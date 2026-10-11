@@ -54,9 +54,10 @@
 #   sclaude drop <name>     abandon a feature: remove its traces here and on
 #                           GitHub
 #   sclaude regression <name> run the checks a step closes on
-#   sclaude friction <name> review what got in a step's way and fix the
-#                           orchestrator
+#   sclaude friction <name> review what got in a step's way and customise
+#                           sclaude for the product
 #   sclaude deferred        the monthly review of the friction put off
+#   sclaude propose         send a change to sclaude itself as a pull request
 #   sclaude reset <name>    start the current step afresh, forgetting its
 #                           conversation
 #   sclaude epilogue [name] append the status to the issue if the epilogue was
@@ -67,9 +68,9 @@
 # with the checkbox set gives the human those same actions in one list without
 # their having to remember command names.
 #
-# Every feature's state is .sclaude/local/feature/state.json in its worktree. The .sclaude/local/feature/
-# directory is a working one: it is in .gitignore, is not committed, and is
-# removed at step 3.
+# Every feature's state is .sclaude/local/feature/state.json in its worktree.
+# The directory is a working one: sclaude hides it from git, it is never
+# committed, and it goes with the worktree.
 #
 # Every session that is started writes its id there BEFORE launching — both a
 # step and the friction review. Otherwise an interrupted session is lost: there
@@ -1559,6 +1560,7 @@ main() {
     drop)          shift; cmd_abandon "$(slugify "${1:-}")" ;;
     friction)      shift; cmd_friction "$(slugify "${1:-}")" ;;
     deferred)      cmd_deferred ;;
+    propose)       cmd_propose ;;
     # A red run is an answer, not a script failure: || true so the shell does
     # not report one where the summary has already said everything.
     regression)    shift; cmd_regression "$(slugify "${1:-}")" || true ;;

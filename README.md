@@ -225,9 +225,12 @@ retrospectives and the monthly deferred review read sclaude's checkout and
 change the product (a hook keeps the checkout read-only to them). A change to
 sclaude's out-of-the-box behaviour is made deliberately. `MAINTAINERS` lists
 the git addresses allowed to commit it straight to `main`. Everybody else
-commits to a branch of their own, `dev/<name>`, and sclaude sends it as a pull
-request into `main` by itself: pushed here if you may push, and otherwise to a
+commits by hand, then runs `sclaude propose`: the commits move from `main` to
+a branch of their own, `dev/<name>`, and sclaude sends it as a pull request
+into `main` by itself: pushed here if you may push, and otherwise to a
 fork of yours, which it makes once with `gh` as the remote `fork`. The pull request is opened once, and every later push updates it.
+Run from a product, `sclaude propose` first lists the product's deferred
+entries of class `sclaude-default`, the findings that asked for a change.
 `origin` stays this repository, so updates keep arriving at your next command
 as before. You use this repository, not your fork; the fork is only how a pull
 request travels. Without `gh`, the push failure prints the commands instead.

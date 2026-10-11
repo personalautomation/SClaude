@@ -1757,6 +1757,54 @@ instruments_propose() {
   return 0
 }
 
+# sclaude propose: a change to sclaude's out-of-the-box behaviour, sent to it
+# deliberately as a pull request. The change is commits in this checkout,
+# made by hand; sessions never make them. Commits on main are moved to a
+# branch of their own, dev/<name> (or dev/<name>-<time> when that is taken), and
+# main goes back to origin's: the person stays on the branch, which
+# instruments_sync keeps merging main into, so they go on running their change
+# until it is merged. The branch then goes out by instruments_propose. Run from
+# a product, it first lists the product's deferred entries of class
+# sclaude-default: the findings that asked for such a change.
+cmd_propose() {
+  local root branch name ahead new
+  root="$(main_repo 2>/dev/null || true)"
+  if [[ -n "$root" && "$(cd "$root" && pwd -P)" != "$(cd "$INSTRUMENTS" && pwd -P)" ]]; then
+    local f found=""
+    while IFS= read -r f; do
+      while IFS= read -r line; do
+        [[ -n "$found" ]] || { echo ""; info "  Findings in this product that asked for a change to sclaude:"; found=1; }
+        info "    ${f#"$root"/}: $(cut -f6 <<< "$line")"
+      done < <(awk -F'\t' '$5 == "sclaude-default"' "$f" 2>/dev/null)
+    done < <(deferred_files "$root")
+  fi
+  if [[ -n "$(git -C "$INSTRUMENTS" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+    warn "  $INSTRUMENTS has uncommitted changes. Commit the change you mean to propose,"
+    warn "  by this repository's rules, and run it again: $SELF propose"
+    return 1
+  fi
+  GIT_TERMINAL_PROMPT=0 git -C "$INSTRUMENTS" fetch -q origin main 2>/dev/null || true
+  ahead="$(git -C "$INSTRUMENTS" rev-list --count origin/main..HEAD 2>/dev/null || echo 0)"
+  if [[ ! "$ahead" =~ ^[1-9][0-9]*$ ]]; then
+    info "  Nothing to propose: $INSTRUMENTS has no commits beyond origin/main."
+    return 0
+  fi
+  branch="$(git -C "$INSTRUMENTS" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [[ "$branch" == "main" ]]; then
+    name="$(developer_name 2>/dev/null)"
+    new="dev/${name:-local}"
+    git -C "$INSTRUMENTS" show-ref --verify -q "refs/heads/$new" && new="$new-$(date +%Y%m%d-%H%M)"
+    git -C "$INSTRUMENTS" switch -q -c "$new" 2>/dev/null || { warn "  could not make $new"; return 1; }
+    git -C "$INSTRUMENTS" branch -q -f main origin/main 2>/dev/null || true
+    info "  $ahead commit(s) moved from main to $new; main is origin's again"
+    branch="$new"
+  fi
+  instruments_propose "$branch" "$ahead" && return 0
+  warn "  could not send it as a pull request (gh missing, or origin is not on GitHub)."
+  warn "  The commits are on $branch: push it and open the pull request by hand."
+  return 1
+}
+
 # Gives up the friction queue run_friction took, if it took one.
 friction_unlock() {
   declare -F lock_release >/dev/null || return 0

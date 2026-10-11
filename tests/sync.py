@@ -253,6 +253,29 @@ with tempfile.TemporaryDirectory() as tmp:
         out = w.run(GH_STUB + "push_instruments", env=env)
         check("propose-%s-quiet-when-sent" % can_push, "pushing" in out, False)
 
+# --- sclaude propose: commits on main become a branch and a pull request ------
+with tempfile.TemporaryDirectory() as tmp:
+    print("propose from main")
+    w = World(tmp, email="Alice.B@x.test", maintainers=["boss@x.test"])
+    log, opened = os.path.join(tmp, "gh.log"), os.path.join(tmp, "pr")
+    env = {"CAN_PUSH": "false", "FORK": os.path.join(tmp, "fork.git"), "GH_LOG": log, "PR_OPEN": opened}
+    stub = GH_STUB + "main_repo() { echo \"$INSTRUMENTS\"; }\ndeferred_files() { :; }\n"
+    out = w.run(stub + "cmd_propose", env=env)
+    check("propose-nothing", "Nothing to propose" in out, True)
+    with open(os.path.join(w.me, "a.txt"), "w") as fh:
+        fh.write("edited, not committed\n")
+    out = w.run(stub + "cmd_propose", env=env)
+    check("propose-dirty-refused", "uncommitted changes" in out, True)
+    git(w.me, "checkout", "--", "a.txt")
+    commit(w.me, "better.txt", "a better default\n")
+    head = git(w.me, "rev-parse", "HEAD")
+    out = w.run(stub + "cmd_propose", env=env)
+    check("propose-on-own-branch", w.branch(), "dev/alice-b")
+    check("propose-branch-has-it", git(w.me, "rev-parse", "dev/alice-b"), head)
+    check("propose-main-is-origins", git(w.me, "rev-parse", "main"), git(w.origin, "rev-parse", "main"))
+    check("propose-pushed-to-fork", git(env["FORK"], "rev-parse", "--verify", "-q", "refs/heads/dev/alice-b"), head)
+    check("propose-opened", "opened a pull request" in out, True)
+
 # --- the net under the switch, and what the prompts tell the session ---------
 #
 # Read as text: driving run_friction for real needs a feature, a log and a

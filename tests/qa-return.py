@@ -75,7 +75,7 @@ def run_bash(script, cwd, modules=("io", "ui", "steps", "state", "watch")):
 def feature(root, step="done", review_done=True):
     """A worktree whose feature has been through every step."""
     wt = os.path.join(root, "wt")
-    os.makedirs(os.path.join(wt, ".feature"), exist_ok=True)
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"), exist_ok=True)
     state = {
         "feature": "demo", "branch": "feat/demo", "issue": 71, "pr": 208,
         "step": step,
@@ -91,13 +91,13 @@ def feature(root, step="done", review_done=True):
             "prod": {"status": "passed"},
         },
     }
-    with open(os.path.join(wt, ".feature", "state.json"), "w") as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
         json.dump(state, fh)
     return wt
 
 
 def read(wt, path):
-    out, _, rc = run_bash('state_get %s/.feature/state.json %s' % (wt, path),
+    out, _, rc = run_bash('state_get %s/.sclaude/local/feature/state.json %s' % (wt, path),
                           os.path.dirname(wt))
     return out.strip() if rc == 0 else None
 
@@ -222,8 +222,8 @@ try:
     # `finished` was already null could not tell the guard from its absence:
     # the first version of this check passed against a mutation that removed it.
     open_wt = os.path.join(tmp, "open", "wt")
-    os.makedirs(os.path.join(open_wt, ".feature"))
-    with open(os.path.join(open_wt, ".feature", "state.json"), "w") as fh:
+    os.makedirs(os.path.join(open_wt, ".sclaude/local/feature"))
+    with open(os.path.join(open_wt, ".sclaude/local/feature", "state.json"), "w") as fh:
         json.dump({"feature": "demo", "step": "review",
                    "steps": {"review": {"done": False,
                                         "finished": "2026-09-11T11:00:00+03:00"}}}, fh)
@@ -288,7 +288,7 @@ try:
         if not guard:
             return None
         _, _, rc = run_bash(
-            'state="%s/.feature/state.json"\n%s'
+            'state="%s/.sclaude/local/feature/state.json"\n%s'
             '[[ "$reopened" != "%s" ]]' % (wt, guard.group(1), step), tmp)
         return rc == 0
 
@@ -300,7 +300,7 @@ try:
 
     # Cleared when the step closes for real, or a merged PR could never close
     # that step again.
-    run_bash('state_set %s/.feature/state.json reopened null' % wt2, tmp)
+    run_bash('state_set %s/.sclaude/local/feature/state.json reopened null' % wt2, tmp)
     check("shortcut-open-once-the-mark-clears",
           shortcut_fires(wt2, "review"), True)
 

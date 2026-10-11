@@ -39,6 +39,12 @@ import subprocess
 import sys
 import tempfile
 
+
+def _cfg(path):
+    """The path of a product's config, its .sclaude/ folder made first."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
 LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sclaude", "lib")
 ROOT_BIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "sclaude")
 
@@ -95,7 +101,7 @@ try:
     # The project's own config. branch_has_migrations asks it where migrations
     # live rather than assuming, so a repository that does not say has none —
     # which is the case a few lines further down.
-    with open(os.path.join(REPO, ".sclaude.json"), "w") as fh:
+    with open(_cfg(os.path.join(REPO, ".sclaude/config.json")), "w") as fh:
         json.dump({"database": {"migrations": "supabase/migrations"}}, fh)
     git("add", "-A", cwd=REPO)
     git("commit", "-qm", "first", cwd=REPO)
@@ -175,8 +181,8 @@ try:
 
     with open(os.path.join(REPO, "real.txt"), "w") as fh:
         fh.write("work\n")
-    os.makedirs(os.path.join(REPO, ".feature"), exist_ok=True)
-    with open(os.path.join(REPO, ".feature", "state.json"), "w") as fh:
+    os.makedirs(os.path.join(REPO, ".sclaude/local/feature"), exist_ok=True)
+    with open(os.path.join(REPO, ".sclaude/local/feature", "state.json"), "w") as fh:
         fh.write("{}\n")
     with open(os.path.join(REPO, ".vercelignore"), "w") as fh:
         fh.write(".env\n")
@@ -185,7 +191,7 @@ try:
     lines = [l for l in out.splitlines() if l.strip()]
     check_true("dirt-reports-real-work", any("real.txt" in l for l in lines))
     check("dirt-hides-the-feature-dir",
-          any(".feature" in l for l in lines), False)
+          any(".sclaude/local/feature" in l for l in lines), False)
     check("dirt-hides-vercelignore",
           any(".vercelignore" in l for l in lines), False)
 
@@ -229,7 +235,7 @@ try:
     # Runs the project's apply from the tree, and never stops the preview: the
     # database is shared, so a refusal there may be another branch's doing.
     alarm_fn = 'alarm() { echo "$*" >&2; }\n'
-    cfg = os.path.join(REPO, ".sclaude.json")
+    cfg = os.path.join(REPO, ".sclaude/config.json")
     with open(cfg) as fh:
         plain_cfg = fh.read()
 
@@ -264,13 +270,13 @@ try:
     # cycle is concerned: no promote is offered and no rollback looks for down
     # blocks. Silence is the answer rather than a guessed directory, which would
     # be this one product's layout applied to somebody else's repository.
-    os.rename(os.path.join(REPO, ".sclaude.json"),
-              os.path.join(REPO, ".sclaude.json.off"))
+    os.rename(os.path.join(REPO, ".sclaude/config.json"),
+              os.path.join(REPO, ".sclaude/config.json.off"))
     _, _, rc = run_bash('REPO=%s; branch_has_migrations %s' % (REPO, REPO), tmp,
                         modules=("ui", "state", "project", "worktree", "deploy", "scratch"))
     check("migrations-false-without-a-config", rc != 0, True)
-    os.rename(os.path.join(REPO, ".sclaude.json.off"),
-              os.path.join(REPO, ".sclaude.json"))
+    os.rename(os.path.join(REPO, ".sclaude/config.json.off"),
+              os.path.join(REPO, ".sclaude/config.json"))
 
     # A migration that is already in main is not the branch's — otherwise every
     # feature would be offered a promote for somebody else's work.

@@ -5,7 +5,7 @@
 # Part of sclaude; pulled in with source from bin/sclaude.
 # It does not run on its own.
 
-# Step 1's plan — from its own session's transcript, into .feature/plan.md.
+# Step 1's plan — from its own session's transcript, into .sclaude/local/feature/plan.md.
 #
 # Step 1 cannot write the file itself: it runs in plan mode, and that forbids
 # writing before any permissions are even considered. But the plan goes outside
@@ -28,7 +28,7 @@
 # then does not close, rather than closing with an empty bridge to step 2.
 capture_plan() {
   local wt="$1" session
-  session="$(state_get "$wt/.feature/state.json" steps.plan.session)" || return 1
+  session="$(state_get "$wt/.sclaude/local/feature/state.json" steps.plan.session)" || return 1
   [[ -n "$session" ]] || return 1
 
   python3 - "$wt" "$session" "$LIB" <<'PY'
@@ -97,7 +97,7 @@ plan = plan_text(approved)
 if not plan or not plan.strip():
     sys.exit(1)
 
-target = os.path.join(wt, ".feature", "plan.md")
+target = os.path.join(wt, ".sclaude/local/feature", "plan.md")
 os.makedirs(os.path.dirname(target), exist_ok=True)
 with open(target, "w") as fh:
     fh.write(plan if plan.endswith("\n") else plan + "\n")

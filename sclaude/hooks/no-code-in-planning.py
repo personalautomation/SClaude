@@ -36,7 +36,7 @@ REASON = (
     "approved: development is step 2, a separate session launched by the "
     "sclaude orchestrator. Through the terminal too — that is the same code, "
     "just a different tool. The friction log is the exception: append to "
-    ".feature/friction.log what this refusal cost you. If the plan is ready "
+    ".sclaude/local/feature/friction.log what this refusal cost you. If the plan is ready "
     "and approved, tell the human and stop."
 )
 
@@ -122,7 +122,7 @@ SUBCOMMANDS = {
 # that a restriction is getting in the way. Without the exception the channel
 # would be closed exactly where it is needed most: writes() cuts every
 # redirection, including one into the log itself.
-LOG = ".feature/friction.log"
+LOG = ".sclaude/local/feature/friction.log"
 
 # Redirection targets that write no file: the null device discards, and the
 # standard streams go where the output was going anyway.
@@ -171,7 +171,7 @@ def allowed_path(path):
     plans = os.path.abspath(os.path.expanduser("~/.claude/plans"))
     if normalized.startswith(plans + os.sep) or in_scratchpad(path):
         return True
-    return normalized.endswith(os.path.join(".feature", "friction.log"))
+    return normalized.endswith(os.path.join(".sclaude/local/feature", "friction.log"))
 
 
 # A quoted span on the command line. The text of a log entry lives in one, or

@@ -58,11 +58,11 @@ friction_count() {
   # both right-hand sides before binding a single name — and $wt in them is not
   # the parameter yet. This worked only by accident: all three callers happened
   # to have a local of their own with the same name, and dynamic scoping
-  # substituted it. A call from any other would give "/.feature/friction.log" and
+  # substituted it. A call from any other would give "/.sclaude/local/feature/friction.log" and
   # a silent "no entries". The same trap is described in github.sh at
   # issue_sync.
   local wt="$1"
-  local log="$wt/.feature/friction.log"
+  local log="$wt/.sclaude/local/feature/friction.log"
   [[ -s "$log" ]] || return 1
   grep -cE '^20[0-9]{2}-' "$log" 2>/dev/null || true
 }
@@ -77,7 +77,7 @@ feature_actions() {
   require_repo
   local slug="$1" wt state step pr issue branch behind fcount
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
-  state="$wt/.feature/state.json"
+  state="$wt/.sclaude/local/feature/state.json"
   step="$(state_get "$state" step || echo "?")"
   pr="$(state_get "$state" pr || true)";       [[ "$pr" == "null" ]] && pr=""
   issue="$(state_get "$state" issue || true)"; [[ "$issue" == "null" ]] && issue=""
@@ -175,7 +175,7 @@ feature_actions() {
   # should not hand a feature a port it has never used.
   local pid cwd port
   port="$DEV_PORT_PINNED"
-  [[ -n "$port" ]] || port="$(state_get "$wt/.feature/state.json" dev.port 2>/dev/null || true)"
+  [[ -n "$port" ]] || port="$(state_get "$wt/.sclaude/local/feature/state.json" dev.port 2>/dev/null || true)"
   pid="$(dev_pid "$port")"
   if [[ -n "$pid" ]]; then
     cwd="$(dev_cwd "$pid")"
@@ -186,7 +186,7 @@ feature_actions() {
     fi
   else
     local where=""
-    [[ -n "$DEV_PORT_PINNED" ]] || where="$(state_get "$wt/.feature/state.json" dev.label 2>/dev/null || true)"
+    [[ -n "$DEV_PORT_PINNED" ]] || where="$(state_get "$wt/.sclaude/local/feature/state.json" dev.label 2>/dev/null || true)"
     labels+=("Dev server (dev)"$'\t'"not running${where:+ — opens at http://$where.localhost:$PROXY_PORT}")
   fi
   verbs+=(dev)
@@ -195,7 +195,7 @@ feature_actions() {
   if [[ -n "$fcount" && "$fcount" != "0" ]]; then
     labels+=("Review friction (friction)"$'\t'"$fcount entry(ies) waiting")
     verbs+=(friction)
-  elif [[ -s "$wt/.feature/friction.log.reviewed" ]]; then
+  elif [[ -s "$wt/.sclaude/local/feature/friction.log.reviewed" ]]; then
     labels+=("Review friction (friction)"$'\t'"nothing new; re-read what was reviewed")
     verbs+=(friction)
   fi
@@ -208,7 +208,7 @@ feature_actions() {
   rstatus="$(regression_status "$wt" local)"
   case "$rstatus" in
     passed) rnote_r="green — it will not run again until something changes" ;;
-    failed) rnote_r="red on $(state_get "$wt/.feature/state.json" regression.local.failed_at 2>/dev/null || echo "a part")" ;;
+    failed) rnote_r="red on $(state_get "$wt/.sclaude/local/feature/state.json" regression.local.failed_at 2>/dev/null || echo "a part")" ;;
     *)      rnote_r="not run yet for this feature" ;;
   esac
   labels+=("Run the regression (regression)"$'\t'"$rnote_r")

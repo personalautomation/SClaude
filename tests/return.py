@@ -63,20 +63,20 @@ def run_bash(script, cwd, home, instruments,
 
 def feature(root, step="done", finished="2026-10-01T19:46:28+01:00"):
     wt = os.path.join(root, "wt")
-    os.makedirs(os.path.join(wt, ".feature"), exist_ok=True)
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"), exist_ok=True)
     state = {"feature": "demo", "branch": "feat/demo", "issue": 71, "pr": 208,
              "step": step,
              "steps": {"plan": {"done": True}, "code": {"done": True},
                        "pr": {"done": True},
                        "review": {"done": True, "finished": finished}},
              "regression": {"preview": {"status": "passed"}}}
-    with open(os.path.join(wt, ".feature", "state.json"), "w") as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
         json.dump(state, fh)
     return wt
 
 
 def read_state(wt):
-    with open(os.path.join(wt, ".feature", "state.json")) as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "state.json")) as fh:
         return json.load(fh)
 
 

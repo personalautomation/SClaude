@@ -36,13 +36,13 @@
 abandon_traces() {
   # `state` on a line of its own, and this is a fix rather than a style: bash
   # assigns a `local` list left to right and does not see a name from the same
-  # command, so `local wt="$1" state="$wt/.feature/state.json"` set `state` to
-  # `/.feature/state.json`. state_get answered nothing for every field, and the
+  # command, so `local wt="$1" state="$wt/.sclaude/local/feature/state.json"` set `state` to
+  # `/.sclaude/local/feature/state.json`. state_get answered nothing for every field, and the
   # table that stands in front of an irreversible deletion showed the worktree
   # and no branch, no PR, no issue — the very "leading them blind" the comment
   # above says this function exists to prevent.
   local wt="$1"
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
   local branch issue pr repo dirty pr_state issue_state
 
   branch="$(state_get "$state" branch || true)"
@@ -60,7 +60,7 @@ abandon_traces() {
   fi
 
   # The friction log disappears with the tree, and worktree_dirt will not
-  # mention it: .feature/ is hidden from git. As a separate line — but not a
+  # mention it: .sclaude/local/feature/ is hidden from git. As a separate line — but not a
   # separate question: it lies inside the worktree, and the same "yes" carries
   # it away.
   local fcount; fcount="$(friction_count "$wt" || true)"
@@ -121,7 +121,7 @@ cmd_abandon() {
   local slug="${1:-}" wt state traces answer
   [[ -n "$slug" ]] || die "name the feature: $SELF drop <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
-  state="$wt/.feature/state.json"
+  state="$wt/.sclaude/local/feature/state.json"
 
   # Everything needed from the state is read now, in one go. state.json lies
   # inside the worktree and disappears with it on the very first agreement —

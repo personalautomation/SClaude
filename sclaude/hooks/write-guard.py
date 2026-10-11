@@ -5,7 +5,7 @@
 #   --team          a product's shared sclaude rules (.sclaude/team/) are
 #                   written by its maintainers only. sclaude passes this for a
 #                   session of somebody who is not on `maintainers` in the
-#                   product's .sclaude.json (product_maintainer in
+#                   product's .sclaude/config.json (product_maintainer in
 #                   developer.sh); their rules go to .sclaude/people/<name>/,
 #                   and a maintainer can lift one into team/.
 #   --readonly DIR  nothing under DIR. sclaude passes its own checkout for the
@@ -33,7 +33,7 @@ READONLY_REASON = ("{dir} is sclaude's own checkout, and a session does not chan
                    "(sclaude propose), so leave it as a deferred entry of class "
                    "sclaude-default.")
 REASON = ("the product's shared sclaude rules (.sclaude/team/) are written by its "
-          "maintainers — `maintainers` in .sclaude.json. Put the rule in your own "
+          "maintainers — `maintainers` in .sclaude/config.json. Put the rule in your own "
           ".sclaude/people/<name>/ instead; a maintainer can lift it into team/.")
 
 # Bash words that change a file named after them.

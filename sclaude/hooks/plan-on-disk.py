@@ -15,7 +15,7 @@
 #
 # So we put the plan next to the feature ourselves, on every presentation. This
 # also makes the step able to survive an interruption: if the session ends
-# without reaching approval, .feature/plan.md will still be in place — the last
+# without reaching approval, .sclaude/local/feature/plan.md will still be in place — the last
 # of what was drafted.
 #
 # The acceptance criteria are the one part of the plan that says what "done"
@@ -54,7 +54,7 @@ from presented_plan import plan_text  # noqa: E402
 # model will read it and pass it on in words — step 1's prompt tells it to do
 # exactly that, right before presenting the plan.
 HINT = (
-    "The plan is saved to .feature/plan.md — it can be opened and read in full "
+    "The plan is saved to .sclaude/local/feature/plan.md — it can be opened and read in full "
     "while the approval dialog waits for an answer. In the session itself the "
     "plan scrolls with Ctrl+O (transcript view; q exits). Remind the human of "
     "both ways before they answer the dialog: the dialog covers the plan and "
@@ -85,11 +85,11 @@ EMPTY = ("The plan's `## Acceptance criteria` section has nothing in it that "
 
 
 def feature_dir(start):
-    """The .feature/ directory, up the tree from the session's working
+    """The .sclaude/local/feature/ directory, up the tree from the session's working
     directory."""
     here = os.path.abspath(start or ".")
     while True:
-        candidate = os.path.join(here, ".feature")
+        candidate = os.path.join(here, ".sclaude/local/feature")
         if os.path.isdir(candidate):
             return candidate
         parent = os.path.dirname(here)

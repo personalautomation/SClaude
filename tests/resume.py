@@ -38,6 +38,12 @@ import sys
 import tempfile
 import threading
 
+
+def _cfg(path):
+    """The path of a product's config, its .sclaude/ folder made first."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCLAUDE = os.path.join(ROOT, "bin", "sclaude")
 
@@ -91,7 +97,7 @@ class World:
         # A config, so the regression has something to say about this project —
         # without one the gate reports "no regression declared" and the step
         # would close for a reason this bench is not about.
-        with open(os.path.join(self.repo, ".sclaude.json"), "w") as fh:
+        with open(_cfg(os.path.join(self.repo, ".sclaude/config.json")), "w") as fh:
             json.dump({"commands": {"noop": "true"},
                        "regression": {"local": ["noop"]}}, fh)
         git("add", "-A", cwd=self.repo)
@@ -223,13 +229,13 @@ exec %s "$@"
              "    d = d.get(k) if isinstance(d, dict) else None\n"
              "    if d is None: print(''); raise SystemExit\n"
              "print(d if not isinstance(d, bool) else str(d).lower())",
-             os.path.join(self.wt, ".feature", "state.json"), path],
+             os.path.join(self.wt, ".sclaude/local/feature", "state.json"), path],
             capture_output=True, text=True)
         return out.stdout.strip()
 
     def set_state(self, blob):
-        os.makedirs(os.path.join(self.wt, ".feature"), exist_ok=True)
-        with open(os.path.join(self.wt, ".feature", "state.json"), "w") as fh:
+        os.makedirs(os.path.join(self.wt, ".sclaude/local/feature"), exist_ok=True)
+        with open(os.path.join(self.wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             json.dump(blob, fh)
 
     def watch(self, blob, notes=None):
@@ -544,8 +550,8 @@ try:
     # be told why it is there. It used to get the ordinary review prompt, with
     # no word of the failure, the rollback or the new pull request.
     w = World(os.path.join(tmp, "g"), merged=True)
-    os.makedirs(os.path.join(w.wt, ".feature"), exist_ok=True)
-    kept = os.path.join(w.wt, ".feature", "regression.prod.failed.log")
+    os.makedirs(os.path.join(w.wt, ".sclaude/local/feature"), exist_ok=True)
+    kept = os.path.join(w.wt, ".sclaude/local/feature", "regression.prod.failed.log")
     with open(kept, "w") as fh:
         fh.write("the landing page returned 500\n")
     w.set_state(dict(DONE_STATE, step="review", steps=reopened_review, worktree=w.wt,

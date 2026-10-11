@@ -27,7 +27,7 @@ One step per phase (`sclaude/lib/steps.sh:14`):
 |---|---|
 | **specify** | the issue, its parents and the product's manuals are read before anything is guessed |
 | **clarify** | step 1 stops on its guess about scope and waits to be corrected — planning around an unconfirmed guess means redoing the plan |
-| **plan** | the approved plan goes to `.feature/plan.md`, the only thing carried between steps |
+| **plan** | the approved plan goes to `.sclaude/local/feature/plan.md`, the only thing carried between steps |
 | **implement** | a fresh session per step, so nothing rots in a context window |
 | **verify** | a regression the step cannot close without |
 
@@ -47,7 +47,7 @@ any code exists is what shift-left asks for.
 | review | a green regression, not re-run on a tree it already passed; the pull request stays open for QA. No session at all when the automatic review is clean |
 
 Ctrl-C, a usage limit or a closed laptop closes nothing: state lives in
-`.feature/state.json` and the conversation resumes. An interrupted run cannot
+`.sclaude/local/feature/state.json` and the conversation resumes. An interrupted run cannot
 be mistaken for a finished one — the failure mode most home-grown agent
 pipelines ship with.
 
@@ -68,7 +68,7 @@ against one shared database do not sweep away each other's fixtures.
 The agent's world is built before it runs, not reviewed afterwards. Each step
 gets its own model, effort and permission mode; step 1 runs in plan mode where
 writing is refused outright. What the project is — its checks, its manuals, its
-environments, its board columns — is declared by the product in `.sclaude.json`,
+environments, its board columns — is declared by the product in `.sclaude/config.json`,
 so the orchestrator carries no assumptions about anybody's repository.
 
 ### Control — the rules apply as the action happens
@@ -138,7 +138,7 @@ included, and what the person typed — under `~/.claude/sclaude/terminal/` (kep
 have their transcripts, and one that runs in sclaude's own window is cut down
 to a line naming it. Right before `sclaude done` asks to remove a
 merged feature, a session reads that record played back as plain text (through
-`tmux`), together with `.feature/`, and answers three questions from facts alone:
+`tmux`), together with `.sclaude/local/feature/`, and answers three questions from facts alone:
 what the person may have missed, how they could work better, and what
 `sclaude` itself could do better. With nothing to act on in the first and the
 third it closes by itself; otherwise it stays open to talk it through, while the
@@ -192,7 +192,7 @@ enables the timers for the platform it finds (WSL or plain Linux) and wires up
 this repository's hooks. `~/.local/bin` has to be in `PATH` (it usually already
 is, through `~/.profile` / `~/.bashrc`). Then run `sclaude doctor`: it lists
 what this machine still lacks and the command that fixes each gap. Run inside a
-product, it also runs the checks the product declares in `.sclaude.json` under
+product, it also runs the checks the product declares in `.sclaude/config.json` under
 `doctor` — for example, whether your tailnet is admitted to the auth
 provider's redirect URLs.
 
@@ -214,7 +214,7 @@ lives elsewhere:
 | what | where |
 |---|---|
 | the orchestrator, its prompts, `MAINTAINERS` | here, one copy for everybody |
-| the product and the team's process: regression, manuals, production, migrations, the GitHub board, its maintainers | `.sclaude.json` in the product's repository, committed |
+| the product and the team's process: regression, manuals, production, migrations, the GitHub board, its maintainers | `.sclaude/config.json` in the product's repository, committed |
 | the team's sclaude rules for the product | `.sclaude/team/` in the product, committed, written by its maintainers |
 | one developer's sclaude rules for the product | `.sclaude/people/<name>/` in the product, committed |
 | what one machine keeps about the product: terminal recordings | `.sclaude/local/` in the product, never committed, never deployed |
@@ -234,7 +234,7 @@ request travels. Without `gh`, the push failure prints the commands instead.
 
 **Who keeps a product's rules.** The same idea, one level down, in folders
 rather than branches, because a rule only applies once it is on the product's
-`main`. `maintainers` in the product's `.sclaude.json` lists the git
+`main`. `maintainers` in the product's `.sclaude/config.json` lists the git
 addresses of the people who curate the product's shared sclaude rules in
 `.sclaude/team/`. A session run by anybody else writes its rules to
 `.sclaude/people/<name>/` instead, and a hook (`sclaude/hooks/write-guard.py`)
@@ -265,10 +265,10 @@ and whether git or a deploy ever sees it:
 | artefact | what it is for | where | who changes it | in git | uploaded by a deploy |
 |---|---|---|---|---|---|
 | sclaude itself: code, prompts, presets (`sclaude/policy/`), `MAINTAINERS`, `known-denials.txt` | the orchestrator and what it offers out of the box | this repository | its maintainers; anybody else by pull request | yes, here | — |
-| `.sclaude.json` | what the product is: checks, manuals, environments, production, board, maintainers | product root | the product's team; `sclaude new` proposes it, a person confirms | yes, the product's | no harm if it is |
+| `.sclaude/config.json` | what the product is: checks, manuals, environments, production, board, maintainers | the product's `.sclaude/` | the product's team; `sclaude new` proposes it, a person confirms | yes, the product's | no harm if it is |
 | `.sclaude/team/policy.json` | the team's rules for sessions | product | the product's maintainers, through the product's pull requests | yes, the product's | no harm if it is |
 | `.sclaude/people/<name>/policy.json` | one developer's rules for sessions | product | that developer | yes, the product's | no harm if it is |
-| `.feature/`: `plan.md`, `state.json`, `friction.log`, `regression.log`, `dev.log`, `db.env`, `review-yours`, `terminal.txt`, … | one feature's working state: the agreed plan, the cycle's state, logs, the feature's local database | the feature's worktree | sclaude and the feature's sessions | never (`.git/info/exclude`) | never (`.vercelignore`) |
+| `.sclaude/local/feature/`: `plan.md`, `state.json`, `friction.log`, `regression.log`, `dev.log`, `db.env`, `review-yours`, `terminal.txt`, … | one feature's working state: the agreed plan, the cycle's state, logs, the feature's local database | the feature's worktree | sclaude and the feature's sessions | never (`.git/info/exclude`) | never (`.vercelignore`) |
 | `.sclaude/local/terminal/*.log` | the recorded terminal, which the retrospective reads | the product's main tree | sclaude | never | never |
 | `.vercelignore` | what a deploy must not upload | each tree sclaude deploys | sclaude, appending what is missing; a project that tracks its own keeps it | no, unless the project tracks one | — |
 | lines in `.git/info/exclude` | hide sclaude's own paths from git | the product's `.git` | sclaude | — (not versioned) | — |
@@ -279,6 +279,12 @@ and whether git or a deploy ever sees it:
 | session transcripts | what each session did; friction reviews and the retrospective read them | `~/.claude/projects/`, Claude Code's own | Claude Code | never | — |
 | issue status comments, pull-request bodies, board columns, `Sclaude-Session` trailers | the feature's story where the team reads it | the product's GitHub, and its commits | sclaude and the feature's sessions | the trailers, in the product's history | — |
 | `~/.config/instruments/` | this machine's settings: `projects` for wsl-update, `metrics-remote`, the polkit mark | your home directory | you | never | — |
+
+In the product, all of it lives in one folder, `.sclaude/`, so the product's
+root does not grow: `config.json`, `team/` and `people/` are committed;
+`local/` (a feature's working directory, the recordings) never is. The one
+file at the root is `.vercelignore`, because Vercel reads it nowhere else, and
+sclaude keeps it out of git.
 
 Nothing a product produces goes into this repository. The review sessions
 write the product's `.sclaude/` and its code, and a hook keeps sclaude's own
@@ -295,12 +301,12 @@ yours and sweep only its own. Two people running the suite on one database
 then never delete each other's test accounts mid-run.
 
 **Joining a product that already uses it.** Clone the product; its
-`.sclaude.json` is already there. The first feature asks once which of the
+`.sclaude/config.json` is already there. The first feature asks once which of the
 product's environments this machine works against. Your own `.env*` files are
 yours to fill; production credentials only for whoever ships. `sclaude doctor`
 run inside the product checks the project half too.
 
-**Setting a product up.** `sclaude new` in a repository without `.sclaude.json`
+**Setting a product up.** `sclaude new` in a repository without `.sclaude/config.json`
 offers to write one, reading the regression from `package.json`, the manuals and
 migrations from the layout, and the board's columns and date fields from the
 repository's GitHub project — shown for confirmation before anything is written.
@@ -327,7 +333,7 @@ used to be written into the library, so the promise above was not true: a second
 repository would have needed the orchestrator edited rather than a file of its
 own.
 
-It is now `.sclaude.json` at the root of whichever repository sclaude is run
+It is now `.sclaude/config.json` in whichever repository sclaude is run
 from, and `sclaude new` offers to write one. Most of the answers are already in
 the repository — package.json's scripts, the directory layout, whatever the
 project keeps about its environments — so the wizard proposes and the human
@@ -347,7 +353,7 @@ shape, with every key explained.
 That includes the team's GitHub board: which column a started feature moves to,
 which one means ready for QA and which one QA ends in, the date fields the Gantt
 chart reads, the label and type of a new issue. They were one team's names
-written into the library; now they are `board` in `.sclaude.json`, the wizard
+written into the library; now they are `board` in `.sclaude/config.json`, the wizard
 reads them off the repository's project board and shows them for confirmation,
 and a column that is not named is a move that is not made.
 
@@ -386,7 +392,7 @@ sessions do not commit to it.
 | `sclaude/lib/environment.sh` | which database this machine's features work against |
 | `sclaude/lib/developer.sh` | who is running it, and whether they maintain the orchestrator (`MAINTAINERS`) |
 | `sclaude/lib/doctor.sh` | `sclaude doctor`: what this machine lacks, with the fix for each gap |
-| `sclaude/lib/state.sh` | the repository, `.feature/state.json` and the cycle's record |
+| `sclaude/lib/state.sh` | the repository, `.sclaude/local/feature/state.json` and the cycle's record |
 | `sclaude/lib/branches.sh` | sorting out branches with nothing left to hold |
 | `sclaude/lib/worktree.sh` | preparing a feature's tree and the dev server |
 | `sclaude/lib/run.sh` | launching a step, the transitions, the friction review |
@@ -500,7 +506,7 @@ Four steps, each with its own model, permissions and prompt
 
 | Step | Model | Permissions | What it does |
 | --- | --- | --- | --- |
-| 1. plan | opus / high | `plan` | Discussion; the only writable file is `.feature/plan.md` |
+| 1. plan | opus / high | `plan` | Discussion; the only writable file is `.sclaude/local/feature/plan.md` |
 | 2. code | opus / medium | `auto` | Implementation, checking through chrome-devtools, commits |
 | 3. pr | sonnet / medium | `auto` | The manuals and the pull request — calls the `pr` skill |
 | 4. review | opus / medium | `auto` | Fixing review comments, the preview deploy |
@@ -514,7 +520,7 @@ cancels. The chosen issue suggests a branch name
 line, and a title in a non-Latin script, of which nothing survives `slugify`,
 comes down to `issue-27`.
 
-The issue's number lives in `.feature/state.json` until the cycle ends: step 1
+The issue's number lives in `.sclaude/local/feature/state.json` until the cycle ends: step 1
 gets the issue itself — the body, the comments, the parent and the links — in the
 prompt already, and step 3 ends the pull request's body with a `Closes #N` line,
 by which GitHub closes the issue on the merge. No network, no `gh`, no open
@@ -549,7 +555,7 @@ new issue gets a one-line body saying so. The markers are declared once, in
 `issue_comments.py`. Issues from before the change keep their sections: the
 criteria are still read from an old body, and nothing is written back to it.
 
-Not a fifth artefact in `.feature/`: the criteria have to outlive the worktree.
+Not a fifth artefact in `.sclaude/local/feature/`: the criteria have to outlive the worktree.
 `sclaude done` removes the tree the moment the PR merges, and the question the
 criteria answer — did this feature do what it was supposed to — is asked after
 that. The plan carries a copy, at its head, so that a step with no network still
@@ -628,7 +634,7 @@ line, and the cycle goes on, as it does with any other refusal from GitHub.
 gathered deterministically is gathered before the launch and embedded in the
 prompt ready-made: for step 1 the issue and both manuals' tables of contents (35
 sections instead of two reads of a couple of thousand lines of TSX each), for
-step 3 a check on whether `.feature/` got into the branch's commits, for step 4
+step 3 a check on whether `.sclaude/local/feature/` got into the branch's commits, for step 4
 the PR's checks and both streams of comments. The session pays tokens for
 judgement rather than for gathering.
 
@@ -645,7 +651,7 @@ leaving the commands for re-reading: changing the PR's state is exactly what ste
 keeps its previous instruction inside itself.
 
 **Context is not carried between steps.** Every step is a new session, and
-`.feature/plan.md` serves as the bridge, written at step 1 specifically to be
+`.sclaude/local/feature/plan.md` serves as the bridge, written at step 1 specifically to be
 handed over: compacting a long session costs more and preserves worse than a plan
 written for that purpose. Returning to an unfinished step goes through
 `--resume`, so an interrupted conversation inside a step is not lost — sessions
@@ -730,7 +736,7 @@ session.
 
 **Every feature has a dev server of its own**, and opens at
 `http://<feature>.localhost:3000`. The first start claims a port from
-3100–3199 and records it in `.feature/state.json`, so a feature keeps its port
+3100–3199 and records it in `.sclaude/local/feature/state.json`, so a feature keeps its port
 and its address between runs; a lock keeps two features started together from
 claiming the same one. Nobody needs to know the ports: `sclaude-proxy` holds
 :3000 and hands each connection to the server its host names (see
@@ -773,18 +779,18 @@ database's data when the project sets `copyFromMain` and the main stack is up �
 the same people with the same ids, so the objects they own in the bucket are
 already there — and with the project's seed otherwise.
 
-The stack runs from `.feature/supabase/`: a rewritten copy of the tree's
+The stack runs from `.sclaude/local/feature/supabase/`: a rewritten copy of the tree's
 `supabase/config.toml` — the tracked one is never touched, or the ports would
 ride into a commit — and symlinks for everything else, so the migrations the
 feature writes are the ones its stack applies. Pending migrations, the
 feature's and main's after a sync, are applied on every start.
 
-`.feature/db.env` points the feature at it, and every process sclaude starts
+`.sclaude/local/feature/db.env` points the feature at it, and every process sclaude starts
 there sources it — the dev server, the local regression, the claude session.
 It carries `SUPABASE_WORKDIR`, so a bare `npx supabase db reset` typed in the
 session rebuilds this feature's database and no other; a hook refuses
 `--workdir` pointing anywhere else. The project decides the rest in
-`.sclaude.json` under `database.local` (see `sclaude/config.example.json`), and
+`.sclaude/config.json` under `database.local` (see `sclaude/config.example.json`), and
 its own dotenv loading must let an exported value win over `.env.local`.
 
 **Nothing runs that nobody uses.** `sclaude-proxy` starts a stopped feature on
@@ -936,7 +942,7 @@ lands first.
 **The fixing session is told all of it.** It gets the log of the run that caused
 the rollback, which is not the one at the usual path: `regression_run` opens with
 `: > "$log"`, and the check after the rollback is a `regression_run`, so by then
-`.feature/regression.log` describes the *previous release passing* — plausible
+`.sclaude/local/feature/regression.log` describes the *previous release passing* — plausible
 enough that nobody would question it. The failing run is copied aside first and
 the prompt points there. It is also told that the local suite is the check that
 matters (production is not serving this branch, so a run against it says nothing
@@ -991,7 +997,7 @@ fighting the board with the person who just moved it.
 fixes ran in one conversation, and every file each fix read stayed in its
 context. The session now fixes through subagents and keeps only the
 coordination; and once the automatic review closes every thread it fixed and
-posts new ones, it writes `.feature/review-round` and stops. A session cannot
+posts new ones, it writes `.sclaude/local/feature/review-round` and stops. A session cannot
 clear its own context, so the orchestrator does: a watcher started beside every
 review session sees the file and ends the `claude` process (found by
 `--session-id`/`--resume` and its id), the run is recorded in the issue as
@@ -1257,11 +1263,11 @@ step's completion, and a `cd` into the feature's tree would not work. In its
 construction this is closest to the friction review — a session outside `STEPS`,
 with a prompt of its own, launched from the main repository.
 
-The state lives in `.feature/state.json` in the feature's worktree. Vercel's CLI
+The state lives in `.sclaude/local/feature/state.json` in the feature's worktree. Vercel's CLI
 never reads `.gitignore`, so before every deploy (a preview from the worktree,
 production from the main repository) sclaude makes sure that tree's
 `.vercelignore` names `.env`, `.env.*` and everything sclaude writes into the
-project: `.feature`, `.vercelignore` itself, and `.sclaude`, where the terminal
+project: `.sclaude/local/feature`, `.vercelignore` itself, and `.sclaude`, where the terminal
 recordings are kept. It only appends what is missing, and a `.vercelignore`
 the project tracks itself is left to the project, with a warning for what it
 lacks; `sclaude doctor` checks the same in advance. One list in
@@ -1399,7 +1405,7 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
 - `/__sclaude/` on any host — the list again.
 
 It keeps no state. sclaude links `~/.claude/sclaude/dev/<feature>` to the
-worktree, and the worktree's `.feature/state.json` holds the port. Routing is
+worktree, and the worktree's `.sclaude/local/feature/state.json` holds the port. Routing is
 decided once per connection, by its first request, and after that bytes are
 only copied — which is also why Next's HMR WebSocket works through it with no
 code of its own. Next 16 already trusts `*.localhost` as a dev origin, so a
@@ -1798,7 +1804,7 @@ the model, the effort, the context fill and the limits.
 
 The first element is the `sclaude` cycle's step: `1-plan`, `2-code`, `3-pr`,
 `4-review`, and `4/4 done` when every step has been through and the PR is waiting
-for a merge. It is read from `.feature/state.json`, so outside a worktree under
+for a merge. It is read from `.sclaude/local/feature/state.json`, so outside a worktree under
 the orchestrator nothing is shown. Any surprise — broken json, an unfamiliar step
 — simply removes the indicator without breaking the line.
 

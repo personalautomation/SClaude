@@ -19,6 +19,12 @@ import os
 import re
 import sys
 
+
+def _cfg(path):
+    """The path of a product's config, its .sclaude/ folder made first."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "sclaude", "lib"))
 
@@ -55,7 +61,7 @@ def shell_const(text, name):
 # --- the stages, which are now the project's to declare ----------------------
 #
 # These were two strings in regression.sh, and the assertions here were about
-# them. They moved into `.sclaude.json` (project.sh), because a table inside the
+# them. They moved into `.sclaude/config.json` (project.sh), because a table inside the
 # orchestrator that happened to match one product is exactly what "not tied to
 # any project" was failing to be.
 #
@@ -102,7 +108,7 @@ check_true("missing-command-is-fatal", "no command for this part" in regression)
 # and must stay testable without it, so this half is guarded — but where the
 # project is here, its local stage has to be complete: it is what closes step 2,
 # and anything missing from it reaches the pull request unchecked.
-CONFIG = os.path.expanduser("~/myapp/.sclaude.json")
+CONFIG = os.path.expanduser("~/myapp/.sclaude/config.json")
 if os.path.isfile(CONFIG):
     with open(CONFIG, encoding="utf-8") as fh:
         config = json.load(fh)
@@ -161,7 +167,7 @@ if os.path.isfile(CONFIG):
 #
 # They were literals here — "Backlog", "In progress", "In QA", "Done" — one
 # team's board applied to every other team's. They are now `board` in the
-# project's .sclaude.json, loaded by board_load (project.sh), and the literal
+# project's .sclaude/config.json, loaded by board_load (project.sh), and the literal
 # spellings must not come back.
 for name, text in (("github.sh", github),
                    ("sclaude-watch", open(os.path.join(ROOT, "bin", "sclaude-watch"),
@@ -180,7 +186,7 @@ def board(config, body):
     """Run a snippet with project.sh loaded against a repo holding `config`."""
     with _tf.TemporaryDirectory() as tmp:
         if config is not None:
-            with open(os.path.join(tmp, ".sclaude.json"), "w") as fh:
+            with open(_cfg(os.path.join(tmp, ".sclaude/config.json")), "w") as fh:
                 json.dump(config, fh)
         script = 'REPO=%s\nsource %s/sclaude/lib/project.sh\nboard_load\n%s\n' % (
             tmp, ROOT, body)
@@ -213,7 +219,7 @@ cat "$REPO/gh-calls" 2>/dev/null
 """ % ROOT), "")
 
 # A project with no `board` section at all is told once why nothing moved —
-# before the names moved into .sclaude.json every project had the same four
+# before the names moved into .sclaude/config.json every project had the same four
 # columns, and losing them silently is the failure. A section that leaves a
 # column out is a choice and is not remarked on.
 NOTICE = """
@@ -837,7 +843,7 @@ check_true("timings-not-in-playwright-output",
 # In the project rather than the worktree: a worktree dies with the feature,
 # and the point of these numbers is that the next feature starts with them.
 check_true("timings-not-in-the-worktree",
-           '.feature/regression-timings' not in regression)
+           '.sclaude/local/feature/regression-timings' not in regression)
 
 check_true("expected-time-read", "regression_expected()" in regression)
 check_true("expected-total-for-the-header", "regression_expected_total()" in regression)
@@ -1008,7 +1014,7 @@ fix_body = regression[regression.find("regression_fix() {"):]
 check_true("fix-reports-an-orchestrator-fix",
            'friction.fix-$stage-$number.fixed' in fix_body and "return 4" in fix_body)
 check_true("fix-drops-the-stale-blocked-note",
-           re.search(r'fixed" 2>/dev/null \|\| true\)" == "true" \]\]; then\n\s*rm -f "\$wt/.feature/regression.blocked"\n\s*return 4',
+           re.search(r'fixed" 2>/dev/null \|\| true\)" == "true" \]\]; then\n\s*rm -f "\$wt/.sclaude/local/feature/regression.blocked"\n\s*return 4',
                      fix_body) is not None)
 gate_body = regression[regression.find("regression_gate() {"):regression.find("regression_rewind() {")]
 check_true("gate-reruns-after-an-orchestrator-fix",
@@ -1201,9 +1207,10 @@ def manual_parts(config, edit, ancestor=True):
                                         capture_output=True, text=True, env=env).stdout.strip()
         git("init", "-q")
         os.makedirs(os.path.join(tmp, "help"))
-        for name in ("help/page.tsx", "app.ts", ".sclaude.json"):
+        os.makedirs(os.path.join(tmp, ".sclaude"))
+        for name in ("help/page.tsx", "app.ts", ".sclaude/config.json"):
             with open(os.path.join(tmp, name), "w") as fh:
-                fh.write(json.dumps(config) if name == ".sclaude.json" else "x\n")
+                fh.write(json.dumps(config) if name == ".sclaude/config.json" else "x\n")
         git("add", "-A")
         git("commit", "-qm", "base")
         was = git("rev-parse", "HEAD")
@@ -1293,15 +1300,15 @@ def preview_gate(deployed, runs, fix_commits=True, ship_ok=True, verdict=None):
             "--allow-empty", "-m", "base")
         head = subprocess.run(["git", "-C", wt, "rev-parse", "HEAD"],
                               capture_output=True, text=True).stdout.strip()
-        os.makedirs(os.path.join(wt, ".feature"))
+        os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
         with open(os.path.join(wt, ".git", "info", "exclude"), "a") as fh:
-            fh.write(".feature\n")
+            fh.write(".sclaude/local/feature\n")
         blob = {"deploy": {"preview": {
             "sha": head if deployed == "head" else deployed}}}
         if verdict:
             blob["regression"] = {"preview": {
                 "status": "passed", "tree": head if verdict == "head" else verdict}}
-        with open(os.path.join(wt, ".feature", "state.json"), "w") as fh:
+        with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             json.dump(blob, fh)
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
@@ -1369,8 +1376,8 @@ check("preview-gate-green-on-another-tree-runs",
 # production rollback reopened; it can only tell them apart by the mark.
 def rewound(stage):
     with tempfile.TemporaryDirectory() as wt:
-        os.makedirs(os.path.join(wt, ".feature"))
-        state = os.path.join(wt, ".feature", "state.json")
+        os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+        state = os.path.join(wt, ".sclaude/local/feature", "state.json")
         with open(state, "w") as fh:
             json.dump({"pr": 7, "regression": {"preview": {"status": "passed"}}}, fh)
         body = "set -uo pipefail\n"

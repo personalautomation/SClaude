@@ -67,7 +67,7 @@ END = os.path.join(LIB, "session_end.py")
 tmp = tempfile.mkdtemp()
 try:
     wt = os.path.join(tmp, "wt")
-    os.makedirs(os.path.join(wt, ".feature"))
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     session = "0f1e2d3c-aaaa-bbbb-cccc-000000000001"
 
     def fake(args):
@@ -112,7 +112,7 @@ echo "x" > "%s"
 sleep %s
 session_watch_stop
 echo "watcher=[$SESSION_WATCHER]"
-""" % (home, wt, session, os.path.join(wt, ".feature", marker), wait)
+""" % (home, wt, session, os.path.join(wt, ".sclaude/local/feature", marker), wait)
         proc = subprocess.Popen(["bash", "-c", script], stdout=subprocess.PIPE, text=True)
         time.sleep(0.8)
         say(*after)
@@ -143,7 +143,7 @@ echo "watcher=[$SESSION_WATCHER]"
     watched("session-done", [turn_end(), typed("wait, one more thing")])
     check("typed-calls-it-off", target.poll(), None)
     check("typed-removes-the-marker",
-          os.path.exists(os.path.join(wt, ".feature", "session-done")), False)
+          os.path.exists(os.path.join(wt, ".sclaude/local/feature", "session-done")), False)
     target.kill()
 
     target = fake("--resume %s" % session)
@@ -173,20 +173,20 @@ echo "watcher=[$SESSION_WATCHER]"
     check("no-marker-no-kill", target.poll(), None)
     check("watcher-cleared", "watcher=[]" in out, True)
     # Writing the marker after the watcher is stopped changes nothing.
-    with open(os.path.join(wt, ".feature", "review-round"), "w") as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "review-round"), "w") as fh:
         fh.write("late\n")
     say(turn_end())
     time.sleep(0.5)
     check("stopped-watcher-stays-stopped", target.poll(), None)
     target.kill()
-    os.remove(os.path.join(wt, ".feature", "review-round"))
+    os.remove(os.path.join(wt, ".sclaude/local/feature", "review-round"))
 
     # --- step 1: the plan's approval is its marker ----------------------------
     for approval, closes in (("User has approved your plan.", True),
                              ("User rejected the plan.", False)):
         target = fake("--session-id %s" % session)
         open(transcript, "w").close()
-        done_file = os.path.join(wt, ".feature", "session-done")
+        done_file = os.path.join(wt, ".sclaude/local/feature", "session-done")
         script = WATCH + """
 export HOME="%s"
 SESSION_POLL=0.2 SESSION_GRACE=0
@@ -300,7 +300,7 @@ session_watch_stop
           "You do not need to type /exit" in RUN[RUN.index("session_report() {"):], True)
 
     # --- the ended session is recorded with its reason ------------------------
-    state = os.path.join(wt, ".feature", "state.json")
+    state = os.path.join(wt, ".sclaude/local/feature", "state.json")
     with open(state, "w") as fh:
         json.dump({"steps": {"review": {}}}, fh)
     body = 'source "%s/state.sh"\n' % LIB
@@ -363,9 +363,9 @@ session_watch_stop
     # --- the prompt names the marker the orchestrator watches -----------------
     with open(os.path.join(ROOT, "sclaude", "prompts", "review.md")) as fh:
         prompt = fh.read()
-    check("prompt-names-the-marker", "> .feature/review-round" in prompt, True)
+    check("prompt-names-the-marker", "> .sclaude/local/feature/review-round" in prompt, True)
     check("prompt-uses-subagents", "Fix through subagents" in prompt, True)
-    check("code-watches-the-same-file", 'echo "$1/.feature/review-round"' in RUN, True)
+    check("code-watches-the-same-file", 'echo "$1/.sclaude/local/feature/review-round"' in RUN, True)
 
     # --- a fresh session sees open threads only --------------------------------
     spec = importlib.util.spec_from_file_location("pr_context", os.path.join(LIB, "pr_context.py"))

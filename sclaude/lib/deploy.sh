@@ -61,7 +61,7 @@ deploy_remember() {
   local wt="$1" stage="$2" sha url
   sha="$(deploy_head "$wt" "$stage")" || return 0
   [[ -n "$sha" ]] || return 0
-  state_set "$wt/.feature/state.json" "deploy.$stage.sha" "$sha" 2>/dev/null || true
+  state_set "$wt/.sclaude/local/feature/state.json" "deploy.$stage.sha" "$sha" 2>/dev/null || true
 
   # For prod, the deployment's own address as well as the commit. `vercel
   # rollback` takes a url or an id and cannot be given a sha, so a record that
@@ -71,14 +71,14 @@ deploy_remember() {
   # hands back a pass or a fail and nothing else.
   if [[ "$stage" == "prod" ]]; then
     url="$(vercel_prod_current | cut -f1)" || url=""
-    [[ -n "$url" ]] && state_set "$wt/.feature/state.json" deploy.prod.url "$url" \
+    [[ -n "$url" ]] && state_set "$wt/.sclaude/local/feature/state.json" deploy.prod.url "$url" \
       2>/dev/null || true
     # A fresh ship ends the rolled-back state. The mark is what makes
     # deploy_unchanged answer "changed" while production serves an older
     # release than main's HEAD; leaving it set after the next deploy would make
     # that answer permanent, and the skip it exists to prevent would never
     # happen again.
-    state_set "$wt/.feature/state.json" rollback.prod.code null 2>/dev/null || true
+    state_set "$wt/.sclaude/local/feature/state.json" rollback.prod.code null 2>/dev/null || true
   fi
 }
 
@@ -94,7 +94,7 @@ deploy_remember() {
 # question is "do we know this is pointless", and not knowing is not a yes.
 deploy_unchanged() {
   local wt="$1" stage="$2" was now
-  was="$(state_get "$wt/.feature/state.json" "deploy.$stage.sha" 2>/dev/null || true)"
+  was="$(state_get "$wt/.sclaude/local/feature/state.json" "deploy.$stage.sha" 2>/dev/null || true)"
   [[ -n "$was" && "$was" != "null" ]] || return 1
 
   # A rolled-back production is never unchanged, whatever the commits say.
@@ -108,7 +108,7 @@ deploy_unchanged() {
   # Cleared by the deploy that follows: deploy_remember writes a new sha, and
   # the code below stops matching until the fix is itself shipped.
   if [[ "$stage" == "prod" ]] \
-     && [[ "$(state_get "$wt/.feature/state.json" rollback.prod.code 2>/dev/null || true)" == "done" ]]; then
+     && [[ "$(state_get "$wt/.sclaude/local/feature/state.json" rollback.prod.code 2>/dev/null || true)" == "done" ]]; then
     return 1
   fi
 
@@ -179,7 +179,7 @@ prod_drift_report() {
 # is needed before shipping to prod depends on it.
 branch_has_migrations() {
   local wt="$1" dir
-  # The directory is the project's answer, from `.sclaude.json`. A project that
+  # The directory is the project's answer, from `.sclaude/config.json`. A project that
   # names none has no migrations to promote, and everything about promoting and
   # reverting them drops out of the cycle rather than being asked about.
   dir="$(project_migrations_dir "$wt")" || return 1
@@ -421,7 +421,7 @@ preview_apply_migrations() {
   if [[ -z "$cmd" ]]; then
     echo ""
     warn "The branch adds migrations and the project names no applyPreview command."
-    info "  The preview runs without the branch's schema; .sclaude.json"
+    info "  The preview runs without the branch's schema; .sclaude/config.json"
     info "  describes it under database.applyPreview."
     return 0
   fi
@@ -472,13 +472,13 @@ preview_deploy() {
 # regression reads from.
 preview_ship() {
   local wt="$1" url_file try
-  url_file="$wt/.feature/preview.url"
+  url_file="$wt/.sclaude/local/feature/preview.url"
   rm -f "$url_file"
   for ((try = 1; try <= PREVIEW_TRIES; try++)); do
     if SCLAUDE_VERCEL_URL_FILE="$url_file" preview_deploy "$wt"; then
       deploy_remember "$wt" preview
       if [[ -s "$url_file" ]]; then
-        state_set "$wt/.feature/state.json" regression.preview.url "$(< "$url_file")"
+        state_set "$wt/.sclaude/local/feature/state.json" regression.preview.url "$(< "$url_file")"
       fi
       rm -f "$url_file"
       return 0
@@ -519,7 +519,7 @@ qa_missed() {
 
   [[ -n "$issue" && "$issue" != "null" ]] || return 1
   if [[ -n "$wt" ]]; then
-    state="$wt/.feature/state.json"
+    state="$wt/.sclaude/local/feature/state.json"
     sent="$(state_get "$state" qa.sha 2>/dev/null || true)"
     accepted="$(state_get "$state" qa.accepted 2>/dev/null || true)"
     [[ -n "$sent" && "$sent" != "null" && "$accepted" == "$sent" ]] && return 1
@@ -577,8 +577,8 @@ qa_retest() {
   local wt="$1" issue="$2" pr="$3" fresh="${4:-}" state sent now repo view pr_state draft
 
   [[ -n "$issue" && "$issue" != "null" && -n "$QA_DONE" && -n "$QA_TO" ]] || return 1
-  [[ "$pr" =~ ^[0-9]+$ && -d "$wt/.feature" ]] || return 1
-  state="$wt/.feature/state.json"
+  [[ "$pr" =~ ^[0-9]+$ && -d "$wt/.sclaude/local/feature" ]] || return 1
+  state="$wt/.sclaude/local/feature/state.json"
   sent="$(state_get "$state" qa.sha 2>/dev/null || true)"
   now="$(state_get "$state" deploy.preview.sha 2>/dev/null || true)"
   [[ -n "$now" && "$now" != "null" ]] || return 1
@@ -614,7 +614,7 @@ qa_retest() {
 
 # Records which preview commit QA has been sent to look at — see qa_retest.
 qa_sent() {
-  local state="$1/.feature/state.json" now
+  local state="$1/.sclaude/local/feature/state.json" now
   now="$(state_get "$state" deploy.preview.sha 2>/dev/null || true)"
   [[ -n "$now" && "$now" != "null" ]] || return 0
   state_set "$state" qa.sha "$now" 2>/dev/null || true
@@ -625,7 +625,7 @@ qa_sent() {
 # matches: a new preview is not accepted until QA says so again.
 qa_accepted() {
   [[ -n "${1:-}" ]] || return 0
-  local state="$1/.feature/state.json" sent
+  local state="$1/.sclaude/local/feature/state.json" sent
   sent="$(state_get "$state" qa.sha 2>/dev/null || true)"
   [[ -n "$sent" && "$sent" != "null" ]] || return 0
   state_set "$state" qa.accepted "$sent" 2>/dev/null || true
@@ -1137,15 +1137,15 @@ remind_prod() {
   # all. So the label is read from the two things it names, and both are already
   # written down.
   local preview_live=0
-  pr="$(state_get "$wt/.feature/state.json" pr || echo "?")"
-  branch="$(state_get "$wt/.feature/state.json" branch || true)"
+  pr="$(state_get "$wt/.sclaude/local/feature/state.json" pr || echo "?")"
+  branch="$(state_get "$wt/.sclaude/local/feature/state.json" branch || true)"
   # The issue's number, the branch and the PR are read here, once, and the rest
   # of the function works from them. The clean-up that used to remove the tree
   # in the middle of this function now stands at its end, so the state no longer
   # vanishes underfoot — but a single snapshot is still what this wants: the
   # values are asked for in several places below, and re-reading them would mean
   # a function whose behaviour changes depending on when each line ran.
-  issue="$(state_get "$wt/.feature/state.json" issue || true)"
+  issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue || true)"
   [[ "$issue" == "null" ]] && issue=""
   [[ -n "$branch" ]] && merged="$(branch_pr_state "$branch")"
   branch_has_migrations "$wt" && migrations=1
@@ -1399,8 +1399,8 @@ remind_prod() {
   # Only that reopening, by the same rule run_step follows: QA's hand-back and
   # production's wait for a session, and a merge must not swallow them.
   if [[ "${merged:-}" == "MERGED" ]] \
-     && [[ "$(state_get "$wt/.feature/state.json" step 2>/dev/null || true)" == "review" ]] \
-     && [[ "$(state_get "$wt/.feature/state.json" reopened_by 2>/dev/null || true)" == "preview" ]]; then
+     && [[ "$(state_get "$wt/.sclaude/local/feature/state.json" step 2>/dev/null || true)" == "review" ]] \
+     && [[ "$(state_get "$wt/.sclaude/local/feature/state.json" reopened_by 2>/dev/null || true)" == "preview" ]]; then
     step_close_merged "$wt"
     issue_sync "$wt"
   fi
@@ -1540,7 +1540,7 @@ remind_prod() {
       prod_cmds+=("git push")
     else
       warn "  The branch adds migrations and the project names no promote command."
-      info "  They will not be applied to production by this block; .sclaude.json"
+      info "  They will not be applied to production by this block; .sclaude/config.json"
       info "  describes it under database.promote."
     fi
     prod_cmds+=("vercel --prod")
@@ -1612,12 +1612,12 @@ remind_prod() {
     local intruders="" intruded=0
     if [[ "$prod_rc" -eq 1 ]]; then
       intruders="$(regression_deploy_intruded prod \
-        "$(state_get "$wt/.feature/state.json" regression.prod.started 2>/dev/null || true)" \
-        "$(state_get "$wt/.feature/state.json" regression.prod.finished 2>/dev/null || true)")" \
+        "$(state_get "$wt/.sclaude/local/feature/state.json" regression.prod.started 2>/dev/null || true)" \
+        "$(state_get "$wt/.sclaude/local/feature/state.json" regression.prod.finished 2>/dev/null || true)")" \
         && intruded=1
     fi
     if [[ "$intruded" -eq 1 ]]; then
-      state_set "$wt/.feature/state.json" regression.prod.intruded \
+      state_set "$wt/.sclaude/local/feature/state.json" regression.prod.intruded \
         "$(cut -f1 <<< "$intruders" | paste -sd' ')" 2>/dev/null || true
       echo ""
       warn "Production was deployed again while its regression was running:"
@@ -1642,7 +1642,7 @@ remind_prod() {
     fi
 
     if [[ "$prod_rc" -eq 0 ]]; then
-      state_set "$wt/.feature/state.json" regression.prod.attempts 0 2>/dev/null || true
+      state_set "$wt/.sclaude/local/feature/state.json" regression.prod.attempts 0 2>/dev/null || true
       regression_clear_mark "$wt" prod
     elif [[ "$prod_rc" -eq 2 ]]; then
       # The stage could not run at all — no address to aim at, nothing served.

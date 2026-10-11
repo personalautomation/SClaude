@@ -28,7 +28,7 @@
 # ~/.claude/sclaude/terminal/.
 #
 # A feature learns which runs touched it: feature_worktree and run_step add the
-# run's recording to .feature/terminal, one path per line. A run that went
+# run's recording to .sclaude/local/feature/terminal, one path per line. A run that went
 # through the menu to two features is listed by both — it is one stretch of
 # terminal, and cutting it apart would need sclaude to say where each feature's
 # part begins.
@@ -105,8 +105,8 @@ term_record() {
 # Add this run's recording to a feature's list. Silent and never fatal.
 term_attach() {
   local wt="$1" list
-  [[ -n "${SCLAUDE_TERM:-}" && "$SCLAUDE_TERM" != "off" && -d "$wt/.feature" ]] || return 0
-  list="$wt/.feature/terminal"
+  [[ -n "${SCLAUDE_TERM:-}" && "$SCLAUDE_TERM" != "off" && -d "$wt/.sclaude/local/feature" ]] || return 0
+  list="$wt/.sclaude/local/feature/terminal"
   grep -qxF -- "$SCLAUDE_TERM" "$list" 2>/dev/null && return 0
   echo "$SCLAUDE_TERM" >> "$list" 2>/dev/null || true
 }
@@ -138,7 +138,7 @@ term_skip() {
 # Every recording a feature has, played back into one text file. Prints the
 # file's path; returns 1 when there is nothing.
 term_render() {
-  local wt="$1" out="$1/.feature/terminal.txt" list="$1/.feature/terminal"
+  local wt="$1" out="$1/.sclaude/local/feature/terminal.txt" list="$1/.sclaude/local/feature/terminal"
   [[ -s "$list" ]] || return 1
   local -a files=()
   local run

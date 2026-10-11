@@ -139,7 +139,7 @@ exit 5
 
     # --- a feature lists each run once ---
     wt = os.path.join(tmp, "wt")
-    os.makedirs(os.path.join(wt, ".feature"))
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     script = r'''
 source "%s/terminal.sh"
 SCLAUDE_TERM=/r/one.log term_attach "%s"
@@ -149,7 +149,7 @@ SCLAUDE_TERM=off term_attach "%s"
 SCLAUDE_TERM= term_attach "%s"
 ''' % ((LIB,) + (wt,) * 5)
     p = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
-    with open(os.path.join(wt, ".feature", "terminal")) as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "terminal")) as fh:
         check("attach-once-each", fh.read().split(), ["/r/one.log", "/r/two.log"])
 
     # --- the marks around a session in place: only in a recorded run ---
@@ -189,7 +189,7 @@ SCLAUDE_TERM=off term_skip begin --session-id 0123
               b"\x1b]7771;sclaude-skip;end\x07the end\r\n")
     recording(later, "2026-10-09 10:05:00+01:00",
               b"second run\r\n\x1b]7771;sclaude-skip;begin;99\x07still running\r\n")
-    with open(os.path.join(wt, ".feature", "terminal"), "w") as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "terminal"), "w") as fh:
         fh.write(later + "\n" + run + "\n" + os.path.join(rec, "gone.log") + "\n")
     script = r'''
 LIB="%s"
@@ -197,7 +197,7 @@ source "$LIB/terminal.sh"
 term_render "%s"
 ''' % (LIB, wt)
     p = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
-    out = os.path.join(wt, ".feature", "terminal.txt")
+    out = os.path.join(wt, ".sclaude/local/feature", "terminal.txt")
     check("render-prints-path", p.stdout.strip(), out)
     text = open(out).read() if os.path.exists(out) else ""
     check("render-scrollback-kept", "line 1\n" in text and "start\n" in text, True)
@@ -211,13 +211,13 @@ term_render "%s"
     check("render-two-headings", text.count("sclaude · started"), 2)
     check("render-no-script-lines", "Script started" in text or "Script done" in text, False)
 
-    open(os.path.join(wt, ".feature", "terminal"), "w").close()
+    open(os.path.join(wt, ".sclaude/local/feature", "terminal"), "w").close()
     p = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
     check("render-nothing", p.returncode, 1)
 
     # --- the retrospective runs once per feature ---
     def retro(state):
-        with open(os.path.join(wt, ".feature", "state.json"), "w") as fh:
+        with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             fh.write(state)
         script = r'''
 PROMPTS="%s/../prompts"

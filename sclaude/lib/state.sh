@@ -441,13 +441,13 @@ pending_epilogues() {
 }
 
 # Every feature under sclaude's management: the worktrees that have a
-# .feature/state.json. Prints "<slug>\t<worktree>\t<step>", one line per
+# .sclaude/local/feature/state.json. Prints "<slug>\t<worktree>\t<step>", one line per
 # feature.
 list_features() {
   git -C "$REPO" worktree list --porcelain 2>/dev/null \
     | awk '/^worktree /{print substr($0, 10)}' \
     | while read -r wt; do
-        local_state="$wt/.feature/state.json"
+        local_state="$wt/.sclaude/local/feature/state.json"
         [[ -f "$local_state" ]] || continue
         slug="$(state_get "$local_state" feature)" || continue
         step="$(state_get "$local_state" step)" || step="?"
@@ -469,7 +469,7 @@ feature_worktree() {
 #
 # One line per finished feature, appended to ~/.claude/sclaude/cycles.jsonl
 # before the worktree goes. Everything the cycle measured about itself lives in
-# .feature/state.json, and that file dies with the tree: until now no feature's
+# .sclaude/local/feature/state.json, and that file dies with the tree: until now no feature's
 # timings, fixing attempts or friction verdicts outlived the clean-up, so the
 # questions they answer — is the cycle getting faster, which step holds it up,
 # are two fixing attempts enough — could not be asked at all.
@@ -487,7 +487,7 @@ feature_worktree() {
 # an abandoned one. They are kept in the same file and must never be averaged
 # together: an abandoned feature's timings describe a decision, not a cycle.
 metrics_append() {
-  local wt="$1" outcome="$2" state="$1/.feature/state.json"
+  local wt="$1" outcome="$2" state="$1/.sclaude/local/feature/state.json"
   [[ -f "$state" ]] || return 0
   SCLAUDE_DEVELOPER="$(developer_name 2>/dev/null || true)" \
     python3 "$LIB/metrics.py" "$state" "$outcome" 2>/dev/null || true

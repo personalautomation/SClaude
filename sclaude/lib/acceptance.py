@@ -14,7 +14,7 @@
 # From there they are the one statement of what this feature has to do that
 # outlives the worktree: the plan is rewritten whenever development deviates,
 # the commits describe what was built rather than what was asked for, and
-# `.feature/` dies with the tree.
+# `.sclaude/local/feature/` dies with the tree.
 #
 # A comment and not the description: the description is the task as a human
 # set it, and it stays exactly that — see issue_comments.py. Issues from before

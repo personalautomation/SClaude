@@ -6,13 +6,13 @@
 # prompt:
 #
 #   1. plan    opus   / high   / plan   — context, scope, the plan in
-#                                         .feature/plan.md
+#                                         .sclaude/local/feature/plan.md
 #   2. code    opus   / medium / auto   — implementation, testing, commits
 #   3. pr      sonnet / medium / auto   — the manuals, the PR body, gh pr create
 #   4. review  opus   / medium / auto   — fixing review comments, preview deploy
 #
 # Context is not carried between steps: every step is a new session, and
-# .feature/plan.md serves as the bridge. The orchestrator writes it, from the
+# .sclaude/local/feature/plan.md serves as the bridge. The orchestrator writes it, from the
 # plan approved in step 1's session: the step itself is in plan mode, and that
 # forbids writing. Returning to an unfinished step goes through --resume, so an
 # interrupted conversation is not lost.
@@ -67,7 +67,7 @@
 # with the checkbox set gives the human those same actions in one list without
 # their having to remember command names.
 #
-# Every feature's state is .feature/state.json in its worktree. The .feature/
+# Every feature's state is .sclaude/local/feature/state.json in its worktree. The .sclaude/local/feature/
 # directory is a working one: it is in .gitignore, is not committed, and is
 # removed at step 3.
 #
@@ -224,7 +224,7 @@ cmd_new() {
   local name="${1:-}" issue="${2:-}" slug wt branch
 
   # A repository sclaude has not been told about yet gets the offer to write
-  # `.sclaude.json` — which checks make up a regression, where the manuals are,
+  # `.sclaude/config.json` — which checks make up a regression, where the manuals are,
   # what production's address is. Most of it is read out of the repository and
   # shown for correction rather than asked from scratch.
   #
@@ -298,8 +298,8 @@ cmd_new() {
   git -C "$REPO" fetch origin || die "git fetch failed"
   git -C "$REPO" worktree add "$wt" -b "$branch" origin/main || die "could not create the worktree"
 
-  mkdir -p "$wt/.feature"
-  python3 - "$wt/.feature/state.json" "$slug" "$branch" "$wt" "$issue" <<'PY'
+  mkdir -p "$wt/.sclaude/local/feature"
+  python3 - "$wt/.sclaude/local/feature/state.json" "$slug" "$branch" "$wt" "$issue" <<'PY'
 import json, sys, datetime
 path, slug, branch, wt, issue = sys.argv[1:6]
 state = {
@@ -331,13 +331,13 @@ cmd_resume() {
   require_repo
   local slug="$1" wt step
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
-  step="$(state_get "$wt/.feature/state.json" step)" || die "corrupted state: $wt/.feature/state.json"
+  step="$(state_get "$wt/.sclaude/local/feature/state.json" step)" || die "corrupted state: $wt/.sclaude/local/feature/state.json"
 
   # The PR may have appeared at any moment — step 3 creates it itself, and if
   # the session closed by another route the number did not reach the state. We
   # ask gh rather than relying on the step advancing: step 4 needs that number in
   # its prompt.
-  [[ -z "$(state_get "$wt/.feature/state.json" pr || true)" ]] && capture_pr "$wt"
+  [[ -z "$(state_get "$wt/.sclaude/local/feature/state.json" pr || true)" ]] && capture_pr "$wt"
 
   # What the watcher saw while no session was open. It changes nothing itself —
   # that is the whole design — so this is where its finding is acted on.
@@ -391,7 +391,7 @@ cmd_resume() {
       # session by run_step, and without this there is no session to hand them
       # to: the review is recorded as finished and nothing reopens it.
       qa_take_back "$wt" "$slug" || true
-      step="$(state_get "$wt/.feature/state.json" step)" || true
+      step="$(state_get "$wt/.sclaude/local/feature/state.json" step)" || true
       # Deliberately NOT acknowledged here: the comments have not been delivered
       # yet. run_step hands them to the session and calls watch_seen once it
       # has, which is the only moment at which they have actually been read.
@@ -408,7 +408,7 @@ cmd_resume() {
   # stands between steps at all: the fix is needed by the step that is about to
   # start. If the review was interrupted, the feature waits here rather than
   # travelling on.
-  local fstate="$wt/.feature/state.json"
+  local fstate="$wt/.sclaude/local/feature/state.json"
   local fkey; fkey="$(friction_pending "$fstate" || true)"
   if [[ -n "$fkey" ]]; then
     # The key names what the review was about, so there is nothing left to look
@@ -426,7 +426,7 @@ cmd_resume() {
   for rstage in local preview prod; do
     if [[ "$(state_get "$fstate" "regression.$rstage.status" || true)" == "running" ]]; then
       info "The $rstage regression was interrupted — it starts again from the beginning."
-      info "  The previous log is still in .feature/regression.log."
+      info "  The previous log is still in .sclaude/local/feature/regression.log."
       state_set "$fstate" "regression.$rstage.status" null
     fi
   done
@@ -540,7 +540,7 @@ cmd_menu() {
   local slug wt step issue
   while IFS=$'\t' read -r slug wt step; do
     [[ -z "$slug" ]] && continue
-    issue="$(state_get "$wt/.feature/state.json" issue 2>/dev/null)" || issue=""
+    issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null)" || issue=""
     [[ "$issue" =~ ^[0-9]+$ ]] && issues+=("$issue")
   done <<< "$rows"
 
@@ -558,7 +558,7 @@ cmd_menu() {
     [[ -z "$slug" ]] && continue
     slugs+=("$slug")
     hint="$(step_label "$step")"
-    issue="$(state_get "$wt/.feature/state.json" issue 2>/dev/null)" || issue=""
+    issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null)" || issue=""
     [[ -n "$issue" && -n "${blocked[$issue]:-}" ]] && hint+=" · blocked by ${blocked[$issue]}"
     labels+=("$slug"$'\t'"$hint")
   done <<< "$rows"
@@ -686,7 +686,7 @@ cmd_issue() {
   local slug="${1:-}" wt state issue
   [[ -n "$slug" ]] || die "name the feature: $SELF issue <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
-  state="$wt/.feature/state.json"
+  state="$wt/.sclaude/local/feature/state.json"
 
   issue="$(state_get "$state" issue || true)"
   if [[ -n "$issue" && "$issue" != "null" ]]; then
@@ -710,7 +710,7 @@ cmd_replan() {
   local slug="${1:-}" wt state step answer
   [[ -n "$slug" ]] || die "name the feature: $SELF replan <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
-  state="$wt/.feature/state.json"
+  state="$wt/.sclaude/local/feature/state.json"
   step="$(state_get "$state" step)" || die "corrupted state: $state"
 
   echo ""
@@ -721,7 +721,7 @@ cmd_replan() {
     # Refusing was a mistake: it left the old session in the state, and the next
     # launch returned to the same dead end.
     echo "Feature '$slug' starts step 1 over, in a new conversation."
-    info "  The plan in .feature/plan.md stays as it is — the new session reads it."
+    info "  The plan in .sclaude/local/feature/plan.md stays as it is — the new session reads it."
   else
     echo "Feature '$slug' goes back from $(step_label "$step") to step 1, planning."
     info "  A new conversation starts — the approved plan is not reopened."
@@ -763,7 +763,7 @@ cmd_return() {
   [[ -n "$slug" ]] || die "name the feature: $SELF return <name> [reason]"
   shift
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
-  state="$wt/.feature/state.json"
+  state="$wt/.sclaude/local/feature/state.json"
   step="$(state_get "$state" step)" || die "corrupted state: $state"
 
   if [[ "$step" != "done" ]]; then
@@ -795,14 +795,14 @@ cmd_friction() {
   # empty by construction, and what has to be returned to is the conversation.
   # run_friction works that out; here it is enough not to turn it away with the
   # emptiness check.
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
   local fkey; fkey="$(friction_pending "$state" || true)"
   if [[ -n "$fkey" ]]; then
     run_friction "$wt" "$slug" "$fkey"
     return 0
   fi
 
-  local log="$wt/.feature/friction.log" reread=""
+  local log="$wt/.sclaude/local/feature/friction.log" reread=""
   if [[ ! -s "$log" ]]; then
     # What was reviewed lies next to it under .reviewed — bringing it back is
     # cheaper than explaining to the human that there is nothing left to look at.
@@ -932,7 +932,7 @@ cmd_reset() {
   local slug="${1:-}" wt state step answer
   [[ -n "$slug" ]] || die "name the feature: $SELF reset <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
-  state="$wt/.feature/state.json"
+  state="$wt/.sclaude/local/feature/state.json"
   step="$(state_get "$state" step)" || die "corrupted state: $state"
 
   # An unclosed friction review comes first and as a separate question rather
@@ -961,7 +961,7 @@ cmd_reset() {
     else
       info "  Its conversation left no transcript — there is nothing to lose."
     fi
-    info "  The entries stay in .feature/friction.log.reviewed, marked as reviewed;"
+    info "  The entries stay in .sclaude/local/feature/friction.log.reviewed, marked as reviewed;"
     info "  re-read them any time with: $SELF friction $slug"
     ask "${BOLD}Close the friction review and move on? [y/n] ${OFF}" answer yn
     if is_yes "$answer"; then
@@ -1037,7 +1037,7 @@ cmd_handoff() {
   local slug="${1:-}" wt state pr issue
   [[ -n "$slug" ]] || die "usage: $SELF _handoff <name>"
   wt="$(feature_worktree "$slug")" || { echo "no such feature: $slug" >&2; return 2; }
-  state="$wt/.feature/state.json"
+  state="$wt/.sclaude/local/feature/state.json"
   pr="$(state_get "$state" pr || true)"
   issue="$(state_get "$state" issue || true)"
   pr_qa_handoff "$wt" "$pr" "$issue"
@@ -1048,7 +1048,7 @@ cmd_done() {
   local slug="${1:-}" wt branch merged pr answer
   [[ -n "$slug" ]] || die "name the feature: $SELF done <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
-  branch="$(state_get "$wt/.feature/state.json" branch)" || die "the state carries no branch"
+  branch="$(state_get "$wt/.sclaude/local/feature/state.json" branch)" || die "the state carries no branch"
 
   IFS=$'\t' read -r merged pr < <(gh pr view "$branch" --repo "$(git -C "$REPO" remote get-url origin)" \
     --json state,number --jq '[.state, .number] | @tsv' 2>/dev/null) || true
@@ -1059,14 +1059,14 @@ cmd_done() {
   # The retrospective, while everything it reads is still here (retro.sh). Before
   # the list below rather than after it, so the list stands right above the
   # question it belongs to.
-  run_retro "$wt" "$slug" "$pr" "$(state_get "$wt/.feature/state.json" issue 2>/dev/null || true)"
+  run_retro "$wt" "$slug" "$pr" "$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null || true)"
 
   # Code the retrospective changed is not cleaned up with the feature: the feature
   # goes back to step 3 for it by itself, and through the review, the preview,
   # QA and the merge after it. The clean-up waits for that merge.
   local again; again="$(retro_changed_code "$wt" "$branch")"
   if [[ -n "$again" ]]; then
-    retro_reopen "$wt" "$pr" || die "could not reopen '$slug': see $wt/.feature/state.json"
+    retro_reopen "$wt" "$pr" || die "could not reopen '$slug': see $wt/.sclaude/local/feature/state.json"
     echo ""
     say "${BOLD}The retrospective committed $again change(s) PR #$pr does not carry — '$slug' goes back to step '$(step_title pr)' for them.${OFF}"
     info "  The clean-up waits until their pull request is merged too: $SELF done $slug"
@@ -1113,7 +1113,7 @@ cmd_done() {
   fi
 
   # An unreviewed friction log is the second thing that exists only here.
-  # worktree_dirt says nothing about it: .feature/ is hidden from git, and by
+  # worktree_dirt says nothing about it: .sclaude/local/feature/ is hidden from git, and by
   # construction it is not in the list of uncommitted changes. So we say it
   # separately —
   # analysis that has already been paid for must not disappear unmentioned.
@@ -1134,7 +1134,7 @@ cmd_done() {
   # We append the summary before the clean-up: state.json lives inside the
   # worktree and will disappear with it, and there will be nothing left to
   # assemble it from.
-  state_set "$wt/.feature/state.json" cleaned true
+  state_set "$wt/.sclaude/local/feature/state.json" cleaned true
   issue_sync "$wt"
 
   # And the cycle's own record, for the same reason and in the same window.
@@ -1206,7 +1206,7 @@ cmd_sync() {
   local slug="${1:-}" wt branch behind ahead answer
   [[ -n "$slug" ]] || die "name the feature: $SELF sync <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
-  branch="$(state_get "$wt/.feature/state.json" branch)" || die "the state carries no branch"
+  branch="$(state_get "$wt/.sclaude/local/feature/state.json" branch)" || die "the state carries no branch"
 
   echo ""
   info "Fetching origin…"
@@ -1272,7 +1272,7 @@ cmd_news() {
   local slug="${1:-}" wt pr news
   [[ -n "$slug" ]] || die "name the feature: $SELF news <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
-  pr="$(state_get "$wt/.feature/state.json" pr || true)"
+  pr="$(state_get "$wt/.sclaude/local/feature/state.json" pr || true)"
   [[ -n "$pr" && "$pr" != "null" ]] || { info "Feature '$slug' has no pull request yet."; return 0; }
 
   # review_news shows what is new relative to step 4's last session, and it
@@ -1282,7 +1282,7 @@ cmd_news() {
   # opposite way: everything there is new, there is simply nothing to count it
   # from.
   local session
-  session="$(state_get "$wt/.feature/state.json" steps.review.session || true)"
+  session="$(state_get "$wt/.sclaude/local/feature/state.json" steps.review.session || true)"
   echo ""
   if [[ -z "$session" || "$session" == "null" ]]; then
     info "PR #$pr has not been reviewed yet — step 4 hasn't run."
@@ -1357,7 +1357,7 @@ cmd_rollback() {
   # `rollback.prod.url` can name a deployment for a ship that never happened.
   # `deploy.prod.sha` is written only by a deploy that succeeded, so it is the
   # honest question.
-  local shipped; shipped="$(state_get "$wt/.feature/state.json" deploy.prod.sha 2>/dev/null || true)"
+  local shipped; shipped="$(state_get "$wt/.sclaude/local/feature/state.json" deploy.prod.sha 2>/dev/null || true)"
   if [[ -z "$shipped" || "$shipped" == "null" ]]; then
     warn "Feature '$slug' has not been shipped to production from here."
     info "  There is nothing to roll back: production is serving whatever it"
@@ -1369,7 +1369,7 @@ cmd_rollback() {
   rollback_prod "$wt" "$slug" || return 1
   rollback_confirm "$wt" "$slug" || true
   rollback_incident "$wt" "$slug" \
-    "$(state_get "$wt/.feature/state.json" issue 2>/dev/null || true)"
+    "$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null || true)"
 }
 
 # The server usually starts by itself before a step; this command is for the
@@ -1399,7 +1399,7 @@ cmd_dev() {
       wt="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not a git repository"
     fi
     port="$DEV_PORT_PINNED"
-    [[ -n "$port" ]] || port="$(state_get "$wt/.feature/state.json" dev.port 2>/dev/null || true)"
+    [[ -n "$port" ]] || port="$(state_get "$wt/.sclaude/local/feature/state.json" dev.port 2>/dev/null || true)"
     pid="$(dev_pid "$port")"
     if [[ -n "$pid" ]]; then
       cwd="$(dev_cwd "$pid")"
@@ -1424,7 +1424,7 @@ cmd_dev() {
     # Without a name, the server for the worktree it was called from.
     wt="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not a git repository"
   fi
-  mkdir -p "$wt/.feature"
+  mkdir -p "$wt/.sclaude/local/feature"
   ensure_dev "$wt"
   [[ "$browser" -eq 1 ]] && ensure_chrome "$wt"
   return 0

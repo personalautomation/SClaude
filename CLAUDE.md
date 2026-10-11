@@ -50,7 +50,7 @@ breaks the other silently — grep before you edit:
   declared once, in `sclaude/lib/issue_comments.py`, and imported elsewhere;
   `sclaude/prompts/plan.md` and `status.md` spell them out for the model.
   `tests/status.py` fails if a copy reappears in `github.sh`.
-- `.feature/review-yours` — the review threads the person decided to leave —
+- `.sclaude/local/feature/review-yours` — the review threads the person decided to leave —
   is named by `YOURS_FILE` in `sclaude/lib/pr_context.py` and spelled out in
   `sclaude/prompts/review.md`, which tells the session its line format;
   `tests/parallel.py` checks the two agree.

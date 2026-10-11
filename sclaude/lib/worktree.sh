@@ -251,9 +251,9 @@ DEV_REGISTRY="${SCLAUDE_DEV_REGISTRY:-$HOME/.claude/sclaude/dev}"
 # `avoid` asks for a new port even though one is recorded: the recorded one is
 # held by a process from another directory, which is not ours to kill.
 dev_claim() {
-  local wt="$1" avoid="${2:-}" state="$1/.feature/state.json" main=0
+  local wt="$1" avoid="${2:-}" state="$1/.sclaude/local/feature/state.json" main=0
   [[ "$wt" == "${REPO:-}" ]] && main=1
-  mkdir -p "$wt/.feature" "$DEV_REGISTRY" || return 1
+  mkdir -p "$wt/.sclaude/local/feature" "$DEV_REGISTRY" || return 1
   [[ -s "$state" ]] || echo '{}' > "$state"
   (
     flock -w 10 9 || exit 1
@@ -287,14 +287,14 @@ def owner(label):
     if not os.path.islink(link):
         return None
     target = os.path.realpath(link)
-    if not os.path.isfile(os.path.join(target, ".feature", "state.json")):
+    if not os.path.isfile(os.path.join(target, ".sclaude/local/feature", "state.json")):
         return None
     return target
 
 
 def port_of(tree):
     try:
-        with open(os.path.join(tree, ".feature", "state.json")) as fh:
+        with open(os.path.join(tree, ".sclaude/local/feature", "state.json")) as fh:
             port = (json.load(fh).get("dev") or {}).get("port")
     except (OSError, ValueError, AttributeError):
         return None
@@ -352,10 +352,10 @@ PY
 feature_port() {
   local wt="$1" port
   [[ -n "$DEV_PORT_PINNED" ]] && { echo "$DEV_PORT_PINNED"; return 0; }
-  port="$(state_get "$wt/.feature/state.json" dev.port 2>/dev/null)"
+  port="$(state_get "$wt/.sclaude/local/feature/state.json" dev.port 2>/dev/null)"
   if [[ ! "$port" =~ ^[0-9]+$ ]]; then
     dev_claim "$wt" || return 1
-    port="$(state_get "$wt/.feature/state.json" dev.port 2>/dev/null)"
+    port="$(state_get "$wt/.sclaude/local/feature/state.json" dev.port 2>/dev/null)"
   fi
   [[ "$port" =~ ^[0-9]+$ ]] && echo "$port"
 }
@@ -368,10 +368,10 @@ feature_url() {
     echo "http://localhost:$DEV_PORT_PINNED"
     return 0
   fi
-  label="$(state_get "$wt/.feature/state.json" dev.label 2>/dev/null)"
+  label="$(state_get "$wt/.sclaude/local/feature/state.json" dev.label 2>/dev/null)"
   if [[ -z "$label" ]]; then
     dev_claim "$wt" || { echo "http://localhost:$PROXY_PORT"; return 0; }
-    label="$(state_get "$wt/.feature/state.json" dev.label 2>/dev/null)"
+    label="$(state_get "$wt/.sclaude/local/feature/state.json" dev.label 2>/dev/null)"
   fi
   echo "http://$label.localhost:$PROXY_PORT"
 }
@@ -441,10 +441,10 @@ dev_cwd() {
 # server. So we step aside to another port instead, and say so.
 ensure_dev() {
   local wt="$1" pid cwd log port
-  log="$wt/.feature/dev.log"
+  log="$wt/.sclaude/local/feature/dev.log"
 
   # A tree being removed gets no server, and no database either — see stop_dev.
-  [[ -e "$wt/.feature/closing" ]] && return 0
+  [[ -e "$wt/.sclaude/local/feature/closing" ]] && return 0
 
   # Before starting rather than after: the server reads the environment once at
   # start-up, and once up against prod it stays that way until a restart. The
@@ -467,9 +467,9 @@ ensure_dev() {
   # started on the old environment, and is restarted the same way.
   if declare -F ensure_db >/dev/null; then
     local before after
-    before="$(cat "$wt/.feature/db.env" 2>/dev/null)"
+    before="$(cat "$wt/.sclaude/local/feature/db.env" 2>/dev/null)"
     ensure_db "$wt"
-    after="$(cat "$wt/.feature/db.env" 2>/dev/null)"
+    after="$(cat "$wt/.sclaude/local/feature/db.env" 2>/dev/null)"
     [[ "$before" == "$after" ]] || switched=1
     db_shared_warning "$wt"
   fi
@@ -537,7 +537,7 @@ ensure_dev() {
   # process is already dead. The difference is visible from whether a single next
   # is alive in this directory.
   if pgrep -f "$wt.*next" >/dev/null 2>&1 || pgrep -f "scripts/dev.mjs" >/dev/null 2>&1; then
-    info "  dev server: building, $(dev_address "$wt") opens in a minute (log: .feature/dev.log)"
+    info "  dev server: building, $(dev_address "$wt") opens in a minute (log: .sclaude/local/feature/dev.log)"
   else
     warn "  the dev server did not start — see $log"
   fi
@@ -590,7 +590,7 @@ ensure_chrome() {
   # with PPID=1 (see the comment on the section above). A background start with
   # closed streams is enough, otherwise the substitution around the call would
   # wait for stdout.
-  log="$wt/.feature/chrome.log"
+  log="$wt/.sclaude/local/feature/chrome.log"
   # Opened at the feature's own address: chrome-debug with no URL lands on the
   # bare proxy, which is the list of every feature rather than this one.
   ( chrome-debug "$(dev_address "$wt")" > "$log" 2>&1 < /dev/null & ) >/dev/null 2>&1
@@ -598,7 +598,7 @@ ensure_chrome() {
   # We do not wait for readiness — for the same reasons as with the server: a
   # cold start is measured in seconds, and the step gets to the browser much
   # later.
-  info "  chrome: starting on port $CHROME_PORT (log: .feature/chrome.log)"
+  info "  chrome: starting on port $CHROME_PORT (log: .sclaude/local/feature/chrome.log)"
 }
 
 # Kills the server's whole process tree: next-server lives as a grandchild, and
@@ -644,7 +644,7 @@ stop_dev_pid() {
 # had ports of their own is still sitting there.
 stop_own_dev() {
   local wt="$1" pid cwd port stopped=1
-  for port in "$DEV_PORT_PINNED" "$(state_get "$wt/.feature/state.json" dev.port 2>/dev/null)" 3000; do
+  for port in "$DEV_PORT_PINNED" "$(state_get "$wt/.sclaude/local/feature/state.json" dev.port 2>/dev/null)" 3000; do
     [[ -n "$port" ]] || continue
     pid="$(dev_pid "$port")"
     [[ -n "$pid" ]] || continue
@@ -674,8 +674,8 @@ stop_own_dev() {
 # start that got in before the mark did.
 stop_dev() {
   local wt="$1" label stopped=0
-  label="$(state_get "$wt/.feature/state.json" dev.label 2>/dev/null)"
-  [[ -d "$wt/.feature" ]] && touch "$wt/.feature/closing"
+  label="$(state_get "$wt/.sclaude/local/feature/state.json" dev.label 2>/dev/null)"
+  [[ -d "$wt/.sclaude/local/feature" ]] && touch "$wt/.sclaude/local/feature/closing"
   if [[ -n "$label" && -L "$DEV_REGISTRY/$label" \
         && "$(readlink -f "$DEV_REGISTRY/$label")" == "$(readlink -f "$wt")" ]]; then
     rm -f "$DEV_REGISTRY/$label"
@@ -720,7 +720,7 @@ remove_worktree() {
 # ~/myapp-review-dispatch-fix, and said it could be removed after the merge.
 # Nothing removed it: `done` takes away the feature's own worktree, and sclaude
 # never knew of the other. Here it is found by what it is — a worktree with no
-# .feature of its own (so no feature's, running or not), whose branch GitHub
+# .sclaude/local/feature of its own (so no feature's, running or not), whose branch GitHub
 # reports merged, with nothing uncommitted in it.
 side_worktrees_offer() {
   local path branch pr answer line
@@ -729,7 +729,7 @@ side_worktrees_offer() {
     path="${line%%$'\t'*}"
     branch="${line#*$'\t'}"
     [[ -n "$path" && -n "$branch" && "$path" != "$REPO" ]] || continue
-    [[ -d "$path" && ! -e "$path/.feature" ]] || continue
+    [[ -d "$path" && ! -e "$path/.sclaude/local/feature" ]] || continue
     [[ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ]] || continue
     pr="$(cd "$REPO" && gh pr list --head "$branch" --state merged --limit 1 \
             --json number --jq '.[0].number // empty' 2>/dev/null)" || continue
@@ -814,7 +814,7 @@ worktree_dirt() {
 # is not acceptable.
 sync_branch() {
   local wt="$1" state branch slug behind dirty answer
-  state="$wt/.feature/state.json"
+  state="$wt/.sclaude/local/feature/state.json"
   branch="$(state_get "$state" branch 2>/dev/null)" || return 0
   [[ -n "$branch" && "$branch" != "null" ]] || return 0
   slug="$(state_get "$state" feature 2>/dev/null)" || slug=""

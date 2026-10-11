@@ -112,8 +112,8 @@ rollback_remember_previous() {
   url="$(printf '%s' "$line" | cut -f1)"
   sha="$(printf '%s' "$line" | cut -f2)"
   [[ -n "$url" ]] || return 0
-  state_set "$wt/.feature/state.json" rollback.prod.url "$url" 2>/dev/null || true
-  [[ -n "$sha" ]] && state_set "$wt/.feature/state.json" rollback.prod.sha "$sha" \
+  state_set "$wt/.sclaude/local/feature/state.json" rollback.prod.url "$url" 2>/dev/null || true
+  [[ -n "$sha" ]] && state_set "$wt/.sclaude/local/feature/state.json" rollback.prod.sha "$sha" \
     2>/dev/null || true
 }
 
@@ -127,10 +127,10 @@ rollback_remember_previous() {
 rollback_target() {
   # `state` on a line of its own: bash assigns a `local` list left to right and
   # does not see a name from the same command, so `local wt="$1"
-  # state="$wt/..."` yields `/.feature/state.json` — a path that reads as
+  # state="$wt/..."` yields `/.sclaude/local/feature/state.json` — a path that reads as
   # nothing there rather than as an error.
   local wt="$1" url sha ours
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
 
   url="$(state_get "$state" rollback.prod.url 2>/dev/null || true)"
   if [[ -n "$url" && "$url" != "null" ]]; then
@@ -260,7 +260,7 @@ rollback_vercel() {
 # the merge, where the range is still the truth.
 rollback_migrations_list() {
   local wt="$1" recorded
-  recorded="$(state_get "$wt/.feature/state.json" deploy.prod.migrations 2>/dev/null || true)"
+  recorded="$(state_get "$wt/.sclaude/local/feature/state.json" deploy.prod.migrations 2>/dev/null || true)"
   if [[ -n "$recorded" && "$recorded" != "null" ]]; then
     printf '%s\n' $recorded | sort -r
     return 0
@@ -283,7 +283,7 @@ rollback_remember_migrations() {
              -- "$dir" 2>/dev/null | tr '\n' ' ')"
   files="${files% }"
   [[ -n "$files" ]] || return 0
-  state_set "$wt/.feature/state.json" deploy.prod.migrations "$files" 2>/dev/null || true
+  state_set "$wt/.sclaude/local/feature/state.json" deploy.prod.migrations "$files" 2>/dev/null || true
 }
 
 # What the branch's migrations say about going back, as a table plus a verdict.
@@ -365,7 +365,7 @@ for line in sys.stdin:
 #
 # Written to a file rather than inlined for two reasons: the human reads it
 # before answering, and the command they are shown stays one readable line
-# rather than a wall of statements. It lives under .feature/, so it dies with
+# rather than a wall of statements. It lives under .sclaude/local/feature/, so it dies with
 # the worktree like everything else the orchestrator writes.
 #
 # Each migration's row in the tool's history table goes with its statements. A
@@ -381,7 +381,7 @@ for line in sys.stdin:
 rollback_migrations_sql() {
   # `out` on its own line, for the reason rollback_target records.
   local wt="$1" file
-  local out="$wt/.feature/rollback/down.sql"
+  local out="$wt/.sclaude/local/feature/rollback/down.sql"
   local -a paths=()
 
   while IFS= read -r file; do
@@ -458,7 +458,7 @@ PY
 # undone by nothing.
 rollback_migrations() {
   local wt="$1" slug="$2" answer sql rc
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
 
   rollback_migrations_report "$wt"
   rc=$?
@@ -514,7 +514,7 @@ rollback_migrations() {
 # success path but after it, unconditionally.
 rollback_apply_sql() {
   local wt="$1" sql="$2" url rc
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
 
   # The credential is read from .env.prod, the same file and the same variable
   # scripts/db-promote.mjs reads. It is never printed: psql takes it as an
@@ -533,7 +533,7 @@ rollback_apply_sql() {
 
   if [[ -z "$url_file" || -z "$url_var" ]]; then
     warn "  The project does not say how to reach production's database."
-    info "  .sclaude.json describes it under database.urlFile and database.urlVar."
+    info "  .sclaude/config.json describes it under database.urlFile and database.urlVar."
     state_set "$state" rollback.db.status ahead 2>/dev/null || true
     return 0
   fi
@@ -626,7 +626,7 @@ rollback_apply_sql() {
 # failures. That case is rare and specific, and it is the only exception.
 rollback_prod() {
   local wt="$1" slug="$2" auto="${3:-}"
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
   # `commit` rather than reusing `line` for the collateral loop below: `line`
   # holds the target, and a loop that overwrites the value it was chosen from is
   # a trap for the next edit even where it happens to be harmless today.
@@ -795,13 +795,13 @@ rollback_confirm() {
   info "  green when it shipped. Look now rather than carrying on."
   "$INSTRUMENTS/bin/sclaude-notify" "$slug: rolled production back and it is STILL red.
 The previous release does not fix it — something else is wrong.
-Log: .feature/regression.log" 2>/dev/null || true
+Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
   return 1
 }
 
 # Keeps the failing run's log, which the next regression_run would truncate.
 #
-# `.feature/regression.log` is rewritten at the head of every run (`: > "$log"`
+# `.sclaude/local/feature/regression.log` is rewritten at the head of every run (`: > "$log"`
 # in regression_run), and a rollback is followed immediately by the confirmation
 # run. So the evidence that caused the rollback survives only if it is copied
 # first. The path goes into the state, and regression_fix reads it from there.
@@ -810,12 +810,12 @@ Log: .feature/regression.log" 2>/dev/null || true
 # starting point, never the rollback.
 rollback_keep_log() {
   local wt="$1" stage="$2" src dest
-  src="$wt/.feature/regression.log"
+  src="$wt/.sclaude/local/feature/regression.log"
   [[ -s "$src" ]] || return 0
-  dest="$wt/.feature/rollback/regression-$stage-$(date +%Y%m%d-%H%M%S).log"
+  dest="$wt/.sclaude/local/feature/rollback/regression-$stage-$(date +%Y%m%d-%H%M%S).log"
   mkdir -p "$(dirname "$dest")" 2>/dev/null || return 0
   cp "$src" "$dest" 2>/dev/null || return 0
-  state_set "$wt/.feature/state.json" rollback.prod.log "$dest" 2>/dev/null || true
+  state_set "$wt/.sclaude/local/feature/state.json" rollback.prod.log "$dest" 2>/dev/null || true
 }
 
 # The marker on an incident comment. Unlike the request, criteria and status
@@ -845,7 +845,7 @@ ROLLBACK_MARKER="<!-- sclaude:rollback -->"
 # be reported as failed because a comment could not be posted.
 rollback_incident() {
   local wt="$1" slug="$2" issue="${3:-}"
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
   local repo failed log target to_sha db_status confirm body
 
   [[ -n "$issue" && "$issue" != "null" ]] || return 0
@@ -884,8 +884,8 @@ rollback_incident() {
       passed)
         printf -- '- the suite against production is green again\n' ;;
       failed)
-        if [[ -s "$wt/.feature/regression.blocked" ]]; then
-          printf -- '- the confirmation run could not be made (see `.feature/regression.blocked`) — whether the previous release serves properly is unverified\n'
+        if [[ -s "$wt/.sclaude/local/feature/regression.blocked" ]]; then
+          printf -- '- the confirmation run could not be made (see `.sclaude/local/feature/regression.blocked`) — whether the previous release serves properly is unverified\n'
         else
           printf -- '- **the suite is still red against it** — the previous release does not fix this, so something outside the feature is wrong\n'
         fi ;;
@@ -938,7 +938,7 @@ rollback_incident_migrations() {
 
   printf '| migration | down block | what happened |\n|---|---|---|\n'
   ROLLBACK_CLASSIFIED="$classified" \
-  ROLLBACK_DB_STATUS="$(state_get "$wt/.feature/state.json" rollback.db.status 2>/dev/null || true)" \
+  ROLLBACK_DB_STATUS="$(state_get "$wt/.sclaude/local/feature/state.json" rollback.db.status 2>/dev/null || true)" \
     python3 <<'PY' 2>/dev/null || true
 import json, os
 

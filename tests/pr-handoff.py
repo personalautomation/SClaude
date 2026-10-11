@@ -70,8 +70,8 @@ os.chmod(os.path.join(bindir, "gh"), 0o755)
 LOG = os.path.join(tmp, "gh.log")
 TABLE = os.path.join(tmp, "table.json")
 WT = os.path.join(tmp, "wt")
-os.makedirs(os.path.join(WT, ".feature"))
-STATE = os.path.join(WT, ".feature", "state.json")
+os.makedirs(os.path.join(WT, ".sclaude/local/feature"))
+STATE = os.path.join(WT, ".sclaude/local/feature", "state.json")
 
 
 def setup(table, state=None):

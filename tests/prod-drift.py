@@ -15,6 +15,12 @@ import subprocess
 import sys
 import tempfile
 
+
+def _cfg(path):
+    """The path of a product's config, its .sclaude/ folder made first."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 failures = []
 
@@ -76,10 +82,10 @@ with tempfile.TemporaryDirectory() as tmp:
                    env=env, check=True)
     subprocess.run(["git", "init", "-q", "-b", "main", repo], env=env, check=True)
     git(repo, "remote", "add", "origin", origin)
-    with open(os.path.join(repo, ".sclaude.json"), "w") as fh:
+    with open(_cfg(os.path.join(repo, ".sclaude/config.json")), "w") as fh:
         fh.write('{"database": {"migrations": "db/migrations",'
                  ' "promote": "npm run db:promote"}}\n')
-    git(repo, "add", ".sclaude.json")
+    git(repo, "add", ".sclaude/config.json")
     shipped = commit(repo, "feat: shipped")
     git(repo, "push", "-q", "origin", "main")
 

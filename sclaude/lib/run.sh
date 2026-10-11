@@ -49,11 +49,11 @@ render_prompt() {
   local -x SCLAUDE_V_SHARED_DB=""
   [[ -n "$wt" ]] && declare -F db_shared_env >/dev/null \
     && SCLAUDE_V_SHARED_DB="$(db_shared_env "$wt" 2>/dev/null || true)"
-  if [[ -n "$wt" && -f "$wt/.feature/state.json" ]]; then
+  if [[ -n "$wt" && -f "$wt/.sclaude/local/feature/state.json" ]]; then
     SCLAUDE_V_DEV_URL="$(dev_address "$wt")"
     SCLAUDE_V_DEV_PORT="$(feature_port "$wt" || echo 3000)"
-    local dbbase; dbbase="$(state_get "$wt/.feature/state.json" db.base 2>/dev/null || true)"
-    [[ -f "$wt/.feature/db.env" && "$dbbase" =~ ^[0-9]+$ ]] \
+    local dbbase; dbbase="$(state_get "$wt/.sclaude/local/feature/state.json" db.base 2>/dev/null || true)"
+    [[ -f "$wt/.sclaude/local/feature/db.env" && "$dbbase" =~ ^[0-9]+$ ]] \
       && SCLAUDE_V_DB_API="http://127.0.0.1:$((dbbase + 1))"
   fi
   local -x SCLAUDE_B_ISSUE_CONTEXT=""
@@ -119,7 +119,7 @@ sys.stdout.write(feature_in_history(sys.argv[2]))' "$LIB" "$wt" 2>/dev/null || t
       # no word of the failure, the rollback or the new pull request the fix
       # needs — and had nothing to fix.
       if [[ -z "$SCLAUDE_B_REGRESSION" && -n "$wt" ]] \
-         && [[ "$(state_get "$wt/.feature/state.json" reopened_by 2>/dev/null || true)" == "prod" ]]; then
+         && [[ "$(state_get "$wt/.sclaude/local/feature/state.json" reopened_by 2>/dev/null || true)" == "prod" ]]; then
         SCLAUDE_B_REGRESSION="$(regression_fix_block "$wt" prod 2>/dev/null || true)"
       fi
       ;;
@@ -155,7 +155,7 @@ sys.stdout.write(feature_in_history(sys.argv[2]))' "$LIB" "$wt" 2>/dev/null || t
 # condition of the work.
 review_news() {
   local wt="$1" step="$2"
-  local state="$wt/.feature/state.json" session transcript pr since
+  local state="$wt/.sclaude/local/feature/state.json" session transcript pr since
 
   [[ "$step" == "review" ]] || return 0
   pr="$(state_get "$state" pr || true)"
@@ -180,7 +180,7 @@ review_news() {
 # Not when the step has a session of its own already — an interrupted one is
 # resumed, never skipped — and not when anything sent the review back.
 review_skippable() {
-  local wt="$1" slug="$2" state="$1/.feature/state.json" session
+  local wt="$1" slug="$2" state="$1/.sclaude/local/feature/state.json" session
   session="$(state_get "$state" steps.review.session 2>/dev/null || true)"
   if [[ -n "$session" && "$session" != "null" ]] && live_session "$wt" "$session" >/dev/null; then
     return 1
@@ -350,7 +350,7 @@ run_step() {
   # global left set by a run that opened nothing went to the next session
   # opened, whatever step that was.
   local wt="$1" slug="$2" step="$3" told="${4:-}"
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
   local model effort mode session prompt pr
 
   model="$(step_model "$step")"
@@ -635,7 +635,7 @@ run_step() {
 # one (`sclaude _session-ended`).
 session_ended() {
   local wt="$1" slug="$2" step="$3" session="$4"
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
   # after_step reads these as run_step's; after code_reload there is no
   # run_step above, and `set -u` stops on the first of them.
   local pr issue
@@ -714,7 +714,7 @@ session_ended() {
   #
   # Before after_step rather than after it: after_step leads into the next step
   # and does not come back, and on the last step it leads to remind_prod, whose
-  # cmd_done removes the tree with .feature/ and an unread log in it. Closing a
+  # cmd_done removes the tree with .sclaude/local/feature/ and an unread log in it. Closing a
   # step after this adds no review of its own — its last session has just had
   # one.
   #
@@ -760,12 +760,12 @@ session_ended() {
 # step falls back to it.
 sync_acceptance() {
   local wt="$1" slug="$2" ac_issue verdict out word line
-  ac_issue="$(state_get "$wt/.feature/state.json" issue || true)"
+  ac_issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue || true)"
 
   # The hook should have made this impossible. Should it have been bypassed —
   # an older session, a hook that failed open — the human hears it now rather
   # than finding an empty checklist at QA.
-  verdict="$(python3 "$LIB/acceptance.py" --verdict "$wt/.feature/plan.md" 2>/dev/null || true)"
+  verdict="$(python3 "$LIB/acceptance.py" --verdict "$wt/.sclaude/local/feature/plan.md" 2>/dev/null || true)"
   if [[ "$verdict" == "missing" || "$verdict" == "empty" ]]; then
     warn "  The approved plan has no acceptance criteria — nothing will say what \"done\" means."
     info "  To agree them now: $SELF replan $slug"
@@ -773,7 +773,7 @@ sync_acceptance() {
   fi
 
   [[ -n "$ac_issue" && "$ac_issue" != "null" ]] || return 0
-  out="$(python3 "$LIB/acceptance.py" --sync "$ac_issue" "$wt/.feature/plan.md" "$wt" 2>/dev/null || true)"
+  out="$(python3 "$LIB/acceptance.py" --sync "$ac_issue" "$wt/.sclaude/local/feature/plan.md" "$wt" 2>/dev/null || true)"
   word="${out%%$'\n'*}"
   case "$word" in
     written)    info "  Acceptance criteria posted as a comment on issue #$ac_issue — QA ticks them there." ;;
@@ -784,8 +784,8 @@ sync_acceptance() {
     torn)       warn "  The criteria comment on issue #$ac_issue has one marker without the other — nothing was written."
                 info "  Mend the pair in GitHub (<!-- sclaude:ac --> … <!-- /sclaude:ac -->); the next approved plan writes them." ;;
     own-heading) warn "  Issue #$ac_issue already has an \"Acceptance criteria\" heading in its description — nothing was added."
-                info "  The agreed list is in .feature/plan.md; copy it there if QA should tick it." ;;
-    *)          warn "  Could not write the acceptance criteria to issue #$ac_issue — they are in .feature/plan.md only." ;;
+                info "  The agreed list is in .sclaude/local/feature/plan.md; copy it there if QA should tick it." ;;
+    *)          warn "  Could not write the acceptance criteria to issue #$ac_issue — they are in .sclaude/local/feature/plan.md only." ;;
   esac
 }
 
@@ -796,9 +796,9 @@ sync_acceptance() {
 # runs after every code session.
 extend_acceptance() {
   local wt="$1" ac_issue out word line
-  ac_issue="$(state_get "$wt/.feature/state.json" issue || true)"
-  [[ -n "$ac_issue" && "$ac_issue" != "null" && -f "$wt/.feature/plan.md" ]] || return 0
-  out="$(python3 "$LIB/acceptance.py" --extend "$ac_issue" "$wt/.feature/plan.md" "$wt" 2>/dev/null || true)"
+  ac_issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue || true)"
+  [[ -n "$ac_issue" && "$ac_issue" != "null" && -f "$wt/.sclaude/local/feature/plan.md" ]] || return 0
+  out="$(python3 "$LIB/acceptance.py" --extend "$ac_issue" "$wt/.sclaude/local/feature/plan.md" "$wt" 2>/dev/null || true)"
   word="${out%%$'\n'*}"
   case "$word" in
     written|extended)
@@ -808,7 +808,7 @@ extend_acceptance() {
     differs)    warn "  The plan's acceptance criteria differ from issue #$ac_issue — only new ones are added:"
                 while IFS= read -r line; do info "    $line"; done < <(tail -n +2 <<<"$out")
                 info "  The issue is where corrections land. If the plan is right, edit the criteria in GitHub." ;;
-    *)          warn "  Could not add the new acceptance criteria to issue #$ac_issue ($word) — they are in .feature/plan.md only." ;;
+    *)          warn "  Could not add the new acceptance criteria to issue #$ac_issue ($word) — they are in .sclaude/local/feature/plan.md only." ;;
   esac
 }
 
@@ -819,7 +819,7 @@ extend_acceptance() {
 # We ask only where the result cannot be looked at. Three steps out of four leave
 # a checkable trace, and each has its own:
 #
-#   plan   — the approved plan, which is .feature/plan.md. It is approved in the
+#   plan   — the approved plan, which is .sclaude/local/feature/plan.md. It is approved in the
 #            session itself, in a dialogue where the plan is visible whole;
 #            asking the same thing a second time, when the plan is no longer
 #            before one's eyes, means teaching people to hit Enter without
@@ -838,7 +838,7 @@ extend_acceptance() {
 # close is possible: `sclaude replan <feature>` returns the feature to step 1.
 after_step() {
   local wt="$1" slug="$2" step="$3"
-  local state="$wt/.feature/state.json" next answer
+  local state="$wt/.sclaude/local/feature/state.json" next answer
 
   echo ""
   case "$step" in
@@ -852,7 +852,7 @@ after_step() {
         info "  Come back with: $SELF $slug"
         return 0
       fi
-      info "  Plan saved to .feature/plan.md — it is what step 2 starts from."
+      info "  Plan saved to .sclaude/local/feature/plan.md — it is what step 2 starts from."
       sync_acceptance "$wt" "$slug"
       ;;
     pr)
@@ -1082,7 +1082,7 @@ after_step() {
 # a problem for a person than for a third try.
 AUTO_RETURNS=2
 auto_return() {
-  local wt="$1" slug="$2" step="$3" why="$4" state="$1/.feature/state.json" used
+  local wt="$1" slug="$2" step="$3" why="$4" state="$1/.sclaude/local/feature/state.json" used
   [[ -n "${SESSION_AUTO_CLOSED:-}" ]] || return 1
   used="$(state_get "$state" "steps.$step.auto_returns" 2>/dev/null || true)"
   [[ "$used" =~ ^[0-9]+$ ]] || used=0
@@ -1140,7 +1140,7 @@ collect_denials() {
 # The friction review: the session that fixes the orchestrator after every step session.
 #
 # Steps run into bans, and some of those bans are unnecessary — they were
-# configured blind. .feature/friction.log accumulates the records of that; here a
+# configured blind. .sclaude/local/feature/friction.log accumulates the records of that; here a
 # separate session reads them, proposes a fix and, with the human's agreement,
 # makes it.
 #
@@ -1166,9 +1166,9 @@ collect_denials() {
 # session paid for every copy as for a new entry.
 run_friction() {
   local wt="$1" slug="$2" key="$3" reread="${4:-}"
-  local log="$wt/.feature/friction.log"
+  local log="$wt/.sclaude/local/feature/friction.log"
   local reviewed="$log.reviewed"
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
   # The key names what is reviewed: `review-3` is the third session of the
   # review step (step_run_key), `fix-preview-1` a fixing session, and a bare
   # step name the key a review had before it followed every session. The step
@@ -1321,7 +1321,7 @@ run_friction() {
     || { cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log" || true; }
 
   local transcript prompt count
-  transcript="$(python3 - "$wt" "$wt/.feature/state.json" <<'PYEOF'
+  transcript="$(python3 - "$wt" "$wt/.sclaude/local/feature/state.json" <<'PYEOF'
 import json, os, sys
 wt, state = sys.argv[1], sys.argv[2]
 # The same method as in capture_plan: the sessions directory is the worktree's
@@ -1616,7 +1616,7 @@ friction_push_project() {
 #   friction_defer_proposals <wt> <slug> <key> <step>
 friction_defer_proposals() {
   local wt="$1" slug="$2" key="$3" step="$4"
-  local log="$wt/.feature/friction.log" state="$wt/.feature/state.json"
+  local log="$wt/.sclaude/local/feature/friction.log" state="$wt/.sclaude/local/feature/state.json"
   local rows n now
   [[ -s "$log" ]] || return 1
   rows="$(python3 "$LIB/friction_proposals.py" "$log" "$(basename "$REPO")" \
@@ -2020,7 +2020,7 @@ review_close_gate() {
 # Prints nothing when there is nothing to resolve. Returns 0 when it printed.
 review_yours_report() {
   local wt="$1" pr="$2" repo="${3:-}" lines link where note
-  [[ -s "$wt/.feature/review-yours" && -n "$pr" && "$pr" != "null" ]] || return 1
+  [[ -s "$wt/.sclaude/local/feature/review-yours" && -n "$pr" && "$pr" != "null" ]] || return 1
   [[ -n "$repo" ]] || repo="$(gh_repo 2>/dev/null || true)"
   [[ -n "$repo" ]] || return 1
   lines="$(python3 "$LIB/pr_context.py" --yours "$wt" "$pr" "$repo" 2>/dev/null || true)"
@@ -2083,7 +2083,7 @@ review_yours_wait() {
 #     session, as a round marker would have given it.
 review_reopen() {
   local wt="$1" slug="$2" pr="$3" repo="$4" waited="$5"
-  local state="$wt/.feature/state.json" session since split older newer
+  local state="$wt/.sclaude/local/feature/state.json" session since split older newer
   if [[ "$waited" -ge "$REVIEW_WAIT_MAX" ]]; then
     info "  Nothing to fix until it has finished. Come back with: $SELF $slug"
     return 0
@@ -2166,7 +2166,7 @@ return_brief() {
   local wt="$1" issue="$2" pr="$3" since
   [[ "$issue" == "null" ]] && issue=""
   [[ "$pr" == "null" ]] && pr=""
-  since="$(state_get "$wt/.feature/state.json" reopened_since 2>/dev/null || true)"
+  since="$(state_get "$wt/.sclaude/local/feature/state.json" reopened_since 2>/dev/null || true)"
   [[ "$since" == "null" ]] && since=""
   printf '**This feature was returned to development.** What has to be done is what was said about it%s' \
     "${since:+ since $since}"
@@ -2196,7 +2196,7 @@ return_brief() {
 # and opens a fresh one, whose prompt carries the pull request as it stands —
 # the new findings, and only them, open.
 round_marker() {
-  echo "$1/.feature/review-round"
+  echo "$1/.sclaude/local/feature/review-round"
 }
 
 # A session whose work is done, closed without anybody typing /exit.
@@ -2218,7 +2218,7 @@ round_marker() {
 # Where a check fails, the work goes back to a session — without a person to
 # ask, since nobody typed /exit (see auto_return).
 done_marker() {
-  echo "$1/.feature/session-done"
+  echo "$1/.sclaude/local/feature/session-done"
 }
 
 # The watcher beside a session that may end itself.
@@ -2398,18 +2398,18 @@ session_report() {
 #
 #   * after step 1 the approved plan is printed whole, every time — a replan
 #     included;
-#   * after any other session it is printed only when .feature/plan.md differs
+#   * after any other session it is printed only when .sclaude/local/feature/plan.md differs
 #     from the copy printed last, under a headline saying that it changed.
 #
-# .feature/plan.printed is that copy. A feature planned before it existed has
+# .sclaude/local/feature/plan.printed is that copy. A feature planned before it existed has
 # none: the plan is then taken as seen, since there is nothing to tell a change
 # from.
 plan_report() {
-  local wt="$1" step="$2" plan="$1/.feature/plan.md" printed="$1/.feature/plan.printed"
+  local wt="$1" step="$2" plan="$1/.sclaude/local/feature/plan.md" printed="$1/.sclaude/local/feature/plan.printed"
   local headline
   if [[ "$step" == "plan" ]]; then
     capture_plan "$wt" || return 0
-    headline="The approved plan — .feature/plan.md, what step 2 starts from:"
+    headline="The approved plan — .sclaude/local/feature/plan.md, what step 2 starts from:"
   else
     [[ -s "$plan" ]] || return 0
     if [[ ! -e "$printed" ]]; then
@@ -2417,7 +2417,7 @@ plan_report() {
       return 0
     fi
     cmp -s "$plan" "$printed" && return 0
-    headline="The plan was changed in this session — .feature/plan.md now reads:"
+    headline="The plan was changed in this session — .sclaude/local/feature/plan.md now reads:"
   fi
   echo ""
   say "${BOLD}$headline${OFF}"

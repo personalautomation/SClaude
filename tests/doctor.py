@@ -12,6 +12,12 @@ import subprocess
 import sys
 import tempfile
 
+
+def _cfg(path):
+    """The path of a product's config, its .sclaude/ folder made first."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 failures = []
 
@@ -57,9 +63,9 @@ with tempfile.TemporaryDirectory() as home:
     repo = os.path.join(home, "product")
     os.makedirs(repo)
     subprocess.run(["git", "init", "-q", repo], env=env, check=True)
-    with open(os.path.join(repo, ".sclaude.json"), "w") as fh:
+    with open(_cfg(os.path.join(repo, ".sclaude/config.json")), "w") as fh:
         json.dump({"doctor": [
-            {"what": "the thing that is there", "check": "test -f .sclaude.json"},
+            {"what": "the thing that is there", "check": "test -f .sclaude/config.json"},
             {"what": "the thing that is not", "check": "echo noise; echo it is missing; exit 1",
              "fix": "make-it-so"},
         ]}, fh)

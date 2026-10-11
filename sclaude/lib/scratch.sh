@@ -8,18 +8,23 @@
 #
 # One list, and both exclusions are built from it. They used to be two lists:
 # SCRATCH_PATHS hid sclaude's paths from git, and write_vercelignore named its
-# own. .feature was on the first and missing from the second, so every preview
-# uploaded the worktree's plan, state, logs, local database settings and
-# rendered terminal. A path added here is now covered by both, and
-# tests/paths.py fails if the two ever part again. There is nothing to
-# configure: a project neither names these paths nor ignores them itself.
+# own. A feature's working directory was on the first and missing from the
+# second, so every preview uploaded the worktree's plan, state, logs, local
+# database settings and rendered terminal. A path added here is now covered by
+# both, and tests/paths.py fails if the two ever part again. There is nothing
+# to configure: a project neither names these paths nor ignores them itself.
 #
-#   .feature       a feature's working directory, in its worktree
-#   .vercelignore  this file's own output, in every tree sclaude deploys
-#   .sclaude/local the machine's part of sclaude's folder in a product: the
-#                  terminal recordings (terminal.sh). The rest of .sclaude/,
-#                  team/ and people/, is the product's and is committed.
-SCRATCH_PATHS=(.feature .vercelignore .sclaude/local)
+# Everything sclaude keeps in a product lives in one folder, .sclaude/, so the
+# product's root does not grow: config.json, team/ and people/ are the
+# product's and committed; local/ is the machine's and is neither.
+#
+#   .sclaude/local  the machine's part: a feature's working directory,
+#                   .sclaude/local/feature/ in its worktree, and the terminal
+#                   recordings, .sclaude/local/terminal/ in the main tree
+#   .vercelignore   this file's own output, in every tree sclaude deploys. It
+#                   is the one thing at the root, because Vercel reads it only
+#                   there
+SCRATCH_PATHS=(.sclaude/local .vercelignore)
 
 # The main repository of a tree, or of the current directory. Nothing outside
 # a repository.
@@ -58,7 +63,7 @@ scratch_hide() {
 # repository's files, which outside this machine point nowhere, and the build
 # dies; Vercel takes its own environment values. The rest are the list,
 # anchored, without a trailing slash so a symlink is matched as well as a
-# directory. An earlier sclaude wrote `/.feature/`, which counts.
+# directory. A line written with a trailing slash counts as the same.
 vercelignore_missing() {
   local f="$1/.vercelignore" line p
   for line in .env '.env.*'; do

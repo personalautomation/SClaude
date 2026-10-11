@@ -112,16 +112,16 @@ The reason is required. An honest "nothing observable changes" is worth more tha
 
 They're the part of the plan I'll read most carefully, because they're the part I'm agreeing to. If the plan changes on rework, the criteria change with it.
 
-You write nothing to disk — no code, no other files. The one exception is `.feature/friction.log` (see below): appending to it is allowed at this step, in plan mode and after the plan is approved. When the plan is ready, present it for approval the usual way. You can present as many times as needed: I may reject it and ask for a rewrite, and the first draft shouldn't be the last word.
+You write nothing to disk — no code, no other files. The one exception is `.sclaude/local/feature/friction.log` (see below): appending to it is allowed at this step, in plan mode and after the plan is approved. When the plan is ready, present it for approval the usual way. You can present as many times as needed: I may reject it and ask for a rewrite, and the first draft shouldn't be the last word.
 
 **Before presenting the plan, remind me how to read it.** The approval dialog covers the plan and doesn't scroll, so a long plan can't be read without answering first. Give me both ways:
 
-- open `.feature/plan.md` — the orchestrator puts the plan there when it's presented;
+- open `.sclaude/local/feature/plan.md` — the orchestrator puts the plan there when it's presented;
 - press `Ctrl+O` in the session: that's the transcript view, where the plan scrolls in full; `q` exits.
 
 Don't suggest `Ctrl+G` for this: it edits the input field rather than showing the plan.
 
-The next step, development, starts with a clean context, and `.feature/plan.md` is the only thing that reaches it — so write the plan as a handover, not as a note to yourself.
+The next step, development, starts with a clean context, and `.sclaude/local/feature/plan.md` is the only thing that reaches it — so write the plan as a handover, not as a note to yourself.
 
 <include:dev-server-read>
 

@@ -64,7 +64,7 @@ developer_name() {
 # empty address is not a maintainer: guessing yes would put a stranger's
 # friction fix on the main branch of everybody's orchestrator.
 # 0 when this person maintains the product: their git address is in
-# `maintainers` in the product's .sclaude.json. The product's own address, from
+# `maintainers` in the product's .sclaude/config.json. The product's own address, from
 # the product's repository, since that is the identity its commits carry. The
 # same rule as MAINTAINERS for the orchestrator: no list, or an empty one, and
 # everybody maintains it, which is what a product with one developer wants.
@@ -72,9 +72,9 @@ developer_name() {
 #   product_maintainer [root]   the current repository without one
 product_maintainer() {
   local root="${1:-${REPO:-.}}" email
-  [[ -f "$root/.sclaude.json" ]] || return 0
+  [[ -f "$root/.sclaude/config.json" ]] || return 0
   email="$(git -C "$root" config user.email 2>/dev/null | tr '[:upper:]' '[:lower:]')"
-  python3 - "$root/.sclaude.json" "$email" <<'PY'
+  python3 - "$root/.sclaude/config.json" "$email" <<'PY'
 import json, sys
 try:
     listed = json.load(open(sys.argv[1])).get("maintainers")

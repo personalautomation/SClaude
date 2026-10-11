@@ -377,7 +377,7 @@ def open_threads(cwd, pr, repo):
 # (review_yours_report in run.sh). The link is the thread's first comment's
 # url — `…/pull/161#discussion_r4218743695` — which is what both the snapshot
 # and `gh api …/pulls/<pr>/comments` (as html_url) give.
-YOURS_FILE = ".feature/review-yours"
+YOURS_FILE = ".sclaude/local/feature/review-yours"
 
 
 def yours(cwd):
@@ -598,7 +598,7 @@ def render(cwd, pr, repo):
 
 
 def feature_in_history(cwd):
-    """Whether .feature/ got into the branch's commits — a block for step 3, or
+    """Whether .sclaude/local/feature/ got into the branch's commits — a block for step 3, or
     empty.
 
     The check is deterministic and almost always clean, so the block appears
@@ -614,11 +614,11 @@ def feature_in_history(cwd):
     if done.returncode != 0:
         return ""
     hits = sorted({line for line in done.stdout.splitlines()
-                   if line.startswith(".feature/") or line == ".feature"})
+                   if line.startswith(".sclaude/local/feature/") or line == ".sclaude/local/feature"})
     if not hits:
         return ""
     return (
-        "**The `.feature/` directory got into the branch history** — here's "
+        "**The `.sclaude/local/feature/` directory got into the branch history** — here's "
         "what shows up in the commits:\n\n%s\n\nStrip it from the branch "
         "history before opening the pull request."
         % "\n".join("- `%s`" % h for h in hits)

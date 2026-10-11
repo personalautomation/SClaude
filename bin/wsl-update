@@ -682,7 +682,7 @@ for s in data if isinstance(data, list) else data.get("services", []):
 # IMAGE_KEEP_DAYS: they only take disk, and a stack that wants one again pulls
 # it.
 #
-# The stacks sclaude starts for a feature (.feature/supabase) are not reported:
+# The stacks sclaude starts for a feature (.sclaude/local/feature/supabase) are not reported:
 # sclaude owns them, and they do not carry the production pins (.temp stays in
 # the main tree), so a restart would move them further from production, not
 # closer.
@@ -697,7 +697,7 @@ report_containers() {
   local label=com.supabase.cli.workdir wd pins all_pins="" name image base tag want behind
   while IFS= read -r wd; do
     [ -n "$wd" ] || continue
-    [[ "$wd" == */.feature/supabase ]] && continue
+    [[ "$wd" == */.sclaude/local/feature/supabase ]] && continue
     if [ ! -d "$wd" ]; then
       note "a Supabase stack belongs to $wd, which no longer exists — remove it: docker rm -f \$(docker ps -aq --filter label=$label=$wd)"
       continue

@@ -189,7 +189,7 @@ try:
 
     # --- column names are not case-sensitive ---------------------------------
     #
-    # The names in .sclaude.json are typed apart from the board. "done" in the
+    # The names in .sclaude/config.json are typed apart from the board. "done" in the
     # config and "Done" on the board are the same column.
     odd = ("BACKLOG", " in progress ", "in qa", "done")
     out, rc, _ = run(tmp, ["In QA", "Done"], watch=dict(armed), names=odd)

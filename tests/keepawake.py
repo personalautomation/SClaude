@@ -1390,8 +1390,8 @@ if os.path.exists(cfg):
     # registry the proxy reads.
     reg = tempfile.mkdtemp(prefix="keepawake-test-registry-")
     wt = tempfile.mkdtemp(prefix="keepawake-test-feature-")
-    os.makedirs(os.path.join(wt, ".feature"))
-    with open(os.path.join(wt, ".feature", "state.json"), "w") as fh:
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+    with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
         json.dump({"dev": {"label": "email-edit", "port": 1}}, fh)
     os.symlink(wt, os.path.join(reg, "email-edit"))
     os.symlink("/nonexistent", os.path.join(reg, "gone"))
@@ -1850,7 +1850,7 @@ check_true("soft holders are checked against the previous run's snapshot",
 check_true("VS Code's activity is measured by its edit journal",
            "VSCODE_HISTORY" in ka_body)
 # We look for the dev server's log by the process's working directory: sclaude
-# puts it at <worktree>/.feature/dev.log, and cwd leads there whoever started the
+# puts it at <worktree>/.sclaude/local/feature/dev.log, and cwd leads there whoever started the
 # server. The counter of written bytes stays as a fallback — for a server started
 # by hand where there is no such log.
 check_true("the dev server's activity is measured by its log", "DEV_LOG_REL" in ka_body)
@@ -1924,11 +1924,11 @@ def bash_fn(names, stubs, call):
 
 def bash_dev(active, around):
     wt = tempfile.mkdtemp(prefix="keepawake-test-dev-")
-    os.makedirs(os.path.join(wt, ".feature"))
-    open(os.path.join(wt, ".feature", "dev.log"), "w").write("GET / 200\n")
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+    open(os.path.join(wt, ".sclaude/local/feature", "dev.log"), "w").write("GET / 200\n")
     stubs = "\n".join([
         'DEV_PORT=3000',
-        'DEV_LOG_REL=".feature/dev.log"',
+        'DEV_LOG_REL=".sclaude/local/feature/dev.log"',
         'ss() { echo \'LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=42,fd=20))\'; }',
         'readlink() { printf %%s %s; }' % shlex.quote(wt),
         'read_snapshot() { :; }',
@@ -1949,14 +1949,14 @@ check("the log was not touched — we do not hold even with a person", bash_dev(
 # say) and holds nothing.
 def bash_devs(listeners):
     wt = tempfile.mkdtemp(prefix="keepawake-test-devs-")
-    os.makedirs(os.path.join(wt, ".feature"))
-    open(os.path.join(wt, ".feature", "dev.log"), "w").write("GET / 200\n")
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+    open(os.path.join(wt, ".sclaude/local/feature", "dev.log"), "w").write("GET / 200\n")
     lines = "\n".join(
         "LISTEN 0 511 0.0.0.0:%d 0.0.0.0:* users:((\"node\",pid=%d,fd=20))" % (port, pid)
         for port, pid in listeners)
     stubs = "\n".join([
         'DEV_PORT=3000', 'DEV_PORT_FIRST=3100', 'DEV_PORT_LAST=3199',
-        'DEV_LOG_REL=".feature/dev.log"',
+        'DEV_LOG_REL=".sclaude/local/feature/dev.log"',
         "ss() { printf '%%s\\n' %s; }" % shlex.quote(lines),
         # Only pid 42 is a feature's server with a log; any other has none.
         'readlink() { case "$2" in /proc/42/*) printf %%s %s ;; *) printf %%s /nonexistent ;; esac; }'

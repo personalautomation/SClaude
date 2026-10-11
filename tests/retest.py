@@ -52,8 +52,8 @@ for name in ("qa_retest", "qa_sent"):
 def run(column, pr_state, draft, sent="aaa111", now="bbb222", fresh=""):
     with tempfile.TemporaryDirectory() as tmp:
         wt = os.path.join(tmp, "wt")
-        os.makedirs(os.path.join(wt, ".feature"))
-        state_file = os.path.join(wt, ".feature", "state.json")
+        os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+        state_file = os.path.join(wt, ".sclaude/local/feature", "state.json")
         with open(state_file, "w") as fh:
             st = {"handoff": "abc123", "deploy": {"preview": {"sha": now}}}
             if sent:

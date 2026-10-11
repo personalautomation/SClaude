@@ -45,7 +45,7 @@ run_retro() {
   # changed the code sent the feature round the cycle again (retro_reopen), and
   # that second pull request, its review and its QA are new matter: a run that
   # started before step 4 last closed does not count.
-  local fstate="$wt/.feature/state.json"
+  local fstate="$wt/.sclaude/local/feature/state.json"
   if [[ -f "$fstate" ]] && python3 - "$fstate" <<'PY' 2>/dev/null; then
 import json, sys
 from datetime import datetime
@@ -74,7 +74,7 @@ PY
   done_file="${TMPDIR:-/tmp}/sclaude-retro-$slug.done"
 
   prompt="$(SCLAUDE_V_TERMINAL="${terminal:-}" \
-    SCLAUDE_V_TERMINAL_RAW="$wt/.feature/terminal" \
+    SCLAUDE_V_TERMINAL_RAW="$wt/.sclaude/local/feature/terminal" \
     SCLAUDE_V_TRANSCRIPTS="$(transcript_dir "$wt")" \
     SCLAUDE_V_WORKTREE="$wt" \
     SCLAUDE_V_BRANCH="$(state_get "$fstate" branch 2>/dev/null || true)" \
@@ -151,7 +151,7 @@ PY
 retro_changed_code() {
   local wt="$1" branch="$2" head n to
   [[ -n "$branch" ]] || return 0
-  to="$(state_get "$wt/.feature/state.json" retro.project_to 2>/dev/null || true)"
+  to="$(state_get "$wt/.sclaude/local/feature/state.json" retro.project_to 2>/dev/null || true)"
   [[ -n "$to" && "$to" != "null" ]] || return 0
   head="$(cd "$REPO" && merged_pr_head "$branch")"
   [[ -n "$head" ]] || return 0
@@ -174,7 +174,7 @@ retro_changed_code() {
 # taking its number for the new one. The preview verdict goes too: it was given
 # on code without these commits.
 retro_reopen() {
-  local wt="$1" old="$2" state="$1/.feature/state.json"
+  local wt="$1" old="$2" state="$1/.sclaude/local/feature/state.json"
   [[ -f "$state" ]] || return 1
   step_rewind_to "$wt" pr pr review
   state_set "$state" reopened pr 2>/dev/null || true
@@ -199,7 +199,7 @@ retro_reopen() {
 #
 #   retro_pr_block <wt>
 retro_pr_block() {
-  local state="$1/.feature/state.json" old
+  local state="$1/.sclaude/local/feature/state.json" old
   [[ "$(state_get "$state" reopened_by 2>/dev/null || true)" == "retro" ]] || return 0
   old="$(state_get "$state" reopened_pr 2>/dev/null || true)"
   [[ -n "$old" && "$old" != "null" ]] || return 0

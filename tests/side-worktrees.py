@@ -6,9 +6,9 @@
 # worktree sclaude never knew of; `done` removed the feature's own and left that
 # one behind. Guarded here, with gh faked:
 #
-#   * a clean worktree with no .feature whose branch has a merged pull request
+#   * a clean worktree with no .sclaude/local/feature whose branch has a merged pull request
 #     is offered, and on "y" removed with its branch;
-#   * a feature's worktree (it has .feature), an unmerged branch, and one with
+#   * a feature's worktree (it has .sclaude/local/feature), an unmerged branch, and one with
 #     uncommitted work are not offered at all;
 #   * `done` calls it.
 #
@@ -48,7 +48,7 @@ try:
         subprocess.run(["git", "-C", repo, "worktree", "add", "-q", "-b",
                         "fix/" + name, path], check=True)
         trees[name] = path
-    os.makedirs(os.path.join(trees["feature"], ".feature"))
+    os.makedirs(os.path.join(trees["feature"], ".sclaude/local/feature"))
     with open(os.path.join(trees["dirty"], "x"), "w") as fh:
         fh.write("work\n")
 

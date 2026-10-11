@@ -417,7 +417,7 @@ def code_url():
 DEV_PORT = 3000
 CHROME_PORT = int(os.environ.get("CHROME_DEBUG_PORT", "9222"))
 # Where sclaude registers each feature's tree for the proxy: one symlink per
-# feature, the tree's .feature/state.json holding its port.
+# feature, the tree's .sclaude/local/feature/state.json holding its port.
 DEV_REGISTRY = os.path.expanduser("~/.claude/sclaude/dev")
 # More rows than this and the card stops fitting a phone's screen.
 FEATURE_ROWS = 8
@@ -439,7 +439,7 @@ def dev_features():
             continue
         wt = os.path.realpath(link)
         try:
-            with open(os.path.join(wt, ".feature", "state.json")) as fh:
+            with open(os.path.join(wt, ".sclaude/local/feature", "state.json")) as fh:
                 port = (json.load(fh).get("dev") or {}).get("port")
         except (OSError, ValueError, AttributeError):
             continue
@@ -1284,7 +1284,7 @@ def feature_state(repo, slug):
     # the steps together. An empty dictionary if there is no feature: the card
     # will then show what it knows from the table.
     wt = os.path.join(os.path.dirname(repo), "%s-%s" % (os.path.basename(repo), slug))
-    path = os.path.join(wt, ".feature", "state.json")
+    path = os.path.join(wt, ".sclaude/local/feature", "state.json")
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)

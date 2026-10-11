@@ -85,17 +85,17 @@ DEFER = functions(RUN, ["friction_defer_proposals"])
 tmp = tempfile.mkdtemp()
 try:
     wt = os.path.join(tmp, "myapp-145-x")
-    os.makedirs(os.path.join(wt, ".feature"))
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     git = ["git", "-C", wt, "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run(["git", "init", "-q", "-b", "feat/145-x", wt], check=True)
     with open(os.path.join(wt, ".gitignore"), "w") as fh:
-        fh.write(".feature/\n")
+        fh.write(".sclaude/local/feature/\n")
     subprocess.run(git + ["add", "-A"], check=True)
     subprocess.run(git + ["commit", "-qm", "init"], check=True)
     # No `maintainers` in the product: everybody keeps team/.
     deferred = os.path.join(wt, ".sclaude", "team", "deferred", "145-x.tsv")
-    state = os.path.join(wt, ".feature", "state.json")
-    log = os.path.join(wt, ".feature", "friction.log")
+    state = os.path.join(wt, ".sclaude/local/feature", "state.json")
+    log = os.path.join(wt, ".sclaude/local/feature", "friction.log")
 
     def defer():
         with open(state, "w") as fh:

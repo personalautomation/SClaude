@@ -11,7 +11,7 @@
 # written into the library. A second project would have needed edits to the
 # source rather than a file of its own.
 #
-# So they move here, into `.sclaude.json` at the root of whichever repository
+# So they move here, into `.sclaude/config.json` in whichever repository
 # sclaude is run from — the same repository it is already finding with
 # `main_repo`. A file in the product rather than a table in the orchestrator:
 # the answers belong to the product, they change when it changes, and the person
@@ -33,12 +33,12 @@
 # a feature in flight may be changing it.
 project_config() {
   local wt="${1:-}"
-  if [[ -n "$wt" && -f "$wt/.sclaude.json" ]]; then
-    echo "$wt/.sclaude.json"
+  if [[ -n "$wt" && -f "$wt/.sclaude/config.json" ]]; then
+    echo "$wt/.sclaude/config.json"
     return 0
   fi
-  [[ -n "${REPO:-}" && -f "$REPO/.sclaude.json" ]] || return 1
-  echo "$REPO/.sclaude.json"
+  [[ -n "${REPO:-}" && -f "$REPO/.sclaude/config.json" ]] || return 1
+  echo "$REPO/.sclaude/config.json"
 }
 
 # A value from the config by dotted path, or nothing.
@@ -124,7 +124,7 @@ project_db_url_var()  { project_get "database.urlVar"  "${1:-}" 2>/dev/null; }
 # here, and it ignores case and surrounding spaces.
 #
 # The names are typed by people in two places that never see each other: the
-# board on GitHub and `board.columns` in .sclaude.json. "In QA" in one and
+# board on GitHub and `board.columns` in .sclaude/config.json. "In QA" in one and
 # "In qa" in the other is the same column to anyone reading them, and an exact
 # comparison turned that into silence — no move into QA, no Done recognised,
 # a wait that never ends. An empty name never matches: a column the project
@@ -191,7 +191,7 @@ BOARD
 
 # --- the wizard ---------------------------------------------------------------
 #
-# A repository with no `.sclaude.json` is not an error and not a dead end: the
+# A repository with no `.sclaude/config.json` is not an error and not a dead end: the
 # orchestrator offers to write one, and the offer is worth taking because most
 # of the answers are already in the repository. project_init.py reads
 # package.json, the directory layout and whatever the project keeps about its
@@ -207,15 +207,15 @@ BOARD
 # parts a config would have described.
 project_init() {
   local root="${1:-$REPO}" answer proposal
-  local file="$root/.sclaude.json"
+  local file="$root/.sclaude/config.json"
 
   if [[ -f "$file" ]]; then
-    info "  $root already has .sclaude.json"
+    info "  $root already has .sclaude/config.json"
     return 0
   fi
 
   echo ""
-  echo "${BOLD}This repository has no .sclaude.json.${OFF}"
+  echo "${BOLD}This repository has no .sclaude/config.json.${OFF}"
   say "  It is where sclaude keeps what it knows about a project: which checks"
   say "  make up a regression, where the manuals are, what production's address"
   say "  is, where the migrations live. Without it the cycle still runs — there"
@@ -225,7 +225,7 @@ project_init() {
   proposal="$(python3 "$LIB/project_init.py" "$root" 2>/dev/null)" || proposal=""
   if [[ -z "$proposal" || "$proposal" == "{}" ]]; then
     warn "  Nothing could be worked out about this project automatically."
-    info "  Write .sclaude.json by hand — sclaude/config.example.json is a"
+    info "  Write .sclaude/config.json by hand — sclaude/config.example.json is a"
     info "  starting point — and run this again."
     return 1
   fi
@@ -235,12 +235,13 @@ project_init() {
   project_init_describe "$proposal"
   echo ""
 
-  ask "${BOLD}Write this to .sclaude.json? [y/n] ${OFF}" answer yn
+  ask "${BOLD}Write this to .sclaude/config.json? [y/n] ${OFF}" answer yn
   if ! is_yes "$answer"; then
     info "  Not written. The cycle runs without it."
     return 1
   fi
 
+  mkdir -p "$(dirname "$file")" 2>/dev/null
   printf '%s\n' "$proposal" > "$file" || {
     warn "  could not write $file"
     return 1

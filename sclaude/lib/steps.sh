@@ -117,7 +117,7 @@ step_mode()   { step_field "$1" 3; }
 # through printf, not considering that a way around. And without git log and
 # gh issue view step 1 is blind.
 #
-# A second hook hangs on ExitPlanMode. It puts the plan into .feature/plan.md
+# A second hook hangs on ExitPlanMode. It puts the plan into .sclaude/local/feature/plan.md
 # and reminds about Ctrl+O: the dialogue unfolds over the plan and covers it,
 # so it has to be read from the file or in the transcript view. It decides one
 # thing only — a plan with no acceptance criteria is denied, which cancels the
@@ -451,7 +451,7 @@ step_next() {
 # cycle went back, and a line here would either repeat it or contradict it.
 step_rewind_to() {
   local wt="$1" target="$2"; shift 2
-  local state="$wt/.feature/state.json" s
+  local state="$wt/.sclaude/local/feature/state.json" s
 
   for s in "$@"; do
     [[ "$(state_get "$state" "steps.$s.done" 2>/dev/null || echo false)" == "true" ]] || continue
@@ -480,7 +480,7 @@ run_comments() {
   [[ -n "$pr" && "$pr" != "null" && -n "$session" ]] || return 0
   repo="$(gh_repo 2>/dev/null || true)"
   [[ -n "$repo" ]] || return 0
-  python3 - "$wt/.feature/state.json" "$session" "$LIB/pr_context.py" "$wt" "$pr" "$repo" <<'PY' 2>/dev/null || true
+  python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$LIB/pr_context.py" "$wt" "$pr" "$repo" <<'PY' 2>/dev/null || true
 import json, subprocess, sys
 path, session, ctx, wt, pr, repo = sys.argv[1:7]
 with open(path) as fh:
@@ -505,7 +505,7 @@ PY
 }
 
 step_run() {
-  session_runs "$1/.feature/state.json" "steps.$2" "$3" "${4:-}" "${5:-}"
+  session_runs "$1/.sclaude/local/feature/state.json" "steps.$2" "$3" "${4:-}" "${5:-}"
 }
 
 # The friction review's key for one session of a step: `<step>-<n>`, where n is
@@ -592,7 +592,7 @@ PY
 # time for good — the worktree went, and with it any run that could close it.
 step_close_merged() {
   local wt="$1"
-  local state="$wt/.feature/state.json" s now
+  local state="$wt/.sclaude/local/feature/state.json" s now
   now="$(date -Iseconds)"
   for s in pr review; do
     [[ "$(state_get "$state" "steps.$s.done" 2>/dev/null || true)" == "true" ]] \

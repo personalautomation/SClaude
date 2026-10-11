@@ -28,7 +28,7 @@ WATCH_DIR="$HOME/.claude/sclaude/watch"
 NOTIFY="$(dirname "$(readlink -f "$0")")/sclaude-notify"
 SCLAUDE="$(dirname "$(readlink -f "$0")")/sclaude"
 
-# The columns are the project's (`board` in its .sclaude.json), and this runs
+# The columns are the project's (`board` in its .sclaude/config.json), and this runs
 # from a timer with no project in reach — so watch_start writes the two it
 # needs into each watch file, and look() reads them from there.
 
@@ -260,7 +260,7 @@ look() {
   QA_BACKLOG="$(field "$file" columns.backlog || true)"
   QA_DONE="$(field "$file" columns.done || true)"
   QA_IN="$(field "$file" columns.qa || true)"
-  # A watch armed before the names moved into .sclaude.json has no `columns`
+  # A watch armed before the names moved into .sclaude/config.json has no `columns`
   # at all. Those were the names every board was assumed to have then, and
   # the watch was armed against them; without this, a pass or a return on an
   # old watch would be reported as a plain move and its comments not kept.
@@ -306,7 +306,7 @@ $said" ;;
   [[ "$(norm "$now")" == "$(norm "$QA_DONE")" ]] || set_field "$file" handoff null
 
   # Compared without case or surrounding spaces, as sclaude's column_is does:
-  # the names in the watch file come from .sclaude.json, typed apart from the
+  # the names in the watch file come from .sclaude/config.json, typed apart from the
   # board. A name that is empty stays empty, and so never matches.
   case "$(norm "$now")" in
     "$(norm "$QA_DONE")")

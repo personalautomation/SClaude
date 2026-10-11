@@ -3,12 +3,12 @@ The feature "<feature>" is done and I've accepted it. Close it out as a pull req
 Work through the `/pr` skill — invoke it. It differs from its usual course because the orchestrator has already done part of the work:
 
 - The branch exists and you're on it; the commits are made. The "switch to a branch" step reduces to checking that the branch isn't `main` and is branched off a current `origin/main`.
-- Take the feature description from `.feature/plan.md` — that's what we agreed on while planning — and cross-check it against the `Requirement:` footers of the commits. Where the plan and the footers disagree, ask me: a mismatch means something changed during development, and either side may be right.
+- Take the feature description from `.sclaude/local/feature/plan.md` — that's what we agreed on while planning — and cross-check it against the `Requirement:` footers of the commits. Where the plan and the footers disagree, ask me: a mismatch means something changed during development, and either side may be right.
 - **The "Requested by the customer (for QA)" section is the acceptance criteria, as a plain list.** The skill builds that section from the commits' footers; the agreed list replaces that draft, because it was written before the code and doesn't move with it. Copy it verbatim — identifiers and wording — in the skill's own order rule: what a tester would do first. **No checkboxes:** QA ticks the criteria in the issue, not in the pull request, and a second checklist here is a second place for a tick to land and disagree with the first.
 
 <if:issue>  Open the section with one line: `QA checks these in #<issue> — tick them there.`
 
-</if:issue>  The list is below if the orchestrator could read it out of the issue. If there's no block there, take it from the `## Acceptance criteria` heading of `.feature/plan.md`, where step 1 put the same list; if neither has it, this feature was planned before criteria existed — build the section from the footers as the skill says, and say so when you report.
+</if:issue>  The list is below if the orchestrator could read it out of the issue. If there's no block there, take it from the `## Acceptance criteria` heading of `.sclaude/local/feature/plan.md`, where step 1 put the same list; if neither has it, this feature was planned before criteria existed — build the section from the footers as the skill says, and say so when you report.
 
   Then use the footers the way the skill says, but as a check rather than a source. Walk `git log origin/main..HEAD --format='%(trailers:key=Requirement,valueonly)'` and compare:
 
@@ -18,7 +18,7 @@ Work through the `/pr` skill — invoke it. It differs from its usual course bec
 
   Don't tick anything, here or in the issue, whatever the footers say. A tick is QA's word that the deployment does it, and a commit is not that check.
 - **Open the pull request as a draft**: add `--draft` to the skill's `gh pr create`. It stays a draft until QA has accepted every issue it closes; then the orchestrator marks it ready, which is what lets anybody merge it. Don't assign anyone either — the orchestrator assigns the PR to its author and clears that at the same moment.
-- The manuals (`/help` and `/help/technical`) are updated here, as the skill requires. `.feature/plan.md` is the source of what was promised.
+- The manuals (`/help` and `/help/technical`) are updated here, as the skill requires. `.sclaude/local/feature/plan.md` is the source of what was promised.
 - **Once the manuals are written, ask whether this feature earns a regression test — and expect the answer to be no.**
 
   The suite is a gate on every future feature, not a record of this one. Each spec is minutes on every stage of every cycle from now on, so the question is not "could this be tested" — everything could — but "if this broke silently six months from now, would we find out any other way, and how much would it cost us before we did".
@@ -43,7 +43,7 @@ Work through the `/pr` skill — invoke it. It differs from its usual course bec
 
 <block:reopened>
 
-About the `.feature/` directory: it's a working directory, it's in `.gitignore`, and it must not be committed. The orchestrator checked the branch history for you — if it had gotten in, it would be stated below. Do **not** delete the directory: `.feature/state.json` is the orchestrator's state, needed by the next step and removed together with the worktree by `sclaude done`. Leave the plan inside it too: the next step checks review comments against it.
+About the `.sclaude/local/feature/` directory: it's a working directory, it's in `.gitignore`, and it must not be committed. The orchestrator checked the branch history for you — if it had gotten in, it would be stated below. Do **not** delete the directory: `.sclaude/local/feature/state.json` is the orchestrator's state, needed by the next step and removed together with the worktree by `sclaude done`. Leave the plan inside it too: the next step checks review comments against it.
 
 <block:feature-in-history>
 
@@ -59,7 +59,7 @@ The orchestrator runs this step with restrictions: merge, deploy and anything le
 
 <include:report>
 
-**When the pull request is open and the branch pushed, `sclaude` closes this session itself.** Write the marker first — `echo done > .feature/session-done` — and then the report, with no tool call after it. About thirty seconds after your turn ends the session is closed and the report printed in the orchestrator's terminal; if I type anything in those thirty seconds, the closing is called off and the marker removed. sclaude then checks that the branch has a pull request and that its head is what is here; if not, it brings you back to this conversation to finish, at most twice. Leave the marker out when something needs my answer — then I close the session myself.
+**When the pull request is open and the branch pushed, `sclaude` closes this session itself.** Write the marker first — `echo done > .sclaude/local/feature/session-done` — and then the report, with no tool call after it. About thirty seconds after your turn ends the session is closed and the report printed in the orchestrator's terminal; if I type anything in those thirty seconds, the closing is called off and the marker removed. sclaude then checks that the branch has a pull request and that its head is what is here; if not, it brings you back to this conversation to finish, at most twice. Leave the marker out when something needs my answer — then I close the session myself.
 
 Once the pull request is open, tell me in that one message — in your own words, but cover all of it:
 

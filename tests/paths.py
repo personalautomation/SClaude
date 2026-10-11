@@ -7,7 +7,7 @@
 # a log. Each looked like a function doing its job.
 #
 #   abandon_traces      built the table that stands in front of an irreversible
-#                       deletion, and built it from `/.feature/state.json` — so
+#                       deletion, and built it from `/.sclaude/local/feature/state.json` — so
 #                       the branch, the pull request and the issue were simply
 #                       absent from it. The worktree line was there, which is
 #                       what made it look right.
@@ -130,8 +130,8 @@ def make_worktree(repo, root):
     wt = os.path.join(root, "repo-demo")
     subprocess.run(["git", "worktree", "add", "-q", wt, "feat/demo"],
                    cwd=repo, capture_output=True, check=False)
-    os.makedirs(os.path.join(wt, ".feature"), exist_ok=True)
-    with open(os.path.join(wt, ".feature", "state.json"), "w") as fh:
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"), exist_ok=True)
+    with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
         fh.write('{"feature": "demo", "branch": "feat/demo", '
                  '"issue": 71, "pr": 208, "step": "review"}\n')
     return wt
@@ -168,7 +168,7 @@ try:
     # The state really is read from the worktree, not from `/`. Asserted
     # directly, because every row above could in principle come from git alone.
     out, _, _ = run_bash(
-        'REPO=%s; state_get %s/.feature/state.json branch' % (REPO, WT), tmp)
+        'REPO=%s; state_get %s/.sclaude/local/feature/state.json branch' % (REPO, WT), tmp)
     check("state-read-from-the-worktree", out.strip(), "feat/demo")
 
     # The trap itself, pinned in the shape it had. A future edit that folds the
@@ -197,7 +197,7 @@ try:
         check_true("vercelignore-excludes-env-variants", ".env.*" in body)
         # sclaude's own working directory: the plan, the state, the logs and
         # the rendered terminal went up with every preview without it.
-        check_true("vercelignore-excludes-feature", "/.feature" in body.splitlines())
+        check_true("vercelignore-excludes-sclaude-local", "/.sclaude/local" in body.splitlines())
 
     # It must not write at the filesystem root, which is where it used to aim.
     # Checked by absence rather than by permissions: on a machine where `/` is
@@ -217,23 +217,23 @@ try:
     lines = open(ignore, encoding="utf-8").read().splitlines()
     check("vercelignore-hand-edit-kept", lines[:2], ["# edited by hand", ".env"])
     check("vercelignore-brought-up-to-date", sorted(lines[2:]),
-          [".env.*", "/.feature", "/.sclaude/local", "/.vercelignore"])
+          [".env.*", "/.sclaude/local", "/.vercelignore"])
 
-    # An earlier sclaude wrote `/.feature/`; that line still counts.
+    # A line with a trailing slash counts as the same rule.
     with open(ignore, "w") as fh:
-        fh.write(".env\n.env.*\n/.feature/\n/.vercelignore\n/.sclaude/local\n")
+        fh.write(".env\n.env.*\n/.sclaude/local/\n/.vercelignore\n")
     run_bash('write_vercelignore %s' % WT, tmp,
              modules=("ui", "state", "worktree", "scratch"))
-    check("vercelignore-old-slash-counts", open(ignore, encoding="utf-8").read().count(".feature"), 1)
+    check("vercelignore-slash-counts", open(ignore, encoding="utf-8").read().count(".sclaude/local"), 1)
 
     # --- one list for git and for Vercel (scratch.sh) -----------------------
     #
-    # The leak this guards: .feature was hidden from git and still went up
+    # The leak this guards: .sclaude/local/feature was hidden from git and still went up
     # with every preview, because the two exclusions had two lists. Every
     # path sclaude writes into a project must reach both.
     scratch = open(os.path.join(LIB, "scratch.sh"), encoding="utf-8").read()
     listed = re.search(r"^SCRATCH_PATHS=\(([^)]*)\)", scratch, re.M).group(1).split()
-    check_true("scratch-lists-feature-and-sclaude", {".feature", ".sclaude/local"} <= set(listed))
+    check_true("scratch-lists-sclaude-local", ".sclaude/local" in listed)
     os.remove(ignore)
     run_bash('scratch_hide %s; write_vercelignore %s' % (WT, WT), tmp,
              modules=("ui", "state", "worktree", "scratch"))
@@ -249,7 +249,7 @@ try:
     out = run_bash('warn() { echo "WARN $*"; }; write_vercelignore %s' % WT, tmp,
                    modules=("ui", "state", "worktree", "scratch"))
     check("vercelignore-tracked-untouched", open(ignore, encoding="utf-8").read(), ".env\n")
-    check_true("vercelignore-tracked-warned", "/.feature" in str(out))
+    check_true("vercelignore-tracked-warned", "/.sclaude/local" in str(out))
     git("rm", "-q", "--cached", ".vercelignore", cwd=WT)
 
     check_true("worktree-declares-the-path-separately",
@@ -281,7 +281,7 @@ try:
 
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO,
                           capture_output=True, text=True).stdout.strip()
-    state = os.path.join(WT, ".feature", "state.json")
+    state = os.path.join(WT, ".sclaude/local/feature", "state.json")
 
     def unchanged(stage):
         _, _, rc = run_bash(

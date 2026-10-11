@@ -17,6 +17,12 @@ import subprocess
 import sys
 import tempfile
 
+
+def _cfg(path):
+    """The path of a product's config, its .sclaude/ folder made first."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
 HOOKS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                      "sclaude", "hooks")
 
@@ -108,17 +114,17 @@ PLANNING = [
     ("git worktree list && git commit -m x", DENY),
     # The friction log is open to a single append, and only to that: the text
     # of the entry hides neither a chain nor a substitution.
-    ("cat >> .feature/friction.log <<'EOF' && rm -rf x\nplain\nEOF", DENY),
-    ("cat >> .feature/friction.log <<EOF\n$(rm -rf x)\nEOF", DENY),
-    ("echo \"$(rm -rf x)\" >> .feature/friction.log", DENY),
-    ("echo `rm -rf x` >> .feature/friction.log", DENY),
-    ("echo x >> .feature/friction.log\nrm -rf x", DENY),
-    ("echo a >> .feature/friction.log > other.ts", DENY),
+    ("cat >> .sclaude/local/feature/friction.log <<'EOF' && rm -rf x\nplain\nEOF", DENY),
+    ("cat >> .sclaude/local/feature/friction.log <<EOF\n$(rm -rf x)\nEOF", DENY),
+    ("echo \"$(rm -rf x)\" >> .sclaude/local/feature/friction.log", DENY),
+    ("echo `rm -rf x` >> .sclaude/local/feature/friction.log", DENY),
+    ("echo x >> .sclaude/local/feature/friction.log\nrm -rf x", DENY),
+    ("echo a >> .sclaude/local/feature/friction.log > other.ts", DENY),
     # A substitution is judged by what it runs: a reading one next to a
     # writing one, or one nested in another, still refuses.
-    ("echo \"$(date) $(rm -rf x)\" >> .feature/friction.log", DENY),
-    ("echo \"$(echo $(rm x))\" >> .feature/friction.log", DENY),
-    ("echo \"`date` `rm x`\" >> .feature/friction.log", DENY),
+    ("echo \"$(date) $(rm -rf x)\" >> .sclaude/local/feature/friction.log", DENY),
+    ("echo \"$(echo $(rm x))\" >> .sclaude/local/feature/friction.log", DENY),
+    ("echo \"`date` `rm x`\" >> .sclaude/local/feature/friction.log", DENY),
     # `npx` reads only when it asks for help or a version.
     ("npx supabase db push", DENY),
     ("npx prettier --write .", DENY),
@@ -144,17 +150,17 @@ PLANNING = [
     # An entry may describe a command. One that mentioned `;`, a pipe or an
     # arrow used to read as a chain, and the only file step 1 may write refused
     # the entries that matter most to it.
-    ("echo 'x' >> .feature/friction.log", ALLOW),
-    ("cat >> .feature/friction.log <<'EOF'\nneeded `git worktree list`; it "
+    ("echo 'x' >> .sclaude/local/feature/friction.log", ALLOW),
+    ("cat >> .sclaude/local/feature/friction.log <<'EOF'\nneeded `git worktree list`; it "
      "only reads | nothing > else, it's fine\nEOF", ALLOW),
-    ("printf '%s\\n' 'a; b' >> .feature/friction.log", ALLOW),
-    ("echo \"git log | head; ok\" >> .feature/friction.log", ALLOW),
+    ("printf '%s\\n' 'a; b' >> .sclaude/local/feature/friction.log", ALLOW),
+    ("echo \"git log | head; ok\" >> .sclaude/local/feature/friction.log", ALLOW),
     # The exact entry a live planning session lost: a timestamp and an
     # escaped backtick, neither of which runs anything that writes.
     ("echo \"$(date -Iseconds) plan/145: a read was refused, since "
      "\\`supabase migration list\\` JSON carries versions only.\" "
-     ">> .feature/friction.log", ALLOW),
-    ("cat >> .feature/friction.log <<EOF\n$(date) refused\nEOF", ALLOW),
+     ">> .sclaude/local/feature/friction.log", ALLOW),
+    ("cat >> .sclaude/local/feature/friction.log <<EOF\n$(date) refused\nEOF", ALLOW),
     # `npx` asking for help or a version only prints. The same session lost
     # both of these to the ban on the name.
     ("npx supabase db --help", ALLOW),
@@ -165,7 +171,7 @@ PLANNING = [
      "order by version desc limit 4;\" 2>&1 | grep -v -i \"postgres://\"; "
      "npx supabase db --help 2>/dev/null | grep -i -A1 \"query\\|^  [a-z]\" "
      "| head -20", ALLOW),
-    ("ls -la .feature/; npx supabase db --help 2>/dev/null | "
+    ("ls -la .sclaude/local/feature/; npx supabase db --help 2>/dev/null | "
      "sed -n '/Available Commands/,/^$/p'; sed -n 60,110p scripts/dump-schema.sh",
      ALLOW),
     # Redirection is judged by its target: the null device and the standard
@@ -456,7 +462,7 @@ def main():
 
     # A feature with a database of its own: the CLI already points at it, and
     # --workdir is the one way past that, to somebody else's stack.
-    own = "/tmp/feature-x/.feature/supabase"
+    own = "/tmp/feature-x/.sclaude/local/feature/supabase"
     workdir_cases = [
         ("npx supabase db reset", {"SUPABASE_WORKDIR": own}, ALLOW),
         ("npx supabase migration up --workdir " + own, {"SUPABASE_WORKDIR": own}, ALLOW),
@@ -480,7 +486,7 @@ def main():
     try:
         os.makedirs(os.path.join(tree, "scripts", "lib"))
         os.makedirs(os.path.join(tree, "config"))
-        with open(os.path.join(tree, ".sclaude.json"), "w") as fh:
+        with open(_cfg(os.path.join(tree, ".sclaude/config.json")), "w") as fh:
             json.dump({"database": {"local": {"environment": "localdb"}}}, fh)
         with open(os.path.join(tree, "config", "environments.json"), "w") as fh:
             json.dump({"dev": {"confirm": False}, "localdb": {"confirm": False},
@@ -525,11 +531,11 @@ def main():
 
     # A plan is not shown for approval without its acceptance criteria. Only
     # inside a feature: the hook must not get in the way of someone else's
-    # planning. The tree carries a `.feature/` of its own, and the session's
+    # planning. The tree carries a `.sclaude/local/feature/` of its own, and the session's
     # directory is a level below it, as a step's may be.
     feature = tempfile.mkdtemp(prefix="hooks-plan-")
     try:
-        os.makedirs(os.path.join(feature, ".feature"))
+        os.makedirs(os.path.join(feature, ".sclaude/local/feature"))
         inside = os.path.join(feature, "app")
         os.makedirs(inside)
         plan_file = os.path.join(feature, "drafted.md")
@@ -569,7 +575,7 @@ def main():
             return (json.loads(out).get("hookSpecificOutput") or {}).get(
                 "permissionDecisionReason") or ""
         no_section = reason(bare)
-        with open(os.path.join(feature, ".feature", "plan.md")) as fh:
+        with open(os.path.join(feature, ".sclaude/local/feature", "plan.md")) as fh:
             plan_saved = "Just do it." in fh.read()
         empty_section = reason("## Acceptance criteria\n\nTBD.\n")
         for name, ok in (("refused plan is saved", plan_saved),

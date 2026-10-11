@@ -4,7 +4,7 @@
 #
 # The orchestrator used to carry one product's answers inside it: the
 # regression's parts and their npm scripts, the manuals' paths, production's
-# address, the migrations directory. They now live in `.sclaude.json` at the
+# address, the migrations directory. They now live in `.sclaude/config.json` at the
 # root of whichever repository sclaude is run from, and what is guarded here is
 # the property that made the move worth making — **no default is this product's
 # answer**. A reintroduced fallback would work silently in the wrong repository,
@@ -22,6 +22,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+
+def _cfg(path):
+    """The path of a product's config, its .sclaude/ folder made first."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
@@ -71,7 +77,7 @@ try:
 
     proj = os.path.join(tmp, "proj")
     os.makedirs(proj)
-    with open(os.path.join(proj, ".sclaude.json"), "w") as fh:
+    with open(_cfg(os.path.join(proj, ".sclaude/config.json")), "w") as fh:
         json.dump({
             "commands": {"typecheck": "pnpm typecheck", "e2e": "pnpm e2e"},
             "regression": {"local": ["typecheck", "e2e"], "preview": ["e2e"]},
@@ -107,7 +113,7 @@ try:
     # A worktree's own copy wins: a feature in flight may be changing it.
     wt = os.path.join(tmp, "proj-feature")
     os.makedirs(wt)
-    with open(os.path.join(wt, ".sclaude.json"), "w") as fh:
+    with open(_cfg(os.path.join(wt, ".sclaude/config.json")), "w") as fh:
         json.dump({"commands": {"typecheck": "from-the-worktree"}}, fh)
     out, _, _ = run_bash('REPO=%s; project_command typecheck %s' % (proj, wt), tmp)
     check("worktree-config-wins", out.strip(), "from-the-worktree")

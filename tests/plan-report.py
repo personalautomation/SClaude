@@ -7,7 +7,7 @@
 #
 #   * after step 1 the approved plan is printed whole, and printed again after
 #     a replan even when its text is the same;
-#   * after a later session nothing is printed while .feature/plan.md is the
+#   * after a later session nothing is printed while .sclaude/local/feature/plan.md is the
 #     plan printed last;
 #   * a later session that changed the plan gets it printed, under a headline
 #     saying it changed, and only once;
@@ -46,7 +46,7 @@ BOLD=""; OFF=""
 say() { printf '%s\\n' "$*"; }
 capture_plan() {
   [[ -n "${APPROVED:-}" ]] || return 1
-  printf '%s\\n' "$APPROVED" > "$1/.feature/plan.md"
+  printf '%s\\n' "$APPROVED" > "$1/.sclaude/local/feature/plan.md"
 }
 """
 
@@ -60,8 +60,8 @@ def report(wt, step, approved=""):
 
 with tempfile.TemporaryDirectory() as tmp:
     wt = os.path.join(tmp, "wt")
-    os.makedirs(os.path.join(wt, ".feature"))
-    plan = os.path.join(wt, ".feature", "plan.md")
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+    plan = os.path.join(wt, ".sclaude/local/feature", "plan.md")
 
     # --- no approval in step 1: nothing to print -----------------------------
     check("plan-unapproved-silent", report(wt, "plan"), "")
@@ -87,9 +87,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("replan-prints-again", "The approved plan" in out, True)
 
     # --- a feature from before the record: silent, then tracked -------------
-    os.remove(os.path.join(wt, ".feature", "plan.printed"))
+    os.remove(os.path.join(wt, ".sclaude/local/feature", "plan.printed"))
     check("no-record-silent", report(wt, "code"), "")
-    check("no-record-started", os.path.exists(os.path.join(wt, ".feature", "plan.printed")), True)
+    check("no-record-started", os.path.exists(os.path.join(wt, ".sclaude/local/feature", "plan.printed")), True)
     with open(plan, "a") as fh:
         fh.write("- one more\n")
     check("tracked-after-start", "The plan was changed" in report(wt, "code"), True)

@@ -35,7 +35,7 @@ pr_milestone() {
   local wt="$1" number="$2"
   local issue repo milestone current candidates
 
-  issue="$(state_get "$wt/.feature/state.json" issue || true)"
+  issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue || true)"
   [[ "$issue" == "null" ]] && issue=""
   repo="$(gh_repo)" || return 0
   [[ -n "$repo" ]] || return 0
@@ -105,7 +105,7 @@ pr_milestone() {
 # Like everything here, it breaks nothing — a failure is a warning.
 pr_setup() {
   local wt="$1" number="$2"
-  local state="$wt/.feature/state.json" repo json
+  local state="$wt/.sclaude/local/feature/state.json" repo json
 
   [[ "$(state_get "$state" pr_setup 2>/dev/null || true)" == "$number" ]] && return 0
   repo="$(gh_repo)" || return 0
@@ -145,13 +145,13 @@ capture_pr() {
   local wt="$1" number
   number="$(cd "$wt" && gh pr view --json number --jq .number 2>/dev/null)" || return 0
   [[ -n "$number" ]] || return 0
-  state_set "$wt/.feature/state.json" pr "$number"
+  state_set "$wt/.sclaude/local/feature/state.json" pr "$number"
   info "PR #$number recorded in the feature's state."
   # Here rather than in step 3: every PR found comes through here — both one
   # just opened and one picked up by the early exit on an already merged one.
   pr_link_issue "$wt" "$number"
   pr_setup "$wt" "$number"
-  issue_hold_open "$(state_get "$wt/.feature/state.json" issue || true)"
+  issue_hold_open "$(state_get "$wt/.sclaude/local/feature/state.json" issue || true)"
 }
 
 # The issue stays open until the whole cycle is over, and sclaude closes it.
@@ -235,7 +235,7 @@ pr_link_issue() {
   local wt="$1" number="$2"
   local issue repo pr_state linked issue_id pr_id body
 
-  issue="$(state_get "$wt/.feature/state.json" issue || true)"
+  issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue || true)"
   [[ -n "$issue" && "$issue" != "null" ]] || return 0
   repo="$(gh_repo)" || return 0
   [[ -n "$repo" ]] || return 0
@@ -289,7 +289,7 @@ issue_sync() {
   # Two declarations rather than one: in `local a="$1" b="$a/x"` bash under
   # set -u trips over the $a that does not exist yet.
   local wt="$1"
-  local state="$wt/.feature/state.json" issue repo body id
+  local state="$wt/.sclaude/local/feature/state.json" issue repo body id
 
   issue="$(state_get "$state" issue || true)"
   [[ -n "$issue" && "$issue" != "null" ]] || return 0
@@ -917,7 +917,7 @@ issue_create() {
     --body-file -
     --assignee "@me"
   )
-  # The project's, from `board.issue` in .sclaude.json; absent means none.
+  # The project's, from `board.issue` in .sclaude/config.json; absent means none.
   [[ -n "${ISSUE_LABEL:-}" ]] && args+=(--label "$ISSUE_LABEL")
   [[ -n "${ISSUE_TYPE:-}" ]] && args+=(--type "$ISSUE_TYPE")
   [[ -n "$milestone" ]] && args+=(--milestone "$milestone")
@@ -996,7 +996,7 @@ features_blockers() {
 #
 # The columns we move between, and the date field. By name rather than as
 # literals through the code: rename a column or a field and there is one place to
-# edit — `board` in the project's .sclaude.json, read by board_load
+# edit — `board` in the project's .sclaude/config.json, read by board_load
 # (project.sh) into PROGRESS_FROM (`columns.backlog`) and PROGRESS_TO
 # (`columns.progress`). We look a column up by name rather than by an option's
 # id: every board has its own ids, whereas the name is what a person sees with
@@ -1117,7 +1117,7 @@ for item in (issue.get("projectItems") or {}).get("nodes") or []:
     status = item.get("fieldValueByName") or {}
     field = status.get("field") or {}
     # Case and surrounding spaces ignored, as column_is does in the shell:
-    # the name comes from .sclaude.json, typed apart from the board.
+    # the name comes from .sclaude/config.json, typed apart from the board.
     option = next((o["id"] for o in field.get("options") or []
                    if (o.get("name") or "").strip().casefold()
                    == (want or "").strip().casefold()), "")
@@ -1310,13 +1310,13 @@ issue_move_status() {
   [[ -n "$issue" && "$issue" != "null" ]] || return 0
   # A column the project does not name is a move it does not make. A project
   # with no `board` section at all is told so once per command: before the
-  # names moved into .sclaude.json every project got the same four columns,
+  # names moved into .sclaude/config.json every project got the same four columns,
   # and one configured back then would otherwise lose its board in silence.
   # A section that leaves a column out is a choice and is not remarked on.
   if [[ -z "$from" || -z "$to" ]]; then
     if [[ -z "${BOARD_NOTED:-}" ]] && ! project_has board; then
       BOARD_NOTED=1
-      info "Issue #$issue is not moved on the board: .sclaude.json has no \`board\`"
+      info "Issue #$issue is not moved on the board: .sclaude/config.json has no \`board\`"
       info "  section naming its columns (see sclaude/config.example.json)."
     fi
     return 0
@@ -1477,13 +1477,13 @@ pr_board_set() {
 #
 # Breaks nothing, like the rest of this file: every step is a warning at worst.
 pr_qa_handoff() {
-  [[ -d "$1/.feature" ]] || return 2
-  ( flock -w 120 9 || exit 1; pr_qa_handoff_now "$@" ) 9>"$1/.feature/handoff.lock"
+  [[ -d "$1/.sclaude/local/feature" ]] || return 2
+  ( flock -w 120 9 || exit 1; pr_qa_handoff_now "$@" ) 9>"$1/.sclaude/local/feature/handoff.lock"
 }
 
 pr_qa_handoff_now() {
   local wt="$1" pr="$2" issue="${3:-}"
-  local state="$wt/.feature/state.json" repo view head draft
+  local state="$wt/.sclaude/local/feature/state.json" repo view head draft
   local -a waiting=() numbers=()
 
   [[ "$pr" =~ ^[0-9]+$ && -n "$QA_DONE" ]] || return 2
@@ -1536,7 +1536,7 @@ pr_qa_handoff_now() {
     fi
   fi
 
-  local note="$wt/.feature/merge-ready.md" posted=failed
+  local note="$wt/.sclaude/local/feature/merge-ready.md" posted=failed
   if python3 "$LIB/pr_handoff.py" summary "$wt" "$pr" "$state" "$QA_DONE" "${numbers[@]}" \
        > "$note" 2>/dev/null && [[ -s "$note" ]]; then
     posted="$(python3 "$LIB/pr_handoff.py" comment "$wt" "$pr" "$note" 2>/dev/null)" || posted=failed
@@ -1875,7 +1875,7 @@ run_status() {
   if [[ -n "$wt" ]]; then
     fingerprint="$(status_fingerprint "$wt" "$pr" "$merged" "$preview" "$prod" || true)"
     if [[ -n "$fingerprint" ]] \
-       && [[ "$fingerprint" == "$(state_get "$wt/.feature/state.json" status.fingerprint 2>/dev/null || true)" ]]; then
+       && [[ "$fingerprint" == "$(state_get "$wt/.sclaude/local/feature/state.json" status.fingerprint 2>/dev/null || true)" ]]; then
       echo ""
       info "The status in issue #$issue already describes this — nothing changed, skipping."
       info "  To write it again anyway: $SELF epilogue $slug"
@@ -1984,8 +1984,8 @@ run_status() {
   # says what to do with an empty value.
   local shas="" psha dsha
   if [[ -n "$wt" ]]; then
-    psha="$(state_get "$wt/.feature/state.json" deploy.preview.sha 2>/dev/null || true)"
-    dsha="$(state_get "$wt/.feature/state.json" deploy.prod.sha 2>/dev/null || true)"
+    psha="$(state_get "$wt/.sclaude/local/feature/state.json" deploy.preview.sha 2>/dev/null || true)"
+    dsha="$(state_get "$wt/.sclaude/local/feature/state.json" deploy.prod.sha 2>/dev/null || true)"
     [[ -n "$dsha" && "$dsha" != "null" ]] \
       && shas="production: $(git -C "$REPO" rev-parse --short "$dsha" 2>/dev/null || echo "$dsha")"
     [[ -n "$psha" && "$psha" != "null" ]] \
@@ -2022,7 +2022,7 @@ run_status() {
   echo ""
 
   # Our own state goes in the main repository: the feature's tree is gone, and
-  # there is nowhere to write into .feature/state.json. The details are in
+  # there is nowhere to write into .sclaude/local/feature/state.json. The details are in
   # epilogue_state (state.sh).
   #
   # We name the session ourselves and write the id BEFORE launching: otherwise an
@@ -2043,7 +2043,7 @@ run_status() {
   # included. Recorded in the feature's state while there is one; the id is
   # named in advance even when there is no epilogue state, so the row has one.
   local fstate=""
-  [[ -n "$wt" && -f "$wt/.feature/state.json" ]] && fstate="$wt/.feature/state.json"
+  [[ -n "$wt" && -f "$wt/.sclaude/local/feature/state.json" ]] && fstate="$wt/.sclaude/local/feature/state.json"
   [[ -n "${session:-}" ]] || session="$(new_session_id)"
   [[ -n "$fstate" ]] && session_runs "$fstate" epilogue open "$session"
 
@@ -2132,6 +2132,6 @@ run_status() {
   # Only when it ran to the end: the early return above is the "did not start"
   # path, and marking that as written would silence the epilogue for good.
   [[ -n "$fingerprint" && -n "$wt" ]] \
-    && state_set "$wt/.feature/state.json" status.fingerprint "$fingerprint" 2>/dev/null
+    && state_set "$wt/.sclaude/local/feature/state.json" status.fingerprint "$fingerprint" 2>/dev/null
   return 0
 }

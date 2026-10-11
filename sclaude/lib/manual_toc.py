@@ -24,7 +24,7 @@ ENTRY = re.compile(
     r"|title:\s*[\"'](?P<title2>[^\"']+)[\"']\s*,\s*id:\s*[\"'](?P<id2>[^\"']+)[\"'])")
 
 def pages(root):
-    """The manuals this project has, from `.sclaude.json`.
+    """The manuals this project has, from `.sclaude/config.json`.
 
     They were two paths written here, and they were one product's: a repository
     that kept its manuals anywhere else got an empty block and no explanation.
@@ -33,7 +33,7 @@ def pages(root):
     emptiness.
     """
     try:
-        with open(os.path.join(root, ".sclaude.json"), encoding="utf-8") as fh:
+        with open(os.path.join(root, ".sclaude/config.json"), encoding="utf-8") as fh:
             declared = json.load(fh).get("manuals") or []
     except (OSError, ValueError):
         return []

@@ -168,12 +168,12 @@ try:
 
     # --- the local regression is not run twice on one tree --------------------
     wt = repo
-    os.makedirs(os.path.join(wt, ".feature"))
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     with open(os.path.join(wt, ".git", "info", "exclude"), "a") as fh:
-        fh.write(".feature\n")
+        fh.write(".sclaude/local/feature\n")
 
     def gate(tree):
-        with open(os.path.join(wt, ".feature", "state.json"), "w") as fh:
+        with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             json.dump({"regression": {"local": {"status": "passed", "tree": tree}}}, fh)
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
@@ -218,7 +218,7 @@ try:
         if watch is not None:
             with open(os.path.join(wdir, "demo.json"), "w") as fh:
                 json.dump(watch, fh)
-        with open(os.path.join(wt, ".feature", "state.json"), "w") as fh:
+        with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             json.dump(state_blob, fh)
         body = "set -uo pipefail\n"
         for name in ("io", "ui", "steps", "state", "watch", "run"):

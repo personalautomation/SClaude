@@ -183,11 +183,11 @@ doctor_project() {
     return
   fi
   REPO="$root"
-  if [[ ! -f "$root/.sclaude.json" ]]; then
-    doctor_warn "$root has no .sclaude.json" "sclaude new offers to write one"
+  if [[ ! -f "$root/.sclaude/config.json" ]]; then
+    doctor_warn "$root has no .sclaude/config.json" "sclaude new offers to write one"
     return
   fi
-  doctor_ok "$root/.sclaude.json"
+  doctor_ok "$root/.sclaude/config.json"
   local section what
   for section in regression manuals prod database board; do
     case "$section" in
@@ -233,7 +233,7 @@ doctor_project() {
 }
 
 # What the project itself asks of a developer's machine, beyond what sclaude
-# knows to look for: `.sclaude.json` → `doctor`, a list of
+# knows to look for: `.sclaude/config.json` → `doctor`, a list of
 # { "what": "…", "check": "<command>", "fix": "<command>" }. The check runs in
 # the project's root; exit 0 is a ✓, anything else a ! with the check's last
 # line and the fix. Warnings, not failures: sclaude cannot know which of a

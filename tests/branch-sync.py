@@ -57,10 +57,10 @@ try:
         git("commit", "-q", "--allow-empty", "-m", "main moves", cwd=other)
         git("push", "-q", "origin", "HEAD:main", cwd=other)
 
-    os.makedirs(os.path.join(repo, ".feature"))
+    os.makedirs(os.path.join(repo, ".sclaude/local/feature"))
     with open(os.path.join(repo, ".git", "info", "exclude"), "a") as fh:
-        fh.write(".feature\n")
-    with open(os.path.join(repo, ".feature", "state.json"), "w") as fh:
+        fh.write(".sclaude/local/feature\n")
+    with open(os.path.join(repo, ".sclaude/local/feature", "state.json"), "w") as fh:
         fh.write('{"branch": "feat/x", "feature": "x"}\n')
 
     def start(answer):

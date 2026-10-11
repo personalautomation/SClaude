@@ -75,14 +75,14 @@ try:
                  '[[ "$b" == feat/demo ]] && echo %s\n' % merged)
     os.chmod(os.path.join(bin_dir, "gh"), 0o755)
 
-    os.makedirs(os.path.join(wt, ".feature"))
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     state = {"feature": "demo", "branch": "feat/demo", "issue": 145, "pr": 160,
              "step": "done",
              "steps": {"pr": {"done": True, "session": "old-pr"},
                        "review": {"done": True, "session": "old-review",
                                   "finished": "2026-10-09T10:00:00+01:00"}},
              "regression": {"preview": {"status": "passed"}}}
-    path = os.path.join(wt, ".feature", "state.json")
+    path = os.path.join(wt, ".sclaude/local/feature", "state.json")
     with open(path, "w") as fh:
         json.dump(state, fh)
 

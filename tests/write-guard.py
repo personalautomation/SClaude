@@ -2,7 +2,7 @@
 #
 # A product's shared sclaude rules belong to its maintainers.
 #
-#   * product_maintainer reads `maintainers` from the product's .sclaude.json
+#   * product_maintainer reads `maintainers` from the product's .sclaude/config.json
 #     against the product repository's own git address; no list, or an empty
 #     one, makes everybody a maintainer;
 #   * product_rules_dir sends a maintainer to .sclaude/team/ and everybody else
@@ -110,7 +110,8 @@ try:
     repo = os.path.join(tmp, "product")
     subprocess.run(["git", "init", "-q", repo], check=True)
     subprocess.run(["git", "-C", repo, "config", "user.email", "Ann@X.test"], check=True)
-    config = os.path.join(repo, ".sclaude.json")
+    config = os.path.join(repo, ".sclaude/config.json")
+    os.makedirs(os.path.dirname(config))
 
     def setup(maintainers):
         with open(config, "w") as fh:

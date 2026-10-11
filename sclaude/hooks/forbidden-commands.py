@@ -303,9 +303,9 @@ SHARED_SCHEMA_ASK = ("this changes the schema of \"{name}\", a database the whol
 
 
 def local_environment(cwd):
-    """The project's local environment, from .sclaude.json, or None."""
+    """The project's local environment, from .sclaude/config.json, or None."""
     try:
-        with open(os.path.join(cwd, ".sclaude.json")) as fh:
+        with open(os.path.join(cwd, ".sclaude/config.json")) as fh:
             config = json.load(fh)
     except (OSError, ValueError):
         return None

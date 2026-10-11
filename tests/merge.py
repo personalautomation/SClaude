@@ -169,7 +169,7 @@ if offer:
     # sits anywhere but Done means the checking is still ahead: the board is
     # being kept, so its answer is worth waiting for, and the caller's reminder
     # stands.
-    # Through column_is: the board and .sclaude.json are typed apart, and case
+    # Through column_is: the board and .sclaude/config.json are typed apart, and case
     # must not decide whether QA's word counts.
     check_true("offer-requires-the-qa-column", 'column_is "$column" "$QA_DONE"' in offer)
     check_true("a-waiting-issue-blocks-the-offer",

@@ -11,12 +11,12 @@
 #
 # The worktree's supabase/config.toml is not touched: it is a tracked file, and
 # a port rewritten there would ride into the feature's commit. The stack runs
-# from .feature/supabase/ instead, where config.toml is a rewritten copy and
+# from .sclaude/local/feature/supabase/ instead, where config.toml is a rewritten copy and
 # everything else — the migrations first of all — is a symlink back into the
 # tree, so a migration the feature writes is one the stack sees.
 #
 #   feature_db.py config <src config.toml> <dst config.toml> <project_id> <base>
-#   feature_db.py envfile <.sclaude.json> <workdir>   < `supabase status -o env`
+#   feature_db.py envfile <.sclaude/config.json> <workdir>   < `supabase status -o env`
 #
 # Called from featuredb.sh; each subcommand is a function below, for the tests.
 import json
@@ -84,7 +84,7 @@ def parse_status(text):
 
 
 def env_lines(mapping, status, workdir):
-    """The lines of .feature/db.env, or None when the stack did not answer.
+    """The lines of .sclaude/local/feature/db.env, or None when the stack did not answer.
 
     `mapping` is the project's: its variable name -> the status key that fills
     it. Every value is shell-quoted, because the file is sourced. The CLI's own

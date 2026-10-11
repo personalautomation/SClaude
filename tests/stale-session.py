@@ -43,7 +43,7 @@ def guard(worktree, session, transcript_exists):
     We put the transcript in the directory transcript_dir names — that way the
     bench checks the path rule itself rather than only the branching.
     """
-    state_dir = os.path.join(worktree, ".feature")
+    state_dir = os.path.join(worktree, ".sclaude/local/feature")
     os.makedirs(state_dir, exist_ok=True)
     state = os.path.join(state_dir, "state.json")
     with open(state, "w") as fh:
@@ -53,7 +53,7 @@ def guard(worktree, session, transcript_exists):
       set -euo pipefail
       source "%s/state.sh"
       info() { :; }
-      wt="%s"; state="$wt/.feature/state.json"; step=code
+      wt="%s"; state="$wt/.sclaude/local/feature/state.json"; step=code
       session="$(state_get "$state" "steps.$step.session" || true)"
       if [[ -n "$session" ]] && ! live_session "$wt" "$session" >/dev/null; then
         session=""

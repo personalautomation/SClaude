@@ -120,7 +120,7 @@ def git_branch(cwd, session_id):
 
 
 # The four steps of the sclaude feature cycle, in order. The label is what the
-# statusline shows; the key is what .feature/state.json holds.
+# statusline shows; the key is what .sclaude/local/feature/state.json holds.
 SCLAUDE_STEPS = ["plan", "code", "pr", "review"]
 
 
@@ -133,7 +133,7 @@ def feature_step(cwd):
     if not cwd:
         return None
     try:
-        with open(os.path.join(cwd, ".feature", "state.json")) as f:
+        with open(os.path.join(cwd, ".sclaude/local/feature", "state.json")) as f:
             step = json.load(f).get("step")
     except (OSError, ValueError, AttributeError):
         return None

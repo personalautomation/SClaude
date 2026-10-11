@@ -43,7 +43,7 @@
 # decides what to do with the name; sclaude only makes sure every part sees it.
 #
 # Which parts each stage runs is the project's answer rather than ours, and it
-# lives in `.sclaude.json` (project.sh). It used to be two strings here, and
+# lives in `.sclaude/config.json` (project.sh). It used to be two strings here, and
 # they were this one product's: a second repository would have needed the
 # orchestrator edited rather than a file of its own. A project that describes no
 # regression simply has none, and the gate says so instead of running a table
@@ -59,7 +59,7 @@ REGRESSION_MAX_ATTEMPTS="2"
 #
 # The parts are named rather than listed as commands for the reason above — a
 # summary prints `lint` beside a duration, not a command line — and the mapping
-# from a name to a command is the project's to declare. `.sclaude.json` holds
+# from a name to a command is the project's to declare. `.sclaude/config.json` holds
 # it under `commands`.
 #
 # `e2e` is the odd one: it takes the address. A deployed stage gives the
@@ -92,8 +92,8 @@ regression_command() {
   # The local stage runs against this feature's own database when it has one
   # (featuredb.sh). Sourced rather than exported by name, so the `$ …` line in
   # the log names the file a person can read, not a row of values.
-  if [[ -z "$base" && -n "$wt" && -f "$wt/.feature/db.env" ]]; then
-    cmd="set -a; . $(printf '%q' "$wt/.feature/db.env"); set +a; $cmd"
+  if [[ -z "$base" && -n "$wt" && -f "$wt/.sclaude/local/feature/db.env" ]]; then
+    cmd="set -a; . $(printf '%q' "$wt/.sclaude/local/feature/db.env"); set +a; $cmd"
   fi
   # The preview stage runs against the credentials the deployment itself reads.
   # A feature on the local stack has .env.local pointing at localdb — for its
@@ -113,10 +113,10 @@ regression_command() {
   # with, or it would come up on another port than the one it is looked for
   # at. SCLAUDE_FEATURE lets a suite on a shared database keep its test data
   # apart from the same developer's other features.
-  if [[ -z "$base" && -n "$wt" && -f "$wt/.feature/state.json" ]]; then
+  if [[ -z "$base" && -n "$wt" && -f "$wt/.sclaude/local/feature/state.json" ]]; then
     local port url label
     if port="$(feature_port "$wt")" && url="$(dev_address "$wt")"; then
-      label="$(state_get "$wt/.feature/state.json" dev.label 2>/dev/null || true)"
+      label="$(state_get "$wt/.sclaude/local/feature/state.json" dev.label 2>/dev/null || true)"
       cmd="export E2E_LOCAL_URL=$url PORT=$port SCLAUDE_DEV_URL=$url${label:+ SCLAUDE_FEATURE=$label}; $cmd"
     fi
   fi
@@ -212,7 +212,7 @@ PY
 # Where a stage points the suite. Empty for local — the absence of the variable
 # is what names localhost, and an empty string would not be the same thing.
 #
-# Production's address is the project's to declare, in `.sclaude.json`. It was
+# Production's address is the project's to declare, in `.sclaude/config.json`. It was
 # read out of this product's own `config/environments.json` before, with the
 # address itself as a literal fallback — which meant a repository that kept the
 # answer anywhere else had its suite aimed at somebody else's production. Being
@@ -222,7 +222,7 @@ regression_base_url() {
   local wt="$1" stage="$2"
   case "$stage" in
     local)   printf '' ;;
-    preview) state_get "$wt/.feature/state.json" regression.preview.url 2>/dev/null || true ;;
+    preview) state_get "$wt/.sclaude/local/feature/state.json" regression.preview.url 2>/dev/null || true ;;
     prod|rollback)
       # From the project's own config. It used to be read out of this one
       # product's `config/environments.json`, with its address as a literal
@@ -293,7 +293,7 @@ sys.exit(0 if found else 1)
 # the same way, which is to run again.
 regression_status() {
   local wt="$1" stage="$2" status
-  status="$(state_get "$wt/.feature/state.json" "regression.$stage.status" 2>/dev/null || true)"
+  status="$(state_get "$wt/.sclaude/local/feature/state.json" "regression.$stage.status" 2>/dev/null || true)"
   case "$status" in
     passed|failed) printf '%s' "$status" ;;
     *)             printf 'none' ;;
@@ -525,7 +525,7 @@ regression_server_wedged() {
 
 # One run of one stage. Returns 0 when every part passed.
 #
-# The log is .feature/regression.log, beside dev.log and friction.log, and it is
+# The log is .sclaude/local/feature/regression.log, beside dev.log and friction.log, and it is
 # truncated at the start of each run: what matters is why this run failed, and
 # the previous run's output under the same headings is what makes a log unusable
 # in a hurry. The worktree outlives production now — remind_prod cleans up last
@@ -599,8 +599,8 @@ regression_run() {
 # The run itself, inside the queue regression_run holds.
 regression_run_body() {
   local wt="$1" slug="$2" stage="$3" only="${4:-}"
-  local state="$wt/.feature/state.json"
-  local log="$wt/.feature/regression.log"
+  local state="$wt/.sclaude/local/feature/state.json"
+  local log="$wt/.sclaude/local/feature/regression.log"
   local base parts part cmd failed="" passed=0
   local started part_started part_total rc retried from
   # The tree under test, taken before the run rather than after it: a change
@@ -618,9 +618,9 @@ regression_run_body() {
   # a suite nobody has declared.
   if [[ -z "$parts" ]]; then
     echo ""
-    info "  No $stage regression: .sclaude.json describes none for this project."
-    [[ -f "${REPO:-$wt}/.sclaude.json" ]] \
-      || info "  There is no .sclaude.json at all — \`$SELF new\` offers to write one."
+    info "  No $stage regression: .sclaude/config.json describes none for this project."
+    [[ -f "${REPO:-$wt}/.sclaude/config.json" ]] \
+      || info "  There is no .sclaude/config.json at all — \`$SELF new\` offers to write one."
     return 2
   fi
 
@@ -832,7 +832,7 @@ regression_run_body() {
     echo ""
     warn "  Every spec failed and $base is not serving."
     warn "  That is the environment, not the code — no fixing session will help."
-    info "     log: .feature/regression.log"
+    info "     log: .sclaude/local/feature/regression.log"
     regression_notify_done "$slug" "$stage" "$failed" "$passed" "$count" "$elapsed" "$log"
     return 2
   fi
@@ -843,7 +843,7 @@ regression_run_body() {
     state_set "$state" "regression.$stage.failed_at" "$failed"
     state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
     warn "  ── $passed/$count, $(regression_duration "$elapsed") · failed on $failed"
-    info "     log: .feature/regression.log"
+    info "     log: .sclaude/local/feature/regression.log"
     regression_notify_done "$slug" "$stage" "$failed" "$passed" "$count" "$elapsed" "$log"
     return 1
   fi
@@ -929,7 +929,7 @@ regression_clear_mark() {
   local wt="$1" stage="$2" issue repo numbers
 
   [[ "$stage" == "preview" || "$stage" == "prod" ]] || return 0
-  issue="$(state_get "$wt/.feature/state.json" issue 2>/dev/null || true)"
+  issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null || true)"
   [[ -n "$issue" && "$issue" != "null" ]] || return 0
   command -v gh >/dev/null 2>&1 || return 0
   repo="$(gh_repo)" || return 0
@@ -947,7 +947,7 @@ regression_clear_mark() {
 
 regression_gate() {
   local wt="$1" slug="$2" stage="$3"
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
   local attempts
 
   # A local verdict is about a tree, and it stays true exactly as long as the
@@ -1006,7 +1006,7 @@ regression_gate() {
   # addressed the note goes and the run proceeds; if it has not, there is
   # nothing to learn from running, and saying so costs a second rather than
   # minutes.
-  local note="$wt/.feature/regression.blocked"
+  local note="$wt/.sclaude/local/feature/regression.blocked"
   if [[ -s "$note" ]]; then
     echo ""
     warn "  The last $stage run was blocked by a cause outside this branch:"
@@ -1021,7 +1021,7 @@ regression_gate() {
       info "  Running $stage again."
     else
       info "  Leaving it: the run would fail the same way."
-      info "  The note is .feature/regression.blocked; carry on with: $SELF $slug"
+      info "  The note is .sclaude/local/feature/regression.blocked; carry on with: $SELF $slug"
       return 1
     fi
   fi
@@ -1107,10 +1107,10 @@ regression_gate() {
       local failed_part
       failed_part="$(state_get "$state" "regression.$stage.failed_at" 2>/dev/null || true)"
       [[ -n "$failed_part" && "$failed_part" != "null" ]] || failed_part="a part"
-      info "  Failed on: $failed_part. The log is .feature/regression.log"
+      info "  Failed on: $failed_part. The log is .sclaude/local/feature/regression.log"
       "$INSTRUMENTS/bin/sclaude-notify" "$slug: regression still red on $stage
 $attempts fixing session(s) did not help — it needs you.
-Log: .feature/regression.log" 2>/dev/null || true
+Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
 
       # The limit stops the machine, not the human. Stopping silently would hand
       # back a feature with no way forward but `sclaude reset`, and the person
@@ -1200,13 +1200,13 @@ Log: .feature/regression.log" 2>/dev/null || true
       warn "  The $stage regression is red for a reason outside this branch."
       while IFS= read -r line; do
         info "  $line"
-      done < "$wt/.feature/regression.blocked"
+      done < "$wt/.sclaude/local/feature/regression.blocked"
       echo ""
       info "  Nothing was changed, and the attempt was not counted."
-      info "  The note is .feature/regression.blocked; carry on with: $SELF $slug"
+      info "  The note is .sclaude/local/feature/regression.blocked; carry on with: $SELF $slug"
       "$INSTRUMENTS/bin/sclaude-notify" "$slug: $stage regression blocked from outside
 The fixing session found the cause outside the branch and changed nothing.
-Note: .feature/regression.blocked" 2>/dev/null || true
+Note: .sclaude/local/feature/regression.blocked" 2>/dev/null || true
       return 1
     fi
 
@@ -1231,7 +1231,7 @@ Note: .feature/regression.blocked" 2>/dev/null || true
 # matches a recorded one and the suite always runs on it.
 #
 # worktree_dirt rather than a bare `git status`: it leaves out sclaude's own
-# scratch paths (.feature, .vercelignore), which are untracked wherever the
+# scratch paths (.sclaude/local/feature, .vercelignore), which are untracked wherever the
 # exclude was never written — and then no tree would ever match. It is the
 # same question deploy_unchanged asks, and the two must not disagree.
 regression_tree() {
@@ -1284,7 +1284,7 @@ regression_rewind() {
   # to do, and `after_step` would close it again the moment the session exited.
   # Only one of the two reopeners used to write them, which left this path with
   # exactly the bug the other one had fixed.
-  local state="$wt/.feature/state.json" pr
+  local state="$wt/.sclaude/local/feature/state.json" pr
   state_set "$state" reopened "${rewind[0]}" 2>/dev/null || true
   # And who reopened it. A preview fix is already green on the preview and goes
   # on to QA and the merge in the same run: once merged, the mark has nothing
@@ -1368,7 +1368,7 @@ fix_word_set() {
 # it, since production ships only after the merge.
 regression_fix_block() {
   local wt="$1" stage="$2" merged="${3:-}" mode="${4:-}"
-  local state="$wt/.feature/state.json" log="$wt/.feature/regression.log"
+  local state="$wt/.sclaude/local/feature/state.json" log="$wt/.sclaude/local/feature/regression.log"
   local failed pr issue
   failed="$(state_get "$state" "regression.$stage.failed_at" 2>/dev/null || true)"
   [[ "$failed" == "null" ]] && failed=""
@@ -1382,7 +1382,7 @@ regression_fix_block() {
   # Which log to quote. After a rollback it is not the one at the usual path:
   # regression_run opens with `: > "$log"`, and the confirmation run that
   # follows a rollback is a regression_run — so by the time this session opens,
-  # `.feature/regression.log` describes the *previous release passing*. That is
+  # `.sclaude/local/feature/regression.log` describes the *previous release passing*. That is
   # the opposite of the evidence this session needs and plausible enough that
   # nobody would question it, which is why rollback_keep_log copies the failing
   # run aside and records where.
@@ -1395,10 +1395,10 @@ regression_fix_block() {
   printf '**The %s regression failed on `%s`.**\n\n' "$stage" "${failed:-a part}"
   if [[ "$rolled" == "done" && "$kept" != "$log" ]]; then
     printf 'That run'"'"'s full output is kept at `%s` — read it rather than\n' "${kept#$wt/}"
-    printf '`.feature/regression.log`, which now holds the check made *after* the\n'
+    printf '`.sclaude/local/feature/regression.log`, which now holds the check made *after* the\n'
     printf 'rollback, against the previous release. Its last lines:\n\n'
   else
-    printf 'The full output is in `.feature/regression.log`; its last lines:\n\n'
+    printf 'The full output is in `.sclaude/local/feature/regression.log`; its last lines:\n\n'
   fi
   printf '```\n%s\n```\n\n' "$(tail -30 "$kept" 2>/dev/null)"
   # A merged pull request cannot be reopened, so the fix needs a new one — from
@@ -1441,7 +1441,7 @@ regression_fix_block() {
 # "shall I fix it?" is asking whether they meant what the gate already decided.
 regression_fix() {
   local wt="$1" slug="$2" stage="$3"
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
   local step model effort mode session prompt pr issue
   local -a extra
 
@@ -1604,7 +1604,7 @@ regression_fix() {
   # would stop the next run with "has that been dealt with?" about a cause the
   # fix was for. If the fix did not help, the next red run writes a new one.
   if [[ "$(state_get "$state" "friction.fix-$stage-$number.fixed" 2>/dev/null || true)" == "true" ]]; then
-    rm -f "$wt/.feature/regression.blocked"
+    rm -f "$wt/.sclaude/local/feature/regression.blocked"
     return 4
   fi
 
@@ -1618,6 +1618,6 @@ regression_fix() {
   # counts the attempt and answers the argument with an identical run.
   #
   # 3 says so to the gate, which stops without spending the attempt.
-  [[ -s "$wt/.feature/regression.blocked" ]] && return 3
+  [[ -s "$wt/.sclaude/local/feature/regression.blocked" ]] && return 3
   return 0
 }

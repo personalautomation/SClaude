@@ -12,7 +12,7 @@
 # ports. The rewriting of the config and the environment file it leaves behind
 # are in feature_db.py; this file decides when, and runs the CLI.
 #
-# What a project declares, in .sclaude.json:
+# What a project declares, in .sclaude/config.json:
 #
 #   "database": { "local": {
 #       "environment": "localdb",           the environment that means "local"
@@ -23,7 +23,7 @@
 #   } }
 #
 # `env` maps the project's variable names to the keys `supabase status -o env`
-# prints. The result is .feature/db.env, and every process sclaude starts in the
+# prints. The result is .sclaude/local/feature/db.env, and every process sclaude starts in the
 # feature — the dev server, the regression, the claude session — sources it.
 # A project's own dotenv loading must let an already-set variable win, or the
 # file's values would be overwritten by .env.local's shared ones.
@@ -70,7 +70,7 @@ db_wanted() {
 # same lock the dev ports are claimed with. A block is free when no other
 # registered tree has recorded it and nothing listens on any port in it.
 db_base() {
-  local wt="$1" state="$1/.feature/state.json" base listening
+  local wt="$1" state="$1/.sclaude/local/feature/state.json" base listening
   base="$(state_get "$state" db.base 2>/dev/null)"
   [[ "$base" =~ ^[0-9]+$ ]] && { echo "$base"; return 0; }
   mkdir -p "$DEV_REGISTRY" || return 1
@@ -92,7 +92,7 @@ for name in os.listdir(registry):
     if tree == real or not os.path.islink(os.path.join(registry, name)):
         continue
     try:
-        with open(os.path.join(tree, ".feature", "state.json")) as fh:
+        with open(os.path.join(tree, ".sclaude/local/feature", "state.json")) as fh:
             base = (json.load(fh).get("db") or {}).get("base")
     except (OSError, ValueError, AttributeError):
         continue
@@ -121,17 +121,17 @@ PY
 db_project_id() {
   local wt="$1" own label
   own="$(sed -n 's/^project_id *= *"\([^"]*\)".*/\1/p' "$wt/supabase/config.toml" | head -1)"
-  label="$(state_get "$wt/.feature/state.json" dev.label 2>/dev/null)"
+  label="$(state_get "$wt/.sclaude/local/feature/state.json" dev.label 2>/dev/null)"
   [[ -n "$label" ]] || label="$(basename "$wt")"
   echo "${own:-project}-$label"
 }
 
-# .feature/supabase/supabase: the rewritten config, and a symlink for
+# .sclaude/local/feature/supabase/supabase: the rewritten config, and a symlink for
 # everything else in the tree's supabase/. Rebuilt on every start, so a change
 # to the config inside the feature reaches its stack. The CLI's own .temp and
 # .branches are the stack's, not the tree's, and are left alone.
 db_workdir() {
-  local wt="$1" base="$2" dir="$1/.feature/supabase/supabase" entry name
+  local wt="$1" base="$2" dir="$1/.sclaude/local/feature/supabase/supabase" entry name
   mkdir -p "$dir" || return 1
   python3 "$LIB/feature_db.py" config "$wt/supabase/config.toml" "$dir/config.toml" \
     "$(db_project_id "$wt")" "$base" || return 1
@@ -255,8 +255,8 @@ docker_ensure() {
 # against the shared local database, as every feature did before, and the
 # warning says so rather than letting it look isolated.
 ensure_db() {
-  local wt="$1" dir="$1/.feature/supabase" envf="$1/.feature/db.env"
-  local log="$1/.feature/db.log" state="$1/.feature/state.json"
+  local wt="$1" dir="$1/.sclaude/local/feature/supabase" envf="$1/.sclaude/local/feature/db.env"
+  local log="$1/.sclaude/local/feature/db.log" state="$1/.sclaude/local/feature/state.json"
   local base cli exclude setup status
 
   if ! db_wanted "$wt"; then
@@ -285,7 +285,7 @@ ensure_db() {
     exclude="$(project_get database.local.exclude "$wt" 2>/dev/null | paste -sd, -)"
     if ! (cd "$wt" && $cli start --workdir "$dir" ${exclude:+-x "$exclude"}) >> "$log" 2>&1; then
       rm -f "$envf"
-      warn "  database: supabase start failed — see .feature/db.log; sharing the main local database"
+      warn "  database: supabase start failed — see .sclaude/local/feature/db.log; sharing the main local database"
       return 0
     fi
   fi
@@ -295,7 +295,7 @@ ensure_db() {
   # brought one numbered below one already applied here — does not apply; the
   # stack is this feature's alone, so rebuilding it is the answer.
   if ! (cd "$wt" && $cli migration up --workdir "$dir") >> "$log" 2>&1; then
-    warn "  database: pending migrations did not apply — see .feature/db.log."
+    warn "  database: pending migrations did not apply — see .sclaude/local/feature/db.log."
     warn "  This feature's database is its own; rebuild it with: npx supabase db reset"
   fi
 
@@ -321,7 +321,7 @@ ensure_db() {
           state_set "$state" db.ready true
           state_set "$state" db.filled "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         else
-          warn "  database: $setup failed — see .feature/db.log"
+          warn "  database: $setup failed — see .sclaude/local/feature/db.log"
         fi
       else
         state_set "$state" db.ready true
@@ -366,7 +366,7 @@ db_container() { echo "supabase_db_$1"; }
 # to tell the people shared with the main database, whose objects are the main
 # database's, from the ones this feature made.
 db_copy_main() {
-  local wt="$1" log="$1/.feature/db.log" state="$1/.feature/state.json"
+  local wt="$1" log="$1/.sclaude/local/feature/db.log" state="$1/.sclaude/local/feature/state.json"
   local own main feature errors
   [[ "$(project_get database.local.copyFromMain "$wt" 2>/dev/null)" == "true" ]] || return 1
   own="$(sed -n 's/^project_id *= *"\([^"]*\)".*/\1/p' "$wt/supabase/config.toml" | head -1)"
@@ -392,13 +392,13 @@ db_copy_main() {
   # would otherwise load whatever it had produced, report no errors, and mark a
   # half-empty database as filled for good. A failed dump leaves the stack
   # empty and falls back to the seed.
-  local dump="$wt/.feature/db-copy.sql"
+  local dump="$wt/.sclaude/local/feature/db-copy.sql"
   if ! docker exec "$main" pg_dump -U supabase_admin -d postgres --data-only --column-inserts \
          --on-conflict-do-nothing --schema=auth --schema=public \
          --exclude-table=auth.schema_migrations > "$dump" 2>>"$log" \
      || ! grep -q '^INSERT INTO' "$dump"; then
     rm -f "$dump"
-    warn "  database: copying the main database failed — see .feature/db.log; filling from the seed instead"
+    warn "  database: copying the main database failed — see .sclaude/local/feature/db.log; filling from the seed instead"
     return 1
   fi
   local out rc
@@ -408,20 +408,20 @@ db_copy_main() {
   rm -f "$dump"
   printf '%s\n' "$out" >> "$log"
   if [[ "$rc" -ne 0 ]]; then
-    warn "  database: loading the copy failed — see .feature/db.log; filling from the seed instead"
+    warn "  database: loading the copy failed — see .sclaude/local/feature/db.log; filling from the seed instead"
     return 1
   fi
   errors="$(grep -c 'ERROR:' <<<"$out")"
   docker exec "$feature" psql -U supabase_admin -d postgres -Atc "select id from auth.users" \
-    > "$wt/.feature/db-copied-users" 2>>"$log" || return 1
+    > "$wt/.sclaude/local/feature/db-copied-users" 2>>"$log" || return 1
   state_set "$state" db.filled "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   state_set "$state" db.copied true
   if [[ "${errors:-0}" -gt 0 ]]; then
-    warn "  database: copied, but $errors row(s) did not fit this feature's schema — see .feature/db.log"
+    warn "  database: copied, but $errors row(s) did not fit this feature's schema — see .sclaude/local/feature/db.log"
     warn "  by table: $(db_error_tables <<<"$out")"
     db_warn_main_behind "$main" "$feature"
   fi
-  info "  database: $(wc -l < "$wt/.feature/db-copied-users") people copied from the main database"
+  info "  database: $(wc -l < "$wt/.sclaude/local/feature/db-copied-users") people copied from the main database"
   return 0
 }
 
@@ -490,7 +490,7 @@ db_shared_warning() {
 # Loads this feature's database environment into the current shell, if it has
 # one. For the subshells that start the dev server and the claude session.
 db_env_load() {
-  local envf="$1/.feature/db.env"
+  local envf="$1/.sclaude/local/feature/db.env"
   [[ -f "$envf" ]] || return 0
   set -a
   # shellcheck source=/dev/null
@@ -502,7 +502,7 @@ db_env_load() {
 # was, in seconds rather than the minute a new one takes. For a server stopped
 # by hand or for idling.
 db_stop() {
-  local wt="$1" dir="$1/.feature/supabase"
+  local wt="$1" dir="$1/.sclaude/local/feature/supabase"
   [[ -f "$dir/supabase/config.toml" ]] || return 0
   docker_up || return 0
   (cd "$wt" && $(db_cli "$wt") stop --workdir "$dir") >/dev/null 2>&1 \
@@ -521,8 +521,8 @@ db_stop() {
 # main database's. A failed teardown is said, not fatal: a leftover object is a
 # cost, and the tree is going either way.
 db_remove() {
-  local wt="$1" dir="$1/.feature/supabase" envf="$1/.feature/db.env"
-  local log="$1/.feature/db.log" cli teardown exclude
+  local wt="$1" dir="$1/.sclaude/local/feature/supabase" envf="$1/.sclaude/local/feature/db.env"
+  local log="$1/.sclaude/local/feature/db.log" cli teardown exclude
   [[ -f "$dir/supabase/config.toml" ]] || return 0
   # Started if it has to be: this is the last moment anything knows the stack
   # and its teardown exist — the tree goes next, and with it db.env and the
@@ -543,15 +543,15 @@ db_remove() {
     # other case unambiguous: a list named and unreadable is a reason for the
     # teardown to remove nothing, not a sign that nobody was copied.
     local copied=""
-    [[ "$(state_get "$wt/.feature/state.json" db.copied 2>/dev/null)" == "true" ]] \
-      && copied="$wt/.feature/db-copied-users"
+    [[ "$(state_get "$wt/.sclaude/local/feature/state.json" db.copied 2>/dev/null)" == "true" ]] \
+      && copied="$wt/.sclaude/local/feature/db-copied-users"
     if (cd "$wt" && set -a && . "$envf" && set +a \
           && { [[ -z "$copied" ]] || export SCLAUDE_DB_COPIED_USERS="$copied"; } \
-          && export SCLAUDE_DB_FILLED="$(state_get "$wt/.feature/state.json" db.filled 2>/dev/null)" \
+          && export SCLAUDE_DB_FILLED="$(state_get "$wt/.sclaude/local/feature/state.json" db.filled 2>/dev/null)" \
           && eval "$teardown") >> "$log" 2>&1; then
       tail -1 "$log" | sed 's/^ */  /'
     else
-      warn "  database: $teardown failed — what it owned outside the database may remain (.feature/db.log)"
+      warn "  database: $teardown failed — what it owned outside the database may remain (.sclaude/local/feature/db.log)"
     fi
   fi
   (cd "$wt" && $cli stop --no-backup --workdir "$dir") >/dev/null 2>&1 \

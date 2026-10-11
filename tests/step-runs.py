@@ -47,8 +47,8 @@ def render(state_path):
 
 
 with tempfile.TemporaryDirectory() as wt:
-    os.makedirs(os.path.join(wt, ".feature"))
-    path = os.path.join(wt, ".feature", "state.json")
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+    path = os.path.join(wt, ".sclaude/local/feature", "state.json")
     with open(path, "w") as fh:
         json.dump({"feature": "x", "step": "review", "steps": {
             # From before `runs`: its session is taken as the first run, with
@@ -78,7 +78,7 @@ with tempfile.TemporaryDirectory() as wt:
           [r["session"] for r in s["steps"]["review"]["runs"]], ["r1111111", "r3333333"])
 
     # The merge closes the review the preview fix reopened.
-    shell(wt, 'state_set "$wt/.feature/state.json" reopened_by preview; step_close_merged "$wt"')
+    shell(wt, 'state_set "$wt/.sclaude/local/feature/state.json" reopened_by preview; step_close_merged "$wt"')
     rows = render(path)
     titles = [r.split("|")[1].strip() for r in rows]
     check("one-row-per-session",
@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory() as wt:
     # A friction review that stalled and was started again: both are named in
     # the cell, the stalled one first.
     shell(wt, '''
-        f="$wt/.feature/state.json"
+        f="$wt/.sclaude/local/feature/state.json"
         session_runs "$f" friction.review open s1111111
         session_runs "$f" friction.review stall s1111111
         session_runs "$f" friction.review open s2222222
@@ -133,7 +133,7 @@ with tempfile.TemporaryDirectory() as wt:
     # A stalled transcript still exists, so the next attempt resumes the same
     # conversation: one run, and no longer stalled once it has finished.
     shell(wt, '''
-        f="$wt/.feature/state.json"
+        f="$wt/.sclaude/local/feature/state.json"
         session_runs "$f" friction.fix-preview-1 open t1111111
         session_runs "$f" friction.fix-preview-1 stall t1111111
         session_runs "$f" friction.fix-preview-1 open t1111111
@@ -163,8 +163,8 @@ def sh_out(wt, script):
 
 
 with tempfile.TemporaryDirectory() as wt:
-    os.makedirs(os.path.join(wt, ".feature"))
-    path = os.path.join(wt, ".feature", "state.json")
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+    path = os.path.join(wt, ".sclaude/local/feature", "state.json")
     with open(path, "w") as fh:
         json.dump({"feature": "x", "step": "review", "steps": {},
                    "friction": {"review": {"empty": True}}}, fh)
@@ -178,7 +178,7 @@ with tempfile.TemporaryDirectory() as wt:
         step_run "$wt" review end r2222222 "fixes confirmed"
         step_run "$wt" review open r3333333
     ''')
-    f = "$wt/.feature/state.json"
+    f = "$wt/.sclaude/local/feature/state.json"
     check("key-of-session", sh_out(wt, 'step_run_key "%s" review r2222222' % f), "review-2")
     check("key-of-latest", sh_out(wt, 'step_run_key "%s" review' % f), "review-3")
     check("key-without-runs", sh_out(wt, 'step_run_key "%s" plan' % f), "plan")
@@ -192,7 +192,7 @@ with tempfile.TemporaryDirectory() as wt:
     check("legacy-earlier-row-dash", cells["review (1)"], "—")
 
     shell(wt, '''
-        f="$wt/.feature/state.json"
+        f="$wt/.sclaude/local/feature/state.json"
         state_set "$f" friction.review-1.empty true
         state_set "$f" friction.review-2.done true
         state_set "$f" friction.review-2.was s2222222

@@ -2,7 +2,7 @@
 #
 # A rejection on such a command is permanent by construction: the step trips
 # over it precisely because the ban works. It can be reviewed once, and the log
-# lives in .feature/ and dies with the worktree — without this list every next
+# lives in .sclaude/local/feature/ and dies with the worktree — without this list every next
 # feature would bring the same entry, and the friction review would pay for the
 # same conclusion again.
 #

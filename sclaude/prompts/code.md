@@ -1,6 +1,6 @@
-Implement the feature "<feature>" following the plan in `.feature/plan.md`. Read it first: it was written in the previous step specifically to hand off to you, and you have no other context from that conversation.
+Implement the feature "<feature>" following the plan in `.sclaude/local/feature/plan.md`. Read it first: it was written in the previous step specifically to hand off to you, and you have no other context from that conversation.
 
-The plan is not binding. If it turns out to be wrong or incomplete, tell me before you deviate, and update `.feature/plan.md` once we agree.
+The plan is not binding. If it turns out to be wrong or incomplete, tell me before you deviate, and update `.sclaude/local/feature/plan.md` once we agree.
 
 Ask me business-level questions, not technical ones: I care about what the user gets and how it behaves, not which files you touch.
 
@@ -12,7 +12,7 @@ If something is missing — the server isn't responding, the browser won't attac
 
 <block:acceptance>
 
-If there's no acceptance criteria block above, look for an `## Acceptance criteria` heading in `.feature/plan.md` — step 1 writes the same list there. A feature that has neither was planned before criteria existed; work from the plan alone and don't invent them now.
+If there's no acceptance criteria block above, look for an `## Acceptance criteria` heading in `.sclaude/local/feature/plan.md` — step 1 writes the same list there. A feature that has neither was planned before criteria existed; work from the plan alone and don't invent them now.
 
 Commit as soon as each piece works, following the project's commit rules, with `Requirement:` footers.
 
@@ -30,7 +30,7 @@ A commit nobody asked for carries no `Requirement:` footer.
 
 A requirement that appears after planning is either a criterion we missed or a change of scope, and both are mine to decide — **so ask at once, through `AskUserQuestion`, before building it**, not in the report at the end: "a new criterion `AC<next>`" (recommended when it is something a tester would check) or "outside the criteria". A question at the end of a long report is a question I miss.
 
-- **A new criterion:** add it to the `## Acceptance criteria` section of `.feature/plan.md` under the next free identifier, worded as the others are — observable behaviour, checkable on a deployment. Never renumber or reword an existing one; if one has to change, tell me, and I'll edit it in the issue. Its commits get the footer with the identifier. When this session ends, the orchestrator appends the new criteria to the list in the issue, where QA ticks them.
+- **A new criterion:** add it to the `## Acceptance criteria` section of `.sclaude/local/feature/plan.md` under the next free identifier, worded as the others are — observable behaviour, checkable on a deployment. Never renumber or reword an existing one; if one has to change, tell me, and I'll edit it in the issue. Its commits get the footer with the identifier. When this session ends, the orchestrator appends the new criteria to the list in the issue, where QA ticks them.
 - **Outside the criteria:** the footer without an identifier.
 
 <if:issue>Either way, **record it in the `User request` comment** on the issue, the same session you hear it. What I want is known only from talking to me; a requirement that lives only in a commit footer leaves the issue describing a scope that is no longer the one being built. Add a `### Added during development` section at the end of the comment (or extend it), one line per request: what I asked for in my terms, and `(AC<n>)` where it became a criterion. Restate, don't extend or compress; don't touch what step 1 wrote above it. Re-read the comment before rewriting it — I may have edited it in GitHub — and rewrite it in place, never post a second one:
@@ -51,7 +51,7 @@ The orchestrator runs this step with restrictions: `gh pr create`, merge, deploy
 
 <include:report>
 
-**When the work is done, `sclaude` closes this session itself.** Write the marker first — `echo done > .feature/session-done` — and then the report, with no tool call after it. About thirty seconds after your turn ends the session is closed and the report printed in the orchestrator's terminal; if I type anything in those thirty seconds, the closing is called off and the marker removed; write it again when you are done again. After the session closes, sclaude asks me whether everything works; if I say no, I come back to this same conversation with what is wrong. Leave the marker out when something needs my answer before the work can be called done — then I close the session myself.
+**When the work is done, `sclaude` closes this session itself.** Write the marker first — `echo done > .sclaude/local/feature/session-done` — and then the report, with no tool call after it. About thirty seconds after your turn ends the session is closed and the report printed in the orchestrator's terminal; if I type anything in those thirty seconds, the closing is called off and the marker removed; write it again when you are done again. After the session closes, sclaude asks me whether everything works; if I say no, I come back to this same conversation with what is wrong. Leave the marker out when something needs my answer before the work can be called done — then I close the session myself.
 
 Once the work is done, tell me in that one message — in your own words, but cover all of it:
 

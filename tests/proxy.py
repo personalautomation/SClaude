@@ -102,7 +102,7 @@ def upstream(name):
 
 # A stand-in for `sclaude dev`: `--no-browser` starts a small server on the
 # port the tree's state records, answering "<LABEL> <host>"; `--stop` kills it.
-# A tree with .feature/fail refuses to start, the way a broken build would.
+# A tree with .sclaude/local/feature/fail refuses to start, the way a broken build would.
 STUB_SERVER = (
     "import http.server, sys\n"
     "class H(http.server.BaseHTTPRequestHandler):\n"
@@ -122,17 +122,17 @@ import json, os, signal, subprocess, sys
 wt = os.getcwd()
 with open(os.environ["STUB_LOG"], "a") as fh:
     fh.write("%%s %%s\\n" %% (os.path.basename(wt), " ".join(sys.argv[1:])))
-pidfile = os.path.join(wt, ".feature", "stub.pid")
+pidfile = os.path.join(wt, ".sclaude/local/feature", "stub.pid")
 if "--stop" in sys.argv:
     try:
         os.kill(int(open(pidfile).read()), signal.SIGTERM)
     except (OSError, ValueError):
         pass
     sys.exit(0)
-if os.path.exists(os.path.join(wt, ".feature", "fail")):
+if os.path.exists(os.path.join(wt, ".sclaude/local/feature", "fail")):
     print("boom: the build broke")
     sys.exit(1)
-state = json.load(open(os.path.join(wt, ".feature", "state.json")))
+state = json.load(open(os.path.join(wt, ".sclaude/local/feature", "state.json")))
 port, label = state["dev"]["port"], state["dev"]["label"]
 proc = subprocess.Popen([sys.executable, "-c", %r, str(port), label.upper()],
                         start_new_session=True, stdout=subprocess.DEVNULL,
@@ -177,7 +177,7 @@ def register(registry, root, label, port, db_base=None, config_ports=None):
     main's shared stack (without one, so services() reads the literal ports
     this config names instead of base + slot)."""
     wt = os.path.join(root, "wt-" + label)
-    os.makedirs(os.path.join(wt, ".feature"))
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     state = {"feature": label, "dev": {"label": label, "port": port}}
     if db_base is not None:
         state["db"] = {"base": db_base}
@@ -186,7 +186,7 @@ def register(registry, root, label, port, db_base=None, config_ports=None):
         with open(os.path.join(wt, "supabase", "config.toml"), "w") as fh:
             for section, p in config_ports.items():
                 fh.write("[%s]\nenabled = true\nport = %d\n" % (section, p))
-    with open(os.path.join(wt, ".feature", "state.json"), "w") as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
         json.dump(state, fh)
     os.symlink(wt, os.path.join(registry, label))
     return wt
@@ -396,7 +396,7 @@ def main():
         # A feature being removed is stopped on purpose: a page still open on it
         # must not bring its server back into a tree git is deleting.
         closing_wt = register(registry, root, "closing", free_port())
-        open(os.path.join(closing_wt, ".feature", "closing"), "w").close()
+        open(os.path.join(closing_wt, ".sclaude/local/feature", "closing"), "w").close()
         status, _, body = request(port, "closing." + host)
         check("a closing feature is a 404", status, "HTTP/1.1 404 Not Found")
         time.sleep(0.3)
@@ -420,7 +420,7 @@ def main():
 
         # A start that fails says so, with the log, and waits to be asked again.
         d = register(registry, root, "d", free_port())
-        open(os.path.join(d, ".feature", "fail"), "w").close()
+        open(os.path.join(d, ".sclaude/local/feature", "fail"), "w").close()
         request(port, "d." + host)
         wait_for(lambda: len(calls_for(log, "d")) == 1, 5)
         time.sleep(0.5)
@@ -444,8 +444,8 @@ def main():
         for wt in (e, f):
             subprocess.run([stub, "dev", "--no-browser"], cwd=wt,
                            env=dict(os.environ, STUB_LOG=log))
-        e_port = json.load(open(os.path.join(e, ".feature", "state.json")))["dev"]["port"]
-        f_port = json.load(open(os.path.join(f, ".feature", "state.json")))["dev"]["port"]
+        e_port = json.load(open(os.path.join(e, ".sclaude/local/feature", "state.json")))["dev"]["port"]
+        f_port = json.load(open(os.path.join(f, ".sclaude/local/feature", "state.json")))["dev"]["port"]
         wait_for(lambda: answers_on(e_port) and answers_on(f_port), 5)
         # Something is working in f: a shell, a session, a regression.
         worker = subprocess.Popen(["sleep", "30"], cwd=f)

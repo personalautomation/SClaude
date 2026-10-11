@@ -93,12 +93,12 @@ Three cases worth naming, because they look like noise and are not:
 - **A stash that is not empty** — `git stash list` output is uncommitted work
   too. Ask whether it is meant to be in this PR rather than leaving it silently
   behind.
-- **`.feature/` under the `sclaude` orchestrator** — the working directory of
+- **`.sclaude/local/feature/` under the `sclaude` orchestrator** — the working directory of
   the feature being developed: `plan.md`, and the orchestrator's own state. It
   belongs in the project's `.gitignore` and must never be committed, so it is
   not a question to bring to the user. Two things are worth checking rather
   than assuming: that no commit on the branch carries it
-  (`git log origin/main..HEAD --name-only | grep .feature`), and that it is
+  (`git log origin/main..HEAD --name-only | grep .sclaude/local/feature`), and that it is
   ignored at all. Do not delete it — it outlives this step and goes away with
   the worktree.
 
@@ -173,15 +173,15 @@ The manuals are **not** written during development; they are written here, once,
 after the feature is approved. Rewriting them while the feature is still moving
 means writing the same text twice.
 
-When a `.feature/plan.md` is present, that is what the manual is written from:
+When a `.sclaude/local/feature/plan.md` is present, that is what the manual is written from:
 it states what was promised to the person using the product, in their terms,
 agreed before any code was written. Reconstructing the same thing from the diff
 gets you the implementation instead.
 
 If the change is user-visible, update the manuals the project declares. Their
-paths are the `manuals` list in `.sclaude.json` at the repository root, each
+paths are the `manuals` list in `.sclaude/config.json` at the repository root, each
 with a note on what it is for — read them from there rather than assuming a
-layout, e.g. `python3 -c 'import json; [print(m["path"], "—", m.get("what","")) for m in json.load(open(".sclaude.json")).get("manuals", [])]'`.
+layout, e.g. `python3 -c 'import json; [print(m["path"], "—", m.get("what","")) for m in json.load(open(".sclaude/config.json")).get("manuals", [])]'`.
 A project with no `manuals` has none to update; say so in your report.
 Usually there are two:
 

@@ -6,7 +6,7 @@
 # sclaude ships presets: sclaude/policy/core.json, the rules no product or
 # person can lift, and one file per integration (vercel.json, supabase.json),
 # the stack's usual dangers. The production commands a product already names
-# in .sclaude.json (database.promote, database.envProd) are banned from there,
+# in .sclaude/config.json (database.promote, database.envProd) are banned from there,
 # so the product does not write them twice. A product picks its integrations and adds its own
 # rules in .sclaude/team/policy.json; a developer adds theirs in
 # .sclaude/people/<name>/policy.json. Every layer has the same shape:
@@ -94,7 +94,7 @@ def detected_integrations(root):
     return found
 
 
-# The commands a product names in .sclaude.json for moving production: they are
+# The commands a product names in .sclaude/config.json for moving production: they are
 # the human's steps by what they are, so the product does not write them twice.
 CONFIG_DENIES = (
     ("promote", "promoting migrations to production is the human's step, after the merge"),
@@ -104,8 +104,8 @@ CONFIG_DENIES = (
 
 
 def config_denies(root):
-    """(words, why) for the production commands .sclaude.json names."""
-    config = read(os.path.join(root, ".sclaude.json")) if root else {}
+    """(words, why) for the production commands .sclaude/config.json names."""
+    config = read(os.path.join(root, ".sclaude/config.json")) if root else {}
     database = config.get("database") if isinstance(config.get("database"), dict) else {}
     out = []
     for key, why in CONFIG_DENIES:
@@ -143,7 +143,7 @@ def merged(root, person="", step=""):
         deny += [d for d in with_source(layer, "deny", name) if not lifted(d[0])]
         rules += [r for r in layer.get("rules") or [] if isinstance(r, str)]
         tools += [t for t in (layer.get("tools") or {}).get("deny") or [] if isinstance(t, str)]
-    # The production commands the product names in .sclaude.json, liftable by
+    # The production commands the product names in .sclaude/config.json, liftable by
     # the team like an integration's.
     deny += [d for d in with_source(config_denies(root), "deny", "config") if not lifted(d[0])]
     deny += with_source(team, "deny", "team")

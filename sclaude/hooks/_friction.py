@@ -20,7 +20,7 @@
 # There is still no reason to do that by searching for a word: a refusal entry
 # has a toolDenialKind field, and it answers precisely.
 #
-# The log lives in .feature/ next to dev.log: the directory is already in
+# The log lives in .sclaude/local/feature/ next to dev.log: the directory is already in
 # .gitignore and already goes away with the worktree, so the entries do not
 # outlive the feature.
 import datetime
@@ -47,7 +47,7 @@ def log_path(start=None):
         return None
     here = os.path.abspath(root)
     while True:
-        candidate = os.path.join(here, ".feature")
+        candidate = os.path.join(here, ".sclaude/local/feature")
         if os.path.isdir(candidate):
             return os.path.join(candidate, "friction.log")
         parent = os.path.dirname(here)

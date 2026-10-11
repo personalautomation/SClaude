@@ -75,16 +75,16 @@ LAST = FIRST + 19
 
 def tree(root, name, feature=None, extra=None):
     wt = os.path.join(root, name)
-    os.makedirs(os.path.join(wt, ".feature"), exist_ok=True)
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"), exist_ok=True)
     data = {"feature": feature or name, "step": "code"}
     data.update(extra or {})
-    with open(os.path.join(wt, ".feature", "state.json"), "w") as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
         json.dump(data, fh)
     return wt
 
 
 def state(wt):
-    with open(os.path.join(wt, ".feature", "state.json")) as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "state.json")) as fh:
         return json.load(fh)
 
 
@@ -199,7 +199,7 @@ def main():
         # left open on the feature did exactly that, and the new server wrote
         # .dev-build into the tree mid-removal.
         check("stop_dev marks the tree as closing",
-              os.path.exists(os.path.join(c, ".feature", "closing")), True)
+              os.path.exists(os.path.join(c, ".sclaude/local/feature", "closing")), True)
         npm_stub = os.path.join(root, "npm-stub")
         os.makedirs(npm_stub)
         with open(os.path.join(npm_stub, "npm"), "w") as fh:
@@ -224,7 +224,7 @@ def main():
         late = os.path.join(root, "wt-late")
         subprocess.run(["git", "-C", g, "worktree", "add", "-q", "-b", "late", late], **quiet)
         subprocess.run(["git", "-C", g, "worktree", "remove", late], **quiet)
-        os.makedirs(os.path.join(late, ".feature"))
+        os.makedirs(os.path.join(late, ".sclaude/local/feature"))
         with open(os.path.join(late, ".dev-build"), "w") as fh:
             fh.write("{}\n")
         check("remove_worktree clears what was written after git's removal",

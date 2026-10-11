@@ -101,9 +101,9 @@ try:
           ["npm run check:r2", "npm run storybook", "vercel deploy"])
     check("supabase-tools-off", "mcp__plugin_supabase_supabase__apply_migration" in merged["tools"], True)
 
-    # --- what .sclaude.json already names, banned from there ---
+    # --- what .sclaude/config.json already names, banned from there ---
     conf = os.path.join(tmp, "conf")
-    write(conf, ".sclaude.json", {"database": {"promote": "npm run db:promote",
+    write(conf, ".sclaude/config.json", {"database": {"promote": "npm run db:promote",
                                                "envProd": "npm run env:prod"}})
     write(conf, ".sclaude/team/policy.json", {
         "deny": [{"command": "node scripts/env.mjs prod", "why": "the script under env:prod"}]})

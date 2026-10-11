@@ -436,7 +436,7 @@ print(step.get('session') or '')
 # rather than walking it whole: a full walk would cost a minute on every run of
 # the timer.
 sclaude_states() {
-  find "$HOME" -maxdepth 3 -name state.json -path '*/.feature/*' 2>/dev/null
+  find "$HOME" -maxdepth 3 -name state.json -path '*/.sclaude/local/feature/*' 2>/dev/null
 }
 
 # A session's transcript size, by its id. The project name is not known in
@@ -509,7 +509,7 @@ count_vscode() {
 # requests, and the server writes each of them to a log; no requests, no entry.
 #
 # We look for the log by the process's own working directory rather than by a
-# list of known paths: sclaude puts it at <worktree>/.feature/dev.log, and cwd
+# list of known paths: sclaude puts it at <worktree>/.sclaude/local/feature/dev.log, and cwd
 # leads there regardless of whose feature it is and who started the server.
 #
 # If the log is not there — the server was started by hand somewhere else — we
@@ -535,7 +535,7 @@ count_vscode() {
 # never gets as far as the soft count. Exactly one case is left — a tab left
 # open on a machine where nobody is — and it is precisely the one the holder was
 # lying for.
-DEV_LOG_REL=".feature/dev.log"
+DEV_LOG_REL=".sclaude/local/feature/dev.log"
 
 count_dev() {
   local -A prev=()

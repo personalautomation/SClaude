@@ -32,6 +32,12 @@ import sys
 import tempfile
 import time
 
+
+def _cfg(path):
+    """The path of a product's config, its .sclaude/ folder made first."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
 
@@ -119,7 +125,7 @@ WATCH = 'source "%s/state.sh"\nLIB="%s"\n' % (LIB, LIB) + functions(
     RUN, ["round_marker", "done_marker", "session_watch_start", "session_watch_stop"])
 
 wt = os.path.join(tmp, "wt")
-os.makedirs(os.path.join(wt, ".feature"))
+os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
 home = os.path.join(tmp, "home")
 tdir = os.path.join(home, ".claude", "projects", re.sub(r"[^a-zA-Z0-9]", "-", wt))
 os.makedirs(tdir)
@@ -216,7 +222,7 @@ check("quota-in-log", bool(ctx.QUOTA_429.search('"api_error_status":429')), True
 # --- the person's threads ------------------------------------------------------
 A = "https://github.com/o/r/pull/1#discussion_r1"
 B = "https://github.com/o/r/pull/1#discussion_r2"
-with open(os.path.join(wt, ".feature", "review-yours"), "w") as fh:
+with open(os.path.join(wt, ".sclaude/local/feature", "review-yours"), "w") as fh:
     fh.write("%s\tleave as it is: the fix would undo d60ca78\n" % A)
 check("yours-read", ctx.yours(wt), {A: "leave as it is: the fix would undo d60ca78"})
 
@@ -274,7 +280,7 @@ PROMPTS = os.path.join(LIB, "..", "prompts")
 report = open(os.path.join(PROMPTS, "_report.md")).read()
 check("report-keeps-a-proposal-open", "A proposal keeps the session open" in report, True)
 review = open(os.path.join(PROMPTS, "review.md")).read()
-check("review-writes-yours", ".feature/review-yours" in review, True)
+check("review-writes-yours", ".sclaude/local/feature/review-yours" in review, True)
 check("review-says-resolve-yourself", "Resolve on GitHub yourself" in review, True)
 check("yours-file-name-agrees", ctx.YOURS_FILE in review, True)
 body = open(os.path.join(PROMPTS, "_friction-body.md")).read()
@@ -368,7 +374,7 @@ check("deferred-not-due-when-empty", due(), None)
 # A maintainer counts everybody's folders; somebody else only their own.
 put(".sclaude/people/bob/deferred/7-y.tsv", entry)
 check("deferred-maintainer-reads-people", due(), "1 %s" % old_day)
-with open(os.path.join(product, ".sclaude.json"), "w") as fh:
+with open(_cfg(os.path.join(product, ".sclaude/config.json")), "w") as fh:
     json.dump({"maintainers": ["lead@x.test"]}, fh)
 check("deferred-others-read-their-own", due(), None)
 check("deferred-file-is-the-persons-per-feature",
@@ -384,7 +390,7 @@ friction_note = open(os.path.join(PROMPTS, "_friction.md")).read()
 # The shape friction_proposals.py reads, so a log of proposals alone is put
 # off without a session.
 check("steps-log-proposals", "proposal (<class>):" in friction_note, True)
-check("review-logs-its-rule", "into `.feature/friction.log` as a proposal" in review, True)
+check("review-logs-its-rule", "into `.sclaude/local/feature/friction.log` as a proposal" in review, True)
 check("friction-may-defer", "<deferred>" in body, True)
 check("steps-told-the-deferred-path", "<deferred>" in friction_note, True)
 check("verdict-knows-deferred", '"deferred"' in open(os.path.join(LIB, "state.sh")).read(), True)

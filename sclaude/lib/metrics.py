@@ -4,7 +4,7 @@
 #
 # Everything the cycle learns about itself — how long each step took, how many
 # fixing sessions a red regression needed, which friction reviews committed and
-# which found every ban deliberate — is written into `.feature/state.json`, and
+# which found every ban deliberate — is written into `.sclaude/local/feature/state.json`, and
 # `sclaude done` removes that file along with the worktree the moment the pull
 # request merges. So the questions the record could answer have never been
 # askable: whether the cycle is getting faster, which step actually holds it up,

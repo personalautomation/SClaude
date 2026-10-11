@@ -25,6 +25,12 @@ sys.path.insert(0, LIB)
 
 import feature_db  # noqa: E402
 
+
+def _cfg(path):
+    """The path of a product's config, its .sclaude/ folder made first."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
 failures = []
 total = 0
 
@@ -119,7 +125,7 @@ esac
 
 def feature_tree(root, name, env="localdb"):
     wt = os.path.join(root, name)
-    os.makedirs(os.path.join(wt, ".feature"))
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     os.makedirs(os.path.join(wt, "supabase", "migrations"))
     os.makedirs(os.path.join(wt, "supabase", ".temp"))
     os.makedirs(os.path.join(wt, "scripts", "lib"))
@@ -127,13 +133,13 @@ def feature_tree(root, name, env="localdb"):
         fh.write(CONFIG)
     with open(os.path.join(wt, "scripts", "lib", "env-guard.mjs"), "w") as fh:
         fh.write('console.log(%s);\n' % json.dumps(env))
-    with open(os.path.join(wt, ".feature", "state.json"), "w") as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
         json.dump({"feature": name, "dev": {"label": name, "port": 3100}}, fh)
     return wt
 
 
 def write_config(wt, cli, setup):
-    with open(os.path.join(wt, ".sclaude.json"), "w") as fh:
+    with open(_cfg(os.path.join(wt, ".sclaude/config.json")), "w") as fh:
         json.dump({"database": {"local": {
             "environment": "localdb",
             "exclude": ["studio", "realtime"],
@@ -181,7 +187,7 @@ def calls(root):
 
 
 def state(wt):
-    with open(os.path.join(wt, ".feature", "state.json")) as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "state.json")) as fh:
         return json.load(fh)
 
 
@@ -201,7 +207,7 @@ def ensure_cases():
         os.symlink(a, os.path.join(root, "registry", "a"))
 
         out = bash(root, 'ensure_db "%s"' % a)
-        envf = os.path.join(a, ".feature", "db.env")
+        envf = os.path.join(a, ".sclaude/local/feature", "db.env")
         check("a feature on localdb gets a stack", os.path.isfile(envf), True)
         started = [c for c in calls(root) if c.startswith("start")]
         check("started once, with the exclusions",
@@ -212,7 +218,7 @@ def ensure_cases():
         check("the env points at the feature's API",
               "NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:%s" % ((base or 0) + 1) in text, True)
         check("the env carries the workdir", "SUPABASE_WORKDIR=" in text, True)
-        workdir = os.path.join(a, ".feature", "supabase", "supabase")
+        workdir = os.path.join(a, ".sclaude/local/feature", "supabase", "supabase")
         check("the config is rewritten", 'project_id = "myapp-a"' in
               open(os.path.join(workdir, "config.toml")).read(), True)
         check("the tree's config is untouched", 'project_id = "myapp"' in
@@ -283,7 +289,7 @@ def ensure_cases():
 
         # No declaration, no stack. The main repository's config is the
         # fallback for a tree without one, so it goes too.
-        os.remove(os.path.join(repo, ".sclaude.json"))
+        os.remove(os.path.join(repo, ".sclaude/config.json"))
         e = feature_tree(root, "e")
         before = len(calls(root))
         bash(root, 'ensure_db "%s"' % e)
@@ -294,7 +300,7 @@ def ensure_cases():
                    {"SCLAUDE_DOCKER_START": "off"})
         check("Docker down says so", "Docker is not running" in out, True)
         check("Docker down leaves no env",
-              os.path.exists(os.path.join(b, ".feature", "db.env")), False)
+              os.path.exists(os.path.join(b, ".sclaude/local/feature", "db.env")), False)
 
         # Docker down with Docker Desktop to hand: sclaude starts it and
         # waits. The fake launcher leaves the flag the fake docker answers by.
@@ -337,14 +343,14 @@ def ensure_cases():
         # Removing the tree removes the stack, data and all — after the
         # project's teardown, which is told who was copied and when.
         torn = os.path.join(root, "torn")
-        with open(os.path.join(b, ".sclaude.json")) as fh:
+        with open(os.path.join(b, ".sclaude/config.json")) as fh:
             cfg = json.load(fh)
         cfg["database"]["local"]["teardown"] = (
             'echo "${SCLAUDE_DB_COPIED_USERS:-}|$SCLAUDE_DB_FILLED|$NEXT_PUBLIC_SUPABASE_URL" > %s'
             % torn)
-        with open(os.path.join(b, ".sclaude.json"), "w") as fh:
+        with open(_cfg(os.path.join(b, ".sclaude/config.json")), "w") as fh:
             json.dump(cfg, fh)
-        bash(root, 'state_set "%s/.feature/state.json" db.filled 2026-09-23T10:00:00Z; ensure_db "%s"'
+        bash(root, 'state_set "%s/.sclaude/local/feature/state.json" db.filled 2026-09-23T10:00:00Z; ensure_db "%s"'
              % (b, b))
         # A seeded stack: no list of copied people is named at all.
         bash(root, 'db_remove "%s"' % b)
@@ -353,12 +359,12 @@ def ensure_cases():
               seen.startswith("|2026-09-23T10:00:00Z|http://127.0.0.1:"), True)
         # A copied one: the list is named.
         os.remove(torn)
-        bash(root, 'state_set "%s/.feature/state.json" db.copied true; ensure_db "%s"' % (b, b))
+        bash(root, 'state_set "%s/.sclaude/local/feature/state.json" db.copied true; ensure_db "%s"' % (b, b))
         before = len(calls(root))
         bash(root, 'db_remove "%s"' % b)
         seen = open(torn).read().strip() if os.path.exists(torn) else ""
         check("teardown runs with the copied people, the time and the feature's env",
-              seen.startswith(os.path.join(b, ".feature", "db-copied-users")
+              seen.startswith(os.path.join(b, ".sclaude/local/feature", "db-copied-users")
                               + "|2026-09-23T10:00:00Z|http://127.0.0.1:"), True)
         check("removal stops without a backup, after the teardown",
               any(c.startswith("stop --no-backup") for c in calls(root)[before:]), True)
@@ -367,10 +373,10 @@ def ensure_cases():
         write_config(a, cli, "")
         with open(envf, "w") as fh:
             fh.write("X=1\n")
-        with open(os.path.join(a, ".sclaude.json")) as fh:
+        with open(os.path.join(a, ".sclaude/config.json")) as fh:
             cfg = json.load(fh)
         cfg["commands"] = {"e2e": "npm run test:e2e"}
-        with open(os.path.join(a, ".sclaude.json"), "w") as fh:
+        with open(_cfg(os.path.join(a, ".sclaude/config.json")), "w") as fh:
             json.dump(cfg, fh)
         local = bash(root, 'source "$LIB/developer.sh"; source "$LIB/regression.sh"; '
                            'regression_command e2e "" "%s"' % a)
@@ -435,10 +441,10 @@ docker() {
         for name, fails in (("ok", False), ("broken", True)):
             wt = feature_tree(root, name)
             write_config(wt, cli, "echo run >> %s" % seeded)
-            with open(os.path.join(wt, ".sclaude.json")) as fh:
+            with open(os.path.join(wt, ".sclaude/config.json")) as fh:
                 cfg = json.load(fh)
             cfg["database"]["local"]["copyFromMain"] = True
-            with open(os.path.join(wt, ".sclaude.json"), "w") as fh:
+            with open(_cfg(os.path.join(wt, ".sclaude/config.json")), "w") as fh:
                 json.dump(cfg, fh)
             os.symlink(wt, os.path.join(root, "registry", name))
             flag = os.path.join(root, "dump-fails")
@@ -450,7 +456,7 @@ docker() {
         ok, broken = os.path.join(root, "ok"), os.path.join(root, "broken")
         check("a good copy is recorded", state(ok).get("db", {}).get("copied"), True)
         check("a good copy lists the people it brought",
-              open(os.path.join(ok, ".feature", "db-copied-users")).read().strip(),
+              open(os.path.join(ok, ".sclaude/local/feature", "db-copied-users")).read().strip(),
               "11111111-1111-1111-1111-111111111111")
         check("a failed dump is not recorded as a copy",
               state(broken).get("db", {}).get("copied"), None)
@@ -490,7 +496,7 @@ def shared_cases():
     try:
         os.makedirs(os.path.join(root, "repo"))
         wt = feature_tree(root, "s", env="dev")
-        with open(os.path.join(wt, ".sclaude.json"), "w") as fh:
+        with open(_cfg(os.path.join(wt, ".sclaude/config.json")), "w") as fh:
             json.dump({"database": {"migrations": "supabase/migrations",
                                     "local": {"environment": "localdb"}}}, fh)
         git = lambda *a: subprocess.run(["git", "-C", wt] + list(a), capture_output=True)

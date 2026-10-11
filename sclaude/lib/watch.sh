@@ -172,7 +172,7 @@ watch_look_now() {
 qa_take_back() {
   local wt="$1" slug="$2" step
   watch_rewind "$wt" "$slug"
-  step="$(state_get "$wt/.feature/state.json" step)" || true
+  step="$(state_get "$wt/.sclaude/local/feature/state.json" step)" || true
   # Read back rather than assumed: watch_rewind answers nothing when there is
   # no state to write to, and `step_title done` is empty — the line would then
   # read "returns to step ''". Saying it only when the rewind took is the
@@ -265,7 +265,7 @@ watch_notes() {
 # concern.
 watch_rewind() {
   local wt="$1" slug="$2"
-  local state="$wt/.feature/state.json"
+  local state="$wt/.sclaude/local/feature/state.json"
   [[ -f "$state" ]] || return 0
 
   step_rewind_to "$wt" review review
@@ -318,7 +318,7 @@ return_since() {
   local wt="$1" slug="$2" since
   since="$(state_get "$(watch_dir)/$slug.json" since 2>/dev/null || true)"
   if [[ -z "$since" || "$since" == "null" ]]; then
-    since="$(state_get "$wt/.feature/state.json" steps.review.finished 2>/dev/null || true)"
+    since="$(state_get "$wt/.sclaude/local/feature/state.json" steps.review.finished 2>/dev/null || true)"
     # The state writes local time with an offset; GitHub and the watcher
     # compare in UTC, as strings.
     [[ -n "$since" && "$since" != "null" ]] \
@@ -350,7 +350,7 @@ return_since() {
 # Returns non-zero when there is nothing to return: no state.
 return_to_development() {
   local wt="$1" slug="$2"; shift 2
-  local reason="$*" state="$wt/.feature/state.json" file issue pr repo since notes
+  local reason="$*" state="$wt/.sclaude/local/feature/state.json" file issue pr repo since notes
   [[ -f "$state" ]] || return 1
   issue="$(state_get "$state" issue 2>/dev/null || true)"; [[ "$issue" == "null" ]] && issue=""
   pr="$(state_get "$state" pr 2>/dev/null || true)"; [[ "$pr" == "null" ]] && pr=""

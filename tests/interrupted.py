@@ -17,7 +17,7 @@
 #     lost silently: the feature is already done, and the menu will not show it.
 #
 # Both now write their state BEFORE launching: the review into
-# .feature/state.json next to steps, the epilogue into
+# .sclaude/local/feature/state.json next to steps, the epilogue into
 # .sclaude/epilogue/<feature>.json in the main repository. The checks below hold
 # three sides of each: an unclosed one is visible, a closed one is not, and an
 # id's liveness is decided by the same live_session.
@@ -52,13 +52,13 @@ def sh(script, **env):
 
 
 def write_state(wt, node, key="code"):
-    """Writes a .feature/state.json with a friction node (or without one).
+    """Writes a .sclaude/local/feature/state.json with a friction node (or without one).
 
     The node goes under its key — `friction.<step>` — because a review is kept
     per subject now. Pass key=None to write the node flat, the way an older
     sclaude did, and check that such a tree is still understood.
     """
-    d = os.path.join(wt, ".feature")
+    d = os.path.join(wt, ".sclaude/local/feature")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "state.json")
     data = {"feature": "71-email-edit-and-show", "step": "code",

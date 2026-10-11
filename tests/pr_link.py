@@ -26,8 +26,8 @@ def check(name, got, want):
 def run(pr_state, linked, mutation_ok=True, issue="40", body="Closes #40"):
     """Run pr_link_issue once; return (gh call log, stderr+stdout)."""
     wt = tempfile.mkdtemp()
-    os.makedirs(os.path.join(wt, ".feature"))
-    with open(os.path.join(wt, ".feature", "state.json"), "w") as f:
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+    with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as f:
         f.write('{"issue": %s}' % issue)
     log = os.path.join(wt, "gh-calls")
     script = f"""

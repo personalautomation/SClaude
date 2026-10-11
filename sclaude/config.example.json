@@ -1,7 +1,7 @@
 {
   "README": [
-    "What sclaude knows about a project. Copy this to the repository's root as",
-    ".sclaude.json and commit it: it describes the project, so it belongs to",
+    "What sclaude knows about a project. Copy this into the repository as",
+    ".sclaude/config.json and commit it: it describes the project, so it belongs to",
     "the project rather than to the orchestrator. `sclaude new` offers to write",
     "one by reading package.json, the directory layout and whatever the project",
     "keeps about its environments — this file is for the parts it could not",

@@ -419,6 +419,33 @@ def main():
         check("hook: an env-guard without `settled` is refused",
               db_push_denied("localdb", subcommand="name"), True)
 
+        # --- a switch that fails leaves no server on production -----------
+        #
+        # The product's switch command failed and the tree stayed on prod.
+        # force_env used to answer 1, "switched", and ensure_dev restarted the
+        # dev server right there. It is 2 now, and no server runs.
+        def failing(where, current):
+            wt_dir = project(where, {"dev": {"ref": "d", "confirm": False},
+                                     "prod": {"ref": "p", "confirm": True}})
+            with open(os.path.join(wt_dir, ".sclaude", "config.json"), "w") as fh:
+                json.dump({"environments": {"file": "config/environments.json",
+                                            "current": "echo %s" % current,
+                                            "switch": "false"}}, fh)
+            return run('force_env "%s" >/dev/null 2>&1; echo "rc=$?"' % wt_dir,
+                       env={"SCLAUDE_ENV": "dev"}, home=home, with_worktree=True)
+
+        os.makedirs(os.path.join(tmp, "stuck"))
+        check("a failed switch off prod keeps the server off", failing(os.path.join(tmp, "stuck"), "prod"),
+              "rc=2")
+        # A failing switch is never run for a tree already where it should be.
+        os.makedirs(os.path.join(tmp, "landed"))
+        check("a tree already on its environment is left alone", failing(os.path.join(tmp, "landed"), "dev"),
+              "rc=0")
+        wd = open(os.path.join(os.path.dirname(LIB), "lib", "worktree.sh")).read()
+        ensure = wd[wd.index("\nensure_dev() {"):]
+        check("ensure_dev starts nothing on rc 2",
+              ensure.index("env_rc == 2") < ensure.index("feature_port"), True)
+
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

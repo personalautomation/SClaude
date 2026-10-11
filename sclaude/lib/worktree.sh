@@ -70,6 +70,9 @@ link_env() {
 #
 # Each worktree has its own supabase/.temp (not a symlink), so switching here
 # stays inside the feature and does not touch the main repository.
+# Returns 0 when the tree was already right, 1 when it was switched (a server
+# started before then read the old environment), and 2 when it may be on a
+# protected environment and could not be moved: no server should run in it.
 force_env() {
   local wt="$1" name want switch current
   # The product says how: `environments.current` prints the tree's name,
@@ -101,7 +104,7 @@ force_env() {
       warn "  no answer for where it should be instead (no SCLAUDE_ENV, nothing"
       warn "  saved, no terminal to ask at)."
       warn "  The dev server would run against it — fix this before trusting anything."
-      return 1
+      return 2
     fi
     return 0
   fi
@@ -118,13 +121,18 @@ force_env() {
 
   # The switch did not work out, and leaving the feature where it was may
   # leave it on production. How a product switches is its own business, so
-  # sclaude does not do it by hand: it says so out loud, with the product's own
-  # command to see where the tree is.
+  # sclaude does not do it by hand: it asks again where the tree is, and when
+  # that is not where it should be, says so out loud with the product's own
+  # command to look, and keeps the dev server off it (2). An earlier sclaude
+  # repointed .env.local by hand here; that was one product's convention, and
+  # without it a failed switch restarted the server wherever the tree was.
+  local now; now="$(cd "$wt" && eval "$current" 2>/dev/null)" || now=""
+  [[ -n "$now" && "$now" == "$want" ]] && return 1
   local status; status="$(environments_command "$wt" status)"
   warn ""
-  warn "  switching this worktree to $want failed, and it is on ${name:-an unknown environment}."
-  warn "  The dev server would run against it — fix this before trusting anything${status:+: $status}."
-  return 1
+  warn "  switching this worktree to $want failed, and it is on ${now:-an unknown environment}."
+  warn "  No dev server runs in it until that is fixed${status:+: $status}."
+  return 2
 }
 
 # Hard links rather than a symlink to a directory: Turbopack refuses to work
@@ -449,8 +457,16 @@ ensure_dev() {
   # check stands here rather than only in prepare_worktree, because a step may
   # resume a week later, and anyone may have moved the environment inside the
   # feature in the meantime.
-  local switched=0
-  force_env "$wt" || switched=1
+  local switched=0 env_rc=0
+  force_env "$wt" || env_rc=$?
+  if (( env_rc == 2 )); then
+    # Possibly on production, and it could not be moved: a server here would
+    # read and write there. One already running is stopped, the database left.
+    stop_own_dev "$wt" >/dev/null 2>&1 || true
+    warn "  dev server: not started — see the environment warning above"
+    return 0
+  fi
+  (( env_rc )) && switched=1
 
   port="$(feature_port "$wt")" || { warn "  dev server: no port could be claimed — see $DEV_REGISTRY"; return 0; }
 

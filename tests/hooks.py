@@ -404,7 +404,19 @@ def run_denials():
              os.path.join(HOOKS, "collect-denials.py"), path],
             capture_output=True, text=True, env=dict(os.environ, CLAUDE_PROJECT_DIR=PRODUCT))
         logged = json.loads(out.stdout or "[]")
-        return [(c, ("Bash: " + c) in logged) for c, _ in DENIAL_SUBJECTS]
+        # Outside any repository the policy is unknown, and every refusal is
+        # logged rather than the script falling over on the way.
+        bare = subprocess.run(
+            [sys.executable, "-c",
+             "import importlib.util, sys; "
+             "s = importlib.util.spec_from_file_location('c', sys.argv[1]); "
+             "m = importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+             "print(len(m.denials(sys.argv[2], 'code')))",
+             os.path.join(HOOKS, "collect-denials.py"), path],
+            capture_output=True, text=True, cwd=tmp,
+            env=dict(os.environ, CLAUDE_PROJECT_DIR=tmp))
+        return [(c, ("Bash: " + c) in logged) for c, _ in DENIAL_SUBJECTS] + \
+            [("outside a repository", bare.stdout.strip() == str(len(DENIAL_SUBJECTS)))]
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -729,7 +741,7 @@ def main():
     # the call ran: a refusal of a Vercel read the hook allows is friction and
     # stays, and a step's own ban (gh pr create on step 2) is deliberate.
     denial_cases = run_denials()
-    for (subject, got), (_, want) in zip(denial_cases, DENIAL_SUBJECTS):
+    for (subject, got), (_, want) in zip(denial_cases, DENIAL_SUBJECTS + [("", True)]):
         if got != want:
             failures.append(("denials", subject, "logged" if want else "dropped",
                              "logged" if got else "dropped"))

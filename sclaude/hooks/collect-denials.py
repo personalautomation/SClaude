@@ -130,7 +130,7 @@ def policy_denials(step=""):
                                  "--git-common-dir"], cwd=tree, capture_output=True,
                                 text=True, timeout=5)
         if common.returncode != 0:
-            return []
+            return [], []
         merged = policy.merged(os.path.dirname(common.stdout.strip()),
                                os.environ.get("SCLAUDE_POLICY_PERSON", ""), step)
     except Exception:

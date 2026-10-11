@@ -107,6 +107,13 @@ try:
     write(conf, ".sclaude/team/policy.json", {
         "deny": [{"command": "node scripts/tool.mjs prod", "why": "the script under env:prod"}]})
     check("config-promote-banned", verdict(conf, "npm run db:promote"), "deny")
+    # A package script however it is spelled: a review found `npm --silent run
+    # x`, `npm run --silent x` and `pnpm run x` past a ban on `npm run x`.
+    for spelled in ("npm --silent run db:promote", "npm run --silent db:promote",
+                    "pnpm run db:promote", "yarn run db:promote", "bun run db:promote",
+                    "npm --prefix . run db:promote", "npm run db:promote -- --yes"):
+        check("config-promote-banned-as-%s" % spelled, verdict(conf, spelled), "deny")
+    check("other-scripts-still-run", verdict(conf, "npm --silent run lint"), "allow")
     check("path-rule-fires", verdict(conf, "node scripts/tool.mjs prod"), "deny")
     check("path-rule-fires-dotted", verdict(conf, "node ./scripts/tool.mjs prod --yes"), "deny")
     check("path-rule-narrow", verdict(conf, "node scripts/tool.mjs dev"), "allow")

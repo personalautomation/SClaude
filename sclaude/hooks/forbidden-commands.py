@@ -51,7 +51,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 from _friction import note
-from _shell import GIT_VALUED, SEPARATORS, strip_runners, strip_wrappers, tokenize, ungroup
+from _shell import GIT_VALUED, SEPARATORS, script_call, strip_runners, strip_wrappers, tokenize, ungroup
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
 
@@ -757,7 +757,7 @@ def refuses(command, step, cwd=None, depth=0):
     if reason:
         return reason
 
-    table = {tuple(d["words"]): d["why"] for d in POLICY.get("deny", [])}
+    table = {tuple(script_call(list(d["words"]))): d["why"] for d in POLICY.get("deny", [])}
 
     where = os.path.realpath(cwd or os.getcwd())
     known = {}
@@ -799,8 +799,9 @@ def refuses(command, step, cwd=None, depth=0):
                   or vercel_refuses(words))
         if reason:
             return reason
+        called = script_call(words)
         for prefix, why in table.items():
-            if tuple(words[:len(prefix)]) == prefix:
+            if tuple(called[:len(prefix)]) == prefix:
                 return why
     return None
 

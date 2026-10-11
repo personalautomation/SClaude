@@ -302,3 +302,31 @@ def ungroup(raw):
         if w:
             words.append(w)
     return words, grouped
+
+
+# A package script, however it is spelled: `npm --silent run x`, `npm run
+# --silent x`, `pnpm run x`, `yarn run x` and `bun run x` all run the script x,
+# and a ban written as `npm run x` compared word by word missed every one but
+# the first. Read as `npm run x …`, on both sides of the comparison.
+MANAGERS = ("npm", "pnpm", "yarn", "bun")
+MANAGER_VALUED = {"--prefix", "-C", "--dir", "-w", "--workspace", "--filter", "-F",
+                  "--cwd", "--loglevel"}
+
+
+def script_call(words):
+    """The words with a package manager's script call read as `npm run x …`."""
+    if not words or words[0] not in MANAGERS:
+        return words
+
+    def past_flags(i):
+        while i < len(words) and words[i].startswith("-") and words[i] != "--":
+            i += 2 if words[i] in MANAGER_VALUED and "=" not in words[i] else 1
+        return i
+
+    i = past_flags(1)
+    if i >= len(words) or words[i] not in ("run", "run-script", "rr"):
+        return words
+    j = past_flags(i + 1)
+    if j >= len(words):
+        return words
+    return ["npm", "run"] + words[j:]

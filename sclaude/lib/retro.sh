@@ -68,7 +68,7 @@ PY
     return 0
   fi
 
-  local terminal session done_file prompt before after
+  local terminal session done_file prompt
   terminal="$(term_render "$wt" 2>/dev/null || true)"
   session="$(new_session_id)"
   done_file="${TMPDIR:-/tmp}/sclaude-retro-$slug.done"
@@ -94,13 +94,12 @@ PY
   echo ""
 
   [[ -f "$fstate" ]] && session_runs "$fstate" retro open "$session"
-  before="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)"
   local project_before project_after
   project_before="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
 
   session_watch_start "" "$session" "$done_file" "$wt" retro
   local -a guard=()
-  mapfile -t guard < <(team_guard_settings "$wt")
+  mapfile -t guard < <(review_guard_settings "$wt")
   ( cd "$wt" && claude_launch --session-id "$session" --model opus --effort medium \
       "${guard[@]}" \
       --permission-mode auto --add-dir "$INSTRUMENTS" --add-dir "$TERM_DIR" \
@@ -131,10 +130,8 @@ PY
     state_set "$fstate" retro.project_to "$project_after"
   fi
 
-  # A change to sclaude agreed in the conversation and committed there goes
-  # out as a friction review's would.
-  after="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)"
-  [[ -n "$before" && -n "$after" && "$before" != "$after" ]] && push_instruments
+  # sclaude's checkout is read-only to the conversation (review_guard_settings):
+  # what it changes is the product's, and the branch above carries it.
   return 0
 }
 

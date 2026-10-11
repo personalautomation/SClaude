@@ -7,13 +7,13 @@
 #     one, makes everybody a maintainer;
 #   * product_rules_dir sends a maintainer to .sclaude/team/ and everybody else
 #     to .sclaude/people/<name>/;
-#   * team-rules.py refuses a write into .sclaude/team/, by a tool or through
+#   * write-guard.py refuses a write into .sclaude/team/, by a tool or through
 #     Bash, and lets reading and every other path through;
 #   * the hook is attached only to a non-maintainer's sessions: a step's
 #     settings carry it, and so does the settings a friction review or a
 #     retrospective is given.
 #
-# Run it with: python3 tests/team-rules.py
+# Run it with: python3 tests/write-guard.py
 import json
 import os
 import shutil
@@ -23,7 +23,7 @@ import tempfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
-HOOK = os.path.join(ROOT, "sclaude", "hooks", "team-rules.py")
+HOOK = os.path.join(ROOT, "sclaude", "hooks", "write-guard.py")
 
 failures = []
 
@@ -33,9 +33,9 @@ def check(name, got, want):
         failures.append((name, want, got))
 
 
-def hook(tool, **data):
-    out = subprocess.run([sys.executable, HOOK], input=json.dumps(
-        {"tool_name": tool, "tool_input": data}), capture_output=True, text=True)
+def hook(tool, args=("--team",), cwd="/r", **data):
+    out = subprocess.run([sys.executable, HOOK] + list(args), input=json.dumps(
+        {"tool_name": tool, "tool_input": data, "cwd": cwd}), capture_output=True, text=True)
     return "deny" if '"deny"' in out.stdout else "allow"
 
 
@@ -64,6 +64,33 @@ for command, want in (("echo x > .sclaude/team/a.md", "deny"),
                       ("echo x > .sclaude/people/ann/a.md", "allow"),
                       ("npm test", "allow")):
     check("bash %s" % command, hook("Bash", command=command), want)
+
+
+# --- read-only: sclaude's own checkout, for the review sessions ---------------
+RO = ("--readonly", "/home/u/sclaude")
+for command, cwd, want in (
+        ("echo x > sclaude/lib/run.sh", "/home/u/sclaude", "deny"),
+        ("sed -i s/a/b/ sclaude/lib/run.sh", "/home/u/sclaude", "deny"),
+        ("git commit -qm fix", "/home/u/sclaude", "deny"),
+        ("git -C /home/u/sclaude add -A", "/home/u/myapp-1", "deny"),
+        ("cd /home/u/sclaude && git reset --hard", "/home/u/myapp-1", "deny"),
+        ("cp /tmp/x /home/u/sclaude/README.md", "/tmp", "deny"),
+        # Reading it, and writing the product, from inside it or not.
+        ("cat sclaude/lib/run.sh", "/home/u/sclaude", "allow"),
+        ("git log --oneline -5", "/home/u/sclaude", "allow"),
+        ("git diff HEAD~1", "/home/u/sclaude", "allow"),
+        ("cd /home/u/myapp-1 && echo x > notes.md", "/home/u/sclaude", "allow"),
+        ("cd /home/u/myapp-1 && git commit -qm fix", "/home/u/sclaude", "allow"),
+        ("git -C /home/u/myapp-1 commit -qm fix", "/home/u/sclaude", "allow"),
+        ("cp sclaude/policy/vercel.json /home/u/myapp-1/.sclaude/team/", "/home/u/sclaude", "allow"),
+        ("echo x > /home/u/myapp-1/.sclaude/team/policy.json", "/home/u/sclaude", "allow")):
+    check("readonly %s (in %s)" % (command, cwd), hook("Bash", RO, cwd, command=command), want)
+check("readonly write tool", hook("Write", RO, "/x", file_path="/home/u/sclaude/a.py"), "deny")
+check("readonly relative write tool", hook("Edit", RO, "/home/u/sclaude", file_path="sclaude/a.py"), "deny")
+check("readonly product write", hook("Write", RO, "/home/u/sclaude", file_path="/home/u/myapp-1/x.ts"), "allow")
+# Both together: a non-maintainer's review.
+check("both team", hook("Bash", RO + ("--team",), "/home/u/sclaude",
+                        command="echo x > /home/u/myapp-1/.sclaude/team/p.json"), "deny")
 
 
 # --- who maintains, and where rules go -----------------------------------------
@@ -106,29 +133,34 @@ try:
     check("others-write-their-own", sh(where, repo, {"SCLAUDE_DEV": "ann"}),
           os.path.join(repo, ".sclaude", "people", "ann"))
 
-    # The hook goes only to a non-maintainer's sessions.
+    # A step's team guard goes only to a non-maintainer; a review's read-only
+    # guard goes to everybody, with --team added for a non-maintainer.
     setup(["ann@x.test"])
-    check("maintainer-no-guard", sh('team_guard_settings "%s"' % repo, repo), "")
+    check("maintainer-no-step-guard", sh('team_guard_entry "%s"' % repo, repo), "")
+    for maintainer, team in ((["ann@x.test"], False), (["lead@x.test"], True)):
+        setup(maintainer)
+        guard = sh('INSTRUMENTS=/opt/sclaude; review_guard_settings "%s"' % repo, repo).splitlines()
+        check("review-guard-is-a-settings-flag-%s" % team, guard[:1], ["--settings"])
+        if len(guard) > 1:
+            entry = json.loads(guard[1])["hooks"]["PreToolUse"][0]
+            command = entry["hooks"][0]["command"]
+            check("review-guard-matcher-%s" % team, entry["matcher"],
+                  "Write|Edit|MultiEdit|NotebookEdit|Bash")
+            check("review-guard-readonly-%s" % team, "--readonly /opt/sclaude" in command, True)
+            check("review-guard-team-%s" % team, "--team" in command, team)
     setup(["lead@x.test"])
-    guard = sh('team_guard_settings "%s"' % repo, repo).splitlines()
-    check("guard-is-a-settings-flag", guard[:1], ["--settings"])
-    if len(guard) > 1:
-        entry = json.loads(guard[1])["hooks"]["PreToolUse"][0]
-        check("guard-covers-tools-and-bash", entry["matcher"],
-              "Write|Edit|MultiEdit|NotebookEdit|Bash")
-        check("guard-runs-the-hook", "team-rules.py" in entry["hooks"][0]["command"], True)
 
     # A step's settings carry it next to forbidden-commands.py.
     flags = sh('BROWSER_ALLOW=x; step_settings code "%s"' % repo, repo).splitlines()
     settings = json.loads(flags[flags.index("--settings") + 1])
     commands = [h["hooks"][0]["command"] for h in settings["hooks"]["PreToolUse"]]
     check("step-has-both-hooks", [any("forbidden-commands" in c for c in commands),
-                                  any("team-rules" in c for c in commands)], [True, True])
+                                  any("write-guard" in c for c in commands)], [True, True])
     setup(["ann@x.test"])
     flags = sh('BROWSER_ALLOW=x; step_settings code "%s"' % repo, repo).splitlines()
     settings = json.loads(flags[flags.index("--settings") + 1])
     check("maintainer-step-without-guard",
-          any("team-rules" in h["hooks"][0]["command"] for h in settings["hooks"]["PreToolUse"]),
+          any("write-guard" in h["hooks"][0]["command"] for h in settings["hooks"]["PreToolUse"]),
           False)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)

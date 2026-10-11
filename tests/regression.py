@@ -1045,17 +1045,10 @@ check_true("push-survives-a-branch-with-no-upstream",
            re.search(r'\[\[ "\$ahead" =~ \^\[0-9\]\+\$ \]\] \|\| return 0', run_sh)
            is not None)
 
-# Called on the way into a feature, so a forgotten commit goes out at the next
-# `sclaude <feature>` rather than waiting to be noticed. The third is the
-# deferral of a log of proposals alone, which commits without a session.
-check("push-called-three-times", len(re.findall(r"^\s*push_instruments$", sclaude + run_sh, re.M)), 3)
-check_true("push-called-when-resuming", re.search(r"^\s*push_instruments$", sclaude, re.M) is not None)
-# NOT in require_repo: that runs for `sclaude status` too, which the bot calls
-# with a 25-second timeout, and a network push has no business on that path.
-require_repo_body = re.search(r"require_repo\(\)\s*\{(.*?)\n\}", state_sh, re.S)
-check_true("push-not-on-the-status-path",
-           require_repo_body is not None
-           and "push_instruments" not in require_repo_body.group(1))
+# Never called on its own any more: the review sessions change the product, not
+# sclaude's checkout, so there is nothing of theirs to send, and a change to
+# sclaude is proposed deliberately.
+check("push-never-automatic", len(re.findall(r"^\s*push_instruments$", sclaude + run_sh, re.M)), 0)
 
 # The module has to be in the source list, or none of it loads.
 # Starting a step over clears the regression's spent attempts, or an exhausted

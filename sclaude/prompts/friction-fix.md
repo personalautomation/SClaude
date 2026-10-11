@@ -6,7 +6,7 @@ This is not a step of the cycle. A fixing session runs with the settings of the 
 
 **One thing to weigh that a step's review does not.** A fixing session is opened at most twice per stage, and only when a run is already red — so an obstacle here costs more than the same obstacle in a step: the feature is stuck, the clock is running, and the human is usually not watching. Judge accordingly. But the opposite also holds: a ban that fired here may be right precisely because a fixing session is the wrong place to do that thing — deploying, merging and promoting are my steps whether the regression is red or green.
 
-**How this ends.** Present me a plan: what to lift, why that's safe, and exactly what changes in which file. Once I approve, make the change yourself and commit it to the branch you are on by this repo's rules: a Conventional Commits subject, a body, and an unbroken footer block at the end.
+**How this ends.** Present me a plan: what to lift, why that's safe, and exactly what changes in which file. Once I approve, make the change yourself and commit it in the worktree, on the feature's branch, by the project's commit rules.
 
 If there's nothing to fix — every entry is a deliberate ban — say so and change nothing. An empty change is worse than no change.
 
@@ -16,7 +16,7 @@ If there's nothing to fix — every entry is a deliberate ban — say so and cha
 sclaude-verdict: lifted|deliberate|deferred|mixed — <one short clause>
 ```
 
-Pick `lifted` if you loosened or removed a restriction, `deliberate` if you changed nothing because every entry was a ban working as intended, `deferred` if you only put entries off into the deferred file, `mixed` if more than one of these happened. The clause after the dash is for a human reading the issue later — "curl allowed for reproducing the failure", "both entries were the deploy ban". Keep it to one line: everything after the first newline is discarded.
+Pick `lifted` if you loosened or removed a restriction (an `allow` in the policy, or a fix to the project), `deliberate` if you changed nothing because every entry was a ban working as intended, `deferred` if you only put entries off into the deferred file, `mixed` if more than one of these happened. The clause after the dash is for a human reading the issue later — "curl allowed for reproducing the failure", "both entries were the deploy ban". Keep it to one line: everything after the first newline is discarded.
 
 This line is read out of your transcript once you exit, and it is the only part of your answer a machine looks at. It does not replace the summary below — write both.
 

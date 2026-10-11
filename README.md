@@ -220,12 +220,14 @@ lives elsewhere:
 | what one machine keeps about the product: terminal recordings | `.sclaude/local/` in the product, never committed, never deployed |
 | the person: name, database, projects for `wsl-update`, the Telegram bot, where records are gathered | `~/.config/instruments/`, `~/.config/keepawake/env`, `~/.claude/sclaude/` |
 
-**Who changes the orchestrator.** `MAINTAINERS` lists the git addresses allowed
-to commit it straight to `main`. Everybody else is moved to `dev/<name>` before
-anything runs, and the friction review commits there. sclaude then sends the
-branch as a pull request into `main` by itself: pushed here if you may push,
-and otherwise to a fork of yours, which it makes once with `gh` as the remote
-`fork`. The pull request is opened once, and every later push updates it.
+**Who changes the orchestrator.** Nobody's sessions do: friction reviews,
+retrospectives and the monthly deferred review read sclaude's checkout and
+change the product (a hook keeps the checkout read-only to them). A change to
+sclaude's out-of-the-box behaviour is made deliberately. `MAINTAINERS` lists
+the git addresses allowed to commit it straight to `main`. Everybody else
+commits to a branch of their own, `dev/<name>`, and sclaude sends it as a pull
+request into `main` by itself: pushed here if you may push, and otherwise to a
+fork of yours, which it makes once with `gh` as the remote `fork`. The pull request is opened once, and every later push updates it.
 `origin` stays this repository, so updates keep arriving at your next command
 as before. You use this repository, not your fork; the fork is only how a pull
 request travels. Without `gh`, the push failure prints the commands instead.
@@ -235,7 +237,7 @@ rather than branches, because a rule only applies once it is on the product's
 `main`. `maintainers` in the product's `.sclaude.json` lists the git
 addresses of the people who curate the product's shared sclaude rules in
 `.sclaude/team/`. A session run by anybody else writes its rules to
-`.sclaude/people/<name>/` instead, and a hook (`sclaude/hooks/team-rules.py`)
+`.sclaude/people/<name>/` instead, and a hook (`sclaude/hooks/write-guard.py`)
 refuses its writes into `team/`. Both reach `main` with the feature's pull
 request, where a maintainer sees them, and a maintainer lifts a personal rule
 into `team/` when it proves itself. No `maintainers` means everybody keeps
@@ -270,7 +272,7 @@ and whether git or a deploy ever sees it:
 | `.sclaude/local/terminal/*.log` | the recorded terminal, which the retrospective reads | the product's main tree | sclaude | never | never |
 | `.vercelignore` | what a deploy must not upload | each tree sclaude deploys | sclaude, appending what is missing; a project that tracks its own keeps it | no, unless the project tracks one | — |
 | lines in `.git/info/exclude` | hide sclaude's own paths from git | the product's `.git` | sclaude | — (not versioned) | — |
-| `friction-deferred.tsv` | findings put off for the monthly review | `~/.local/state/sclaude/` | friction reviews and the monthly review | never | — |
+| `deferred.tsv` | findings put off for the monthly review | the person's rules folder in the product: `.sclaude/team/` or `.sclaude/people/<name>/` | friction reviews (on the feature's branch) and the monthly review (on a branch and pull request of its own) | yes, the product's | no harm if it is |
 | `cycles.jsonl` | one record per finished feature: durations, attempts, verdicts | `~/.claude/sclaude/` | sclaude | never; published as `<name>.jsonl` only if `metrics-remote` names a team repository | — |
 | `environment`, `epilogue`, `watch`, `dev` | the environment you chose per product, the status epilogue's state, the QA watcher, the dev servers the proxy routes to | `~/.claude/sclaude/` | sclaude | never | — |
 | `terminal/` | recordings of runs started outside any repository | `~/.claude/sclaude/` | sclaude | never | — |
@@ -278,11 +280,12 @@ and whether git or a deploy ever sees it:
 | issue status comments, pull-request bodies, board columns, `Sclaude-Session` trailers | the feature's story where the team reads it | the product's GitHub, and its commits | sclaude and the feature's sessions | the trailers, in the product's history | — |
 | `~/.config/instruments/` | this machine's settings: `projects` for wsl-update, `metrics-remote`, the polkit mark | your home directory | you | never | — |
 
-The aim is that nothing a product produces goes into this repository, and a
-change to sclaude's out-of-the-box behaviour reaches it only as a deliberate
-pull request. Not yet: friction reviews, retrospectives and the monthly
-deferred review still commit their fixes here, and moving them into the
-product's `.sclaude/` is the next change.
+Nothing a product produces goes into this repository. The review sessions
+write the product's `.sclaude/` and its code, and a hook keeps sclaude's own
+checkout read-only to them. A change to sclaude's out-of-the-box behaviour
+reaches it only as a deliberate pull request; a review that thinks a preset is
+wrong for every product works around it in the product and leaves a deferred
+entry of class `sclaude-default` for that decision.
 
 **Who you are.** The local part of `git config user.email`, reduced to
 `[a-z0-9-]` (`SCLAUDE_DEV` overrides it). It names your branch, marks your
@@ -366,18 +369,12 @@ The same holds at the end of a step's session, which may have run for hours:
 if `bin/sclaude` or a module changed on disk meanwhile, the process hands what
 follows claude's exit to the current sclaude (`code_reload`), so an `/exit`
 is handled by the new code. `SCLAUDE_NO_RELOAD=1` turns that off.
-`MAINTAINERS` names who may commit the orchestrator straight to `main`; anybody
-else is moved to `dev/<name>` at that moment (the name comes from
-`developer.sh`), and the friction review refuses to open on `main` for them.
-
-The review commits its own fixes to the branch it is on, and when it finishes they go
-to `origin` by themselves — but only if the review really committed something:
-HEAD is remembered before the session and compared afterwards, so that somebody
-else's commit made in the meantime does not ride along. The push does not ask
-(the commit has already been approved inside the session, and a question would
-stand in the middle of the cycle) and does not bring the cycle down if it fails:
-the fix is in place and available to the next step, and the output keeps the
-command to finish it by hand.
+`MAINTAINERS` names who may commit the orchestrator straight to `main`. The
+update leaves everybody on `main`; a branch of one's own, `dev/<name>` (the
+name comes from `developer.sh`), is for proposing a change to sclaude, and a
+non-maintainer's commits there go out as a pull request (see "Who changes the
+orchestrator"). sclaude never pushes its own checkout otherwise: the review
+sessions do not commit to it.
 
 | File | What is in it |
 | --- | --- |

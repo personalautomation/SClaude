@@ -336,19 +336,29 @@ except (OSError, ValueError):
 for key, node in reviews.items():
     if not isinstance(node, dict):
         continue
-    if (node.get("from") and node.get("to")) or node.get("verdict"):
+    if ((node.get("project_from") and node.get("project_to"))
+            or (node.get("from") and node.get("to")) or node.get("verdict")):
         print(key)
 PY
   ); do
-    ffrom="$(state_get "$state" "friction.$fkey.from" || true)"
-    fto="$(state_get "$state" "friction.$fkey.to" || true)"
+    # A review commits into the product now, on the feature's branch: that
+    # range, read in the worktree. A state from before then may still carry
+    # an orchestrator range, read where it was made.
+    local fgit="$wt"
+    ffrom="$(state_get "$state" "friction.$fkey.project_from" || true)"
+    fto="$(state_get "$state" "friction.$fkey.project_to" || true)"
+    if [[ -z "$ffrom" || -z "$fto" ]]; then
+      fgit="$INSTRUMENTS"
+      ffrom="$(state_get "$state" "friction.$fkey.from" || true)"
+      fto="$(state_get "$state" "friction.$fkey.to" || true)"
+    fi
     if [[ -n "$ffrom" && -n "$fto" ]]; then
       while IFS= read -r line; do
         [[ -n "$line" ]] || continue
-        fixes+="$fkey"$'\t'"$line"$'\t'"$(git -C "$INSTRUMENTS" diff-tree \
+        fixes+="$fkey"$'\t'"$line"$'\t'"$(git -C "$fgit" diff-tree \
           --no-commit-id --name-only -r "${line%%$'\t'*}" 2>/dev/null \
           | tr '\n' ' ')"$'\n'
-      done < <(git -C "$INSTRUMENTS" log --no-merges --format='%h%x09%s' \
+      done < <(git -C "$fgit" log --no-merges --format='%h%x09%s' \
                  "$ffrom..$fto" 2>/dev/null || true)
     else
       # No commits: one row carrying the verdict alone, with empty sha and

@@ -10,9 +10,9 @@
 #     included or defaulted, with their indented context;
 #   * anything else in the log — a hook refusal, a free note — leaves it to a
 #     session;
-#   * friction_defer_proposals appends the rows to the deferred file — local
-#     state outside instruments, created with its header when missing — and
-#     records the review in the state; it commits nothing;
+#   * friction_defer_proposals appends the rows to the product's deferred file
+#     in the feature's worktree, created with its header when missing, commits
+#     it on the feature's branch, and records the review in the state;
 #   * run_friction asks it before the log moves and before any session opens.
 #
 # Run it with: python3 tests/friction-proposals.py
@@ -82,33 +82,35 @@ def functions(source, names):
 
 
 DEFER = functions(RUN, ["friction_defer_proposals"])
-with open(os.path.join(LIB, "deferred.sh")) as fh:
-    ENSURE = functions(fh.read(), ["deferred_ensure"])
 tmp = tempfile.mkdtemp()
 try:
-    inst = os.path.join(tmp, "instruments")
     wt = os.path.join(tmp, "myapp-145-x")
-    os.makedirs(os.path.join(inst, "sclaude"))
     os.makedirs(os.path.join(wt, ".feature"))
-    git = ["git", "-C", inst, "-c", "user.name=t", "-c", "user.email=t@t"]
-    subprocess.run(["git", "init", "-q", "-b", "main", inst], check=True)
-    subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "init"], check=True)
-    deferred = os.path.join(tmp, "state", "sclaude", "friction-deferred.tsv")
+    git = ["git", "-C", wt, "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(["git", "init", "-q", "-b", "feat/145-x", wt], check=True)
+    with open(os.path.join(wt, ".gitignore"), "w") as fh:
+        fh.write(".feature/\n")
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-qm", "init"], check=True)
+    # No `maintainers` in the product: everybody keeps team/.
+    deferred = os.path.join(wt, ".sclaude", "team", "deferred.tsv")
     state = os.path.join(wt, ".feature", "state.json")
     log = os.path.join(wt, ".feature", "friction.log")
 
     def defer():
         with open(state, "w") as fh:
             fh.write("{}")
-        script = ('source "%s/state.sh"\nLIB="%s"; INSTRUMENTS="%s"; REPO="%s/myapp"\n'
-                  'DEFERRED_FILE="%s"\ninfo() { :; }\n%s\n%s\n'
+        script = ('for m in state developer deferred; do source "%s/$m.sh"; done\n'
+                  'LIB="%s"; REPO="%s/myapp"\ninfo() { :; }\n%s\n'
+                  'export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t '
+                  'GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t\n'
                   'friction_defer_proposals "%s" 145-x review-21 review; echo "rc=$?"'
-                  % (LIB, LIB, inst, tmp, deferred, ENSURE, DEFER, wt))
+                  % (LIB, LIB, tmp, DEFER, wt))
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
         return out.stdout.strip().splitlines()[-1] if out.stdout.strip() else out.stderr
 
     def commits():
-        return int(subprocess.run(["git", "-C", inst, "rev-list", "--count", "HEAD"],
+        return int(subprocess.run(["git", "-C", wt, "rev-list", "--count", "HEAD"],
                                   capture_output=True, text=True).stdout)
 
     def rows():
@@ -118,24 +120,34 @@ try:
     with open(log, "w") as fh:
         fh.writelines(both)
     check("defer-done", defer(), "rc=0")
-    check("defer-commits-nothing", commits(), 1)
-    check("defer-file-outside-instruments", os.path.exists(deferred), True)
+    check("defer-committed-on-the-branch", commits(), 2)
+    check("defer-file-in-the-product", os.path.exists(deferred), True)
     with open(deferred) as fh:
         check("defer-file-has-header", fh.readline().startswith("# Friction"), True)
     check("defer-rows-written", rows(), 2)
+    tree = subprocess.run(["git", "-C", wt, "show", "--name-only", "--format=", "HEAD"],
+                          capture_output=True, text=True).stdout.split()
+    check("defer-commit-holds-the-file", tree, [".sclaude/team/deferred.tsv"])
     with open(state) as fh:
         node = (json.load(fh).get("friction") or {}).get("review-21") or {}
     check("defer-state-verdict", node.get("verdict"), "deferred")
     check("defer-state-done", node.get("done"), True)
-    check("defer-state-no-range", node.get("from") or node.get("to"), None)
 
     check("defer-appends", defer(), "rc=0")
     check("defer-appended-rows", rows(), 4)
+    check("defer-appended-commit", commits(), 3)
 
     with open(log, "a") as fh:
         fh.write("2026-10-09T05:00:00+01:00\treview\thook\tgit push origin main\n")
     check("defer-mixed-left-to-session", defer(), "rc=1")
-    check("defer-mixed-writes-nothing", rows(), 4)
+    check("defer-mixed-writes-nothing", (rows(), commits()), (4, 3))
+
+    # Somebody editing the file by hand: left to a session rather than mixed in.
+    with open(log, "w") as fh:
+        fh.writelines(both)
+    with open(deferred, "a") as fh:
+        fh.write("somebody editing\n")
+    check("defer-dirty-file-left-to-session", defer(), "rc=1")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

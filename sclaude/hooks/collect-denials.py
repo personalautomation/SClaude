@@ -72,6 +72,7 @@ OWN_MARKERS = (
     "tell the human and stop.",
     "Then present the plan again.",
     "a maintainer can lift it into team/.",
+    "leave it as a deferred entry of class sclaude-default.",
 )
 
 

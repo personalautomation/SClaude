@@ -142,8 +142,11 @@ with tempfile.TemporaryDirectory() as tmp:
     w = World(os.path.join(tmp, "2"), email="Alice.B@x.test",
               maintainers=["boss@x.test"])
     out = w.run()
-    check("switched-to-own-branch", w.branch(), "dev/alice-b")
-    check("switch-reexecutes", "REEXEC 1" in out, True)
+    # Nobody is moved off main any more: the review sessions do not commit to
+    # sclaude. A branch of one's own is made deliberately, to propose a change.
+    check("non-maintainer-stays-on-main", w.branch(), "main")
+    check("nothing-to-reexecute", "REEXEC" in out, False)
+    git(w.me, "switch", "-q", "-c", "dev/alice-b")
 
     # Upstream moves; the developer's branch has a commit of its own.
     commit(w.me, "mine.txt", "mine\n")
@@ -223,7 +226,7 @@ with tempfile.TemporaryDirectory() as tmp:
         base = os.path.join(tmp, can_push)
         os.makedirs(base)
         w = World(base, email="Alice.B@x.test", maintainers=["boss@x.test"])
-        w.run()
+        git(w.me, "switch", "-q", "-c", "dev/alice-b")
         commit(w.me, "fix.txt", "fix\n")
         log, opened = os.path.join(base, "gh.log"), os.path.join(base, "pr")
         env = {"CAN_PUSH": can_push, "FORK": os.path.join(base, "fork.git"),
@@ -257,9 +260,12 @@ with tempfile.TemporaryDirectory() as tmp:
 RUN = open(os.path.join(LIB, "run.sh"), encoding="utf-8").read()
 friction = RUN[RUN.index("run_friction() {"):]
 friction = friction[:friction.index("\n}\n")]
-net = friction.find("MAINTAINERS does not list you")
+# The review no longer commits to sclaude, so there is no branch to guard: its
+# checkout is read-only to the session instead, set up before the launch.
+guard = friction.find("review_guard_settings")
 first_claude = friction.find("claude_launch --")
-check("friction-net-before-session", -1 < net < first_claude, True)
+check("friction-guard-before-session", -1 < guard < first_claude, True)
+check("friction-no-maintainers-net", "MAINTAINERS does not list you" in friction, False)
 
 PROMPTS = os.path.join(LIB, "..", "prompts")
 for name in ("_friction-body.md", "friction.md", "friction-fix.md"):

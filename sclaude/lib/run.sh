@@ -39,7 +39,7 @@ render_prompt() {
   # server, and the plain address is as good as any.
   local -x SCLAUDE_V_DEV_URL="http://localhost:3000"
   # The deferred file the friction note points at (deferred.sh).
-  local -x SCLAUDE_V_DEFERRED="$DEFERRED_FILE"
+  local -x SCLAUDE_V_DEFERRED="$(deferred_file "${wt:-${REPO:-.}}")"
   local -x SCLAUDE_V_DEV_PORT="3000"
   # And its own database, when it has one: the conditional paragraph about it
   # drops out of the prompt otherwise.
@@ -1261,13 +1261,13 @@ run_friction() {
     lock_take FRICTION_LOCK "$FRICTION_LOCK_FILE" "$slug, a friction review" "a friction review"
   fi
   # Proposals alone have nothing to decide: see friction_proposals.py. They are
-  # put off here, under the lock, since the deferred file is the instruments
-  # tree's, and the log moves into .reviewed as a reviewed one does.
+  # put off here, into the product's deferred file on the feature's branch, and
+  # the log moves into .reviewed as a reviewed one does.
   if [[ -z "$reread" && -z "$pending" ]] \
      && friction_defer_proposals "$wt" "$slug" "$key" "$step"; then
     { cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log"; } || true
     friction_unlock
-    push_instruments
+    friction_push_project "$wt"
     return 0
   fi
   # What is being reviewed, and which prompt says so.
@@ -1381,13 +1381,15 @@ PYEOF
   # worktree, so the marker is a path of its own, as the epilogue's is.
   local done_file="${TMPDIR:-/tmp}/sclaude-friction-$slug.done"
 
-  # The deferred file the review may append to lives outside instruments
-  # (deferred.sh); it is created here so the session finds it with its header.
-  deferred_ensure || true
+  # The deferred file the review may append to is the product's, in this
+  # person's rules folder (deferred.sh); created here so the session finds it
+  # with its header.
+  deferred_ensure "$wt" || true
   prompt="$(sed -e "/^<body>$/r $PROMPTS/_friction-body.md" -e "/^<body>$/d" \
     "$head_prompt" \
     | sed -e "s|<feature>|$slug|g" -e "s|<step>|$label|g" \
-      -e "s|<deferred>|$DEFERRED_FILE|g" \
+      -e "s|<deferred>|$(deferred_file "$wt")|g" \
+      -e "s|<rules>|$(product_rules_dir "$wt")|g" -e "s|<instruments>|$INSTRUMENTS|g" \
       -e "s|<log>|$reviewed|g" -e "s|<transcript>|$transcript|g" \
       -e "s|<done-marker>|$done_file|g" -e "s|<worktree>|$wt|g" \
       -e "s|<branch>|$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "the feature's branch")|g")"
@@ -1442,21 +1444,10 @@ PYEOF
     fi
   fi
 
-  # A non-maintainer's review must not commit to main. instruments_sync moved
-  # them off it at the start; this is the net under that, for a switch that
-  # failed or a checkout made by hand since.
-  if ! developer_is_maintainer \
-     && [[ "$(git -C "$INSTRUMENTS" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "main" ]]; then
-    warn ""
-    warn "  The friction review would commit the orchestrator to main, and"
-    warn "  MAINTAINERS does not list you. Switch $INSTRUMENTS to dev/<your name>"
-    warn "  and run it again: $SELF friction $slug"
-    friction_unlock
-    return 1
-  fi
-
-  local before after project_before project_after
-  before="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)"
+  # The review changes the product only: its policy, its deferred file, its
+  # code, on the feature's branch. sclaude's checkout is read-only to it
+  # (review_guard_settings), so there is no orchestrator range to record.
+  local project_before project_after
   project_before="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
 
   # A stall belongs to the conversation that stalled, which its run keeps.
@@ -1464,10 +1455,9 @@ PYEOF
   # or new: a stalled transcript can exist, so a stall is often resumed.
   state_set "$state" "friction.$key.stalled" null 2>/dev/null || true
 
-  # The product's shared rules stay its maintainers' (team_guard_settings):
-  # the review may edit the project too, in the feature's worktree.
+  # The review changes the product, never sclaude (review_guard_settings).
   local -a guard=()
-  mapfile -t guard < <(team_guard_settings "$wt")
+  mapfile -t guard < <(review_guard_settings "$wt")
   if [[ -n "$session" ]]; then
     # Returning to an interrupted review. The log does not need moving — it is
     # already in .reviewed, and that is what the session was reading; the prompt
@@ -1478,7 +1468,7 @@ PYEOF
     ( cd "$INSTRUMENTS" && claude_launch --resume "$session" --model opus --effort medium \
         "${guard[@]}" \
         --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$wt" \
-        --add-dir "$(dirname "$DEFERRED_FILE")" -n "friction/$slug" \
+        -n "friction/$slug" \
         "Back in the friction review for feature '$slug'. Pick up where the conversation left off; re-read $reviewed if you need to." )
   else
     session="$(new_session_id)"
@@ -1500,22 +1490,17 @@ PYEOF
     ( cd "$INSTRUMENTS" && claude_launch --session-id "$session" --model opus --effort medium \
         "${guard[@]}" \
         --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$wt" \
-        --add-dir "$(dirname "$DEFERRED_FILE")" -n "friction/$slug" "$prompt" )
+        -n "friction/$slug" "$prompt" )
   fi
   session_watch_stop
   session_closed "$done_file" "$INSTRUMENTS" "$session" \
     "The friction review reported its work done, and sclaude closed it." || true
 
-  after="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)"
   local changed=""
-  if [[ -n "$before" && -n "$after" && "$before" != "$after" ]]; then
-    changed=1
-    push_instruments
-  fi
   friction_unlock
-  # And the project's: a review may fix the project in the feature's worktree
-  # too, committing on the feature's branch (_friction-body.md). Pushed here,
-  # with the project's own hooks, so the pull request carries the fix.
+  # What the review changed is the product's, committed on the feature's branch
+  # (_friction-body.md). Pushed here, with the project's own hooks, so the pull
+  # request carries the fix.
   project_after="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
   if [[ -n "$project_before" && -n "$project_after" && "$project_before" != "$project_after" ]]; then
     changed=1
@@ -1622,11 +1607,11 @@ friction_push_project() {
 }
 
 # Puts off a friction log that holds only proposed CLAUDE.md rules, without a
-# session: the rows go into the deferred file (outside instruments, see
-# deferred.sh), and the state records the review the way a session's deferral
-# does. Nothing is committed — the orchestrator did not change. Returns 1 to
-# leave the log to a session: anything but proposals in it, or a deferred file
-# that could not be written.
+# session: the rows go into the product's deferred file in the worktree
+# (deferred.sh) and are committed on the feature's branch, and the state
+# records the review the way a session's deferral does. Returns 1 to leave the
+# log to a session: anything but proposals in it, or a deferred file that could
+# not be written or committed.
 #
 #   friction_defer_proposals <wt> <slug> <key> <step>
 friction_defer_proposals() {
@@ -1638,8 +1623,15 @@ friction_defer_proposals() {
             "$slug" "$step" 2>/dev/null)" || return 1
   [[ -n "$rows" ]] || return 1
   n="$(grep -c . <<< "$rows")"
-  deferred_ensure || return 1
-  printf '%s\n' "$rows" >> "$DEFERRED_FILE" 2>/dev/null || return 1
+  local file; file="$(deferred_file "$wt")"
+  deferred_ensure "$wt" || return 1
+  git -C "$wt" diff --quiet HEAD -- "$file" 2>/dev/null || return 1
+  printf '%s\n' "$rows" >> "$file" 2>/dev/null || return 1
+  git -C "$wt" add -- "$file" 2>/dev/null \
+    && git -C "$wt" commit -q -m "chore(sclaude): put off $n CLAUDE.md proposal(s) from $key" \
+         -m "The friction log after '$key' held nothing but proposals, so sclaude put them off to the monthly review itself, with no session." \
+         -- "$file" >/dev/null 2>&1 \
+    || { git -C "$wt" checkout -q HEAD -- "$file" 2>/dev/null || true; return 1; }
   now="$(date -Iseconds)"
   state_set "$state" "friction.$key.started" "$now"
   state_set "$state" "friction.$key.finished" "$now"
@@ -1910,23 +1902,10 @@ instruments_sync() {
     return 0
   fi
 
-  if [[ "$branch" == "main" ]] && ! developer_is_maintainer; then
-    name="$(developer_name)"
-    own="dev/${name:-local}"
-    if git -C "$INSTRUMENTS" show-ref --verify -q "refs/heads/$own"; then
-      git -C "$INSTRUMENTS" switch -q "$own" 2>/dev/null
-    else
-      git -C "$INSTRUMENTS" switch -q -c "$own" 2>/dev/null
-    fi
-    if [[ "$(git -C "$INSTRUMENTS" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$own" ]]; then
-      info "  instruments: on $own — MAINTAINERS does not list you, so fixes go here"
-      branch="$own"
-      changed=1
-    else
-      warn "  instruments: could not switch to $own; staying on main"
-    fi
-  fi
-
+  # Everybody's checkout stays on main and follows it. A non-maintainer used to
+  # be moved to dev/<name> first, because friction reviews committed their
+  # fixes to sclaude; they change the product now, and a change to sclaude
+  # itself is proposed deliberately, on a branch of its own.
   if GIT_TERMINAL_PROMPT=0 timeout 20 \
        git -C "$INSTRUMENTS" fetch -q origin main 2>/dev/null; then
     behind="$(git -C "$INSTRUMENTS" rev-list --count HEAD..origin/main 2>/dev/null || true)"

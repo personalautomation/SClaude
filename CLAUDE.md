@@ -67,26 +67,28 @@ breaks the other silently — grep before you edit:
 ## Public repository, private projects
 
 This repository is public (personalautomation/SClaude). The projects sclaude
-drives are not, and the sessions that commit here — friction reviews, the
-monthly deferred review, retrospectives — work from those projects' material,
-and `push_instruments` publishes what they commit without asking. So nothing
-committed here names a project's details: no project names, no pull-request,
+drives are not. sclaude's review sessions — friction reviews, the monthly
+deferred review, retrospectives — work from those projects' material and
+change the product, never this checkout (`sclaude/hooks/write-guard.py
+--readonly`). Whoever commits here by hand still works from what they saw in
+a product, so nothing committed here names a project's details: no project names, no pull-request,
 issue or feature numbers, no file paths, tables, services or infrastructure
 of a product. Describe a problem in the orchestrator's own terms. What belongs
 to a project's story goes to that project.
 
-Data about projects that sclaude collects stays out of git altogether: the
-deferred friction is local state (`sclaude/lib/deferred.sh`), and terminal
-recordings live in sclaude's own folder in the project, which git and every
-Vercel upload are kept out of (`sclaude/lib/scratch.sh`).
+Data about projects that sclaude collects stays with the project: the
+deferred friction and the session rules in the product's `.sclaude/`
+(`sclaude/lib/deferred.sh`, `sclaude/lib/policy.py`), and terminal recordings
+in its `.sclaude/local/`, which git and every Vercel upload are kept out of
+(`sclaude/lib/scratch.sh`).
 
 ## Who commits the orchestrator to main
 
 `MAINTAINERS` lists the git addresses allowed to commit sclaude's core straight
-to `main`. Everybody else works on `dev/<name>` (the name comes from
-`developer_name` in `sclaude/lib/developer.sh`) and reaches `main` through a
-pull request. A friction review run by a non-maintainer commits to that branch,
-not to `main`.
+to `main`. Everybody else proposes a change on `dev/<name>` (the name comes
+from `developer_name` in `sclaude/lib/developer.sh`), which reaches `main`
+through a pull request. No session commits here: the review sessions change
+the product.
 
 With `MAINTAINERS` absent everybody is a maintainer, which is what a copy used
 by one person wants.

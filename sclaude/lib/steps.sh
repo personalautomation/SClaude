@@ -193,21 +193,31 @@ step_mode()   { step_field "$1" 3; }
 # classifier a look at each one. The deny list and the hooks still come first.
 BROWSER_ALLOW='mcp__chrome-devtools'
 
-# The hook that keeps a product's shared rules (.sclaude/team/) to its
-# maintainers, as a PreToolUse entry in JSON, or nothing for a maintainer:
-# their sessions write there. See team-rules.py and product_maintainer.
-team_guard_entry() {
-  product_maintainer "${1:-${REPO:-.}}" && return 0
-  printf '{"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash", "hooks": [{"type": "command", "command": "python3 %s", "timeout": 10}]}' \
-    "$HOOKS/team-rules.py"
+# write-guard.py as a PreToolUse entry in JSON, with the arguments given, or
+# nothing when there are none.
+guard_entry() {
+  [[ $# -gt 0 ]] || return 0
+  local args; args="$(printf ' %q' "$@")"
+  python3 -c 'import json, sys; print(json.dumps({"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash", "hooks": [{"type": "command", "command": "python3 " + sys.argv[1] + sys.argv[2], "timeout": 10}]}))' \
+    "$HOOKS/write-guard.py" "$args"
 }
 
-# The same as a whole --settings value, for a session that has no settings of
-# its own (the friction review, the retrospective). Nothing for a maintainer.
-team_guard_settings() {
-  local entry; entry="$(team_guard_entry "$@")"
-  [[ -n "$entry" ]] || return 0
-  printf '%s\n' --settings "{\"hooks\": {\"PreToolUse\": [$entry]}}"
+# For a step: a product's shared rules (.sclaude/team/) stay its maintainers'.
+# Nothing for a maintainer, whose sessions write there. See product_maintainer.
+team_guard_entry() {
+  product_maintainer "${1:-${REPO:-.}}" && return 0
+  guard_entry --team
+}
+
+# For the sessions that review the work rather than do it: the friction
+# review, the retrospective, the monthly deferred review. They read sclaude's
+# checkout and change the product, never sclaude itself (write-guard.py
+# --readonly), and the team's rules stay the maintainers'. A whole --settings
+# value: these sessions have no settings of their own.
+review_guard_settings() {
+  local -a args=(--readonly "$INSTRUMENTS")
+  product_maintainer "${1:-${REPO:-.}}" || args+=(--team)
+  printf '%s\n' --settings "{\"hooks\": {\"PreToolUse\": [$(guard_entry "${args[@]}")]}}"
 }
 
 # The rules the policy layers give a session (sclaude/lib/policy.py): the

@@ -328,27 +328,54 @@ check("riders-name-a-direct-commit",
 check("riders-skip-promote-commits", "promote" in out, False)
 
 # --- the deferred friction ----------------------------------------------------
-def due(text):
-    path = os.path.join(tmp, "deferred.log")
+#
+# The files are the product's, one per rules folder (deferred.sh): a
+# maintainer's review reads them all, anybody else's their own.
+product = os.path.join(tmp, "deferred-product")
+subprocess.run(["git", "init", "-q", product], check=True)
+subprocess.run(["git", "-C", product, "config", "user.email", "ann@x.test"], check=True)
+
+
+def deferred_sh(script, dev="ann"):
+    body = ('INSTRUMENTS="%s"; for m in developer deferred; do source "%s/$m.sh"; done\n%s'
+            % (ROOT, LIB, script))
+    return subprocess.run(["bash", "-c", body], capture_output=True, text=True,
+                          env=dict(os.environ, SCLAUDE_DEV=dev))
+
+
+def put(rel, text):
+    path = os.path.join(product, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as fh:
         fh.write(text)
-    script = 'INSTRUMENTS="%s"; source "%s/deferred.sh"; DEFERRED_FILE="%s"; deferred_due' % (
-        ROOT, LIB, path)
-    done = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+
+
+def due():
+    done = deferred_sh('deferred_due "%s"' % product)
     return done.stdout.strip() if done.returncode == 0 else None
 
 
 old_day = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
 today = datetime.date.today().isoformat()
 entry = "%s\tmyapp\t152-x\treview\tclaude-md-stale-docs\tProposal: grep the docs.\n" % old_day
-check("deferred-due-after-a-month-unreviewed", due("# last reviewed: never\n" + entry),
-      "1 %s" % old_day)
-check("deferred-not-due-when-reviewed-today", due("# last reviewed: %s\n" % today + entry), None)
-check("deferred-not-due-when-empty", due("# last reviewed: never\n"), None)
-fresh = os.path.join(tmp, "state", "friction-deferred.tsv")
-subprocess.run(["bash", "-c", 'INSTRUMENTS="%s"; source "%s/deferred.sh"; DEFERRED_FILE="%s"; deferred_ensure'
-                % (ROOT, LIB, fresh)], check=True)
-check("deferred-file-starts-empty", due(open(fresh).read()), None)
+put(".sclaude/team/deferred.tsv", "# last reviewed: never\n" + entry)
+check("deferred-due-after-a-month-unreviewed", due(), "1 %s" % old_day)
+put(".sclaude/team/deferred.tsv", "# last reviewed: %s\n" % today + entry)
+check("deferred-not-due-when-reviewed-today", due(), None)
+put(".sclaude/team/deferred.tsv", "# last reviewed: never\n")
+check("deferred-not-due-when-empty", due(), None)
+# A maintainer counts everybody's files; somebody else only their own.
+put(".sclaude/people/bob/deferred.tsv", "# last reviewed: never\n" + entry)
+check("deferred-maintainer-reads-people", due(), "1 %s" % old_day)
+with open(os.path.join(product, ".sclaude.json"), "w") as fh:
+    json.dump({"maintainers": ["lead@x.test"]}, fh)
+check("deferred-others-read-their-own", due(), None)
+check("deferred-file-is-the-persons",
+      deferred_sh('deferred_file "%s"' % product).stdout.strip(),
+      os.path.join(product, ".sclaude", "people", "ann", "deferred.tsv"))
+deferred_sh('deferred_ensure "%s"' % product)
+with open(os.path.join(product, ".sclaude", "people", "ann", "deferred.tsv")) as fh:
+    check("deferred-file-starts-with-its-header", fh.readline().startswith("# Friction"), True)
 check("deferred-file-not-in-instruments",
       os.path.exists(os.path.join(ROOT, "sclaude", "friction-deferred.tsv")), False)
 

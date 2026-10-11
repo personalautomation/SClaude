@@ -433,17 +433,9 @@ cmd_resume() {
 
   # A friction fix that was committed and never sent.
   #
-  # run_friction pushes after the review session, but only if it reaches that
-  # line: a session interrupted by Ctrl-C or a limit *after* it had committed
-  # leaves the fix on this machine alone. Nothing notices — the next step takes
-  # it from the working tree and behaves correctly — so it sits there until
-  # somebody happens to look, which is how two of them were found by eye.
-  #
-  # Here rather than in require_repo: that runs for `sclaude status` too, which
-  # the bot calls with a 25-second timeout, and a network push has no business
-  # on that path. Continuing a feature is the moment the orchestrator is about
-  # to act on the tooling anyway.
-  push_instruments
+  # No push of sclaude's own checkout here any more: the review sessions do not
+  # commit to it (they change the product), and a change to sclaude itself is
+  # proposed deliberately.
 
 
   prepare_worktree "$wt"

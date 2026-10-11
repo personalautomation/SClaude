@@ -156,6 +156,13 @@ WRAPPER_POSITIONAL = {"timeout": 1}
 # WRAPPERS would take that ban away: `npx tsc` would come out as `tsc` and step
 # 1's hook would see a name it does not know. So the runners are stripped by a
 # function of its own, and only forbidden-commands.py calls it.
+# git's own options, before the subcommand, that take their value as the next
+# word; `--name=value` carries it in itself. Read past these, a check that
+# looked at the second word as the subcommand saw `user.name=x` in
+# `git -c user.name=x commit`, and let the commit through.
+GIT_VALUED = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
+              "--config-env", "--super-prefix"}
+
 RUNNERS = ("npx", "bunx", "pnpx")
 
 # Runners spelled as a subcommand of their package manager.

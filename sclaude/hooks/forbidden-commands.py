@@ -51,7 +51,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 from _friction import note
-from _shell import SEPARATORS, strip_runners, strip_wrappers, tokenize
+from _shell import GIT_VALUED, SEPARATORS, strip_runners, strip_wrappers, tokenize
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 
 # The branch that must not be pushed to: it moves only by merging a PR.
@@ -717,9 +717,8 @@ def ungroup(raw):
 # so all of them — main, --force, --no-verify — went through with any of these
 # in front.
 #
-# These take their value as the next word; `--name=value` carries it in itself.
-GIT_VALUED = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
-              "--config-env", "--super-prefix"}
+# The options that take their value as the next word are GIT_VALUED, in
+# _shell.py: write-guard.py reads git calls the same way.
 
 
 def git_globals(raw, where):

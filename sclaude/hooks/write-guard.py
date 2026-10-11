@@ -24,7 +24,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _shell import tokenize  # noqa: E402
+from _shell import GIT_VALUED, strip_wrappers, tokenize  # noqa: E402
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
 READONLY_REASON = ("{dir} is sclaude's own checkout, and a session does not change "
@@ -53,6 +53,18 @@ TO_LAST = ("cp", "mv", "install", "ln")
 SEPS = ("|", "||", "&&", ";", "&")
 
 
+def unwrap(segment):
+    """The call itself, past `sudo`, `env X=1`, `timeout 5` and the like.
+
+    strip_wrappers knows the wrappers but also cuts every word to its last
+    path part, and a write's target needs its path; so only its count of words
+    dropped from the front is taken. Without this `sudo git commit` and
+    `env git commit` were not git calls at all here.
+    """
+    bare = strip_wrappers(segment)
+    return segment[len(segment) - len(bare):] if bare else []
+
+
 def write_targets(command, cwd):
     """(word, directory it is relative to) for every path the command writes.
 
@@ -69,6 +81,7 @@ def write_targets(command, cwd):
         if w not in SEPS:
             segment.append(w)
             continue
+        segment = unwrap(segment)
         if segment:
             names = [c.rsplit("/", 1)[-1] for c in segment]
             if names[0] == "cd":
@@ -108,17 +121,23 @@ def git_writes_in(command, cwd, inside):
         if w not in SEPS:
             call.append(w)
             continue
+        call = unwrap(call)
         names = [c.rsplit("/", 1)[-1] for c in call]
         if names and names[0] == "cd" and len(call) > 1:
             where = None if "$" in call[1] else os.path.join(where or cwd, os.path.expanduser(call[1]))
         elif names and names[0] == "git":
             here, j = where, 1
             while j < len(call) and call[j].startswith("-"):
-                if call[j] == "-C" and j + 1 < len(call):
-                    here = None if "$" in call[j + 1] else os.path.join(
-                        here or cwd, os.path.expanduser(call[j + 1]))
+                name, has_value, value = call[j].partition("=")
+                if name in GIT_VALUED and not has_value:
+                    value = call[j + 1] if j + 1 < len(call) else ""
                     j += 1
                 j += 1
+                # The repository the call changes: -C moves like `cd`, and
+                # --git-dir and --work-tree name it outright.
+                if name in ("-C", "--git-dir", "--work-tree"):
+                    here = None if "$" in value or "`" in value else os.path.join(
+                        here or cwd, os.path.expanduser(value))
             if j < len(call) and call[j] in GIT_WRITES and (here is None or inside(here)):
                 return True
         call = []

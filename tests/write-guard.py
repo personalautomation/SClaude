@@ -75,6 +75,18 @@ for command, cwd, want in (
         ("git -C /home/u/sclaude add -A", "/home/u/myapp-1", "deny"),
         ("cd /home/u/sclaude && git reset --hard", "/home/u/myapp-1", "deny"),
         ("cp /tmp/x /home/u/sclaude/README.md", "/tmp", "deny"),
+        # git's own options before the subcommand, and a wrapper in front: a
+        # review got all of these past the guard while `git commit` alone
+        # was refused.
+        ("git -c user.name=x commit -m x", "/home/u/sclaude", "deny"),
+        ("git -c core.hooksPath=/dev/null commit -am x", "/home/u/sclaude", "deny"),
+        ("sudo git commit -m x", "/home/u/sclaude", "deny"),
+        ("command git commit -m x", "/home/u/sclaude", "deny"),
+        ("env GIT_X=1 git commit -m x", "/home/u/sclaude", "deny"),
+        ("timeout 5 git -C . add -A", "/home/u/sclaude", "deny"),
+        ("git --work-tree=/home/u/sclaude checkout -- .", "/tmp", "deny"),
+        ("sudo rm sclaude/x", "/home/u/sclaude", "deny"),
+        ("env X=1 cp /tmp/a sclaude/x", "/home/u/sclaude", "deny"),
         # Reading it, and writing the product, from inside it or not.
         ("cat sclaude/lib/run.sh", "/home/u/sclaude", "allow"),
         ("git log --oneline -5", "/home/u/sclaude", "allow"),
@@ -82,6 +94,8 @@ for command, cwd, want in (
         ("cd /home/u/myapp-1 && echo x > notes.md", "/home/u/sclaude", "allow"),
         ("cd /home/u/myapp-1 && git commit -qm fix", "/home/u/sclaude", "allow"),
         ("git -C /home/u/myapp-1 commit -qm fix", "/home/u/sclaude", "allow"),
+        ("git -c user.name=x -C /home/u/myapp-1 commit -qm fix", "/home/u/sclaude", "allow"),
+        ("sudo git -C /home/u/myapp-1 commit -qm fix", "/home/u/sclaude", "allow"),
         ("cp sclaude/policy/vercel.json /home/u/myapp-1/.sclaude/team/", "/home/u/sclaude", "allow"),
         ("echo x > /home/u/myapp-1/.sclaude/team/policy.json", "/home/u/sclaude", "allow")):
     check("readonly %s (in %s)" % (command, cwd), hook("Bash", RO, cwd, command=command), want)

@@ -180,10 +180,10 @@ exit 1
 
         # `git`, with exactly one subcommand taken away.
         #
-        # This is not caution. `cmd_resume` calls `push_instruments`
-        # unconditionally, and that pushes `$INSTRUMENTS` — which
+        # This is not caution. `cmd_resume` once pushed `$INSTRUMENTS`
+        # unconditionally, and `$INSTRUMENTS` is what
         # `readlink -f "$0"` resolves to the *real* repository this bench lives
-        # in, whatever HOME says. Left alone, running the test suite pushes the
+        # in, whatever HOME says. Left alone, running the test suite pushed the
         # developer's unpushed commits to GitHub: verified in the act, with
         # `git -C ~/instruments push origin main` visible in `ps` while
         # the bench ran.
@@ -193,9 +193,8 @@ exit 1
         # before reaching `watch_seen`, and two assertions failed with nothing to
         # suggest why.
         #
-        # A refusal rather than a silent success: `push_instruments` reports a
-        # failed push in words and carries on, which is the path this bench
-        # should exercise anyway. Everything else is the real git — the fixture
+        # A refusal rather than a silent success, so that a push anything here
+        # still attempts fails in words rather than reaching GitHub. Everything else is the real git — the fixture
         # is a real repository and the orchestrator reads it constantly.
         self.write("git", '''
 # The subcommand is the first word that is neither a flag nor a flag's value.

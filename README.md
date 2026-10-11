@@ -1234,8 +1234,7 @@ instruments `HEAD` from either side of a review that committed — it already
 compared the two to decide whether to push — and the summary turns that range
 into commit subjects with `git log`. The range is honest by construction:
 while a review is open, the only things running in that tree are the review's
-own session and read-only git calls, and `push_instruments` pushes without ever
-committing.
+own session and read-only git calls.
 
 A row is one commit, and the step is named once per review, so a review with
 four commits reads as one piece of work rather than four unrelated ones.

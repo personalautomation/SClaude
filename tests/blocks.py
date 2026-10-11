@@ -19,8 +19,6 @@
 #                       shipped against a schema that was never pushed.
 #   dev_cwd             which tree the server on the port belongs to. Wrong, and
 #                       somebody is offered a restart of somebody else's server.
-#   push_instruments    pushes after a friction review. Wrong, and a commit that
-#                       is not ours rides along.
 #   vercel_project_flag the `--project` for a preview. Empty once already, and
 #                       it created a spare Vercel project that had to be deleted
 #                       by hand.
@@ -336,85 +334,6 @@ try:
     check("dev-cwd-silent-for-a-dead-pid", out.strip(), "")
     out, _, rc = run_bash('dev_cwd ""', tmp)
     check("dev-cwd-refuses-an-empty-pid", rc != 0, True)
-
-    # --- push_instruments ----------------------------------------------------
-    #
-    # Pushes the friction review's commits. `git push` is stubbed: what is under
-    # test is when it decides to push, not whether GitHub accepts it.
-
-    INST = os.path.join(tmp, "inst")
-    os.makedirs(INST)
-    git("init", "-q", "-b", "main", cwd=INST)
-    git("config", "user.email", "t@t", cwd=INST)
-    git("config", "user.name", "T", cwd=INST)
-    with open(os.path.join(INST, "a"), "w") as fh:
-        fh.write("1\n")
-    git("add", "-A", cwd=INST)
-    git("commit", "-qm", "first", cwd=INST)
-    inst_origin = os.path.join(tmp, "inst-origin.git")
-    subprocess.run(["git", "clone", "-q", "--bare", INST, inst_origin],
-                   capture_output=True, check=False)
-    git("remote", "add", "origin", inst_origin, cwd=INST)
-    git("fetch", "-q", "origin", cwd=INST)
-
-    pushlog = os.path.join(tmp, "pushed")
-
-    def push(inst=INST):
-        if os.path.exists(pushlog):
-            os.remove(pushlog)
-        out, _, _ = run_bash(
-            'INSTRUMENTS=%s\n'
-            'git() { if [[ "$*" == *" push "* ]]; then echo "$*" >> %s; return 0; fi; '
-            'command git "$@"; }\n'
-            'push_instruments' % (inst, pushlog),
-            tmp, modules=("ui", "state", "run"))
-        return out
-
-    # Nothing ahead of origin: silent, and no push. This is the ordinary case —
-    # the function is called on the way into a feature too.
-    out = push()
-    check("push-silent-with-nothing-to-send", out.strip(), "")
-    check("push-does-not-push-nothing", os.path.exists(pushlog), False)
-
-    # One commit ahead: it pushes, and says how many.
-    with open(os.path.join(INST, "a"), "w") as fh:
-        fh.write("2\n")
-    git("commit", "-qam", "second", cwd=INST)
-    out = push()
-    check_true("push-sends-when-ahead", os.path.exists(pushlog))
-    check_true("push-counts-the-commits", "1 commit(s)" in out)
-    if os.path.exists(pushlog):
-        check_true("push-names-the-branch", "origin main" in open(pushlog).read())
-
-    # A detached HEAD is not a branch, and pushing from one would send a commit
-    # to whatever name happened to resolve. Two things stop it — the explicit
-    # `!= "HEAD"` and, behind it, `rev-list origin/HEAD..HEAD` failing — so this
-    # asserts on the guard itself as well as on the outcome. Without that, a
-    # removed guard still passes on the accident of the second one, which is how
-    # a test comes to describe a defence that is no longer there.
-    sha = git("rev-parse", "HEAD", cwd=INST).stdout.strip()
-    git("checkout", "-q", sha, cwd=INST)
-    out = push()
-    check("push-refuses-a-detached-head", os.path.exists(pushlog), False)
-    run_src = open(os.path.join(LIB, "run.sh"), encoding="utf-8").read()
-    check_true("push-names-the-detached-head-explicitly",
-               '"$branch" != "HEAD"' in run_src)
-    git("checkout", "-q", "main", cwd=INST)
-
-    # No origin at all: counting what origin lacks would count every commit,
-    # and the function must answer nothing rather than push somewhere.
-    lone = os.path.join(tmp, "lone")
-    os.makedirs(lone)
-    git("init", "-q", "-b", "main", cwd=lone)
-    git("config", "user.email", "t@t", cwd=lone)
-    git("config", "user.name", "T", cwd=lone)
-    with open(os.path.join(lone, "a"), "w") as fh:
-        fh.write("1\n")
-    git("add", "-A", cwd=lone)
-    git("commit", "-qm", "only", cwd=lone)
-    out = push(lone)
-    check("push-silent-without-an-upstream", out.strip(), "")
-    check("push-does-not-push-without-an-upstream", os.path.exists(pushlog), False)
 
     # --- the rollback's own silent failures ----------------------------------
     #

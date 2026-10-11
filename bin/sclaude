@@ -229,9 +229,8 @@ cmd_new() {
   # what production's address is. Most of it is read out of the repository and
   # shown for correction rather than asked from scratch.
   #
-  # Here rather than in require_repo, by the same argument push_instruments
-  # makes below: require_repo runs for `sclaude status` too, which the bot calls
-  # on a timeout, and a question there would hang it. Starting a feature is the
+  # Here rather than in require_repo: require_repo runs for `sclaude status`
+  # too, which the bot calls on a timeout, and a question there would hang it. Starting a feature is the
   # moment somebody is present and the answers are about to matter.
   #
   # A decline is an answer and the feature starts anyway: without a config there

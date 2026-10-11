@@ -1591,8 +1591,8 @@ PYEOF
 
 # Pushes the feature's branch after a friction review committed to it.
 #
-# Not a reason to stop: like push_instruments, a failed push is about delivery,
-# and the next step's push carries the commit as well.
+# Not a reason to stop: a failed push is about delivery, and the next step's
+# push carries the commit as well.
 friction_push_project() {
   local wt="$1" branch
   branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
@@ -1796,72 +1796,6 @@ cmd_propose() {
   warn "  could not send it as a pull request (gh missing, or origin is not on GitHub)."
   warn "  The commits are on $branch: push it and open the pull request by hand."
   return 1
-}
-
-# Sends the review's commits to origin.
-#
-# The review edits the orchestrator and commits to the branch instruments_sync
-# put it on — main for a maintainer, dev/<name> for everybody else — but until
-# now nobody did the pushing, and the fix stayed on one machine. That is not
-# noticeable at once: the next step takes it from the working tree and behaves
-# correctly, so an unpushed commit lies there exactly until somebody remembers
-# it.
-#
-# Without a question: the commit has already been approved by the human inside
-# the review session, and a second confirmation would stand in the middle of the
-# cycle, before the next step.
-#
-# A failed push does not bring the cycle down — it is about delivery rather than
-# the work: the fix is in place and available to the step. So we warn and carry
-# on, naming the command to finish it by hand.
-push_instruments() {
-  local branch ahead
-  branch="$(git -C "$INSTRUMENTS" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  [[ -n "$branch" && "$branch" != "HEAD" ]] || return 0
-  # Only the branches sclaude itself commits to. A maintainer's `wip/foo` is
-  # theirs to publish or not, and pushing it unasked on the way into a feature
-  # would decide that for them.
-  instruments_own_branch "$branch" || return 0
-
-  # Nothing to send is the ordinary case once this is also called on the way
-  # into a feature: say nothing and cost nothing. A branch with no upstream
-  # answers this with a fatal error rather than a number, so the question is
-  # asked in a way that cannot throw — hence `|| true` and the digit check
-  # rather than `@{u}`, which dies where there is no upstream at all.
-  #
-  # Counted against everything origin has rather than against origin/<branch>:
-  # a developer's dev/<name> does not exist on origin until its first push, and
-  # a count against a missing ref is an error — which read as "nothing to send"
-  # and kept the branch on this machine for ever.
-  # With no origin at all, "not on origin" is every commit there is — so no
-  # origin is asked about first, and answers nothing.
-  git -C "$INSTRUMENTS" remote get-url origin >/dev/null 2>&1 || return 0
-  # A fork counts as sent: a commit that is on it is in its pull request.
-  ahead="$(git -C "$INSTRUMENTS" rev-list --count HEAD --not --remotes=origin --remotes=fork 2>/dev/null || true)"
-  [[ "$ahead" =~ ^[0-9]+$ ]] || return 0
-  [[ "$ahead" -gt 0 ]] || return 0
-
-  # Somebody MAINTAINERS does not list reaches main through a pull request,
-  # and sclaude opens it for them (instruments_propose). Where that cannot be
-  # done — no gh, no GitHub origin — the branch is pushed to origin as before.
-  if [[ "$branch" != "main" ]] && ! developer_is_maintainer; then
-    instruments_propose "$branch" "$ahead" && return 0
-  fi
-
-  info "  instruments: pushing $ahead commit(s) to origin/$branch"
-  if GIT_TERMINAL_PROMPT=0 git -C "$INSTRUMENTS" push -u origin "$branch" >/dev/null 2>&1; then
-    info "  instruments: pushed"
-  else
-    warn "  instruments: push failed — the work is committed but not sent"
-    warn "  finish it by hand: git -C $INSTRUMENTS push origin $branch"
-    # Reached only without gh, or with an origin gh cannot place:
-    # instruments_propose does the forking when it can.
-    if ! developer_is_maintainer; then
-      warn "  no write access? propose it instead:"
-      warn "    cd $INSTRUMENTS && gh repo fork --remote --remote-name fork"
-      warn "    git push -u fork $branch && gh pr create --fill"
-    fi
-  fi
 }
 
 # The branches sclaude may push and merge main into: main, and this person's

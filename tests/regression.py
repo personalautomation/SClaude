@@ -975,28 +975,6 @@ check_true("watcher-knows-in-qa", 'field "$file" columns.qa' in watcher)
 check_true("orchestrator-fix-checked-before-blocked",
            -1 < gate_body.find('"$frc" -eq 4') < gate_body.find('"$frc" -eq 3'))
 
-# --- a friction fix that was committed and never sent ------------------------
-#
-# run_friction pushes after the review session, but only if it reaches that
-# line: a session interrupted after it had committed leaves the fix on one
-# machine. Nothing notices, because the next step reads the working tree and
-# behaves correctly — two of them were found by eye, days later.
-check_true("push-checks-there-is-something-to-send",
-           re.search(r'ahead="\$\(git -C "\$INSTRUMENTS" rev-list --count', run_sh)
-           is not None)
-check_true("push-is-silent-with-nothing-to-send",
-           re.search(r'\[\[ "\$ahead" -gt 0 \]\] \|\| return 0', run_sh) is not None)
-# A branch with no upstream answers rev-list with a fatal error rather than a
-# number, so the digit check is what keeps this from pushing blind.
-check_true("push-survives-a-branch-with-no-upstream",
-           re.search(r'\[\[ "\$ahead" =~ \^\[0-9\]\+\$ \]\] \|\| return 0', run_sh)
-           is not None)
-
-# Never called on its own any more: the review sessions change the product, not
-# sclaude's checkout, so there is nothing of theirs to send, and a change to
-# sclaude is proposed deliberately.
-check("push-never-automatic", len(re.findall(r"^\s*push_instruments$", sclaude + run_sh, re.M)), 0)
-
 # The module has to be in the source list, or none of it loads.
 # Starting a step over clears the regression's spent attempts, or an exhausted
 # stage stays wedged: once both fixing sessions are used up, every later entry

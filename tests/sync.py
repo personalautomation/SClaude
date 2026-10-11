@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
-# A bench for instruments_sync and push_instruments: how the orchestrator keeps
-# itself up to date and where a friction review's commits go.
+# A bench for instruments_sync and instruments_propose: how the orchestrator
+# keeps itself up to date and how a change to it is proposed.
 #
 # Everybody installs instruments from one repository, so this is the only way a
 # fix reaches a team; and MAINTAINERS decides who may commit the orchestrator
@@ -157,11 +157,6 @@ with tempfile.TemporaryDirectory() as tmp:
            os.path.isfile(os.path.join(w.me, "mine.txt")), w.branch()),
           (True, True, "dev/alice-b"))
 
-    print("push_instruments on a branch origin has never seen")
-    out = w.run("push_instruments")
-    check("new-branch-pushed", git(w.origin, "rev-parse", "--verify", "-q",
-                                   "refs/heads/dev/alice-b") != "", True)
-
     print("conflict")
     commit(w.me, "a.txt", "mine\n")
     w.upstream_commit("a.txt", "theirs\n")
@@ -185,9 +180,6 @@ with tempfile.TemporaryDirectory() as tmp:
     out = w.run()
     check("wip-not-merged", (os.path.isfile(os.path.join(w.me, "d.txt")),
                              "not" in out and "sclaude's to merge into" in out), (False, True))
-    w.run("push_instruments")
-    check("wip-not-pushed", git(w.origin, "rev-parse", "--verify", "-q",
-                                "refs/heads/wip/idea"), "")
 
     print("a merge that fails without a conflict")
     git(w.me, "switch", "-q", "dev/alice-b")
@@ -231,7 +223,7 @@ with tempfile.TemporaryDirectory() as tmp:
         log, opened = os.path.join(base, "gh.log"), os.path.join(base, "pr")
         env = {"CAN_PUSH": can_push, "FORK": os.path.join(base, "fork.git"),
                "GH_LOG": log, "PR_OPEN": opened}
-        out = w.run(GH_STUB + "push_instruments", env=env)
+        out = w.run(GH_STUB + "instruments_propose dev/alice-b 1", env=env)
         calls = open(log).read() if os.path.exists(log) else ""
         target = os.path.join(base, "fork.git") if can_push == "false" else w.origin
         check("propose-%s-pushed" % can_push,
@@ -244,14 +236,11 @@ with tempfile.TemporaryDirectory() as tmp:
         check("propose-%s-said" % can_push, "opened a pull request: https://pr/1" in out, True)
         # The next push updates the same pull request rather than opening another.
         commit(w.me, "fix2.txt", "more\n")
-        out = w.run(GH_STUB + "push_instruments", env=env)
+        out = w.run(GH_STUB + "instruments_propose dev/alice-b 1", env=env)
         calls = open(log).read()
         check("propose-%s-one-fork" % can_push, calls.split("\n").count("fork"), 1 if can_push == "false" else 0)
         check("propose-%s-one-pr" % can_push, sum(l.startswith("create ") for l in calls.splitlines()), 1)
         check("propose-%s-pr-updated" % can_push, "your pull request has it" in out, True)
-        # Nothing new: nothing sent, nothing asked.
-        out = w.run(GH_STUB + "push_instruments", env=env)
-        check("propose-%s-quiet-when-sent" % can_push, "pushing" in out, False)
 
 # --- sclaude propose: commits on main become a branch and a pull request ------
 with tempfile.TemporaryDirectory() as tmp:

@@ -521,9 +521,8 @@ rollback_apply_sql() {
   # than returning: `switched` carries the outcome instead of an early return.
   # The credential is never printed: psql takes it as an argument, and the
   # argument is not echoed.
-  local switched=1 prod back schema_dump
+  local switched=1 prod snapshot schema_dump
   prod="$(environment_production "$REPO")"
-  back="$(environment_current "$REPO")"
   schema_dump="$(project_get database.schemaDump "$wt" || true)"
 
   if [[ -z "$prod" ]]; then
@@ -533,6 +532,13 @@ rollback_apply_sql() {
     return 0
   fi
 
+  # Kept exactly, rather than by name: a .env.local that is no declared
+  # environment has no name to switch back to.
+  snapshot="$(environment_snapshot "$REPO")" || {
+    warn "  could not keep the main tree's environment to put it back — nothing was run."
+    state_set "$state" rollback.db.status ahead 2>/dev/null || true
+    return 0
+  }
   if ! environment_switch "$REPO" "$prod"; then
     switched=0
     warn "  could not switch to the production environment — nothing was run."
@@ -589,10 +595,8 @@ rollback_apply_sql() {
 
   # Back to where the tree was, always — including after every early return
   # above, which is why they set the status and fall through to here.
-  if [[ -n "$back" && "$back" != "$prod" ]]; then
-    environment_switch "$REPO" "$back" >/dev/null 2>&1 \
-      || warn "  could not switch back to \"$back\" — check: readlink $REPO/.env.local"
-  fi
+  environment_restore "$REPO" "$snapshot" \
+    || warn "  could not put the main tree's environment back — check: readlink $REPO/.env.local"
   return 0
 }
 

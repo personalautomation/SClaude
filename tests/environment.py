@@ -468,6 +468,29 @@ def main():
         check("switch: to a file that is not there fails",
               run('environment_switch "%s" nosuch && echo ok || echo no' % sw), "no")
 
+        # A snapshot puts a tree back exactly, including a .env.local that is
+        # a plain file of the person's own: no name could switch back to that,
+        # and a rollback left the tree on production.
+        local = os.path.join(sw, ".env.local")
+        os.remove(local)
+        with open(local, "w") as fh:
+            fh.write("MINE=1\n")
+        with open(os.path.join(sw, "supabase", ".temp", "project-ref"), "w") as fh:
+            fh.write("oldref\n")
+        out = run('db_cli() { echo %s; }; s="$(environment_snapshot "%s")"; '
+                  'environment_switch "%s" dev >/dev/null; environment_current "%s"; '
+                  'environment_restore "%s" "$s" && echo restored; [ -e "$s" ] || echo gone'
+                  % (stub, sw, sw, sw, sw))
+        check("snapshot: switched, then restored", out.split(), ["dev", "restored", "gone"])
+        check("snapshot: the own file is back",
+              (os.path.islink(local), open(local).read()), (False, "MINE=1\n"))
+        check("snapshot: the CLI link is back",
+              open(os.path.join(sw, "supabase", ".temp", "project-ref")).read(), "oldref\n")
+        on_env(sw, "localdb")
+        out = run('s="$(environment_snapshot "%s")"; environment_switch "%s" dev >/dev/null 2>&1; '
+                  'environment_restore "%s" "$s"; environment_current "%s"' % (sw, sw, sw, sw))
+        check("snapshot: a link is back", out, "localdb")
+
         check("value: read from the environment's file",
               run('environment_value "%s" dev POSTGRES_URL_NON_POOLING' % sw),
               "postgresql://u:s%40cret@db:5432/postgres")

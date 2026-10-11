@@ -1529,13 +1529,14 @@ remind_prod() {
     # what is declared, and a missing promote leaves the migrations unshipped
     # where a guessed one would run something nobody named.
     local -a prod_cmds=("cd $REPO" "git pull")
-    local promote_cmd schema_path back
+    local promote_cmd schema_path
     promote_cmd="$(project_get database.promote "$wt" || true)"
     schema_path="$(project_get database.schemaFile "$wt" || true)"
-    # Where the main tree is now: a promote may switch it to production, and the
-    # block ends by putting it back here.
-    back="$(environment_current "$REPO")"
     if [[ -n "$promote_cmd" ]]; then
+      # A promote may switch the main tree to production, and the block ends
+      # by putting it back exactly as it was (environment_snapshot): by name
+      # it could not, when .env.local is no declared environment.
+      prod_cmds+=("_env=\"\$(environment_snapshot $(printf %q "$REPO"))\"")
       prod_cmds+=("$promote_cmd")
       prod_cmds+=("git add $migrations_dir${schema_path:+ $schema_path}")
       prod_cmds+=("git commit -m 'chore(db): promote migrations for $slug'")
@@ -1549,8 +1550,8 @@ remind_prod() {
     # What production uploads is the main tree, and sclaude keeps its own
     # folder there (scratch.sh).
     write_vercelignore "$REPO"
-    [[ -n "$back" ]] && ! environment_protected "$REPO" "$back" \
-      && prod_cmds+=("environment_switch $(printf %q "$REPO") $(printf %q "$back")")
+    [[ -n "$promote_cmd" ]] \
+      && prod_cmds+=("environment_restore $(printf %q "$REPO") \"\$_env\"")
 
     if run_block \
       "Production" \

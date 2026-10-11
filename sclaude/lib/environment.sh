@@ -145,6 +145,49 @@ environment_switch() {
   [[ "$(environment_settled "$wt")" == "$name" ]]
 }
 
+# What a tree is on, exactly, kept so that it can be put back: .env.local as it
+# is (a link, or a file of the person's own) and the Supabase CLI's link. A
+# switch by name cannot restore a .env.local that is a plain file or points at
+# a file the config does not name: environment_current has no name for it, and
+# the tree used to stay on whatever it was switched to — production, after a
+# rollback. Prints the directory the copy is in, private to this user.
+#
+#   environment_snapshot <tree>
+environment_snapshot() {
+  local wt="$1" dir
+  dir="$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/sclaude-env.XXXXXX")" || return 1
+  if [[ -L "$wt/.env.local" ]]; then
+    readlink "$wt/.env.local" > "$dir/link"
+  elif [[ -e "$wt/.env.local" ]]; then
+    cp -p "$wt/.env.local" "$dir/file"
+  fi
+  [[ -d "$wt/supabase/.temp" ]] && cp -rp "$wt/supabase/.temp" "$dir/temp"
+  echo "$dir"
+}
+
+# Puts back what environment_snapshot kept, and removes the copy.
+#
+#   environment_restore <tree> <dir>
+environment_restore() {
+  local wt="$1" dir="$2" before
+  [[ -n "$dir" && -d "$dir" ]] || return 1
+  before="$(readlink -f "$wt/.env.local" 2>/dev/null || true)"
+  rm -f "$wt/.env.local"
+  if [[ -f "$dir/link" ]]; then
+    ln -sfn "$(cat "$dir/link")" "$wt/.env.local"
+  elif [[ -f "$dir/file" ]]; then
+    cp -p "$dir/file" "$wt/.env.local"
+  fi
+  if [[ -d "$wt/supabase" ]]; then
+    rm -rf "$wt/supabase/.temp"
+    [[ -d "$dir/temp" ]] && cp -rp "$dir/temp" "$wt/supabase/.temp"
+  fi
+  # A build made on the file in between serves its keys: as environment_switch.
+  [[ "$before" != "$(readlink -f "$wt/.env.local" 2>/dev/null || true)" && -d "$wt/.next" ]] \
+    && rm -rf "$wt/.next"
+  rm -rf "$dir"
+}
+
 # The name of a key sclaude reads from the files (`envKeys`, envs.py).
 environment_key() {
   python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import envs; print(envs.keys(sys.argv[2])[sys.argv[3]])' \

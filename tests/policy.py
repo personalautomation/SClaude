@@ -80,7 +80,7 @@ try:
         "deny": [{"command": "npm run db:promote", "why": "prod migrations"}],
         "allow": [{"command": "vercel deploy", "why": "previews are ours"},
                   {"command": "gh pr merge", "why": "trying to lift core"},
-                  {"command": "npm run check:r2", "why": "dev bucket only"}],
+                  {"command": "npm run check:storage", "why": "dev bucket only"}],
     })
     write(team, ".sclaude/people/ann/policy.json", {
         "deny": [{"command": "npm run seed", "why": "I keep my data"}],
@@ -98,7 +98,7 @@ try:
     merged = policy.merged(team, "ann")
     allowed = [" ".join(a["words"]) for a in merged["allow"]]
     check("allow-becomes-permission", sorted(allowed),
-          ["npm run check:r2", "npm run storybook", "vercel deploy"])
+          ["npm run check:storage", "npm run storybook", "vercel deploy"])
     check("supabase-tools-off", "mcp__plugin_supabase_supabase__apply_migration" in merged["tools"], True)
 
     # --- what .sclaude/config.json already names, banned from there ---
@@ -106,12 +106,12 @@ try:
     write(conf, ".sclaude/config.json", {"database": {"promote": "npm run db:promote",
                                                "envProd": "npm run env:prod"}})
     write(conf, ".sclaude/team/policy.json", {
-        "deny": [{"command": "node scripts/env.mjs prod", "why": "the script under env:prod"}]})
+        "deny": [{"command": "node scripts/tool.mjs prod", "why": "the script under env:prod"}]})
     check("config-promote-banned", verdict(conf, "npm run db:promote"), "deny")
     check("config-envprod-banned", verdict(conf, "npx npm run env:prod"), "deny")
-    check("path-rule-fires", verdict(conf, "node scripts/env.mjs prod"), "deny")
-    check("path-rule-fires-dotted", verdict(conf, "node ./scripts/env.mjs prod --yes"), "deny")
-    check("path-rule-narrow", verdict(conf, "node scripts/env.mjs dev"), "allow")
+    check("path-rule-fires", verdict(conf, "node scripts/tool.mjs prod"), "deny")
+    check("path-rule-fires-dotted", verdict(conf, "node ./scripts/tool.mjs prod --yes"), "deny")
+    check("path-rule-narrow", verdict(conf, "node scripts/tool.mjs dev"), "allow")
     write(conf, ".sclaude/team/policy.json", {"allow": [{"command": "npm run env:prod", "why": "ours"}]})
     check("config-ban-liftable-by-team", verdict(conf, "npm run env:prod"), "allow")
 

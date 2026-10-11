@@ -104,65 +104,6 @@ check_true("undeclared-stage-does-not-block",
 check_true("commands-come-from-the-project", "project_command" in regression)
 check_true("missing-command-is-fatal", "no command for this part" in regression)
 
-# The product's own config, where it is checked out. instruments is machine-level
-# and must stay testable without it, so this half is guarded — but where the
-# project is here, its local stage has to be complete: it is what closes step 2,
-# and anything missing from it reaches the pull request unchecked.
-CONFIG = os.path.expanduser("~/myapp/.sclaude/config.json")
-if os.path.isfile(CONFIG):
-    with open(CONFIG, encoding="utf-8") as fh:
-        config = json.load(fh)
-    local_parts = (config.get("regression") or {}).get("local") or []
-    deployed_parts = (config.get("regression") or {}).get("preview") or []
-    commands = config.get("commands") or {}
-
-    check("config-local-parts", local_parts,
-          ["typecheck", "lint", "build", "migrations", "migrations:style",
-           "schema", "check:rls", "check:r2", "e2e"])
-
-    # migrations and schema are also in .githooks/pre-push, and they are here
-    # anyway: --no-verify skips the hook entirely and both cost seconds. What
-    # must NOT appear is the rest of checks.yml — those run on every pull
-    # request from the repository alone, and repeating them would spend minutes
-    # to learn nothing. (build/typecheck/lint are the deliberate exception: they
-    # catch before a pull request exists, which is the point of a gate on step 2.)
-    #
-    # migrations:style is the second exception, added by myapp in c27a5b3.
-    # Every feature has a database of its own now, so two features can each
-    # add migration 0062 and neither stack notices; the style check fails on a
-    # shared number, and it has to run before the branch leaves step 2 rather
-    # than when the second pull request finally meets the first on main.
-    #
-    # Checked by what a part runs, not by its name. The two namespaces differ —
-    # the part is `migrations:style`, the script `check:migrations:style` — and
-    # a check on names alone stayed silent when a checks.yml script arrived
-    # under a part name of its own.
-    local_commands = [commands.get(part) or "" for part in local_parts]
-    for absent in ("check:bio", "check:links", "db:types:check"):
-        runs_it = re.compile(r"\brun\s+%s(\s|$)" % re.escape(absent))
-        check_true("config-local-omits-%s" % absent,
-                   absent not in local_parts
-                   and not any(runs_it.search(cmd) for cmd in local_commands))
-
-    # A deployed stage asks what a browser sees and nothing else. check:rls and
-    # check:r2 create and delete real rows and refuse a protected environment
-    # outright; a build has already happened on Vercel's side.
-    check("config-deployed-parts", deployed_parts, ["e2e"])
-    check_true("config-deployed-no-db-checks",
-               "check:rls" not in deployed_parts and "check:r2" not in deployed_parts)
-    check_true("config-deployed-not-empty", len(deployed_parts) > 0)
-
-    # Every part either stage names must have a command, or the run stops on it.
-    for part in set(local_parts) | set(deployed_parts):
-        check_true("config-command-for-%s" % part, bool(commands.get(part)))
-
-    # `db:schema` writes the snapshot unless it is told to check, and a
-    # regression that rewrote one would be reporting on a file it had just
-    # changed.
-    check_true("config-schema-only-checks",
-               "--check" in (commands.get("schema") or ""))
-
-
 # --- the board's columns ----------------------------------------------------
 #
 # They were literals here — "Backlog", "In progress", "In QA", "Done" — one

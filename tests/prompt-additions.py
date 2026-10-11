@@ -41,17 +41,17 @@ try:
         return subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
 
     check("nothing-to-add", additions("review"), "")
-    put(".sclaude/team/prompts/review.md", "Run npm run check:r2 after upload changes.\n")
+    put(".sclaude/team/prompts/review.md", "Run npm run check:storage after upload changes.\n")
     put(".sclaude/people/ann/prompts/review.md", "I like small commits.\n")
     put(".sclaude/people/bob/prompts/review.md", "Bob's own.\n")
     put(".sclaude/team/prompts/code.md", "")
     out = additions("review")
-    check("team-then-person", out.index("check:r2") < out.index("small commits"), True)
+    check("team-then-person", out.index("check:storage") < out.index("small commits"), True)
     check("team-heading", "**This product adds** (`.sclaude/team/prompts/review.md`)" in out, True)
     check("person-heading", "**ann adds** (`.sclaude/people/ann/prompts/review.md`)" in out, True)
     check("not-another-persons", "Bob's own" in out, False)
     check("empty-adds-nothing", additions("code"), "")
-    check("other-step-adds-nothing", "check:r2" in additions("plan"), False)
+    check("other-step-adds-nothing", "check:storage" in additions("plan"), False)
     check("no-name-team-only", "small commits" in additions("review", name=""), False)
 
     rp = re.search(r"^render_prompt\(\) \{\n.*?^\}\n", RUN, re.S | re.M).group(0)

@@ -36,7 +36,6 @@ KNOWN_PARTS = [
     ("migrations", ["check:migrations"]),
     ("schema", ["db:schema"]),
     ("check:rls", ["check:rls"]),
-    ("check:r2", ["check:r2"]),
     ("e2e", ["test:e2e", "e2e", "test:playwright"]),
 ]
 

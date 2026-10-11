@@ -140,7 +140,7 @@ def vercel_refuses(words):
     """The reason this `vercel` call is banned, or None."""
     if not words or words[0] != "vercel" or not rule_on("vercel-deploy", words):
         return None
-    # The subcommand is the first word that is not a flag. `--scope agorateam`
+    # The subcommand is the first word that is not a flag. `--scope my-team`
     # and `--token x` carry a value, but a value is never a subcommand's name
     # here: a read is named by its own first word, so the longest prefix that
     # matches the allowlist decides.

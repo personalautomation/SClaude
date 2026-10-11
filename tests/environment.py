@@ -82,8 +82,8 @@ source "%s/environment.sh"
 # How a product tells sclaude about its environments (.sclaude/config.json).
 ENVIRONMENTS_CONTRACT = {
     "file": "config/environments.json",
-    "current": "node scripts/lib/env-guard.mjs name",
-    "settled": "node scripts/lib/env-guard.mjs settled",
+    "current": "node scripts/lib/envs.mjs name",
+    "settled": "node scripts/lib/envs.mjs settled",
     "switch": "npm run env:{name}",
     "status": "npm run env:status",
 }
@@ -186,16 +186,16 @@ def main():
         #
         # `environment_protected` answering "protected" for an unreadable config
         # is the right direction for a permission check and the wrong one for
-        # "is this worktree somewhere alarming": a project with an env-guard and
+        # "is this worktree somewhere alarming": a project with an environments script and
         # no config/environments.json is one that does not do environments at
         # all. It used to warn that the tree was on a protected environment and
         # return 1 — which `ensure_dev` reads as `switched=1` and answers by
         # tearing down a healthy dev server on every single step.
         noconf = os.path.join(tmp, "noconf")
         os.makedirs(os.path.join(noconf, "scripts", "lib"), exist_ok=True)
-        with open(os.path.join(noconf, "scripts", "env.mjs"), "w") as fh:
+        with open(os.path.join(noconf, "scripts", "switch.mjs"), "w") as fh:
             fh.write("")
-        with open(os.path.join(noconf, "scripts", "lib", "env-guard.mjs"), "w") as fh:
+        with open(os.path.join(noconf, "scripts", "lib", "envs.mjs"), "w") as fh:
             fh.write('if (process.argv[2] === "name") console.log("dev");\n')
 
         check("a project without environments is left alone, quietly",
@@ -338,7 +338,7 @@ def main():
                              "..", "sclaude", "hooks")
         forbidden = os.path.join(hooks, "forbidden-commands.py")
 
-        # The hook asks the project where it is by running env-guard.mjs, so the
+        # The hook asks the project where it is by running envs.mjs, so the
         # fixture needs one.
         #
         # The stand-in answers `settled` and refuses everything else, which is
@@ -350,21 +350,21 @@ def main():
         # anything it was asked would pass either way and prove nothing.
         guard_dir = os.path.join(wt, "scripts", "lib")
         os.makedirs(guard_dir, exist_ok=True)
-        guard = os.path.join(guard_dir, "env-guard.mjs")
+        guard = os.path.join(guard_dir, "envs.mjs")
         # The product tells the hook how to ask, in its team policy: the same
         # settings a product on Supabase writes (sclaude/policy/supabase.json).
         os.makedirs(os.path.join(wt, ".sclaude", "team"), exist_ok=True)
         with open(os.path.join(wt, ".sclaude", "team", "policy.json"), "w") as fh:
             json.dump({"integrations": ["supabase"]}, fh)
         with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
-            json.dump({"environments": {"settled": "node scripts/lib/env-guard.mjs settled",
+            json.dump({"environments": {"settled": "node scripts/lib/envs.mjs settled",
                                         "file": "config/environments.json"}}, fh)
 
         def db_push_denied(env_name, subcommand="settled"):
             """Whether the hook refuses `supabase db push` on this environment.
 
             `subcommand` is the one the stub will answer; anything else exits
-            non-zero. Passing "name" simulates an env-guard too old to know
+            non-zero. Passing "name" simulates an environments script too old to know
             about `settled`.
             """
             with open(guard, "w") as fh:
@@ -412,11 +412,11 @@ def main():
             check("hook: db push on %s denied -> %s" % (label, want),
                   db_push_denied(name), want)
 
-        # An env-guard that only knows `name` is one from before the link was
+        # An environments script that only knows `name` is one from before the link was
         # being checked at all. Its silence is not permission: the hook asks for
         # `settled`, gets a non-zero exit, and refuses — which is the same
         # answer it gives for an environment it cannot identify.
-        check("hook: an env-guard without `settled` is refused",
+        check("hook: an environments script without `settled` is refused",
               db_push_denied("localdb", subcommand="name"), True)
 
         # --- a switch that fails leaves no server on production -----------

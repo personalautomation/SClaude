@@ -49,7 +49,7 @@ with open(os.path.join(PRODUCT, ".sclaude", "team", "policy.json"), "w") as _fh:
 # How it reports its environments: once, in its config, for every rule to read.
 with open(os.path.join(PRODUCT, ".sclaude", "config.json"), "w") as _fh:
     json.dump({"environments": {
-        "settled": "node scripts/lib/env-guard.mjs settled",
+        "settled": "node scripts/lib/envs.mjs settled",
         "file": "config/environments.json",
     }}, _fh)
 
@@ -506,7 +506,7 @@ def main():
                        "prod": {"confirm": True}}, fh)
 
         def guard(name):
-            with open(os.path.join(tree, "scripts", "lib", "env-guard.mjs"), "w") as fh:
+            with open(os.path.join(tree, "scripts", "lib", "envs.mjs"), "w") as fh:
                 fh.write("console.log(%s);\n" % json.dumps(name))
 
         def verdict(command):

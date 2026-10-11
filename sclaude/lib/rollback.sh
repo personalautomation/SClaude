@@ -516,8 +516,7 @@ rollback_apply_sql() {
   local wt="$1" sql="$2" url rc
   local state="$wt/.sclaude/local/feature/state.json"
 
-  # The credential is read from .env.prod, the same file and the same variable
-  # scripts/db-promote.mjs reads. It is never printed: psql takes it as an
+  # The credential is read from .env.prod. It is never printed: psql takes it as an
   # argument, and the argument is not echoed.
   # A failure here still falls through to the switch back at the end rather
   # than returning: the product's switch to production (`database.envProd`) moves a symlink and then does more, so a
@@ -583,7 +582,7 @@ rollback_apply_sql() {
       # The snapshot has to follow, or supabase/schema.sql describes a schema
       # production no longer has and the next local regression fails for a
       # reason that has nothing to do with the branch. Left uncommitted, as
-      # db-promote leaves it: naming what was reverted is a sentence for a human
+      # a promote leaves it: naming what was reverted is a sentence for a human
       # to write.
       if [[ -n "$schema_dump" ]]; then
         ( cd "$REPO" && eval "$schema_dump" ) >/dev/null 2>&1 \

@@ -66,8 +66,16 @@
     "            sclaude checks: each `check` runs in the project's root, and",
     "            `sclaude doctor` shows ✓ when it exits 0, or ! with its last",
     "            line and the `fix` to run. Warnings only: a developer may",
-    "            reasonably do without a project's extras."
+    "            reasonably do without a project's extras.",
+    "maintainers — the git addresses of the people who keep this project's",
+    "            shared sclaude rules, in .sclaude/team/. Everybody else's",
+    "            sessions put theirs in .sclaude/people/<name>/, and a hook",
+    "            keeps them out of team/; a maintainer lifts a rule from there.",
+    "            Absent or empty, everybody is a maintainer: what a project with",
+    "            one developer wants."
   ],
+
+  "maintainers": ["lead@example.com"],
 
   "commands": {
     "typecheck": "npm run typecheck",

@@ -212,6 +212,12 @@ doctor_project() {
   fi
   doctor_project_checks "$root"
   doctor_scratch "$root"
+  if product_maintainer "$root"; then
+    doctor_ok "you maintain this product: sclaude rules go to .sclaude/team/"
+  else
+    local mine; mine="$(product_rules_dir "$root")"
+    doctor_ok "sclaude rules from your sessions go to ${mine#"$root"/}/ (team/ is the maintainers')"
+  fi
   local names
   names="$(environment_choices "$root" | tr '\n' ' ' | sed 's/ $//')"
   if [[ -n "$names" ]]; then

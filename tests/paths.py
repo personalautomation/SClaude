@@ -217,11 +217,11 @@ try:
     lines = open(ignore, encoding="utf-8").read().splitlines()
     check("vercelignore-hand-edit-kept", lines[:2], ["# edited by hand", ".env"])
     check("vercelignore-brought-up-to-date", sorted(lines[2:]),
-          [".env.*", "/.feature", "/.sclaude", "/.vercelignore"])
+          [".env.*", "/.feature", "/.sclaude/local", "/.vercelignore"])
 
     # An earlier sclaude wrote `/.feature/`; that line still counts.
     with open(ignore, "w") as fh:
-        fh.write(".env\n.env.*\n/.feature/\n/.vercelignore\n/.sclaude\n")
+        fh.write(".env\n.env.*\n/.feature/\n/.vercelignore\n/.sclaude/local\n")
     run_bash('write_vercelignore %s' % WT, tmp,
              modules=("ui", "state", "worktree", "scratch"))
     check("vercelignore-old-slash-counts", open(ignore, encoding="utf-8").read().count(".feature"), 1)
@@ -233,7 +233,7 @@ try:
     # path sclaude writes into a project must reach both.
     scratch = open(os.path.join(LIB, "scratch.sh"), encoding="utf-8").read()
     listed = re.search(r"^SCRATCH_PATHS=\(([^)]*)\)", scratch, re.M).group(1).split()
-    check_true("scratch-lists-feature-and-sclaude", {".feature", ".sclaude"} <= set(listed))
+    check_true("scratch-lists-feature-and-sclaude", {".feature", ".sclaude/local"} <= set(listed))
     os.remove(ignore)
     run_bash('scratch_hide %s; write_vercelignore %s' % (WT, WT), tmp,
              modules=("ui", "state", "worktree", "scratch"))

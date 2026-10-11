@@ -214,7 +214,10 @@ lives elsewhere:
 | what | where |
 |---|---|
 | the orchestrator, its prompts, `MAINTAINERS` | here, one copy for everybody |
-| the product and the team's process: regression, manuals, production, migrations, the GitHub board | `.sclaude.json` in the product's repository, committed |
+| the product and the team's process: regression, manuals, production, migrations, the GitHub board, its maintainers | `.sclaude.json` in the product's repository, committed |
+| the team's sclaude rules for the product | `.sclaude/team/` in the product, committed, written by its maintainers |
+| one developer's sclaude rules for the product | `.sclaude/people/<name>/` in the product, committed |
+| what one machine keeps about the product: terminal recordings | `.sclaude/local/` in the product, never committed, never deployed |
 | the person: name, database, projects for `wsl-update`, the Telegram bot, where records are gathered | `~/.config/instruments/`, `~/.config/keepawake/env`, `~/.claude/sclaude/` |
 
 **Who changes the orchestrator.** `MAINTAINERS` lists the git addresses allowed
@@ -222,6 +225,17 @@ to commit it straight to `main`. Everybody else is moved to `dev/<name>` before
 anything runs, the friction review commits there, and their fixes reach `main`
 as a pull request — from a branch here if they can push, from a fork of their
 own if they cannot (the push failure prints the commands).
+
+**Who keeps a product's rules.** The same idea, one level down, in folders
+rather than branches, because a rule only applies once it is on the product's
+`main`. `maintainers` in the product's `.sclaude.json` lists the git
+addresses of the people who curate the product's shared sclaude rules in
+`.sclaude/team/`. A session run by anybody else writes its rules to
+`.sclaude/people/<name>/` instead, and a hook (`sclaude/hooks/team-rules.py`)
+refuses its writes into `team/`. Both reach `main` with the feature's pull
+request, where a maintainer sees them, and a maintainer lifts a personal rule
+into `team/` when it proves itself. No `maintainers` means everybody keeps
+them, as with one developer. `sclaude doctor` says which folder is yours.
 
 **Who you are.** The local part of `git config user.email`, reduced to
 `[a-z0-9-]` (`SCLAUDE_DEV` overrides it). It names your branch, marks your

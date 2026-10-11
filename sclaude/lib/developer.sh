@@ -63,6 +63,43 @@ developer_name() {
 # person has nobody to be protected from. With the file present, an unknown or
 # empty address is not a maintainer: guessing yes would put a stranger's
 # friction fix on the main branch of everybody's orchestrator.
+# 0 when this person maintains the product: their git address is in
+# `maintainers` in the product's .sclaude.json. The product's own address, from
+# the product's repository, since that is the identity its commits carry. The
+# same rule as MAINTAINERS for the orchestrator: no list, or an empty one, and
+# everybody maintains it, which is what a product with one developer wants.
+#
+#   product_maintainer [root]   the current repository without one
+product_maintainer() {
+  local root="${1:-${REPO:-.}}" email
+  [[ -f "$root/.sclaude.json" ]] || return 0
+  email="$(git -C "$root" config user.email 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+  python3 - "$root/.sclaude.json" "$email" <<'PY'
+import json, sys
+try:
+    listed = json.load(open(sys.argv[1])).get("maintainers")
+except (OSError, ValueError, AttributeError):
+    sys.exit(0)
+if not isinstance(listed, list) or not listed:
+    sys.exit(0)
+sys.exit(0 if sys.argv[2] and sys.argv[2] in [str(m).strip().lower() for m in listed] else 1)
+PY
+}
+
+# Where this person's sclaude rules for the product go: the team's folder for a
+# maintainer, their own under people/ for everybody else.
+#
+#   product_rules_dir [root]
+product_rules_dir() {
+  local root="${1:-${REPO:-.}}" name
+  if product_maintainer "$root"; then
+    echo "$root/.sclaude/team"
+  else
+    name="$(developer_name)"
+    echo "$root/.sclaude/people/${name:-unknown}"
+  fi
+}
+
 developer_is_maintainer() {
   local file="${INSTRUMENTS:-.}/MAINTAINERS" email
   [[ -f "$file" ]] || return 0

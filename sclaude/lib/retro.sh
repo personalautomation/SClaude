@@ -99,7 +99,10 @@ PY
   project_before="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
 
   session_watch_start "" "$session" "$done_file" "$wt" retro
+  local -a guard=()
+  mapfile -t guard < <(team_guard_settings "$wt")
   ( cd "$wt" && claude_launch --session-id "$session" --model opus --effort medium \
+      "${guard[@]}" \
       --permission-mode auto --add-dir "$INSTRUMENTS" --add-dir "$TERM_DIR" \
       --add-dir "$(cd "$wt" && term_dir)" \
       --add-dir "$HOME/.claude/projects" \

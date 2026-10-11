@@ -71,6 +71,7 @@ OWN_MARKERS = (
     "Tell the human and stop — the next move is theirs.",
     "tell the human and stop.",
     "Then present the plan again.",
+    "a maintainer can lift it into team/.",
 )
 
 

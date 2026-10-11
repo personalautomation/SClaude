@@ -193,6 +193,23 @@ step_mode()   { step_field "$1" 3; }
 # classifier a look at each one. The deny list and the hooks still come first.
 BROWSER_ALLOW='mcp__chrome-devtools'
 
+# The hook that keeps a product's shared rules (.sclaude/team/) to its
+# maintainers, as a PreToolUse entry in JSON, or nothing for a maintainer:
+# their sessions write there. See team-rules.py and product_maintainer.
+team_guard_entry() {
+  product_maintainer "${1:-${REPO:-.}}" && return 0
+  printf '{"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash", "hooks": [{"type": "command", "command": "python3 %s", "timeout": 10}]}' \
+    "$HOOKS/team-rules.py"
+}
+
+# The same as a whole --settings value, for a session that has no settings of
+# its own (the friction review, the retrospective). Nothing for a maintainer.
+team_guard_settings() {
+  local entry; entry="$(team_guard_entry "$@")"
+  [[ -n "$entry" ]] || return 0
+  printf '%s\n' --settings "{\"hooks\": {\"PreToolUse\": [$entry]}}"
+}
+
 step_settings() {
   local step="$1" wt="$2" hook trusted origin
 
@@ -289,7 +306,7 @@ PY
     trusted+=" checkout undoes it."
   fi
 
-  printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$step" "$trusted" "$BROWSER_ALLOW" <<'PY'
+  printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$step" "$trusted" "$BROWSER_ALLOW" "$(team_guard_entry "$wt")" <<'PY'
 import json, sys
 
 settings = {"permissions": {"allow": [sys.argv[4]]}, "hooks": {"PreToolUse": [{
@@ -298,6 +315,10 @@ settings = {"permissions": {"allow": [sys.argv[4]]}, "hooks": {"PreToolUse": [{
                "command": "python3 %s --step %s" % (sys.argv[1], sys.argv[2]),
                "timeout": 10}],
 }]}}
+# A product's shared rules are its maintainers' (team_guard_entry): empty for
+# a maintainer.
+if len(sys.argv) > 5 and sys.argv[5]:
+    settings["hooks"]["PreToolUse"].append(json.loads(sys.argv[5]))
 # The line about the worktree is context for auto mode's classifier, not
 # permission. It arrives empty when the path to the tree is unknown.
 if len(sys.argv) > 3 and sys.argv[3]:

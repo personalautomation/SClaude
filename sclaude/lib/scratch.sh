@@ -16,9 +16,10 @@
 #
 #   .feature       a feature's working directory, in its worktree
 #   .vercelignore  this file's own output, in every tree sclaude deploys
-#   .sclaude       sclaude's folder in the main repository: the terminal
-#                  recordings (terminal.sh)
-SCRATCH_PATHS=(.feature .vercelignore .sclaude)
+#   .sclaude/local the machine's part of sclaude's folder in a product: the
+#                  terminal recordings (terminal.sh). The rest of .sclaude/,
+#                  team/ and people/, is the product's and is committed.
+SCRATCH_PATHS=(.feature .vercelignore .sclaude/local)
 
 # The main repository of a tree, or of the current directory. Nothing outside
 # a repository.

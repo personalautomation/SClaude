@@ -21,7 +21,8 @@
 # playback leaves a line naming it instead of its screen.
 #
 # One recording per sclaude run, in the main repository it was started in:
-# .sclaude/terminal, sclaude's own folder there (scratch.sh), kept out of git
+# .sclaude/local/terminal, the machine's part of sclaude's folder there
+# (scratch.sh), kept out of git
 # and out of every Vercel upload with the rest of what sclaude writes into a
 # project. Nothing to configure. Outside a repository the recording goes to
 # ~/.claude/sclaude/terminal/.
@@ -38,14 +39,14 @@ TERM_DIR="$HOME/.claude/sclaude/terminal"
 # A recording outlives its feature by this many days, then goes.
 TERM_KEEP_DAYS=60
 
-# Where a run started here is recorded: .sclaude/terminal in the main
+# Where a run started here is recorded: .sclaude/local/terminal in the main
 # repository of the current directory — the recording starts before any
 # feature is known, and a worktree's files go when the feature does — or
 # TERM_DIR outside a repository.
 term_dir() {
   local common
   if common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
-    echo "$(dirname "$common")/.sclaude/terminal"
+    echo "$(dirname "$common")/.sclaude/local/terminal"
   else
     echo "$TERM_DIR"
   fi

@@ -567,7 +567,8 @@ def main():
         if not any(marker in tail for tail in (
                 const("forbidden-commands.py", "TAIL"),
                 const("no-code-in-planning.py", "REASON"),
-                const("plan-on-disk.py", "TAIL"))):
+                const("plan-on-disk.py", "TAIL"),
+                const("team-rules.py", "REASON"))):
             failures.append(("markers", marker, "a hook's tail", "matched nothing"))
 
     total = len(PLANNING) + len(FORBIDDEN) + len(BY_STEP) + 2 + len(workdir_cases) + \

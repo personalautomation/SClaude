@@ -1463,6 +1463,10 @@ PYEOF
   # or new: a stalled transcript can exist, so a stall is often resumed.
   state_set "$state" "friction.$key.stalled" null 2>/dev/null || true
 
+  # The product's shared rules stay its maintainers' (team_guard_settings):
+  # the review may edit the project too, in the feature's worktree.
+  local -a guard=()
+  mapfile -t guard < <(team_guard_settings "$wt")
   if [[ -n "$session" ]]; then
     # Returning to an interrupted review. The log does not need moving — it is
     # already in .reviewed, and that is what the session was reading; the prompt
@@ -1471,6 +1475,7 @@ PYEOF
     session_runs "$state" "friction.$key" open "$session"
     session_watch_start "" "$session" "$done_file" "$INSTRUMENTS"
     ( cd "$INSTRUMENTS" && claude_launch --resume "$session" --model opus --effort medium \
+        "${guard[@]}" \
         --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$wt" \
         --add-dir "$(dirname "$DEFERRED_FILE")" -n "friction/$slug" \
         "Back in the friction review for feature '$slug'. Pick up where the conversation left off; re-read $reviewed if you need to." )
@@ -1492,6 +1497,7 @@ PYEOF
     session_runs "$state" "friction.$key" open "$session"
     session_watch_start "" "$session" "$done_file" "$INSTRUMENTS"
     ( cd "$INSTRUMENTS" && claude_launch --session-id "$session" --model opus --effort medium \
+        "${guard[@]}" \
         --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$wt" \
         --add-dir "$(dirname "$DEFERRED_FILE")" -n "friction/$slug" "$prompt" )
   fi

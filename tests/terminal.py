@@ -258,18 +258,24 @@ try:
 
     # Nothing to configure: always sclaude's folder in the main repository,
     # from any directory in it, and the home directory outside one.
-    check("dir-in-the-repository", where(sub), os.path.join(proj, ".sclaude", "terminal"))
+    check("dir-in-the-repository", where(sub), os.path.join(proj, ".sclaude", "local", "terminal"))
     check("dir-outside-a-repo", where(tempfile.gettempdir()), "/h/.claude/sclaude/terminal")
 
-    rec = os.path.join(proj, ".sclaude", "terminal")
+    rec = os.path.join(proj, ".sclaude", "local", "terminal")
     script = ('source "%s/terminal.sh"; source "%s/scratch.sh"; scratch_hide; scratch_hide; '
               'mkdir -p "%s"; touch "%s/r.log"' % (LIB, LIB, rec, rec))
     subprocess.run(["bash", "-c", script], cwd=sub, check=True)
     with open(os.path.join(proj, ".git", "info", "exclude")) as fh:
-        check("exclude-once", fh.read().splitlines().count(".sclaude"), 1)
+        check("exclude-once", fh.read().splitlines().count(".sclaude/local"), 1)
     status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=proj,
                             capture_output=True, text=True).stdout
-    check("exclude-hides-recordings", ".sclaude" in status, False)
+    check("exclude-hides-recordings", ".sclaude/local" in status, False)
+    # The rest of the folder is the product's, and git sees it.
+    os.makedirs(os.path.join(proj, ".sclaude", "team"))
+    open(os.path.join(proj, ".sclaude", "team", "rules.md"), "w").close()
+    status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=proj,
+                            capture_output=True, text=True).stdout
+    check("team-folder-visible-to-git", ".sclaude/team/rules.md" in status, True)
 finally:
     shutil.rmtree(proj, ignore_errors=True)
 

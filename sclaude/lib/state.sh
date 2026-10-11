@@ -27,10 +27,24 @@ main_repo() {
 # here, in the main repository and every worktree, so a feature in flight is
 # not lost. The config is tracked, and moving it is a change to the product,
 # by its own pull request, so it is only said, every run, until it is done.
+#
+# Not while another sclaude runs: one started before the move reads its state
+# from .feature/ and would lose it mid-step. And git is told to ignore the new
+# place before anything lands there, since a tree made by an older sclaude
+# excludes only .feature, and a step's `git add -A` would put the state files
+# in its pull request.
 layout_migrate() {
-  local wt
+  local wt others=""
   while IFS= read -r wt; do
     [[ -d "$wt/.feature" && ! -e "$wt/.sclaude/local/feature" ]] || continue
+    if [[ -z "$others" ]] && declare -F instruments_others >/dev/null; then
+      others="$(instruments_others)" || others="none"
+    fi
+    if [[ -n "$others" && "$others" != "none" ]]; then
+      info "  ${wt}/.feature stays where it is while another sclaude runs ($others)"
+      continue
+    fi
+    declare -F scratch_hide >/dev/null && scratch_hide "$wt"
     mkdir -p "$wt/.sclaude/local" && mv "$wt/.feature" "$wt/.sclaude/local/feature" \
       && info "  moved ${wt}/.feature to .sclaude/local/feature (sclaude keeps its state there now)"
   done < <(git -C "$REPO" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')

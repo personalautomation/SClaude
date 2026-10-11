@@ -66,16 +66,8 @@
     "            sclaude checks: each `check` runs in the project's root, and",
     "            `sclaude doctor` shows ✓ when it exits 0, or ! with its last",
     "            line and the `fix` to run. Warnings only: a developer may",
-    "            reasonably do without a project's extras.",
-    "recordings — where this project's sclaude runs are recorded (the",
-    "            terminal the retrospective reads), a folder inside the",
-    "            repository. sclaude keeps git out of it through the",
-    "            repository's own .git/info/exclude, so it is never committed;",
-    "            the folder is 0700 and each recording 0600, kept 60 days.",
-    "            Without it the recordings go to ~/.claude/sclaude/terminal."
+    "            reasonably do without a project's extras."
   ],
-
-  "recordings": ".sclaude/terminal",
 
   "commands": {
     "typecheck": "npm run typecheck",

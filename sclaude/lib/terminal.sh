@@ -20,13 +20,11 @@
 # terminal; one that runs in place does, and term_skip marks it off so the
 # playback leaves a line naming it instead of its screen.
 #
-# One recording per sclaude run. A project chooses where its runs are kept with
-# `recordings` in its .sclaude.json, a folder inside the repository
-# (".sclaude/terminal"); sclaude keeps git out of it through the repository's
-# own .git/info/exclude, so nothing is committed and nothing in the project
-# changes. Without that key, or outside a repository, the recording goes to
-# ~/.claude/sclaude/terminal/, outside every repository for the reason
-# metrics_append gives.
+# One recording per sclaude run, in the main repository it was started in:
+# .sclaude/terminal, sclaude's own folder there (scratch.sh), kept out of git
+# and out of every Vercel upload with the rest of what sclaude writes into a
+# project. Nothing to configure. Outside a repository the recording goes to
+# ~/.claude/sclaude/terminal/.
 #
 # A feature learns which runs touched it: feature_worktree and run_step add the
 # run's recording to .feature/terminal, one path per line. A run that went
@@ -40,42 +38,17 @@ TERM_DIR="$HOME/.claude/sclaude/terminal"
 # A recording outlives its feature by this many days, then goes.
 TERM_KEEP_DAYS=60
 
-# Where a run started here is recorded: the project's `recordings` folder when
-# the repository sclaude runs in names one, TERM_DIR otherwise. Read from the
-# main repository's .sclaude.json — the recording starts before any feature is
-# known. A path that is absolute or climbs out is not a folder of the
-# project's, and is ignored.
+# Where a run started here is recorded: .sclaude/terminal in the main
+# repository of the current directory — the recording starts before any
+# feature is known, and a worktree's files go when the feature does — or
+# TERM_DIR outside a repository.
 term_dir() {
-  local common root rel=""
-  common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""
-  root="${common:+$(dirname "$common")}"
-  if [[ -n "$root" && -f "$root/.sclaude.json" ]]; then
-    rel="$(python3 -c 'import json, sys
-v = json.load(open(sys.argv[1])).get("recordings")
-v = v.strip() if isinstance(v, str) else ""
-print("" if v.startswith("/") else v.rstrip("/"))' "$root/.sclaude.json" 2>/dev/null)" || rel=""
-  fi
-  if [[ -n "$rel" && "$rel" != /* && "/$rel/" != */../* ]]; then
-    echo "$root/$rel"
+  local common
+  if common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+    echo "$(dirname "$common")/.sclaude/terminal"
   else
     echo "$TERM_DIR"
   fi
-}
-
-# Keeps git out of a recordings folder inside a repository: one line in the
-# repository's .git/info/exclude, which every worktree of it reads. Not the
-# project's .gitignore — that is a tracked file, and changing it is the
-# project's business, by its own pull request.
-term_exclude() {
-  local dir="$1" common root line exclude
-  common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
-  root="$(dirname "$common")"
-  [[ "$dir" == "$root"/* ]] || return 0
-  line="/${dir#"$root"/}/"
-  exclude="$common/info/exclude"
-  grep -qxF -- "$line" "$exclude" 2>/dev/null && return 0
-  mkdir -p "$common/info" 2>/dev/null || return 0
-  printf '%s\n' "$line" >> "$exclude" 2>/dev/null || true
 }
 
 # Run the rest of this sclaude under script(1), recording it. Called by main
@@ -93,7 +66,7 @@ term_record() {
   command -v script >/dev/null 2>&1 || return 0
   local dir; dir="$(term_dir)"
   # Excluded before the folder exists, so there is no moment git could see it.
-  term_exclude "$dir"
+  declare -F scratch_hide >/dev/null && scratch_hide
   mkdir -p "$dir" 2>/dev/null || return 0
   # Private, whatever the umask: a recording holds everything the run showed
   # and echoed, a pasted token included, for two months. The directory is

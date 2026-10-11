@@ -187,7 +187,7 @@ try:
     if os.path.exists(ignore):
         os.remove(ignore)
     run_bash('write_vercelignore %s' % WT, tmp,
-             modules=("ui", "state", "worktree"))
+             modules=("ui", "state", "worktree", "scratch"))
     check_true("vercelignore-written-in-the-worktree", os.path.exists(ignore))
     if os.path.exists(ignore):
         body = open(ignore, encoding="utf-8").read()
@@ -197,7 +197,7 @@ try:
         check_true("vercelignore-excludes-env-variants", ".env.*" in body)
         # sclaude's own working directory: the plan, the state, the logs and
         # the rendered terminal went up with every preview without it.
-        check_true("vercelignore-excludes-feature", "/.feature/" in body.splitlines())
+        check_true("vercelignore-excludes-feature", "/.feature" in body.splitlines())
 
     # It must not write at the filesystem root, which is where it used to aim.
     # Checked by absence rather than by permissions: on a machine where `/` is
@@ -211,12 +211,46 @@ try:
     with open(ignore, "w") as fh:
         fh.write("# edited by hand\n.env\n")
     run_bash('write_vercelignore %s' % WT, tmp,
-             modules=("ui", "state", "worktree"))
+             modules=("ui", "state", "worktree", "scratch"))
     run_bash('write_vercelignore %s' % WT, tmp,
-             modules=("ui", "state", "worktree"))
+             modules=("ui", "state", "worktree", "scratch"))
     lines = open(ignore, encoding="utf-8").read().splitlines()
     check("vercelignore-hand-edit-kept", lines[:2], ["# edited by hand", ".env"])
-    check("vercelignore-brought-up-to-date", sorted(lines[2:]), [".env.*", "/.feature/"])
+    check("vercelignore-brought-up-to-date", sorted(lines[2:]),
+          [".env.*", "/.feature", "/.sclaude", "/.vercelignore"])
+
+    # An earlier sclaude wrote `/.feature/`; that line still counts.
+    with open(ignore, "w") as fh:
+        fh.write(".env\n.env.*\n/.feature/\n/.vercelignore\n/.sclaude\n")
+    run_bash('write_vercelignore %s' % WT, tmp,
+             modules=("ui", "state", "worktree", "scratch"))
+    check("vercelignore-old-slash-counts", open(ignore, encoding="utf-8").read().count(".feature"), 1)
+
+    # --- one list for git and for Vercel (scratch.sh) -----------------------
+    #
+    # The leak this guards: .feature was hidden from git and still went up
+    # with every preview, because the two exclusions had two lists. Every
+    # path sclaude writes into a project must reach both.
+    scratch = open(os.path.join(LIB, "scratch.sh"), encoding="utf-8").read()
+    listed = re.search(r"^SCRATCH_PATHS=\(([^)]*)\)", scratch, re.M).group(1).split()
+    check_true("scratch-lists-feature-and-sclaude", {".feature", ".sclaude"} <= set(listed))
+    os.remove(ignore)
+    run_bash('scratch_hide %s; write_vercelignore %s' % (WT, WT), tmp,
+             modules=("ui", "state", "worktree", "scratch"))
+    exclude = open(os.path.join(REPO, ".git", "info", "exclude"), encoding="utf-8").read().splitlines()
+    vercel = open(ignore, encoding="utf-8").read().splitlines()
+    check("scratch-every-path-hidden-from-git", [p for p in listed if p not in exclude], [])
+    check("scratch-every-path-kept-from-vercel", [p for p in listed if "/" + p not in vercel], [])
+
+    # A .vercelignore the project tracks is its own: not edited, only warned.
+    with open(ignore, "w") as fh:
+        fh.write(".env\n")
+    git("add", "-f", ".vercelignore", cwd=WT)
+    out = run_bash('warn() { echo "WARN $*"; }; write_vercelignore %s' % WT, tmp,
+                   modules=("ui", "state", "worktree", "scratch"))
+    check("vercelignore-tracked-untouched", open(ignore, encoding="utf-8").read(), ".env\n")
+    check_true("vercelignore-tracked-warned", "/.feature" in str(out))
+    git("rm", "-q", "--cached", ".vercelignore", cwd=WT)
 
     check_true("worktree-declares-the-path-separately",
                not code_has(os.path.join(LIB, "worktree.sh"), 'local wt="$1" f='))

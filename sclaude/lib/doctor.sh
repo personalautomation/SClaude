@@ -149,6 +149,31 @@ SETTINGS
     || doctor_warn "no status line" "./install.sh, then point statusLine in settings.json at ~/.claude/statusline.py"
 }
 
+# What sclaude writes into the project, kept out of git and of Vercel uploads
+# (scratch.sh). Warnings only: the gaps sclaude can close it closes itself on
+# the next run or deploy; one in a .vercelignore the project tracks is the
+# project's to fix, and the line to add is printed.
+doctor_scratch() {
+  local root="$1" exclude="$1/.git/info/exclude" p missing=()
+  for p in "${SCRATCH_PATHS[@]}"; do
+    grep -qxF "$p" "$exclude" 2>/dev/null || missing+=("$p")
+  done
+  if (( ${#missing[@]} )); then
+    doctor_warn "git can still see ${missing[*]}" "the next sclaude run adds them to .git/info/exclude"
+  else
+    doctor_ok "sclaude's own files are hidden from git"
+  fi
+  [[ -d "$root/.vercel" ]] || return 0
+  local lack; lack="$(vercelignore_missing "$root" | tr '\n' ' ' | sed 's/ $//')"
+  if [[ -z "$lack" ]]; then
+    doctor_ok ".vercelignore keeps sclaude's files out of a deploy"
+  elif vercelignore_tracked "$root"; then
+    doctor_warn "the project's .vercelignore lets a deploy upload: $lack" "add those lines to it"
+  else
+    doctor_ok ".vercelignore is sclaude's; the next deploy adds: $lack"
+  fi
+}
+
 doctor_project() {
   doctor_section "This project"
   local root
@@ -186,6 +211,7 @@ doctor_project() {
     fi
   fi
   doctor_project_checks "$root"
+  doctor_scratch "$root"
   local names
   names="$(environment_choices "$root" | tr '\n' ' ' | sed 's/ $//')"
   if [[ -n "$names" ]]; then

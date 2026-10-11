@@ -1543,8 +1543,8 @@ remind_prod() {
       info "  describes it under database.promote."
     fi
     prod_cmds+=("vercel --prod")
-    # What production uploads is the main tree, and it holds the recordings
-    # folder when the project keeps one there (write_vercelignore).
+    # What production uploads is the main tree, and sclaude keeps its own
+    # folder there (scratch.sh).
     write_vercelignore "$REPO"
     [[ -n "$env_dev" ]] && prod_cmds+=("$env_dev")
 

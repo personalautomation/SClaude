@@ -55,7 +55,7 @@ def check_true(name, got):
         failures.append((name, "true", got))
 
 
-def run_bash(script, cwd, modules=("ui", "state", "project", "worktree", "deploy"),
+def run_bash(script, cwd, modules=("ui", "state", "project", "worktree", "deploy", "scratch"),
              stdin="", env=None):
     """The real functions in a real shell, with the network shadowed out."""
     body = "set -uo pipefail\n"
@@ -221,7 +221,7 @@ try:
     git("add", "-A", cwd=REPO)
     git("commit", "-qm", "a migration", cwd=REPO)
     _, _, rc = run_bash('REPO=%s; branch_has_migrations %s' % (REPO, REPO), tmp,
-                        modules=("ui", "state", "project", "worktree", "deploy"))
+                        modules=("ui", "state", "project", "worktree", "deploy", "scratch"))
     check("migrations-true-when-the-branch-adds-one", rc, 0)
 
     # --- preview_apply_migrations -------------------------------------------
@@ -267,7 +267,7 @@ try:
     os.rename(os.path.join(REPO, ".sclaude.json"),
               os.path.join(REPO, ".sclaude.json.off"))
     _, _, rc = run_bash('REPO=%s; branch_has_migrations %s' % (REPO, REPO), tmp,
-                        modules=("ui", "state", "project", "worktree", "deploy"))
+                        modules=("ui", "state", "project", "worktree", "deploy", "scratch"))
     check("migrations-false-without-a-config", rc != 0, True)
     os.rename(os.path.join(REPO, ".sclaude.json.off"),
               os.path.join(REPO, ".sclaude.json"))

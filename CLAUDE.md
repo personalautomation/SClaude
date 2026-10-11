@@ -77,8 +77,8 @@ to a project's story goes to that project.
 
 Data about projects that sclaude collects stays out of git altogether: the
 deferred friction is local state (`sclaude/lib/deferred.sh`), and terminal
-recordings live outside the repository or in the project's own `recordings`
-folder (`sclaude/lib/terminal.sh`).
+recordings live in sclaude's own folder in the project, which git and every
+Vercel upload are kept out of (`sclaude/lib/scratch.sh`).
 
 ## Who commits the orchestrator to main
 

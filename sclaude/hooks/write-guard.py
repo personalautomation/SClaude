@@ -71,6 +71,12 @@ CONFIG_READS = ("--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list"
                 "--get-color", "--get-colorbool", "get", "list")
 
 
+# Flags that put branch and tag in list mode, some with a value of their own.
+LIST_FLAGS = ("--contains", "--no-contains", "--merged", "--no-merged", "--points-at",
+              "--sort", "--format", "--column", "-v", "-vv", "-a", "-r", "--all",
+              "--remotes", "-n")
+
+
 def git_reads(sub, rest):
     """Whether this call of a GIT_WRITES subcommand only reads."""
     plain = [w for w in rest if not w.startswith("-")]
@@ -82,11 +88,13 @@ def git_reads(sub, rest):
     if sub == "branch":
         if any(f in BRANCH_WRITES for f in flags):
             return False
-        return not plain or any(f in ("-l", "--list", "--show-current") for f in flags)
+        return not plain or any(f in ("-l", "--list", "--show-current") + LIST_FLAGS
+                                for f in flags)
     if sub == "tag":
         if any(f in ("-d", "--delete", "-a", "-s", "-u", "-f", "--force", "-m", "-F") for f in flags):
             return False
-        return not plain or any(f in ("-l", "--list", "-v", "--verify") for f in flags)
+        return not plain or any(f in ("-l", "--list", "-v", "--verify") + LIST_FLAGS
+                                for f in flags)
     if sub == "config":
         if any(f in CONFIG_WRITES for f in flags) or plain[:1] in (["set"], ["unset"]):
             return False
@@ -118,6 +126,29 @@ def unwrap(segment):
     return segment[len(segment) - len(bare):] if bare else []
 
 
+# perl switches whose value is the rest of the word: an `i` in `-Mstrict` or
+# `-Ilib` is the module's or the path's, not in-place editing. `-0` and `-l`
+# take digits only, and the cluster goes on after them.
+PERL_VALUED = "MmIeExFdDC"
+
+
+def perl_inplace(flag):
+    """Whether a cluster of perl switches (`-pi`, `-0777pi.bak`) edits in place."""
+    rest = flag[1:]
+    k = 0
+    while k < len(rest):
+        ch = rest[k]
+        if ch == "i":
+            return True
+        if ch in PERL_VALUED:
+            return False
+        k += 1
+        if ch in "0l":
+            while k < len(rest) and rest[k] in "0123456789abcdefABCDEFx":
+                k += 1
+    return False
+
+
 def unmask(word):
     return word.replace(QUOTED_GT, ">")
 
@@ -144,8 +175,13 @@ def calls(command, cwd):
         if not segment:
             continue
         opens = segment[0] in ("(", "{") or (segment[0].startswith("(") and not segment[0].startswith("$("))
-        last = segment[-1]
-        closes = last in (")", "}") or (last.endswith(")") and last.count("(") < last.count(")"))
+        # What follows the bracket that closes a group is the outer shell's:
+        # `(cd X; ls) > out` writes out where the line runs, not in X.
+        k = closing_at(segment)
+        tail = segment[k + 1:] if k is not None else []
+        if k is not None:
+            segment = segment[:k + 1]
+        closes = k is not None
         if opens:
             saved.append((where, "{" if segment[0] == "{" else "("))
         flat, _ = ungroup(segment)
@@ -170,7 +206,28 @@ def calls(command, cwd):
             # and its `cd` stays, which is not worth following: unknown.
             before, kind = saved.pop() if saved else (None, "{")
             where = before if kind == "(" else None
+        if tail:
+            out.append((tail, where))
     return out
+
+
+def closing_at(segment):
+    """The index of the word that closes a group, or None.
+
+    A `)` closes a `$(` opened earlier before it closes a group, as in
+    ungroup: shlex cuts `x=$(cat f)` into `x=$(cat` and `f)`.
+    """
+    subs = 0
+    for k, w in enumerate(segment):
+        if w == "}":
+            return k
+        subs += w.count("$(")
+        closing = w.count(")") - w.count("(") + w.count("$(")
+        while closing > 0 and subs:
+            subs, closing = subs - 1, closing - 1
+        if closing > 0:
+            return k
+    return None
 
 
 def write_targets(command, cwd):
@@ -193,12 +250,12 @@ def write_targets(command, cwd):
             if skip:
                 skip = False
                 continue
-            if i and word in (">", ">>", "&>", "&>>", "1>", "2>", "1>>", "2>>", ">|"):
+            if word in (">", ">>", "&>", "&>>", "1>", "2>", "1>>", "2>>", ">|"):
                 if i + 1 < len(segment):
                     out.append((segment[i + 1], where))
                 skip = True
                 continue
-            m = REDIRECT.search(word) if i else None
+            m = REDIRECT.search(word)
             if m and m.group(1) and not m.group(1).startswith("&"):
                 out.append((m.group(1), where))
                 head = word[:m.start()]
@@ -212,7 +269,12 @@ def write_targets(command, cwd):
             args.append(word)
         name = args[0].rsplit("/", 1)[-1] if args else ""
         rest = args[1:]
-        if name in TO_LAST:
+        if name == "mv":
+            # mv removes what it moves: every path is written.
+            out += [(w, where) for w in rest if not w.startswith("-")]
+        elif name == "dd":
+            out += [(w[3:], where) for w in rest if w.startswith("of=")]
+        elif name in TO_LAST:
             target = next((rest[j + 1] for j, w in enumerate(rest[:-1])
                            if w in ("-t", "--target-directory")), None)
             target = target or next((w.split("=", 1)[1] for w in rest
@@ -226,8 +288,11 @@ def write_targets(command, cwd):
             out += [(w, where) for w in rest if not w.startswith("-")]
         elif name in ("sed", "perl"):
             flags = [w for w in rest if w.startswith("-") and not w.startswith("--")]
-            inplace = any("i" in w[1:].split(".", 1)[0] or w.startswith("-i") for w in flags) \
-                or "--in-place" in rest or any(w.startswith("--in-place=") for w in rest)
+            if name == "perl":
+                inplace = any(perl_inplace(w) for w in flags)
+            else:
+                inplace = any("i" in w[1:].split(".", 1)[0] or w.startswith("-i") for w in flags) \
+                    or "--in-place" in rest or any(w.startswith("--in-place=") for w in rest)
             if inplace:
                 # The script is the first plain word unless -e or -f gave it.
                 valued = ("-e", "-f", "-E") if name == "perl" else ("-e", "-f")

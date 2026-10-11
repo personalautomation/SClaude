@@ -139,6 +139,25 @@ for command, cwd, want in (
         ("git config --unset user.email", "/home/u/sclaude", "deny"),
         ("git tag v1", "/home/u/sclaude", "deny"),
         ("git worktree add ../x", "/home/u/sclaude", "deny"),
+        # Writes it used to miss: what mv moves away, dd's of=, and a
+        # redirection with no command in front.
+        ("mv /home/u/sclaude/file /tmp/", "/tmp", "deny"),
+        ("dd if=/dev/zero of=/home/u/sclaude/f", "/tmp", "deny"),
+        ("> /home/u/sclaude/f", "/tmp", "deny"),
+        ("echo hi && >/home/u/sclaude/f", "/tmp", "deny"),
+        ("dd if=/home/u/sclaude/f of=/tmp/x", "/tmp", "allow"),
+        # Reads it used to refuse.
+        ("perl -Mstrict -ne print /home/u/sclaude/f", "/tmp", "allow"),
+        ("perl -Ilib -e 1 /home/u/sclaude/f", "/tmp", "allow"),
+        ("perl -pi -e 's/a/b/' /home/u/sclaude/f", "/tmp", "deny"),
+        ("perl -0777pi.bak -e 1 /home/u/sclaude/f", "/tmp", "deny"),
+        ("git -C /home/u/sclaude branch --contains HEAD", "/tmp", "allow"),
+        ("git -C /home/u/sclaude branch --merged main", "/tmp", "allow"),
+        ("git -C /home/u/sclaude tag --points-at HEAD", "/tmp", "allow"),
+        ("git -C /home/u/sclaude tag --contains HEAD", "/tmp", "allow"),
+        ("(cd /home/u/sclaude; ls) > out.txt", "/home/u/myapp-1", "allow"),
+        ("(cd /home/u/myapp-1; ls) > out.txt", "/home/u/sclaude", "deny"),
+        ("(x=$(cat f); ls) > out.txt", "/home/u/myapp-1", "allow"),
         # A `>` in quotes is text, not a redirection.
         ('cd /home/u/myapp-1 && git commit -m "a -> b"', "/home/u/sclaude", "allow"),
         ("git log --format='%h>%s'", "/home/u/sclaude", "allow"),

@@ -207,6 +207,16 @@ try:
     entry = json.loads(sh('HOOKS="/opt/my tools/hooks"; guard_entry --readonly /x', repo))
     words = shlex.split(entry["hooks"][0]["command"])
     check("guard-path-with-space", words[:2], ["python3", "/opt/my tools/hooks/write-guard.py"])
+    # And every other hook a session gets: the step's, the plan's, the status's.
+    for call, name in (("step_settings code \"%s\"" % repo, "forbidden-commands.py"),
+                       ("step_settings plan \"%s\"" % repo, "no-code-in-planning.py"),
+                       ("step_settings plan \"%s\"" % repo, "plan-on-disk.py"),
+                       ("status_settings", "forbidden-commands.py")):
+        flags = sh('HOOKS="/opt/my tools/hooks"; BROWSER_ALLOW=x; %s' % call, repo).splitlines()
+        settings = json.loads(flags[flags.index("--settings") + 1])
+        firsts = [shlex.split(h["hooks"][0]["command"])[1] for h in settings["hooks"]["PreToolUse"]]
+        check("hook-path-with-space %s %s" % (call.split()[0], name),
+              "/opt/my tools/hooks/" + name in firsts, True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

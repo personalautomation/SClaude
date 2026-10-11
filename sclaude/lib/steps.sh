@@ -260,13 +260,13 @@ step_settings() {
     # do what --tools cannot do at all — it sees writing through Bash (printf,
     # tee), which is what the model uses when Write is closed.
     printf '%s\n' --settings "$(python3 - "$hook" "$HOOKS/plan-on-disk.py" "$BROWSER_ALLOW" <<'PY'
-import json, sys
+import json, shlex, sys
 
 
 def entry(matcher, script):
     return {
         "matcher": matcher,
-        "hooks": [{"type": "command", "command": "python3 " + script, "timeout": 10}],
+        "hooks": [{"type": "command", "command": "python3 " + shlex.quote(script), "timeout": 10}],
     }
 
 
@@ -334,12 +334,14 @@ PY
   fi
 
   printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$step" "$trusted" "$BROWSER_ALLOW" "$(team_guard_entry "$wt")" "$(policy_hook_args)" "${allow[@]}" <<'PY'
-import json, sys
+import json, shlex, sys
 
+# The path quoted, as in guard_entry: a checkout under a name with a space in it
+# made the hook fail to start, and a hook that fails lets everything through.
 settings = {"permissions": {"allow": [sys.argv[4]] + sys.argv[7:]}, "hooks": {"PreToolUse": [{
     "matcher": "Bash",
     "hooks": [{"type": "command",
-               "command": "python3 %s --step %s %s" % (sys.argv[1], sys.argv[2], sys.argv[6]),
+               "command": "python3 %s --step %s %s" % (shlex.quote(sys.argv[1]), shlex.quote(sys.argv[2]), sys.argv[6]),
                "timeout": 10}],
 }]}}
 # A product's shared rules are its maintainers' (team_guard_entry): empty for
@@ -388,12 +390,12 @@ status_settings() {
   # a step no policy names, so only the shared rules and the push parsing apply.
   policy_rules deny allow status
   printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$(policy_hook_args)" <<'PYSTATUS'
-import json, sys
+import json, shlex, sys
 
 print(json.dumps({"hooks": {"PreToolUse": [{
     "matcher": "Bash",
     "hooks": [{"type": "command",
-               "command": "python3 %s --step status %s" % (sys.argv[1], sys.argv[2]),
+               "command": "python3 %s --step status %s" % (shlex.quote(sys.argv[1]), sys.argv[2]),
                "timeout": 10}],
 }]}}))
 PYSTATUS

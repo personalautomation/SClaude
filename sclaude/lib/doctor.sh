@@ -174,6 +174,35 @@ doctor_scratch() {
   fi
 }
 
+# The product's environments, each the .env file it names (envs.py): the
+# shape of the config, the files themselves, and who else can read them. A
+# file of credentials that every user of the machine can read is a warning,
+# not a failure: whether others share the machine is the person's to know.
+doctor_environments() {
+  local root="$1" old name file mode
+  if old="$(envs old "$root")"; then
+    doctor_bad "environments are in the old shape" "$old"
+    return
+  fi
+  [[ -n "$(environment_names "$root")" ]] || return 0
+  if [[ -n "$(environment_site "$root")" ]]; then
+    doctor_ok "production answers at $(environment_site "$root")"
+  else
+    doctor_warn "no production address: mark the production environment protected, with its siteUrl"
+  fi
+  while IFS= read -r name; do
+    file="$(envs file "$root" "$name")"
+    if [[ ! -f "$file" ]]; then
+      doctor_warn "$name: ${file#"$root"/} does not exist" "create it, or leave $name out of environments"
+      continue
+    fi
+    mode="$(stat -c %a "$(readlink -f "$file")" 2>/dev/null || echo 600)"
+    if [[ "${mode: -1}" != 0 || "${mode: -2:1}" != 0 ]]; then
+      doctor_warn "$name: ${file#"$root"/} can be read by others ($mode)" "chmod 600 ${file#"$root"/}"
+    fi
+  done < <(environment_names "$root")
+}
+
 doctor_project() {
   doctor_section "This project"
   local root
@@ -184,16 +213,20 @@ doctor_project() {
   fi
   REPO="$root"
   if [[ ! -f "$root/.sclaude/config.json" ]]; then
-    doctor_warn "$root has no .sclaude/config.json" "sclaude new offers to write one"
+    if [[ -f "$root/.sclaude.json" ]]; then
+      doctor_bad "$root has the old .sclaude.json, which sclaude no longer reads" \
+        "git mv .sclaude.json .sclaude/config.json, then describe environments by their .env files (sclaude/config.example.json)"
+    else
+      doctor_warn "$root has no .sclaude/config.json" "sclaude new offers to write one"
+    fi
     return
   fi
   doctor_ok "$root/.sclaude/config.json"
   local section what
-  for section in regression manuals prod database board; do
+  for section in regression manuals database board; do
     case "$section" in
       regression) what="no regression: nothing gates step 2" ;;
       manuals) what="no manuals: step 1 reads none, step 3 updates none" ;;
-      prod) what="no production address: nothing is shipped from here" ;;
       database) what="no migrations described" ;;
       board) what="no board: issues are not moved between columns" ;;
     esac
@@ -203,7 +236,8 @@ doctor_project() {
       doctor_warn "$what"
     fi
   done
-  if project_has prod "$root" && command -v vercel >/dev/null 2>&1; then
+  doctor_environments "$root"
+  if [[ -n "$(environment_site "$root")" ]] && command -v vercel >/dev/null 2>&1; then
     if (cd "$root" && timeout 20 vercel whoami >/dev/null 2>&1); then
       doctor_ok "vercel is logged in"
     else

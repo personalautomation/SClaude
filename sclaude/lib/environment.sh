@@ -41,172 +41,125 @@ environment_file() {
   echo "$HOME/.claude/sclaude/environment"
 }
 
-# The names this project actually has, one per line.
+# What the product says about its environments lives in its
+# .sclaude/config.json, `environments`, each one naming the .env file that
+# holds it (envs.py, which this reads through). A product that names none does
+# not do environments, and every caller below treats that as such rather than
+# as an error — same shape as project.sh's absent sections.
 #
-# Read from the product's own file of environments (`environments.file` in its
-# .sclaude/config.json) rather than declared here: sclaude does not get to
-# decide what a project calls its databases. A project without one answers
-# nothing, and every caller
-# below treats that as "this project does not do environments" rather than as an
-# error — same shape as project.sh's absent sections.
-# The product's file of environments, {name: {confirm, ref, ...}}, as
-# `environments.file` in its .sclaude/config.json names it; nothing when it
-# names none, and then this machine has no environments to choose from.
-environments_file() {
-  local wt="$1" rel
-  rel="$(project_get environments.file "$wt" 2>/dev/null)" || return 0
-  [[ -n "$rel" ]] && echo "$wt/$rel"
-  return 0
-}
-
-# A command the product names under `environments` in its config, with
-# {name} put in: `current`, `settled`, `switch` or `status`. Nothing when it
-# names none.
-#
-#   environments_command <tree> <which> [name]
-environments_command() {
-  local wt="$1" which="$2" name="${3:-}" cmd
-  cmd="$(project_get "environments.$which" "$wt" 2>/dev/null)" || return 0
-  [[ -n "$cmd" ]] && echo "${cmd//\{name\}/$name}"
-  return 0
+# The tree passed in is the one the question is about: a feature's worktree,
+# where link_env has put every .env file of the main repository as a symlink,
+# or the main repository itself.
+envs() {
+  python3 "${LIB:-$(dirname "${BASH_SOURCE[0]}")}/envs.py" "$@" 2>/dev/null
 }
 
 environment_names() {
-  local wt="$1"
-  local envs; envs="$(environments_file "$wt")"
-  [[ -f "$envs" ]] || return 0
-  python3 - "$envs" <<'PY' 2>/dev/null || true
-import json, sys
-try:
-    with open(sys.argv[1]) as fh:
-        data = json.load(fh)
-except (OSError, ValueError):
-    sys.exit(0)
-if isinstance(data, dict):
-    for name in data:
-        print(name)
-PY
+  envs names "$1" || true
 }
 
-# Whether a name is one this project protects — `confirm: true`, which is how
-# the product marks a database holding somebody's real account.
-#
-# Used to keep production off the list of things a feature may be pointed at.
-# Silence means protected: a name we cannot resolve is not permission.
+# Whether a name is one this project protects — `protected: true`, which is how
+# the product marks a database holding somebody's real data. Silence means
+# protected: a name we cannot resolve is not permission.
 environment_protected() {
-  local wt="$1" name="$2" rc
-  [[ -n "$name" ]] || return 0
-  local envs; envs="$(environments_file "$wt")"
-  [[ -f "$envs" ]] || return 0
-  # The exit code is captured on its own line. `python3 … <<'PY' || return 0`
-  # attaches the `||` to the redirection rather than to the finished command,
-  # and the function then answers "protected" for everything — which reads as a
-  # working guard and is really a guard that has stopped asking.
-  python3 - "$envs" "$name" <<'PY' 2>/dev/null
-import json, sys
-try:
-    with open(sys.argv[1]) as fh:
-        data = json.load(fh)
-except (OSError, ValueError):
-    sys.exit(0)          # unreadable: protected
-entry = data.get(sys.argv[2]) if isinstance(data, dict) else None
-if not isinstance(entry, dict):
-    sys.exit(0)          # unknown name: protected
-sys.exit(1 if not entry.get("confirm") else 0)
-PY
-  rc=$?
-  return "$rc"
+  [[ -n "$2" ]] || return 0
+  envs protected "$1" "$2"
 }
 
-# Whether an environment names a hosted project — a `ref` the Supabase CLI can
-# be linked to.
-#
-# A local stack has none: it is reached by address, and `env:<name>` skips the
-# link for it. Callers use this to tell "the link is missing and should be made"
-# from "there is no link to make", which otherwise look identical from outside.
-#
-# Silence means no ref, like everywhere else here: unreadable config, unknown
-# name and a null ref all mean the same thing to every caller.
+# Whether an environment names a hosted Supabase project: its file's URL is a
+# project's. A local stack is reached by address and has none.
 environment_has_ref() {
-  local wt="$1" name="$2" rc
-  [[ -n "$name" ]] || return 1
-  local envs; envs="$(environments_file "$wt")"
-  [[ -f "$envs" ]] || return 1
-  # Exit code on its own line, for the reason in environment_protected above.
-  python3 - "$envs" "$name" <<'PY' 2>/dev/null
-import json, sys
-try:
-    with open(sys.argv[1]) as fh:
-        data = json.load(fh)
-except (OSError, ValueError):
-    sys.exit(1)
-entry = data.get(sys.argv[2]) if isinstance(data, dict) else None
-if not isinstance(entry, dict):
-    sys.exit(1)
-sys.exit(0 if entry.get("ref") else 1)
-PY
-  rc=$?
-  return "$rc"
+  [[ -n "$2" ]] || return 1
+  envs ref "$1" "$2" >/dev/null
 }
 
-# Whether an environment can be worked against from this machine.
-#
-# Not every unprotected environment can. A project may declare one that names a
-# deployed host rather than a developer's own server — this product's `preview`
-# is the case that taught us: it is the name the Vercel previews run under, it
-# shares its database with `dev`, and it is perfectly safe to write to. It is
-# simply not somewhere a local `npm run dev` and a local browser suite belong,
-# and the suite says so by refusing to start.
-#
-# The signal is `siteUrl`, which is already the project's statement of "where
-# does this answer": a loopback address for the environments a developer runs,
-# something else for a deployed one, and null where there is no fixed address
-# because every deployment gets its own. A separate flag would be a second
-# answer to a question the config already answers.
-#
-# **A project that names no address anywhere is answering nothing, not "no".**
-# The first version read a missing `siteUrl` as "not runnable", which is right
-# for a config that uses the field and wrong for one that does not: there every
-# environment fell out, `environment_choices` came back empty, and force_env
-# stopped switching at all — including away from a production environment a
-# `db:promote` had left behind, which is the guard it exists for. So the field
-# is consulted only where the project uses it: if no environment declares one,
-# it tells us nothing and everything unprotected stays a choice.
-#
-# Where the field *is* used, absent or unreadable still means not runnable. The
-# cost of that direction is one fewer environment offered; the cost of the other
-# is a feature pointed somewhere its own regression refuses to run.
+# Whether an environment can be worked against from this machine: not
+# protected, not `deployed`, and with no siteUrl other than a loopback address
+# (envs.py). A deployed preview is perfectly safe to write to and still not
+# somewhere a local `npm run dev` and a local browser suite belong.
 environment_runnable() {
-  local wt="$1" name="$2" rc
-  [[ -n "$name" ]] || return 1
-  local envs; envs="$(environments_file "$wt")"
-  [[ -f "$envs" ]] || return 1
-  python3 - "$envs" "$name" <<'PY' 2>/dev/null
-import json, sys
-try:
-    with open(sys.argv[1]) as fh:
-        data = json.load(fh)
-except (OSError, ValueError):
-    sys.exit(1)
-if not isinstance(data, dict):
-    sys.exit(1)
-entry = data.get(sys.argv[2])
-if not isinstance(entry, dict):
-    sys.exit(1)
+  [[ -n "$2" ]] || return 1
+  envs runnable "$1" "$2"
+}
 
-# Does this project use siteUrl at all? If no environment declares one, the
-# field says nothing here and cannot be read as a refusal -- see the note above.
-uses_site = any(
-    isinstance(v, dict) and v.get("siteUrl") for v in data.values()
-)
-if not uses_site:
-    sys.exit(0)
+# The environment a tree is on: the one whose file its .env.local points at.
+environment_current() {
+  envs current "$1" "$1" || true
+}
 
-site = entry.get("siteUrl") or ""
-sys.exit(0 if ("localhost" in site or "127.0.0.1" in site) else 1)
-PY
-  rc=$?
-  return "$rc"
+# The same, but only when the Supabase CLI's link agrees with it, which is the
+# answer that matters before anything writes to a database.
+environment_settled() {
+  envs settled "$1" "$1" || true
+}
+
+# One value from an environment's file. When the product names no file for
+# it, or the file lacks the key, the person is asked at the terminal, every
+# time, and told that naming the file once spares them the question. Nothing,
+# and 1, without a terminal.
+#
+#   environment_value <tree> <name> <KEY>
+environment_value() {
+  local wt="$1" name="$2" key="$3" found
+  if found="$(envs value "$wt" "$name" "$key")" && [[ -n "$found" ]]; then
+    printf '%s' "$found"
+    return 0
+  fi
+  [[ -t 0 && -t 2 ]] || return 1
+  warn "  $key for \"$name\" is not in a file sclaude knows of." >&2
+  warn "  Name the file once — \"environments\": {\"$name\": {\"env\": \".env.$name\"}} in" >&2
+  warn "  .sclaude/config.json — and this question goes away." >&2
+  local reply=""
+  read -r -s -p "  $key: " reply < /dev/tty || return 1
+  echo "" >&2
+  [[ -n "$reply" ]] || return 1
+  printf '%s' "$reply"
+}
+
+# Points a tree at an environment: .env.local to its file and, for a product
+# on Supabase, the CLI linked to its project — or unlinked, for a local one,
+# since `supabase db push` obeys a leftover ref and not .env.local. Returns 0
+# when both are where they should be.
+environment_switch() {
+  local wt="$1" name="$2" file ref password
+  file="$(envs file "$wt" "$name")" || return 1
+  [[ -f "$file" ]] || { warn "  $name: $file does not exist"; return 1; }
+  local before; before="$(readlink -f "$wt/.env.local" 2>/dev/null || true)"
+  ln -sfn "$(readlink -f "$file")" "$wt/.env.local" || return 1
+  # NEXT_PUBLIC_* is inlined at build time, so a .next built on the old file
+  # keeps serving the old project's URL and keys. Only when the target moved:
+  # relinking the CLI alone leaves the build as it is.
+  [[ "$before" != "$(readlink -f "$file")" && -d "$wt/.next" ]] && rm -rf "$wt/.next"
+  [[ -f "$wt/supabase/config.toml" ]] || return 0
+  if ref="$(envs ref "$wt" "$name")"; then
+    password="$(envs value "$wt" "$name" "$(environment_key "$wt" database)" \
+                | python3 -c 'import sys, urllib.parse as u; print(u.unquote(u.urlsplit(sys.stdin.read().strip()).password or ""))' 2>/dev/null)"
+    [[ -n "$password" ]] || { warn "  $name: no database URL in $file, so the Supabase CLI was not linked"; return 1; }
+    # The password goes to the CLI as an argument, never to the terminal;
+    # npx's own notice would echo the argv, so it is silenced.
+    ( cd "$wt" && npm_config_loglevel=silent $(db_cli "$wt" 2>/dev/null || echo "npx --yes supabase") \
+        link --project-ref "$ref" -p "$password" >/dev/null 2>&1 ) || return 1
+  else
+    rm -f "$wt/supabase/.temp/project-ref"
+  fi
+  [[ "$(environment_settled "$wt")" == "$name" ]]
+}
+
+# The name of a key sclaude reads from the files (`envKeys`, envs.py).
+environment_key() {
+  python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import envs; print(envs.keys(sys.argv[2])[sys.argv[3]])' \
+    "${LIB:-$(dirname "${BASH_SOURCE[0]}")}" "$1" "$2" 2>/dev/null
+}
+
+# Production's name (envs.py: the protected environment, or of several the one
+# at a public address), or nothing.
+environment_production() {
+  envs production "$1" || true
+}
+
+# Production's address, from the protected environment that names one.
+environment_site() {
+  envs site "$1" || true
 }
 
 # The names a feature may be pointed at: everything this project declares, minus

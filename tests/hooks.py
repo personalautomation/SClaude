@@ -46,11 +46,10 @@ with open(os.path.join(PRODUCT, ".sclaude", "team", "policy.json"), "w") as _fh:
             {"command": "npm run env:prod", "why": "moves the environment to prod"},
         ],
     }, _fh)
-# How it reports its environments: once, in its config, for every rule to read.
+# Its environments, each the .env file that holds it (envs.py).
 with open(os.path.join(PRODUCT, ".sclaude", "config.json"), "w") as _fh:
     json.dump({"environments": {
-        "settled": "node scripts/lib/envs.mjs settled",
-        "file": "config/environments.json",
+        "dev": {"env": ".env.dev"}, "prod": {"env": ".env.prod", "protected": True},
     }}, _fh)
 
 
@@ -497,17 +496,30 @@ def main():
     import tempfile, shutil
     tree = tempfile.mkdtemp(prefix="hooks-shared-")
     try:
-        os.makedirs(os.path.join(tree, "scripts", "lib"))
-        os.makedirs(os.path.join(tree, "config"))
+        os.makedirs(os.path.join(tree, "supabase", ".temp"))
         with open(_cfg(os.path.join(tree, ".sclaude/config.json")), "w") as fh:
-            json.dump({"database": {"local": {"environment": "localdb"}}}, fh)
-        with open(os.path.join(tree, "config", "environments.json"), "w") as fh:
-            json.dump({"dev": {"confirm": False}, "localdb": {"confirm": False},
-                       "prod": {"confirm": True}}, fh)
+            json.dump({"database": {"local": {"environment": "localdb"}},
+                       "environments": {"dev": {"env": ".env.dev"},
+                                        "localdb": {"env": ".env.localdb"},
+                                        "prod": {"env": ".env.prod", "protected": True}}}, fh)
+        refs = {"dev": "devdevdevdevdevdevde", "prod": "prodprodprodprodprod"}
+        for name in ("dev", "localdb", "prod"):
+            with open(os.path.join(tree, ".env." + name), "w") as fh:
+                url = ("https://%s.supabase.co" % refs[name]) if name in refs else "http://127.0.0.1:54321"
+                fh.write("NEXT_PUBLIC_SUPABASE_URL=%s\n" % url)
 
         def guard(name):
-            with open(os.path.join(tree, "scripts", "lib", "envs.mjs"), "w") as fh:
-                fh.write("console.log(%s);\n" % json.dumps(name))
+            """Put the tree on an environment: .env.local and the CLI link agree."""
+            link = os.path.join(tree, ".env.local")
+            if os.path.lexists(link):
+                os.remove(link)
+            os.symlink(".env." + name, link)
+            ref = os.path.join(tree, "supabase", ".temp", "project-ref")
+            if name in refs:
+                with open(ref, "w") as fh:
+                    fh.write(refs[name])
+            elif os.path.exists(ref):
+                os.remove(ref)
 
         def verdict(command):
             argv = [sys.executable, os.path.join(HOOKS, "forbidden-commands.py"), "--step", "code",
@@ -539,6 +551,19 @@ def main():
         guard("localdb")
         if verdict("npx supabase db push") != "allow":
             failures.append(("shared", "db push on localdb", "allow", verdict("npx supabase db push")))
+        # .env.local on localdb while the CLI is still linked to a hosted
+        # project: `db push` obeys the link, so it is not settled, and refused.
+        with open(os.path.join(tree, "supabase", ".temp", "project-ref"), "w") as fh:
+            fh.write(refs["prod"])
+        if verdict("npx supabase db push") != "deny":
+            failures.append(("shared", "db push with a stale link", "deny", verdict("npx supabase db push")))
+        guard("dev")
+        # Pointing .env.local at production's file is the switch to production.
+        for command, want in (("ln -sfn .env.prod .env.local", "deny"),
+                              ("cp .env.prod .env.local", "deny"),
+                              ("ln -sfn .env.localdb .env.local", "allow")):
+            if verdict(command) != want:
+                failures.append(("shared", command, want, verdict(command)))
     finally:
         shutil.rmtree(tree, ignore_errors=True)
 
@@ -638,7 +663,7 @@ def main():
             failures.append(("markers", marker, "a hook's tail", "matched nothing"))
 
     total = len(PLANNING) + len(FORBIDDEN) + len(BY_STEP) + 2 + len(workdir_cases) + \
-        len(shared_cases) + 1 + len(plan_cases) + 3 + \
+        len(shared_cases) + 1 + 1 + 3 + len(plan_cases) + 3 + \
         len(const("collect-denials.py", "OWN_MARKERS")) + len(branch_cases)
     for step, command, want, got in failures:
         print("FAIL [%s] %s — expected %s, got %s" % (step, command, want, got))

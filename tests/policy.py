@@ -103,12 +103,10 @@ try:
 
     # --- what .sclaude/config.json already names, banned from there ---
     conf = os.path.join(tmp, "conf")
-    write(conf, ".sclaude/config.json", {"database": {"promote": "npm run db:promote",
-                                               "envProd": "npm run env:prod"}})
+    write(conf, ".sclaude/config.json", {"database": {"promote": "npm run db:promote"}})
     write(conf, ".sclaude/team/policy.json", {
         "deny": [{"command": "node scripts/tool.mjs prod", "why": "the script under env:prod"}]})
     check("config-promote-banned", verdict(conf, "npm run db:promote"), "deny")
-    check("config-envprod-banned", verdict(conf, "npx npm run env:prod"), "deny")
     check("path-rule-fires", verdict(conf, "node scripts/tool.mjs prod"), "deny")
     check("path-rule-fires-dotted", verdict(conf, "node ./scripts/tool.mjs prod --yes"), "deny")
     check("path-rule-narrow", verdict(conf, "node scripts/tool.mjs dev"), "allow")

@@ -102,9 +102,10 @@ project_command() {
   project_get "commands.$1" "${2:-}" 2>/dev/null
 }
 
-# Where production lives, as the suite should address it.
+# Where production lives, as the suite should address it: the siteUrl of the
+# protected environment (envs.py). Its one place; `prod.siteUrl` was a second.
 project_prod_url() {
-  project_get "prod.siteUrl" "${1:-}" 2>/dev/null
+  environment_site "${1:-${REPO:-.}}"
 }
 
 # The directory migrations live in, relative to the tree. Empty means the
@@ -114,9 +115,6 @@ project_migrations_dir() {
   project_get "database.migrations" "${1:-}" 2>/dev/null
 }
 
-# The credential file and variable a rollback reads to reach production.
-project_db_url_file() { project_get "database.urlFile" "${1:-}" 2>/dev/null; }
-project_db_url_var()  { project_get "database.urlVar"  "${1:-}" 2>/dev/null; }
 
 # --- the board ----------------------------------------------------------------
 #
@@ -289,10 +287,13 @@ if manuals:
     for entry in manuals:
         print("    %s" % entry.get("path"))
 
-prod = data.get("prod") or {}
-if prod.get("siteUrl"):
+envs = data.get("environments") if isinstance(data.get("environments"), dict) else {}
+named = {k: v for k, v in envs.items() if isinstance(v, dict) and v.get("env")}
+if named:
     print("")
-    print("  Production answers at: %s" % prod["siteUrl"])
+    print("  Environments, by the .env file each one is:")
+    for name, entry in named.items():
+        print("    %-10s %s%s" % (name, entry["env"], "  (protected)" if entry.get("protected") else ""))
 
 db = data.get("database") or {}
 if db:
@@ -303,9 +304,6 @@ if db:
         print("  Applying them to the preview database: %s" % db["applyPreview"])
     if db.get("promote"):
         print("  Promoting them to production: %s" % db["promote"])
-    if db.get("urlFile"):
-        print("  A rollback would read %s from %s (the value is never printed)"
-              % (db.get("urlVar", "?"), db["urlFile"]))
 
 board = data.get("board") or {}
 columns = board.get("columns") or {}

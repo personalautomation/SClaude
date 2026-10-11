@@ -123,16 +123,28 @@ esac
 """
 
 
+def on_env(wt, name):
+    """Put a tree on an environment: its .env.local points at that file."""
+    link = os.path.join(wt, ".env.local")
+    if os.path.lexists(link):
+        os.remove(link)
+    os.symlink(".env." + name, link)
+
+
+ENVIRONMENTS = {"localdb": {"env": ".env.localdb"}, "dev": {"env": ".env.dev"}}
+
+
 def feature_tree(root, name, env="localdb"):
     wt = os.path.join(root, name)
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     os.makedirs(os.path.join(wt, "supabase", "migrations"))
     os.makedirs(os.path.join(wt, "supabase", ".temp"))
-    os.makedirs(os.path.join(wt, "scripts", "lib"))
     with open(os.path.join(wt, "supabase", "config.toml"), "w") as fh:
         fh.write(CONFIG)
-    with open(os.path.join(wt, "scripts", "lib", "envs.mjs"), "w") as fh:
-        fh.write('console.log(%s);\n' % json.dumps(env))
+    for env_name in ("localdb", "dev"):
+        with open(os.path.join(wt, ".env." + env_name), "w") as fh:
+            fh.write("APP_ENV=%s\n" % env_name)
+    on_env(wt, env)
     with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
         json.dump({"feature": name, "dev": {"label": name, "port": 3100}}, fh)
     return wt
@@ -140,7 +152,7 @@ def feature_tree(root, name, env="localdb"):
 
 def write_config(wt, cli, setup):
     with open(_cfg(os.path.join(wt, ".sclaude/config.json")), "w") as fh:
-        json.dump({"environments": {"current": "node scripts/lib/envs.mjs name"},
+        json.dump({"environments": ENVIRONMENTS,
                    "database": {"local": {
             "environment": "localdb",
             "exclude": ["studio", "realtime"],
@@ -269,8 +281,7 @@ def ensure_cases():
         held.close()
 
         # Switched to the cloud project: the local address must go.
-        with open(os.path.join(a, "scripts", "lib", "envs.mjs"), "w") as fh:
-            fh.write('console.log("dev");\n')
+        on_env(a, "dev")
         bash(root, 'ensure_db "%s"' % a)
         check("a feature off localdb drops the env", os.path.exists(envf), False)
 
@@ -499,8 +510,7 @@ def shared_cases():
         os.makedirs(os.path.join(root, "repo"))
         wt = feature_tree(root, "s", env="dev")
         with open(_cfg(os.path.join(wt, ".sclaude/config.json")), "w") as fh:
-            json.dump({"environments": {"current": "node scripts/lib/envs.mjs name",
-                                        "switch": "npm run env:{name}"},
+            json.dump({"environments": ENVIRONMENTS,
                        "database": {"migrations": "supabase/migrations",
                                     "local": {"environment": "localdb"}}}, fh)
         git = lambda *a: subprocess.run(["git", "-C", wt] + list(a), capture_output=True)
@@ -513,9 +523,8 @@ def shared_cases():
             fh.write("select 1;\n")
         out = bash(root, 'db_shared_warning "%s"' % wt)
         check("a migration on the shared project is warned about",
-              'against "dev"' in out and "npm run env:localdb" in out, True)
-        with open(os.path.join(wt, "scripts", "lib", "envs.mjs"), "w") as fh:
-            fh.write('console.log("localdb");\n')
+              'against "dev"' in out and "SCLAUDE_ENV=localdb" in out, True)
+        on_env(wt, "localdb")
         out = bash(root, 'db_shared_warning "%s"' % wt)
         check("the same migration on localdb is fine", out.strip(), "")
     finally:

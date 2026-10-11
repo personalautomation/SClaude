@@ -507,56 +507,47 @@ rollback_migrations() {
 # The part that actually touches production, kept separate so the environment is
 # put back whatever happens inside it.
 #
-# the product's switch to production (`database.envProd`) switches the tree's .env.local symlink, and a tree left
-# pointing at production is a machine whose next `npm run dev` talks to it. The
-# prod block in remind_prod ends with its switch back (`database.envDev`) for exactly this reason;
-# here it must survive a failure halfway too, so the switch back is not on the
-# success path but after it, unconditionally.
+# The main tree is switched to production (environment_switch): the
+# credential is read from production's .env file either way, and the switch is
+# there so the schema snapshot afterwards is taken from production. A tree
+# left pointing at production is a machine whose next `npm run dev` talks to
+# it, so the switch back — to wherever the tree was — is not on the success
+# path but after it, unconditionally.
 rollback_apply_sql() {
   local wt="$1" sql="$2" url rc
   local state="$wt/.sclaude/local/feature/state.json"
 
-  # The credential is read from .env.prod. It is never printed: psql takes it as an
-  # argument, and the argument is not echoed.
   # A failure here still falls through to the switch back at the end rather
-  # than returning: the product's switch to production (`database.envProd`) moves a symlink and then does more, so a
-  # failure partway can leave the tree pointing at production — which is the
-  # state this function must never exit in. `switched` carries the outcome
-  # instead of an early return.
-  local switched=1 env_prod env_dev url_file url_var schema_dump
-  env_prod="$(project_get database.envProd "$wt" || true)"
-  env_dev="$(project_get database.envDev "$wt" || true)"
-  url_file="$(project_db_url_file "$wt" || true)"
-  url_var="$(project_db_url_var "$wt" || true)"
+  # than returning: `switched` carries the outcome instead of an early return.
+  # The credential is never printed: psql takes it as an argument, and the
+  # argument is not echoed.
+  local switched=1 prod back schema_dump
+  prod="$(environment_production "$REPO")"
+  back="$(environment_current "$REPO")"
   schema_dump="$(project_get database.schemaDump "$wt" || true)"
 
-  if [[ -z "$url_file" || -z "$url_var" ]]; then
-    warn "  The project does not say how to reach production's database."
-    info "  .sclaude/config.json describes it under database.urlFile and database.urlVar."
+  if [[ -z "$prod" ]]; then
+    warn "  The project does not say which environment is production."
+    info "  .sclaude/config.json marks it \"protected\" under environments."
     state_set "$state" rollback.db.status ahead 2>/dev/null || true
     return 0
   fi
 
-  # Switching environments is the project's own command, and a project that has
-  # none simply is not switched: the credential is read from a file either way,
-  # and the switch exists so that whatever else the project points at follows.
-  [[ -n "$env_prod" ]] && { ( cd "$REPO" && eval "$env_prod" ) >/dev/null 2>&1 || switched=0; }
-  if [[ "$switched" -eq 0 ]]; then
+  if ! environment_switch "$REPO" "$prod"; then
+    switched=0
     warn "  could not switch to the production environment — nothing was run."
     state_set "$state" rollback.db.status ahead 2>/dev/null || true
     url=""
   else
-    url="$(grep -m1 "^${url_var}=" "$REPO/$url_file" 2>/dev/null \
-            | cut -d= -f2- | tr -d '"'"'"'')"
+    url="$(environment_value "$REPO" "$prod" "$(environment_key "$REPO" database)" || true)"
   fi
 
   if [[ "$switched" -eq 0 ]]; then
     : # already reported; fall through to the switch back
   elif [[ -z "$url" ]]; then
-    warn "  $url_var is not in $url_file — nothing was run."
+    warn "  no database URL for \"$prod\" — nothing was run."
     state_set "$state" rollback.db.status ahead 2>/dev/null || true
   else
-    echo ""
     echo "${BLUE}\$ psql -v ON_ERROR_STOP=1 -f ${sql#$wt/}${OFF}"
     # ON_ERROR_STOP because psql carries on by default, and a down block applied
     # halfway is worse than one not applied at all.
@@ -596,11 +587,11 @@ rollback_apply_sql() {
     fi
   fi
 
-  # Back to dev, always — including after every early return above, which is
-  # why they set the status and fall through to here rather than returning.
-  if [[ -n "$env_dev" ]]; then
-    ( cd "$REPO" && eval "$env_dev" ) >/dev/null 2>&1 \
-      || warn "  could not switch back to dev — check the project's environment"
+  # Back to where the tree was, always — including after every early return
+  # above, which is why they set the status and fall through to here.
+  if [[ -n "$back" && "$back" != "$prod" ]]; then
+    environment_switch "$REPO" "$back" >/dev/null 2>&1 \
+      || warn "  could not switch back to \"$back\" — check: readlink $REPO/.env.local"
   fi
   return 0
 }

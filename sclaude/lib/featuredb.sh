@@ -41,14 +41,10 @@ db_cli() {
   echo "${cli:-npx --yes supabase}"
 }
 
-# The environment a tree is on, as the product's own command says
-# (`environments.current` in its .sclaude/config.json). Empty when it names
-# none.
+# The environment a tree is on: the one whose file its .env.local points at
+# (environment.sh). Empty when the product names no environments.
 db_env_name() {
-  local wt="$1" current
-  current="$(environments_command "$wt" current)"
-  [[ -n "$current" ]] || return 0
-  (cd "$wt" && eval "$current" 2>/dev/null) || true
+  environment_current "$1"
 }
 
 # Should this tree have a stack of its own right now?
@@ -486,8 +482,8 @@ db_shared_warning() {
   warn "  database: this feature changes the schema ($(project_migrations_dir "$wt")),"
   warn "  but works against \"$name\", which the whole team shares — every feature"
   warn "  pointed there sees these migrations. Database work belongs on \"$local\","
-  local switch; switch="$(environments_command "$wt" switch "$local")"
-  warn "  where the feature gets a database of its own${switch:+: $switch}"
+  warn "  where the feature gets a database of its own: SCLAUDE_ENV=$local for one run,"
+  warn "  or rm $(environment_file) to be asked again"
 }
 
 # Loads this feature's database environment into the current shell, if it has

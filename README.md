@@ -714,24 +714,35 @@ were isolated, or on an empty local one believing they were looking at real
 data, and both mistakes are quiet ones. A project that declares no environments
 simply does not get asked, and keeps whatever its worktree had.
 
-**Not every environment is a choice.** Two are filtered out, for different
-reasons. A `confirm: true` one is production. The other kind is subtler and was
-found by asking what the regression would do with the answer: a project may
-declare an environment that names *deployments* rather than a machine — this
-product's `preview` is one, sharing a database with `dev` and perfectly safe to
-write to, but not somewhere a local dev server and a local browser suite belong.
-Offered as a choice, it sent the cycle into a regression whose e2e stage refuses
-to start, and the refusal reads as a broken setup rather than a wrong pick. The
-signal is the project's own `siteUrl`: a loopback address means a developer runs
-it, anything else means somebody deploys it.
+**An environment is a `.env` file.** The product names each one in
+`.sclaude/config.json` — `"dev": {"env": ".env.dev"}`, `"prod": {"env":
+".env.prod", "protected": true, "siteUrl": "https://…"}` — and that is all
+sclaude needs to know (`sclaude/lib/envs.py`). A tree is on the environment
+whose file its `.env.local` points at. sclaude switches it itself: `.env.local`
+to the file, and on Supabase the CLI linked to the project that file's URL
+names, or unlinked for a local stack, since `supabase db push` obeys the link
+and not `.env.local`. A build made on the old file is removed with it,
+because `NEXT_PUBLIC_*` is inlined. The credentials stay in those files: a
+rollback reads production's database URL from production's file, and
+whatever sclaude needs and no file holds it asks for at the terminal, every
+time, saying that naming the file once spares the question.
+
+**Not every environment is a choice.** A `protected` one is production. A
+`deployed` one names deployments rather than a machine — a preview, perfectly
+safe to write to, but not somewhere a local dev server and a local browser
+suite belong; offered as a choice, it sent the cycle into a regression whose
+e2e stage refuses to start. Nor is one whose `siteUrl` is not a loopback
+address.
 
 Two things survive from the old behaviour unchanged. A feature is still never
 left pointed at production — that is why the function acts rather than reporting,
-and `confirm: true` environments are excluded from the choices, refused from
+and protected environments are excluded from the choices, refused from
 `$SCLAUDE_ENV`, and refused from a saved answer somebody edited by hand. And an
 environment we cannot identify is still treated as protected: the hook that
-governs `supabase db push` allows it on anything the project does not protect,
-and silence is not permission.
+governs `supabase db push` allows it only on an environment the project does
+not protect, and only when `.env.local` and the CLI's link agree — silence is
+not permission. A session may not point `.env.local` at production's file
+either; a product's own switch script is banned in its policy.
 
 **The orchestrator runs the dev server, not the session.** A `next dev` started
 from a claude session stays in its process group and will not let it exit — and
@@ -913,9 +924,9 @@ deploying again, and this half's is no because a `delete from` is undone by
 nothing. Each reversed migration takes its row out of
 `supabase_migrations.schema_migrations` with it — `supabase db push` put it
 there, and a row left behind makes every future `db:promote` refuse. The
-environment goes back to dev whatever happens, including halfway through a
-failure: a tree left pointing at production is a machine whose next `npm run dev`
-talks to it.
+environment goes back to wherever the tree was whatever happens, including
+halfway through a failure: a tree left pointing at production is a machine
+whose next `npm run dev` talks to it.
 
 Where the blocks cannot be run the schema stays ahead of the code, and that is
 said in those words. One case overrides the "no question asked" rule: a migration

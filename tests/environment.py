@@ -80,31 +80,62 @@ source "%s/environment.sh"
 
 
 # How a product tells sclaude about its environments (.sclaude/config.json).
-ENVIRONMENTS_CONTRACT = {
-    "file": "config/environments.json",
-    "current": "node scripts/lib/envs.mjs name",
-    "settled": "node scripts/lib/envs.mjs settled",
-    "switch": "npm run env:{name}",
-    "status": "npm run env:status",
-}
+def ref_of(name):
+    """A 20-character project ref, as Supabase's are, made from a short name."""
+    return (name + "0" * 20)[:20]
+
+
+def env_url(spec):
+    ref = spec.get("ref")
+    return "https://%s.supabase.co" % ref_of(ref) if ref else "http://127.0.0.1:54321"
 
 
 def project(tmp, environments):
-    """A worktree with a config/environments.json and nothing else.
+    """A worktree whose .sclaude/config.json names each environment's .env file.
+
+    The fixtures below are written as {name: {ref, confirm, siteUrl}}, the
+    facts a product used to keep in a file of its own; here they become what
+    sclaude reads now. `confirm` is `protected`, a siteUrl given as None is a
+    `deployed` environment, and the ref becomes the Supabase URL in the
+    environment's .env file.
 
     `tmp` is the directory the worktree is made *in*, so two fixtures in one
-    run need two of them — they would otherwise be the same tree, and the
-    second would quietly rewrite the first's config.
+    run need two of them.
     """
     wt = os.path.join(tmp, "wt")
-    os.makedirs(os.path.join(wt, "config"), exist_ok=True)
-    with open(os.path.join(wt, "config", "environments.json"), "w") as fh:
-        json.dump(environments, fh)
-    # Named in the product's config, the way a product on this contract does.
     os.makedirs(os.path.join(wt, ".sclaude"), exist_ok=True)
+    config = {}
+    for name, spec in environments.items():
+        entry = {"env": ".env." + name}
+        if spec.get("confirm"):
+            entry["protected"] = True
+        if "siteUrl" in spec:
+            if spec["siteUrl"] is None:
+                entry["deployed"] = True
+            else:
+                entry["siteUrl"] = spec["siteUrl"]
+        config[name] = entry
+        with open(os.path.join(wt, ".env." + name), "w") as fh:
+            fh.write("NEXT_PUBLIC_SUPABASE_URL=%s\n" % env_url(spec))
     with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
-        json.dump({"environments": ENVIRONMENTS_CONTRACT}, fh)
+        json.dump({"environments": config}, fh)
     return wt
+
+
+def on_env(wt, name, linked=None):
+    """Put a tree on an environment: .env.local, and the CLI's link."""
+    link = os.path.join(wt, ".env.local")
+    if os.path.lexists(link):
+        os.remove(link)
+    if name:
+        os.symlink(".env." + name, link)
+    ref = os.path.join(wt, "supabase", ".temp", "project-ref")
+    os.makedirs(os.path.dirname(ref), exist_ok=True)
+    if linked:
+        with open(ref, "w") as fh:
+            fh.write(linked)
+    elif os.path.exists(ref):
+        os.remove(ref)
 
 
 # Shaped like the real config/environments.json, `siteUrl` included: it is what
@@ -192,11 +223,7 @@ def main():
         # return 1 — which `ensure_dev` reads as `switched=1` and answers by
         # tearing down a healthy dev server on every single step.
         noconf = os.path.join(tmp, "noconf")
-        os.makedirs(os.path.join(noconf, "scripts", "lib"), exist_ok=True)
-        with open(os.path.join(noconf, "scripts", "switch.mjs"), "w") as fh:
-            fh.write("")
-        with open(os.path.join(noconf, "scripts", "lib", "envs.mjs"), "w") as fh:
-            fh.write('if (process.argv[2] === "name") console.log("dev");\n')
+        os.makedirs(noconf, exist_ok=True)
 
         check("a project without environments is left alone, quietly",
               run('force_env "%s" >/dev/null 2>&1; echo "rc=$?"' % noconf,
@@ -338,47 +365,24 @@ def main():
                              "..", "sclaude", "hooks")
         forbidden = os.path.join(hooks, "forbidden-commands.py")
 
-        # The hook asks the project where it is by running envs.mjs, so the
-        # fixture needs one.
-        #
-        # The stand-in answers `settled` and refuses everything else, which is
-        # what the real one does for an unknown subcommand. That distinction is
-        # the point: the hook used to ask for `name`, which answers from
-        # .env.local alone and says nothing about the Supabase CLI's own link —
-        # so a tree on a local stack with the CLI still linked to prod was
-        # allowed to `db push` straight into production. A stub that answered
-        # anything it was asked would pass either way and prove nothing.
-        guard_dir = os.path.join(wt, "scripts", "lib")
-        os.makedirs(guard_dir, exist_ok=True)
-        guard = os.path.join(guard_dir, "envs.mjs")
-        # The product tells the hook how to ask, in its team policy: the same
-        # settings a product on Supabase writes (sclaude/policy/supabase.json).
+        # The hook reads where the tree is from its .env.local, and holds the
+        # Supabase CLI's link to it: `supabase db push` obeys the link, so a tree
+        # on a local stack with the CLI still linked to prod was once allowed
+        # to push straight into production.
         os.makedirs(os.path.join(wt, ".sclaude", "team"), exist_ok=True)
         with open(os.path.join(wt, ".sclaude", "team", "policy.json"), "w") as fh:
             json.dump({"integrations": ["supabase"]}, fh)
-        with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
-            json.dump({"environments": {"settled": "node scripts/lib/envs.mjs settled",
-                                        "file": "config/environments.json"}}, fh)
 
-        def db_push_denied(env_name, subcommand="settled"):
+        def db_push_denied(env_name, linked="own"):
             """Whether the hook refuses `supabase db push` on this environment.
 
-            `subcommand` is the one the stub will answer; anything else exits
-            non-zero. Passing "name" simulates an environments script too old to know
-            about `settled`.
+            `linked` is the CLI's link: "own" for the environment's own project
+            (none for a local one), or a ref of some other project.
             """
-            with open(guard, "w") as fh:
-                if env_name is None:
-                    # No answer at all: the guard exits non-zero, which
-                    # active_environment reports as None.
-                    fh.write("process.exit(1);\n")
-                else:
-                    fh.write(
-                        "const want = %s;\n"
-                        "if (process.argv[2] !== want) process.exit(2);\n"
-                        "console.log(%s);\n"
-                        % (json.dumps(subcommand), json.dumps(env_name))
-                    )
+            spec = FOUR.get(env_name or "", {})
+            own = ref_of(spec["ref"]) if spec.get("ref") else None
+            on_env(wt, env_name if env_name in FOUR else None,
+                   own if linked == "own" else linked)
             payload = {"tool_name": "Bash",
                        "tool_input": {"command": "npx supabase db push"}}
             done = subprocess.run(
@@ -386,8 +390,7 @@ def main():
                 input=json.dumps(payload), capture_output=True, text=True,
                 cwd=wt, env={**os.environ, "CLAUDE_PROJECT_DIR": wt})
             # A refusal is a JSON decision on stdout, with exit 0 either way —
-            # allowing is silence. Reading the exit code instead would call
-            # every run an allow.
+            # allowing is silence.
             if not done.stdout.strip():
                 return False
             try:
@@ -397,42 +400,19 @@ def main():
             out = decision.get("hookSpecificOutput") or {}
             return out.get("permissionDecision") == "deny"
 
-        # The stand-in is JavaScript, and without node the hook cannot ask the
-        # project anything — so it refuses every push, which is the safe answer
-        # and makes the "allowed" cases unprovable here. They are skipped on a
-        # machine without node rather than reported as the hook's fault.
-        have_node = shutil.which("node") is not None
         for name, want in [("dev", False), ("localdb", False),
                            ("preview", False), ("prod", True),
                            ("nosuch", True), (None, True)]:
             label = name if name else "unresolvable"
-            if not want and not have_node:
-                print("  SKIP  hook: db push on %s (no node)" % label)
-                continue
             check("hook: db push on %s denied -> %s" % (label, want),
                   db_push_denied(name), want)
 
-        # An environments script that only knows `name` is one from before the link was
-        # being checked at all. Its silence is not permission: the hook asks for
-        # `settled`, gets a non-zero exit, and refuses — which is the same
-        # answer it gives for an environment it cannot identify.
-        check("hook: an environments script without `settled` is refused",
-              db_push_denied("localdb", subcommand="name"), True)
-
-        # A `settled` command with shell syntax in it is run by a shell, as the
-        # product's other environment commands are. Split with no shell, this
-        # one always failed and every db push was refused.
-        with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
-            json.dump({"environments": {"settled": "echo dev | tr -d ' '",
-                                        "file": "config/environments.json"}}, fh)
-        payload = {"tool_name": "Bash", "tool_input": {"command": "npx supabase db push"}}
-        done = subprocess.run([sys.executable, forbidden, "--step", "code", "--root", wt],
-                              input=json.dumps(payload), capture_output=True, text=True,
-                              cwd=wt, env={**os.environ, "CLAUDE_PROJECT_DIR": wt})
-        check("hook: a settled command with a pipe is answered", '"deny"' in done.stdout, False)
-        with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
-            json.dump({"environments": {"settled": "node scripts/lib/envs.mjs settled",
-                                        "file": "config/environments.json"}}, fh)
+        # The link and .env.local disagree: not settled, and refused.
+        check("hook: localdb with the CLI linked to prod is refused",
+              db_push_denied("localdb", linked=ref_of("cloudprod")), True)
+        check("hook: dev with the CLI unlinked is refused",
+              db_push_denied("dev", linked=None), True)
+        on_env(wt, None)
 
         # --- a switch that fails leaves no server on production -----------
         #
@@ -440,12 +420,12 @@ def main():
         # force_env used to answer 1, "switched", and ensure_dev restarted the
         # dev server right there. It is 2 now, and no server runs.
         def failing(where, current):
+            """force_env on a tree on `current`, told to be on dev, whose
+            .env.dev is missing so the switch cannot happen."""
             wt_dir = project(where, {"dev": {"ref": "d", "confirm": False},
                                      "prod": {"ref": "p", "confirm": True}})
-            with open(os.path.join(wt_dir, ".sclaude", "config.json"), "w") as fh:
-                json.dump({"environments": {"file": "config/environments.json",
-                                            "current": "echo %s" % current,
-                                            "switch": "false"}}, fh)
+            on_env(wt_dir, current)
+            os.remove(os.path.join(wt_dir, ".env.dev")) if current != "dev" else None
             return run('force_env "%s" >/dev/null 2>&1; echo "rc=$?"' % wt_dir,
                        env={"SCLAUDE_ENV": "dev"}, home=home, with_worktree=True)
 
@@ -456,6 +436,45 @@ def main():
         os.makedirs(os.path.join(tmp, "landed"))
         check("a tree already on its environment is left alone", failing(os.path.join(tmp, "landed"), "dev"),
               "rc=0")
+        # --- switching, and what is read from the files ------------------
+        #
+        # sclaude switches a tree itself now: .env.local to the file, and the
+        # Supabase CLI linked to the project that file's URL names, with the
+        # password from its database URL. A stub stands in for the CLI.
+        sw = project(os.path.join(tmp, "sw"), {"localdb": {"ref": None},
+                                                 "dev": {"ref": "cloudshared"}})
+        os.makedirs(os.path.join(sw, "supabase", ".temp"))
+        open(os.path.join(sw, "supabase", "config.toml"), "w").close()
+        with open(os.path.join(sw, ".env.dev"), "a") as fh:
+            fh.write("POSTGRES_URL_NON_POOLING=postgresql://u:s%40cret@db:5432/postgres\n")
+        calls = os.path.join(tmp, "cli-calls")
+        stub = os.path.join(tmp, "stub-cli")
+        with open(stub, "w") as fh:
+            fh.write('#!/bin/sh\necho "$*" >> %s\n'
+                     '[ "$1" = link ] && mkdir -p supabase/.temp && echo "$3" > supabase/.temp/project-ref\n'
+                     'exit 0\n' % calls)
+        os.chmod(stub, 0o755)
+        on_env(sw, "localdb")
+        os.makedirs(os.path.join(sw, ".next"))
+        out = run('db_cli() { echo %s; }; environment_switch "%s" dev && echo ok; '
+                  'environment_current "%s"; environment_settled "%s"' % (stub, sw, sw, sw))
+        check("switch: done and settled", out.split(), ["ok", "dev", "dev"])
+        check("switch: the CLI was linked with the URL's password",
+              open(calls).read().strip(), "link --project-ref %s -p s@cret" % ref_of("cloudshared"))
+        check("switch: a build of the old file is gone", os.path.exists(os.path.join(sw, ".next")), False)
+        out = run('db_cli() { echo %s; }; environment_switch "%s" localdb && echo ok; '
+                  'environment_settled "%s"' % (stub, sw, sw))
+        check("switch: a local one leaves no link behind", out.split(), ["ok", "localdb"])
+        check("switch: to a file that is not there fails",
+              run('environment_switch "%s" nosuch && echo ok || echo no' % sw), "no")
+
+        check("value: read from the environment's file",
+              run('environment_value "%s" dev POSTGRES_URL_NON_POOLING' % sw),
+              "postgresql://u:s%40cret@db:5432/postgres")
+        # No file says, and no terminal to ask at: nothing, rather than a guess.
+        check("value: none without a terminal",
+              run('environment_value "%s" dev NOT_THERE || echo none' % sw), "none")
+
         wd = open(os.path.join(os.path.dirname(LIB), "lib", "worktree.sh")).read()
         ensure = wd[wd.index("\nensure_dev() {"):]
         check("ensure_dev starts nothing on rc 2",

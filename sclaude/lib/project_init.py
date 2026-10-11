@@ -82,15 +82,6 @@ PROD_HINTS = [
     ("config/environments.json", ("prod", "url")),
 ]
 
-# Where a database URL might be kept, and the variable inside it. A rollback
-# needs these to run a migration's down block against production.
-DB_URL_HINTS = [
-    (".env.prod", "POSTGRES_URL_NON_POOLING"),
-    (".env.production", "DATABASE_URL"),
-    (".env.prod", "DATABASE_URL"),
-]
-
-
 def scripts(root):
     try:
         with open(os.path.join(root, "package.json"), encoding="utf-8") as fh:
@@ -163,23 +154,6 @@ def guess_prod_url(root):
     return ""
 
 
-def guess_db_url(root):
-    for path, var in DB_URL_HINTS:
-        full = os.path.join(root, path)
-        if not os.path.isfile(full):
-            continue
-        try:
-            with open(full, encoding="utf-8") as fh:
-                for line in fh:
-                    if re.match(r"^\s*%s\s*=" % re.escape(var), line):
-                        # The value is never read, let alone printed: what is
-                        # wanted is the fact that it is there.
-                        return {"urlFile": path, "urlVar": var}
-        except OSError:
-            continue
-    return {}
-
-
 # Where a schema snapshot might live. It is committed alongside the migrations
 # that produced it, and a rollback regenerates it.
 SCHEMA_HINTS = ["supabase/schema.sql", "db/schema.sql", "prisma/schema.prisma"]
@@ -199,8 +173,6 @@ def guess_promote(root):
             out["schemaFile"] = path
             break
     for key, names in (("promote", ["db:promote"]),
-                       ("envProd", ["env:prod"]),
-                       ("envDev", ["env:dev"]),
                        ("schemaDump", ["db:schema"])):
         for name in names:
             if name in have:
@@ -209,24 +181,36 @@ def guess_promote(root):
     return out
 
 
-# How the product tells its environments apart, when it evidently does: a file
-# of them and npm scripts that switch to each. A guess to confirm, like the
-# rest; how to print the current one and the settled one is left for the
-# person, since nothing in a repository says.
-ENVIRONMENT_FILES = ("config/environments.json",)
+# The product's environments, one for each .env.<name> file at its root: the
+# file is the environment (envs.py). `prod` and `production` are proposed
+# protected, with the address guess_prod_url finds; everything else is for the
+# person to confirm, like the rest of the proposal.
+PROTECTED_NAMES = ("prod", "production")
 
 
 def guess_environments(root):
-    have = scripts(root)
     out = {}
-    for path in ENVIRONMENT_FILES:
-        if os.path.isfile(os.path.join(root, path)):
-            out["file"] = path
-            break
-    if out and any(name.startswith("env:") for name in have):
-        out["switch"] = "npm run env:{name}"
-        if "env:status" in have:
-            out["status"] = "npm run env:status"
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return out
+    for file in names:
+        if not file.startswith(".env.") or file.endswith(".example") \
+                or file in (".env.local", ".env.example") or file.endswith(".local"):
+            continue
+        name = file[len(".env."):]
+        if not name or not os.path.isfile(os.path.join(root, file)):
+            continue
+        entry = {"env": file}
+        if name == "preview":
+            # Deployments with no fixed address: not where a local server runs.
+            entry["deployed"] = True
+        if name in PROTECTED_NAMES:
+            entry["protected"] = True
+            url = guess_prod_url(root)
+            if url:
+                entry["siteUrl"] = url
+        out[name] = entry
     return out
 
 
@@ -319,7 +303,6 @@ def main():
         "commands": commands,
         "regression": {},
         "manuals": guess_manuals(root),
-        "prod": {},
         "database": {},
     }
     if local:
@@ -331,10 +314,6 @@ def main():
     if manual and proposal["manuals"]:
         proposal["regression"]["manual"] = manual
 
-    url = guess_prod_url(root)
-    if url:
-        proposal["prod"]["siteUrl"] = url
-
     environments = guess_environments(root)
     if environments:
         proposal["environments"] = environments
@@ -342,7 +321,6 @@ def main():
     migrations = guess_migrations(root)
     if migrations:
         proposal["database"]["migrations"] = migrations
-    proposal["database"].update(guess_db_url(root))
     promote = guess_promote(root)
     if promote:
         proposal["database"].update(promote)
@@ -357,7 +335,7 @@ def main():
     # Empty sections are dropped rather than written as `{}`: a config should
     # say what the project has, and an empty object invites somebody to fill it
     # in when the honest answer may be that there is nothing to fill.
-    for key in ("regression", "prod", "database", "commands"):
+    for key in ("regression", "database", "commands"):
         if not proposal.get(key):
             proposal.pop(key, None)
     if not proposal.get("manuals"):

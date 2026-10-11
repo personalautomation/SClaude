@@ -45,7 +45,7 @@ def check_true(name, got):
         failures.append((name, "true", got))
 
 
-def run_bash(script, cwd, modules=("io", "ui", "state", "project")):
+def run_bash(script, cwd, modules=("io", "ui", "state", "project", "environment")):
     body = "set -uo pipefail\n"
     body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
     for name in modules:
@@ -82,7 +82,8 @@ try:
             "commands": {"typecheck": "pnpm typecheck", "e2e": "pnpm e2e"},
             "regression": {"local": ["typecheck", "e2e"], "preview": ["e2e"]},
             "manuals": [{"path": "docs/a.md", "what": "one"}],
-            "prod": {"siteUrl": "https://example.test"},
+            "environments": {"prod": {"env": ".env.prod", "protected": True,
+                                      "siteUrl": "https://example.test"}},
             "database": {"migrations": "db/migrations"},
         }, fh)
 
@@ -178,7 +179,7 @@ try:
     # is dropped rather than written, so a reader is not invited to fill in
     # something whose honest answer is "there is none".
     check("foreign-no-database", "database" in guess, False)
-    check("foreign-no-prod", "prod" in guess, False)
+    check("foreign-no-environments", "environments" in guess, False)
 
     # e2e belongs to both stages rather than moving out of the local one: a
     # suite against this machine's dev server is the point of having one.
@@ -223,7 +224,7 @@ try:
     with open(os.path.join(ROOT, "sclaude", "config.example.json"),
               encoding="utf-8") as fh:
         example = json.load(fh)
-    for key in ("commands", "regression", "manuals", "prod", "database"):
+    for key in ("commands", "regression", "manuals", "environments", "database"):
         check_true("example-has-%s" % key, key in example)
     # Every part the example's stages name has a command, which is the rule the
     # run enforces at run time.
@@ -239,7 +240,7 @@ try:
     # The example must be copyable as it stands, so nothing inside the sections
     # the readers walk may be commentary. The prose lives in one top-level key.
     check_true("example-prose-is-top-level", isinstance(example.get("README"), list))
-    for key in ("commands", "regression", "prod", "database"):
+    for key in ("commands", "regression", "environments", "database"):
         check("example-%s-has-no-prose" % key,
               any(k.startswith("_") or k == "README" for k in example[key]), False)
 

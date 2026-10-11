@@ -19,9 +19,37 @@ main_repo() {
   dirname "$common"
 }
 
+# What an older sclaude left in a product, put where this one reads it.
+#
+# Everything sclaude keeps in a product moved into .sclaude/: a tree's working
+# state from .feature/ to .sclaude/local/feature/, the config from
+# .sclaude.json to .sclaude/config.json. The state is machine-local and moved
+# here, in the main repository and every worktree, so a feature in flight is
+# not lost. The config is tracked, and moving it is a change to the product,
+# by its own pull request, so it is only said, every run, until it is done.
+layout_migrate() {
+  local wt
+  while IFS= read -r wt; do
+    [[ -d "$wt/.feature" && ! -e "$wt/.sclaude/local/feature" ]] || continue
+    mkdir -p "$wt/.sclaude/local" && mv "$wt/.feature" "$wt/.sclaude/local/feature" \
+      && info "  moved ${wt}/.feature to .sclaude/local/feature (sclaude keeps its state there now)"
+  done < <(git -C "$REPO" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+  if [[ -f "$REPO/.sclaude.json" && ! -f "$REPO/.sclaude/config.json" ]]; then
+    warn "  $REPO has the old .sclaude.json, which sclaude no longer reads: no"
+    warn "  regression, board or environments apply until it is .sclaude/config.json"
+    warn "  (git mv .sclaude.json .sclaude/config.json, by the product's own pull request)."
+  fi
+  local old
+  if declare -F envs >/dev/null && old="$(envs old "$REPO")"; then
+    warn "  $old"
+  fi
+  return 0
+}
+
 require_repo() {
   REPO="$(main_repo)" || die "not a git repository: $(pwd)"
   [[ -n "$REPO" ]] || die "could not find the repository root"
+  layout_migrate
   # The board's column and field names are the project's (project.sh).
   board_load
 }

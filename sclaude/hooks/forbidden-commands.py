@@ -53,6 +53,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from _friction import note
 from _shell import GIT_VALUED, SEPARATORS, strip_runners, strip_wrappers, tokenize, ungroup
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
+import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
 
 # The branch that must not be pushed to: it moves only by merging a PR.
 PROTECTED = "main"
@@ -62,7 +63,7 @@ PROTECTED = "main"
 # The flag catches their direct form; this hook catches the form with a path or
 # behind a wrapper. The rules below that need more than a prefix are code, and
 # the policy says which of them are on.
-POLICY = {"deny": [], "allow": [], "rules": [], "lifted": [], "environments": {}}
+POLICY = {"deny": [], "allow": [], "rules": [], "lifted": []}
 
 
 def rule_on(name, words=None):
@@ -76,11 +77,6 @@ def rule_on(name, words=None):
         return False
     return True
 
-
-def product_environments():
-    """`environments` from the product's .sclaude/config.json (policy.py)."""
-    found = POLICY.get("environments")
-    return found if isinstance(found, dict) else {}
 
 # `supabase db push` is the only ban that depends not on the command but on
 # where it will go. It used to stand in the table above, unconditionally, and
@@ -152,30 +148,14 @@ def vercel_refuses(words):
 
 
 def active_environment(cwd):
-    """The environment this tree is looking at, or None when there is no answer.
+    """The environment this tree is on, or None when there is no settled answer.
 
-    The product says how to ask: `environments.settled` in its
-    .sclaude/config.json, a command run in the tree that prints the name, and
-    only that, when every source of the answer agrees. A command that cannot be run, fails,
-    times out or prints nothing gives None, and to the callers that is not
-    permission. A product that names no command has no answer at all, so every
-    environment counts as protected.
+    The tree's .env.local names the environment, by the file it points at,
+    and the Supabase CLI's link has to agree with it, since `supabase db push`
+    obeys the link (envs.settled). No answer is not permission: a product that
+    names no environments has none, and every environment counts as protected.
     """
-    command = product_environments().get("settled")
-    if not isinstance(command, str) or not command.strip():
-        return None
-    # Through bash, as worktree.sh and featuredb.sh eval the product's other
-    # environment commands: split by shlex with no shell, one that used shell
-    # syntax (a pipe, `&&`, a variable) always failed, and every
-    # `supabase db push` was refused for want of an answer.
-    try:
-        done = subprocess.run(["bash", "-c", command], cwd=cwd, capture_output=True,
-                              text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if done.returncode != 0:
-        return None
-    return done.stdout.strip() or None
+    return envs_lib.settled(cwd, cwd)
 
 
 def project_dir():
@@ -189,29 +169,38 @@ def project_dir():
 
 
 def environment_is_protected(cwd, name):
-    """Whether the product marks this environment `confirm: true`.
+    """Whether the product marks this environment protected, in the tree's
+    .sclaude/config.json. True for anything that cannot be resolved: the
+    question is "may a migration be applied here", and an environment that
+    cannot be identified is exactly the case the ban exists for."""
+    return not name or envs_lib.protected(cwd, name)
 
-    The file is the product's, named by `environments.file` in its
-    .sclaude/config.json: {name: {"confirm": bool}}. True for anything we cannot
-    resolve. The question being asked is "may a migration be applied here",
-    and an environment we cannot identify is exactly the case the ban exists
-    for — an unreadable config is not permission.
-    """
-    if not name:
-        return True
-    rel = product_environments().get("file")
-    if not isinstance(rel, str) or not rel:
-        return True
-    path = os.path.join(cwd, rel)
-    try:
-        with open(path) as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
-        return True
-    entry = data.get(name) if isinstance(data, dict) else None
-    if not isinstance(entry, dict):
-        return True
-    return bool(entry.get("confirm"))
+
+# A tree is on the environment whose file its .env.local points at
+# (envs.py), so pointing it at production's file is the switch to production:
+# the next step's server, checks and database calls would all work there
+# without anybody seeing it. A product's own switch script is named in its
+# policy; this is the one every product shares.
+ENV_SWITCH_REASON = ("this points .env.local at production's environment file, and the "
+                     "next step would work against production without knowing it")
+
+
+def env_switch_refuses(words, raw):
+    """The reason this `ln` or `cp` onto .env.local is banned, or None."""
+    if not words or words[0] not in ("ln", "cp", "install"):
+        return None
+    paths = [w for w in raw[1:] if not w.startswith("-")]
+    if not paths or os.path.basename(paths[-1].rstrip("/")) != ".env.local":
+        return None
+    tree = project_dir()
+    prod = envs_lib.production(tree)
+    target = envs_lib.env_file(tree, prod) if prod else None
+    if not target:
+        return None
+    name = os.path.basename(target)
+    if any(os.path.basename(p) == name for p in paths[:-1]):
+        return ENV_SWITCH_REASON
+    return None
 
 
 DB_URL_REASON = ("--db-url points the push at a database named on the command "
@@ -806,6 +795,7 @@ def refuses(command, step, cwd=None, depth=0):
                                redirected or also, known)
                   or api_merge_refuses(words, raw[len(raw) - len(words):])
                   or db_push_refuses(words, raw[len(raw) - len(words):])
+                  or env_switch_refuses(words, raw[len(raw) - len(words):])
                   or vercel_refuses(words))
         if reason:
             return reason

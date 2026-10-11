@@ -5,9 +5,9 @@
 #
 # sclaude ships presets: sclaude/policy/core.json, the rules no product or
 # person can lift, and one file per integration (vercel.json, supabase.json),
-# the stack's usual dangers. The production commands a product already names
-# in .sclaude/config.json (database.promote, database.envProd) are banned from there,
-# so the product does not write them twice. A product picks its integrations and adds its own
+# the stack's usual dangers. The production command a product already names
+# in .sclaude/config.json (database.promote) is banned from there, so the
+# product does not write it twice. A product picks its integrations and adds its own
 # rules in .sclaude/team/policy.json; a developer adds theirs in
 # .sclaude/people/<name>/policy.json. Every layer has the same shape:
 #
@@ -111,8 +111,6 @@ def detected_integrations(root):
 # the human's steps by what they are, so the product does not write them twice.
 CONFIG_DENIES = (
     ("promote", "promoting migrations to production is the human's step, after the merge"),
-    ("envProd", "switching the environment to production would leave the next step "
-                "working against production without knowing it"),
 )
 
 
@@ -126,13 +124,6 @@ def config_denies(root):
         if isinstance(command, str) and command.strip():
             out.append({"command": command, "why": why})
     return {"deny": out}
-
-
-def environments(root):
-    """`environments` from the product's .sclaude/config.json, or {}."""
-    config = read(os.path.join(root, ".sclaude", "config.json")) if root else {}
-    found = config.get("environments")
-    return found if isinstance(found, dict) else {}
 
 
 def merged(root, person="", step=""):
@@ -199,10 +190,6 @@ def merge(root, person, step, layers):
         "lifted": [list(l) for l in lifts],
         "tools": sorted(set(tools)),
         "integrations": sorted(integrations),
-        # How the product reports its environments, from .sclaude/config.json:
-        # the integrations' rules read it from here rather than have it
-        # written a second time in a policy.
-        "environments": environments(root),
     }
 
 

@@ -149,6 +149,31 @@ try:
     with open(deferred, "a") as fh:
         fh.write("somebody editing\n")
     check("defer-dirty-file-left-to-session", defer(), "rc=1")
+    subprocess.run(["git", "-C", wt, "checkout", "-q", "--", deferred], check=True)
+
+    # The product's hooks refuse the commit. The file goes back to how it was,
+    # or the session that takes over appends the same rows again.
+    hooks = os.path.join(wt, ".git", "hooks")
+    os.makedirs(hooks, exist_ok=True)
+    refuse = os.path.join(hooks, "commit-msg")
+    with open(refuse, "w") as fh:
+        fh.write("#!/bin/sh\nexit 1\n")
+    os.chmod(refuse, 0o755)
+    before = open(deferred).read()
+    check("refused-tracked-left-to-session", defer(), "rc=1")
+    check("refused-tracked-restored", open(deferred).read(), before)
+    # A feature with no file of its own yet: the file made for the rows goes.
+    fresh = os.path.join(wt, ".sclaude", "team", "deferred", "146-y.tsv")
+    script = ('for m in state developer deferred; do source "%s/$m.sh"; done\n'
+              'LIB="%s"; REPO="%s/myapp"\ninfo() { :; }\n%s\n'
+              'friction_defer_proposals "%s" 146-y review-3 review; echo "rc=$?"'
+              % (LIB, LIB, tmp, DEFER, wt))
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                         env=dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                                  GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
+    check("refused-new-left-to-session", out.stdout.strip().splitlines()[-1:], ["rc=1"])
+    check("refused-new-file-gone", os.path.exists(fresh), False)
+    os.remove(refuse)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -157,6 +182,9 @@ rf = RUN[RUN.index("\nrun_friction() {"):]
 rf = rf[:rf.index("\n}\n")]
 asked = rf.index('friction_defer_proposals "$wt"')
 check("asked-after-lock", rf.index("lock_take FRICTION_LOCK") < asked, True)
+# Most reviews defer nothing, and a file made empty beforehand stood in the
+# worktree as uncommitted work. Only its folder is made, which git ignores.
+check("review-does-not-create-the-file", "deferred_ensure" in rf, False)
 check("asked-before-log-moves", asked < rf.index('cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log" || true'), True)
 check("asked-before-session", asked < rf.index("session_holder"), True)
 

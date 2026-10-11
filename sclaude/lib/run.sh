@@ -1405,9 +1405,11 @@ PYEOF
   local done_file="${TMPDIR:-/tmp}/sclaude-friction-$slug.done"
 
   # The deferred file the review may append to is the product's, in this
-  # person's rules folder (deferred.sh); created here so the session finds it
-  # with its header.
-  deferred_ensure "$wt" "$slug" || true
+  # person's rules folder (deferred.sh). Only its folder is made here, which
+  # git does not see: the file itself was created empty before every review,
+  # most of which defer nothing, and it then stood in the worktree as
+  # uncommitted work and rode into the next `git add -A`.
+  mkdir -p "$(dirname "$(deferred_file "$wt" "$slug")")" 2>/dev/null || true
   prompt="$(sed -e "/^<body>$/r $PROMPTS/_friction-body.md" -e "/^<body>$/d" \
     "$head_prompt" \
     | sed -e "s|<feature>|$slug|g" -e "s|<step>|$label|g" \
@@ -1636,14 +1638,31 @@ friction_defer_proposals() {
   [[ -n "$rows" ]] || return 1
   n="$(grep -c . <<< "$rows")"
   local file; file="$(deferred_file "$wt" "$slug")"
+  # How the file was before the rows, so a failed commit can put it back: from
+  # HEAD when it is tracked, cut to its old size when it was there untracked,
+  # gone when it was made just now. `git checkout HEAD` alone failed on a file
+  # HEAD never had, the rows stayed, and the session that took over appended
+  # them a second time.
+  local existed=0 size=0
+  [[ -f "$file" ]] && { existed=1; size="$(stat -c %s "$file" 2>/dev/null || echo 0)"; }
   deferred_ensure "$wt" "$slug" || return 1
   git -C "$wt" diff --quiet HEAD -- "$file" 2>/dev/null || return 1
   printf '%s\n' "$rows" >> "$file" 2>/dev/null || return 1
-  git -C "$wt" add -- "$file" 2>/dev/null \
-    && git -C "$wt" commit -q -m "chore(sclaude): put off $n CLAUDE.md proposal(s) from $key" \
-         -m "The friction log after '$key' held nothing but proposals, so sclaude put them off to the monthly review itself, with no session." \
-         -- "$file" >/dev/null 2>&1 \
-    || { git -C "$wt" checkout -q HEAD -- "$file" 2>/dev/null || true; return 1; }
+  if ! { git -C "$wt" add -- "$file" 2>/dev/null \
+         && git -C "$wt" commit -q -m "chore(sclaude): put off $n CLAUDE.md proposal(s) from $key" \
+              -m "The friction log after '$key' held nothing but proposals, so sclaude put them off to the monthly review itself, with no session." \
+              -- "$file" >/dev/null 2>&1; }; then
+    git -C "$wt" reset -q -- "$file" 2>/dev/null || true
+    local rel; rel="$(git -C "$wt" ls-files --full-name --error-unmatch -- "$file" 2>/dev/null)" || rel=""
+    if [[ -n "$rel" ]] && git -C "$wt" cat-file -e "HEAD:$rel" 2>/dev/null; then
+      git -C "$wt" checkout -q HEAD -- "$file" 2>/dev/null || true
+    elif (( existed )); then
+      truncate -s "$size" "$file" 2>/dev/null || true
+    else
+      rm -f "$file"
+    fi
+    return 1
+  fi
   now="$(date -Iseconds)"
   state_set "$state" "friction.$key.started" "$now"
   state_set "$state" "friction.$key.finished" "$now"

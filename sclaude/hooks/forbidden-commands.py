@@ -546,8 +546,35 @@ def follow_cd(where, words, known=None, command=""):
     return os.path.normpath(os.path.join(where, path))
 
 
+MAIN_REASON = ("main moves only by merging a pull request — that is "
+               "the GitHub flow of this project")
+
+
+def push_target(ref, known):
+    """Where a refspec pushes to, as a branch name; None when it cannot be told.
+
+    The destination is the right-hand side, and git takes it in more than one
+    spelling: `+HEAD:main` forces it, `HEAD:refs/heads/main` names it in full.
+    A variable set to a literal earlier in the command is put in; one that is
+    not, or a command substitution, leaves the destination unknown — and an
+    unknown destination is treated as main. A code review found
+    `x=main; git push origin HEAD:$x` and `git push origin $(echo main)` going
+    through.
+    """
+    target = ref.split(":")[-1].lstrip("+")
+    if "$(" in target or "`" in target or ")" in target:
+        return None
+    if "$" in target:
+        target = expand(target, known, "") if known else None
+        if target is None:
+            return None
+    if target.startswith("refs/heads/"):
+        target = target[len("refs/heads/"):]
+    return target
+
+
 def push_refuses(words, command="", parts=(), where=None, raw=(),
-                 redirected=False):
+                 redirected=False, known=None):
     """The reason this `git push` is banned, or None."""
     if words[:2] != ["git", "push"]:
         return None
@@ -571,22 +598,103 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
     if remote and scratch_push(command, parts, where, remote[0], redirected):
         return None
     for ref in refs[1:] if len(refs) > 1 else []:
-        target = ref.split(":")[-1]
+        target = push_target(ref, known or {})
+        if target is None:
+            return ("the push's destination is built at run time, so it cannot "
+                    "be told from main; " + MAIN_REASON)
         if target == PROTECTED:
-            return ("main moves only by merging a pull request — that is "
-                    "the GitHub flow of this project")
+            return MAIN_REASON
     # `git push main` without a remote name is an attempt too, crooked as it
     # is.
-    if len(refs) == 1 and refs[0] == PROTECTED:
-        return ("main moves only by merging a pull request — that is "
-                "the GitHub flow of this project")
+    if len(refs) == 1 and push_target(refs[0], known or {}) in (PROTECTED, None):
+        return MAIN_REASON
     return None
+
+
+# The merge through the API rather than `gh pr merge`: the REST endpoint takes
+# it as a PUT (a GET on the same path only asks whether it is merged), and
+# GraphQL as the mergePullRequest mutation. A code review found both going
+# through.
+MERGE_PATH = re.compile(r"(^|/)repos/[^/]+/[^/]+/pulls/[^/]+/merge/?$")
+MERGE_REASON = "merging is the human's step — gh pr merge, through the API or not"
+
+
+def api_merge_refuses(words, raw):
+    """The reason this `gh api` call is banned, or None.
+
+    `raw` is the same call with its words unstripped: the endpoint is a path,
+    and stripping leaves only its last part.
+    """
+    if words[:2] != ["gh", "api"]:
+        return None
+    rest = raw[2:]
+    if any("mergePullRequest" in w for w in rest):
+        return MERGE_REASON
+    put = False
+    for i, w in enumerate(rest):
+        if w in ("-X", "--method") and i + 1 < len(rest) and rest[i + 1].upper() == "PUT":
+            put = True
+        elif w.upper() in ("-XPUT", "--METHOD=PUT"):
+            put = True
+    if put and any(MERGE_PATH.search(w) for w in rest):
+        return MERGE_REASON
+    return None
+
+
+# A shell handed the command as a string, or eval: the command is that string,
+# and it is judged the same way. A code review found `bash -c 'gh pr merge 5'`
+# and `eval gh pr merge 5` going through. Only the string is judged; a script
+# file the shell is pointed at is not read, and that is the limit of a hook.
+SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
+
+
+def inner_command(words):
+    """The command a shell or eval is told to run as a string, or None."""
+    if not words:
+        return None
+    if words[0] == "eval":
+        return " ".join(words[1:]) or None
+    if words[0] in SHELLS:
+        for i, w in enumerate(words[1:], 1):
+            if w.startswith("-") and not w.startswith("--") and "c" in w[1:]:
+                return words[i + 1] if i + 1 < len(words) else None
+            if not w.startswith("-"):
+                return None
+    return None
+
+
+# Grouping: `( … )` runs in a subshell, `{ …; }` in this one, and both run what
+# is inside. shlex leaves the brackets on the words around them, so the first
+# word was `(gh` and no ban matched. The brackets are taken off; a directory
+# changed inside them is not followed out (follow_cd sees the brackets first
+# and gives up), and from a group on the directory is unknown, so it never
+# counts as scratch.
+def ungroup(raw):
+    """The words with grouping brackets removed, and whether there were any."""
+    words, grouped, open_subs = [], False, 0
+    for w in raw:
+        if w in ("{", "}", "(", ")") and not open_subs:
+            grouped = True
+            continue
+        while w.startswith("(") and not open_subs:
+            w, grouped = w[1:], True
+        # A `)` closes a `$(` opened earlier before it closes a group: shlex
+        # cuts `TOKEN=$(cat f)` into `TOKEN=$(cat` and `f)`.
+        open_subs += w.count("$(")
+        closing = w.count(")") - w.count("(") + w.count("$(")
+        while closing > 0 and open_subs:
+            open_subs, closing = open_subs - 1, closing - 1
+        if closing > 0 and w.endswith(")"):
+            w, grouped = w.rstrip(")"), True
+        if w:
+            words.append(w)
+    return words, grouped
 
 
 # git's own options, the ones before the subcommand. `git -C ~/myapp push
 # origin main` is the push to main however it is spelled, and so are
-# `git --git-dir=… push` and `git -c k=v push`; the friction review of feature
-# 145 found that every check below compared the first two words with `git push`,
+# `git --git-dir=… push` and `git -c k=v push`; a friction review found that
+# every check below compared the first two words with `git push`,
 # so all of them — main, --force, --no-verify — went through with any of these
 # in front.
 #
@@ -619,7 +727,7 @@ def git_globals(raw, where):
     return i - 1, where, redirected
 
 
-def refuses(command, step, cwd=None):
+def refuses(command, step, cwd=None, depth=0):
     """The reason to refuse this command, or None."""
     parts = segments(command)
     if parts is None:
@@ -635,12 +743,26 @@ def refuses(command, step, cwd=None):
     where = os.path.realpath(cwd or os.getcwd())
     known = {}
     redirected = False
+    grouped = False
     for raw in segments(command, raw=True):
-        remember(known, raw)
+        flat, bracket = ungroup(raw)
+        remember(known, flat)
         redirected = redirected or any("GIT_DIR" in w for w in raw)
-        where = follow_cd(where, raw, known, command)
+        where = None if grouped else follow_cd(where, raw, known, command)
+        grouped = grouped or bracket
+        raw = flat
         words = strip_runners(strip_wrappers(raw))
         if not words:
+            continue
+        inner = inner_command(words)
+        if inner is not None:
+            # Deep enough for any honest use; a string nested further than this
+            # is refused rather than followed.
+            if depth >= 3:
+                return "a command nested this deep cannot be judged"
+            reason = refuses(inner, step, where, depth + 1)
+            if reason:
+                return reason
             continue
         # `-C` moves this call only, so the directory the next segment starts
         # in stays `where`.
@@ -649,7 +771,8 @@ def refuses(command, step, cwd=None):
             taken, here, also = git_globals(raw[len(raw) - len(words):], where)
             words = words[:1] + words[1 + taken:]
         reason = (push_refuses(words, command, parts, here, raw,
-                               redirected or also)
+                               redirected or also, known)
+                  or api_merge_refuses(words, raw[len(raw) - len(words):])
                   or db_push_refuses(words) or vercel_refuses(words))
         if reason:
             return reason

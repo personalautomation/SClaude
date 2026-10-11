@@ -73,18 +73,39 @@ so the orchestrator carries no assumptions about anybody's repository.
 
 ### Control — the rules apply as the action happens
 
-Not by convention, by a PreToolUse hook that refuses the command
+A PreToolUse hook refuses the command as the session tries it
 (`sclaude/hooks/forbidden-commands.py`):
 
-- **merging a pull request** — "they decide when a PR goes to main";
+- **merging a pull request**: "they decide when a PR goes to main";
+- **pushing to `main`**, force-pushing, skipping the pre-push hook;
 - **promoting migrations to production**, **switching the environment to prod**;
-- **writing code during planning** — a separate hook, because a plan that has
+- **writing code during planning**: a separate hook, because a plan that has
   already edited files is not a plan;
-- **deploying to production** — a question whose default is *no*, worded "Ship
-  to production **anyway**?" when QA never saw the feature.
+- **deploying to production**: a question with no default, which re-asks until
+  it gets yes or no, worded "Ship to production **anyway**?" when QA never saw
+  the feature.
 
-An agent that cannot merge and cannot promote cannot ship by accident, and every
-privileged action stays attributable to whoever answered the question.
+An agent that tries the ordinary spellings of a merge or a promote is stopped,
+and every privileged action stays attributable to whoever answered the
+question.
+
+#### Why a hook, and not branch protection
+
+The hook guards against accidents, not against a session set on getting
+round it. It reads the command line it is shown. Subshells, brace groups,
+`bash -c '…'`, `eval`, a merge through `gh api` (REST or GraphQL) and a push
+whose destination is a variable, a substitution or `refs/heads/main` are all
+read and refused; a code review found each of them going through, and
+`tests/hooks.py` now holds them. What it cannot see is a command written to
+a file and run from there (`python x.py`, `bash x.sh`), or a git alias. No
+hook can.
+
+Branch protection on GitHub is the guard that holds against that, because it
+is enforced on the server. sclaude does not rely on it, because GitHub offers
+it on private repositories only on paid plans (Pro, Team, Enterprise), and a
+product on the free plan would be left with nothing. On a paid plan, or on a
+public repository, where it is free, turn it on for `main` on top of the
+hook: require a pull request, and allow no direct pushes.
 
 ### Quality gates, in the Definition-of-Done sense
 

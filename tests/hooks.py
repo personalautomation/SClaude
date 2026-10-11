@@ -189,6 +189,34 @@ PLANNING = [
 # Steps 2-4: merging and prod are the human's steps, and a wrapper must not open
 # them up.
 FORBIDDEN = [
+    # The shapes a code review found going through: a subshell, a brace
+    # group, a shell or eval given the command as a string, the merge through
+    # the REST API or GraphQL, and a push whose destination is a variable, a
+    # substitution or a full ref name.
+    ("(gh pr merge 1)", DENY),
+    ("{ gh pr merge 1; }", DENY),
+    ("( cd /tmp && gh pr merge 1 )", DENY),
+    ("bash -c 'gh pr merge 5'", DENY),
+    ("sh -c \"git push origin HEAD:main\"", DENY),
+    ("bash -lc 'vercel --prod'", DENY),
+    ("eval gh pr merge 5", DENY),
+    ("eval 'gh pr merge 5'", DENY),
+    ("gh api -X PUT repos/o/r/pulls/5/merge", DENY),
+    ("gh api --method PUT repos/o/r/pulls/5/merge -f merge_method=squash", DENY),
+    ("gh api -XPUT /repos/o/r/pulls/5/merge", DENY),
+    ("gh api graphql -f query='mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'", DENY),
+    ("x=main; git push origin HEAD:$x", DENY),
+    ("git push origin $(echo main)", DENY),
+    ("git push origin HEAD:`echo main`", DENY),
+    ("git push origin HEAD:refs/heads/main", DENY),
+    ("git push origin +HEAD:main", DENY),
+    # ...and what must still go through.
+    ("gh api repos/o/r/pulls/5/merge", ALLOW),
+    ("gh api repos/o/r/pulls/5", ALLOW),
+    ("bash -c 'npm run lint'", ALLOW),
+    ("(cd app && npm test)", ALLOW),
+    ("b=feat/x; git push origin HEAD:$b", ALLOW),
+    ("git push origin HEAD:refs/heads/feat/x", ALLOW),
     ("gh pr merge 82", DENY),
     ("timeout 5 gh pr merge 82", DENY),
     ("timeout -k 3 5 gh pr merge 82", DENY),

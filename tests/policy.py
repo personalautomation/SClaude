@@ -101,6 +101,20 @@ try:
           ["npm run check:r2", "npm run storybook", "vercel deploy"])
     check("supabase-tools-off", "mcp__plugin_supabase_supabase__apply_migration" in merged["tools"], True)
 
+    # --- what .sclaude.json already names, banned from there ---
+    conf = os.path.join(tmp, "conf")
+    write(conf, ".sclaude.json", {"database": {"promote": "npm run db:promote",
+                                               "envProd": "npm run env:prod"}})
+    write(conf, ".sclaude/team/policy.json", {
+        "deny": [{"command": "node scripts/env.mjs prod", "why": "the script under env:prod"}]})
+    check("config-promote-banned", verdict(conf, "npm run db:promote"), "deny")
+    check("config-envprod-banned", verdict(conf, "npx npm run env:prod"), "deny")
+    check("path-rule-fires", verdict(conf, "node scripts/env.mjs prod"), "deny")
+    check("path-rule-fires-dotted", verdict(conf, "node ./scripts/env.mjs prod --yes"), "deny")
+    check("path-rule-narrow", verdict(conf, "node scripts/env.mjs dev"), "allow")
+    write(conf, ".sclaude/team/policy.json", {"allow": [{"command": "npm run env:prod", "why": "ours"}]})
+    check("config-ban-liftable-by-team", verdict(conf, "npm run env:prod"), "allow")
+
     # --- the flags a step is launched with ---
     out = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"),
                           "flags", team, "ann", "code"], capture_output=True, text=True).stdout

@@ -5,7 +5,9 @@
 #
 # sclaude ships presets: sclaude/policy/core.json, the rules no product or
 # person can lift, and one file per integration (vercel.json, supabase.json),
-# the stack's usual dangers. A product picks its integrations and adds its own
+# the stack's usual dangers. The production commands a product already names
+# in .sclaude.json (database.promote, database.envProd) are banned from there,
+# so the product does not write them twice. A product picks its integrations and adds its own
 # rules in .sclaude/team/policy.json; a developer adds theirs in
 # .sclaude/people/<name>/policy.json. Every layer has the same shape:
 #
@@ -54,7 +56,7 @@ def read(path):
 
 
 def entries(layer, key, step):
-    """(words, why) pairs of one list in a layer, for the step if named."""
+    """(words, why, command) of one list in a layer, for the step if named."""
     out = []
     lists = [layer.get(key)]
     if step:
@@ -65,11 +67,15 @@ def entries(layer, key, step):
             if not isinstance(command, str) or not command.strip():
                 continue
             try:
-                words = tuple(shlex.split(command))
+                # Compared as the hook compares a call: each word by its last
+                # path component, so `node scripts/env.mjs prod` matches
+                # `node ./scripts/env.mjs prod` as well, and a rule written
+                # with a path is not one that can never fire.
+                words = tuple(w.rsplit("/", 1)[-1] for w in shlex.split(command))
             except ValueError:
                 continue
             why = item.get("why", "") if isinstance(item, dict) else ""
-            out.append((words, why))
+            out.append((words, why, command.strip()))
     return out
 
 
@@ -88,6 +94,27 @@ def detected_integrations(root):
     return found
 
 
+# The commands a product names in .sclaude.json for moving production: they are
+# the human's steps by what they are, so the product does not write them twice.
+CONFIG_DENIES = (
+    ("promote", "promoting migrations to production is the human's step, after the merge"),
+    ("envProd", "switching the environment to production would leave the next step "
+                "working against production without knowing it"),
+)
+
+
+def config_denies(root):
+    """(words, why) for the production commands .sclaude.json names."""
+    config = read(os.path.join(root, ".sclaude.json")) if root else {}
+    database = config.get("database") if isinstance(config.get("database"), dict) else {}
+    out = []
+    for key, why in CONFIG_DENIES:
+        command = database.get(key)
+        if isinstance(command, str) and command.strip():
+            out.append({"command": command, "why": why})
+    return {"deny": out}
+
+
 def merged(root, person="", step=""):
     """The policy a session in this product, run by this person, works under."""
     core = read(os.path.join(PRESETS, "core.json"))
@@ -102,10 +129,10 @@ def merged(root, person="", step=""):
                     for n in names if isinstance(n, str) and n.replace("-", "").isalnum()}
 
     def with_source(layer, key, source):
-        return [(w, why, source) for w, why in entries(layer, key, step)]
+        return [(w, why, source, raw) for w, why, raw in entries(layer, key, step)]
 
     hard = with_source(core, "deny", "core")
-    lifts = [w for w, _ in entries(team, "allow", step)]
+    lifts = [w for w, _, _ in entries(team, "allow", step)]
 
     def lifted(words):
         return any(words[:len(l)] == l for l in lifts)
@@ -116,6 +143,9 @@ def merged(root, person="", step=""):
         deny += [d for d in with_source(layer, "deny", name) if not lifted(d[0])]
         rules += [r for r in layer.get("rules") or [] if isinstance(r, str)]
         tools += [t for t in (layer.get("tools") or {}).get("deny") or [] if isinstance(t, str)]
+    # The production commands the product names in .sclaude.json, liftable by
+    # the team like an integration's.
+    deny += [d for d in with_source(config_denies(root), "deny", "config") if not lifted(d[0])]
     deny += with_source(team, "deny", "team")
     deny += with_source(mine, "deny", "person")
 
@@ -125,8 +155,10 @@ def merged(root, person="", step=""):
     allow = [a for a in allow if not any(a[0][:len(b)] == b for b in blocked)]
 
     return {
-        "deny": [{"words": list(w), "why": why, "from": src} for w, why, src in deny],
-        "allow": [{"words": list(w), "why": why, "from": src} for w, why, src in allow],
+        "deny": [{"words": list(w), "command": raw, "why": why, "from": src}
+                 for w, why, src, raw in deny],
+        "allow": [{"words": list(w), "command": raw, "why": why, "from": src}
+                  for w, why, src, raw in allow],
         "rules": sorted(set(rules)),
         "lifted": [list(l) for l in lifts],
         "tools": sorted(set(tools)),
@@ -135,8 +167,9 @@ def merged(root, person="", step=""):
     }
 
 
-def claude_rule(words):
-    return "Bash(%s:*)" % " ".join(words)
+def claude_rule(command):
+    """A Claude permission rule for the command as the policy writes it."""
+    return "Bash(%s:*)" % command
 
 
 def main(argv):
@@ -150,12 +183,12 @@ def main(argv):
         print(json.dumps(policy, ensure_ascii=False))
         return 0
     for d in policy["deny"]:
-        print(claude_rule(d["words"]))
+        print(claude_rule(d["command"]))
     for t in policy["tools"]:
         print(t)
     print("")
     for a in policy["allow"]:
-        print(claude_rule(a["words"]))
+        print(claude_rule(a["command"]))
     return 0
 
 

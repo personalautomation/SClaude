@@ -64,6 +64,22 @@ breaks the other silently — grep before you edit:
   they came with the parallel-features fixes of 2026-10-09, so that a later
   edit to one side does not silently break the other.)*
 
+## Public repository, private projects
+
+This repository is public (personalautomation/SClaude). The projects sclaude
+drives are not, and the sessions that commit here — friction reviews, the
+monthly deferred review, retrospectives — work from those projects' material,
+and `push_instruments` publishes what they commit without asking. So nothing
+committed here names a project's details: no project names, no pull-request,
+issue or feature numbers, no file paths, tables, services or infrastructure
+of a product. Describe a problem in the orchestrator's own terms. What belongs
+to a project's story goes to that project.
+
+Data about projects that sclaude collects stays out of git altogether: the
+deferred friction is local state (`sclaude/lib/deferred.sh`), and terminal
+recordings live outside the repository or in the project's own `recordings`
+folder (`sclaude/lib/terminal.sh`).
+
 ## Who commits the orchestrator to main
 
 `MAINTAINERS` lists the git addresses allowed to commit sclaude's core straight

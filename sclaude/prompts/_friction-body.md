@@ -1,5 +1,7 @@
 You're editing `~/instruments` — the `sclaude` orchestrator, not the product. The feature cycle (plan → code → PR → review) doesn't apply here: this repo commits to the branch it is already on — `main` for the orchestrator's maintainers, `dev/<name>` for everybody else — and sclaude put you on the right one before this session opened. Commit where you are: no new branch, no checkout, no pull request. You're already in it.
 
+**instruments is public; the projects are not.** Whatever you commit here — code, comments, commit messages, prompts, tests — is published on GitHub the moment `sclaude` pushes it. Describe the problem in the orchestrator's own terms, never the project's: no project names, no pull-request, issue or feature numbers, no file paths, table names, services or infrastructure of the product. "A review round after a merge conflict", not the pull request and the project it happened in. What the project's own story needs goes to the project — its branch, its pull request, its issue.
+
 **The fix may belong to the project instead — or to both.** Friction is not always the orchestrator's: a project script that hangs, a rule missing from the project's `CLAUDE.md`, a hook or a config of the project's own. You may edit the project too, in this feature's worktree, `<worktree>` — it is open to you in this session. There the project's own rules apply: read its `CLAUDE.md` first, and commit on the feature's branch, `<branch>`, by the project's commit rules — never on its `main`, and no new branch or pull request: the fix reaches `main` with this feature's pull request, and goes through its review like any other change. Don't push; `sclaude` pushes the branch after this session. Keep it to what the friction calls for — the feature's own code is the steps' work, not yours. Say in the plan which repository each change goes to, and in the report which commits you made where.
 
 **What to read.**
@@ -28,7 +30,7 @@ Entries marked `proposal` are rules a session proposed for the project's `CLAUDE
 The line, tab-separated: the date, the project, the feature, the step, a short kebab-case class, and one sentence on what happened (or the proposed rule):
 
 ```
-2026-10-09	social	152-review-profile-page	review	claude-md-stale-docs	Proposal: a change of behaviour greps docs/, both manuals and comments for the old wording in the same commit.
+2026-10-09	myapp	12-review-profile-page	review	claude-md-stale-docs	Proposal: a change of behaviour greps docs/, both manuals and comments for the old wording in the same commit.
 ```
 
 If you're unsure which kind an entry is, ask me instead of guessing.

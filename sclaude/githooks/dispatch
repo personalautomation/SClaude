@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#
+# The git hooks of a step's session, in front of the project's own.
+#
+# sclaude points core.hooksPath here for the claude it launches, and only for
+# it — through GIT_CONFIG_* in that process's environment, so nothing in the
+# repository or its config changes, and a commit made by hand runs the
+# project's hooks as before. Every hook here runs the project's hook of the
+# same name, if there is one, with the same arguments and input; commit-msg
+# first adds the session's trailer:
+#
+#   Sclaude-Session: <the session's id, as in the issue and `claude --resume`>
+#
+# The commits already carry Claude-Session, but that is claude.ai's id, and
+# nothing on the issue's table of sessions names it. This one is the id the
+# table shows, so a row there finds its commits: git log --grep=<id>.
+name="$(basename "$0")"
+
+if [[ "$name" == "commit-msg" && -n "${SCLAUDE_SESSION:-}" && -f "${1:-}" ]]; then
+  # Into the trailer block, at its end: the project's own commit-msg may check
+  # that block stays unbroken, and it runs after this.
+  git interpret-trailers --in-place --if-exists addIfDifferent \
+    --trailer "Sclaude-Session: $SCLAUDE_SESSION" "$1" 2>/dev/null || true
+fi
+
+# The project's hooks: its own core.hooksPath, read from the repository's
+# config rather than from ours (ours is the environment's), relative to the
+# work tree as git reads it; else the default .git/hooks.
+common="$(git rev-parse --git-common-dir 2>/dev/null)" || exit 0
+own="$(git config --file "$common/config" core.hooksPath 2>/dev/null || true)"
+if [[ -n "$own" ]]; then
+  [[ "$own" == /* ]] || own="$(git rev-parse --show-toplevel)/$own"
+else
+  own="$common/hooks"
+fi
+hook="$own/$name"
+[[ -x "$hook" ]] || exit 0
+exec "$hook" "$@"

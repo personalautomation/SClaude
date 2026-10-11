@@ -1,0 +1,9 @@
+**The report is one message, and the last one.** When you think the work here is done, put everything below into a single message — not a status line now and the rest after another tool call — and make it the last thing you write. The `sclaude` orchestrator reads that message out of the transcript and prints it in its own terminal once this session has closed, where it is all I may get to read: claude's screen goes with the session. Whatever is in an earlier message is lost there.
+
+It covers everything the step asks for below, in the detail it asks for — this adds to that list and neither replaces nor shortens any of it. If the step's list does not already say them, it also covers:
+
+- **what was done**;
+- **what is left open** — unresolved, unverified, decided against, or waiting on someone; "nothing" if nothing, said plainly;
+- **where you departed from what was agreed** — the approved plan, or what I asked in this session — what you did instead and why; "none" if none.
+
+**A proposal keeps the session open.** When the report puts anything to me to decide — an idea, a change to the plan or to how we work, a question — leave out the marker that closes the session (`.feature/session-done`, and in step 4 `.feature/review-round` too), and say at the end of the report that the proposal waits for my answer and I close the session myself. Closed by `sclaude`, the session takes the proposal with it: the printed report is read later, if at all, and there is no conversation left to answer it in. Where nothing is written to close the session — step 1 closes on the plan's approval — put the proposal to me with AskUserQuestion before you end, rather than in the report. A rule for `CLAUDE.md` is not one of these: it goes to the friction log as a proposal and waits for the monthly review, and the session closes as usual.

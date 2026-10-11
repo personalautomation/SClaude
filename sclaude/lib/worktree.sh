@@ -1,0 +1,1002 @@
+#!/usr/bin/env bash
+#
+# Preparing a feature's tree and the dev server in it.
+#
+# Part of sclaude; pulled in with source from bin/sclaude.
+# It does not run on its own.
+
+# --- preparing the worktree --------------------------------------------------
+#
+# `claude --worktree` creates a worktree but does not carry untracked files
+# across, and without them the worktree does not work: .env.local is in
+# .gitignore, and so is node_modules. Symlinks rather than copies — editing a key
+# in the main repo must reach every feature at once.
+
+link_env() {
+  local wt="$1" name target found=0
+  shopt -s nullglob
+  for src in "$REPO"/.env "$REPO"/.env.*; do
+    [[ -e "$src" ]] || continue
+    name="$(basename "$src")"
+    # .env.example is versioned — it is already in the worktree as its own
+    # file.
+    [[ "$name" == ".env.example" ]] && continue
+    if [[ -e "$wt/$name" && ! -L "$wt/$name" ]]; then
+      warn "  $name already exists here as a real file — leaving it alone"
+      continue
+    fi
+    # .env.local in the main repo is itself a symlink to .env.dev or .env.prod,
+    # and scripts/env.mjs reads the target's name to name the current
+    # environment. A symlink to a symlink would give it a target named
+    # ".env.local", that is an environment "local", which does not exist. So we
+    # point at the same target rather than at the symlink itself.
+    if [[ -L "$src" ]]; then
+      target="$(readlink -f "$src")" || continue
+    else
+      target="$src"
+    fi
+    ln -sfn "$target" "$wt/$name"
+    found=$((found + 1))
+  done
+  shopt -u nullglob
+  info "  environment: $found .env files linked to the main repo"
+}
+
+# --- a feature's environment -------------------------------------------------
+#
+# A feature works against this machine's chosen database, and that is a
+# condition rather than a wish: the dev server, the step's checks and the
+# Supabase MCP look where `.env.local` looks. It does not come about by itself —
+# `link_env` points the links where they point in the main repository at the
+# moment of creation, and that stands wherever it was left. After an
+# `npm run db:promote` it stays on prod: returning is the last line of the "Ship
+# to production" block, that is the human's step, which can be skipped. A
+# feature created at that moment got `.env.local -> .env.prod`, and `npm run
+# dev` came up against prod silently — indistinguishable from a normal start
+# from the outside. **That is what this function is for, and it is why it still
+# acts rather than merely reporting.**
+#
+# Which database, though, is no longer a constant. It used to be the literal
+# "dev" written here three times; it is now environment_choose (environment.sh),
+# which reads $SCLAUDE_ENV, then this machine's saved answer, and asks only if
+# neither has one. A developer running Supabase locally and a developer on the
+# shared project are both right, and this function no longer has an opinion
+# about which of them is using it.
+#
+# No answer at all is a real outcome — a project with no environments, a call
+# with no terminal to ask at. Then the only thing still worth doing is the
+# original guard: refuse to leave a feature pointed at production. Everything
+# else is left alone.
+#
+# Each worktree has its own supabase/.temp (not a symlink), so switching here
+# stays inside the feature and does not touch the main repository.
+force_env() {
+  local wt="$1" name want
+  [[ -f "$wt/scripts/env.mjs" ]] || return 0
+
+  name="$(cd "$wt" && node scripts/lib/env-guard.mjs name 2>/dev/null)" || name=""
+  want="$(environment_choose "$wt" || true)"
+
+  # Nobody could say where this should point. The feature keeps whatever it has,
+  # unless what it has is production — which is the one answer that is wrong
+  # whoever is asking.
+  #
+  # The config has to exist before that question can be asked at all.
+  # `environment_protected` answers "protected" for a project it cannot read,
+  # which is the right direction for a permission check and the wrong one here:
+  # a project with an env-guard but no config/environments.json is one that does
+  # not do environments, and warning it about production is a false alarm. Worse
+  # than noise — the rc reaches `ensure_dev` as `switched=1`, which tears down a
+  # healthy dev server on every step.
+  if [[ -z "$want" ]]; then
+    if [[ -f "$wt/config/environments.json" ]] \
+       && [[ -n "$name" ]] && environment_protected "$wt" "$name"; then
+      warn ""
+      warn "  this worktree is on \"$name\", a protected environment, and there is"
+      warn "  no answer for where it should be instead (no SCLAUDE_ENV, nothing"
+      warn "  saved, no terminal to ask at)."
+      warn "  The dev server would run against it — fix this before trusting anything."
+      return 1
+    fi
+    return 0
+  fi
+
+  [[ "$name" == "$want" ]] && return 0
+
+  # The exit code tells "it was already right" from "it had to be changed": a
+  # server started before the switch read the old environment and cannot be
+  # trusted.
+  if ( cd "$wt" && npm run "env:$want" >/dev/null 2>&1 ); then
+    info "  environment: switched to $want${name:+ (was $name)}"
+    return 1
+  fi
+
+  # The npm script did not work out — but leaving the feature where it was is
+  # worse, and may be production. We set the link ourselves: that is what the
+  # first half of `switchTo` does, and it is what decides which database the
+  # server and the checks will see. What is left undone is the `supabase link`,
+  # that is the CLI; that is what we complain about out loud.
+  if [[ -e "$wt/.env.$want" ]]; then
+    ln -sfn ".env.$want" "$wt/.env.local"
+    warn ""
+    warn "  npm run env:$want failed here — .env.local forced to .env.$want by hand."
+    warn "  The Supabase CLI link may still point elsewhere: check npm run env:status."
+  else
+    warn ""
+    warn "  no .env.$want in this worktree, and the environment is ${name:-unknown}."
+    warn "  The dev server would run against it — fix this before trusting anything."
+  fi
+  return 1
+}
+
+# Hard links rather than a symlink to a directory: Turbopack refuses to work
+# with a symlink that leads outside the project — "Symlink
+# [project]/node_modules is invalid, it points out of the filesystem root" — and
+# `next dev` dies at start-up. `cp -al` creates links to the same inodes, so the
+# data is not duplicated: about 10 seconds and almost no space, while the
+# directory is a real one.
+link_node_modules() {
+  local wt="$1"
+  [[ -d "$REPO/node_modules" ]] || { warn "  the main repo has no node_modules — skipping"; return; }
+  [[ -e "$wt/node_modules" ]] && return
+  # A symlink from earlier versions: it breaks Turbopack, so we replace it with
+  # links.
+  [[ -L "$wt/node_modules" ]] && rm -f "$wt/node_modules"
+  info "  node_modules: hard-linking from the main repo…"
+  if cp -al "$REPO/node_modules" "$wt/node_modules" 2>/dev/null; then
+    info "  node_modules: done"
+  else
+    # Different filesystems or links refused — then an honest install.
+    warn "  hard links did not work out, installing dependencies instead"
+    ( cd "$wt" && npm install ) || warn "  npm install failed"
+  fi
+}
+
+# node_modules is copied with links from the main repo and is correct exactly
+# while the branch has not touched the dependencies. As soon as package-lock.json
+# has diverged, the directory starts lying — and lies silently, on somebody
+# else's package versions.
+#
+# The reinstall stops this tree's dev server first and drops .next/dev with it.
+# The server outlives a step, so it is usually up when this runs, and in feature
+# 104 it kept serving while node_modules was torn down and reinstalled under it.
+# Every page then failed with "Cannot find module '@vercel/turbopack/postcss'",
+# and a plain restart did not help: Turbopack's persistent cache in .next/dev
+# still resolved modules into the old tree. The step spent ten calls finding
+# that out. ensure_dev starts a fresh server when the step begins, and the proxy
+# does it on the next page open.
+check_deps() {
+  local wt="$1" answer
+  [[ -d "$wt/node_modules" ]] || return 0
+  cmp -s "$REPO/package-lock.json" "$wt/package-lock.json" && return 0
+  warn ""
+  warn "  package-lock.json differs from the main repo in this branch,"
+  warn "  and node_modules was copied from there. This feature's dependencies are missing."
+  ask "  Run npm install in this worktree? [y/n] " answer yn
+  if is_yes "$answer"; then
+    # npm install edits the directory in place, and hard links share files with
+    # the main repo — the edit would reach there too. So we tear it down and
+    # install from scratch.
+    stop_own_dev "$wt" && info "  dev server: stopped for the reinstall, it starts again fresh"
+    rm -rf "$wt/.next/dev"
+    rm -rf "$wt/node_modules"
+    ( cd "$wt" && npm install ) || warn "  npm install failed"
+  fi
+}
+
+# --- the dev server ----------------------------------------------------------
+#
+# The orchestrator runs the server, not the session. The reason is simple: a
+# `next dev` started from a claude session stays in its process group and will
+# not let it exit — and exiting is what a step ends with. `setsid` takes the
+# server into a session of its own, where it outlives both claude and sclaude
+# itself.
+#
+# Chrome, by comparison, detaches itself: `chrome-debug` does a `disown`, and the
+# browser it started stays with PPID=1, holding nobody's session. So it needs no
+# `setsid` — but it still has to be started, and that used to mean "by hand".
+# Hence `ensure_chrome` below: the step's prompt requires checking the work
+# through the chrome-devtools MCP, and the MCP server is connected with
+# `--browserUrl` and does not start a browser itself — it only attaches to a port
+# already open.
+#
+# Every feature has a server of its own, on a port of its own. It used to be one
+# port for all of them, deliberately, and that stopped being right the day two
+# features were worked on at once: the second one's browser and e2e went to the
+# first one's server, silently and green. Nobody is meant to remember the ports,
+# though. `sclaude-proxy` listens on :3000 and hands each connection to the
+# server the Host names, so a feature is always http://<feature>.localhost:3000.
+# A different host rather than only a different port is also what keeps two
+# features' sign-ins apart in one browser: cookies ignore the port.
+
+# An explicit DEV_PORT pins every server to that one port and bypasses the
+# proxy and the registry altogether. It exists for the integration bench, which
+# drives a whole `sclaude <feature>` and must neither find the developer's real
+# servers nor register its fixtures next to them. Nothing in service sets it.
+#
+# Validated the way MERGE_POLL is: it reaches `ss | grep ":$port "`, so a
+# non-numeric value would silently match nothing and make every server
+# invisible.
+DEV_PORT_PINNED=""
+[[ "${DEV_PORT:-}" =~ ^[1-9][0-9]*$ ]] && DEV_PORT_PINNED="$DEV_PORT"
+
+# The range the features' own ports come from. Not from 3000 up: 3000 is the
+# proxy's, and the ports right after it are where other tools settle when they
+# find 3000 taken.
+DEV_PORT_FIRST=3100
+DEV_PORT_LAST=3199
+
+# Where the proxy listens, and where it learns which feature is where: one
+# symlink per feature, <label> -> worktree. The worktree's state holds the
+# port, so the link is all the proxy needs and nothing here can go stale in a
+# way that matters — a link to a removed tree is skipped by both sides.
+PROXY_PORT="${SCLAUDE_PROXY_PORT:-3000}"
+DEV_REGISTRY="${SCLAUDE_DEV_REGISTRY:-$HOME/.claude/sclaude/dev}"
+
+# Gives a worktree its label and its port, once, and registers it for the
+# proxy. Prints nothing; the answers are in the state as `dev.label` and
+# `dev.port`.
+#
+# Chosen once and then remembered rather than computed from the name each time:
+# the state is what makes the address stable between runs, and the lock is what
+# stops two sessions starting together from choosing the same port. A hash of
+# the name would give neither — at a hundred ports and eight features the odds
+# of two names landing on one port are about one in four.
+#
+# The label is the feature's slug, cut to what a DNS name allows. A tree that is
+# not a feature — the main repository, run by `sclaude dev` — is `main`. A label
+# another live worktree already holds gets a numeric suffix rather than taking
+# the link from it.
+#
+# `avoid` asks for a new port even though one is recorded: the recorded one is
+# held by a process from another directory, which is not ours to kill.
+dev_claim() {
+  local wt="$1" avoid="${2:-}" state="$1/.feature/state.json" main=0
+  [[ "$wt" == "${REPO:-}" ]] && main=1
+  mkdir -p "$wt/.feature" "$DEV_REGISTRY" || return 1
+  [[ -s "$state" ]] || echo '{}' > "$state"
+  (
+    flock -w 10 9 || exit 1
+    # An argument rather than a pipe: the script itself arrives on stdin.
+    local listening
+    listening="$(ss -ltnH 2>/dev/null | awk '{print $4}' | sed 's/.*://' | tr '\n' ' ')"
+    python3 - "$wt" "$state" "$DEV_REGISTRY" "$main" "$avoid" \
+      "$DEV_PORT_FIRST" "$DEV_PORT_LAST" "$listening" <<'PY'
+import json, os, re, sys
+
+wt, state, registry, main, avoid, first, last, listening = sys.argv[1:9]
+first, last = int(first), int(last)
+listening = {int(p) for p in listening.split() if p.isdigit()}
+
+with open(state) as fh:
+    data = json.load(fh)
+dev = data.setdefault("dev", {})
+
+
+def label_of():
+    if main == "1":
+        return "main"
+    raw = data.get("feature") or os.path.basename(wt)
+    label = re.sub(r"[^a-z0-9]+", "-", str(raw).lower()).strip("-")[:63].strip("-")
+    return label or "feature"
+
+
+def owner(label):
+    """The worktree a label is registered to, if that worktree still exists."""
+    link = os.path.join(registry, label)
+    if not os.path.islink(link):
+        return None
+    target = os.path.realpath(link)
+    if not os.path.isfile(os.path.join(target, ".feature", "state.json")):
+        return None
+    return target
+
+
+def port_of(tree):
+    try:
+        with open(os.path.join(tree, ".feature", "state.json")) as fh:
+            port = (json.load(fh).get("dev") or {}).get("port")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return port if isinstance(port, int) else None
+
+
+real = os.path.realpath(wt)
+
+label = dev.get("label")
+if not label or owner(label) not in (None, real):
+    base = label_of()
+    label, n = base, 1
+    while owner(label) not in (None, real):
+        n += 1
+        label = "%s-%d" % (base[:60], n)
+
+taken = set(listening)
+for name in os.listdir(registry):
+    tree = owner(name)
+    if tree and tree != real:
+        port = port_of(tree)
+        if port:
+            taken.add(port)
+
+port = dev.get("port")
+if not isinstance(port, int) or avoid:
+    if avoid.isdigit():
+        taken.add(int(avoid))
+    port = next((p for p in range(first, last + 1) if p not in taken), None)
+    if port is None:
+        sys.stderr.write("no free port in %d-%d\n" % (first, last))
+        sys.exit(1)
+
+dev["label"], dev["port"] = label, port
+with open(state, "w") as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
+
+link = os.path.join(registry, label)
+if os.path.islink(link) or os.path.exists(link):
+    os.unlink(link)
+os.symlink(real, link)
+
+# Links to trees that are gone. The proxy skips them anyway; this only keeps
+# its list from filling with the dead.
+for name in os.listdir(registry):
+    path = os.path.join(registry, name)
+    if os.path.islink(path) and not owner(name):
+        os.unlink(path)
+PY
+  ) 9>"$DEV_REGISTRY/.lock"
+}
+
+# The port this worktree's server listens on. Claims one on first use.
+feature_port() {
+  local wt="$1" port
+  [[ -n "$DEV_PORT_PINNED" ]] && { echo "$DEV_PORT_PINNED"; return 0; }
+  port="$(state_get "$wt/.feature/state.json" dev.port 2>/dev/null)"
+  if [[ ! "$port" =~ ^[0-9]+$ ]]; then
+    dev_claim "$wt" || return 1
+    port="$(state_get "$wt/.feature/state.json" dev.port 2>/dev/null)"
+  fi
+  [[ "$port" =~ ^[0-9]+$ ]] && echo "$port"
+}
+
+# Where a person or a session opens this feature: through the proxy by its
+# label, or straight at the port when the port is pinned.
+feature_url() {
+  local wt="$1" label
+  if [[ -n "$DEV_PORT_PINNED" ]]; then
+    echo "http://localhost:$DEV_PORT_PINNED"
+    return 0
+  fi
+  label="$(state_get "$wt/.feature/state.json" dev.label 2>/dev/null)"
+  if [[ -z "$label" ]]; then
+    dev_claim "$wt" || { echo "http://localhost:$PROXY_PORT"; return 0; }
+    label="$(state_get "$wt/.feature/state.json" dev.label 2>/dev/null)"
+  fi
+  echo "http://$label.localhost:$PROXY_PORT"
+}
+
+# Is the proxy answering? Without it the feature's address leads nowhere, and
+# the direct port is the one that works.
+#
+# Asked many times a step — every address printed or passed on goes through
+# dev_address — so it asks the proxy's cheap /__sclaude/ping, and the answer is
+# kept for half a minute in a file rather than a variable: most callers are
+# $(…) subshells, where a variable would be forgotten on return.
+proxy_up() {
+  local cache="$DEV_REGISTRY/.proxy-up" now
+  now="$(date +%s)"
+  if [[ -f "$cache" ]] && (( now - $(stat -c %Y "$cache" 2>/dev/null || echo 0) < 30 )); then
+    [[ "$(cat "$cache" 2>/dev/null)" == "up" ]]
+    return
+  fi
+  local answer=down
+  [[ "$(curl -s -m 2 "http://127.0.0.1:$PROXY_PORT/__sclaude/ping" 2>/dev/null)" == "sclaude-proxy" ]] \
+    && answer=up
+  mkdir -p "$DEV_REGISTRY" 2>/dev/null && printf '%s\n' "$answer" > "$cache" 2>/dev/null
+  [[ "$answer" == "up" ]]
+}
+
+# The address to hand out: the feature's own, or — when the proxy is down — the
+# port itself, with nothing lost but the name.
+dev_address() {
+  local wt="$1"
+  if [[ -z "$DEV_PORT_PINNED" ]] && ! proxy_up; then
+    echo "http://localhost:$(feature_port "$wt")"
+    return 0
+  fi
+  feature_url "$wt"
+}
+
+# Everything a process started in the feature must see besides its own
+# arguments: today, the feature's own database (featuredb.sh). A no-op where that
+# module is not loaded.
+dev_env_load() {
+  declare -F db_env_load >/dev/null || return 0
+  db_env_load "$1"
+}
+
+# The PID of the process listening on a port, or empty.
+dev_pid() {
+  local port="$1"
+  [[ "$port" =~ ^[0-9]+$ ]] || return 0
+  ss -ltnp 2>/dev/null | grep ":$port " | grep -oP 'pid=\K[0-9]+' | head -1
+}
+
+# A process's working directory — that is how we learn which worktree the server
+# was started from.
+dev_cwd() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 1
+  readlink -f "/proc/$pid/cwd" 2>/dev/null
+}
+
+# Starts the dev server for this worktree, if one is not already up from the
+# same place.
+#
+# A process from another directory on this feature's port used to be the
+# human's question — restart it, or look at somebody else's code. With a port
+# per feature it is neither: it is somebody else's server that happens to sit
+# where ours was going to, and a "yes" would have killed another feature's
+# server. So we step aside to another port instead, and say so.
+ensure_dev() {
+  local wt="$1" pid cwd log port
+  log="$wt/.feature/dev.log"
+
+  # A tree being removed gets no server, and no database either — see stop_dev.
+  [[ -e "$wt/.feature/closing" ]] && return 0
+
+  # Before starting rather than after: the server reads the environment once at
+  # start-up, and once up against prod it stays that way until a restart. The
+  # check stands here rather than only in prepare_worktree, because a step may
+  # resume a week later, and anyone may have moved the environment inside the
+  # feature in the meantime.
+  local switched=0
+  force_env "$wt" || switched=1
+
+  port="$(feature_port "$wt")" || { warn "  dev server: no port could be claimed — see $DEV_REGISTRY"; return 0; }
+
+  # The PATH this was started with, for sclaude-proxy: it starts a feature's
+  # server itself when somebody opens a stopped one, and under systemd it has
+  # none of the shell's — no nvm, so no node, no npm, no npx.
+  [[ -z "$DEV_PORT_PINNED" ]] && printf '%s\n' "$PATH" > "$DEV_REGISTRY/.path" 2>/dev/null
+
+  # The feature's own database, before the server that reads it. A server
+  # started against another database — the shared one, before this feature had
+  # its own, or a stack since rebuilt on other ports — is as wrong as one
+  # started on the old environment, and is restarted the same way.
+  if declare -F ensure_db >/dev/null; then
+    local before after
+    before="$(cat "$wt/.feature/db.env" 2>/dev/null)"
+    ensure_db "$wt"
+    after="$(cat "$wt/.feature/db.env" 2>/dev/null)"
+    [[ "$before" == "$after" ]] || switched=1
+    db_shared_warning "$wt"
+  fi
+
+  pid="$(dev_pid "$port")"
+  if [[ -n "$pid" ]]; then
+    cwd="$(dev_cwd "$pid")"
+    if [[ "$cwd" == "$wt" ]]; then
+      # Our own server, but started before the switch: it read the environment
+      # at start-up, and leaving it means looking into the old database through a
+      # page that looks correct.
+      if [[ "$switched" -eq 0 ]]; then
+        info "  dev server: already running from here ($(dev_address "$wt"))"
+        return 0
+      fi
+      info "  dev server: restarting — it was started on the old environment"
+      stop_dev_pid "$pid" "$port"
+    elif [[ -n "$DEV_PORT_PINNED" ]]; then
+      warn "  port $port is held by a server from ${cwd:-another directory}, and DEV_PORT pins it — not starting"
+      return 0
+    else
+      dev_claim "$wt" "$port" || { warn "  dev server: no other port could be claimed"; return 0; }
+      warn "  port $port is held by ${cwd:-another directory} — this feature moves to $(feature_port "$wt")"
+      port="$(feature_port "$wt")"
+    fi
+  fi
+
+  # setsid takes the server into a session of its own, nohup detaches it from
+  # the terminal: without this it dies along with sclaude, and until then holds
+  # claude's session. --fork is essential: without it setsid does not create a
+  # session when the caller is already a group leader, and the server stays
+  # attached. All three streams are closed, otherwise the $(...) substitution
+  # around the call waits for the inherited stdout to close.
+  #
+  # PORT is the one thing that tells the server where to listen: `next dev`
+  # reads it, and so does anything else that follows the convention.
+  #
+  # SCLAUDE_DEV_URL is where the server will be reached from, which the server
+  # cannot work out for itself: it sees its own port, not the proxy's name. An
+  # app builds its sign-in redirects and the links in its emails from its own
+  # address, and left at localhost:3000 they lead to the list of features — or,
+  # through a cookie, to another feature entirely. What the app does with it is
+  # the project's business; sclaude only says it.
+  local url; url="$(dev_address "$wt")"
+  ( cd "$wt" && dev_env_load "$wt" && PORT="$port" SCLAUDE_DEV_URL="$url" \
+      setsid --fork npm run dev > "$log" 2>&1 < /dev/null & ) >/dev/null 2>&1
+
+  if [[ -z "$DEV_PORT_PINNED" ]] && ! proxy_up; then
+    warn "  sclaude-proxy is not answering on :$PROXY_PORT — use the port directly,"
+    warn "  or: systemctl --user enable --now sclaude-proxy.socket"
+  fi
+
+  # We do not wait for readiness: the first build of a cold worktree takes tens
+  # of seconds, and the session would not start for all that time. The server
+  # will catch up — by the time the browser matters, it has long been ready. We
+  # wait only a couple of seconds to catch a start-up crash, which is visible at
+  # once.
+  local waited=0
+  while [[ "$waited" -lt 6 ]]; do
+    sleep 0.5
+    waited=$((waited + 1))
+    [[ -n "$(dev_pid "$port")" ]] && { info "  dev server: up on $(dev_address "$wt")"; return 0; }
+  done
+  # The port is not open yet — that is normal for a cold build, but not when the
+  # process is already dead. The difference is visible from whether a single next
+  # is alive in this directory.
+  if pgrep -f "$wt.*next" >/dev/null 2>&1 || pgrep -f "scripts/dev.mjs" >/dev/null 2>&1; then
+    info "  dev server: building, $(dev_address "$wt") opens in a minute (log: .feature/dev.log)"
+  else
+    warn "  the dev server did not start — see $log"
+  fi
+}
+
+# --- the browser -------------------------------------------------------------
+
+CHROME_PORT="${CHROME_DEBUG_PORT:-9222}"
+
+# Starts Chrome with the debugging port, if it is not answering yet.
+#
+# The second half of the same environment as the dev server: the step's prompt
+# tells it to check the work through the chrome-devtools MCP, and that one
+# connects to a ready port and does not open a browser itself. While this was
+# missing, a step began with "Could not connect to Chrome" and spent several
+# turns finding `chrome-debug`, reading it and making sure that starting it would
+# not hold the process group — a conclusion already reached and written down
+# above.
+#
+# We measure liveness by the port answering, as `chrome-debug` itself does: it is
+# an answering port that the MCP server needs, whereas `pgrep` would speak only
+# of a process that might not have opened it yet or might already have lost
+# it.
+ensure_chrome() {
+  local wt="$1" log
+
+  # A browser already up is not brought forward: `chrome-debug` would raise the
+  # window, and doing that at every start of a step means yanking it out from
+  # under someone looking at another feature. It only gets this feature's
+  # address, in a background tab, and not even that if a tab of this feature
+  # is already open.
+  if curl -sf -m 2 "http://127.0.0.1:$CHROME_PORT/json/version" >/dev/null 2>&1; then
+    if command -v chrome-debug >/dev/null 2>&1; then
+      case "$(chrome-debug --tab "$(dev_address "$wt")" 2>/dev/null)" in
+        *opened*) info "  chrome: up on port $CHROME_PORT, this feature opened in a background tab" ;;
+        *) info "  chrome: already up on port $CHROME_PORT" ;;
+      esac
+    else
+      info "  chrome: already up on port $CHROME_PORT"
+    fi
+    return 0
+  fi
+
+  if ! command -v chrome-debug >/dev/null 2>&1; then
+    warn "  chrome-debug not found — the step will have no browser to verify in"
+    return 0
+  fi
+
+  # `setsid` is not needed: chrome-debug does a `disown`, and the browser stays
+  # with PPID=1 (see the comment on the section above). A background start with
+  # closed streams is enough, otherwise the substitution around the call would
+  # wait for stdout.
+  log="$wt/.feature/chrome.log"
+  # Opened at the feature's own address: chrome-debug with no URL lands on the
+  # bare proxy, which is the list of every feature rather than this one.
+  ( chrome-debug "$(dev_address "$wt")" > "$log" 2>&1 < /dev/null & ) >/dev/null 2>&1
+
+  # We do not wait for readiness — for the same reasons as with the server: a
+  # cold start is measured in seconds, and the step gets to the browser much
+  # later.
+  info "  chrome: starting on port $CHROME_PORT (log: .feature/chrome.log)"
+}
+
+# Kills the server's whole process tree: next-server lives as a grandchild, and
+# killing the parent alone would leave it an orphan still holding the port.
+stop_dev_pid() {
+  local pid="$1" port="$2" pgid
+  [[ -n "$pid" ]] || return 0
+  pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
+  if [[ -n "$pgid" ]]; then
+    kill -TERM -"$pgid" 2>/dev/null
+  else
+    kill -TERM "$pid" 2>/dev/null
+  fi
+  local waited=0
+  while [[ "$waited" -lt 20 ]] && [[ -n "$(dev_pid "$port")" ]]; do
+    sleep 0.25
+    waited=$((waited + 1))
+  done
+  [[ -n "$pgid" && -n "$(dev_pid "$port")" ]] && kill -KILL -"$pgid" 2>/dev/null
+  # A free port is not a dead group. The launcher outlives next-server by a
+  # moment, and in social it carries a file watcher: still alive while the tree
+  # is being removed, it saw the deletions as a rebuild and wrote .dev-build back
+  # into the directory, and `git worktree remove` failed on "Directory not
+  # empty". So the group has to be gone, not just the listener.
+  if [[ -n "$pgid" ]]; then
+    waited=0
+    while [[ "$waited" -lt 20 ]] && kill -0 -"$pgid" 2>/dev/null; do
+      sleep 0.25
+      waited=$((waited + 1))
+    done
+    kill -0 -"$pgid" 2>/dev/null && kill -KILL -"$pgid" 2>/dev/null
+  fi
+  return 0
+}
+
+# Stops the server started from this worktree, and only that one. Succeeds if it
+# stopped something. It leaves the database and the proxy link alone: stop_dev
+# adds those for a tree about to be removed, and check_deps wants the server
+# down and nothing else.
+#
+# Nothing is claimed here: a tree with no port recorded has no server of ours to
+# stop. The one exception is 3000 — a server this tree started before features
+# had ports of their own is still sitting there.
+stop_own_dev() {
+  local wt="$1" pid cwd port stopped=1
+  for port in "$DEV_PORT_PINNED" "$(state_get "$wt/.feature/state.json" dev.port 2>/dev/null)" 3000; do
+    [[ -n "$port" ]] || continue
+    pid="$(dev_pid "$port")"
+    [[ -n "$pid" ]] || continue
+    cwd="$(dev_cwd "$pid")"
+    [[ "$cwd" == "$wt" ]] || continue
+    stop_dev_pid "$pid" "$port"
+    stopped=0
+  done
+  return "$stopped"
+}
+
+# Kills the server only if it was started from this worktree — we do not touch
+# somebody else's. Both callers remove the tree straight after, so the proxy's
+# link to it goes too, and so does the feature's own database.
+#
+# Which ports it looks at is stop_own_dev's business — see there.
+#
+# The order is the point. A browser left open on the feature keeps asking the
+# proxy for it, and the proxy starts a stopped server by itself. While the
+# registry link stood through the seconds db_remove takes, that is exactly what
+# happened: a fresh server came up in its own session, outside every group we
+# had waited for, its watcher wrote .dev-build back while git was deleting the
+# tree, and `git worktree remove` failed on "Directory not empty". It would have
+# brought the dropped database back too. So the tree is marked as closing and
+# unlinked before anything is stopped — ensure_dev and the proxy both honour
+# the mark — and the server is looked for once more after the database, for a
+# start that got in before the mark did.
+stop_dev() {
+  local wt="$1" label stopped=0
+  label="$(state_get "$wt/.feature/state.json" dev.label 2>/dev/null)"
+  [[ -d "$wt/.feature" ]] && touch "$wt/.feature/closing"
+  if [[ -n "$label" && -L "$DEV_REGISTRY/$label" \
+        && "$(readlink -f "$DEV_REGISTRY/$label")" == "$(readlink -f "$wt")" ]]; then
+    rm -f "$DEV_REGISTRY/$label"
+  fi
+  stop_own_dev "$wt" && stopped=1
+  # The feature's database goes with it: the volumes are its data, and a tree
+  # about to be removed is the last moment anything knows they are there.
+  declare -F db_remove >/dev/null && db_remove "$wt"
+  stop_own_dev "$wt" && stopped=1
+  [[ "$stopped" -eq 1 ]] && echo "  ${GREEN}dev server stopped${OFF}"
+  return 0
+}
+
+# Removes a feature's worktree, its server and its database with it. Fails only
+# when git refused and left the work in place.
+#
+# One failure is not a refusal: git has deleted everything it knew and dropped
+# the tree from its list, and rmdir found a file written after that. Whoever
+# wrote it has been stopped by now, so what is left is its leftovers and nothing
+# else, and they go the same way.
+remove_worktree() {
+  local wt="$1" out
+  stop_dev "$wt"
+  out="$(git -C "$REPO" worktree remove --force "$wt" 2>&1)" && return 0
+  if git -C "$REPO" worktree list --porcelain | grep -qxF "worktree $wt"; then
+    printf '%s\n' "$out" >&2
+    return 1
+  fi
+  stop_own_dev "$wt"
+  rm -rf -- "$wt" || return 1
+  git -C "$REPO" worktree prune
+  info "  removed what was written into $wt after git had deleted it"
+  return 0
+}
+
+# Worktrees a session made beside the feature's, for a pull request of their
+# own, once that pull request is merged. Offered at the end of `done`, one
+# question each.
+#
+# A session sometimes opens a side pull request from a worktree it makes itself:
+# on feature 145 the review moved a workflow fix into #164 from
+# ~/social-review-dispatch-fix, and said it could be removed after the merge.
+# Nothing removed it: `done` takes away the feature's own worktree, and sclaude
+# never knew of the other. Here it is found by what it is — a worktree with no
+# .feature of its own (so no feature's, running or not), whose branch GitHub
+# reports merged, with nothing uncommitted in it.
+side_worktrees_offer() {
+  local path branch pr answer line
+  command -v gh >/dev/null 2>&1 || return 0
+  while IFS= read -r line; do
+    path="${line%%$'\t'*}"
+    branch="${line#*$'\t'}"
+    [[ -n "$path" && -n "$branch" && "$path" != "$REPO" ]] || continue
+    [[ -d "$path" && ! -e "$path/.feature" ]] || continue
+    [[ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ]] || continue
+    pr="$(cd "$REPO" && gh pr list --head "$branch" --state merged --limit 1 \
+            --json number --jq '.[0].number // empty' 2>/dev/null)" || continue
+    [[ "$pr" =~ ^[0-9]+$ ]] || continue
+    echo ""
+    say "  ${BOLD}$path${OFF} is the worktree of $branch, and PR #$pr from it is merged."
+    ask "${BOLD}  Remove that worktree and its local branch? [y/n] ${OFF}" answer yn
+    is_yes "$answer" || continue
+    if git -C "$REPO" worktree remove "$path" >/dev/null 2>&1; then
+      git -C "$REPO" branch -d "$branch" >/dev/null 2>&1 \
+        || warn "  local branch $branch kept: it carries commits that are not in main"
+      info "  removed $path"
+    else
+      warn "  could not remove $path — git worktree remove $path"
+    fi
+  done < <(git -C "$REPO" worktree list --porcelain 2>/dev/null | awk '
+    /^worktree /{ p = substr($0, 10) }
+    /^branch refs\/heads\//{ print p "\t" substr($0, 19) }')
+}
+
+# tsconfig.json includes .next/types, where Next writes the types of its routes —
+# LayoutProps among them. That is a build product, it is not in git, and in a
+# fresh worktree `npm run typecheck` dies on names it cannot find until a build
+# has happened. In the main repo the directory is always there from the last
+# `npm run dev`, so this can be run into exactly here. A symlink to a shared
+# .next will not do: a `next dev` in the worktree would overwrite the main repo's
+# build.
+check_next_types() {
+  local wt="$1"
+  [[ -f "$wt/tsconfig.json" ]] || return 0
+  grep -q '\.next/types' "$wt/tsconfig.json" || return 0
+  [[ -d "$wt/.next/types" ]] && return 0
+  warn ""
+  warn "  this worktree has no .next/types yet — npm run typecheck will fail on"
+  warn "  LayoutProps and its like until the first build has run."
+  warn "  Either one fixes it: npm run dev or npm run build."
+}
+
+# Vercel uploads a directory's contents as they are, and symlinks to .env travel
+# broken: the build dies on `ENOENT: no such file or directory, stat
+# '/vercel/path0/.env.dev'`. The environment's values there are its own anyway,
+# from the project, so these files are simply excluded from the upload.
+# The internal paths the script creates itself: they do not outlive the feature
+# and have no business in the repository. They are kept in a list because they
+# are needed in three places — to hide them, to leave them out of the clean-up,
+# and to delete them.
+SCRATCH_PATHS=(.feature .vercelignore)
+
+# We hide them through .git/info/exclude: it is machine-local, shared by every
+# worktree and needs no edit to the project's .gitignore — otherwise the rule
+# would have to go through a PR and wait for a merge, and until then an internal
+# file would surface as "uncommitted changes" in the clean-up, where the question
+# must mean "you are about to lose work". (git does not read a linked worktree's
+# own info/exclude, so we write to the main one.)
+hide_scratch_paths() {
+  local exclude="$REPO/.git/info/exclude" p
+  [[ -f "$exclude" ]] || return 0
+  for p in "${SCRATCH_PATHS[@]}"; do
+    grep -qxF "$p" "$exclude" 2>/dev/null && continue
+    printf '\n# Written by sclaude in feature worktrees; machine-local.\n%s\n' "$p" >> "$exclude"
+  done
+}
+
+# What is uncommitted in a worktree — less the internal files the script created
+# itself. Those are temporary and go away with the worktree; showing them in a
+# question that says "you are about to lose this work" means asking about what
+# nobody minds losing.
+worktree_dirt() {
+  local wt="$1" line path p keep
+  # We parse line by line rather than with a regex: the path in
+  # `status --short` starts at the third character, and an exact comparison is
+  # more reliable than a pattern that has to be escaped for every dot in a
+  # name.
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    path="${line:3}"
+    path="${path%/}"
+    keep=1
+    for p in "${SCRATCH_PATHS[@]}"; do
+      [[ "$path" == "$p" || "$path" == "$p/"* ]] && { keep=0; break; }
+    done
+    [[ "$keep" -eq 1 ]] && printf '%s\n' "$line"
+  done < <(git -C "$wt" status --short --untracked-files=all 2>/dev/null)
+}
+
+write_vercelignore() {
+  # Two declarations rather than one, for the reason three other files in this
+  # library already record: bash assigns a `local` list left to right and does
+  # not see a name from the same command, so `local wt="$1" f="$wt/..."` made
+  # `f` into `/.vercelignore`. The existence check then asked about a file at
+  # the filesystem root, and the write went there too — failing silently for
+  # want of permission. The upshot was that no worktree ever got the file, and
+  # every preview went up carrying the `.env` symlinks it exists to exclude.
+  local wt="$1"
+  local f="$wt/.vercelignore"
+  [[ -e "$f" ]] && return 0
+  cat > "$f" <<'IGNORE'
+# Symlinks to the main repository's files: outside this machine they point
+# nowhere, and the build dies. Vercel takes its own environment values.
+.env
+.env.*
+IGNORE
+}
+
+# --- the branch's freshness --------------------------------------------------
+#
+# A feature's tree is created from a fresh origin/main (cmd_new), but time passes
+# between steps: step 1 of feature 71-email-edit-and-show happened on 7
+# September, step 2 on the eighth, and main moved 19 commits forward in a day.
+# Step 2 opened on a branch without somebody else's migration 0057, which had
+# already been applied to both databases: `npm run check:migrations` died at
+# once, and the step's own migration would have collided with it by number. The
+# session worked it out and merged main itself — five calls before the work even
+# began, and that with the answer known in advance.
+#
+# So freshness is checked when every step opens rather than only when the tree is
+# created: the gap arises precisely between steps.
+#
+# The decision is the same one `sclaude sync` makes, but its unambiguous half is
+# done silently: for a branch with no commits of its own a fast-forward changes
+# nothing except that it stops lying. A real merge comes with a question: it can
+# stall on conflicts, and untangling those under a session that is about to open
+# is not acceptable.
+sync_branch() {
+  local wt="$1" state branch slug behind dirty answer
+  state="$wt/.feature/state.json"
+  branch="$(state_get "$state" branch 2>/dev/null)" || return 0
+  [[ -n "$branch" && "$branch" != "null" ]] || return 0
+  slug="$(state_get "$state" feature 2>/dev/null)" || slug=""
+
+  # Silently: the network here is a convenience rather than an obligation. No
+  # origin means we work with what we have, as cmd_sync does.
+  git -C "$REPO" fetch origin -q 2>/dev/null || true
+
+  behind="$(git -C "$REPO" rev-list --count "$branch..origin/main" 2>/dev/null)" || return 0
+  # Empty or "0" means there is nothing to compare or nothing to merge in. A
+  # non-number means rev-list did not work out: there is no origin/main, or the
+  # branch did not resolve. We stay quiet — the step can do nothing about it, and
+  # a warning at every start stops being read.
+  [[ "$behind" =~ ^[0-9]+$ ]] || return 0
+  [[ "$behind" -eq 0 ]] && return 0
+
+  # Uncommitted work must not be merged into: merge would stop halfway. We check
+  # before everything else — offering what is known to be impossible is
+  # lying.
+  dirty="$(worktree_dirt "$wt")"
+  if [[ -n "$dirty" ]]; then
+    warn ""
+    warn "  $branch is $behind commit(s) behind origin/main, and there is"
+    warn "  uncommitted work here — merge it yourself once this step is done:"
+    warn "    sclaude sync ${slug:-<feature>}"
+    return 0
+  fi
+
+  # A branch with no commits of its own: a fast-forward is all that is
+  # needed.
+  if git -C "$wt" merge --ff-only origin/main >/dev/null 2>&1; then
+    info "  branch: fast-forwarded $behind commit(s) from origin/main"
+    return 0
+  fi
+
+  # The fast-forward did not apply, which means the branch has something of its
+  # own, and this is a real merge.
+  # Asked once for each state of main. A "no" is remembered against the
+  # commit origin/main stood at, and every later start of a step — a review
+  # round's fresh session, a resume, a rerun — says one line instead of asking
+  # again. #143 in social asked the same question at every round. When main
+  # moves, it is a new question.
+  local tip declined
+  tip="$(git -C "$REPO" rev-parse -q --verify origin/main 2>/dev/null || true)"
+  declined="$(state_get "$state" sync.declined 2>/dev/null || true)"
+  if [[ -n "$tip" && "$declined" == "$tip" ]]; then
+    info "  branch: $behind commit(s) behind origin/main — merging was declined for"
+    info "  this main; merge it with: sclaude sync ${slug:-<feature>}"
+    return 0
+  fi
+
+  warn ""
+  warn "  $branch is $behind commit(s) behind origin/main and has commits of its own."
+  warn "  Starting the step on a stale branch is how a migration collides with one"
+  warn "  that is already in main."
+  echo ""
+  ask "${BOLD}Merge origin/main into $branch? [y/n] ${OFF}" answer yn
+  if ! is_yes "$answer"; then
+    [[ -n "$tip" ]] && state_set "$state" sync.declined "$tip"
+    info "  Left as it is — the step opens on the branch as it stands."
+    info "  Not asked again until main moves; merge any time with: sclaude sync ${slug:-<feature>}"
+    return 0
+  fi
+
+  # `--no-edit`: the person has just answered yes, and a merge message editor
+  # opening on top of that leaves the orchestrator waiting on a window that may
+  # be in another program entirely ("Waiting for your editor to close the
+  # file..."), with nothing in the terminal to say what it is waiting for.
+  if git -C "$wt" merge --no-edit origin/main; then
+    echo "  ${GREEN}merged — $branch now carries everything from main${OFF}"
+    return 0
+  fi
+
+  # Conflicts: the tree is half-merged, and a session must not be opened on it.
+  # The only case where this function stops a step.
+  warn ""
+  warn "  The merge stopped on conflicts. They are yours to resolve:"
+  warn "    cd $wt && git status"
+  warn "  To back out entirely: git -C $wt merge --abort"
+  warn "  The step has not been started."
+  return 1
+}
+
+# The Supabase CLI's link: whether it exists at all.
+#
+# force_env above looks at the environment's name and stops there — and a name
+# and being configured are not the same thing. In a fresh tree .env.local already
+# points somewhere valid (link_env put it there as a symlink), so force_env
+# returns at once, `npm run env:<name>` never runs, and `supabase link` with it:
+# supabase/.temp/project-ref does not appear. `npx supabase db push` dies on
+# LegacyProjectNotLinkedError, while `npm run env:status` answers that everything
+# agrees — its check of the link is wrapped in existsSync, and a missing file
+# reads as agreement. Step 2 of feature 71 spent half a dozen calls on working
+# this out: the crash, status, reading env.mjs and env-guard.mjs, env:dev.
+#
+# A separate function rather than part of force_env, because of the npm script's
+# side effect: it tears down .next (NEXT_PUBLIC_* are baked into the build).
+# force_env is also called from ensure_dev, that is at the moment the server
+# starts — checking the link there would mean erasing the build under a server
+# already up. Here it is less of a risk, but not none: prepare_worktree runs
+# before run_step, and therefore before ensure_dev, yet a server started by an
+# earlier step is often still up at that moment — it outlives the step. The
+# script only runs when the link is missing, which in practice is a fresh tree
+# with no server yet.
+#
+# **An environment with no hosted project has no link to make.** A local Supabase
+# stack is reached by address, not by ref, and `env:<name>` skips `supabase link`
+# for it — so waiting for project-ref to appear would warn for ever about a file
+# that is never coming. Such an environment is nothing to do here at all.
+ensure_linked() {
+  local wt="$1" want
+  [[ -f "$wt/scripts/env.mjs" ]] || return 0
+  [[ -f "$wt/supabase/.temp/project-ref" ]] && return 0
+
+  want="$(environment_choose "$wt" || true)"
+  [[ -n "$want" ]] || return 0
+  environment_has_ref "$wt" "$want" || return 0
+
+  if ( cd "$wt" && npm run "env:$want" >/dev/null 2>&1 ); then
+    info "  supabase: linked (the CLI had no project-ref in this worktree)"
+    return 0
+  fi
+
+  # It did not work out, and we say so out loud. Staying quiet here will not do
+  # precisely because env:status will not mention it: the step would learn of an
+  # unlinked CLI only when a db push died in the middle of the work.
+  warn ""
+  warn "  the Supabase CLI is not linked in this worktree, and npm run env:$want"
+  warn "  did not fix it. \`supabase db push\` will fail with"
+  warn "  LegacyProjectNotLinkedError, and npm run env:status will not say so."
+  return 0
+}
+
+prepare_worktree() {
+  local wt="$1"
+  link_env "$wt"
+  force_env "$wt"
+  ensure_linked "$wt"
+  link_node_modules "$wt"
+  check_deps "$wt"
+  check_next_types "$wt"
+  hide_scratch_paths
+  write_vercelignore "$wt"
+}

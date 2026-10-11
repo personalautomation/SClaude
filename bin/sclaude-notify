@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+#
+# Sends a line to the Telegram chat keepawake already talks to.
+#
+#   sclaude-notify "regression failed"        with a sound
+#   sclaude-notify --quiet "regression started"   silent, sits in the chat
+#   echo "..." | sclaude-notify                   the text on stdin
+#
+# Why a separate sender rather than the daemon: keepawake-telegram is a long
+# poll that owns getUpdates, and a regression run has no business waking it.
+# This is a one-shot HTTP request with the same token, and it exits.
+#
+# The credentials come from ~/.config/keepawake/env, which this script parses
+# itself. The daemon does not: systemd hands it the file through
+# EnvironmentFile=, so telegramd's load_env() reads the process environment and
+# would find nothing here — a regression runs from a terminal and from a timer,
+# where nobody has loaded that file.
+#
+# A missing or empty token is not an error. A notification must never be the
+# reason a regression fails, so this stays silent and exits zero — the run's
+# own summary is already on the terminal, and the message is the extra.
+set -uo pipefail
+
+ENV_FILE="$HOME/.config/keepawake/env"
+
+quiet=""
+if [[ "${1:-}" == "--quiet" ]]; then
+  quiet=1
+  shift
+fi
+
+# The text: arguments if there are any, otherwise stdin. The pipe form is what
+# a regression summary uses — it is already several lines by the time it gets
+# here, and passing it as one argument would mean quoting it twice.
+if [[ $# -gt 0 ]]; then
+  text="$*"
+else
+  text="$(cat)"
+fi
+[[ -n "${text//[[:space:]]/}" ]] || exit 0
+
+[[ -f "$ENV_FILE" ]] || exit 0
+
+# Only the two names we need, and only the value after the first `=`: the token
+# contains a colon and the chat id may be negative, so nothing here may split on
+# anything else. `export` is not accepted because systemd's EnvironmentFile does
+# not accept it either — the file has one format, not two.
+token="$(sed -n 's/^KEEPAWAKE_BOT_TOKEN=//p' "$ENV_FILE" 2>/dev/null | head -1)"
+chat="$(sed -n 's/^KEEPAWAKE_CHAT_ID=//p' "$ENV_FILE" 2>/dev/null | head -1)"
+token="${token%\"}"; token="${token#\"}"
+chat="${chat%\"}"; chat="${chat#\"}"
+[[ -n "$token" && -n "$chat" ]] || exit 0
+
+# A heredoc rather than python3 -c: an apostrophe inside a single-quoted -c
+# block closes the string and breaks the script, and the comments below have
+# several.
+#
+# A failed send does not fail the run — that is the header's promise — but it
+# does say so on stderr. The two are not the same thing: no token is a machine
+# that was never set up, while a rejected request is a message that was meant to
+# arrive and did not, and swallowing that in silence is how a regression summary
+# disappears without anybody learning it was ever sent. Standard library only —
+# this runs on a machine where nothing was installed for it.
+python3 - "$token" "$chat" "$text" "${quiet:-}" <<'PY' || exit 0
+import html
+import json
+import sys
+import urllib.parse
+import urllib.request
+
+token, chat, text, quiet = sys.argv[1:5]
+
+# Everything is escaped, and formatting is applied here rather than accepted
+# from the caller. What comes through this script is test output: names like
+# "expected a < b" and "<Foo> renders" are ordinary there, and to the Bot API
+# they are unsupported tags — the request comes back 400 and the message is
+# lost. The caller cannot be trusted to remember that, because the caller is a
+# regression run splicing in whatever a test was called.
+#
+# The first line is made bold instead: a summary wants a heading, that is all
+# the markup ever needed here, and it is applied after escaping so the escape
+# cannot eat it.
+lines = html.escape(text).split("\n")
+body = "\n".join(["<b>%s</b>" % lines[0]] + lines[1:])
+
+# The string "true" rather than Python's True: urlencode prints a bool
+# capitalised, and while the Bot API accepts that, the documented form is lower
+# case. When a sound is wanted the parameter is left out altogether.
+params = {"chat_id": chat, "text": body, "parse_mode": "HTML"}
+if quiet:
+    params["disable_notification"] = "true"
+
+url = "https://api.telegram.org/bot%s/sendMessage" % token
+req = urllib.request.Request(url, data=urllib.parse.urlencode(params).encode())
+try:
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        out = json.load(resp)
+    if not out.get("ok"):
+        sys.stderr.write("sclaude-notify: telegram refused: %s\n"
+                         % out.get("description", "no reason given"))
+        sys.exit(1)
+except Exception as exc:
+    detail = ""
+    if hasattr(exc, "read"):
+        try:
+            detail = json.loads(exc.read().decode()).get("description", "")
+        except Exception:
+            detail = ""
+    sys.stderr.write("sclaude-notify: did not send: %s%s\n"
+                     % (type(exc).__name__, ": " + detail if detail else ""))
+    sys.exit(1)
+PY

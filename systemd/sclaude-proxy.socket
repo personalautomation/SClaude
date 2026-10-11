@@ -1,0 +1,15 @@
+[Unit]
+Description=sclaude-proxy's port: every feature's dev server at <feature>.localhost:3000
+Documentation=file:%h/instruments/README.md
+
+[Socket]
+# Every address, like the `next dev` that used to hold this port: the Windows
+# browser comes over WSL's localhost forwarding, the phone over the tailnet, and
+# both must keep reaching :3000. Loopback-only would cut the phone off.
+ListenStream=3000
+# Accept=no: the proxy takes the listening socket whole and accepts connections
+# itself (LISTEN_FDS, fd 3).
+Accept=no
+
+[Install]
+WantedBy=sockets.target

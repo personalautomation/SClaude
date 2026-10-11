@@ -1,0 +1,31 @@
+[Unit]
+Description=keepawake Telegram bot: extending the hold and service commands
+Documentation=file:%h/instruments/keepawake/telegramd.py
+After=network-online.target
+Wants=network-online.target
+
+# Without this systemd stops bringing the service up after a run of restarts —
+# for instance when the laptop woke before the network appeared.
+# The directive only works in [Unit]: in [Service] systemd ignores it.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# The token and chat_id live outside the repository. It is private, but that is
+# no reason to keep secrets inside: the repository gets cloned to other machines
+# and ends up in backups, and a token that has made it into git history is not
+# revoked by simply deleting the file.
+EnvironmentFile=%h/.config/keepawake/env
+# systemd hands over a bare system PATH, without ~/.local/bin, where keepawake,
+# chrome-debug and sclaude live. Without this line every button in the bot
+# answers "not found", even though the same commands work from the terminal.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+ExecStart=/usr/bin/python3 %h/instruments/keepawake/telegramd.py
+# The network drops, and that is normal, not a reason to stop. The daemon keeps
+# its own backoff on network errors; a restart is for what it cannot survive.
+Restart=always
+RestartSec=10
+Nice=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+#
+# Refuses a commit message whose trailer block is broken.
+#
+# Git reads only the **last** paragraph of a message as trailers, and it reads
+# that paragraph only if every line in it looks like one. Break either rule and
+# every `Requirement:` footer silently stops being a trailer:
+#
+#   git log --format='%(trailers:key=Requirement,valueonly)'
+#
+# returns nothing, which is what the `pr` skill assembles the PR's QA section
+# from. Nothing warns you: the commit succeeds, the message still looks right in
+# `git log`, and the requirements are gone.
+#
+# There are two ways to do it, and both have been done for real:
+#
+#   * a blank line inside the block — `Requirement:` lines, then a blank, then
+#     `Co-Authored-By:`. Only the part after the blank is trailers.
+#   * no blank line before the block — the body's last line runs straight into
+#     the first `Requirement:`. Now the paragraph holds a line that is not a
+#     trailer, and git discards the whole paragraph.
+#
+# The first was made five times in one session, which is what prompted the
+# original hook in `social`; the second slipped past that hook three times in
+# one session afterwards, because it only checked which paragraph the footers
+# were in.
+#
+# So this does not parse the format itself. It asks git what git will see —
+# `git interpret-trailers --parse` is the same code path `%(trailers:...)` uses
+# — and compares that with what was written. Any future way of breaking the
+# block is caught by the same question.
+set -uo pipefail
+
+msg_file="$1"
+
+# Comments are not part of the message.
+body="$(grep -v '^#' "$msg_file")"
+
+# How many Requirement: footers were written, and how many survive as trailers.
+written="$(printf '%s\n' "$body" | grep -c '^Requirement:')"
+[[ "$written" -eq 0 ]] && exit 0
+
+parsed="$(printf '%s\n' "$body" | git interpret-trailers --parse | grep -c '^Requirement:')"
+[[ "$parsed" -eq "$written" ]] && exit 0
+
+cat >&2 <<MESSAGE
+
+  commit-msg: $written Requirement: footer(s) written, $parsed reach git as trailers.
+
+  Git collects trailers only from the last paragraph, and only when every line
+  in that paragraph is itself a trailer. As written, these footers will not be
+  collected by
+
+    git log --format='%(trailers:key=Requirement,valueonly)'
+
+  and the PR's QA section will be assembled without them.
+
+  The trailer block comes last, is unbroken, and is separated from the body by
+  exactly one blank line:
+
+    <body, ending here>
+                                  <- one blank line, and only one
+    Requirement: ...
+    Requirement: ...
+    Co-Authored-By: ...
+    Claude-Session: ...
+
+  Two things break it: a blank line anywhere inside the block, and a body line
+  running straight into the first Requirement: with no blank line at all.
+
+MESSAGE
+exit 1

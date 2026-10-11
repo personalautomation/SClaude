@@ -1,0 +1,16 @@
+[Unit]
+Description=Counting keepawake holders (claude, ssh, code-server)
+Documentation=file:%h/.local/bin/keepawake
+# Under WSL the state lives on the Windows drive via /mnt/c — with the
+# filesystem unmounted there is nowhere to write. On plain Linux there is no
+# such mount and the line asks for nothing.
+RequiresMountsFor=/mnt/c
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/keepawake
+# A run takes a fraction of a second; if it hangs longer, something is wrong
+# with 9p, and holding up the timer's queue for that is not worth it.
+TimeoutStartSec=60
+Nice=10
+IOSchedulingClass=idle

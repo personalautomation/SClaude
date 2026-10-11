@@ -1,0 +1,16 @@
+[Unit]
+Description=keepawake's holding side on plain Linux: keeping the machine from sleeping
+Documentation=file:%h/.local/bin/keepawake-linux
+# Only works in [Unit]: in [Service] systemd ignores it.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/keepawake-linux
+# Stopping the service drops the lock: the process releases it on SIGTERM, and
+# the systemd-inhibit it started is in its own process group, which it kills.
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

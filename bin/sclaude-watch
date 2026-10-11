@@ -1,0 +1,401 @@
+#!/usr/bin/env bash
+#
+# Asks GitHub what QA has done, and says so in Telegram.
+#
+#   sclaude-watch            look at every watched feature once
+#   sclaude-watch <slug>     just that one
+#
+# Run by sclaude-watch.timer every five minutes. It is deliberately the dullest
+# thing here: it reads, it compares, it sends a message. Acting on what it found
+# is sclaude's job, when the human comes back to the feature — with one
+# exception. When QA accepts the work, the pull request is handed over to the
+# merger (`sclaude _handoff`, pr_qa_handoff in github.sh): marked ready, moved
+# to the backlog, unassigned, summarised. Nobody needs to be at a terminal for
+# that, and a merger should not wait for the author to come back before the PR
+# says it is ready. It is sclaude's own code doing it, run in the project; this
+# script only notices the moment.
+#
+# The split is still the point. The waiting after "In QA" lasts hours or days,
+# and holding a Claude session open for it costs tokens to learn nothing. A
+# five-minute shell poll costs one `gh` call per watched feature.
+#
+# The files it reads are written by watch_start (sclaude/lib/watch.sh):
+# ~/.claude/sclaude/watch/<slug>.json, one per feature being waited on.
+set -uo pipefail
+
+SELF="$(basename "$0")"
+WATCH_DIR="$HOME/.claude/sclaude/watch"
+NOTIFY="$(dirname "$(readlink -f "$0")")/sclaude-notify"
+SCLAUDE="$(dirname "$(readlink -f "$0")")/sclaude"
+
+# The columns are the project's (`board` in its .sclaude.json), and this runs
+# from a timer with no project in reach — so watch_start writes the two it
+# needs into each watch file, and look() reads them from there.
+
+# A column name for comparison: lower case, surrounding spaces gone. Empty
+# stays empty, and a case pattern of "" matches nothing a board can hold.
+norm() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "${s,,}"
+}
+
+# SCLAUDE_WATCH_QUIET is set by sclaude when it asks for one look from inside a
+# session (watch_look_now): the person is at that terminal already, and a
+# Telegram message about what they are looking at is noise.
+notify() {
+  [[ -z "${SCLAUDE_WATCH_QUIET:-}" ]] || return 0
+  [[ -x "$NOTIFY" ]] || return 0
+  "$NOTIFY" "$@" 2>/dev/null || true
+}
+
+# One value out of a watch file. Silent and empty on anything unexpected: a
+# half-written file must not take the whole sweep down with it.
+field() {
+  python3 - "$1" "$2" <<'PY' 2>/dev/null
+import json, sys
+try:
+    with open(sys.argv[1]) as fh:
+        value = json.load(fh)
+    for key in sys.argv[2].split("."):
+        value = value[key]
+except Exception:
+    sys.exit(1)
+if value is None:
+    sys.exit(1)
+print(value)
+PY
+}
+
+# Writes one value back. The same shape as state_set in sclaude/lib/state.sh,
+# and deliberately so — these are the same files, read by the same code.
+set_field() {
+  python3 - "$1" "$2" "$3" <<'PY' 2>/dev/null
+import json, sys
+path, key, raw = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(path) as fh:
+        data = json.load(fh)
+except Exception:
+    data = {}
+if raw.isdigit():
+    value = int(raw)
+elif raw in ("true", "false"):
+    value = raw == "true"
+elif raw == "null":
+    value = None
+else:
+    value = raw
+node = data
+parts = key.split(".")
+for part in parts[:-1]:
+    node = node.setdefault(part, {})
+node[parts[-1]] = value
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
+PY
+}
+
+# Which column an issue is in, on whichever board carries it. Empty when the
+# issue is on no board, or when gh cannot answer.
+issue_column() {
+  local repo="$1" number="$2" owner name
+  owner="${repo%%/*}"
+  name="${repo##*/}"
+
+  gh api graphql -f owner="$owner" -f name="$name" -F number="$number" \
+    -f query='
+      query($owner:String!, $name:String!, $number:Int!) {
+        repository(owner:$owner, name:$name) {
+          issue(number:$number) {
+            projectItems(first:10) {
+              nodes {
+                fieldValueByName(name:"Status") {
+                  ... on ProjectV2ItemFieldSingleSelectValue { name }
+                }
+              }
+            }
+          }
+        }
+      }' 2>/dev/null \
+    | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+issue = (((data.get("data") or {}).get("repository") or {}).get("issue")) or {}
+for item in (issue.get("projectItems") or {}).get("nodes") or []:
+    status = item.get("fieldValueByName") or {}
+    if status.get("name"):
+        print(status["name"])
+        break
+' 2>/dev/null
+}
+
+# The comments on one GitHub endpoint since a moment, as markdown. Empty when
+# there are none — which is the ordinary case and says nothing is wrong.
+#
+#   comments_since <api-path> <since> <heading>
+#
+# `--slurp` because `--paginate` alone prints one JSON array per page, back to
+# back, and json.load refuses the second: past the first page (30 comments) the
+# whole collection used to come back as nothing. An inline review comment
+# carries the file and line it was left on, and they lead its entry, since the
+# words alone ("this can starve") do not say where.
+comments_since() {
+  local path="$1" since="$2" heading="$3"
+  gh api "$path?per_page=100" --paginate --slurp 2>/dev/null \
+    | SCLAUDE_SINCE="$since" SCLAUDE_HEADING="$heading" python3 -c '
+import json, os, sys
+since = os.environ.get("SCLAUDE_SINCE", "")
+try:
+    pages = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+if not isinstance(pages, list):
+    sys.exit(0)
+rows = [row for page in pages if isinstance(page, list) for row in page
+        if isinstance(row, dict)]
+out = []
+for row in rows:
+    when = row.get("created_at") or ""
+    # Both sides are ISO-8601 in UTC; GitHub spells it with a Z and we with
+    # +00:00, so they are compared on the part that is the same in both.
+    if when.rstrip("Z")[:19] <= since[:19]:
+        continue
+    who = (row.get("user") or {}).get("login") or "someone"
+    body = (row.get("body") or "").strip()
+    if not body:
+        continue
+    where = ""
+    if row.get("path"):
+        line = row.get("line") or row.get("original_line")
+        where = " on `%s%s`" % (row["path"], ":%s" % line if line else "")
+    out.append("**%s**%s (%s):\n\n%s" % (who, where, when[:10], body))
+if out:
+    print("### %s\n\n%s" % (os.environ.get("SCLAUDE_HEADING", ""),
+                             "\n\n---\n\n".join(out)))
+' 2>/dev/null
+}
+
+# Everything said since a moment, wherever it was said: the issue, and — when
+# the feature has one — the pull request, both its conversation and the
+# comments left on its lines.
+#
+# The pull request is read too because a hand-back is not always QA's own
+# words on the issue. The automatic review leaves its findings on the pull
+# request, and a return made because of them (PR #143 in social: ten findings
+# the first review missed, found on a second run) is answered by fixing what
+# is there. The review session re-reads the pull request itself, but this file
+# is what the Telegram message quotes and the first thing the session is
+# handed, and a return that points nowhere reads as a return with nothing said.
+notes_since() {
+  local repo="$1" issue="$2" pr="$3" since="$4" parts=() part
+  part="$(comments_since "repos/$repo/issues/$issue/comments" "$since" "On issue #$issue")"
+  [[ -n "$part" ]] && parts+=("$part")
+  if [[ -n "$pr" && "$pr" != "null" ]]; then
+    part="$(comments_since "repos/$repo/issues/$pr/comments" "$since" "On pull request #$pr")"
+    [[ -n "$part" ]] && parts+=("$part")
+    part="$(comments_since "repos/$repo/pulls/$pr/comments" "$since" "On the lines of pull request #$pr")"
+    [[ -n "$part" ]] && parts+=("$part")
+  fi
+  local IFS=$'\n'
+  [[ ${#parts[@]} -gt 0 ]] && printf '%s\n\n' "${parts[@]}"
+  return 0
+}
+
+# Hands the feature's pull request over, through sclaude in the project.
+#
+#   handoff <watch file> <slug>
+#
+# Prints what to tell, as a word on the first line and sclaude's own words
+# after it — `handed`, `partial` or `waiting` — or nothing when there is
+# nothing new to say. What happened is read from the exit code
+# (pr_qa_handoff in github.sh), never from the words, so rewording a message
+# there cannot change what happens here.
+#
+# Called on every sweep that finds the issue in Done until the outcome is
+# final, not only on the move: a PR closing two issues is handed over when the
+# second one reaches Done, and that is no move of the issue watched here. The
+# watch file records the outcome in `handoff`: `done` and `gone` end the
+# tries, `partial` keeps them going without repeating the message. Watches
+# armed before the project root was recorded have no `root`, and are left to
+# sclaude as before.
+handoff() {
+  local file="$1" slug="$2" root out rc=0
+  root="$(field "$file" root)" || return 0
+  [[ -d "$root" && -x "$SCLAUDE" ]] || return 0
+  out="$(cd "$root" && "$SCLAUDE" _handoff "$slug" 2>&1)" || rc=$?
+  # sclaude's words without colour codes and blank lines, for the message.
+  out="$(sed -e 's/\x1b\[[0-9;]*m//g' -e 's/^ *//' -e '/^$/d' <<< "$out" | head -n 8)"
+  case "$rc" in
+    0) set_field "$file" handoff done; echo handed ;;
+    # Done before — by sclaude in a terminal, which told the person there.
+    3) set_field "$file" handoff done ;;
+    2) set_field "$file" handoff gone ;;
+    4) [[ "$(field "$file" handoff || true)" == partial ]] && return 0
+       set_field "$file" handoff partial
+       printf 'partial\n%s\n' "$out" ;;
+    *) printf 'waiting\n%s\n' "$out" ;;
+  esac
+}
+
+# One feature. Looks, compares with what was recorded, and tells if it changed.
+look() {
+  local file="$1" slug issue repo pr was now notes qa_file
+
+  slug="$(field "$file" feature)" || return 0
+  issue="$(field "$file" issue)" || return 0
+  repo="$(field "$file" repo)" || return 0
+  was="$(field "$file" status || true)"
+  pr="$(field "$file" pr || true)"
+  # Empty when the project declares no such column: then no move is a pass or
+  # a return, and every one is reported as a plain move below.
+  local QA_BACK QA_BACKLOG QA_DONE QA_IN
+  QA_BACK="$(field "$file" columns.back || true)"
+  # Backlog is a hand-back as much as In progress is. Absent on watches armed
+  # before it was recorded, and on boards that name no backlog column.
+  QA_BACKLOG="$(field "$file" columns.backlog || true)"
+  QA_DONE="$(field "$file" columns.done || true)"
+  QA_IN="$(field "$file" columns.qa || true)"
+  # A watch armed before the names moved into .sclaude.json has no `columns`
+  # at all. Those were the names every board was assumed to have then, and
+  # the watch was armed against them; without this, a pass or a return on an
+  # old watch would be reported as a plain move and its comments not kept.
+  if ! field "$file" columns >/dev/null; then
+    QA_BACK="In progress"
+    QA_DONE="Done"
+  fi
+
+  now="$(issue_column "$repo" "$issue")"
+  # No answer at all means gh failed or the network is down. That is not a
+  # change, and reporting it every five minutes would train the reader to
+  # ignore the channel.
+  [[ -n "$now" ]] || return 0
+
+  local handed="" said="" ready
+  ready="PR #$pr is out of draft, in ${QA_BACKLOG:-the backlog}, unassigned,
+and its conversation has the summary for the merge."
+  if [[ -n "$QA_DONE" && "$(norm "$now")" == "$(norm "$QA_DONE")" ]]; then
+    case "$(field "$file" handoff || true)" in
+      done|gone) ;;
+      *) said="$(handoff "$file" "$slug")"
+         handed="${said%%$'\n'*}"
+         [[ "$said" == *$'\n'* ]] && said="${said#*$'\n'}" || said="" ;;
+    esac
+  fi
+
+  if [[ "$(norm "$now")" == "$(norm "$was")" ]]; then
+    # Still in Done: the last of the PR's issues has just followed it, or a
+    # hand-off that failed in part went through, or failed for the first time.
+    # Still waiting is not news — it was said when the issue reached Done.
+    case "$handed" in
+      handed)  notify "$slug: QA accepted every issue of PR #$pr — it is ready to merge.
+$ready" ;;
+      partial) notify "$slug: the hand-off of PR #$pr is incomplete; it is tried again on every look.
+$said" ;;
+    esac
+    return 0
+  fi
+
+  set_field "$file" status "$now"
+  # Anywhere but Done, the next acceptance is a new hand-off: the work came
+  # back, and the head QA accepts next is not the one handed over.
+  [[ "$(norm "$now")" == "$(norm "$QA_DONE")" ]] || set_field "$file" handoff null
+
+  # Compared without case or surrounding spaces, as sclaude's column_is does:
+  # the names in the watch file come from .sclaude.json, typed apart from the
+  # board. A name that is empty stays empty, and so never matches.
+  case "$(norm "$now")" in
+    "$(norm "$QA_DONE")")
+      set_field "$file" verdict done
+      if [[ "$handed" == handed ]]; then
+        notify "$slug: issue #$issue is in $QA_DONE
+QA accepted it. $ready"
+      else
+        notify "$slug: issue #$issue is in $QA_DONE
+QA accepted it — the merge${pr:+ of PR #$pr} is next.${said:+
+$said}
+Continue with: sclaude $slug"
+      fi
+      ;;
+    "$(norm "${QA_IN:-$QA_DONE}")")
+      # Back into QA after a detour: the wait simply goes on. Nothing to tell,
+      # and the verdict of the detour means nothing any more.
+      set_field "$file" verdict null
+      ;;
+    "$(norm "$QA_BACK")"|"$(norm "${QA_BACKLOG:-$QA_BACK}")")
+      # Back into progress means QA found something, and what they found is in
+      # the comments — on the issue, and on the pull request. We save them beside the watch file so the review step can
+      # be handed them verbatim rather than a summary of them.
+      qa_file="${file%.json}.qa.md"
+      notes="$(notes_since "$repo" "$issue" "$pr" "$(field "$file" since || echo '1970-01-01T00:00:00+00:00')")"
+      # The file is replaced on every return, empty notes included. Writing it
+      # only when there is something to write left the previous round's
+      # complaints in place — and this round's verdict beside them, so the next
+      # session was handed old comments as though they were the new ones. A
+      # silent return (no comment, or gh could not answer) is a return with
+      # nothing to say, not a return with last week's news.
+      rm -f "$qa_file" 2>/dev/null || true
+      if [[ -n "$notes" ]]; then
+        printf '%s\n' "$notes" > "$qa_file"
+      fi
+      set_field "$file" verdict returned
+      notify "$slug: issue #$issue went back to $now — returned to development.
+What was said since${pr:+ (issue and PR #$pr)} is kept for the review step.
+Pick it up with: sclaude $slug${notes:+
+
+$(head -c 600 <<< "$notes")}"
+      ;;
+    *)
+      # Some other column. Nobody's verdict lives there while QA has the
+      # feature, so it is called what it is — unexpected — and the person is
+      # asked to set the status properly. We keep watching: the next move is
+      # what counts, and it is their board to fix.
+      set_field "$file" verdict other
+      notify "$slug: issue #$issue moved to '$now' — unexpected while waiting for QA.
+Please set the ticket status: ${QA_DONE:-Done} if it is accepted, ${QA_BACK:-In progress}${QA_BACKLOG:+ or $QA_BACKLOG} if it needs work."
+      ;;
+  esac
+  return 0
+}
+
+main() {
+  local one="${1:-}"
+
+  # `--notes <repo> <issue> <pr> <since>`: what notes_since collects, printed.
+  # For `sclaude return`, which sends a feature back without the board moving
+  # first and needs the same notes the board path saves — from the one place
+  # that knows how to gather them, rather than from a second copy.
+  if [[ "$one" == "--notes" ]]; then
+    [[ $# -ge 5 ]] || { echo "usage: $SELF --notes <repo> <issue> <pr> <since>" >&2; exit 2; }
+    notes_since "$2" "$3" "$4" "$5"
+    exit 0
+  fi
+
+  # A named feature answers before the sweep's own preconditions: "not watching
+  # that" is the answer a person typing a name needs, and an empty watch
+  # directory turned it into silence and a zero — indistinguishable from having
+  # looked and found nothing changed.
+  if [[ -n "$one" ]]; then
+    [[ -s "$WATCH_DIR/$one.json" ]] || { echo "$SELF: not watching $one" >&2; exit 1; }
+    command -v gh >/dev/null 2>&1 || { echo "$SELF: gh is not installed" >&2; exit 1; }
+    look "$WATCH_DIR/$one.json"
+    exit 0
+  fi
+
+  # The sweep, on the other hand, is run by a timer every five minutes and is
+  # silent by design: nothing to watch is the ordinary state of this machine.
+  [[ -d "$WATCH_DIR" ]] || exit 0
+  command -v gh >/dev/null 2>&1 || exit 0
+
+  local file
+  for file in "$WATCH_DIR"/*.json; do
+    [[ -e "$file" ]] || continue
+    look "$file"
+  done
+}
+
+main "$@"

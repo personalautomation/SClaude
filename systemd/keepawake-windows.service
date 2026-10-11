@@ -1,0 +1,20 @@
+[Unit]
+Description=keepawake's Windows side: keeping the system from sleeping
+Documentation=file:%h/instruments/README.md
+# The script lives on the Windows drive, and without it there is nothing to run.
+RequiresMountsFor=/mnt/c
+# Only works in [Unit]: in [Service] systemd ignores it.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/keepawake-windows
+# Kill the process on the Windows side along with stopping WSL: while the
+# distribution is not running there is nobody to hold for, and there should be
+# no deviation from Windows' own rules.
+ExecStop=%h/.local/bin/keepawake-windows --stop
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

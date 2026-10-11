@@ -1,0 +1,1593 @@
+#!/usr/bin/env bash
+#
+# sclaude — the orchestrator of a feature's development cycle on top of claude.
+#
+# A feature's cycle is four steps, each with its own model, permissions and
+# prompt:
+#
+#   1. plan    opus   / high   / plan   — context, scope, the plan in
+#                                         .feature/plan.md
+#   2. code    opus   / medium / auto   — implementation, testing, commits
+#   3. pr      sonnet / medium / auto   — the manuals, the PR body, gh pr create
+#   4. review  opus   / medium / auto   — fixing review comments, preview deploy
+#
+# Context is not carried between steps: every step is a new session, and
+# .feature/plan.md serves as the bridge. The orchestrator writes it, from the
+# plan approved in step 1's session: the step itself is in plan mode, and that
+# forbids writing. Returning to an unfinished step goes through --resume, so an
+# interrupted conversation is not lost.
+#
+# Step 1 does not begin with the plan: first the issue with all its links and the
+# manual sections that are needed, then a guess about the scope — and a stop,
+# until the human corrects it. Planning around an unconfirmed guess means redoing
+# the whole plan afterwards.
+#
+# An issue is created in GitHub for a feature started from a name too: sclaude
+# asks about that at the very beginning and sets everything that is known without
+# a conversation — the title, the assignee, the label, the type, the milestone.
+# The "User request" is driven by step 1, in a comment of its own: what the
+# human wants is known only from talking to them, and the description is never
+# edited after it is created.
+#
+# Step 1 is closed not by a question but by the plan's approval, and development
+# begins right after the exit. Changing one's mind after that is `replan`: it
+# returns the feature to planning, but as a new conversation rather than a
+# continuation of the old one.
+#
+#   sclaude                 the menu: active features, chosen with arrow keys
+#   sclaude new [name]      start a feature at step 1
+#   sclaude <name>          continue a feature from its current step
+#   sclaude status          a table of every feature and its step
+#   sclaude actions [name]  every action on one feature in a single list
+#   sclaude dev [name]      start the dev server (without a name, for the
+#                           current directory); it opens at
+#                           http://<name>.localhost:3000
+#   sclaude sync <name>     merge origin/main into a feature's branch
+#   sclaude news <name>     what has changed on the pull request
+#   sclaude preview <name>  ship the branch to preview
+#   sclaude rollback <name> put production back to the release before this
+#                           feature
+#   sclaude issue <name>    create a GitHub issue for a feature that has none
+#   sclaude replan <name>   return a feature to step 1 and plan it afresh
+#   sclaude return <name> [reason]  send a finished feature back to step 4
+#   sclaude done <name>     clean up after the merge (the worktree and branches)
+#   sclaude drop <name>     abandon a feature: remove its traces here and on
+#                           GitHub
+#   sclaude regression <name> run the checks a step closes on
+#   sclaude friction <name> review what got in a step's way and fix the
+#                           orchestrator
+#   sclaude deferred        the monthly review of the friction put off
+#   sclaude reset <name>    start the current step afresh, forgetting its
+#                           conversation
+#   sclaude epilogue [name] append the status to the issue if the epilogue was
+#                           interrupted
+#   sclaude doctor          what this machine has and lacks, and how to fix it
+#
+# All of this is also a list, behind the checkbox in the menu: choosing a feature
+# with the checkbox set gives the human those same actions in one list without
+# their having to remember command names.
+#
+# Every feature's state is .feature/state.json in its worktree. The .feature/
+# directory is a working one: it is in .gitignore, is not committed, and is
+# removed at step 3.
+#
+# Every session that is started writes its id there BEFORE launching — both a
+# step and the friction review. Otherwise an interrupted session is lost: there
+# is nothing to return to it by, and what was begun has to be done again. There
+# is no place there for the epilogue — by its minute the feature's tree has been
+# removed — and it writes its own into ~/.claude/sclaude/epilogue/, outside the
+# repositories altogether. The menu offers to finish an unclosed one itself, next
+# to the branch review: a closed feature has left the list, and there will be no
+# other occasion to remember it.
+#
+# Anything at all can interrupt a session: a limit, a closed terminal, Ctrl-C. So
+# none of them counts as an answer: a step is closed by a trace in the world (an
+# approved plan, a PR number, a merged PR) rather than by a process that has
+# ended. If the review did not take place, the next step waits for it rather than
+# travelling ahead with the old orchestrator. And when there is nowhere to return
+# to — the transcript is damaged, the session hangs open, the step does not
+# survive to a conversation — `reset` erases the launch's trace without touching
+# the work.
+set -uo pipefail
+
+# --- the environment ---------------------------------------------------------
+
+SELF="$(basename "$0")"
+PROMPTS="$(cd "$(dirname "$(readlink -f "$0")")/../sclaude/prompts" && pwd)"
+HOOKS="$(cd "$(dirname "$(readlink -f "$0")")/../sclaude/hooks" && pwd)"
+LIB="$(cd "$(dirname "$(readlink -f "$0")")/../sclaude/lib" && pwd)"
+# The tool's own root: that is where the friction review session makes its edits
+# — the orchestrator rather than the product. Through readlink, because sclaude
+# is called by a symlink.
+INSTRUMENTS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+
+# The orchestrator's body is spread across modules: bin/sclaude holds the
+# environment, the commands and the argument parsing, and everything else lies in
+# sclaude/lib and is pulled in here.
+#
+# It is not a matter of readability alone. The friction review session edits this
+# very file while it is executing, and bash reads a script lazily, by offset into
+# an open descriptor: an edit in place shifts everything the process has not read
+# yet. That is how the log tidying went missing after the `code` step of the
+# password-change feature, and on this revision a ready fix waited four hours for
+# the end of somebody else's step. A module pulled in with source is read whole
+# at that moment, so editing it is no longer dangerous to a running process, and
+# bin/sclaude itself became four times shorter — the window narrowed by as
+# much.
+#
+# The order of the sources does not matter: the files only declare functions
+# without executing anything. A read error on any of them is death on the spot:
+# half an orchestrator is worse than none.
+for _module in io ui steps state project environment developer branches worktree featuredb lock pane run \
+               github plan deploy regression rollback watch picker abandon actions doctor deferred \
+               terminal retro; do
+  # shellcheck source=/dev/null
+  source "$LIB/$_module.sh" || {
+    echo "sclaude: cannot load $LIB/$_module.sh" >&2
+    exit 1
+  }
+done
+unset _module
+# What was loaded just now, to notice when it changes under a long session.
+SCLAUDE_CODE="$(code_fingerprint)"
+
+# Everything below, bash is obliged to read to the end before it executes a
+# single command from here: it finds a compound command's closing brace by
+# parsing, not by executing. That is exactly what the braces are for — not
+# grouping but the moment of reading.
+#
+# Without them the last lazily-read piece was left, the most dangerous one: bash
+# finishes reading `main` and its `case` at the end of a session, that is their
+# offset in the descriptor waits for an edit longer than anything else. The
+# `review` step's session on feature 20-change-where-user-logouts died of exactly
+# that — the file grew by three lines, the offset stayed where it was, and
+# `cmd_replan` was read as `replan`:
+#
+#   line 543: syntax error near unexpected token `;;'
+#
+# The braces do not spawn a subshell, so exit, variables and set see exactly what
+# they saw before.
+{
+
+# Colours only when the output really goes to a terminal: sclaude status | grep
+# must not receive escape sequences.
+if [[ -t 1 ]]; then
+  BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; GREEN=$'\033[32m'
+  YELLOW=$'\033[33m'; BLUE=$'\033[34m'; OFF=$'\033[0m'
+else
+  BOLD=''; DIM=''; RED=''; GREEN=''; YELLOW=''; BLUE=''; OFF=''
+fi
+
+# These print to the screen and accumulate what was printed for the next
+# question: a question shown in a messenger arrives there without the lines that
+# stand right above it in the terminal — and without them "Publish?" is agreement
+# to who knows what. ask_note (io.sh) accumulates, and the next ask clears it.
+# This does not affect the terminal: the lines are printed as they always
+# were.
+die()  { echo "${RED}$*${OFF}" >&2; exit 1; }
+warn() { ask_note "$*"; echo "${YELLOW}$*${OFF}" >&2; }
+# Red rather than yellow: not a caution but an exception to the flow itself —
+# something that should not have happened and that the human must notice.
+alarm() { ask_note "$*"; echo "${RED}$*${OFF}" >&2; }
+info() { ask_note "$*"; echo "${DIM}$*${OFF}"; }
+
+# Printing without formatting but with remembering — for what the human must see
+# next to the question. A plain echo will not do for that: it puts nothing into
+# the buffer, and the question arrives on the phone bare.
+#
+# The difference is expensive. `run_block` prints the list of commands that will
+# run this way — without it the "Publish?" button is agreement to who knows what.
+# `cmd_menu` prints the feature list this way, and without it the choice buttons
+# arrive as the unlabelled digits "1 2 3 4".
+say() { ask_note "$*"; echo "$*"; }
+
+# --- commands ----------------------------------------------------------------
+
+slugify() {
+  echo "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-\+//' -e 's/-\+$//'
+}
+
+# A suggested branch name from an issue: the number and the title's first words,
+# all together no longer than 40 characters. We trim on word boundaries — a word
+# cut off in the middle reads worse than one word fewer. A title that is entirely
+# non-Latin disappears after slugify; the number alone is then left.
+suggest_slug() {
+  local number="$1" title="$2" slug="" word n=0
+  for word in $(slugify "$title" | tr '-' ' '); do
+    [[ $n -ge 4 ]] && break
+    [[ $(( ${#number} + 1 + ${#slug} + 1 + ${#word} )) -gt 40 ]] && break
+    slug="${slug:+$slug-}$word"
+    n=$((n + 1))
+  done
+  # A trailing preposition or article adds nothing: "change-an-account-how" reads
+  # worse than "change-an-account".
+  while [[ "$slug" == *-* ]] \
+     && [[ "$slug" =~ -(a|an|the|to|of|for|on|in|by|with|and|how|our|this)$ ]]; do
+    slug="${slug%-*}"
+  done
+  [[ -n "$slug" ]] && echo "$number-$slug" || echo "issue-$number"
+}
+
+# The cycle's start: a choice between a name thought up and an open issue.
+start_feature() {
+  local choice; choice="$(pick_start)" || { info "Cancelled."; return 0; }
+  case "$choice" in
+    manual) cmd_new ;;
+    issue*) cmd_new "" "$(cut -f2 <<< "$choice")" "$(cut -f3 <<< "$choice")" ;;
+  esac
+}
+
+cmd_new() {
+  require_repo
+  local name="${1:-}" issue="${2:-}" slug wt branch
+
+  # A repository sclaude has not been told about yet gets the offer to write
+  # `.sclaude.json` — which checks make up a regression, where the manuals are,
+  # what production's address is. Most of it is read out of the repository and
+  # shown for correction rather than asked from scratch.
+  #
+  # Here rather than in require_repo, by the same argument push_instruments
+  # makes below: require_repo runs for `sclaude status` too, which the bot calls
+  # on a timeout, and a question there would hang it. Starting a feature is the
+  # moment somebody is present and the answers are about to matter.
+  #
+  # A decline is an answer and the feature starts anyway: without a config there
+  # is no regression to gate on and no production to ship to, and the cycle says
+  # so where it would have run them.
+  project_init "$REPO" || true
+
+  # Before the branch name is asked: a feature that is not going to start
+  # should not cost the person a name first.
+  if [[ -n "$issue" ]] && ! issue_blockers_gate "$issue"; then
+    info "Cancelled."
+    return 0
+  fi
+
+  if [[ -z "$name" && -n "$issue" ]]; then
+    # The name is suggested rather than imposed: the line can be edited right
+    # there.
+    local suggested; suggested="$(suggest_slug "$issue" "${3:-}")"
+    if [[ -t 0 ]]; then
+      read -e -i "$suggested" -rp "Branch name: " name < /dev/tty || name=""
+      name="$(clean_reply "$name")"
+    else
+      ask "Branch name [$suggested]: " name
+    fi
+    [[ -z "$name" ]] && name="$suggested"
+  elif [[ -z "$name" ]]; then
+    ask "Feature name: " name
+    # An empty answer here is a refusal rather than an error: there is no
+    # "shall we start" question any more, and this is the only way to change
+    # one's mind when the picker did not appear.
+    [[ -z "$name" ]] && { info "Cancelled."; return 0; }
+  fi
+  slug="$(slugify "$name")"
+  [[ -n "$slug" ]] || die "a feature name needs at least one letter or digit: $name"
+
+  branch="feat/$slug"
+  wt="$(dirname "$REPO")/$(basename "$REPO")-$slug"
+
+  [[ -e "$wt" ]] && die "directory already exists: $wt"
+  git -C "$REPO" show-ref --verify --quiet "refs/heads/$branch" \
+    && die "branch already exists: $branch (continue the feature with: $SELF $slug)"
+
+  # A feature started from a name used to stay without an issue for ever:
+  # issue_sync says nothing without a number, and step 1's prompt loses the whole
+  # block about the issue along with it. We ask here — after the checks, so that
+  # an issue is not created for a feature that cannot be created anyway, and
+  # before the worktree, so that a refusal leaves nothing on disk.
+  if [[ -z "$issue" ]]; then
+    echo ""
+    issue="$(issue_offer "$name")" || issue=""
+    [[ -n "$issue" ]] && info "  issue #$issue created for this feature"
+  fi
+
+  # An issue the work has started on must not stay in Backlog. Here rather than
+  # in issue_sync: "the work has started" is exactly one moment of the cycle, and
+  # repeating the move at every step transition would mean putting back into
+  # progress an issue the human has meanwhile moved to another column themselves.
+  # Through an `if` rather than a trailing `&&`: that would return 1 for a
+  # feature without an issue, and this line ends a branch — the same case as in
+  # deploy.sh.
+  if [[ -n "$issue" ]]; then issue_start_progress "$issue"; fi
+
+  echo ""
+  info "Branching from a fresh origin/main…"
+  git -C "$REPO" fetch origin || die "git fetch failed"
+  git -C "$REPO" worktree add "$wt" -b "$branch" origin/main || die "could not create the worktree"
+
+  mkdir -p "$wt/.feature"
+  python3 - "$wt/.feature/state.json" "$slug" "$branch" "$wt" "$issue" <<'PY'
+import json, sys, datetime
+path, slug, branch, wt, issue = sys.argv[1:6]
+state = {
+    'feature': slug,
+    'branch': branch,
+    'worktree': wt,
+    'issue': int(issue) if issue else None,
+    'step': 'plan',
+    'steps': {},
+    'pr': None,
+    'created': datetime.date.today().isoformat(),
+}
+with open(path, 'w') as fh:
+    json.dump(state, fh, indent=2, ensure_ascii=False)
+    fh.write('\n')
+PY
+
+  echo "${GREEN}Feature '$slug' created:${OFF} $wt (branch $branch)"
+  # The issue learns of the work at once rather than after the first closed
+  # step: until now it stayed silent through the whole planning, and from the
+  # outside the feature looked untouched.
+  issue_sync "$wt"
+  prepare_worktree "$wt"
+
+  run_step "$wt" "$slug" "plan"
+}
+
+cmd_resume() {
+  require_repo
+  local slug="$1" wt step
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
+  step="$(state_get "$wt/.feature/state.json" step)" || die "corrupted state: $wt/.feature/state.json"
+
+  # The PR may have appeared at any moment — step 3 creates it itself, and if
+  # the session closed by another route the number did not reach the state. We
+  # ask gh rather than relying on the step advancing: step 4 needs that number in
+  # its prompt.
+  [[ -z "$(state_get "$wt/.feature/state.json" pr || true)" ]] && capture_pr "$wt"
+
+  # What the watcher saw while no session was open. It changes nothing itself —
+  # that is the whole design — so this is where its finding is acted on.
+  #
+  # Above the done-feature return below, and that placement is the whole of a
+  # bug this once had. `watch_start` is called from remind_prod, so a feature
+  # waiting on QA always sits at `step: done` — the one state this block was
+  # written for was the one state it could not be reached in. QA returned the
+  # feature, the comments were saved, and the human got the production reminder
+  # as though nothing had been said.
+  case "$(watch_verdict "$slug")" in
+    done)
+      echo ""
+      say "${BOLD}QA passed this one while you were away.${OFF}"
+      info "  The issue is in Done; the merge is next."
+      # Acknowledged here, because nothing downstream will. watch_seen is called
+      # from inside run_step, and a passed feature goes to remind_prod instead —
+      # so the verdict would stay set and this banner would print on every
+      # `sclaude <slug>` from now until the clean-up. It could not happen before
+      # this block moved above the done-return, where it was unreachable for
+      # exactly these features.
+      #
+      # But notes can be here, and an earlier comment claiming otherwise was
+      # wrong. The watcher's `Done` branch only writes the verdict; it never
+      # touches `.qa.md`. So a feature QA handed back on Friday and passed on
+      # Monday arrives here with the Friday complaints still on disk, and
+      # acknowledging blindly would file them into `.qa.md.seen` — which nothing
+      # reads — without a session ever seeing them.
+      #
+      # They are shown rather than swallowed. Whether they still matter is the
+      # human's call: QA passed the feature afterwards, so most likely the
+      # complaint was answered or withdrawn, but that is not a thing to decide
+      # on somebody's behalf in silence.
+      local stranded; stranded="$(watch_notes "$slug")"
+      if [[ -n "$stranded" ]]; then
+        echo ""
+        warn "  QA had left comments before they passed it:"
+        while IFS= read -r line; do
+          [[ -n "$line" ]] && info "    $line"
+        done <<< "$stranded"
+        info "  They were never handed to a session. Kept in the watch directory."
+      fi
+      watch_seen "$slug"
+      ;;
+    returned)
+      echo ""
+      say "${BOLD}This feature was returned to development.${OFF}"
+      info "  What was said since — on the issue and on the pull request — goes into"
+      info "  the review session below, and the session reads both for itself as well."
+      # The cycle goes back with them. Their comments are handed to the step's
+      # session by run_step, and without this there is no session to hand them
+      # to: the review is recorded as finished and nothing reopens it.
+      qa_take_back "$wt" "$slug" || true
+      step="$(state_get "$wt/.feature/state.json" step)" || true
+      # Deliberately NOT acknowledged here: the comments have not been delivered
+      # yet. run_step hands them to the session and calls watch_seen once it
+      # has, which is the only moment at which they have actually been read.
+      ;;
+  esac
+
+  if [[ "$step" == "done" ]]; then
+    echo "Feature '$slug' has been through every step."
+    remind_prod "$wt" "$slug"
+    return 0
+  fi
+
+  # An unclosed friction review comes before the step — for the same reason it
+  # stands between steps at all: the fix is needed by the step that is about to
+  # start. If the review was interrupted, the feature waits here rather than
+  # travelling on.
+  local fstate="$wt/.feature/state.json"
+  local fkey; fkey="$(friction_pending "$fstate" || true)"
+  if [[ -n "$fkey" ]]; then
+    # The key names what the review was about, so there is nothing left to look
+    # up: it used to be read from friction.after beside a nameless slot.
+    if ! run_friction "$wt" "$slug" "$fkey"; then
+      return 0
+    fi
+  fi
+
+  # A regression that was killed mid-run leaves "running" in the state. It is
+  # not resumed from where it stopped — the phase inside a run is deliberately
+  # not recorded — but it must be said out loud, or the next run looks like it
+  # started for no reason.
+  local rstage
+  for rstage in local preview prod; do
+    if [[ "$(state_get "$fstate" "regression.$rstage.status" || true)" == "running" ]]; then
+      info "The $rstage regression was interrupted — it starts again from the beginning."
+      info "  The previous log is still in .feature/regression.log."
+      state_set "$fstate" "regression.$rstage.status" null
+    fi
+  done
+
+  # A friction fix that was committed and never sent.
+  #
+  # run_friction pushes after the review session, but only if it reaches that
+  # line: a session interrupted by Ctrl-C or a limit *after* it had committed
+  # leaves the fix on this machine alone. Nothing notices — the next step takes
+  # it from the working tree and behaves correctly — so it sits there until
+  # somebody happens to look, which is how two of them were found by eye.
+  #
+  # Here rather than in require_repo: that runs for `sclaude status` too, which
+  # the bot calls with a 25-second timeout, and a network push has no business
+  # on that path. Continuing a feature is the moment the orchestrator is about
+  # to act on the tooling anyway.
+  push_instruments
+
+
+  prepare_worktree "$wt"
+  run_step "$wt" "$slug" "$step"
+}
+
+cmd_status() {
+  require_repo
+  local rows; rows="$(list_features)"
+  if [[ -z "$rows" ]]; then
+    echo "No features in progress. Start one with: $SELF new"
+  else
+    local table="FEATURE"$'\t'"STEP"$'\t'"WORKTREE"$'\n'
+    while IFS=$'\t' read -r slug wt step; do
+      table+="$slug"$'\t'"$(step_label "$step")"$'\t'"$wt"$'\n'
+    done <<< "$rows"
+    align_columns "$table"
+    echo ""
+  fi
+  review_branches
+  prod_drift_report
+}
+
+# We align with python rather than printf: bash counts %-24s in bytes, and a
+# non-ASCII step name is twice as long in bytes as on the screen — the columns
+# drift apart.
+align_columns() {
+  # We assemble the output rather than printing at once: this table is the items
+  # the human is about to choose from, and on a phone it is needed exactly as
+  # much as in the terminal. Without it the choice buttons arrive as unlabelled
+  # digits.
+  local out
+  out="$(printf '%s' "$1" | python3 -c '
+import sys
+rows = [line.split("\t") for line in sys.stdin.read().splitlines() if line]
+if not rows:
+    sys.exit()
+# The last column is not aligned - it has nothing to catch up with on the right.
+# The rows can be of different lengths: the "new feature" item in the menu is
+# shorter than the rest.
+width = max(len(row) for row in rows)
+widths = [max((len(row[i]) for row in rows if len(row) > i + 1), default=0)
+          for i in range(width - 1)]
+for row in rows:
+    head = "  ".join(c.ljust(w) for c, w in zip(row[:-1], widths))
+    print((head + "  " + row[-1]).rstrip() if head else row[-1])
+')"
+  [[ -n "$out" ]] || return 0
+  say "$out"
+}
+
+# The main menu: the features in progress, "new feature" and the checkbox below
+# them.
+#
+# The choice is made with arrow keys, by the same pick_list that draws the issue
+# list. The numbered question stayed as a fallback path and comes into play by
+# itself when there is no terminal: that is how the menu opens from a phone,
+# where arrow keys do not exist and the bot draws the buttons.
+#
+# The checkbox is the last row, and it changes the meaning of Enter rather than
+# the list of items. Cleared (the usual state), Enter on a feature continues its
+# current step, exactly as before. Set, Enter opens the list of actions on that
+# feature.
+#
+# That is how "drop the feature" left the top list. An action among features was
+# doubly out of place: first, it is not a feature; second, every subsequent
+# action (sync with main, link an issue, preview) would have to be added here
+# too, and the menu would drown. Now they all live behind the checkbox, and the
+# top list stays what it was — a list of features.
+#
+# The checkbox lives for this one function. It is deliberately not put on disk:
+# the same key must not do different things depending on what the human pressed a
+# week ago.
+cmd_menu() {
+  require_repo
+  local rows; rows="$(list_features)"
+
+  # We sort the branches out before the choice: a clean-up is done before the
+  # work rather than in the middle of it.
+  review_branches
+  # After the branches, which fetched origin: what main holds that production
+  # does not, and what main holds that origin does not.
+  prod_drift_report
+
+  # And an interrupted epilogue on the same occasion and in the same place.
+  # Necessarily BEFORE the "no features" branch: a closed feature has left the
+  # list, and an empty menu is precisely the most frequent case where an epilogue
+  # is waiting.
+  offer_epilogues
+
+  # Nothing to continue means we start a new one. There is nothing to ask here:
+  # whoever launched sclaude has already answered by launching it, and declining
+  # is possible in the choice itself, with the q key.
+  if [[ -z "$rows" ]]; then
+    echo ""
+    info "No features in progress."
+    start_feature
+    return 0
+  fi
+
+  local -a slugs=() labels=() issues=()
+  local slug wt step issue
+  while IFS=$'\t' read -r slug wt step; do
+    [[ -z "$slug" ]] && continue
+    issue="$(state_get "$wt/.feature/state.json" issue 2>/dev/null)" || issue=""
+    [[ "$issue" =~ ^[0-9]+$ ]] && issues+=("$issue")
+  done <<< "$rows"
+
+  # A feature whose issue is still blocked says so next to its step: its plan
+  # leans on work that has not landed, and that is worth seeing before choosing
+  # which one to continue. One request for all of them, after the list is read.
+  local -A blocked=()
+  local number by
+  while IFS=$'\t' read -r number by; do
+    [[ -n "$number" ]] && blocked[$number]="$by"
+  done <<< "$(features_blockers "${issues[@]}")"
+
+  local hint
+  while IFS=$'\t' read -r slug wt step; do
+    [[ -z "$slug" ]] && continue
+    slugs+=("$slug")
+    hint="$(step_label "$step")"
+    issue="$(state_get "$wt/.feature/state.json" issue 2>/dev/null)" || issue=""
+    [[ -n "$issue" && -n "${blocked[$issue]:-}" ]] && hint+=" · blocked by ${blocked[$issue]}"
+    labels+=("$slug"$'\t'"$hint")
+  done <<< "$rows"
+
+  local n="${#slugs[@]}"
+  local extra=0            # the checkbox's state: 0 cleared, 1 set
+  local choice rc
+
+  while :; do
+    local -a items=("${labels[@]}")
+    items+=("new feature"$'\t'"start one from an issue or a name")
+    items+=($'\t')        # a blank line, the separator before the checkbox
+    if [[ "$extra" -eq 1 ]]; then
+      items+=("[x] show actions after choosing"$'\t'"Enter on a feature opens its actions")
+    else
+      items+=("[ ] show actions after choosing"$'\t'"Enter on a feature continues it")
+    fi
+
+    PICK_LIST_HINT="  ↑↓ move · Space toggle · Enter open · q cancel"
+    choice="$(pick_list "Features in progress:" "${items[@]}")"; rc=$?
+    PICK_LIST_HINT=""
+
+    case "$rc" in
+      1) info "Cancelled."; return 0 ;;
+      2) break ;;          # no terminal — we leave for the numbered question
+      3)
+        # The space bar. We toggle only on the checkbox itself: on a feature it
+        # means nothing, and a silent toggle from somebody else's row would be
+        # confusing.
+        [[ "$choice" -eq $((n + 2)) ]] && extra=$((1 - extra))
+        # We come back where we stood: otherwise setting the checkbox would mean
+        # walking down to it again first, and every press would throw us back to
+        # the top.
+        PICK_LIST_START="$choice"
+        continue ;;
+    esac
+
+    # Enter. Something of its own opens next, and the requested cursor has
+    # nothing to do with it: it is about this picture rather than the next one.
+    # Without clearing it, the action list would open with the cursor on a row
+    # nobody chose in it.
+    PICK_LIST_START=0
+
+    # The items come in the same order they were assembled in above.
+    if [[ "$choice" -lt "$n" ]]; then
+      if [[ "$extra" -eq 1 ]]; then
+        # Exit code 10 is "back": the human chose "Go back" or left with a key.
+        # We come back here, to the feature list, and put the cursor on the
+        # feature they left: a return to a menu where everything has been reset
+        # is not a return. The checkbox stays set in doing so, otherwise the next
+        # Enter would behave differently from the previous one.
+        local arc
+        feature_actions "${slugs[$choice]}"; arc=$?
+        [[ "$arc" -eq 10 ]] || return 0
+        PICK_LIST_START="$choice"
+        continue
+      else
+        cmd_resume "${slugs[$choice]}"
+        return 0
+      fi
+    elif [[ "$choice" -eq "$n" ]]; then
+      start_feature
+      return 0
+    elif [[ "$choice" -eq $((n + 2)) ]]; then
+      # Enter on the checkbox toggles it — the second natural key for the same
+      # action. It destroys nothing, and so it does not ask.
+      extra=$((1 - extra))
+      PICK_LIST_START="$choice"
+      continue
+    fi
+    # A separator is an item without meaning; Enter on it does nothing, but
+    # there is no reason to lose the cursor either.
+    PICK_LIST_START="$choice"
+  done
+
+  # The fallback path: there is no terminal. We print the list as text and ask
+  # for the choice as a number — the bot will see that same thing as buttons.
+  # There is no checkbox here: on a phone there is nothing to toggle it with, and
+  # a button of its own opens the actions on a feature.
+  echo ""
+  echo "${BOLD}Features in progress:${OFF}"
+  local -a options=()
+  local i=1 menu=""
+  for slug in "${slugs[@]}"; do
+    menu+="  $i)"$'\t'"${labels[$((i - 1))]}"$'\n'
+    options+=("$slug")
+    i=$((i + 1))
+  done
+  menu+="  $i)"$'\t'"new feature"$'\n'
+  options+=("new feature")
+  local acts=$((i + 1))
+  menu+="  $acts)"$'\t'"actions for a feature"$'\n'
+  options+=("actions for a feature")
+  align_columns "$menu"
+
+  echo ""
+  ask "What are we doing? [1-$acts] " choice "pick:$acts" "${options[@]}"
+  [[ "$choice" =~ ^[0-9]+$ ]] || die "a number, please"
+  if [[ "$choice" -eq "$acts" ]]; then
+    actions_menu "$rows"
+  elif [[ "$choice" -eq "$i" ]]; then
+    start_feature
+  elif [[ "$choice" -ge 1 && "$choice" -lt "$i" ]]; then
+    cmd_resume "${slugs[$((choice - 1))]}"
+  else
+    die "no such entry: $choice"
+  fi
+}
+
+# Returning a feature to step 1. Step 1 is closed by the plan's approval inside
+# the session, and development begins right after the exit — the pause at which
+# one could change one's mind is gone. This command is that "changed my mind":
+# the plan turned out to be the wrong one, and it has to be discussed afresh.
+#
+# The only transition that moves the state backwards, which is why it asks. What
+# step 2 wrote stays in the worktree: what to do with code already written is the
+# human's decision, and it is taken in conversation rather than by a command's
+# flag. Step 1 will see those changes and ask about them itself.
+# An issue for a feature created before sclaude learned to create them — and for
+# one whose human declined at the start and then changed their mind. Without this
+# such a feature stays without an issue for ever: the question is asked only in
+# cmd_new, once.
+cmd_issue() {
+  require_repo
+  local slug="${1:-}" wt state issue
+  [[ -n "$slug" ]] || die "name the feature: $SELF issue <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
+  state="$wt/.feature/state.json"
+
+  issue="$(state_get "$state" issue || true)"
+  if [[ -n "$issue" && "$issue" != "null" ]]; then
+    info "Feature '$slug' already has issue #$issue."
+    return 0
+  fi
+
+  echo ""
+  issue="$(issue_offer "$slug")" || { info "Cancelled."; return 0; }
+  [[ -n "$issue" ]] || return 0
+
+  state_set "$state" issue "$issue"
+  echo "${GREEN}Issue #$issue created for '$slug'.${OFF}"
+  # The summary at once: otherwise the issue would stand empty until the next
+  # transition.
+  issue_sync "$wt"
+}
+
+cmd_replan() {
+  require_repo
+  local slug="${1:-}" wt state step answer
+  [[ -n "$slug" ]] || die "name the feature: $SELF replan <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
+  state="$wt/.feature/state.json"
+  step="$(state_get "$state" step)" || die "corrupted state: $state"
+
+  echo ""
+  if [[ "$step" == "plan" ]]; then
+    # The step is already the first one — but that does not mean there is
+    # nothing to do. The conversation going on there may have reached a dead end,
+    # and "start the planning afresh" is exactly what people come here for.
+    # Refusing was a mistake: it left the old session in the state, and the next
+    # launch returned to the same dead end.
+    echo "Feature '$slug' starts step 1 over, in a new conversation."
+    info "  The plan in .feature/plan.md stays as it is — the new session reads it."
+  else
+    echo "Feature '$slug' goes back from $(step_label "$step") to step 1, planning."
+    info "  A new conversation starts — the approved plan is not reopened."
+    info "  Anything already written stays in the worktree; step 1 will ask about it."
+  fi
+  ask "${BOLD}Go back to planning? [y/n] ${OFF}" answer yn
+  is_yes "$answer" || { info "Left as it is."; return 0; }
+
+  # A new conversation rather than a --resume. The previous one either ended in
+  # approval — and continuing it means arguing with a decision already taken — or
+  # got stuck, and then there is even less reason to return to it: a session gets
+  # its hook settings at launch, so even a repaired orchestrator will not save
+  # it.
+  state_set "$state" steps.plan.session null
+  # Every step, because planning afresh un-passes all of them. The same four
+  # lines the regression's rewind and the QA hand-back want — see
+  # step_rewind_to in steps.sh.
+  step_rewind_to "$wt" plan "${STEPS[@]}"
+  issue_sync "$wt"
+
+  prepare_worktree "$wt"
+  run_step "$wt" "$slug" plan
+}
+
+# Send a finished feature back to development: `sclaude return <name> [reason]`.
+#
+# For every reason a feature has to go back other than QA moving its card —
+# which the watcher already turns into the same return. The work happens in
+# return_to_development (watch.sh); this checks the feature is one that can be
+# returned and hands over to cmd_resume, which acts on the `returned` verdict
+# exactly as it does for the board, so there is one way back, not two.
+#
+# Only from `done`. A feature on an earlier step is still being developed, and
+# what it needs is said where its session will read it — on the pull request or
+# the issue — not a rewind.
+cmd_return() {
+  require_repo
+  local slug="${1:-}" wt state step
+  [[ -n "$slug" ]] || die "name the feature: $SELF return <name> [reason]"
+  shift
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
+  state="$wt/.feature/state.json"
+  step="$(state_get "$state" step)" || die "corrupted state: $state"
+
+  if [[ "$step" != "done" ]]; then
+    echo ""
+    echo "Feature '$slug' is still in development: $(step_label "$step")."
+    info "  There is nothing to return it from. Say what is wrong on the pull request"
+    info "  or the issue, where its session reads it, and continue: $SELF $slug"
+    return 0
+  fi
+
+  return_to_development "$wt" "$slug" "$@" || die "could not return '$slug': see $state"
+  cmd_resume "$slug"
+}
+
+# The clean-up is the only irreversible command here, which is why it checks the
+# fact of the merge with GitHub rather than trusting the state, and asks before
+# every deletion.
+# Reviewing the friction by hand: usually this happens by itself, after every
+# step, but the log stays to hand — and going back to what was reviewed is
+# sometimes needed too.
+cmd_friction() {
+  require_repo
+  local slug="${1:-}" wt
+  [[ -n "$slug" ]] || die "name the feature: $SELF friction <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+
+  # An unclosed review — one that began and was interrupted — is resumed without
+  # asking about either the log or what was reviewed: the log in that case is
+  # empty by construction, and what has to be returned to is the conversation.
+  # run_friction works that out; here it is enough not to turn it away with the
+  # emptiness check.
+  local state="$wt/.feature/state.json"
+  local fkey; fkey="$(friction_pending "$state" || true)"
+  if [[ -n "$fkey" ]]; then
+    run_friction "$wt" "$slug" "$fkey"
+    return 0
+  fi
+
+  local log="$wt/.feature/friction.log" reread=""
+  if [[ ! -s "$log" ]]; then
+    # What was reviewed lies next to it under .reviewed — bringing it back is
+    # cheaper than explaining to the human that there is nothing left to look at.
+    #
+    # This must not be done with a copy: run_friction appends the log to
+    # .reviewed, and the copy landed on top of the original — every round doubled
+    # every entry. So we do not copy but say outright: what has to be read is
+    # what was reviewed.
+    if [[ -s "$log.reviewed" ]]; then
+      info "Nothing new; re-reading the entries reviewed last time."
+      reread=1
+    else
+      info "friction.log is empty — nothing to review."
+      return 0
+    fi
+  fi
+  local lkey; lkey="$(last_run_key "$state")"
+  [[ -n "$lkey" ]] || lkey="$(state_get "$state" step || echo "?")"
+  run_friction "$wt" "$slug" "$lkey" "$reread"
+}
+
+# Returning to an interrupted epilogue. As a separate command, because by this
+# moment the feature is closed and cleared away: it is not in the menu, nor in
+# the action list — there is nothing to show, and the tree does not exist. The
+# only way back is to name it, and the warn in run_status names exactly this
+# command.
+# The regression on demand, outside a step's gate.
+#
+# It runs the stage and reports; it does not open fixing sessions and does not
+# rewind steps. That is deliberate. From a gate a red run means "the step does
+# not close, here is what to do about it", and the loop that follows is the
+# answer. From a menu item somebody may have pressed to find out where things
+# stand, the same loop would start sessions nobody asked for — so this answers
+# the question and stops, and the gate does the gating when the step ends.
+#
+# The stage is always `local`: preview and production are asked about their own
+# deployments, which do not exist to be re-tested on demand — remind_prod runs
+# those right after it makes them.
+cmd_regression() {
+  require_repo
+  local slug="${1:-}" wt
+  [[ -n "$slug" ]] || die "name the feature: $SELF regression <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+
+  prepare_worktree "$wt"
+  if regression_run "$wt" "$slug" local; then
+    info "  The step will not run it again unless something changes."
+    return 0
+  fi
+
+  echo ""
+  info "  Nothing was started to fix it: this was a run you asked for, not a gate."
+  info "  Closing the step runs it again and fixes it then: $SELF $slug"
+  return 1
+}
+
+cmd_epilogue() {
+  require_repo
+  local slug="${1:-}" file
+
+  # Without a name, whatever is waiting. Usually nothing: an epilogue is rarely
+  # interrupted, and an empty list is then an answer rather than an excuse.
+  if [[ -z "$slug" ]]; then
+    local rows; rows="$(pending_epilogues)"
+    [[ -n "$rows" ]] || { info "No unfinished epilogues."; return 0; }
+    echo ""
+    echo "${BOLD}Unfinished epilogues${OFF}"
+    while IFS=$'\t' read -r slug file; do
+      [[ -n "$slug" ]] || continue
+      info "  $slug — issue #$(state_get "$file" issue || echo "?"), started $(state_get "$file" started || echo "?")"
+    done <<< "$rows"
+    echo ""
+    info "Resume one with: $SELF epilogue <name>"
+    return 0
+  fi
+
+  file="$(epilogue_dir)/$slug.json"
+  [[ -f "$file" ]] || die "no epilogue recorded for: $slug"
+  # As in pending_epilogues: a closed epilogue leaves no file behind, so nobody
+  # will come here with one. The check is insurance against a record from the
+  # previous arrangement.
+  [[ "$(state_get "$file" done || echo false)" != "true" ]] \
+    || { info "The epilogue for '$slug' is already finished."; return 0; }
+
+  local issue; issue="$(state_get "$file" issue || true)"
+  [[ -n "$issue" && "$issue" != "null" ]] || die "the epilogue state carries no issue"
+
+  # We take the deployment's outcome from the state: the interrupted attempt,
+  # which knew the situation, wrote it. It cannot be assembled here by hand —
+  # there is no tree, and remind_prod passed these values as arguments.
+  #
+  # This used to say "MERGED 1 1" — a guess, and a wrong one: an epilogue is
+  # created on an unmerged branch too (deploy.sh, the "there is no merge yet"
+  # branch). Resuming such a one, sclaude would write into the issue and its
+  # parents that the feature was merged and in prod — as a trustworthy outcome,
+  # over the top of the truth.
+  local pr merged preview prod
+  pr="$(state_get "$file" pr || true)";          [[ "$pr" == "null" ]] && pr=""
+  merged="$(state_get "$file" merged || true)";  [[ "$merged" == "null" ]] && merged=""
+  preview="$(state_get "$file" preview || echo 0)"
+  prod="$(state_get "$file" prod || echo 0)"
+
+  run_status "$slug" "$issue" "$pr" "$merged" "$preview" "$prod"
+}
+
+# Erasing a step's traces and starting it afresh — a "safe boot" for a feature
+# that will not start.
+#
+# Returning to a session is the ordinary path, and almost always the right one:
+# context is worth more than a clean slate. But sometimes there is nowhere or
+# nothing to return to: the transcript is damaged, the session hangs open in
+# somebody else's process, the step hits a limit right at the entrance and does
+# not survive to a conversation. The state then holds an id that cannot be opened
+# and cannot be forgotten — and the feature stands still.
+#
+# All three cases were already caught separately: efeb328 learned to forget an id
+# with no transcript, session_holder to recognise an open session. There was no
+# common way out, and only one remained — editing state.json by hand.
+#
+# We erase precisely the launch's trace: the session's id, the start time, the
+# background-launch flag. We touch nothing of what the step did in the world —
+# the commits, the branch, the PR, the plan and the friction log stay in place.
+# This is a restart of the conversation rather than a rollback of the work; for a
+# rollback there is replan, and for abandoning, drop.
+cmd_reset() {
+  require_repo
+  local slug="${1:-}" wt state step answer
+  [[ -n "$slug" ]] || die "name the feature: $SELF reset <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
+  state="$wt/.feature/state.json"
+  step="$(state_get "$state" step)" || die "corrupted state: $state"
+
+  # An unclosed friction review comes first and as a separate question rather
+  # than together with the step. There are two reasons.
+  #
+  # It holds the step: while the review is not closed, cmd_resume leads into it
+  # rather than into the step — so "the feature is not moving" most often means
+  # exactly this, and it is exactly this that has to be cleared. One question for
+  # both would additionally offer a restart of the step that nobody asked for.
+  #
+  # And their scope differs. Here a step has its launch trace erased while its
+  # conversation stays on disk; a review, on the other hand, has nothing to close
+  # but a flag — the entries have long been in .reviewed, and nobody will offer
+  # them a second time. That has to be asked outright: "close it unreviewed"
+  # rather than "start afresh".
+  local fsession fkey
+  fkey="$(friction_pending "$state" || true)"
+  fsession=""
+  [[ -n "$fkey" ]] && fsession="$(state_get "$state" "friction.$fkey.session" || true)"
+  if [[ -n "$fsession" && "$fsession" != "null" ]]; then
+    echo ""
+    echo "Feature '$slug' has an unfinished friction review, and it holds the step."
+    if live_session "$INSTRUMENTS" "$fsession" >/dev/null; then
+      info "  Its conversation stays on disk — it is only forgotten here."
+      info "  Read it any time: claude --resume $fsession"
+    else
+      info "  Its conversation left no transcript — there is nothing to lose."
+    fi
+    info "  The entries stay in .feature/friction.log.reviewed, marked as reviewed;"
+    info "  re-read them any time with: $SELF friction $slug"
+    ask "${BOLD}Close the friction review and move on? [y/n] ${OFF}" answer yn
+    if is_yes "$answer"; then
+      state_set "$state" "friction.$fkey.done" true
+      # Keep the id under `was`, as run_friction does when it closes one
+      # normally: the conversation stays on disk, and the issue's Friction
+      # column names it so there is something to resume.
+      state_set "$state" "friction.$fkey.was" "$fsession"
+      # And say that nobody read it. This closes a review by hand, leaving the
+      # entries in .reviewed unexamined — an outcome worth telling apart from a
+      # review that ran, which is what the column would otherwise show.
+      state_set "$state" "friction.$fkey.unread" true
+      state_set "$state" "friction.$fkey.session" null
+      info "  The friction review is closed."
+    else
+      info "  Left as it is — the feature stays on it."
+      return 0
+    fi
+  fi
+
+  [[ "$step" != "done" ]] || { info "Feature '$slug' has been through every step."; return 0; }
+
+  local session; session="$(state_get "$state" "steps.$step.session" || true)"
+
+  echo ""
+  echo "Feature '$slug' starts step $(step_label "$step") over, in a new conversation."
+  if [[ -n "$session" && "$session" != "null" ]]; then
+    if live_session "$wt" "$session" >/dev/null; then
+      info "  The recorded conversation stays on disk — it is only forgotten here."
+      info "  Read it any time: claude --resume $session"
+    else
+      info "  The recorded conversation left no transcript — there is nothing to lose."
+    fi
+  fi
+  info "  Commits, branch, PR, the plan and the friction log all stay as they are."
+  ask "${BOLD}Start this step over? [y/n] ${OFF}" answer yn
+  is_yes "$answer" || { info "Left as it is."; return 0; }
+
+  state_set "$state" "steps.$step.session" null
+  state_set "$state" "steps.$step.started" null
+  state_set "$state" "steps.$step.bg" null
+
+  # And the regression's exhausted attempts. Without this a stage that used up
+  # both fixing sessions stays wedged: every later entry runs the whole suite
+  # again, minutes of it, only to refuse at the limit — and "start this step
+  # over" is exactly where a human says the attempts should start over too.
+  local rs
+  for rs in local preview prod; do
+    state_set "$state" "regression.$rs.attempts" 0
+  done
+
+  prepare_worktree "$wt"
+  run_step "$wt" "$slug" "$step"
+}
+
+# The end of a step's session, run by a sclaude that has just replaced one whose
+# code went stale while the session ran. See code_reload.
+cmd_session_ended() {
+  require_repo
+  local slug="${1:-}" step="${2:-}" session="${3:-}" wt
+  [[ -n "$slug" && -n "$step" && -n "$session" ]] || die "usage: $SELF _session-ended <name> <step> <session>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+  session_ended "$wt" "$slug" "$step" "$session"
+}
+
+# The hand-off of a pull request QA has accepted, for the timer: it sees Done
+# while nobody has sclaude open, and the hand-off should not wait for somebody
+# to come back. The same pr_qa_handoff the wait for QA runs, so the two cannot
+# drift apart, and its exit code is passed through unchanged (see there). A
+# feature that no longer exists is 2: nothing left to hand over, ever.
+cmd_handoff() {
+  require_repo
+  local slug="${1:-}" wt state pr issue
+  [[ -n "$slug" ]] || die "usage: $SELF _handoff <name>"
+  wt="$(feature_worktree "$slug")" || { echo "no such feature: $slug" >&2; return 2; }
+  state="$wt/.feature/state.json"
+  pr="$(state_get "$state" pr || true)"
+  issue="$(state_get "$state" issue || true)"
+  pr_qa_handoff "$wt" "$pr" "$issue"
+}
+
+cmd_done() {
+  require_repo
+  local slug="${1:-}" wt branch merged pr answer
+  [[ -n "$slug" ]] || die "name the feature: $SELF done <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+  branch="$(state_get "$wt/.feature/state.json" branch)" || die "the state carries no branch"
+
+  IFS=$'\t' read -r merged pr < <(gh pr view "$branch" --repo "$(git -C "$REPO" remote get-url origin)" \
+    --json state,number --jq '[.state, .number] | @tsv' 2>/dev/null) || true
+  if [[ "$merged" != "MERGED" ]]; then
+    die "the PR for $branch is not merged (state: ${merged:-not found}). Cleaning up comes after the merge."
+  fi
+
+  # The retrospective, while everything it reads is still here (retro.sh). Before
+  # the list below rather than after it, so the list stands right above the
+  # question it belongs to.
+  run_retro "$wt" "$slug" "$pr" "$(state_get "$wt/.feature/state.json" issue 2>/dev/null || true)"
+
+  # Code the retrospective changed is not cleaned up with the feature: the feature
+  # goes back to step 3 for it by itself, and through the review, the preview,
+  # QA and the merge after it. The clean-up waits for that merge.
+  local again; again="$(retro_changed_code "$wt" "$branch")"
+  if [[ -n "$again" ]]; then
+    retro_reopen "$wt" "$pr" || die "could not reopen '$slug': see $wt/.feature/state.json"
+    echo ""
+    say "${BOLD}The retrospective committed $again change(s) PR #$pr does not carry — '$slug' goes back to step '$(step_title pr)' for them.${OFF}"
+    info "  The clean-up waits until their pull request is merged too: $SELF done $slug"
+    cmd_resume "$slug"
+    return 0
+  fi
+
+  # The feature is closed, so it is cleared away whole, with one question.
+  # Splitting it into three would mean asking about parts of what the human has
+  # already agreed to.
+  #
+  # Pruned first: GitHub may have deleted the branch at the merge, and a stale
+  # origin/<branch> would put a branch on this list that is not there — and
+  # then fail to delete it.
+  git -C "$REPO" fetch origin --prune >/dev/null 2>&1
+  local remote=0
+  git -C "$REPO" show-ref --verify --quiet "refs/remotes/origin/$branch" && remote=1
+
+  echo ""
+  echo "This will be removed:"
+  echo "  worktree  $wt"
+  echo "  branch    $branch"
+  [[ "$remote" -eq 1 ]] && echo "  branch    origin/$branch"
+
+  # A copy of the PR fetched for reading — `git fetch origin pull/N/head:prN` —
+  # is the same work under another name, and nothing else ever removes it: the
+  # next sclaude would ask about it on its own. It goes with the feature only
+  # when everything it holds is already in origin/main; otherwise it is left
+  # for the branch sort-out, which shows it and asks.
+  local copy=""
+  if [[ -n "$pr" ]] && git -C "$REPO" show-ref --verify --quiet "refs/heads/pr$pr" \
+      && git -C "$REPO" merge-base --is-ancestor "pr$pr" origin/main 2>/dev/null; then
+    copy="pr$pr"
+    echo "  branch    $copy  (a local copy of PR #$pr, nothing new in it)"
+  fi
+
+  # The only thing that deserves a mention of its own is uncommitted work: it
+  # exists only here and will disappear for good.
+  local dirty; dirty="$(worktree_dirt "$wt")"
+  if [[ -n "$dirty" ]]; then
+    echo ""
+    warn "Uncommitted work will go with them:"
+    printf '%s\n' "$dirty"
+  fi
+
+  # An unreviewed friction log is the second thing that exists only here.
+  # worktree_dirt says nothing about it: .feature/ is hidden from git, and by
+  # construction it is not in the list of uncommitted changes. So we say it
+  # separately —
+  # analysis that has already been paid for must not disappear unmentioned.
+  local fcount; fcount="$(friction_count "$wt" || true)"
+  if [[ -n "$fcount" && "$fcount" != "0" ]]; then
+    echo ""
+    warn "$fcount unreviewed friction entry(ies) will go with them."
+    info "  Review them first: $SELF friction $slug"
+  fi
+
+  echo ""
+  # Returning 1 on a refusal is not an error but an answer: the epilogue decides
+  # by it whether to mention `sclaude done`. For a direct call from the terminal
+  # the exit code means nothing, everything there is said in words.
+  ask "${BOLD}Remove all of it? [y/n] ${OFF}" answer yn
+  is_yes "$answer" || { info "Cancelled."; return 1; }
+
+  # We append the summary before the clean-up: state.json lives inside the
+  # worktree and will disappear with it, and there will be nothing left to
+  # assemble it from.
+  state_set "$wt/.feature/state.json" cleaned true
+  issue_sync "$wt"
+
+  # And the cycle's own record, for the same reason and in the same window.
+  # Everything the cycle measured about itself is in that file, and nothing has
+  # ever outlived it: the questions it could answer — is the cycle getting
+  # faster, which step holds it up, are two fixing attempts enough — have not
+  # been askable at all.
+  #
+  # After issue_sync rather than before: that call writes the last thing the
+  # state learns, and a record taken ahead of it would be missing it.
+  metrics_append "$wt" done
+
+  # The QA watch ends with the feature. Left behind, its file would have a timer
+  # asking GitHub about a closed issue every five minutes for ever — and telling
+  # somebody about it the next time a human touched that column.
+  watch_stop "$slug"
+
+  # We shut the server down after the agreement but before the directory is
+  # removed: any earlier and a refusal would leave the human without a server;
+  # any later and it would go on running in a worktree that does not exist,
+  # holding the port.
+  remove_worktree "$wt" || die "could not remove the worktree"
+
+  # -d, not -D: it will refuse if the branch holds anything that has not reached
+  # main. git's own warning is muted — for a merged PR it is a false alarm, the
+  # merge happened on GitHub's side — while a real refusal is said in our own
+  # words.
+  if ! git -C "$REPO" branch -d "$branch" >/dev/null 2>&1; then
+    warn "  local branch $branch kept: it carries commits that are not in main"
+    warn "  to force it: git branch -D $branch"
+  fi
+
+  # Checked again right before -D: -D does not look at main itself, so the
+  # ancestry test is the only thing standing between it and lost commits.
+  if [[ -n "$copy" ]]; then
+    if git -C "$REPO" merge-base --is-ancestor "$copy" origin/main 2>/dev/null; then
+      git -C "$REPO" branch -D "$copy" >/dev/null 2>&1 \
+        || warn "  could not delete the local branch $copy"
+    else
+      warn "  local branch $copy kept: it carries commits that are not in main"
+    fi
+  fi
+
+  # push's output is muted: .githooks/pre-push does not tell deleting a branch
+  # from an ordinary push and runs all the database checks, dumping their report
+  # — which has nothing to do with the clean-up.
+  if [[ "$remote" -eq 1 ]]; then
+    git -C "$REPO" push origin --delete "$branch" >/dev/null 2>&1 \
+      || warn "  could not delete origin/$branch"
+  fi
+
+  echo "${GREEN}Feature '$slug' cleaned up.${OFF}"
+  side_worktrees_offer
+}
+
+# Checking a branch against main. The only place where a feature learns that the
+# world has moved on: until now a branch equalled origin/main exactly once — at
+# the moment it was created — and diverged silently after that. A feature that
+# has lain for a week plans and writes code against an outdated foundation, and
+# that is discovered at the merge.
+#
+# We count both sides rather than one: "12 behind" without "3 of its own" does
+# not say what it threatens. We merge rather than rebase: the branch is already
+# in origin, it may have an open PR, and rewriting its history means breaking
+# what the review is looking at. A merge leaves a commit but does not touch what
+# has already been published.
+cmd_sync() {
+  require_repo
+  local slug="${1:-}" wt branch behind ahead answer
+  [[ -n "$slug" ]] || die "name the feature: $SELF sync <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+  branch="$(state_get "$wt/.feature/state.json" branch)" || die "the state carries no branch"
+
+  echo ""
+  info "Fetching origin…"
+  git -C "$REPO" fetch origin -q 2>/dev/null || warn "  could not reach origin — using what we have"
+
+  behind="$(git -C "$REPO" rev-list --count "$branch..origin/main" 2>/dev/null)" || behind="?"
+  ahead="$(git -C "$REPO" rev-list --count "origin/main..$branch" 2>/dev/null)" || ahead="?"
+
+  echo ""
+  say "${BOLD}$slug${OFF} — $ahead commit(s) of its own, $behind behind origin/main."
+
+  if [[ "$behind" == "0" ]]; then
+    info "  Nothing to do: the branch already has everything from main."
+    return 0
+  fi
+
+  # A "?" instead of a number means rev-list did not work: there is no
+  # origin/main, or the branch did not resolve. Asking "merge it in?" after that
+  # is the same as asking over uncommitted work below: offering what is known to
+  # be impossible is lying. The only difference is that there it is the human's
+  # work in the way, while here we have nothing to compare.
+  if [[ "$behind" == "?" ]]; then
+    warn ""
+    warn "  Could not compare $branch with origin/main."
+    info "  Is there an origin/main to merge from? Try: git -C $REPO fetch origin"
+    return 0
+  fi
+
+  # Uncommitted work must not be merged into: merge would stop halfway and leave
+  # the tree in a state that would have to be untangled by hand. We check before
+  # the question — offering what is known not to work out is lying.
+  local dirty; dirty="$(worktree_dirt "$wt")"
+  if [[ -n "$dirty" ]]; then
+    warn ""
+    warn "  Uncommitted work in the worktree — commit or stash it first:"
+    printf '%s\n' "$dirty"
+    return 0
+  fi
+
+  echo ""
+  ask "${BOLD}Merge origin/main into $branch? [y/n] ${OFF}" answer yn
+  is_yes "$answer" || { info "Left as it is."; return 0; }
+
+  # `--no-edit` for the reason sync_branch gives in worktree.sh.
+  if git -C "$wt" merge --no-edit origin/main; then
+    echo "${GREEN}Merged — $branch now carries everything from main.${OFF}"
+  else
+    warn ""
+    warn "  The merge stopped on conflicts. They are yours to resolve:"
+    warn "    cd $wt && git status"
+    warn "  To back out entirely: git -C $wt merge --abort"
+  fi
+}
+
+# What has changed on the PR since the step last saw it.
+#
+# review_news (run.sh) assembles this — the same gathering that goes as a prompt
+# into a resumed step 4. Until now there was no other way to see it: without
+# opening the step, a human did not know whether there was anything new there at
+# all.
+cmd_news() {
+  require_repo
+  local slug="${1:-}" wt pr news
+  [[ -n "$slug" ]] || die "name the feature: $SELF news <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+  pr="$(state_get "$wt/.feature/state.json" pr || true)"
+  [[ -n "$pr" && "$pr" != "null" ]] || { info "Feature '$slug' has no pull request yet."; return 0; }
+
+  # review_news shows what is new relative to step 4's last session, and it
+  # returns nothing for four different reasons. One of them has to be separated
+  # out: there may be no review session at all — step 3 has just closed and step
+  # 4 has not begun. "There is nothing new" is then untrue in exactly the
+  # opposite way: everything there is new, there is simply nothing to count it
+  # from.
+  local session
+  session="$(state_get "$wt/.feature/state.json" steps.review.session || true)"
+  echo ""
+  if [[ -z "$session" || "$session" == "null" ]]; then
+    info "PR #$pr has not been reviewed yet — step 4 hasn't run."
+    info "  Everything on it is new. Open it with: $SELF $slug"
+    return 0
+  fi
+
+  news="$(review_news "$wt" review)"
+  if [[ -z "$news" ]]; then
+    info "PR #$pr: nothing new since the last review session."
+    return 0
+  fi
+  echo "${BOLD}PR #$pr — what has happened since the last review session:${OFF}"
+  echo ""
+  printf '%s\n' "$news"
+}
+
+# A preview deploy on demand.
+#
+# With the same block as in the cycle's epilogue: the command is one and the
+# same, and there is no reason for them to diverge. Preview used to be offered
+# exactly once — at the end — and a refusal meant there would be no second offer
+# until the epilogue was gone through again.
+#
+# From the main repository with a path to the worktree: the project's link lies
+# in its .vercel/, and the feature's tree has none — a vercel launched from there
+# would create a new project instead of deploying to this one.
+cmd_preview() {
+  require_repo
+  local slug="${1:-}" wt
+  [[ -n "$slug" ]] || die "name the feature: $SELF preview <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+
+  # The record, the same one remind_prod keeps. Without it a preview sent from
+  # here leaves no trace, deploy_unchanged has nothing to compare against, and
+  # the cycle offers the same unchanged tree again as though it had never gone.
+  # It matters more now that the section reports the deployed commit: a deploy
+  # nobody wrote down is a commit the issue cannot name.
+  #
+  # The migrations first, as in the cycle: a preview recorded here is one the
+  # cycle later skips as unchanged, so a deploy without them would stay without
+  # them.
+  preview_apply_migrations "$wt" || true
+  if preview_deploy "$wt"; then
+    deploy_remember "$wt" preview
+  fi
+}
+
+# Puts production back to the release before this feature, by hand.
+#
+# The same code the red-prod path runs automatically, minus the `--auto`: there
+# the decision has been taken by a suite, here it is taken by a person, and a
+# person gets asked. The default is yes — by the time somebody has typed this,
+# they know what they want, and a default of no would make the common case take
+# two keystrokes.
+#
+# A cleaned-up feature cannot be rolled back this way: feature_worktree dies,
+# and the record of what it shipped died with the tree. The message says what to
+# do instead rather than leaving somebody at a dead end.
+cmd_rollback() {
+  require_repo
+  local slug="${1:-}" wt
+  [[ -n "$slug" ]] || die "name the feature: $SELF rollback <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug
+  A feature that has been cleaned up keeps no record of what it shipped.
+  By hand: vercel ls --environment production, then vercel rollback <url>"
+
+  # The same gate the action list applies: nothing is offered until the feature
+  # has actually reached production. The menu had it and the typed command did
+  # not, and the gap was reachable — `rollback_remember_previous` runs before
+  # the prod block and regardless of whether the human accepts it, so
+  # `rollback.prod.url` can name a deployment for a ship that never happened.
+  # `deploy.prod.sha` is written only by a deploy that succeeded, so it is the
+  # honest question.
+  local shipped; shipped="$(state_get "$wt/.feature/state.json" deploy.prod.sha 2>/dev/null || true)"
+  if [[ -z "$shipped" || "$shipped" == "null" ]]; then
+    warn "Feature '$slug' has not been shipped to production from here."
+    info "  There is nothing to roll back: production is serving whatever it"
+    info "  was serving before this feature existed."
+    info "  What is on hosting now: vercel ls --environment production"
+    return 1
+  fi
+
+  rollback_prod "$wt" "$slug" || return 1
+  rollback_confirm "$wt" "$slug" || true
+  rollback_incident "$wt" "$slug" \
+    "$(state_get "$wt/.feature/state.json" issue 2>/dev/null || true)"
+}
+
+# The server usually starts by itself before a step; this command is for the
+# cases where it is needed without a session or simply has to be switched off.
+cmd_dev() {
+  require_repo
+  # --no-browser is for sclaude-proxy, which starts a server because a browser
+  # is already asking for it — and may be a phone's, where a window opening on
+  # the laptop helps nobody.
+  local browser=1 a
+  local -a args=()
+  for a in "$@"; do
+    [[ "$a" == "--no-browser" ]] && { browser=0; continue; }
+    args+=("$a")
+  done
+  set -- "${args[@]}"
+  local arg="${1:-}" pid cwd wt
+
+  # `stop` takes the feature as its second word; without one, the tree it was
+  # called from. Every feature has a server of its own now, so "the" server no
+  # longer names anything.
+  if [[ "$arg" == "--stop" || "$arg" == "stop" ]]; then
+    local port
+    if [[ -n "${2:-}" ]]; then
+      wt="$(feature_worktree "$(slugify "$2")")" || die "no such feature: $2"
+    else
+      wt="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not a git repository"
+    fi
+    port="$DEV_PORT_PINNED"
+    [[ -n "$port" ]] || port="$(state_get "$wt/.feature/state.json" dev.port 2>/dev/null || true)"
+    pid="$(dev_pid "$port")"
+    if [[ -n "$pid" ]]; then
+      cwd="$(dev_cwd "$pid")"
+      # Before anything is stopped: refusing after the database had gone down
+      # would say nothing was stopped while this feature's database was.
+      [[ "$cwd" == "$wt" ]] || die "port $port is held by ${cwd:-an unknown directory}, not by $wt — leaving it"
+    fi
+    # The database goes to sleep with the server: it holds memory and is of no
+    # use without it, and the next start brings both back. Also when the server
+    # is already down — a database left running on its own is the same waste.
+    declare -F db_stop >/dev/null && db_stop "$wt"
+    [[ -z "$pid" ]] && { echo "The dev server of $(basename "$wt") is not running."; return 0; }
+    echo "Stopping the server from $wt…"
+    stop_dev_pid "$pid" "$port"
+    echo "${GREEN}stopped${OFF}"
+    return 0
+  fi
+
+  if [[ -n "$arg" ]]; then
+    wt="$(feature_worktree "$(slugify "$arg")")" || die "no such feature: $arg"
+  else
+    # Without a name, the server for the worktree it was called from.
+    wt="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not a git repository"
+  fi
+  mkdir -p "$wt/.feature"
+  ensure_dev "$wt"
+  [[ "$browser" -eq 1 ]] && ensure_chrome "$wt"
+  return 0
+}
+
+usage() {
+  cat <<EOF
+${BOLD}$SELF${OFF} — an orchestrator for the feature development cycle
+
+  $SELF                 menu: features in progress, arrows to choose
+  $SELF new [name]      start a feature at step 1 (planning)
+  $SELF <name>          continue a feature from its current step
+  $SELF status          a table of every feature and its step
+  $SELF doctor          what this machine has and lacks, with the fix for each gap
+  $SELF dev [name]      start the dev server (no name — for the current directory)
+  $SELF dev --stop [name]  stop the dev server of a feature (or of this directory)
+  $SELF actions [name]  every action for one feature, in one list
+  $SELF sync <name>     merge origin/main into the feature's branch
+  $SELF news <name>     what has moved on the pull request
+  $SELF preview <name>  deploy this branch to a preview URL
+  $SELF rollback <name> put production back to the release before this feature
+  $SELF issue <name>    create a GitHub issue for a feature that has none
+  $SELF replan <name>   take a feature back to step 1 and plan it again
+  $SELF return <name> [reason]  send a finished feature back to development
+                        (step 4): its session reads what was said since, on
+                        the issue and on the pull request
+  $SELF done <name>     remove the worktree and branches after the merge
+  $SELF drop <name>     abandon a feature: clear its traces here and on GitHub
+  $SELF regression <name> run the checks step 2 and step 4 close on
+  $SELF friction <name> review what got in the step's way and fix the tooling
+  $SELF deferred        the monthly review of the friction put off (offered by itself)
+  $SELF reset <name>    start the current step over, forgetting its conversation
+  $SELF epilogue [name] write the status into the issue if the epilogue broke off
+                        (the menu offers this by itself; the command is for a
+                        named feature, or to list what is waiting)
+
+In the menu, tick 'show actions after choosing' to get all of the above for
+one feature in a single list, instead of remembering the command names.
+
+Steps: $(printf '%s → ' "${STEPS[@]}" | sed 's/ → $//')
+
+The orchestrator runs the dev server, not the claude session: a \`next dev\`
+started from inside a session stays in its process group and keeps you from
+leaving it — and leaving is how a step ends.
+EOF
+}
+
+main() {
+  # We open the question-answer channel only where a conversation is possible at
+  # all.
+  #
+  # Conversational commands and informational ones are outwardly
+  # indistinguishable — either may have no terminal — while the difference is
+  # fundamental: a question in the channel waits for an answer for as long as it
+  # takes. For `status` that would be a disaster: the bot calls it with a
+  # 25-second timeout to draw the feature list, and a hanging question would hang
+  # the whole Sclaude section along with it.
+  #
+  # The directory is the main repository's .git/sclaude/, one for the whole cycle
+  # and all the worktrees. It is also the only one: a question is found even
+  # before the feature is created, and the bot looks exactly here without knowing
+  # about its tree.
+  case "${1:-}" in
+    # _handoff is the timer's: no update of the orchestrator from inside a
+    # five-minute sweep, and nobody to ask anything.
+    #
+    # Nor a channel for questions, even one inherited: a step's claude session
+    # runs under a sclaude that exported ASK_DIR, and a `sclaude status` it
+    # calls would publish review_branches' question there and wait for an
+    # answer nobody gives. Killed by its caller's timeout, it lived on as an
+    # orphan polling the channel once a second, and held off every update of
+    # instruments as "another sclaude" for as long as it lived.
+    status|ls|dev|news|doctor|_handoff|-h|--help|help|-*) unset ASK_DIR ;;
+    *)
+      # The same line decides what is recorded (terminal.sh): a conversation
+      # is worth reading back, a report is not. First, so the record holds
+      # everything the run prints; it may re-execute this process.
+      term_record "$@"
+
+      # The same line between talking and reporting decides whether the
+      # orchestrator updates itself first: a fetch has no business on the path
+      # the bot calls with a timeout. It may re-execute this process.
+      instruments_sync "$@"
+
+      # Through a temporary variable: an assignment inside the `if` itself would
+      # leave ASK_DIR equal to "/.git/sclaude" where there is no repository at
+      # all — and ask would go through a channel that does not exist.
+      local _repo; _repo="$(main_repo 2>/dev/null)" || _repo=""
+      if [[ -n "$_repo" && -d "$_repo/.git" ]]; then
+        export ASK_DIR="$_repo/.git/sclaude"
+      else
+        unset ASK_DIR
+      fi
+      ;;
+  esac
+
+  case "${1:-}" in
+    # Once a month the deferred friction is offered first: see deferred.sh.
+    "")            deferred_offer; cmd_menu ;;
+    new)           shift; [[ -n "${1:-}" ]] && cmd_new "$1" || start_feature ;;
+    status|ls)     cmd_status ;;
+    doctor)        doctor_run ;;
+    dev)           shift; cmd_dev "$@" ;;
+    # The list of actions on a feature. In the terminal people arrive here from
+    # the menu, by the checkbox; from a phone there is no checkbox — there is
+    # nothing to press space with there — and the card's button opens that same
+    # list directly, by a command of its own.
+    actions)       shift
+                   if [[ -n "${1:-}" ]]; then
+                     # For a named feature there is no previous menu: the list
+                     # is open on its own, by a button from a phone or by a
+                     # command. "Go back" is then simply an exit rather than an
+                     # exit code passed outwards — a ten from the shell would
+                     # read as a failure.
+                     feature_actions "$(slugify "$1")" || true
+                   else
+                     require_repo; actions_menu "$(list_features)"
+                   fi ;;
+    sync)          shift; cmd_sync "$(slugify "${1:-}")" ;;
+    news)          shift; cmd_news "$(slugify "${1:-}")" ;;
+    preview)       shift; cmd_preview "$(slugify "${1:-}")" ;;
+    # A refused rollback is an answer rather than a failure — the same reason
+    # `done` ends with `|| true`.
+    rollback)      shift; cmd_rollback "$(slugify "${1:-}")" || true ;;
+    issue)         shift; cmd_issue "$(slugify "${1:-}")" ;;
+    replan)        shift; cmd_replan "$(slugify "${1:-}")" ;;
+    return)        shift; _slug="$(slugify "${1:-}")"; shift || true; cmd_return "$_slug" "$@" ;;
+    # Refusing the clean-up is not a script failure: the epilogue reads
+    # cmd_done's exit code, whereas to a command from the terminal it would say
+    # "it did not work out", which is not what happened.
+    done)          shift; cmd_done "${1:-}" || true ;;
+    drop)          shift; cmd_abandon "$(slugify "${1:-}")" ;;
+    friction)      shift; cmd_friction "$(slugify "${1:-}")" ;;
+    deferred)      cmd_deferred ;;
+    # A red run is an answer, not a script failure: || true so the shell does
+    # not report one where the summary has already said everything.
+    regression)    shift; cmd_regression "$(slugify "${1:-}")" || true ;;
+    reset)         shift; cmd_reset "$(slugify "${1:-}")" ;;
+    # Internal: the end of a step's session, handed over by code_reload.
+    _session-ended) shift; cmd_session_ended "$@" ;;
+    # Internal: the timer handing over a PR that QA accepted.
+    _handoff)      shift; cmd_handoff "$(slugify "${1:-}")" ;;
+    # Without a name it prints whatever is waiting — hence slugify only when
+    # there is an argument.
+    epilogue)      shift; cmd_epilogue "${1:+$(slugify "$1")}" ;;
+    -h|--help|help) usage ;;
+    -*)            die "unknown flag: $1" ;;
+    *)             cmd_resume "$(slugify "$1")" ;;
+  esac
+}
+
+main "$@"
+# exit INSIDE the braces: once the block finishes, bash would go on reading
+# the file from the byte where the block ended, and if the file grew meanwhile
+# that byte is in the middle of some line (seen as a `;;` syntax error after a
+# clean-up had already succeeded).
+exit
+}

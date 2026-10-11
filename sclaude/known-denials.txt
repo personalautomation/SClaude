@@ -1,0 +1,20 @@
+# Deliberate bans: reviewed, judged to be the human's steps, kept out of the log.
+#
+# A rejection on such a command is permanent by construction: the step trips
+# over it precisely because the ban works. It can be reviewed once, and the log
+# lives in .feature/ and dies with the worktree — without this list every next
+# feature would bring the same entry, and the friction review would pay for the
+# same conclusion again.
+#
+# A line is a substring of an entry's subject ("Bash: <command>"). The friction
+# review adds lines here when it decides to leave something as it is; removing a
+# line means wanting to see that rejection in the log again.
+#
+# Only what is permanent by construction goes here — the human's step: merge,
+# deploy, prod. A one-off obstacle fixed by editing the orchestrator does not:
+# it will not recur anyway, and a line here would hide it if it did.
+
+vercel                  # deploy — the human's step
+gh pr merge             # merge — the human's step
+npm run db:promote      # prod migrations — after the merge, by hand
+npm run env:prod        # switching the environment to prod

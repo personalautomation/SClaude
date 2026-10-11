@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#
+# Starts code-server in whichever repository is selected in the bot.
+#
+# A wrapper rather than a path straight in the unit: the choice lives in
+# keepawake's state and is changed by a button in Telegram, while the unit is
+# read by systemd once at boot. Without this layer, changing repository would
+# require editing the unit and a daemon-reload.
+#
+# No choice made, or the directory is gone — open the home directory: an empty
+# editor is more use than a failed service.
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+STATE_PY="$REPO_ROOT/keepawake/state.py"
+
+target="$(python3 "$STATE_PY" get sclaude_repo 2>/dev/null)"
+if [[ -z "$target" || ! -d "$target" ]]; then
+  target="$HOME"
+fi
+
+exec "$HOME/.local/bin/code-server" "$target"

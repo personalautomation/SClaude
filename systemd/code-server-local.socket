@@ -1,0 +1,14 @@
+[Unit]
+Description=code-server's local port for the Windows browser
+Documentation=file:%h/instruments/README.md
+
+[Socket]
+# Loopback only: WSL2 forwards localhost into Windows itself, so this is enough
+# for the browser on the laptop and does not open the port to the network.
+ListenStream=127.0.0.1:8080
+# Accept=no: systemd-socket-proxyd takes the listening socket whole and sorts
+# out the connections itself. With Accept=yes it receives an already accepted
+# connection and refuses to work — "Passed in socket is not a stream socket".
+
+[Install]
+WantedBy=sockets.target

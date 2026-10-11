@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#
+# Keeps KeepAwake.ps1 running on the Windows side for as long as WSL is alive.
+#
+# The script used to be started from the Windows startup folder and lived for as
+# long as the laptop was on. That did no harm — without WSL the heartbeat goes
+# stale in fifteen minutes and the hold releases itself — but the process hung
+# around for nothing: while WSL is not running there is nobody to hold for.
+#
+# Its life is now managed by systemd inside WSL: started with the distribution,
+# stopped with it. No deviation from Windows' own rules is left at all while WSL
+# is switched off.
+#
+#   keepawake-windows          start and watch (what the unit calls)
+#   keepawake-windows --stop   stop the process on the Windows side
+set -uo pipefail
+
+WIN32="/mnt/c/Windows/System32"
+PS="$WIN32/WindowsPowerShell/v1.0/powershell.exe"
+
+win_user() {
+  local name
+  name=$("$WIN32/cmd.exe" /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r')
+  if [[ -z "$name" || "$name" == *"%"* ]]; then
+    # The fallback is the same as state.py's: the only profile in Users.
+    name=$(ls /mnt/c/Users 2>/dev/null \
+           | grep -viE '^(public|default|default user|all users)$' | head -1)
+  fi
+  printf '%s' "$name"
+}
+
+# We stop by command line rather than by process name: powershell.exe may be
+# running for something else too, and we have no right to kill what is not ours.
+stop_windows_side() {
+  "$PS" -NoProfile -Command '
+    Get-CimInstance Win32_Process |
+      Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -like "*KeepAwake.ps1*" } |
+      ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  ' >/dev/null 2>&1
+}
+
+if [[ "${1:-}" == "--stop" ]]; then
+  stop_windows_side
+  exit 0
+fi
+
+USER_NAME="$(win_user)"
+if [[ -z "$USER_NAME" ]]; then
+  echo "keepawake-windows: could not determine the Windows user" >&2
+  exit 1
+fi
+SCRIPT="C:\\Users\\$USER_NAME\\.keepawake\\KeepAwake.ps1"
+
+# In case the unit is restarted: an old instance may have survived. The mutex
+# inside the script would stop a new one from working, and we would hang for
+# nothing.
+stop_windows_side
+sleep 1
+
+"$PS" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$SCRIPT" \
+  >/dev/null 2>&1 &
+
+# Waiting on the child process is pointless: powershell.exe through interop
+# returns control immediately, and wait would finish at once — systemd would
+# consider the service done and shut the Windows side down through ExecStop.
+#
+# So we watch by polling: while the process on that side is alive, so are we.
+# Type=simple, and the service's life is the life of this very loop.
+trap 'stop_windows_side; exit 0' TERM INT
+
+windows_side_alive() {
+  "$PS" -NoProfile -Command '
+    $p = Get-CimInstance Win32_Process |
+      Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -like "*KeepAwake.ps1*" }
+    if ($p) { exit 0 } else { exit 1 }
+  ' >/dev/null 2>&1
+}
+
+# Give it time to come up before judging it.
+sleep 5
+while windows_side_alive; do
+  sleep 30
+done
+echo "keepawake-windows: the process on the Windows side is gone" >&2
+exit 1

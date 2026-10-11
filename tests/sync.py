@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+#
+# A bench for instruments_sync and push_instruments: how the orchestrator keeps
+# itself up to date and where a friction review's commits go.
+#
+# Everybody installs instruments from one repository, so this is the only way a
+# fix reaches a team; and MAINTAINERS decides who may commit the orchestrator
+# to main. The failures are all quiet ones:
+#
+#   no update             every machine runs whatever it cloned months ago.
+#   a merge into dirt     somebody's hand edit is mixed with upstream's.
+#   a conflict left open  the orchestrator is left half-merged and cannot load.
+#   a stranger on main    their friction fix lands on everybody's main.
+#   a new branch unpushed dev/<name> never leaves the machine, because a count
+#                         against a missing origin/<branch> read as "nothing".
+#
+# A bare repository plays origin; the clone plays $INSTRUMENTS. $0 is a stub
+# that records the re-execution instead of performing it.
+#
+# Run it with: python3 tests/sync.py
+import os
+import subprocess
+import sys
+import tempfile
+
+LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sclaude", "lib")
+
+failures = []
+
+
+def check(name, got, want):
+    if got == want:
+        print("  PASS  %s" % name)
+    else:
+        failures.append(name)
+        print("  FAIL  %s" % name)
+        print("        want: %r" % (want,))
+        print("        got:  %r" % (got,))
+
+
+ENV = {k: v for k, v in os.environ.items()
+       if not k.startswith("GIT_") and not k.startswith("SCLAUDE_")}
+ENV.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo] + list(args), capture_output=True,
+                          text=True, env=ENV).stdout.strip()
+
+
+def commit(repo, name, text):
+    with open(os.path.join(repo, name), "w") as fh:
+        fh.write(text)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "edit " + name)
+
+
+class World:
+    def __init__(self, tmp, email="me@x.test", maintainers=None):
+        self.origin = os.path.join(tmp, "origin.git")
+        self.up = os.path.join(tmp, "upstream")   # somebody else's clone
+        self.me = os.path.join(tmp, "instruments")
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", self.origin],
+                       env=ENV, check=True)
+        subprocess.run(["git", "clone", "-q", self.origin, self.up], env=ENV,
+                       capture_output=True)
+        git(self.up, "config", "user.email", "up@x.test")
+        git(self.up, "config", "user.name", "Up")
+        if maintainers is not None:
+            with open(os.path.join(self.up, "MAINTAINERS"), "w") as fh:
+                fh.write("".join(m + "\n" for m in maintainers))
+        commit(self.up, "a.txt", "one\n")
+        git(self.up, "push", "-q", "origin", "main")
+        subprocess.run(["git", "clone", "-q", self.origin, self.me], env=ENV,
+                       capture_output=True)
+        git(self.me, "config", "user.email", email)
+        git(self.me, "config", "user.name", "Me")
+        self.reexec = os.path.join(tmp, "reexec")
+        with open(self.reexec, "w") as fh:
+            fh.write('#!/usr/bin/env bash\necho "REEXEC $SCLAUDE_SYNCED $*"\n')
+        os.chmod(self.reexec, 0o755)
+
+    def upstream_commit(self, name="b.txt", text="two\n"):
+        commit(self.up, name, text)
+        git(self.up, "push", "-q", "origin", "main")
+
+    def run(self, fn="instruments_sync", env=None):
+        script = """
+info() { echo "INFO $*"; }
+warn() { echo "WARN $*"; }
+INSTRUMENTS=%s
+SELF=sclaude
+source %s/developer.sh
+source %s/run.sh
+# Other sclaude processes on the real machine must not decide this bench.
+[[ -n "${OTHERS:-}" ]] && instruments_others() { echo 4242; } || instruments_others() { return 1; }
+%s one two
+echo "RETURNED"
+""" % (self.me, LIB, LIB, fn)
+        full = dict(ENV)
+        if env:
+            full.update(env)
+        done = subprocess.run(["bash", "-c", script, self.reexec],
+                              capture_output=True, text=True, env=full)
+        return done.stdout
+
+    def branch(self):
+        return git(self.me, "rev-parse", "--abbrev-ref", "HEAD")
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    print("maintainer on main (no MAINTAINERS file)")
+    os.makedirs(os.path.join(tmp, "1"))
+    w = World(os.path.join(tmp, "1"))
+    out = w.run()
+    check("nothing-to-do-returns", "RETURNED" in out and "REEXEC" not in out, True)
+    w.upstream_commit()
+    out = w.run()
+    check("behind-fast-forwards", os.path.isfile(os.path.join(w.me, "b.txt")), True)
+    check("behind-reexecutes-with-args", "REEXEC 1 one two" in out, True)
+    check("reexec-guard", "REEXEC" in w.run(env={"SCLAUDE_SYNCED": "1"}), False)
+    w.upstream_commit("c.txt")
+    out = w.run(env={"SCLAUDE_NO_SYNC": "1"})
+    check("no-sync-switch", os.path.isfile(os.path.join(w.me, "c.txt")), False)
+
+    print("dirty tree")
+    with open(os.path.join(w.me, "a.txt"), "w") as fh:
+        fh.write("hand edit\n")
+    out = w.run()
+    check("dirty-not-updated", os.path.isfile(os.path.join(w.me, "c.txt")), False)
+    check("dirty-said", "uncommitted changes" in out, True)
+    check("dirty-edit-kept", open(os.path.join(w.me, "a.txt")).read(), "hand edit\n")
+
+    print("offline")
+    git(w.me, "checkout", "--", "a.txt")
+    git(w.me, "remote", "set-url", "origin", os.path.join(tmp, "nowhere.git"))
+    out = w.run()
+    check("offline-silent", ("RETURNED" in out, "WARN" in out), (True, False))
+
+    print("non-maintainer")
+    os.makedirs(os.path.join(tmp, "2"))
+    w = World(os.path.join(tmp, "2"), email="Alice.B@x.test",
+              maintainers=["boss@x.test"])
+    out = w.run()
+    check("switched-to-own-branch", w.branch(), "dev/alice-b")
+    check("switch-reexecutes", "REEXEC 1" in out, True)
+
+    # Upstream moves; the developer's branch has a commit of its own.
+    commit(w.me, "mine.txt", "mine\n")
+    w.upstream_commit()
+    out = w.run()
+    check("main-merged-into-own-branch",
+          (os.path.isfile(os.path.join(w.me, "b.txt")),
+           os.path.isfile(os.path.join(w.me, "mine.txt")), w.branch()),
+          (True, True, "dev/alice-b"))
+
+    print("push_instruments on a branch origin has never seen")
+    out = w.run("push_instruments")
+    check("new-branch-pushed", git(w.origin, "rev-parse", "--verify", "-q",
+                                   "refs/heads/dev/alice-b") != "", True)
+
+    print("conflict")
+    commit(w.me, "a.txt", "mine\n")
+    w.upstream_commit("a.txt", "theirs\n")
+    out = w.run()
+    check("conflict-aborted", (git(w.me, "status", "--porcelain"),
+                               open(os.path.join(w.me, "a.txt")).read()),
+          ("", "mine\n"))
+    check("conflict-said", "conflicts" in out, True)
+
+
+    print("somebody else is running from it")
+    w.upstream_commit("d.txt")
+    out = w.run(env={"OTHERS": "1"})
+    check("others-not-updated", (os.path.isfile(os.path.join(w.me, "d.txt")),
+                                 "another sclaude" in out), (False, True))
+
+    print("a branch that is not sclaude's")
+    git(w.me, "merge", "--abort")
+    git(w.me, "checkout", "-q", "-B", "wip/idea", "HEAD")
+    commit(w.me, "idea.txt", "idea\n")
+    out = w.run()
+    check("wip-not-merged", (os.path.isfile(os.path.join(w.me, "d.txt")),
+                             "not" in out and "sclaude's to merge into" in out), (False, True))
+    w.run("push_instruments")
+    check("wip-not-pushed", git(w.origin, "rev-parse", "--verify", "-q",
+                                "refs/heads/wip/idea"), "")
+
+    print("a merge that fails without a conflict")
+    git(w.me, "switch", "-q", "dev/alice-b")
+    git(w.me, "reset", "-q", "--hard", "HEAD")
+    w.upstream_commit("untracked.txt", "theirs\n")
+    with open(os.path.join(w.me, "untracked.txt"), "w") as fh:
+        fh.write("mine, untracked\n")
+    out = w.run()
+    check("non-conflict-failure-said-as-such",
+          ("could not merge" in out, "conflicts" in out), (True, False))
+    check("untracked-file-kept", open(os.path.join(w.me, "untracked.txt")).read(),
+          "mine, untracked\n")
+
+
+# --- the net under the switch, and what the prompts tell the session ---------
+#
+# Read as text: driving run_friction for real needs a feature, a log and a
+# claude, and what matters is only that the refusal comes before the session.
+RUN = open(os.path.join(LIB, "run.sh"), encoding="utf-8").read()
+friction = RUN[RUN.index("run_friction() {"):]
+friction = friction[:friction.index("\n}\n")]
+net = friction.find("MAINTAINERS does not list you")
+first_claude = friction.find("claude_launch --")
+check("friction-net-before-session", -1 < net < first_claude, True)
+
+PROMPTS = os.path.join(LIB, "..", "prompts")
+for name in ("_friction-body.md", "friction.md", "friction-fix.md"):
+    text = open(os.path.join(PROMPTS, name), encoding="utf-8").read()
+    check("prompt-names-no-main-target-%s" % name,
+          [p for p in ("commit it to `main`", "commits straight to `main`")
+           if p in text], [])
+
+if failures:
+    print("\n%d failed: %s" % (len(failures), ", ".join(failures)))
+    sys.exit(1)
+print("\nall passed")

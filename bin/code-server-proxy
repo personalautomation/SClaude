@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+#
+# Proxies a local port to code-server, which listens in the tailnet.
+#
+# The wrapper exists for one reason: the address is taken from code-server's
+# config rather than set in the unit as a constant. It is tied to the node's
+# address in the tailnet and changes on re-registration — a hardcoded one would
+# survive the change silently, connecting to nowhere. systemd cannot substitute
+# a command's output into ExecStart, hence the script.
+set -uo pipefail
+
+CONFIG="$HOME/.config/code-server/config.yaml"
+# Split on the first colon, not on every one: in "bind-addr: 100.64.0.1:8080"
+# the second belongs to the address, and -F': *' would cut the port off with it.
+TARGET=$(sed -n 's/^bind-addr:[[:space:]]*//p' "$CONFIG" 2>/dev/null | head -1)
+[[ -z "$TARGET" ]] && TARGET="127.0.0.1:8080"
+
+# Wait until the server opens its port. Requires= brings it up, but systemd
+# considers the service started immediately, while the port opens a second or
+# two later — without the wait the first request after idling was cut off, and
+# the link had to be pressed twice.
+host="${TARGET%%:*}"
+port="${TARGET##*:}"
+for _ in $(seq 1 40); do
+  (exec 3<>"/dev/tcp/$host/$port") 2>/dev/null && break
+  sleep 0.5
+done
+
+exec /usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=30min "$TARGET"

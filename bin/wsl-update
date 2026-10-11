@@ -1,0 +1,967 @@
+#!/usr/bin/env bash
+# The daily update of the tooling in WSL2.
+#
+# Started by the wsl-update.timer systemd timer (see ~/.config/systemd/user/),
+# but meant to be run by hand as well.
+#
+#   wsl-update                run every step
+#   wsl-update --help         print this
+#
+# The steps: apt packages, nvm itself, Node, npm with its global packages,
+# Claude Code with its plugins, Chromium, code-server; then reports on the local
+# Supabase stacks (their unused images are removed), on what waits on the Windows
+# side (WSL itself, winget) and on the projects, a cache clean-up and log
+# rotation. Each run's log goes to
+# ~/.local/state/wsl-update/.
+#
+# It breaks nothing silently: every step is isolated, one failing does not cancel
+# the rest, and the outcome is gathered into a summary at the end of the log. The
+# exit code is non-zero if even one step failed.
+
+set -uo pipefail
+
+# Everything below, bash is obliged to read to the end before it executes a
+# single command from here: it finds a compound command's closing brace by
+# parsing, not by executing. Otherwise a long-running invocation reads its own
+# file lazily, by offset into an open descriptor, and an edit in place shifts the
+# tail it has not read yet — sclaude has already died mid-step that way (see
+# 9648f23).
+#
+# The braces do not create a subshell: exit, variables and set work as before.
+{
+
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+export PATH="$HOME/.local/bin:$PATH"
+export DEBIAN_FRONTEND=noninteractive
+# npm and nvm go to the network; do not let them hang for ever in a background
+# run
+export npm_config_fund=false
+export npm_config_audit=false
+
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/wsl-update"
+LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d_%H%M%S).log"
+LOCK_FILE="$LOG_DIR/.lock"
+KEEP_LOGS=30
+# Directories in ~/.npm/_npx older than this many days are deleted: it is a pure
+# cache, and npx recreates it at the next run.
+CACHE_KEEP_DAYS=30
+# A Supabase image no container uses and no CLI pins is removed only once it was
+# pulled longer ago than this. `supabase stop` removes the containers, so the
+# images of a stopped stack look unused; a stack stopped for the night must not
+# pull 1.7 GB of postgres again in the morning.
+IMAGE_KEEP_DAYS=30
+# The ceiling on one network npm command in the project report. The registry
+# sometimes accepts a connection and does not answer (observed on the POST to
+# bulk-advisories that `npm audit` makes), and npm has no timeout of its own for
+# that — without a ceiling the whole run would hang, holding the flock and
+# blocking the timer's next launches.
+NPM_STEP_TIMEOUT=120
+
+# The projects the outdated-dependency report is gathered for. A report, not an
+# update: nothing in the repositories is changed.
+#
+# Listed per person rather than here: they used to be one person's four
+# directories written into the script, which every other machine then looked
+# for. One path per line, `~` allowed, `#` for comments. No file, no report.
+PROJECTS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/instruments/projects"
+
+mkdir -p "$LOG_DIR"
+
+# A single instance: a manual run will not collide with the timer.
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "wsl-update: already running (lock: $LOCK_FILE)" >&2
+  exit 75  # EX_TEMPFAIL
+fi
+
+# All the output goes both to the log and to the screen.
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+FAILED=()
+SKIPPED=()
+NOTES=()
+UPDATED=()
+PENDING=()
+
+# Green is what this run changed, orange an update that exists but was not
+# applied (it needs hands, or it is only reported), plain a piece of advice. The
+# summary keeps the three apart, so a glance at the end tells whether anything
+# is waiting.
+GREEN=$'\033[32m'
+ORANGE=$'\033[38;5;208m'
+RESET=$'\033[0m'
+
+say()     { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+info()    { printf '   %s\n' "$*"; }
+note()    { NOTES+=("$*"); printf '   → %s\n' "$*"; }
+updated() { UPDATED+=("$*"); printf '   %s✓ %s%s\n' "$GREEN" "$*" "$RESET"; }
+pending() { PENDING+=("$*"); printf '   %s↑ %s%s\n' "$ORANGE" "$*" "$RESET"; }
+# indent_in <color> — the listing under an updated() or pending() line, in its color
+indent_in() { sed "s/^/     $1/; s/\$/$RESET/"; }
+
+# step <name> <command...> — runs a step, remembers a failure, but does not
+# interrupt the script.
+step() {
+  local name="$1"; shift
+  if "$@"; then
+    return 0
+  else
+    local rc=$?
+    printf '   \033[31mERROR\033[0m: %s (code %d)\n' "$name" "$rc"
+    FAILED+=("$name")
+    return $rc
+  fi
+}
+
+skip() { SKIPPED+=("$1"); printf '   \033[33mskipped\033[0m: %s — %s\n' "$1" "$2"; }
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# ------------------------------------------------------------- the network
+
+check_network() {
+  # Without a network nvm and npm give incoherent errors; better to stop at
+  # once.
+  if ! curl -fsS --max-time 10 -o /dev/null https://registry.npmjs.org/ 2>/dev/null; then
+    echo "wsl-update: no access to registry.npmjs.org — the update is cancelled" >&2
+    return 1
+  fi
+}
+
+# ---------------------------------------------------------------- apt
+
+# apt_not_unattended — the upgradable packages unattended-upgrades will never
+# install: no origin of the candidate is in its Allowed-Origins or
+# Origins-Pattern, or the name is on its Package-Blacklist. One name per line.
+# It mirrors the matching unattended-upgrades does, through python3-apt (a
+# dependency of unattended-upgrades itself); without it, prints nothing, and
+# every package counts as taken care of.
+apt_not_unattended() {
+  /usr/bin/python3 - 2>/dev/null <<'PY'
+import fnmatch, re, subprocess
+import apt, apt_pkg
+
+apt_pkg.init_config()
+cfg = apt_pkg.config
+distro_id, codename = subprocess.run(
+    ["lsb_release", "-is", "-cs"], capture_output=True, text=True, check=True
+).stdout.split()
+
+def expand(s):
+    return s.replace("${distro_id}", distro_id).replace("${distro_codename}", codename)
+
+allowed = []
+for entry in cfg.value_list("Unattended-Upgrade::Allowed-Origins"):
+    origin, _, archive = expand(entry).rpartition(":")
+    allowed.append((origin, archive))
+
+keys = {"o": "origin", "origin": "origin", "a": "archive", "suite": "archive",
+        "archive": "archive", "n": "codename", "codename": "codename",
+        "l": "label", "label": "label", "c": "component", "component": "component",
+        "site": "site"}
+patterns = []
+for entry in cfg.value_list("Unattended-Upgrade::Origins-Pattern"):
+    rule = []
+    for token in expand(entry).split(","):
+        key, _, value = token.partition("=")
+        if key.strip() in keys:
+            rule.append((keys[key.strip()], value.strip()))
+    patterns.append(rule)
+
+blacklist = [re.compile(r) for r in cfg.value_list("Unattended-Upgrade::Package-Blacklist")]
+
+def origin_allowed(o):
+    if (o.origin, o.archive) in allowed:
+        return True
+    return any(rule and all(fnmatch.fnmatch(getattr(o, attr, "") or "", value)
+                            for attr, value in rule)
+               for rule in patterns)
+
+for pkg in apt.Cache():
+    if not pkg.is_upgradable:
+        continue
+    name = pkg.shortname
+    if any(r.match(name) for r in blacklist) or \
+       not any(origin_allowed(o) for o in pkg.candidate.origins):
+        print(name)
+PY
+}
+
+update_apt() {
+  say "System packages (apt)"
+  if ! have apt-get; then
+    skip "apt" "apt-get not found"
+    return 0
+  fi
+
+  # unattended-upgrades installs the packages — a root process on
+  # apt-daily-upgrade.timer, with the permitted origins in
+  # /etc/apt/apt.conf.d/52unattended-upgrades-local. This step installs nothing
+  # itself (a background run has no terminal for a sudo password, and setting up
+  # NOPASSWD for this is unnecessary): it checks that the mechanism is alive and
+  # raises only what really needs hands.
+
+  local periodic
+  periodic=$(apt-config dump APT::Periodic::Unattended-Upgrade 2>/dev/null | awk -F'"' '{print $2}')
+  if [ "${periodic:-0}" = "0" ]; then
+    note "unattended-upgrades is off (APT::Periodic::Unattended-Upgrade=0) — apt does not update itself"
+  else
+    info "unattended-upgrades is on"
+  fi
+
+  local last last_epoch age
+  last=$(systemctl show apt-daily-upgrade.service -p ExecMainExitTimestamp --value 2>/dev/null)
+  last_epoch=$(date -d "$last" +%s 2>/dev/null)
+  if [ -n "$last" ] && [ -n "$last_epoch" ]; then
+    age=$(( ( $(date +%s) - last_epoch ) / 86400 ))
+    info "last run: $last ($age day(s) ago)"
+    # The timer runs only while the distribution is up; Persistent=true catches
+    # up on what was missed, but a long idle spell is still worth noticing.
+    [ "$age" -gt 3 ] && note "unattended-upgrades has not run for $age day(s) — check: systemctl status apt-daily-upgrade.timer"
+  else
+    info "there have been no runs in this boot yet"
+  fi
+
+  # The root apt-daily.service updates the lists, so the cache is fresh.
+  local upgradable
+  upgradable=$(apt list --upgradable 2>/dev/null | grep 'upgradable from')
+  # Split them by who installs them. What unattended-upgrades may take goes in on
+  # its own schedule (phased updates included) and is listed plainly; a package
+  # from an origin it is not allowed to use (a third-party repository such as
+  # gh or tailscale) or on its blacklist never goes in by itself, so it is
+  # pending.
+  if [ -n "$upgradable" ]; then
+    local manual_names auto manual
+    manual_names=$(apt_not_unattended)
+    # A line reads "name/suite version arch [upgradable from: old]".
+    auto=$(awk -F/ 'NR==FNR { if ($0 != "") m[$0]; next } !($1 in m)' <(printf '%s\n' "$manual_names") - <<<"$upgradable")
+    manual=$(awk -F/ 'NR==FNR { if ($0 != "") m[$0]; next } ($1 in m)' <(printf '%s\n' "$manual_names") - <<<"$upgradable")
+    if [ -n "$auto" ]; then
+      info "packages not installed yet: $(wc -l <<<"$auto") — unattended-upgrades installs them when it decides to"
+      printf '%s\n' "$auto" | sed 's/^/     /'
+    fi
+    if [ -n "$manual" ]; then
+      pending "packages unattended-upgrades will not install: $(wc -l <<<"$manual") — sudo apt install --only-upgrade $(sed 's|/.*||' <<<"$manual" | paste -sd' ')"
+      printf '%s\n' "$manual" | indent_in "$ORANGE"
+    fi
+  else
+    info "every available update is installed"
+  fi
+
+  # The only symptom that really requires intervention by hand. Look at the last
+  # run only: the log is cumulative, and a problem already solved would otherwise
+  # raise a note for ever.
+  local kept
+  kept=$(awk '/Starting unattended upgrades script/ {buf=""} {buf = buf $0 "\n"} END {printf "%s", buf}' \
+           /var/log/unattended-upgrades/unattended-upgrades.log 2>/dev/null | grep 'kept back')
+  # Only together with a non-empty upgradable: if there is nothing left to
+  # install, the log entry refers to a problem that was resolved after that
+  # run.
+  if [ -n "$kept" ] && [ -n "$upgradable" ]; then
+    pending "packages were kept back — sort it out by hand: sudo apt upgrade"
+    printf '%s\n' "$kept" | indent_in "$ORANGE"
+  fi
+}
+
+# ---------------------------------------------------------------- nvm
+
+update_nvm_itself() {
+  say "nvm"
+  if [ ! -d "$NVM_DIR/.git" ]; then
+    skip "nvm self-update" "$NVM_DIR is not a git clone"
+    return 0
+  fi
+
+  local before after
+  before=$(git -C "$NVM_DIR" describe --tags 2>/dev/null)
+  if ! git -C "$NVM_DIR" fetch --tags --quiet origin 2>/dev/null; then
+    FAILED+=("nvm fetch"); info "could not fetch the tags"; return 1
+  fi
+
+  local latest
+  latest=$(git -C "$NVM_DIR" tag -l 'v[0-9]*' --sort=-v:refname | head -1)
+  if [ -z "$latest" ]; then
+    skip "nvm self-update" "no tags found"
+    return 0
+  fi
+
+  if [ "$before" = "$latest" ]; then
+    info "already the latest version: $before"
+    return 0
+  fi
+
+  if step "nvm checkout $latest" git -C "$NVM_DIR" checkout --quiet "$latest"; then
+    after=$(git -C "$NVM_DIR" describe --tags 2>/dev/null)
+    updated "nvm: $before → $after"
+  else
+    pending "nvm $latest is available (installed: $before)"
+  fi
+}
+
+load_nvm() {
+  # shellcheck disable=SC1091
+  . "$NVM_DIR/nvm.sh" >/dev/null 2>&1
+}
+
+update_node() {
+  say "Node.js (nvm, the lts/* channel)"
+  if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+    skip "node" "nvm is not installed"
+    return 0
+  fi
+  load_nvm || { FAILED+=("nvm load"); return 1; }
+
+  local before after target
+  before=$(node -v 2>/dev/null)
+  info "current: ${before:-none}"
+
+  # --reinstall-packages-from carries the global packages over to the new
+  # version, but dies with code 2 when there is nothing to carry from (the target
+  # equals the current one). So we first ask the registry what the latest LTS
+  # even is.
+  target=$(nvm version-remote --lts 2>/dev/null)
+  info "latest LTS: ${target:-unknown}"
+
+  # There is nothing to install and nothing to touch. Otherwise nvm would
+  # reinstall npm afresh every day (--latest-npm), duplicating the next step.
+  if [ -n "$target" ] && [ "$target" = "$before" ]; then
+    info "no installation needed"
+    prune_node_versions "$before"
+    return 0
+  fi
+
+  if [ -n "$target" ] && [ -n "$before" ]; then
+    step "nvm install $target" nvm install --lts --reinstall-packages-from="$before" --latest-npm \
+      || { pending "Node $target is available (installed: $before)"; return 1; }
+  else
+    # Either Node is not there yet or the registry did not answer: there is
+    # nothing to carry the packages from or nothing to carry them to — we install
+    # without --reinstall-packages-from, which would have failed.
+    step "nvm install --lts" nvm install --lts --latest-npm || return 1
+  fi
+
+  nvm alias default 'lts/*' >/dev/null 2>&1
+  nvm use default >/dev/null 2>&1
+  after=$(node -v 2>/dev/null)
+
+  if [ "$before" != "$after" ]; then
+    updated "Node: $before → $after"
+    if [ "${before%%.*}" != "${after%%.*}" ]; then
+      note "Node's major version changed — rebuild the dependencies in the projects: rm -rf node_modules && npm ci"
+    fi
+  else
+    info "already the latest LTS: $after"
+  fi
+  prune_node_versions "$after"
+}
+
+# in_use <dir> — does a running process execute a binary from under <dir>? Read
+# from /proc/*/exe rather than the command line: node started through PATH shows
+# up as a bare `node`, with no path to match.
+in_use() {
+  local dir="${1%/}/" exe proc
+  for proc in /proc/[0-9]*; do
+    exe=$(readlink "$proc/exe" 2>/dev/null) || continue
+    [[ "$exe" == "$dir"* ]] && return 0
+  done
+  return 1
+}
+
+# Every nvm install --lts leaves the previous version behind, together with its
+# own copy of every global package (~250-550 MB each), and those copies keep
+# stale caches alive elsewhere — an old global playwright pins its Chromium
+# build. Remove the older versions of the current major: a newer patch or minor
+# is a drop-in replacement for them. Other majors may have been installed on
+# purpose for a project, so they are only reported.
+prune_node_versions() {
+  local current="$1" v removed=() others=()
+  [ -n "$current" ] || return 0
+  while read -r v; do
+    [ -n "$v" ] && [ "$v" != "$current" ] || continue
+    if [ "${v%%.*}" != "${current%%.*}" ]; then
+      others+=("$v")
+      continue
+    fi
+    # sort -V puts the older of the two first; a newer one is not ours to drop
+    [ "$(printf '%s\n' "$v" "$current" | sort -V | head -n1)" = "$v" ] || continue
+    if in_use "$NVM_DIR/versions/node/$v"; then
+      note "Node $v is in use by a running process — kept until the next run"
+      continue
+    fi
+    step "nvm uninstall $v" nvm uninstall "$v" && removed+=("$v")
+  done < <(ls -1 "$NVM_DIR/versions/node" 2>/dev/null | sort -V)
+  [ ${#removed[@]} -gt 0 ] && updated "old Node versions removed: ${removed[*]}"
+  [ ${#others[@]} -gt 0 ] && info "other Node majors kept (remove by hand: nvm uninstall <ver>): ${others[*]}"
+  return 0
+}
+
+update_npm_and_globals() {
+  say "npm and the global packages"
+  load_nvm
+
+  local npm_before npm_after
+  npm_before=$(npm -v 2>/dev/null)
+  step "npm self-update" npm install -g npm@latest --silent
+  npm_after=$(npm -v 2>/dev/null)
+  if [ "$npm_before" != "$npm_after" ]; then
+    updated "npm: $npm_before → $npm_after"
+  else
+    info "npm is already the latest: $npm_after"
+  fi
+
+  # Updates everything installed globally within their semver ranges. npm does
+  # not say what it changed, so compare the listings around it.
+  local globals_before globals_after changed
+  globals_before=$(npm ls -g --depth=0 2>/dev/null | tail -n +2)
+  step "npm update -g" npm update -g --silent
+  globals_after=$(npm ls -g --depth=0 2>/dev/null | tail -n +2)
+  changed=$(comm -13 <(sort <<<"$globals_before") <(sort <<<"$globals_after") | sed 's/^[^a-z@]*//')
+  [ -n "$changed" ] && updated "global packages updated: $(tr '\n' ' ' <<<"$changed")"
+  info "installed globally:"
+  printf '%s\n' "$globals_after" | sed 's/^/     /'
+
+  # What is left is outside the semver ranges (a new major): npm update does not
+  # cross that line by design.
+  local outdated
+  outdated=$(npm outdated -g 2>/dev/null)
+  if [ -n "$outdated" ]; then
+    pending "global packages with a new major (npm install -g <pkg>@latest):"
+    printf '%s\n' "$outdated" | tail -n +2 | indent_in "$ORANGE"
+  fi
+}
+
+# ---------------------------------------------------------------- claude
+
+update_claude() {
+  say "Claude Code"
+  if ! have claude; then
+    skip "claude" "not found in PATH"
+    return 0
+  fi
+
+  local before after
+  before=$(claude --version 2>/dev/null | awk '{print $1}')
+  step "claude update" claude update
+  after=$(claude --version 2>/dev/null | awk '{print $1}')
+  if [ "$before" != "$after" ]; then
+    updated "Claude Code: $before → $after"
+  else
+    info "already the latest: $after"
+  fi
+}
+
+update_claude_plugins() {
+  say "Claude Code plugins"
+  if ! have claude; then
+    skip "plugins" "claude not found"
+    return 0
+  fi
+
+  # The marketplaces' metadata first, otherwise update will not see the new
+  # versions.
+  step "plugin marketplace update" claude plugin marketplace update >/dev/null
+
+  local manifest="$HOME/.claude/plugins/installed_plugins.json"
+  [ -f "$manifest" ] || { skip "plugins" "no $manifest"; return 0; }
+
+  # id, scope and projectPath come from the manifest: a local plugin is updated
+  # only from its own project, otherwise claude does not see it.
+  # The separator is "|" rather than a tab: a tab belongs to IFS whitespace, so an
+  # empty projectPath field collapsed and the version travelled into the
+  # directory variable.
+  local id scope dir before after
+  while IFS='|' read -r id scope dir before; do
+    [ -n "$id" ] || continue
+    ( cd "${dir:-$HOME}" 2>/dev/null && claude plugin update "$id" --scope "$scope" >/dev/null 2>&1 ) \
+      || { info "could not update $id"; FAILED+=("plugin $id"); continue; }
+    after=$(node -e '
+      const m=require(process.argv[1]).plugins[process.argv[2]];
+      console.log(m && m[0] ? m[0].version : "");' "$manifest" "$id" 2>/dev/null)
+    if [ -n "$after" ] && [ "$after" != "$before" ]; then
+      updated "plugin $id: $before → $after (takes effect after Claude Code restarts)"
+    else
+      info "$id: $before — up to date"
+    fi
+  done < <(node -e '
+    const m=require(process.argv[1]).plugins||{};
+    for (const [id, arr] of Object.entries(m)) {
+      const e = arr[0]; if (!e) continue;
+      console.log([id, e.scope||"user", e.projectPath||"", e.version||""].join("|"));
+    }' "$manifest" 2>/dev/null)
+}
+
+update_chromium() {
+  say "Chromium (Playwright — the browser for the chrome-devtools MCP)"
+  local pw="$HOME/.cache/ms-playwright"
+  if [ ! -d "$pw" ]; then
+    skip "chromium" "$pw does not exist — the browser was never installed"
+    return 0
+  fi
+
+  local before after
+  before=$(ls -1 "$pw" 2>/dev/null | grep '^chromium-' | sort -V | tr '\n' ' ')
+  info "installed: ${before:-none}"
+
+  # Browsers are no longer installed through a bare `npx playwright install`:
+  # Playwright sees that it is not a project dependency, prints a warning and
+  # exits with code 0 having downloaded nothing. So we keep the CLI globally.
+  step "npm i -g playwright" npm install -g playwright@latest --silent
+  if ! have playwright; then
+    skip "chromium" "the playwright CLI is unavailable"
+    return 0
+  fi
+  info "playwright: $(playwright --version 2>/dev/null)"
+
+  # The CLI's version determines which browser build is needed; if the number is
+  # the same, install downloads nothing and stays quiet.
+  step "playwright install chromium" playwright install chromium || return 1
+
+  after=$(ls -1 "$pw" 2>/dev/null | grep '^chromium-' | sort -V | tr '\n' ' ')
+  if [ "$before" != "$after" ]; then
+    updated "Chromium: a new build appeared — $(comm -13 <(tr ' ' '\n' <<<"$before" | sort) <(tr ' ' '\n' <<<"$after" | sort) | tr '\n' ' ')"
+    note "if chrome-debug is running, restart it (chrome-debug --stop && chrome-debug) — it takes the newest build"
+  else
+    info "no new build: ${after% } is current"
+  fi
+
+  prune_chromium_builds "$pw"
+}
+
+# wanted_chromium_builds <pw> — one line per build a project still uses:
+# "<dir> <project>". Every installation that ran `playwright install` leaves a
+# file in <pw>/.links pointing at its playwright-core, whose browsers.json names
+# the builds it launches. Links under ~/.nvm/versions are global CLIs — the stale
+# pins the prune exists for — and are left out; so are links whose target is gone.
+wanted_chromium_builds() {
+  local pw="$1" link target
+  for link in "$pw"/.links/*; do
+    [ -f "$link" ] || continue
+    target=$(cat "$link")
+    [ -f "$target/browsers.json" ] || continue
+    [[ "$target" == "$HOME"/.nvm/versions/* ]] && continue
+    python3 -c '
+import json, sys
+target = sys.argv[1]
+project = target.split("/node_modules/")[0]
+for b in json.load(open(target + "/browsers.json"))["browsers"]:
+    if b["name"] in ("chromium", "chromium-headless-shell"):
+        print(b["name"].replace("-", "_") + "-" + b["revision"], project)
+' "$target" 2>/dev/null
+  done
+}
+
+# Playwright collects its own garbage, but only builds no installation refers
+# to — and a global playwright left in an old nvm Node version keeps referring
+# to the build it came with, so every superseded build stays on disk (~400 MB
+# each). Keep the newest build of each family, and any build a project still
+# launches: a project pins its own Playwright, often behind the global one, and
+# nothing downloads its build again — its e2e suite just stops starting. Delete
+# the rest. Runs only after a successful install, so the newest build is never a
+# half-finished download.
+prune_chromium_builds() {
+  local pw="$1" family dir removed=() wanted owner
+  wanted=$(wanted_chromium_builds "$pw")
+  for family in chromium chromium_headless_shell; do
+    while read -r dir; do
+      [ -n "$dir" ] || continue
+      owner=$(awk -v d="$dir" '$1 == d { print $2; exit }' <<<"$wanted")
+      if [ -n "$owner" ]; then
+        note "old build $dir is still used by $owner — kept"
+        continue
+      fi
+      # A browser started from this build (chrome-debug, a test run) would lose
+      # its files from under it; leave the build for the next run.
+      if in_use "$pw/$dir"; then
+        note "old build $dir is in use by a running browser — kept until the next run"
+        continue
+      fi
+      rm -rf -- "${pw:?}/$dir" && removed+=("$dir")
+    done < <(ls -1 "$pw" | grep -E "^${family}-[0-9]+$" | sort -V | head -n -1)
+  done
+  if [ ${#removed[@]} -gt 0 ]; then
+    updated "old Chromium builds removed: ${removed[*]}"
+  fi
+}
+
+# github_latest <owner/repo> — the tag of the latest stable release, without a
+# leading "v". Pre-releases are skipped: /releases/latest never returns one.
+github_latest() {
+  curl -fsS --max-time 20 "https://api.github.com/repos/$1/releases/latest" 2>/dev/null \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"].lstrip("v"))' 2>/dev/null
+}
+
+# code-server is installed the way its install.sh --method=standalone does it:
+# the release unpacked into ~/.local/lib/code-server-<ver>, with
+# ~/.local/bin/code-server a symlink into it. Updating is the same move again —
+# no sudo, and a running server keeps its own directory until it restarts.
+update_code_server() {
+  say "code-server"
+  local link="$HOME/.local/bin/code-server" lib="$HOME/.local/lib"
+  local target
+  target=$(readlink "$link" 2>/dev/null)
+  if [[ "$target" != "$lib"/code-server-*/bin/code-server ]]; then
+    skip "code-server" "not a standalone install in $lib"
+    return 0
+  fi
+
+  local before latest arch
+  before=${target#"$lib"/code-server-}; before=${before%/bin/code-server}
+  latest=$(github_latest coder/code-server)
+  if [ -z "$latest" ]; then
+    FAILED+=("code-server: latest version"); info "could not ask GitHub for the latest release"
+    return 1
+  fi
+  if [ "$before" = "$latest" ]; then
+    info "already the latest: $before"
+    prune_code_server "$before"
+    return 0
+  fi
+
+  case "$(uname -m)" in
+    x86_64) arch=amd64 ;;
+    aarch64) arch=arm64 ;;
+    *) pending "code-server $latest is available (installed: $before)"; return 0 ;;
+  esac
+
+  local name="code-server-$latest-linux-$arch" tmp
+  tmp=$(mktemp -d) || return 1
+  if step "code-server download $latest" \
+       curl -fsSL --max-time 300 -o "$tmp/$name.tar.gz" \
+       "https://github.com/coder/code-server/releases/download/v$latest/$name.tar.gz" \
+     && step "code-server unpack $latest" tar -xzf "$tmp/$name.tar.gz" -C "$tmp" \
+     && rm -rf -- "${lib:?}/code-server-$latest" \
+     && mv "$tmp/$name" "$lib/code-server-$latest" \
+     && ln -sfn "$lib/code-server-$latest/bin/code-server" "$link"; then
+    updated "code-server: $before → $latest"
+    if in_use "$lib/code-server-$before"; then
+      note "code-server is running the old version — it takes the new one when it next starts"
+    fi
+    prune_code_server "$latest"
+  else
+    pending "code-server $latest is available (installed: $before)"
+  fi
+  rm -rf -- "$tmp"
+}
+
+# Every version but the current one, unless a running server still uses it.
+prune_code_server() {
+  local current="$1" dir removed=()
+  for dir in "$HOME"/.local/lib/code-server-*/; do
+    dir=${dir%/}
+    [ -d "$dir" ] && [ "$dir" != "$HOME/.local/lib/code-server-$current" ] || continue
+    in_use "$dir" && continue
+    rm -rf -- "$dir" && removed+=("${dir##*/}")
+  done
+  [ ${#removed[@]} -gt 0 ] && updated "old code-server versions removed: ${removed[*]}"
+  return 0
+}
+
+# ------------------------------------------------------------ containers
+
+# supabase_pins <workdir> — "image tag" per line: what the Supabase CLI starts
+# for that project. The CLI pins every image, and for a linked project it pins
+# postgres, gotrue, postgrest and storage to the versions production runs
+# (supabase/.temp), so an image is never bumped past the CLI: that would break
+# the parity of the local stack with production. The image is the last part of
+# the repository, as the container image names it (supabase/realtime → realtime).
+supabase_pins() {
+  (cd "$1" && timeout 60 npx --no-install supabase services -o json 2>/dev/null) \
+    | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+# A bare list with -o json; an object around it without.
+for s in data if isinstance(data, list) else data.get("services", []):
+    if s.get("local"):
+        print(s["name"].rsplit("/", 1)[-1], s["local"])' 2>/dev/null
+}
+
+# The local Supabase stacks: a stack keeps the images it was created with until
+# it is restarted, so after the CLI moves on it runs older versions than the CLI
+# would start — reported, because restarting a stack is up to whoever works in
+# it. Images no container uses and no CLI pins any longer are removed after
+# IMAGE_KEEP_DAYS: they only take disk, and a stack that wants one again pulls
+# it.
+#
+# The stacks sclaude starts for a feature (.feature/supabase) are not reported:
+# sclaude owns them, and they do not carry the production pins (.temp stays in
+# the main tree), so a restart would move them further from production, not
+# closer.
+report_containers() {
+  say "Containers (the local Supabase stacks)"
+  if ! have docker || ! timeout 20 docker info >/dev/null 2>&1; then
+    info "Docker is not running — skipped"
+    return 0
+  fi
+  load_nvm
+
+  local label=com.supabase.cli.workdir wd pins all_pins="" name image base tag want behind
+  while IFS= read -r wd; do
+    [ -n "$wd" ] || continue
+    [[ "$wd" == */.feature/supabase ]] && continue
+    if [ ! -d "$wd" ]; then
+      note "a Supabase stack belongs to $wd, which no longer exists — remove it: docker rm -f \$(docker ps -aq --filter label=$label=$wd)"
+      continue
+    fi
+    pins=$(supabase_pins "$wd")
+    if [ -z "$pins" ]; then
+      info "${wd/#$HOME/\~}: the Supabase CLI did not say what it pins — skipped"
+      continue
+    fi
+    all_pins+="$pins"$'\n'
+    behind=()
+    while read -r name image; do
+      base=${image%:*}; base=${base##*/}; tag=${image##*:}
+      want=$(awk -v b="$base" '$1 == b {print $2; exit}' <<<"$pins")
+      [ -n "$want" ] && [ "$want" != "$tag" ] && behind+=("$base $tag → $want")
+    done < <(docker ps -a --filter "label=$label=$wd" --format '{{.Names}} {{.Image}}')
+    if [ ${#behind[@]} -gt 0 ]; then
+      pending "${wd/#$HOME/\~}: the stack runs older images than the CLI starts — restart it: cd ${wd/#$HOME/\~} && npx supabase stop && npx supabase start"
+      printf '%s\n' "${behind[@]}" | indent_in "$ORANGE"
+    else
+      info "${wd/#$HOME/\~}: the stack is on the images the CLI starts"
+    fi
+  done < <(docker ps -a --filter "label=$label" --format "{{.Label \"$label\"}}" | sort -u)
+
+  # Without a single answer from the CLI nothing is known to be unpinned.
+  [ -n "$all_pins" ] || return 0
+  local used removed=() size pulled cutoff
+  used=$(docker ps -a --format '{{.Image}}' | sort -u)
+  cutoff=$(( $(date +%s) - IMAGE_KEEP_DAYS * 86400 ))
+  while read -r image size; do
+    grep -qxF "$image" <<<"$used" && continue
+    base=${image%:*}; base=${base##*/}; tag=${image##*:}
+    awk -v b="$base" -v t="$tag" '$1 == b && $2 == t {f = 1} END {exit !f}' <<<"$all_pins" && continue
+    pulled=$(date -d "$(docker image inspect "$image" --format '{{.Metadata.LastTagTime}}' 2>/dev/null \
+               | cut -d' ' -f1-3)" +%s 2>/dev/null) || continue
+    [ "$pulled" -lt "$cutoff" ] || continue
+    docker rmi "$image" >/dev/null 2>&1 && removed+=("${image##*/} ($size)")
+  done < <(docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep '/supabase/')
+  [ ${#removed[@]} -gt 0 ] && updated "unused Supabase images removed: ${removed[*]}"
+  return 0
+}
+
+# ------------------------------------------------------ the Windows side
+
+# win_exe <name> — the path of a Windows executable. A systemd unit does not
+# inherit the Windows half of PATH, so look in System32 when PATH has nothing.
+win_exe() {
+  command -v "$1" 2>/dev/null && return 0
+  local p
+  for p in /mnt/c/Windows/System32/"$1" /mnt/c/WINDOWS/system32/"$1"; do
+    [ -x "$p" ] && { echo "$p"; return 0; }
+  done
+  return 1
+}
+
+# WSL itself is only reported. `wsl --update` replaces the package the running
+# VM belongs to and shuts it down — this very script included — so it is run
+# from Windows, by hand, when nothing is in the middle of work.
+report_wsl() {
+  say "WSL (a report only — it is updated from Windows)"
+  local wsl
+  if ! wsl=$(win_exe wsl.exe); then
+    skip "wsl" "wsl.exe is unreachable (not WSL, or interop is off)"
+    return 0
+  fi
+
+  local installed latest
+  installed=$(cd /mnt/c 2>/dev/null; WSL_UTF8=1 timeout 30 "$wsl" --version 2>/dev/null \
+                | tr -d '\0\r' | awk -F': ' 'NR==1 {print $2}')
+  installed=${installed%.0}
+  latest=$(github_latest microsoft/WSL)
+  info "installed: ${installed:-unknown}; latest stable: ${latest:-unknown}"
+  if [ -z "$installed" ] || [ -z "$latest" ]; then
+    return 0
+  fi
+  if [ "$(printf '%s\n' "$installed" "$latest" | sort -V | tail -n1)" != "$installed" ]; then
+    pending "WSL $latest is available (installed: $installed) — from Windows: wsl --update (restarts WSL)"
+  fi
+}
+
+# winget lists what it can upgrade; installing is left to a person, because an
+# installer may ask for elevation or close an application in use.
+report_winget() {
+  say "Windows applications (winget, a report only)"
+  local cmd
+  if ! cmd=$(win_exe cmd.exe); then
+    skip "winget" "cmd.exe is unreachable (not WSL, or interop is off)"
+    return 0
+  fi
+
+  # cmd resolves winget through the Windows PATH, which knows the per-user
+  # WindowsApps directory. It runs from /mnt/c: a Linux working directory is a
+  # UNC path, which cmd refuses.
+  local out rc
+  out=$(cd /mnt/c && timeout 180 "$cmd" /c winget upgrade --accept-source-agreements \
+          --disable-interactivity </dev/null 2>/dev/null)
+  rc=$?
+  if [ "$rc" -eq 124 ]; then
+    info "winget did not finish within 180s — skipped"
+    return 0
+  fi
+  # Lines end in CRLF, and the spinner redraws over itself with bare carriage
+  # returns; keep what each line ends as. The table is the line before the dashes, the dashes and the rows up
+  # to the first blank line or the count, which begins with a digit.
+  local table
+  table=$(sed 's/\r$//; s/.*\r//' <<<"$out" | awk '
+    /^-{10,}/ { print prev; print; on = 1; next }
+    on && (/^[[:space:]]*$/ || /^[0-9]/) { exit }
+    on { print }
+    { prev = $0 }')
+  if [ -z "$table" ]; then
+    # Without a table winget still prints a line of its own; an empty output
+    # means it never started.
+    if [ -z "$(tr -d '[:space:]' <<<"$out")" ]; then
+      info "winget gave no answer (code $rc)"
+    else
+      info "every application is up to date"
+    fi
+    return 0
+  fi
+  pending "Windows applications with updates: $(( $(wc -l <<<"$table") - 2 )) — from Windows: winget upgrade --all"
+  head -n2 <<<"$table" | sed 's/^/     /'
+  tail -n +3 <<<"$table" | indent_in "$ORANGE"
+}
+
+prune_caches() {
+  say "Caches"
+  local npx_dir="$HOME/.npm/_npx"
+  [ -d "$npx_dir" ] || return 0
+
+  info "size before: $(du -sh "$npx_dir" 2>/dev/null | cut -f1) ($npx_dir)"
+  # npx caches every version of every package separately and never cleans up.
+  # The directories regenerate at the next run — deleting them is safe.
+  local removed
+  removed=$(find "$npx_dir" -maxdepth 1 -mindepth 1 -type d -mtime +$CACHE_KEEP_DAYS -print 2>/dev/null | wc -l)
+  if [ "${removed:-0}" -gt 0 ]; then
+    find "$npx_dir" -maxdepth 1 -mindepth 1 -type d -mtime +$CACHE_KEEP_DAYS -exec rm -rf {} + 2>/dev/null
+    updated "npx cache: removed $removed director(ies) older than $CACHE_KEEP_DAYS day(s); now $(du -sh "$npx_dir" 2>/dev/null | cut -f1)"
+  else
+    info "nothing to clean (the threshold is $CACHE_KEEP_DAYS day(s))"
+  fi
+}
+
+# ---------------------------------------------------------- the projects
+
+report_projects() {
+  say "Project dependencies (a report only, nothing is changed)"
+  load_nvm
+
+  local dir name outdated vulns line
+  local -a dirs=()
+  if [ -f "$PROJECTS_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%%#*}"
+      line="${line#"${line%%[![:space:]]*}"}"
+      line="${line%"${line##*[![:space:]]}"}"
+      [ -n "$line" ] && dirs+=("${line/#\~/$HOME}")
+    done < "$PROJECTS_FILE"
+  fi
+  if [ "${#dirs[@]}" -eq 0 ]; then
+    info "no projects listed in $PROJECTS_FILE — skipped"
+    return 0
+  fi
+
+  for dir in "${dirs[@]}"; do
+    [ -f "$dir/package.json" ] || continue
+    name=${dir/#$HOME/\~}
+
+    # npm outdated returns 1 when something is outdated — that is not an
+    # error.
+    outdated=$(cd "$dir" && timeout "$NPM_STEP_TIMEOUT" npm outdated 2>/dev/null)
+    if [ $? -eq 124 ]; then
+      printf '   \033[1m%s\033[0m\n' "$name"
+      printf '     \033[33mnpm outdated did not finish within %ss — skipped\033[0m\n' "$NPM_STEP_TIMEOUT"
+    elif [ -z "$outdated" ]; then
+      printf '   %-34s all up to date\n' "$name"
+    else
+      # The header row stays plain; every package row is an update not applied.
+      PENDING+=("$name: $(( $(wc -l <<<"$outdated") - 1 )) outdated package(s)")
+      printf '   \033[1m%s\033[0m\n' "$name"
+      printf '%s\n' "$outdated" | head -n1 | sed 's/^/     /'
+      printf '%s\n' "$outdated" | tail -n +2 | indent_in "$ORANGE"
+    fi
+
+    # High and critical only — the rest is noise.
+    vulns=$(cd "$dir" && timeout "$NPM_STEP_TIMEOUT" npm audit --audit-level=high 2>/dev/null)
+    if [ $? -eq 124 ]; then
+      printf '     \033[33maudit: did not finish within %ss — skipped\033[0m\n' "$NPM_STEP_TIMEOUT"
+    else
+      vulns=$(printf '%s\n' "$vulns" | grep -E '^[0-9]+ (high|critical|vulnerabilit)' | head -3)
+      if [ -n "$vulns" ]; then
+        PENDING+=("$name: audit — $(head -n1 <<<"$vulns")")
+        printf '%s\n' "$vulns" | sed 's/^/audit: /' | indent_in "$ORANGE"
+      fi
+    fi
+  done
+  return 0
+}
+
+# ----------------------------------------------------------- the summary
+
+rotate_logs() {
+  ls -1t "$LOG_DIR"/*.log 2>/dev/null | tail -n +$((KEEP_LOGS + 1)) | xargs -r rm -f
+}
+
+summary() {
+  say "Outcome"
+  if [ ${#UPDATED[@]} -gt 0 ]; then
+    info "${GREEN}updated:${RESET}"
+    printf "     ${GREEN}✓ %s${RESET}\n" "${UPDATED[@]}"
+  elif [ ${#PENDING[@]} -eq 0 ]; then
+    info "no changes — everything is already up to date"
+  else
+    info "nothing was updated"
+  fi
+  if [ ${#PENDING[@]} -gt 0 ]; then
+    info "${ORANGE}available but not applied:${RESET}"
+    printf "     ${ORANGE}↑ %s${RESET}\n" "${PENDING[@]}"
+  fi
+  if [ ${#NOTES[@]} -gt 0 ]; then
+    info "notes:"
+    printf '     • %s\n' "${NOTES[@]}"
+  fi
+  [ ${#SKIPPED[@]} -gt 0 ] && { info "skipped: ${SKIPPED[*]}"; }
+  if [ ${#FAILED[@]} -gt 0 ]; then
+    printf '   \033[31mfailed: %s\033[0m\n' "${FAILED[*]}"
+    info "log: $LOG_FILE"
+    return 1
+  fi
+  info "log: $LOG_FILE"
+  return 0
+}
+
+# ---------------------------------------------------------------- main
+
+main() {
+  printf '\033[1mwsl-update\033[0m — %s (%s)\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$(hostname)"
+
+  check_network || exit 1
+
+  update_apt
+  update_nvm_itself
+  update_node
+  update_npm_and_globals
+  update_claude
+  update_claude_plugins
+  update_chromium
+  update_code_server
+  report_containers
+  report_wsl
+  report_winget
+  report_projects
+  prune_caches
+
+  rotate_logs
+  summary
+}
+
+# The help text lives in the header and is printed from there, so that the two
+# cannot diverge.
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  sed -n '2,19p' "$(readlink -f "$0")" | sed 's/^# \{0,1\}//'
+  exit 0
+fi
+
+main "$@"
+}

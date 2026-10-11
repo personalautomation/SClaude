@@ -1,0 +1,1072 @@
+#!/usr/bin/env bash
+#
+# Keeps Windows from sleeping while there is someone in WSL to work.
+#
+# Once a minute (the keepawake.timer systemd timer) it counts the holders — live
+# claude processes, mobile SSH sessions, code-server sessions — and, if there is
+# anyone at all, pushes the deadline an hour forward. The Windows side
+# (KeepAwake.ps1) reads the resulting state file and keeps the system awake
+# until the deadline passes. It decides nothing itself: the counting happens
+# here, the executing there.
+#
+#   keepawake              one run (what the timer calls)
+#   keepawake status       why the laptop is (not) sleeping — the whole picture
+#   keepawake status --json    the same, for machines
+#   keepawake extend [sec] extend by hand, an hour by default
+#   keepawake release      let go immediately
+#
+# Extending does not accumulate: while a single holder is alive, the deadline is
+# always "an hour from now". Accumulating would mean three short connections
+# leave the laptop awake for three hours after all of them have closed.
+#
+# The state lives on the Windows side (C:\Users\<user>\.keepawake\state.json),
+# because PowerShell reads it — and reads it at the very moment WSL may already
+# have stopped. The other direction, reading from Windows over \\wsl$, breaks
+# exactly when it is needed.
+set -uo pipefail
+
+# Everything below, bash is obliged to read to the end before it executes a
+# single command from here: it finds a compound command's closing brace by
+# parsing, not by executing.
+#
+# Without this a daemon that lives for days reads its own file lazily — by
+# offset into an open descriptor. An edit in place shifts everything the process
+# has not read yet while the offset stays where it was, and the continuation is
+# read from the middle of a line. The file is edited often and runs for a long
+# time: the combination sclaude has already died on mid-step (see 9648f23).
+#
+# The braces do not create a subshell, so exit, variables and set see exactly
+# what they saw before.
+{
+
+SELF="$(basename "$0")"
+KEEPAWAKE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+STATE_PY="$KEEPAWAKE/keepawake/state.py"
+
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/keepawake"
+LOG_FILE="$LOG_DIR/keepawake.log"
+LOCK_FILE="$LOG_DIR/.run.lock"
+LOG_MAX_BYTES=$((512 * 1024))
+
+# The dev servers' ports, as sclaude hands them out (sclaude/lib/worktree.sh):
+# 3000 is sclaude-proxy, or a server started by hand, and every feature's own
+# server sits in the range.
+DEV_PORT=3000
+DEV_PORT_FIRST=3100
+DEV_PORT_LAST=3199
+
+mkdir -p "$LOG_DIR"
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Windows commands by full path rather than through PATH. In systemd's
+# environment there are no Windows paths in PATH — WSL adds them for interactive
+# shells only — and status run from the daemon reported "PowerShell not running"
+# even though the process was alive. Checking for the Windows side with a
+# command that is itself missing means always getting the same wrong answer.
+WIN32="/mnt/c/Windows/System32"
+winexe() {
+  local exe="$1"; shift
+  if [[ -x "$WIN32/$exe" ]]; then
+    "$WIN32/$exe" "$@"
+  elif have "$exe"; then
+    "$exe" "$@"
+  else
+    return 127
+  fi
+}
+
+# A process's parent. Through /proc/PID/status rather than field 4 of
+# /proc/PID/stat: the command name there is written in brackets and may contain
+# spaces, and then awk '{print $4}' returns a piece of the name rather than the
+# ppid. A live example on this machine is "npm exec chrome", whose field 4 is
+# "chrome)". In an arithmetic context bash takes such a value for a variable
+# name and dies with unbound variable.
+ppid_of() {
+  awk '/^PPid:/ {print $2; exit}' "/proc/$1/status" 2>/dev/null
+}
+state() { python3 "$STATE_PY" "$@"; }
+
+log() {
+  # The log is short: one line per run, and only when something has changed.
+  # A minute-long timer would give 1440 lines about nothing over a day.
+  printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
+  if [[ -f "$LOG_FILE" ]] && (( $(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0) > LOG_MAX_BYTES )); then
+    tail -n 500 "$LOG_FILE" > "$LOG_FILE.tmp" && mv -f "$LOG_FILE.tmp" "$LOG_FILE"
+  fi
+}
+
+# --- holders -----------------------------------------------------------------
+
+# A snapshot of the counters for soft holders. A soft holder is obliged to prove
+# work, not existence: a VS Code left open and forgotten, a dev server listening
+# in silence, an abandoned session — none is a reason to deny the laptop sleep.
+# So each has its own sign of activity, while the shared mechanism is one:
+# compare the counter with the previous run.
+#
+# None of this concerns hard holders: a live SSH session or an open tab means a
+# person is at the machine, and their mere presence is enough.
+#
+# A key looks like "holder:which-one", the value is the previous run's counter.
+SOFT_SNAPSHOT="$LOG_DIR/.soft-counters"
+
+# Accumulated in a file rather than a variable: the count_ functions are called
+# in command substitutions, that is each in its own subshell, and what is
+# assigned there does not survive as far as the parent.
+#
+# We always write to a separate file, and only run_once replaces the snapshot
+# with it. That is why status and is_busy, which call the same count_ functions,
+# do not spoil the baseline: they write to the same .new but never move it.
+# Otherwise it would be enough to look at status more often to get "no growth"
+# every time and put the machine to sleep in the middle of the work.
+SOFT_SNAPSHOT_NEW="$SOFT_SNAPSHOT.new"
+remember() {
+  printf '%s %s\n' "$1" "$2" >> "$SOFT_SNAPSHOT_NEW"
+}
+
+# Read the snapshot into the associative array whose name is passed as the first
+# argument. Through a nameref: copying the parsing into every count_ function
+# would mean writing the same loop three times.
+read_snapshot() {
+  local -n dest="$1"
+  local key val
+  [[ -f "$SOFT_SNAPSHOT" ]] || return 0
+  while read -r key val; do
+    [[ -n "$key" ]] && dest[$key]=$val
+  done < "$SOFT_SNAPSHOT"
+}
+
+# Bytes written by the process. wchar specifically, not rchar: reading grows
+# even when idling (the server polls files), whereas a process writes only when
+# answering a request or keeping a log.
+io_wchar_of() {
+  awk '/^wchar:/ {print $2; exit}' "/proc/$1/io" 2>/dev/null
+}
+
+# Whether a holder's counter has changed since the previous run. A key's first
+# appearance counts as "active": there is nothing to judge by, and the better
+# way to be wrong is towards "do not sleep in the middle of the work". The
+# threshold is passed in because time and bytes have different units and
+# different idle noise.
+#
+# A threshold of 0 means "any change, in either direction". It is needed where
+# the counter is not obliged to grow monotonically: a transcript's size almost
+# always only grows, but it can shrink too, and such a change is work as well.
+grew() {
+  local key="$1" now="$2" threshold="$3"
+  local -n snap="$4"
+  remember "$key" "$now"
+  [[ -z "${snap[$key]:-}" ]] && return 0
+  if (( threshold == 0 )); then
+    (( now != snap[$key] ))
+  else
+    (( now - snap[$key] >= threshold ))
+  fi
+}
+
+
+# Live Claude Code sessions.
+#
+# We count only those busy with something. An open session waiting for input is
+# not work: it can stand all night, and that is exactly what happened before —
+# the process lived from the evening on, the detector extended the deadline
+# every minute, and the laptop did not sleep until morning. No warning came
+# either: the deadline moved forward faster than it approached the half-hour
+# threshold.
+#
+# The sign of work is a growing conversation transcript
+# (~/.claude/projects/<project>/<session>.jsonl). Every message, every tool call
+# appends a line; a session waiting for input writes nothing.
+#
+# We used to measure CPU time. That also told a busy session from a waiting one,
+# but it required excluding ourselves and our ancestors — the detector is
+# started from under claude among other places, and counting itself produced an
+# endless hold. With the transcript none of that is needed: the file grows from
+# the conversation, not from who started whom.
+CLAUDE_PROJECTS="$HOME/.claude/projects"
+
+# How fresh a transcript must be to be considered at all. Transcripts are never
+# deleted: there are two hundred of them on this machine, and on the first run,
+# when there is no snapshot yet, all of them at once would count as active
+# sessions. The window is slightly wider than the timer's period — the one
+# minute interval plus room for a slow run.
+#
+# We select with -mmin rather than -newermt: find on this machine is bfs, and it
+# does not understand relative stamps like "-5 min" at all. It writes the error
+# to stderr, which is suppressed, so the search silently returned nothing — the
+# holder would always go dark, whether a session was working or not.
+CLAUDE_FRESH_MINUTES=5
+
+# How long to remember a transcript's size after it stopped being fresh. The
+# memory is there so that a file returning into the window does not look like a
+# new session, but there is no reason for it to be eternal: a session that has
+# fallen silent for good will not come back.
+#
+# The span is deliberately more than half an hour — that is how often a
+# forgotten session touches its transcript, and had we forgotten it sooner the
+# sawtooth would come back in exactly its old form.
+CLAUDE_REMEMBER_MINUTES=180
+
+count_claude() {
+  [[ -d "$CLAUDE_PROJECTS" ]] || { printf '0'; return; }
+
+  local -A prev=()
+  read_snapshot prev
+
+  # Depth 2: projects/<project>/<session>.jsonl. We count each transcript
+  # separately: two sessions working at once are two holders, and one leaving
+  # must not put out the other.
+  #
+  # We look at the file's size, not at its modification time. An open and
+  # forgotten session touches its transcript every half hour without appending a
+  # single line: mtime updates, the content does not. By mtime such a session
+  # looked like work and extended the deadline by an hour — the laptop would not
+  # sleep for days even though the conversation had broken off in the morning. A
+  # write always changes the size, a touch never does.
+  local -A seen=()
+  local n=0 size path id
+  while read -r size path; do
+    id=$(basename "$path" .jsonl)
+    seen[$id]=1
+    grew "claude:$id" "$size" 0 prev && n=$((n + 1))
+  done < <(find "$CLAUDE_PROJECTS" -maxdepth 2 -name '*.jsonl' \
+                -mmin "-$CLAUDE_FRESH_MINUTES" \
+                -printf '%s %p\n' 2>/dev/null)
+
+  # A transcript known from previous runs but fallen out of the freshness
+  # window is carried into the new snapshot as it is.
+  #
+  # Otherwise you get a sawtooth: five minutes of silence and the key is gone
+  # from the snapshot; a touch without a write and the file is back in the
+  # window with no key, so "first appearance" counts as work again. That is
+  # exactly how a forgotten session kept extending the deadline every half hour,
+  # after touches had already stopped counting as work in themselves. The
+  # freshness window exists only so that all two hundred old transcripts are not
+  # dragged into the snapshot — it must not cost us the memory of the live
+  # ones.
+  local key id_only
+  for key in "${!prev[@]}"; do
+    [[ "$key" == claude:* ]] || continue
+    id_only="${key#claude:}"
+    [[ -n "${seen[$id_only]:-}" ]] && continue
+    # The really old ones we forget, otherwise the snapshot grows with every
+    # new session. Through a substitution rather than "| read": a pipe creates a
+    # subshell, and leaving it would not break this loop.
+    [[ -n "$(find "$CLAUDE_PROJECTS" -maxdepth 2 -name "$id_only.jsonl" \
+             -mmin "-$CLAUDE_REMEMBER_MINUTES" 2>/dev/null)" ]] || continue
+    remember "$key" "${prev[$key]}"
+  done
+
+  printf '%d' "$n"
+}
+
+# Mobile SSH sessions. Counted by processes rather than utmp: `who` and `w` are
+# filled in inconsistently under WSL, and tmux and screen give false negatives
+# there. A live session is always a descendant of sshd with a line like
+# `sshd: <user>@pts/3`, which also cuts off the master daemon and short-lived
+# `sshd: [accepted]` entries.
+count_ssh() {
+  local -A seen=()
+  local pid cmd tty
+  for pid in $(pgrep -x sshd 2>/dev/null); do
+    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
+    [[ "$cmd" != sshd:* ]] && continue
+    [[ "$cmd" == *"[accepted]"* || "$cmd" == *"[listener]"* || "$cmd" == *"[net]"* ]] && continue
+    [[ "$cmd" != *@* ]] && continue
+    tty="${cmd##*@}"
+    tty="${tty%% *}"
+    seen[$tty]=1
+  done
+  printf '%d' "${#seen[@]}"
+}
+
+# A live code-server session in the browser. A hard holder: an open tab means a
+# person at the machine.
+#
+# code-server keeps a heartbeat file itself and touches it once a minute while
+# the page is open (heartbeatInterval = 60000 in out/node/heart.js). That is
+# more reliable than counting processes: extension hosts live on after the tab
+# is closed, seeing out a three-hour reconnection-grace-time.
+#
+# The threshold is twice the period: one missed update must not reset the
+# mode.
+CODE_HEARTBEAT="$HOME/.local/share/code-server/heartbeat"
+CODE_ALIVE_SECONDS=120
+
+count_code_session() {
+  [[ -f "$CODE_HEARTBEAT" ]] || { printf '0'; return; }
+  local age=$(( $(date +%s) - $(stat -c %Y "$CODE_HEARTBEAT" 2>/dev/null || echo 0) ))
+  if (( age < CODE_ALIVE_SECONDS )); then printf '1'; else printf '0'; fi
+}
+
+# A running code-server with no tabs open. A soft holder: it lives for days on
+# its own, and there is no reason to keep the laptop awake for ever because of
+# it.
+#
+# "No reason" had until now been an intention only: the service is alive, so the
+# counter is one, and so every minute, which means the deadline for ever moves
+# an hour forward. The hour since the last activity never arrived, because the
+# very fact of it running counted as activity. So we ask someone_around as well:
+# an open tab is the hard holder code, a terminal in it likewise, while the
+# service by itself proves nothing beyond having been switched on once.
+count_code_server() {
+  systemctl --user is-active code-server.service >/dev/null 2>&1 \
+    || { printf '0'; return; }
+  someone_around || { printf '0'; return; }
+  printf '1'
+}
+
+# Terminals inside code-server: a process with a TTY whose ancestor up the chain
+# is the server process itself.
+#
+# This cannot be found by the text of the command line: a pattern like
+# shellIntegration catches any process that merely happens to have the word in
+# its arguments — while debugging it caught the bash of the Claude Code session
+# itself. Kinship cannot be faked; a substring match can happen by accident.
+count_code() {
+  local srv
+  srv=$(pgrep -f 'code-server.*out/node/entry' 2>/dev/null | head -1)
+  [[ -z "$srv" ]] && { printf '0'; return; }
+
+  local -A seen=()
+  local pid tty anc hops
+  for pid in $(ps -u "$USER" -o pid= 2>/dev/null); do
+    tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
+    [[ -z "$tty" || "$tty" == "?" ]] && continue
+    anc=$pid
+    for hops in 1 2 3 4 5 6; do
+      anc=$(ppid_of "$anc")
+      [[ -z "$anc" ]] && break
+      (( anc <= 1 )) && break
+      if [[ "$anc" == "$srv" ]]; then seen[$tty]=1; break; fi
+    done
+  done
+  printf '%d' "${#seen[@]}"
+}
+
+# A live connection through the tailnet. A hard holder: traffic is flowing,
+# which means someone at the other end is working with the machine right now.
+#
+# Counted by Active rather than Online: the phone is present in the network
+# around the clock (verified — Online=true with Active=false and a silent
+# handshake), and holding on presence would never let the laptop sleep.
+count_tailscale() {
+  have tailscale || { printf '0'; return; }
+  tailscale status --json 2>/dev/null | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print(0); raise SystemExit
+print(sum(1 for p in (d.get('Peer') or {}).values() if p.get('Active')))
+" 2>/dev/null || printf '0'
+}
+
+# A running sclaude step. A soft holder: the orchestrator is driving a feature's
+# cycle, and there is no reason to cut it off with sleep mid-step.
+#
+# The ^ anchor is essential: without it pgrep -f catches any command where the
+# word "sclaude" merely appears in the arguments — while debugging it caught the
+# checking command itself. With the anchor only a process whose argv[0] starts
+# with sclaude matches.
+count_sclaude() {
+  local -A prev=()
+  read_snapshot prev
+
+  # A live orchestrator is a necessary condition but not a sufficient one: a
+  # step's session gets opened and forgotten, and its existence alone is not
+  # enough.
+  #
+  # We exclude ourselves: the detector may be started from under an sclaude
+  # step, and counting itself would give a hold that never ends.
+  local -A skip=()
+  local p=$$
+  while [[ "$p" -gt 1 ]]; do
+    skip[$p]=1
+    p=$(ppid_of "$p")
+    [[ -z "$p" ]] && break
+  done
+
+  local pid alive=0
+  for pid in $(pgrep -f '^sclaude' 2>/dev/null); do
+    [[ -n "${skip[$pid]:-}" ]] && continue
+    alive=1
+    break
+  done
+  (( alive )) || { printf '0'; return; }
+
+  # Work inside a step is the conversation with claude, and all of it lands in
+  # the transcript of the session whose id is written in the feature's
+  # state.json. We look straight at that rather than at a child process's CPU
+  # time: the growing file is the work.
+  local active=0 f session mtime
+  for f in $(sclaude_states); do
+    # Changing step is activity too, and it is not visible in the transcript: a
+    # new step is a new session, while the previous one simply stops growing. It
+    # is visible here, though: the transition appends finished and started to
+    # state.json.
+    mtime=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+    (( mtime )) && grew "sclaude:$f" "$mtime" 1 prev && active=1
+
+    # The transcript's size, not its mtime: a step's session left open and
+    # forgotten touches the file every half hour without appending anything, and
+    # by modification time it would look like work. That is precisely what kept
+    # the laptop from sleeping.
+    session=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    raise SystemExit
+step = d.get('steps', {}).get(d.get('step') or '', {})
+print(step.get('session') or '')
+" "$f" 2>/dev/null)
+    [[ -z "$session" ]] && continue
+    local size
+    size=$(transcript_size "$session")
+    [[ -z "$size" ]] && continue
+    grew "sclaude:$session" "$size" 0 prev && active=1
+  done
+
+  printf '%d' "$active"
+}
+
+# The state files of sclaude features. Worktrees sit next to the repository and
+# are named after the feature, so we search one level around the home directory
+# rather than walking it whole: a full walk would cost a minute on every run of
+# the timer.
+sclaude_states() {
+  find "$HOME" -maxdepth 3 -name state.json -path '*/.feature/*' 2>/dev/null
+}
+
+# A session's transcript size, by its id. The project name is not known in
+# advance — a step's session lives in its worktree's directory — so we search by
+# file name.
+#
+# The size, not the modification time: a touch without a write does not change
+# the content, and so is not work either.
+transcript_size() {
+  find "$CLAUDE_PROJECTS" -maxdepth 2 -name "$1.jsonl" -printf '%s' 2>/dev/null
+}
+
+# An open VS Code connected to WSL (Remote-WSL). A soft holder: the editor is
+# open, work is going on, but there may be nobody around.
+#
+# Being open is not enough — work is needed. An editor left open lives for
+# weeks: on this machine it was counted a holder ten days running without
+# editing anything.
+#
+# The work is visible in VS Code's own edit journal (data/User/History): an entry
+# lands there on every file save. CPU time will not do — the extension host
+# burns two hundred ticks a minute when idle, ten times over the busy threshold
+# — and walking the working directories would require knowing which folders are
+# open, which vscode-server stores nowhere.
+#
+# We look for a live server process rather than the ~/.vscode-server directory:
+# that one stays for ever after the very first connection and says nothing about
+# the current session.
+#
+# We check argv[0] rather than the whole command line: pgrep -f over the string
+# catches any command where the path is merely mentioned — the check itself
+# included. The answer is binary: the server spawns nine processes, but the
+# holder here is one — the editor is either connected or not.
+VSCODE_HISTORY="$HOME/.vscode-server/data/User/History"
+
+count_vscode() {
+  local pid a0 connected=0
+  for pid in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do
+    # We suppress stderr of the whole substitution rather than of tr alone:
+    # bash opens the file itself, before the command even starts, and a
+    # "2>/dev/null" inside the substitution does not catch its complaint about a
+    # process that has gone. Processes end between ls /proc and reading cmdline
+    # all the time — that is normal, not a failure.
+    a0=$( { tr '\0' '\n' < "/proc/$pid/cmdline" | head -1; } 2>/dev/null ) || continue
+    if [[ "$a0" == "$HOME/.vscode-server/"* ]]; then connected=1; break; fi
+  done
+  (( connected )) || { printf '0'; return; }
+
+  [[ -d "$VSCODE_HISTORY" ]] || { printf '0'; return; }
+  # Depth 2: History/<file hash>/<version>. We look at the freshest entry in the
+  # whole journal — which file was edited does not matter.
+  #
+  # We take the first line with read rather than head: head closes the pipe
+  # without reading it to the end, and sort writes "Broken pipe" into the log on
+  # every run of the timer.
+  local newest
+  newest=$(find "$VSCODE_HISTORY" -maxdepth 2 -printf '%T@\n' 2>/dev/null \
+           | sort -rn | { read -r first _; printf '%s' "${first%%.*}"; })
+  [[ -z "$newest" ]] && { printf '0'; return; }
+
+  local -A prev=()
+  read_snapshot prev
+  grew "vscode:history" "$newest" 1 prev && printf '1' || printf '0'
+}
+
+# A running dev server. A soft holder: work is going on, but the person may have
+# left it hanging and gone.
+#
+# A listening socket is not enough: the server listens at night too. Work means
+# requests, and the server writes each of them to a log; no requests, no entry.
+#
+# We look for the log by the process's own working directory rather than by a
+# list of known paths: sclaude puts it at <worktree>/.feature/dev.log, and cwd
+# leads there regardless of whose feature it is and who started the server.
+#
+# If the log is not there — the server was started by hand somewhere else — we
+# look at the counter of bytes written in /proc. The same fact (the server wrote
+# something), measured by the kernel instead of the filesystem, and it works for
+# any server on this port.
+#
+# But writing is not enough either. A request comes not from a person but from a
+# browser: a tab left open goes to the server by itself — an HMR reconnect, the
+# page polling its own API — and the log grows at night exactly as it does under
+# someone's hands. The laptop would not sleep for days because of it: the holder
+# flared up every minute, the deadline moved an hour forward faster than it
+# approached the warning threshold, and the "extend?" question never came at all
+# — the same scenario as with claude's transcript (see cb891af), only here it is
+# the page knocking rather than a file being touched. So the log answers "the
+# server is working", someone_around answers "there is someone to look", and we
+# hold only when both say yes.
+#
+# This loses the person in none of the ways of looking at a dev server. At the
+# laptop itself Windows does not sleep because of the mouse and keyboard, and it
+# has no need of the hold. From a phone the tailnet traffic holds; from a
+# terminal or a code-server tab, ssh and code do; all three are hard, and it
+# never gets as far as the soft count. Exactly one case is left — a tab left
+# open on a machine where nobody is — and it is precisely the one the holder was
+# lying for.
+DEV_LOG_REL=".feature/dev.log"
+
+count_dev() {
+  local -A prev=()
+  read_snapshot prev
+
+  # Every dev server there is: one per feature now, and any of them being
+  # worked with is reason enough. sclaude-proxy on :3000 is not a server of its
+  # own — it writes whatever the servers behind it send, so its bytes would only
+  # count those servers' traffic a second time, and a tab left open behind it
+  # would count twice as loudly.
+  #
+  # We write the counter into the snapshot in any case, even when there is
+  # nobody: the snapshot is a memory of the previous run, not a decision.
+  # Otherwise a person coming back would find the key gone, and a missing key
+  # means "first appearance", that is an hour of holding for a log that has not
+  # changed since the night. So every server is asked, even after one has
+  # already said yes.
+  local active=0 port pid cwd log mtime wchar
+  local -A seen=()
+  while read -r port pid; do
+    [[ -n "$pid" && -z "${seen[$pid]:-}" ]] || continue
+    seen[$pid]=1
+    cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null)
+    log="$cwd/$DEV_LOG_REL"
+    if [[ -n "$cwd" && -f "$log" ]]; then
+      mtime=$(stat -c %Y "$log" 2>/dev/null || echo 0)
+      grew "dev:$log" "$mtime" 1 prev && active=1
+    elif [[ "$port" == "$DEV_PORT" ]] \
+         && ! tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q sclaude-proxy; then
+      wchar=$(io_wchar_of "$pid")
+      [[ -n "$wchar" ]] || continue
+      # A threshold in bytes rather than zero: the server occasionally writes
+      # housekeeping even in silence. One request's log line is under a hundred
+      # bytes, so a quarter of a kilobyte separates real traffic from background
+      # noise without losing single requests.
+      grew "dev:$pid" "$wchar" 256 prev && active=1
+    fi
+  done < <(ss -ltnp 2>/dev/null | awk -v one="$DEV_PORT" \
+             -v first="$DEV_PORT_FIRST" -v last="$DEV_PORT_LAST" '
+    { port = $4; sub(/.*:/, "", port)
+      if (port !~ /^[0-9]+$/) next
+      # A number from here on: after sub() it is a string, and a string
+      # compared with a number compares as text — "31234" > "3199" is false.
+      port = port + 0
+      if (port != one && (port < first + 0 || port > last + 0)) next
+      if (match($0, /pid=[0-9]+/)) print port, substr($0, RSTART + 4, RLENGTH - 4) }')
+
+  (( active )) && ! someone_around && active=0
+  printf '%d' "$active"
+}
+
+# --- traces of work ----------------------------------------------------------
+
+# How much silence counts as "the person left without closing the session".
+IDLE_AFTER=3600
+# The load above which we consider the machine busy with something. One core
+# under a build or tests gives around 1.0; the threshold is lower so as to catch
+# moderate work too, but above the background noise of an idling system.
+BUSY_LOADAVG=0.7
+
+# Seconds since the last input in the freshest interactive session.
+#
+# A TTY device has two timestamps, and neither can be trusted on its own. mtime
+# is moved by a program's output rather than a keystroke: a forgotten tab with
+# `tail -f` or a dev server prints into the void and looks like work — because
+# of which the question about a forgotten session was never asked, in exactly
+# the case it was created for. atime is moved by reading from the terminal, that
+# is by what a person typed, but an automaton feeding input into a pty moves it
+# too.
+#
+# So for "when was anyone last here" we take the smaller of the stamps, that is
+# the greater age: nobody is there only when both are silent. This does not lose
+# a live person — what they type moves atime, and the shell's echo immediately
+# moves mtime, so a live session has both fresh at once.
+#
+# Prints 999999 if there are no interactive sessions at all. That is not "a very
+# long idle" but "nothing to measure": the reading side is obliged to tell one
+# from the other, otherwise you get "277 hours without input" on a machine that
+# has been working since yesterday.
+idle_seconds() {
+  local now newest=0 tty mtime atime seen
+  now=$(date +%s)
+  # All the user's TTYs, not only sessions under sshd and code-server. Those
+  # were exactly what we used to look at, and work in a local WSL terminal was
+  # not visible to the counter at all: it came out as "26 hours without input"
+  # on a day spent at the machine since morning. Whose terminal it is does not
+  # matter; typing in it is the same either way.
+  for tty in $(ps -u "$USER" -o tty= 2>/dev/null | sort -u); do
+    [[ -z "$tty" || "$tty" == "?" ]] && continue
+    [[ -c "/dev/$tty" ]] || continue
+    mtime=$(stat -c %Y "/dev/$tty" 2>/dev/null || echo 0)
+    atime=$(stat -c %X "/dev/$tty" 2>/dev/null || echo 0)
+    # The smaller stamp is that very "both are silent". Across terminals we
+    # then take the largest: one where work is really happening is enough.
+    seen=$(( mtime < atime ? mtime : atime ))
+    (( seen > newest )) && newest=$seen
+  done
+  # A code-server tab holds the machine without any TTY: the person reads code
+  # and edits a file without typing anything into a terminal. Its heartbeat is
+  # as much a sign of presence as a keystroke, and without it an open tab came
+  # out as "an hour without input" and something to ask about.
+  if [[ -f "$CODE_HEARTBEAT" ]]; then
+    local hb; hb=$(stat -c %Y "$CODE_HEARTBEAT" 2>/dev/null || echo 0)
+    (( hb > newest )) && newest=$hb
+  fi
+
+  (( newest == 0 )) && { printf '%d' 999999; return; }
+  printf '%d' $(( now - newest ))
+}
+
+# Load above the threshold. A separate function because two callers ask about
+# it for different reasons: "the machine is busy with something" and "is there
+# anyone here at all".
+loaded() {
+  local load
+  load=$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)
+  awk -v l="$load" -v t="$BUSY_LOADAVG" 'BEGIN{exit !(l > t)}'
+}
+
+# Whether the machine is busy with something: a live claude or noticeable load.
+# A long build without a single keystroke is work, and interrupting it with a
+# question is not the thing to do.
+is_busy() {
+  [[ "$(count_claude)" != "0" ]] && return 0
+  loaded
+}
+
+# Whether there is anyone alive at the machine right now: recent input in a
+# terminal or a code-server tab, or noticeable load.
+#
+# The ones asking are the soft holders that prove not work but their own
+# existence — the dev server and the code-server service. Their sign lives a life
+# of its own without a person, so it alone is not enough.
+#
+# 999999 is idle_seconds' placeholder for "no interactive sessions at all". In
+# the question about forgotten hard holders it cannot be judged by: there a tab
+# or traffic is holding, and there may be no terminal at all. Here it can and
+# must be — no session at all means no input by which a person could have made
+# themselves known.
+someone_around() {
+  local idle; idle=$(idle_seconds)
+  (( idle < IDLE_AFTER )) && return 0
+  loaded
+}
+
+# Whether hard holders are holding while there are no traces of work. That is
+# precisely the reason to ask.
+idle_hard_hold() {
+  [[ "$(state get hard_hold)" == "True" ]] || return 1
+  is_busy && return 1
+  local idle; idle=$(idle_seconds)
+  (( idle >= IDLE_AFTER ))
+}
+
+# --- the run -----------------------------------------------------------------
+
+run_once() {
+  exec 9>"$LOCK_FILE"
+  if ! flock -n 9; then
+    echo "$SELF: already running (lock: $LOCK_FILE)" >&2
+    exit 75  # EX_TEMPFAIL
+  fi
+
+  # The holders read the previous run's snapshot and write the new one as they
+  # go. We empty it at the start and swap it in at the end: should the run break
+  # off halfway, the old snapshot stays intact, and the holders that survived
+  # will not count as new.
+  : > "$SOFT_SNAPSHOT_NEW"
+
+  local claude ssh code codesrv dev tscale sclaude vscode before after
+  claude=$(count_claude)
+  ssh=$(count_ssh)
+  # A live session — by heartbeat or by an open terminal: a terminal can be
+  # busy with a long command when the page has stopped sending heartbeats.
+  code=$(count_code_session)
+  [[ "$code" == "0" && "$(count_code)" != "0" ]] && code=1
+  codesrv=$(count_code_server)
+  dev=$(count_dev)
+  tscale=$(count_tailscale)
+  sclaude=$(count_sclaude)
+  vscode=$(count_vscode)
+
+  mv -f "$SOFT_SNAPSHOT_NEW" "$SOFT_SNAPSHOT"
+
+  before=$(state get until_ts)
+  after=$(state holders "claude=$claude" "ssh=$ssh" "code=$code" \
+                        "codesrv=$codesrv" "dev=$dev" "tailscale=$tscale" \
+                        "sclaude=$sclaude" "vscode=$vscode")
+
+  # Idling with hard holders present is what the daemon asks about once an
+  # hour. The detector counts it rather than the daemon: it already has all the
+  # counters and access to /proc, leaving the daemon to read a ready number.
+  state set idle_seconds "$(idle_seconds)" >/dev/null
+  # Busyness is assembled from the claude count already taken rather than by
+  # calling is_busy: by this line the soft holders' snapshot has already been
+  # swapped, and a repeat count_claude would compare transcript sizes with
+  # themselves. The answer would come out as "not busy" for any working session
+  # — and it is by this field that the daemon decides whether its question would
+  # get in the way.
+  state set busy "$( { (( claude )) || loaded; } && echo 1 || echo 0 )" >/dev/null
+
+  # We log only a change of picture: holders appeared or went away.
+  local prev_holders
+  prev_holders="$LOG_DIR/.holders"
+  local now_holders="claude=$claude ssh=$ssh code=$code codesrv=$codesrv dev=$dev tailscale=$tscale sclaude=$sclaude vscode=$vscode"
+  if [[ "$(cat "$prev_holders" 2>/dev/null)" != "$now_holders" ]]; then
+    log "holders: $now_holders (deadline $before -> $after)"
+    printf '%s' "$now_holders" > "$prev_holders"
+  fi
+}
+
+# --- status ------------------------------------------------------------------
+
+# The address in the tailnet: code-server and the dev server open on it from a
+# phone. We ask tailscale rather than parse the config: the address is issued by
+# the network and changes when the node re-registers, while the config can fall
+# behind.
+tailnet_ip() {
+  tailscale ip -4 2>/dev/null | head -1
+}
+
+# The tools' version. There is no incremental one, so we take the commit — and
+# say separately what is uncommitted: without that, status would insist
+# yesterday's code is running exactly when the edits are already in the working
+# tree. That is the very question the line was added for: "did my edits take
+# effect, or am I looking at the old thing?"
+tools_version() {
+  local desc mtime
+  desc=$(git -C "$KEEPAWAKE" log -1 --format='%h of %cd' \
+         --date=format:'%d.%m %H:%M' 2>/dev/null)
+  [[ -z "$desc" ]] && { printf 'version unknown — not a git repository'; return; }
+  # The freshest tracked file, if the working tree is dirty. We search among the
+  # changed ones rather than the whole tree: rebuilt artefacts and logs have
+  # nothing to do with the code's version.
+  if ! git -C "$KEEPAWAKE" diff --quiet 2>/dev/null \
+     || ! git -C "$KEEPAWAKE" diff --cached --quiet 2>/dev/null; then
+    mtime=$(git -C "$KEEPAWAKE" diff --name-only HEAD 2>/dev/null \
+            | while read -r f; do
+                [[ -f "$KEEPAWAKE/$f" ]] && stat -c %Y "$KEEPAWAKE/$f" 2>/dev/null
+              done | sort -rn | head -1)
+    [[ -n "$mtime" ]] && desc+=" + edits $(date -d "@$mtime" '+%d.%m %H:%M')"
+  fi
+  printf '%s' "$desc"
+}
+
+unit_state() {
+  local unit="$1" out
+  out=$(systemctl --user is-active "$unit" 2>/dev/null)
+  if [[ -z "$out" || "$out" == "inactive" ]] \
+     && ! systemctl --user cat "$unit" >/dev/null 2>&1; then
+    printf 'not installed'
+    return
+  fi
+  printf '%s' "${out:-unknown}"
+}
+
+human_left() {
+  local secs=$1
+  if (( secs <= 0 )); then printf 'expired'; return; fi
+  if (( secs < 60 )); then printf '%ds' "$secs"; return; fi
+  if (( secs < 3600 )); then printf '%dmin' "$((secs / 60))"; return; fi
+  printf '%dh %02dmin' "$((secs / 3600))" "$(((secs % 3600) / 60))"
+}
+
+cmd_status() {
+  if [[ "${1:-}" == "--json" ]]; then
+    state show
+    return 0
+  fi
+
+  # The link markers are parsed by whoever can display them. The bot makes an
+  # <a href>, the terminal simply puts the address in brackets: there is nothing
+  # to click there anyway, but the address is worth knowing.
+  if [[ "${1:-}" != "--raw" ]]; then
+    cmd_status --raw "$@" | sed $'s/\x01\([^\x02]*\)\x02\([^\x03]*\)\x03/\\2 (\\1)/g'
+    return 0
+  fi
+  shift
+
+  # Status answers three different questions, and they used to be piled into a
+  # single list: whether to hold right now and why; whether the holding
+  # machinery itself is sound; whether anyone will be let in from outside. The
+  # first is always needed, the second and third only when they are broken,
+  # which is why they have a traffic light and their details unfold only on a
+  # failure. Otherwise eight lines reported "active, active, 1" every time —
+  # exactly what you expect from a working system.
+  #
+  # The traffic light is emoji rather than ANSI colour: this same text goes to
+  # Telegram, where there is no colour at all. One look in both places is
+  # cheaper than repainting on the fly.
+
+  # All the fields at once: every call to state is a python3 launch and a read
+  # of a file from the Windows drive, and there are fifteen or so fields here.
+  local now; now=$(date +%s)
+  local fields
+  mapfile -t fields < <(state get until_ts updated_ts version decision hard_hold \
+    until_local holders.manual.until_ts \
+    holders.ssh.count holders.code.count holders.tailscale.count \
+    holders.claude.count holders.sclaude.count holders.dev.count \
+    holders.vscode.count holders.codesrv.count)
+  local until=${fields[0]} updated=${fields[1]} version=${fields[2]}
+  local decision=${fields[3]} hard=${fields[4]} until_local=${fields[5]}
+  local manual=${fields[6]}
+  local age=$((now - updated + 1))
+
+  # --- the hold ----------------------------------------------------------
+
+  # The bottom line goes into the heading: "until when the machine will not
+  # sleep" is the one thing status is most often opened for, and it must not
+  # have to be assembled from the lines below.
+  local left=$((until - now))
+  if state hold; then
+    if [[ "$hard" == "True" ]]; then
+      # A hard holder does not look at the deadline: while one is there, there
+      # will be no sleep, and naming a time would be a lie.
+      printf '🟢 HOLD indefinite, while hard holders are holding\n'
+    else
+      printf '🟢 HOLD until %s (%s)\n' "$until_local" "$(human_left $left)"
+    fi
+  else
+    printf '⚪ HOLD released — Windows sleeps by its own rules\n'
+  fi
+
+  # We list all the holders, the zero ones included. Showing only the active
+  # ones was shorter but answered the wrong question: "why is it not holding"
+  # requires seeing the whole list of what is checked, otherwise it is unclear
+  # what the system is looking for at all. Where the current measurement
+  # diverges from what is written in the file, we say so in words: the
+  # divergence is the news — the detector has not caught up yet.
+  local name file_n now_n
+  # The address is hidden in the name itself: "dev server — none" with a
+  # clickable "dev server" reads as one line, whereas a tail of
+  # "— none http://100.64.0.1:3000" took one and a half. There are no links in
+  # a terminal, so there the address is printed in brackets after it; in
+  # Telegram the bot parses the marker and makes an <a href>. A marker rather
+  # than ready HTML: the script's output is escaped as a whole, and letting
+  # markup through it would mean putting holes in the escaping.
+  holder_line() {
+    local title=$1 file_n=${2:-0} now_n=${3:-0} addr=${4:-} state
+    if (( file_n == 0 && now_n == 0 )); then
+      state='none'
+    elif (( file_n == now_n )); then
+      state=$now_n
+    else
+      state="was $file_n, now $now_n"
+    fi
+    if [[ -n "$addr" ]]; then
+      printf '   • \x01%s\x02%s\x03 — %s\n' "$addr" "$title" "$state"
+    else
+      printf '   • %s — %s\n' "$title" "$state"
+    fi
+  }
+
+  # The hard ones are all three ways of reaching the machine remotely, from a
+  # phone. Work at the laptop itself does not get in here and cannot: the
+  # Windows keyboard is not visible from WSL. Hence not "a person at the
+  # machine", as it used to say — that wording promised more than is checked.
+  # The address is written right at the holder rather than on a separate line
+  # below: it answers "how do I get there", and that is a property of the holder
+  # itself. The health section then stays a summary only, with no reference
+  # data.
+  local tsip; tsip=$(tailnet_ip)
+
+  printf '\n   Hard — remote work, prevents sleep altogether\n'
+  # The addresses are real URLs with a scheme: Telegram rejects an <a href> on
+  # anything that does not look like a link with a 400 error, not silently. A
+  # bare IP and a string like "ssh user@host" do not qualify.
+  holder_line 'SSH session'        "${fields[7]}"  "$(count_ssh)" \
+    "${tsip:+ssh://$USER@$tsip:22}"
+  holder_line 'code-server tab'    "${fields[8]}"  "$(count_code_session)" \
+    "${tsip:+http://$tsip:8080}"
+  # The tailnet has no web interface — the link is Tailscale's own console,
+  # where you can see who is in the network and when they were last active.
+  holder_line 'tailnet traffic'    "${fields[9]}"  "$(count_tailscale)" \
+    'https://login.tailscale.com/admin/machines'
+
+  printf '\n   Soft — give an hour from the last activity\n'
+  holder_line 'claude'             "${fields[10]}" "$(count_claude)"
+  holder_line 'sclaude'            "${fields[11]}" "$(count_sclaude)"
+  holder_line 'dev server'         "${fields[12]}" "$(count_dev)" \
+    "${tsip:+http://$tsip:$DEV_PORT}"
+  holder_line 'VS Code'            "${fields[13]}" "$(count_vscode)"
+  holder_line 'code-server service' "${fields[14]}" "$(count_code_server)" \
+    "${tsip:+http://$tsip:8080}"
+
+  # The human's commands are not holders, but they move the deadline too, and
+  # without them "why until 11pm when a single claude is running" cannot be
+  # explained.
+  printf '\n   The human\'s commands\n'
+  if [[ -n "$manual" && "$manual" != "0" ]] && (( manual > now )) && (( manual <= until )); then
+    printf '   • manual extension — until %s, then the usual calculation\n' \
+      "$(date -d "@$manual" '+%H:%M %d.%m')"
+  else
+    printf '   • manual extension — none\n'
+  fi
+  if [[ -n "$decision" ]]; then
+    printf '   • decision by button — %s\n' "$decision"
+  else
+    printf '   • decision by button — none\n'
+  fi
+
+  # --- health ------------------------------------------------------------
+
+  # The machinery and access are one question: "is everything all right with the
+  # machinery itself". Keeping them as two sections meant a traffic light for a
+  # single line. Only the summary is here: the addresses have moved to the
+  # holders they belong to.
+
+  # The most likely class of failure is "WSL does everything right while the
+  # Windows side is not running". That must be visible without going into Task
+  # Scheduler.
+  # We look for a live process on the Windows side through tasklist: it is the
+  # answer to "is anyone holding at all".
+  # We take the return code from winexe itself rather than after the pipe: $?
+  # behind a pipeline is grep's status, and the "could not ask" branch below was
+  # dead. Status then lied "not running" every time tasklist.exe simply was not
+  # found, that is under systemd — where there are no Windows paths in PATH.
+  local ps_out rc ps_alive win_line platform side
+  platform=$(state platform)
+  local win_bad=0 win_unknown=0
+  if [[ "$platform" == "linux" ]]; then
+    # No Windows: the holding side is keepawake-linux on this machine, and
+    # systemd knows whether it is alive.
+    side="the holding side"
+    local holder; holder=$(unit_state keepawake-linux.service)
+    win_line="keepawake-linux $holder"
+    [[ "$holder" == "active" ]] || win_bad=1
+  else
+  side="the Windows side"
+  ps_out=$(winexe tasklist.exe /fi "IMAGENAME eq powershell.exe" /fo CSV 2>/dev/null)
+  rc=$?
+  ps_alive=$(printf '%s' "$ps_out" | tr -d '\r' | grep -c '^"powershell')
+  if [[ "$rc" -eq 127 ]]; then
+    # We tell "could not ask" from "not running": the first is about
+    # diagnostics, the second about the system, and they must not be confused.
+    # But not knowing must not be marked green either: a tick would mean
+    # "checked and working", and checking is exactly what did not happen.
+    win_line='unknown — no access to tasklist.exe'
+    win_unknown=1
+  elif [[ "${ps_alive:-0}" -gt 0 ]]; then
+    win_line="powershell $ps_alive"
+  else
+    win_line='not running'
+    win_bad=1
+  fi
+  fi
+
+  local daemon timer stale=0
+  daemon=$(unit_state keepawake-telegram.service)
+  timer=$(unit_state keepawake.timer)
+  # We take the staleness threshold from state.py: that is where it decides to
+  # release the hold.
+  local stale_after; stale_after=$(state const STALE_AFTER)
+  (( age > ${stale_after:-900} )) && stale=1
+
+  local ssh_up=0
+  systemctl is-active ssh >/dev/null 2>&1 && ssh_up=1
+
+  local bad=()
+  (( win_bad )) && bad+=("$side is not holding")
+  [[ "$daemon" != "active" ]] && bad+=("daemon $daemon")
+  [[ "$timer" != "active" ]] && bad+=("timer $timer")
+  (( stale )) && bad+=("the file is not being updated")
+  (( ssh_up )) || bad+=("SSH is not running")
+
+  printf '\n'
+  if (( ${#bad[@]} == 0 && win_unknown == 0 )); then
+    printf '🟢 HEALTH\n'
+  elif (( ${#bad[@]} == 0 )); then
+    # Yellow: the WSL side is fine, but Windows could not be asked about.
+    printf '🟡 HEALTH — the Windows side has not been checked\n'
+  else
+    printf '🔴 HEALTH — %s\n' \
+      "$(IFS=,; printf '%s' "${bad[*]}" | sed 's/,/, /g')"
+  fi
+
+  # A one-line summary per subsystem. We unfold the details only under red:
+  # fixing goes by the overall picture — "the timer is stopped" and "the file is
+  # not being updated" are one breakage, and they need to be seen together.
+  if (( ${#bad[@]} == 0 && win_unknown == 0 )); then
+    printf '   • the machinery works\n'
+  else
+    printf '   • machinery: file %s ago, daemon %s, timer %s, holder %s\n' \
+      "$(human_left $age)" "$daemon" "$timer" "$win_line"
+    win_log
+  fi
+
+  # We do not repeat the address: it already stands at the "SSH session" holder
+  # it belongs to. Only "will they be let in or not" is here.
+  if (( ssh_up )); then
+    printf '   • remote access — SSH is listening\n'
+  else
+    printf '   • remote access — SSH is not running, no way in from a phone\n'
+  fi
+
+  printf '   • version — %s\n' "$(tools_version)"
+}
+
+# The last entry from the holding side's log. It answers the question
+# "is the live process re-reading the file": an entry time lagging behind the
+# current deadline means the process is alive but not doing its job.
+win_log() {
+  local pslog
+  # Where the holding side writes: KeepAwake.ps1 on Windows, keepawake-linux
+  # elsewhere. state.py knows which, and both write the same lines.
+  pslog=$(state holdlog 2>/dev/null)
+  [[ -n "$pslog" && -f "$pslog" ]] || return 0
+  # The last line about the hold, not simply the last one: the log holds
+  # housekeeping entries ("already running", "start") too, and they answer a
+  # different question from the one people look here for.
+  # PowerShell 5.1 puts a BOM at the start of the file — we drop it when
+  # reading.
+  # We drop the date: the entry is always today's, and it takes up room.
+  # The pattern must match what KeepAwake.ps1 and keepawake-linux write: "hold
+  # set", "hold released" and "holding" all start with "hold".
+  local psline
+  psline=$(sed '1s/^\xEF\xBB\xBF//' "$pslog" | grep -E "hold set|hold released|holding" | tail -1)
+  psline=${psline:-$(tail -1 "$pslog" | sed '1s/^\xEF\xBB\xBF//')}
+  printf '   • log: %s\n' "${psline#[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] }"
+}
+
+# --- argument parsing --------------------------------------------------------
+
+case "${1:-}" in
+  "")        run_once ;;
+  status)    shift; cmd_status "$@" ;;
+  extend)    state extend "${2:-3600}" && echo "extended until $(state get until_local)" ;;
+  release)   state release && echo "hold released" ;;
+  -h|--help) sed -n '2,25p' "$(readlink -f "$0")" | sed 's/^# \{0,1\}//' ;;
+  *)         echo "$SELF: unknown command ${1}" >&2; exit 2 ;;
+esac
+# exit inside the braces, so bash never reads past them into an edited file.
+exit
+}

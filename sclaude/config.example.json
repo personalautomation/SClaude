@@ -1,0 +1,138 @@
+{
+  "README": [
+    "What sclaude knows about a project. Copy this to the repository's root as",
+    ".sclaude.json and commit it: it describes the project, so it belongs to",
+    "the project rather than to the orchestrator. `sclaude new` offers to write",
+    "one by reading package.json, the directory layout and whatever the project",
+    "keeps about its environments — this file is for the parts it could not",
+    "work out, and for reading before you agree to what it proposes.",
+    "",
+    "Every section is optional and nothing is guessed at run time. What is",
+    "absent is simply not done: no `regression` means no gate on step 2, no",
+    "`manuals` means step 1 gets no table of contents, no `prod` means",
+    "production is never offered. A default would be one product's answer",
+    "applied to another's repository, which is the failure this file removes.",
+    "",
+    "commands  — the command behind each regression part. The names on the",
+    "            left are sclaude's: they appear beside durations in the",
+    "            summary and in 'failed on X'. `e2e` is the only one sclaude",
+    "            touches — against a deployed stage it is prefixed with",
+    "            E2E_BASE_URL=<host> exported, so one command serves both. Every",
+    "            part also gets SCLAUDE_DEV=<name> exported when sclaude knows",
+    "            who is running it (developer.sh): a suite that creates test",
+    "            data on a shared database can mark it with the name and sweep",
+    "            only its own, instead of deleting a colleague's mid-run.",
+    "regression — which parts each stage runs, in order. `local` closes step 2",
+    "            against this machine's dev server; `preview` and `prod` run",
+    "            against a deployment and usually hold only what a browser can",
+    "            see. A part named here with no entry in `commands` stops the",
+    "            run rather than being skipped: a suite that quietly drops a",
+    "            check reports green on work it never did.",
+    "            `manual` is what the end of the review runs instead of",
+    "            `local` when nothing but the `manuals` changed since the last",
+    "            green local run — checks that read the code, since a manual is",
+    "            code too. The dev server and database are not brought up for",
+    "            it, so leave out anything that needs them. Absent or empty,",
+    "            the full `local` list runs.",
+    "manuals   — the pages describing the product as a person sees it. Step 1",
+    "            gets their contents before it guesses at the scope; step 3",
+    "            updates them in the same pull request as the feature.",
+    "prod      — where production answers. The deployed regression aims its",
+    "            suite here, and there is deliberately no default: being wrong",
+    "            about which host is production means running a write-capable",
+    "            suite against it.",
+    "database  — everything about migrations; leave it out if there are none.",
+    "            urlFile/urlVar name where a production database URL is kept —",
+    "            a rollback reads it to run a migration's down block, and the",
+    "            value is never printed. historyTable is where the migration",
+    "            tool records what it has applied; a reverted migration's row",
+    "            is deleted with it, or the next promote refuses. Name it only",
+    "            if you know it: a guessed table that a rollback deletes from",
+    "            is worse than a row left behind.",
+    "            `local` gives a feature on the local environment a Supabase",
+    "            stack of its own: `environment` names that environment,",
+    "            `exclude` the containers a feature does not need, `setup` the",
+    "            command that fills a new stack, and `env` maps each of your",
+    "            variables to the `supabase status -o env` key that fills it.",
+    "            `cli` overrides how the CLI is run (npx --yes supabase).",
+    "board     — the GitHub project board. `columns` names which column a",
+    "            started feature leaves (backlog) and enters (progress),",
+    "            where it goes once the preview is green (qa) and where QA",
+    "            passes it (done). `dates` names the issue date fields filled",
+    "            at the start and the end. `issue` is the label and type a new",
+    "            issue gets. Every key optional: a column not named is a move",
+    "            not made, and nothing here is assumed about your board.",
+    "doctor    — what the project asks of a developer's machine beyond what",
+    "            sclaude checks: each `check` runs in the project's root, and",
+    "            `sclaude doctor` shows ✓ when it exits 0, or ! with its last",
+    "            line and the `fix` to run. Warnings only: a developer may",
+    "            reasonably do without a project's extras."
+  ],
+
+  "commands": {
+    "typecheck": "npm run typecheck",
+    "lint": "npm run lint",
+    "build": "npm run build",
+    "e2e": "npm run test:e2e"
+  },
+
+  "regression": {
+    "local": ["typecheck", "lint", "build", "e2e"],
+    "manual": ["typecheck", "lint", "build"],
+    "preview": ["e2e"],
+    "prod": ["e2e"]
+  },
+
+  "manuals": [
+    { "path": "docs/help.md", "what": "user-facing — what a person can do" },
+    { "path": "docs/technical.md", "what": "technical — where things apply" }
+  ],
+
+  "prod": {
+    "siteUrl": "https://example.com"
+  },
+
+  "database": {
+    "migrations": "db/migrations",
+    "schemaFile": "db/schema.sql",
+    "historyTable": "schema_migrations",
+    "urlFile": ".env.prod",
+    "urlVar": "DATABASE_URL",
+    "promote": "npm run db:promote",
+    "applyPreview": "npm run db:preview",
+    "schemaDump": "npm run db:schema",
+    "envProd": "npm run env:prod",
+    "envDev": "npm run env:dev",
+    "local": {
+      "environment": "localdb",
+      "exclude": ["realtime", "storage-api", "imgproxy", "studio", "postgres-meta",
+                  "logflare", "vector", "edge-runtime", "supavisor"],
+      "setup": "npm run seed",
+      "env": {
+        "NEXT_PUBLIC_SUPABASE_URL": "API_URL",
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "PUBLISHABLE_KEY",
+        "SUPABASE_SECRET_KEY": "SECRET_KEY",
+        "DATABASE_URL": "DB_URL"
+      }
+    }
+  },
+
+  "board": {
+    "columns": {
+      "backlog": "Backlog",
+      "progress": "In progress",
+      "qa": "In QA",
+      "done": "Done"
+    },
+    "dates": { "start": "Start date", "end": "Target date" },
+    "issue": { "label": "Dev", "type": "Feature" }
+  },
+
+  "doctor": [
+    {
+      "what": "the staging database is reachable",
+      "check": "npm run -s db:ping",
+      "fix": "npm run db:tunnel"
+    }
+  ]
+}

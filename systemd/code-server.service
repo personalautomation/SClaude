@@ -1,0 +1,36 @@
+[Unit]
+Description=code-server — VS Code in the browser, for working from a phone
+Documentation=https://coder.com/docs/code-server
+# The bind goes to the tailscale0 address, and without the interface up the
+# bind will not happen. Restart below pulls the service through if it started
+# first.
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+# Without this systemd stops bringing the service up after a run of restarts —
+# for instance when the laptop woke before the network appeared.
+# The directive only works in [Unit]: in [Service] systemd ignores it.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# bind-addr, the password and everything else are in
+# ~/.config/code-server/config.yaml. We listen on the tailnet address only: in a
+# café the port must not be open to anyone.
+#
+# Started through a wrapper: it opens the repository chosen in the bot. A path
+# right here would mean editing the unit and running daemon-reload on every
+# change of project, and the choice is changed by a button in Telegram.
+ExecStart=%h/.local/bin/code-server-start
+# on-failure rather than always: on idling out code-server exits with code 0
+# (idle-timeout-seconds in config.yaml), and that is not a failure — bringing it
+# back would defeat the timeout. The button in the bot and systemctl start bring
+# it up by hand.
+Restart=on-failure
+RestartSec=10
+Nice=5
+
+# There is deliberately no [Install] section: the server does not come up at
+# boot. It goes out by itself after 59 minutes of idling, and autostart would
+# bring back to life what was just deliberately shut down. It is brought up by
+# the button in the bot or systemctl --user start code-server.

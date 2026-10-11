@@ -1,0 +1,13 @@
+[Unit]
+Description=Asking GitHub what QA has done with the features sclaude is waiting on
+Documentation=file:%h/.local/bin/sclaude-watch
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/sclaude-watch
+# gh over a slow network, once per watched feature. Well past what a sweep
+# takes, and short enough that a hung request cannot sit across the next tick.
+TimeoutStartSec=120
+# Nothing here is urgent: the thing it waits for takes hours.
+Nice=10
+IOSchedulingClass=idle

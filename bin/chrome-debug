@@ -1,0 +1,626 @@
+#!/usr/bin/env bash
+#
+# Starts the Chrome that Claude Code's chrome-devtools MCP server talks to.
+#
+# The MCP server is configured with --browserUrl, so it never launches a browser
+# itself: it attaches to whatever is already listening on the debugging port.
+# That split is deliberate — it is what keeps the window visible and lets the
+# browser outlive any one Claude session.
+#
+#   chrome-debug              bring the window forward, opening it if needed
+#   chrome-debug <url>        the same, and point it at that URL
+#   chrome-debug --stop       close it
+#   chrome-debug --keep       skip the restart a misplaced window would need
+#   chrome-debug --tab <url>  open the URL in a background tab, window untouched
+#   chrome-debug --help       print this
+#
+# CHROME_DEBUG_PORT and CHROME_DEBUG_PROFILE move it off 9222 and off the shared
+# profile — nothing needs that day to day, but it is how the window handling
+# below can be exercised without touching the browser somebody is working in.
+#
+# Safe to run twice, and "twice" is where the interesting case is. An answering
+# port is not a window: the browser can be alive with its window minimized,
+# dragged onto a screen that is no longer attached, or with no window at all
+# after the last one was closed. Reporting success at a browser nobody can see
+# is the failure this guards against — so the port check is followed by a look
+# at the window geometry, and a missing window is restored or reopened.
+#
+# Every run ends with a window in front of you, which is the whole promise and
+# is why the "already running" shortcut is gone. It cost nothing to print and
+# was wrong exactly when the command was worth typing: the browser answers on
+# its port from the other monitor just as readily as from this one, so the run
+# that reported success was the run that had just failed to help.
+#
+# Usually that is two protocol calls and no restart — see `front` and `restore`.
+# The restart is the fallback for a window that will not move, and it is cheaper
+# than it looks: Chrome reopens the tabs from the profile's saved session, so
+# what is spent is the seconds and the MCP server's attachment.
+set -uo pipefail
+
+# Everything below, bash is obliged to read to the end before it executes a
+# single command from here: it finds a compound command's closing brace by
+# parsing, not by executing. Otherwise a long-running invocation reads its own
+# file lazily, by offset into an open descriptor, and an edit in place shifts
+# the tail it has not read yet — sclaude has already died mid-step that way
+# (see 9648f23).
+#
+# The braces do not create a subshell: exit, variables and set work as before.
+{
+
+PORT=${CHROME_DEBUG_PORT:-9222}
+PROFILE=${CHROME_DEBUG_PROFILE:-"$HOME/.cache/chrome-devtools-mcp/visible-profile"}
+DEFAULT_URL="http://localhost:3000"
+LOG="$HOME/.cache/chrome-devtools-mcp/chrome.log"
+
+# Playwright puts every build in its own directory — chromium-1234, chromium-1250,
+# … — and leaves the previous one behind. A hardcoded path would therefore keep
+# launching the old build after an update, silently. Resolve the newest instead.
+CHROME=$(ls -1d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux64/chrome 2>/dev/null | sort -V | tail -1)
+# A machine without Playwright's build may still have a browser of its own; the
+# DevTools port works the same in any Chromium. CHROME_DEBUG_BIN names one
+# outright.
+if [[ -n "${CHROME_DEBUG_BIN:-}" ]]; then
+  CHROME="$CHROME_DEBUG_BIN"
+elif [[ -z "$CHROME" ]]; then
+  for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      CHROME="$(command -v "$candidate")"
+      break
+    fi
+  done
+fi
+
+alive() { curl -sf -m 2 "http://127.0.0.1:$PORT/json/version" >/dev/null 2>&1; }
+
+# Everything that needs the DevTools protocol proper — the HTTP endpoints answer
+# what pages exist, but not where their windows are. No websocket library is
+# installed and none is worth requiring for this, so the client is the ~40 lines
+# of RFC 6455 that CDP's small text frames actually use.
+#
+#   cdp probe        ->  home | astray | hidden | orphaned | none  (exit 0), unknown (exit 1)
+#   cdp front        ->  fronted | failed
+#   cdp restore      ->  restored | failed
+#   cdp open <url>   ->  opened | failed
+cdp() {
+  PORT="$PORT" python3 - "$1" "${2:-}" <<'PY' 2>/dev/null
+import base64, json, os, socket, struct, sys, time, urllib.request
+
+PORT = int(os.environ["PORT"])
+BASE = "http://127.0.0.1:%d" % PORT
+
+# A window counts as reachable when this much of it lands on its own screen.
+# Half a title bar is enough to drag it back; a stray pixel is not.
+ON_SCREEN = 0.3
+
+# The screen the window is meant to be on, as the page reports it in
+# screen.availLeft. It is 0 because the launch pins the window to 0,0 — the two
+# have to name the same monitor or the script would restart a window forever,
+# so they are read from one place and the launch flag quotes this name.
+#
+# "Visible" is not the question a second run is asking. A window on the other
+# monitor is visible, answers its port, and renders screenshots exactly like one
+# in front of you; the probe said so every time, correctly, and the window still
+# was not where somebody typing this command wanted it. So the probe reports the
+# screen as well, and only this one counts as arrived.
+HOME_SCREEN = 0
+
+
+def display_alive():
+    """Whether the X server this Chrome was launched against still answers.
+
+    WSLg restarts its compositor on its own schedule, typically because the
+    Windows host slept and resumed, which is also what leaves a trail of
+    "Time jumped backwards" lines in the journal right before it. The old
+    Chrome process is not killed by that: it keeps its DevTools port, keeps
+    answering /json/list, and keeps reporting window geometry from before
+    the restart, because none of that asks X anything. Only a render actually
+    hits the dead connection, and Chromium does not always surface that as a
+    prompt, clean error - a probe built only on CDP can stay fooled by a
+    window that no longer has anywhere to draw.
+
+    The fix is to ask X directly, the same way any client does: connect to
+    the socket named by $DISPLAY. A restarted compositor listens on a fresh
+    socket at the same path, so a connection failure here means what
+    Chrome's own reports cannot rule out - the display this browser was
+    drawing to is gone.
+    """
+    display = os.environ.get("DISPLAY", ":0")
+    num = display.split(":")[-1].split(".")[0]
+    path = "/tmp/.X11-unix/X%s" % num
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(2)
+            s.connect(path)
+        return True
+    except OSError:
+        return False
+
+
+class WS:
+    """The smallest websocket client that can carry a CDP command and its reply."""
+
+    def __init__(self, url, timeout=5):
+        hostport, _, path = url.split("://", 1)[1].partition("/")
+        host, _, port = hostport.partition(":")
+        self.sock = socket.create_connection((host, int(port or 80)), timeout)
+        self.sock.settimeout(timeout)
+        self.sock.sendall((
+            "GET /%s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\n"
+            "Connection: Upgrade\r\nSec-WebSocket-Key: %s\r\n"
+            "Sec-WebSocket-Version: 13\r\n\r\n"
+            % (path, hostport, base64.b64encode(os.urandom(16)).decode())).encode())
+        self.buf = b""
+        while b"\r\n\r\n" not in self.buf:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                raise IOError("handshake closed")
+            self.buf += chunk
+        head, _, self.buf = self.buf.partition(b"\r\n\r\n")
+        if b" 101 " not in head.split(b"\r\n")[0] + b" ":
+            raise IOError("not upgraded")
+        self.last_id = 0
+
+    def _read(self, n):
+        while len(self.buf) < n:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise IOError("closed")
+            self.buf += chunk
+        out, self.buf = self.buf[:n], self.buf[n:]
+        return out
+
+    def call(self, method, params=None):
+        self.last_id += 1
+        want = self.last_id
+        body = json.dumps({"id": want, "method": method, "params": params or {}}).encode()
+        n, mask = len(body), os.urandom(4)
+        frame = b"\x81"
+        if n < 126:
+            frame += bytes([0x80 | n])
+        elif n < 65536:
+            frame += bytes([0x80 | 126]) + struct.pack(">H", n)
+        else:
+            frame += bytes([0x80 | 127]) + struct.pack(">Q", n)
+        self.sock.sendall(frame + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(body)))
+        acc, op = b"", 0
+        while True:
+            head = self._read(2)
+            fin, code, length = head[0] & 0x80, head[0] & 0x0F, head[1] & 0x7F
+            if length == 126:
+                length = struct.unpack(">H", self._read(2))[0]
+            elif length == 127:
+                length = struct.unpack(">Q", self._read(8))[0]
+            data = self._read(length)
+            if code in (1, 2):
+                acc, op = data, code
+            elif code == 0:
+                acc += data
+            else:  # ping, pong, close — nothing this client has to answer
+                continue
+            if not fin or op != 1:
+                continue
+            msg = json.loads(acc)
+            # Events arrive unbidden on the same socket; wait for the reply.
+            if msg.get("id") == want:
+                if "error" in msg:
+                    raise IOError(msg["error"].get("message", "cdp error"))
+                return msg.get("result", {})
+
+
+def http(path):
+    with urllib.request.urlopen(BASE + path, timeout=3) as r:
+        return json.load(r)
+
+
+def windows():
+    """Every browser window, with the geometry and the page targets that answer for it.
+
+    A screenshot would prove nothing here — CDP renders a minimized or
+    off-screen window exactly as it renders a visible one — so the question is
+    answered twice over: the window rectangle against the screen the page says
+    it is on, and whether any tab in that window considers itself displayed.
+    Geometry alone misses a minimized window under WSLg, where Chrome keeps
+    reporting the state it had before; visibilityState alone would mistake a
+    background tab for a hidden window. Together they only agree on a window
+    nobody can see.
+    """
+    pages = [t for t in http("/json/list") if t.get("type") == "page"]
+    if not pages:
+        return []
+    browser = WS(http("/json/version")["webSocketDebuggerUrl"])
+    found = {}
+    for page in pages:
+        try:
+            window = browser.call("Browser.getWindowForTarget", {"targetId": page["id"]})
+            shown = WS(page["webSocketDebuggerUrl"]).call("Runtime.evaluate", {
+                "expression": "[screen.availLeft,screen.availTop,screen.availWidth,"
+                              "screen.availHeight,document.visibilityState]",
+                "returnByValue": True,
+            })["result"]["value"]
+        except (IOError, KeyError, OSError, TypeError):
+            continue
+        seat = found.setdefault(window["windowId"], {
+            "browser": browser,
+            "id": window["windowId"],
+            "bounds": window["bounds"],
+            "screen": shown[:4],
+            "page": page,
+            # A tab that cannot be asked must not count as an answer either way,
+            # so a window nothing answered for is left alone rather than moved.
+            "displayed": None,
+        })
+        if shown[4] == "visible":
+            seat["displayed"] = True
+            seat["page"] = page
+        elif seat["displayed"] is None:
+            seat["displayed"] = False
+    return list(found.values())
+
+
+def seen(window):
+    bounds, screen = window["bounds"], window["screen"]
+    if bounds.get("windowState") == "minimized" or window["displayed"] is False:
+        return False
+    left, top, width, height = (bounds["left"], bounds["top"],
+                                bounds["width"], bounds["height"])
+    if width <= 0 or height <= 0:
+        return False
+    sl, st, sw, sh = screen
+    over_w = max(0, min(left + width, sl + sw) - max(left, sl))
+    over_h = max(0, min(top + height, st + sh) - max(top, st))
+    return over_w * over_h >= ON_SCREEN * width * height
+
+
+def at_home(window):
+    """Visible, and on the monitor the launch aims at.
+
+    The screen comes from the page rather than from the window bounds because
+    that is the one number WSLg keeps honest. Bounds are reported in a desktop
+    space spanning both monitors and drift by the frame — a window at the left
+    edge of the second screen reads left 1926, not 1920 — whereas availLeft is
+    the origin of whichever screen the window is actually on, exactly.
+    """
+    return seen(window) and window["screen"][0] == HOME_SCREEN
+
+
+# open: put a URL in front of somebody, in the browser that is already running.
+#
+# A URL named on the command line has to go somewhere, and until this existed it
+# went nowhere unless the browser happened to be starting: the launch passed it
+# as an argument and every other path dropped it silently.
+#
+# Reusing a tab that already holds the URL is what keeps this runnable in a loop
+# without collecting duplicates of the same page. The comparison ignores a
+# trailing slash, since "/pro" and "/pro/" are one page to everyone but string
+# equality, but is otherwise exact — a query string or a fragment is a different
+# page and gets its own tab.
+# --tab: a feature's address for a session that is about to work in it, while
+# the window may well be in use for another feature. So nothing is raised and
+# nothing is navigated: a tab already on the same origin — the same feature,
+# any page of it — is enough, and a new one opens in the background.
+if sys.argv[1] == "tab":
+    url = sys.argv[2]
+    origin = "/".join(url.split("/")[:3])
+    try:
+        for tab in http("/json/list"):
+            if tab.get("type") == "page" and \
+                    "/".join(tab.get("url", "").split("/")[:3]) == origin:
+                print("present")
+                sys.exit(0)
+        browser = WS(http("/json/version")["webSocketDebuggerUrl"])
+        browser.call("Target.createTarget", {"url": url, "background": True})
+    except (IOError, OSError, KeyError, IndexError):
+        print("failed")
+        sys.exit(0)
+    print("opened")
+    sys.exit(0)
+
+if sys.argv[1] == "open":
+    url = sys.argv[2]
+    try:
+        browser = WS(http("/json/version")["webSocketDebuggerUrl"])
+        for tab in http("/json/list"):
+            if tab.get("type") != "page":
+                continue
+            if tab.get("url", "").rstrip("/") == url.rstrip("/"):
+                WS(tab["webSocketDebuggerUrl"]).call("Page.bringToFront")
+                break
+        else:
+            target = browser.call("Target.createTarget", {"url": url})["targetId"]
+            time.sleep(0.3)
+            for tab in http("/json/list"):
+                if tab["id"] == target:
+                    WS(tab["webSocketDebuggerUrl"]).call("Page.bringToFront")
+                    break
+    except (IOError, OSError, KeyError, IndexError):
+        print("failed")
+        sys.exit(0)
+    print("opened")
+    sys.exit(0)
+
+try:
+    found = windows()
+except (IOError, OSError, ValueError):
+    print("unknown")
+    sys.exit(1)
+
+# Checked after windows(), not before: it is windows() that pays for the CDP
+# round trips, and a display that died between two runs of this script is the
+# common case, not the one worth a socket connect on every call. Checked
+# before deciding what windows() found, though — geometry read off a dead
+# connection is not evidence of anything, home included.
+if not display_alive():
+    print("orphaned")
+    sys.exit(0)
+
+if not found:
+    print("none")
+    sys.exit(0)
+
+if sys.argv[1] == "probe":
+    if any(at_home(w) for w in found):
+        print("home")
+    elif any(seen(w) for w in found):
+        print("astray")
+    else:
+        print("hidden")
+    sys.exit(0)
+
+# front: the cheap case — a window already on the home screen, made prominent.
+#
+# Maximizing is not cosmetic here. It is the difference between the launch size
+# and the screen (1500x863 of viewport against 1908x900, measured), and it is
+# also what a window left small or shuffled aside by hand needs. Asking for it
+# when it is already maximized is a no-op, so it is unconditional.
+#
+# Page.bringToFront then switches tabs for real: the tab it names reports
+# visibilityState "visible" afterwards and the one that was in front reports
+# "hidden". What it cannot do is raise the window above other applications —
+# nothing exposed here can, the compositor being an RDP session that takes no
+# such request — so a browser behind your editor stays behind it.
+if sys.argv[1] == "front":
+    for window in found:
+        if not at_home(window):
+            continue
+        try:
+            window["browser"].call("Browser.setWindowBounds", {
+                "windowId": window["id"], "bounds": {"windowState": "maximized"}})
+            WS(window["page"]["webSocketDebuggerUrl"]).call("Page.bringToFront")
+        except (IOError, OSError, KeyError):
+            continue
+        print("fronted")
+        sys.exit(0)
+    print("failed")
+    sys.exit(0)
+
+# restore: put a stray window back on the home screen, and grow it there.
+#
+# Three calls, and the order and the pauses are the whole of it: leave whatever
+# state the window is in, move, then maximize the way a cold start does.
+#
+# **A maximized window ignores coordinates, and it does so silently.** That is
+# the one trap here, and it costs a restart to fall into: asked to move from the
+# second monitor while still maximized, a window answered without error, kept
+# reporting the width it had been given, and stayed exactly where it was — which
+# reads as "this compositor cannot move windows" and is not true. Dropping to
+# normal first is what makes the move land, and the drop needs its own pause,
+# because the move is refused by the state the window is still leaving.
+#
+# The move is then checked rather than trusted, since a refusal looks like a
+# success. Announcing "restored" at a window nobody can see is the exact failure
+# this whole file exists to avoid.
+#
+# The check has to wait too, and must not ask getWindowForTarget. Asked
+# immediately, that echoes the coordinates just requested whether or not
+# anything honoured them: a window measured at a real left of 6 answered 9000 to
+# a move it had ignored. screen.availLeft comes from the page and names the
+# screen the window actually landed on.
+for window in found:
+    if at_home(window):
+        continue
+    browser, window_id = window["browser"], window["id"]
+    page = WS(window["page"]["webSocketDebuggerUrl"])
+    sw, sh = window["screen"][2:]
+    try:
+        browser.call("Browser.setWindowBounds",
+                     {"windowId": window_id, "bounds": {"windowState": "normal"}})
+        time.sleep(0.5)
+        browser.call("Browser.setWindowBounds", {"windowId": window_id, "bounds": {
+            "left": HOME_SCREEN, "top": 0,
+            "width": max(800, sw // 2), "height": max(600, sh // 2)}})
+        time.sleep(0.8)
+        landed = page.call("Runtime.evaluate", {
+            "expression": "screen.availLeft", "returnByValue": True})["result"]["value"]
+        if landed != HOME_SCREEN:
+            continue
+        browser.call("Browser.setWindowBounds",
+                     {"windowId": window_id, "bounds": {"windowState": "maximized"}})
+        page.call("Page.bringToFront")
+    except (IOError, OSError, KeyError, TypeError):
+        continue
+    print("restored")
+    sys.exit(0)
+
+print("failed")
+PY
+}
+
+# Launching with a profile another process already holds is not a second
+# browser: Chrome hands the arguments to the running instance over the profile's
+# singleton socket and exits. That is what turns this one command into "open a
+# window" as well as "start the browser".
+launch() {
+  mkdir -p "$PROFILE" "$(dirname "$LOG")"
+
+  # setsid detaches it from this terminal's session, so closing the terminal — or
+  # restarting Claude Code — leaves the browser running.
+  #
+  # --test-type=gpu removes the "Chrome for Testing … is only for automated
+  # testing" bar, which costs 56px of every page. Chrome only skips that bar for
+  # the exact value "gpu" (chrome/browser/ui/startup/infobar_utils.cc), and any
+  # --test-type also suppresses the other startup bars.
+  #
+  # --window-position pins the monitor; --start-maximized would not, and that is
+  # the whole reason it is not used here. On a two-monitor WSLg session Chrome
+  # asks the compositor for a maximized window without naming a screen, and the
+  # RDP session hands it whichever monitor it currently considers active — so
+  # the window opens on the other screen, reports itself visible (it is), and
+  # the profile's saved placement never gets a say. Naming the position is what
+  # decides it, and 0 has to be the screen HOME_SCREEN names.
+  #
+  # The size is then still worth setting — the default window is only half the
+  # screen wide, 945x973 of viewport against 1908x960 maximized, measured here —
+  # so the launch is a placed window and `front` above grows it in place.
+  setsid nohup "$CHROME" \
+    --remote-debugging-port="$PORT" \
+    --user-data-dir="$PROFILE" \
+    --no-first-run \
+    --no-default-browser-check \
+    --test-type=gpu \
+    --window-position=0,0 \
+    --window-size=1500,950 \
+    "$URL" \
+    >"$LOG" 2>&1 </dev/null &
+  disown
+}
+
+stop() { pkill -f "user-data-dir=$PROFILE"; }
+
+# The usage lives in the header comment and is printed from there, so the two
+# cannot drift apart: editing one edits the other.
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  sed -n '3,19p' "$(readlink -f "$0")" | sed 's/^# \{0,1\}//'
+  exit 0
+fi
+
+if [ "${1:-}" = "--stop" ]; then
+  stop && echo "chrome-debug: stopped" || echo "chrome-debug: was not running"
+  exit 0
+fi
+
+# A running browser gets the tab and nothing else. One that is not running has
+# no window to leave alone, and an ordinary start with the URL is the answer.
+if [ "${1:-}" = "--tab" ]; then
+  [ -n "${2:-}" ] || { echo "chrome-debug: --tab needs a URL" >&2; exit 2; }
+  if alive; then
+    echo "chrome-debug: $(cdp tab "$2") $2"
+    exit 0
+  fi
+  set -- "$2"
+fi
+
+KEEP=
+if [ "${1:-}" = "--keep" ]; then
+  KEEP=1
+  shift
+fi
+
+# Whether a URL was asked for is a different question from what it is, and only
+# a launch can use the default. A running browser is sent the address only when
+# somebody named one: opening the home page on every bare run would add a tab a
+# turn to a browser that is already showing what was wanted.
+ASKED=${1:-}
+URL=${1:-$DEFAULT_URL}
+
+# A window that is merely somewhere is not the answer; every case below either
+# ends with one in front of you or says why it could not.
+if alive; then
+  case "$(cdp probe)" in
+    home)
+      # Already on the right monitor: grow it, raise it, and show what was asked
+      # for. `open` runs after `front` so the tab it raises is the one left in
+      # front, rather than being buried by the tab `front` chose.
+      cdp front >/dev/null
+      [ -n "$ASKED" ] && cdp open "$URL" >/dev/null
+      echo "chrome-debug: brought forward on port $PORT"
+      exit 0
+      ;;
+    astray|hidden)
+      # On the wrong screen, or nowhere useful. Moving it is the answer and
+      # normally works; the restart below is for when it does not.
+      if [ "$(cdp restore)" = "restored" ]; then
+        [ -n "$ASKED" ] && cdp open "$URL" >/dev/null
+        echo "chrome-debug: window was out of the way — restored on port $PORT"
+        exit 0
+      fi
+      if [ -n "$KEEP" ]; then
+        echo "chrome-debug: window is out of the way and would not move; --keep given, leaving it" >&2
+        exit 1
+      fi
+      # Nothing else reaches a window that will not move: the flags handed to a
+      # new process are the only other thing that places one. Chrome reopens the
+      # tabs from the profile's saved session, so this costs the seconds and the
+      # MCP server's attachment, not the work in them.
+      echo "chrome-debug: window is out of the way and would not move — restarting"
+      stop
+      # Wait for the profile lock to clear, or the new process hands its
+      # arguments to the old one over the singleton socket and exits.
+      for _ in $(seq 1 20); do alive || break; sleep 0.25; done
+      ;;
+    orphaned)
+      # The port still answers and the window may still look fine on paper,
+      # but the display it was drawing to is gone — WSLg restarted its
+      # compositor under it, typically because the host slept and resumed.
+      # `restore` moves a window by asking the same dead connection to
+      # relocate itself, which is not a fix here, so there is no cheaper step
+      # to try first: this is what stayed invisible until a `wsl --shutdown`.
+      if [ -n "$KEEP" ]; then
+        echo "chrome-debug: window is orphaned from a dead display; --keep given, leaving it" >&2
+        exit 1
+      fi
+      echo "chrome-debug: display restarted under the browser — restarting"
+      stop
+      for _ in $(seq 1 20); do alive || break; sleep 0.25; done
+      ;;
+    none)
+      echo "chrome-debug: running on port $PORT with no window — opening one"
+      ;;
+    *)
+      # No python, or the protocol did not answer. The port did, so say so and
+      # do nothing: an unnecessary window is worse than an unanswered question.
+      echo "chrome-debug: already running on port $PORT (could not check for a window)"
+      exit 0
+      ;;
+  esac
+fi
+
+if [ -z "$CHROME" ] || [ ! -x "$CHROME" ]; then
+  echo "chrome-debug: no browser under $HOME/.cache/ms-playwright, and no" >&2
+  echo "  google-chrome or chromium on PATH (CHROME_DEBUG_BIN names one outright)" >&2
+  # Not `npx playwright install`: run that way, Playwright sees it is not a
+  # project dependency, prints a banner and exits 0 without downloading a thing.
+  echo "Install one with: npm install -g playwright && playwright install chromium" >&2
+  exit 1
+fi
+
+launch
+
+# A cold start has to wait for the port; a window asked of a running instance is
+# there as soon as a page target is, and the launch flags settle after both, so
+# the same loop waits for a window that is actually where it should be.
+#
+# Bounded by the clock rather than by a count of turns, because the turns are
+# not the same length: `restore` sleeps over a second of its own waiting for the
+# compositor, so counting them once cost 68 seconds of a case that was never
+# going to converge. Fifteen is well past a cold start measured at about five.
+deadline=$((SECONDS + 15))
+while [ "$SECONDS" -lt "$deadline" ]; do
+  if alive; then
+    case "$(cdp probe)" in
+      home) cdp front >/dev/null; echo "chrome-debug: ready on port $PORT"; exit 0 ;;
+      astray|hidden)
+        [ "$(cdp restore)" = "restored" ] && { echo "chrome-debug: ready on port $PORT"; exit 0; } ;;
+      orphaned)
+        # The display died again during the wait — a fresh Chrome process
+        # cannot fix that, and looping on it would just restart forever.
+        echo "chrome-debug: display died again while starting up — see $LOG" >&2
+        exit 1 ;;
+      unknown|"") echo "chrome-debug: ready on port $PORT (could not check for a window)"; exit 0 ;;
+    esac
+  fi
+  sleep 0.5
+done
+
+echo "chrome-debug: did not come up — see $LOG" >&2
+exit 1
+}

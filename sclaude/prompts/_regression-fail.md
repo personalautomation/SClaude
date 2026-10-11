@@ -1,0 +1,17 @@
+**The regression failed and the step is not closed.** The run stopped on the part named below; the full output is in `.feature/regression.log`, and the failing part's section is the last one in it — read that before anything else.
+
+Fix the cause, not the symptom. A test that fails because the code is wrong is fixed in the code; a test that asserts something no longer true is fixed in the test, and then say so in the commit message. Deleting a spec, marking it skipped, or loosening an assertion until it passes are none of these — if a test looks genuinely wrong, that is a thing to say out loud rather than to quietly remove.
+
+Then run the regression again yourself before you say you are done: `sclaude` runs it at the gate anyway, and a fix that was never run is a guess. The command is the one printed in the log's `$` line for that part — unless production has been rolled back, in which case that line names a run against a release that is no longer serving your code, and the section above says which check to make instead.
+
+**If the cause is not in this tree, say so and change nothing.** Some failures are not the branch's: a deployed stage built before an environment variable changed, a bucket or a database the deployment points at and this worktree does not, a service that is down. The evidence for that is specific — the same specs pass locally against the same code, the diff touches nothing the failing specs exercise, the failure reproduces on a build made before this branch existed.
+
+When that is what you find, do not edit the code to make a red run go green. Write the finding to `.feature/regression.blocked` — what fails, what the cause is, what has to change and who can change it — and stop. One paragraph is enough; it is read by a human, not parsed.
+
+That file is an ending, not a failure. It tells the orchestrator that another fixing session would be spent on the same conclusion, so none is opened and the attempt is not counted against the two. What it must not become is an escape from a fix that is merely hard: if the cause is in reach of this worktree, it is yours, however tedious. Write the file when you have evidence, not when you are stuck.
+
+**How a fixing session ends — this, not the step's ending further down.** When your fix is committed and the run you made yourself is green, or when `.feature/regression.blocked` is written, `sclaude` closes this session itself and runs the regression again: that run, not your word, decides whether the fix holds. Write the marker first — `echo done > .feature/session-done` — then the report as your last message, with no tool call after it. About thirty seconds after your turn ends the session is closed and the report printed in the orchestrator's terminal; if I type anything in those thirty seconds, the closing is called off and the marker removed. Should the same part fail again, this conversation is resumed with the new log; another part failing gets a fresh session.
+
+The report is one message, and the last one: what the cause was and what you changed, or why the cause is outside this tree; what is left open; and where you departed from the approved plan or from the test as written, and why — "none" if none.
+
+If you could neither fix it nor show the cause is elsewhere, leave the marker out and say so: that is for me to decide, and I close the session myself. Leave it out too when your report proposes something for me to decide — a rule, an idea, a question: a session closed by `sclaude` takes the proposal with it, and nobody is there to answer.

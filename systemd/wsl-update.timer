@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily wsl-update run
+
+[Timer]
+# 10:00 local time. WSL is often switched off at that moment —
+# Persistent=true runs what was missed at the distribution's next start.
+OnCalendar=*-*-* 10:00:00
+Persistent=true
+# A spread, so the run does not land exactly on the moment WSL starts.
+RandomizedDelaySec=15min
+AccuracySec=1min
+Unit=wsl-update.service
+
+[Install]
+WantedBy=timers.target

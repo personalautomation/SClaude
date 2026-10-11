@@ -1,0 +1,40 @@
+[Unit]
+Description=Forwarding localhost:8080 to code-server in the tailnet
+Documentation=file:%h/instruments/README.md
+# There is nothing to proxy to until the server itself is up.
+Requires=code-server.service
+After=code-server.service
+Requires=code-server-local.socket
+After=code-server-local.socket
+
+[Service]
+Type=notify
+# code-server accepts only one --bind-addr, and two addresses are needed: one in
+# the tailnet for the phone and localhost for the Windows browser, which is not
+# in the tailnet — Tailscale runs inside WSL, and the 100.x tailnet address lives
+# on its interface.
+#
+# Raising a second code-server instance for this is pointless: it would take
+# memory and would keep a separate editor session. Binding to 0.0.0.0 with a
+# firewall rule was rejected deliberately — one mistake in the rules opens an
+# editor with filesystem access to the café's network.
+# Wait until code-server opens its port. Without this the first request after
+# idling was cut off: Requires brings the server up, but systemd considers it
+# started immediately, while the port opens a second or two later — there is
+# nothing to proxy to yet, and curl got an empty response. The second request
+# went through, but "press the link twice" is not behaviour worth keeping.
+# The address is read by the wrapper from ~/.config/code-server/config.yaml
+# rather than set here as a constant: it is tied to the node's address in the
+# tailnet, and that changes on re-registration. A hardcoded address would
+# survive the change silently — the bot's card would show the new one (it reads
+# the same config) while the forward connected to nowhere, and the failure would
+# only be visible as a dead 127.0.0.1:8080.
+ExecStart=%h/.local/bin/code-server-proxy
+PrivateTmp=yes
+
+# There is deliberately no [Install] section, as with code-server.service. What
+# needs enabling is the socket (code-server-local.socket), and it brings this
+# service up on first contact. With WantedBy=default.target the service would
+# start by itself at boot and drag code-server along through Requires= — exactly
+# what the absence of [Install] on it avoids: the server would end up running
+# unasked, and count_code_server would record a soft holder out of nowhere.

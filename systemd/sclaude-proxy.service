@@ -1,0 +1,12 @@
+[Unit]
+Description=Routes <feature>.localhost:3000 to that feature's dev server
+Documentation=file:%h/instruments/README.md
+Requires=sclaude-proxy.socket
+After=sclaude-proxy.socket
+
+[Service]
+ExecStart=%h/.local/bin/sclaude-proxy
+Restart=on-failure
+
+# No [Install] section, as with code-server-local.service: what is enabled is
+# the socket, and the first connection to :3000 brings this up.

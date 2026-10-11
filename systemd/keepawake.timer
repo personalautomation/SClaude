@@ -1,0 +1,19 @@
+[Unit]
+Description=Polling keepawake holders every minute
+
+[Timer]
+# Once a minute. The Windows idle window is 900 seconds and the warning goes
+# out at 1800: a minute leaves a fifteen- and thirty-fold margin, and being one
+# tick off does not bring it near the edge. Any rarer is not an option — the
+# state's staleness threshold (the same 900 seconds) would become just three
+# ticks, and a single run missed while the machine starts would look like WSL
+# had died.
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+# Persistent does harm here: catching up on missed runs is pointless, as the
+# state is determined by the present moment, not by history.
+Unit=keepawake.service
+
+[Install]
+WantedBy=timers.target

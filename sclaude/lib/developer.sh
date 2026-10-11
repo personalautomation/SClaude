@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+#
+# Which person is running this, and whether they maintain the orchestrator.
+#
+# Part of sclaude; pulled in with source from bin/sclaude.
+# It does not run on its own.
+#
+# sclaude was written for one person at one machine, and that showed as an
+# absence rather than an assumption: nothing anywhere asked who was at the
+# keyboard. Everything was keyed by the feature or by the repository. That holds
+# only while nobody shares anything — and a small team shares a database, a
+# preview deployment and this repository.
+#
+# environment.sh does not answer this. It says which database; two people on
+# the same shared database get the same answer from it and different answers
+# from here.
+#
+#   $SCLAUDE_DEV         explicit, and beats everything.
+#   git user.email       its local part. Already set on every machine that
+#                        commits, so nothing new has to be configured.
+#   nothing              an empty name, which is not an error.
+#
+# An empty name is today's behaviour exactly: no prefixes, no author field, the
+# friction review on the current branch. Same principle as project.sh — what is
+# absent is simply not done.
+#
+# Not cached. Callers take the name through $( ), and a command substitution is
+# a subshell: an assignment made there never reaches the caller, so a cache
+# would be refilled on every call anyway. `git config` costs a few milliseconds.
+
+# The raw address, from the orchestrator's own repository when it is known, so
+# a per-repository identity set there wins over the global one.
+developer_email() {
+  if [[ -n "${INSTRUMENTS:-}" && -d "$INSTRUMENTS" ]]; then
+    git -C "$INSTRUMENTS" config user.email 2>/dev/null || true
+  else
+    git config user.email 2>/dev/null || true
+  fi
+}
+
+# Reduces a name to what survives everywhere it is used: an email address
+# (pwtest-<dev>-…@example.com), a git branch (dev/<dev>) and a JSON field. A dot
+# or a slash from an address breaks the first two, so this is not cosmetic.
+developer_sanitize() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+}
+
+# The name, or nothing.
+developer_name() {
+  local raw="${SCLAUDE_DEV:-}"
+  if [[ -z "$raw" ]]; then
+    raw="$(developer_email)"
+    raw="${raw%%@*}"
+  fi
+  developer_sanitize "$raw"
+}
+
+# 0 when this person may commit the orchestrator straight to main.
+#
+# MAINTAINERS at the repository root lists addresses, one per line, `#` for
+# comments. With no file at all everybody is a maintainer — a copy used by one
+# person has nobody to be protected from. With the file present, an unknown or
+# empty address is not a maintainer: guessing yes would put a stranger's
+# friction fix on the main branch of everybody's orchestrator.
+developer_is_maintainer() {
+  local file="${INSTRUMENTS:-.}/MAINTAINERS" email
+  [[ -f "$file" ]] || return 0
+  email="$(developer_email | tr '[:upper:]' '[:lower:]')"
+  [[ -n "$email" ]] || return 1
+  sed -e 's/#.*//' -e 's/[[:space:]]//g' "$file" | tr '[:upper:]' '[:lower:]' \
+    | grep -qxF -- "$email"
+}

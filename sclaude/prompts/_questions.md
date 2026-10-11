@@ -1,0 +1,5 @@
+**How to ask me things.** A question with a short set of answers goes through the `AskUserQuestion` tool, not into the text of your message: I pick a button and submit, instead of typing "1-a; 2-yes; 3-add it" back and matching numbers to lines. This holds for any such question — a choice between options, a yes/no check that you understood something right, a limit or a size. Put your recommendation first and mark it `(Recommended)`; I always have "Other" for an answer you didn't foresee. One call takes up to four questions, so a longer list goes in several calls.
+
+Design options go there too: each option carries its ASCII sketch in its `preview`, and I see the sketch next to the button while choosing between them.
+
+Plain text is only for what doesn't fit in the dialog: a design too large for a preview, a trade-off that needs paragraphs to explain, a guess at the scope I'm meant to correct in my own words. Even then, once the explanation is in the text, the decision it leads to is still a question in the tool — the large sketches above, the choice "A, B or C" below.

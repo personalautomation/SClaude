@@ -1,0 +1,7 @@
+# Who may commit the sclaude orchestrator straight to main.
+#
+# One git user.email per line. Everybody else's friction reviews commit to
+# dev/<name> and reach main through a pull request. Read by
+# developer_is_maintainer in sclaude/lib/developer.sh; with this file absent,
+# everybody is a maintainer.
+33526551+personalautomation@users.noreply.github.com

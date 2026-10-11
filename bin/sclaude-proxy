@@ -1,0 +1,750 @@
+#!/usr/bin/env python3
+#
+# One address for every feature's dev server: http://<feature>.localhost:3000.
+#
+# Each feature's `next dev` listens on a port of its own (feature_port in
+# sclaude/lib/worktree.sh), and nobody is meant to remember those. This listens
+# on the one port everybody already knows and hands each connection to the
+# server the Host header names. Chrome resolves every *.localhost name to the
+# loopback by itself, so no DNS or hosts file is involved — and a different host
+# is also what keeps two features' cookies apart, which different ports alone
+# would not: cookies ignore the port.
+#
+#   <feature>.localhost:3000    that feature's dev server
+#   localhost:3000 (any host)   the feature the `sclaude_feature` cookie names,
+#                               or the list of features to choose from
+#   /__sclaude/                 the list, whatever the host
+#
+# Which feature lives where is read, never remembered. sclaude links
+# ~/.claude/sclaude/dev/<feature> to the worktree, and the worktree's
+# .feature/state.json holds the port. Nothing here has state to clean up after
+# a crash: a feature whose server is down is listed as not running, and a link
+# to a tree that is gone is skipped.
+#
+# Routing is per connection, by its first request. A browser does not carry
+# requests for two hosts over one HTTP/1.1 connection, so the first Host is the
+# Host of the whole connection, and after it the bytes are only copied both
+# ways. That is also why a WebSocket (Next's HMR) needs no code of its own: its
+# upgrade is a request like any other, and what follows it is more bytes.
+# The one place a connection could change its mind is the cookie. Every page of
+# this proxy closes its connection, and so does every request routed by the
+# cookie — the server is asked to close after answering (close_after) — so
+# pooled connections, a browser's or `tailscale serve`'s, never carry a request
+# to the feature the cookie named a moment ago.
+#
+# Started by systemd through sclaude-proxy.socket, which owns the port. Run by
+# hand it binds the port itself:
+#
+#   sclaude-proxy               listen on SCLAUDE_PROXY_PORT (3000)
+#
+# A feature nobody is running is started on the first request for it, and one
+# nobody has looked at for SCLAUDE_DEV_IDLE seconds (half an hour) is stopped,
+# its database with it — both through `sclaude dev`, so the proxy decides only
+# when and never how. A feature is never stopped while anything is working in
+# its tree: a claude session, a regression, a person's shell.
+#
+# SCLAUDE_PROXY_BIND moves it off 0.0.0.0, SCLAUDE_DEV_REGISTRY off the real
+# registry, SCLAUDE_BIN to a stand-in for sclaude, SCLAUDE_PROXY_TICK to a
+# faster idle check and SCLAUDE_PROXY_BUILD_GRACE to a shorter wait for a first
+# build — for the tests.
+import asyncio
+import html
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+from urllib.parse import parse_qs, urlsplit
+
+# realpath, not just abspath: install.sh symlinks this file into
+# ~/.local/bin, and resolving through that link is how "../sclaude/lib" still
+# finds the repo rather than ~/.local/sclaude/lib, which does not exist.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                                "..", "sclaude", "lib"))
+import feature_db  # noqa: E402 — PORT_SLOTS, the single source of truth
+
+PORT = int(os.environ.get("SCLAUDE_PROXY_PORT") or 3000)
+BIND = os.environ.get("SCLAUDE_PROXY_BIND") or "0.0.0.0"
+REGISTRY = os.environ.get("SCLAUDE_DEV_REGISTRY") or os.path.expanduser(
+    "~/.claude/sclaude/dev")
+COOKIE = "sclaude_feature"
+# A request head larger than this is not a browser's.
+HEAD_LIMIT = 64 * 1024
+LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+IDLE = int(os.environ.get("SCLAUDE_DEV_IDLE") or 1800)
+TICK = float(os.environ.get("SCLAUDE_PROXY_TICK") or 60)
+SCLAUDE = os.environ.get("SCLAUDE_BIN") or "sclaude"
+# A start that has run this long without the server answering has failed, even
+# if the process is still there. A cold feature — a new database, a first
+# build — is well inside it.
+START_LIMIT = 600
+# `sclaude dev` returns once the server is launched, not once it answers: a
+# first build keeps the port shut a while longer. This is how long a finished
+# start is still "starting" rather than "failed".
+BUILD_GRACE = float(os.environ.get("SCLAUDE_PROXY_BUILD_GRACE") or 180)
+
+# Per feature label: the `sclaude dev` that is starting it and when, the one
+# stopping it, and when a connection for it was last opened. In memory only: a
+# restarted proxy forgets them, which costs one idle period of patience.
+STARTING = {}
+STOPPING = {}
+LAST_SEEN = {}
+
+
+def feature(label):
+    """(worktree, dev port, db.base) for a feature, or None when it is not
+    registered.
+
+    A link to a tree that is gone is no feature: sclaude clears such links on
+    its next claim, and until then they are skipped. The dev port is None when
+    the tree has none recorded or its state cannot be read; db.base is None
+    the same way, and for main, which has none — its stack is the shared one,
+    on the ports its own config names rather than a block of its own."""
+    if not LABEL.match(label):
+        return None
+    link = os.path.join(REGISTRY, label)
+    if not os.path.islink(link):
+        return None
+    wt = os.path.realpath(link)
+    state = os.path.join(wt, ".feature", "state.json")
+    if not os.path.isfile(state):
+        return None
+    # A tree being removed: sclaude has stopped its server on purpose, and a
+    # lazy start here would bring it back into a directory git is deleting.
+    if os.path.exists(os.path.join(wt, ".feature", "closing")):
+        return None
+    try:
+        with open(state) as fh:
+            data = json.load(fh)
+        port = (data.get("dev") or {}).get("port")
+        base = (data.get("db") or {}).get("base")
+    except (OSError, ValueError, AttributeError):
+        port = base = None
+    return (wt, port if isinstance(port, int) else None,
+            base if isinstance(base, int) else None)
+
+
+def features():
+    try:
+        names = sorted(os.listdir(REGISTRY))
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        found = feature(name)
+        if found:
+            out.append((name,) + found)
+    return out
+
+
+# --- a feature's own Supabase -------------------------------------------------
+#
+# Alongside the dev server, a feature working against the project's local
+# stack (featuredb.sh) has web UIs of its own: Supabase Studio and the
+# Inbucket mail catcher, each on a port ten apart from the others in the
+# feature's block (feature_db.PORT_SLOTS — the same map that lays the block
+# out in the first place, so a slot moved there never goes stale here). main
+# has no block — it runs the one local stack everybody shares, on the ports
+# supabase/config.toml itself names. Both are read, never remembered, same as
+# a feature's dev port: a stack that was never started, or whose config does
+# not enable a UI, has no port to show and is left out.
+#
+# Kept to the two that are worth opening in a browser. The API port (Kong) is
+# an endpoint for curl/fetch, not a page, and Analytics needs Logflare
+# credentials nobody has here — both would just be dead links.
+SERVICE_NAMES = {"studio": "Studio", "local_smtp": "Inbucket", "inbucket": "Inbucket"}
+SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*(#.*)?$")
+ENABLED_RE = re.compile(r"^\s*enabled\s*=\s*(true|false)\s*(#.*)?$")
+PORT_RE = re.compile(r"^\s*port\s*=\s*(\d+)\s*(#.*)?$")
+NOT_SET = object()
+
+
+def config_ports(config_path):
+    """{section: port} of every enabled section in a supabase/config.toml that
+    SERVICE_NAMES cares about, read directly rather than through the CLI —
+    this runs once per page load and must not shell out.
+
+    A section with no `port` line at all is as absent as one that is
+    disabled; `port = 0` is not — NOT_SET tells the two apart, where a bare
+    truthiness check on the port would wrongly drop the second."""
+    try:
+        with open(config_path) as fh:
+            text = fh.read()
+    except OSError:
+        return {}
+    section, enabled, port, out = None, True, NOT_SET, {}
+
+    def flush():
+        if section in SERVICE_NAMES and enabled and port is not NOT_SET:
+            out[section] = port
+
+    for line in text.splitlines():
+        m = SECTION_RE.match(line)
+        if m:
+            flush()
+            section, enabled, port = m.group(1), True, NOT_SET
+            continue
+        m = ENABLED_RE.match(line)
+        if m and section is not None:
+            enabled = m.group(1) == "true"
+            continue
+        m = PORT_RE.match(line)
+        if m and section is not None:
+            port = int(m.group(1))
+    flush()
+    return out
+
+
+def services(label, wt, base):
+    """[(name, port)] of a feature's — or main's — own Studio and Inbucket.
+
+    `base` is None for main and for a feature with no database block of its
+    own (sharing the main local database); either way there is nothing to
+    offer. Otherwise the ports are `base + slot` for a feature, or the
+    literal ports its own config.toml names for main, which has no block."""
+    ports = config_ports(os.path.join(wt, "supabase", "config.toml"))
+    seen, out = set(), []
+    for section, name in SERVICE_NAMES.items():
+        slot = feature_db.PORT_SLOTS.get((section, "port"))
+        if section not in ports or slot is None or slot in seen:
+            continue
+        seen.add(slot)
+        if label == "main":
+            out.append((name, ports[section]))
+        elif base is not None:
+            out.append((name, base + slot))
+    return out
+
+
+def answers(port):
+    if not port:
+        return False
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
+def parse_head(head):
+    """(method, target, {lowercased header: value}) of a request head."""
+    lines = head.decode("latin-1").split("\r\n")
+    parts = lines[0].split(" ")
+    headers = {}
+    for line in lines[1:]:
+        name, sep, value = line.partition(":")
+        if sep:
+            headers[name.strip().lower()] = value.strip()
+    return (parts[0] if parts else ""), (parts[1] if len(parts) > 1 else "/"), headers
+
+
+def host_label(host):
+    """The feature a Host header names, or "" for a host that names none."""
+    name = host.rsplit(":", 1)[0] if not host.startswith("[") else ""
+    name = name.lower().rstrip(".")
+    if name.endswith(".localhost"):
+        return name[: -len(".localhost")].rsplit(".", 1)[-1]
+    return ""
+
+
+def cookie_label(header):
+    for part in header.split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == COOKIE:
+            return value.strip()
+    return ""
+
+
+def is_local(host):
+    name = host.rsplit(":", 1)[0].lower()
+    return name in ("localhost", "127.0.0.1", "[::1]") or name.endswith(".localhost")
+
+
+# --- the proxy's own pages ---------------------------------------------------
+
+STYLE = """
+body{font:15px/1.5 system-ui,sans-serif;margin:0;padding:24px 16px;
+background:#fafaf9;color:#1c1917}
+main{max-width:720px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}
+p{color:#57534e;margin:0 0 16px}
+table{width:100%;border-collapse:collapse}
+td{padding:8px 6px;border-top:1px solid #e7e5e4;vertical-align:top}
+td.path{color:#78716c;font-size:13px;word-break:break-all}
+td.sub{padding-left:22px;font-size:13px}
+.up{color:#15803d}.down{color:#a8a29e}
+a{color:#1d4ed8}
+code{font-size:13px}
+pre{font-size:12px;background:#f5f5f4;padding:8px 10px;border-radius:6px;
+white-space:pre-wrap;word-break:break-all}
+@media (prefers-color-scheme:dark){body{background:#1c1917;color:#f5f5f4}
+p,td.path{color:#a8a29e}td{border-color:#44403c}a{color:#93c5fd}.up{color:#4ade80}
+pre{background:#292524}}
+"""
+
+
+def page(title, body):
+    return ("<!doctype html><html><head><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<title>%s</title><style>%s</style></head><body><main>%s</main>"
+            "</body></html>" % (html.escape(title), STYLE, body))
+
+
+def probe_features():
+    """[(label, wt, live dev server?, [(name, port), …live services])] — every
+    blocking connect() a listing needs, gathered in one pass off the event
+    loop (see gather_listing). A feature's own services are probed only once
+    each, same cost `answers` already pays for the dev server itself."""
+    out = []
+    for label, wt, fport, base in features():
+        live = [(name, sport) for name, sport in services(label, wt, base)
+                if answers(sport)]
+        out.append((label, wt, answers(fport), live))
+    return out
+
+
+def listing(host, probed, note=""):
+    """The rendered page from `probed` (probe_features()'s result) — pure
+    string building, no I/O, so it is safe to call straight from the event
+    loop once the blocking work is done."""
+    local = is_local(host)
+    port = host.rsplit(":", 1)[1] if ":" in host and not host.endswith("]") else ""
+    rows = []
+    for label, wt, live, live_services in probed:
+        if local:
+            href = "http://%s.localhost%s/" % (label, ":" + port if port else "")
+        else:
+            href = "/__sclaude/select?f=%s" % label
+        rows.append(
+            "<tr><td><a href='%s'>%s</a></td><td class='%s'>%s</td>"
+            "<td class=path>%s</td></tr>" % (
+                html.escape(href), html.escape(label),
+                "up" if live else "down",
+                "running" if live else "not running",
+                html.escape(wt)))
+        for name, sport in live_services:
+            rows.append(
+                "<tr><td class=sub><a href='http://127.0.0.1:%d/'>%s — %s</a></td>"
+                "<td class=up>running</td><td class=path></td></tr>" % (
+                    sport, html.escape(label), html.escape(name)))
+    table = ("<table>%s</table>" % "".join(rows)) if rows else \
+        "<p>No feature has a dev server registered yet.</p>"
+    hint = ("<p>Opening a feature that is not running starts it. One nobody has "
+            "opened for a while is stopped again, its database with it.</p>")
+    lead = "<p>%s</p>" % html.escape(note) if note else ""
+    return page("Features", "<h1>Features</h1>%s%s%s" % (lead, table, hint))
+
+
+async def gather_listing(host, note=""):
+    """listing(), with every socket probe run in a worker thread — the same
+    move idle_features makes and for the same reason: on the event loop this
+    is one page load blocking every proxied connection, HMR sockets included,
+    for as long as the slowest of N features' dev port and two services take
+    to time out."""
+    return listing(host, await asyncio.to_thread(probe_features), note)
+
+
+# --- starting and stopping ---------------------------------------------------
+
+def run_env():
+    """The environment for `sclaude dev`: the PATH of the shell that last ran it.
+
+    Under systemd this process has none of that shell's PATH — no nvm, so no
+    node, npm or npx, and possibly no sclaude. sclaude leaves its own PATH in
+    the registry each time it starts a server (ensure_dev)."""
+    env = dict(os.environ)
+    for name in ("LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES"):
+        env.pop(name, None)
+    try:
+        with open(os.path.join(REGISTRY, ".path")) as fh:
+            path = fh.read().strip()
+        if path:
+            env["PATH"] = path
+    except OSError:
+        pass
+    return env
+
+
+class NotStarted:
+    """A start that could not even be launched — no sclaude on the PATH, a log
+    that cannot be opened. Behaves as a process that has already failed, so
+    the page says so once instead of the connection dying on every reload."""
+
+    pid = -1
+
+    def __init__(self, reason):
+        self.reason = reason
+
+    def poll(self):
+        return 127
+
+
+def spawn(wt, args):
+    log = os.path.join(wt, ".feature", "lazy-start.log")
+    try:
+        with open(log, "ab") as out:
+            out.write(("\n$ sclaude dev %s  (%s)\n" % (" ".join(args), time.strftime("%F %T"))).encode())
+            out.flush()
+            return subprocess.Popen([SCLAUDE, "dev"] + args, cwd=wt, env=run_env(),
+                                    stdin=subprocess.DEVNULL, stdout=out,
+                                    stderr=subprocess.STDOUT, start_new_session=True)
+    except OSError as exc:
+        return NotStarted("could not run `%s dev %s`: %s" % (SCLAUDE, " ".join(args), exc))
+
+
+def start_state(label, wt):
+    """'starting' or 'failed' for a feature whose server does not answer.
+
+    Starts it the first time it is asked, and once only: every request after
+    that finds the start already running. A start that failed stays failed
+    until somebody asks again through /__sclaude/start — retrying on every
+    request would restart a broken build in a loop.
+
+    One case looks like a failure and is not: a start that succeeded long ago
+    whose server has since been stopped — from the bot, or by hand — without
+    a request through here in between to clear it. That is started again, once;
+    a server that goes quiet twice in a row after a clean start is a failure."""
+    now = time.time()
+    tries = 0
+    entry = STARTING.get(label)
+    if entry:
+        proc, since, tries = entry
+        code = proc.poll()
+        if code is None and now - since < START_LIMIT:
+            return "starting"
+        if code == 0 and now - since < BUILD_GRACE:
+            return "starting"
+        if code != 0 or tries >= 2:
+            return "failed"
+    STOPPING.pop(label, None)
+    STARTING[label] = (spawn(wt, ["--no-browser"]), now, tries + 1)
+    return "starting"
+
+
+def log_tail(wt, lines=15):
+    try:
+        with open(os.path.join(wt, ".feature", "lazy-start.log"), "rb") as fh:
+            fh.seek(0, 2)
+            fh.seek(max(0, fh.tell() - 8192))
+            text = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    return "\n".join(text.rstrip().split("\n")[-lines:])
+
+
+# X-Sclaude-Proxy says a 503 or 502 is this page and not the application's
+# own, passed through: social's Playwright global setup (waitForProxyStart)
+# waits on "starting" and stops on "failed", and nothing else.
+def status_page(label, wt, state):
+    tail = log_tail(wt)
+    entry = STARTING.get(label)
+    if entry and isinstance(entry[0], NotStarted):
+        tail = entry[0].reason
+    tail = html.escape(tail)
+    if state == "starting":
+        body = ("<h1>Starting %s…</h1><p>Its dev server was not running, so it is "
+                "being started now. A feature's first start also builds its "
+                "database and its pages: about a minute. This page reloads by "
+                "itself.</p>" % html.escape(label))
+        extra = ("Retry-After: 2", "X-Sclaude-Proxy: starting")
+        title, status = "Starting", "503 Service Unavailable"
+        refresh = "<meta http-equiv=refresh content=2>"
+    else:
+        body = ("<h1>%s did not start</h1><p><a href='/__sclaude/start?f=%s'>Try "
+                "again</a>, or run <code>sclaude dev %s</code> in a terminal to "
+                "see why.</p>" % (html.escape(label), html.escape(label), html.escape(label)))
+        extra = ("X-Sclaude-Proxy: failed",)
+        title, status, refresh = "Not started", "502 Bad Gateway", ""
+    if tail:
+        body += "<pre>%s</pre>" % tail
+    text = page(title, body).replace("<head>", "<head>" + refresh, 1)
+    return respond(status, text, extra)
+
+
+# --- stopping the idle --------------------------------------------------------
+#
+# The check runs in a worker thread: it reads all of /proc and runs `ss`, and
+# on the event loop that would stall every proxied connection — HMR sockets and
+# page loads of every feature — for the length of it. The thread gets a
+# snapshot of what the loop knows and returns the features to stop; the loop
+# alone touches STARTING and STOPPING and starts processes.
+
+def listeners():
+    """{port: set of process groups listening on it}, from one `ss` run."""
+    try:
+        out = subprocess.run(["ss", "-ltnpH"], capture_output=True, text=True,
+                             timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    groups = {}
+    for line in out.splitlines():
+        cols = line.split()
+        if len(cols) < 4:
+            continue
+        port = cols[3].rsplit(":", 1)[-1]
+        if not port.isdigit():
+            continue
+        for pid in re.findall(r"pid=(\d+)", line):
+            try:
+                groups.setdefault(int(port), set()).add(os.getpgid(int(pid)))
+            except OSError:
+                pass
+    return groups
+
+
+def working_dirs():
+    """[(pid, pgid, cwd)] of every process whose directory can be read, from
+    one pass over /proc."""
+    out = []
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        try:
+            out.append((pid, os.getpgid(pid), os.readlink("/proc/%d/cwd" % pid)))
+        except OSError:
+            continue
+    return out
+
+
+def busy(root, server_groups, processes, mine):
+    """Is anything but the server itself working in this tree?
+
+    A claude session, a regression, a person's shell: each has its working
+    directory in the tree. The server has too, so its own process group is left
+    out — along with anything the proxy itself started there."""
+    for pid, pgid, cwd in processes:
+        if cwd != root and not cwd.startswith(root + "/"):
+            continue
+        if pgid in server_groups or pid in mine:
+            continue
+        return True
+    return False
+
+
+def idle_features(snapshot):
+    """The features to stop: (label, wt). Runs off the event loop.
+
+    `snapshot` is what the loop knew when the tick began: last connections,
+    start times, which starts and stops are still running, the pids it
+    started."""
+    now = time.time()
+    candidates = []
+    for label, wt, port, _base in features():
+        if label in snapshot["running"] or not answers(port):
+            continue
+        seen = [snapshot["seen"].get(label, 0.0), snapshot["started"].get(label, 0.0)]
+        try:
+            seen.append(os.path.getmtime(os.path.join(wt, ".feature", "dev.log")))
+        except OSError:
+            pass
+        if now - max(seen) >= IDLE:
+            candidates.append((label, wt, port))
+    if not candidates:
+        return []
+    groups = listeners()
+    processes = working_dirs()
+    return [(label, wt) for label, wt, port in candidates
+            if not busy(os.path.realpath(wt), groups.get(port, set()), processes,
+                        snapshot["mine"])]
+
+
+async def reaper():
+    while True:
+        await asyncio.sleep(TICK)
+        try:
+            snapshot = {
+                "seen": dict(LAST_SEEN),
+                "started": {k: v[1] for k, v in STARTING.items()},
+                "running": {k for k, v in STARTING.items() if v[0].poll() is None}
+                           | {k for k, p in STOPPING.items() if p.poll() is None},
+                "mine": {v[0].pid for v in STARTING.values()} | {p.pid for p in STOPPING.values()},
+            }
+            for label, wt in await asyncio.to_thread(idle_features, snapshot):
+                # Asked for again while the check ran: not idle after all.
+                if LAST_SEEN.get(label, 0.0) > max(snapshot["seen"].get(label, 0.0), 0.0):
+                    continue
+                STARTING.pop(label, None)
+                STOPPING[label] = spawn(wt, ["--stop"])
+        except Exception as exc:  # the proxy must outlive a bad tick
+            sys.stderr.write("sclaude-proxy: idle check failed: %s\n" % exc)
+
+
+def respond(status, body, extra=()):
+    data = body.encode("utf-8")
+    head = ["HTTP/1.1 %s" % status,
+            "Content-Type: text/html; charset=utf-8",
+            "Content-Length: %d" % len(data),
+            "Cache-Control: no-store",
+            # Every page of ours closes its connection: see the note at the top
+            # on why the next request must be routed afresh.
+            "Connection: close"]
+    head.extend(extra)
+    return ("\r\n".join(head) + "\r\n\r\n").encode("latin-1") + data
+
+
+async def own_page(target, host):
+    """The response to a /__sclaude/ request."""
+    url = urlsplit(target)
+    if url.path == "/__sclaude/select":
+        label = (parse_qs(url.query).get("f") or [""])[0]
+        if not feature(label):
+            return respond("404 Not Found",
+                           await gather_listing(host, "No such feature: %s" % label))
+        return respond("303 See Other", "", (
+            "Location: /",
+            "Set-Cookie: %s=%s; Path=/; SameSite=Lax" % (COOKIE, label)))
+    if url.path == "/__sclaude/ping":
+        # What sclaude asks many times a step: is the proxy here? The list
+        # would answer too, but it probes every feature's port to draw itself.
+        return respond("200 OK", "sclaude-proxy")
+    if url.path == "/__sclaude/start":
+        # A failed start is not retried on its own; this is the retry.
+        label = (parse_qs(url.query).get("f") or [""])[0]
+        found = feature(label)
+        if not found:
+            return respond("404 Not Found",
+                           await gather_listing(host, "No such feature: %s" % label))
+        STARTING.pop(label, None)
+        start_state(label, found[0])
+        local = is_local(host)
+        port = host.rsplit(":", 1)[1] if ":" in host and not host.endswith("]") else ""
+        target = ("http://%s.localhost%s/" % (label, ":" + port if port else "")) if local else "/"
+        return respond("303 See Other", "", ("Location: %s" % target,))
+    if url.path == "/__sclaude/clear":
+        return respond("303 See Other", "", (
+            "Location: /__sclaude/",
+            "Set-Cookie: %s=; Path=/; Max-Age=0; SameSite=Lax" % COOKIE))
+    return respond("200 OK", await gather_listing(host))
+
+
+# --- the connection ----------------------------------------------------------
+
+async def pipe(reader, writer):
+    try:
+        while True:
+            chunk = await reader.read(65536)
+            if not chunk:
+                break
+            writer.write(chunk)
+            await writer.drain()
+    except (ConnectionError, OSError):
+        pass
+    finally:
+        try:
+            if writer.can_write_eof():
+                writer.write_eof()
+        except (OSError, RuntimeError):
+            pass
+
+
+def close_after(head):
+    """A request head with its connection set to close after the response."""
+    lines = head.decode("latin-1").split("\r\n")
+    kept = [line for line in lines[1:] if line and not line.lower().startswith(
+        ("connection:", "keep-alive:", "proxy-connection:"))]
+    return ("\r\n".join([lines[0]] + kept + ["Connection: close", "", ""])).encode("latin-1")
+
+
+async def handle(reader, writer):
+    upstream = None
+    try:
+        try:
+            head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 30)
+        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError,
+                asyncio.TimeoutError, ConnectionError):
+            return
+        method, target, headers = parse_head(head)
+        host = headers.get("host", "")
+
+        if target.startswith("/__sclaude/") or target == "/__sclaude":
+            writer.write(await own_page(target, host))
+            await writer.drain()
+            return
+
+        label = host_label(host)
+        by_cookie = False
+        if not label:
+            label = cookie_label(headers.get("cookie", ""))
+            by_cookie = bool(label)
+        if not label:
+            writer.write(respond("200 OK", await gather_listing(host)))
+            await writer.drain()
+            return
+
+        found = feature(label)
+        if not found:
+            writer.write(respond("404 Not Found",
+                                 await gather_listing(host, "No such feature: %s" % label)))
+            await writer.drain()
+            return
+        wt, port, _base = found
+        try:
+            if not port:
+                raise OSError("no port recorded")
+            up_reader, upstream = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", port), 5)
+        except (OSError, asyncio.TimeoutError):
+            writer.write(status_page(label, wt, start_state(label, wt)))
+            await writer.drain()
+            return
+
+        LAST_SEEN[label] = time.time()
+        STARTING.pop(label, None)
+        # A connection routed by the cookie carries one request. The routing is
+        # decided once per connection, and a bare host is where the cookie
+        # changes: a browser's pooled connections, and those `tailscale serve`
+        # keeps to this port for every phone, would otherwise carry the next
+        # request — after a switch to another feature — to this one. So the
+        # server is asked to close after answering, and the next request comes
+        # on a fresh connection and is routed afresh. A WebSocket upgrade is
+        # left alone: it is one long exchange by design.
+        if by_cookie and headers.get("upgrade", "").lower() != "websocket":
+            head = close_after(head)
+        upstream.write(head)
+        await asyncio.gather(pipe(reader, upstream), pipe(up_reader, writer))
+    finally:
+        for w in (upstream, writer):
+            if w is not None:
+                try:
+                    w.close()
+                except (OSError, RuntimeError):
+                    pass
+
+
+def listening_socket():
+    """systemd's socket when started by sclaude-proxy.socket, else our own."""
+    if os.environ.get("LISTEN_PID") == str(os.getpid()) \
+            and int(os.environ.get("LISTEN_FDS") or 0) >= 1:
+        sock = socket.socket(fileno=3)
+        sock.setblocking(False)
+        return sock
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((BIND, PORT))
+    sock.listen(128)
+    sock.setblocking(False)
+    return sock
+
+
+async def main():
+    server = await asyncio.start_server(handle, sock=listening_socket(),
+                                        limit=HEAD_LIMIT)
+    idle = asyncio.ensure_future(reaper())
+    try:
+        async with server:
+            await server.serve_forever()
+    finally:
+        idle.cancel()
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
+    except OSError as exc:
+        sys.stderr.write("sclaude-proxy: %s\n" % exc)
+        sys.exit(1)

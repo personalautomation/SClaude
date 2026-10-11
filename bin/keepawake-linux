@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+#
+# The holding side of keepawake on a plain Linux machine — what KeepAwake.ps1 is
+# on Windows.
+#
+# bin/keepawake decides; this executes. Every 30 seconds it reads the state file
+# and asks state.should_hold — the same function whose word-for-word twin lives
+# in KeepAwake.ps1 — and while the answer is yes it keeps a `systemd-inhibit`
+# lock: on sleep, idle and the lid switch where logind allows it, on idle alone
+# where it does not (see WHAT below). When
+# the answer turns to no, or the state goes stale, the lock is dropped and the
+# machine sleeps by its own rules again.
+#
+# The log lines are the Windows side's, word for word: "hold set", "hold
+# released", "holding". `keepawake status` greps for exactly those, so they are
+# coupled strings (see CLAUDE.md) — change them together or not at all.
+#
+#   keepawake-linux          run the loop (what keepawake-linux.service calls)
+#
+# Run by systemd as a user service; one instance at a time.
+import fcntl
+import os
+import signal
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+from keepawake import state  # noqa: E402
+
+POLL_SECONDS = 30
+LOG_EVERY_SECONDS = 600
+LOG_MAX_BYTES = 1024 * 1024
+
+# What is held, most first. logind's default polkit policy grants blocking
+# sleep and the lid switch only to a process inside a login session
+# (allow_any=no), and a user service under linger is in none — so as installed
+# it is refused both and gets idle alone, which still stops the idle timer from
+# suspending the machine under remote work but not a closed lid or an explicit
+# suspend. The polkit rule in the README grants the rest; with it the full set
+# is taken. Holding something beats holding nothing because one part was
+# refused.
+WHAT = ("sleep:idle:handle-lid-switch", "sleep:idle", "idle")
+
+
+def inhibit_command(what):
+    # KEEPAWAKE_INHIBIT is for the tests: a stand-in that behaves like the lock
+    # without asking logind for anything.
+    override = os.environ.get("KEEPAWAKE_INHIBIT")
+    if override:
+        return [override, what]
+    return ["systemd-inhibit", "--what=" + what, "--who=keepawake",
+            "--why=work in progress (keepawake)", "--mode=block",
+            "sleep", "infinity"]
+
+
+def log(message):
+    path = state.hold_log_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.exists(path) and os.path.getsize(path) > LOG_MAX_BYTES:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                tail = fh.readlines()[-200:]
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.writelines(tail)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("%s  %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), message))
+    except OSError:
+        pass
+
+
+def until_label(data):
+    until = data.get("until_ts") or 0
+    return time.strftime("%H:%M", time.localtime(until)) if until else "?"
+
+
+class Holder:
+    """The lock and what has been said about it. tick() is one pass of the loop."""
+
+    def __init__(self):
+        self.child = None
+        self.broken = False       # report a refusal once, not every 30 seconds
+        self.logged_until = 0
+        self.last_log = 0
+        self.what = None
+        self.said_partial = False  # the "idle only" note, once per process
+
+    def holding(self):
+        return self.child is not None and self.child.poll() is None
+
+    def acquire(self):
+        self.what = None
+        for what in WHAT:
+            try:
+                child = subprocess.Popen(inhibit_command(what),
+                                         stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.DEVNULL,
+                                         stderr=subprocess.DEVNULL,
+                                         start_new_session=True)
+            except OSError:
+                continue
+            # A refusal from logind ends the process at once; a granted lock
+            # keeps it waiting on `sleep infinity`.
+            time.sleep(1)
+            if child.poll() is None:
+                self.child = child
+                self.what = what
+                return True
+        return False
+
+    def release(self):
+        if self.child is None:
+            return
+        try:
+            os.killpg(self.child.pid, signal.SIGTERM)
+        except OSError:
+            pass
+        try:
+            self.child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(self.child.pid, signal.SIGKILL)
+            except OSError:
+                pass
+        self.child = None
+
+    def tick(self, now=None):
+        now = int(time.time()) if now is None else now
+        data = state.read()
+        want = state.should_hold(data, now)
+
+        if want and not self.holding():
+            # Either a fresh hold or a lock that died under us; both are a
+            # "hold set", because from here on the machine is held again.
+            if self.acquire():
+                self.broken = False
+                if data.get("hard_hold"):
+                    log("hold set: a person is at the machine")
+                else:
+                    log("hold set, until %s" % until_label(data))
+                if self.what != WHAT[0] and not self.said_partial:
+                    self.said_partial = True
+                    log("NOTE: logind granted only '%s'; a closed lid or an "
+                        "explicit suspend still sleeps. The polkit rule in the "
+                        "README grants the rest." % self.what)
+                self.logged_until = data.get("until_ts") or 0
+                self.last_log = now
+            elif not self.broken:
+                self.broken = True
+                log("ERROR: systemd-inhibit refused every lock (%s)" % ", ".join(WHAT))
+        elif not want and self.child is not None:
+            self.release()
+            log("hold released")
+            self.logged_until = 0
+            self.last_log = now
+        elif want and (now - self.last_log) >= LOG_EVERY_SECONDS \
+                and (data.get("until_ts") or 0) != self.logged_until:
+            log("holding, until %s" % until_label(data))
+            self.logged_until = data.get("until_ts") or 0
+            self.last_log = now
+        return want
+
+
+def main():
+    lock_file = os.path.join(state.linux_state_dir(), ".linux-hold.lock")
+    os.makedirs(os.path.dirname(lock_file), exist_ok=True)
+    lock = open(lock_file, "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log("exit: keepawake-linux is already running (this one's pid is %d)" % os.getpid())
+        return 0
+
+    holder = Holder()
+
+    def stop(signum, frame):
+        if holder.child is not None:
+            holder.release()
+            log("hold released")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    log("start: pid=%d, state=%s" % (os.getpid(), state.state_path()))
+    while True:
+        try:
+            holder.tick()
+        except Exception as error:  # the loop must outlive one bad read
+            log("ERROR in the loop: %s" % error)
+            holder.release()
+        time.sleep(POLL_SECONDS)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

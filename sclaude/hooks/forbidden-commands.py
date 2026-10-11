@@ -1,0 +1,709 @@
+#!/usr/bin/env python3
+#
+# The bans of steps 2-4 that --disallowed-tools cannot express.
+#
+# Most of the bans live as a flag: `Bash(vercel:*)` and the like are read
+# straight from sclaude's command line, and that is enough. Only what the flag
+# breaks on ends up here — verified live, not from the documentation:
+#
+#   * "push is allowed, but not to main". A rule with a `*` in the middle —
+#     `Bash(git push * main)` — does not fire at all, and `git push` cannot be
+#     banned outright: step 2 pushes the branch, step 4 pushes review fixes. So
+#     the arguments have to be parsed, and that is a hook's work.
+#
+#   * `--force` and `--no-verify` — the same arguments of the same command.
+#
+#   * The form with a path. `Bash(gh pr merge:*)` lets `/usr/bin/gh pr merge`
+#     through; here the command's name is compared by basename, and a path does
+#     not help. The flag and the hook therefore overlap deliberately: the flag
+#     closes the direct form and is visible to the human, the hook closes the
+#     way around.
+#
+#   * `supabase db push`. The ban on it depends not on the command but on which
+#     environment the tree is looking at — a flag does not express that at all.
+#     More at DB_PUSH below.
+#
+#   * `vercel`. The ban depends on the subcommand: deploying is the human's
+#     step, while `vercel env ls` reads a value and changes nothing. A flag bans
+#     the name or nothing, so it banned the read too — and a fixing session lost
+#     its investigation to that. More at VERCEL_READS below.
+#
+#   * A package runner. `npx vercel --prod` and `bunx vercel --prod` are that
+#     same deploy, and `Bash(npx vercel:*)` matched neither the runner's flags
+#     (`npx -y vercel`) nor a version in the name (`vercel@59.17.0`) nor an
+#     assignment before it. Stripped in _shell.strip_runners.
+#
+# A double space does not trouble the flag — it catches `gh  pr view`, verified.
+# That is not the hole to plug here.
+#
+# The parsing is the same as in no-code-in-planning.py, and now literally the
+# same: `_shell.tokenize` cuts the string. While the parsing was copied, the
+# hooks could diverge silently — and they did: a `;` without spaces stayed a
+# separator in words only, and `echo hi;gh pr merge` went past the ban.
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _friction import note
+from _shell import SEPARATORS, strip_runners, strip_wrappers, tokenize
+
+# The branch that must not be pushed to: it moves only by merging a PR.
+PROTECTED = "main"
+
+# Commands banned for a whole step. The flag catches their direct form; they are
+# here for the form with a path. The key is a tuple of the first words after the
+# wrappers have been dropped.
+FORBIDDEN = {
+    ("gh", "pr", "merge"):
+        "merging is the human's step: they decide when a PR goes to main",
+    ("npm", "run", "db:promote"):
+        "db:promote pushes migrations to prod — the human's step, after the merge",
+    ("npm", "run", "env:prod"):
+        "env:prod silently moves the environment and supabase link to prod, "
+        "and the next step would work against prod without knowing it",
+}
+
+# `supabase db push` is the only ban that depends not on the command but on
+# where it will go. It used to stand in the table above, unconditionally, and
+# that caught real trouble exactly one time in two: the first refusal fell on an
+# environment set to prod and was to the point; the second came after
+# `npm run env:dev`, when `env:status` confirmed dev, and said "this is the same
+# prod" about a command that was going to dev. The project has no suitable npm
+# script for "apply to dev" (db:promote is prod), while
+# docs/database-operations.md calls `supabase db push` the thing that "builds a
+# database". The ban closed a documented path without offering a replacement,
+# and the step applied the migration around the CLI, writing the migration
+# history by hand — exactly the class of "something got into the database by
+# another route" that check:migrations is written against.
+DB_PUSH = (("npx", "supabase", "db", "push"), ("supabase", "db", "push"))
+
+DB_PUSH_REASON = ("this environment is protected (or could not be identified) — "
+                  "applying a migration here bypasses the npm script")
+
+# `vercel` is the one ban that depends on the subcommand, which is why it is a
+# function below rather than a line in the table above.
+#
+# It used to stand there unconditionally, and the flag banned the name as well.
+# That refused `vercel env ls preview` — a read that deploys nothing — to a
+# session repairing a red preview regression: it needed the Preview value of
+# R2_BUCKET to tell "the deployment points at another bucket" from "the keys no
+# longer open this one". It gave up, and the human ran the command by hand while
+# the feature stood. Reading the environment is exactly how a deployed stage's
+# failure is told apart from the branch's, and it is the one thing a fixing
+# session cannot get from the worktree.
+#
+# An allowlist rather than a list of banned subcommands: whatever Vercel adds
+# next is a deploy until somebody says otherwise. A bare `vercel`, and `vercel`
+# with flags alone, is a deploy — that is the CLI's default — so it needs no
+# entry here and falls through to the ban.
+# `rollback status` is a read like the rest: it answers whether a rollback is
+# in flight and moves nothing. A session looking at a red production regression
+# has a real reason to ask — the same class of read as `vercel env ls preview`,
+# which this list was widened for once already. The lookup below tries the
+# two-word prefix before the one-word one, so it matches ahead of a bare
+# `rollback`, which stays banned.
+VERCEL_READS = {
+    ("env", "ls"), ("inspect",), ("ls",), ("list",), ("logs",),
+    ("whoami",), ("teams", "ls"), ("project", "ls"), ("projects",),
+    ("domains", "ls"), ("certs", "ls"), ("dns", "ls"),
+    ("rollback", "status"), ("promote", "status"),
+}
+
+VERCEL_REASON = ("deploying is the human's step; the orchestrator offers "
+                 "preview itself, from the main repository, where the project "
+                 "link lives. Rolling production back is the orchestrator's "
+                 "too — from the red-prod path or `sclaude rollback`, where "
+                 "the deployment to go back to is on record and the branch's "
+                 "migrations are classified first. Reading is allowed: env ls, "
+                 "inspect, ls, logs, rollback status")
+
+
+def vercel_refuses(words):
+    """The reason this `vercel` call is banned, or None."""
+    if not words or words[0] != "vercel":
+        return None
+    # The subcommand is the first word that is not a flag. `--scope agorateam`
+    # and `--token x` carry a value, but a value is never a subcommand's name
+    # here: a read is named by its own first word, so the longest prefix that
+    # matches the allowlist decides.
+    rest = [w for w in words[1:] if not w.startswith("-")]
+    for length in (2, 1):
+        if tuple(rest[:length]) in VERCEL_READS:
+            return None
+    return VERCEL_REASON
+
+
+def active_environment(cwd):
+    """The environment this tree is looking at, when every source agrees.
+
+    We ask the project itself: scripts/lib/env-guard.mjs is the shared source of
+    truth that all its writing scripts use.
+
+    `settled` rather than `name`, and the difference is the whole point. `name`
+    answers from .env.local alone. The Supabase CLI keeps a second, independent
+    target in supabase/.temp/project-ref, and that is the one `supabase db push`
+    obeys — so a tree switched to a local stack straight after `db:promote` says
+    "localdb" by name while the CLI is still linked to production. This function
+    used to ask for the name and carried a docstring claiming it checked the
+    link; it did not, and the ban below would have allowed a migration into
+    prod on the strength of it.
+
+    None means "there is no answer" — no script, an error, a timeout, or the two
+    disagreeing. To the caller that is not permission.
+
+    `settled` is newer than this hook. A project whose env-guard predates it
+    exits non-zero on an unknown subcommand, which lands in the same None, so
+    an old checkout is refused rather than silently allowed.
+    """
+    guard = os.path.join(cwd, "scripts", "lib", "env-guard.mjs")
+    if not os.path.isfile(guard):
+        return None
+    try:
+        done = subprocess.run(
+            ["node", guard, "settled"],
+            cwd=cwd, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    return done.stdout.strip() or None
+
+
+def project_dir():
+    """The repository this hook is deciding about.
+
+    The step's session sets CLAUDE_PROJECT_DIR to its worktree's root, and that
+    is the answer whenever it is there. `os.getcwd()` is the fallback for a hook
+    run outside one, where it is the only clue available.
+    """
+    return os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+
+
+def environment_is_protected(cwd, name):
+    """Whether the project marks this environment `confirm: true`.
+
+    True for anything we cannot resolve. The question being asked is "may a
+    migration be applied here", and an environment we cannot identify is exactly
+    the case the ban exists for — an unreadable config is not permission.
+    """
+    if not name:
+        return True
+    path = os.path.join(cwd, "config", "environments.json")
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return True
+    entry = data.get(name) if isinstance(data, dict) else None
+    if not isinstance(entry, dict):
+        return True
+    return bool(entry.get("confirm"))
+
+
+def db_push_refuses(words):
+    """The reason this `supabase db push` is banned, or None."""
+    if not any(tuple(words[:len(p)]) == p for p in DB_PUSH):
+        return None
+    # Any environment the project does not protect, rather than the literal
+    # "dev" this used to name.
+    #
+    # The literal was right while dev was the only database a feature could be
+    # pointed at. It stopped being right the moment a developer could run
+    # Supabase locally or work under the `preview` name: both are ordinary
+    # places to apply a migration, and both would have been refused here with a
+    # message about prod. That is the same failure the comment above DB_PUSH
+    # describes — a ban closing a documented path and sending the step around
+    # the CLI — repeated on the environments that came later.
+    #
+    # Silence still means a ban: an unknown environment is not permission but
+    # precisely the case the ban was written for.
+    #
+    # CLAUDE_PROJECT_DIR first, `os.getcwd()` only as a fallback. Both of the
+    # things read below — scripts/lib/env-guard.mjs and
+    # config/environments.json — are repository-relative, and the working
+    # directory is not reliably the repository: the friction review session runs
+    # these hooks by hand to check a fix, and `cd`s into a feature's tree while
+    # doing so. `_friction.py` records that incident at length and resolves the
+    # same way. Getting it wrong here fails closed — an unreadable config reads
+    # as protected — so the symptom would be `supabase db push` refused with a
+    # reason that does not fit, which is the kind of ban nobody can act on.
+    cwd = project_dir()
+    if not environment_is_protected(cwd, active_environment(cwd)):
+        return None
+    return DB_PUSH_REASON
+
+
+# A feature with a local Supabase of its own (sclaude/lib/featuredb.sh) runs
+# with SUPABASE_WORKDIR pointing at it, so a bare `supabase db reset` rebuilds
+# this feature's database and nobody else's. `--workdir` is the one way to point
+# the CLI past that — at the main repository's stack, which is every other
+# feature's fallback and the developer's own data, or at another feature's. A
+# reset there is not recoverable, and nothing in a step needs another stack.
+WORKDIR_REASON = ("this feature has its own local Supabase, and SUPABASE_WORKDIR "
+                  "already points the CLI at it; --workdir would reach another "
+                  "stack — the main repository's or another feature's. Drop the "
+                  "flag")
+
+
+def workdir_refuses(command):
+    """The reason this `supabase --workdir` is banned, or None.
+
+    Read from the raw command rather than from segments(): the shared tokenizer
+    keeps only the last component of a path — it exists to name programs — and
+    here the path is the whole question."""
+    own = os.environ.get("SUPABASE_WORKDIR")
+    if not own:
+        return None
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if not any(os.path.basename(w) == "supabase" for w in words):
+        return None
+    for i, word in enumerate(words):
+        if word == "--workdir":
+            target = words[i + 1] if i + 1 < len(words) else ""
+        elif word.startswith("--workdir="):
+            target = word.split("=", 1)[1]
+        else:
+            continue
+        path = os.path.realpath(os.path.join(project_dir(), os.path.expanduser(target)))
+        if path != os.path.realpath(own):
+            return WORKDIR_REASON
+    return None
+
+
+# A schema change aimed at a shared cloud project rather than the local
+# database. Not a ban — the cloud dev project is a legitimate place, and a
+# person may mean it — but a question: work that touches the database belongs on
+# the project's local environment, where every feature has a database of its
+# own (sclaude/lib/featuredb.sh), and a migration pushed to the shared project
+# lands under everybody else's features. The protected environments stay with
+# db_push_refuses, which refuses them outright.
+#
+# Only what reaches the linked project: `db push` always does; `migration up`
+# and `db reset` do only with --linked, and without it they touch the local
+# stack, which is the point.
+SHARED_SCHEMA_ASK = ("this changes the schema of \"{name}\", a database the whole team "
+                     "shares — their features see your migration at once. Work that "
+                     "touches the database belongs on \"{local}\", where this feature "
+                     "has a database of its own: npm run env:{local}. Go ahead only if "
+                     "the shared project is really what you mean.")
+
+
+def local_environment(cwd):
+    """The project's local environment, from .sclaude.json, or None."""
+    try:
+        with open(os.path.join(cwd, ".sclaude.json")) as fh:
+            config = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    local = ((config.get("database") or {}).get("local") or {}).get("environment")
+    return local if isinstance(local, str) and local else None
+
+
+def shared_schema_asks(command):
+    """The question to put before a schema change on a shared project, or None."""
+    parts = segments(command)
+    if not parts:
+        return None
+    for words in parts:
+        if words[:1] != ["supabase"]:
+            continue
+        rest = words[1:]
+        linked = "--linked" in rest
+        if not (rest[:2] == ["db", "push"]
+                or (rest[:2] == ["migration", "up"] and linked)
+                or (rest[:2] == ["db", "reset"] and linked)):
+            continue
+        cwd = project_dir()
+        local = local_environment(cwd)
+        if not local:
+            return None
+        name = active_environment(cwd)
+        # Unresolved or protected is db_push_refuses' business, and it refuses.
+        if not name or name == local or environment_is_protected(cwd, name):
+            return None
+        return SHARED_SCHEMA_ASK.format(name=name, local=local)
+    return None
+
+
+# Step 2 does not open the pull request: that is step 3's work, in a separate
+# session.
+FORBIDDEN_BY_STEP = {
+    "code": {
+        ("gh", "pr", "create"):
+            "step 3 opens the pull request, in a separate session with the /pr skill",
+    },
+}
+
+TAIL = ("  Tell the human and stop — the next move is theirs.")
+
+
+def segments(command, raw=False):
+    """The command split on | && ; into separate calls, each without wrappers.
+
+    Returns a list of lists of words. Something unparsable (an unclosed quote)
+    gives None: such a string cannot be judged, and it cannot be let through
+    blindly either. With `raw` the words are kept as they are: stripping cuts
+    the path off every word, and `cd` and a push's remote need theirs.
+    """
+    tokens = tokenize(command)
+    if tokens is None:
+        return None
+
+    out, current = [], []
+    for token in tokens:
+        if token in SEPARATORS:
+            if current:
+                out.append(current)
+            current = []
+            continue
+        current.append(token)
+    if current:
+        out.append(current)
+
+    # Wrappers come in chains (`setsid nohup npm …`) and carry their own
+    # arguments with them: without this `timeout 5 gh pr merge` left "5" as the
+    # first word, and the whole ban table missed. The parsing is shared with
+    # step 1's hook — see strip_wrappers in _shell.py.
+    #
+    # And then the package runners: `npx vercel --prod` is a deploy to prod
+    # however it is spelled, and the table compares the first word. Separate
+    # from strip_wrappers because step 1's hook must keep seeing `npx` itself —
+    # see RUNNERS in _shell.py.
+    if raw:
+        return out
+    trimmed = []
+    for words in out:
+        stripped = strip_runners(strip_wrappers(words))
+        if stripped:
+            trimmed.append(stripped)
+    return trimmed
+
+
+# A push to `main` that cannot reach the project's remote is not the push the
+# ban is about. A review subagent of feature 145 built a throwaway repository in
+# its scratchpad — `git init --bare o.git`, `git remote add origin ../o.git` —
+# to see how git fails on a broken config, and `git push -q origin main` there
+# was refused with "tell the human and stop". The feature reads `main` from git,
+# so `main` was the natural branch to test with; the session got by renaming it,
+# and a less resourceful one would have stopped.
+#
+# So a push to `main` passes only from a directory under the temp root, where
+# every scratchpad lives and the project never does, and only when nothing in
+# sight is a network address: not the remote argument, not any word of the
+# command (a `git clone https://…` before the push), not the URL an existing
+# repository there has for that remote (a clone made by an earlier command).
+TEMP_ROOT = os.path.realpath(tempfile.gettempdir())
+
+# An address git reaches over the network: a URL other than file://, or the scp
+# form `user@host:path`.
+NETWORK_WORD = re.compile(r"(?<!file)://|[\w.-]+@[\w.-]+:")
+
+
+def network(address):
+    """Is this remote argument (a name resolved, or a path, or a URL) remote?"""
+    if address.startswith("file://"):
+        return False
+    if "://" in address:
+        return True
+    # `host:path` with no slash before the colon is ssh to git.
+    return ":" in address.split("/", 1)[0]
+
+
+def remote_url(where, remote):
+    """The URL an existing repository has for this remote, or None."""
+    try:
+        done = subprocess.run(["git", "-C", where, "remote", "get-url", remote],
+                              capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+# The commands that give a repository its remotes.
+REMOTE_SETTERS = (("git", "remote", "add"), ("git", "remote", "set-url"),
+                  ("git", "clone"), ("git", "config"))
+
+
+def hidden_remote(parts):
+    """Does a command that sets a remote take its address from a variable?"""
+    return any(tuple(words[:len(p)]) == p
+               and any("$" in w or "`" in w for w in words)
+               for words in parts for p in REMOTE_SETTERS)
+
+
+def scratch_push(command, parts, where, remote, redirected=False):
+    """Is this a push into a throwaway repository under the temp root?"""
+    if not where or not remote:
+        return False
+    if os.path.exists(where):
+        where = os.path.realpath(where)
+    project = os.path.realpath(project_dir())
+    if TEMP_ROOT in ("/", project) or project.startswith(TEMP_ROOT + os.sep):
+        return False
+    if not where.startswith(TEMP_ROOT + os.sep):
+        return False
+    # The repository can be redirected by name, past the directory we follow:
+    # by GIT_DIR in the environment, set before the push or on it, or by the
+    # push's own `--git-dir` (see refuses and git_globals). Not by `--git-dir`
+    # on another git call elsewhere in the command — it is a flag of that one
+    # call. Review 18 of feature 145 had it in a heredoc, a script written to a
+    # file after the push, and the push was refused.
+    if redirected:
+        return False
+    if NETWORK_WORD.search(command):
+        return False
+    if "/" in remote or ":" in remote:
+        return not network(remote)
+    if os.path.isdir(where):
+        url = remote_url(where, remote)
+        if url is not None:
+            return not network(url)
+    # The remote does not exist yet, so this command adds it, and nothing in
+    # it is a network address — unless it comes from a variable.
+    return not hidden_remote(parts)
+
+
+# A variable set to a literal earlier in the same command is as known as the
+# literal itself. Review 7 of feature 145 wrote `S=/tmp/…/scratchpad/r2; cd $S/w`
+# before its scratch push to main, and the unresolved `$S` kept the refusal.
+ASSIGNMENT = re.compile(r"([A-Za-z_]\w*)=(.*)", re.S)
+VARIABLE = re.compile(r"\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))")
+
+
+def remember(known, words):
+    """Record the variables a segment of bare assignments sets.
+
+    Only a segment that is nothing but `NAME=value` words, with an optional
+    `export` in front, persists in bash; `S=x cmd` lives for that command only.
+    A value with a substitution in it is not known, and forgets the name.
+    """
+    if words[:1] == ["export"]:
+        words = words[1:]
+    pairs = [ASSIGNMENT.fullmatch(w) for w in words]
+    if not words or not all(pairs):
+        return
+    for match in pairs:
+        name, value = match.groups()
+        if any(c in value for c in "$`("):
+            known.pop(name, None)
+        else:
+            known[name] = value
+
+
+def expand(path, known, command):
+    """The path with known variables put in, or None when one is unknown."""
+    def put(match):
+        name = match.group(1) or match.group(2)
+        # Quotes are gone from the words, so `cd '$S'` looks the same as
+        # `cd $S` here; bash takes the first literally. Refuse to guess.
+        if name not in known or any(VARIABLE.search(q) for q in
+                                    re.findall(r"'[^']*'", command)
+                                    if name in q):
+            raise KeyError(name)
+        return known[name]
+    try:
+        return VARIABLE.sub(put, path)
+    except KeyError:
+        return None
+
+
+def follow_cd(where, words, known=None, command=""):
+    """The directory after this segment, or None when it cannot be told.
+
+    Only a plain `cd <path>` is followed. No argument, `-`, `~`, a variable
+    nobody set to a literal earlier in the command, a subshell bracket or
+    pushd/popd make the directory unknown, and an unknown directory never
+    counts as scratch.
+    """
+    if any("(" in w or ")" in w for w in words):
+        return None
+    if words[0] in ("pushd", "popd"):
+        return None
+    if words[0] != "cd":
+        return where
+    if len(words) != 2:
+        return None
+    path = words[1]
+    if "$" in path and known:
+        path = expand(path, known, command)
+        if path is None:
+            return None
+    if path.startswith(("-", "~")) or "$" in path or "`" in path:
+        return None
+    if os.path.isabs(path):
+        return os.path.normpath(path)
+    if where is None:
+        return None
+    return os.path.normpath(os.path.join(where, path))
+
+
+def push_refuses(words, command="", parts=(), where=None, raw=(),
+                 redirected=False):
+    """The reason this `git push` is banned, or None."""
+    if words[:2] != ["git", "push"]:
+        return None
+
+    flags = [w for w in words[2:] if w.startswith("-")]
+    for flag in flags:
+        if flag in ("--force", "-f") or flag.startswith("--force-with-lease"):
+            return ("a reviewer is reading this branch, and rewritten "
+                    "history strands the discussion")
+        if flag == "--no-verify":
+            return ("--no-verify bypasses .githooks/pre-push, which exists "
+                    "precisely to catch the database drifting from the repo")
+
+    # The positional arguments: the remote's name and the refspecs. We count
+    # both `git push origin main` and `git push origin HEAD:main` as a push to
+    # main — in a refspec the right-hand side is what matters, and it is the
+    # destination branch.
+    refs = [w for w in words[2:] if not w.startswith("-")]
+    # The remote with its path, from the same words before stripping.
+    remote = [w for w in raw[len(raw) - len(words) + 2:] if not w.startswith("-")]
+    if remote and scratch_push(command, parts, where, remote[0], redirected):
+        return None
+    for ref in refs[1:] if len(refs) > 1 else []:
+        target = ref.split(":")[-1]
+        if target == PROTECTED:
+            return ("main moves only by merging a pull request — that is "
+                    "the GitHub flow of this project")
+    # `git push main` without a remote name is an attempt too, crooked as it
+    # is.
+    if len(refs) == 1 and refs[0] == PROTECTED:
+        return ("main moves only by merging a pull request — that is "
+                "the GitHub flow of this project")
+    return None
+
+
+# git's own options, the ones before the subcommand. `git -C ~/social push
+# origin main` is the push to main however it is spelled, and so are
+# `git --git-dir=… push` and `git -c k=v push`; the friction review of feature
+# 145 found that every check below compared the first two words with `git push`,
+# so all of them — main, --force, --no-verify — went through with any of these
+# in front.
+#
+# These take their value as the next word; `--name=value` carries it in itself.
+GIT_VALUED = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
+              "--config-env", "--super-prefix"}
+
+
+def git_globals(raw, where):
+    """git's options before the subcommand, read off one call.
+
+    `raw` is the call with its paths, starting at `git`. Returns how many words
+    the options take, the directory the call runs in (`-C`, followed like `cd`;
+    None when it cannot be told), and whether the repository is named past the
+    directory (`--git-dir`, `--work-tree`, or a `-c` that could set a remote) —
+    such a call is never a scratch push.
+    """
+    i, redirected = 1, False
+    while i < len(raw) and raw[i].startswith("-"):
+        name, has_value, value = raw[i].partition("=")
+        if name in GIT_VALUED and not has_value:
+            value = raw[i + 1] if i + 1 < len(raw) else ""
+            i += 2
+        else:
+            i += 1
+        if name == "-C":
+            where = follow_cd(where, ["cd", value]) if value else None
+        elif name in ("--git-dir", "--work-tree", "-c", "--config-env"):
+            redirected = True
+    return i - 1, where, redirected
+
+
+def refuses(command, step, cwd=None):
+    """The reason to refuse this command, or None."""
+    parts = segments(command)
+    if parts is None:
+        return "the command could not be parsed, and the step's bans outweigh convenience"
+
+    reason = workdir_refuses(command)
+    if reason:
+        return reason
+
+    table = dict(FORBIDDEN)
+    table.update(FORBIDDEN_BY_STEP.get(step, {}))
+
+    where = os.path.realpath(cwd or os.getcwd())
+    known = {}
+    redirected = False
+    for raw in segments(command, raw=True):
+        remember(known, raw)
+        redirected = redirected or any("GIT_DIR" in w for w in raw)
+        where = follow_cd(where, raw, known, command)
+        words = strip_runners(strip_wrappers(raw))
+        if not words:
+            continue
+        # `-C` moves this call only, so the directory the next segment starts
+        # in stays `where`.
+        here, also = where, False
+        if words[0] == "git":
+            taken, here, also = git_globals(raw[len(raw) - len(words):], where)
+            words = words[:1] + words[1 + taken:]
+        reason = (push_refuses(words, command, parts, here, raw,
+                               redirected or also)
+                  or db_push_refuses(words) or vercel_refuses(words))
+        if reason:
+            return reason
+        for prefix, why in table.items():
+            if tuple(words[:len(prefix)]) == prefix:
+                return why
+    return None
+
+
+def deny(reason, step="", subject=""):
+    # The refusal reaches the log: between steps the review session will go
+    # through it and decide whether the ban was deliberate or is getting in the
+    # way by oversight.
+    note(step, "hook", subject, reason)
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason + TAIL,
+        }
+    }, ensure_ascii=False))
+    sys.exit(0)
+
+
+step = ""
+argv = sys.argv[1:]
+if "--step" in argv:
+    i = argv.index("--step")
+    if i + 1 < len(argv):
+        step = argv[i + 1]
+
+try:
+    payload = json.load(sys.stdin)
+except ValueError:
+    # Parsing the input did not work out: we pass rather than ban at random.
+    # The same choice as in no-code-in-planning.py, and for the same reason.
+    sys.exit(0)
+
+if payload.get("tool_name") == "Bash":
+    command = str((payload.get("tool_input") or {}).get("command", ""))
+    reason = refuses(command, step, payload.get("cwd"))
+    if reason:
+        deny(reason, step, command)
+    question = shared_schema_asks(command)
+    if question:
+        # Asked of the person at the terminal rather than refused: not our
+        # refusal, so not in the friction log either.
+        print(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason": question,
+            }
+        }, ensure_ascii=False))
+        sys.exit(0)
+
+sys.exit(0)

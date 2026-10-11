@@ -1,0 +1,14 @@
+[Unit]
+Description=Updating the WSL2 tooling (apt, nvm/Node, npm, Claude Code, code-server)
+Documentation=file:%h/.local/bin/wsl-update
+# Without the network the steps would fail anyway; the script checks for it
+# itself, but this is cleaner.
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/wsl-update
+# The network in WSL sometimes comes up later than the user manager.
+TimeoutStartSec=30min
+Nice=10
+IOSchedulingClass=idle

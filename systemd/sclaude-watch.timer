@@ -1,0 +1,18 @@
+[Unit]
+Description=Polling GitHub every five minutes for what QA has done
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+# The thing being waited on takes hours or days, so a minute either way is
+# nothing — and a loose window lets systemd group this with other wake-ups
+# instead of waking the machine for it alone.
+AccuracySec=1min
+# A laptop is asleep or shut most of the night. Without this the sweep missed
+# every change made while it was off and only noticed at the next boot tick;
+# with it, the run that was due happens once the machine is back.
+Persistent=true
+Unit=sclaude-watch.service
+
+[Install]
+WantedBy=timers.target

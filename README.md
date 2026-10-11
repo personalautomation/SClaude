@@ -1178,8 +1178,13 @@ step's completion, and a `cd` into the feature's tree would not work. In its
 construction this is closest to the friction review — a session outside `STEPS`,
 with a prompt of its own, launched from the main repository.
 
-The state lives in `.feature/state.json` in the feature's worktree. Together with
-`.vercelignore` these are the script's internal files: they do not outlive the
+The state lives in `.feature/state.json` in the feature's worktree. Vercel's CLI
+never reads `.gitignore`, so before every deploy (a preview from the worktree,
+production from the main repository) sclaude makes sure that tree's
+`.vercelignore` names `.env`, `.env.*`, `/.feature/` and the project's
+recordings folder; it only appends what is missing, and a `.vercelignore` the
+project tracks itself is left to the project, with a warning for what it lacks.
+Together with that `.vercelignore` these are the script's internal files: they do not outlive the
 feature and have no business in the repository — the script hides them through
 `.git/info/exclude`, which is machine-local and shared by every worktree, rather
 than through a rule in `.gitignore` that would have to go through a PR. They are

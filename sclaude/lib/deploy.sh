@@ -448,6 +448,7 @@ preview_apply_migrations() {
 # Vercel setting, which sclaude cannot see.
 preview_deploy() {
   local wt="$1"
+  write_vercelignore "$wt"
   run_block \
     "Preview — see the branch on real hosting" \
     "Its own URL for this build." \
@@ -1542,6 +1543,9 @@ remind_prod() {
       info "  describes it under database.promote."
     fi
     prod_cmds+=("vercel --prod")
+    # What production uploads is the main tree, and it holds the recordings
+    # folder when the project keeps one there (write_vercelignore).
+    write_vercelignore "$REPO"
     [[ -n "$env_dev" ]] && prod_cmds+=("$env_dev")
 
     if run_block \
@@ -1553,6 +1557,7 @@ remind_prod() {
       deploy_remember "$wt" prod
     fi
   else
+    write_vercelignore "$REPO"
     if run_block \
       "Production" \
       "${prod_note:-The branch adds no migrations.}" \

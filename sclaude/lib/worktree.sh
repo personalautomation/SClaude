@@ -815,6 +815,24 @@ worktree_dirt() {
   done < <(git -C "$wt" status --short --untracked-files=all 2>/dev/null)
 }
 
+# What `vercel` must not upload from a tree sclaude deploys: a feature's
+# worktree for a preview, the main repository for production. The CLI reads
+# .vercelignore and a short list of its own, never .gitignore or
+# .git/info/exclude, so a path git never sees still goes up with a deploy.
+#
+#   .env, .env.*  symlinks to the main repository's files: outside this machine
+#                 they point nowhere, and the build dies. Vercel takes its own
+#                 environment values.
+#   /.feature/    sclaude's working directory: the plan, the state, the logs,
+#                 the local database's settings and the rendered terminal. Every
+#                 preview carried it until this line was added.
+#   recordings    the project's terminal recordings, when .sclaude.json keeps
+#                 them inside the repository (terminal.sh).
+#
+# Lines already there are kept, a hand edit included; only the missing ones
+# are appended, so it is safe before every deploy and brings an old file up to
+# date. A .vercelignore the project tracks is the project's: it is not edited,
+# and what it lacks is said instead.
 write_vercelignore() {
   # Two declarations rather than one, for the reason three other files in this
   # library already record: bash assigns a `local` list left to right and does
@@ -824,14 +842,26 @@ write_vercelignore() {
   # want of permission. The upshot was that no worktree ever got the file, and
   # every preview went up carrying the `.env` symlinks it exists to exclude.
   local wt="$1"
-  local f="$wt/.vercelignore"
-  [[ -e "$f" ]] && return 0
-  cat > "$f" <<'IGNORE'
-# Symlinks to the main repository's files: outside this machine they point
-# nowhere, and the build dies. Vercel takes its own environment values.
-.env
-.env.*
-IGNORE
+  local f="$wt/.vercelignore" rec root line
+  local -a want=(.env '.env.*' /.feature/) missing=()
+  [[ -n "$wt" && -d "$wt" ]] || return 0
+  rec="$(cd "$wt" 2>/dev/null && term_dir 2>/dev/null)" || rec=""
+  root="$(cd "$wt" 2>/dev/null && git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || root=""
+  root="${root:+$(dirname "$root")}"
+  [[ -n "$root" && "$rec" == "$root"/* ]] && want+=("/${rec#"$root"/}/")
+  for line in "${want[@]}"; do
+    grep -qxF -- "$line" "$f" 2>/dev/null || missing+=("$line")
+  done
+  (( ${#missing[@]} )) || return 0
+  if git -C "$wt" ls-files --error-unmatch .vercelignore >/dev/null 2>&1; then
+    warn "  $f is the project's own and lacks: ${missing[*]}"
+    warn "  a deploy uploads those; add them to it"
+    return 0
+  fi
+  {
+    [[ -s "$f" ]] || echo "# Written by sclaude (write_vercelignore): what a deploy must not upload."
+    printf '%s\n' "${missing[@]}"
+  } 2>/dev/null >> "$f" || true
 }
 
 # --- the branch's freshness --------------------------------------------------

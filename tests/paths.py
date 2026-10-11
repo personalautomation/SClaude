@@ -195,20 +195,28 @@ try:
         # the build dies.
         check_true("vercelignore-excludes-env", ".env" in body)
         check_true("vercelignore-excludes-env-variants", ".env.*" in body)
+        # sclaude's own working directory: the plan, the state, the logs and
+        # the rendered terminal went up with every preview without it.
+        check_true("vercelignore-excludes-feature", "/.feature/" in body.splitlines())
 
     # It must not write at the filesystem root, which is where it used to aim.
     # Checked by absence rather than by permissions: on a machine where `/` is
     # writable the old code would have created the file instead of failing.
     check_true("vercelignore-not-at-the-root", not os.path.exists("/.vercelignore"))
 
-    # Idempotent: an existing file is left alone. The early return is what makes
-    # the function safe to call before every deploy.
+
+    # A file already there keeps what it has, a hand edit included, and gets
+    # only the lines it lacks: an old worktree's file is brought up to date
+    # before the next deploy, and calling it twice adds nothing.
     with open(ignore, "w") as fh:
-        fh.write("# edited by hand\n")
+        fh.write("# edited by hand\n.env\n")
     run_bash('write_vercelignore %s' % WT, tmp,
              modules=("ui", "state", "worktree"))
-    check("vercelignore-left-alone",
-          open(ignore, encoding="utf-8").read(), "# edited by hand\n")
+    run_bash('write_vercelignore %s' % WT, tmp,
+             modules=("ui", "state", "worktree"))
+    lines = open(ignore, encoding="utf-8").read().splitlines()
+    check("vercelignore-hand-edit-kept", lines[:2], ["# edited by hand", ".env"])
+    check("vercelignore-brought-up-to-date", sorted(lines[2:]), [".env.*", "/.feature/"])
 
     check_true("worktree-declares-the-path-separately",
                not code_has(os.path.join(LIB, "worktree.sh"), 'local wt="$1" f='))

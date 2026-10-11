@@ -156,30 +156,36 @@ cmd_deferred() {
   local prompt session done_file root wt branch base
   [[ -f "$PROMPTS/friction-deferred.md" ]] || die "no prompt for the deferred review"
   root="$(main_repo 2>/dev/null)" || die "run it inside a product's repository"
-  local -a files=()
-  mapfile -t files < <(deferred_files "$root")
-  if (( ${#files[@]} == 0 )) || ! grep -qhvE '^(#|[[:space:]]*$)' "${files[@]}" 2>/dev/null; then
-    info "Nothing deferred in $root."
-    return 0
-  fi
 
   branch="sclaude/deferred-$(date +%F)"
   wt="$root-deferred-$(date +%F)"
   git -C "$root" fetch -q origin main 2>/dev/null || true
   base="$(git -C "$root" rev-parse -q --verify origin/main 2>/dev/null || git -C "$root" rev-parse HEAD)"
+  local made=""
   if [[ ! -d "$wt" ]]; then
     git -C "$root" worktree add -q -B "$branch" "$wt" "$base" 2>/dev/null \
       || die "could not make the review's worktree at $wt"
+    made=1
   fi
-  # The files as they are in the review's tree: the one the review edits.
-  local f rel list="" stamps=""
+  # The files as they are in the review's tree, the one the review edits, made
+  # from origin/main. Entries reach main by the features' pull requests, so
+  # the main checkout's working copy can hold more or fewer than main does,
+  # and a list read there named files the session then did not find.
+  local -a files=()
+  mapfile -t files < <(deferred_files "$wt")
+  if (( ${#files[@]} == 0 )) || ! grep -qhvE '^(#|[[:space:]]*$)' "${files[@]}" 2>/dev/null; then
+    [[ -n "$made" ]] && git -C "$root" worktree remove "$wt" >/dev/null 2>&1
+    [[ -n "$made" ]] && git -C "$root" branch -q -D "$branch" >/dev/null 2>&1
+    info "Nothing deferred on main in $root."
+    return 0
+  fi
+  local f list="" stamps=""
   for f in "${files[@]}"; do
-    rel="${f#"$root"/}"
-    list+="- \`$wt/$rel\`"$'\n'
+    list+="- \`$f\`"$'\n'
   done
   while IFS= read -r f; do
-    stamps+="- \`$wt/${f#"$root"/}/last-reviewed\`"$'\n'
-  done < <(deferred_dirs "$root")
+    stamps+="- \`$f/last-reviewed\`"$'\n'
+  done < <(deferred_dirs "$wt")
 
   done_file="${TMPDIR:-/tmp}/sclaude-deferred.done"
   prompt="$(D_FILES="${list%$'\n'}" D_STAMPS="${stamps%$'\n'}" D_WT="$wt" D_BRANCH="$branch" \

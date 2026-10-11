@@ -87,7 +87,23 @@ exit 5
         return sorted(os.listdir(term_dir))
 
     # --- at a terminal: recorded, arguments and exit status intact ---
-    text, rc = in_pty([prog, "a b", "c'd"], env)
+    # An old recording left readable, from before the directory was closed.
+    os.makedirs(term_dir)
+    os.chmod(term_dir, 0o755)
+    old_rec = os.path.join(term_dir, "00000000-000000-1.log")
+    with open(old_rec, "w") as fh:
+        fh.write("old\n")
+    os.chmod(old_rec, 0o644)
+    was = os.umask(0o022)
+    try:
+        text, rc = in_pty([prog, "a b", "c'd"], env)
+    finally:
+        os.umask(was)
+    check("tty-dir-private", oct(os.stat(term_dir).st_mode & 0o777), "0o700")
+    check("tty-old-closed", oct(os.stat(old_rec).st_mode & 0o777), "0o600")
+    os.remove(old_rec)
+    for name in recordings():
+        check("tty-recording-private", oct(os.stat(os.path.join(term_dir, name)).st_mode & 0o777), "0o600")
     check("tty-status", rc, 5)
     check("tty-args", "args=[a b][c'd]" in text, True)
     check("tty-one-recording", len(recordings()), 1)

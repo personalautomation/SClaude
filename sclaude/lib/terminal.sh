@@ -49,9 +49,18 @@ term_record() {
   [[ -t 0 && -t 1 ]] || return 0
   command -v script >/dev/null 2>&1 || return 0
   mkdir -p "$TERM_DIR" 2>/dev/null || return 0
+  # Private, whatever the umask: a recording holds everything the run showed
+  # and echoed, a pasted token included, for two months. The directory is
+  # closed, and recordings made before it was are closed too.
+  chmod 700 "$TERM_DIR" 2>/dev/null || true
   find "$TERM_DIR" -maxdepth 1 -name '*.log' -mtime +"$TERM_KEEP_DAYS" -delete 2>/dev/null || true
+  find "$TERM_DIR" -maxdepth 1 -name '*.log' -perm /077 -exec chmod 600 {} + 2>/dev/null || true
 
   local file; file="$TERM_DIR/$(date +%Y%m%d-%H%M%S)-$$.log"
+  # Created here, 0600, and only then handed to script, which truncates it and
+  # keeps its mode. A umask around the exec would reach every file sclaude
+  # itself writes afterwards.
+  ( umask 077; : > "$file" ) 2>/dev/null || return 0
   # The command line through a file, as pane.sh does. script hands -c to
   # $SHELL, which need not be bash, and printf %q quotes for bash: under fish
   # an argument with a space or a quote in it would arrive in pieces. So the

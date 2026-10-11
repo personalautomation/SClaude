@@ -2442,6 +2442,28 @@ check_true("without buttons there is a hint about a number",
            _tg.t("ask.pick") in _tg.ask_text(
                "myapp", {"form": "pick:12", "prompt": "Which one?"}))
 
+# --- which sclaude features the detector sees (sclaude_states) -------------
+#
+# A step holds the machine awake only if its feature's state.json is found.
+# When the state moved two levels deeper the old `find -maxdepth 3` found
+# none, and every check here still passed: none of them looked.
+_ka = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "keepawake")
+_fn = subprocess.run(["sed", "-n", "/^sclaude_states/,/^}/p", _ka],
+                     capture_output=True, text=True).stdout
+_home = tempfile.mkdtemp(prefix="keepawake-test-home-")
+try:
+    _want = os.path.join(_home, "myapp-12-x", ".sclaude", "local", "feature", "state.json")
+    os.makedirs(os.path.dirname(_want))
+    open(_want, "w").close()
+    # Not a feature: the main repository has a .sclaude/ but no feature state.
+    os.makedirs(os.path.join(_home, "myapp", ".sclaude", "local"))
+    _out = subprocess.run(["bash", "-c", _fn + "\nsclaude_states"],
+                          env=dict(os.environ, HOME=_home),
+                          capture_output=True, text=True).stdout.split()
+    check("sclaude_states finds a feature worktree's state", _out, [_want])
+finally:
+    shutil.rmtree(_home, ignore_errors=True)
+
 # ------------------------------------------------------------- the outcome
 
 if failures:

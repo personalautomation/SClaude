@@ -432,11 +432,17 @@ print(step.get('session') or '')
 }
 
 # The state files of sclaude features. Worktrees sit next to the repository and
-# are named after the feature, so we search one level around the home directory
+# are named after the feature, so we look one level under the home directory
 # rather than walking it whole: a full walk would cost a minute on every run of
-# the timer.
+# the timer. A glob names the exact depth. A `find -maxdepth` counted it, and
+# when the state moved from .feature/ to .sclaude/local/feature/ two levels
+# deeper the count stayed at 3: nothing was found, and a running step stopped
+# holding the machine awake.
 sclaude_states() {
-  find "$HOME" -maxdepth 3 -name state.json -path '*/.sclaude/local/feature/*' 2>/dev/null
+  local f
+  for f in "$HOME"/*/.sclaude/local/feature/state.json; do
+    [[ -f "$f" ]] && echo "$f"
+  done
 }
 
 # A session's transcript size, by its id. The project name is not known in

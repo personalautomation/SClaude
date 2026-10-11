@@ -20,8 +20,13 @@
 # terminal; one that runs in place does, and term_skip marks it off so the
 # playback leaves a line naming it instead of its screen.
 #
-# One recording per sclaude run, under ~/.claude/sclaude/terminal/, outside
-# every repository for the reason metrics_append gives.
+# One recording per sclaude run. A project chooses where its runs are kept with
+# `recordings` in its .sclaude.json, a folder inside the repository
+# (".sclaude/terminal"); sclaude keeps git out of it through the repository's
+# own .git/info/exclude, so nothing is committed and nothing in the project
+# changes. Without that key, or outside a repository, the recording goes to
+# ~/.claude/sclaude/terminal/, outside every repository for the reason
+# metrics_append gives.
 #
 # A feature learns which runs touched it: feature_worktree and run_step add the
 # run's recording to .feature/terminal, one path per line. A run that went
@@ -34,6 +39,44 @@
 TERM_DIR="$HOME/.claude/sclaude/terminal"
 # A recording outlives its feature by this many days, then goes.
 TERM_KEEP_DAYS=60
+
+# Where a run started here is recorded: the project's `recordings` folder when
+# the repository sclaude runs in names one, TERM_DIR otherwise. Read from the
+# main repository's .sclaude.json — the recording starts before any feature is
+# known. A path that is absolute or climbs out is not a folder of the
+# project's, and is ignored.
+term_dir() {
+  local common root rel=""
+  common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""
+  root="${common:+$(dirname "$common")}"
+  if [[ -n "$root" && -f "$root/.sclaude.json" ]]; then
+    rel="$(python3 -c 'import json, sys
+v = json.load(open(sys.argv[1])).get("recordings")
+v = v.strip() if isinstance(v, str) else ""
+print("" if v.startswith("/") else v.rstrip("/"))' "$root/.sclaude.json" 2>/dev/null)" || rel=""
+  fi
+  if [[ -n "$rel" && "$rel" != /* && "/$rel/" != */../* ]]; then
+    echo "$root/$rel"
+  else
+    echo "$TERM_DIR"
+  fi
+}
+
+# Keeps git out of a recordings folder inside a repository: one line in the
+# repository's .git/info/exclude, which every worktree of it reads. Not the
+# project's .gitignore — that is a tracked file, and changing it is the
+# project's business, by its own pull request.
+term_exclude() {
+  local dir="$1" common root line exclude
+  common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  root="$(dirname "$common")"
+  [[ "$dir" == "$root"/* ]] || return 0
+  line="/${dir#"$root"/}/"
+  exclude="$common/info/exclude"
+  grep -qxF -- "$line" "$exclude" 2>/dev/null && return 0
+  mkdir -p "$common/info" 2>/dev/null || return 0
+  printf '%s\n' "$line" >> "$exclude" 2>/dev/null || true
+}
 
 # Run the rest of this sclaude under script(1), recording it. Called by main
 # before anything is printed, with main's own arguments; returns only when
@@ -48,15 +91,18 @@ term_record() {
   [[ -z "${SCLAUDE_TERM:-}" ]] || return 0
   [[ -t 0 && -t 1 ]] || return 0
   command -v script >/dev/null 2>&1 || return 0
-  mkdir -p "$TERM_DIR" 2>/dev/null || return 0
+  local dir; dir="$(term_dir)"
+  # Excluded before the folder exists, so there is no moment git could see it.
+  term_exclude "$dir"
+  mkdir -p "$dir" 2>/dev/null || return 0
   # Private, whatever the umask: a recording holds everything the run showed
   # and echoed, a pasted token included, for two months. The directory is
   # closed, and recordings made before it was are closed too.
-  chmod 700 "$TERM_DIR" 2>/dev/null || true
-  find "$TERM_DIR" -maxdepth 1 -name '*.log' -mtime +"$TERM_KEEP_DAYS" -delete 2>/dev/null || true
-  find "$TERM_DIR" -maxdepth 1 -name '*.log' -perm /077 -exec chmod 600 {} + 2>/dev/null || true
+  chmod 700 "$dir" 2>/dev/null || true
+  find "$dir" -maxdepth 1 -name '*.log' -mtime +"$TERM_KEEP_DAYS" -delete 2>/dev/null || true
+  find "$dir" -maxdepth 1 -name '*.log' -perm /077 -exec chmod 600 {} + 2>/dev/null || true
 
-  local file; file="$TERM_DIR/$(date +%Y%m%d-%H%M%S)-$$.log"
+  local file; file="$dir/$(date +%Y%m%d-%H%M%S)-$$.log"
   # Created here, 0600, and only then handed to script, which truncates it and
   # keeps its mode. A umask around the exec would reach every file sclaude
   # itself writes afterwards.

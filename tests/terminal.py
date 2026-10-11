@@ -15,6 +15,7 @@
 #     in the order they started, each under a heading.
 #
 # Run it with: python3 tests/terminal.py
+import json
 import os
 import pty
 import select
@@ -239,6 +240,47 @@ echo "rc=$?"
     check("retro-unfinished-not-skipped", "already took place" in text, False)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
+
+# --- where a project's runs are recorded (term_dir, term_exclude) ---
+proj = tempfile.mkdtemp()
+try:
+    subprocess.run(["git", "init", "-q", proj], check=True)
+    sub = os.path.join(proj, "app")
+    os.makedirs(sub)
+
+    def where(cwd, home="/h"):
+        script = 'HOME=%s; source "%s/terminal.sh"; term_dir' % (home, LIB)
+        return subprocess.run(["bash", "-c", script], cwd=cwd, capture_output=True,
+                              text=True).stdout.strip()
+
+    check("dir-default-without-config", where(proj), "/h/.claude/sclaude/terminal")
+    for value, want in ((".sclaude/terminal", os.path.join(proj, ".sclaude/terminal")),
+                        ("/etc/x", "/h/.claude/sclaude/terminal"),
+                        ("../out", "/h/.claude/sclaude/terminal"),
+                        ("a/../../b", "/h/.claude/sclaude/terminal"),
+                        (7, "/h/.claude/sclaude/terminal")):
+        with open(os.path.join(proj, ".sclaude.json"), "w") as fh:
+            json.dump({"recordings": value}, fh)
+        check("dir-config-%s" % value, where(sub), want)
+    check("dir-outside-a-repo", where(tempfile.gettempdir()), "/h/.claude/sclaude/terminal")
+
+    with open(os.path.join(proj, ".sclaude.json"), "w") as fh:
+        json.dump({"recordings": ".sclaude/terminal"}, fh)
+    rec = os.path.join(proj, ".sclaude", "terminal")
+    script = 'source "%s/terminal.sh"; term_exclude "%s"; term_exclude "%s"; mkdir -p "%s"; touch "%s/r.log"' % (
+        LIB, rec, rec, rec, rec)
+    subprocess.run(["bash", "-c", script], cwd=sub, check=True)
+    with open(os.path.join(proj, ".git", "info", "exclude")) as fh:
+        check("exclude-once", fh.read().count("/.sclaude/terminal/\n"), 1)
+    status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=proj,
+                            capture_output=True, text=True).stdout
+    check("exclude-hides-recordings", ".sclaude/terminal" in status, False)
+    script = 'source "%s/terminal.sh"; term_exclude "/elsewhere/x"' % LIB
+    subprocess.run(["bash", "-c", script], cwd=sub, check=True)
+    with open(os.path.join(proj, ".git", "info", "exclude")) as fh:
+        check("exclude-only-inside", "elsewhere" in fh.read(), False)
+finally:
+    shutil.rmtree(proj, ignore_errors=True)
 
 for name, want, got in failures:
     print("FAIL %s: want %r, got %r" % (name, want, got))

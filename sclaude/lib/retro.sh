@@ -100,6 +100,7 @@ PY
   session_watch_start "" "$session" "$done_file" "$wt" retro
   ( cd "$wt" && claude_launch --session-id "$session" --model opus --effort medium \
       --permission-mode auto --add-dir "$INSTRUMENTS" --add-dir "$TERM_DIR" \
+      --add-dir "$(cd "$wt" && term_dir)" \
       --add-dir "$HOME/.claude/projects" \
       -n "retro/$slug" "$prompt" )
   session_watch_stop

@@ -98,15 +98,47 @@ def split_separators(command):
     return "".join(out)
 
 
-def tokenize(command):
+# What a `>` inside quotes becomes with tokenize(…, mask=True): not a
+# redirection, which is all a hook looking for redirections needs to know.
+QUOTED_GT = "\x01"
+
+
+def mask_quoted(command):
+    """The command with every `>` inside quotes replaced by QUOTED_GT.
+
+    The words come out of shlex with their quotes gone, so `git commit -m
+    "a -> b"` looked like a redirection to a file called ` b`.
+    """
+    out, quote, i = [], "", 0
+    while i < len(command):
+        ch = command[i]
+        if ch == "\\" and quote != "'" and i + 1 < len(command):
+            out.append(command[i:i + 2])
+            i += 2
+            continue
+        if quote:
+            if ch == quote:
+                quote = ""
+            out.append(QUOTED_GT if ch == ">" else ch)
+        else:
+            if ch in "'\"":
+                quote = ch
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def tokenize(command, mask=False):
     """The command's words with the separators split off, or None.
 
     None means "parsing did not work out" — an unclosed quote. Such a string
     cannot be judged, and each hook decides for itself what to do about it: both
-    choose to forbid, but their reasons differ.
+    choose to forbid, but their reasons differ. With `mask`, a `>` in quotes
+    comes out as QUOTED_GT.
     """
     try:
-        return shlex.split(split_separators(strip_heredocs(command)))
+        command = strip_heredocs(command)
+        return shlex.split(split_separators(mask_quoted(command) if mask else command))
     except ValueError:
         return None
 

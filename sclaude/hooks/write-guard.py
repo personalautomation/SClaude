@@ -24,7 +24,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _shell import GIT_VALUED, strip_wrappers, tokenize, ungroup  # noqa: E402
+from _shell import GIT_VALUED, QUOTED_GT, strip_wrappers, tokenize, ungroup  # noqa: E402
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
 READONLY_REASON = ("{dir} is sclaude's own checkout, and a session does not change "
@@ -59,6 +59,42 @@ GIT_WRITE_FORMS = {
 }
 
 
+# The forms of a GIT_WRITES subcommand that only read: "reading is never
+# refused", and `git stash list` or `git config user.email` in sclaude's
+# checkout were.
+BRANCH_WRITES = ("-d", "-D", "--delete", "-m", "-M", "--move", "-c", "-C", "--copy",
+                 "-f", "--force", "-u", "--set-upstream-to", "--unset-upstream",
+                 "--edit-description", "--track", "-t", "--no-track")
+CONFIG_WRITES = ("--add", "--unset", "--unset-all", "--replace-all", "--rename-section",
+                 "--remove-section", "-e", "--edit")
+CONFIG_READS = ("--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l",
+                "--get-color", "--get-colorbool", "get", "list")
+
+
+def git_reads(sub, rest):
+    """Whether this call of a GIT_WRITES subcommand only reads."""
+    plain = [w for w in rest if not w.startswith("-")]
+    flags = [w.split("=", 1)[0] for w in rest if w.startswith("-")]
+    if sub == "stash":
+        return plain[:1] in (["list"], ["show"])
+    if sub == "worktree":
+        return plain[:1] == ["list"]
+    if sub == "branch":
+        if any(f in BRANCH_WRITES for f in flags):
+            return False
+        return not plain or any(f in ("-l", "--list", "--show-current") for f in flags)
+    if sub == "tag":
+        if any(f in ("-d", "--delete", "-a", "-s", "-u", "-f", "--force", "-m", "-F") for f in flags):
+            return False
+        return not plain or any(f in ("-l", "--list", "-v", "--verify") for f in flags)
+    if sub == "config":
+        if any(f in CONFIG_WRITES for f in flags) or plain[:1] in (["set"], ["unset"]):
+            return False
+        return any(f in CONFIG_READS for f in flags) or plain[:1] in (["get"], ["list"]) \
+            or len(plain) == 1
+    return False
+
+
 # Writers whose last argument alone is written: the rest is read. `-t DIR`
 # (`--target-directory`) names the destination outright instead.
 TO_LAST = ("cp", "mv", "install", "ln")
@@ -82,6 +118,10 @@ def unwrap(segment):
     return segment[len(segment) - len(bare):] if bare else []
 
 
+def unmask(word):
+    return word.replace(QUOTED_GT, ">")
+
+
 def calls(command, cwd):
     """(words, directory) for each command in the line, past its wrappers.
 
@@ -91,7 +131,9 @@ def calls(command, cwd):
     worth guessing past. One that cannot be told — a variable — is None, and
     stays None: a relative `cd` from an unknown place is still unknown.
     """
-    words = tokenize(command)
+    # A `>` in quotes comes out masked, so that only a real redirection reads
+    # as one (write_targets); unmask() gives a word back as it was written.
+    words = tokenize(command, mask=True)
     if words is None:
         return None
     out, where, segment, saved = [], cwd, [], []
@@ -115,7 +157,7 @@ def calls(command, cwd):
         if flat:
             out.append((flat, where))
         if name == "cd":
-            target = flat[1] if len(flat) > 1 else "~"
+            target = unmask(flat[1]) if len(flat) > 1 else "~"
             target = os.path.expanduser(target)
             if "$" in target or "`" in target:
                 where = None
@@ -201,7 +243,7 @@ def write_targets(command, cwd):
                 out += [(w, where) for w in (plain if given else plain[1:])]
         elif name == "git" and rest[:1] in (["checkout"], ["restore"]):
             out += [(w, where) for w in rest[1:] if not w.startswith("-")]
-    return out
+    return [(unmask(w), where) for w, where in out]
 
 
 def git_writes_in(command, cwd, inside):
@@ -236,7 +278,7 @@ def git_writes_in(command, cwd, inside):
         if j >= len(call):
             continue
         sub, rest = call[j], call[j + 1:]
-        writes = sub in GIT_WRITES or (
+        writes = (sub in GIT_WRITES and not git_reads(sub, rest)) or (
             sub in GIT_WRITE_FORMS
             and next((w for w in rest if not w.startswith("-")), "") in GIT_WRITE_FORMS[sub])
         if writes and (here is None or inside(here)):

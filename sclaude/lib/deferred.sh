@@ -220,7 +220,10 @@ PY
 
   # What the review committed goes to the product as a pull request, unless
   # the session opened one itself.
-  if [[ "$(git -C "$wt" rev-list --count "$base..HEAD" 2>/dev/null || echo 0)" -gt 0 ]]; then
+  local committed dirty
+  committed="$(git -C "$wt" rev-list --count "$base..HEAD" 2>/dev/null || echo 0)"
+  dirty="$(git -C "$wt" status --porcelain 2>/dev/null)"
+  if [[ "$committed" -gt 0 ]]; then
     if GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q -u origin "$branch" >/dev/null 2>&1; then
       local pr
       pr="$(cd "$wt" && gh pr list --head "$branch" --state open --json url --jq '.[0].url // ""' 2>/dev/null)" || pr=""
@@ -229,10 +232,17 @@ PY
     else
       warn "  the review committed to $branch in $wt, and the push failed — push it by hand"
     fi
-  else
+  elif [[ -z "$dirty" ]]; then
     info "  the review changed nothing"
   fi
-  # A clean worktree has nothing more to give: the branch keeps the work.
-  [[ -z "$(git -C "$wt" status --porcelain 2>/dev/null)" ]] \
-    && git -C "$root" worktree remove "$wt" >/dev/null 2>&1 || true
+  # Edits the session made and did not commit are its work too: "changed
+  # nothing" over them was wrong, and the tree holding them is named, and kept.
+  if [[ -n "$dirty" ]]; then
+    warn "  the review left changes it did not commit in $wt — commit them there, or remove the tree"
+    return 0
+  fi
+  # A clean worktree has nothing more to give: the branch keeps the work, and a
+  # branch with none is not left behind for next month's review to trip on.
+  git -C "$root" worktree remove "$wt" >/dev/null 2>&1 || true
+  [[ "$committed" -gt 0 ]] || git -C "$root" branch -q -D "$branch" >/dev/null 2>&1 || true
 }

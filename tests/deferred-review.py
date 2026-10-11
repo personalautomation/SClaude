@@ -35,7 +35,7 @@ def git(cwd, *args):
                           text=True, env=env, check=True).stdout
 
 
-def review(repo, prompt_out):
+def review(repo, prompt_out, dirty=False):
     """Run cmd_deferred with the session stubbed; its output."""
     script = r'''
 set -uo pipefail
@@ -46,11 +46,20 @@ info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; die() { echo "DIE $*"; e
 new_session_id() { echo 00000000-0000-0000-0000-000000000000; }
 review_guard_settings() { :; }
 session_watch_start() { :; }; session_watch_stop() { :; }; session_closed() { return 0; }
-claude_launch() { printf '%%s' "${@: -1}" > "%(out)s"; }
+claude_launch() { printf '%%s' "${@: -1}" > "%(out)s"; [[ -z "${DIRTY:-}" ]] || echo x > dirty.txt; }
 cmd_deferred
 ''' % {"lib": LIB, "prompts": PROMPTS, "root": ROOT, "out": prompt_out}
+    env = dict(os.environ, DIRTY="1" if dirty else "")
     return subprocess.run(["bash", "-c", script], cwd=repo, capture_output=True,
-                          text=True, timeout=60).stdout
+                          text=True, timeout=60, env=env).stdout
+
+
+def trees(tmp):
+    return [w for w in os.listdir(tmp) if w.startswith("myapp-deferred-")]
+
+
+def branches(repo):
+    return [b.strip(" *+") for b in git(repo, "branch").splitlines() if "sclaude/deferred-" in b]
 
 
 tmp = tempfile.mkdtemp()
@@ -78,16 +87,24 @@ try:
     check("review-ran", "DIE" in out, False)
     check("names-mains-file", "deferred/12-a.tsv" in prompt, True)
     check("not-the-working-copys", "deferred/13-b.tsv" in prompt, False)
+    # A review that changed nothing says so and leaves no tree or branch.
+    check("nothing-says-so", "the review changed nothing" in out, True)
+    check("nothing-no-tree", trees(tmp), [])
+    check("nothing-no-branch", branches(repo), [])
+
+    # Edits it did not commit are named, and the tree holding them stays.
+    out = review(repo, out_file, dirty=True)
+    check("dirty-not-nothing", "the review changed nothing" in out, False)
+    check("dirty-named", "did not commit" in out and trees(tmp)[0] in out if trees(tmp) else False, True)
+    for w in trees(tmp):
+        git(repo, "worktree", "remove", "--force", os.path.join(tmp, w))
+    for b in branches(repo):
+        git(repo, "branch", "-q", "-D", b)
 
     # Main with nothing deferred: no session, and no worktree left behind.
     git(repo, "rm", "-q", "--cached", ".sclaude/team/deferred/12-a.tsv")
     git(repo, "commit", "-qm", "reviewed")
     git(repo, "push", "-q", "origin", "HEAD:main")
-    for w in os.listdir(tmp):
-        if w.startswith("myapp-deferred-"):
-            git(repo, "worktree", "remove", "--force", os.path.join(tmp, w))
-    git(repo, "branch", "-D", [b.strip(" *+") for b in git(repo, "branch").splitlines()
-                               if "sclaude/deferred-" in b][0])
     os.remove(out_file)
     out = review(repo, out_file)
     check("empty-main-says-so", "Nothing deferred on main" in out, True)

@@ -87,6 +87,24 @@ for command, cwd, want in (
         ("git --work-tree=/home/u/sclaude checkout -- .", "/tmp", "deny"),
         ("sudo rm sclaude/x", "/home/u/sclaude", "deny"),
         ("env X=1 cp /tmp/a sclaude/x", "/home/u/sclaude", "deny"),
+        # Inside a group, an `if` or a loop.
+        ("(git commit -am x)", "/home/u/sclaude", "deny"),
+        ("{ git commit -am x; }", "/home/u/sclaude", "deny"),
+        ("if true; then git commit -m y; fi", "/home/u/sclaude", "deny"),
+        ("(cd /home/u/myapp-1) && git commit -m x", "/home/u/sclaude", "deny"),
+        ("{ cd /home/u/myapp-1; } && git commit -m x", "/home/u/sclaude", "deny"),
+        # The right target: past a redirection, after -t, stuck to `>`, and
+        # in-place flags bundled with others.
+        ("cp evil /home/u/sclaude/x > /tmp/log", "/tmp", "deny"),
+        ("cp -t /home/u/sclaude a b", "/tmp", "deny"),
+        ("echo hi>/home/u/sclaude/f", "/tmp", "deny"),
+        ("perl -pi -e 's/a/b/' /home/u/sclaude/f", "/tmp", "deny"),
+        ("sed -Ei 's/a/b/' /home/u/sclaude/f", "/tmp", "deny"),
+        # git that changes the checkout without a commit: its remote, its refs.
+        ("git -C /home/u/sclaude remote set-url origin x", "/tmp", "deny"),
+        ("cd /home/u/sclaude && git fetch", "/tmp", "deny"),
+        # A relative `cd` from an unknown place is still unknown.
+        ('cd "$X" && cd sub && echo x > f', "/home/u/myapp-1", "deny"),
         # Reading it, and writing the product, from inside it or not.
         ("cat sclaude/lib/run.sh", "/home/u/sclaude", "allow"),
         ("git log --oneline -5", "/home/u/sclaude", "allow"),
@@ -96,6 +114,12 @@ for command, cwd, want in (
         ("git -C /home/u/myapp-1 commit -qm fix", "/home/u/sclaude", "allow"),
         ("git -c user.name=x -C /home/u/myapp-1 commit -qm fix", "/home/u/sclaude", "allow"),
         ("sudo git -C /home/u/myapp-1 commit -qm fix", "/home/u/sclaude", "allow"),
+        ("(cd /home/u/myapp-1 && git commit -m x)", "/home/u/sclaude", "allow"),
+        ("cd /home/u/myapp-1 && (git commit -m x)", "/home/u/sclaude", "allow"),
+        ("git -C /home/u/sclaude remote -v", "/tmp", "allow"),
+        ("sed -n 1,5p /home/u/sclaude/lib/run.sh", "/tmp", "allow"),
+        ("grep -n foo /home/u/sclaude/lib/run.sh", "/tmp", "allow"),
+        ("cp /home/u/sclaude/a /tmp/b", "/tmp", "allow"),
         ("cp sclaude/policy/vercel.json /home/u/myapp-1/.sclaude/team/", "/home/u/sclaude", "allow"),
         ("echo x > /home/u/myapp-1/.sclaude/team/policy.json", "/home/u/sclaude", "allow")):
     check("readonly %s (in %s)" % (command, cwd), hook("Bash", RO, cwd, command=command), want)

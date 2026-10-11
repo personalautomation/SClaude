@@ -24,7 +24,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _shell import GIT_VALUED, strip_wrappers, tokenize  # noqa: E402
+from _shell import GIT_VALUED, strip_wrappers, tokenize, ungroup  # noqa: E402
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
 READONLY_REASON = ("{dir} is sclaude's own checkout, and a session does not change "
@@ -42,15 +42,32 @@ WRITERS = ("cp", "mv", "rm", "tee", "touch", "install", "ln", "truncate", "mkdir
 
 
 # git subcommands that change a repository: in a read-only checkout they are
-# writes, whichever file they name.
+# writes, whichever file they name. remote, notes and reflog change it only in
+# some of their forms; those are GIT_WRITE_FORMS.
 GIT_WRITES = ("commit", "add", "rm", "mv", "reset", "checkout", "switch", "restore",
               "merge", "rebase", "cherry-pick", "revert", "stash", "apply", "am",
-              "push", "tag", "branch", "pull", "clean", "worktree", "config")
+              "push", "tag", "branch", "pull", "clean", "worktree", "config",
+              "fetch", "init", "submodule", "update-ref", "update-index", "symbolic-ref",
+              "replace", "gc", "prune", "repack", "sparse-checkout", "filter-branch",
+              "maintenance", "lfs")
+GIT_WRITE_FORMS = {
+    # `git -C <checkout> remote set-url origin x` repoints sclaude's own sync.
+    "remote": ("add", "set-url", "remove", "rm", "rename", "prune", "set-head",
+               "set-branches", "update"),
+    "notes": ("add", "append", "copy", "edit", "merge", "prune", "remove"),
+    "reflog": ("expire", "delete"),
+}
 
 
-# Writers whose last argument alone is written: the rest is read.
+# Writers whose last argument alone is written: the rest is read. `-t DIR`
+# (`--target-directory`) names the destination outright instead.
 TO_LAST = ("cp", "mv", "install", "ln")
 SEPS = ("|", "||", "&&", ";", "&")
+# Words that open a command inside `if`, a loop or a negation: the command
+# after them is the one that runs.
+KEYWORDS = ("if", "then", "else", "elif", "while", "until", "do", "!")
+# A redirection, alone or stuck to its neighbours: `>f`, `2>>f`, `hi>/x/f`.
+REDIRECT = re.compile(r"(?:^|(?<=[^\\>]))\d?(?:>>?|&>>?)\|?(?!&)(.*)$")
 
 
 def unwrap(segment):
@@ -65,6 +82,55 @@ def unwrap(segment):
     return segment[len(segment) - len(bare):] if bare else []
 
 
+def calls(command, cwd):
+    """(words, directory) for each command in the line, past its wrappers.
+
+    None when the line cannot be parsed. The directory follows `cd`, inside a
+    group too, and what a `( … )` or `{ …; }` changed is undone where it
+    closes: a subshell's `cd` does not leave it, and a brace group's is not
+    worth guessing past. One that cannot be told — a variable — is None, and
+    stays None: a relative `cd` from an unknown place is still unknown.
+    """
+    words = tokenize(command)
+    if words is None:
+        return None
+    out, where, segment, saved = [], cwd, [], []
+    for w in words + [";"]:
+        if w not in SEPS:
+            segment.append(w)
+            continue
+        if not segment:
+            continue
+        opens = segment[0] in ("(", "{") or (segment[0].startswith("(") and not segment[0].startswith("$("))
+        last = segment[-1]
+        closes = last in (")", "}") or (last.endswith(")") and last.count("(") < last.count(")"))
+        if opens:
+            saved.append((where, "{" if segment[0] == "{" else "("))
+        flat, _ = ungroup(segment)
+        while flat and flat[0] in KEYWORDS:
+            flat = flat[1:]
+        flat = unwrap(flat)
+        segment = []
+        name = flat[0].rsplit("/", 1)[-1] if flat else ""
+        if flat:
+            out.append((flat, where))
+        if name == "cd":
+            target = flat[1] if len(flat) > 1 else "~"
+            target = os.path.expanduser(target)
+            if "$" in target or "`" in target:
+                where = None
+            elif os.path.isabs(target):
+                where = target
+            else:
+                where = None if where is None else os.path.join(where, target)
+        if closes:
+            # A subshell's `cd` ends with it; a brace group runs in this shell
+            # and its `cd` stays, which is not worth following: unknown.
+            before, kind = saved.pop() if saved else (None, "{")
+            where = before if kind == "(" else None
+    return out
+
+
 def write_targets(command, cwd):
     """(word, directory it is relative to) for every path the command writes.
 
@@ -73,37 +139,68 @@ def write_targets(command, cwd):
     variable in it makes the directory unknown, and an unknown directory is
     the sclaude checkout's to the read-only check, which is the safe side.
     """
-    words = tokenize(command)
-    if words is None:
+    found = calls(command, cwd)
+    if found is None:
         return None
-    out, where, segment = [], cwd, []
-    for w in words + [";"]:
-        if w not in SEPS:
-            segment.append(w)
-            continue
-        segment = unwrap(segment)
-        if segment:
-            names = [c.rsplit("/", 1)[-1] for c in segment]
-            if names[0] == "cd":
-                target = segment[1] if len(segment) > 1 else "~"
-                where = None if "$" in target else os.path.join(where or cwd, os.path.expanduser(target))
-            for i, word in enumerate(segment):
-                bare = re.sub(r"^\d?[<>]+&?", "", word)
-                before = segment[i - 1] if i else ""
-                if bare and (before in (">", ">>", "&>", "1>", "2>")
-                             or (bare != word and ">" in word)):
-                    out.append((bare, where))
-            args = [c for c in segment[1:] if not c.startswith("-") and not re.match(r"^\d?[<>]", c)]
-            name = names[0]
-            if name in TO_LAST and args:
-                out.append((args[-1], where))
-            elif name in WRITERS:
-                out += [(a, where) for a in args]
-            elif name in ("sed", "perl") and any(c.startswith("-i") or c == "--in-place" for c in segment):
-                out += [(a, where) for a in args[1:]]
-            elif names[:2] in (["git", "checkout"], ["git", "restore"]):
-                out += [(a, where) for a in args[1:]]
-        segment = []
+    out = []
+    for segment, where in found:
+        # Redirections first, and out of the arguments: `cp a x > log` writes
+        # x and log, and log was taken for cp's destination.
+        args, skip = [], False
+        for i, word in enumerate(segment):
+            if skip:
+                skip = False
+                continue
+            if i and word in (">", ">>", "&>", "&>>", "1>", "2>", "1>>", "2>>", ">|"):
+                if i + 1 < len(segment):
+                    out.append((segment[i + 1], where))
+                skip = True
+                continue
+            m = REDIRECT.search(word) if i else None
+            if m and m.group(1) and not m.group(1).startswith("&"):
+                out.append((m.group(1), where))
+                head = word[:m.start()]
+                if head:
+                    args.append(head)
+                continue
+            if m and not m.group(1) and i + 1 < len(segment):
+                out.append((segment[i + 1], where))
+                skip = True
+                continue
+            args.append(word)
+        name = args[0].rsplit("/", 1)[-1] if args else ""
+        rest = args[1:]
+        if name in TO_LAST:
+            target = next((rest[j + 1] for j, w in enumerate(rest[:-1])
+                           if w in ("-t", "--target-directory")), None)
+            target = target or next((w.split("=", 1)[1] for w in rest
+                                     if w.startswith("--target-directory=")), None)
+            plain = [w for w in rest if not w.startswith("-")]
+            if target:
+                out.append((target, where))
+            elif plain:
+                out.append((plain[-1], where))
+        elif name in WRITERS:
+            out += [(w, where) for w in rest if not w.startswith("-")]
+        elif name in ("sed", "perl"):
+            flags = [w for w in rest if w.startswith("-") and not w.startswith("--")]
+            inplace = any("i" in w[1:].split(".", 1)[0] or w.startswith("-i") for w in flags) \
+                or "--in-place" in rest or any(w.startswith("--in-place=") for w in rest)
+            if inplace:
+                # The script is the first plain word unless -e or -f gave it.
+                valued = ("-e", "-f", "-E") if name == "perl" else ("-e", "-f")
+                plain, given, k = [], False, 0
+                while k < len(rest):
+                    w = rest[k]
+                    if w in valued:
+                        given, k = True, k + 2
+                        continue
+                    if not w.startswith("-"):
+                        plain.append(w)
+                    k += 1
+                out += [(w, where) for w in (plain if given else plain[1:])]
+        elif name == "git" and rest[:1] in (["checkout"], ["restore"]):
+            out += [(w, where) for w in rest[1:] if not w.startswith("-")]
     return out
 
 
@@ -113,34 +210,37 @@ def git_writes_in(command, cwd, inside):
     The directory is followed through `cd` and `git -C`; one that cannot be
     told (a variable) counts as inside, which is the safe side.
     """
-    words = tokenize(command)
-    if words is None:
+    found = calls(command, cwd)
+    if found is None:
         return False
-    where, call = cwd, []
-    for w in words + [";"]:
-        if w not in SEPS:
-            call.append(w)
+    for call, where in found:
+        if call[0].rsplit("/", 1)[-1] != "git":
             continue
-        call = unwrap(call)
-        names = [c.rsplit("/", 1)[-1] for c in call]
-        if names and names[0] == "cd" and len(call) > 1:
-            where = None if "$" in call[1] else os.path.join(where or cwd, os.path.expanduser(call[1]))
-        elif names and names[0] == "git":
-            here, j = where, 1
-            while j < len(call) and call[j].startswith("-"):
-                name, has_value, value = call[j].partition("=")
-                if name in GIT_VALUED and not has_value:
-                    value = call[j + 1] if j + 1 < len(call) else ""
-                    j += 1
+        here, j = where, 1
+        while j < len(call) and call[j].startswith("-"):
+            name, has_value, value = call[j].partition("=")
+            if name in GIT_VALUED and not has_value:
+                value = call[j + 1] if j + 1 < len(call) else ""
                 j += 1
-                # The repository the call changes: -C moves like `cd`, and
-                # --git-dir and --work-tree name it outright.
-                if name in ("-C", "--git-dir", "--work-tree"):
-                    here = None if "$" in value or "`" in value else os.path.join(
-                        here or cwd, os.path.expanduser(value))
-            if j < len(call) and call[j] in GIT_WRITES and (here is None or inside(here)):
-                return True
-        call = []
+            j += 1
+            # The repository the call changes: -C moves like `cd`, and
+            # --git-dir and --work-tree name it outright.
+            if name in ("-C", "--git-dir", "--work-tree"):
+                value = os.path.expanduser(value)
+                if "$" in value or "`" in value:
+                    here = None
+                elif os.path.isabs(value):
+                    here = value
+                else:
+                    here = None if here is None else os.path.join(here, value)
+        if j >= len(call):
+            continue
+        sub, rest = call[j], call[j + 1:]
+        writes = sub in GIT_WRITES or (
+            sub in GIT_WRITE_FORMS
+            and next((w for w in rest if not w.startswith("-")), "") in GIT_WRITE_FORMS[sub])
+        if writes and (here is None or inside(here)):
+            return True
     return False
 
 
@@ -196,7 +296,13 @@ def main():
         payload = json.load(sys.stdin)
     except ValueError:
         return 0
-    reason = refuses(payload, team, readonly)
+    # A hook that raises exits non-zero, and Claude Code runs the call anyway.
+    # Refused instead: an unreadable call near a guarded place is refused too.
+    try:
+        reason = refuses(payload, team, readonly)
+    except Exception as exc:  # noqa: BLE001
+        reason = "the write guard failed on this call (%s: %s), so it is refused" % (
+            type(exc).__name__, exc)
     if reason:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",

@@ -51,7 +51,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 from _friction import note
-from _shell import GIT_VALUED, SEPARATORS, strip_runners, strip_wrappers, tokenize
+from _shell import GIT_VALUED, SEPARATORS, strip_runners, strip_wrappers, tokenize, ungroup
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 
 # The branch that must not be pushed to: it moves only by merging a PR.
@@ -698,32 +698,8 @@ def inner_command(words):
     return None
 
 
-# Grouping: `( … )` runs in a subshell, `{ …; }` in this one, and both run what
-# is inside. shlex leaves the brackets on the words around them, so the first
-# word was `(gh` and no ban matched. The brackets are taken off; a directory
-# changed inside them is not followed out (follow_cd sees the brackets first
-# and gives up), and from a group on the directory is unknown, so it never
-# counts as scratch.
-def ungroup(raw):
-    """The words with grouping brackets removed, and whether there were any."""
-    words, grouped, open_subs = [], False, 0
-    for w in raw:
-        if w in ("{", "}", "(", ")") and not open_subs:
-            grouped = True
-            continue
-        while w.startswith("(") and not open_subs:
-            w, grouped = w[1:], True
-        # A `)` closes a `$(` opened earlier before it closes a group: shlex
-        # cuts `TOKEN=$(cat f)` into `TOKEN=$(cat` and `f)`.
-        open_subs += w.count("$(")
-        closing = w.count(")") - w.count("(") + w.count("$(")
-        while closing > 0 and open_subs:
-            open_subs, closing = open_subs - 1, closing - 1
-        if closing > 0 and w.endswith(")"):
-            w, grouped = w.rstrip(")"), True
-        if w:
-            words.append(w)
-    return words, grouped
+# Grouping brackets are taken off by ungroup(), in _shell.py: write-guard.py
+# reads groups the same way.
 
 
 # git's own options, the ones before the subcommand. `git -C ~/myapp push

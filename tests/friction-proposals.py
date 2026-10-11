@@ -181,7 +181,9 @@ finally:
 rf = RUN[RUN.index("\nrun_friction() {"):]
 rf = rf[:rf.index("\n}\n")]
 asked = rf.index('friction_defer_proposals "$wt"')
-check("asked-after-lock", rf.index("lock_take FRICTION_LOCK") < asked, True)
+# Reviews no longer queue for sclaude's checkout: each works in its own
+# feature's worktree.
+check("no-friction-queue", "lock_take" in rf, False)
 # Most reviews defer nothing, and a file made empty beforehand stood in the
 # worktree as uncommitted work. Only its folder is made, which git ignores.
 check("review-does-not-create-the-file", "deferred_ensure" in rf, False)

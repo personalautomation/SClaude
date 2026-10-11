@@ -1268,28 +1268,15 @@ run_friction() {
     }
   fi
 
-  # One friction review on the machine at a time: they all edit the one
-  # instruments tree. On 2026-10-07 at 00:31 two features each started one
-  # from the same commit, and the two committed a minute apart; they happened
-  # to touch different files. The second now waits, and starts on the first
-  # one's commits — the tree is shared, so there is nothing to fetch.
-  #
-  # Taken before the log is moved into .reviewed: a Ctrl-C while waiting
-  # leaves the entries where the next review reads them. Every return from
-  # here to the session's end gives it up again — see friction_unlock.
-  FRICTION_LOCK=""
-  FRICTION_LOCK_FILE="$(git -C "$INSTRUMENTS" rev-parse --path-format=absolute \
-    --git-common-dir 2>/dev/null)/sclaude-friction.lock"
-  if declare -F lock_take >/dev/null && [[ "$FRICTION_LOCK_FILE" == /* ]]; then
-    lock_take FRICTION_LOCK "$FRICTION_LOCK_FILE" "$slug, a friction review" "a friction review"
-  fi
+  # No queue between reviews: each commits into its own feature's worktree, on
+  # that feature's branch. They used to wait for each other because they all
+  # edited the one sclaude checkout, which they no longer touch.
   # Proposals alone have nothing to decide: see friction_proposals.py. They are
   # put off here, into the product's deferred file on the feature's branch, and
   # the log moves into .reviewed as a reviewed one does.
   if [[ -z "$reread" && -z "$pending" ]] \
      && friction_defer_proposals "$wt" "$slug" "$key" "$step"; then
     { cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log"; } || true
-    friction_unlock
     friction_push_project "$wt"
     return 0
   fi
@@ -1314,7 +1301,7 @@ run_friction() {
     label="$(step_title "$step")"
     head_prompt="$PROMPTS/friction.md"
   fi
-  [[ -f "$head_prompt" && -f "$PROMPTS/_friction-body.md" ]] || { friction_unlock; return 0; }
+  [[ -f "$head_prompt" && -f "$PROMPTS/_friction-body.md" ]] || return 0
 
   # We move the log away BEFORE the session rather than after it: the line that
   # stands after the return from `claude` cannot be trusted. The review exists
@@ -1464,7 +1451,6 @@ PYEOF
       warn "  This friction review is already open elsewhere ($fholder)."
       warn "  Close it there and try again — or just carry on where it is open."
       warn "  To drop it and move on: $SELF reset $slug"
-      friction_unlock
       return 1
     fi
   fi
@@ -1522,7 +1508,6 @@ PYEOF
     "The friction review reported its work done, and sclaude closed it." || true
 
   local changed=""
-  friction_unlock
   # What the review changed is the product's, committed on the feature's branch
   # (_friction-body.md). Pushed here, with the project's own hooks, so the pull
   # request carries the fix.
@@ -1811,13 +1796,6 @@ cmd_propose() {
   warn "  could not send it as a pull request (gh missing, or origin is not on GitHub)."
   warn "  The commits are on $branch: push it and open the pull request by hand."
   return 1
-}
-
-# Gives up the friction queue run_friction took, if it took one.
-friction_unlock() {
-  declare -F lock_release >/dev/null || return 0
-  lock_release "${FRICTION_LOCK:-}" "${FRICTION_LOCK_FILE:-}"
-  FRICTION_LOCK=""
 }
 
 # Sends the review's commits to origin.

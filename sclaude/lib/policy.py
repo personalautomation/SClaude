@@ -18,7 +18,6 @@
 #     "steps": {"code": {"deny": [...], "allow": [...]}},
 #     "tools": {"deny": ["mcp__…"]},                   integrations only
 #     "rules": ["vercel-deploy"],                      integrations only
-#     "settings": {"supabase": {...}}                  team only
 #   }
 #
 # A command is matched by its first words, after the wrappers and package
@@ -115,6 +114,13 @@ def config_denies(root):
     return {"deny": out}
 
 
+def environments(root):
+    """`environments` from the product's .sclaude/config.json, or {}."""
+    config = read(os.path.join(root, ".sclaude", "config.json")) if root else {}
+    found = config.get("environments")
+    return found if isinstance(found, dict) else {}
+
+
 def merged(root, person="", step=""):
     """The policy a session in this product, run by this person, works under."""
     core = read(os.path.join(PRESETS, "core.json"))
@@ -163,7 +169,10 @@ def merged(root, person="", step=""):
         "lifted": [list(l) for l in lifts],
         "tools": sorted(set(tools)),
         "integrations": sorted(integrations),
-        "settings": team.get("settings") if isinstance(team.get("settings"), dict) else {},
+        # How the product reports its environments, from .sclaude/config.json:
+        # the integrations' rules read it from here rather than have it
+        # written a second time in a policy.
+        "environments": environments(root),
     }
 
 

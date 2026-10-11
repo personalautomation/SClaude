@@ -125,9 +125,9 @@ regression_command() {
 
 # Which parts a stage runs.
 #
-# Only the local stage builds and checks the database and the bucket: check:rls
-# refuses a protected environment outright (refuse_prod in the project's
-# env-guard), both create and delete real rows, and a build of a deployed
+# Only the local stage builds and checks the database and the bucket: a
+# project's database checks refuse a protected environment outright, both
+# create and delete real rows, and a build of a deployed
 # commit has already happened on Vercel's side. What is left to ask a deployed
 # host is what a browser sees.
 #
@@ -213,7 +213,7 @@ PY
 # is what names localhost, and an empty string would not be the same thing.
 #
 # Production's address is the project's to declare, in `.sclaude/config.json`. It was
-# read out of this product's own `config/environments.json` before, with the
+# read out of the product's own file of environments before, with the
 # address itself as a literal fallback — which meant a repository that kept the
 # answer anywhere else had its suite aimed at somebody else's production. Being
 # wrong about which host is production means running a write-capable suite
@@ -225,7 +225,7 @@ regression_base_url() {
     preview) state_get "$wt/.sclaude/local/feature/state.json" regression.preview.url 2>/dev/null || true ;;
     prod|rollback)
       # From the project's own config. It used to be read out of this one
-      # product's `config/environments.json`, with its address as a literal
+      # product's file of environments, with its address as a literal
       # fallback — so a second repository would have had its suite aimed at
       # somebody else's production. There is no fallback now: an unknown
       # address means the stage cannot run, which regression_run reports as

@@ -67,6 +67,13 @@
     "            `sclaude doctor` shows ✓ when it exits 0, or ! with its last",
     "            line and the `fix` to run. Warnings only: a developer may",
     "            reasonably do without a project's extras.",
+    "environments — how the project tells its databases apart, for the",
+    "            features to work against one of them: `file`, its list of",
+    "            them, {name: {confirm, ref, siteUrl}}; `current`, a command",
+    "            that prints the tree's; `settled`, one that prints it only when",
+    "            every source agrees (the Supabase rule asks it before a push);",
+    "            `switch`, with {name}, which moves the tree; `status`, one a",
+    "            person runs to see where it is. Leave it out if there is one.",
     "maintainers — the git addresses of the people who keep this project's",
     "            shared sclaude rules, in .sclaude/team/. Everybody else's",
     "            sessions put theirs in .sclaude/people/<name>/, and a hook",
@@ -98,6 +105,14 @@
 
   "prod": {
     "siteUrl": "https://example.com"
+  },
+
+  "environments": {
+    "file": "config/environments.json",
+    "current": "node scripts/env-name.mjs",
+    "settled": "node scripts/env-name.mjs --settled",
+    "switch": "npm run env:{name}",
+    "status": "npm run env:status"
   },
 
   "database": {

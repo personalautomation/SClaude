@@ -153,7 +153,7 @@ step_mode()   { step_field "$1" 3; }
 # one trusted path written into it, hardcoded (~/myapp), while a step works in
 # ~/myapp-<feature>. The Local Operations rule calls going into "other repos" a
 # step outside the project's boundaries, and ordinary reading fell under
-# suspicion. Step 4 of feature 75-review-58-results got three refusals in a row
+# suspicion. One feature's step 4 got three refusals in a row
 # that way — a `gh run view | grep` over another run's log and a `python3 -c`
 # parsing YAML for validity — and went around them by downloading the whole log
 # into a temporary directory and rewriting the one-line check as a file.

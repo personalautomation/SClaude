@@ -6,7 +6,7 @@
 # survive to a conversation. The state is then left with the id of a session that
 # does not exist — and it is poison: the resume branch is chosen by a non-empty
 # id, a `--resume` on it exits with "No conversation found with session ID", and
-# the step never starts again. That is how feature 71-email-edit-and-show got
+# the step never starts again. That is how one feature got
 # stuck: step 2 could not begin for a day.
 #
 # The boundary here is the transcript file: every conversation that took place

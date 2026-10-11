@@ -140,7 +140,7 @@ SCLAUDE_CODE="$(code_fingerprint)"
 # Without them the last lazily-read piece was left, the most dangerous one: bash
 # finishes reading `main` and its `case` at the end of a session, that is their
 # offset in the descriptor waits for an edit longer than anything else. The
-# `review` step's session on feature 20-change-where-user-logouts died of exactly
+# `review` step's session on one feature died of exactly
 # that — the file grew by three lines, the offset stayed where it was, and
 # `cmd_replan` was read as `replan`:
 #

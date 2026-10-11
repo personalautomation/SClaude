@@ -64,9 +64,10 @@ info() { :; }
 warn() { :; }
 ask() { return 1; }
 REPO="%s"
+source "%s/project.sh"
 source "%s/environment.sh"
 %s%s
-""" % (os.path.dirname(LIB), LIB, extra, body)
+""" % (os.path.dirname(LIB), LIB, LIB, extra, body)
     full = dict(os.environ)
     full.pop("SCLAUDE_ENV", None)
     if home:
@@ -76,6 +77,16 @@ source "%s/environment.sh"
     done = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                           env=full, cwd=cwd)
     return done.stdout.strip()
+
+
+# How a product tells sclaude about its environments (.sclaude/config.json).
+ENVIRONMENTS_CONTRACT = {
+    "file": "config/environments.json",
+    "current": "node scripts/lib/env-guard.mjs name",
+    "settled": "node scripts/lib/env-guard.mjs settled",
+    "switch": "npm run env:{name}",
+    "status": "npm run env:status",
+}
 
 
 def project(tmp, environments):
@@ -89,6 +100,10 @@ def project(tmp, environments):
     os.makedirs(os.path.join(wt, "config"), exist_ok=True)
     with open(os.path.join(wt, "config", "environments.json"), "w") as fh:
         json.dump(environments, fh)
+    # Named in the product's config, the way a product on this contract does.
+    os.makedirs(os.path.join(wt, ".sclaude"), exist_ok=True)
+    with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
+        json.dump({"environments": ENVIRONMENTS_CONTRACT}, fh)
     return wt
 
 
@@ -340,9 +355,10 @@ def main():
         # settings a product on Supabase writes (sclaude/policy/supabase.json).
         os.makedirs(os.path.join(wt, ".sclaude", "team"), exist_ok=True)
         with open(os.path.join(wt, ".sclaude", "team", "policy.json"), "w") as fh:
-            json.dump({"integrations": ["supabase"], "settings": {"supabase": {
-                "environment": "node scripts/lib/env-guard.mjs settled",
-                "environments": "config/environments.json"}}}, fh)
+            json.dump({"integrations": ["supabase"]}, fh)
+        with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
+            json.dump({"environments": {"settled": "node scripts/lib/env-guard.mjs settled",
+                                        "file": "config/environments.json"}}, fh)
 
         def db_push_denied(env_name, subcommand="settled"):
             """Whether the hook refuses `supabase db push` on this environment.

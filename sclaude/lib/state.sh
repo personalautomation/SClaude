@@ -172,7 +172,7 @@ transcript_dir() {
 # very start — the state keeps the id of a session that does not exist. From
 # then on it is poison: a `--resume` on it exits with "No conversation found
 # with session ID", and the resume branch is chosen precisely by a non-empty id,
-# so returning will never work again. That is how feature 71-email-edit-and-show
+# so returning will never work again. That is how one feature
 # stood idle for a day.
 #
 # The boundary is the transcript file: every conversation that took place has

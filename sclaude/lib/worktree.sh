@@ -26,7 +26,7 @@ link_env() {
       continue
     fi
     # .env.local in the main repo is itself a symlink to .env.dev or .env.prod,
-    # and scripts/env.mjs reads the target's name to name the current
+    # and a product's switch may read the target's name to name the current
     # environment. A symlink to a symlink would give it a target named
     # ".env.local", that is an environment "local", which does not exist. So we
     # point at the same target rather than at the symlink itself.
@@ -71,25 +71,30 @@ link_env() {
 # Each worktree has its own supabase/.temp (not a symlink), so switching here
 # stays inside the feature and does not touch the main repository.
 force_env() {
-  local wt="$1" name want
-  [[ -f "$wt/scripts/env.mjs" ]] || return 0
+  local wt="$1" name want switch current
+  # The product says how: `environments.current` prints the tree's name,
+  # `environments.switch` moves it (.sclaude/config.json). A product that names
+  # neither does not do environments.
+  current="$(environments_command "$wt" current)"
+  switch="$(environments_command "$wt" switch "{name}")"
+  [[ -n "$current" && -n "$switch" ]] || return 0
 
-  name="$(cd "$wt" && node scripts/lib/env-guard.mjs name 2>/dev/null)" || name=""
+  name="$(cd "$wt" && eval "$current" 2>/dev/null)" || name=""
   want="$(environment_choose "$wt" || true)"
 
   # Nobody could say where this should point. The feature keeps whatever it has,
   # unless what it has is production — which is the one answer that is wrong
   # whoever is asking.
   #
-  # The config has to exist before that question can be asked at all.
-  # `environment_protected` answers "protected" for a project it cannot read,
-  # which is the right direction for a permission check and the wrong one here:
-  # a project with an env-guard but no config/environments.json is one that does
-  # not do environments, and warning it about production is a false alarm. Worse
-  # than noise — the rc reaches `ensure_dev` as `switched=1`, which tears down a
-  # healthy dev server on every step.
+  # The file of environments has to exist before that question can be asked at
+  # all. `environment_protected` answers "protected" for a project it cannot
+  # read, which is the right direction for a permission check and the wrong one
+  # here: a project that names no file does not do environments, and warning it
+  # about production is a false alarm. Worse than noise — the rc reaches
+  # `ensure_dev` as `switched=1`, which tears down a healthy dev server on every
+  # step.
   if [[ -z "$want" ]]; then
-    if [[ -f "$wt/config/environments.json" ]] \
+    if [[ -f "$(environments_file "$wt")" ]] \
        && [[ -n "$name" ]] && environment_protected "$wt" "$name"; then
       warn ""
       warn "  this worktree is on \"$name\", a protected environment, and there is"
@@ -106,26 +111,19 @@ force_env() {
   # The exit code tells "it was already right" from "it had to be changed": a
   # server started before the switch read the old environment and cannot be
   # trusted.
-  if ( cd "$wt" && npm run "env:$want" >/dev/null 2>&1 ); then
+  if ( cd "$wt" && eval "$(environments_command "$wt" switch "$want")" >/dev/null 2>&1 ); then
     info "  environment: switched to $want${name:+ (was $name)}"
     return 1
   fi
 
-  # The npm script did not work out — but leaving the feature where it was is
-  # worse, and may be production. We set the link ourselves: that is what the
-  # first half of `switchTo` does, and it is what decides which database the
-  # server and the checks will see. What is left undone is the `supabase link`,
-  # that is the CLI; that is what we complain about out loud.
-  if [[ -e "$wt/.env.$want" ]]; then
-    ln -sfn ".env.$want" "$wt/.env.local"
-    warn ""
-    warn "  npm run env:$want failed here — .env.local forced to .env.$want by hand."
-    warn "  The Supabase CLI link may still point elsewhere: check npm run env:status."
-  else
-    warn ""
-    warn "  no .env.$want in this worktree, and the environment is ${name:-unknown}."
-    warn "  The dev server would run against it — fix this before trusting anything."
-  fi
+  # The switch did not work out, and leaving the feature where it was may
+  # leave it on production. How a product switches is its own business, so
+  # sclaude does not do it by hand: it says so out loud, with the product's own
+  # command to see where the tree is.
+  local status; status="$(environments_command "$wt" status)"
+  warn ""
+  warn "  switching this worktree to $want failed, and it is on ${name:-an unknown environment}."
+  warn "  The dev server would run against it — fix this before trusting anything${status:+: $status}."
   return 1
 }
 
@@ -796,7 +794,7 @@ worktree_dirt() {
 # --- the branch's freshness --------------------------------------------------
 #
 # A feature's tree is created from a fresh origin/main (cmd_new), but time passes
-# between steps: step 1 of feature 71-email-edit-and-show happened on 7
+# between steps: one feature's step 1 happened on 7
 # September, step 2 on the eighth, and main moved 19 commits forward in a day.
 # Step 2 opened on a branch without somebody else's migration 0057, which had
 # already been applied to both databases: `npm run check:migrations` died at
@@ -903,12 +901,12 @@ sync_branch() {
 # force_env above looks at the environment's name and stops there — and a name
 # and being configured are not the same thing. In a fresh tree .env.local already
 # points somewhere valid (link_env put it there as a symlink), so force_env
-# returns at once, `npm run env:<name>` never runs, and `supabase link` with it:
+# returns at once, the product's switch never runs, and `supabase link` with it:
 # supabase/.temp/project-ref does not appear. `npx supabase db push` dies on
-# LegacyProjectNotLinkedError, while `npm run env:status` answers that everything
+# LegacyProjectNotLinkedError, while the product's status command answers that everything
 # agrees — its check of the link is wrapped in existsSync, and a missing file
-# reads as agreement. Step 2 of feature 71 spent half a dozen calls on working
-# this out: the crash, status, reading env.mjs and env-guard.mjs, env:dev.
+# reads as agreement. One step 2 spent half a dozen calls on working this out:
+# the crash, status, reading the product's switch and guard.
 #
 # A separate function rather than part of force_env, because of the npm script's
 # side effect: it tears down .next (NEXT_PUBLIC_* are baked into the build).
@@ -925,26 +923,29 @@ sync_branch() {
 # for it — so waiting for project-ref to appear would warn for ever about a file
 # that is never coming. Such an environment is nothing to do here at all.
 ensure_linked() {
-  local wt="$1" want
-  [[ -f "$wt/scripts/env.mjs" ]] || return 0
+  local wt="$1" want switch
+  # The product's own switch is what links the CLI (`environments.switch` in
+  # its .sclaude/config.json); without one there is nothing to run.
+  switch="$(environments_command "$wt" switch "{name}")"
+  [[ -n "$switch" ]] || return 0
   [[ -f "$wt/supabase/.temp/project-ref" ]] && return 0
 
   want="$(environment_choose "$wt" || true)"
   [[ -n "$want" ]] || return 0
   environment_has_ref "$wt" "$want" || return 0
 
-  if ( cd "$wt" && npm run "env:$want" >/dev/null 2>&1 ); then
+  switch="$(environments_command "$wt" switch "$want")"
+  if ( cd "$wt" && eval "$switch" >/dev/null 2>&1 ); then
     info "  supabase: linked (the CLI had no project-ref in this worktree)"
     return 0
   fi
 
   # It did not work out, and we say so out loud. Staying quiet here will not do
-  # precisely because env:status will not mention it: the step would learn of an
-  # unlinked CLI only when a db push died in the middle of the work.
+  # precisely because the product's status may not mention it: the step would
+  # learn of an unlinked CLI only when a db push died in the middle of the work.
   warn ""
-  warn "  the Supabase CLI is not linked in this worktree, and npm run env:$want"
-  warn "  did not fix it. \`supabase db push\` will fail with"
-  warn "  LegacyProjectNotLinkedError, and npm run env:status will not say so."
+  warn "  the Supabase CLI is not linked in this worktree, and \`$switch\` did not"
+  warn "  fix it. \`supabase db push\` will fail with LegacyProjectNotLinkedError."
   return 0
 }
 

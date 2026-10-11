@@ -13,7 +13,7 @@
 # can finish successfully having checked nothing — when the workflow file
 # diverges from the default branch the action writes "Skipping action due to
 # workflow validation" and exits with zero in about 13 seconds. That is what
-# happened on PR #82: success in 14 seconds and zero comments in both streams.
+# happened on one pull request: success in 14 seconds and zero comments in both streams.
 # The prompt spent a paragraph explaining the difference between "the reviewer
 # never got there" and "there are no complaints", and still left the step unable
 # to see it. Here it is arithmetic: the duration, the output and the number of

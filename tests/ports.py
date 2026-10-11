@@ -195,7 +195,7 @@ def main():
         bash(root, 'stop_dev "%s"' % c)
         check("stop_dev unregisters", os.path.islink(os.path.join(registry, "c")), False)
         # And marks the tree as closing, so neither the proxy nor ensure_dev
-        # brings a server back while git deletes it. In feature 40 a browser
+        # brings a server back while git deletes it. Once a browser
         # left open on the feature did exactly that, and the new server wrote
         # .dev-build into the tree mid-removal.
         check("stop_dev marks the tree as closing",

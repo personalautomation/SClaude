@@ -273,7 +273,7 @@ pr_link_issue() {
 #
 # Until now the link was one-way: the issue was read to choose a feature and
 # start the plan, and was not touched again. The issue meanwhile said nothing
-# about anything — issue #43 closed with a merge and zero comments, and from it
+# about anything — an issue closed with a merge and zero comments, and from it
 # one could learn neither that the work had happened nor what it was done with.
 #
 # One comment, rewritten at every transition, rather than a feed: a feed repeats
@@ -1617,7 +1617,7 @@ issue_end_date() {
 # --- a feature's outcome -----------------------------------------------------
 #
 # A closed sub-issue changes an epic's state, but the epic says nothing about it:
-# to understand where it stands, the children had to be opened one by one. #59
+# to understand where it stands, the children had to be opened one by one. One
 # has ten of them. A "Current status" section in the description at every level
 # of the chain removes that walk.
 

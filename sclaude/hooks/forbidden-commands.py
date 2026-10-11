@@ -62,7 +62,7 @@ PROTECTED = "main"
 # The flag catches their direct form; this hook catches the form with a path or
 # behind a wrapper. The rules below that need more than a prefix are code, and
 # the policy says which of them are on.
-POLICY = {"deny": [], "allow": [], "rules": [], "lifted": [], "settings": {}}
+POLICY = {"deny": [], "allow": [], "rules": [], "lifted": [], "environments": {}}
 
 
 def rule_on(name, words=None):
@@ -77,8 +77,9 @@ def rule_on(name, words=None):
     return True
 
 
-def supabase_settings():
-    found = (POLICY.get("settings") or {}).get("supabase")
+def product_environments():
+    """`environments` from the product's .sclaude/config.json (policy.py)."""
+    found = POLICY.get("environments")
     return found if isinstance(found, dict) else {}
 
 # `supabase db push` is the only ban that depends not on the command but on
@@ -153,14 +154,14 @@ def vercel_refuses(words):
 def active_environment(cwd):
     """The environment this tree is looking at, or None when there is no answer.
 
-    The product says how to ask: settings.supabase.environment in its team
-    policy, a command run in the tree that prints the name, and only that, when
-    every source of the answer agrees. A command that cannot be run, fails,
+    The product says how to ask: `environments.settled` in its
+    .sclaude/config.json, a command run in the tree that prints the name, and
+    only that, when every source of the answer agrees. A command that cannot be run, fails,
     times out or prints nothing gives None, and to the callers that is not
     permission. A product that names no command has no answer at all, so every
     environment counts as protected.
     """
-    command = supabase_settings().get("environment")
+    command = product_environments().get("settled")
     if not isinstance(command, str) or not command.strip():
         return None
     try:
@@ -186,15 +187,15 @@ def project_dir():
 def environment_is_protected(cwd, name):
     """Whether the product marks this environment `confirm: true`.
 
-    The file is the product's, named by settings.supabase.environments in its
-    team policy: {name: {"confirm": bool}}. True for anything we cannot
+    The file is the product's, named by `environments.file` in its
+    .sclaude/config.json: {name: {"confirm": bool}}. True for anything we cannot
     resolve. The question being asked is "may a migration be applied here",
     and an environment we cannot identify is exactly the case the ban exists
     for — an unreadable config is not permission.
     """
     if not name:
         return True
-    rel = supabase_settings().get("environments")
+    rel = product_environments().get("file")
     if not isinstance(rel, str) or not rel:
         return True
     path = os.path.join(cwd, rel)
@@ -253,7 +254,7 @@ def db_push_refuses(words, raw=None):
     #
     # CLAUDE_PROJECT_DIR first, `os.getcwd()` only as a fallback. Both of the
     # things read below — the product's environment command and its file of
-    # environments (settings.supabase) — are repository-relative, and the working
+    # environments (`environments` in .sclaude/config.json) — are repository-relative, and the working
     # directory is not reliably the repository: the friction review session runs
     # these hooks by hand to check a fix, and `cd`s into a feature's tree while
     # doing so. `_friction.py` records that incident at length and resolves the

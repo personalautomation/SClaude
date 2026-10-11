@@ -1242,7 +1242,7 @@ run_friction() {
   # transcript. This goes BEFORE the emptiness check: a step obstructed by the
   # classifier alone leaves the log empty, and without the gathering the review
   # would not come up at all. That is exactly how three refusals in step 4 of
-  # feature 75-review-58-results were lost.
+  # one feature were lost.
   [[ -n "$reread" ]] || collect_denials "$wt" "$step" "$(step_run_session "$state" "$key")"
 
   # Empty means there is nothing to review and we do not start a session. When
@@ -1329,7 +1329,7 @@ run_friction() {
   # possible, and that is what `sclaude friction` lives on.
   #
   # We append rather than replace. `mv -f` destroyed the previous .reviewed
-  # whenever there already was one: on feature 75-review-58-results step 2's
+  # whenever there already was one: on one feature step 2's
   # entry about check:links was lost that way — 860 bytes that no longer exist.
   # The round trip through cmd_friction (which copies .reviewed back into log)
   # made that even more certain: it is enough for somebody to have added a line

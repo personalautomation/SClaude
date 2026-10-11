@@ -45,11 +45,13 @@ with open(os.path.join(PRODUCT, ".sclaude", "team", "policy.json"), "w") as _fh:
             {"command": "npm run db:promote", "why": "prod migrations, after the merge"},
             {"command": "npm run env:prod", "why": "moves the environment to prod"},
         ],
-        "settings": {"supabase": {
-            "environment": "node scripts/lib/env-guard.mjs settled",
-            "environments": "config/environments.json",
-        }},
     }, _fh)
+# How it reports its environments: once, in its config, for every rule to read.
+with open(os.path.join(PRODUCT, ".sclaude", "config.json"), "w") as _fh:
+    json.dump({"environments": {
+        "settled": "node scripts/lib/env-guard.mjs settled",
+        "file": "config/environments.json",
+    }}, _fh)
 
 
 def run(hook, command, step=None, tool="Bash", tool_input=None, env=None,

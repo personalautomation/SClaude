@@ -507,9 +507,9 @@ rollback_migrations() {
 # The part that actually touches production, kept separate so the environment is
 # put back whatever happens inside it.
 #
-# `npm run env:prod` switches the tree's .env.local symlink, and a tree left
+# the product's switch to production (`database.envProd`) switches the tree's .env.local symlink, and a tree left
 # pointing at production is a machine whose next `npm run dev` talks to it. The
-# prod block in remind_prod ends with `npm run env:dev` for exactly this reason;
+# prod block in remind_prod ends with its switch back (`database.envDev`) for exactly this reason;
 # here it must survive a failure halfway too, so the switch back is not on the
 # success path but after it, unconditionally.
 rollback_apply_sql() {
@@ -520,7 +520,7 @@ rollback_apply_sql() {
   # scripts/db-promote.mjs reads. It is never printed: psql takes it as an
   # argument, and the argument is not echoed.
   # A failure here still falls through to the switch back at the end rather
-  # than returning: `npm run env:prod` moves a symlink and then does more, so a
+  # than returning: the product's switch to production (`database.envProd`) moves a symlink and then does more, so a
   # failure partway can leave the tree pointing at production — which is the
   # state this function must never exit in. `switched` carries the outcome
   # instead of an early return.

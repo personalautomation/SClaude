@@ -5,7 +5,7 @@
 #
 # A closed sub-issue changes an epic's state, but the epic says nothing about
 # it: to understand where it stands, the children had to be opened one by one.
-# #59 has ten of them. Here the chain is assembled whole and once, and a
+# One had ten of them. Here the chain is assembled whole and once, and a
 # separate session writes the "Current status" section from it — see
 # sclaude/prompts/status.md.
 #

@@ -210,6 +210,27 @@ def guess_promote(root):
     return out
 
 
+# How the product tells its environments apart, when it evidently does: a file
+# of them and npm scripts that switch to each. A guess to confirm, like the
+# rest; how to print the current one and the settled one is left for the
+# person, since nothing in a repository says.
+ENVIRONMENT_FILES = ("config/environments.json",)
+
+
+def guess_environments(root):
+    have = scripts(root)
+    out = {}
+    for path in ENVIRONMENT_FILES:
+        if os.path.isfile(os.path.join(root, path)):
+            out["file"] = path
+            break
+    if out and any(name.startswith("env:") for name in have):
+        out["switch"] = "npm run env:{name}"
+        if "env:status" in have:
+            out["status"] = "npm run env:status"
+    return out
+
+
 # Which of a board's columns plays which part, by the words people use for
 # them. The first option matching a role wins; a board with none of them simply
 # leaves that role out, which means sclaude will not make that move.
@@ -314,6 +335,10 @@ def main():
     url = guess_prod_url(root)
     if url:
         proposal["prod"]["siteUrl"] = url
+
+    environments = guess_environments(root)
+    if environments:
+        proposal["environments"] = environments
 
     migrations = guess_migrations(root)
     if migrations:

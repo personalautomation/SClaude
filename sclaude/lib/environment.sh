@@ -43,15 +43,39 @@ environment_file() {
 
 # The names this project actually has, one per line.
 #
-# Read from the product's own config/environments.json rather than declared
-# here: sclaude does not get to decide what a project calls its databases. A
-# project without that file (or without node) answers nothing, and every caller
+# Read from the product's own file of environments (`environments.file` in its
+# .sclaude/config.json) rather than declared here: sclaude does not get to
+# decide what a project calls its databases. A project without one answers
+# nothing, and every caller
 # below treats that as "this project does not do environments" rather than as an
 # error — same shape as project.sh's absent sections.
+# The product's file of environments, {name: {confirm, ref, ...}}, as
+# `environments.file` in its .sclaude/config.json names it; nothing when it
+# names none, and then this machine has no environments to choose from.
+environments_file() {
+  local wt="$1" rel
+  rel="$(project_get environments.file "$wt" 2>/dev/null)" || return 0
+  [[ -n "$rel" ]] && echo "$wt/$rel"
+  return 0
+}
+
+# A command the product names under `environments` in its config, with
+# {name} put in: `current`, `settled`, `switch` or `status`. Nothing when it
+# names none.
+#
+#   environments_command <tree> <which> [name]
+environments_command() {
+  local wt="$1" which="$2" name="${3:-}" cmd
+  cmd="$(project_get "environments.$which" "$wt" 2>/dev/null)" || return 0
+  [[ -n "$cmd" ]] && echo "${cmd//\{name\}/$name}"
+  return 0
+}
+
 environment_names() {
   local wt="$1"
-  [[ -f "$wt/config/environments.json" ]] || return 0
-  python3 - "$wt/config/environments.json" <<'PY' 2>/dev/null || true
+  local envs; envs="$(environments_file "$wt")"
+  [[ -f "$envs" ]] || return 0
+  python3 - "$envs" <<'PY' 2>/dev/null || true
 import json, sys
 try:
     with open(sys.argv[1]) as fh:
@@ -72,12 +96,13 @@ PY
 environment_protected() {
   local wt="$1" name="$2" rc
   [[ -n "$name" ]] || return 0
-  [[ -f "$wt/config/environments.json" ]] || return 0
+  local envs; envs="$(environments_file "$wt")"
+  [[ -f "$envs" ]] || return 0
   # The exit code is captured on its own line. `python3 … <<'PY' || return 0`
   # attaches the `||` to the redirection rather than to the finished command,
   # and the function then answers "protected" for everything — which reads as a
   # working guard and is really a guard that has stopped asking.
-  python3 - "$wt/config/environments.json" "$name" <<'PY' 2>/dev/null
+  python3 - "$envs" "$name" <<'PY' 2>/dev/null
 import json, sys
 try:
     with open(sys.argv[1]) as fh:
@@ -105,9 +130,10 @@ PY
 environment_has_ref() {
   local wt="$1" name="$2" rc
   [[ -n "$name" ]] || return 1
-  [[ -f "$wt/config/environments.json" ]] || return 1
+  local envs; envs="$(environments_file "$wt")"
+  [[ -f "$envs" ]] || return 1
   # Exit code on its own line, for the reason in environment_protected above.
-  python3 - "$wt/config/environments.json" "$name" <<'PY' 2>/dev/null
+  python3 - "$envs" "$name" <<'PY' 2>/dev/null
 import json, sys
 try:
     with open(sys.argv[1]) as fh:
@@ -153,8 +179,9 @@ PY
 environment_runnable() {
   local wt="$1" name="$2" rc
   [[ -n "$name" ]] || return 1
-  [[ -f "$wt/config/environments.json" ]] || return 1
-  python3 - "$wt/config/environments.json" "$name" <<'PY' 2>/dev/null
+  local envs; envs="$(environments_file "$wt")"
+  [[ -f "$envs" ]] || return 1
+  python3 - "$envs" "$name" <<'PY' 2>/dev/null
 import json, sys
 try:
     with open(sys.argv[1]) as fh:

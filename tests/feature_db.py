@@ -140,7 +140,8 @@ def feature_tree(root, name, env="localdb"):
 
 def write_config(wt, cli, setup):
     with open(_cfg(os.path.join(wt, ".sclaude/config.json")), "w") as fh:
-        json.dump({"database": {"local": {
+        json.dump({"environments": {"current": "node scripts/lib/env-guard.mjs name"},
+                   "database": {"local": {
             "environment": "localdb",
             "exclude": ["studio", "realtime"],
             "setup": setup,
@@ -161,6 +162,7 @@ REPO="%s/repo"
 docker() { return 0; }
 source "$LIB/state.sh"
 source "$LIB/project.sh"
+source "$LIB/environment.sh"
 source "$LIB/worktree.sh"
 source "$LIB/featuredb.sh"
 %s
@@ -497,7 +499,9 @@ def shared_cases():
         os.makedirs(os.path.join(root, "repo"))
         wt = feature_tree(root, "s", env="dev")
         with open(_cfg(os.path.join(wt, ".sclaude/config.json")), "w") as fh:
-            json.dump({"database": {"migrations": "supabase/migrations",
+            json.dump({"environments": {"current": "node scripts/lib/env-guard.mjs name",
+                                        "switch": "npm run env:{name}"},
+                       "database": {"migrations": "supabase/migrations",
                                     "local": {"environment": "localdb"}}}, fh)
         git = lambda *a: subprocess.run(["git", "-C", wt] + list(a), capture_output=True)
         git("init", "-q", "-b", "main")

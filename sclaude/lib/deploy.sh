@@ -397,7 +397,7 @@ run_block() {
 #
 # From the worktree, because that is where they are: until the merge they are
 # not in main. Without this a preview runs the branch's code on a schema that
-# lacks the branch's tables, and feature 40 went through QA exactly so, with a
+# lacks the branch's tables, and one feature went through QA exactly so, with a
 # green regression, because the suite never touched the new tables.
 #
 # Its own step, before the deploy block and outside its retries, and never a

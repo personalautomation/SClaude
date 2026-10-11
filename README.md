@@ -619,7 +619,7 @@ Roadmap — GitHub's Gantt chart — draws a bar from a pair of DATE fields, and
 there are exactly two in the repository: `Start date` and `Target date`. The
 computed `Closed` that GitHub maintains itself does not enter that choice, so an
 issue's closing date is not visible to the chart at all. That is how the field
-was filled in by hand: on issue #9 `Target date` coincides with the day it was
+was filled in by hand: on one issue `Target date` coincides with the day it was
 closed. The price of the decision is that the field stops being a plan, and
 "we overran" can no longer be seen from it.
 
@@ -1672,8 +1672,8 @@ shows what its step is busy with right now: 🟢 running, 🟡 waiting for an an
 ⚪ idle, ⚫ not started. There are GitHub links there too: for a feature, the
 issue and the pull request from its `state.json`; for a repository with no
 features, those parsed from the last commit. A merge commit names only the PR
-("Merge pull request #89"), while the issue hides a line deeper, in its body
-(`Closes #20`) — the card fetches both, because the question "why was this done"
+("Merge pull request #N"), while the issue hides a line deeper, in its body
+(`Closes #N`) — the card fetches both, because the question "why was this done"
 leads to the issue more often than to the diff. The state is asked of
 `claude agents --json`, so "waiting for an answer" is a real `blocked`, that is
 the step is stalled and will not move without a person. The "Continue" button on

@@ -9,7 +9,7 @@
 # such an event at all — PostToolUse fires only after a successful call, and
 # there is no separate "permission denied". Verified on 2.1.258.
 #
-# That is how three refusals in step 4 of feature 75-review-58-results were
+# That is how three refusals in one feature's step 4 were
 # lost: reading the log of someone else's CI run, and checking YAML for
 # validity. The log stayed empty, the session took a detour, and it was found
 # only because a human read the transcript by hand — precisely the work the log

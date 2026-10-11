@@ -227,20 +227,27 @@ review_guard_settings() {
 # named by $1; the commands it may run without being asked into the one named
 # by $2. The product is the main repository, the person this developer.
 #
-#   policy_rules <deny-array> <allow-array> <step>
+# The feature's tree, when there is one, counts too: a friction review commits
+# its rule there, and main's copy will not have it until the merge.
+#
+#   policy_rules <deny-array> <allow-array> <step> [tree]
 policy_rules() {
   local -n _deny="$1" _allow="$2"
-  local step="$3" out line seen=""
-  out="$(python3 "$LIB/policy.py" flags "${REPO:-}" "$(developer_name 2>/dev/null)" "$step" 2>/dev/null)" || out=""
+  local step="$3" tree="${4:-}" out line seen=""
+  out="$(python3 "$LIB/policy.py" flags "${REPO:-}" "$(developer_name 2>/dev/null)" "$step" "$tree" 2>/dev/null)" || out=""
   while IFS= read -r line; do
     if [[ -z "$line" ]]; then seen=1; continue; fi
     if [[ -z "$seen" ]]; then _deny+=("$line"); else _allow+=("$line"); fi
   done <<< "$out"
 }
 
-# The hook's own arguments: which product's policy, for whom.
+# The hook's own arguments: which product's policy, for whom, in which tree.
+#
+#   policy_hook_args [tree]
 policy_hook_args() {
   printf -- '--root %q --person %q' "${REPO:-}" "$(developer_name 2>/dev/null)"
+  [[ -n "${1:-}" ]] && printf -- ' --tree %q' "$1"
+  return 0
 }
 
 step_settings() {
@@ -311,7 +318,7 @@ PY
     'EnterWorktree'
     'ExitWorktree'
   )
-  policy_rules deny allow "$step"
+  policy_rules deny allow "$step" "$wt"
 
   # Without a path to the tree there is nothing to compose the trust line from;
   # the step then runs as before, with the hooks alone. The orchestrator always
@@ -333,7 +340,7 @@ PY
     trusted+=" checkout undoes it."
   fi
 
-  printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$step" "$trusted" "$BROWSER_ALLOW" "$(team_guard_entry "$wt")" "$(policy_hook_args)" "${allow[@]}" <<'PY'
+  printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$step" "$trusted" "$BROWSER_ALLOW" "$(team_guard_entry "$wt")" "$(policy_hook_args "$wt")" "${allow[@]}" <<'PY'
 import json, shlex, sys
 
 # The path quoted, as in guard_entry: a checkout under a name with a space in it

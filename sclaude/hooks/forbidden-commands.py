@@ -883,7 +883,8 @@ if not root:
         root = os.path.dirname(common.stdout.strip()) if common.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError):
         root = ""
-POLICY = policy_lib.merged(root, flag(argv, "--person"), step)
+# The feature's tree: a friction review commits a rule there before main has it.
+POLICY = policy_lib.merged(root, flag(argv, "--person"), step, flag(argv, "--tree"))
 
 try:
     payload = json.load(sys.stdin)

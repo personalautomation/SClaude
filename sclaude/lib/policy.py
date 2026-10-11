@@ -32,8 +32,8 @@
 # Used by forbidden-commands.py, and by steps.sh for --disallowed-tools and
 # permissions.allow:
 #
-#   policy.py json <product root> <person> [step]   the merged policy
-#   policy.py flags <product root> <person> [step]  disallowed, then allowed,
+#   policy.py json <product root> <person> [step [tree]]   the merged policy
+#   policy.py flags <product root> <person> [step [tree]]  disallowed, then allowed,
 #                                                   one Claude rule per line,
 #                                                   a blank line between
 import json
@@ -126,8 +126,16 @@ def config_denies(root):
     return {"deny": out}
 
 
-def merged(root, person="", step=""):
+def merged(root, person="", step="", tree=""):
     """The policy a session in this product, run by this person, works under.
+
+    `tree` is the feature's worktree, when the session works in one. A friction
+    review commits its rule there, on the feature's branch, and the next
+    session of that feature must see it, not only main's copy in the main
+    checkout: the lifted ban fired again in every round until the merge. The
+    bans of both copies apply, and the allows are the tree's, so a branch made
+    before a rule reached main does not shed it. Integrations are still told
+    from the main checkout, which holds the untracked .vercel link.
 
     Never raises. A product's or a person's file that breaks the merge in a
     way entries() did not foresee is dropped, and the policy is built from
@@ -136,17 +144,38 @@ def merged(root, person="", step=""):
     --disallowed-tools came out empty.
     """
     try:
-        return merge(root, person, step, layers=True)
+        return merge(root, person, step, layers=True, tree=tree)
     except Exception as exc:  # noqa: BLE001 — any failure, the presets still hold
         sys.stderr.write("sclaude policy: the product's or the person's rules could "
                          "not be read (%s); working from sclaude's presets\n" % exc)
-        return merge(root, person, step, layers=False)
+        return merge(root, person, step, layers=False, tree=tree)
 
 
-def merge(root, person, step, layers):
+def layered(root, tree, *parts):
+    """One layer's file from the main checkout and the tree, as one layer:
+    the bans of both, the rest from the tree's copy when it has one."""
+    main = read(os.path.join(root, *parts))
+    if not tree or os.path.realpath(tree) == os.path.realpath(root):
+        return main
+    path = os.path.join(tree, *parts)
+    if not os.path.isfile(path):
+        return main
+    own = dict(read(path))
+    own["deny"] = as_list(main.get("deny")) + as_list(own.get("deny"))
+    steps = dict(as_dict(own.get("steps")))
+    for name, rules in as_dict(main.get("steps")).items():
+        mine = dict(as_dict(steps.get(name)))
+        mine["deny"] = as_list(as_dict(rules).get("deny")) + as_list(mine.get("deny"))
+        steps[name] = mine
+    if steps:
+        own["steps"] = steps
+    return own
+
+
+def merge(root, person, step, layers, tree=""):
     core = read(os.path.join(PRESETS, "core.json"))
-    team = read(os.path.join(root, ".sclaude", "team", "policy.json")) if root and layers else {}
-    mine = read(os.path.join(root, ".sclaude", "people", person, "policy.json")) \
+    team = layered(root, tree, ".sclaude", "team", "policy.json") if root and layers else {}
+    mine = layered(root, tree, ".sclaude", "people", person, "policy.json") \
         if root and person and layers else {}
 
     names = team.get("integrations")
@@ -173,6 +202,8 @@ def merge(root, person, step, layers):
     # The production commands the product names in .sclaude/config.json, liftable by
     # the team like an integration's.
     deny += [d for d in with_source(config_denies(root), "deny", "config") if not lifted(d[0])]
+    if tree and os.path.realpath(tree) != os.path.realpath(root or tree):
+        deny += [d for d in with_source(config_denies(tree), "deny", "config") if not lifted(d[0])]
     deny += with_source(team, "deny", "team")
     deny += with_source(mine, "deny", "person")
 
@@ -204,7 +235,8 @@ def main(argv):
         return 2
     root, person = argv[1], argv[2]
     step = argv[3] if len(argv) > 3 else ""
-    policy = merged(root, person, step)
+    tree = argv[4] if len(argv) > 4 else ""
+    policy = merged(root, person, step, tree)
     if argv[0] == "json":
         print(json.dumps(policy, ensure_ascii=False))
         return 0

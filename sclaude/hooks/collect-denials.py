@@ -131,8 +131,9 @@ def policy_denials(step=""):
                                 text=True, timeout=5)
         if common.returncode != 0:
             return [], []
+        # The tree's own rules too: a friction review commits them there.
         merged = policy.merged(os.path.dirname(common.stdout.strip()),
-                               os.environ.get("SCLAUDE_POLICY_PERSON", ""), step)
+                               os.environ.get("SCLAUDE_POLICY_PERSON", ""), step, tree)
     except Exception:
         return [], []
     return ([tuple(script_call(list(d["words"]))) for d in merged["deny"]],

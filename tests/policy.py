@@ -41,8 +41,10 @@ def write(root, rel, data):
         json.dump(data, fh)
 
 
-def verdict(root, command, person="", step="review"):
+def verdict(root, command, person="", step="review", tree=""):
     argv = [sys.executable, HOOK, "--step", step, "--root", root, "--person", person]
+    if tree:
+        argv += ["--tree", tree]
     env = dict(os.environ)
     env.pop("SUPABASE_WORKDIR", None)
     out = subprocess.run(argv, input=json.dumps({"tool_name": "Bash",
@@ -123,6 +125,26 @@ try:
     check("path-rule-narrow", verdict(conf, "node scripts/tool.mjs dev"), "allow")
     write(conf, ".sclaude/team/policy.json", {"allow": [{"command": "npm run env:prod", "why": "ours"}]})
     check("config-ban-liftable-by-team", verdict(conf, "npm run env:prod"), "allow")
+
+    # --- a feature's tree: its rules count before main has them ---
+    #
+    # A friction review lifts a ban in the tree and commits it on the branch;
+    # the next session of that feature must not meet the ban again. A ban main
+    # has and the tree's copy lacks still holds.
+    main = os.path.join(tmp, "main")
+    tree = os.path.join(tmp, "main-feat")
+    write(main, ".sclaude/team/policy.json", {"integrations": ["vercel"], "deny": [
+        {"command": "npm run seed", "why": "main's"}]})
+    write(tree, ".sclaude/team/policy.json", {"integrations": ["vercel"], "allow": [
+        {"command": "vercel --prod", "why": "lifted by a review"}],
+        "deny": [{"command": "npm run wipe", "why": "the tree's"}]})
+    check("tree-lift-applies", verdict(main, "vercel --prod", tree=tree), "allow")
+    check("tree-lift-not-without-tree", verdict(main, "vercel --prod"), "deny")
+    check("tree-ban-applies", verdict(main, "npm run wipe", tree=tree), "deny")
+    check("main-ban-still-applies", verdict(main, "npm run seed", tree=tree), "deny")
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"),
+                          "flags", main, "", "code", tree], capture_output=True, text=True).stdout
+    check("tree-flags", "Bash(npm run wipe:*)" in out.splitlines(), True)
 
     # --- the flags a step is launched with ---
     out = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"),

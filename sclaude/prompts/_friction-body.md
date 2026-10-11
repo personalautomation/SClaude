@@ -28,11 +28,11 @@ Commit everything in the worktree, on the feature's branch, `<branch>`, by the p
 
 What needs fixing is the other kind — a restriction that blocks the work and protects nothing. The mark of it: the session wasn't trying to do something forbidden, it couldn't do something ordinary.
 
-**And a third kind: put off.** Some entries are neither — a restriction that cost something once but might be protecting something, an obstacle one feature is not enough evidence to call. Don't force those either way: append them to `<deferred>`, one line each, and commit it with the rest. The file is reviewed as a whole once a month (`sclaude deferred`), where how often a class comes back decides it. Read the file before you add to it: an entry that is the same problem as one already there takes the same class.
+**And a third kind: put off.** Some entries are neither — a restriction that cost something once but might be protecting something, an obstacle one feature is not enough evidence to call. Don't force those either way: append them to `<deferred>`, one line each, and commit it with the rest. It is this feature's own file; the other features' sit beside it in the same folder, and once a month all of them are reviewed together (`sclaude deferred`), where how often a class comes back decides it. Read them before you add: an entry that is the same problem as one already there takes the same class.
 
 Entries marked `proposal` are rules a session proposed for the project's `CLAUDE.md`. They are always put off, never applied here: copy each into the deferred file, the proposed line as its text.
 
-The line, tab-separated: the date, the project, the feature, the step, a short kebab-case class, and one sentence on what happened (or the proposed rule):
+The line, tab-separated, with no tab inside a field: the date, the project, the feature, the step and a short kebab-case class (each a single word), and one sentence on what happened (or the proposed rule). Say what happened, not a copy of the code or spec it happened in — that changes, and the entry would then be judged on facts that no longer hold:
 
 ```
 2026-10-09	myapp	12-review-profile-page	review	claude-md-stale-docs	Proposal: a change of behaviour greps docs/, both manuals and comments for the old wording in the same commit.

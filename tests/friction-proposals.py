@@ -93,7 +93,7 @@ try:
     subprocess.run(git + ["add", "-A"], check=True)
     subprocess.run(git + ["commit", "-qm", "init"], check=True)
     # No `maintainers` in the product: everybody keeps team/.
-    deferred = os.path.join(wt, ".sclaude", "team", "deferred.tsv")
+    deferred = os.path.join(wt, ".sclaude", "team", "deferred", "145-x.tsv")
     state = os.path.join(wt, ".feature", "state.json")
     log = os.path.join(wt, ".feature", "friction.log")
 
@@ -123,11 +123,11 @@ try:
     check("defer-committed-on-the-branch", commits(), 2)
     check("defer-file-in-the-product", os.path.exists(deferred), True)
     with open(deferred) as fh:
-        check("defer-file-has-header", fh.readline().startswith("# Friction"), True)
+        check("defer-file-has-header", fh.readline().startswith("# Put off by sclaude"), True)
     check("defer-rows-written", rows(), 2)
     tree = subprocess.run(["git", "-C", wt, "show", "--name-only", "--format=", "HEAD"],
                           capture_output=True, text=True).stdout.split()
-    check("defer-commit-holds-the-file", tree, [".sclaude/team/deferred.tsv"])
+    check("defer-commit-holds-the-file", tree, [".sclaude/team/deferred/145-x.tsv"])
     with open(state) as fh:
         node = (json.load(fh).get("friction") or {}).get("review-21") or {}
     check("defer-state-verdict", node.get("verdict"), "deferred")

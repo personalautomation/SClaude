@@ -14,98 +14,107 @@
 # and once a month the file is read as a whole: a class that came back ten
 # times is a different decision from one seen once.
 #
-# The file is the product's: what friction teaches is how the product
-# customises sclaude, and it belongs with the rest of that. It lives in the
-# person's rules folder, `.sclaude/team/deferred.tsv` for the product's
-# maintainers and `.sclaude/people/<name>/deferred.tsv` for everybody else
-# (product_rules_dir), written in a feature's worktree and committed on its
-# branch, so it reaches the product's main with the feature. A maintainer's
-# monthly review reads every file of the product; anybody else's, their own.
+# The entries are the product's: what friction teaches is how the product
+# customises sclaude, and it belongs with the rest of that. They live in the
+# person's rules folder (product_rules_dir), `.sclaude/team/deferred/` for the
+# product's maintainers and `.sclaude/people/<name>/deferred/` for everybody
+# else, one file per feature, `<feature>.tsv`, written in that feature's
+# worktree and committed on its branch. One file per feature because two
+# features' branches appending to one shared file conflicted at every second
+# merge; and the review's own state, the date of the last review, is a file
+# of its own, `last-reviewed`, that only the monthly review writes. A
+# maintainer's monthly review reads every folder of the product; anybody
+# else's, their own.
 #
-# The month is counted from the `# last reviewed:` line the review writes into
-# a file. No timer starts the review: it is a conversation, and a conversation
-# needs a person at a terminal. sclaude offers it when it is opened in a
-# product and the month is up.
+# A line, tab-separated: date, project, feature, step, class, what happened.
+# No field holds a tab, and step and class are single words. Class
+# `sclaude-default` marks something about sclaude itself — a preset wrong for
+# every product, or a bug in its code: the product works around it, and
+# changing sclaude is a deliberate pull request to it.
+#
+# No timer starts the review: it is a conversation, and a conversation needs
+# a person at a terminal. sclaude offers it when it is opened in a product and
+# a month has passed since `last-reviewed`, or since the oldest entry.
 
 DEFERRED_DAYS=30
 
-# This person's deferred file in a tree of the product: a feature's worktree
-# while a feature runs, the main tree otherwise.
+# This person's deferred file for a feature, in a tree of the product: the
+# feature's worktree while it runs, the main tree otherwise.
 #
-#   deferred_file [tree]
+#   deferred_file <tree> [feature]
 deferred_file() {
-  echo "$(product_rules_dir "${1:-${REPO:-.}}")/deferred.tsv"
+  local tree="${1:-${REPO:-.}}" feature="${2:-general}"
+  echo "$(product_rules_dir "$tree")/deferred/${feature}.tsv"
 }
 
-# Creates the file with its header if it is not there yet. Silent; returns 1
-# when it could not.
+# Creates the folder for the file, and the file with its one-line header, if
+# they are not there yet. Silent; returns 1 when it could not.
 #
-#   deferred_ensure [tree]
+#   deferred_ensure <tree> [feature]
 deferred_ensure() {
-  local file; file="$(deferred_file "${1:-}")"
+  local file; file="$(deferred_file "${1:-}" "${2:-}")"
   [[ -f "$file" ]] && return 0
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 1
-  cat > "$file" 2>/dev/null <<'HEADER' || return 1
-# Friction that was neither lifted nor kept as a deliberate ban, but put off —
-# and the rules sessions proposed for a project's CLAUDE.md. Collected here by
-# the friction reviews, and reviewed together once a month (`sclaude deferred`),
-# where how often a class comes back is what decides it.
-#
-# One entry per line, tab-separated:
-#
-#   date  project  feature  step  class  what happened, or the proposed rule
-#
-# `class` is a short kebab-case name for the problem. An entry that is the same
-# problem as one above reuses its class, so the monthly review can count them.
-# Class `sclaude-default` marks a preset of sclaude's that looks wrong for every
-# product: the product works around it, and changing sclaude is a deliberate
-# pull request to it.
-#
-# last reviewed: never
-HEADER
+  printf '%s\n' "# Put off by sclaude's friction reviews (sclaude/lib/deferred.sh in sclaude)." \
+    > "$file" 2>/dev/null || return 1
 }
 
-# The deferred files the monthly review reads in a tree: every one in the
-# product for a maintainer, only one's own for anybody else. One path a line.
+# The deferred folders the monthly review reads in a tree: every one in the
+# product for a maintainer, only one's own for anybody else. One a line.
 #
-#   deferred_files [tree]
-deferred_files() {
-  local tree="${1:-${REPO:-.}}" f
+#   deferred_dirs [tree]
+deferred_dirs() {
+  local tree="${1:-${REPO:-.}}" d
   if product_maintainer "$tree"; then
-    for f in "$tree/.sclaude/team/deferred.tsv" "$tree"/.sclaude/people/*/deferred.tsv; do
-      [[ -f "$f" ]] && echo "$f"
+    for d in "$tree/.sclaude/team/deferred" "$tree"/.sclaude/people/*/deferred; do
+      [[ -d "$d" ]] && echo "$d"
     done
   else
-    f="$(deferred_file "$tree")"
-    [[ -f "$f" ]] && echo "$f"
+    d="$(product_rules_dir "$tree")/deferred"
+    [[ -d "$d" ]] && echo "$d"
   fi
   return 0
 }
 
+# Every entry file in those folders. One a line.
+deferred_files() {
+  local d f
+  while IFS= read -r d; do
+    for f in "$d"/*.tsv; do
+      [[ -f "$f" ]] && echo "$f"
+    done
+  done < <(deferred_dirs "${1:-}")
+  return 0
+}
+
 # Whether the monthly review is due: prints "<entries> <since>" and returns 0
-# when it is, returns 1 otherwise. <since> is the oldest of the files' last
-# reviews, or of their first entries where there was none.
+# when it is, returns 1 otherwise. <since> is the oldest of the folders' last
+# reviews, or of their first entries where a folder was never reviewed.
 deferred_due() {
-  local -a files=()
-  mapfile -t files < <(deferred_files "${1:-}")
-  (( ${#files[@]} )) || return 1
-  python3 - "$DEFERRED_DAYS" "${files[@]}" <<'PY'
-import datetime, re, sys
-days, paths = int(sys.argv[1]), sys.argv[2:]
+  local -a dirs=()
+  mapfile -t dirs < <(deferred_dirs "${1:-}")
+  (( ${#dirs[@]} )) || return 1
+  python3 - "$DEFERRED_DAYS" "${dirs[@]}" <<'PY'
+import datetime, glob, os, re, sys
+days, dirs = int(sys.argv[1]), sys.argv[2:]
 entries, since = 0, None
-for path in paths:
-    reviewed, first, count = None, None, 0
-    for line in open(path, encoding="utf-8"):
-        found = re.match(r"#\s*last reviewed:\s*(\d{4}-\d{2}-\d{2})", line)
-        if found:
-            reviewed = found.group(1)
-            continue
-        if not line.strip() or line.startswith("#"):
-            continue
-        count += 1
-        stamp = line.split("\t", 1)[0].strip()[:10]
-        if re.match(r"\d{4}-\d{2}-\d{2}$", stamp) and (first is None or stamp < first):
-            first = stamp
+for folder in dirs:
+    reviewed = None
+    try:
+        stamp = open(os.path.join(folder, "last-reviewed"), encoding="utf-8").read().strip()
+        if re.match(r"\d{4}-\d{2}-\d{2}$", stamp):
+            reviewed = stamp
+    except OSError:
+        pass
+    first, count = None, 0
+    for path in glob.glob(os.path.join(folder, "*.tsv")):
+        for line in open(path, encoding="utf-8"):
+            if not line.strip() or line.startswith("#"):
+                continue
+            count += 1
+            date = line.split("\t", 1)[0].strip()[:10]
+            if re.match(r"\d{4}-\d{2}-\d{2}$", date) and (first is None or date < first):
+                first = date
     if not count:
         continue
     entries += count
@@ -114,8 +123,7 @@ for path in paths:
         since = mark
 if not entries or not since:
     sys.exit(1)
-age = (datetime.date.today() - datetime.date.fromisoformat(since)).days
-if age < days:
+if (datetime.date.today() - datetime.date.fromisoformat(since)).days < days:
     sys.exit(1)
 print("%d %s" % (entries, since))
 PY
@@ -163,20 +171,24 @@ cmd_deferred() {
       || die "could not make the review's worktree at $wt"
   fi
   # The files as they are in the review's tree: the one the review edits.
-  local f rel list=""
+  local f rel list="" stamps=""
   for f in "${files[@]}"; do
     rel="${f#"$root"/}"
     list+="- \`$wt/$rel\`"$'\n'
   done
+  while IFS= read -r f; do
+    stamps+="- \`$wt/${f#"$root"/}/last-reviewed\`"$'\n'
+  done < <(deferred_dirs "$root")
 
   done_file="${TMPDIR:-/tmp}/sclaude-deferred.done"
-  prompt="$(D_FILES="${list%$'\n'}" D_WT="$wt" D_BRANCH="$branch" \
+  prompt="$(D_FILES="${list%$'\n'}" D_STAMPS="${stamps%$'\n'}" D_WT="$wt" D_BRANCH="$branch" \
     D_RULES="$(product_rules_dir "$wt")" D_INSTRUMENTS="$INSTRUMENTS" \
     D_DONE="$done_file" D_TODAY="$(date +%F)" \
     python3 - "$PROMPTS/friction-deferred.md" <<'PY'
 import os, sys
 text = open(sys.argv[1], encoding="utf-8").read()
-for key, env in (("<files>", "D_FILES"), ("<worktree>", "D_WT"), ("<branch>", "D_BRANCH"),
+for key, env in (("<files>", "D_FILES"), ("<stamps>", "D_STAMPS"),
+                 ("<worktree>", "D_WT"), ("<branch>", "D_BRANCH"),
                  ("<rules>", "D_RULES"), ("<instruments>", "D_INSTRUMENTS"),
                  ("<done-marker>", "D_DONE"), ("<today>", "D_TODAY")):
     text = text.replace(key, os.environ.get(env, ""))

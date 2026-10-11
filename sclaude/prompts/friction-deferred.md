@@ -1,6 +1,10 @@
-This is the monthly review of the deferred friction for this product:
+This is the monthly review of the deferred friction for this product, one file per feature:
 
 <files>
+
+and the date each folder was last reviewed:
+
+<stamps>
 
 You are in `<worktree>`, a worktree of the product's main on its own branch, `<branch>`, made for this review. `<instruments>` is sclaude's own checkout: read it if you need to understand a restriction, and change nothing in it — a hook refuses writes there.
 
@@ -22,6 +26,6 @@ Over the month the friction reviews put two kinds of things in these files rathe
 
 `<rules>` is where this person's rules go: `.sclaude/team/` for the product's maintainers, their own `.sclaude/people/<name>/` for everybody else — a hook keeps everybody else out of `team/`.
 
-Present it as a plan, and once I approve it, make the changes in `<worktree>`: the policy and the rules, and the files themselves — remove the entries of every class that was decided (lifted, banned, written or dropped), keep those that keep waiting or wait for a change to sclaude, and set each file's `# last reviewed:` line to `<today>`. Commit on `<branch>` by the product's commit rules. When this session ends, `sclaude` pushes the branch and opens its pull request into the product's main; don't push or open one yourself.
+Present it as a plan, and once I approve it, make the changes in `<worktree>`: the policy and the rules, and the entry files themselves — remove the entries of every class that was decided (lifted, banned, written or dropped), keep those that keep waiting or wait for a change to sclaude, delete a file left with no entries, and write `<today>` alone into each `last-reviewed` above, creating it if it is not there. Only this review writes those files: a feature's branch adds entries, never dates. Commit on `<branch>` by the product's commit rules. When this session ends, `sclaude` pushes the branch and opens its pull request into the product's main; don't push or open one yourself.
 
 **How this ends.** When the changes are committed, write the marker — `echo done > <done-marker>` — and then the report as your last message, with no tool call after it: what was decided for each class, which commits were made, what waits for a change to sclaude's defaults, and what keeps waiting. About thirty seconds after your turn ends `sclaude` closes the session and prints the report; if I type anything in that time, the closing is called off. If something is left for me to answer, leave the marker out, and I close the session myself.

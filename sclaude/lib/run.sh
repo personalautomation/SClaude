@@ -39,7 +39,7 @@ render_prompt() {
   # server, and the plain address is as good as any.
   local -x SCLAUDE_V_DEV_URL="http://localhost:3000"
   # The deferred file the friction note points at (deferred.sh).
-  local -x SCLAUDE_V_DEFERRED="$(deferred_file "${wt:-${REPO:-.}}")"
+  local -x SCLAUDE_V_DEFERRED="$(deferred_file "${wt:-${REPO:-.}}" "$slug")"
   local -x SCLAUDE_V_DEV_PORT="3000"
   # And its own database, when it has one: the conditional paragraph about it
   # drops out of the prompt otherwise.
@@ -1384,11 +1384,11 @@ PYEOF
   # The deferred file the review may append to is the product's, in this
   # person's rules folder (deferred.sh); created here so the session finds it
   # with its header.
-  deferred_ensure "$wt" || true
+  deferred_ensure "$wt" "$slug" || true
   prompt="$(sed -e "/^<body>$/r $PROMPTS/_friction-body.md" -e "/^<body>$/d" \
     "$head_prompt" \
     | sed -e "s|<feature>|$slug|g" -e "s|<step>|$label|g" \
-      -e "s|<deferred>|$(deferred_file "$wt")|g" \
+      -e "s|<deferred>|$(deferred_file "$wt" "$slug")|g" \
       -e "s|<rules>|$(product_rules_dir "$wt")|g" -e "s|<instruments>|$INSTRUMENTS|g" \
       -e "s|<log>|$reviewed|g" -e "s|<transcript>|$transcript|g" \
       -e "s|<done-marker>|$done_file|g" -e "s|<worktree>|$wt|g" \
@@ -1623,8 +1623,8 @@ friction_defer_proposals() {
             "$slug" "$step" 2>/dev/null)" || return 1
   [[ -n "$rows" ]] || return 1
   n="$(grep -c . <<< "$rows")"
-  local file; file="$(deferred_file "$wt")"
-  deferred_ensure "$wt" || return 1
+  local file; file="$(deferred_file "$wt" "$slug")"
+  deferred_ensure "$wt" "$slug" || return 1
   git -C "$wt" diff --quiet HEAD -- "$file" 2>/dev/null || return 1
   printf '%s\n' "$rows" >> "$file" 2>/dev/null || return 1
   git -C "$wt" add -- "$file" 2>/dev/null \

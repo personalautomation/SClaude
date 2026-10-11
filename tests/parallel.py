@@ -358,24 +358,25 @@ def due():
 old_day = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
 today = datetime.date.today().isoformat()
 entry = "%s\tmyapp\t152-x\treview\tclaude-md-stale-docs\tProposal: grep the docs.\n" % old_day
-put(".sclaude/team/deferred.tsv", "# last reviewed: never\n" + entry)
+put(".sclaude/team/deferred/152-x.tsv", "# header\n" + entry)
 check("deferred-due-after-a-month-unreviewed", due(), "1 %s" % old_day)
-put(".sclaude/team/deferred.tsv", "# last reviewed: %s\n" % today + entry)
+put(".sclaude/team/deferred/last-reviewed", today + "\n")
 check("deferred-not-due-when-reviewed-today", due(), None)
-put(".sclaude/team/deferred.tsv", "# last reviewed: never\n")
+os.remove(os.path.join(product, ".sclaude", "team", "deferred", "last-reviewed"))
+put(".sclaude/team/deferred/152-x.tsv", "# header\n")
 check("deferred-not-due-when-empty", due(), None)
-# A maintainer counts everybody's files; somebody else only their own.
-put(".sclaude/people/bob/deferred.tsv", "# last reviewed: never\n" + entry)
+# A maintainer counts everybody's folders; somebody else only their own.
+put(".sclaude/people/bob/deferred/7-y.tsv", entry)
 check("deferred-maintainer-reads-people", due(), "1 %s" % old_day)
 with open(os.path.join(product, ".sclaude.json"), "w") as fh:
     json.dump({"maintainers": ["lead@x.test"]}, fh)
 check("deferred-others-read-their-own", due(), None)
-check("deferred-file-is-the-persons",
-      deferred_sh('deferred_file "%s"' % product).stdout.strip(),
-      os.path.join(product, ".sclaude", "people", "ann", "deferred.tsv"))
-deferred_sh('deferred_ensure "%s"' % product)
-with open(os.path.join(product, ".sclaude", "people", "ann", "deferred.tsv")) as fh:
-    check("deferred-file-starts-with-its-header", fh.readline().startswith("# Friction"), True)
+check("deferred-file-is-the-persons-per-feature",
+      deferred_sh('deferred_file "%s" 9-z' % product).stdout.strip(),
+      os.path.join(product, ".sclaude", "people", "ann", "deferred", "9-z.tsv"))
+deferred_sh('deferred_ensure "%s" 9-z' % product)
+with open(os.path.join(product, ".sclaude", "people", "ann", "deferred", "9-z.tsv")) as fh:
+    check("deferred-file-starts-with-its-header", fh.readline().startswith("# Put off by sclaude"), True)
 check("deferred-file-not-in-instruments",
       os.path.exists(os.path.join(ROOT, "sclaude", "friction-deferred.tsv")), False)
 

@@ -37,7 +37,7 @@ def check(name, got, want):
 
 
 CONFIG = """# a comment with port = 1
-project_id = "social"
+project_id = "myapp"
 
 [api]
 enabled = true
@@ -72,9 +72,9 @@ project_id = "should-stay"
 
 
 def config_cases():
-    out = feature_db.rewrite_config(CONFIG, "social-a", 55010)
+    out = feature_db.rewrite_config(CONFIG, "myapp-a", 55010)
     lines = out.split("\n")
-    check("project_id at the top", 'project_id = "social-a"' in lines, True)
+    check("project_id at the top", 'project_id = "myapp-a"' in lines, True)
     check("project_id in a section untouched", 'project_id = "should-stay"' in lines, True)
     for want in ("port = 55011", "port = 55012", "shadow_port = 55010", "port = 55019",
                  "port = 55013", "port = 55014", "inspector_port = 55018", "port = 55017"):
@@ -213,9 +213,9 @@ def ensure_cases():
               "NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:%s" % ((base or 0) + 1) in text, True)
         check("the env carries the workdir", "SUPABASE_WORKDIR=" in text, True)
         workdir = os.path.join(a, ".feature", "supabase", "supabase")
-        check("the config is rewritten", 'project_id = "social-a"' in
+        check("the config is rewritten", 'project_id = "myapp-a"' in
               open(os.path.join(workdir, "config.toml")).read(), True)
-        check("the tree's config is untouched", 'project_id = "social"' in
+        check("the tree's config is untouched", 'project_id = "myapp"' in
               open(os.path.join(a, "supabase", "config.toml")).read(), True)
         check("migrations are the tree's", os.path.realpath(os.path.join(workdir, "migrations")),
               os.path.realpath(os.path.join(a, "supabase", "migrations")))
@@ -465,14 +465,14 @@ docker() {
   case "$*" in
     *schema_migrations*)
       echo 0001; echo 0002
-      [[ "$*" == *supabase_db_social\ * ]] || { echo 0003; echo 0004; } ;;
+      [[ "$*" == *supabase_db_myapp\ * ]] || { echo 0003; echo 0004; } ;;
   esac
 }
 """
         log = "\n".join(
             ['psql:<stdin>:1: ERROR:  null value in column "origin" of relation "activities" violates not-null constraint'] * 2
             + ['psql:<stdin>:9: ERROR:  new row for relation "tiers" violates check constraint "tiers_limits_shape"'])
-        out = bash(root, unfit + 'db_error_tables <<<%s; echo; db_warn_main_behind supabase_db_social supabase_db_feature'
+        out = bash(root, unfit + 'db_error_tables <<<%s; echo; db_warn_main_behind supabase_db_myapp supabase_db_feature'
                    % shlex.quote(log))
         check("rows that did not fit are counted by table",
               out.splitlines()[0], "2 in public.activities, 1 in public.tiers")

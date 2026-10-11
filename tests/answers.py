@@ -2,7 +2,7 @@
 #
 # What a typed answer is taken for.
 #
-# On #143 in social, "Merge origin/main into …? [y/N] n" merged, twice. A
+# Once "Merge origin/main into …? [y/N] n" merged, twice. A
 # Cyrillic letter typed and erased with Backspace on a terminal without
 # `iutf8` loses only its last byte; the first, \320 or \321, stayed in the
 # line, invisible, and bash matched it against the first byte of "д" or "у" in

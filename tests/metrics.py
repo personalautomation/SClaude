@@ -42,7 +42,7 @@ def check_true(name, got):
 # calls in run.sh, regression.sh and deploy.sh.
 FULL = {
     "feature": "71-email-edit",
-    "repo": "/home/x/social",
+    "repo": "/home/x/myapp",
     "issue": 71,
     "pr": 208,
     "step": "done",

@@ -239,7 +239,7 @@ def main():
         check("and leaves it in place", os.path.isdir(locked), True)
 
         # Reinstalling dependencies stops this tree's server and drops the
-        # Turbopack cache. In feature 104 both survived the reinstall, and every
+        # Turbopack cache. Once both survived the reinstall, and every
         # page failed on a module path into the old node_modules.
         with open(os.path.join(root, "repo", "package-lock.json"), "w") as fh:
             fh.write("main\n")

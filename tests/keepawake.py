@@ -1204,25 +1204,25 @@ with sandbox() as box:
     # Parsing the sclaude status table: the menu's second level is buttons onto
     # features, and it is built from these columns.
     sample = ("FEATURE                STEP           WORKTREE\n"
-              "27-nif-website         2. code        /home/ilia/social-27\n"
-              "password-change        4. review      /home/ilia/social-pw\n")
+              "27-nif-website         2. code        /home/u/myapp-27\n"
+              "password-change        4. review      /home/u/myapp-pw\n")
     saved_run = telegramd.run
     telegramd.run = lambda cmd, timeout=25: sample
     # The buttons are built for a repository by name, and the name is looked up
     # among the git repositories in HOME. Left to the real HOME this section
-    # passed only on a machine that happened to have ~/social checked out.
+    # passed only on a machine that happened to have ~/myapp checked out.
     saved_known = telegramd.known_repos
-    telegramd.known_repos = lambda: ["/nonexistent/social"]
+    telegramd.known_repos = lambda: ["/nonexistent/myapp"]
     try:
         feats, raw = telegramd.features_of("/tmp/whatever")
         check("features parsed", len(feats), 2)
         check("the feature's name", feats[0][0], "27-nif-website")
         check("the feature's step in full", feats[0][1], "2. code")
-        check("the worktree separately", feats[0][2], "/home/ilia/social-27")
+        check("the worktree separately", feats[0][2], "/home/u/myapp-27")
         check("the table's header did not get into the features",
               any(f[0] == "FEATURE" for f in feats), False)
 
-        labels = [b["text"] for row in telegramd.features_keyboard("social")
+        labels = [b["text"] for row in telegramd.features_keyboard("myapp")
                   for b in row]
         check_true("the button has the name and the step", "27-nif-website — 2. code" in labels)
 
@@ -1231,29 +1231,29 @@ with sandbox() as box:
         # them, there is nothing on a phone to open a worktree path with, and the
         # branch breakdown is about branches without features, that is about
         # exactly what is not in this list.
-        body = telegramd.repo_text("social")
+        body = telegramd.repo_text("myapp")
         check_true("the message has the number of features", "2" in body)
         check_true("there is no table under the header", "FEATURE" not in body)
-        check_true("the worktree is not shown", "/home/ilia" not in body)
+        check_true("the worktree is not shown", "/home/u" not in body)
         check_true("there is no branch breakdown", "Branches in progress" not in body)
         check_true("the message is one line", len(body.strip().splitlines()) == 1)
         check_true("there is no path on the button",
-                   not any("/home/ilia" in l for l in labels))
+                   not any("/home/u" in l for l in labels))
 
         # Every feature button addresses its own feature — otherwise a press
         # would open somebody else's. A feature's row is now two buttons: the
         # wide one drives the step, the narrow one leads to the list of actions
         # on the same feature.
-        datas = [b["callback_data"] for row in telegramd.features_keyboard("social")
+        datas = [b["callback_data"] for row in telegramd.features_keyboard("myapp")
                  for b in row if b["callback_data"].startswith("go:")]
         check("a callback for every feature", len(datas), 2)
         check_true("the callback carries the repository and the feature",
-                   datas[0] == "go:social:27-nif-website")
-        acts = [b["callback_data"] for row in telegramd.features_keyboard("social")
+                   datas[0] == "go:myapp:27-nif-website")
+        acts = [b["callback_data"] for row in telegramd.features_keyboard("myapp")
                 for b in row if b["callback_data"].startswith("acts:")]
         check("an actions button for every feature", len(acts), 2)
         check_true("the actions button carries the same feature",
-                   acts[0] == "acts:social:27-nif-website")
+                   acts[0] == "acts:myapp:27-nif-website")
     finally:
         telegramd.known_repos = saved_known
         telegramd.run = saved_run
@@ -1286,7 +1286,7 @@ with sandbox() as box:
     try:
         feats, _ = telegramd.features_of("/tmp/whatever")
         check("no features, no rows", feats, [])
-        rows = telegramd.features_keyboard("social")
+        rows = telegramd.features_keyboard("myapp")
         # We count the exits rather than the rows: there are now two navigation
         # rows ("to the repositories" and "to the main menu"), and tying to their
         # number would break on any rearrangement. Only one thing matters — that
@@ -1318,7 +1318,7 @@ with sandbox() as box:
         # imported function, and that is visible only when it is called.
         routed = ["menu_extend", "menu_status", "menu_chrome", "menu_services",
                   "menu_back", "menu_code", "svc_repos", "svc_sclaude",
-                  "svc_docs", "repo:social", "feat:social:nothing",
+                  "svc_docs", "repo:myapp", "feat:myapp:nothing",
                   "chrome_start", "code_start", "idle_keep", "noop",
                   "devopen:no-such-feature", "devstop:no-such-feature"]
         from keepawake import docs as _docs
@@ -1573,7 +1573,7 @@ from keepawake import telegramd as tg_acl
 # A repository's name arrives in callback_data and reaches a shell command. Even
 # with shlex.quote it is unwise to rely on escaping alone: the name has to come
 # from the list of known repositories.
-for evil in ("../../etc", "..", "no-such-repo", "social; rm -rf /", "", "/etc"):
+for evil in ("../../etc", "..", "no-such-repo", "myapp; rm -rf /", "", "/etc"):
     check("a forged repository name is rejected: %r" % evil,
           tg_acl.repo_path(evil), "")
 
@@ -2254,7 +2254,7 @@ from keepawake import telegramd as _tg
 
 # The labels were passed — a button per option, with its name and its own number
 # in the answer.
-_kb = _tg.ask_keyboard("social", {
+_kb = _tg.ask_keyboard("myapp", {
     "form": "pick:3",
     "options": ["Continue", "Sync with main", "Drop the feature"],
 })
@@ -2262,12 +2262,12 @@ check("the choice buttons are labelled", [b[0]["text"] for b in _kb],
       ["Continue", "Sync with main", "Drop the feature"])
 check("the choice buttons answer with a number",
       [b[0]["callback_data"] for b in _kb],
-      ["answer:social:1", "answer:social:2", "answer:social:3"])
+      ["answer:myapp:1", "answer:myapp:2", "answer:myapp:3"])
 
 # No labels means the previous behaviour down to the last character: whoever
 # does not know about options noticed nothing.
 check("without labels the digits remain",
-      [b["text"] for row in _tg.ask_keyboard("social", {"form": "pick:3"}) for b in row],
+      [b["text"] for row in _tg.ask_keyboard("myapp", {"form": "pick:3"}) for b in row],
       ["1", "2", "3"])
 
 # There are as many labels as options — otherwise they cannot be trusted: a list
@@ -2275,7 +2275,7 @@ check("without labels the digits remain",
 # worse than honest digits.
 check("a mismatch in the labels gives digits",
       [b["text"] for row in _tg.ask_keyboard(
-          "social", {"form": "pick:3", "options": ["Continue"]}) for b in row],
+          "myapp", {"form": "pick:3", "options": ["Continue"]}) for b in row],
       ["1", "2", "3"])
 
 # A long list does become a wall — but at the twenty-fifth option rather than
@@ -2283,7 +2283,7 @@ check("a mismatch in the labels gives digits",
 
 # A label that is too long is cut from the tail: an option's start is what
 # matters.
-_long = _tg.ask_keyboard("social", {"form": "pick:1", "options": ["A" * 90]})
+_long = _tg.ask_keyboard("myapp", {"form": "pick:1", "options": ["A" * 90]})
 check_true("a long label is trimmed", len(_long[0][0]["text"]) <= 60)
 check_true("a long label is cut from the tail",
            _long[0][0]["text"].startswith("AAA") and _long[0][0]["text"].endswith("…"))
@@ -2291,52 +2291,52 @@ check_true("a long label is cut from the tail",
 # An empty label does not leave an empty button: better a number than something
 # with nothing for the eye to land on.
 check("an empty label is replaced by a number",
-      _tg.ask_keyboard("social", {"form": "pick:1", "options": [""]})[0][0]["text"],
+      _tg.ask_keyboard("myapp", {"form": "pick:1", "options": [""]})[0][0]["text"],
       "1")
 
 # Labelled buttons have a ceiling of their own. Nine options is exactly how many
 # the list of actions on a feature has, and with the old shared threshold of
 # eight it got no buttons at all — which is what the whole thing was for.
 check("nine labelled buttons fit",
-      len(_tg.ask_keyboard("social", {"form": "pick:9",
+      len(_tg.ask_keyboard("myapp", {"form": "pick:9",
                                       "options": ["a%d" % i for i in range(9)]})), 9)
 check("twenty-four — still yes",
-      len(_tg.ask_keyboard("social", {"form": "pick:24",
+      len(_tg.ask_keyboard("myapp", {"form": "pick:24",
                                       "options": ["a%d" % i for i in range(24)]})), 24)
 check("twenty-five — as text now",
-      _tg.ask_keyboard("social", {"form": "pick:25",
+      _tg.ask_keyboard("myapp", {"form": "pick:25",
                                   "options": ["a%d" % i for i in range(25)]}), [])
 # The unlabelled ones kept the old one: a digit is checked against the list by
 # eye, and by the ninth that costs more than typing the number by hand.
 check("nine unlabelled ones do not fit",
-      _tg.ask_keyboard("social", {"form": "pick:9"}), [])
+      _tg.ask_keyboard("myapp", {"form": "pick:9"}), [])
 
 # The numbered list above labelled buttons is the same list a second time. We
 # remove precisely that, leaving the lines that explain the question.
 _ctx = "71-email · issue #71\n  1)  Continue  step 2/4\n  2)  Drop  clears all"
-_named = _tg.ask_text("social", {"form": "pick:2", "prompt": "Which one?",
+_named = _tg.ask_text("myapp", {"form": "pick:2", "prompt": "Which one?",
                                  "context": _ctx, "options": ["Continue", "Drop"]})
 check_true("the list above labelled buttons is removed", "1)  Continue" not in _named)
 check_true("the line with the issue next to the buttons stayed", "issue #71" in _named)
 
 # Without labels the list has to stay: "3" says nothing until it is written next
 # to it what the third option is.
-_bare = _tg.ask_text("social", {"form": "pick:2", "prompt": "Which one?",
+_bare = _tg.ask_text("myapp", {"form": "pick:2", "prompt": "Which one?",
                                 "context": _ctx})
 check_true("the list stayed with numeric buttons", "1)  Continue" in _bare)
 
 # The feature list's buttons: the wide one drives the step, the narrow one leads
 # to the actions on the same feature. That is the Telegram form of the terminal's
 # checkbox, unfolded across the width.
-_feat_rows = [r for r in _tg.features_keyboard("social")
+_feat_rows = [r for r in _tg.features_keyboard("myapp")
               if len(r) == 2 and r[1]["callback_data"].startswith("acts:")]
 if _feat_rows:
     _row = _feat_rows[0]
     _slug = _row[1]["callback_data"].split(":", 2)[2]
     check("the wide feature button drives the step",
-          _row[0]["callback_data"], "go:social:%s" % _slug)
+          _row[0]["callback_data"], "go:myapp:%s" % _slug)
     check("the narrow feature button leads to the actions",
-          _row[1]["callback_data"], "acts:social:%s" % _slug)
+          _row[1]["callback_data"], "acts:myapp:%s" % _slug)
     check_true("the narrow button has no caption", len(_row[1]["text"]) <= 4)
     check_true("the feature's name is trimmed to half a row",
                len(_row[0]["text"]) <= 40)
@@ -2345,7 +2345,7 @@ if _feat_rows:
 # in the orchestrator to assemble it with — whether the session is alive is known
 # to the bot — so the orchestrator only names the feature in the feature field,
 # and ask_text builds the card.
-_ask_card = _tg.ask_text("social", {"form": "pick:2", "prompt": "Which one?",
+_ask_card = _tg.ask_text("myapp", {"form": "pick:2", "prompt": "Which one?",
                                     "feature": "no-such-feature",
                                     "options": ["a", "b"]})
 check_true("a non-existent feature does not bring the question down",
@@ -2354,11 +2354,11 @@ check_true("a question with a card has its own prompt",
            "Which one?" in _ask_card)
 
 # Without the feature field, the previous look down to the last character:
-# "social is asking".
-_plain = _tg.ask_text("social", {"form": "yn", "prompt": "Ship it? [y/n] "})
+# "myapp is asking".
+_plain = _tg.ask_text("myapp", {"form": "yn", "prompt": "Ship it? [y/n] "})
 check_true("an ordinary question is untouched", "Ship it?" in _plain)
 check_true("an ordinary question keeps its header",
-           _tg.t("ask.title", repo="social", prompt="Ship it? [y/n] ") in _plain)
+           _tg.t("ask.title", repo="myapp", prompt="Ship it? [y/n] ") in _plain)
 
 # The field gets through from the orchestrator: io.sh puts it there from
 # ASK_FEATURE.
@@ -2415,11 +2415,11 @@ _saved_feats = _tg.features_of_name
 try:
     _tg.features_of_name = lambda n: (
         [("feat-%d" % i, "2/4 development", "/wt/%d" % i) for i in range(1, 10)], "")
-    _nine = _tg.repo_text("social")
+    _nine = _tg.repo_text("myapp")
     check_true("the counter counts all nine", "9" in _nine)
     check_true("the ninth feature is named in the text", "feat-9" in _nine)
     check("there are still eight buttons",
-          len([r for r in _tg.features_keyboard("social")
+          len([r for r in _tg.features_keyboard("myapp")
                if len(r) == 2 and r[1]["callback_data"].startswith("acts:")]), 8)
     # Eight features fit whole — there must then be no extra line.
     _tg.features_of_name = lambda n: (
@@ -2427,8 +2427,8 @@ try:
     # Both halves of the bilingual string are checked: the bot picks by the
     # client's language, and the addendum must be absent in either.
     check_true("with eight features there is no addendum",
-               "Not shown" not in _tg.repo_text("social")
-               and "Не поместились" not in _tg.repo_text("social"))
+               "Not shown" not in _tg.repo_text("myapp")
+               and "Не поместились" not in _tg.repo_text("myapp"))
 finally:
     _tg.features_of_name = _saved_feats
 
@@ -2436,11 +2436,11 @@ finally:
 # available.
 check_true("with buttons there is no hint about a number",
            _tg.t("ask.pick") not in _tg.ask_text(
-               "social", {"form": "pick:2", "prompt": "Which one?",
+               "myapp", {"form": "pick:2", "prompt": "Which one?",
                           "options": ["A", "B"]}))
 check_true("without buttons there is a hint about a number",
            _tg.t("ask.pick") in _tg.ask_text(
-               "social", {"form": "pick:12", "prompt": "Which one?"}))
+               "myapp", {"form": "pick:12", "prompt": "Which one?"}))
 
 # ------------------------------------------------------------- the outcome
 

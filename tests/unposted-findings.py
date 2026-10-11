@@ -5,7 +5,7 @@
 # The project's review job hands the code-review skill a commit range, and with
 # that target the skill ignores --comment: the findings check goes red with "N
 # review findings posted as a comment, not as threads" while nothing is posted.
-# On #160 three review sessions in a row dug the findings out of the job log.
+# Once three review sessions in a row dug the findings out of the job log.
 # pr_context.render() now reads them from that log itself.
 import importlib.util
 import json

@@ -3,7 +3,7 @@
 # Commits the retrospective leaves on a merged feature's branch send it back to
 # step 3, and on through the review like the feature itself.
 #
-# On feature 145 the retrospective opened #165 from a branch and worktree of its
+# Once a retrospective opened a pull request from a branch and worktree of its
 # own; the automatic review left two findings on it, and nothing in sclaude knew
 # the pull request existed. Now the fix is committed on the feature's branch,
 # and `done` reopens step 3 for it. Guarded here, with gh faked:

@@ -1198,7 +1198,7 @@ run_friction() {
   # It used to hold nothing. The gate above was the only reader of
   # friction_pending here, and it compares against this step's key — so a review
   # keyed `fix-preview-1` was never equal to the step `review`, never fired, and
-  # the feature travelled on with it open. Feature 103 carried one to the end
+  # the feature travelled on with it open. One feature carried one to the end
   # that way. cmd_resume and cmd_reset already ask the bare question; this makes
   # the three agree.
   #

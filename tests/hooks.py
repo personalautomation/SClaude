@@ -181,7 +181,7 @@ PLANNING = [
      "diff <(cat " + SCRATCH + "/p/s/scratchpad/ur.md) - <<'EOF' ; "
      "echo rc=$?\nnew body\nEOF\nwc -l " + SCRATCH + "/p/s/scratchpad/ur.md",
      ALLOW),
-    ("echo x > " + SCRATCH + "/../../home/ilia/social/f.ts", DENY),
+    ("echo x > " + SCRATCH + "/../../home/u/myapp/f.ts", DENY),
     ("echo x > " + SCRATCH + "x/f", DENY),
     ("cat f > " + SCRATCH + "/p/x && rm -rf /tmp/x", DENY),
 ]
@@ -206,17 +206,17 @@ FORBIDDEN = [
     ("git push --force origin feat/x", DENY),
     ("git push --no-verify origin feat/x", DENY),
     # git's own options before the subcommand: every one of these went through,
-    # found by the friction review of feature 145.
-    ("git -C /home/x/social push origin main", DENY),
-    ("git -C ~/social push origin main", DENY),
-    ("git --git-dir=/home/x/social/.git push origin main", DENY),
-    ("git --git-dir /home/x/social/.git push origin main", DENY),
+    # found by a friction review.
+    ("git -C /home/x/myapp push origin main", DENY),
+    ("git -C ~/myapp push origin main", DENY),
+    ("git --git-dir=/home/x/myapp/.git push origin main", DENY),
+    ("git --git-dir /home/x/myapp/.git push origin main", DENY),
     ("git -c core.x=1 push origin main", DENY),
     ("git --no-pager -C x push origin HEAD:main", DENY),
-    ("git -C /home/x/social push --force origin feat/x", DENY),
-    ("git -C /home/x/social push --no-verify origin feat/x", DENY),
-    ("git -C /home/x/social push origin feat/x", ALLOW),
-    ("git -C /home/x/social log main", ALLOW),
+    ("git -C /home/x/myapp push --force origin feat/x", DENY),
+    ("git -C /home/x/myapp push --no-verify origin feat/x", DENY),
+    ("git -C /home/x/myapp push origin feat/x", ALLOW),
+    ("git -C /home/x/myapp log main", ALLOW),
     ("echo hi;gh pr merge 82", DENY),
     # A package runner is a wrapper like any other, and every one of these went
     # through until a fixing session found the shape by accident.
@@ -320,7 +320,7 @@ def main():
                         "https://github.com/o/r.git"], check=True)
         home = os.path.expanduser("~")
         push_cases = [
-            # The exact command a review subagent of feature 145 lost.
+            # The exact command a review subagent once lost.
             ("cd " + scratch + " && rm -rf exp && mkdir exp && cd exp && "
              "export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=a "
              "GIT_AUTHOR_EMAIL=a@b; git init -q --bare -b main o.git; "
@@ -330,12 +330,12 @@ def main():
              "echo ls=$?", home, ALLOW),
             ("cd " + scratch + " && git push ../o.git main", home, ALLOW),
             ("git push origin main", scratch + "/new", ALLOW),
-            # Review 7 of feature 145: the scratch path in a variable.
+            # A review session: the scratch path in a variable.
             ("S=" + scratch + "; cd $S/w && git remote add origin ../o.git "
              "&& git push -q origin HEAD:main", home, ALLOW),
             ("export S=" + scratch + "; cd ${S}/w && git push ../o.git main",
              home, ALLOW),
-            # Review 18 of feature 145: --git-dir in a heredoc after the push.
+            # A review session: --git-dir in a heredoc after the push.
             ("cd " + scratch + " && rm -rf t && mkdir t && cd t && "
              "git init -q --bare -b main o.git && git init -q -b main w && "
              "cd w && git commit -q --allow-empty -m a && "
@@ -344,15 +344,15 @@ def main():
              "exec git upload-pack \"$1\"\nEOF\necho done", home, ALLOW),
             ("cd " + scratch + " && git --git-dir=o.git log && "
              "git push ../o.git main", home, ALLOW),
-            ("cd " + scratch + " && export GIT_DIR=" + home + "/social/.git "
+            ("cd " + scratch + " && export GIT_DIR=" + home + "/myapp/.git "
              "&& git push origin main", home, DENY),
             # `-C` is a `cd` for that one call: into a scratch repository it
             # passes, out of one it does not, and the next call is not moved.
             ("git -C " + scratch + " push ../o.git main", home, ALLOW),
-            ("git -C " + home + "/social push origin main", scratch, DENY),
+            ("git -C " + home + "/myapp push origin main", scratch, DENY),
             ("git -C " + scratch + " status && git push origin main", home,
              DENY),
-            ("cd " + scratch + " && git --git-dir=" + home + "/social/.git "
+            ("cd " + scratch + " && git --git-dir=" + home + "/myapp/.git "
              "push origin main", home, DENY),
             ("cd " + scratch + " && git -c remote.o.url=$U push o main",
              home, DENY),
@@ -373,9 +373,9 @@ def main():
             ("git push origin main", clone, DENY),
             ("cd " + scratch + " && git remote add origin \"$U\" && "
              "git push origin main", home, DENY),
-            ("cd " + scratch + " && GIT_DIR=" + home + "/social/.git "
+            ("cd " + scratch + " && GIT_DIR=" + home + "/myapp/.git "
              "git push origin main", home, DENY),
-            ("cd ~/social && git push origin main", scratch, DENY),
+            ("cd ~/myapp && git push origin main", scratch, DENY),
             ("cd $HOME/x && git push origin main", scratch, DENY),
             ("cd " + scratch + "; cd -; git push origin main", home, DENY),
             ("(cd " + scratch + "); git push origin main", home, DENY),
@@ -398,7 +398,7 @@ def main():
     # Writing with the file tools at step 1 — past the command parsing.
     for path, want in ((os.path.expanduser("~/.claude/plans/x.md"), ALLOW),
                        (SCRATCH + "/p/s/scratchpad/ur.md", ALLOW),
-                       ("/home/ilia/social/app/page.tsx", DENY)):
+                       ("/home/u/myapp/app/page.tsx", DENY)):
         got = run("no-code-in-planning.py", None, tool="Write",
                   tool_input={"file_path": path})
         if got != want:
@@ -410,7 +410,7 @@ def main():
     workdir_cases = [
         ("npx supabase db reset", {"SUPABASE_WORKDIR": own}, ALLOW),
         ("npx supabase migration up --workdir " + own, {"SUPABASE_WORKDIR": own}, ALLOW),
-        ("npx --yes supabase db reset --workdir /home/ilia/social",
+        ("npx --yes supabase db reset --workdir /home/u/myapp",
          {"SUPABASE_WORKDIR": own}, DENY),
         ("supabase db reset --workdir=/elsewhere", {"SUPABASE_WORKDIR": own}, DENY),
         # No stack of its own — the flag is nobody's business here.

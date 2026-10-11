@@ -3,7 +3,7 @@
 # Returning a finished feature to development, by hand.
 #
 # QA moving the card out of "In QA" has always sent a feature back to step 4.
-# Every other reason did not have a way: PR #143 in social went to "done" on a
+# Every other reason did not have a way: one pull request went to "done" on a
 # review that read a third of it, and its ten real findings could only be sent
 # back by pretending QA had moved the card. `sclaude return` is that same return
 # under its own name, and both paths now land in one place.

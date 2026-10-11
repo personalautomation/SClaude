@@ -110,7 +110,7 @@ def main():
         check("red-with-comment", "fix it" in got and "red as well" in got, True)
 
         # The findings check red only for threads resolved by hand or kept by
-        # the person is nothing for a session (#166 was woken for it); red
+        # the person is nothing for a session (one was woken for it); red
         # with something behind it is still news.
         findings = [{"name": pr_context.FINDINGS_CHECK, "state": "FAILURE",
                      "startedAt": "2026-09-06T10:00:00Z",

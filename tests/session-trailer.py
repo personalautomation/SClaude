@@ -8,7 +8,7 @@
 # its hooks through sclaude/githooks, which add `Sclaude-Session: <id>`.
 #
 # Guarded here, on a scratch repository with hooks of its own in .githooks —
-# as social has — and a linked worktree, as a feature has:
+# as myapp has — and a linked worktree, as a feature has:
 #
 #   * a commit made under session_git_env carries the trailer, inside the
 #     trailer block the message already had;

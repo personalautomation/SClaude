@@ -179,7 +179,7 @@ exit 1
         # `readlink -f "$0"` resolves to the *real* repository this bench lives
         # in, whatever HOME says. Left alone, running the test suite pushes the
         # developer's unpushed commits to GitHub: verified in the act, with
-        # `git -C /home/ilia/instruments push origin main` visible in `ps` while
+        # `git -C ~/instruments push origin main` visible in `ps` while
         # the bench ran.
         #
         # It also made the bench's verdict a function of network latency. The

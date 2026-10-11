@@ -43,7 +43,7 @@ spec = importlib.util.spec_from_file_location("pr_context",
 pr_context = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pr_context)
 
-# The review job as the social workflow names it: "Review" without "Claude",
+# The review job as the myapp workflow names it: "Review" without "Claude",
 # which only its workflow name supplies.
 REVIEW_JOB = "Review — delta, whole PR once all fixed (Opus)"
 

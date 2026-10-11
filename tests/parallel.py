@@ -2,7 +2,7 @@
 #
 # Two features at once, and what they share.
 #
-# On 2026-10-06 #145 and #152 in social ran side by side for the first time,
+# On 2026-10-06 two features ran side by side for the first time,
 # and the trouble was all in what the two sclaude processes shared: the Claude
 # quota, the machine, the instruments tree, and the person's attention.
 #
@@ -340,7 +340,7 @@ def due(text):
 
 old_day = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
 today = datetime.date.today().isoformat()
-entry = "%s\tsocial\t152-x\treview\tclaude-md-stale-docs\tProposal: grep the docs.\n" % old_day
+entry = "%s\tmyapp\t152-x\treview\tclaude-md-stale-docs\tProposal: grep the docs.\n" % old_day
 check("deferred-due-after-a-month-unreviewed", due("# last reviewed: never\n" + entry),
       "1 %s" % old_day)
 check("deferred-not-due-when-reviewed-today", due("# last reviewed: %s\n" % today + entry), None)

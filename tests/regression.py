@@ -102,7 +102,7 @@ check_true("missing-command-is-fatal", "no command for this part" in regression)
 # and must stay testable without it, so this half is guarded — but where the
 # project is here, its local stage has to be complete: it is what closes step 2,
 # and anything missing from it reaches the pull request unchecked.
-CONFIG = os.path.expanduser("~/social/.sclaude.json")
+CONFIG = os.path.expanduser("~/myapp/.sclaude.json")
 if os.path.isfile(CONFIG):
     with open(CONFIG, encoding="utf-8") as fh:
         config = json.load(fh)
@@ -121,7 +121,7 @@ if os.path.isfile(CONFIG):
     # to learn nothing. (build/typecheck/lint are the deliberate exception: they
     # catch before a pull request exists, which is the point of a gate on step 2.)
     #
-    # migrations:style is the second exception, added by social in c27a5b3.
+    # migrations:style is the second exception, added by myapp in c27a5b3.
     # Every feature has a database of its own now, so two features can each
     # add migration 0062 and neither stack notices; the style check fails on a
     # shared number, and it has to run before the branch leaves step 2 rather
@@ -998,7 +998,7 @@ check_true("waiting-names-the-next-check", "next check in %ss" in deploy_sh)
 
 # --- a fix to the orchestrator re-runs the stage ---------------------------
 #
-# Feature #104: the preview e2e was red because of how sclaude wired the
+# Once the preview e2e was red because of how sclaude wired the
 # environment, the friction review after the fixing session fixed exactly that
 # — and the gate still stopped with "blocked, carry on with sclaude <feature>",
 # and the next run walked past the red preview. A fix to the orchestrator now
@@ -1401,7 +1401,7 @@ check("rewind-prod-clears-the-preview-verdict",
 
 # --- a dev server that wedged during the local e2e -----------------------------
 #
-# On 2026-10-09 #145's server, restarted right before the run, stopped finishing
+# On 2026-10-09 a feature's server, restarted right before the run, stopped finishing
 # /_next/image requests halfway through it, and a fixing session spent a quarter
 # of an hour on code nothing was wrong with. The run now tries e2e once more on
 # a fresh server — but only on that signature, or a real failure would be run

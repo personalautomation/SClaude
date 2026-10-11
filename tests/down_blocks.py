@@ -188,7 +188,7 @@ check("forward-ignores-the-down-block",
 # Guarded: instruments is machine-level and must stay testable with no product
 # checked out.
 
-SOCIAL = os.path.expanduser("~/social/supabase/migrations")
+SOCIAL = os.path.expanduser("~/myapp/supabase/migrations")
 if os.path.isdir(SOCIAL):
     # The anchors, each one a shape that cost something to get right.
     for name, want in (

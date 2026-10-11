@@ -85,7 +85,7 @@ def main():
     env_home = os.environ.get("HOME")
     os.environ["HOME"] = home
     try:
-        wt = os.path.join(home, "social-71-email-edit-and-show")
+        wt = os.path.join(home, "myapp-71-email-edit-and-show")
         sid = "86ea3d09-3f9f-43ef-ab6a-419b6b9f284f"
 
         # --- the friction review ------------------------------------------
@@ -151,7 +151,7 @@ def main():
 
         # Its own storage is in the main repository: by this minute the feature's
         # tree is gone. The file is created by itself, as an empty object.
-        repo = os.path.join(home, "social")
+        repo = os.path.join(home, "myapp")
         os.makedirs(repo, exist_ok=True)
         path = sh('epilogue_state 71-email').strip()
         check("the epilogue's file is created", os.path.isfile(path), True)

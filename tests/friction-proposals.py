@@ -2,7 +2,7 @@
 #
 # A friction log of proposals alone is put off by sclaude itself.
 #
-# On feature 145 three friction reviews in a row were sessions whose whole work
+# On one feature three friction reviews in a row were sessions whose whole work
 # was one CLAUDE.md proposal appended to the deferred file — a decision the
 # prompt makes in advance ("proposals always are" deferred). Guarded here:
 #
@@ -49,10 +49,10 @@ both = [
     "\n",
     "2026-10-09 proposal (claude-md-fix-every-call-site): Fix every call.\n",
 ]
-got = fp.rows(both, "social", "145-x", "review")
+got = fp.rows(both, "myapp", "145-x", "review")
 check("two-rows", len(got or []), 2)
 check("row-default-class", got[0].split("\t"),
-      ["2026-10-09", "social", "145-x", "review", "claude-md-proposal",
+      ["2026-10-09", "myapp", "145-x", "review", "claude-md-proposal",
        "Proposal: A git option names the git version. "
        "(Drawn from #160: --diff-merges= (2.31) and --porcelain (2.41).)"])
 check("row-own-class", got[1].split("\t")[4], "claude-md-fix-every-call-site")
@@ -87,7 +87,7 @@ with open(os.path.join(LIB, "deferred.sh")) as fh:
 tmp = tempfile.mkdtemp()
 try:
     inst = os.path.join(tmp, "instruments")
-    wt = os.path.join(tmp, "social-145-x")
+    wt = os.path.join(tmp, "myapp-145-x")
     os.makedirs(os.path.join(inst, "sclaude"))
     os.makedirs(os.path.join(wt, ".feature"))
     git = ["git", "-C", inst, "-c", "user.name=t", "-c", "user.email=t@t"]
@@ -100,7 +100,7 @@ try:
     def defer():
         with open(state, "w") as fh:
             fh.write("{}")
-        script = ('source "%s/state.sh"\nLIB="%s"; INSTRUMENTS="%s"; REPO="%s/social"\n'
+        script = ('source "%s/state.sh"\nLIB="%s"; INSTRUMENTS="%s"; REPO="%s/myapp"\n'
                   'DEFERRED_FILE="%s"\ninfo() { :; }\n%s\n%s\n'
                   'friction_defer_proposals "%s" 145-x review-21 review; echo "rc=$?"'
                   % (LIB, LIB, inst, tmp, deferred, ENSURE, DEFER, wt))

@@ -382,7 +382,7 @@ if obstacle:
 # Step 4 used to wait for the merge, and that ran the back half of the cycle in
 # the wrong order: the preview, "In QA" and the QA watch are in remind_prod,
 # which only runs once step 4 has closed — so the branch was merged first and QA
-# looked at main afterwards (PR #136 for issue #104). Step 4 now closes with
+# looked at main afterwards (it happened once). Step 4 now closes with
 # the pull request open, and remind_prod waits for QA and then for the merge.
 after_step = body_of(run_sh, "after_step") or ""
 review_branch = after_step[after_step.find("    review)"):
@@ -441,7 +441,7 @@ check_true("qa-missed-needs-a-merge", '[[ "$merged" == "MERGED" ]] || return 1' 
 check_true("qa-missed-callers-pass-the-merge",
            deploy.count('qa_missed "$issue" "${merged:-}" "$wt"') == 2)
 # Quiet on a preview QA accepted: later runs of a merged feature said "nobody
-# checked" of one QA had (#145).
+# checked" of one QA had.
 check_true("qa-missed-quiet-when-accepted", "qa.accepted" in qa_missed)
 check_true("qa-wait-records-acceptance", 'qa_accepted "$wt"' in (body_of(deploy, "qa_wait") or ""))
 # A merge while QA has it ends the wait, and says so in red.

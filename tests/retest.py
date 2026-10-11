@@ -2,7 +2,7 @@
 #
 # An accepted issue goes back to QA when the preview under it is replaced.
 #
-# Issue #150 in social was moved to Done by QA; a fix for a red regression
+# An issue was moved to Done by QA; a fix for a red regression
 # followed and the preview was deployed again, and the issue stayed in Done —
 # the merge offered on a yes given to code that was no longer there.
 #

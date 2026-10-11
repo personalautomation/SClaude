@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory() as wt:
 # The key names the session by its row: `review-2` is the second run of the
 # review step. Every ended session has one; the running one is queued; a
 # step-wide key from before is shown on the last row only, and never on a row
-# still running — that is how #125's live seventh round read `nothing`.
+# still running — that is how one live seventh round read `nothing`.
 def sh_out(wt, script):
     return subprocess.run(
         ["bash", "-c", 'source "$1/state.sh"; source "$1/steps.sh"; wt="$2"; ' + script,

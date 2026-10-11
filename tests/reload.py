@@ -3,7 +3,7 @@
 # A step's session outlives the code that started it.
 #
 # bash keeps the functions it sourced, and a session runs for hours: the fix
-# for step 4's rounds was pushed while #143's review session ran, and that
+# for step 4's rounds was pushed while a review session ran, and that
 # session's /exit would have been handled by the old code — which closes the
 # step with new findings open. code_reload, between claude's exit and anything
 # done about it, replaces the process with the sclaude now on disk.

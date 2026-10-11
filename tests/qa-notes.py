@@ -5,7 +5,7 @@
 # notes_since (bin/sclaude-watch) gathers everything said since the watch began:
 # the issue, and the pull request's conversation and the comments on its lines.
 # The pull request is there because a return can be made over the automatic
-# review's findings rather than over QA's own words — PR #143 in social — and a
+# review's findings rather than over QA's own words — it happened once — and a
 # file that held only the issue would hand the session a return that points
 # nowhere.
 #

@@ -2,7 +2,7 @@
 #
 # "Merge origin/main into <branch>?" is asked once for each state of main.
 #
-# On #143 in social every review round opened a fresh session through
+# On one pull request every review round opened a fresh session through
 # run_step, and every one stopped on the same question the human had already
 # answered "n". A "no" is now remembered against origin/main's commit.
 #

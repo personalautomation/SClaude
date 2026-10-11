@@ -3,7 +3,7 @@
 # pr_link_issue: a PR that GitHub failed to link to its issue gets linked by hand.
 # issue_hold_open / issue_close_done: the issue stays open until the cycle ends.
 #
-# PR #137 in social ended with `Closes #40` and GitHub never linked them, so the
+# A pull request once ended with `Closes #N` and GitHub never linked them, so the
 # merge would have left the issue open. These run the real function against a
 # stubbed `gh` that logs every call, and assert on which calls were made.
 #
@@ -72,7 +72,7 @@ check("success is reported", "linked to issue #40 by hand" in out, True)
 calls, _ = run("open", "4\n400\n")
 check("a prefix number is not a match", mutated(calls), True)
 
-# `Refs #40` and nothing closing it: a choice (#166 for #145), left unlinked.
+# `Refs #40` and nothing closing it: a choice (a follow-up to a shipped issue), left unlinked.
 calls, out = run("open", "", body="Follow-up.\n\nRefs #40")
 check("refs-only is left unlinked", mutated(calls), False)
 check("refs-only says so", "without closing it" in out, True)

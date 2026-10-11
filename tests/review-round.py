@@ -2,7 +2,7 @@
 #
 # The review step, one round per session.
 #
-# On #143 in social five review rounds ran in one conversation, and every file
+# On one pull request five review rounds ran in one conversation, and every file
 # each fix read stayed in its context. Now a session fixes through subagents,
 # and once the automatic review closes everything it fixed and posts new
 # findings, it writes a marker and stops; the orchestrator ends it, records it
@@ -484,7 +484,7 @@ session_watch_stop
     a = a[a.index("    review)"):]
     check("gate-before-regression",
           a.index("review_close_gate") < a.index("regression_gate"), True)
-    # Feature 145: the regression's fixing session committed, nobody pushed, and
+    # Once the regression's fixing session committed, nobody pushed, and
     # the pull request merged without the fix. After the gate, the fix is pushed
     # and the review is asked again.
     rg = a.index('regression_gate "$wt"')

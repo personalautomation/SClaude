@@ -2,7 +2,7 @@
 #
 # `done` offers to remove a side pull request's worktree once it is merged.
 #
-# Feature 145's review opened #164 from ~/social-review-dispatch-fix, a
+# A review once opened a pull request from ~/myapp-review-dispatch-fix, a
 # worktree sclaude never knew of; `done` removed the feature's own and left that
 # one behind. Guarded here, with gh faked:
 #
@@ -38,13 +38,13 @@ check("function-present", bool(OFFER), True)
 
 tmp = tempfile.mkdtemp()
 try:
-    repo = os.path.join(tmp, "social")
+    repo = os.path.join(tmp, "myapp")
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True)
     subprocess.run(git + ["-C", repo, "commit", "-q", "--allow-empty", "-m", "a"], check=True)
     trees = {}
     for name in ("merged", "feature", "open", "dirty"):
-        path = os.path.join(tmp, "social-" + name)
+        path = os.path.join(tmp, "myapp-" + name)
         subprocess.run(["git", "-C", repo, "worktree", "add", "-q", "-b",
                         "fix/" + name, path], check=True)
         trees[name] = path

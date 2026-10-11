@@ -1320,7 +1320,13 @@ project needs no `allowedDevOrigins` for it.
 
 The socket listens on every address, as the `next dev` that used to hold :3000
 did: the Windows browser reaches it through WSL's localhost forwarding and the
-phone through the tailnet.
+phone through the tailnet. Those are the only two it answers. The proxy checks
+each connection's address and lets in loopback (the forwarded Windows browser
+arrives as `::1`) and Tailscale's ranges, `100.64.0.0/10` and
+`fd7a:115c:a1e0::/48`. Anyone else who can reach the port, on a café's Wi-Fi or
+on a LAN under WSL's mirrored networking, gets `403` and cannot list, open or
+start a feature. `SCLAUDE_PROXY_ALLOW` replaces the list with comma-separated
+networks of your own.
 
 A `npm run dev` started by hand in the main repository finds :3000 taken and
 moves to another port. `sclaude dev` in the main repository gives it a port of

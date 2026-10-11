@@ -5,7 +5,9 @@ Documentation=file:%h/instruments/README.md
 [Socket]
 # Every address, like the `next dev` that used to hold this port: the Windows
 # browser comes over WSL's localhost forwarding, the phone over the tailnet, and
-# both must keep reaching :3000. Loopback-only would cut the phone off.
+# both must keep reaching :3000. Loopback-only would cut the phone off. Who is
+# answered is the proxy's decision, by the peer's address: loopback and the
+# tailnet only (ALLOW in bin/sclaude-proxy).
 ListenStream=3000
 # Accept=no: the proxy takes the listening socket whole and accepts connections
 # itself (LISTEN_FDS, fd 3).

@@ -235,6 +235,38 @@ def start_proxy(registry, stub, log, idle, tick, grace=180):
     return proc, port
 
 
+def check_peers(registry, stub, log):
+    """Only loopback and the tailnet are answered (allowed, SCLAUDE_PROXY_ALLOW)."""
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+    loader = SourceFileLoader("sclaude_proxy", PROXY)
+    mod = module_from_spec(spec_from_loader("sclaude_proxy", loader))
+    loader.exec_module(mod)
+    for peer, want in (("127.0.0.1", True), ("::1", True), ("::ffff:127.0.0.1", True),
+                       ("100.72.15.17", True), ("::ffff:100.101.2.3", True),
+                       ("fd7a:115c:a1e0::1", True), ("192.168.1.20", False),
+                       ("::ffff:192.168.1.20", False), ("172.28.0.1", False),
+                       ("100.128.0.1", False), ("fe80::1%eth0", False), ("junk", False)):
+        check("peer-allowed-%s" % peer, mod.allowed(peer), want)
+
+    calls = len(stub_calls(log))
+    os.environ["SCLAUDE_PROXY_ALLOW"] = "10.0.0.0/8"
+    try:
+        proc, port = start_proxy(registry, stub, log, idle=600, tick=60)
+    finally:
+        del os.environ["SCLAUDE_PROXY_ALLOW"]
+    try:
+        status, _, body = request(port, "localhost:%d" % port, "/__sclaude/")
+        check("stranger-refused", status, "HTTP/1.1 403 Forbidden")
+        check("stranger-sees-nothing", body, "")
+        status, _, _ = request(port, "a.localhost:%d" % port)
+        check("stranger-starts-nothing", (status, len(stub_calls(log))),
+              ("HTTP/1.1 403 Forbidden", calls))
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
 def main():
     root = tempfile.mkdtemp(prefix="sclaude-proxy-")
     registry = os.path.join(root, "registry")
@@ -247,6 +279,7 @@ def main():
         os.chmod(stub, 0o755)
         log = os.path.join(root, "stub.log")
 
+        check_peers(registry, stub, log)
         srv_a, port_a = upstream("A")
         srv_b, port_b = upstream("B")
         ups = [srv_a, srv_b]

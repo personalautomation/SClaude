@@ -43,12 +43,21 @@
 # when and never how. A feature is never stopped while anything is working in
 # its tree: a claude session, a regression, a person's shell.
 #
+# The port is open on every address, because the phone comes over the tailnet,
+# but only this machine and the tailnet are answered: loopback (the Windows
+# browser arrives through WSL's localhost forwarding as ::1) and Tailscale's
+# ranges. Anybody else who reaches :3000 — a café's Wi-Fi, a LAN in WSL's
+# mirrored mode — would otherwise list every feature, browse its dev server
+# and make sclaude start one. SCLAUDE_PROXY_ALLOW replaces the list with its
+# own comma-separated networks.
+#
 # SCLAUDE_PROXY_BIND moves it off 0.0.0.0, SCLAUDE_DEV_REGISTRY off the real
 # registry, SCLAUDE_BIN to a stand-in for sclaude, SCLAUDE_PROXY_TICK to a
 # faster idle check and SCLAUDE_PROXY_BUILD_GRACE to a shorter wait for a first
 # build — for the tests.
 import asyncio
 import html
+import ipaddress
 import json
 import os
 import re
@@ -69,6 +78,10 @@ PORT = int(os.environ.get("SCLAUDE_PROXY_PORT") or 3000)
 BIND = os.environ.get("SCLAUDE_PROXY_BIND") or "0.0.0.0"
 REGISTRY = os.environ.get("SCLAUDE_DEV_REGISTRY") or os.path.expanduser(
     "~/.claude/sclaude/dev")
+# Loopback, and Tailscale's IPv4 and IPv6 ranges.
+ALLOW = [ipaddress.ip_network(n.strip()) for n in (
+    os.environ.get("SCLAUDE_PROXY_ALLOW")
+    or "127.0.0.0/8,::1/128,100.64.0.0/10,fd7a:115c:a1e0::/48").split(",") if n.strip()]
 COOKIE = "sclaude_feature"
 # A request head larger than this is not a browser's.
 HEAD_LIMIT = 64 * 1024
@@ -648,6 +661,18 @@ def close_after(head):
     return ("\r\n".join([lines[0]] + kept + ["Connection: close", "", ""])).encode("latin-1")
 
 
+def allowed(peer):
+    """Whether a connection from this address is answered at all."""
+    try:
+        ip = ipaddress.ip_address(peer.split("%", 1)[0])
+    except ValueError:
+        return False
+    # A dual-stack socket reports an IPv4 peer as ::ffff:a.b.c.d.
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return any(ip in net for net in ALLOW if net.version == ip.version)
+
+
 async def handle(reader, writer):
     upstream = None
     try:
@@ -655,6 +680,14 @@ async def handle(reader, writer):
             head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 30)
         except (asyncio.IncompleteReadError, asyncio.LimitOverrunError,
                 asyncio.TimeoutError, ConnectionError):
+            return
+        # After the head, not before: closing on a request still unread makes
+        # the kernel answer with a reset instead of the 403.
+        peer = writer.get_extra_info("peername")
+        if not (peer and allowed(peer[0])):
+            writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n"
+                         b"Connection: close\r\n\r\n")
+            await writer.drain()
             return
         method, target, headers = parse_head(head)
         host = headers.get("host", "")

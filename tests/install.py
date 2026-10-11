@@ -105,6 +105,15 @@ with tempfile.TemporaryDirectory() as tmp:
     check("pipe-shows-undo", "sudo rm %s" % rule in out, True)
     check("pipe-points-at-flag", "./install.sh --polkit" in out, True)
     check("pipe-writes-nothing", os.path.exists(rule), False)
+    # The units are written with this checkout's path, under whatever name it
+    # has: a file, not a link, and no placeholder left in it.
+    telegram = os.path.join(env["HOME"], ".config", "systemd", "user", "keepawake-telegram.service")
+    check("unit-is-a-file", (os.path.isfile(telegram), os.path.islink(telegram)), (True, False))
+    if os.path.isfile(telegram):
+        body = open(telegram).read()
+        check("unit-names-the-checkout", "%s/keepawake/telegramd.py" % os.path.realpath(ROOT) in body
+              or "%s/keepawake/telegramd.py" % ROOT in body, True)
+        check("unit-has-no-placeholder", "@REPO@" in body, False)
 
     print("--no-polkit")
     out = run(env, "--no-polkit")
@@ -141,7 +150,7 @@ with tempfile.TemporaryDirectory() as tmp:
     try:
         out = run(env, answer="y")
         check("unreadable-with-note-not-asked", "Add it now?" in out, False)
-        os.remove(os.path.join(env["HOME"], ".config", "instruments", "polkit-rule"))
+        os.remove(os.path.join(env["HOME"], ".config", "sclaude", "polkit-rule"))
         out = run(env, answer="")
         check("unreadable-without-note-asks", "Add it now?" in out, True)
     finally:

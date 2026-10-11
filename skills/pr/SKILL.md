@@ -47,7 +47,7 @@ Two things to know when you use it:
   commits, not on labels. To get a review after the fact: push to the branch, or
   dispatch the review workflow from `main` with the PR number.
 
-**This is for product repositories, not for tooling.** `~/instruments` — the
+**This is for product repositories, not for tooling.** sclaude's own checkout — the
 user's own scripts and skills — is committed and pushed straight to `main` every
 time, without a branch, a PR, or asking. A change to this very skill ships that
 way.

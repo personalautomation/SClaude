@@ -280,7 +280,7 @@ PY
 #
 # So the review says it in words, as the last line it prints, and we read that
 # line back out of its transcript. Not a file it writes: the review runs in
-# ~/instruments with the feature's tree outside its scope, and widening that
+# sclaude's checkout with the feature's tree outside its scope, and widening that
 # scope to let it write one bookkeeping file would hand the session that edits
 # the orchestrator a writable path into the product — the very confusion
 # _friction.py's log_path docstring records as having happened once already.

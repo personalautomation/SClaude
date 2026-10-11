@@ -1171,7 +1171,7 @@ collect_denials() {
 # deliberate or an obstacle" requires context — what the step was trying to do
 # and what it cost. That is reading a transcript and reasoning, not a grep.
 #
-# The directory is ~/instruments rather than the feature's worktree: it is the
+# The directory is sclaude's checkout rather than the feature's worktree: it is the
 # orchestrator being edited, not the product, and it is committed straight to
 # main. The transcripts lie outside both directories, hence --add-dir: without it
 # the file tools will not go there. The feature's worktree is added as well:
@@ -1440,7 +1440,7 @@ PYEOF
   # runs in the terminal), so --session-id is available, and a UUID generated in
   # advance survives any way of leaving.
   #
-  # A review's sessions directory is not a step's: it works in ~/instruments
+  # A review's sessions directory is not a step's: it works in sclaude's checkout
   # rather than in the feature's tree. The transcript lies at that path, and we
   # check the id's liveness by it too.
   local session
@@ -1879,7 +1879,7 @@ push_instruments() {
 }
 
 # The branches sclaude may push and merge main into: main, and this person's
-# dev/<name>. Anything else in ~/instruments is somebody's own work in progress.
+# dev/<name>. Anything else in sclaude's checkout is somebody's own work in progress.
 instruments_own_branch() {
   local branch="$1" name
   [[ "$branch" == "main" ]] && return 0

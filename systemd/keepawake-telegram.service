@@ -1,6 +1,6 @@
 [Unit]
 Description=keepawake Telegram bot: extending the hold and service commands
-Documentation=file:%h/instruments/keepawake/telegramd.py
+Documentation=file:@REPO@/keepawake/telegramd.py
 After=network-online.target
 Wants=network-online.target
 
@@ -20,7 +20,7 @@ EnvironmentFile=%h/.config/keepawake/env
 # chrome-debug and sclaude live. Without this line every button in the bot
 # answers "not found", even though the same commands work from the terminal.
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
-ExecStart=/usr/bin/python3 %h/instruments/keepawake/telegramd.py
+ExecStart=/usr/bin/python3 @REPO@/keepawake/telegramd.py
 # The network drops, and that is normal, not a reason to stop. The daemon keeps
 # its own backoff on network errors; a restart is for what it cannot survive.
 Restart=always

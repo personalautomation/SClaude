@@ -1,6 +1,6 @@
 [Unit]
 Description=Routes <feature>.localhost:3000 to that feature's dev server
-Documentation=file:%h/instruments/README.md
+Documentation=file:@REPO@/README.md
 Requires=sclaude-proxy.socket
 After=sclaude-proxy.socket
 

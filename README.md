@@ -182,12 +182,15 @@ never saw the feature.
 ## Installation
 
 ```bash
-git clone git@github.com:personalautomation/SClaude.git ~/instruments
-cd ~/instruments && ./install.sh
+git clone git@github.com:personalautomation/SClaude.git ~/sclaude
+cd ~/sclaude && ./install.sh
 ```
 
+The checkout may live under any name: nothing refers to `~/sclaude` by path.
 `install.sh` is idempotent: it creates symlinks in `~/.local/bin`,
-`~/.config/systemd/user`, `~/.claude/skills` and `~/.claude` (the status line),
+`~/.claude/skills` and `~/.claude` (the status line), writes the systemd units
+into `~/.config/systemd/user` with the checkout's path filled in (re-run it
+after a unit changes),
 enables the timers for the platform it finds (WSL or plain Linux) and wires up
 this repository's hooks. `~/.local/bin` has to be in `PATH` (it usually already
 is, through `~/.profile` / `~/.bashrc`). Then run `sclaude doctor`: it lists
@@ -218,7 +221,7 @@ lives elsewhere:
 | the team's sclaude rules for the product | `.sclaude/team/` in the product, committed, written by its maintainers |
 | one developer's sclaude rules for the product | `.sclaude/people/<name>/` in the product, committed |
 | what one machine keeps about the product: terminal recordings | `.sclaude/local/` in the product, never committed, never deployed |
-| the person: name, database, projects for `wsl-update`, the Telegram bot, where records are gathered | `~/.config/instruments/`, `~/.config/keepawake/env`, `~/.claude/sclaude/` |
+| the person: name, database, projects for `wsl-update`, the Telegram bot, where records are gathered | `~/.config/sclaude/`, `~/.config/keepawake/env`, `~/.claude/sclaude/` |
 
 **Who changes the orchestrator.** Nobody's sessions do: friction reviews,
 retrospectives and the monthly deferred review read sclaude's checkout and
@@ -282,7 +285,7 @@ and whether git or a deploy ever sees it:
 | `terminal/` | recordings of runs started outside any repository | `~/.claude/sclaude/` | sclaude | never | — |
 | session transcripts | what each session did; friction reviews and the retrospective read them | `~/.claude/projects/`, Claude Code's own | Claude Code | never | — |
 | issue status comments, pull-request bodies, board columns, `Sclaude-Session` trailers | the feature's story where the team reads it | the product's GitHub, and its commits | sclaude and the feature's sessions | the trailers, in the product's history | — |
-| `~/.config/instruments/` | this machine's settings: `projects` for wsl-update, `metrics-remote`, the polkit mark | your home directory | you | never | — |
+| `~/.config/sclaude/` | this machine's settings: `projects` for wsl-update, `metrics-remote`, the polkit mark | your home directory | you | never | — |
 
 In the product, all of it lives in one folder, `.sclaude/`, so the product's
 root does not grow: `config.json`, `team/` and `people/` are committed;
@@ -321,7 +324,7 @@ so there is no shared bot: each person makes one with @BotFather and puts it in
 `~/.config/keepawake/env`. See `bin/keepawake` below.
 
 **Gathering the team's records.** Optional: name a git repository of the team's
-in `~/.config/instruments/metrics-remote`, and each person's cycle records are
+in `~/.config/sclaude/metrics-remote`, and each person's cycle records are
 published there as `<name>.jsonl`.
 
 ## bin/sclaude
@@ -1201,7 +1204,7 @@ with `fixes` position for position — `state_set` writes scalars, which is what
 made `fixes` a string too. Writer and reader derive the row from the same place.
 
 The id is the review's own session, kept under `was` once the review closes, and
-`claude --resume <id>` in `~/instruments` opens it again. It is a separate field
+`claude --resume <id>` in sclaude's checkout opens it again. It is a separate field
 from `session` on purpose: `run_friction` reads `session` to decide whether to
 resume, and an id left there would send the next review into the closed
 conversation instead of starting a new one.
@@ -1214,7 +1217,7 @@ and no friction review.
 
 **Underneath stands a second table: what the friction reviews actually changed.**
 The column above says *that* a review fixed the orchestrator; it cannot say what
-the fix was, and a reader was left to open `~/instruments` and work out which
+the fix was, and a reader was left to open sclaude's checkout and work out which
 commits fell between two steps of a feature. So `run_friction` keeps the
 instruments `HEAD` from either side of a review that committed — it already
 compared the two to decide whether to push — and the summary turns that range
@@ -1239,7 +1242,7 @@ all, and so had no row here. The review therefore says it in words: the two
 prompts ask for a last line, `sclaude-verdict: <kind> — <clause>`, and
 `friction_verdict` reads it back out of the review's transcript once the
 session exits. It is read rather than written by the session on purpose — the
-review works in `~/instruments` with the feature's tree outside its scope, and
+review works in sclaude's checkout with the feature's tree outside its scope, and
 widening that scope so it could write one bookkeeping file would hand the one
 session that edits the orchestrator a writable path into the product.
 
@@ -1318,7 +1321,7 @@ decided now, before anybody has looked at the data, and that is the wrong order.
 
 Each record names who ran the cycle (`developer`, from `developer.sh`; `null`
 where nobody could be named). A team that wants its cycles in one place names a
-git repository of its own in `~/.config/instruments/metrics-remote`; each
+git repository of its own in `~/.config/sclaude/metrics-remote`; each
 developer's records are then published there as `<developer>.jsonl` after every
 record — one file per person, so publishing never conflicts, and a second
 machine of the same person adds its lines rather than replacing the first's.
@@ -1459,7 +1462,7 @@ looking at another feature. It gets the feature in a background tab
 The daily update of the tooling in WSL2: apt (unattended-upgrades), nvm/Node,
 the npm globals, Claude Code with its plugins, Playwright's Chromium,
 code-server; and a report on outdated dependencies for the projects listed in
-`~/.config/instruments/projects`, one path per line (a report only, it does not
+`~/.config/sclaude/projects`, one path per line (a report only, it does not
 touch the repositories; no file, no report).
 
 The local Supabase stacks, when Docker is running (it is never started for

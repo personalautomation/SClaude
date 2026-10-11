@@ -1,6 +1,6 @@
 [Unit]
 Description=code-server's local port for the Windows browser
-Documentation=file:%h/instruments/README.md
+Documentation=file:@REPO@/README.md
 
 [Socket]
 # Loopback only: WSL2 forwards localhost into Windows itself, so this is enough

@@ -63,7 +63,7 @@ NPM_STEP_TIMEOUT=120
 # Listed per person rather than here: they used to be one person's four
 # directories written into the script, which every other machine then looked
 # for. One path per line, `~` allowed, `#` for comments. No file, no report.
-PROJECTS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/instruments/projects"
+PROJECTS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/sclaude/projects"
 
 mkdir -p "$LOG_DIR"
 

@@ -270,9 +270,9 @@ def append(state_path, outcome, path=None):
 # nothing by default: no file, no publishing — the records stay on this
 # machine, as they always did.
 REMOTE_FILE = os.path.join(os.environ.get("XDG_CONFIG_HOME") or "~/.config",
-                           "instruments", "metrics-remote")
+                           "sclaude", "metrics-remote")
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or "~/.cache",
-                     "instruments", "metrics")
+                     "sclaude", "metrics")
 
 
 def remote_url():

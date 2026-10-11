@@ -309,7 +309,7 @@ issue_sync() {
   #
   # run_friction records the instruments HEAD on either side of a review that
   # committed; here those ranges become commit subjects. The reading is done in
-  # shell rather than inside the heredoc because git lives in ~/instruments and
+  # shell rather than inside the heredoc because git lives in sclaude's checkout and
   # the summary is assembled from the product's worktree — and because
   # INSTRUMENTS is not exported, so the child python cannot see it anyway.
   #
@@ -752,7 +752,7 @@ if preview_url:
 # Friction column above; repeating it here as an empty row would say nothing.
 # When no review changed anything the whole section is absent.
 #
-# The subjects come from `git log` in ~/instruments, gathered by issue_sync —
+# The subjects come from `git log` in sclaude's checkout, gathered by issue_sync —
 # see the comment there. Conventional Commits already name the kind of change,
 # so the subject is printed as it stands rather than parsed into a verdict.
 def fix_label(key):

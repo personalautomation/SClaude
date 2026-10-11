@@ -1,6 +1,6 @@
 [Unit]
 Description=sclaude-proxy's port: every feature's dev server at <feature>.localhost:3000
-Documentation=file:%h/instruments/README.md
+Documentation=file:@REPO@/README.md
 
 [Socket]
 # Every address, like the `next dev` that used to hold this port: the Windows

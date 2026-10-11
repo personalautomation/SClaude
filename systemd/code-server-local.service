@@ -1,6 +1,6 @@
 [Unit]
 Description=Forwarding localhost:8080 to code-server in the tailnet
-Documentation=file:%h/instruments/README.md
+Documentation=file:@REPO@/README.md
 # There is nothing to proxy to until the server itself is up.
 Requires=code-server.service
 After=code-server.service

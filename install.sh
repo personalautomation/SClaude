@@ -32,6 +32,16 @@ CLAUDE="$HOME/.claude"
 
 mkdir -p "$BIN" "$UNITS" "$SKILLS" "$CLAUDE"
 
+# A systemd unit, written into $UNITS with this checkout's path put in for
+# @REPO@: the checkout may live under any name, and a unit cannot find it any
+# other way. Written, not linked — a link would carry the placeholder — so
+# re-run this after a unit changes. The old link, if any, goes first: writing
+# through it would rewrite the file in the repository.
+unit() {
+  rm -f "$UNITS/$1"
+  sed "s|@REPO@|$REPO|g" "$REPO/systemd/$1" > "$UNITS/$1"
+}
+
 # Asked of keepawake/state.py rather than tested again here: that is what
 # decides where keepawake writes its state, and two copies of the test would
 # one day set up the units for one platform while the state went to the other.
@@ -49,27 +59,27 @@ echo "symlinked: sclaude, sclaude-notify, sclaude-watch, sclaude-proxy, keepawak
 if [[ $WSL -eq 1 ]]; then
   ln -sfn "$REPO/bin/wsl-update"        "$BIN/wsl-update"
   ln -sfn "$REPO/bin/keepawake-windows" "$BIN/keepawake-windows"
-  ln -sfn "$REPO/systemd/wsl-update.service"        "$UNITS/wsl-update.service"
-  ln -sfn "$REPO/systemd/wsl-update.timer"          "$UNITS/wsl-update.timer"
-  ln -sfn "$REPO/systemd/keepawake-windows.service" "$UNITS/keepawake-windows.service"
+  unit wsl-update.service
+  unit wsl-update.timer
+  unit keepawake-windows.service
   echo "symlinked (WSL): wsl-update, keepawake-windows and their units"
 else
   ln -sfn "$REPO/bin/keepawake-linux"             "$BIN/keepawake-linux"
-  ln -sfn "$REPO/systemd/keepawake-linux.service" "$UNITS/keepawake-linux.service"
+  unit keepawake-linux.service
   echo "symlinked (Linux): keepawake-linux and its unit"
 fi
 
-ln -sfn "$REPO/systemd/code-server.service"        "$UNITS/code-server.service"
-ln -sfn "$REPO/systemd/code-server-local.socket"   "$UNITS/code-server-local.socket"
-ln -sfn "$REPO/systemd/code-server-local.service"  "$UNITS/code-server-local.service"
-ln -sfn "$REPO/systemd/keepawake.service"          "$UNITS/keepawake.service"
-ln -sfn "$REPO/systemd/keepawake.timer"            "$UNITS/keepawake.timer"
-ln -sfn "$REPO/systemd/keepawake-telegram.service" "$UNITS/keepawake-telegram.service"
-ln -sfn "$REPO/systemd/sclaude-watch.service"      "$UNITS/sclaude-watch.service"
-ln -sfn "$REPO/systemd/sclaude-watch.timer"        "$UNITS/sclaude-watch.timer"
-ln -sfn "$REPO/systemd/sclaude-proxy.socket"       "$UNITS/sclaude-proxy.socket"
-ln -sfn "$REPO/systemd/sclaude-proxy.service"      "$UNITS/sclaude-proxy.service"
-echo "symlinked: $UNITS/keepawake{.service,.timer,-telegram.service}, code-server.service, sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}"
+unit code-server.service
+unit code-server-local.socket
+unit code-server-local.service
+unit keepawake.service
+unit keepawake.timer
+unit keepawake-telegram.service
+unit sclaude-watch.service
+unit sclaude-watch.timer
+unit sclaude-proxy.socket
+unit sclaude-proxy.service
+echo "units: $UNITS/keepawake{.service,.timer,-telegram.service}, code-server.service, sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}"
 
 ln -sfn "$REPO/skills/pr" "$SKILLS/pr"
 echo "symlinked: $SKILLS/pr"
@@ -231,7 +241,7 @@ POLKIT_RULE="${KEEPAWAKE_POLKIT_RULE:-/etc/polkit-1/rules.d/49-keepawake.rules}"
 # Where this installer notes that it wrote the rule. Fedora and Arch keep
 # rules.d unreadable to a normal user, so the rule itself cannot be seen from
 # here; the note is what `sclaude doctor` and the next run read there instead.
-POLKIT_MARK="$HOME/.config/instruments/polkit-rule"
+POLKIT_MARK="$HOME/.config/sclaude/polkit-rule"
 POLKIT_OFF="sudo rm $POLKIT_RULE && rm -f $POLKIT_MARK && systemctl --user restart keepawake-linux.service"
 
 polkit_present() {

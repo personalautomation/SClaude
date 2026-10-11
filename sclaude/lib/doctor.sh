@@ -286,7 +286,7 @@ doctor_machine() {
   local rule="${KEEPAWAKE_POLKIT_RULE:-/etc/polkit-1/rules.d/49-keepawake.rules}"
   local have_rule=0
   if [[ -f "$rule" ]] \
-     || { [[ ! -r "$(dirname "$rule")" ]] && [[ -f "$HOME/.config/instruments/polkit-rule" ]]; }; then
+     || { [[ ! -r "$(dirname "$rule")" ]] && [[ -f "$HOME/.config/sclaude/polkit-rule" ]]; }; then
     have_rule=1
   fi
   if [[ "$platform" == linux && "$have_rule" -eq 0 ]]; then

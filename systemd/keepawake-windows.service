@@ -1,6 +1,6 @@
 [Unit]
 Description=keepawake's Windows side: keeping the system from sleeping
-Documentation=file:%h/instruments/README.md
+Documentation=file:@REPO@/README.md
 # The script lives on the Windows drive, and without it there is nothing to run.
 RequiresMountsFor=/mnt/c
 # Only works in [Unit]: in [Service] systemd ignores it.

@@ -210,6 +210,13 @@ try:
     check("listed-any-case", sh(ask, repo), "yes")
     setup(["lead@x.test"])
     check("not-listed", sh(ask, repo), "no")
+    # A config that cannot be read makes nobody a maintainer, not everybody.
+    with open(config, "w") as fh:
+        fh.write('{"maintainers": ["ann@x.test"],}')
+    check("broken-config-nobody", sh(ask, repo), "no")
+    with open(config, "w") as fh:
+        fh.write('["ann@x.test"]')
+    check("non-object-config-nobody", sh(ask, repo), "no")
 
     where = 'product_rules_dir "%s"' % repo
     setup(["ann@x.test"])

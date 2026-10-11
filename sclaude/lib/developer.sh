@@ -69,10 +69,19 @@ product_maintainer() {
   email="$(git -C "$root" config user.email 2>/dev/null | tr '[:upper:]' '[:lower:]')"
   python3 - "$root/.sclaude/config.json" "$email" <<'PY'
 import json, sys
+# A config that is there and cannot be read says nothing about who maintains
+# the product, and "everybody" is the answer that drops the team guard: a
+# trailing comma made every developer a maintainer. Not one, then, and said.
 try:
-    listed = json.load(open(sys.argv[1])).get("maintainers")
-except (OSError, ValueError, AttributeError):
-    sys.exit(0)
+    data = json.load(open(sys.argv[1]))
+except (OSError, ValueError) as exc:
+    sys.stderr.write("sclaude: %s cannot be read (%s); nobody counts as its maintainer\n"
+                     % (sys.argv[1], exc))
+    sys.exit(1)
+if not isinstance(data, dict):
+    sys.stderr.write("sclaude: %s is not an object; nobody counts as its maintainer\n" % sys.argv[1])
+    sys.exit(1)
+listed = data.get("maintainers")
 if not isinstance(listed, list) or not listed:
     sys.exit(0)
 sys.exit(0 if sys.argv[2] and sys.argv[2] in [str(m).strip().lower() for m in listed] else 1)

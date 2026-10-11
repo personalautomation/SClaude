@@ -250,6 +250,12 @@ FORBIDDEN = [
     ("supabase db push --db-url postgres://u:p@db.prod.example.com:5432/postgres", DENY),
     ("npx supabase db push --yes --db-url \"$(grep URL .env.prod | cut -d= -f2-)\"", DENY),
     ("supabase db push --db-url=postgresql://postgres:postgres@127.0.0.1:54322/postgres", ALLOW),
+    # libpq takes the host from the query too, and it wins over the address.
+    ("supabase db push --db-url 'postgresql://u:p@localhost:5432/postgres?host=db.prod.example.com'", DENY),
+    ("supabase db push --db-url 'postgresql://u:p@127.0.0.1/postgres?sslmode=disable&hostaddr=10.0.0.5'", DENY),
+    ("supabase db push --db-url 'postgresql://u:p@localhost/postgres?host=/var/run/postgresql'", ALLOW),
+    # Auto-merge is the merge, only later.
+    ("gh api graphql -f query='mutation{enablePullRequestAutoMerge(input:{pullRequestId:\"x\"}){clientMutationId}}'", DENY),
     # ...and what must still go through.
     ("gh api repos/o/r/pulls/5/merge", ALLOW),
     ("gh api repos/o/r/pulls/5", ALLOW),
@@ -383,7 +389,11 @@ def main():
     scratch = tempfile.mkdtemp(prefix="hooks-push-")
     try:
         clone = os.path.join(scratch, "clone")
-        subprocess.run(["git", "init", "-q", clone], check=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", clone], check=True)
+        feature = os.path.join(scratch, "feature")
+        subprocess.run(["git", "init", "-q", "-b", "feat/x", feature], check=True)
+        subprocess.run(["git", "-C", feature, "remote", "add", "origin",
+                        "https://github.com/o/r.git"], check=True)
         subprocess.run(["git", "-C", clone, "remote", "add", "origin",
                         "https://github.com/o/r.git"], check=True)
         home = os.path.expanduser("~")
@@ -450,6 +460,20 @@ def main():
             ("cd " + scratch + "/../.." + home + " && git push origin main",
              home, DENY),
             ("cd " + scratch + " && git push --force origin feat/x", home, DENY),
+            # HEAD and @ are the branch checked out: on main, main.
+            ("git push origin HEAD", clone, DENY),
+            ("git push -u origin @", clone, DENY),
+            ("git push origin +HEAD", clone, DENY),
+            ("git push origin HEAD", feature, ALLOW),
+            ("git push -u origin @", feature, ALLOW),
+            # A subshell ends with its `cd`; the bare push after it is still
+            # judged where the line runs.
+            ("(npm test) && git push", clone, DENY),
+            ("(cd " + feature + " && npm test) && git push origin HEAD", clone, DENY),
+            ("(cd " + clone + " && npm test) && git push origin HEAD", feature, ALLOW),
+            ("(cd " + clone + " && git push origin HEAD)", feature, DENY),
+            ("{ npm test; } && git push", clone, DENY),
+            ("{ cd " + clone + "; } && git push", feature, DENY),
         ]
         for command, cwd, want in push_cases:
             got = run("forbidden-commands.py", command, step="review", cwd=cwd)

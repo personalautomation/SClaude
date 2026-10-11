@@ -47,6 +47,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
@@ -208,6 +209,22 @@ DB_URL_REASON = ("--db-url points the push at a database named on the command "
                  "says nothing about where it lands; only a local database may be "
                  "named that way")
 LOCAL_DB = re.compile(r"^[a-z]+://[^@/]*@?(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(/|$)")
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
+
+
+def local_db_url(url):
+    """Whether this connection string reaches only a database on this machine.
+
+    The host in the address is not the whole answer: libpq takes `host` and
+    `hostaddr` from the query too, and they win, so `…@localhost/db?host=<prod>`
+    goes to production. A review found it passing as local.
+    """
+    if not LOCAL_DB.match(url):
+        return False
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query, keep_blank_values=True)
+    return all(v in LOCAL_HOSTS or v.startswith("/")
+               for key in ("host", "hostaddr") for value in query.get(key, [])
+               for v in value.split(","))
 
 
 def db_push_refuses(words, raw=None):
@@ -230,7 +247,7 @@ def db_push_refuses(words, raw=None):
             url = word.split("=", 1)[1] if "=" in word else (full[i + 1] if i + 1 < len(full) else "")
             # A local database named outright is the one place the push goes,
             # whatever the tree is on.
-            return None if LOCAL_DB.match(url) else DB_URL_REASON
+            return None if local_db_url(url) else DB_URL_REASON
     # Any environment the project does not protect, rather than the literal
     # "dev" this used to name.
     #
@@ -610,6 +627,14 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
     if remote and scratch_push(command, parts, where, remote[0], redirected):
         return None
     for ref in refs[1:] if len(refs) > 1 else []:
+        # `HEAD` or `@` alone is the branch checked out, pushed under its own
+        # name: `git push origin HEAD` on main is the push to main, and it went
+        # through as a branch called HEAD. A directory that cannot be told is
+        # left alone, as for a bare push below.
+        if ref.lstrip("+") in ("HEAD", "@"):
+            if where and current_branch(where) == PROTECTED:
+                return MAIN_REASON
+            continue
         target = push_target(ref, known or {})
         if target is None:
             return ("the push's destination is built at run time, so it cannot "
@@ -657,7 +682,9 @@ def api_merge_refuses(words, raw):
     if words[:2] != ["gh", "api"]:
         return None
     rest = raw[2:]
-    if any("mergePullRequest" in w for w in rest):
+    # enablePullRequestAutoMerge merges as surely, only later: `gh pr merge
+    # --auto` is banned, and the mutation behind it went through.
+    if any(m in w for w in rest for m in ("mergePullRequest", "enablePullRequestAutoMerge")):
         return MERGE_REASON
     put = False
     for i, w in enumerate(rest):
@@ -762,13 +789,24 @@ def refuses(command, step, cwd=None, depth=0):
     where = os.path.realpath(cwd or os.getcwd())
     known = {}
     redirected = False
-    grouped = False
+    # The directory a `( … )` opened in, restored where it closes: a subshell's
+    # `cd` ends with it. Any group used to make the directory unknown for the
+    # rest of the line, and `(npm test) && git push` on main went through. A
+    # brace group runs in this shell, so its `cd` simply stays.
+    saved, restore = [], False
     for raw in segments(command, raw=True):
-        flat, bracket = ungroup(raw)
+        if restore:
+            where = saved.pop() if saved else None
+        opens = raw[0] == "(" or (raw[0].startswith("(") and not raw[0].startswith("$("))
+        last = raw[-1]
+        restore = bool(saved or opens) and (
+            last == ")" or (last.endswith(")") and last.count("(") < last.count(")")))
+        if opens:
+            saved.append(where)
+        flat, _ = ungroup(raw)
         remember(known, flat)
         redirected = redirected or any("GIT_DIR" in w for w in raw)
-        where = None if grouped else follow_cd(where, raw, known, command)
-        grouped = grouped or bracket
+        where = follow_cd(where, flat, known, command)
         raw = flat
         words = strip_runners(strip_wrappers(raw))
         if not words:

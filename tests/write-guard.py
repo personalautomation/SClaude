@@ -15,6 +15,7 @@
 #
 # Run it with: python3 tests/write-guard.py
 import json
+import shlex
 import os
 import shutil
 import subprocess
@@ -201,6 +202,11 @@ try:
     check("maintainer-step-without-guard",
           any("write-guard" in h["hooks"][0]["command"] for h in settings["hooks"]["PreToolUse"]),
           False)
+    # A checkout whose path has a space: Claude Code runs the hook through a
+    # shell, and the unquoted path split there.
+    entry = json.loads(sh('HOOKS="/opt/my tools/hooks"; guard_entry --readonly /x', repo))
+    words = shlex.split(entry["hooks"][0]["command"])
+    check("guard-path-with-space", words[:2], ["python3", "/opt/my tools/hooks/write-guard.py"])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

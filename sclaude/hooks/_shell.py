@@ -149,13 +149,6 @@ WRAPPER_VALUE_FLAGS = {
 WRAPPER_POSITIONAL = {"timeout": 1}
 
 
-# Package runners: the real command stands behind them, exactly as behind a
-# wrapper. They are deliberately NOT in WRAPPERS, and that is not tidiness.
-# no-code-in-planning.py keeps `npx` in its own WRITERS list — at step 1 `npx` is
-# banned as such, because it can run anything at all. Stripping it in the shared
-# WRAPPERS would take that ban away: `npx tsc` would come out as `tsc` and step
-# 1's hook would see a name it does not know. So the runners are stripped by a
-# function of its own, and only forbidden-commands.py calls it.
 # git's own options, before the subcommand, that take their value as the next
 # word; `--name=value` carries it in itself. Read past these, a check that
 # looked at the second word as the subcommand saw `user.name=x` in
@@ -163,6 +156,14 @@ WRAPPER_POSITIONAL = {"timeout": 1}
 GIT_VALUED = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
               "--config-env", "--super-prefix"}
 
+
+# Package runners: the real command stands behind them, exactly as behind a
+# wrapper. They are deliberately NOT in WRAPPERS, and that is not tidiness.
+# no-code-in-planning.py keeps `npx` in its own WRITERS list — at step 1 `npx` is
+# banned as such, because it can run anything at all. Stripping it in the shared
+# WRAPPERS would take that ban away: `npx tsc` would come out as `tsc` and step
+# 1's hook would see a name it does not know. So the runners are stripped by a
+# function of its own, and only forbidden-commands.py calls it.
 RUNNERS = ("npx", "bunx", "pnpx")
 
 # Runners spelled as a subcommand of their package manager.

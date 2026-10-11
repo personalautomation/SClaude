@@ -198,7 +198,9 @@ BROWSER_ALLOW='mcp__chrome-devtools'
 guard_entry() {
   [[ $# -gt 0 ]] || return 0
   local args; args="$(printf ' %q' "$@")"
-  python3 -c 'import json, sys; print(json.dumps({"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash", "hooks": [{"type": "command", "command": "python3 " + sys.argv[1] + sys.argv[2], "timeout": 10}]}))' \
+  # The path quoted for the shell Claude Code runs the command in: a checkout
+  # under a name with a space in it broke the guard.
+  python3 -c 'import json, shlex, sys; print(json.dumps({"matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash", "hooks": [{"type": "command", "command": "python3 " + shlex.quote(sys.argv[1]) + sys.argv[2], "timeout": 10}]}))' \
     "$HOOKS/write-guard.py" "$args"
 }
 

@@ -56,13 +56,6 @@ developer_name() {
   developer_sanitize "$raw"
 }
 
-# 0 when this person may commit the orchestrator straight to main.
-#
-# MAINTAINERS at the repository root lists addresses, one per line, `#` for
-# comments. With no file at all everybody is a maintainer — a copy used by one
-# person has nobody to be protected from. With the file present, an unknown or
-# empty address is not a maintainer: guessing yes would put a stranger's
-# friction fix on the main branch of everybody's orchestrator.
 # 0 when this person maintains the product: their git address is in
 # `maintainers` in the product's .sclaude/config.json. The product's own address, from
 # the product's repository, since that is the identity its commits carry. The
@@ -100,6 +93,13 @@ product_rules_dir() {
   fi
 }
 
+# 0 when this person may commit the orchestrator straight to main.
+#
+# MAINTAINERS at the repository root lists addresses, one per line, `#` for
+# comments. With no file at all everybody is a maintainer — a copy used by one
+# person has nobody to be protected from. With the file present, an unknown or
+# empty address is not a maintainer: guessing yes would put a stranger's
+# friction fix on the main branch of everybody's orchestrator.
 developer_is_maintainer() {
   local file="${INSTRUMENTS:-.}/MAINTAINERS" email
   [[ -f "$file" ]] || return 0

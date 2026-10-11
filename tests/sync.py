@@ -199,6 +199,57 @@ with tempfile.TemporaryDirectory() as tmp:
           "mine, untracked\n")
 
 
+# --- a non-maintainer's pull request (instruments_propose) -------------------
+#
+# gh is a stub: it says who the repository is, whether this person may push,
+# makes the "fork" as a second bare repository, and records the pull requests
+# it is asked to open.
+GH_STUB = r"""
+gh() {
+  case "$1 $2" in
+    "repo view") echo boss/sclaude ;;
+    "api repos/boss/sclaude") echo "$CAN_PUSH" ;;
+    "api user") echo alice ;;
+    "repo fork") git init -q --bare "$FORK" && git remote add fork "$FORK"; echo fork >> "$GH_LOG" ;;
+    "pr list") [[ -s "$PR_OPEN" ]] && cat "$PR_OPEN" || true ;;
+    "pr create") echo "create $*" >> "$GH_LOG"; echo https://pr/1 | tee "$PR_OPEN" ;;
+  esac
+}
+"""
+
+with tempfile.TemporaryDirectory() as tmp:
+    for can_push in ("false", "true"):
+        print("propose, can push: %s" % can_push)
+        base = os.path.join(tmp, can_push)
+        os.makedirs(base)
+        w = World(base, email="Alice.B@x.test", maintainers=["boss@x.test"])
+        w.run()
+        commit(w.me, "fix.txt", "fix\n")
+        log, opened = os.path.join(base, "gh.log"), os.path.join(base, "pr")
+        env = {"CAN_PUSH": can_push, "FORK": os.path.join(base, "fork.git"),
+               "GH_LOG": log, "PR_OPEN": opened}
+        out = w.run(GH_STUB + "push_instruments", env=env)
+        calls = open(log).read() if os.path.exists(log) else ""
+        target = os.path.join(base, "fork.git") if can_push == "false" else w.origin
+        check("propose-%s-pushed" % can_push,
+              git(target, "rev-parse", "--verify", "-q", "refs/heads/dev/alice-b") != "", True)
+        check("propose-%s-forked" % can_push, "fork" in calls.split("\n"), can_push == "false")
+        check("propose-%s-origin-kept" % can_push, git(w.me, "remote", "get-url", "origin"), w.origin)
+        check("propose-%s-pr-opened" % can_push, sum(l.startswith("create ") for l in calls.splitlines()), 1)
+        check("propose-%s-pr-head" % can_push,
+              ("--head alice:dev/alice-b" if can_push == "false" else "--head dev/alice-b") in calls, True)
+        check("propose-%s-said" % can_push, "opened a pull request: https://pr/1" in out, True)
+        # The next push updates the same pull request rather than opening another.
+        commit(w.me, "fix2.txt", "more\n")
+        out = w.run(GH_STUB + "push_instruments", env=env)
+        calls = open(log).read()
+        check("propose-%s-one-fork" % can_push, calls.split("\n").count("fork"), 1 if can_push == "false" else 0)
+        check("propose-%s-one-pr" % can_push, sum(l.startswith("create ") for l in calls.splitlines()), 1)
+        check("propose-%s-pr-updated" % can_push, "your pull request has it" in out, True)
+        # Nothing new: nothing sent, nothing asked.
+        out = w.run(GH_STUB + "push_instruments", env=env)
+        check("propose-%s-quiet-when-sent" % can_push, "pushing" in out, False)
+
 # --- the net under the switch, and what the prompts tell the session ---------
 #
 # Read as text: driving run_friction for real needs a feature, a log and a

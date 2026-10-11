@@ -222,9 +222,13 @@ lives elsewhere:
 
 **Who changes the orchestrator.** `MAINTAINERS` lists the git addresses allowed
 to commit it straight to `main`. Everybody else is moved to `dev/<name>` before
-anything runs, the friction review commits there, and their fixes reach `main`
-as a pull request — from a branch here if they can push, from a fork of their
-own if they cannot (the push failure prints the commands).
+anything runs, and the friction review commits there. sclaude then sends the
+branch as a pull request into `main` by itself: pushed here if you may push,
+and otherwise to a fork of yours, which it makes once with `gh` as the remote
+`fork`. The pull request is opened once, and every later push updates it.
+`origin` stays this repository, so updates keep arriving at your next command
+as before. You use this repository, not your fork; the fork is only how a pull
+request travels. Without `gh`, the push failure prints the commands instead.
 
 **Who keeps a product's rules.** The same idea, one level down, in folders
 rather than branches, because a rule only applies once it is on the product's

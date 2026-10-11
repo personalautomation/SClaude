@@ -1673,6 +1673,74 @@ regression_push_fix() {
   return 2
 }
 
+# A non-maintainer's dev/<name>, sent as a pull request into origin's main.
+#
+# The repository is public, and most people who use it cannot push to it. They
+# were left with a failed push and three commands to type. Now the branch goes
+# to origin when they can push there, and to a fork of theirs otherwise:
+# sclaude makes the fork once, as the remote `fork`, with gh, and never moves
+# origin, so updates go on coming from origin as before and the fork is only
+# the way a pull request travels. The pull request is opened once and every
+# later push updates it; a closed or merged one makes way for a new one.
+# Returns 1 to leave the push to the plain path: no gh, an origin gh cannot
+# place on GitHub, or a fork that could not be made.
+#
+#   instruments_propose <branch> <commits>
+instruments_propose() {
+  local branch="$1" ahead="$2" slug remote=origin login head pr title body
+  command -v gh >/dev/null 2>&1 || return 1
+  slug="$(cd "$INSTRUMENTS" && GH_PROMPT_DISABLED=1 gh repo view \
+            --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || return 1
+  [[ "$slug" == */* ]] || return 1
+  if [[ "$(GH_PROMPT_DISABLED=1 gh api "repos/$slug" --jq .permissions.push 2>/dev/null)" != "true" ]]; then
+    if ! git -C "$INSTRUMENTS" remote get-url fork >/dev/null 2>&1; then
+      info "  instruments: you cannot push to $slug; making your fork of it, once"
+      ( cd "$INSTRUMENTS" && GH_PROMPT_DISABLED=1 gh repo fork \
+          --remote --remote-name fork >/dev/null 2>&1 ) || return 1
+      git -C "$INSTRUMENTS" remote get-url fork >/dev/null 2>&1 || return 1
+    fi
+    remote=fork
+  fi
+
+  info "  instruments: pushing $ahead commit(s) to $remote/$branch"
+  if ! GIT_TERMINAL_PROMPT=0 git -C "$INSTRUMENTS" push -q -u "$remote" "$branch" >/dev/null 2>&1; then
+    warn "  instruments: push failed — the work is committed but not sent"
+    warn "  finish it by hand: git -C $INSTRUMENTS push $remote $branch"
+    return 0
+  fi
+
+  head="$branch"
+  if [[ "$remote" == fork ]]; then
+    login="$(GH_PROMPT_DISABLED=1 gh api user --jq .login 2>/dev/null)" || login=""
+    [[ -n "$login" ]] && head="$login:$branch"
+  fi
+  pr="$(GH_PROMPT_DISABLED=1 gh pr list --repo "$slug" --head "$branch" \
+          --state open --json url --jq '.[0].url // ""' 2>/dev/null)" || pr=""
+  if [[ -n "$pr" ]]; then
+    info "  instruments: pushed; your pull request has it: $pr"
+    return 0
+  fi
+
+  # Named by its one commit, or by whose fixes they are.
+  if [[ "$(git -C "$INSTRUMENTS" rev-list --count origin/main..HEAD 2>/dev/null)" == 1 ]]; then
+    title="$(git -C "$INSTRUMENTS" log -1 --format=%s 2>/dev/null)"
+  else
+    title="sclaude: fixes from $(developer_name 2>/dev/null || echo "$branch")"
+  fi
+  body="$(printf '%s\n\n%s\n\n%s\n' \
+    "Fixes to sclaude from \`$branch\`, committed by friction reviews and retrospectives on this developer's machine and opened by sclaude itself." \
+    "$(git -C "$INSTRUMENTS" log origin/main..HEAD --format='- %s' 2>/dev/null)" \
+    "Later pushes to the branch update this pull request.")"
+  if pr="$(GH_PROMPT_DISABLED=1 gh pr create --repo "$slug" --base main \
+             --head "$head" --title "$title" --body "$body" 2>/dev/null)"; then
+    info "  instruments: pushed, and opened a pull request: $pr"
+  else
+    warn "  instruments: pushed to $remote/$branch, but the pull request did not open"
+    warn "  open it by hand: gh pr create --repo $slug --base main --head $head --fill"
+  fi
+  return 0
+}
+
 # Gives up the friction queue run_friction took, if it took one.
 friction_unlock() {
   declare -F lock_release >/dev/null || return 0
@@ -1718,9 +1786,17 @@ push_instruments() {
   # With no origin at all, "not on origin" is every commit there is — so no
   # origin is asked about first, and answers nothing.
   git -C "$INSTRUMENTS" remote get-url origin >/dev/null 2>&1 || return 0
-  ahead="$(git -C "$INSTRUMENTS" rev-list --count HEAD --not --remotes=origin 2>/dev/null || true)"
+  # A fork counts as sent: a commit that is on it is in its pull request.
+  ahead="$(git -C "$INSTRUMENTS" rev-list --count HEAD --not --remotes=origin --remotes=fork 2>/dev/null || true)"
   [[ "$ahead" =~ ^[0-9]+$ ]] || return 0
   [[ "$ahead" -gt 0 ]] || return 0
+
+  # Somebody MAINTAINERS does not list reaches main through a pull request,
+  # and sclaude opens it for them (instruments_propose). Where that cannot be
+  # done — no gh, no GitHub origin — the branch is pushed to origin as before.
+  if [[ "$branch" != "main" ]] && ! developer_is_maintainer; then
+    instruments_propose "$branch" "$ahead" && return 0
+  fi
 
   info "  instruments: pushing $ahead commit(s) to origin/$branch"
   if GIT_TERMINAL_PROMPT=0 git -C "$INSTRUMENTS" push -u origin "$branch" >/dev/null 2>&1; then
@@ -1728,9 +1804,8 @@ push_instruments() {
   else
     warn "  instruments: push failed — the work is committed but not sent"
     warn "  finish it by hand: git -C $INSTRUMENTS push origin $branch"
-    # Somebody outside the team that owns this repository cannot push to it at
-    # all, and that is by design: their fixes reach everybody through a pull
-    # request from a fork of their own.
+    # Reached only without gh, or with an origin gh cannot place:
+    # instruments_propose does the forking when it can.
     if ! developer_is_maintainer; then
       warn "  no write access? propose it instead:"
       warn "    cd $INSTRUMENTS && gh repo fork --remote --remote-name fork"

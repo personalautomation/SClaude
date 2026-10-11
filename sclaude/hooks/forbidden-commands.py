@@ -624,10 +624,27 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
         if target == PROTECTED:
             return MAIN_REASON
     # `git push main` without a remote name is an attempt too, crooked as it
-    # is.
-    if len(refs) == 1 and push_target(refs[0], known or {}) in (PROTECTED, None):
+    # is. Any other lone word is the remote — `git push "$REMOTE"` included,
+    # which an unknown value used to refuse as a push to main.
+    if len(refs) == 1 and refs[0] == PROTECTED:
+        return MAIN_REASON
+    # With no refspec git pushes the branch checked out, so `git push` or
+    # `git push origin` on main is the push to main. It went through, because
+    # only refspecs were read. A directory that cannot be told is left alone,
+    # as it was before.
+    if len(refs) <= 1 and where and current_branch(where) == PROTECTED:
         return MAIN_REASON
     return None
+
+
+def current_branch(where):
+    """The branch checked out in a directory, or None."""
+    try:
+        done = subprocess.run(["git", "-C", where, "symbolic-ref", "--short", "-q", "HEAD"],
+                              capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
 
 
 # The merge through the API rather than `gh pr merge`: the REST endpoint takes

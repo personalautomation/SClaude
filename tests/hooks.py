@@ -600,6 +600,29 @@ def main():
     finally:
         shutil.rmtree(feature, ignore_errors=True)
 
+    # With no refspec git pushes the branch checked out: `git push` on main is
+    # the push to main, and it went through. A lone word is the remote, so
+    # `git push "$REMOTE"` on a feature branch is not refused any more.
+    branches = tempfile.mkdtemp(prefix="hooks-branches-")
+    on_main, on_feat = os.path.join(branches, "m"), os.path.join(branches, "f")
+    try:
+        subprocess.run(["git", "init", "-q", "-b", "main", on_main], check=True)
+        subprocess.run(["git", "init", "-q", "-b", "feat/x", on_feat], check=True)
+        branch_cases = [
+            ("git push", on_main, DENY), ("git push origin", on_main, DENY),
+            ("git -C %s push" % on_main, on_feat, DENY),
+            ("git push", on_feat, ALLOW), ("git push origin", on_feat, ALLOW),
+            ('git push "$REMOTE"', on_feat, ALLOW), ("git push main", on_feat, DENY)]
+        for command, where, want in branch_cases:
+            # The session's own tree, as a step sets it: a repository under the
+            # temp root outside the project would read as a scratch push.
+            got = run("forbidden-commands.py", command, step="code", cwd=where,
+                      env={"CLAUDE_PROJECT_DIR": where})
+            if got != want:
+                failures.append(("code", "%s (in %s)" % (command, os.path.basename(where)), want, got))
+    finally:
+        shutil.rmtree(branches, ignore_errors=True)
+
     # The markers by which collect-denials.py recognises our own hooks' refusals
     # and does not write them into the log a second time. The comparison goes
     # through the transcript's text, so a marker is a copy of the tail the hook
@@ -616,7 +639,7 @@ def main():
 
     total = len(PLANNING) + len(FORBIDDEN) + len(BY_STEP) + 2 + len(workdir_cases) + \
         len(shared_cases) + 1 + len(plan_cases) + 3 + \
-        len(const("collect-denials.py", "OWN_MARKERS"))
+        len(const("collect-denials.py", "OWN_MARKERS")) + len(branch_cases)
     for step, command, want, got in failures:
         print("FAIL [%s] %s — expected %s, got %s" % (step, command, want, got))
     print("%d/%d passed" % (total - len(failures), total))

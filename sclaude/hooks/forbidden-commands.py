@@ -667,18 +667,34 @@ def api_merge_refuses(words, raw):
 SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
 
 
+# The shell options that take the next word as their value: `bash -o pipefail
+# -c '…'` reads `pipefail` as the option's, and the `-c` after it still counts.
+SHELL_VALUED = ("-o", "+o", "-O", "+O")
+
+
 def inner_command(words):
-    """The command a shell or eval is told to run as a string, or None."""
+    """The command a shell or eval is told to run as a string, or None.
+
+    `words` must keep their paths: the string is checked again as a command of
+    its own, and `gh pr merge 5 --repo o/r` cut to last path parts was `r`.
+    Only the shell's own name may be bare.
+    """
     if not words:
         return None
     if words[0] == "eval":
         return " ".join(words[1:]) or None
     if words[0] in SHELLS:
-        for i, w in enumerate(words[1:], 1):
+        i = 1
+        while i < len(words):
+            w = words[i]
+            if w in SHELL_VALUED:
+                i += 2
+                continue
             if w.startswith("-") and not w.startswith("--") and "c" in w[1:]:
                 return words[i + 1] if i + 1 < len(words) else None
-            if not w.startswith("-"):
+            if not w.startswith(("-", "+")):
                 return None
+            i += 1
     return None
 
 
@@ -771,7 +787,9 @@ def refuses(command, step, cwd=None, depth=0):
         words = strip_runners(strip_wrappers(raw))
         if not words:
             continue
-        inner = inner_command(words)
+        # The string a shell or eval runs, from the words as written: the ones
+        # above are cut to their last path part, all but the command's name.
+        inner = inner_command(words[:1] + raw[len(raw) - len(words) + 1:])
         if inner is not None:
             # Deep enough for any honest use; a string nested further than this
             # is refused rather than followed.

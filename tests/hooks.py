@@ -231,6 +231,13 @@ FORBIDDEN = [
     ("bash -lc 'vercel --prod'", DENY),
     ("eval gh pr merge 5", DENY),
     ("eval 'gh pr merge 5'", DENY),
+    # The string keeps its paths: cut to last path parts, the first was `r`
+    # and the endpoint `merge`, and both went through.
+    ("bash -c 'gh pr merge 5 --repo o/r'", DENY),
+    ("eval gh api -X PUT repos/o/r/pulls/5/merge", DENY),
+    ("/bin/bash -c 'gh pr merge 5'", DENY),
+    # An option that takes a value before -c.
+    ("bash -o pipefail -c 'gh pr merge 5'", DENY),
     ("gh api -X PUT repos/o/r/pulls/5/merge", DENY),
     ("gh api --method PUT repos/o/r/pulls/5/merge -f merge_method=squash", DENY),
     ("gh api -XPUT /repos/o/r/pulls/5/merge", DENY),

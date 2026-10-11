@@ -864,7 +864,14 @@ except ValueError:
 
 if payload.get("tool_name") == "Bash":
     command = str((payload.get("tool_input") or {}).get("command", ""))
-    reason = refuses(command, step, payload.get("cwd"))
+    # A hook that raises exits non-zero, and Claude Code runs the command
+    # anyway: an error here let every ban go. Refused instead, as a command
+    # that cannot be parsed is: the step's bans outweigh convenience.
+    try:
+        reason = refuses(command, step, payload.get("cwd"))
+    except Exception as exc:  # noqa: BLE001
+        reason = "the ban check failed on this command (%s: %s), so it is refused" % (
+            type(exc).__name__, exc)
     if reason:
         deny(reason, step, command)
     question = shared_schema_asks(command)

@@ -134,6 +134,23 @@ try:
         check("no-%s-in-hook" % name, name in hook, False)
     for name in ("db:promote", "env:prod"):
         check("no-%s-in-steps" % name, name in steps, False)
+    # --- a team file of the wrong shape keeps every ban ---
+    #
+    # `{"steps": ["code"]}` raised inside the merge, the hook died, Claude
+    # Code ran the command, and --disallowed-tools came out empty too.
+    broken = os.path.join(tmp, "broken")
+    os.makedirs(os.path.join(broken, ".vercel"))
+    for i, bad in enumerate(({"steps": ["code"]}, {"steps": {"code": ["x"]}},
+                             {"deny": "gh"}, {"integrations": "vercel"},
+                             {"tools": ["x"]}, {"deny": [{"command": "x", "why": 5}]})):
+        write(broken, ".sclaude/team/policy.json", bad)
+        check("broken-%d-merge-banned" % i, verdict(broken, "gh pr merge 1", step="code"), "deny")
+        flags = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"), "flags",
+                                broken, "", "code"], capture_output=True, text=True)
+        check("broken-%d-flags-keep-merge" % i, "Bash(gh pr merge:*)" in flags.stdout, True)
+    # Dropping the broken layer keeps what the product evidently uses.
+    check("broken-keeps-integrations", policy.merge(broken, "", "code", layers=False)["integrations"],
+          ["vercel"])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

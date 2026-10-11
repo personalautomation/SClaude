@@ -14,7 +14,7 @@
 #   {
 #     "integrations": ["vercel", "supabase"],          team only
 #     "deny":  [{"command": "npm run db:promote", "why": "..."}],
-#     "allow": [{"command": "npm run check:r2", "why": "..."}],
+#     "allow": [{"command": "npm run check:storage", "why": "..."}],
 #     "steps": {"code": {"deny": [...], "allow": [...]}},
 #     "tools": {"deny": ["mcp__…"]},                   integrations only
 #     "rules": ["vercel-deploy"],                      integrations only
@@ -54,26 +54,40 @@ def read(path):
     return data if isinstance(data, dict) else {}
 
 
+def as_dict(value):
+    return value if isinstance(value, dict) else {}
+
+
+def as_list(value):
+    return value if isinstance(value, list) else []
+
+
 def entries(layer, key, step):
-    """(words, why, command) of one list in a layer, for the step if named."""
+    """(words, why, command) of one list in a layer, for the step if named.
+
+    A value of the wrong shape counts as absent: `{"steps": ["code"]}` in a
+    team's file used to raise here, and the hook died with every ban.
+    """
     out = []
+    layer = as_dict(layer)
     lists = [layer.get(key)]
     if step:
-        lists.append(((layer.get("steps") or {}).get(step) or {}).get(key))
+        lists.append(as_dict(as_dict(layer.get("steps")).get(step)).get(key))
     for items in lists:
-        for item in items or []:
+        for item in as_list(items):
             command = item.get("command") if isinstance(item, dict) else item
             if not isinstance(command, str) or not command.strip():
                 continue
             try:
                 # Compared as the hook compares a call: each word by its last
-                # path component, so `node scripts/env.mjs prod` matches
-                # `node ./scripts/env.mjs prod` as well, and a rule written
+                # path component, so `node scripts/tool.mjs run` matches
+                # `node ./scripts/tool.mjs run` as well, and a rule written
                 # with a path is not one that can never fire.
                 words = tuple(w.rsplit("/", 1)[-1] for w in shlex.split(command))
             except ValueError:
                 continue
             why = item.get("why", "") if isinstance(item, dict) else ""
+            why = why if isinstance(why, str) else ""
             out.append((words, why, command.strip()))
     return out
 
@@ -122,11 +136,27 @@ def environments(root):
 
 
 def merged(root, person="", step=""):
-    """The policy a session in this product, run by this person, works under."""
+    """The policy a session in this product, run by this person, works under.
+
+    Never raises. A product's or a person's file that breaks the merge in a
+    way entries() did not foresee is dropped, and the policy is built from
+    sclaude's presets, the product's integrations and its config alone, with
+    a line on stderr. A hook that died here let every command through, and
+    --disallowed-tools came out empty.
+    """
+    try:
+        return merge(root, person, step, layers=True)
+    except Exception as exc:  # noqa: BLE001 — any failure, the presets still hold
+        sys.stderr.write("sclaude policy: the product's or the person's rules could "
+                         "not be read (%s); working from sclaude's presets\n" % exc)
+        return merge(root, person, step, layers=False)
+
+
+def merge(root, person, step, layers):
     core = read(os.path.join(PRESETS, "core.json"))
-    team = read(os.path.join(root, ".sclaude", "team", "policy.json")) if root else {}
+    team = read(os.path.join(root, ".sclaude", "team", "policy.json")) if root and layers else {}
     mine = read(os.path.join(root, ".sclaude", "people", person, "policy.json")) \
-        if root and person else {}
+        if root and person and layers else {}
 
     names = team.get("integrations")
     if not isinstance(names, list):
@@ -147,8 +177,8 @@ def merged(root, person="", step=""):
     rules, tools = [], []
     for name, layer in integrations.items():
         deny += [d for d in with_source(layer, "deny", name) if not lifted(d[0])]
-        rules += [r for r in layer.get("rules") or [] if isinstance(r, str)]
-        tools += [t for t in (layer.get("tools") or {}).get("deny") or [] if isinstance(t, str)]
+        rules += [r for r in as_list(layer.get("rules")) if isinstance(r, str)]
+        tools += [t for t in as_list(as_dict(layer.get("tools")).get("deny")) if isinstance(t, str)]
     # The production commands the product names in .sclaude/config.json, liftable by
     # the team like an integration's.
     deny += [d for d in with_source(config_denies(root), "deny", "config") if not lifted(d[0])]

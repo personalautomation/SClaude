@@ -135,6 +135,29 @@ sys.stdout.write(feature_in_history(sys.argv[2]))' "$LIB" "$wt" 2>/dev/null || t
 
   python3 "$LIB/render_prompt.py" "$file" "$PROMPTS" \
     || die "could not assemble the prompt for step $step"
+  prompt_additions "$step" "${wt:-${REPO:-}}"
+}
+
+# What the product, and then the person, add to a prompt sclaude ships: the
+# text of .sclaude/team/prompts/<step>.md and .sclaude/people/<name>/prompts/
+# <step>.md in the tree, each under a heading naming its file. Appended, never
+# put in place of sclaude's own text: the prompts carry markers and formats
+# sclaude's code reads back, and a product that replaced one would stop
+# receiving every later improvement to it. A rule that contradicts sclaude's
+# is a change to sclaude, proposed as such.
+#
+#   prompt_additions <step> <tree>
+prompt_additions() {
+  local step="$1" tree="$2" name file who
+  [[ -n "$tree" ]] || return 0
+  name="$(developer_name 2>/dev/null || true)"
+  for file in "$tree/.sclaude/team/prompts/$step.md" \
+              ${name:+"$tree/.sclaude/people/$name/prompts/$step.md"}; do
+    [[ -s "$file" ]] || continue
+    if [[ "$file" == */team/* ]]; then who="This product adds"; else who="$name adds"; fi
+    printf '\n\n---\n\n**%s** (`%s`):\n\n' "$who" "${file#"$tree"/}"
+    cat "$file"
+  done
 }
 
 # The comments that appeared on a PR while step 4's session was closed.

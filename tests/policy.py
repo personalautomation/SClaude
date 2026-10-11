@@ -111,9 +111,13 @@ try:
     # x`, `npm run --silent x` and `pnpm run x` past a ban on `npm run x`.
     for spelled in ("npm --silent run db:promote", "npm run --silent db:promote",
                     "pnpm run db:promote", "yarn run db:promote", "bun run db:promote",
-                    "npm --prefix . run db:promote", "npm run db:promote -- --yes"):
+                    "npm --prefix . run db:promote", "npm run db:promote -- --yes",
+                    "pnpm db:promote", "yarn db:promote", "bun db:promote",
+                    "yarn --silent db:promote"):
         check("config-promote-banned-as-%s" % spelled, verdict(conf, spelled), "deny")
     check("other-scripts-still-run", verdict(conf, "npm --silent run lint"), "allow")
+    for other in ("pnpm lint", "yarn install", "pnpm dlx tsc", "npm db:promote"):
+        check("not-the-promote-%s" % other, verdict(conf, other), "allow")
     check("path-rule-fires", verdict(conf, "node scripts/tool.mjs prod"), "deny")
     check("path-rule-fires-dotted", verdict(conf, "node ./scripts/tool.mjs prod --yes"), "deny")
     check("path-rule-narrow", verdict(conf, "node scripts/tool.mjs dev"), "allow")

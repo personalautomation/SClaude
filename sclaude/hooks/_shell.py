@@ -356,8 +356,17 @@ def script_call(words):
         return i
 
     i = past_flags(1)
-    if i >= len(words) or words[i] not in ("run", "run-script", "rr"):
+    if i >= len(words):
         return words
+    # yarn, pnpm and bun also run a script named straight after them, with no
+    # `run`: `pnpm db:promote` is the promote a ban on `npm run db:promote`
+    # meant, and it went through. Read the same way on both sides, so a word
+    # that is one of their own commands (`pnpm install`) only ever meets a ban
+    # written in the same spelling.
+    if words[i] not in ("run", "run-script", "rr"):
+        if words[0] == "npm" or words[i] in ("exec", "dlx", "x", "create"):
+            return words
+        return ["npm", "run"] + words[i:]
     j = past_flags(i + 1)
     if j >= len(words):
         return words

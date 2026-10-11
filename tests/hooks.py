@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
 HOOKS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                      "sclaude", "hooks")
@@ -26,12 +27,33 @@ ALLOW = "allow"
 SCRATCH = "/tmp/claude-{}".format(os.getuid())
 
 
+# A product for forbidden-commands.py to read its policy from: the shape a
+# product on Vercel and Supabase writes in .sclaude/team/policy.json, with the
+# product's own bans and the way it tells its environment.
+PRODUCT = tempfile.mkdtemp(prefix="sclaude-hooks-product-")
+os.makedirs(os.path.join(PRODUCT, ".sclaude", "team"))
+with open(os.path.join(PRODUCT, ".sclaude", "team", "policy.json"), "w") as _fh:
+    json.dump({
+        "integrations": ["vercel", "supabase"],
+        "deny": [
+            {"command": "npm run db:promote", "why": "prod migrations, after the merge"},
+            {"command": "npm run env:prod", "why": "moves the environment to prod"},
+        ],
+        "settings": {"supabase": {
+            "environment": "node scripts/lib/env-guard.mjs settled",
+            "environments": "config/environments.json",
+        }},
+    }, _fh)
+
+
 def run(hook, command, step=None, tool="Bash", tool_input=None, env=None,
-        cwd=None):
+        cwd=None, root=None):
     """The hook's verdict in one word."""
     argv = [sys.executable, os.path.join(HOOKS, hook)]
     if step:
         argv += ["--step", step]
+    if hook == "forbidden-commands.py":
+        argv += ["--root", root or PRODUCT]
     payload = {"tool_name": tool,
                "tool_input": tool_input or {"command": command}}
     if cwd:
@@ -469,7 +491,8 @@ def main():
                 fh.write("console.log(%s);\n" % json.dumps(name))
 
         def verdict(command):
-            argv = [sys.executable, os.path.join(HOOKS, "forbidden-commands.py"), "--step", "code"]
+            argv = [sys.executable, os.path.join(HOOKS, "forbidden-commands.py"), "--step", "code",
+                    "--root", PRODUCT]
             full = dict(os.environ, CLAUDE_PROJECT_DIR=tree)
             full.pop("SUPABASE_WORKDIR", None)
             out = subprocess.run(argv, input=json.dumps({"tool_name": "Bash",

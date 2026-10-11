@@ -1433,7 +1433,8 @@ remind_prod() {
       info "Waiting for the merge of PR #$pr${issue:+ (issue #$issue)}."
       info "  Merge it, then run: $SELF done $slug"
       info "  It removes the worktree and the branches. Production comes after"
-      info "  that, from $REPO: ${migrations:+npm run db:promote, then }vercel --prod."
+      local promote_cmd; promote_cmd="$(project_get database.promote "$wt" 2>/dev/null || true)"
+      info "  that, from $REPO: ${migrations:+${promote_cmd:-the promote command}, then }vercel --prod."
     fi
     # We write the outcome here too: the feature is not in prod, but it exists,
     # it is on preview and waiting for the merge — and that is exactly what an

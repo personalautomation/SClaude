@@ -241,6 +241,49 @@ request, where a maintainer sees them, and a maintainer lifts a personal rule
 into `team/` when it proves itself. No `maintainers` means everybody keeps
 them, as with one developer. `sclaude doctor` says which folder is yours.
 
+**What a session may run.** sclaude ships presets, and the product decides
+the rest (`sclaude/lib/policy.py`):
+
+| layer | where | what it can do |
+|---|---|---|
+| sclaude's own rules | `sclaude/policy/core.json` | merging, pushing to `main`, `--force`, `--no-verify`, a pull request from step 2. Nobody lifts them |
+| an integration's preset | `sclaude/policy/vercel.json`, `supabase.json` | the stack's usual dangers: a deploy, a migration into a protected database, Supabase's MCP writing tools. On when the product lists the integration, or, while it lists none, evidently uses it |
+| the product's team | `.sclaude/team/policy.json` | its own bans (`npm run db:promote`), its integrations, their settings (how to tell which database the tree is on); an `allow` lifts an integration's ban and stops the question |
+| one developer | `.sclaude/people/<name>/policy.json` | bans and permissions of their own; lifts nothing the team or an integration bans |
+
+Every file has the same shape: `deny` and `allow` lists of commands with a
+reason, matched by their first words however they are wrapped, and the same
+per step under `steps`. The hook and the step's `--disallowed-tools` are both
+built from the merged result, so no product's command is named in sclaude
+itself.
+
+**What sclaude writes, and where.** Everything it produces, who changes it,
+and whether git or a deploy ever sees it:
+
+| artefact | what it is for | where | who changes it | in git | uploaded by a deploy |
+|---|---|---|---|---|---|
+| sclaude itself: code, prompts, presets (`sclaude/policy/`), `MAINTAINERS`, `known-denials.txt` | the orchestrator and what it offers out of the box | this repository | its maintainers; anybody else by pull request | yes, here | — |
+| `.sclaude.json` | what the product is: checks, manuals, environments, production, board, maintainers | product root | the product's team; `sclaude new` proposes it, a person confirms | yes, the product's | no harm if it is |
+| `.sclaude/team/policy.json` | the team's rules for sessions | product | the product's maintainers, through the product's pull requests | yes, the product's | no harm if it is |
+| `.sclaude/people/<name>/policy.json` | one developer's rules for sessions | product | that developer | yes, the product's | no harm if it is |
+| `.feature/`: `plan.md`, `state.json`, `friction.log`, `regression.log`, `dev.log`, `db.env`, `review-yours`, `terminal.txt`, … | one feature's working state: the agreed plan, the cycle's state, logs, the feature's local database | the feature's worktree | sclaude and the feature's sessions | never (`.git/info/exclude`) | never (`.vercelignore`) |
+| `.sclaude/local/terminal/*.log` | the recorded terminal, which the retrospective reads | the product's main tree | sclaude | never | never |
+| `.vercelignore` | what a deploy must not upload | each tree sclaude deploys | sclaude, appending what is missing; a project that tracks its own keeps it | no, unless the project tracks one | — |
+| lines in `.git/info/exclude` | hide sclaude's own paths from git | the product's `.git` | sclaude | — (not versioned) | — |
+| `friction-deferred.tsv` | findings put off for the monthly review | `~/.local/state/sclaude/` | friction reviews and the monthly review | never | — |
+| `cycles.jsonl` | one record per finished feature: durations, attempts, verdicts | `~/.claude/sclaude/` | sclaude | never; published as `<name>.jsonl` only if `metrics-remote` names a team repository | — |
+| `environment`, `epilogue`, `watch`, `dev` | the environment you chose per product, the status epilogue's state, the QA watcher, the dev servers the proxy routes to | `~/.claude/sclaude/` | sclaude | never | — |
+| `terminal/` | recordings of runs started outside any repository | `~/.claude/sclaude/` | sclaude | never | — |
+| session transcripts | what each session did; friction reviews and the retrospective read them | `~/.claude/projects/`, Claude Code's own | Claude Code | never | — |
+| issue status comments, pull-request bodies, board columns, `Sclaude-Session` trailers | the feature's story where the team reads it | the product's GitHub, and its commits | sclaude and the feature's sessions | the trailers, in the product's history | — |
+| `~/.config/instruments/` | this machine's settings: `projects` for wsl-update, `metrics-remote`, the polkit mark | your home directory | you | never | — |
+
+The aim is that nothing a product produces goes into this repository, and a
+change to sclaude's out-of-the-box behaviour reaches it only as a deliberate
+pull request. Not yet: friction reviews, retrospectives and the monthly
+deferred review still commit their fixes here, and moving them into the
+product's `.sclaude/` is the next change.
+
 **Who you are.** The local part of `git config user.email`, reduced to
 `[a-z0-9-]` (`SCLAUDE_DEV` overrides it). It names your branch, marks your
 metrics records, and is exported to every regression part as `SCLAUDE_DEV`, so

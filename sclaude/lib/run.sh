@@ -1132,7 +1132,8 @@ collect_denials() {
   # worktree's root. The silence on an error is deliberate, as in note() itself:
   # statistics that were not gathered are no reason to bring a feature's cycle
   # down.
-  CLAUDE_PROJECT_DIR="$wt" python3 "$HOOKS/collect-denials.py" \
+  CLAUDE_PROJECT_DIR="$wt" SCLAUDE_POLICY_PERSON="$(developer_name 2>/dev/null)" \
+    python3 "$HOOKS/collect-denials.py" \
     "$step" "$transcript" 2>/dev/null || true
 }
 

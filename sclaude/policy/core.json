@@ -1,0 +1,19 @@
+{
+  "README": [
+    "The rules sclaude's cycle stands on, for every product and every person.",
+    "Nothing in a product's .sclaude/team/ or a person's .sclaude/people/ lifts",
+    "them; see sclaude/lib/policy.py for the layers. Pushing to main, --force",
+    "and --no-verify are refused by forbidden-commands.py itself: they need the",
+    "push's arguments read, which a prefix cannot do."
+  ],
+  "deny": [
+    {"command": "gh pr merge", "why": "merging is the human's step: they decide when a PR goes to main"}
+  ],
+  "steps": {
+    "code": {
+      "deny": [
+        {"command": "gh pr create", "why": "step 3 opens the pull request, in a separate session with the /pr skill"}
+      ]
+    }
+  }
+}

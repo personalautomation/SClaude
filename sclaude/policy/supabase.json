@@ -1,0 +1,30 @@
+{
+  "README": [
+    "The Supabase preset: on for a product that lists \"supabase\" in",
+    "`integrations`, or, while it lists nothing, has a supabase/ folder.",
+    "",
+    "supabase-db-push   `supabase db push` only into an environment the product",
+    "                   does not protect. Which one the tree is looking at, and",
+    "                   which are protected, the product says in its team policy",
+    "                   under settings.supabase: `environment` is a command that",
+    "                   prints the current environment's name, `environments` a",
+    "                   JSON file of {name: {confirm: bool}}. Without them every",
+    "                   environment counts as protected.",
+    "supabase-workdir   no --workdir past the feature's own local stack.",
+    "supabase-shared    a question before a schema change on a shared project.",
+    "",
+    "The writing tools of Supabase's MCP are off: schema changes go as",
+    "migrations through files."
+  ],
+  "rules": ["supabase-db-push", "supabase-workdir", "supabase-shared"],
+  "tools": {
+    "deny": [
+      "mcp__plugin_supabase_supabase__apply_migration",
+      "mcp__plugin_supabase_supabase__deploy_edge_function",
+      "mcp__plugin_supabase_supabase__create_project",
+      "mcp__plugin_supabase_supabase__delete_branch",
+      "mcp__plugin_supabase_supabase__pause_project",
+      "mcp__plugin_supabase_supabase__restore_project"
+    ]
+  }
+}

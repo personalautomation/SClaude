@@ -1,0 +1,11 @@
+{
+  "README": [
+    "The Vercel preset: on for a product whose .sclaude/team/policy.json lists",
+    "\"vercel\" in `integrations`, or, while it lists nothing, has a .vercel/",
+    "folder or a vercel.json. `vercel-deploy` is a rule in forbidden-commands.py:",
+    "every vercel call that is not a known read is a deploy, and deploying is the",
+    "human's step. A team that wants its sessions to deploy lifts it with an",
+    "`allow` of the command."
+  ],
+  "rules": ["vercel-deploy"]
+}

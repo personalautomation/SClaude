@@ -336,6 +336,13 @@ def main():
         guard_dir = os.path.join(wt, "scripts", "lib")
         os.makedirs(guard_dir, exist_ok=True)
         guard = os.path.join(guard_dir, "env-guard.mjs")
+        # The product tells the hook how to ask, in its team policy: the same
+        # settings a product on Supabase writes (sclaude/policy/supabase.json).
+        os.makedirs(os.path.join(wt, ".sclaude", "team"), exist_ok=True)
+        with open(os.path.join(wt, ".sclaude", "team", "policy.json"), "w") as fh:
+            json.dump({"integrations": ["supabase"], "settings": {"supabase": {
+                "environment": "node scripts/lib/env-guard.mjs settled",
+                "environments": "config/environments.json"}}}, fh)
 
         def db_push_denied(env_name, subcommand="settled"):
             """Whether the hook refuses `supabase db push` on this environment.
@@ -359,7 +366,7 @@ def main():
             payload = {"tool_name": "Bash",
                        "tool_input": {"command": "npx supabase db push"}}
             done = subprocess.run(
-                [sys.executable, forbidden, "--step", "code"],
+                [sys.executable, forbidden, "--step", "code", "--root", wt],
                 input=json.dumps(payload), capture_output=True, text=True,
                 cwd=wt, env={**os.environ, "CLAUDE_PROJECT_DIR": wt})
             # A refusal is a JSON decision on stdout, with exit 0 either way —

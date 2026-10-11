@@ -100,7 +100,37 @@ def known_denials():
             line = line.split("#", 1)[0].strip()
             if line:
                 out.append(line)
-    return out
+    return out + policy_denials()
+
+
+def policy_denials():
+    """The bans the session's policy made: deliberate by construction.
+
+    A product's own bans (`npm run db:promote` and the like) and its
+    integrations' are written in its .sclaude/team/ and in sclaude's presets;
+    a refusal of one is that rule working, not friction. Read for the product
+    whose worktree this is (CLAUDE_PROJECT_DIR) and the person in
+    SCLAUDE_POLICY_PERSON. Nothing on any trouble.
+    """
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        os.pardir, "lib"))
+        import subprocess
+        import policy
+        tree = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+        common = subprocess.run(["git", "rev-parse", "--path-format=absolute",
+                                 "--git-common-dir"], cwd=tree, capture_output=True,
+                                text=True, timeout=5)
+        if common.returncode != 0:
+            return []
+        merged = policy.merged(os.path.dirname(common.stdout.strip()),
+                               os.environ.get("SCLAUDE_POLICY_PERSON", ""))
+    except Exception:
+        return []
+    out = [" ".join(d["words"]) for d in merged["deny"]]
+    if "vercel-deploy" in merged["rules"]:
+        out.append("vercel")
+    return out + list(merged["tools"])
 
 
 def denial_reason(result):

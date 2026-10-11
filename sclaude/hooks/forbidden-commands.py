@@ -49,49 +49,61 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 from _friction import note
 from _shell import SEPARATORS, strip_runners, strip_wrappers, tokenize
+import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 
 # The branch that must not be pushed to: it moves only by merging a PR.
 PROTECTED = "main"
 
-# Commands banned for a whole step. The flag catches their direct form; they are
-# here for the form with a path. The key is a tuple of the first words after the
-# wrappers have been dropped.
-FORBIDDEN = {
-    ("gh", "pr", "merge"):
-        "merging is the human's step: they decide when a PR goes to main",
-    ("npm", "run", "db:promote"):
-        "db:promote pushes migrations to prod — the human's step, after the merge",
-    ("npm", "run", "env:prod"):
-        "env:prod silently moves the environment and supabase link to prod, "
-        "and the next step would work against prod without knowing it",
-}
+# The commands banned by prefix come from the session's policy: sclaude's
+# presets, the product's team rules and the person's own (sclaude/lib/policy.py).
+# The flag catches their direct form; this hook catches the form with a path or
+# behind a wrapper. The rules below that need more than a prefix are code, and
+# the policy says which of them are on.
+POLICY = {"deny": [], "allow": [], "rules": [], "lifted": [], "settings": {}}
+
+
+def rule_on(name, words=None):
+    """Whether a rule of an integration applies to this call.
+
+    A team's `allow` lifts an integration's rule for the commands it names.
+    """
+    if name not in POLICY.get("rules", []):
+        return False
+    if words and any(tuple(words[:len(l)]) == tuple(l) for l in POLICY.get("lifted", [])):
+        return False
+    return True
+
+
+def supabase_settings():
+    found = (POLICY.get("settings") or {}).get("supabase")
+    return found if isinstance(found, dict) else {}
 
 # `supabase db push` is the only ban that depends not on the command but on
 # where it will go. It used to stand in the table above, unconditionally, and
 # that caught real trouble exactly one time in two: the first refusal fell on an
-# environment set to prod and was to the point; the second came after
-# `npm run env:dev`, when `env:status` confirmed dev, and said "this is the same
-# prod" about a command that was going to dev. The project has no suitable npm
-# script for "apply to dev" (db:promote is prod), while
-# docs/database-operations.md calls `supabase db push` the thing that "builds a
-# database". The ban closed a documented path without offering a replacement,
-# and the step applied the migration around the CLI, writing the migration
-# history by hand — exactly the class of "something got into the database by
-# another route" that check:migrations is written against.
+# environment set to prod and was to the point; the second came after the tree
+# had been switched to dev and confirmed as dev, and said "this is the same
+# prod" about a command that was going to dev. The project had no other way to
+# apply a migration to dev, and its own docs named `supabase db push` as the
+# one. The ban closed a documented path without offering a replacement, and
+# the step applied the migration around the CLI, writing the migration history
+# by hand — exactly the class of "something got into the database by another
+# route" that a project's migration checks are written against.
 DB_PUSH = (("npx", "supabase", "db", "push"), ("supabase", "db", "push"))
 
 DB_PUSH_REASON = ("this environment is protected (or could not be identified) — "
-                  "applying a migration here bypasses the npm script")
+                  "applying a migration here bypasses the project's own way of doing it")
 
 # `vercel` is the one ban that depends on the subcommand, which is why it is a
 # function below rather than a line in the table above.
 #
 # It used to stand there unconditionally, and the flag banned the name as well.
 # That refused `vercel env ls preview` — a read that deploys nothing — to a
-# session repairing a red preview regression: it needed the Preview value of
-# R2_BUCKET to tell "the deployment points at another bucket" from "the keys no
+# session repairing a red preview regression: it needed a Preview variable's
+# value to tell "the deployment points at another bucket" from "the keys no
 # longer open this one". It gave up, and the human ran the command by hand while
 # the feature stood. Reading the environment is exactly how a deployed stage's
 # failure is told apart from the branch's, and it is the one thing a fixing
@@ -125,7 +137,7 @@ VERCEL_REASON = ("deploying is the human's step; the orchestrator offers "
 
 def vercel_refuses(words):
     """The reason this `vercel` call is banned, or None."""
-    if not words or words[0] != "vercel":
+    if not words or words[0] != "vercel" or not rule_on("vercel-deploy", words):
         return None
     # The subcommand is the first word that is not a flag. `--scope agorateam`
     # and `--token x` carry a value, but a value is never a subcommand's name
@@ -139,36 +151,22 @@ def vercel_refuses(words):
 
 
 def active_environment(cwd):
-    """The environment this tree is looking at, when every source agrees.
+    """The environment this tree is looking at, or None when there is no answer.
 
-    We ask the project itself: scripts/lib/env-guard.mjs is the shared source of
-    truth that all its writing scripts use.
-
-    `settled` rather than `name`, and the difference is the whole point. `name`
-    answers from .env.local alone. The Supabase CLI keeps a second, independent
-    target in supabase/.temp/project-ref, and that is the one `supabase db push`
-    obeys — so a tree switched to a local stack straight after `db:promote` says
-    "localdb" by name while the CLI is still linked to production. This function
-    used to ask for the name and carried a docstring claiming it checked the
-    link; it did not, and the ban below would have allowed a migration into
-    prod on the strength of it.
-
-    None means "there is no answer" — no script, an error, a timeout, or the two
-    disagreeing. To the caller that is not permission.
-
-    `settled` is newer than this hook. A project whose env-guard predates it
-    exits non-zero on an unknown subcommand, which lands in the same None, so
-    an old checkout is refused rather than silently allowed.
+    The product says how to ask: settings.supabase.environment in its team
+    policy, a command run in the tree that prints the name, and only that, when
+    every source of the answer agrees. A command that cannot be run, fails,
+    times out or prints nothing gives None, and to the callers that is not
+    permission. A product that names no command has no answer at all, so every
+    environment counts as protected.
     """
-    guard = os.path.join(cwd, "scripts", "lib", "env-guard.mjs")
-    if not os.path.isfile(guard):
+    command = supabase_settings().get("environment")
+    if not isinstance(command, str) or not command.strip():
         return None
     try:
-        done = subprocess.run(
-            ["node", guard, "settled"],
-            cwd=cwd, capture_output=True, text=True, timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
+        done = subprocess.run(shlex.split(command), cwd=cwd, capture_output=True,
+                              text=True, timeout=5)
+    except (OSError, ValueError, subprocess.SubprocessError):
         return None
     if done.returncode != 0:
         return None
@@ -186,15 +184,20 @@ def project_dir():
 
 
 def environment_is_protected(cwd, name):
-    """Whether the project marks this environment `confirm: true`.
+    """Whether the product marks this environment `confirm: true`.
 
-    True for anything we cannot resolve. The question being asked is "may a
-    migration be applied here", and an environment we cannot identify is exactly
-    the case the ban exists for — an unreadable config is not permission.
+    The file is the product's, named by settings.supabase.environments in its
+    team policy: {name: {"confirm": bool}}. True for anything we cannot
+    resolve. The question being asked is "may a migration be applied here",
+    and an environment we cannot identify is exactly the case the ban exists
+    for — an unreadable config is not permission.
     """
     if not name:
         return True
-    path = os.path.join(cwd, "config", "environments.json")
+    rel = supabase_settings().get("environments")
+    if not isinstance(rel, str) or not rel:
+        return True
+    path = os.path.join(cwd, rel)
     try:
         with open(path) as fh:
             data = json.load(fh)
@@ -209,6 +212,8 @@ def environment_is_protected(cwd, name):
 def db_push_refuses(words):
     """The reason this `supabase db push` is banned, or None."""
     if not any(tuple(words[:len(p)]) == p for p in DB_PUSH):
+        return None
+    if not rule_on("supabase-db-push", words):
         return None
     # Any environment the project does not protect, rather than the literal
     # "dev" this used to name.
@@ -225,8 +230,8 @@ def db_push_refuses(words):
     # precisely the case the ban was written for.
     #
     # CLAUDE_PROJECT_DIR first, `os.getcwd()` only as a fallback. Both of the
-    # things read below — scripts/lib/env-guard.mjs and
-    # config/environments.json — are repository-relative, and the working
+    # things read below — the product's environment command and its file of
+    # environments (settings.supabase) — are repository-relative, and the working
     # directory is not reliably the repository: the friction review session runs
     # these hooks by hand to check a fix, and `cd`s into a feature's tree while
     # doing so. `_friction.py` records that incident at length and resolves the
@@ -258,7 +263,7 @@ def workdir_refuses(command):
     keeps only the last component of a path — it exists to name programs — and
     here the path is the whole question."""
     own = os.environ.get("SUPABASE_WORKDIR")
-    if not own:
+    if not own or not rule_on("supabase-workdir"):
         return None
     try:
         words = shlex.split(command)
@@ -293,8 +298,8 @@ def workdir_refuses(command):
 SHARED_SCHEMA_ASK = ("this changes the schema of \"{name}\", a database the whole team "
                      "shares — their features see your migration at once. Work that "
                      "touches the database belongs on \"{local}\", where this feature "
-                     "has a database of its own: npm run env:{local}. Go ahead only if "
-                     "the shared project is really what you mean.")
+                     "has a database of its own: switch the tree to it first. Go ahead "
+                     "only if the shared project is really what you mean.")
 
 
 def local_environment(cwd):
@@ -311,7 +316,7 @@ def local_environment(cwd):
 def shared_schema_asks(command):
     """The question to put before a schema change on a shared project, or None."""
     parts = segments(command)
-    if not parts:
+    if not parts or not rule_on("supabase-shared"):
         return None
     for words in parts:
         if words[:1] != ["supabase"]:
@@ -333,15 +338,6 @@ def shared_schema_asks(command):
         return SHARED_SCHEMA_ASK.format(name=name, local=local)
     return None
 
-
-# Step 2 does not open the pull request: that is step 3's work, in a separate
-# session.
-FORBIDDEN_BY_STEP = {
-    "code": {
-        ("gh", "pr", "create"):
-            "step 3 opens the pull request, in a separate session with the /pr skill",
-    },
-}
 
 TAIL = ("  Tell the human and stop — the next move is theirs.")
 
@@ -737,8 +733,7 @@ def refuses(command, step, cwd=None, depth=0):
     if reason:
         return reason
 
-    table = dict(FORBIDDEN)
-    table.update(FORBIDDEN_BY_STEP.get(step, {}))
+    table = {tuple(d["words"]): d["why"] for d in POLICY.get("deny", [])}
 
     where = os.path.realpath(cwd or os.getcwd())
     known = {}
@@ -797,12 +792,27 @@ def deny(reason, step="", subject=""):
     sys.exit(0)
 
 
-step = ""
+def flag(argv, name):
+    if name in argv:
+        i = argv.index(name)
+        if i + 1 < len(argv):
+            return argv[i + 1]
+    return ""
+
+
 argv = sys.argv[1:]
-if "--step" in argv:
-    i = argv.index("--step")
-    if i + 1 < len(argv):
-        step = argv[i + 1]
+step = flag(argv, "--step")
+# The product and the person whose policy this session works under. steps.sh
+# passes both; without a root the hook works out the repository it runs in.
+root = flag(argv, "--root")
+if not root:
+    try:
+        common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                cwd=project_dir(), capture_output=True, text=True, timeout=5)
+        root = os.path.dirname(common.stdout.strip()) if common.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        root = ""
+POLICY = policy_lib.merged(root, flag(argv, "--person"), step)
 
 try:
     payload = json.load(sys.stdin)

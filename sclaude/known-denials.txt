@@ -6,6 +6,10 @@
 # feature would bring the same entry, and the friction review would pay for the
 # same conclusion again.
 #
+# Only what holds for every product lives here. A product's own bans, and its
+# integrations', are deliberate by construction and come from its policy
+# (collect-denials.py, policy_denials).
+#
 # A line is a substring of an entry's subject ("Bash: <command>"). The friction
 # review adds lines here when it decides to leave something as it is; removing a
 # line means wanting to see that rejection in the log again.
@@ -14,7 +18,4 @@
 # deploy, prod. A one-off obstacle fixed by editing the orchestrator does not:
 # it will not recur anyway, and a line here would hide it if it did.
 
-vercel                  # deploy — the human's step
 gh pr merge             # merge — the human's step
-npm run db:promote      # prod migrations — after the merge, by hand
-npm run env:prod        # switching the environment to prod

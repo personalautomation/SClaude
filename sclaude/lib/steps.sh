@@ -210,6 +210,27 @@ team_guard_settings() {
   printf '%s\n' --settings "{\"hooks\": {\"PreToolUse\": [$entry]}}"
 }
 
+# The rules the policy layers give a session (sclaude/lib/policy.py): the
+# commands and tools it may not use, one Claude rule per line, into the array
+# named by $1; the commands it may run without being asked into the one named
+# by $2. The product is the main repository, the person this developer.
+#
+#   policy_rules <deny-array> <allow-array> <step>
+policy_rules() {
+  local -n _deny="$1" _allow="$2"
+  local step="$3" out line seen=""
+  out="$(python3 "$LIB/policy.py" flags "${REPO:-}" "$(developer_name 2>/dev/null)" "$step" 2>/dev/null)" || out=""
+  while IFS= read -r line; do
+    if [[ -z "$line" ]]; then seen=1; continue; fi
+    if [[ -z "$seen" ]]; then _deny+=("$line"); else _allow+=("$line"); fi
+  done <<< "$out"
+}
+
+# The hook's own arguments: which product's policy, for whom.
+policy_hook_args() {
+  printf -- '--root %q --person %q' "${REPO:-}" "$(developer_name 2>/dev/null)"
+}
+
 step_settings() {
   local step="$1" wt="$2" hook trusted origin
 
@@ -265,16 +286,11 @@ PY
   # refused, and the human had to run the command by hand while the feature
   # stood. The hook decides it instead: it sees the subcommand, and it also sees
   # the form with a path and the form behind `npx`, which the flag never caught.
+  # The commands and tools come from the policy: sclaude's presets (core.json,
+  # and the integrations the product uses, Supabase's MCP writing tools among
+  # them) and the product's and the person's own rules.
+  local -a allow=()
   local -a deny=(
-    'Bash(npm run db:promote:*)'
-    'Bash(npm run env:prod:*)'
-    'Bash(gh pr merge:*)'
-    'mcp__plugin_supabase_supabase__apply_migration'
-    'mcp__plugin_supabase_supabase__deploy_edge_function'
-    'mcp__plugin_supabase_supabase__create_project'
-    'mcp__plugin_supabase_supabase__delete_branch'
-    'mcp__plugin_supabase_supabase__pause_project'
-    'mcp__plugin_supabase_supabase__restore_project'
     # The orchestrator brought the step into the feature's tree, and the step
     # has nowhere to go from it: state.json, the dev server and the branch are
     # tied to that directory. This does not break entering it — that goes past
@@ -283,8 +299,7 @@ PY
     'EnterWorktree'
     'ExitWorktree'
   )
-  # Step 3 opens the pull request — step 2 has nothing to do it with.
-  [[ "$step" == "code" ]] && deny+=('Bash(gh pr create:*)')
+  policy_rules deny allow "$step"
 
   # Without a path to the tree there is nothing to compose the trust line from;
   # the step then runs as before, with the hooks alone. The orchestrator always
@@ -306,13 +321,13 @@ PY
     trusted+=" checkout undoes it."
   fi
 
-  printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$step" "$trusted" "$BROWSER_ALLOW" "$(team_guard_entry "$wt")" <<'PY'
+  printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$step" "$trusted" "$BROWSER_ALLOW" "$(team_guard_entry "$wt")" "$(policy_hook_args)" "${allow[@]}" <<'PY'
 import json, sys
 
-settings = {"permissions": {"allow": [sys.argv[4]]}, "hooks": {"PreToolUse": [{
+settings = {"permissions": {"allow": [sys.argv[4]] + sys.argv[7:]}, "hooks": {"PreToolUse": [{
     "matcher": "Bash",
     "hooks": [{"type": "command",
-               "command": "python3 %s --step %s" % (sys.argv[1], sys.argv[2]),
+               "command": "python3 %s --step %s %s" % (sys.argv[1], sys.argv[2], sys.argv[6]),
                "timeout": 10}],
 }]}}
 # A product's shared rules are its maintainers' (team_guard_entry): empty for
@@ -341,7 +356,7 @@ PY
 # `git grep` and `git show` against origin/main, `gh pr diff` — and none of
 # those is banned either.
 #
-# `gh pr merge` is in the list not out of inertia: the session is tasked, among
+# `gh pr merge` is banned here too (core.json), and not out of inertia: the session is tasked, among
 # other things, with honestly writing "waiting for the merge", and it must not
 # have the means to fix that itself. `git push` is banned entirely rather than
 # as for steps 2-4: the feature's branch is deleted, there is nothing to push,
@@ -351,24 +366,22 @@ status_settings() {
   local -a deny=(
     'Bash(vercel:*)'
     'Bash(npx vercel:*)'
-    'Bash(npm run db:promote:*)'
-    'Bash(npm run env:prod:*)'
-    'Bash(gh pr merge:*)'
     'Bash(gh pr create:*)'
     'Bash(git push:*)'
     'EnterWorktree'
     'ExitWorktree'
-  )
-  # The hook is called with --step status. An unknown step does not alarm it:
-  # FORBIDDEN_BY_STEP.get(step, {}) simply adds no rules of its own, while the
-  # shared table and the `git push` parsing work as always.
-  printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" <<'PYSTATUS'
+  ) allow=()
+  # And the product's own bans, from its policy: a status session runs nothing
+  # the product forbids a step to run. The hook is called with --step status,
+  # a step no policy names, so only the shared rules and the push parsing apply.
+  policy_rules deny allow status
+  printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$(policy_hook_args)" <<'PYSTATUS'
 import json, sys
 
 print(json.dumps({"hooks": {"PreToolUse": [{
     "matcher": "Bash",
     "hooks": [{"type": "command",
-               "command": "python3 %s --step status" % sys.argv[1],
+               "command": "python3 %s --step status %s" % (sys.argv[1], sys.argv[2]),
                "timeout": 10}],
 }]}}))
 PYSTATUS

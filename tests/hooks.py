@@ -238,6 +238,10 @@ FORBIDDEN = [
     ("git push origin HEAD:`echo main`", DENY),
     ("git push origin HEAD:refs/heads/main", DENY),
     ("git push origin +HEAD:main", DENY),
+    # A target named on the command line: only a local one passes.
+    ("supabase db push --db-url postgres://u:p@db.prod.example.com:5432/postgres", DENY),
+    ("npx supabase db push --yes --db-url \"$(grep URL .env.prod | cut -d= -f2-)\"", DENY),
+    ("supabase db push --db-url=postgresql://postgres:postgres@127.0.0.1:54322/postgres", ALLOW),
     # ...and what must still go through.
     ("gh api repos/o/r/pulls/5/merge", ALLOW),
     ("gh api repos/o/r/pulls/5", ALLOW),

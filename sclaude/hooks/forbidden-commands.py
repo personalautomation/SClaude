@@ -209,12 +209,34 @@ def environment_is_protected(cwd, name):
     return bool(entry.get("confirm"))
 
 
-def db_push_refuses(words):
-    """The reason this `supabase db push` is banned, or None."""
+DB_URL_REASON = ("--db-url points the push at a database named on the command "
+                 "line rather than the one this tree is on, so the tree's environment "
+                 "says nothing about where it lands; only a local database may be "
+                 "named that way")
+LOCAL_DB = re.compile(r"^[a-z]+://[^@/]*@?(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(/|$)")
+
+
+def db_push_refuses(words, raw=None):
+    """The reason this `supabase db push` is banned, or None.
+
+    `raw` is the same call with its words unstripped: a URL is a path to the
+    stripping, which would leave only its last part.
+    """
     if not any(tuple(words[:len(p)]) == p for p in DB_PUSH):
         return None
     if not rule_on("supabase-db-push", words):
         return None
+    # A target named on the command line overrides the tree's: a review found
+    # `supabase db push --db-url <production>` allowed on a tree that was on
+    # dev. Only a local database passes, and an address that cannot be read
+    # (a variable, a substitution) is not one.
+    full = raw or words
+    for i, word in enumerate(full):
+        if word == "--db-url" or word.startswith("--db-url="):
+            url = word.split("=", 1)[1] if "=" in word else (full[i + 1] if i + 1 < len(full) else "")
+            # A local database named outright is the one place the push goes,
+            # whatever the tree is on.
+            return None if LOCAL_DB.match(url) else DB_URL_REASON
     # Any environment the project does not protect, rather than the literal
     # "dev" this used to name.
     #
@@ -768,7 +790,8 @@ def refuses(command, step, cwd=None, depth=0):
         reason = (push_refuses(words, command, parts, here, raw,
                                redirected or also, known)
                   or api_merge_refuses(words, raw[len(raw) - len(words):])
-                  or db_push_refuses(words) or vercel_refuses(words))
+                  or db_push_refuses(words, raw[len(raw) - len(words):])
+                  or vercel_refuses(words))
         if reason:
             return reason
         for prefix, why in table.items():

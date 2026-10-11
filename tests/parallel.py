@@ -382,7 +382,7 @@ check("deferred-file-is-the-persons-per-feature",
       os.path.join(product, ".sclaude", "people", "ann", "deferred", "9-z.tsv"))
 deferred_sh('deferred_ensure "%s" 9-z' % product)
 with open(os.path.join(product, ".sclaude", "people", "ann", "deferred", "9-z.tsv")) as fh:
-    check("deferred-file-starts-with-its-header", fh.readline().startswith("# Put off by sclaude"), True)
+    check("deferred-file-starts-empty", fh.read(), "")
 check("deferred-file-not-in-instruments",
       os.path.exists(os.path.join(ROOT, "sclaude", "friction-deferred.tsv")), False)
 

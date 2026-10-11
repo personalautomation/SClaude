@@ -123,7 +123,8 @@ try:
     check("defer-committed-on-the-branch", commits(), 2)
     check("defer-file-in-the-product", os.path.exists(deferred), True)
     with open(deferred) as fh:
-        check("defer-file-has-header", fh.readline().startswith("# Put off by sclaude"), True)
+        check("defer-file-only-entries", all(l.startswith("2026-") or l.startswith("\t")
+                                             for l in fh if l.strip()), True)
     check("defer-rows-written", rows(), 2)
     tree = subprocess.run(["git", "-C", wt, "show", "--name-only", "--format=", "HEAD"],
                           capture_output=True, text=True).stdout.split()

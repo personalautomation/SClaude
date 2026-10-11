@@ -47,16 +47,17 @@ deferred_file() {
   echo "$(product_rules_dir "$tree")/deferred/${feature}.tsv"
 }
 
-# Creates the folder for the file, and the file with its one-line header, if
-# they are not there yet. Silent; returns 1 when it could not.
+# Creates the folder for the file, and the file, empty, if they are not there
+# yet: no header, so a reader of tab-separated lines meets nothing but
+# entries. The format is the one this file's head describes. Silent; returns 1
+# when it could not.
 #
 #   deferred_ensure <tree> [feature]
 deferred_ensure() {
   local file; file="$(deferred_file "${1:-}" "${2:-}")"
   [[ -f "$file" ]] && return 0
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 1
-  printf '%s\n' "# Put off by sclaude's friction reviews (sclaude/lib/deferred.sh in sclaude)." \
-    > "$file" 2>/dev/null || return 1
+  : > "$file" 2>/dev/null || return 1
 }
 
 # The deferred folders the monthly review reads in a tree: every one in the

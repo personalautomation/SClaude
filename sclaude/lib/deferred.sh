@@ -130,11 +130,27 @@ print("%d %s" % (entries, since))
 PY
 }
 
+# The open pull request of an earlier review, if one waits. The review stamps
+# last-reviewed on its own branch, so until that merges, main still reads as
+# due: without this the review was offered again, and run again, over it.
+deferred_pending() {
+  local root="$1" pr
+  command -v gh >/dev/null 2>&1 || return 1
+  pr="$(cd "$root" && gh pr list --state open --json headRefName,url \
+          --jq '[.[] | select(.headRefName | startswith("sclaude/deferred-"))][0].url // ""' 2>/dev/null)" \
+    || return 1
+  [[ -n "$pr" ]] && echo "$pr"
+}
+
 # Offered when sclaude is opened in a product: once a month, if anything waits.
 deferred_offer() {
-  local due entries since answer root
+  local due entries since answer root pending
   root="$(main_repo 2>/dev/null)" || return 0
   due="$(deferred_due "$root" 2>/dev/null)" || return 0
+  if pending="$(deferred_pending "$root")"; then
+    info "  The last review of the deferred friction waits on its pull request: $pending"
+    return 0
+  fi
   read -r entries since <<< "$due"
   echo ""
   say "${BOLD}The deferred friction is due for its monthly review:${OFF} $entries entr$([[ "$entries" == 1 ]] && echo y || echo ies) since $since."
@@ -163,8 +179,19 @@ cmd_deferred() {
   base="$(git -C "$root" rev-parse -q --verify origin/main 2>/dev/null || git -C "$root" rev-parse HEAD)"
   local made=""
   if [[ ! -d "$wt" ]]; then
-    git -C "$root" worktree add -q -B "$branch" "$wt" "$base" 2>/dev/null \
-      || die "could not make the review's worktree at $wt"
+    # A review run earlier the same day may have pushed this branch already:
+    # it is continued, not reset to main, or the next push no longer fits
+    # on top of what its pull request holds.
+    if git -C "$root" show-ref --verify -q "refs/heads/$branch"; then
+      git -C "$root" worktree add -q "$wt" "$branch" 2>/dev/null \
+        || die "could not make the review's worktree at $wt"
+    elif git -C "$root" show-ref --verify -q "refs/remotes/origin/$branch"; then
+      git -C "$root" worktree add -q -b "$branch" "$wt" "origin/$branch" 2>/dev/null \
+        || die "could not make the review's worktree at $wt"
+    else
+      git -C "$root" worktree add -q -B "$branch" "$wt" "$base" 2>/dev/null \
+        || die "could not make the review's worktree at $wt"
+    fi
     made=1
   fi
   # The files as they are in the review's tree, the one the review edits, made

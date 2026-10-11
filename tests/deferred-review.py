@@ -47,6 +47,7 @@ new_session_id() { echo 00000000-0000-0000-0000-000000000000; }
 review_guard_settings() { :; }
 session_watch_start() { :; }; session_watch_stop() { :; }; session_closed() { return 0; }
 claude_launch() { printf '%%s' "${@: -1}" > "%(out)s"; [[ -z "${DIRTY:-}" ]] || echo x > dirty.txt; }
+gh() { :; }
 cmd_deferred
 ''' % {"lib": LIB, "prompts": PROMPTS, "root": ROOT, "out": prompt_out}
     env = dict(os.environ, DIRTY="1" if dirty else "")
@@ -100,6 +101,36 @@ try:
         git(repo, "worktree", "remove", "--force", os.path.join(tmp, w))
     for b in branches(repo):
         git(repo, "branch", "-q", "-D", b)
+
+    # A review pushed earlier the same day is continued, not reset to main:
+    # the push after it still fits on top of what was pushed.
+    branch = "sclaude/deferred-" + subprocess.run(["date", "+%F"], capture_output=True,
+                                                  text=True).stdout.strip()
+    git(repo, "branch", "-q", branch, "origin/main")
+    side = os.path.join(tmp, "side")
+    git(repo, "worktree", "add", "-q", side, branch)
+    with open(os.path.join(side, "earlier.txt"), "w") as fh:
+        fh.write("earlier\n")
+    git(side, "add", "-A")
+    git(side, "commit", "-qm", "earlier review")
+    git(side, "push", "-q", "origin", branch)
+    earlier = git(side, "rev-parse", "HEAD").strip()
+    git(repo, "worktree", "remove", side)
+    out = review(repo, out_file)
+    check("same-day-continued",
+          subprocess.run(["git", "-C", repo, "merge-base", "--is-ancestor", earlier, branch]).returncode, 0)
+    check("same-day-push-fits", "push failed" in out, False)
+    for w in trees(tmp):
+        git(repo, "worktree", "remove", "--force", os.path.join(tmp, w))
+    subprocess.run(["git", "-C", repo, "branch", "-q", "-D", branch], capture_output=True)
+    git(repo, "push", "-q", "origin", "--delete", branch)
+    git(repo, "fetch", "-q", "--prune", "origin")
+
+    # An open pull request of an earlier review is named rather than offered over.
+    pending = subprocess.run(["bash", "-c", 'for m in state project developer deferred; do source "%s/$m.sh"; done; '
+                              'gh() { echo https://pr/7; }; deferred_pending "%s"' % (LIB, repo)],
+                             capture_output=True, text=True).stdout.strip()
+    check("pending-named", pending, "https://pr/7")
 
     # Main with nothing deferred: no session, and no worktree left behind.
     git(repo, "rm", "-q", "--cached", ".sclaude/team/deferred/12-a.tsv")

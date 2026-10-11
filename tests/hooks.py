@@ -370,6 +370,45 @@ def const(name, constant):
     raise AssertionError("no %s in %s" % (constant, name))
 
 
+DENIAL_SUBJECTS = [
+    ("vercel env ls preview", True),
+    ("grep -rn 'vercel' docs", True),
+    ("npm --silent run db:promote", False),
+    ("timeout 5 gh pr create --base main", False),
+    ("grep 'gh pr create' docs", True),
+]
+
+
+def run_denials():
+    """(subject, whether it reached the log) for a transcript of refusals."""
+    import shutil
+    tmp = tempfile.mkdtemp(prefix="hooks-denials-")
+    try:
+        subprocess.run(["git", "init", "-q", PRODUCT], check=True)
+        path = os.path.join(tmp, "t.jsonl")
+        with open(path, "w") as fh:
+            for i, (command, _) in enumerate(DENIAL_SUBJECTS):
+                fh.write(json.dumps({"message": {"content": [{
+                    "type": "tool_use", "id": "t%d" % i, "name": "Bash",
+                    "input": {"command": command}}]}}) + "\n")
+                fh.write(json.dumps({"toolDenialKind": "automode-blocked",
+                                     "toolUseResult": "blocked %d" % i,
+                                     "message": {"content": [{
+                                         "type": "tool_result", "tool_use_id": "t%d" % i}]}}) + "\n")
+        out = subprocess.run(
+            [sys.executable, "-c",
+             "import importlib.util, json, sys; "
+             "s = importlib.util.spec_from_file_location('c', sys.argv[1]); "
+             "m = importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+             "print(json.dumps([d[1] for d in m.denials(sys.argv[2], 'code')]))",
+             os.path.join(HOOKS, "collect-denials.py"), path],
+            capture_output=True, text=True, env=dict(os.environ, CLAUDE_PROJECT_DIR=PRODUCT))
+        logged = json.loads(out.stdout or "[]")
+        return [(c, ("Bash: " + c) in logged) for c, _ in DENIAL_SUBJECTS]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     failures = []
 
@@ -686,9 +725,18 @@ def main():
                 const("write-guard.py", "READONLY_REASON"))):
             failures.append(("markers", marker, "a hook's tail", "matched nothing"))
 
+    # collect-denials.py drops what the policy bans on purpose, by the command
+    # the call ran: a refusal of a Vercel read the hook allows is friction and
+    # stays, and a step's own ban (gh pr create on step 2) is deliberate.
+    denial_cases = run_denials()
+    for (subject, got), (_, want) in zip(denial_cases, DENIAL_SUBJECTS):
+        if got != want:
+            failures.append(("denials", subject, "logged" if want else "dropped",
+                             "logged" if got else "dropped"))
     total = len(PLANNING) + len(FORBIDDEN) + len(BY_STEP) + 2 + len(workdir_cases) + \
         len(shared_cases) + 1 + 1 + 3 + len(plan_cases) + 3 + \
-        len(const("collect-denials.py", "OWN_MARKERS")) + len(branch_cases)
+        len(const("collect-denials.py", "OWN_MARKERS")) + len(branch_cases) + \
+        len(denial_cases)
     for step, command, want, got in failures:
         print("FAIL [%s] %s — expected %s, got %s" % (step, command, want, got))
     print("%d/%d passed" % (total - len(failures), total))

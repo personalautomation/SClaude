@@ -45,6 +45,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _friction import note
+from _shell import SEPARATORS, script_call, strip_runners, strip_wrappers, tokenize
 
 # The refusals that reach the log, and how their source is named in the entry.
 # user-rejected is deliberately not here: a human who refused by hand is not
@@ -101,17 +102,23 @@ def known_denials():
             line = line.split("#", 1)[0].strip()
             if line:
                 out.append(line)
-    return out + policy_denials()
+    return out
 
 
-def policy_denials():
+def policy_denials(step=""):
     """The bans the session's policy made: deliberate by construction.
 
     A product's own bans (`npm run db:promote` and the like) and its
     integrations' are written in its .sclaude/team/ and in sclaude's presets;
     a refusal of one is that rule working, not friction. Read for the product
     whose worktree this is (CLAUDE_PROJECT_DIR) and the person in
-    SCLAUDE_POLICY_PERSON. Nothing on any trouble.
+    SCLAUDE_POLICY_PERSON, at this step: a step's own bans (`gh pr create`
+    on step 2) are among them. Nothing on any trouble.
+
+    Returns the banned command prefixes, as word tuples, and the banned tools.
+    The prefixes are compared with the commands the call ran, not searched for
+    in its text: a bare `vercel` found in any subject used to drop every
+    refusal that mentioned Vercel, the reads the hook allows among them.
     """
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -125,13 +132,31 @@ def policy_denials():
         if common.returncode != 0:
             return []
         merged = policy.merged(os.path.dirname(common.stdout.strip()),
-                               os.environ.get("SCLAUDE_POLICY_PERSON", ""))
+                               os.environ.get("SCLAUDE_POLICY_PERSON", ""), step)
     except Exception:
-        return []
-    out = [" ".join(d["words"]) for d in merged["deny"]]
-    if "vercel-deploy" in merged["rules"]:
-        out.append("vercel")
-    return out + list(merged["tools"])
+        return [], []
+    return ([tuple(script_call(list(d["words"]))) for d in merged["deny"]],
+            list(merged["tools"]))
+
+
+def runs_banned(subject, prefixes, tools):
+    """Whether the call in this subject is one of the policy's bans."""
+    name, _, rest = subject.partition(": ")
+    if name in tools:
+        return True
+    if name != "Bash" or not prefixes:
+        return False
+    words = tokenize(rest) or []
+    part = []
+    for word in words + [";"]:
+        if word not in SEPARATORS:
+            part.append(word)
+            continue
+        called = script_call(strip_runners(strip_wrappers(part)))
+        if any(tuple(called[:len(p)]) == p for p in prefixes):
+            return True
+        part = []
+    return False
 
 
 def denial_reason(result):
@@ -207,10 +232,11 @@ def tool_calls(path):
     return calls
 
 
-def denials(path):
+def denials(path, step=""):
     """The refusals from a transcript: a list of (source, subject, reason)."""
     calls = tool_calls(path)
     wont_note = known_denials()
+    prefixes, tools = policy_denials(step)
     out = []
     try:
         handle = open(path, encoding="utf-8", errors="replace")
@@ -243,7 +269,8 @@ def denials(path):
                         break
             # A deliberate ban, reviewed once: there is nothing to review
             # again, and this entry would cost a whole session.
-            if any(known in subject for known in wont_note):
+            if any(known in subject for known in wont_note) \
+                    or runs_banned(subject, prefixes, tools):
                 continue
             out.append((source, subject or "—", reason))
     return out
@@ -254,7 +281,7 @@ def main(argv):
         return 0
     step, paths = argv[0], argv[1:]
     for path in paths:
-        for source, subject, reason in denials(path):
+        for source, subject, reason in denials(path, step):
             note(step, source, subject, reason)
     return 0
 

@@ -419,6 +419,21 @@ def main():
         check("hook: an environments script without `settled` is refused",
               db_push_denied("localdb", subcommand="name"), True)
 
+        # A `settled` command with shell syntax in it is run by a shell, as the
+        # product's other environment commands are. Split with no shell, this
+        # one always failed and every db push was refused.
+        with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
+            json.dump({"environments": {"settled": "echo dev | tr -d ' '",
+                                        "file": "config/environments.json"}}, fh)
+        payload = {"tool_name": "Bash", "tool_input": {"command": "npx supabase db push"}}
+        done = subprocess.run([sys.executable, forbidden, "--step", "code", "--root", wt],
+                              input=json.dumps(payload), capture_output=True, text=True,
+                              cwd=wt, env={**os.environ, "CLAUDE_PROJECT_DIR": wt})
+        check("hook: a settled command with a pipe is answered", '"deny"' in done.stdout, False)
+        with open(os.path.join(wt, ".sclaude", "config.json"), "w") as fh:
+            json.dump({"environments": {"settled": "node scripts/lib/envs.mjs settled",
+                                        "file": "config/environments.json"}}, fh)
+
         # --- a switch that fails leaves no server on production -----------
         #
         # The product's switch command failed and the tree stayed on prod.

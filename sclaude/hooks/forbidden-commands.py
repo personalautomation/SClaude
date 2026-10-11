@@ -164,10 +164,14 @@ def active_environment(cwd):
     command = product_environments().get("settled")
     if not isinstance(command, str) or not command.strip():
         return None
+    # Through bash, as worktree.sh and featuredb.sh eval the product's other
+    # environment commands: split by shlex with no shell, one that used shell
+    # syntax (a pipe, `&&`, a variable) always failed, and every
+    # `supabase db push` was refused for want of an answer.
     try:
-        done = subprocess.run(shlex.split(command), cwd=cwd, capture_output=True,
+        done = subprocess.run(["bash", "-c", command], cwd=cwd, capture_output=True,
                               text=True, timeout=5)
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError):
         return None
     if done.returncode != 0:
         return None

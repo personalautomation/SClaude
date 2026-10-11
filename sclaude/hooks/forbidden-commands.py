@@ -616,6 +616,10 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
         if flag == "--no-verify":
             return ("--no-verify bypasses .githooks/pre-push, which exists "
                     "precisely to catch the database drifting from the repo")
+        # Every local branch, main among them, whichever is checked out; and
+        # --mirror also deletes and force-updates the remote's refs.
+        if flag in ("--all", "--branches", "--mirror"):
+            return "--all and --mirror push main too; " + MAIN_REASON
 
     # The positional arguments: the remote's name and the refspecs. We count
     # both `git push origin main` and `git push origin HEAD:main` as a push to

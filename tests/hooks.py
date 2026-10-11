@@ -279,6 +279,9 @@ FORBIDDEN = [
     ("git push origin HEAD:main", DENY),
     ("git push --force origin feat/x", DENY),
     ("git push --no-verify origin feat/x", DENY),
+    ("git push origin --all", DENY),
+    ("git push --mirror origin", DENY),
+    ("git push --branches origin", DENY),
     # git's own options before the subcommand: every one of these went through,
     # found by a friction review.
     ("git -C /home/x/myapp push origin main", DENY),

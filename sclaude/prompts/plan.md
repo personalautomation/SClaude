@@ -75,7 +75,7 @@ If a database change is needed, explain in plain language why and what it entail
 
 Don't list the specific files you'd change. Name the affected parts of the system instead, with a brief reminder of what each is responsible for.
 
-**Size it before presenting.** Estimate how many lines the feature will change — code, migrations, tests and manuals together. If that comes to more than about 10,000, say so and propose splitting it into several pull requests, each one shippable and reviewable on its own, with where you would draw the lines; I decide. The automatic review reads worst exactly where it has the most to read: PR #143 in social was ~9,700 lines, and the review covered a third of it and called the rest clean. Below that size, don't raise it.
+**Size it before presenting.** Estimate how many lines the feature will change — code, migrations, tests and manuals together. If that comes to more than about 10,000, say so and propose splitting it into several pull requests, each one shippable and reviewable on its own, with where you would draw the lines; I decide. The automatic review reads worst exactly where it has the most to read: one pull request was ~9,700 lines, and the review covered a third of it and called the rest clean. Below that size, don't raise it.
 
 **The plan opens with its acceptance criteria.** A section headed `## Acceptance criteria`, before anything about implementation. They come first because they're what the rest of the plan exists to satisfy — and because approving the plan is approving them. **A plan without this section is not shown to me:** a hook refuses it and tells you why, and you add the section and present again.
 

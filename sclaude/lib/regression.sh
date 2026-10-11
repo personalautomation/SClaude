@@ -498,7 +498,7 @@ regression_environment_broken() {
 
 # Whether a local e2e failed because the dev server stopped finishing pages.
 #
-# On 2026-10-09 #145's local e2e failed on two specs that open `/`: nine
+# On 2026-10-09 a feature's local e2e failed on two specs that open `/`: nine
 # /_next/image requests hung inside `next dev`, `load` never fired, and both
 # timed out in page.goto. The server had been restarted right before the run —
 # regression_run does that — and wedged during it. The fixing session spent a
@@ -540,7 +540,7 @@ regression_server_wedged() {
 # the project's `regression.manual` when nothing but the manuals changed.
 #
 # One run on the machine at a time, whichever feature it belongs to: see
-# lock.sh. On 2026-10-06 #152's local e2e timed out while #145's work loaded the
+# lock.sh. On 2026-10-06 one feature's local e2e timed out while another's work loaded the
 # machine beside it, and a fixing session went on proving the code innocent.
 #
 # The dev server is restarted inside the queue, right before the parts: a
@@ -582,7 +582,7 @@ regression_run() {
   # compiles its pages on first hit either way.
   #
   # A restart before the run does not cover a server that wedges during it —
-  # #145's did, on 2026-10-09, minutes after this one. That case is
+  # one did, on 2026-10-09, minutes after this one. That case is
   # regression_server_wedged's, and regression_run_body retries e2e on it.
   if [[ "$stage" == "local" && -z "$only" ]] && declare -F ensure_dev >/dev/null; then
     declare -F stop_own_dev >/dev/null && stop_own_dev "$wt" \
@@ -1593,7 +1593,7 @@ regression_fix() {
   run_friction "$wt" "$slug" "fix-$stage-$number" || true
 
   # The friction review changed the orchestrator. A cause "outside this branch"
-  # is very often the orchestrator itself — feature #104's preview e2e ran with
+  # is very often the orchestrator itself — once a preview e2e ran with
   # the worktree's local database because of how sclaude wired the environment,
   # and the review right here fixed exactly that. Stopping with "blocked" and
   # "carry on with sclaude <feature>" then hands the human an errand the machine

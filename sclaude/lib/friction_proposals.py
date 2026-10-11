@@ -3,7 +3,7 @@
 
 The friction review always puts a proposed CLAUDE.md rule off: the rules are
 decided together once a month, by how often each comes back (_friction-body.md).
-So a log with nothing else in it has nothing to decide, and on feature 145
+So a log with nothing else in it has nothing to decide, and on one feature
 three friction reviews in a row were opus sessions whose whole work was one
 line appended to friction-deferred.tsv. run_friction now asks this first, and
 writes the rows itself when the answer is yes.

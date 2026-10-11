@@ -160,7 +160,7 @@ capture_pr() {
 # with the "Auto-close issue" workflow closes an issue the moment its status
 # becomes Done — and Done is how QA says yes, before the merge. And a merge
 # carrying `Closes #N` (or a manual closing link, see pr_link_issue) closes it
-# at the merge, before production and its regression. Issue #40 in social went
+# at the merge, before production and its regression. An issue once went
 # Closed that way with its PR still open.
 #
 # Closed means "nothing left to do here", and until production is green that is
@@ -218,7 +218,7 @@ issue_close_done() {
 # The PR linked to its issue as a closing reference — checked, and made if missing.
 #
 # The body ends with `Closes #N` and GitHub is supposed to link the two from it.
-# Usually it does; on PR #137 in social it did not, with nothing in the body,
+# Usually it does; once it did not, with nothing in the body,
 # the base branch or the permissions to explain why, and re-saving the body did
 # not help. An unlinked PR is not cosmetic: the merge closes the issue through
 # that same link, so without it the issue stays open and the board card never
@@ -249,7 +249,7 @@ pr_link_issue() {
   grep -qx "$issue" <<<"$linked" && return 0
 
   # `Refs #N` with no closing keyword is a choice, not a link GitHub missed: a
-  # follow-up pull request for an issue already shipped (#166 for #145) says
+  # follow-up pull request for an issue already shipped says
   # so on purpose. sclaude closes the issue itself when the cycle ends.
   body="$(gh api "repos/$repo/pulls/$number" --jq .body 2>/dev/null || true)"
   if grep -qiE "(^|[^[:alnum:]])refs?[[:space:]]+#$issue([^0-9]|$)" <<<"$body" \

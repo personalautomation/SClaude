@@ -150,7 +150,7 @@ def limit(path, after=0):
 
     When the subscription runs out, claude ends the turn with a synthetic
     message — "You've hit your session limit · resets 6:50pm" — and waits for
-    somebody to type. Nobody does: on 2026-10-06 #145 and #152 both stopped on
+    somebody to type. Nobody does: on 2026-10-06 two features both stopped on
     one at 18:05, the limit reset at 18:50, and both stood until 23:01, when a
     person came back and typed `go` in each.
 

@@ -1112,7 +1112,7 @@ def ask_text(repo_name, question):
     # to the bot, not to it — so the orchestrator only names the feature (the
     # feature field, see ask_publish in io.sh) and we build the card here.
     #
-    # The usual "social is asking" line is then unnecessary: the card starts
+    # The usual "<repository> is asking" line is then unnecessary: the card starts
     # with the repository's and the feature's name, and repeating them means
     # pushing the buttons further down.
     slug = (question.get("feature") or "").strip()
@@ -1147,7 +1147,7 @@ def ask_text(repo_name, question):
         body += t("ask.context",
                   body=escape(clip(strip_ansi(context), ASK_CONTEXT_MAX)))
     if slug:
-        # The prompt itself in italics and without "social is asking": the
+        # The prompt itself in italics and without "<repository> is asking": the
         # repository and the feature are already named by the card a line
         # above.
         body += "<i>%s</i>" % escape(strip_ansi(question.get("prompt") or "").strip())

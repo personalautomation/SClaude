@@ -222,7 +222,7 @@ is_no() {
 # first, \320 or \321, stays in the line, invisible. Bash then matched that
 # lone byte against the first byte of "д" or "у" in is_yes, so "\321n" — an
 # "n" on screen — was a yes. That is how "Merge origin/main into …? [y/N] n"
-# merged on #143 in social, twice.
+# merged, twice.
 clean_reply() {
   local valid="$1"
   if command -v iconv >/dev/null 2>&1; then

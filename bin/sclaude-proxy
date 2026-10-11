@@ -448,8 +448,8 @@ def log_tail(wt, lines=15):
 
 
 # X-Sclaude-Proxy says a 503 or 502 is this page and not the application's
-# own, passed through: social's Playwright global setup (waitForProxyStart)
-# waits on "starting" and stops on "failed", and nothing else.
+# own, passed through: a project's test setup can wait on "starting" and stop
+# on "failed", and on nothing else.
 def status_page(label, wt, state):
     tail = log_tail(wt)
     entry = STARTING.get(label)

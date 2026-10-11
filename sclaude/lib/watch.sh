@@ -334,7 +334,7 @@ return_since() {
 #
 # The same return the board makes when QA moves the card out of "In QA", for
 # every other reason a feature has to go back — a review finding that surfaced
-# after the step was skipped as clean (PR #143 in social), a problem noticed in
+# after the step was skipped as clean, a problem noticed in
 # the preview, a second thought. It does here what the watcher and cmd_resume
 # do between them for the board:
 #

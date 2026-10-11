@@ -314,14 +314,11 @@ npm run typecheck
 npm run lint
 ```
 
-And, when the change touched them (project-specific — see the project's
-CLAUDE.md):
+And whatever further checks the project's `CLAUDE.md` asks for after the kind
+of change you made — they are the project's, not this skill's.
 
-- `npm run check:rls` after any policy or grant change;
-- `npm run check:r2` after any change to the upload flow.
-
-The repo's `.githooks/pre-push` runs the migration, schema and bio checks on push
-by itself. Do not bypass it with `--no-verify`.
+A project's own pre-push hook may run more checks on push by itself. Do not
+bypass it with `--no-verify`.
 
 Report failures rather than working around them.
 

@@ -186,8 +186,8 @@ if out:
 #
 # The pull request is read too because a hand-back is not always QA's own
 # words on the issue. The automatic review leaves its findings on the pull
-# request, and a return made because of them (PR #143 in social: ten findings
-# the first review missed, found on a second run) is answered by fixing what
+# request, and a return made because of them (once, ten findings the first
+# review missed, found on a second run) is answered by fixing what
 # is there. The review session re-reads the pull request itself, but this file
 # is what the Telegram message quotes and the first thing the session is
 # handed, and a return that points nowhere reads as a return with nothing said.

@@ -4,9 +4,9 @@
 #
 # `vercel --prod` ships main, all of it. When an earlier feature was merged and
 # its production question answered no, its code and its migrations wait on main
-# — and the next feature's ship takes them along. On 2026-10-09 #152 shipped
-# #150 that way: `db:promote` applied 0084_events_say_activities.sql, #150's,
-# beside #152's own 0085, while the question above it said only "The branch
+# — and the next feature's ship takes them along. On 2026-10-09 one feature
+# shipped another that way: the promotion applied the other's migration
+# beside its own, while the question above it said only "The branch
 # adds migrations". The ship was right; the person was not told what it was.
 #
 #   prod_riders.py <repo> <prod sha> <main ref> <own slug> [<migrations dir>]

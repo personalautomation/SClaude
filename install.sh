@@ -79,8 +79,8 @@ echo "symlinked: $SKILLS/pr"
 ln -sfn "$REPO/statusline.py" "$CLAUDE/statusline.py"
 echo "symlinked: $CLAUDE/statusline.py"
 
-# This repository's hooks live in githooks/, as they do in social; there is no
-# `npm install` here to point at them, so we do it here.
+# This repository's hooks live in githooks/; there is no `npm install` here to
+# point at them, as a product's might, so we do it here.
 git -C "$REPO" config core.hooksPath githooks
 echo "hooks: $REPO/githooks"
 

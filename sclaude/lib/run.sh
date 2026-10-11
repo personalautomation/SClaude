@@ -197,7 +197,7 @@ review_skippable() {
 #
 # Step 4 used to open its session straight after step 3, while the review was
 # still running, and the session then waited on it or read an empty list. When
-# the review finds nothing — PR #136: "No issues found", every check green —
+# the review finds nothing — "No issues found", every check green —
 # that session had nothing to do but say so, and cost a launch to say it.
 #
 # pr_context.py decides; this only waits out `pending`, the way the merge wait
@@ -706,8 +706,8 @@ session_ended() {
   # It used to run once the step closed, on the reasoning that the fix is
   # needed by the step about to start. The reasoning holds, one level down: the
   # next thing to start is the next session, and that is often the same step's.
-  # The review step rotates a session per round of the automatic review — #125
-  # ran seven — so a ban the first round hit could be met by every round after
+  # The review step rotates a session per round of the automatic review — one pull
+  # request ran seven — so a ban the first round hit could be met by every round after
   # it and still be reviewed only once, at the end. A session that leaves the
   # step open (a "no" to the question, an unmerged review) used to carry its
   # entries into the next one with nobody reading them.
@@ -891,7 +891,7 @@ after_step() {
       fi
       ;;
     review)
-      # Leaving the session is not the review being done. #143's third round
+      # Leaving the session is not the review being done. Once a third round's
       # session exited while the automatic review of its push was still
       # running, and that review then opened six new threads: closing here
       # would have sent the feature to QA with them. So the step closes only
@@ -913,7 +913,7 @@ after_step() {
       fi
       # A red run above opens a fixing session, which commits its fix and is
       # not told to push. review_close_gate has already asked whether the pull
-      # request carries every commit, so nothing asked again: on feature 145
+      # request carries every commit, so nothing asked again: once
       # the fix went green here, the preview was deployed from this tree with
       # it, QA accepted that preview — and the pull request merged without it.
       # So it is pushed now, and the review reads it like any other push.
@@ -934,8 +934,8 @@ after_step() {
       # QA watch all live in remind_prod, which runs only once this step has
       # closed — so the branch was merged first and QA looked at main
       # afterwards, when their verdict could no longer hold anything back.
-      # Feature #104 showed it plainly: the review step closed in the same
-      # second PR #136 was merged, and the preview was deployed after both.
+      # One feature showed it plainly: the review step closed in the same
+      # second its pull request was merged, and the preview was deployed after both.
       #
       # The order now is review → preview → QA → merge. The waits for QA and
       # for the merge are in remind_prod (qa_wait, merge_wait), after the
@@ -1245,7 +1245,7 @@ run_friction() {
   fi
 
   # One friction review on the machine at a time: they all edit the one
-  # instruments tree. On 2026-10-07 at 00:31 #145 and #152 each started one
+  # instruments tree. On 2026-10-07 at 00:31 two features each started one
   # from the same commit, and the two committed a minute apart; they happened
   # to touch different files. The second now waits, and starts on the first
   # one's commits — the tree is shared, so there is nothing to fetch.
@@ -1757,7 +1757,7 @@ instruments_own_branch() {
 # Nor our own ancestors. term_record runs this sclaude under script(1), which
 # starts it in a session of its own, and script's command line names sclaude:
 # every recorded run read its own recorder as "another sclaude (pid N)" — N being
-# the pid in the name of its own recording — and never updated (feature 145).
+# the pid in the name of its own recording — and never updated.
 #
 # Every one of them is named, one per session, with what it runs and for how
 # long: naming the first alone sent the person to close it only to meet the
@@ -1954,7 +1954,7 @@ review_close_gate() {
 #   review_yours_report <wt> <pr> [<repo>]
 #
 # Printed by sclaude itself at the end of every review session rather than left
-# to the session's report: on #161 three reports in a row said "you close the
+# to the session's report: once three reports in a row said "you close the
 # thread" in their middle, with no link, and the thread came back each round.
 # Prints nothing when there is nothing to resolve. Returns 0 when it printed.
 review_yours_report() {
@@ -2077,7 +2077,7 @@ code_fingerprint() {
 #
 # bash holds the functions it sourced, so a sclaude started before a fix keeps
 # the old behaviour to the end — and a step's session lives for hours. The fix
-# for step 4's rounds landed while #143's review session ran, and on that
+# for step 4's rounds landed while a review session ran, and on that
 # session's /exit the old code would have closed the step with new findings
 # still open. Here, between claude's exit and anything done about it, the
 # process replaces itself with the current sclaude, which picks up where this
@@ -2126,7 +2126,7 @@ return_brief() {
 # pushes; the automatic review reads the fixes and closes what they fixed. When
 # it has closed every one of them and posted new findings, the session that
 # fixed the old ones has nothing left to answer, and all it carries into the
-# new findings is context. On #143 five rounds ran in one conversation.
+# new findings is context. Once five rounds ran in one conversation.
 #
 # A session cannot clear its own context — /clear and /compact are the
 # person's, and no tool reaches them — so the orchestrator does it. The

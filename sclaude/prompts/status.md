@@ -71,7 +71,7 @@ Go up the chain only as far as the contradiction reaches. That child changes how
 
 ### For both
 
-**Check the code when in doubt, and only on what the section claims.** You're in the main repository, whose working tree may be in use: don't check out, pull or switch branches. `git fetch origin` and then `git grep <word> origin/main`, `git show origin/main:<path>` read the merged code without touching anything.<if:pr-number> A feature that is not merged yet is in its pull request: `gh pr diff <pr-number>`.</if:pr-number> A count or a mechanism taken from the pull request's description counts as in doubt: the description was written before the review rounds, and #145's status repeated its "16 cases" when 52 had been merged.
+**Check the code when in doubt, and only on what the section claims.** You're in the main repository, whose working tree may be in use: don't check out, pull or switch branches. `git fetch origin` and then `git grep <word> origin/main`, `git show origin/main:<path>` read the merged code without touching anything.<if:pr-number> A feature that is not merged yet is in its pull request: `gh pr diff <pr-number>`.</if:pr-number> A count or a mechanism taken from the pull request's description counts as in doubt: the description was written before the review rounds, and one status repeated its "16 cases" when 52 had been merged.
 
 **Describe what is on `main`.** Behaviour that is still waiting for its merge is not current: on the feature itself say in one line that it takes effect on merge; on a parent, leave the parent's section as it is and say in its status which child will change it.
 

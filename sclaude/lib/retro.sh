@@ -24,8 +24,9 @@
 # branch. cmd_done then finds the commits (retro_changed_code) and puts the
 # feature back on step 3 (retro_reopen): from there they go the way the
 # feature's own did — pull request, review, preview, QA, merge — and the
-# automatic review's findings reach a session like any other round's. On feature 145 the retrospective opened #165 from a branch and
-# worktree of its own instead; the review left two findings on it, and nothing
+# automatic review's findings reach a session like any other round's. Once a
+# retrospective opened a pull request from a branch and worktree of its own
+# instead; the review left two findings on it, and nothing
 # in sclaude knew the pull request was there.
 #
 #   SCLAUDE_RETRO=off   skip it.
@@ -140,7 +141,7 @@ PY
 #   retro_changed_code <wt> <branch>  → their count, or nothing
 #
 # Only when the retrospective changed the code: a branch can carry other commits
-# past the merge (feature 145's unpushed regression fix), and those are not
+# past the merge (an unpushed regression fix, say), and those are not
 # what this sends back to step 3. Once the second pull request is merged, its
 # head carries the commits and the count is nothing again.
 #
@@ -182,8 +183,8 @@ retro_reopen() {
     && state_set "$state" reopened_pr "$old" 2>/dev/null || true
   state_set "$state" regression.preview.status null 2>/dev/null || true
   # Fresh conversations for both steps. A closed step keeps its session's id,
-  # and run_step resumes whatever id it finds: on feature 145 step 3 reopened
-  # the conversation that had opened #160 three days before, with no word of
+  # and run_step resumes whatever id it finds: once step 3 reopened
+  # the conversation that had opened the first pull request three days before, with no word of
   # the new commits, and it sat waiting for input. The runs stay, and so do
   # their rows in the issue.
   state_set "$state" steps.pr.session null 2>/dev/null || true

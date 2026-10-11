@@ -150,8 +150,8 @@ step_mode()   { step_field "$1" 3; }
 # autoMode.environment is passed to steps 2-4 the same way. Auto mode judges
 # commands with a classifier, and that one, knowing nothing about worktrees,
 # considered a feature's tree a foreign repository: the user's environment has
-# one trusted path written into it, hardcoded (~/social), while a step works in
-# ~/social-<feature>. The Local Operations rule calls going into "other repos" a
+# one trusted path written into it, hardcoded (~/myapp), while a step works in
+# ~/myapp-<feature>. The Local Operations rule calls going into "other repos" a
 # step outside the project's boundaries, and ordinary reading fell under
 # suspicion. Step 4 of feature 75-review-58-results got three refusals in a row
 # that way — a `gh run view | grep` over another run's log and a `python3 -c`
@@ -163,7 +163,7 @@ step_mode()   { step_field "$1" 3; }
 # rule lists `git checkout -- .` and `git reset --hard` and tells itself to
 # "presume the tree is dirty": it does not see the tools' output and assumes the
 # restore will overwrite unsaved work. The per-file form with a revision fell
-# under that. Step 2 of feature 101-split-user-manual was refused on a
+# under that. A step 2 was refused on a
 # `git checkout <sha> -- <three manual paths>` with which it meant to render the
 # pre-merge pages and compare the rendering with the post-change one; without it
 # it compared the sources through `git diff` and a normaliser of its own — it

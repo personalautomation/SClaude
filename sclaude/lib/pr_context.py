@@ -39,7 +39,7 @@ SKIP_SECONDS = 40
 # How to investigate a failing check. This used to say "read the log
 # (`gh run view <run-id> --log-failed`)" — and for the review job that advice
 # leads the wrong way: the flag replays the reviewer's own streaming transcript
-# rather than the error. On PR #100 it produced 10744 lines (1.5 MB) of JSON
+# rather than the error. Once it produced 10744 lines (1.5 MB) of JSON
 # containing no cause at all. Step 4 obeyed and spent eight calls getting out:
 # it downloaded the job's log to a file, downloaded it again with
 # --allow-escape-sequences because of escape sequences, grepped for
@@ -230,7 +230,7 @@ def render_new(cwd, pr, repo, since):
     # The findings check stays red after the person resolves by hand the
     # threads they kept: it is not run again for that. close_state already
     # lets step 4 close on such a red; told to a session as news, it woke the
-    # review of #166 only to comment `/review` and turn it green.
+    # review of a pull request only to comment `/review` and turn it green.
     if any(r[0] == FINDINGS_CHECK for r in red) and findings_red_explained(cwd, pr, repo, view):
         red = [r for r in red if r[0] != FINDINGS_CHECK]
 
@@ -274,7 +274,7 @@ def render_new(cwd, pr, repo, since):
 #
 # Through GraphQL because only it knows a thread is resolved: the REST list of
 # comments carries every comment ever left, and a fresh review session handed
-# that list re-read every round already closed — on #143, dozens of findings
+# that list re-read every round already closed — once, dozens of findings
 # and their "Resolved automatically" replies, ahead of the few still open. It
 # was also read with `--paginate` alone, which prints one array per page, so
 # past thirty comments the parse failed and the snapshot showed no inline
@@ -362,8 +362,8 @@ def open_threads(cwd, pr, repo):
 #
 # A finding the person declines stays open on GitHub: the review does not close
 # what was not fixed, and resolving it is the person's own act. Every review
-# session used to meet it again as an open thread and ask again — on #161 the
-# same `dialog-host.tsx:224` was put to the person in three rounds running, each
+# session used to meet it again as an open thread and ask again — once the
+# same `path:line` was put to the person in three rounds running, each
 # answered "leave it", and each report said "you close the thread" somewhere in
 # its middle, with no link.
 #
@@ -525,7 +525,7 @@ def render(cwd, pr, repo):
         out.append("No open review threads and no discussion as of this snapshot.")
         out.append("")
     # A resolved thread is shown only where a thread is still open on the same
-    # file: there a new finding can undo an earlier fix. On #143 that happened
+    # file: there a new finding can undo an earlier fix. Once that happened
     # three times in one chain (sweep, guard, action, guard again), each round
     # in a fresh session that could not see what the last one settled.
     open_paths = {t["path"] for t in threads}
@@ -779,7 +779,7 @@ def review_state(cwd, pr, repo):
 
 # The Claude review job that stopped on its quota: the subscription it runs
 # under is the one the sessions on this machine spend, and two features' worth
-# of sessions and reviews run it out (PR #100 met it first). Nothing in the
+# of sessions and reviews run it out (it has happened). Nothing in the
 # diff caused that and no session can fix it — the job is to be run again once
 # the limit resets, which sclaude does by itself (review_quota_rerun in
 # run.sh). Read from the job's log, where the action leaves its result:
@@ -1004,7 +1004,7 @@ def unposted_findings(cwd, repo, head, rollup, comments):
     target the skill ignores --comment: its findings come back as text and are
     posted nowhere. The job counts them as `unthreaded` and the findings check
     goes red with "N review findings posted as a comment" — while no such
-    comment exists. On #160 three review sessions in a row had to download the
+    comment exists. Once three review sessions in a row had to download the
     job log and grep it to learn what they were supposed to fix.
 
     Nothing when the fallback comment really was posted (a discussion comment by

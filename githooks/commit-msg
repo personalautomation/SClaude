@@ -21,7 +21,7 @@
 #     trailer, and git discards the whole paragraph.
 #
 # The first was made five times in one session, which is what prompted the
-# original hook in `social`; the second slipped past that hook three times in
+# original hook in a product repository; the second slipped past that hook three times in
 # one session afterwards, because it only checked which paragraph the footers
 # were in.
 #

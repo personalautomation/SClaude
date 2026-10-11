@@ -619,7 +619,7 @@ stop_dev_pid() {
   done
   [[ -n "$pgid" && -n "$(dev_pid "$port")" ]] && kill -KILL -"$pgid" 2>/dev/null
   # A free port is not a dead group. The launcher outlives next-server by a
-  # moment, and in social it carries a file watcher: still alive while the tree
+  # moment, and in a project it can carry a file watcher: still alive while the tree
   # is being removed, it saw the deletions as a rebuild and wrote .dev-build back
   # into the directory, and `git worktree remove` failed on "Directory not
   # empty". So the group has to be gone, not just the listener.
@@ -716,8 +716,8 @@ remove_worktree() {
 # question each.
 #
 # A session sometimes opens a side pull request from a worktree it makes itself:
-# on feature 145 the review moved a workflow fix into #164 from
-# ~/social-review-dispatch-fix, and said it could be removed after the merge.
+# once a review moved a workflow fix into a pull request of its own from
+# ~/myapp-review-dispatch-fix, and said it could be removed after the merge.
 # Nothing removed it: `done` takes away the feature's own worktree, and sclaude
 # never knew of the other. Here it is found by what it is — a worktree with no
 # .feature of its own (so no feature's, running or not), whose branch GitHub
@@ -896,7 +896,7 @@ sync_branch() {
   # Asked once for each state of main. A "no" is remembered against the
   # commit origin/main stood at, and every later start of a step — a review
   # round's fresh session, a resume, a rerun — says one line instead of asking
-  # again. #143 in social asked the same question at every round. When main
+  # again. Once the same question was asked at every round. When main
   # moves, it is a new question.
   local tip declined
   tip="$(git -C "$REPO" rev-parse -q --verify origin/main 2>/dev/null || true)"

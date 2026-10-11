@@ -198,7 +198,7 @@ live_session() {
 # launch, the prompt being assembled, the process winding down. A session that
 # died on entry can spend seven seconds doing that, and seven is more than five,
 # so the check passed and the caller went on to close a review that had read
-# nothing. That is how feature 103 got `fix-preview-3`: 0.2 seconds of
+# nothing. That is how one feature got `fix-preview-3`: 0.2 seconds of
 # conversation, not one word from the model, marked `done`.
 #
 # The transcript is the honest witness. A session that ran leaves at least one

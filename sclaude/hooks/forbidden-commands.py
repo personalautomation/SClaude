@@ -389,7 +389,7 @@ def segments(command, raw=False):
 
 
 # A push to `main` that cannot reach the project's remote is not the push the
-# ban is about. A review subagent of feature 145 built a throwaway repository in
+# ban is about. A review subagent once built a throwaway repository in
 # its scratchpad — `git init --bare o.git`, `git remote add origin ../o.git` —
 # to see how git fails on a broken config, and `git push -q origin main` there
 # was refused with "tell the human and stop". The feature reads `main` from git,
@@ -455,7 +455,7 @@ def scratch_push(command, parts, where, remote, redirected=False):
     # by GIT_DIR in the environment, set before the push or on it, or by the
     # push's own `--git-dir` (see refuses and git_globals). Not by `--git-dir`
     # on another git call elsewhere in the command — it is a flag of that one
-    # call. Review 18 of feature 145 had it in a heredoc, a script written to a
+    # call. One review session had it in a heredoc, a script written to a
     # file after the push, and the push was refused.
     if redirected:
         return False
@@ -473,7 +473,7 @@ def scratch_push(command, parts, where, remote, redirected=False):
 
 
 # A variable set to a literal earlier in the same command is as known as the
-# literal itself. Review 7 of feature 145 wrote `S=/tmp/…/scratchpad/r2; cd $S/w`
+# literal itself. A review session wrote `S=/tmp/…/scratchpad/r2; cd $S/w`
 # before its scratch push to main, and the unresolved `$S` kept the refusal.
 ASSIGNMENT = re.compile(r"([A-Za-z_]\w*)=(.*)", re.S)
 VARIABLE = re.compile(r"\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))")
@@ -583,7 +583,7 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
     return None
 
 
-# git's own options, the ones before the subcommand. `git -C ~/social push
+# git's own options, the ones before the subcommand. `git -C ~/myapp push
 # origin main` is the push to main however it is spelled, and so are
 # `git --git-dir=… push` and `git -c k=v push`; the friction review of feature
 # 145 found that every check below compared the first two words with `git push`,

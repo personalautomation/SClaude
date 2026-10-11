@@ -6,10 +6,10 @@
 # Part of sclaude; pulled in with source from bin/sclaude.
 # It does not run on its own.
 #
-# Two features ran in parallel for the first time on 2026-10-06 (#145 and #152
-# in social), each in its own sclaude, and two kinds of work collided:
+# Two features ran in parallel for the first time on 2026-10-06, each in its
+# own sclaude, and two kinds of work collided:
 #
-#   * the local regression. #152's e2e failed on timeouts while #145's sessions
+#   * the local regression. One's e2e failed on timeouts while the other's sessions
 #     ran tsc and next-server beside it — load average 6–7 on eight CPUs. A
 #     fixing session spent its time proving that nothing was wrong with the
 #     code, and the timings both runs wrote made the next estimates wrong;

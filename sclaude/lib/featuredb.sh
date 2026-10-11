@@ -185,7 +185,7 @@ docker_desktop_exe() {
 # Brings Docker up when it is down and a stack needs it. Returns 1 when it
 # cannot, and the caller falls back as it always did.
 #
-# On 2026-10-10 #145's local regression failed on check:rls with Docker
+# On 2026-10-10 a feature's local regression failed on a database check with Docker
 # stopped: no stack answered, the fixing session found that, wrote
 # regression.blocked and stopped. sclaude had already said "Docker is not
 # running" at the start of the step, and starting it was one command. So
@@ -514,8 +514,8 @@ db_stop() {
 # volumes are the feature's database, and nothing else holds a copy.
 #
 # What the database owned outside itself goes first: the project's `teardown`
-# (for social, the objects its people have in R2, a bucket every local database
-# of the developer's shares). It needs the database to ask who was in it, so a
+# (for example, the objects its people have in object storage, a bucket every
+# local database of the developer's shares). It needs the database to ask who was in it, so a
 # stack stopped for idling is started for the purpose. It is told which people
 # were copied from the main database, and when — their objects are partly the
 # main database's. A failed teardown is said, not fatal: a leftover object is a

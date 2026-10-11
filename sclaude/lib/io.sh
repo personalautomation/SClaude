@@ -230,7 +230,7 @@ PY
 #
 #   ask_log <prompt> <from> <reply> <tty-still-read>
 #
-# On #143 in social an "n" typed at "Merge origin/main into …? [y/N]" was
+# Once an "n" typed at "Merge origin/main into …? [y/N]" was
 # followed by the merge, and neither the terminal nor the bot could say what
 # had answered: the same code with the same key, replayed, says no. The next
 # time, .git/sclaude/answers.log says which input it was — the terminal, stdin

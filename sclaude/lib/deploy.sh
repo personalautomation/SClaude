@@ -511,7 +511,7 @@ preview_ship() {
 #
 # Quiet as well when QA did accept the preview that is there now (qa_accepted).
 # Every later run of a merged feature lands here with the issue in Done, and
-# on #145 the second and third runs said "nobody checked the deployment" of a
+# on one feature the second and third runs said "nobody checked the deployment" of a
 # preview QA had accepted before the merge.
 qa_missed() {
   local issue="$1" merged="${2:-}" wt="${3:-}" state sent accepted
@@ -1496,7 +1496,7 @@ remind_prod() {
 
   # What rides along. After the two notes above: fetching main empties the
   # range rollback_remember_migrations reads. See prod_riders.py — on
-  # 2026-10-09 #152 shipped #150 and its migration without a word about it.
+  # 2026-10-09 one feature shipped another's migration without a word about it.
   local riders="" rider_issues=""
   if ! deploy_unchanged "$wt" prod; then
     riders="$(prod_riders "$wt" "$slug")"
@@ -1699,8 +1699,8 @@ remind_prod() {
   # The cycle is over here: every red or unrunnable production regression
   # returned above. So the issue closes — whether production carries the
   # feature or the human declined to ship it. A declined production used to
-  # leave the issue open, and nothing ever came back to close it: #150 in
-  # social stayed open, merged and accepted, after its production question was
+  # leave the issue open, and nothing ever came back to close it: one issue
+  # stayed open, merged and accepted, after its production question was
   # answered no. Shipping later is `vercel --prod` from the repository, which
   # needs no open issue.
   if [[ "$prod_done" -eq 1 ]] || deploy_unchanged "$wt" prod; then

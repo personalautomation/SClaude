@@ -160,6 +160,22 @@ check("asked-after-lock", rf.index("lock_take FRICTION_LOCK") < asked, True)
 check("asked-before-log-moves", asked < rf.index('cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log" || true'), True)
 check("asked-before-session", asked < rf.index("session_holder"), True)
 
+# --- every variable run_friction reads, it sets -----------------------------
+#
+# bin/sclaude runs under `set -u`. A review that stopped committing to sclaude
+# lost its `before`/`after` HEADs, and the line still reading them killed
+# sclaude after every review that fixed something, before the review's result
+# reached the state. Nothing runs run_friction whole, so this reads it: a
+# lowercase name (a local, by this code's habit) read but never assigned.
+code = "\n".join(l for l in rf.splitlines() if not l.lstrip().startswith("#"))
+code = re.sub(r"<<'PY'.*?\nPY", "", code, flags=re.S)
+read_names = set(re.findall(r"\$\{?([a-z_][a-z0-9_]*)", code))
+set_names = set(re.findall(r"\b([a-z_][a-z0-9_]*)=", code))
+for m in re.finditer(r"\blocal(?:\s+-\w+)?\s+([^\n;|&]+)", code):
+    set_names |= set(re.findall(r"\b([a-z_][a-z0-9_]*)\b", m.group(1)))
+set_names |= set(re.findall(r"\bfor\s+([a-z_][a-z0-9_]*)\s+in", code))
+check("friction-reads-only-what-it-sets", sorted(read_names - set_names), [])
+
 if failures:
     for name, want, got in failures:
         print("FAIL %s: want %r, got %r" % (name, want, got))

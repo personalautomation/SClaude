@@ -1571,21 +1571,10 @@ PYEOF
   [[ -n "$changed" ]] && state_set "$state" "friction.$key.fixed" true
   # And which commits it was. The boolean above says a fix happened; the range
   # says what the fix was, and the issue's second table is rendered from it by
-  # `git log`. Without it a reader is told the orchestrator changed and has to
-  # go and find out how.
-  #
-  # The range is honest: nothing else moves instruments' HEAD while a review
-  # runs. Another feature's review waits in the friction queue, and
-  # push_instruments (the other toucher, called on the way into a feature)
-  # pushes and never commits, so before..after holds the review's own work and
-  # nothing else.
-  if [[ -n "$changed" && "$before" != "$after" ]]; then
-    state_set "$state" "friction.$key.from" "$before"
-    state_set "$state" "friction.$key.to" "$after"
-  fi
-  # And the project's own commits, when the review fixed the project too: the
-  # range above is instruments' and says nothing of them.
-  if [[ -n "$project_before" && -n "$project_after" && "$project_before" != "$project_after" ]]; then
+  # `git log` in the worktree. A review commits into the product, on the
+  # feature's branch, and never into sclaude (write-guard.py --readonly), so
+  # the product's range is the whole of it.
+  if [[ -n "$changed" ]]; then
     state_set "$state" "friction.$key.project_from" "$project_before"
     state_set "$state" "friction.$key.project_to" "$project_after"
   fi

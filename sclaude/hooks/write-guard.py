@@ -303,8 +303,16 @@ def write_targets(command, cwd):
                         plain.append(w)
                     k += 1
                 out += [(w, where) for w in (plain if given else plain[1:])]
-        elif name == "git" and rest[:1] in (["checkout"], ["restore"]):
-            out += [(w, where) for w in rest[1:] if not w.startswith("-")]
+        elif name == "git":
+            # Past git's own options, to the subcommand.
+            k = 0
+            while k < len(rest) and rest[k].startswith("-"):
+                k += 2 if rest[k] in GIT_VALUED else 1
+            sub = rest[k:k + 1]
+            # checkout and restore write what they name; rm and mv change it in
+            # the tree as their shell namesakes do.
+            if sub in (["checkout"], ["restore"], ["rm"], ["mv"]):
+                out += [(w, where) for w in rest[k + 1:] if not w.startswith("-")]
     return [(unmask(w), where) for w, where in out]
 
 
@@ -386,7 +394,12 @@ def refuses(payload, team, readonly):
                     return READONLY_REASON.format(dir=readonly[0])
             if git_writes_in(command, cwd, inside):
                 return READONLY_REASON.format(dir=readonly[0])
-        if team and any(TEAM.search(word) for word, _ in targets):
+        # The path as it resolves, from the directory the call runs in:
+        # `cd .sclaude/team && echo x > policy.json` names no team path in a
+        # word. Where the directory cannot be told, the word alone.
+        if team and any(TEAM.search(word if base is None else
+                                    os.path.normpath(os.path.join(base, os.path.expanduser(word))))
+                        for word, base in targets):
             return REASON
     return None
 

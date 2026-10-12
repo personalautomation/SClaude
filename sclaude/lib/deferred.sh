@@ -146,9 +146,21 @@ deferred_pending() {
 
 # Offered when sclaude is opened in a product: once a month, if anything waits.
 deferred_offer() {
-  local due entries since answer root pending
+  local due entries since answer root pending main_copy
   root="$(main_repo 2>/dev/null)" || return 0
-  due="$(deferred_due "$root" 2>/dev/null)" || return 0
+  # Due by main as the remote has it, which is what the review runs on: the
+  # main checkout is only fetched, and after a review's pull request merged
+  # its working copy still read as due, and the review was offered and run
+  # again over entries already reviewed.
+  main_copy="$(mktemp -d)"
+  if git -C "$root" archive origin/main .sclaude 2>/dev/null | tar -x -C "$main_copy" 2>/dev/null; then
+    # Who maintains the product is the root's question, asked once.
+    product_maintainer "$root"; PRODUCT_MAINTAINER_SEEN[$main_copy]=$?
+    due="$(deferred_due "$main_copy" 2>/dev/null)" || { rm -rf "$main_copy"; return 0; }
+  else
+    due="$(deferred_due "$root" 2>/dev/null)" || { rm -rf "$main_copy"; return 0; }
+  fi
+  rm -rf "$main_copy"
   if pending="$(deferred_pending "$root")"; then
     info "  The last review of the deferred friction waits on its pull request: $pending"
     return 0

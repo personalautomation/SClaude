@@ -149,6 +149,30 @@ try:
     subprocess.run(["git", "-C", repo, "push", "-q", "origin", "--delete", branch], capture_output=True)
     git(repo, "fetch", "-q", "--prune", "origin")
 
+    # Due by main as the remote has it: a main checkout not pulled since the
+    # review's pull request merged still lacks its stamp, and is not due.
+    stamp_dir = os.path.join(repo, ".sclaude", "team", "deferred")
+    with open(os.path.join(stamp_dir, "old.tsv"), "w") as fh:
+        fh.write("2026-01-01\tmyapp\told\treview\tclass-o\tOld.\n")
+    with open(os.path.join(stamp_dir, "last-reviewed"), "w") as fh:
+        fh.write(subprocess.run(["date", "+%F"], capture_output=True, text=True).stdout)
+    git(repo, "add", ".sclaude/team/deferred/old.tsv", ".sclaude/team/deferred/last-reviewed")
+    git(repo, "commit", "-qm", "reviewed today")
+    git(repo, "push", "-q", "origin", "HEAD:main")
+    git(repo, "fetch", "-q", "origin")
+    os.remove(os.path.join(stamp_dir, "last-reviewed"))
+    offer = subprocess.run(["bash", "-c",
+                            'for m in state project developer deferred; do source "%s/$m.sh"; done; '
+                            'DEFERRED_DAYS=30; info() { echo "$*"; }; say() { echo "$*"; }; '
+                            'ask() { echo ASKED; }; is_yes() { return 1; }; gh() { :; }; '
+                            'cd "%s" && deferred_offer' % (LIB, repo)],
+                           capture_output=True, text=True, env=dict(os.environ, SCLAUDE_DEV="tester")).stdout
+    check("offer-reads-main-not-the-checkout", "ASKED" in offer, False)
+    git(repo, "checkout", "-q", "--", ".sclaude/team/deferred/last-reviewed")
+    git(repo, "rm", "-q", ".sclaude/team/deferred/old.tsv", ".sclaude/team/deferred/last-reviewed")
+    git(repo, "commit", "-qm", "clean")
+    git(repo, "push", "-q", "origin", "HEAD:main")
+
     # An open pull request of an earlier review is named rather than offered over.
     pending = subprocess.run(["bash", "-c", 'for m in state project developer deferred; do source "%s/$m.sh"; done; '
                               'gh() { echo https://pr/7; }; deferred_pending "%s"' % (LIB, repo)],

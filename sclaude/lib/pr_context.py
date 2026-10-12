@@ -630,6 +630,11 @@ def feature_in_history(cwd):
 # `external_id` is "reviewed" only when the review actually read the commits —
 # the workflow-validation skip succeeds in seconds and is marked "not-reviewed".
 #
+# The workflow writes it twice under this one name: a check run, which is the
+# record (the mark, the title and summary read below), and a commit status,
+# which is the signal — the check run can land in a check suite the rollup
+# hides. In the rollup the status carries the name as `context`, not `name`.
+#
 # Coupled with `FINDINGS_CHECK` in the project's claude-code-review.yml, which
 # writes it and looks its own marks up by it: change both or neither.
 FINDINGS_CHECK = "Counts Green/Red sign based on open review comments — whole PR (no AI)"
@@ -732,7 +737,7 @@ def review_state(cwd, pr, repo):
     # judged below, where it can be told whether its red is still true.
     for c in rollup:
         state = (c.get("conclusion") or c.get("state") or "").upper()
-        if state not in GREEN and (c.get("name") or "") != FINDINGS_CHECK:
+        if state not in GREEN and (c.get("name") or c.get("context") or "") != FINDINGS_CHECK:
             return "dirty"
 
     latest = findings_run(cwd, repo, head)

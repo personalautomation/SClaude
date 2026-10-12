@@ -105,6 +105,13 @@ try:
           state(world(reviews=[{"user": person, "state": "APPROVED", "body": ""}])),
           "clean")
 
+    # The workflow posts the verdict as a commit status as well, which the
+    # rollup names by `context`. It is the findings check, judged by its run
+    # below, and not a red build: here the run says green, so it is clean.
+    check("findings-status-is-the-findings-check",
+          state(world(rollup=green + [{"context": pr_context.FINDINGS_CHECK,
+                                       "state": "FAILURE"}])), "clean")
+
     # --- dirty: something to answer ------------------------------------------
     check("open-finding", state(world(findings=[{
         "name": pr_context.FINDINGS_CHECK, "status": "completed",

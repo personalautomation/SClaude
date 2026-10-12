@@ -170,7 +170,14 @@ def layered(root, tree, *parts):
     path = os.path.join(tree, *parts)
     if not os.path.isfile(path):
         return main
-    own = dict(read(path))
+    # The tree's copy is the session's to break, and a broken one is only its
+    # own loss: main's copy holds. It used to fail the whole merge, and the
+    # fallback to the presets threw main's team rules away with it.
+    try:
+        own = dict(read(path))
+    except ValueError as exc:
+        sys.stderr.write("sclaude policy: %s; this tree's copy is left out, main's holds\n" % exc)
+        return main
     own["deny"] = as_list(main.get("deny")) + as_list(own.get("deny"))
     # An integration is a set of bans too: one main uses holds for a branch
     # made before main named it.
@@ -208,8 +215,14 @@ def merge(root, person, step, layers, tree=""):
         raise CoreUnreadable("%s is missing, unreadable or gives no rule"
                              % os.path.join(PRESETS, "core.json"))
     team = layered(root, tree, ".sclaude", "team", "policy.json") if root and layers else {}
-    mine = layered(root, tree, ".sclaude", "people", person, "policy.json") \
-        if root and person and layers else {}
+    # A person's own file breaks only that person's layer: it adds bans and
+    # lifts nothing, so dropping it alone is safe, and the team's stays.
+    try:
+        mine = layered(root, tree, ".sclaude", "people", person, "policy.json") \
+            if root and person and layers else {}
+    except ValueError as exc:
+        sys.stderr.write("sclaude policy: %s; your own rules are left out\n" % exc)
+        mine = {}
 
     names = team.get("integrations")
     if not isinstance(names, list):
@@ -238,9 +251,10 @@ def merge(root, person, step, layers, tree=""):
         try:
             named = config_denies(where)
         except ValueError as exc:
-            # The product's config, broken: merged() falls back and says so;
-            # in the fallback it is said here, and the rest still holds.
-            if layers:
+            # The main checkout's config, broken: merged() falls back and
+            # says so. The tree's is the session's to break, and only its
+            # own production commands are lost with it.
+            if layers and where == root:
                 raise
             sys.stderr.write("sclaude policy: %s; its production commands are not banned\n" % exc)
             continue

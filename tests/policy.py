@@ -207,6 +207,22 @@ try:
     check("bad-json-said", "not valid JSON" in done.stderr, True)
     check("bad-json-presets-hold", "Bash(gh pr merge:*)" in done.stdout, True)
 
+    # A broken file in the session's tree, or a person's own, drops only that
+    # layer: main's team rules hold.
+    hold = os.path.join(tmp, "hold")
+    hold_tree = os.path.join(tmp, "hold-feat")
+    write(hold, ".sclaude/team/policy.json", {"deny": [{"command": "npm run seed", "why": "team"}]})
+    os.makedirs(os.path.join(hold_tree, ".sclaude", "team"))
+    with open(os.path.join(hold_tree, ".sclaude", "team", "policy.json"), "w") as fh:
+        fh.write("{,")
+    os.makedirs(os.path.join(hold_tree, ".sclaude", "people", "ann"))
+    with open(os.path.join(hold_tree, ".sclaude", "people", "ann", "policy.json"), "w") as fh:
+        fh.write("{,")
+    with open(os.path.join(hold_tree, ".sclaude", "config.json"), "w") as fh:
+        fh.write("{,")
+    held = [" ".join(d["words"]) for d in policy.merged(hold, "ann", "code", hold_tree)["deny"]]
+    check("broken-tree-keeps-team", "npm run seed" in held, True)
+
     # A core.json that gives no rule is sclaude's own breakage: raised, not
     # read as an empty layer, and not blamed on the product.
     saved = policy.PRESETS

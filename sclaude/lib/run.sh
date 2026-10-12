@@ -1773,7 +1773,7 @@ instruments_propose() {
     title="sclaude: fixes from $(developer_name 2>/dev/null || echo "$branch")"
   fi
   body="$(printf '%s\n\n%s\n\n%s\n' \
-    "Fixes to sclaude from \`$branch\`, committed by friction reviews and retrospectives on this developer's machine and opened by sclaude itself." \
+    "Changes to sclaude from \`$branch\`, made by hand by this developer and proposed with \`sclaude propose\`; sclaude's sessions never commit to it." \
     "$(git -C "$INSTRUMENTS" log origin/main..HEAD --format='- %s' 2>/dev/null)" \
     "Later pushes to the branch update this pull request.")"
   if pr="$(GH_PROMPT_DISABLED=1 gh pr create --repo "$slug" --base main \

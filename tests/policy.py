@@ -189,6 +189,18 @@ try:
     check("broken-keeps-integrations", policy.merge(broken, "", "code", layers=False)["integrations"],
           ["vercel"])
 
+    # A team file that is not JSON is said, not read as an empty layer: the
+    # product's bans go, and the person must hear it.
+    bad = os.path.join(tmp, "bad-json")
+    write(bad, ".sclaude/config.json", {})
+    os.makedirs(os.path.join(bad, ".sclaude", "team"), exist_ok=True)
+    with open(os.path.join(bad, ".sclaude", "team", "policy.json"), "w") as fh:
+        fh.write('{"deny": [{"command": "npm run seed"}],}')
+    done = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"),
+                           "flags", bad, "", "code"], capture_output=True, text=True)
+    check("bad-json-said", "not valid JSON" in done.stderr, True)
+    check("bad-json-presets-hold", "Bash(gh pr merge:*)" in done.stdout, True)
+
     # A core.json that gives no rule is sclaude's own breakage: raised, not
     # read as an empty layer, and not blamed on the product.
     saved = policy.PRESETS

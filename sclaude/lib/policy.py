@@ -46,11 +46,16 @@ PRESETS = os.path.join(HERE, "..", "policy")
 
 
 def read(path):
+    """A layer's file: {} when there is none. One that is there and is not
+    JSON raises: read as {}, a trailing comma in the team's file dropped every
+    product ban without a word, where merged() falls back and says so."""
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
-    except (OSError, ValueError):
+    except OSError:
         return {}
+    except ValueError as exc:
+        raise ValueError("%s is not valid JSON (%s)" % (path, exc))
     return data if isinstance(data, dict) else {}
 
 
@@ -187,7 +192,10 @@ class CoreUnreadable(RuntimeError):
 
 
 def merge(root, person, step, layers, tree=""):
-    core = read(os.path.join(PRESETS, "core.json"))
+    try:
+        core = read(os.path.join(PRESETS, "core.json"))
+    except ValueError as exc:
+        raise CoreUnreadable(str(exc))
     # The rules nothing lifts are not optional: read as an empty layer, a
     # missing or broken core.json took the merge ban with it, silently. What
     # counts is the rules read from it, not that a list is there: an entry
@@ -222,9 +230,17 @@ def merge(root, person, step, layers, tree=""):
         tools += [t for t in as_list(as_dict(layer.get("tools")).get("deny")) if isinstance(t, str)]
     # The production commands the product names in .sclaude/config.json, liftable by
     # the team like an integration's.
-    deny += [d for d in with_source(config_denies(root), "deny", "config") if not lifted(d[0])]
-    if tree and os.path.realpath(tree) != os.path.realpath(root or tree):
-        deny += [d for d in with_source(config_denies(tree), "deny", "config") if not lifted(d[0])]
+    for where in [root] + ([tree] if tree and os.path.realpath(tree) != os.path.realpath(root or tree) else []):
+        try:
+            named = config_denies(where)
+        except ValueError as exc:
+            # The product's config, broken: merged() falls back and says so;
+            # in the fallback it is said here, and the rest still holds.
+            if layers:
+                raise
+            sys.stderr.write("sclaude policy: %s; its production commands are not banned\n" % exc)
+            continue
+        deny += [d for d in with_source(named, "deny", "config") if not lifted(d[0])]
     deny += with_source(team, "deny", "team")
     deny += with_source(mine, "deny", "person")
 

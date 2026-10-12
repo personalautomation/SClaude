@@ -76,7 +76,7 @@ product_maintainer() {
   # who maintains the product, and "everybody" is the answer that drops the
   # team guard: a trailing comma made every developer a maintainer. Nobody,
   # then, and said.
-  [[ "$rc" -eq 1 ]] && return 0
+  [[ "$rc" -eq 3 ]] && return 0
   if [[ "$rc" -ne 0 ]]; then
     warn "  $root/.sclaude/config.json cannot be read; nobody counts as its maintainer" >&2
     return 1

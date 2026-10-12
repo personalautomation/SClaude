@@ -495,6 +495,36 @@ def main():
                   'environment_restore "%s" "$s"; environment_current "%s"' % (sw, sw, sw, sw))
         check("snapshot: a link is back", out, "localdb")
 
+        # The orchestrator reads protection from main as well: a tree that
+        # drops "protected" from prod does not make it runnable. And
+        # main-config tells no config (3) from one it cannot read (2).
+        guarded = os.path.join(tmp, "guarded")
+        os.makedirs(os.path.join(guarded, ".sclaude"))
+        cfg = os.path.join(guarded, ".sclaude", "config.json")
+        with open(cfg, "w") as fh:
+            json.dump({"environments": {"prod": {"env": ".env.prod", "protected": True}}}, fh)
+        genv = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                    GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+        subprocess.run(["git", "init", "-q", "-b", "main", guarded], check=True)
+        subprocess.run(["git", "-C", guarded, "add", "-A"], check=True)
+        subprocess.run(["git", "-C", guarded, "commit", "-qm", "c"], check=True, env=genv)
+        subprocess.run(["git", "-C", guarded, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
+        with open(cfg, "w") as fh:
+            json.dump({"environments": {"prod": {"env": ".env.prod"}}}, fh)
+        envs_py = os.path.join(LIB, "envs.py")
+        check("protected: read from main, not the tree",
+              subprocess.run([sys.executable, envs_py, "protected", guarded, "prod"]).returncode, 0)
+        subprocess.run(["git", "-C", guarded, "update-ref", "-d", "refs/remotes/origin/main"], check=True)
+        with open(cfg, "w") as fh:
+            fh.write("{,")
+        check("main-config: unreadable is 2",
+              subprocess.run([sys.executable, envs_py, "main-config", guarded],
+                             capture_output=True).returncode, 2)
+        os.remove(cfg)
+        check("main-config: none is 3",
+              subprocess.run([sys.executable, envs_py, "main-config", guarded],
+                             capture_output=True).returncode, 3)
+
         # Files that share a name in folders of their own: the exact path
         # decides, and production is not read as the first of them.
         same = os.path.join(tmp, "same")

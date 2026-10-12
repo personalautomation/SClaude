@@ -48,7 +48,8 @@
 #   envs.py production <root>               production's name
 #   envs.py site <root>                     production's siteUrl
 #   envs.py old <root>                      why the config is of the old shape
-#   envs.py main-config <root> [tree]       the config as main has it (JSON)
+#   envs.py main-config <root> [tree]       the config as main has it (JSON);
+#                                           exit 3 when there is none
 import json
 import os
 import re
@@ -84,12 +85,22 @@ def main_config(repo, tree=None):
     Unreadable when the one found is not a JSON object.
     """
     import subprocess
+    text, has_main = None, False
     try:
-        done = subprocess.run(["git", "-C", repo, "show", "origin/main:.sclaude/config.json"],
-                              capture_output=True, text=True, timeout=5)
-        text = done.stdout if done.returncode == 0 else None
+        has_main = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "-q", "origin/main"],
+                                  capture_output=True, timeout=5).returncode == 0
+        if has_main:
+            done = subprocess.run(["git", "-C", repo, "show", "origin/main:.sclaude/config.json"],
+                                  capture_output=True, timeout=5)
+            text = done.stdout.decode("utf-8") if done.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
-        text = None
+        has_main = False
+    except UnicodeDecodeError as exc:
+        raise Unreadable("origin/main:.sclaude/config.json: %s" % exc)
+    # A main without the file has no config: the tree's copy, the session's to
+    # edit, is not what a protection may be read from.
+    if has_main and text is None:
+        return {}
     source = "origin/main"
     main = None
     try:
@@ -102,8 +113,11 @@ def main_config(repo, tree=None):
         for where in (main, repo, tree):
             path = os.path.join(where, ".sclaude", "config.json") if where else ""
             if path and os.path.isfile(path):
-                with open(path, encoding="utf-8") as fh:
-                    text, source = fh.read(), path
+                try:
+                    with open(path, encoding="utf-8") as fh:
+                        text, source = fh.read(), path
+                except (OSError, UnicodeDecodeError) as exc:
+                    raise Unreadable("%s: %s" % (path, exc))
                 break
     if text is None:
         return {}
@@ -260,6 +274,16 @@ def production_site(root, data=None):
     return site if isinstance(site, str) and site else None
 
 
+def guarded(root):
+    """main_config for the protections the orchestrator reads too: which
+    environment is protected, runnable, production. Unreadable reads as none
+    known, so every environment counts as protected and none as production."""
+    try:
+        return main_config(root, root)
+    except Unreadable:
+        return {}
+
+
 def main(argv):
     if len(argv) < 2:
         sys.stderr.write(__doc__ or "")
@@ -271,9 +295,9 @@ def main(argv):
             print(name)
         return 0
     if what == "protected" and rest:
-        return 0 if protected(root, rest[0]) else 1
+        return 0 if protected(root, rest[0], guarded(root)) else 1
     if what == "runnable" and rest:
-        return 0 if runnable(root, rest[0]) else 1
+        return 0 if runnable(root, rest[0], guarded(root)) else 1
     if what in ("file", "ref", "current", "settled") and rest:
         found = {"file": env_file, "ref": ref, "current": current, "settled": settled}[what](root, rest[0])
         if not found:
@@ -287,26 +311,27 @@ def main(argv):
         print(found)
         return 0
     if what == "production":
-        found = production(root)
+        found = production(root, guarded(root))
         if not found:
             return 1
         print(found)
         return 0
     if what == "site":
-        found = production_site(root)
+        found = production_site(root, guarded(root))
         if not found:
             return 1
         print(found)
         return 0
     if what == "main-config":
-        # 0 and the JSON; 1 with no config anywhere; 2 when it is unreadable.
+        # 0 and the JSON; 3 with no config anywhere; anything else, an
+        # uncaught exception's 1 included, is a config that cannot be read.
         try:
             found = main_config(root, rest[0] if rest else None)
-        except Unreadable as exc:
+        except Exception as exc:  # noqa: BLE001
             sys.stderr.write("%s\n" % exc)
             return 2
         if not found:
-            return 1
+            return 3
         print(json.dumps(found))
         return 0
     if what == "old":

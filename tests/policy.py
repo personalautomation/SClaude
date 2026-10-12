@@ -188,6 +188,23 @@ try:
     # Dropping the broken layer keeps what the product evidently uses.
     check("broken-keeps-integrations", policy.merge(broken, "", "code", layers=False)["integrations"],
           ["vercel"])
+
+    # A core.json that gives no rule is sclaude's own breakage: raised, not
+    # read as an empty layer, and not blamed on the product.
+    saved = policy.PRESETS
+    for i, text in enumerate(('{"deny": [{"cmd": "gh pr merge"}]}', '{"deny": [""]}', "{")):
+        presets = os.path.join(tmp, "presets-%d" % i)
+        os.makedirs(presets)
+        with open(os.path.join(presets, "core.json"), "w") as fh:
+            fh.write(text)
+        policy.PRESETS = presets
+        try:
+            policy.merged(bare, "", "code")
+            raised = None
+        except policy.CoreUnreadable as exc:
+            raised = str(exc)
+        check("core-unreadable-%d" % i, bool(raised) and "core.json" in raised, True)
+    policy.PRESETS = saved
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

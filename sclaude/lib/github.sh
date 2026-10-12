@@ -2038,7 +2038,8 @@ run_status() {
   fi
 
   local settings
-  settings="$(status_settings)" || { warn "  The status session was not started."; return 1; }
+  settings="$(status_settings)" \
+    || { warn "  The status session was not started: sclaude could not read its rules (see above)."; return 1; }
   local -a extra; mapfile -t extra <<< "$settings"
 
   # Every claude conversation belongs in the issue's table, the epilogue's

@@ -490,6 +490,13 @@ run_step() {
     after_step "$wt" "$slug" "$step"
     return 0
   fi
+  # Not started without its rules: a session whose policy could not be read
+  # would run with none of the product's bans (policy_rules says why on the
+  # terminal). Before the dev server and Chrome, which a step that does not
+  # start would leave running for nothing.
+  local settings
+  settings="$(step_settings "$step" "$wt")" \
+    || { warn "  The step was not started: sclaude could not read its rules (see above)."; return 1; }
   ensure_dev "$wt"
   ensure_chrome "$wt"
   echo ""
@@ -524,10 +531,6 @@ run_step() {
     fi
   fi
 
-  # Not started without its rules: a session whose policy could not be read
-  # would run with none of the product's bans (policy_rules says why).
-  local settings
-  settings="$(step_settings "$step" "$wt")" || { warn "  The step was not started."; return 1; }
   local -a extra; mapfile -t extra <<< "$settings"
 
   # A step's conversation needs a terminal, and without one we stop rather than

@@ -146,6 +146,10 @@ def merged(root, person="", step="", tree=""):
     """
     try:
         return merge(root, person, step, layers=True, tree=tree)
+    except CoreUnreadable:
+        # The presets are what broke: nothing to fall back on, and the
+        # message below would blame the product.
+        raise
     except Exception as exc:  # noqa: BLE001 — any failure, the presets still hold
         sys.stderr.write("sclaude policy: the product's or the person's rules could "
                          "not be read (%s); working from sclaude's presets\n" % exc)
@@ -178,13 +182,19 @@ def layered(root, tree, *parts):
     return own
 
 
+class CoreUnreadable(RuntimeError):
+    """core.json gave no rule: sclaude's own presets are broken."""
+
+
 def merge(root, person, step, layers, tree=""):
     core = read(os.path.join(PRESETS, "core.json"))
     # The rules nothing lifts are not optional: read as an empty layer, a
-    # missing or broken core.json took the merge ban with it, silently.
-    if not as_list(core.get("deny")):
-        raise RuntimeError("%s is missing, unreadable or has no deny list"
-                           % os.path.join(PRESETS, "core.json"))
+    # missing or broken core.json took the merge ban with it, silently. What
+    # counts is the rules read from it, not that a list is there: an entry
+    # with a misspelt key is skipped, and the ban with it.
+    if not entries(core, "deny", step):
+        raise CoreUnreadable("%s is missing, unreadable or gives no rule"
+                             % os.path.join(PRESETS, "core.json"))
     team = layered(root, tree, ".sclaude", "team", "policy.json") if root and layers else {}
     mine = layered(root, tree, ".sclaude", "people", person, "policy.json") \
         if root and person and layers else {}

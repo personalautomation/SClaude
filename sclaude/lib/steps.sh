@@ -247,6 +247,10 @@ policy_rules() {
     rm -f "$err"
     return 1
   fi
+  # Read, but not whole: a product's or a person's file that broke the merge
+  # was dropped, and the session runs on sclaude's presets alone. Said, since
+  # the product's bans are not there.
+  [[ -s "$err" ]] && warn "  $(tail -n 1 "$err")" >&2
   rm -f "$err"
   while IFS= read -r line; do
     if [[ -z "$line" ]]; then seen=1; continue; fi

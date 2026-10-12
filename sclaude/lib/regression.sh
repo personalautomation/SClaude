@@ -1143,6 +1143,11 @@ Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
     state_set "$state" "regression.$stage.attempts" "$((attempts + 1))"
     regression_fix "$wt" "$slug" "$stage"
     local frc=$?
+    if [[ "$frc" -eq 5 ]]; then
+      state_set "$state" "regression.$stage.attempts" "$attempts"
+      info "  Nothing was spent on $stage. Repair sclaude's rules, then: $SELF $slug"
+      return 1
+    fi
 
     # 4 means the friction review after the session fixed the orchestrator.
     # The stage is run again rather than reported: a red run must never be
@@ -1466,7 +1471,10 @@ regression_fix() {
   SCLAUDE_B_REGRESSION="$(regression_fix_block "$wt" "$stage" "$merged" gate)"
 
   local settings
-  settings="$(step_settings "$step" "$wt")" || { warn "  The fix was not started."; return 1; }
+  # 5: not started, for sclaude's own trouble rather than the branch's, so the
+  # caller neither counts it as an attempt nor reports a failed fix.
+  settings="$(step_settings "$step" "$wt")" \
+    || { warn "  The fix was not started: sclaude could not read its rules (see above)."; return 5; }
   mapfile -t extra <<< "$settings"
 
   # The same part red again after a fix goes back to the session that made the

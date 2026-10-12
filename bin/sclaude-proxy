@@ -762,15 +762,46 @@ def listening_socket():
     return sock
 
 
+# The proxy lives for days, and an update of sclaude changes the code it runs
+# under it: one started before the state moved into .sclaude/local/feature/
+# went on looking in .feature/ and answered "No such feature" for every tree
+# made after. So it watches its own file and steps down when that changes.
+# Started by the socket, it simply exits: systemd keeps the socket listening
+# and starts the new code on the next connection. Run by hand, it re-executes.
+OWN_FILE = os.path.realpath(__file__)
+
+
+def own_mtime():
+    try:
+        return os.stat(OWN_FILE).st_mtime
+    except OSError:
+        return None
+
+
+async def watch_own_code(server, started):
+    while True:
+        await asyncio.sleep(float(os.environ.get("SCLAUDE_PROXY_WATCH") or 10))
+        now = own_mtime()
+        if now is not None and now != started:
+            sys.stderr.write("sclaude-proxy: its code changed; restarting on the new one\n")
+            sys.stderr.flush()
+            server.close()
+            if os.environ.get("LISTEN_PID") == str(os.getpid()):
+                os._exit(0)
+            os.execv(sys.executable, [sys.executable, OWN_FILE] + sys.argv[1:])
+
+
 async def main():
     server = await asyncio.start_server(handle, sock=listening_socket(),
                                         limit=HEAD_LIMIT)
     idle = asyncio.ensure_future(reaper())
+    watch = asyncio.ensure_future(watch_own_code(server, own_mtime()))
     try:
         async with server:
             await server.serve_forever()
     finally:
         idle.cancel()
+        watch.cancel()
 
 
 if __name__ == "__main__":

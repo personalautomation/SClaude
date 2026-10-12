@@ -531,6 +531,37 @@ def main():
                     pass
         shutil.rmtree(root, ignore_errors=True)
 
+    # A proxy whose own code changes steps down onto the new code: one left
+    # on old code looked in the old state folder and found no feature.
+    watched = tempfile.mkdtemp(prefix="proxy-watch-")
+    try:
+        # A copy with the library beside it, as in the checkout, so that its
+        # file can be touched without touching the real one.
+        os.makedirs(os.path.join(watched, "bin"))
+        shutil.copytree(os.path.join(os.path.dirname(PROXY), "..", "sclaude", "lib"),
+                        os.path.join(watched, "sclaude", "lib"))
+        copy = os.path.join(watched, "bin", "sclaude-proxy")
+        shutil.copy(PROXY, copy)
+        port = free_port()
+        env = dict(os.environ, SCLAUDE_PROXY_PORT=str(port), SCLAUDE_PROXY_BIND="127.0.0.1",
+                   SCLAUDE_DEV_REGISTRY=watched, SCLAUDE_PROXY_WATCH="0.2")
+        env.pop("LISTEN_PID", None)
+        proc = subprocess.Popen([sys.executable, copy], env=env,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        try:
+            wait_for(lambda: answers_on(port), 5)
+            time.sleep(0.5)
+            os.utime(copy, (time.time() + 5, time.time() + 5))
+            time.sleep(1.5)
+            wait_for(lambda: answers_on(port), 5)
+            check("a code change is picked up, and it answers again", answers_on(port), True)
+        finally:
+            proc.terminate()
+            _, err = proc.communicate(timeout=5)
+        check("it says it restarted", b"its code changed" in err, True)
+    finally:
+        shutil.rmtree(watched, ignore_errors=True)
+
     for name, want, got in failures:
         print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))
     print("%d/%d passed" % (total - len(failures), total))

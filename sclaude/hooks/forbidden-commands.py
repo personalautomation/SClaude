@@ -64,7 +64,7 @@ except Exception as _exc:  # noqa: BLE001
     sys.exit(0)
 _failsafe.install("ban check (forbidden-commands.py)")
 from _friction import note  # noqa: E402
-from _shell import (GIT_VALUED, SEPARATORS, closing_at, inner_command, script_call,  # noqa: E402
+from _shell import (GIT_VALUED, SEPARATORS, call_form, closing_at, inner_command, script_call,  # noqa: E402
                     strip_keywords, strip_redirections, strip_runners, strip_wrappers,
                     substitutions, tokenize, ungroup)
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
@@ -659,11 +659,17 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
         return None
 
     flags = [w for w in words[2:] if w.startswith("-")]
+    force = ("a reviewer is reading this branch, and rewritten history strands the discussion")
     for flag in flags:
-        if flag in ("--force", "-f") or flag.startswith("--force-with-lease"):
-            return ("a reviewer is reading this branch, and rewritten "
-                    "history strands the discussion")
-        if flag == "--no-verify":
+        name = flag.split("=", 1)[0]
+        # Short flags come grouped (-uf), and git takes a long one shortened
+        # to any unique prefix (--no-verif, --forc).
+        short = flag[1:] if not flag.startswith("--") else ""
+        if "f" in short or (len(name) >= 5 and "--force".startswith(name)) \
+                or name.startswith("--force"):
+            return force
+        # (-n is --dry-run: --no-verify has no short form.)
+        if len(name) >= 6 and "--no-verify".startswith(name):
             return ("--no-verify bypasses .githooks/pre-push, which exists "
                     "precisely to catch the database drifting from the repo")
         # Every local branch, main among them, whichever is checked out; and
@@ -678,6 +684,10 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
     refs = [w for w in words[2:] if not w.startswith("-")]
     # The remote with its path, from the same words before stripping.
     remote = [w for w in raw[len(raw) - len(words) + 2:] if not w.startswith("-")]
+    # A `+` in front of a refspec forces it, as --force does. From the words
+    # as written: cut to its last part, `+feat/x` was `x`.
+    if any(ref.startswith("+") for ref in remote[1:]):
+        return force
     # A bare `git push` goes to origin as far as this can tell: in a scratch
     # repository it is as harmless as the same push with the remote named.
     if scratch_push(command, parts, where, remote[0] if remote else "origin", redirected):
@@ -814,7 +824,7 @@ def refuses(command, step, cwd=None, depth=0):
     if inner_parts is None:
         return "a substitution in the command is left open, so it cannot be judged"
 
-    table = {tuple(script_call(list(d["words"]))): d["why"] for d in POLICY.get("deny", [])}
+    table = {tuple(call_form(list(d["words"]))): d["why"] for d in POLICY.get("deny", [])}
 
     where = os.path.realpath(cwd or os.getcwd())
     # Every directory the line is in at some point: a substitution runs where
@@ -888,6 +898,12 @@ def refuses(command, step, cwd=None, depth=0):
         # in stays `where`.
         here, also = where, False
         if words[0] == "git":
+            # Pointing core.hooksPath elsewhere skips pre-push as surely as
+            # --no-verify does.
+            if any(w.lower().replace(" ", "").startswith("core.hookspath")
+                   for w in raw[len(raw) - len(words):]):
+                return ("core.hooksPath set on the command line bypasses .githooks/pre-push, "
+                        "which exists precisely to catch the database drifting from the repo")
             taken, here, also = git_globals(raw[len(raw) - len(words):], where)
             words = words[:1] + words[1 + taken:]
         reason = (push_refuses(words, command, parts, here, raw,
@@ -898,7 +914,9 @@ def refuses(command, step, cwd=None, depth=0):
                   or vercel_refuses(words, raw[len(raw) - len(words):]))
         if reason:
             return reason
-        called = script_call(words)
+        # gh's options carry paths (--repo=o/r), which the cut words lose.
+        called = call_form(words[:1] + raw[len(raw) - len(words) + 1:]
+                           if words[0] == "gh" else words)
         for prefix, why in table.items():
             if tuple(called[:len(prefix)]) == prefix:
                 return why

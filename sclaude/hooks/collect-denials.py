@@ -45,7 +45,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _friction import note
-from _shell import SEPARATORS, script_call, strip_runners, strip_wrappers, tokenize
+from _shell import SEPARATORS, call_form, strip_runners, strip_wrappers, tokenize
 
 # The refusals that reach the log, and how their source is named in the entry.
 # user-rejected is deliberately not here: a human who refused by hand is not
@@ -137,7 +137,7 @@ def policy_denials(step=""):
                                os.environ.get("SCLAUDE_POLICY_PERSON", ""), step, tree)
     except Exception:
         return [], []
-    return ([tuple(script_call(list(d["words"]))) for d in merged["deny"]],
+    return ([tuple(call_form(list(d["words"]))) for d in merged["deny"]],
             list(merged["tools"]))
 
 
@@ -154,7 +154,7 @@ def runs_banned(subject, prefixes, tools):
         if word not in SEPARATORS:
             part.append(word)
             continue
-        called = script_call(strip_runners(strip_wrappers(part)))
+        called = call_form(strip_runners(strip_wrappers(part)))
         if any(tuple(called[:len(p)]) == p for p in prefixes):
             return True
         part = []

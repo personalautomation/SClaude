@@ -557,3 +557,34 @@ def closing_at(segment, braces=True):
         if closing > 0:
             return k
     return None
+
+
+# gh's own options, which may stand anywhere: `gh pr -R o/r merge 5` is the
+# merge a ban written as `gh pr merge` meant, and it went past the hook and the
+# flag both.
+GH_VALUED = ("-R", "--repo", "--hostname")
+
+
+def gh_call(words):
+    """A gh call with its repository options taken out, wherever they stood."""
+    if not words or words[0] != "gh":
+        return words
+    out, i = [], 0
+    while i < len(words):
+        w = words[i]
+        if w in GH_VALUED:
+            i += 2
+            continue
+        if any(w.startswith(v + "=") for v in GH_VALUED if v.startswith("--")) \
+                or (w.startswith("-R") and len(w) > 2):
+            i += 1
+            continue
+        out.append(w)
+        i += 1
+    return out
+
+
+def call_form(words):
+    """The words as a ban compares them: a package script as `npm run x`, a gh
+    call without its repository options. Both sides of the comparison."""
+    return gh_call(script_call(words))

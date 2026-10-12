@@ -514,6 +514,13 @@ def main():
         envs_py = os.path.join(LIB, "envs.py")
         check("protected: read from main, not the tree",
               subprocess.run([sys.executable, envs_py, "protected", guarded, "prod"]).returncode, 0)
+        # Nor does a tree that maps a name to production's file get it linked.
+        with open(cfg, "w") as fh:
+            json.dump({"environments": {"prod": {"env": ".env.prod", "protected": True},
+                                        "dev": {"env": ".env.prod"}}}, fh)
+        check("file: a name's file is main's",
+              subprocess.run([sys.executable, envs_py, "file", guarded, "dev"],
+                             capture_output=True, text=True).stdout.strip(), "")
         subprocess.run(["git", "-C", guarded, "update-ref", "-d", "refs/remotes/origin/main"], check=True)
         with open(cfg, "w") as fh:
             fh.write("{,")

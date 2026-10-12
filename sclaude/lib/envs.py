@@ -97,10 +97,9 @@ def main_config(repo, tree=None):
         has_main = False
     except UnicodeDecodeError as exc:
         raise Unreadable("origin/main:.sclaude/config.json: %s" % exc)
-    # A main without the file has no config: the tree's copy, the session's to
-    # edit, is not what a protection may be read from.
-    if has_main and text is None:
-        return {}
+    # A main without the file: its own checkout's copy, a product being set up
+    # whose config has not merged yet, but never the tree's, the session's to
+    # edit.
     source = "origin/main"
     main = None
     try:
@@ -110,7 +109,7 @@ def main_config(repo, tree=None):
     except (OSError, subprocess.SubprocessError):
         pass
     if text is None:
-        for where in (main, repo, tree):
+        for where in ((main,) if has_main else (main, repo, tree)):
             path = os.path.join(where, ".sclaude", "config.json") if where else ""
             if path and os.path.isfile(path):
                 try:
@@ -290,8 +289,11 @@ def main(argv):
         return 2
     what, root = argv[0], argv[1]
     rest = argv[2:]
+    # Which file a name stands for is a protection too: a tree that mapped
+    # "dev" to .env.prod had the orchestrator link production in as dev. So
+    # names and files come from main as well; the files resolve in the tree.
     if what == "names":
-        for name in environments(root):
+        for name in environments(root, guarded(root)):
             print(name)
         return 0
     if what == "protected" and rest:
@@ -299,13 +301,14 @@ def main(argv):
     if what == "runnable" and rest:
         return 0 if runnable(root, rest[0], guarded(root)) else 1
     if what in ("file", "ref", "current", "settled") and rest:
-        found = {"file": env_file, "ref": ref, "current": current, "settled": settled}[what](root, rest[0])
+        found = {"file": env_file, "ref": ref, "current": current, "settled": settled}[what](
+            root, rest[0], guarded(root))
         if not found:
             return 1
         print(found)
         return 0
     if what == "value" and len(rest) >= 2:
-        found = value(root, rest[0], rest[1])
+        found = value(root, rest[0], rest[1], guarded(root))
         if found is None:
             return 1
         print(found)

@@ -12,12 +12,13 @@
 #   * a block missed entirely, reported as "nothing was written down" — which
 #     reads as the safe answer and is how a destructive block goes unmentioned.
 #
-# Both are real: the first is migration 0055, the second was 0048, whose header
-# carries a rule of dashes that an end-of-line anchor did not match.
+# Both happened: the first in a block that dropped a view and rebuilt it in a
+# comment, the second in a block whose header carried a rule of dashes that an
+# end-of-line anchor did not match.
 #
-# The fixtures are the shapes actually in the product repository. Where it is
-# checked out, every one of its migrations is classified too — instruments must
-# stay testable without it, so that half is guarded.
+# The fixtures are shapes real migrations were written in, with neutral names.
+# A product's whole migrations folder can be classified too, by pointing
+# SCLAUDE_MIGRATIONS at it: instruments stays testable without one.
 #
 # Run it with: python3 tests/down_blocks.py
 import os
@@ -54,8 +55,8 @@ def block(*lines):
 
 check("no-block-is-none", extract("create table public.t (id int);\n"), None)
 
-# The header with a rule of dashes after it. 0048 writes it that way, and an
-# anchor insisting on end-of-line after the colon missed the file — reporting
+# The header with a rule of dashes after it. A real migration wrote it that
+# way, and an anchor insisting on end-of-line after the colon missed the file — reporting
 # "nothing was written down" about a block that drops two columns.
 ruled = ("create table public.t (id int);\n"
          "-- down: ---------------------------------------------------------\n"
@@ -81,8 +82,8 @@ check("runnable-several",
       "runnable")
 
 # Dropping behaviour is not destructive: a function, a view, a trigger and a
-# policy take no rows with them. 0060 is exactly one `drop function`, and
-# warning about it every time is how a warning stops being read.
+# policy take no rows with them. A block that is exactly one `drop function`
+# is common, and warning about it every time is how a warning stops being read.
 for kind in ("drop function if exists public.f();",
              "drop view if exists public.v;",
              "drop trigger if exists t on public.x;",
@@ -90,7 +91,7 @@ for kind in ("drop function if exists public.f();",
     check("not-destructive-%s" % kind.split()[1], verdict(block("--   " + kind)), "runnable")
 
 # (b) destructive: rows go.
-for sql in ("delete from public.notifications where kind = 'x';",
+for sql in ("delete from public.events where kind = 'x';",
             "truncate public.t;",
             "drop table public.t;",
             "alter table public.t drop column c;"):
@@ -99,13 +100,13 @@ for sql in ("delete from public.notifications where kind = 'x';",
 # (c) prose. The ellipsis case is the dangerous one: strip the inner comments
 # and what is left parses, runs, and leaves production without the view.
 danger = block(
-    "--   -- profile_cards cannot lose columns by being replaced, so: drop the view,",
-    "--   -- recreate it in the shape above without the six trailing columns.",
+    "--   -- the view cannot lose columns by being replaced, so: drop it,",
+    "--   -- recreate it in the shape above without the trailing columns.",
     "--",
-    "--   drop view if exists public.profile_cards;",
-    "--   -- ...recreate from section 7 of 0051's schema snapshot, ending at",
-    "--   -- bio_search_text...",
-    "--   revoke all on public.profile_cards from anon, authenticated;")
+    "--   drop view if exists public.v;",
+    "--   -- ...recreate from the previous schema snapshot, ending at",
+    "--   -- the last column...",
+    "--   revoke all on public.v from anon, authenticated;")
 check("ellipsis-is-prose", verdict(danger), "prose")
 check_true("ellipsis-says-why", "missing" in classify(danger)["reason"])
 # And the statements are still returned: the report shows what it found rather
@@ -113,7 +114,7 @@ check_true("ellipsis-says-why", "missing" in classify(danger)["reason"])
 check_true("prose-still-reports-its-sql", len(classify(danger)["sql"]) > 0)
 
 check("rebuild-is-prose",
-      verdict(block("--   -- recreate the view from 0051 by hand",
+      verdict(block("--   -- recreate the view from the earlier migration by hand",
                     "--   drop view if exists public.v;")),
       "prose")
 
@@ -128,21 +129,21 @@ check("dollar-quoted-is-prose",
                     "--   $$;")),
       "prose")
 
-# An English sentence flush among the statements — 0052 and 0059 write their
+# An English sentence flush among the statements: migrations write their
 # closing paragraph inside the block, with the same indentation as the SQL.
-mixed = block("--   update public.tiers set limits = '{}'::jsonb where code = 'free';",
+mixed = block("--   update public.plans set limits = '{}'::jsonb where code = 'free';",
               "--",
               "--   Nothing else goes back: no column, function, policy or grant is",
-              "--   touched here, and a bio already written past 280 characters would",
+              "--   touched here, and a value already written past the new limit would",
               "--   simply stop validating on the next save.")
 check("trailing-prose-does-not-become-sql", verdict(mixed), "runnable")
 check("trailing-prose-kept-out-of-sql", len(classify(mixed)["sql"]), 1)
 
 # A block that was written and says there is nothing to undo is not the same as
-# no block at all — 0031. Calling it `absent` would accuse somebody of an
+# no block at all. Calling it `absent` would accuse somebody of an
 # omission and invite the next reader to "fix" a deliberate decision.
-noted = block("--   the 0029 body, with `c.id <> (select auth.uid())` in place of the",
-              "--   line above — which is the bug, so there is nothing worth going back to.")
+noted = block("--   the earlier body, with the check above in place of this one,",
+              "--   which is the bug, so there is nothing worth going back to.")
 check("note-without-statements-is-prose", verdict(noted), "prose")
 check("absent-is-only-for-no-block",
       verdict("create table public.t (id int);\n"), "absent")
@@ -150,11 +151,11 @@ check("absent-is-only-for-no-block",
 
 # --- statements across several lines ----------------------------------------
 
-# 0055's `grant select (...)` runs to eight lines; grouping is by semicolon, not
+# A `grant select (...)` can run to several lines; grouping is by semicolon, not
 # by line, or a rollback would run a third of a statement.
-multi = block("--   grant select (id, username, avatar_media_id,",
-              "--                 visibility, tier, created_at)",
-              "--     on public.profiles to anon, authenticated;")
+multi = block("--   grant select (id, name, picture_id,",
+              "--                 visibility, plan, created_at)",
+              "--     on public.accounts to anon, authenticated;")
 stmts, _ = split(extract(multi))
 check("multiline-is-one-statement", len(stmts), 1)
 check_true("multiline-joined", stmts[0].startswith("grant select (id"))
@@ -183,40 +184,26 @@ check("forward-ignores-the-down-block",
       False)
 
 
-# --- against the real migrations --------------------------------------------
+# --- against a product's migrations ----------------------------------------
 #
-# Guarded: instruments is machine-level and must stay testable with no product
-# checked out.
+# Optional: instruments is machine-level and must stay testable with no product
+# checked out. SCLAUDE_MIGRATIONS names a folder of migrations, and the property
+# that matters across a whole set is checked on it: a block is called absent
+# only when the file really has no `-- down:` line, and nothing offered for
+# execution holds a line that is not a statement.
 
-SOCIAL = os.path.expanduser("~/myapp/supabase/migrations")
-if os.path.isdir(SOCIAL):
-    # The anchors, each one a shape that cost something to get right.
-    for name, want in (
-            ("0060_cancel_email_change.sql", "runnable"),
-            ("0061_announce_a_moved_address.sql", "runnable"),
-            ("0059_email_changed_notification.sql", "destructive"),
-            ("0048_country_points.sql", "destructive"),
-            ("0055_links_phone_and_tax.sql", "prose"),
-            ("0051_bio_plain_text_without_recursion.sql", "prose"),
-            ("0031_people_districts_null_caller.sql", "prose"),
-    ):
-        path = os.path.join(SOCIAL, name)
-        if os.path.isfile(path):
-            check("real-%s" % name[:4], classify_file(path)["verdict"], want)
-
-    # And the property that matters across the whole set: a block is called
-    # absent only when the file really has no `-- down:` line, and nothing
-    # offered for execution holds a line that is not a statement.
+MIGRATIONS = os.environ.get("SCLAUDE_MIGRATIONS", "")
+if MIGRATIONS and os.path.isdir(MIGRATIONS):
     header = re.compile(r"^--[ \t]*down:", re.M)
     opener = re.compile(
         r"^\s*(?:create|drop|alter|grant|revoke|insert|update|delete|truncate"
         r"|comment|set|select|with|do|begin|commit|refresh|analyze|vacuum|reindex)\b",
         re.I)
     missed = phantom = stray = 0
-    for entry in sorted(os.listdir(SOCIAL)):
+    for entry in sorted(os.listdir(MIGRATIONS)):
         if not entry.endswith(".sql"):
             continue
-        path = os.path.join(SOCIAL, entry)
+        path = os.path.join(MIGRATIONS, entry)
         record = classify_file(path)
         with open(path, encoding="utf-8") as fh:
             has_block = header.search(fh.read()) is not None

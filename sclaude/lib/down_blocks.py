@@ -51,13 +51,13 @@ INNER_COMMENT = re.compile(r"^\s*--")
 # What makes a block prose rather than a script: it points at something the
 # reader has to go and get.
 #
-# This is the rule that matters most, and it earns its place from a real file.
-# 0055's block reads:
+# This is the rule that matters most, and it earns its place from a real file,
+# whose block read, names aside:
 #
-#     drop view if exists public.profile_cards;
-#     -- ...recreate from section 7 of 0051's schema snapshot, ending at
-#     -- bio_search_text...
-#     revoke all on public.profile_cards from anon, authenticated;
+#     drop view if exists public.v;
+#     -- ...recreate from the previous schema snapshot, ending at
+#     -- the last column...
+#     revoke all on public.v from anon, authenticated;
 #
 # Strip the inner comments and what is left parses, runs, and leaves production
 # without the view — the `drop` happens, the recreation does not. A block whose

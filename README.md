@@ -907,9 +907,9 @@ verdicts, and the two interesting ones are what the file exists for:
 | `prose` | it looks like SQL and is a note to a human |
 | `absent` | no block at all — the loudest of the four |
 
-`prose` is the one that matters. Migration 0055's block reads `drop view if
-exists public.profile_cards;`, then — inside a comment — "...recreate from
-section 7 of 0051's schema snapshot...", then two `grant` lines. Strip the
+`prose` is the one that matters. A real block read `drop view if exists
+public.v;`, then — inside a comment — "...recreate from the previous schema
+snapshot...", then two `grant` lines. Strip the
 comments and what is left parses, runs, and leaves production without the view.
 An ellipsis where statements should be, a function body in `$$` this reader
 cannot split, an English sentence among the statements: any of them refuses the

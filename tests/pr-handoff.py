@@ -178,7 +178,7 @@ check("setup-once", calls(), [])
 
 def board(status):
     return {"data": {"repository": {"issueOrPullRequest": {"projectItems": {"nodes": [{
-        "id": "ITEM", "project": {"id": "PROJ", "title": "agoramove"},
+        "id": "ITEM", "project": {"id": "PROJ", "title": "myapp"},
         "fieldValueByName": {"name": status, "field": {"id": "F", "options": [
             {"id": "OB", "name": "Backlog"}, {"id": "OD", "name": "Done"}]}}}]}}}}}
 

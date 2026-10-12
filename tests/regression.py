@@ -81,7 +81,8 @@ check_true("stages-come-from-the-project",
 # And no hardcoded production host: the address decides which database a
 # write-capable suite reaches, so a literal fallback aimed one product's suite
 # at another's production.
-check_true("no-hardcoded-prod-host", "agoramove" not in regression)
+check_true("no-hardcoded-prod-host",
+           re.search(r"https://[\w.-]+\.(?:vercel\.app|com|org|net)\b", regression) is None)
 check_true("prod-url-comes-from-the-project", "project_prod_url" in regression)
 
 # A stage the project does not describe is not a red run. `regression_run`

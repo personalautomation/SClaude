@@ -137,7 +137,7 @@ try:
     # library. These are the exact strings that used to be written into it, and
     # a comment mentioning them is fine — a line of code is not.
     for module, needles in (
-            ("regression.sh", ["agoramove", "REGRESSION_LOCAL_PARTS="]),
+            ("regression.sh", [".vercel.app", "REGRESSION_LOCAL_PARTS="]),
             ("deploy.sh", ["supabase/migrations"]),
             ("rollback.sh", ["POSTGRES_URL_NON_POOLING", ".env.prod"]),
     ):

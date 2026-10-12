@@ -629,7 +629,9 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
     refs = [w for w in words[2:] if not w.startswith("-")]
     # The remote with its path, from the same words before stripping.
     remote = [w for w in raw[len(raw) - len(words) + 2:] if not w.startswith("-")]
-    if remote and scratch_push(command, parts, where, remote[0], redirected):
+    # A bare `git push` goes to origin as far as this can tell: in a scratch
+    # repository it is as harmless as the same push with the remote named.
+    if scratch_push(command, parts, where, remote[0] if remote else "origin", redirected):
         return None
     for ref in refs[1:] if len(refs) > 1 else []:
         # `HEAD` or `@` alone is the branch checked out, pushed under its own

@@ -467,6 +467,9 @@ def main():
         subprocess.run(["git", "-C", clone, "remote", "add", "origin",
                         "https://github.com/o/r.git"], check=True)
         home = os.path.expanduser("~")
+        bare_scratch = os.path.join(scratch, "b")
+        subprocess.run(["git", "init", "-q", "-b", "main", bare_scratch], check=True)
+        subprocess.run(["git", "-C", bare_scratch, "remote", "add", "origin", "../o.git"], check=True)
         push_cases = [
             # The exact command a review subagent once lost.
             ("cd " + scratch + " && rm -rf exp && mkdir exp && cd exp && "
@@ -478,6 +481,9 @@ def main():
              "echo ls=$?", home, ALLOW),
             ("cd " + scratch + " && git push ../o.git main", home, ALLOW),
             ("git push origin main", scratch + "/new", ALLOW),
+            # A bare push there is the same push, and is not refused either.
+            ("git push", bare_scratch, ALLOW),
+            ("git push -u", bare_scratch, ALLOW),
             # A review session: the scratch path in a variable.
             ("S=" + scratch + "; cd $S/w && git remote add origin ../o.git "
              "&& git push -q origin HEAD:main", home, ALLOW),

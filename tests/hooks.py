@@ -267,6 +267,8 @@ FORBIDDEN = [
     ("vercel projects rm myapp", DENY),
     ("vercel --cwd ls --prod", DENY),
     ("vercel projects ls", ALLOW),
+    ("vercel ./ls --prod", DENY),
+    ("vercel /tmp/logs --prod", DENY),
     ("vercel --scope team ls", ALLOW),
     ("git push origin 'refs/heads/*:refs/heads/*'", DENY),
     ("git push --prune origin 'refs/heads/*'", DENY),
@@ -565,6 +567,8 @@ def main():
             ("(cd " + feature + " && npm test) && git push origin HEAD", clone, DENY),
             ("(cd " + clone + " && npm test) && git push origin HEAD", feature, ALLOW),
             ("(cd " + clone + " && git push origin HEAD)", feature, DENY),
+            # A substitution inside a subshell does not end it.
+            ("(cd " + clone + "; x=$(git rev-parse HEAD); git push)", feature, DENY),
             # A substitution runs where the line has got to.
             ("cd " + clone + " && out=$(git push origin 2>&1)", feature, DENY),
             ("cd " + feature + " && out=$(git push origin HEAD 2>&1)", feature, ALLOW),

@@ -50,6 +50,7 @@ for path, want in (("/r/.sclaude/team/policy.json", "deny"),
     check("write %s" % path, hook("Write", file_path=path), want)
     check("edit %s" % path, hook("Edit", file_path=path), want)
 check("notebook", hook("NotebookEdit", notebook_path="/r/.sclaude/team/n.ipynb"), "deny")
+check("write through ..", hook("Write", file_path="/r/.sclaude/people/../team/policy.json"), "deny")
 
 for command, want in (("echo x > .sclaude/team/a.md", "deny"),
                       ("echo x >>.sclaude/team/a.md", "deny"),
@@ -190,6 +191,14 @@ for command, cwd, want in (
         ("cd /home/u/sclaude && git checkout-index -a -f", "/tmp", "deny"),
         ("git clone https://x/r /home/u/sclaude/new", "/tmp", "deny"),
         ("git clone https://x/r /tmp/new", "/tmp", "allow"),
+        # Writes this guard used to miss: a clobbering redirection, the
+        # repository named in the environment, sed's long script flag.
+        ("echo x >| /home/u/sclaude/f", "/tmp", "deny"),
+        ("GIT_DIR=/home/u/sclaude/.git git commit -m x", "/tmp", "deny"),
+        ("env GIT_DIR=/home/u/sclaude/.git git add .", "/tmp", "deny"),
+        ("GIT_DIR=/home/u/myapp-1/.git git commit -m x", "/tmp", "allow"),
+        ("GIT_DIR=/home/u/sclaude/.git git log", "/tmp", "allow"),
+        ("sed -i --expression=s/a/b/ /home/u/sclaude/f", "/tmp", "deny"),
         # A bracket in quotes closes no group.
         ('echo "a)" > notes.txt', "/home/u/myapp-1", "allow"),
         ("echo '(x' && echo y > notes.txt", "/home/u/myapp-1", "allow"),

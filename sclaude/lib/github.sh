@@ -2037,7 +2037,9 @@ run_status() {
     fi
   fi
 
-  local -a extra; mapfile -t extra < <(status_settings)
+  local settings
+  settings="$(status_settings)" || { warn "  The status session was not started."; return 1; }
+  local -a extra; mapfile -t extra <<< "$settings"
 
   # Every claude conversation belongs in the issue's table, the epilogue's
   # included. Recorded in the feature's state while there is one; the id is

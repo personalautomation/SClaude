@@ -201,8 +201,8 @@ check("both team", hook("Bash", RO + ("--team",), "/home/u/sclaude",
 
 # --- who maintains, and where rules go -----------------------------------------
 def sh(script, cwd, env=None):
-    body = ('source "%s/developer.sh"; source "%s/steps.sh"; HOOKS=/hooks\n%s'
-            % (LIB, LIB, script))
+    body = ('source "%s/developer.sh"; source "%s/steps.sh"; HOOKS=/hooks; LIB="%s"\n'
+            'warn() { echo "WARN $*" >&2; }\n%s' % (LIB, LIB, LIB, script))
     full = dict(os.environ, **(env or {}))
     full.pop("SCLAUDE_DEV", None)
     if env:

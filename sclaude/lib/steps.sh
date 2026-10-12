@@ -233,11 +233,21 @@ review_guard_settings() {
 # The feature's tree, when there is one, counts too: a friction review commits
 # its rule there, and main's copy will not have it until the merge.
 #
+# Returns 1, and says why, when the policy cannot be read: a session started
+# then would have no --disallowed-tools but the fixed few, the integrations'
+# and the product's bans gone without a word.
+#
 #   policy_rules <deny-array> <allow-array> <step> [tree]
 policy_rules() {
   local -n _deny="$1" _allow="$2"
-  local step="$3" tree="${4:-}" out line seen=""
-  out="$(python3 "$LIB/policy.py" flags "${REPO:-}" "$(developer_name 2>/dev/null)" "$step" "$tree" 2>/dev/null)" || out=""
+  local step="$3" tree="${4:-}" out line seen="" err
+  err="$(mktemp)"
+  if ! out="$(python3 "$LIB/policy.py" flags "${REPO:-}" "$(developer_name 2>/dev/null)" "$step" "$tree" 2>"$err")"; then
+    warn "  sclaude could not read the session's rules: $(tail -n 1 "$err")" >&2
+    rm -f "$err"
+    return 1
+  fi
+  rm -f "$err"
   while IFS= read -r line; do
     if [[ -z "$line" ]]; then seen=1; continue; fi
     if [[ -z "$seen" ]]; then _deny+=("$line"); else _allow+=("$line"); fi
@@ -320,11 +330,8 @@ PY
     # inside it already, through the `cd "$wt"` before claude is called.
     'EnterWorktree'
     'ExitWorktree'
-    # The merge stays banned here even if the policy cannot be read: then
-    # policy_rules adds nothing, quietly, and this line is what is left.
-    'Bash(gh pr merge:*)'
   )
-  policy_rules deny allow "$step" "$wt"
+  policy_rules deny allow "$step" "$wt" || return 1
 
   # Without a path to the tree there is nothing to compose the trust line from;
   # the step then runs as before, with the hooks alone. The orchestrator always
@@ -400,7 +407,7 @@ status_settings() {
   # And the product's own bans, from its policy: a status session runs nothing
   # the product forbids a step to run. The hook is called with --step status,
   # a step no policy names, so only the shared rules and the push parsing apply.
-  policy_rules deny allow status
+  policy_rules deny allow status || return 1
   printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$(policy_hook_args)" <<'PYSTATUS'
 import json, shlex, sys
 

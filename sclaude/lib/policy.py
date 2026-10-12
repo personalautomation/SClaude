@@ -137,11 +137,12 @@ def merged(root, person="", step="", tree=""):
     before a rule reached main does not shed it. Integrations are still told
     from the main checkout, which holds the untracked .vercel link.
 
-    Never raises. A product's or a person's file that breaks the merge in a
-    way entries() did not foresee is dropped, and the policy is built from
-    sclaude's presets, the product's integrations and its config alone, with
-    a line on stderr. A hook that died here let every command through, and
-    --disallowed-tools came out empty.
+    A product's or a person's file that breaks the merge in a way entries()
+    did not foresee is dropped, and the policy is built from sclaude's
+    presets, the product's integrations and its config alone, with a line on
+    stderr. What it raises is sclaude's own trouble, core.json unreadable
+    among it: the hook refuses on it (_failsafe.py), and the step does not
+    start (policy_rules).
     """
     try:
         return merge(root, person, step, layers=True, tree=tree)
@@ -179,6 +180,11 @@ def layered(root, tree, *parts):
 
 def merge(root, person, step, layers, tree=""):
     core = read(os.path.join(PRESETS, "core.json"))
+    # The rules nothing lifts are not optional: read as an empty layer, a
+    # missing or broken core.json took the merge ban with it, silently.
+    if not as_list(core.get("deny")):
+        raise RuntimeError("%s is missing, unreadable or has no deny list"
+                           % os.path.join(PRESETS, "core.json"))
     team = layered(root, tree, ".sclaude", "team", "policy.json") if root and layers else {}
     mine = layered(root, tree, ".sclaude", "people", person, "policy.json") \
         if root and person and layers else {}

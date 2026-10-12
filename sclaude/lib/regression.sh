@@ -1465,7 +1465,9 @@ regression_fix() {
   local -x SCLAUDE_B_REGRESSION
   SCLAUDE_B_REGRESSION="$(regression_fix_block "$wt" "$stage" "$merged" gate)"
 
-  mapfile -t extra < <(step_settings "$step" "$wt")
+  local settings
+  settings="$(step_settings "$step" "$wt")" || { warn "  The fix was not started."; return 1; }
+  mapfile -t extra <<< "$settings"
 
   # The same part red again after a fix goes back to the session that made the
   # fix: it has just learnt that its guess was wrong, and with its context it

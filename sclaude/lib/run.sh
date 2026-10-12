@@ -524,7 +524,11 @@ run_step() {
     fi
   fi
 
-  local -a extra; mapfile -t extra < <(step_settings "$step" "$wt")
+  # Not started without its rules: a session whose policy could not be read
+  # would run with none of the product's bans (policy_rules says why).
+  local settings
+  settings="$(step_settings "$step" "$wt")" || { warn "  The step was not started."; return 1; }
+  local -a extra; mapfile -t extra <<< "$settings"
 
   # A step's conversation needs a terminal, and without one we stop rather than
   # work around it.

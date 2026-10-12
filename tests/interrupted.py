@@ -61,7 +61,7 @@ def write_state(wt, node, key="code"):
     d = os.path.join(wt, ".sclaude/local/feature")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "state.json")
-    data = {"feature": "71-email-edit-and-show", "step": "code",
+    data = {"feature": "12-sample-feature-one", "step": "code",
             "steps": {"plan": {"done": True}, "code": {}}}
     if node is not None:
         data["friction"] = node if key is None else {key: node}
@@ -85,7 +85,7 @@ def main():
     env_home = os.environ.get("HOME")
     os.environ["HOME"] = home
     try:
-        wt = os.path.join(home, "myapp-71-email-edit-and-show")
+        wt = os.path.join(home, "myapp-12-sample-feature-one")
         sid = "86ea3d09-3f9f-43ef-ab6a-419b6b9f284f"
 
         # --- the friction review ------------------------------------------

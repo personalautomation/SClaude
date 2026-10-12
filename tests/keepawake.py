@@ -1204,7 +1204,7 @@ with sandbox() as box:
     # Parsing the sclaude status table: the menu's second level is buttons onto
     # features, and it is built from these columns.
     sample = ("FEATURE                STEP           WORKTREE\n"
-              "27-nif-website         2. code        /home/u/myapp-27\n"
+              "34-sample-site         2. code        /home/u/myapp-34\n"
               "password-change        4. review      /home/u/myapp-pw\n")
     saved_run = telegramd.run
     telegramd.run = lambda cmd, timeout=25: sample
@@ -1216,15 +1216,15 @@ with sandbox() as box:
     try:
         feats, raw = telegramd.features_of("/tmp/whatever")
         check("features parsed", len(feats), 2)
-        check("the feature's name", feats[0][0], "27-nif-website")
+        check("the feature's name", feats[0][0], "34-sample-site")
         check("the feature's step in full", feats[0][1], "2. code")
-        check("the worktree separately", feats[0][2], "/home/u/myapp-27")
+        check("the worktree separately", feats[0][2], "/home/u/myapp-34")
         check("the table's header did not get into the features",
               any(f[0] == "FEATURE" for f in feats), False)
 
         labels = [b["text"] for row in telegramd.features_keyboard("myapp")
                   for b in row]
-        check_true("the button has the name and the step", "27-nif-website — 2. code" in labels)
+        check_true("the button has the name and the step", "34-sample-site — 2. code" in labels)
 
         # The message above the buttons is one line. An sclaude status table
         # below it would repeat the buttons: a feature's name and step stand on
@@ -1248,12 +1248,12 @@ with sandbox() as box:
                  for b in row if b["callback_data"].startswith("go:")]
         check("a callback for every feature", len(datas), 2)
         check_true("the callback carries the repository and the feature",
-                   datas[0] == "go:myapp:27-nif-website")
+                   datas[0] == "go:myapp:34-sample-site")
         acts = [b["callback_data"] for row in telegramd.features_keyboard("myapp")
                 for b in row if b["callback_data"].startswith("acts:")]
         check("an actions button for every feature", len(acts), 2)
         check_true("the actions button carries the same feature",
-                   acts[0] == "acts:myapp:27-nif-website")
+                   acts[0] == "acts:myapp:34-sample-site")
     finally:
         telegramd.known_repos = saved_known
         telegramd.run = saved_run
@@ -1392,8 +1392,8 @@ if os.path.exists(cfg):
     wt = tempfile.mkdtemp(prefix="keepawake-test-feature-")
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
-        json.dump({"dev": {"label": "email-edit", "port": 1}}, fh)
-    os.symlink(wt, os.path.join(reg, "email-edit"))
+        json.dump({"dev": {"label": "sample-one", "port": 1}}, fh)
+    os.symlink(wt, os.path.join(reg, "sample-one"))
     os.symlink("/nonexistent", os.path.join(reg, "gone"))
     saved_registry = tg_menu.DEV_REGISTRY
     tg_menu.DEV_REGISTRY = reg
@@ -1403,7 +1403,7 @@ if os.path.exists(cfg):
         # that picks the feature with a cookie — at the tailscale serve name
         # when there is one, since only a name survives a sign-in.
         check_true("the phone link picks the feature through the proxy",
-                   'href="%s/__sclaude/select?f=email-edit"' % tg_menu.phone_origin()
+                   'href="%s/__sclaude/select?f=sample-one"' % tg_menu.phone_origin()
                    in chrome_body)
         saved_run = tg_menu.run
         try:
@@ -1418,7 +1418,7 @@ if os.path.exists(cfg):
         finally:
             tg_menu.run = saved_run
         check_true("the laptop address is the feature's own name",
-                   "<code>http://email-edit.localhost:%d</code>" % tg_menu.DEV_PORT
+                   "<code>http://sample-one.localhost:%d</code>" % tg_menu.DEV_PORT
                    in chrome_body)
         check_true("a feature whose server is down says so", "⏹" in chrome_body)
         check("a link to a tree that is gone is left out", "gone" in chrome_body, False)
@@ -1428,8 +1428,8 @@ if os.path.exists(cfg):
         datas = [b["callback_data"] for row in rows for b in row]
         check_true("the first row is the browser",
                    any(b["callback_data"].startswith("chrome_") for b in rows[0]))
-        check_true("each feature can be opened", "devopen:email-edit" in datas)
-        check("a stopped feature has no stop button", "devstop:email-edit" in datas, False)
+        check_true("each feature can be opened", "devopen:sample-one" in datas)
+        check("a stopped feature has no stop button", "devstop:sample-one" in datas, False)
         check("the last row goes back", rows[-1][0]["callback_data"], "menu_back")
         # The row caption is not a button: pressing it must do nothing.
         check_true("the row captions are marked noop", "noop" in datas)

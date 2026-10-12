@@ -78,7 +78,7 @@ def main():
     env_home = os.environ.get("HOME")
     os.environ["HOME"] = home
     try:
-        wt = os.path.join(home, "myapp-71-email-edit-and-show")
+        wt = os.path.join(home, "myapp-12-sample-feature-one")
         dead = "3e7f13e6-4f88-4eab-99d4-452e9b89e208"
         live = "86ea3d09-3f9f-43ef-ab6a-419b6b9f284f"
 

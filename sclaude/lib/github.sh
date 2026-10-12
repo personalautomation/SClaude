@@ -882,7 +882,7 @@ EOF
 # Creates an issue for a feature and prints its number.
 #
 # The title is the name as the human typed it rather than the slug: what should
-# reach GitHub is "Email edit and show", not "email-edit-and-show".
+# reach GitHub is "Sample feature one", not "sample-feature-one".
 #
 # The body is one line saying where the rest will be: step 1 records the request
 # in a comment as the conversation goes, because its content exists only there.

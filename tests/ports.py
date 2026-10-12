@@ -94,18 +94,18 @@ def main():
         os.makedirs(os.path.join(root, "repo"))
         registry = os.path.join(root, "registry")
 
-        a = tree(root, "a", "71-email-edit")
+        a = tree(root, "a", "12-sample-one")
         port_a = bash(root, 'feature_port "%s"' % a)
         check("first claim is in the range", port_a.isdigit()
               and FIRST <= int(port_a) <= LAST, True)
         check("the port is recorded", state(a)["dev"]["port"], int(port_a) if port_a.isdigit() else None)
-        check("the label is the slug", state(a)["dev"]["label"], "71-email-edit")
+        check("the label is the slug", state(a)["dev"]["label"], "12-sample-one")
         check("the rest of the state is kept", state(a)["step"], "code")
         check("the proxy's link points at the tree",
-              os.path.realpath(os.path.join(registry, "71-email-edit")), os.path.realpath(a))
+              os.path.realpath(os.path.join(registry, "12-sample-one")), os.path.realpath(a))
         check("a second call keeps the port", bash(root, 'feature_port "%s"' % a), port_a)
         check("the address is the label under the proxy",
-              bash(root, 'feature_url "%s"' % a), "http://71-email-edit.localhost:3000")
+              bash(root, 'feature_url "%s"' % a), "http://12-sample-one.localhost:3000")
 
         b = tree(root, "b")
         port_b = bash(root, 'feature_port "%s"' % b)
@@ -139,11 +139,11 @@ def main():
 
         # The same slug in two trees: the second does not take the first's
         # link.
-        other = tree(root, "other-a", "71-email-edit")
+        other = tree(root, "other-a", "12-sample-one")
         bash(root, 'feature_port "%s"' % other)
-        check("a clashing label gets a suffix", state(other)["dev"]["label"], "71-email-edit-2")
+        check("a clashing label gets a suffix", state(other)["dev"]["label"], "12-sample-one-2")
         check("the first tree keeps its link",
-              os.path.realpath(os.path.join(registry, "71-email-edit")), os.path.realpath(a))
+              os.path.realpath(os.path.join(registry, "12-sample-one")), os.path.realpath(a))
 
         # What a DNS name allows.
         odd = tree(root, "odd", "Foo_Bar--Baz " + "x" * 80)

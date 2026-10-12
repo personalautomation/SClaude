@@ -472,7 +472,7 @@ feature.
 
 ```
 ┌───────────────────────┬───────────────────┐
-│ 71-email-edit-and-…   │        ⚙️         │
+│ 12-sample-one-and-…   │        ⚙️         │
 └───────────────────────┴───────────────────┘
    └─ drives the step        └─ the action list
 ```
@@ -523,7 +523,7 @@ spot.** The list's top item is to type a name by hand, and below it are the
 repository's open issues: first those assigned to whoever `gh` is authenticated
 as, then all the rest. The arrow keys move through the list, Enter chooses, `q`
 cancels. The chosen issue suggests a branch name
-(`27-nif-website-and-multiple`) — the suggestion is edited right in the input
+(`34-sample-site-and-multiple`) — the suggestion is edited right in the input
 line, and a title in a non-Latin script, of which nothing survives `slugify`,
 comes down to `issue-27`.
 

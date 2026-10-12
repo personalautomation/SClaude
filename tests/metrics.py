@@ -41,7 +41,7 @@ def check_true(name, got):
 # A state in the shape sclaude really writes: the keys come from the state_set
 # calls in run.sh, regression.sh and deploy.sh.
 FULL = {
-    "feature": "71-email-edit",
+    "feature": "12-sample-one",
     "repo": "/home/x/myapp",
     "issue": 71,
     "pr": 208,
@@ -191,7 +191,7 @@ check("stage-no-attempts", clean["attempts"], 0)
 # --- the whole record --------------------------------------------------------
 
 full = record(FULL, "done")
-check("record-feature", full["feature"], "71-email-edit")
+check("record-feature", full["feature"], "12-sample-one")
 check("record-issue", full["issue"], 71)
 check("record-outcome", full["outcome"], "done")
 check("record-step-count", len(full["steps"]), 4)
@@ -282,7 +282,7 @@ try:
     # with jq without loading all of it.
     check("append-lines-parse",
           [json.loads(line)["feature"] for line in lines],
-          ["71-email-edit", "71-email-edit"])
+          ["12-sample-one", "12-sample-one"])
 
     # A state that cannot be read. False, and nothing written: losing a
     # measurement must not stand in the way of a cleanup.

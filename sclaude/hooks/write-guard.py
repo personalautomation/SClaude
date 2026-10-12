@@ -36,7 +36,8 @@ except Exception as _exc:  # noqa: BLE001
           'refused.  Tell the human and stop \u2014 the next move is theirs."}}')
     sys.exit(0)
 _failsafe.install("write guard (write-guard.py)")
-from _shell import (GIT_VALUED, KEYWORDS, QUOTED, closing_at, inner_command, strip_wrappers,  # noqa: E402
+from _shell import (GIT_VALUED, KEYWORDS, QUOTED, closing_at, inner_command, strip_heads,  # noqa: E402
+                    strip_wrappers,
                     substitutions, tokenize, ungroup)
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
@@ -208,11 +209,12 @@ def calls(command, cwd, seen=None):
     words = tokenize(command, mask=True)
     if words is None:
         return None
-    out, where, segment, saved = [], cwd, [], []
+    out, where, segment, saved, shape = [], cwd, [], [], {}
     for w in words + [";"]:
         if w not in SEPS:
             segment.append(w)
             continue
+        segment = strip_heads(segment, shape)
         if not segment:
             continue
         opens = segment[0] in ("(", "{") or (segment[0].startswith("(") and not segment[0].startswith("$("))

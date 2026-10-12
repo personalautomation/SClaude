@@ -207,6 +207,11 @@ for command, cwd, want in (
         ("cd -- /home/u/sclaude && echo x > f", "/home/u/myapp-1", "deny"),
         ("cd - && echo x > f", "/home/u/myapp-1", "deny"),
         ("cd -P /home/u/myapp-1 && echo x > f", "/home/u/sclaude", "allow"),
+        # A function's body and a case branch are judged as well.
+        ("f() { rm /home/u/sclaude/README.md; }; f", "/tmp", "deny"),
+        ("function f { rm /home/u/sclaude/README.md; }", "/tmp", "deny"),
+        ("case x in x) rm /home/u/sclaude/README.md;; esac", "/tmp", "deny"),
+        ("f() { cat /home/u/sclaude/README.md; }; f", "/tmp", "allow"),
         # A bracket in quotes closes no group.
         ('echo "a)" > notes.txt', "/home/u/myapp-1", "allow"),
         ("echo '(x' && echo y > notes.txt", "/home/u/myapp-1", "allow"),

@@ -601,3 +601,32 @@ def call_form(words):
     """The words as a ban compares them: a package script as `npm run x`, a gh
     call without its repository options. Both sides of the comparison."""
     return gh_call(script_call(words))
+
+
+def strip_heads(words, shape):
+    """A segment without what stands before the command it runs: a `case`
+    branch's `pattern)` label and a function's header. Shared by both hooks,
+    since each missed what the other had learnt: `case a in a) gh pr merge 5;;
+    esac` and `f() { rm $RO/f; }; f` both ran their command unjudged.
+
+    `shape` is the state carried from one segment of the line to the next:
+    whether a case is open.
+    """
+    if not words:
+        return words
+    if words[0] == "case":
+        shape["case"] = True
+        words = words[words.index("in") + 1:] if "in" in words else []
+    elif words[0] == "esac":
+        shape["case"] = False
+        words = words[1:]
+    if shape.get("case") and words and words[0].endswith(")") and (
+            "(" not in words[0] or (words[0].startswith("(") and words[0].count("(") == 1)):
+        words = words[1:]
+    if words and re.fullmatch(r"[\w.:-]+\(\)", words[0]):
+        words = words[1:]
+    elif words[:1] == ["function"] and len(words) > 1:
+        words = words[2:]
+        if words[:1] == ["()"]:
+            words = words[1:]
+    return words

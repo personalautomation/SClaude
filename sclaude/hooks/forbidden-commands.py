@@ -66,7 +66,7 @@ except Exception as _exc:  # noqa: BLE001
 _failsafe.install("ban check (forbidden-commands.py)")
 from _friction import note  # noqa: E402
 from _shell import (GIT_VALUED, SEPARATORS, call_form, closing_at, inner_command, script_call,  # noqa: E402
-                    redirect_targets, strip_keywords, strip_redirections, strip_runners,
+                    redirect_targets, strip_heads, strip_keywords, strip_redirections, strip_runners,
                     strip_wrappers,
                     substitutions, tokenize, ungroup)
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
@@ -861,30 +861,11 @@ def refuses(command, step, cwd=None, depth=0):
     # rest of the line, and `(npm test) && git push` on main went through. A
     # brace group runs in this shell, so its `cd` simply stays.
     saved, restore = [], False
-    in_case = False
+    shape = {}
     for raw in segments(command, raw=True):
         if restore:
             where = saved.pop() if saved else None
-        # A `case` branch runs what follows its `pattern)` label, and the
-        # label was read as the command: `case a in a) gh pr merge 5;; esac`
-        # merged. Inside a case, a first word ending in `)` is a label.
-        if raw[0] == "case":
-            in_case = True
-            raw = raw[raw.index("in") + 1:] if "in" in raw else []
-        elif raw[0] == "esac":
-            in_case = False
-            raw = raw[1:]
-        if in_case and raw and raw[0].endswith(")") and (
-                "(" not in raw[0] or (raw[0].startswith("(") and raw[0].count("(") == 1)):
-            raw = raw[1:]
-        # A function's body runs when it is called, and its header stood first:
-        # `f() { gh pr merge 5; }; f` merged. The header is taken off.
-        if raw and re.fullmatch(r"[\w.:-]+\(\)", raw[0]):
-            raw = raw[1:]
-        elif raw[:1] == ["function"] and len(raw) > 1:
-            raw = raw[2:]
-            if raw[:1] == ["()"]:
-                raw = raw[1:]
+        raw = strip_heads(raw, shape)
         if not raw:
             restore = False
             continue

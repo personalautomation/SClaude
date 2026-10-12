@@ -159,6 +159,25 @@ def perl_inplace(flag):
     return False
 
 
+def cd_to(where, args):
+    """Where `cd args` from `where` lands, None when it cannot be told.
+
+    Its options come first and are not the target: `cd -P DIR` and `cd --
+    DIR` went to <cwd>/-P, and the read-only checkout they entered was never
+    seen. `cd -` goes back to somewhere this does not know.
+    """
+    args = list(args)
+    while args and args[0] in ("-P", "-L", "-e", "-@", "-Pe", "-LP", "-PL"):
+        args = args[1:]
+    if args[:1] == ["--"]:
+        args = args[1:]
+    if not args:
+        return moved(where, "~")
+    if args[0] == "-" or len(args) > 1:
+        return None
+    return moved(where, args[0])
+
+
 def moved(where, value):
     """The directory `cd value` from `where` lands in, None when it cannot be told."""
     value = os.path.expanduser(value)
@@ -218,14 +237,7 @@ def calls(command, cwd, seen=None):
         if name in ("pushd", "popd"):
             where = None
         if name == "cd":
-            target = unmask(flat[1]) if len(flat) > 1 else "~"
-            target = os.path.expanduser(target)
-            if "$" in target or "`" in target:
-                where = None
-            elif os.path.isabs(target):
-                where = target
-            else:
-                where = None if where is None else os.path.join(where, target)
+            where = cd_to(where, [unmask(w) for w in flat[1:]])
         if closes:
             # A subshell's `cd` ends with it; a brace group runs in this shell
             # and its `cd` stays, which is not worth following: unknown.
@@ -367,34 +379,29 @@ def git_writes_in(command, cwd, inside):
     for call, where in found:
         if call[0].rsplit("/", 1)[-1] != "git":
             continue
-        if any(n is None or inside(n) for n in named):
-            sub = next((w for w in call[1:] if not w.startswith("-")), "")
-            if sub in GIT_WRITES or sub in GIT_WRITE_FORMS:
-                return True
-        here, j = where, 1
+        # Every place the call changes, not the last one named: -C moves like
+        # `cd`, and --git-dir and --work-tree each name a part of the
+        # repository outright, so `--git-dir=$RO/.git --work-tree=/tmp`
+        # changes $RO, though the work tree is elsewhere.
+        here, places, j = where, list(named), 1
         while j < len(call) and call[j].startswith("-"):
             name, has_value, value = call[j].partition("=")
             if name in GIT_VALUED and not has_value:
                 value = call[j + 1] if j + 1 < len(call) else ""
                 j += 1
             j += 1
-            # The repository the call changes: -C moves like `cd`, and
-            # --git-dir and --work-tree name it outright.
-            if name in ("-C", "--git-dir", "--work-tree"):
-                value = os.path.expanduser(value)
-                if "$" in value or "`" in value:
-                    here = None
-                elif os.path.isabs(value):
-                    here = value
-                else:
-                    here = None if here is None else os.path.join(here, value)
+            if name == "-C":
+                here = moved(here, unmask(value))
+            elif name in ("--git-dir", "--work-tree"):
+                places.append(moved(here, unmask(value)))
+        places.append(here)
         if j >= len(call):
             continue
         sub, rest = call[j], call[j + 1:]
         writes = (sub in GIT_WRITES and not git_reads(sub, rest)) or (
             sub in GIT_WRITE_FORMS
             and next((w for w in rest if not w.startswith("-")), "") in GIT_WRITE_FORMS[sub])
-        if writes and (here is None or inside(here)):
+        if writes and any(p is None or inside(p) for p in places):
             return True
     return False
 

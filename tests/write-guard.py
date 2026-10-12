@@ -199,6 +199,14 @@ for command, cwd, want in (
         ("GIT_DIR=/home/u/myapp-1/.git git commit -m x", "/tmp", "allow"),
         ("GIT_DIR=/home/u/sclaude/.git git log", "/tmp", "allow"),
         ("sed -i --expression=s/a/b/ /home/u/sclaude/f", "/tmp", "deny"),
+        # Every place a git call changes, and cd's options.
+        ("git --git-dir=/home/u/sclaude/.git --work-tree=/tmp commit -am x", "/tmp", "deny"),
+        ("GIT_DIR=/home/u/sclaude/.git git -C /tmp commit -am x", "/tmp", "deny"),
+        ("GIT_DIR=/home/u/sclaude/.git git -c a=b commit -am x", "/tmp", "deny"),
+        ("cd -P /home/u/sclaude && echo x > f", "/home/u/myapp-1", "deny"),
+        ("cd -- /home/u/sclaude && echo x > f", "/home/u/myapp-1", "deny"),
+        ("cd - && echo x > f", "/home/u/myapp-1", "deny"),
+        ("cd -P /home/u/myapp-1 && echo x > f", "/home/u/sclaude", "allow"),
         # A bracket in quotes closes no group.
         ('echo "a)" > notes.txt', "/home/u/myapp-1", "allow"),
         ("echo '(x' && echo y > notes.txt", "/home/u/myapp-1", "allow"),

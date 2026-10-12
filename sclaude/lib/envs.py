@@ -48,6 +48,7 @@
 #   envs.py production <root>               production's name
 #   envs.py site <root>                     production's siteUrl
 #   envs.py old <root>                      why the config is of the old shape
+#   envs.py main-config <root> [tree]       the config as main has it (JSON)
 import json
 import os
 import re
@@ -66,6 +67,53 @@ def config(root):
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+class Unreadable(ValueError):
+    """A config that is there and is not a JSON object."""
+
+
+def main_config(repo, tree=None):
+    """The product's .sclaude/config.json as main has it.
+
+    What decides a protection — which environment is protected, who maintains
+    the product — is read from main, not from a session's tree, which the
+    session can edit: one that dropped "protected" from prod there was let
+    push to it. Main as the remote has it, else the main checkout's copy,
+    else the tree's when there is no main at all. {} when none has one;
+    Unreadable when the one found is not a JSON object.
+    """
+    import subprocess
+    try:
+        done = subprocess.run(["git", "-C", repo, "show", "origin/main:.sclaude/config.json"],
+                              capture_output=True, text=True, timeout=5)
+        text = done.stdout if done.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        text = None
+    source = "origin/main"
+    main = None
+    try:
+        common = subprocess.run(["git", "-C", repo, "rev-parse", "--path-format=absolute",
+                                 "--git-common-dir"], capture_output=True, text=True, timeout=5)
+        main = os.path.dirname(common.stdout.strip()) if common.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if text is None:
+        for where in (main, repo, tree):
+            path = os.path.join(where, ".sclaude", "config.json") if where else ""
+            if path and os.path.isfile(path):
+                with open(path, encoding="utf-8") as fh:
+                    text, source = fh.read(), path
+                break
+    if text is None:
+        return {}
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise Unreadable("%s: %s" % (source, exc))
+    if not isinstance(data, dict):
+        raise Unreadable("%s is not an object" % source)
+    return data
 
 
 def environments(root, data=None):
@@ -249,6 +297,17 @@ def main(argv):
         if not found:
             return 1
         print(found)
+        return 0
+    if what == "main-config":
+        # 0 and the JSON; 1 with no config anywhere; 2 when it is unreadable.
+        try:
+            found = main_config(root, rest[0] if rest else None)
+        except Unreadable as exc:
+            sys.stderr.write("%s\n" % exc)
+            return 2
+        if not found:
+            return 1
+        print(json.dumps(found))
         return 0
     if what == "old":
         found = old_shape(root)

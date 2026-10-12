@@ -192,7 +192,7 @@ def active_environment(cwd):
     obeys the link (envs.settled). No answer is not permission: a product that
     names no environments has none, and every environment counts as protected.
     """
-    return envs_lib.settled(cwd, cwd, ENVIRONMENTS)
+    return envs_lib.settled(cwd, cwd, environments_data())
 
 
 def project_dir():
@@ -210,7 +210,7 @@ def environment_is_protected(cwd, name):
     .sclaude/config.json. True for anything that cannot be resolved: the
     question is "may a migration be applied here", and an environment that
     cannot be identified is exactly the case the ban exists for."""
-    return not name or envs_lib.protected(cwd, name, ENVIRONMENTS)
+    return not name or envs_lib.protected(cwd, name, environments_data())
 
 
 # A tree is on the environment whose file its .env.local points at
@@ -230,14 +230,14 @@ def env_switch_refuses(words, raw):
     if not paths or os.path.basename(paths[-1].rstrip("/")) != ".env.local":
         return None
     tree = project_dir()
-    prod = envs_lib.production(tree, ENVIRONMENTS)
-    target = envs_lib.env_file(tree, prod, ENVIRONMENTS) if prod else None
+    prod = envs_lib.production(tree, environments_data())
+    target = envs_lib.env_file(tree, prod, environments_data()) if prod else None
     if not target:
         return None
     # By the file itself first. The name alone decides only where it singles
     # production out: environments in folders of their own share it
     # (envs/dev/.env, envs/prod/.env), and every switch read as production.
-    files = [envs_lib.env_file(tree, n, ENVIRONMENTS) for n in envs_lib.environments(tree, ENVIRONMENTS)]
+    files = [envs_lib.env_file(tree, n, environments_data()) for n in envs_lib.environments(tree, environments_data())]
     real = os.path.realpath(target)
     name = os.path.basename(target)
     unique = sum(1 for f in files if f and os.path.basename(f) == name) == 1
@@ -383,12 +383,8 @@ SHARED_SCHEMA_ASK = ("this changes the schema of \"{name}\", a database the whol
 
 
 def local_environment(cwd):
-    """The project's local environment, from .sclaude/config.json, or None."""
-    try:
-        with open(os.path.join(cwd, ".sclaude/config.json")) as fh:
-            config = json.load(fh)
-    except (OSError, ValueError):
-        return None
+    """The project's local environment, from main's .sclaude/config.json, or None."""
+    config = environments_data()
     local = ((config.get("database") or {}).get("local") or {}).get("environment")
     return local if isinstance(local, str) and local else None
 
@@ -979,32 +975,29 @@ if not root:
 POLICY = policy_lib.merged(root, flag(argv, "--person"), step, flag(argv, "--tree"))
 
 
-def main_config(repo):
-    """The product's .sclaude/config.json as main has it, for the environments.
+class _MainEnvironments(dict):
+    """envs.main_config, read the first time a check needs it: most calls of
+    a step (ls, grep, npm test) need none, and it costs a git process."""
 
-    Which environment is protected, and which file is production's, is read
-    from main, not from the session's tree: the tree is the session's to
-    edit, and one that dropped "protected" from prod there was let push to it
-    and switch to it. The file names in it resolve in the tree as ever. Main
-    as the remote has it, else the main checkout's copy, else the tree's,
-    when there is no main to ask.
-    """
-    for source in (["git", "-C", repo, "show", "origin/main:.sclaude/config.json"],):
-        try:
-            done = subprocess.run(source, capture_output=True, text=True, timeout=5)
-            if done.returncode == 0:
-                data = json.loads(done.stdout)
-                return data if isinstance(data, dict) else {}
-        except (OSError, subprocess.SubprocessError, ValueError):
-            pass
-    for path in (os.path.join(repo, ".sclaude", "config.json"),
-                 os.path.join(project_dir(), ".sclaude", "config.json")):
-        if os.path.isfile(path):
-            return envs_lib.config(os.path.dirname(os.path.dirname(path)))
-    return {}
+    def __init__(self, repo):
+        super().__init__()
+        self.repo, self.read = repo, False
+
+    def load(self):
+        if not self.read:
+            self.read = True
+            try:
+                self.update(envs_lib.main_config(self.repo, project_dir()))
+            except envs_lib.Unreadable:
+                pass  # nothing protected is known: every environment counts as one
+        return self
 
 
-ENVIRONMENTS = main_config(root or project_dir())
+_MAIN = _MainEnvironments(root or project_dir())
+
+
+def environments_data():
+    return _MAIN.load()
 
 try:
     payload = json.load(sys.stdin)

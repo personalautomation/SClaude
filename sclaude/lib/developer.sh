@@ -64,41 +64,31 @@ developer_name() {
 #
 #   product_maintainer [root]   the current repository without one
 #
-# The list is read from main as the remote has it, not from the tree: the tree
+# The list is read from main (envs.main_config), not from the tree: the tree
 # is a session's to edit, and a session guarded by --team could write itself
 # into `maintainers`, or empty the list, and the sessions after it would get
-# no guard. A change to the list counts once it has merged. Without a remote
-# main, the main checkout's copy.
+# no guard. A change to the list counts once it has merged.
 product_maintainer() {
-  local root="${1:-${REPO:-.}}" email content source main
-  source="origin/main:.sclaude/config.json"
-  if ! content="$(git -C "$root" show "$source" 2>/dev/null)"; then
-    main="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-    main="${main:+$(dirname "$main")}"
-    source="${main:-$root}/.sclaude/config.json"
-    [[ -f "$source" ]] || return 0
-    content="$(cat "$source")"
+  local root="${1:-${REPO:-.}}" email content rc
+  content="$(python3 "${LIB:-$(dirname "${BASH_SOURCE[0]}")}/envs.py" main-config "$root" "$root" 2>/dev/null)"
+  rc=$?
+  # No config anywhere: everybody. One that cannot be read says nothing about
+  # who maintains the product, and "everybody" is the answer that drops the
+  # team guard: a trailing comma made every developer a maintainer. Nobody,
+  # then, and said.
+  [[ "$rc" -eq 1 ]] && return 0
+  if [[ "$rc" -ne 0 ]]; then
+    warn "  $root/.sclaude/config.json cannot be read; nobody counts as its maintainer" >&2
+    return 1
   fi
   email="$(git -C "$root" config user.email 2>/dev/null | tr '[:upper:]' '[:lower:]')"
   printf '%s' "$content" | python3 -c '
 import json, sys
-# A config that is there and cannot be read says nothing about who maintains
-# the product, and "everybody" is the answer that drops the team guard: a
-# trailing comma made every developer a maintainer. Not one, then, and said.
-try:
-    data = json.load(sys.stdin)
-except ValueError as exc:
-    sys.stderr.write("sclaude: %s cannot be read (%s); nobody counts as its maintainer\n"
-                     % (sys.argv[1], exc))
-    sys.exit(1)
-if not isinstance(data, dict):
-    sys.stderr.write("sclaude: %s is not an object; nobody counts as its maintainer\n" % sys.argv[1])
-    sys.exit(1)
-listed = data.get("maintainers")
+listed = json.load(sys.stdin).get("maintainers")
 if not isinstance(listed, list) or not listed:
     sys.exit(0)
-sys.exit(0 if sys.argv[2] and sys.argv[2] in [str(m).strip().lower() for m in listed] else 1)
-' "$source" "$email"
+sys.exit(0 if sys.argv[1] and sys.argv[1] in [str(m).strip().lower() for m in listed] else 1)
+' "$email"
 }
 
 # Where this person's sclaude rules for the product go: the team's folder for a

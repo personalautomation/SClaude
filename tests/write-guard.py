@@ -177,6 +177,19 @@ for command, cwd, want in (
         ("x=`rm /home/u/sclaude/f`", "/tmp", "deny"),
         ('bash -c "cat /home/u/sclaude/f"', "/tmp", "allow"),
         ("echo $(git -C /home/u/sclaude log -1)", "/tmp", "allow"),
+        # A substitution after a cd runs where the cd went.
+        ("cd /home/u/sclaude && out=$(git pull 2>&1)", "/home/u/myapp-1", "deny"),
+        ("cd /home/u/sclaude && x=$(echo hi > f)", "/home/u/myapp-1", "deny"),
+        ("cd /home/u/myapp-1 && x=$(echo hi > f)", "/home/u/sclaude", "deny"),
+        ("cd /home/u/myapp-1 && x=$(git rev-parse HEAD)", "/home/u/myapp-1", "allow"),
+        # pushd leaves the directory unknown, and unknown is the checkout.
+        ("pushd /home/u/sclaude && echo x > f", "/home/u/myapp-1", "deny"),
+        # Git that rewrites the tree or makes a new one there.
+        ("git -C /home/u/sclaude bisect start", "/tmp", "deny"),
+        ("git -C /home/u/sclaude read-tree -u HEAD~1", "/tmp", "deny"),
+        ("cd /home/u/sclaude && git checkout-index -a -f", "/tmp", "deny"),
+        ("git clone https://x/r /home/u/sclaude/new", "/tmp", "deny"),
+        ("git clone https://x/r /tmp/new", "/tmp", "allow"),
         # A bracket in quotes closes no group.
         ('echo "a)" > notes.txt', "/home/u/myapp-1", "allow"),
         ("echo '(x' && echo y > notes.txt", "/home/u/myapp-1", "allow"),

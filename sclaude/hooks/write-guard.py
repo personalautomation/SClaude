@@ -62,7 +62,7 @@ GIT_WRITES = ("commit", "add", "rm", "mv", "reset", "checkout", "switch", "resto
               "push", "tag", "branch", "pull", "clean", "worktree", "config",
               "fetch", "init", "submodule", "update-ref", "update-index", "symbolic-ref",
               "replace", "gc", "prune", "repack", "sparse-checkout", "filter-branch",
-              "maintenance", "lfs")
+              "maintenance", "lfs", "bisect", "read-tree", "checkout-index", "clone")
 GIT_WRITE_FORMS = {
     # `git -C <checkout> remote set-url origin x` repoints sclaude's own sync.
     "remote": ("add", "set-url", "remove", "rm", "rename", "prune", "set-head",
@@ -175,7 +175,7 @@ def unmask(word):
     return word
 
 
-def calls(command, cwd):
+def calls(command, cwd, seen=None):
     """(words, directory) for each command in the line, past its wrappers.
 
     None when the line cannot be parsed. The directory follows `cd`, inside a
@@ -214,6 +214,9 @@ def calls(command, cwd):
         name = flat[0].rsplit("/", 1)[-1] if flat else ""
         if flat:
             out.append((flat, where))
+        # pushd and popd move too, to where cannot always be told: unknown.
+        if name in ("pushd", "popd"):
+            where = None
         if name == "cd":
             target = unmask(flat[1]) if len(flat) > 1 else "~"
             target = os.path.expanduser(target)
@@ -230,6 +233,11 @@ def calls(command, cwd):
             where = before if kind == "(" else None
         if tail:
             out.append((tail, where))
+        # Every directory the line is in, a line of bare assignments included:
+        # `cd X && out=$(…)` has no call after the cd, and its substitution
+        # runs in X.
+        if seen is not None:
+            seen.append(where)
     return out
 
 
@@ -345,6 +353,11 @@ def write_targets(command, cwd):
             # the tree as their shell namesakes do.
             if sub in (["checkout"], ["restore"], ["rm"], ["mv"]):
                 out += [(w, here) for w in rest[k + 1:] if not w.startswith("-")]
+            # clone writes the directory it is given, the last word after the URL.
+            elif sub == ["clone"]:
+                plain = [w for w in rest[k + 1:] if not w.startswith("-")]
+                if len(plain) > 1:
+                    out.append((plain[-1], here))
     return [(unmask(w), where) for w, where in out]
 
 
@@ -412,19 +425,27 @@ def refuses(payload, team, readonly, depth=0):
         command = str(data.get("command", ""))
         # What a substitution, a shell's -c string or eval runs writes as
         # surely as the line itself: `bash -c "echo x > $RO/f"` passed.
-        nested = substitutions(command)
-        if nested is None:
-            nested = []
-        for words, where in calls(command, cwd) or []:
+        # A substitution runs where the line has got to by then, which is not
+        # told apart here: it is judged in every directory the line is in, and
+        # an unknown one is the read-only checkout, the safe side.
+        seen = []
+        found = calls(command, cwd, seen) or []
+        visited = []
+        for there in [cwd] + seen:
+            there = there if there is not None else (readonly[0] if readonly else cwd)
+            if there not in visited:
+                visited.append(there)
+        nested = [(text, there) for text in (substitutions(command) or []) for there in visited]
+        for words, where in found:
             inner = inner_command([words[0].rsplit("/", 1)[-1]] + [unmask(w) for w in words[1:]])
             if inner is not None:
-                nested.append((inner, where))
-        for inner in nested:
-            text, where = inner if isinstance(inner, tuple) else (inner, cwd)
+                nested.append((inner, where if where is not None else
+                               (readonly[0] if readonly else cwd)))
+        for text, where in nested:
             if depth >= 3:
                 return "a command nested this deep cannot be judged"
             reason = refuses({"tool_name": "Bash", "tool_input": {"command": text},
-                              "cwd": where or cwd}, team, readonly, depth + 1)
+                              "cwd": where}, team, readonly, depth + 1)
             if reason:
                 return reason
         targets = write_targets(command, cwd)

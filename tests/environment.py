@@ -491,6 +491,20 @@ def main():
                   'environment_restore "%s" "$s"; environment_current "%s"' % (sw, sw, sw, sw))
         check("snapshot: a link is back", out, "localdb")
 
+        # Files that share a name in folders of their own: the exact path
+        # decides, and production is not read as the first of them.
+        same = os.path.join(tmp, "same")
+        for env_name in ("dev", "prod"):
+            os.makedirs(os.path.join(same, "envs", env_name))
+            open(os.path.join(same, "envs", env_name, ".env"), "w").close()
+        os.makedirs(os.path.join(same, ".sclaude"))
+        with open(os.path.join(same, ".sclaude", "config.json"), "w") as fh:
+            json.dump({"environments": {"dev": {"env": "envs/dev/.env"},
+                                        "prod": {"env": "envs/prod/.env", "protected": True}}}, fh)
+        os.symlink(os.path.join(same, "envs", "prod", ".env"), os.path.join(same, ".env.local"))
+        check("current: a shared basename is told by its path",
+              run('environment_current "%s"' % same), "prod")
+
         check("value: read from the environment's file",
               run('environment_value "%s" dev POSTGRES_URL_NON_POOLING' % sw),
               "postgresql://u:s%40cret@db:5432/postgres")

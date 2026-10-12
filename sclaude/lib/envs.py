@@ -162,12 +162,17 @@ def current(root, tree, data=None):
         target = None
     if not target:
         return None
-    for name in environments(root, data):
-        path = env_file(root, name, data)
-        if path and (os.path.realpath(path) == target
-                     or os.path.basename(path) == os.path.basename(target)):
+    files = {name: env_file(root, name, data) for name in environments(root, data)}
+    for name, path in files.items():
+        if path and os.path.realpath(path) == target:
             return name
-    return None
+    # A link made in another tree (a worktree's .env.local into the main
+    # repository) names the same file by another path: the basename then,
+    # but only when it singles one out. Environments in folders of their own
+    # can share it (envs/dev/.env, envs/prod/.env), and the first of them was
+    # taken, production read as dev.
+    alike = [n for n, p in files.items() if p and os.path.basename(p) == os.path.basename(target)]
+    return alike[0] if len(alike) == 1 else None
 
 
 def settled(root, tree, data=None):

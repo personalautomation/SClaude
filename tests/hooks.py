@@ -256,6 +256,22 @@ FORBIDDEN = [
     ("supabase db push --db-url 'postgresql://u:p@localhost/postgres?host=/var/run/postgresql'", ALLOW),
     # Auto-merge is the merge, only later.
     ("gh api graphql -f query='mutation{enablePullRequestAutoMerge(input:{pullRequestId:\"x\"}){clientMutationId}}'", DENY),
+    # Shell keywords, exec, and a command substitution run the command too.
+    ("if true; then gh pr merge 5; fi", DENY),
+    ("! gh pr merge 5", DENY),
+    ("for i in 1; do gh pr merge 5; done", DENY),
+    ("while false; do :; done; until true; do vercel --prod; done", DENY),
+    ("exec gh pr merge 5", DENY),
+    ("x=$(gh pr merge 5)", DENY),
+    ("echo \"$(gh pr merge 5)\"", DENY),
+    ("echo `gh pr merge 5`", DENY),
+    ("diff <(gh pr merge 5) x", DENY),
+    ("echo $(echo $(gh pr merge 5))", DENY),
+    ("echo '$(gh pr merge 5)'", ALLOW),
+    ("gh pr comment 1 --body-file - <<'EOF'\nrun $(gh pr merge 5) later\nEOF", ALLOW),
+    ("echo \"a ->(b\"", ALLOW),
+    ("x=$(git rev-parse HEAD); echo $x", ALLOW),
+    ("if git diff --quiet; then echo clean; fi", ALLOW),
     # ...and what must still go through.
     ("gh api repos/o/r/pulls/5/merge", ALLOW),
     ("gh api repos/o/r/pulls/5", ALLOW),

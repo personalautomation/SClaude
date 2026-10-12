@@ -154,7 +154,7 @@ def tokenize(command, mask=False):
 # went through, whereas a bare `rm -rf` was rejected. _shell.py exists precisely
 # because of that divergence.
 WRAPPERS = ("sudo", "env", "time", "nohup", "xargs", "setsid", "command",
-            "timeout", "stdbuf", "nice")
+            "timeout", "stdbuf", "nice", "exec")
 
 # Wrappers that swallow an argument of their own before the command's name.
 #
@@ -173,7 +173,98 @@ WRAPPER_VALUE_FLAGS = {
     "stdbuf": ("-i", "--input", "-o", "--output", "-e", "--error"),
     "nice": ("-n", "--adjustment"),
     "env": ("-u", "--unset", "-C", "--chdir", "-S", "--split-string"),
+    "exec": ("-a",),
 }
+
+# Words that open a command inside `if`, a loop or a negation: the command
+# after them is the one that runs. `if true; then gh pr merge 5; fi` put
+# `then` first, and the ban table compares the first word.
+KEYWORDS = ("if", "then", "else", "elif", "while", "until", "do", "!")
+
+
+def strip_keywords(words):
+    while words and words[0] in KEYWORDS:
+        words = words[1:]
+    return words
+
+
+def substitutions(command):
+    """The commands inside $( … ), <( … ), >( … ) and backticks, or None.
+
+    Each runs as a command of its own, and `x=$(gh pr merge 5)` merged with no
+    ban looking: the words around it are an assignment. Single quotes and the
+    body of a heredoc with a quoted delimiter expand nothing and are skipped.
+    One nested in another is found when its outer one is judged. None when a
+    bracket is left open: unknown is not permission.
+    """
+    text = strip_quoted_heredocs(command)
+    out, i, quote = [], 0, ""
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and quote != "'":
+            i += 2
+            continue
+        if quote == "'":
+            if ch == "'":
+                quote = ""
+            i += 1
+            continue
+        if ch == "'" and not quote:
+            quote = "'"
+            i += 1
+            continue
+        if ch == '"':
+            quote = "" if quote == '"' else '"'
+            i += 1
+            continue
+        # Process substitution is not one inside double quotes: there `->(`
+        # is text, and only $( and backticks expand.
+        if (ch == "$" or (ch in "<>" and not quote)) and text[i + 1:i + 2] == "(":
+            depth, j, inner = 1, i + 2, ""
+            while j < len(text) and depth:
+                if text[j] == "(":
+                    depth += 1
+                elif text[j] == ")":
+                    depth -= 1
+                if depth:
+                    inner += text[j]
+                j += 1
+            if depth:
+                return None
+            out.append(inner)
+            i = j
+            continue
+        if ch == "`":
+            j = text.find("`", i + 1)
+            if j == -1:
+                return None
+            out.append(text[i + 1:j])
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
+def strip_quoted_heredocs(command):
+    """The command without the bodies of heredocs whose delimiter is quoted."""
+    lines = command.split("\n")
+    out, i = [], 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        i += 1
+        for m in HEREDOC.finditer(line):
+            delimiter = m.group(1) or m.group(2) or m.group(3)
+            quoted = m.group(3) is None
+            start = i
+            while i < len(lines) and lines[i].strip() != delimiter:
+                i += 1
+            if not quoted:
+                out.extend(lines[start:i])
+            if i < len(lines):
+                out.append(lines[i])
+            i += 1
+    return "\n".join(out)
 
 # Wrappers whose first positional argument is not the command but a parameter
 # of their own: `timeout 5 …` and `nice -n 5 …` take a number. For timeout it is

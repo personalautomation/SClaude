@@ -24,7 +24,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _shell import GIT_VALUED, QUOTED_GT, strip_wrappers, tokenize, ungroup  # noqa: E402
+from _shell import GIT_VALUED, KEYWORDS, QUOTED_GT, strip_wrappers, tokenize, ungroup  # noqa: E402
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
 READONLY_REASON = ("{dir} is sclaude's own checkout, and a session does not change "
@@ -107,9 +107,6 @@ def git_reads(sub, rest):
 # (`--target-directory`) names the destination outright instead.
 TO_LAST = ("cp", "mv", "install", "ln")
 SEPS = ("|", "||", "&&", ";", "&")
-# Words that open a command inside `if`, a loop or a negation: the command
-# after them is the one that runs.
-KEYWORDS = ("if", "then", "else", "elif", "while", "until", "do", "!")
 # A redirection, alone or stuck to its neighbours: `>f`, `2>>f`, `hi>/x/f`.
 REDIRECT = re.compile(r"(?:^|(?<=[^\\>]))\d?(?:>>?|&>>?)\|?(?!&)(.*)$")
 

@@ -52,7 +52,8 @@ import urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 from _friction import note
-from _shell import GIT_VALUED, SEPARATORS, script_call, strip_runners, strip_wrappers, tokenize, ungroup
+from _shell import (GIT_VALUED, SEPARATORS, script_call, strip_keywords, strip_runners,
+                    strip_wrappers, substitutions, tokenize, ungroup)
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
 
@@ -788,6 +789,17 @@ def refuses(command, step, cwd=None, depth=0):
     if reason:
         return reason
 
+    # What a substitution runs is a command of its own, judged as one.
+    inner_parts = substitutions(command)
+    if inner_parts is None:
+        return "a substitution in the command is left open, so it cannot be judged"
+    for inner in inner_parts:
+        if depth >= 3:
+            return "a command nested this deep cannot be judged"
+        reason = refuses(inner, step, cwd, depth + 1)
+        if reason:
+            return reason
+
     table = {tuple(script_call(list(d["words"]))): d["why"] for d in POLICY.get("deny", [])}
 
     where = os.path.realpath(cwd or os.getcwd())
@@ -808,6 +820,7 @@ def refuses(command, step, cwd=None, depth=0):
         if opens:
             saved.append(where)
         flat, _ = ungroup(raw)
+        flat = strip_keywords(flat)
         remember(known, flat)
         redirected = redirected or any("GIT_DIR" in w for w in raw)
         where = follow_cd(where, flat, known, command)

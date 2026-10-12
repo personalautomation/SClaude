@@ -609,24 +609,39 @@ def strip_heads(words, shape):
     since each missed what the other had learnt: `case a in a) gh pr merge 5;;
     esac` and `f() { rm $RO/f; }; f` both ran their command unjudged.
 
-    `shape` is the state carried from one segment of the line to the next:
-    whether a case is open.
+    Either may stand behind keywords and an opening bracket (`then f() {`,
+    `(case x in`), which are left in place for the walkers to read. `shape`
+    is the state carried from one segment of the line to the next: whether a
+    case is open.
     """
     if not words:
         return words
-    if words[0] == "case":
+    # Past what opens the command: keywords and brackets, kept as they are.
+    k = 0
+    while k < len(words) and (words[k] in KEYWORDS or words[k] in ("{", "(")
+                              or (words[k].startswith("(") and words[k].lstrip("(") in KEYWORDS)):
+        k += 1
+    head, rest = list(words[:k]), list(words[k:])
+    # `(case` comes stuck together: the bracket stays, the word is read.
+    if rest and rest[0].startswith("(") and rest[0].lstrip("(") in ("case",):
+        head.append("(" * (len(rest[0]) - len(rest[0].lstrip("("))))
+        rest[0] = rest[0].lstrip("(")
+    if rest and rest[0] == "case":
         shape["case"] = True
-        words = words[words.index("in") + 1:] if "in" in words else []
-    elif words[0] == "esac":
+        rest = rest[rest.index("in") + 1:] if "in" in rest else []
+    elif rest and rest[0] == "esac":
         shape["case"] = False
-        words = words[1:]
-    if shape.get("case") and words and words[0].endswith(")") and (
-            "(" not in words[0] or (words[0].startswith("(") and words[0].count("(") == 1)):
-        words = words[1:]
-    if words and re.fullmatch(r"[\w.:-]+\(\)", words[0]):
-        words = words[1:]
-    elif words[:1] == ["function"] and len(words) > 1:
-        words = words[2:]
-        if words[:1] == ["()"]:
-            words = words[1:]
-    return words
+        rest = rest[1:]
+    # A label has a command after it; a lone `true)` closes a subshell.
+    if shape.get("case") and len(rest) > 1 and rest[0].endswith(")") and (
+            "(" not in rest[0] or (rest[0].startswith("(") and rest[0].count("(") == 1)):
+        rest = rest[1:]
+    if rest and re.fullmatch(r"[\w.:-]+\(\)", rest[0]):
+        rest = rest[1:]
+    elif len(rest) > 1 and re.fullmatch(r"[\w.:-]+", rest[0]) and rest[1] == "()":
+        rest = rest[2:]
+    elif rest[:1] == ["function"] and len(rest) > 1:
+        rest = rest[2:]
+        if rest[:1] == ["()"]:
+            rest = rest[1:]
+    return head + rest

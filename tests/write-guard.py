@@ -212,6 +212,11 @@ for command, cwd, want in (
         ("function f { rm /home/u/sclaude/README.md; }", "/tmp", "deny"),
         ("case x in x) rm /home/u/sclaude/README.md;; esac", "/tmp", "deny"),
         ("f() { cat /home/u/sclaude/README.md; }; f", "/tmp", "allow"),
+        ("if true; then f() { rm /home/u/sclaude/R; }; fi", "/tmp", "deny"),
+        ("{ f() { rm /home/u/sclaude/R; }; }", "/tmp", "deny"),
+        ("f () { rm /home/u/sclaude/R; }", "/tmp", "deny"),
+        # A subshell closing inside a case branch still ends its cd.
+        ("case x in x) (cd /home/u/myapp-1; true); echo x > f;; esac", "/home/u/sclaude", "deny"),
         # A bracket in quotes closes no group.
         ('echo "a)" > notes.txt', "/home/u/myapp-1", "allow"),
         ("echo '(x' && echo y > notes.txt", "/home/u/myapp-1", "allow"),

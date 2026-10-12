@@ -755,7 +755,15 @@ def main():
                               ("cat .env.prod | tee .env.local", "deny"),
                               ("cat .env.prod | cat > .env.local", "deny"),
                               ("tee .env.local < .env.prod", "deny"),
-                              ("cat .env.dev | tee .env.local", "allow")):
+                              ("cat .env.dev | tee .env.local", "allow"),
+                              ("cat .env.prod | sudo tee .env.local", "deny"),
+                              ("cat .env.prod | command tee .env.local", "deny"),
+                              ("cat .env.prod | dd of=.env.local", "deny"),
+                              ("sh -c 'cat .env.prod' | tee .env.local", "deny"),
+                              ("echo \"$(cat .env.prod)\" > .env.local", "deny"),
+                              # Unrelated commands on one line are not a switch.
+                              ("grep X .env.prod; echo Y=1 >> .env.local", "allow"),
+                              ("diff .env.prod .env.dev && cat .env.dev > .env.local", "allow")):
             if verdict(command) != want:
                 failures.append(("shared", command, want, verdict(command)))
         # Main's config unreadable: nothing is put onto .env.local.

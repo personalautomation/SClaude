@@ -277,6 +277,65 @@ def env_switch_refuses(words, raw, into=()):
     return None
 
 
+def env_pipeline_refuses(command, inner_parts):
+    """The reason a pipeline writing .env.local is banned, or None.
+
+    A pipe splits the file read from what writes it: `cat .env.prod | tee
+    .env.local`, `… | sudo tee`, `… | dd of=.env.local`, `sh -c 'cat
+    .env.prod' | tee .env.local`, `echo "$(cat .env.prod)" > .env.local`. So
+    the pipeline is judged whole, by what it reads and what it writes, and
+    only that pipeline: a line that reads production's file in one command
+    and appends a dev key in the next is not a switch.
+    """
+    tokens = tokenize(command) or []
+    pipelines, current = [], []
+    for token in tokens + [";"]:
+        if token in SEPARATORS and token != "|":
+            if current:
+                pipelines.append(current)
+            current = []
+        else:
+            current.append(token)
+    extra = [w for text in inner_parts for w in (tokenize(text) or [])]
+    for pipeline in pipelines:
+        sources, writes, shape = [], False, {}
+        parts, part = [], []
+        for token in pipeline + ["|"]:
+            if token == "|":
+                parts.append(part)
+                part = []
+            else:
+                part.append(token)
+        for words in parts:
+            flat = strip_keywords(ungroup(strip_heads(words, shape))[0])
+            targets = redirect_targets(flat)
+            sources += [m.group(1) or (flat[i + 1] if i + 1 < len(flat) else "")
+                        for i, m in ((i, re.match(r"^\d*<(?!<)(.*)$", w)) for i, w in enumerate(flat)) if m]
+            flat = strip_redirections(flat)
+            bare = strip_wrappers(flat)
+            call = flat[len(flat) - len(bare):] if bare else []
+            if not call:
+                continue
+            name = call[0].rsplit("/", 1)[-1]
+            args = [w for w in call[1:] if not w.startswith("-")]
+            if name == "tee":
+                targets += args
+            elif name == "dd":
+                targets += [w[3:] for w in call[1:] if w.startswith("of=")]
+                args = [w[3:] for w in call[1:] if w.startswith("if=")]
+            inner = inner_command([name] + call[1:])
+            if inner is not None:
+                args += [w for w in tokenize(inner) or [] if not w.startswith("-")]
+            sources += args
+            writes = writes or any(os.path.basename(t.rstrip("/")) == ".env.local" for t in targets)
+        if writes:
+            named = [w for w in sources + extra if os.path.basename(w) != ".env.local"]
+            reason = env_switch_refuses(["cat"], ["cat"] + named, into=[".env.local"])
+            if reason:
+                return reason
+    return None
+
+
 DB_URL_REASON = ("--db-url points the push at a database named on the command "
                  "line rather than the one this tree is on, so the tree's environment "
                  "says nothing about where it lands; only a local database may be "
@@ -872,10 +931,6 @@ def refuses(command, step, cwd=None, depth=0):
     # brace group runs in this shell, so its `cd` simply stays.
     saved, restore = [], False
     shape = {}
-    # What the whole line writes onto .env.local and what it names: a pipe
-    # splits the file read from the redirection or tee that writes it, and
-    # `cat .env.prod | tee .env.local` went past a check of each segment alone.
-    line_words, writes_env = [], False
     for raw in segments(command, raw=True):
         if restore:
             where = saved.pop() if saved else None
@@ -890,14 +945,7 @@ def refuses(command, step, cwd=None, depth=0):
         flat, _ = ungroup(raw)
         flat = strip_keywords(flat)
         into = redirect_targets(flat)
-        # A file read in by `<` is named as surely as an argument is.
-        line_words += [m.group(1) or (flat[i + 1] if i + 1 < len(flat) else "")
-                       for i, m in ((i, re.match(r"^\d*<(?!<)(.*)$", w)) for i, w in enumerate(flat)) if m]
         flat = strip_redirections(flat)
-        line_words += [w for w in flat[1:] if not w.startswith("-")]
-        writes_env = writes_env or any(os.path.basename(t.rstrip("/")) == ".env.local" for t in into) \
-            or (flat[:1] and flat[0].rsplit("/", 1)[-1] == "tee"
-                and any(os.path.basename(w) == ".env.local" for w in flat[1:]))
         remember(known, flat)
         redirected = redirected or any("GIT_DIR" in w for w in raw)
         where = follow_cd(where, flat, known, command)
@@ -946,12 +994,9 @@ def refuses(command, step, cwd=None, depth=0):
         for prefix, why in table.items():
             if tuple(called[:len(prefix)]) == prefix:
                 return why
-    if writes_env:
-        reason = env_switch_refuses(
-            ["cat"], ["cat"] + [w for w in line_words if os.path.basename(w) != ".env.local"],
-            into=[".env.local"])
-        if reason:
-            return reason
+    reason = env_pipeline_refuses(command, inner_parts)
+    if reason:
+        return reason
     for inner in inner_parts:
         if depth >= 3:
             return "a command nested this deep cannot be judged"

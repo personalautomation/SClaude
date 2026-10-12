@@ -145,6 +145,12 @@ try:
     out = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"),
                           "flags", main, "", "code", tree], capture_output=True, text=True).stdout
     check("tree-flags", "Bash(npm run wipe:*)" in out.splitlines(), True)
+    # An integration main names and the branch's older copy does not still holds.
+    write(main, ".sclaude/team/policy.json", {"integrations": ["vercel", "supabase"]})
+    write(tree, ".sclaude/team/policy.json", {"integrations": ["vercel"]})
+    merged_tree = policy.merged(main, "", "code", tree)
+    check("tree-keeps-mains-integrations", merged_tree["integrations"], ["supabase", "vercel"])
+    check("tree-keeps-mains-rules", "supabase-db-push" in merged_tree["rules"], True)
 
     # --- the flags a step is launched with ---
     out = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"),

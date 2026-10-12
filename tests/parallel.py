@@ -285,7 +285,9 @@ check("review-says-resolve-yourself", "Resolve on GitHub yourself" in review, Tr
 check("yours-file-name-agrees", ctx.YOURS_FILE in review, True)
 body = open(os.path.join(PROMPTS, "_friction-body.md")).read()
 check("friction-may-fix-the-project", "<worktree>" in body and "<branch>" in body, True)
-check("friction-gets-the-worktree", RUN.count('--add-dir "$wt"'), 2)
+# The review runs in the feature's tree, with sclaude's checkout added to read.
+check("friction-runs-in-the-worktree", RUN.count('( cd "$where" && claude_launch'), 2)
+check("friction-reads-sclaude", RUN.count('--add-dir "$INSTRUMENTS" \\'), 2)
 
 # --- what rides along to production -------------------------------------------
 repo = os.path.join(tmp, "riders")

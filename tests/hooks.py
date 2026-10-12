@@ -258,6 +258,11 @@ FORBIDDEN = [
     ("gh api graphql -f query='mutation{enablePullRequestAutoMerge(input:{pullRequestId:\"x\"}){clientMutationId}}'", DENY),
     # Shell keywords, exec, and a command substitution run the command too.
     ("if true; then gh pr merge 5; fi", DENY),
+    ("case a in a) gh pr merge 5;; esac", DENY),
+    ("case $x in a|b) echo; ;; c) vercel --prod;; esac", DENY),
+    ("case $x in a) echo ok;; esac", ALLOW),
+    ("{ echo a; echo b; } | sort", ALLOW),
+    ("{ ls; }", ALLOW),
     ("! gh pr merge 5", DENY),
     ("for i in 1; do gh pr merge 5; done", DENY),
     ("while false; do :; done; until true; do vercel --prod; done", DENY),

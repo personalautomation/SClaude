@@ -554,6 +554,8 @@ def follow_cd(where, words, known=None, command=""):
     pushd/popd make the directory unknown, and an unknown directory never
     counts as scratch.
     """
+    if not words:
+        return where
     if any("(" in w or ")" in w for w in words):
         return None
     if words[0] in ("pushd", "popd"):
@@ -812,9 +814,24 @@ def refuses(command, step, cwd=None, depth=0):
     # rest of the line, and `(npm test) && git push` on main went through. A
     # brace group runs in this shell, so its `cd` simply stays.
     saved, restore = [], False
+    in_case = False
     for raw in segments(command, raw=True):
         if restore:
             where = saved.pop() if saved else None
+        # A `case` branch runs what follows its `pattern)` label, and the
+        # label was read as the command: `case a in a) gh pr merge 5;; esac`
+        # merged. Inside a case, a first word ending in `)` is a label.
+        if raw[0] == "case":
+            in_case = True
+            raw = raw[raw.index("in") + 1:] if "in" in raw else []
+        elif raw[0] == "esac":
+            in_case = False
+            raw = raw[1:]
+        if in_case and raw and raw[0].endswith(")") and "(" not in raw[0]:
+            raw = raw[1:]
+        if not raw:
+            restore = False
+            continue
         opens = raw[0] == "(" or (raw[0].startswith("(") and not raw[0].startswith("$("))
         last = raw[-1]
         restore = bool(saved or opens) and (

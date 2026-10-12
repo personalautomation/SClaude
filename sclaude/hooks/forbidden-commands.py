@@ -40,6 +40,7 @@
 # same: `_shell.tokenize` cuts the string. While the parsing was copied, the
 # hooks could diverge silently — and they did: a `;` without spaces stayed a
 # separator in words only, and `echo hi;gh pr merge` went past the ban.
+import functools
 import json
 import os
 import re
@@ -65,7 +66,8 @@ except Exception as _exc:  # noqa: BLE001
 _failsafe.install("ban check (forbidden-commands.py)")
 from _friction import note  # noqa: E402
 from _shell import (GIT_VALUED, SEPARATORS, call_form, closing_at, inner_command, script_call,  # noqa: E402
-                    strip_keywords, strip_redirections, strip_runners, strip_wrappers,
+                    redirect_targets, strip_keywords, strip_redirections, strip_runners,
+                    strip_wrappers,
                     substitutions, tokenize, ungroup)
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
@@ -192,7 +194,7 @@ def active_environment(cwd):
     obeys the link (envs.settled). No answer is not permission: a product that
     names no environments has none, and every environment counts as protected.
     """
-    return envs_lib.settled(cwd, cwd, environments_data())
+    return envs_lib.settled(cwd, cwd, environments_data()[0])
 
 
 def project_dir():
@@ -210,7 +212,7 @@ def environment_is_protected(cwd, name):
     .sclaude/config.json. True for anything that cannot be resolved: the
     question is "may a migration be applied here", and an environment that
     cannot be identified is exactly the case the ban exists for."""
-    return not name or envs_lib.protected(cwd, name, environments_data())
+    return not name or envs_lib.protected(cwd, name, environments_data()[0])
 
 
 # A tree is on the environment whose file its .env.local points at
@@ -222,26 +224,40 @@ ENV_SWITCH_REASON = ("this points .env.local at production's environment file, a
                      "next step would work against production without knowing it")
 
 
-def env_switch_refuses(words, raw):
-    """The reason this `ln` or `cp` onto .env.local is banned, or None."""
-    if not words or words[0] not in ("ln", "cp", "install"):
+def env_switch_refuses(words, raw, into=()):
+    """The reason this call onto .env.local is banned, or None.
+
+    ln, cp, install and mv put a file there; a redirection writes one in, and
+    through the link it writes the environment's own file:
+    `cat .env.prod > .env.local` gave every tree on dev production's keys.
+    """
+    if not words:
         return None
     paths = [w for w in raw[1:] if not w.startswith("-")]
-    if not paths or os.path.basename(paths[-1].rstrip("/")) != ".env.local":
+    if any(os.path.basename(t.rstrip("/")) == ".env.local" for t in into):
+        sources = paths
+    elif words[0] in ("ln", "cp", "install", "mv") and paths \
+            and os.path.basename(paths[-1].rstrip("/")) == ".env.local":
+        sources = paths[:-1]
+    else:
         return None
+    data, unreadable = environments_data()
+    if unreadable:
+        return ("main's .sclaude/config.json cannot be read, so which file is production's "
+                "cannot be told; nothing is put onto .env.local until it can")
     tree = project_dir()
-    prod = envs_lib.production(tree, environments_data())
-    target = envs_lib.env_file(tree, prod, environments_data()) if prod else None
+    prod = envs_lib.production(tree, data)
+    target = envs_lib.env_file(tree, prod, data) if prod else None
     if not target:
         return None
     # By the file itself first. The name alone decides only where it singles
     # production out: environments in folders of their own share it
     # (envs/dev/.env, envs/prod/.env), and every switch read as production.
-    files = [envs_lib.env_file(tree, n, environments_data()) for n in envs_lib.environments(tree, environments_data())]
+    files = [envs_lib.env_file(tree, n, data) for n in envs_lib.environments(tree, data)]
     real = os.path.realpath(target)
     name = os.path.basename(target)
     unique = sum(1 for f in files if f and os.path.basename(f) == name) == 1
-    for p in paths[:-1]:
+    for p in sources:
         full = os.path.join(tree, os.path.expanduser(p))
         if os.path.exists(full):
             if os.path.realpath(full) == real:
@@ -384,7 +400,7 @@ SHARED_SCHEMA_ASK = ("this changes the schema of \"{name}\", a database the whol
 
 def local_environment(cwd):
     """The project's local environment, from main's .sclaude/config.json, or None."""
-    config = environments_data()
+    config = environments_data()[0]
     local = ((config.get("database") or {}).get("local") or {}).get("environment")
     return local if isinstance(local, str) and local else None
 
@@ -877,7 +893,9 @@ def refuses(command, step, cwd=None, depth=0):
         if opens:
             saved.append(where)
         flat, _ = ungroup(raw)
-        flat = strip_redirections(strip_keywords(flat))
+        flat = strip_keywords(flat)
+        into = redirect_targets(flat)
+        flat = strip_redirections(flat)
         remember(known, flat)
         redirected = redirected or any("GIT_DIR" in w for w in raw)
         where = follow_cd(where, flat, known, command)
@@ -916,7 +934,7 @@ def refuses(command, step, cwd=None, depth=0):
                                redirected or also, known)
                   or api_merge_refuses(words, raw[len(raw) - len(words):])
                   or db_push_refuses(words, raw[len(raw) - len(words):])
-                  or env_switch_refuses(words, raw[len(raw) - len(words):])
+                  or env_switch_refuses(words, raw[len(raw) - len(words):], into)
                   or vercel_refuses(words, raw[len(raw) - len(words):]))
         if reason:
             return reason
@@ -975,29 +993,17 @@ if not root:
 POLICY = policy_lib.merged(root, flag(argv, "--person"), step, flag(argv, "--tree"))
 
 
-class _MainEnvironments(dict):
-    """envs.main_config, read the first time a check needs it: most calls of
-    a step (ls, grep, npm test) need none, and it costs a git process."""
-
-    def __init__(self, repo):
-        super().__init__()
-        self.repo, self.read = repo, False
-
-    def load(self):
-        if not self.read:
-            self.read = True
-            try:
-                self.update(envs_lib.main_config(self.repo, project_dir()))
-            except envs_lib.Unreadable:
-                pass  # nothing protected is known: every environment counts as one
-        return self
-
-
-_MAIN = _MainEnvironments(root or project_dir())
-
-
+@functools.lru_cache(maxsize=None)
 def environments_data():
-    return _MAIN.load()
+    """envs.main_config, and whether it could not be read; read the first time
+    a check needs it: most calls of a step (ls, grep, npm test) need none, and
+    it costs a git process. Unreadable reads as no environments, so every one
+    counts as protected, and nothing is switched onto .env.local."""
+    try:
+        return envs_lib.main_config(root or project_dir(), project_dir()), False
+    except envs_lib.Unreadable:
+        return {}, True
+
 
 try:
     payload = json.load(sys.stdin)

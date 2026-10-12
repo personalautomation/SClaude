@@ -280,6 +280,9 @@ FORBIDDEN = [
     ("for i in 1; do gh pr merge 5; done", DENY),
     ("while false; do :; done; until true; do vercel --prod; done", DENY),
     ("exec gh pr merge 5", DENY),
+    ("coproc gh pr merge 5", DENY),
+    ("builtin command gh pr merge 5", DENY),
+    ("coproc git push origin main", DENY),
     ("x=$(gh pr merge 5)", DENY),
     ("echo \"$(gh pr merge 5)\"", DENY),
     ("echo `gh pr merge 5`", DENY),
@@ -731,6 +734,23 @@ def main():
                              verdict("ln -sfn .env.prod .env.local")))
         subprocess.run(["git", "-C", tree, "update-ref", "-d", "refs/remotes/origin/main"], check=True)
         guard("dev")
+
+        # mv and a redirection put production's file onto .env.local too.
+        with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:
+            json.dump({"environments": {"dev": {"env": ".env.dev"}, "localdb": {"env": ".env.localdb"},
+                                        "prod": {"env": ".env.prod", "protected": True}}}, fh)
+        for command, want in (("mv .env.prod .env.local", "deny"),
+                              ("cat .env.prod > .env.local", "deny"),
+                              ("cat .env.prod >> .env.local", "deny"),
+                              ("cat .env.dev > .env.local", "allow")):
+            if verdict(command) != want:
+                failures.append(("shared", command, want, verdict(command)))
+        # Main's config unreadable: nothing is put onto .env.local.
+        with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:
+            fh.write('{"environments": {},}')
+        if verdict("ln -sfn .env.localdb .env.local") != "deny":
+            failures.append(("shared", "switch with main's config unreadable", "deny",
+                             verdict("ln -sfn .env.localdb .env.local")))
 
         # Environments in folders of their own share a file name: the file
         # itself decides, and dev is not taken for production.

@@ -168,7 +168,7 @@ def tokenize(command, mask=False):
 # went through, whereas a bare `rm -rf` was rejected. _shell.py exists precisely
 # because of that divergence.
 WRAPPERS = ("sudo", "env", "time", "nohup", "xargs", "setsid", "command",
-            "timeout", "stdbuf", "nice", "exec")
+            "timeout", "stdbuf", "nice", "exec", "builtin")
 
 # Wrappers that swallow an argument of their own before the command's name.
 #
@@ -193,7 +193,7 @@ WRAPPER_VALUE_FLAGS = {
 # Words that open a command inside `if`, a loop or a negation: the command
 # after them is the one that runs. `if true; then gh pr merge 5; fi` put
 # `then` first, and the ban table compares the first word.
-KEYWORDS = ("if", "then", "else", "elif", "while", "until", "do", "!")
+KEYWORDS = ("if", "then", "else", "elif", "while", "until", "do", "!", "coproc")
 
 
 def strip_keywords(words):
@@ -518,6 +518,19 @@ def inner_command(words):
 
 # A redirection, the target stuck to it or not: `2>&1`, `>out`, `> out`, `<in`.
 REDIRECTION = re.compile(r"^\d*(?:>>?|<|&>>?|>\|)(.*)$")
+
+
+def redirect_targets(words):
+    """The files the redirections among the words write to."""
+    out = []
+    for i, w in enumerate(words):
+        m = REDIRECTION.match(w)
+        if not m or not i or w.lstrip("0123456789").startswith("<"):
+            continue
+        target = m.group(1) or (words[i + 1] if i + 1 < len(words) else "")
+        if target and not target.startswith("&"):
+            out.append(target)
+    return out
 
 
 def strip_redirections(words):

@@ -1837,6 +1837,34 @@ cmd_propose() {
   return 1
 }
 
+# Brings this machine's installed systemd units up to the repository's.
+#
+# install.sh writes them with the checkout's path put in for @REPO@, and
+# nothing wrote them again when an update changed one: a unit installed as a
+# link into the repository, as an older install.sh made them, came to say
+# ExecStart=… @REPO@/… and the Telegram bot crash-looped on it; a written one
+# kept its old lines (KillMode). Only units already installed are touched, and
+# only when they differ; systemd is told once when any did.
+#
+#   units_refresh
+units_refresh() {
+  local units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" src name want changed=""
+  [[ -d "$units" && -d "$INSTRUMENTS/systemd" ]] || return 0
+  for src in "$INSTRUMENTS"/systemd/*; do
+    [[ -f "$src" ]] || continue
+    name="$(basename "$src")"
+    [[ -e "$units/$name" || -L "$units/$name" ]] || continue
+    want="$(sed "s|@REPO@|$INSTRUMENTS|g" "$src")"
+    if [[ -L "$units/$name" || "$(cat "$units/$name" 2>/dev/null)" != "$want" ]]; then
+      rm -f "$units/$name"
+      printf '%s\n' "$want" > "$units/$name" && changed=1
+    fi
+  done
+  [[ -n "$changed" ]] && command -v systemctl >/dev/null 2>&1 \
+    && systemctl --user daemon-reload >/dev/null 2>&1
+  return 0
+}
+
 # The branches sclaude may push and merge main into: main, and this person's
 # dev/<name>, with the time cmd_propose may add. Anything else in sclaude's
 # checkout is somebody's own work in progress.

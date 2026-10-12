@@ -1516,6 +1516,8 @@ main() {
       # orchestrator updates itself first: a fetch has no business on the path
       # the bot calls with a timeout. It may re-execute this process.
       instruments_sync "$@"
+      # And the units it installed, which an update changes under them.
+      units_refresh
 
       # Through a temporary variable: an assignment inside the `if` itself would
       # leave ASK_DIR equal to "/.git/sclaude" where there is no repository at

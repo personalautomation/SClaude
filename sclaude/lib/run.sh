@@ -1402,6 +1402,9 @@ PYEOF
   # git does not see: the file itself was created empty before every review,
   # most of which defer nothing, and it then stood in the worktree as
   # uncommitted work and rode into the next `git add -A`.
+  # Asked once here, so the substitutions below find the answer kept rather
+  # than asking main again in each of their subshells.
+  product_maintainer "$wt" || true
   mkdir -p "$(dirname "$(deferred_file "$wt" "$slug")")" 2>/dev/null || true
   prompt="$(sed -e "/^<body>$/r $PROMPTS/_friction-body.md" -e "/^<body>$/d" \
     "$head_prompt" \

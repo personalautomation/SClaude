@@ -227,10 +227,21 @@ review_guard_settings() {
 
 # sclaude's checkout as it stands: its HEAD and what is uncommitted, in one
 # line. Taken before and after a review session (instruments_unchanged).
+#
+# Untracked files by their content, since their status line stays the same
+# however they change, and the repository's own config and hooks, which no
+# status shows. Ignored files are left out: running the hooks writes their
+# caches, and every review would be reported.
 instruments_state() {
+  local git_dir
+  git_dir="$(git -C "$INSTRUMENTS" rev-parse --absolute-git-dir 2>/dev/null)"
   printf '%s %s\n' "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null)" \
-    "$( { git -C "$INSTRUMENTS" status --porcelain; git -C "$INSTRUMENTS" diff HEAD; } 2>/dev/null \
-        | md5sum | cut -c1-12)"
+    "$( { git -C "$INSTRUMENTS" status --porcelain
+          git -C "$INSTRUMENTS" diff HEAD
+          git -C "$INSTRUMENTS" ls-files -o --exclude-standard -z \
+            | (cd "$INSTRUMENTS" && xargs -0 -r sha1sum)
+          [[ -n "$git_dir" ]] && cat "$git_dir/config" && ls -la "$git_dir/hooks"
+        } 2>/dev/null | md5sum | cut -c1-12)"
 }
 
 # Says so, loudly, when a review session changed sclaude's checkout after all.

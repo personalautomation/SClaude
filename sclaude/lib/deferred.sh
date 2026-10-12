@@ -136,7 +136,9 @@ PY
 deferred_pending() {
   local root="$1" pr
   command -v gh >/dev/null 2>&1 || return 1
-  pr="$(cd "$root" && gh pr list --state open --json headRefName,url \
+  # This person's own: the folders are per person, and another's open
+  # review held back the offer of this one.
+  pr="$(cd "$root" && gh pr list --state open --author @me --json headRefName,url \
           --jq '[.[] | select(.headRefName | startswith("sclaude/deferred-"))][0].url // ""' 2>/dev/null)" \
     || return 1
   [[ -n "$pr" ]] && echo "$pr"

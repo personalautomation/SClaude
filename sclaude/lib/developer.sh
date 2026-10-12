@@ -68,8 +68,22 @@ developer_name() {
 # is a session's to edit, and a session guarded by --team could write itself
 # into `maintainers`, or empty the list, and the sessions after it would get
 # no guard. A change to the list counts once it has merged.
+# The answer is kept for this process, by root: a friction review asked it four
+# times on the way in, a git process and two python ones each time.
+declare -gA PRODUCT_MAINTAINER_SEEN=()
 product_maintainer() {
-  local root="${1:-${REPO:-.}}" email content rc
+  local root="${1:-${REPO:-.}}"
+  if [[ -n "${PRODUCT_MAINTAINER_SEEN[$root]:-}" ]]; then
+    return "${PRODUCT_MAINTAINER_SEEN[$root]}"
+  fi
+  local rc_
+  product_maintainer_ask "$root"; rc_=$?
+  PRODUCT_MAINTAINER_SEEN[$root]="$rc_"
+  return "$rc_"
+}
+
+product_maintainer_ask() {
+  local root="$1" email content rc
   content="$(python3 "${LIB:-$(dirname "${BASH_SOURCE[0]}")}/envs.py" main-config "$root" "$root" 2>/dev/null)"
   rc=$?
   # No config anywhere: everybody. One that cannot be read says nothing about

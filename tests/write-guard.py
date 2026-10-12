@@ -339,6 +339,13 @@ try:
     changed = sh('INSTRUMENTS="%s"; s="$(instruments_state)"; echo 2 > "%s/a"; '
                  'instruments_unchanged "$s" review 2>&1 || echo changed' % (inst, inst), repo)
     check("instruments-changed-said", "changed sclaude's own checkout" in changed and "changed" in changed, True)
+    # Untracked content and the repository's config count too.
+    with open(os.path.join(inst, "loose"), "w") as fh:
+        fh.write("1\n")
+    for change in ('echo 2 > "%s/loose"' % inst, 'git -C "%s" config core.hooksPath x' % inst):
+        out = sh('INSTRUMENTS="%s"; s="$(instruments_state)"; %s; '
+                 'instruments_unchanged "$s" review 2>/dev/null || echo changed' % (inst, change), repo)
+        check("instruments-changed %s" % change.split()[0], out, "changed")
     # A checkout whose path has a space: Claude Code runs the hook through a
     # shell, and the unquoted path split there.
     entry = json.loads(sh('HOOKS="/opt/my tools/hooks"; guard_entry --readonly /x', repo))

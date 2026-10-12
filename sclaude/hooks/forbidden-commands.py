@@ -51,11 +51,25 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
-from _friction import note
-from _shell import (GIT_VALUED, SEPARATORS, inner_command, script_call, strip_keywords,
-                    strip_runners, strip_wrappers, substitutions, tokenize, ungroup)
-import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
-import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
+# A module that fails to load would end the hook before any check, and a hook
+# that exits with an error lets the command run: the bans and, since the step's
+# flags come from the same policy.py, --disallowed-tools with them. Every command
+# is refused instead, until the module loads again.
+try:
+    from _friction import note
+    from _shell import (GIT_VALUED, SEPARATORS, inner_command, script_call, strip_keywords,
+                        strip_runners, strip_wrappers, substitutions, tokenize, ungroup)
+    import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
+    import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
+except Exception as exc:  # noqa: BLE001
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "sclaude's ban check could not load (%s: %s), so every "
+                                    "command is refused. Tell the human and stop." % (
+                                        type(exc).__name__, exc),
+    }}))
+    sys.exit(0)
 
 # The branch that must not be pushed to: it moves only by merging a PR.
 PROTECTED = "main"

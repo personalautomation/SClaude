@@ -780,6 +780,22 @@ def main():
                 const("write-guard.py", "READONLY_REASON"))):
             failures.append(("markers", marker, "a hook's tail", "matched nothing"))
 
+    # A module that fails to load refuses every command rather than letting
+    # them all through: a hook that raises does not block.
+    broken = tempfile.mkdtemp(prefix="hooks-broken-")
+    try:
+        shutil.copytree(os.path.join(HOOKS, ".."), os.path.join(broken, "sclaude"))
+        with open(os.path.join(broken, "sclaude", "lib", "policy.py"), "w") as fh:
+            fh.write("raise RuntimeError('broken')\n")
+        out = subprocess.run([sys.executable, os.path.join(broken, "sclaude", "hooks",
+                                                           "forbidden-commands.py"), "--step", "code"],
+                             input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}),
+                             capture_output=True, text=True, timeout=20).stdout
+        if '"deny"' not in out:
+            failures.append(("broken", "ls with policy.py failing to load", DENY, ALLOW))
+    finally:
+        shutil.rmtree(broken, ignore_errors=True)
+
     # collect-denials.py drops what the policy bans on purpose, by the command
     # the call ran: a refusal of a Vercel read the hook allows is friction and
     # stays, and a step's own ban (gh pr create on step 2) is deliberate.
@@ -791,7 +807,7 @@ def main():
     total = len(PLANNING) + len(FORBIDDEN) + len(BY_STEP) + 2 + len(workdir_cases) + \
         len(shared_cases) + 1 + 1 + 3 + len(plan_cases) + 3 + \
         len(const("collect-denials.py", "OWN_MARKERS")) + len(branch_cases) + \
-        len(denial_cases)
+        len(denial_cases) + 1
     for step, command, want, got in failures:
         print("FAIL [%s] %s — expected %s, got %s" % (step, command, want, got))
     print("%d/%d passed" % (total - len(failures), total))

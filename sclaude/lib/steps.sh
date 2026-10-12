@@ -320,6 +320,9 @@ PY
     # inside it already, through the `cd "$wt"` before claude is called.
     'EnterWorktree'
     'ExitWorktree'
+    # The merge stays banned here even if the policy cannot be read: then
+    # policy_rules adds nothing, quietly, and this line is what is left.
+    'Bash(gh pr merge:*)'
   )
   policy_rules deny allow "$step" "$wt"
 

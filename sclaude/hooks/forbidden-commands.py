@@ -199,9 +199,20 @@ def env_switch_refuses(words, raw):
     target = envs_lib.env_file(tree, prod) if prod else None
     if not target:
         return None
+    # By the file itself first. The name alone decides only where it singles
+    # production out: environments in folders of their own share it
+    # (envs/dev/.env, envs/prod/.env), and every switch read as production.
+    files = [envs_lib.env_file(tree, n) for n in envs_lib.environments(tree)]
+    real = os.path.realpath(target)
     name = os.path.basename(target)
-    if any(os.path.basename(p) == name for p in paths[:-1]):
-        return ENV_SWITCH_REASON
+    unique = sum(1 for f in files if f and os.path.basename(f) == name) == 1
+    for p in paths[:-1]:
+        full = os.path.join(tree, os.path.expanduser(p))
+        if os.path.exists(full):
+            if os.path.realpath(full) == real:
+                return ENV_SWITCH_REASON
+        elif unique and os.path.basename(p) == name:
+            return ENV_SWITCH_REASON
     return None
 
 

@@ -39,6 +39,16 @@ link_env() {
     found=$((found + 1))
   done
   shopt -u nullglob
+  # And the files the config names elsewhere (envs/dev/.env): untracked, so a
+  # new worktree does not have them, and the tree's environments were not found.
+  local env_name file rel
+  while IFS= read -r env_name; do
+    file="$(envs file "$REPO" "$env_name" 2>/dev/null)" || continue
+    rel="${file#"$REPO"/}"
+    [[ "$rel" != "$file" && "$rel" == */* && -e "$file" && ! -e "$wt/$rel" ]] || continue
+    mkdir -p "$wt/$(dirname "$rel")" && ln -sfn "$(readlink -f "$file")" "$wt/$rel" \
+      && found=$((found + 1))
+  done < <(envs names "$REPO" 2>/dev/null)
   info "  environment: $found .env files linked to the main repo"
 }
 

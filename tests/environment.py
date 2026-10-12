@@ -504,6 +504,13 @@ def main():
         os.symlink(os.path.join(same, "envs", "prod", ".env"), os.path.join(same, ".env.local"))
         check("current: a shared basename is told by its path",
               run('environment_current "%s"' % same), "prod")
+        # A new worktree gets those files too: untracked, it would have none.
+        linked = os.path.join(tmp, "same-wt")
+        os.makedirs(linked)
+        run('REPO="%s"; link_env "%s"' % (same, linked), with_worktree=True)
+        check("link_env: files in folders are linked",
+              [os.path.realpath(os.path.join(linked, "envs", n, ".env")) for n in ("dev", "prod")],
+              [os.path.realpath(os.path.join(same, "envs", n, ".env")) for n in ("dev", "prod")])
 
         check("value: read from the environment's file",
               run('environment_value "%s" dev POSTGRES_URL_NON_POOLING' % sw),

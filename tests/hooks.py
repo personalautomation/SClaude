@@ -669,6 +669,19 @@ def main():
                               ("ln -sfn .env.localdb .env.local", "allow")):
             if verdict(command) != want:
                 failures.append(("shared", command, want, verdict(command)))
+        # Environments in folders of their own share a file name: the file
+        # itself decides, and dev is not taken for production.
+        for env_name in ("dev", "prod"):
+            os.makedirs(os.path.join(tree, "envs", env_name))
+            open(os.path.join(tree, "envs", env_name, ".env"), "w").close()
+        with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:
+            json.dump({"environments": {"dev": {"env": "envs/dev/.env"},
+                                        "prod": {"env": "envs/prod/.env", "protected": True}}}, fh)
+        for command, want in (("ln -sfn envs/dev/.env .env.local", "allow"),
+                              ("ln -sfn envs/prod/.env .env.local", "deny"),
+                              ("cp envs/prod/.env .env.local", "deny")):
+            if verdict(command) != want:
+                failures.append(("shared", command, want, verdict(command)))
     finally:
         shutil.rmtree(tree, ignore_errors=True)
 

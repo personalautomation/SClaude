@@ -122,11 +122,15 @@ def feature(label):
         return None
     wt = os.path.realpath(link)
     state = os.path.join(wt, ".sclaude/local/feature", "state.json")
+    # A tree an older sclaude still runs keeps it in .feature/ until that
+    # sclaude is done (layout_migrate waits for it).
+    if not os.path.isfile(state):
+        state = os.path.join(wt, ".feature", "state.json")
     if not os.path.isfile(state):
         return None
     # A tree being removed: sclaude has stopped its server on purpose, and a
     # lazy start here would bring it back into a directory git is deleting.
-    if os.path.exists(os.path.join(wt, ".sclaude/local/feature", "closing")):
+    if os.path.exists(os.path.join(os.path.dirname(state), "closing")):
         return None
     try:
         with open(state) as fh:

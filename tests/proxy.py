@@ -242,6 +242,18 @@ def check_peers(registry, stub, log):
     loader = SourceFileLoader("sclaude_proxy", PROXY)
     mod = module_from_spec(spec_from_loader("sclaude_proxy", loader))
     loader.exec_module(mod)
+    # A tree an older sclaude still runs keeps its state in .feature/.
+    old = tempfile.mkdtemp(prefix="proxy-old-")
+    try:
+        os.makedirs(os.path.join(old, "wt", ".feature"))
+        with open(os.path.join(old, "wt", ".feature", "state.json"), "w") as fh:
+            json.dump({"dev": {"port": 3123}}, fh)
+        os.symlink(os.path.join(old, "wt"), os.path.join(old, "12-old"))
+        mod.REGISTRY = old
+        check("the old state folder is read", (mod.feature("12-old") or (None, None))[1], 3123)
+    finally:
+        mod.REGISTRY = registry
+        shutil.rmtree(old, ignore_errors=True)
     for peer, want in (("127.0.0.1", True), ("::1", True), ("::ffff:127.0.0.1", True),
                        ("100.72.15.17", True), ("::ffff:100.101.2.3", True),
                        ("fd7a:115c:a1e0::1", True), ("192.168.1.20", False),

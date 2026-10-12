@@ -700,7 +700,9 @@ report_containers() {
   local label=com.supabase.cli.workdir wd pins all_pins="" name image base tag want behind
   while IFS= read -r wd; do
     [ -n "$wd" ] || continue
-    [[ "$wd" == */.sclaude/local/feature/supabase ]] && continue
+    # A feature's own stack, sclaude's to manage; one made before its folder
+    # moved keeps the old .feature/ in its label, and is not an orphan.
+    [[ "$wd" == */.sclaude/local/feature/supabase || "$wd" == */.feature/supabase ]] && continue
     if [ ! -d "$wd" ]; then
       note "a Supabase stack belongs to $wd, which no longer exists — remove it: docker rm -f \$(docker ps -aq --filter label=$label=$wd)"
       continue

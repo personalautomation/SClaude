@@ -7,6 +7,9 @@ After=sclaude-proxy.socket
 [Service]
 ExecStart=%h/.local/bin/sclaude-proxy
 Restart=on-failure
+# The dev servers the proxy starts on demand live in this unit's cgroup; a
+# restart of the proxy must not take them down with it.
+KillMode=process
 
 # No [Install] section, as with code-server-local.service: what is enabled is
 # the socket, and the first connection to :3000 brings this up.

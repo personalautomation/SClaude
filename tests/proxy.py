@@ -559,6 +559,32 @@ def main():
             proc.terminate()
             _, err = proc.communicate(timeout=5)
         check("it says it restarted", b"its code changed" in err, True)
+        # Started by the socket, as systemd does it: the same process goes on,
+        # on the socket it was handed, since an exit takes the unit's dev
+        # servers down with it.
+        port = free_port()
+        launcher = ("import os, socket, sys\n"
+                    "s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+                    "s.bind(('127.0.0.1', %d)); s.listen(16)\n"
+                    "os.dup2(s.fileno(), 3); os.set_inheritable(3, True)\n"
+                    "os.environ.update(LISTEN_PID=str(os.getpid()), LISTEN_FDS='1')\n"
+                    "os.execv(sys.executable, [sys.executable, %r])\n" % (port, copy))
+        senv = dict(env)
+        proc = subprocess.Popen([sys.executable, "-c", launcher], env=senv,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        try:
+            wait_for(lambda: answers_on(port), 5)
+            # The socket listens before the proxy is up on it: give it time
+            # to read its own file first.
+            time.sleep(1)
+            os.utime(copy, (time.time() + 10, time.time() + 10))
+            time.sleep(1.5)
+            check("socket-started: still the same process", proc.poll(), None)
+            check("socket-started: answers on the new code", answers_on(port), True)
+        finally:
+            proc.terminate()
+            _, err = proc.communicate(timeout=5)
+        check("socket-started: it restarted in place", b"its code changed" in err, True)
     finally:
         shutil.rmtree(watched, ignore_errors=True)
 

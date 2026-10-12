@@ -765,9 +765,10 @@ def listening_socket():
 # The proxy lives for days, and an update of sclaude changes the code it runs
 # under it: one started before the state moved into .sclaude/local/feature/
 # went on looking in .feature/ and answered "No such feature" for every tree
-# made after. So it watches its own file and steps down when that changes.
-# Started by the socket, it simply exits: systemd keeps the socket listening
-# and starts the new code on the next connection. Run by hand, it re-executes.
+# made after. So it watches its own file and re-executes when that changes.
+# In place, not by exiting: under systemd an exit takes the unit's whole
+# cgroup down, every dev server the proxy started with it. The same process
+# keeps the socket systemd handed it (fd 3) and its LISTEN_PID.
 OWN_FILE = os.path.realpath(__file__)
 
 
@@ -789,9 +790,10 @@ async def watch_own_code(server, started):
         if now is not None and now != started:
             sys.stderr.write("sclaude-proxy: its code changed; restarting on the new one\n")
             sys.stderr.flush()
-            server.close()
             if os.environ.get("LISTEN_PID") == str(os.getpid()):
-                os._exit(0)
+                os.set_inheritable(3, True)
+            else:
+                server.close()
             os.execv(sys.executable, [sys.executable, OWN_FILE] + sys.argv[1:])
 
 

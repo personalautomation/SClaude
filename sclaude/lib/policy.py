@@ -251,11 +251,10 @@ def merge(root, person, step, layers, tree=""):
         try:
             named = config_denies(where)
         except ValueError as exc:
-            # The main checkout's config, broken: merged() falls back and
-            # says so. The tree's is the session's to break, and only its
-            # own production commands are lost with it.
-            if layers and where == root:
-                raise
+            # A config that is broken loses only its own production commands,
+            # said here: raising failed the whole merge, and the fallback to
+            # the presets threw away the team's and the person's rules, valid
+            # as they were.
             sys.stderr.write("sclaude policy: %s; its production commands are not banned\n" % exc)
             continue
         deny += [d for d in with_source(named, "deny", "config") if not lifted(d[0])]

@@ -222,6 +222,11 @@ try:
         fh.write("{,")
     held = [" ".join(d["words"]) for d in policy.merged(hold, "ann", "code", hold_tree)["deny"]]
     check("broken-tree-keeps-team", "npm run seed" in held, True)
+    # Nor does a broken config of the main checkout's.
+    with open(os.path.join(hold, ".sclaude", "config.json"), "w") as fh:
+        fh.write("{,")
+    held = [" ".join(d["words"]) for d in policy.merged(hold, "", "code")["deny"]]
+    check("broken-config-keeps-team", "npm run seed" in held, True)
 
     # A core.json that gives no rule is sclaude's own breakage: raised, not
     # read as an empty layer, and not blamed on the product.

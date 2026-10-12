@@ -1474,6 +1474,13 @@ EOF
 }
 
 main() {
+  # This machine's settings moved from ~/.config/instruments/ to
+  # ~/.config/sclaude/ with the repository's name; an older install's are moved
+  # once rather than lost (projects, metrics-remote, the polkit mark).
+  local old_config="${XDG_CONFIG_HOME:-$HOME/.config}/instruments"
+  [[ -d "$old_config" && ! -e "${XDG_CONFIG_HOME:-$HOME/.config}/sclaude" ]] \
+    && mv "$old_config" "${XDG_CONFIG_HOME:-$HOME/.config}/sclaude"
+
   # We open the question-answer channel only where a conversation is possible at
   # all.
   #

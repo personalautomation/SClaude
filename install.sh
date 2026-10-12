@@ -242,6 +242,10 @@ POLKIT_RULE="${KEEPAWAKE_POLKIT_RULE:-/etc/polkit-1/rules.d/49-keepawake.rules}"
 # rules.d unreadable to a normal user, so the rule itself cannot be seen from
 # here; the note is what `sclaude doctor` and the next run read there instead.
 POLKIT_MARK="$HOME/.config/sclaude/polkit-rule"
+# The settings folder was ~/.config/instruments/ before the repository's name
+# changed; an older install's is moved once rather than lost.
+[[ -d "$HOME/.config/instruments" && ! -e "$HOME/.config/sclaude" ]] \
+  && mv "$HOME/.config/instruments" "$HOME/.config/sclaude"
 POLKIT_OFF="sudo rm $POLKIT_RULE && rm -f $POLKIT_MARK && systemctl --user restart keepawake-linux.service"
 
 polkit_present() {

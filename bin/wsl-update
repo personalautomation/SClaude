@@ -64,6 +64,9 @@ NPM_STEP_TIMEOUT=120
 # directories written into the script, which every other machine then looked
 # for. One path per line, `~` allowed, `#` for comments. No file, no report.
 PROJECTS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/sclaude/projects"
+# An older install kept it under the repository's former name; read there until
+# sclaude or install.sh moves the folder.
+[[ -f "$PROJECTS_FILE" ]] || PROJECTS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/instruments/projects"
 
 mkdir -p "$LOG_DIR"
 

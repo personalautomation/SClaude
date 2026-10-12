@@ -1533,10 +1533,6 @@ remind_prod() {
     promote_cmd="$(project_get database.promote "$wt" || true)"
     schema_path="$(project_get database.schemaFile "$wt" || true)"
     if [[ -n "$promote_cmd" ]]; then
-      # A promote may switch the main tree to production, and the block ends
-      # by putting it back exactly as it was (environment_snapshot): by name
-      # it could not, when .env.local is no declared environment.
-      prod_cmds+=("_env=\"\$(environment_snapshot $(printf %q "$REPO"))\"")
       prod_cmds+=("$promote_cmd")
       prod_cmds+=("git add $migrations_dir${schema_path:+ $schema_path}")
       prod_cmds+=("git commit -m 'chore(db): promote migrations for $slug'")
@@ -1550,8 +1546,13 @@ remind_prod() {
     # What production uploads is the main tree, and sclaude keeps its own
     # folder there (scratch.sh).
     write_vercelignore "$REPO"
-    [[ -n "$promote_cmd" ]] \
-      && prod_cmds+=("environment_restore $(printf %q "$REPO") \"\$_env\"")
+    # A promote may switch the main tree to production. It is put back
+    # exactly as it was (environment_snapshot), by name it could not when
+    # .env.local is no declared environment, and outside the block: the block
+    # stops at its first failure, and a promote that failed halfway is when
+    # the tree is most likely left on production.
+    local snapshot=""
+    [[ -n "$promote_cmd" ]] && snapshot="$(environment_snapshot "$REPO")"
 
     if run_block \
       "Production" \
@@ -1560,6 +1561,10 @@ remind_prod() {
       "${prod_cmds[@]}"; then
       prod_done=1
       deploy_remember "$wt" prod
+    fi
+    if [[ -n "$snapshot" ]]; then
+      environment_restore "$REPO" "$snapshot" \
+        || warn "  could not put the main tree's environment back — check: readlink $REPO/.env.local"
     fi
   else
     write_vercelignore "$REPO"

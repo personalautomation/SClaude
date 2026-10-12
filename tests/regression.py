@@ -1366,6 +1366,15 @@ check_true("retry-restarts-the-server",
 check_true("retried-time-not-remembered",
            '[[ -n "$retried" ]] || regression_remember' in regression)
 
+# The production block stops at its first failure, so putting the main tree's
+# environment back cannot be one of its commands: a promote that failed halfway
+# left the tree on production.
+prod_block = deploy[deploy.index('"${prod_note:-The branch adds migrations'):]
+check_true("prod-restore-after-the-block",
+           re.search(r'^\s+fi\n\s+if \[\[ -n "\$snapshot" \]\]; then\n\s+environment_restore',
+                     prod_block, re.M) is not None)
+check_true("prod-restore-not-a-block-command", "prod_cmds+=(\"environment_restore" not in deploy)
+
 if failures:
     for name, want, got in failures:
         print("FAIL %s\n  expected: %r\n  got:      %r" % (name, want, got))

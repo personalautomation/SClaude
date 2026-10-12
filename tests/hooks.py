@@ -579,6 +579,12 @@ def main():
             ("(cd " + feature + " && npm test) && git push origin HEAD", clone, DENY),
             ("(cd " + clone + " && npm test) && git push origin HEAD", feature, ALLOW),
             ("(cd " + clone + " && git push origin HEAD)", feature, DENY),
+            # Where the directory cannot be told, a push naming no branch is
+            # refused: unknown counts as main.
+            ("cd $HOME/myapp && git push", feature, DENY),
+            ("pushd ~/myapp && git push", feature, DENY),
+            ("cd $X && git push origin HEAD", feature, DENY),
+            ("cd $X && git push origin feat/x", feature, ALLOW),
             # A substitution inside a subshell does not end it.
             ("(cd " + clone + "; x=$(git rev-parse HEAD); git push)", feature, DENY),
             # A substitution runs where the line has got to.

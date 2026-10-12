@@ -698,7 +698,9 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
         # through as a branch called HEAD. A directory that cannot be told is
         # left alone, as for a bare push below.
         if ref.lstrip("+") in ("HEAD", "@"):
-            if where and current_branch(where) == PROTECTED:
+            if where is None:
+                return UNKNOWN_BRANCH
+            if current_branch(where) == PROTECTED:
                 return MAIN_REASON
             continue
         target = push_target(ref, known or {})
@@ -717,11 +719,19 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
         return MAIN_REASON
     # With no refspec git pushes the branch checked out, so `git push` or
     # `git push origin` on main is the push to main. It went through, because
-    # only refspecs were read. A directory that cannot be told is left alone,
-    # as it was before.
-    if len(refs) <= 1 and where and current_branch(where) == PROTECTED:
-        return MAIN_REASON
+    # only refspecs were read. Where the directory cannot be told, the branch
+    # cannot either, and unknown counts as main, as an unknown refspec does:
+    # `cd $HOME/myapp && git push` pushed main.
+    if len(refs) <= 1:
+        if where is None:
+            return UNKNOWN_BRANCH
+        if current_branch(where) == PROTECTED:
+            return MAIN_REASON
     return None
+
+
+UNKNOWN_BRANCH = ("the push names no branch, and where it runs cannot be told, so neither "
+                  "can the branch it pushes: name it (git push origin <branch>); " + MAIN_REASON)
 
 
 def current_branch(where):

@@ -217,12 +217,29 @@ team_guard_entry() {
 # For the sessions that review the work rather than do it: the friction
 # review, the retrospective, the monthly deferred review. They read sclaude's
 # checkout and change the product, never sclaude itself (write-guard.py
-# --readonly), and the team's rules stay the maintainers'. A whole --settings
-# value: these sessions have no settings of their own.
+# --readonly), and the team's rules stay the maintainers'.
+#
+# And they run in the product's tree now, so the step bans hold for them as
+# for any step: the merge, a deploy, a push to main, a migration onto a
+# protected database. In sclaude's checkout none of those reached a product;
+# in the tree they did, with no hook to refuse them. The same hook, under a
+# step no policy names (friction), and the policy's flags.
+#
+# Returns 1 when the policy cannot be read, as a step does: the caller does
+# not start the session.
+#
+#   review_guard_settings [tree]
 review_guard_settings() {
-  local -a args=(--readonly "$INSTRUMENTS")
-  product_maintainer "${1:-${REPO:-.}}" || args+=(--team)
-  printf '%s\n' --settings "{\"hooks\": {\"PreToolUse\": [$(guard_entry "${args[@]}")]}}"
+  local tree="${1:-${REPO:-.}}" bans_json
+  local -a args=(--readonly "$INSTRUMENTS") deny=() allow=()
+  product_maintainer "$tree" || args+=(--team)
+  policy_rules deny allow friction "$tree" || return 1
+  bans_json="$(python3 -c 'import json, shlex, sys; print(json.dumps({"type": "command", "timeout": 10, "command": "python3 %s --step friction %s" % (shlex.quote(sys.argv[1]), sys.argv[2])}))' \
+    "$HOOKS/forbidden-commands.py" "$(policy_hook_args "$tree")")"
+  printf '%s\n' --settings \
+    "{\"hooks\": {\"PreToolUse\": [$(guard_entry "${args[@]}"), {\"matcher\": \"Bash\", \"hooks\": [$bans_json]}]}}"
+  (( ${#deny[@]} )) && printf '%s\n' --disallowed-tools "${deny[*]}"
+  return 0
 }
 
 # sclaude's checkout as it stands: its HEAD and what is uncommitted, in one

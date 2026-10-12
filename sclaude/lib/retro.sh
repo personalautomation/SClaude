@@ -100,7 +100,10 @@ PY
   session_watch_start "" "$session" "$done_file" "$wt" retro
   local before_instruments; before_instruments="$(instruments_state)"
   local -a guard=()
-  mapfile -t guard < <(review_guard_settings "$wt")
+  local guard_out
+  guard_out="$(review_guard_settings "$wt")" \
+    || { warn "  The retrospective was not started: sclaude could not read its rules (see above)."; return 1; }
+  mapfile -t guard <<< "$guard_out"
   ( cd "$wt" && claude_launch --session-id "$session" --model opus --effort medium \
       "${guard[@]}" \
       --permission-mode auto --add-dir "$INSTRUMENTS" --add-dir "$TERM_DIR" \

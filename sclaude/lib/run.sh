@@ -1501,7 +1501,10 @@ PYEOF
 
   # The review changes the product, never sclaude (review_guard_settings).
   local -a guard=()
-  mapfile -t guard < <(review_guard_settings "$wt")
+  local guard_out
+  guard_out="$(review_guard_settings "$wt")" \
+    || { warn "  The friction review was not started: sclaude could not read its rules (see above)."; return 1; }
+  mapfile -t guard <<< "$guard_out"
   local before_instruments; before_instruments="$(instruments_state)"
   if [[ -n "$session" ]]; then
     # Returning to an interrupted review. The log does not need moving — it is

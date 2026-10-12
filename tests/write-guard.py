@@ -329,6 +329,13 @@ try:
                   "Write|Edit|MultiEdit|NotebookEdit|Bash")
             check("review-guard-readonly-%s" % team, "--readonly /opt/sclaude" in command, True)
             check("review-guard-team-%s" % team, "--team" in command, team)
+            # The step bans hold in a review too: it runs in the product's tree.
+            hooks = json.loads(guard[1])["hooks"]["PreToolUse"]
+            check("review-guard-has-the-bans-%s" % team,
+                  any("forbidden-commands.py" in h["hooks"][0]["command"] for h in hooks), True)
+            check("review-guard-flags-the-merge-%s" % team,
+                  "--disallowed-tools" in guard and "Bash(gh pr merge:*)" in guard[guard.index("--disallowed-tools") + 1],
+                  True)
     setup(["lead@x.test"])
 
     # A step's settings carry it next to forbidden-commands.py.

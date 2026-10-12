@@ -252,7 +252,10 @@ PY
 )"
   session="$(new_session_id)"
   local -a guard=()
-  mapfile -t guard < <(review_guard_settings "$wt")
+  local guard_out
+  guard_out="$(review_guard_settings "$wt")" \
+    || { warn "  The deferred review was not started: sclaude could not read its rules (see above)."; return 1; }
+  mapfile -t guard <<< "$guard_out"
 
   echo ""
   echo "${BOLD}${BLUE}── the deferred friction · monthly review ──${OFF}"

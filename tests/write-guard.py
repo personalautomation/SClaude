@@ -250,10 +250,11 @@ try:
     check("others-write-their-own", sh(where, repo, {"SCLAUDE_DEV": "ann"}),
           os.path.join(repo, ".sclaude", "people", "ann"))
 
-    # A step's team guard goes only to a non-maintainer; a review's read-only
-    # guard goes to everybody, with --team added for a non-maintainer.
+    # A step's team guard goes to everybody, a maintainer included: a step that
+    # wrote an allow into the team's rules freed itself. A review's read-only
+    # guard goes to everybody too, with --team added for a non-maintainer.
     setup(["ann@x.test"])
-    check("maintainer-no-step-guard", sh('team_guard_entry "%s"' % repo, repo), "")
+    check("maintainer-step-guard", "--team" in sh('team_guard_entry "%s"' % repo, repo), True)
     for maintainer, team in ((["ann@x.test"], False), (["lead@x.test"], True)):
         setup(maintainer)
         guard = sh('INSTRUMENTS=/opt/sclaude; review_guard_settings "%s"' % repo, repo).splitlines()
@@ -276,9 +277,9 @@ try:
     setup(["ann@x.test"])
     flags = sh('BROWSER_ALLOW=x; step_settings code "%s"' % repo, repo).splitlines()
     settings = json.loads(flags[flags.index("--settings") + 1])
-    check("maintainer-step-without-guard",
+    check("maintainer-step-guarded",
           any("write-guard" in h["hooks"][0]["command"] for h in settings["hooks"]["PreToolUse"]),
-          False)
+          True)
     # A checkout whose path has a space: Claude Code runs the hook through a
     # shell, and the unquoted path split there.
     entry = json.loads(sh('HOOKS="/opt/my tools/hooks"; guard_entry --readonly /x', repo))

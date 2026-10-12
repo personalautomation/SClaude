@@ -204,10 +204,13 @@ guard_entry() {
     "$HOOKS/write-guard.py" "$args"
 }
 
-# For a step: a product's shared rules (.sclaude/team/) stay its maintainers'.
-# Nothing for a maintainer, whose sessions write there. See product_maintainer.
+# For a step: a product's shared rules (.sclaude/team/) are not a step's to
+# write, a maintainer's included. Its allow lifts bans, the hook reads the
+# tree's copy on every call, and a step that wrote {"allow": [{"command":
+# "vercel"}]} there deployed on its next call. Rules are changed by the
+# reviews, which a person approves (review_guard_settings), never by the step
+# they would free.
 team_guard_entry() {
-  product_maintainer "${1:-${REPO:-.}}" && return 0
   guard_entry --team
 }
 
@@ -351,8 +354,7 @@ settings = {"permissions": {"allow": [sys.argv[4]] + sys.argv[7:]}, "hooks": {"P
                "command": "python3 %s --step %s %s" % (shlex.quote(sys.argv[1]), shlex.quote(sys.argv[2]), sys.argv[6]),
                "timeout": 10}],
 }]}}
-# A product's shared rules are its maintainers' (team_guard_entry): empty for
-# a maintainer.
+# A product's shared rules are not a step's to write (team_guard_entry).
 if len(sys.argv) > 5 and sys.argv[5]:
     settings["hooks"]["PreToolUse"].append(json.loads(sys.argv[5]))
 # The line about the worktree is context for auto mode's classifier, not

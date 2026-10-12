@@ -265,6 +265,17 @@ FORBIDDEN = [
     ("function f() { gh pr merge 5; }", DENY),
     ("f() { echo hi; }; f", ALLOW),
     ("f () { gh pr merge 5; }; f", DENY),
+    ("f(){ gh pr merge 5; }; f", DENY),
+    ("bash -c -- \"gh pr merge 5\"", DENY),
+    ("sudo -u x gh pr merge 5", DENY),
+    ("xargs -a f gh pr merge", DENY),
+    ("watch gh pr merge 5", DENY),
+    ("watch -n 5 gh pr merge 5", DENY),
+    ("git push -ofoo origin feat/x", ALLOW),
+    ("gh api -X PUT repos/o/r/pulls/5/merge?x=1", DENY),
+    ("gh api repos/o/r/merges -f base=main -f head=feat/x", DENY),
+    ("gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc", DENY),
+    ("gh api repos/o/r/git/refs/heads/main", ALLOW),
     ("if true; then f() { gh pr merge 5; }; f; fi", DENY),
     ("{ f() { gh pr merge 5; }; f; }", DENY),
     ("if true; then case x in x) gh pr merge 5;; esac; fi", DENY),
@@ -597,6 +608,7 @@ def main():
             ("pushd ~/myapp && git push", feature, DENY),
             ("cd $X && git push origin HEAD", feature, DENY),
             ("cd $X && git push origin feat/x", feature, ALLOW),
+            ("git push -o ci.skip origin", clone, DENY),
             # A substitution inside a subshell does not end it.
             ("(cd " + clone + "; x=$(git rev-parse HEAD); git push)", feature, DENY),
             # A substitution runs where the line has got to.
@@ -682,7 +694,7 @@ def main():
                     "--root", tree]
             full = dict(os.environ, CLAUDE_PROJECT_DIR=tree)
             full.pop("SUPABASE_WORKDIR", None)
-            out = subprocess.run(argv, input=json.dumps({"tool_name": "Bash",
+            out = subprocess.run(argv, input=json.dumps({"tool_name": "Bash", "cwd": tree,
                                  "tool_input": {"command": command}}),
                                  text=True, capture_output=True, timeout=20, env=full).stdout
             try:
@@ -735,6 +747,9 @@ def main():
         with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:
             json.dump(edited, fh)
         guard("prod")
+        for command in ("supabase --debug db push", "supabase db --debug push"):
+            if verdict(command) != "deny":
+                failures.append(("shared", command, "deny", verdict(command)))
         if verdict("npx supabase db push") != "deny":
             failures.append(("shared", "db push to prod unprotected in the tree only", "deny",
                              verdict("npx supabase db push")))
@@ -781,7 +796,9 @@ def main():
         with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:
             json.dump({"environments": {"dev": {"env": "envs/dev/.env"},
                                         "prod": {"env": "envs/prod/.env", "protected": True}}}, fh)
-        for command, want in (("ln -sfn envs/dev/.env .env.local", "allow"),
+        for command, want in (("cd envs && ln -sf prod/.env ../.env.local", "deny"),
+                              ("cd envs/prod && cat .env > ../../.env.local", "deny"),
+                              ("ln -sfn envs/dev/.env .env.local", "allow"),
                               ("ln -sfn envs/prod/.env .env.local", "deny"),
                               ("cp envs/prod/.env .env.local", "deny")):
             if verdict(command) != want:

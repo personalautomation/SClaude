@@ -217,6 +217,15 @@ for command, cwd, want in (
         ("f () { rm /home/u/sclaude/R; }", "/tmp", "deny"),
         # A subshell closing inside a case branch still ends its cd.
         ("case x in x) (cd /home/u/myapp-1; true); echo x > f;; esac", "/home/u/sclaude", "deny"),
+        # A target with a variable: set in the line, from the environment,
+        # or unknown, which counts as inside.
+        ("RO=/home/u/sclaude; echo x > $RO/f", "/tmp", "deny"),
+        ("echo x > ${UNSET_ANYWHERE_X}/f", "/tmp", "deny"),
+        ("for f in /home/u/sclaude/*.md; do rm \"$f\"; done", "/tmp", "deny"),
+        ("D=/home/u/myapp-1; echo x > $D/f", "/tmp", "allow"),
+        ("f(){ rm /home/u/sclaude/x; }; f", "/tmp", "deny"),
+        ("git -C /home/u/sclaude branch --sort=refname newb", "/tmp", "deny"),
+        ("bash -c -- \"rm /home/u/sclaude/x\"", "/tmp", "deny"),
         # A bracket in quotes closes no group.
         ('echo "a)" > notes.txt', "/home/u/myapp-1", "allow"),
         ("echo '(x' && echo y > notes.txt", "/home/u/myapp-1", "allow"),

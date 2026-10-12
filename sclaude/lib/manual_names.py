@@ -3,26 +3,19 @@
 # The product's manuals as its config names them, in one line for a prompt.
 #
 # The prompts used to name one product's two pages outright. A product names
-# its own under `manuals` in .sclaude/config.json, and the prompts say those.
+# its own under `manuals` in .sclaude/config.json, read by manual_toc.pages,
+# the same reading step 1's table of contents uses.
 #
 #   manual_names.py <tree>
-import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from manual_toc import pages  # noqa: E402
+
 
 def names(tree):
-    try:
-        with open(os.path.join(tree, ".sclaude", "config.json"), encoding="utf-8") as fh:
-            manuals = json.load(fh).get("manuals") or []
-    except (OSError, ValueError, AttributeError):
-        manuals = []
-    named = []
-    for entry in manuals if isinstance(manuals, list) else []:
-        if isinstance(entry, dict) and isinstance(entry.get("path"), str):
-            what = entry.get("what")
-            named.append("`%s` (%s)" % (entry["path"], what) if isinstance(what, str) and what
-                         else "`%s`" % entry["path"])
+    named = ["`%s` (%s)" % (path, what) if what else "`%s`" % path for path, what in pages(tree)]
     if not named:
         return "none: the product names none under `manuals` in .sclaude/config.json"
     return named[0] if len(named) == 1 else ", ".join(named[:-1]) + " and " + named[-1]

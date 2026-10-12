@@ -234,7 +234,7 @@ ENV_SWITCH_REASON = ("this points .env.local at production's environment file, a
                      "next step would work against production without knowing it")
 
 
-def env_switch_refuses(words, raw, into=()):
+def env_switch_refuses(words, raw, into=(), base=None):
     """The reason this call onto .env.local is banned, or None.
 
     ln, cp, install and mv put a file there; a redirection writes one in, and
@@ -267,8 +267,10 @@ def env_switch_refuses(words, raw, into=()):
     real = os.path.realpath(target)
     name = os.path.basename(target)
     unique = sum(1 for f in files if f and os.path.basename(f) == name) == 1
+    # A relative path from where the call runs: `cd envs && ln -sf
+    # prod/.env ../.env.local` named production's file from envs/.
     for p in sources:
-        full = os.path.join(tree, os.path.expanduser(p))
+        full = os.path.join(base or tree, os.path.expanduser(p))
         if os.path.exists(full):
             if os.path.realpath(full) == real:
                 return ENV_SWITCH_REASON
@@ -359,13 +361,34 @@ def local_db_url(url):
                for v in value.split(","))
 
 
+# The supabase CLI's options that take a value of their own.
+SUPABASE_VALUED = ("--workdir", "--profile", "--network-id", "-o", "--output",
+                   "--db-url", "--password", "-p", "--schema", "-s", "--include-roles")
+
+
+def supabase_positionals(words):
+    """The words of a supabase call that are not options or their values."""
+    out, i = [], 1
+    while i < len(words):
+        w = words[i]
+        if w in SUPABASE_VALUED:
+            i += 2
+            continue
+        if not w.startswith("-"):
+            out.append(w)
+        i += 1
+    return out
+
+
 def db_push_refuses(words, raw=None):
     """The reason this `supabase db push` is banned, or None.
 
     `raw` is the same call with its words unstripped: a URL is a path to the
     stripping, which would leave only its last part.
     """
-    if not any(tuple(words[:len(p)]) == p for p in DB_PUSH):
+    # The CLI takes its flags anywhere: `supabase --debug db push` and
+    # `supabase db --debug push` are the push, which a prefix match missed.
+    if not words or words[0] != "supabase" or supabase_positionals(words)[:2] != ["db", "push"]:
         return None
     if not rule_on("supabase-db-push", words):
         return None
@@ -733,6 +756,22 @@ def push_target(ref, known):
     return target
 
 
+PUSH_VALUED = ("-o", "--push-option", "--repo", "--receive-pack", "--exec")
+
+
+def push_positionals(words):
+    out, i = [], 0
+    while i < len(words):
+        w = words[i]
+        if w in PUSH_VALUED:
+            i += 2
+            continue
+        if not w.startswith("-"):
+            out.append(w)
+        i += 1
+    return out
+
+
 def push_refuses(words, command="", parts=(), where=None, raw=(),
                  redirected=False, known=None):
     """The reason this `git push` is banned, or None."""
@@ -745,7 +784,9 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
         name = flag.split("=", 1)[0]
         # Short flags come grouped (-uf), and git takes a long one shortened
         # to any unique prefix (--no-verif, --forc).
-        short = flag[1:] if not flag.startswith("--") else ""
+        # A short cluster ends where an option that takes a value starts:
+        # `-ofoo` is -o foo, not a force.
+        short = flag[1:].split("o", 1)[0] if not flag.startswith("--") else ""
         if "f" in short or (len(name) >= 5 and "--force".startswith(name)) \
                 or name.startswith("--force"):
             return force
@@ -762,9 +803,12 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
     # both `git push origin main` and `git push origin HEAD:main` as a push to
     # main — in a refspec the right-hand side is what matters, and it is the
     # destination branch.
-    refs = [w for w in words[2:] if not w.startswith("-")]
+    # The positional words: the remote and the refspecs. An option's value is
+    # not one: `git push -o ci.skip origin` took ci.skip for the remote and
+    # origin for a refspec, and the push of main went through.
+    refs = push_positionals(words[2:])
     # The remote with its path, from the same words before stripping.
-    remote = [w for w in raw[len(raw) - len(words) + 2:] if not w.startswith("-")]
+    remote = push_positionals(raw[len(raw) - len(words) + 2:])
     # A `+` in front of a refspec forces it, as --force does. From the words
     # as written: cut to its last part, `+feat/x` was `x`.
     if any(ref.startswith("+") for ref in remote[1:]):
@@ -829,7 +873,10 @@ def current_branch(where):
 # it as a PUT (a GET on the same path only asks whether it is merged), and
 # GraphQL as the mergePullRequest mutation. A code review found both going
 # through.
-MERGE_PATH = re.compile(r"(^|/)repos/[^/]+/[^/]+/pulls/[^/]+/merge/?$")
+MERGE_PATH = re.compile(r"(^|/)repos/[^/]+/[^/]+/pulls/[^/]+/merge/?(\?.*)?$")
+# The other ways main moves through the API: a merge of one branch into
+# another, and the ref itself rewritten or deleted.
+MAIN_MOVE_PATH = re.compile(r"(^|/)repos/[^/]+/[^/]+/(merges/?|git/refs/heads/main/?)(\?.*)?$")
 MERGE_REASON = "merging is the human's step — gh pr merge, through the API or not"
 
 
@@ -853,6 +900,19 @@ def api_merge_refuses(words, raw):
         elif w.upper() in ("-XPUT", "--METHOD=PUT"):
             put = True
     if put and any(MERGE_PATH.search(w) for w in rest):
+        return MERGE_REASON
+    method = None
+    for i, w in enumerate(rest):
+        if w in ("-X", "--method") and i + 1 < len(rest):
+            method = rest[i + 1].upper()
+        elif w.upper().startswith("--METHOD="):
+            method = w.upper().split("=", 1)[1]
+        elif w.startswith("-X") and len(w) > 2:
+            method = w[2:].upper()
+    # A field (-f/-F) makes gh send POST without -X.
+    if method is None and any(w in ("-f", "-F", "--field", "--raw-field", "--input") for w in rest):
+        method = "POST"
+    if method in ("POST", "PUT", "PATCH", "DELETE") and any(MAIN_MOVE_PATH.search(w) for w in rest):
         return MERGE_REASON
     return None
 
@@ -984,7 +1044,8 @@ def refuses(command, step, cwd=None, depth=0):
                                redirected or also, known)
                   or api_merge_refuses(words, raw[len(raw) - len(words):])
                   or db_push_refuses(words, raw[len(raw) - len(words):])
-                  or env_switch_refuses(words, raw[len(raw) - len(words):], into)
+                  or env_switch_refuses(words, raw[len(raw) - len(words):], into,
+                                        here if here != visited[0] else None)
                   or vercel_refuses(words, raw[len(raw) - len(words):]))
         if reason:
             return reason

@@ -205,6 +205,14 @@ try:
     check_true("vercelignore-not-at-the-root", not os.path.exists("/.vercelignore"))
 
 
+    # One that does not end in a newline keeps its last line whole.
+    with open(ignore, "w") as fh:
+        fh.write("node_modules")
+    run_bash('write_vercelignore %s' % WT, tmp,
+             modules=("ui", "state", "worktree", "scratch"))
+    lines = open(ignore, encoding="utf-8").read().splitlines()
+    check_true("vercelignore-keeps-the-last-line-whole", "node_modules" in lines and ".env" in lines)
+
     # A file already there keeps what it has, a hand edit included, and gets
     # only the lines it lacks: an old worktree's file is brought up to date
     # before the next deploy, and calling it twice adds nothing.

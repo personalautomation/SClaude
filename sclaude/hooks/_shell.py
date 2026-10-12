@@ -168,7 +168,7 @@ def tokenize(command, mask=False):
 # went through, whereas a bare `rm -rf` was rejected. _shell.py exists precisely
 # because of that divergence.
 WRAPPERS = ("sudo", "env", "time", "nohup", "xargs", "setsid", "command",
-            "timeout", "stdbuf", "nice", "exec", "builtin")
+            "timeout", "stdbuf", "nice", "exec", "builtin", "watch", "ionice")
 
 # Wrappers that swallow an argument of their own before the command's name.
 #
@@ -183,11 +183,18 @@ WRAPPERS = ("sudo", "env", "time", "nohup", "xargs", "setsid", "command",
 WRAPPER_VALUE_FLAGS = {
     "timeout": ("-k", "--kill-after", "-s", "--signal"),
     "xargs": ("-n", "--max-args", "-P", "--max-procs", "-I", "-d",
-              "--delimiter", "-L", "-s", "--max-chars", "-E"),
+              "--delimiter", "-L", "-s", "--max-chars", "-E", "-a", "--arg-file"),
     "stdbuf": ("-i", "--input", "-o", "--output", "-e", "--error"),
     "nice": ("-n", "--adjustment"),
     "env": ("-u", "--unset", "-C", "--chdir", "-S", "--split-string"),
     "exec": ("-a",),
+    # sudo -u x gh pr merge 5: the user's name stood as the command.
+    "sudo": ("-u", "--user", "-g", "--group", "-C", "--close-from", "-D", "--chdir",
+             "-h", "--host", "-p", "--prompt", "-r", "--role", "-t", "--type",
+             "-U", "--other-user", "-T", "--command-timeout"),
+    "watch": ("-n", "--interval", "-d", "--differences", "-q", "--equexit"),
+    "ionice": ("-c", "--class", "-n", "--classdata", "-p", "--pid", "-P", "--pgid",
+               "-u", "--uid"),
 }
 
 # Words that open a command inside `if`, a loop or a negation: the command
@@ -509,7 +516,9 @@ def inner_command(words):
                 i += 2
                 continue
             if w.startswith("-") and not w.startswith("--") and "c" in w[1:]:
-                return words[i + 1] if i + 1 < len(words) else None
+                # `bash -c -- 'cmd'` runs the string after the `--`.
+                j = i + 2 if i + 1 < len(words) and words[i + 1] == "--" else i + 1
+                return words[j] if j < len(words) else None
             if not w.startswith(("-", "+")):
                 return None
             i += 1
@@ -638,6 +647,9 @@ def strip_heads(words, shape):
         rest = rest[1:]
     if rest and re.fullmatch(r"[\w.:-]+\(\)", rest[0]):
         rest = rest[1:]
+    elif rest and re.fullmatch(r"[\w.:-]+\(\)\{", rest[0]):
+        # `f(){` comes as one word: the header goes, its brace stays.
+        rest = ["{"] + rest[1:]
     elif len(rest) > 1 and re.fullmatch(r"[\w.:-]+", rest[0]) and rest[1] == "()":
         rest = rest[2:]
     elif rest[:1] == ["function"] and len(rest) > 1:

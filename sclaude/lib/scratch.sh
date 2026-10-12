@@ -104,6 +104,9 @@ write_vercelignore() {
   fi
   {
     [[ -s "$f" ]] || echo "# Written by sclaude (scratch.sh): what a deploy must not upload."
+    # A file that does not end in a newline would take the first line in as
+    # part of its last: node_modules.env.
+    [[ -s "$f" && -n "$(tail -c 1 "$f")" ]] && echo ""
     printf '%s\n' "$missing"
   } 2>/dev/null >> "$f" || true
 }

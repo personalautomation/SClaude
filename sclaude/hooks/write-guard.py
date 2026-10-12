@@ -86,9 +86,10 @@ CONFIG_READS = ("--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list"
 
 
 # Flags that put branch and tag in list mode, some with a value of their own.
+# --sort, --format and --column are not among them: `git branch --sort=x new`
+# creates new.
 LIST_FLAGS = ("--contains", "--no-contains", "--merged", "--no-merged", "--points-at",
-              "--sort", "--format", "--column", "-v", "-vv", "-a", "-r", "--all",
-              "--remotes", "-n")
+              "-v", "-vv", "-a", "-r", "--all", "--remotes", "-n")
 
 
 def git_reads(sub, rest):
@@ -464,6 +465,20 @@ def refuses(payload, team, readonly, depth=0):
                 return READONLY_REASON.format(dir=readonly[0]) if readonly else REASON
             return None
         if readonly:
+            # A target with a variable in it: what the line set, then the
+            # environment the shell will have. One still unknown, like
+            # `"$f"` from a loop over sclaude's files, is taken as inside, the
+            # safe side, as an unknown directory is: `RO=…; echo x > $RO/f`
+            # was joined to the cwd as a literal and passed.
+            assigned = dict(re.findall(r"(?:^|[;&|\s])([A-Za-z_]\w*)=([^\s;&|$`]+)", command))
+            for i, (word, base) in enumerate(targets):
+                if "$" in word or "`" in word:
+                    known = re.sub(r"\$\{?([A-Za-z_]\w*)\}?",
+                                   lambda m: assigned.get(m.group(1), m.group(0)), word)
+                    known = os.path.expandvars(known)
+                    if "$" in known or "`" in known:
+                        return READONLY_REASON.format(dir=readonly[0])
+                    targets[i] = (known, base)
             for word, base in targets:
                 # An unknown directory: an absolute path still tells, a relative
                 # one is taken as the checkout's.

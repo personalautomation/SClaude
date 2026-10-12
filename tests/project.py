@@ -300,6 +300,9 @@ try:
     with open(os.path.join(_mtmp, ".sclaude", "config.json"), "w") as fh:
         json.dump({"manuals": [{"path": "docs/a.md", "what": "for people"}, {"path": "docs/b.md"}]}, fh)
     check("manuals-named", _names(), "`docs/a.md` (for people) and `docs/b.md`")
+    with open(os.path.join(_mtmp, ".sclaude", "config.json"), "w") as fh:
+        json.dump({"manuals": ["app/help/page.tsx"]}, fh)
+    check("manuals-as-a-plain-path", _names(), "`app/help/page.tsx`")
     for prompt in ("code.md", "plan.md", "pr.md"):
         text = open(os.path.join(LIB, "..", "prompts", prompt), encoding="utf-8").read()
         check("prompt-names-no-product-page-%s" % prompt, "/help" in text, False)

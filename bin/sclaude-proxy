@@ -772,10 +772,14 @@ OWN_FILE = os.path.realpath(__file__)
 
 
 def own_mtime():
-    try:
-        return os.stat(OWN_FILE).st_mtime
-    except OSError:
-        return None
+    """The newest of its own file and the library module it imports."""
+    times = []
+    for path in (OWN_FILE, os.path.realpath(getattr(feature_db, "__file__", OWN_FILE))):
+        try:
+            times.append(os.stat(path).st_mtime)
+        except OSError:
+            pass
+    return max(times) if times else None
 
 
 async def watch_own_code(server, started):

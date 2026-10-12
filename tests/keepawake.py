@@ -2428,7 +2428,7 @@ try:
     # client's language, and the addendum must be absent in either.
     check_true("with eight features there is no addendum",
                "Not shown" not in _tg.repo_text("myapp")
-               and "Не поместились" not in _tg.repo_text("myapp"))
+               and i18n.STRINGS["repo.rest"][0].split(":")[0].strip() not in _tg.repo_text("myapp"))
 finally:
     _tg.features_of_name = _saved_feats
 

@@ -217,14 +217,12 @@ environment_site() {
 
 # The names a feature may be pointed at: everything this project declares, minus
 # the protected ones and the ones that cannot be run against from here.
+#
+# One envs.py call reads main's config once for the whole list; asking it name
+# by name cost two processes, and three git calls each, per environment, and
+# the list is drawn several times on the way into a step.
 environment_choices() {
-  local wt="$1" name
-  while IFS= read -r name; do
-    [[ -n "$name" ]] || continue
-    environment_protected "$wt" "$name" && continue
-    environment_runnable "$wt" "$name" || continue
-    printf '%s\n' "$name"
-  done < <(environment_names "$wt")
+  envs choices "$1" || true
 }
 
 # The saved answer, if it is still a name this project offers.

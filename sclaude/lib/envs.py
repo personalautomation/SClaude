@@ -39,6 +39,7 @@
 #   envs.py names <root>                    every environment, one a line
 #   envs.py protected <root> <name>         exit 0 when protected (or unknown)
 #   envs.py runnable <root> <name>          exit 0 when a feature may run on it
+#   envs.py choices <root>                  every one a feature may run on, one a line
 #   envs.py file <root> <name>              its .env file, absolute
 #   envs.py ref <root> <name>               its Supabase project ref, if hosted
 #   envs.py value <root> <name> <key>       one value from its file
@@ -295,6 +296,13 @@ def main(argv):
     if what == "names":
         for name in environments(root, guarded(root)):
             print(name)
+        return 0
+    if what == "choices":
+        # The environments a feature on this machine may be pointed at.
+        data = guarded(root)
+        for name in environments(root, data):
+            if not protected(root, name, data) and runnable(root, name, data):
+                print(name)
         return 0
     if what == "protected" and rest:
         return 0 if protected(root, rest[0], guarded(root)) else 1

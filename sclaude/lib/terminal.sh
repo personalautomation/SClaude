@@ -68,6 +68,11 @@ term_record() {
   local dir; dir="$(term_dir)"
   # Excluded before the folder exists, so there is no moment git could see it.
   declare -F scratch_hide >/dev/null && scratch_hide
+  # And from a deploy: the recordings are in the main tree, and a production
+  # deployed by hand from it, before sclaude's own production block wrote its
+  # .vercelignore, uploaded them, a pasted token in them included.
+  [[ "$dir" == */.sclaude/local/terminal ]] && declare -F write_vercelignore >/dev/null \
+    && write_vercelignore "${dir%/.sclaude/local/terminal}" >/dev/null 2>&1
   mkdir -p "$dir" 2>/dev/null || return 0
   # Private, whatever the umask: a recording holds everything the run showed
   # and echoed, a pasted token included, for two months. The directory is

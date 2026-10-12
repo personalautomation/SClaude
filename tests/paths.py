@@ -32,6 +32,7 @@
 # again, which is exactly the failure that does not announce itself.
 #
 # Run it with: python3 tests/paths.py
+import json
 import os
 import re
 import shutil
@@ -242,6 +243,29 @@ try:
     run_bash('write_vercelignore %s' % WT, tmp,
              modules=("ui", "state", "worktree", "scratch"))
     check("vercelignore-slash-counts", open(ignore, encoding="utf-8").read().count(".sclaude/local"), 1)
+    # One the config names in a folder of its own, linked in as link_env does.
+    os.makedirs(os.path.join(WT, ".sclaude"), exist_ok=True)
+    # The environments are main's to name: the main checkout's copy.
+    os.makedirs(os.path.join(REPO, ".sclaude"), exist_ok=True)
+    cfg_path = os.path.join(REPO, ".sclaude", "config.json")
+    had_cfg = os.path.exists(cfg_path)
+    saved_cfg = open(cfg_path).read() if had_cfg else None
+    with open(cfg_path, "w") as fh:
+        json.dump({"environments": {"dev": {"env": ".env.dev"}, "staging": {"env": "envs/staging/.env"}}}, fh)
+    os.makedirs(os.path.join(WT, "envs", "staging"))
+    os.symlink("/nonexistent/.env.staging", os.path.join(WT, "envs", "staging", ".env"))
+    os.remove(ignore)
+    run_bash('write_vercelignore %s' % WT, tmp,
+             modules=("ui", "state", "worktree", "scratch", "environment"))
+    lines = open(ignore, encoding="utf-8").read().splitlines()
+    check_true("vercelignore-excludes-a-nested-env", "/envs/staging/.env" in lines)
+    check("vercelignore-names-each-once", lines.count("/.env.dev"), 1)
+    shutil.rmtree(os.path.join(WT, "envs"))
+    if had_cfg:
+        with open(cfg_path, "w") as fh:
+            fh.write(saved_cfg)
+    else:
+        os.remove(cfg_path)
     # The untracked one goes again: later checks want a clean tree.
     os.remove(os.path.join(WT, ".env.dev"))
 

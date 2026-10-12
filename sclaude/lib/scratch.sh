@@ -69,10 +69,20 @@ scratch_hide() {
 # directory. A line written with a trailing slash counts as the same.
 vercelignore_missing() {
   local f="$1/.vercelignore" env name p
-  for env in "$1"/.env "$1"/.env.*; do
+  # The root's, and those the config names in folders of their own, which
+  # link_env links into a worktree too (envs/dev/.env).
+  local -a envs_here=("$1"/.env "$1"/.env.*)
+  local declared
+  while IFS= read -r declared; do
+    [[ -n "$declared" ]] && envs_here+=("$1/${declared#"$1"/}")
+  done < <(declare -F envs >/dev/null && envs names "$1" 2>/dev/null | while IFS= read -r n; do
+             envs file "$1" "$n" 2>/dev/null; done)
+  local seen=" "
+  for env in "${envs_here[@]}"; do
     [[ -e "$env" || -L "$env" ]] || continue
-    name="$(basename "$env")"
-    [[ "$name" == ".env.example" ]] && continue
+    name="${env#"$1"/}"
+    [[ "$name" == ".env.example" || "$name" == /* || "$seen" == *" $name "* ]] && continue
+    seen+="$name "
     git -C "$1" ls-files --error-unmatch "$name" >/dev/null 2>&1 && continue
     grep -qxF -e "/$name" -e "$name" "$f" 2>/dev/null || echo "/$name"
   done

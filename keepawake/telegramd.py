@@ -439,7 +439,7 @@ def dev_features():
             continue
         wt = os.path.realpath(link)
         try:
-            with open(os.path.join(wt, ".sclaude/local/feature", "state.json")) as fh:
+            with open(state_path(wt)) as fh:
                 port = (json.load(fh).get("dev") or {}).get("port")
         except (OSError, ValueError, AttributeError):
             continue
@@ -1279,12 +1279,21 @@ def session_state(session_id, cache=None):
     return ""
 
 
+def state_path(wt):
+    """A feature's state.json, in the old .feature/ when an older sclaude
+    still runs the tree: layout_migrate leaves it there until that sclaude is
+    done, and the feature went missing from the bot meanwhile."""
+    new = os.path.join(wt, ".sclaude/local/feature", "state.json")
+    old = os.path.join(wt, ".feature", "state.json")
+    return new if os.path.exists(new) or not os.path.exists(old) else old
+
+
 def feature_state(repo, slug):
     # A feature's whole state — the very file with which the orchestrator ties
     # the steps together. An empty dictionary if there is no feature: the card
     # will then show what it knows from the table.
     wt = os.path.join(os.path.dirname(repo), "%s-%s" % (os.path.basename(repo), slug))
-    path = os.path.join(wt, ".sclaude/local/feature", "state.json")
+    path = state_path(wt)
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)

@@ -2469,6 +2469,11 @@ try:
                           env=dict(os.environ, HOME=_home),
                           capture_output=True, text=True).stdout.split()
     check("sclaude_states finds the old place too", sorted(_out), sorted([_want, _old]))
+    # The bot reads the old place too, for the same trees.
+    check("telegramd reads the old place", telegramd.state_path(os.path.dirname(os.path.dirname(_old))), _old)
+    check("telegramd prefers the new place",
+          telegramd.state_path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_want))))),
+          _want)
 finally:
     shutil.rmtree(_home, ignore_errors=True)
 

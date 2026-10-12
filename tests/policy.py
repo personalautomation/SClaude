@@ -151,6 +151,12 @@ try:
     merged_tree = policy.merged(main, "", "code", tree)
     check("tree-keeps-mains-integrations", merged_tree["integrations"], ["supabase", "vercel"])
     check("tree-keeps-mains-rules", "supabase-db-push" in merged_tree["rules"], True)
+    # Nor does an empty list in the tree turn off what main evidently uses.
+    found = os.path.join(tmp, "found-supabase")
+    os.makedirs(os.path.join(found, "supabase"))
+    write(found, ".sclaude/team/policy.json", {})
+    write(tree, ".sclaude/team/policy.json", {"integrations": []})
+    check("tree-keeps-detected", policy.merged(found, "", "code", tree)["integrations"], ["supabase"])
 
     # --- the flags a step is launched with ---
     out = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"),

@@ -174,8 +174,12 @@ def layered(root, tree, *parts):
     own["deny"] = as_list(main.get("deny")) + as_list(own.get("deny"))
     # An integration is a set of bans too: one main uses holds for a branch
     # made before main named it.
+    # Where main names none, what it evidently uses counts as named: a tree's
+    # `"integrations": []` otherwise turned the detected ones off.
     if isinstance(main.get("integrations"), list) or isinstance(own.get("integrations"), list):
-        names = as_list(main.get("integrations")) + as_list(own.get("integrations"))
+        mains = main.get("integrations")
+        mains = mains if isinstance(mains, list) else detected_integrations(root)
+        names = as_list(mains) + as_list(own.get("integrations"))
         own["integrations"] = [n for i, n in enumerate(names) if n not in names[:i]]
     steps = dict(as_dict(own.get("steps")))
     for name, rules in as_dict(main.get("steps")).items():

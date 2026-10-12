@@ -28,6 +28,10 @@ import shlex
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# First, so that a module failing to load, or anything raising later, refuses
+# the call rather than letting it run (_failsafe.py).
+import _failsafe  # noqa: E402
+_failsafe.install("planning guard (no-code-in-planning.py)")
 from _friction import note
 from _shell import HEREDOC, strip_heredocs, strip_wrappers, tokenize
 

@@ -447,6 +447,7 @@ def run_denials():
 
 def main():
     failures = []
+    broken_cases = []
 
     for command, want in PLANNING:
         got = run("no-code-in-planning.py", command)
@@ -773,28 +774,42 @@ def main():
     # of the two stood exactly like that, matching nothing.
     for marker in const("collect-denials.py", "OWN_MARKERS"):
         if not any(marker in tail for tail in (
-                const("forbidden-commands.py", "TAIL"),
+                const("_failsafe.py", "TAIL"),
                 const("no-code-in-planning.py", "REASON"),
                 const("plan-on-disk.py", "TAIL"),
                 const("write-guard.py", "REASON"),
                 const("write-guard.py", "READONLY_REASON"))):
             failures.append(("markers", marker, "a hook's tail", "matched nothing"))
 
-    # A module that fails to load refuses every command rather than letting
-    # them all through: a hook that raises does not block.
-    broken = tempfile.mkdtemp(prefix="hooks-broken-")
-    try:
-        shutil.copytree(os.path.join(HOOKS, ".."), os.path.join(broken, "sclaude"))
-        with open(os.path.join(broken, "sclaude", "lib", "policy.py"), "w") as fh:
-            fh.write("raise RuntimeError('broken')\n")
-        out = subprocess.run([sys.executable, os.path.join(broken, "sclaude", "hooks",
-                                                           "forbidden-commands.py"), "--step", "code"],
-                             input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}),
-                             capture_output=True, text=True, timeout=20).stdout
-        if '"deny"' not in out:
-            failures.append(("broken", "ls with policy.py failing to load", DENY, ALLOW))
-    finally:
-        shutil.rmtree(broken, ignore_errors=True)
+    # A hook that breaks refuses rather than letting the call through: every
+    # module it loads, broken in turn, and an empty core.json, which used to
+    # read as a layer with no rules.
+    for hook, modules in (("forbidden-commands.py", ("hooks/_shell.py", "hooks/_friction.py",
+                                                     "lib/policy.py", "lib/envs.py",
+                                                     "policy/core.json")),
+                          ("no-code-in-planning.py", ("hooks/_shell.py", "hooks/_friction.py")),
+                          ("write-guard.py", ("hooks/_shell.py",))):
+        for module in modules:
+            broken = tempfile.mkdtemp(prefix="hooks-broken-")
+            try:
+                shutil.copytree(os.path.join(HOOKS, ".."), os.path.join(broken, "sclaude"))
+                with open(os.path.join(broken, "sclaude", module), "w") as fh:
+                    fh.write("{}\n" if module.endswith(".json") else "raise RuntimeError('broken')\n")
+                out = subprocess.run([sys.executable, os.path.join(broken, "sclaude", "hooks", hook),
+                                      "--step", "code"],
+                                     input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}),
+                                     capture_output=True, text=True, timeout=20).stdout
+                try:
+                    decision = json.loads(out)["hookSpecificOutput"]
+                except (ValueError, KeyError, TypeError):
+                    decision = {}
+                got = decision.get("permissionDecision")
+                said = decision.get("permissionDecisionReason", "")
+                if got != "deny" or not any(m in said for m in const("collect-denials.py", "OWN_MARKERS")):
+                    failures.append(("broken", "%s with %s broken" % (hook, module), DENY, got or ALLOW))
+                broken_cases.append(module)
+            finally:
+                shutil.rmtree(broken, ignore_errors=True)
 
     # collect-denials.py drops what the policy bans on purpose, by the command
     # the call ran: a refusal of a Vercel read the hook allows is friction and
@@ -807,7 +822,7 @@ def main():
     total = len(PLANNING) + len(FORBIDDEN) + len(BY_STEP) + 2 + len(workdir_cases) + \
         len(shared_cases) + 1 + 1 + 3 + len(plan_cases) + 3 + \
         len(const("collect-denials.py", "OWN_MARKERS")) + len(branch_cases) + \
-        len(denial_cases) + 1
+        len(denial_cases) + len(broken_cases)
     for step, command, want, got in failures:
         print("FAIL [%s] %s — expected %s, got %s" % (step, command, want, got))
     print("%d/%d passed" % (total - len(failures), total))

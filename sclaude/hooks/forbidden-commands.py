@@ -51,25 +51,15 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
-# A module that fails to load would end the hook before any check, and a hook
-# that exits with an error lets the command run: the bans and, since the step's
-# flags come from the same policy.py, --disallowed-tools with them. Every command
-# is refused instead, until the module loads again.
-try:
-    from _friction import note
-    from _shell import (GIT_VALUED, SEPARATORS, inner_command, script_call, strip_keywords,
-                        strip_runners, strip_wrappers, substitutions, tokenize, ungroup)
-    import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
-    import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
-except Exception as exc:  # noqa: BLE001
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": "deny",
-        "permissionDecisionReason": "sclaude's ban check could not load (%s: %s), so every "
-                                    "command is refused. Tell the human and stop." % (
-                                        type(exc).__name__, exc),
-    }}))
-    sys.exit(0)
+# First, so that a module failing to load, or anything raising later, refuses
+# the call rather than letting it run (_failsafe.py).
+import _failsafe  # noqa: E402
+_failsafe.install("ban check (forbidden-commands.py)")
+from _friction import note  # noqa: E402
+from _shell import (GIT_VALUED, SEPARATORS, inner_command, script_call, strip_keywords,  # noqa: E402
+                    strip_runners, strip_wrappers, substitutions, tokenize, ungroup)
+import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
+import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
 
 # The branch that must not be pushed to: it moves only by merging a PR.
 PROTECTED = "main"
@@ -398,7 +388,7 @@ def shared_schema_asks(command):
     return None
 
 
-TAIL = ("  Tell the human and stop — the next move is theirs.")
+TAIL = _failsafe.TAIL
 
 
 def segments(command, raw=False):

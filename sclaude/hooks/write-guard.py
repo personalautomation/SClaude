@@ -24,6 +24,10 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# First, so that a module failing to load, or anything raising later, refuses
+# the call rather than letting it run (_failsafe.py).
+import _failsafe  # noqa: E402
+_failsafe.install("write guard (write-guard.py)")
 from _shell import (GIT_VALUED, KEYWORDS, QUOTED, inner_command, strip_wrappers,  # noqa: E402
                     substitutions, tokenize, ungroup)
 

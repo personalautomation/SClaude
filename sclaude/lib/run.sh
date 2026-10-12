@@ -1480,6 +1480,11 @@ PYEOF
   local project_before project_after
   project_before=""
   [[ -n "$session" ]] && project_before="$(state_get "$state" "friction.$key.project_base" || true)"
+  # Only while HEAD still descends from it: a branch that moved elsewhere in
+  # between (rebased, reset) would credit the review with commits not its own.
+  if [[ -n "$project_before" ]] && ! git -C "$wt" merge-base --is-ancestor "$project_before" HEAD 2>/dev/null; then
+    project_before=""
+  fi
   if [[ -z "$project_before" ]]; then
     project_before="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
     state_set "$state" "friction.$key.project_base" "$project_before" 2>/dev/null || true

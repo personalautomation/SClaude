@@ -243,7 +243,8 @@ instruments_state() {
           # The hooks by their content: a listing carries the mtime of .git
           # itself, which an index refresh during the review moves.
           [[ -n "$git_dir" ]] && cat "$git_dir/config" \
-            && (cd "$git_dir/hooks" && find . -type f -exec sha1sum {} + | sort)
+            && (cd "$git_dir/hooks" && find . \( -type f -o -type l \) -printf '%p %m %l\n' | sort \
+                && find . -type f -exec sha1sum {} + | sort)
         } 2>/dev/null | md5sum | cut -c1-12)"
 }
 

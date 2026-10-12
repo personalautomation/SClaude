@@ -352,7 +352,8 @@ try:
     # Untracked content and the repository's config count too.
     with open(os.path.join(inst, "loose"), "w") as fh:
         fh.write("1\n")
-    for change in ('echo 2 > "%s/loose"' % inst, 'git -C "%s" config core.hooksPath x' % inst):
+    for change in ('echo 2 > "%s/loose"' % inst, 'git -C "%s" config core.hooksPath x' % inst,
+                   'ln -s /tmp/x "%s/.git/hooks/pre-push"' % inst):
         out = sh('INSTRUMENTS="%s"; s="$(instruments_state)"; %s; '
                  'instruments_unchanged "$s" review 2>/dev/null || echo changed' % (inst, change), repo)
         check("instruments-changed %s" % change.split()[0], out, "changed")

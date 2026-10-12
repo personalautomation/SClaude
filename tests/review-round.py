@@ -362,6 +362,8 @@ session_watch_stop
     # kept with the review, not taken from HEAD again.
     check("friction-base-kept", '[[ -n "$session" ]] && project_before="$(state_get "$state" '
           '"friction.$key.project_base"' in RUN, True)
+    check("friction-base-must-be-an-ancestor",
+          'merge-base --is-ancestor "$project_before" HEAD' in RUN, True)
     check("friction-watched", RUN.count('session_watch_start "" "$session" "$done_file" "$where"'), 2)
 
     # --- the prompt names the marker the orchestrator watches -----------------

@@ -200,7 +200,7 @@ environment_restore() {
 
 # The name of a key sclaude reads from the files (`envKeys`, envs.py).
 environment_key() {
-  python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import envs; print(envs.keys(sys.argv[2])[sys.argv[3]])' \
+  python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import envs; print(envs.keys(sys.argv[2], envs.guarded(sys.argv[2]))[sys.argv[3]])' \
     "${LIB:-$(dirname "${BASH_SOURCE[0]}")}" "$1" "$2" 2>/dev/null
 }
 

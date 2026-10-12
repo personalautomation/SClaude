@@ -57,7 +57,8 @@ import _failsafe  # noqa: E402
 _failsafe.install("ban check (forbidden-commands.py)")
 from _friction import note  # noqa: E402
 from _shell import (GIT_VALUED, SEPARATORS, inner_command, script_call, strip_keywords,  # noqa: E402
-                    strip_runners, strip_wrappers, substitutions, tokenize, ungroup)
+                    strip_redirections, strip_runners, strip_wrappers, substitutions,
+                    tokenize, ungroup)
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
 
@@ -124,10 +125,17 @@ DB_PUSH_REASON = ("this environment is protected (or could not be identified) �
 # `rollback`, which stays banned.
 VERCEL_READS = {
     ("env", "ls"), ("inspect",), ("ls",), ("list",), ("logs",),
-    ("whoami",), ("teams", "ls"), ("project", "ls"), ("projects",),
+    ("whoami",), ("teams", "ls"), ("project", "ls"), ("projects", "ls"),
     ("domains", "ls"), ("certs", "ls"), ("dns", "ls"),
     ("rollback", "status"), ("promote", "status"),
 }
+# The global options that take a value, which is never a subcommand's name:
+# `vercel --cwd ls --prod` deploys the directory ls to production.
+VERCEL_VALUED = ("--cwd", "--scope", "-S", "--token", "-t", "--team", "-T",
+                 "--local-config", "-A", "--global-config", "-Q")
+# A subcommand whose whole work is reading: nothing after it can make it write.
+# Others name a group (projects, env), and a write follows them.
+VERCEL_ONE_WORD = (("inspect",), ("ls",), ("list",), ("logs",), ("whoami",))
 
 VERCEL_REASON = ("deploying is the human's step; the orchestrator offers "
                  "preview itself, from the main repository, where the project "
@@ -146,10 +154,19 @@ def vercel_refuses(words):
     # and `--token x` carry a value, but a value is never a subcommand's name
     # here: a read is named by its own first word, so the longest prefix that
     # matches the allowlist decides.
-    rest = [w for w in words[1:] if not w.startswith("-")]
-    for length in (2, 1):
-        if tuple(rest[:length]) in VERCEL_READS:
-            return None
+    rest, i = [], 1
+    while i < len(words):
+        w = words[i]
+        if w in VERCEL_VALUED:
+            i += 2
+            continue
+        if not w.startswith("-"):
+            rest.append(w)
+        i += 1
+    if tuple(rest[:2]) in VERCEL_READS:
+        return None
+    if tuple(rest[:1]) in VERCEL_ONE_WORD:
+        return None
     return VERCEL_REASON
 
 
@@ -571,12 +588,13 @@ def follow_cd(where, words, known=None, command=""):
     """
     if not words:
         return where
-    if any("(" in w or ")" in w for w in words):
-        return None
+    # Only a change of directory changes it: `out=$(git push)` stays where it is.
     if words[0] in ("pushd", "popd"):
         return None
     if words[0] != "cd":
         return where
+    if any("(" in w or ")" in w for w in words):
+        return None
     if len(words) != 2:
         return None
     path = words[1]
@@ -660,6 +678,9 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
                 return MAIN_REASON
             continue
         target = push_target(ref, known or {})
+        # A pattern pushes every branch it matches, main among them.
+        if target is not None and "*" in target:
+            return "a refspec pattern pushes main too; " + MAIN_REASON
         if target is None:
             return ("the push's destination is built at run time, so it cannot "
                     "be told from main; " + MAIN_REASON)
@@ -778,16 +799,15 @@ def refuses(command, step, cwd=None, depth=0):
     inner_parts = substitutions(command)
     if inner_parts is None:
         return "a substitution in the command is left open, so it cannot be judged"
-    for inner in inner_parts:
-        if depth >= 3:
-            return "a command nested this deep cannot be judged"
-        reason = refuses(inner, step, cwd, depth + 1)
-        if reason:
-            return reason
 
     table = {tuple(script_call(list(d["words"]))): d["why"] for d in POLICY.get("deny", [])}
 
     where = os.path.realpath(cwd or os.getcwd())
+    # Every directory the line is in at some point: a substitution runs where
+    # the line has got to by then, and `cd ../main && x=$(git push origin)`
+    # pushed main while judged from where the line started. Which one is not
+    # told apart here, so it is judged in each.
+    visited = [where]
     known = {}
     redirected = False
     # The directory a `( … )` opened in, restored where it closes: a subshell's
@@ -808,8 +828,17 @@ def refuses(command, step, cwd=None, depth=0):
         elif raw[0] == "esac":
             in_case = False
             raw = raw[1:]
-        if in_case and raw and raw[0].endswith(")") and "(" not in raw[0]:
+        if in_case and raw and raw[0].endswith(")") and (
+                "(" not in raw[0] or (raw[0].startswith("(") and raw[0].count("(") == 1)):
             raw = raw[1:]
+        # A function's body runs when it is called, and its header stood first:
+        # `f() { gh pr merge 5; }; f` merged. The header is taken off.
+        if raw and re.fullmatch(r"[\w.:-]+\(\)", raw[0]):
+            raw = raw[1:]
+        elif raw[:1] == ["function"] and len(raw) > 1:
+            raw = raw[2:]
+            if raw[:1] == ["()"]:
+                raw = raw[1:]
         if not raw:
             restore = False
             continue
@@ -820,10 +849,13 @@ def refuses(command, step, cwd=None, depth=0):
         if opens:
             saved.append(where)
         flat, _ = ungroup(raw)
-        flat = strip_keywords(flat)
+        flat = strip_redirections(strip_keywords(flat))
         remember(known, flat)
         redirected = redirected or any("GIT_DIR" in w for w in raw)
         where = follow_cd(where, flat, known, command)
+        # An unknown one is left alone, as a bare push from it is.
+        if where is not None and where not in visited:
+            visited.append(where)
         raw = flat
         words = strip_runners(strip_wrappers(raw))
         if not words:
@@ -858,6 +890,13 @@ def refuses(command, step, cwd=None, depth=0):
         for prefix, why in table.items():
             if tuple(called[:len(prefix)]) == prefix:
                 return why
+    for inner in inner_parts:
+        if depth >= 3:
+            return "a command nested this deep cannot be judged"
+        for there in visited:
+            reason = refuses(inner, step, there, depth + 1)
+            if reason:
+                return reason
     return None
 
 

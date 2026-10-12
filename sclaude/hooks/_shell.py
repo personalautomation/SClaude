@@ -86,6 +86,11 @@ def split_separators(command):
             out.append(" ; ")
             i += 1
             continue
+        # `2>&1` and `&>f` are redirections, not a background `&`.
+        if ch == "&" and (command[i - 1:i] in (">", "<") or command[i + 1:i + 2] == ">"):
+            out.append(ch)
+            i += 1
+            continue
         if ch in ";|&":
             # `&&` and `||` are one separator, not two: we cut them in
             # pairs.
@@ -504,3 +509,23 @@ def inner_command(words):
                 return None
             i += 1
     return None
+
+
+# A redirection, the target stuck to it or not: `2>&1`, `>out`, `> out`, `<in`.
+REDIRECTION = re.compile(r"^\d*(?:>>?|<|&>>?|>\|)(.*)$")
+
+
+def strip_redirections(words):
+    """The words without redirections and their targets: they are not
+    arguments, and `git push origin 2>&1` read `2>` as a refspec."""
+    out, skip = [], False
+    for w in words:
+        if skip:
+            skip = False
+            continue
+        m = REDIRECTION.match(w)
+        if m and out:
+            skip = not m.group(1)
+            continue
+        out.append(w)
+    return out

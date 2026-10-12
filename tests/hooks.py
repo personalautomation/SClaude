@@ -259,6 +259,17 @@ FORBIDDEN = [
     # Shell keywords, exec, and a command substitution run the command too.
     ("if true; then gh pr merge 5; fi", DENY),
     ("case a in a) gh pr merge 5;; esac", DENY),
+    ("case x in (x) /usr/bin/gh pr merge 5;; esac", DENY),
+    ("f() { /usr/bin/gh pr merge 5; }; f", DENY),
+    ("function f { /usr/bin/gh pr merge 5; }; f", DENY),
+    ("function f() { gh pr merge 5; }", DENY),
+    ("f() { echo hi; }; f", ALLOW),
+    ("vercel projects rm myapp", DENY),
+    ("vercel --cwd ls --prod", DENY),
+    ("vercel projects ls", ALLOW),
+    ("vercel --scope team ls", ALLOW),
+    ("git push origin 'refs/heads/*:refs/heads/*'", DENY),
+    ("git push --prune origin 'refs/heads/*'", DENY),
     ("case $x in a|b) echo; ;; c) vercel --prod;; esac", DENY),
     ("case $x in a) echo ok;; esac", ALLOW),
     ("{ echo a; echo b; } | sort", ALLOW),
@@ -554,6 +565,9 @@ def main():
             ("(cd " + feature + " && npm test) && git push origin HEAD", clone, DENY),
             ("(cd " + clone + " && npm test) && git push origin HEAD", feature, ALLOW),
             ("(cd " + clone + " && git push origin HEAD)", feature, DENY),
+            # A substitution runs where the line has got to.
+            ("cd " + clone + " && out=$(git push origin 2>&1)", feature, DENY),
+            ("cd " + feature + " && out=$(git push origin HEAD 2>&1)", feature, ALLOW),
             ("{ npm test; } && git push", clone, DENY),
             ("{ cd " + clone + "; } && git push", feature, DENY),
         ]

@@ -225,6 +225,29 @@ review_guard_settings() {
   printf '%s\n' --settings "{\"hooks\": {\"PreToolUse\": [$(guard_entry "${args[@]}")]}}"
 }
 
+# sclaude's checkout as it stands: its HEAD and what is uncommitted, in one
+# line. Taken before and after a review session (instruments_unchanged).
+instruments_state() {
+  printf '%s %s\n' "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null)" \
+    "$( { git -C "$INSTRUMENTS" status --porcelain; git -C "$INSTRUMENTS" diff HEAD; } 2>/dev/null \
+        | md5sum | cut -c1-12)"
+}
+
+# Says so, loudly, when a review session changed sclaude's checkout after all.
+# The write guard refuses the writes it can name, and a list of commands can
+# never name them all — rsync, tar -C, unzip -d, patch, awk -i inplace — so
+# what the checkout looks like afterwards is the check that holds for every
+# one of them. Nothing is reverted: what changed is for a person to look at.
+#
+#   instruments_unchanged <state before> <who>
+instruments_unchanged() {
+  [[ "$(instruments_state)" == "$1" ]] && return 0
+  warn ""
+  warn "  The $2 changed sclaude's own checkout ($INSTRUMENTS), which it may only read."
+  warn "  Look before anything else runs from it: git -C $INSTRUMENTS status; git -C $INSTRUMENTS log -3"
+  return 1
+}
+
 # The rules the policy layers give a session (sclaude/lib/policy.py): the
 # commands and tools it may not use, one Claude rule per line, into the array
 # named by $1; the commands it may run without being asked into the one named

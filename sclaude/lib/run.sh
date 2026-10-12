@@ -1482,6 +1482,7 @@ PYEOF
   # The review changes the product, never sclaude (review_guard_settings).
   local -a guard=()
   mapfile -t guard < <(review_guard_settings "$wt")
+  local before_instruments; before_instruments="$(instruments_state)"
   if [[ -n "$session" ]]; then
     # Returning to an interrupted review. The log does not need moving — it is
     # already in .reviewed, and that is what the session was reading; the prompt
@@ -1518,6 +1519,7 @@ PYEOF
         -n "friction/$slug" "$prompt" )
   fi
   session_watch_stop
+  instruments_unchanged "$before_instruments" "friction review" || true
   session_closed "$done_file" "$where" "$session" \
     "The friction review reported its work done, and sclaude closed it." || true
 

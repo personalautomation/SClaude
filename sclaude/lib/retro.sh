@@ -98,6 +98,7 @@ PY
   project_before="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
 
   session_watch_start "" "$session" "$done_file" "$wt" retro
+  local before_instruments; before_instruments="$(instruments_state)"
   local -a guard=()
   mapfile -t guard < <(review_guard_settings "$wt")
   ( cd "$wt" && claude_launch --session-id "$session" --model opus --effort medium \
@@ -107,6 +108,7 @@ PY
       --add-dir "$HOME/.claude/projects" \
       -n "retro/$slug" "$prompt" )
   session_watch_stop
+  instruments_unchanged "$before_instruments" "retrospective" || true
   session_closed "$done_file" "$wt" "$session" \
     "The retrospective found nothing to act on, and sclaude closed it." \
     || retro_report "$wt" "$session"

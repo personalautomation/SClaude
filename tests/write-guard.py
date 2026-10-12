@@ -324,6 +324,21 @@ try:
     check("maintainer-step-guarded",
           any("write-guard" in h["hooks"][0]["command"] for h in settings["hooks"]["PreToolUse"]),
           True)
+    # Whatever a review session did to sclaude's checkout is noticed after
+    # it, by every command the guard cannot name.
+    inst = os.path.join(tmp, "inst")
+    subprocess.run(["git", "init", "-q", inst], check=True)
+    with open(os.path.join(inst, "a"), "w") as fh:
+        fh.write("1\n")
+    subprocess.run(["git", "-C", inst, "add", "a"], check=True)
+    subprocess.run(["git", "-C", inst, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "a"],
+                   check=True)
+    unchanged = sh('INSTRUMENTS="%s"; s="$(instruments_state)"; instruments_unchanged "$s" review '
+                   '&& echo same' % inst, repo)
+    check("instruments-unchanged", unchanged, "same")
+    changed = sh('INSTRUMENTS="%s"; s="$(instruments_state)"; echo 2 > "%s/a"; '
+                 'instruments_unchanged "$s" review 2>&1 || echo changed' % (inst, inst), repo)
+    check("instruments-changed-said", "changed sclaude's own checkout" in changed and "changed" in changed, True)
     # A checkout whose path has a space: Claude Code runs the hook through a
     # shell, and the unquoted path split there.
     entry = json.loads(sh('HOOKS="/opt/my tools/hooks"; guard_entry --readonly /x', repo))

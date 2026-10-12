@@ -244,10 +244,12 @@ PY
   # the same day already holds commits, and they are not this session's work.
   local start; start="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
   session_watch_start "" "$session" "$done_file" "$wt" deferred
+  local before_instruments; before_instruments="$(instruments_state)"
   ( cd "$wt" && claude_launch --session-id "$session" --model opus --effort medium \
       "${guard[@]}" --permission-mode plan --add-dir "$INSTRUMENTS" \
       --add-dir "$HOME/.claude/projects" -n "friction/deferred" "$prompt" )
   session_watch_stop
+  instruments_unchanged "$before_instruments" "deferred review" || true
   session_closed "$done_file" "$wt" "$session" \
     "The deferred review reported its work done, and sclaude closed it." || true
 

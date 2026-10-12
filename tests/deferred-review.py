@@ -45,6 +45,7 @@ LIB="%(lib)s"; PROMPTS="%(prompts)s"; INSTRUMENTS="%(root)s"
 info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; die() { echo "DIE $*"; exit 1; }
 new_session_id() { echo 00000000-0000-0000-0000-000000000000; }
 review_guard_settings() { :; }
+instruments_state() { echo same; }; instruments_unchanged() { :; }
 session_watch_start() { :; }; session_watch_stop() { :; }; session_closed() { return 0; }
 claude_launch() { printf '%%s' "${@: -1}" > "%(out)s"; [[ -z "${DIRTY:-}" ]] || echo x > dirty.txt; }
 gh() { :; }

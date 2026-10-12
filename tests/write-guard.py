@@ -225,6 +225,23 @@ try:
     with open(config, "w") as fh:
         fh.write('["ann@x.test"]')
     check("non-object-config-nobody", sh(ask, repo), "no")
+    # The list is main's, not the tree's: a session editing its tree's copy
+    # does not make itself a maintainer.
+    setup(["lead@x.test"])
+    subprocess.run(["git", "-C", repo, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", repo, "-c", "user.name=t", "commit", "-qm", "config"], check=True)
+    origin = os.path.join(tmp, "origin.git")
+    subprocess.run(["git", "clone", "-q", "--bare", repo, origin], check=True)
+    subprocess.run(["git", "-C", repo, "remote", "add", "origin", origin], check=True)
+    subprocess.run(["git", "-C", repo, "fetch", "-q", "origin"], check=True)
+    subprocess.run(["git", "-C", repo, "update-ref", "refs/remotes/origin/main",
+                    subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True,
+                                   text=True).stdout.strip()], check=True)
+    setup(["ann@x.test"])
+    check("tree-edit-not-a-maintainer", sh(ask, repo), "no")
+    setup([])
+    check("tree-emptied-not-everybody", sh(ask, repo), "no")
+    subprocess.run(["git", "-C", repo, "remote", "remove", "origin"], check=True)
 
     where = 'product_rules_dir "%s"' % repo
     setup(["ann@x.test"])

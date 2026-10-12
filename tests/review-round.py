@@ -358,7 +358,7 @@ session_watch_stop
     check("returns-reset-on-close", 'state_set "$state" "steps.$step.auto_returns" null' in after, True)
     check("resume-hears-the-opening", '[[ -n "$told" ]] && opening=' in RUN, True)
     check("fresh-hears-the-opening", '[[ -n "$told" ]] && prompt=' in RUN, True)
-    check("friction-watched", RUN.count('session_watch_start "" "$session" "$done_file" "$INSTRUMENTS"'), 2)
+    check("friction-watched", RUN.count('session_watch_start "" "$session" "$done_file" "$where"'), 2)
 
     # --- the prompt names the marker the orchestrator watches -----------------
     with open(os.path.join(ROOT, "sclaude", "prompts", "review.md")) as fh:

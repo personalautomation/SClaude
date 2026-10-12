@@ -955,7 +955,8 @@ cmd_reset() {
   if [[ -n "$fsession" && "$fsession" != "null" ]]; then
     echo ""
     echo "Feature '$slug' has an unfinished friction review, and it holds the step."
-    if live_session "$INSTRUMENTS" "$fsession" >/dev/null; then
+    local fwhere; fwhere="$(state_get "$state" "friction.$fkey.cwd" || true)"
+    if live_session "${fwhere:-$INSTRUMENTS}" "$fsession" >/dev/null; then
       info "  Its conversation stays on disk — it is only forgotten here."
       info "  Read it any time: claude --resume $fsession"
     else

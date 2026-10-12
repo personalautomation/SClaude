@@ -1171,12 +1171,11 @@ collect_denials() {
 # deliberate or an obstacle" requires context — what the step was trying to do
 # and what it cost. That is reading a transcript and reasoning, not a grep.
 #
-# The directory is sclaude's checkout rather than the feature's worktree: it is the
-# orchestrator being edited, not the product, and it is committed straight to
-# main. The transcripts lie outside both directories, hence --add-dir: without it
-# the file tools will not go there. The feature's worktree is added as well:
-# friction is often the project's to fix — its scripts, its CLAUDE.md — and a
-# review that could only edit instruments left those for somebody to notice.
+# The directory is the feature's worktree: what the review decides goes into the
+# product, on the feature's branch, and sclaude's checkout is read-only to it.
+# That checkout is added with --add-dir, to read a restriction where it is
+# written, and so are the transcripts, which lie outside both: without it the
+# file tools will not go there.
 # The fourth argument is "re-read what was reviewed": the log is empty and the
 # human wants to go back to what has already been reviewed. We then skip both the
 # gathering and the tidying — there is nothing to move, and the session reads
@@ -1413,7 +1412,7 @@ PYEOF
   echo ""
   echo "${BOLD}${BLUE}── $slug · friction review after $([[ "$step" == fix-* ]] \
     && printf "the %s fix" "$label" || printf "step '%s'%s" "$label" "${number:+, session $number}") ──${OFF}"
-  info "   opus / medium / plan · $INSTRUMENTS"
+  info "   opus / medium / plan · $wt"
   info "   $count entries · $(basename "$reviewed")"
   echo ""
 
@@ -1429,14 +1428,21 @@ PYEOF
   # runs in the terminal), so --session-id is available, and a UUID generated in
   # advance survives any way of leaving.
   #
-  # A review's sessions directory is not a step's: it works in sclaude's checkout
-  # rather than in the feature's tree. The transcript lies at that path, and we
-  # check the id's liveness by it too.
-  local session
+  # The review works in the feature's tree, as the retrospective and the
+  # deferred review do: it changes the product, sclaude's checkout is
+  # read-only to it, and started there every relative write and bare git
+  # commit resolved into that checkout and was refused, with sclaude's
+  # CLAUDE.md loaded rather than the product's. The transcript lies by the
+  # directory a session was started in, recorded with it; one started before
+  # the record is sclaude's checkout's.
+  local session where
   session="$(state_get "$state" "friction.$key.session" || true)"
-  if [[ -n "$session" ]] && ! live_session "$INSTRUMENTS" "$session" >/dev/null; then
+  where="$(state_get "$state" "friction.$key.cwd" || true)"
+  [[ -n "$session" && -z "$where" ]] && where="$INSTRUMENTS"
+  if [[ -n "$session" ]] && ! live_session "$where" "$session" >/dev/null; then
     session=""
   fi
+  [[ -n "$session" ]] || where="$wt"
 
   # An open session cannot be opened a second time — the same trouble as with a
   # step: claude exits immediately, printing "Resume this session with…". The
@@ -1475,10 +1481,10 @@ PYEOF
     # is the same as it was.
     info "   resuming the interrupted friction review"
     session_runs "$state" "friction.$key" open "$session"
-    session_watch_start "" "$session" "$done_file" "$INSTRUMENTS"
-    ( cd "$INSTRUMENTS" && claude_launch --resume "$session" --model opus --effort medium \
+    session_watch_start "" "$session" "$done_file" "$where"
+    ( cd "$where" && claude_launch --resume "$session" --model opus --effort medium \
         "${guard[@]}" \
-        --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$wt" \
+        --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$INSTRUMENTS" \
         -n "friction/$slug" \
         "Back in the friction review for feature '$slug'. Pick up where the conversation left off; re-read $reviewed if you need to." )
   else
@@ -1487,6 +1493,7 @@ PYEOF
     # because the slot itself was nameless; now the name is the key and the
     # field has nothing left to say.
     state_set "$state" "friction.$key.session" "$session"
+    state_set "$state" "friction.$key.cwd" "$where"
     state_set "$state" "friction.$key.started" "$(date -Iseconds)"
     state_set "$state" "friction.$key.done" false
     # What an earlier review of this key came to belongs to that review, which
@@ -1497,14 +1504,14 @@ PYEOF
       state_set "$state" "friction.$key.$flag" null 2>/dev/null || true
     done
     session_runs "$state" "friction.$key" open "$session"
-    session_watch_start "" "$session" "$done_file" "$INSTRUMENTS"
-    ( cd "$INSTRUMENTS" && claude_launch --session-id "$session" --model opus --effort medium \
+    session_watch_start "" "$session" "$done_file" "$where"
+    ( cd "$where" && claude_launch --session-id "$session" --model opus --effort medium \
         "${guard[@]}" \
-        --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$wt" \
+        --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$INSTRUMENTS" \
         -n "friction/$slug" "$prompt" )
   fi
   session_watch_stop
-  session_closed "$done_file" "$INSTRUMENTS" "$session" \
+  session_closed "$done_file" "$where" "$session" \
     "The friction review reported its work done, and sclaude closed it." || true
 
   local changed=""
@@ -1522,7 +1529,7 @@ PYEOF
   # means losing it silently: the log is already in .reviewed, and nobody will
   # offer it a second time. The same witness by which run_step tells a step that
   # never happened.
-  if ! session_started "$INSTRUMENTS" "$session"; then
+  if ! session_started "$where" "$session"; then
     # Marked so the issue can say which kind of open this is. An interrupted
     # review has a conversation to return to; one that never started has
     # nothing, and telling a human to go back to it sends them to an empty
@@ -1578,7 +1585,7 @@ PYEOF
   # unset and the table falls back to naming the commits, which is what it did
   # before this existed.
   local verdict
-  verdict="$(friction_verdict "$INSTRUMENTS" "$session" || true)"
+  verdict="$(friction_verdict "$where" "$session" || true)"
   if [[ -n "$verdict" ]]; then
     state_set "$state" "friction.$key.verdict" "${verdict%%$'\t'*}"
     local note="${verdict#*$'\t'}"

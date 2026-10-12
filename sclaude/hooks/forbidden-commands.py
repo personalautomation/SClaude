@@ -143,6 +143,8 @@ VERCEL_READS = {
 # `vercel --cwd ls --prod` deploys the directory ls to production.
 VERCEL_VALUED = ("--cwd", "--scope", "-S", "--token", "-t", "--team", "-T",
                  "--local-config", "-A", "--global-config", "-Q")
+# The global options that take no value.
+VERCEL_GLOBAL_FLAGS = ("--debug", "-d", "--no-color", "--help", "-h", "--version", "-v")
 # A subcommand whose whole work is reading: nothing after it can make it write.
 # Others name a group (projects, env), and a write follows them.
 VERCEL_ONE_WORD = (("inspect",), ("ls",), ("list",), ("logs",), ("whoami",))
@@ -176,6 +178,14 @@ def vercel_refuses(words, raw=None):
         if w in VERCEL_VALUED:
             i += 2
             continue
+        if w.split("=", 1)[0] in VERCEL_VALUED:
+            i += 1
+            continue
+        # Before the subcommand only global options: any other flag there
+        # makes the call a deploy, `vercel --prod ls` deploying the directory
+        # ls to production.
+        if w.startswith("-") and not rest and w not in VERCEL_GLOBAL_FLAGS:
+            return VERCEL_REASON
         if not w.startswith("-"):
             rest.append(w)
         i += 1
@@ -862,6 +872,10 @@ def refuses(command, step, cwd=None, depth=0):
     # brace group runs in this shell, so its `cd` simply stays.
     saved, restore = [], False
     shape = {}
+    # What the whole line writes onto .env.local and what it names: a pipe
+    # splits the file read from the redirection or tee that writes it, and
+    # `cat .env.prod | tee .env.local` went past a check of each segment alone.
+    line_words, writes_env = [], False
     for raw in segments(command, raw=True):
         if restore:
             where = saved.pop() if saved else None
@@ -876,7 +890,14 @@ def refuses(command, step, cwd=None, depth=0):
         flat, _ = ungroup(raw)
         flat = strip_keywords(flat)
         into = redirect_targets(flat)
+        # A file read in by `<` is named as surely as an argument is.
+        line_words += [m.group(1) or (flat[i + 1] if i + 1 < len(flat) else "")
+                       for i, m in ((i, re.match(r"^\d*<(?!<)(.*)$", w)) for i, w in enumerate(flat)) if m]
         flat = strip_redirections(flat)
+        line_words += [w for w in flat[1:] if not w.startswith("-")]
+        writes_env = writes_env or any(os.path.basename(t.rstrip("/")) == ".env.local" for t in into) \
+            or (flat[:1] and flat[0].rsplit("/", 1)[-1] == "tee"
+                and any(os.path.basename(w) == ".env.local" for w in flat[1:]))
         remember(known, flat)
         redirected = redirected or any("GIT_DIR" in w for w in raw)
         where = follow_cd(where, flat, known, command)
@@ -925,6 +946,12 @@ def refuses(command, step, cwd=None, depth=0):
         for prefix, why in table.items():
             if tuple(called[:len(prefix)]) == prefix:
                 return why
+    if writes_env:
+        reason = env_switch_refuses(
+            ["cat"], ["cat"] + [w for w in line_words if os.path.basename(w) != ".env.local"],
+            into=[".env.local"])
+        if reason:
+            return reason
     for inner in inner_parts:
         if depth >= 3:
             return "a command nested this deep cannot be judged"

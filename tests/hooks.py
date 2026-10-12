@@ -268,6 +268,10 @@ FORBIDDEN = [
     ("vercel --cwd ls --prod", DENY),
     ("vercel projects ls", ALLOW),
     ("vercel ./ls --prod", DENY),
+    ("vercel --prod ls", DENY),
+    ("vercel --yes logs", DENY),
+    ("vercel --debug ls", ALLOW),
+    ("vercel --scope=team ls", ALLOW),
     ("vercel /tmp/logs --prod", DENY),
     ("vercel --scope team ls", ALLOW),
     ("git push origin 'refs/heads/*:refs/heads/*'", DENY),
@@ -742,7 +746,11 @@ def main():
         for command, want in (("mv .env.prod .env.local", "deny"),
                               ("cat .env.prod > .env.local", "deny"),
                               ("cat .env.prod >> .env.local", "deny"),
-                              ("cat .env.dev > .env.local", "allow")):
+                              ("cat .env.dev > .env.local", "allow"),
+                              ("cat .env.prod | tee .env.local", "deny"),
+                              ("cat .env.prod | cat > .env.local", "deny"),
+                              ("tee .env.local < .env.prod", "deny"),
+                              ("cat .env.dev | tee .env.local", "allow")):
             if verdict(command) != want:
                 failures.append(("shared", command, want, verdict(command)))
         # Main's config unreadable: nothing is put onto .env.local.

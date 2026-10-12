@@ -642,8 +642,10 @@ def main():
                 os.remove(ref)
 
         def verdict(command):
+            # The tree is its own main checkout here: the environments are
+            # read from main's config, and this tree's is the one under test.
             argv = [sys.executable, os.path.join(HOOKS, "forbidden-commands.py"), "--step", "code",
-                    "--root", PRODUCT]
+                    "--root", tree]
             full = dict(os.environ, CLAUDE_PROJECT_DIR=tree)
             full.pop("SUPABASE_WORKDIR", None)
             out = subprocess.run(argv, input=json.dumps({"tool_name": "Bash",
@@ -684,6 +686,30 @@ def main():
                               ("ln -sfn .env.localdb .env.local", "allow")):
             if verdict(command) != want:
                 failures.append(("shared", command, want, verdict(command)))
+        # Which environment is protected is main's to say, not the tree's: a
+        # session that drops "protected" from prod in its copy still may not
+        # push there.
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+        subprocess.run(["git", "init", "-q", "-b", "main", tree], check=True)
+        subprocess.run(["git", "-C", tree, "add", ".sclaude/config.json"], check=True)
+        subprocess.run(["git", "-C", tree, "commit", "-qm", "config"], check=True, env=env)
+        subprocess.run(["git", "-C", tree, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
+        with open(os.path.join(tree, ".sclaude/config.json")) as fh:
+            edited = json.load(fh)
+        edited["environments"]["prod"].pop("protected")
+        with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:
+            json.dump(edited, fh)
+        guard("prod")
+        if verdict("npx supabase db push") != "deny":
+            failures.append(("shared", "db push to prod unprotected in the tree only", "deny",
+                             verdict("npx supabase db push")))
+        if verdict("ln -sfn .env.prod .env.local") != "deny":
+            failures.append(("shared", "switch to prod unprotected in the tree only", "deny",
+                             verdict("ln -sfn .env.prod .env.local")))
+        subprocess.run(["git", "-C", tree, "update-ref", "-d", "refs/remotes/origin/main"], check=True)
+        guard("dev")
+
         # Environments in folders of their own share a file name: the file
         # itself decides, and dev is not taken for production.
         for env_name in ("dev", "prod"):

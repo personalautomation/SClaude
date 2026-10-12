@@ -91,6 +91,11 @@ def split_separators(command):
             out.append(ch)
             i += 1
             continue
+        # `>|` is a redirection that overwrites, not a pipe.
+        if ch == "|" and command[i - 1:i] == ">":
+            out.append(ch)
+            i += 1
+            continue
         if ch in ";|&":
             # `&&` and `||` are one separator, not two: we cut them in
             # pairs.
@@ -529,3 +534,26 @@ def strip_redirections(words):
             continue
         out.append(w)
     return out
+
+
+def closing_at(segment, braces=True):
+    """The index of the word that closes a group, or None.
+
+    Shared by both hooks: the step hook counted `)` word by word, and in
+    `(cd ../main; x=$(git rev-parse HEAD); git push)` took `HEAD)` for the end
+    of the subshell, and judged the push from outside it.
+
+    A `)` closes a `$(` opened earlier before it closes a group, as in
+    ungroup: shlex cuts `x=$(cat f)` into `x=$(cat` and `f)`.
+    """
+    subs = 0
+    for k, w in enumerate(segment):
+        if w == "}" and braces:
+            return k
+        subs += w.count("$(")
+        closing = w.count(")") - w.count("(") + w.count("$(")
+        while closing > 0 and subs:
+            subs, closing = subs - 1, closing - 1
+        if closing > 0:
+            return k
+    return None

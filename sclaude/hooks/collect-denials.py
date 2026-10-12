@@ -72,9 +72,10 @@ OWN_MARKERS = (
     "Tell the human and stop — the next move is theirs.",
     "tell the human and stop.",
     "Then present the plan again.",
-    "a maintainer can lift it into team/.",
-    "leave it as a deferred entry of class sclaude-default.",
 )
+# The write guard's refusals are not among them: it writes nothing to the
+# log itself, so a refusal of its own, one getting in the way of real work
+# included, reaches the review only from here.
 
 
 # Deliberate bans, already reviewed once: sclaude/known-denials.txt.

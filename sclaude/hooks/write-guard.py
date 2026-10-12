@@ -36,7 +36,7 @@ except Exception as _exc:  # noqa: BLE001
           'refused.  Tell the human and stop \u2014 the next move is theirs."}}')
     sys.exit(0)
 _failsafe.install("write guard (write-guard.py)")
-from _shell import (GIT_VALUED, KEYWORDS, QUOTED, inner_command, strip_wrappers,  # noqa: E402
+from _shell import (GIT_VALUED, KEYWORDS, QUOTED, closing_at, inner_command, strip_wrappers,  # noqa: E402
                     substitutions, tokenize, ungroup)
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
@@ -241,25 +241,6 @@ def calls(command, cwd, seen=None):
     return out
 
 
-def closing_at(segment):
-    """The index of the word that closes a group, or None.
-
-    A `)` closes a `$(` opened earlier before it closes a group, as in
-    ungroup: shlex cuts `x=$(cat f)` into `x=$(cat` and `f)`.
-    """
-    subs = 0
-    for k, w in enumerate(segment):
-        if w == "}":
-            return k
-        subs += w.count("$(")
-        closing = w.count(")") - w.count("(") + w.count("$(")
-        while closing > 0 and subs:
-            subs, closing = subs - 1, closing - 1
-        if closing > 0:
-            return k
-    return None
-
-
 def write_targets(command, cwd):
     """(word, directory it is relative to) for every path the command writes.
 
@@ -332,6 +313,10 @@ def write_targets(command, cwd):
                     if w in valued:
                         given, k = True, k + 2
                         continue
+                    # The long spellings, the script stuck to them.
+                    if w.startswith(("--expression=", "--file=")):
+                        given, k = True, k + 1
+                        continue
                     if not w.startswith("-"):
                         plain.append(w)
                     k += 1
@@ -370,9 +355,22 @@ def git_writes_in(command, cwd, inside):
     found = calls(command, cwd)
     if found is None:
         return False
+    # GIT_DIR or GIT_WORK_TREE set in the line names the repository past the
+    # directory, as --git-dir does: `GIT_DIR=$RO/.git git commit` committed
+    # into the read-only checkout. The assignment is dropped with the
+    # wrappers, so it is read off the line.
+    named = []
+    for word in tokenize(command) or []:
+        m = re.match(r"^(?:export\s+)?GIT_(?:DIR|WORK_TREE)=(.*)$", word)
+        if m:
+            named.append(moved(cwd, m.group(1)))
     for call, where in found:
         if call[0].rsplit("/", 1)[-1] != "git":
             continue
+        if any(n is None or inside(n) for n in named):
+            sub = next((w for w in call[1:] if not w.startswith("-")), "")
+            if sub in GIT_WRITES or sub in GIT_WRITE_FORMS:
+                return True
         here, j = where, 1
         while j < len(call) and call[j].startswith("-"):
             name, has_value, value = call[j].partition("=")
@@ -412,7 +410,9 @@ def refuses(payload, team, readonly, depth=0):
         return any(full == d or full.startswith(d + os.sep) for d in readonly)
 
     def is_team(path):
-        return team and TEAM.search(path) is not None
+        # As resolved: `.sclaude/people/../team/policy.json` is the team's.
+        full = os.path.normpath(os.path.join(cwd, os.path.expanduser(path)))
+        return team and TEAM.search(full) is not None
 
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         path = str(data.get("file_path") or data.get("notebook_path") or "")

@@ -64,9 +64,9 @@ except Exception as _exc:  # noqa: BLE001
     sys.exit(0)
 _failsafe.install("ban check (forbidden-commands.py)")
 from _friction import note  # noqa: E402
-from _shell import (GIT_VALUED, SEPARATORS, inner_command, script_call, strip_keywords,  # noqa: E402
-                    strip_redirections, strip_runners, strip_wrappers, substitutions,
-                    tokenize, ungroup)
+from _shell import (GIT_VALUED, SEPARATORS, closing_at, inner_command, script_call,  # noqa: E402
+                    strip_keywords, strip_redirections, strip_runners, strip_wrappers,
+                    substitutions, tokenize, ungroup)
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
 
@@ -154,10 +154,16 @@ VERCEL_REASON = ("deploying is the human's step; the orchestrator offers "
                  "inspect, ls, logs, rollback status")
 
 
-def vercel_refuses(words):
-    """The reason this `vercel` call is banned, or None."""
+def vercel_refuses(words, raw=None):
+    """The reason this `vercel` call is banned, or None.
+
+    `raw` is the same call with its words uncut: cut to their last path part,
+    `vercel ./ls --prod`, a deploy of the directory ls, read as `vercel ls`.
+    """
     if not words or words[0] != "vercel" or not rule_on("vercel-deploy", words):
         return None
+    if raw:
+        words = words[:1] + list(raw[1:])
     # The subcommand is the first word that is not a flag. `--scope my-team`
     # and `--token x` carry a value, but a value is never a subcommand's name
     # here: a read is named by its own first word, so the longest prefix that
@@ -186,7 +192,7 @@ def active_environment(cwd):
     obeys the link (envs.settled). No answer is not permission: a product that
     names no environments has none, and every environment counts as protected.
     """
-    return envs_lib.settled(cwd, cwd)
+    return envs_lib.settled(cwd, cwd, ENVIRONMENTS)
 
 
 def project_dir():
@@ -204,7 +210,7 @@ def environment_is_protected(cwd, name):
     .sclaude/config.json. True for anything that cannot be resolved: the
     question is "may a migration be applied here", and an environment that
     cannot be identified is exactly the case the ban exists for."""
-    return not name or envs_lib.protected(cwd, name)
+    return not name or envs_lib.protected(cwd, name, ENVIRONMENTS)
 
 
 # A tree is on the environment whose file its .env.local points at
@@ -224,14 +230,14 @@ def env_switch_refuses(words, raw):
     if not paths or os.path.basename(paths[-1].rstrip("/")) != ".env.local":
         return None
     tree = project_dir()
-    prod = envs_lib.production(tree)
-    target = envs_lib.env_file(tree, prod) if prod else None
+    prod = envs_lib.production(tree, ENVIRONMENTS)
+    target = envs_lib.env_file(tree, prod, ENVIRONMENTS) if prod else None
     if not target:
         return None
     # By the file itself first. The name alone decides only where it singles
     # production out: environments in folders of their own share it
     # (envs/dev/.env, envs/prod/.env), and every switch read as production.
-    files = [envs_lib.env_file(tree, n) for n in envs_lib.environments(tree)]
+    files = [envs_lib.env_file(tree, n, ENVIRONMENTS) for n in envs_lib.environments(tree, ENVIRONMENTS)]
     real = os.path.realpath(target)
     name = os.path.basename(target)
     unique = sum(1 for f in files if f and os.path.basename(f) == name) == 1
@@ -851,9 +857,7 @@ def refuses(command, step, cwd=None, depth=0):
             restore = False
             continue
         opens = raw[0] == "(" or (raw[0].startswith("(") and not raw[0].startswith("$("))
-        last = raw[-1]
-        restore = bool(saved or opens) and (
-            last == ")" or (last.endswith(")") and last.count("(") < last.count(")")))
+        restore = bool(saved or opens) and closing_at(raw, braces=False) is not None
         if opens:
             saved.append(where)
         flat, _ = ungroup(raw)
@@ -891,7 +895,7 @@ def refuses(command, step, cwd=None, depth=0):
                   or api_merge_refuses(words, raw[len(raw) - len(words):])
                   or db_push_refuses(words, raw[len(raw) - len(words):])
                   or env_switch_refuses(words, raw[len(raw) - len(words):])
-                  or vercel_refuses(words))
+                  or vercel_refuses(words, raw[len(raw) - len(words):]))
         if reason:
             return reason
         called = script_call(words)
@@ -945,6 +949,34 @@ if not root:
         root = ""
 # The feature's tree: a friction review commits a rule there before main has it.
 POLICY = policy_lib.merged(root, flag(argv, "--person"), step, flag(argv, "--tree"))
+
+
+def main_config(repo):
+    """The product's .sclaude/config.json as main has it, for the environments.
+
+    Which environment is protected, and which file is production's, is read
+    from main, not from the session's tree: the tree is the session's to
+    edit, and one that dropped "protected" from prod there was let push to it
+    and switch to it. The file names in it resolve in the tree as ever. Main
+    as the remote has it, else the main checkout's copy, else the tree's,
+    when there is no main to ask.
+    """
+    for source in (["git", "-C", repo, "show", "origin/main:.sclaude/config.json"],):
+        try:
+            done = subprocess.run(source, capture_output=True, text=True, timeout=5)
+            if done.returncode == 0:
+                data = json.loads(done.stdout)
+                return data if isinstance(data, dict) else {}
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+    for path in (os.path.join(repo, ".sclaude", "config.json"),
+                 os.path.join(project_dir(), ".sclaude", "config.json")):
+        if os.path.isfile(path):
+            return envs_lib.config(os.path.dirname(os.path.dirname(path)))
+    return {}
+
+
+ENVIRONMENTS = main_config(root or project_dir())
 
 try:
     payload = json.load(sys.stdin)

@@ -129,6 +129,25 @@ try:
     git(repo, "push", "-q", "origin", "--delete", branch)
     git(repo, "fetch", "-q", "--prune", "origin")
 
+    # An earlier run today whose push failed: its commits are sent this time,
+    # though this session changed nothing.
+    git(repo, "branch", "-q", branch, "origin/main")
+    side = os.path.join(tmp, "side2")
+    git(repo, "worktree", "add", "-q", side, branch)
+    with open(os.path.join(side, "unsent.txt"), "w") as fh:
+        fh.write("unsent\n")
+    git(side, "add", "-A")
+    git(side, "commit", "-qm", "earlier review, push failed")
+    unsent = git(side, "rev-parse", "HEAD").strip()
+    git(repo, "worktree", "remove", side)
+    out = review(repo, out_file)
+    check("unsent-pushed", git(repo, "ls-remote", "origin", branch).split()[:1], [unsent])
+    for w in trees(tmp):
+        git(repo, "worktree", "remove", "--force", os.path.join(tmp, w))
+    subprocess.run(["git", "-C", repo, "branch", "-q", "-D", branch], capture_output=True)
+    subprocess.run(["git", "-C", repo, "push", "-q", "origin", "--delete", branch], capture_output=True)
+    git(repo, "fetch", "-q", "--prune", "origin")
+
     # An open pull request of an earlier review is named rather than offered over.
     pending = subprocess.run(["bash", "-c", 'for m in state project developer deferred; do source "%s/$m.sh"; done; '
                               'gh() { echo https://pr/7; }; deferred_pending "%s"' % (LIB, repo)],
@@ -140,6 +159,16 @@ try:
     git(repo, "commit", "-qm", "reviewed")
     git(repo, "push", "-q", "origin", "HEAD:main")
     os.remove(out_file)
+    # A branch from earlier today with unsent work survives a run that finds
+    # nothing to review.
+    git(repo, "branch", "-q", branch, "origin/main")
+    side = os.path.join(tmp, "side3")
+    git(repo, "worktree", "add", "-q", side, branch)
+    git(side, "commit", "-q", "--allow-empty", "-m", "unsent work")
+    git(repo, "worktree", "remove", side)
+    out = review(repo, out_file)
+    check("empty-main-keeps-work", branches(repo), [branch])
+    git(repo, "branch", "-q", "-D", branch)
     out = review(repo, out_file)
     check("empty-main-says-so", "Nothing deferred on main" in out, True)
     check("empty-main-no-session", os.path.exists(out_file), False)

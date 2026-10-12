@@ -202,7 +202,10 @@ cmd_deferred() {
   mapfile -t files < <(deferred_files "$wt")
   if (( ${#files[@]} == 0 )) || ! grep -qhvE '^(#|[[:space:]]*$)' "${files[@]}" 2>/dev/null; then
     [[ -n "$made" ]] && git -C "$root" worktree remove "$wt" >/dev/null 2>&1
-    [[ -n "$made" ]] && git -C "$root" branch -q -D "$branch" >/dev/null 2>&1
+    # Only a branch with no work on it: one continued from earlier today may
+    # hold commits its push never sent.
+    [[ -n "$made" && "$(git -C "$root" rev-list --count "$base..$branch" 2>/dev/null || echo 0)" -eq 0 ]] \
+      && git -C "$root" branch -q -D "$branch" >/dev/null 2>&1
     info "Nothing deferred on main in $root."
     return 0
   fi
@@ -254,7 +257,16 @@ PY
   committed="$(git -C "$wt" rev-list --count "${start:-$base}..HEAD" 2>/dev/null || echo 0)"
   kept="$(git -C "$wt" rev-list --count "$base..HEAD" 2>/dev/null || echo 0)"
   dirty="$(git -C "$wt" status --porcelain 2>/dev/null)"
-  if [[ "$committed" -gt 0 ]]; then
+  # What origin does not have yet, this session's or an earlier run's whose
+  # push failed: that one was never pushed again, and read as "changed nothing".
+  local unsent
+  if git -C "$wt" rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null; then
+    unsent="$(git -C "$wt" rev-list --count "origin/$branch..HEAD" 2>/dev/null || echo 0)"
+  else
+    unsent="$kept"
+  fi
+  if [[ "$committed" -gt 0 || "$unsent" -gt 0 ]]; then
+    [[ "$committed" -gt 0 ]] || info "  sending what an earlier review today committed and did not push"
     if GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q -u origin "$branch" >/dev/null 2>&1; then
       local pr
       pr="$(cd "$wt" && gh pr list --head "$branch" --state open --json url --jq '.[0].url // ""' 2>/dev/null)" || pr=""

@@ -130,6 +130,23 @@ print("%d %s" % (entries, since))
 PY
 }
 
+# The machine-wide file the deferred friction was kept in before it moved into
+# each product's .sclaude/. Nothing reads it any more, so its entries for this
+# product are named, with where they go, rather than left there unseen: the
+# review said "nothing deferred" over a month of them.
+DEFERRED_LEGACY="${XDG_STATE_HOME:-$HOME/.local/state}/sclaude/friction-deferred.tsv"
+
+deferred_legacy() {
+  local root="$1" product count
+  [[ -f "$DEFERRED_LEGACY" ]] || return 0
+  product="$(basename "$root")"
+  count="$(awk -F'\t' -v p="$product" '!/^#/ && $2 == p' "$DEFERRED_LEGACY" | grep -c .)"
+  [[ "$count" -gt 0 ]] || return 0
+  warn "  $count deferred entr$([[ "$count" == 1 ]] && echo y || echo ies) for $product are still in the old $DEFERRED_LEGACY,"
+  warn "  which nothing reads now. Move the rows you still want to $(product_rules_dir "$root")/deferred/<name>.tsv"
+  warn "  (one file per feature, the same columns) and commit them by the product's own pull request."
+}
+
 # The open pull request of an earlier review, if one waits. The review stamps
 # last-reviewed on its own branch, so until that merges, main still reads as
 # due: without this the review was offered again, and run again, over it.
@@ -148,6 +165,7 @@ deferred_pending() {
 deferred_offer() {
   local due entries since answer root pending main_copy
   root="$(main_repo 2>/dev/null)" || return 0
+  deferred_legacy "$root"
   # Due by main as the remote has it, which is what the review runs on: the
   # main checkout is only fetched, and after a review's pull request merged
   # its working copy still read as due, and the review was offered and run
@@ -186,6 +204,7 @@ cmd_deferred() {
   local prompt session done_file root wt branch base
   [[ -f "$PROMPTS/friction-deferred.md" ]] || die "no prompt for the deferred review"
   root="$(main_repo 2>/dev/null)" || die "run it inside a product's repository"
+  deferred_legacy "$root"
 
   # The person in the name: folders are per person, and two people reviewing
   # on the same day shared one branch, the second's commits going onto the

@@ -173,6 +173,19 @@ try:
     git(repo, "commit", "-qm", "clean")
     git(repo, "push", "-q", "origin", "HEAD:main")
 
+    # Entries left in the old machine-wide file are named, not lost.
+    legacy = os.path.join(tmp, "state", "sclaude", "friction-deferred.tsv")
+    os.makedirs(os.path.dirname(legacy))
+    with open(legacy, "w") as fh:
+        fh.write("# header\n2026-09-01\tmyapp\t12-a\treview\tclass-a\tOld.\n"
+                 "2026-09-02\tother\t3-b\treview\tclass-b\tNot ours.\n")
+    said = subprocess.run(["bash", "-c",
+                           'for m in state project developer deferred; do source "%s/$m.sh"; done; '
+                           'warn() { echo "$*"; }; deferred_legacy "%s"' % (LIB, repo)],
+                          capture_output=True, text=True,
+                          env=dict(os.environ, XDG_STATE_HOME=os.path.join(tmp, "state"))).stdout
+    check("legacy-entries-named", "1 deferred entry for myapp" in said, True)
+
     # An open pull request of an earlier review is named rather than offered over.
     pending = subprocess.run(["bash", "-c", 'for m in state project developer deferred; do source "%s/$m.sh"; done; '
                               'gh() { echo https://pr/7; }; deferred_pending "%s"' % (LIB, repo)],

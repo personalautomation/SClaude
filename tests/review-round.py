@@ -358,6 +358,10 @@ session_watch_stop
     check("returns-reset-on-close", 'state_set "$state" "steps.$step.auto_returns" null' in after, True)
     check("resume-hears-the-opening", '[[ -n "$told" ]] && opening=' in RUN, True)
     check("fresh-hears-the-opening", '[[ -n "$told" ]] && prompt=' in RUN, True)
+    # A resumed review counts what its interrupted run committed: the base is
+    # kept with the review, not taken from HEAD again.
+    check("friction-base-kept", '[[ -n "$session" ]] && project_before="$(state_get "$state" '
+          '"friction.$key.project_base"' in RUN, True)
     check("friction-watched", RUN.count('session_watch_start "" "$session" "$done_file" "$where"'), 2)
 
     # --- the prompt names the marker the orchestrator watches -----------------

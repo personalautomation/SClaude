@@ -1474,8 +1474,16 @@ PYEOF
   # The review changes the product only: its policy, its deferred file, its
   # code, on the feature's branch. sclaude's checkout is read-only to it
   # (review_guard_settings), so there is no orchestrator range to record.
+  # Where the feature's branch stood when this review began, kept with it: a
+  # resumed review starts on top of what its interrupted run committed, and
+  # taking HEAD again here made that work invisible, never pushed or counted.
   local project_before project_after
-  project_before="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
+  project_before=""
+  [[ -n "$session" ]] && project_before="$(state_get "$state" "friction.$key.project_base" || true)"
+  if [[ -z "$project_before" ]]; then
+    project_before="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
+    state_set "$state" "friction.$key.project_base" "$project_before" 2>/dev/null || true
+  fi
 
   # A stall belongs to the conversation that stalled, which its run keeps.
   # Left on the node, it would name this one stalled while it runs — resumed

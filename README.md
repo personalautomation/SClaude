@@ -1399,7 +1399,7 @@ asked for, in terms of requirements and observable behaviour, with no
 implementation details and only what this PR closes; then **How to verify** and,
 if there is anything to say, **Notes**.
 
-The manuals (`/help`, `/help/technical`) are updated here too, in one step after
+The manuals (`manuals` in `.sclaude/config.json`) are updated here too, in one step after
 the feature is approved, rather than as development goes. The skill does not
 merge the PR or deploy.
 

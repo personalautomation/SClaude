@@ -18,7 +18,7 @@ Work through the `/pr` skill — invoke it. It differs from its usual course bec
 
   Don't tick anything, here or in the issue, whatever the footers say. A tick is QA's word that the deployment does it, and a commit is not that check.
 - **Open the pull request as a draft**: add `--draft` to the skill's `gh pr create`. It stays a draft until QA has accepted every issue it closes; then the orchestrator marks it ready, which is what lets anybody merge it. Don't assign anyone either — the orchestrator assigns the PR to its author and clears that at the same moment.
-- The manuals (`/help` and `/help/technical`) are updated here, as the skill requires. `.sclaude/local/feature/plan.md` is the source of what was promised.
+- The manuals (<manuals>) are updated here, as the skill requires. `.sclaude/local/feature/plan.md` is the source of what was promised.
 - **Once the manuals are written, ask whether this feature earns a regression test — and expect the answer to be no.**
 
   The suite is a gate on every future feature, not a record of this one. Each spec is minutes on every stage of every cycle from now on, so the question is not "could this be tested" — everything could — but "if this broke silently six months from now, would we find out any other way, and how much would it cost us before we did".

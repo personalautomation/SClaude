@@ -43,7 +43,7 @@ The orchestrator maintains its own progress summary in the issue — step, branc
 
 </if:issue>### The product manuals
 
-There are two: `app/(app)/help/page.tsx` (user-facing) and `app/(app)/help/technical/page.tsx` (technical). They describe the product's behaviour as a person sees it — business context that isn't in the code. They're always current: project rules require both pages to be updated in the same PR as the feature.
+The product's manuals: <manuals>. They describe the product's behaviour as a person sees it — business context that isn't in the code. They're current: they are updated in the same pull request as each feature.
 
 <block:manual-toc>
 

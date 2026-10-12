@@ -41,6 +41,10 @@ render_prompt() {
   # The deferred file the friction note points at (deferred.sh).
   local -x SCLAUDE_V_DEFERRED="$(deferred_file "${wt:-${REPO:-.}}" "$slug")"
   local -x SCLAUDE_V_DEV_PORT="3000"
+  # The product's manuals as its config names them, for the prompts to say
+  # where they are rather than one product's pages.
+  local -x SCLAUDE_V_MANUALS
+  SCLAUDE_V_MANUALS="$(python3 "$LIB/manual_names.py" "${wt:-${REPO:-.}}" 2>/dev/null || true)"
   # And its own database, when it has one: the conditional paragraph about it
   # drops out of the prompt otherwise.
   local -x SCLAUDE_V_DB_API=""

@@ -37,7 +37,7 @@ A requirement that appears after planning is either a criterion we missed or a c
 
 <block:user-request>
 </if:issue>
-Don't touch the user documentation (`/help` and `/help/technical`). It's written in the next step, after the feature is accepted: a manual written during development gets rewritten with every change.
+Don't touch the product's manuals: <manuals>. It's written in the next step, after the feature is accepted: a manual written during development gets rewritten with every change.
 
 <block:regression>
 

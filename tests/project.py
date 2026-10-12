@@ -286,6 +286,28 @@ finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+# --- the manuals the prompts name ---------------------------------------------
+#
+# The prompts named one product's two pages; they name the product's own now,
+# from `manuals` in its config, and say so when it names none.
+_mtmp = tempfile.mkdtemp()
+try:
+    _mn = os.path.join(LIB, "manual_names.py")
+    def _names():
+        return subprocess.run([sys.executable, _mn, _mtmp], capture_output=True, text=True).stdout.strip()
+    check("manuals-none", _names().startswith("none"), True)
+    os.makedirs(os.path.join(_mtmp, ".sclaude"))
+    with open(os.path.join(_mtmp, ".sclaude", "config.json"), "w") as fh:
+        json.dump({"manuals": [{"path": "docs/a.md", "what": "for people"}, {"path": "docs/b.md"}]}, fh)
+    check("manuals-named", _names(), "`docs/a.md` (for people) and `docs/b.md`")
+    for prompt in ("code.md", "plan.md", "pr.md"):
+        text = open(os.path.join(LIB, "..", "prompts", prompt), encoding="utf-8").read()
+        check("prompt-names-no-product-page-%s" % prompt, "/help" in text, False)
+        check("prompt-names-the-manuals-%s" % prompt, "<manuals>" in text, True)
+finally:
+    shutil.rmtree(_mtmp, ignore_errors=True)
+
+
 if failures:
     for name, want, got in failures:
         sys.stderr.write("FAIL %s\n  want: %r\n  got:  %r\n" % (name, want, got))

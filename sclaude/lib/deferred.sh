@@ -237,6 +237,9 @@ PY
   echo "${BOLD}${BLUE}── the deferred friction · monthly review ──${OFF}"
   info "   opus / medium / plan · $wt ($branch)"
   echo ""
+  # Where the branch stood before this session: one continued from earlier
+  # the same day already holds commits, and they are not this session's work.
+  local start; start="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
   session_watch_start "" "$session" "$done_file" "$wt" deferred
   ( cd "$wt" && claude_launch --session-id "$session" --model opus --effort medium \
       "${guard[@]}" --permission-mode plan --add-dir "$INSTRUMENTS" \
@@ -247,8 +250,9 @@ PY
 
   # What the review committed goes to the product as a pull request, unless
   # the session opened one itself.
-  local committed dirty
-  committed="$(git -C "$wt" rev-list --count "$base..HEAD" 2>/dev/null || echo 0)"
+  local committed kept dirty
+  committed="$(git -C "$wt" rev-list --count "${start:-$base}..HEAD" 2>/dev/null || echo 0)"
+  kept="$(git -C "$wt" rev-list --count "$base..HEAD" 2>/dev/null || echo 0)"
   dirty="$(git -C "$wt" status --porcelain 2>/dev/null)"
   if [[ "$committed" -gt 0 ]]; then
     if GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q -u origin "$branch" >/dev/null 2>&1; then
@@ -271,5 +275,5 @@ PY
   # A clean worktree has nothing more to give: the branch keeps the work, and a
   # branch with none is not left behind for next month's review to trip on.
   git -C "$root" worktree remove "$wt" >/dev/null 2>&1 || true
-  [[ "$committed" -gt 0 ]] || git -C "$root" branch -q -D "$branch" >/dev/null 2>&1 || true
+  [[ "$kept" -gt 0 ]] || git -C "$root" branch -q -D "$branch" >/dev/null 2>&1 || true
 }

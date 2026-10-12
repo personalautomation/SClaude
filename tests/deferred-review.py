@@ -120,6 +120,9 @@ try:
     check("same-day-continued",
           subprocess.run(["git", "-C", repo, "merge-base", "--is-ancestor", earlier, branch]).returncode, 0)
     check("same-day-push-fits", "push failed" in out, False)
+    # This session changed nothing, and the morning's commits are not its work.
+    check("same-day-nothing-new", "the review changed nothing" in out, True)
+    check("same-day-branch-kept", branches(repo), [branch])
     for w in trees(tmp):
         git(repo, "worktree", "remove", "--force", os.path.join(tmp, w))
     subprocess.run(["git", "-C", repo, "branch", "-q", "-D", branch], capture_output=True)

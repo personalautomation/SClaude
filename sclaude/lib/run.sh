@@ -1284,10 +1284,11 @@ run_friction() {
   # Proposals alone have nothing to decide: see friction_proposals.py. They are
   # put off here, into the product's deferred file on the feature's branch, and
   # the log moves into .reviewed as a reviewed one does.
+  local deferred_from; deferred_from="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
   if [[ -z "$reread" && -z "$pending" ]] \
      && friction_defer_proposals "$wt" "$slug" "$key" "$step"; then
     { cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log"; } || true
-    friction_push_project "$wt"
+    friction_push_project "$wt" "$deferred_from"
     return 0
   fi
   # What is being reviewed, and which prompt says so.
@@ -1553,7 +1554,7 @@ PYEOF
   project_after="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
   if [[ -n "$project_before" && -n "$project_after" && "$project_before" != "$project_after" ]]; then
     changed=1
-    friction_push_project "$wt"
+    friction_push_project "$wt" "$project_before"
   fi
 
   # A session that never got going did not review anything — it refused to
@@ -1632,16 +1633,50 @@ PYEOF
 #
 # Not a reason to stop: a failed push is about delivery, and the next step's
 # push carries the commit as well.
+#
+# A branch whose pull request has merged already (a review after a fix to a
+# red production regression) would carry the fix nowhere: no open pull request
+# takes it to main, and `sclaude done` deletes the branch. Then the review's
+# own commits, from <from>, go onto a new branch from main with a pull request
+# of their own.
+#
+#   friction_push_project <wt> [from]
 friction_push_project() {
-  local wt="$1" branch
+  local wt="$1" from="${2:-}" branch
   branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   [[ -n "$branch" && "$branch" != "HEAD" && "$branch" != "main" ]] || return 0
+  if [[ -n "$from" && "$( (cd "$wt" && branch_pr_state "$branch") )" == "MERGED" ]]; then
+    friction_propose_project "$wt" "$from" "$branch"
+    return 0
+  fi
   if git -C "$wt" push -q origin "$branch" 2>/dev/null; then
     info "  the friction review's fix to the project is pushed to $branch"
   else
     warn "  could not push the friction review's fix to $branch — push it by hand:"
     warn "    git -C $wt push origin $branch"
   fi
+}
+
+# The friction review's commits, from..HEAD of the tree, on a branch of their
+# own from origin/main, pushed with a pull request: the feature's branch has
+# merged, and they would reach main no other way.
+friction_propose_project() {
+  local wt="$1" from="$2" branch="$3" new tmp pr
+  new="sclaude/friction-${branch##*/}-$(date +%Y%m%d-%H%M)"
+  tmp="$(mktemp -d)"
+  git -C "$wt" fetch -q origin main 2>/dev/null || true
+  if git -C "$wt" worktree add -q -b "$new" "$tmp/tree" origin/main 2>/dev/null \
+      && git -C "$tmp/tree" cherry-pick "$from..$(git -C "$wt" rev-parse HEAD)" >/dev/null 2>&1 \
+      && git -C "$tmp/tree" push -q -u origin "$new" 2>/dev/null; then
+    pr="$(cd "$tmp/tree" && gh pr create --base main --head "$new" --fill 2>/dev/null)" || pr=""
+    info "  $branch has merged; the friction review's fix goes to main as ${pr:-$new (open its pull request by hand)}"
+  else
+    git -C "$tmp/tree" cherry-pick --abort >/dev/null 2>&1 || true
+    warn "  $branch has merged, and the friction review's fix could not be put on a branch of its own."
+    warn "  Its commits are $from..HEAD in $wt: carry them to main by hand."
+  fi
+  git -C "$wt" worktree remove --force "$tmp/tree" >/dev/null 2>&1 || true
+  rm -rf "$tmp"
 }
 
 # Puts off a friction log that holds only proposed CLAUDE.md rules, without a

@@ -1799,12 +1799,15 @@ cmd_propose() {
 }
 
 # The branches sclaude may push and merge main into: main, and this person's
-# dev/<name>. Anything else in sclaude's checkout is somebody's own work in progress.
+# dev/<name>, with the time cmd_propose may add. Anything else in sclaude's
+# checkout is somebody's own work in progress.
 instruments_own_branch() {
   local branch="$1" name
   [[ "$branch" == "main" ]] && return 0
   name="$(developer_name 2>/dev/null || true)"
-  [[ "$branch" == "dev/${name:-local}" ]]
+  # And the dev/<name>-<time> cmd_propose makes when dev/<name> exists already:
+  # not merging main into it left its owner on an orchestrator that never moved.
+  [[ "$branch" == "dev/${name:-local}" || "$branch" == "dev/${name:-local}-"[0-9]* ]]
 }
 
 # Whether another sclaude is running from this checkout, in another terminal.

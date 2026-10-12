@@ -157,6 +157,14 @@ with tempfile.TemporaryDirectory() as tmp:
            os.path.isfile(os.path.join(w.me, "mine.txt")), w.branch()),
           (True, True, "dev/alice-b"))
 
+    print("a second proposal's branch")
+    git(w.me, "switch", "-q", "-c", "dev/alice-b-20261012-1400")
+    w.upstream_commit("second.txt")
+    out = w.run()
+    check("timestamped-branch-merged", os.path.isfile(os.path.join(w.me, "second.txt")), True)
+    git(w.me, "switch", "-q", "dev/alice-b")
+    git(w.me, "branch", "-q", "-D", "dev/alice-b-20261012-1400")
+
     print("conflict")
     commit(w.me, "a.txt", "mine\n")
     w.upstream_commit("a.txt", "theirs\n")

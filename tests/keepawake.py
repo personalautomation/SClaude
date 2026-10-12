@@ -2461,6 +2461,14 @@ try:
                           env=dict(os.environ, HOME=_home),
                           capture_output=True, text=True).stdout.split()
     check("sclaude_states finds a feature worktree's state", _out, [_want])
+    # And one an older sclaude still runs, in the old place.
+    _old = os.path.join(_home, "myapp-13-y", ".feature", "state.json")
+    os.makedirs(os.path.dirname(_old))
+    open(_old, "w").close()
+    _out = subprocess.run(["bash", "-c", _fn + "\nsclaude_states"],
+                          env=dict(os.environ, HOME=_home),
+                          capture_output=True, text=True).stdout.split()
+    check("sclaude_states finds the old place too", sorted(_out), sorted([_want, _old]))
 finally:
     shutil.rmtree(_home, ignore_errors=True)
 

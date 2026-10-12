@@ -240,7 +240,10 @@ instruments_state() {
           git -C "$INSTRUMENTS" diff HEAD
           git -C "$INSTRUMENTS" ls-files -o --exclude-standard -z \
             | (cd "$INSTRUMENTS" && xargs -0 -r sha1sum)
-          [[ -n "$git_dir" ]] && cat "$git_dir/config" && ls -la "$git_dir/hooks"
+          # The hooks by their content: a listing carries the mtime of .git
+          # itself, which an index refresh during the review moves.
+          [[ -n "$git_dir" ]] && cat "$git_dir/config" \
+            && (cd "$git_dir/hooks" && find . -type f -exec sha1sum {} + | sort)
         } 2>/dev/null | md5sum | cut -c1-12)"
 }
 

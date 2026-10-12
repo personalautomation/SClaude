@@ -438,9 +438,13 @@ print(step.get('session') or '')
 # when the state moved from .feature/ to .sclaude/local/feature/ two levels
 # deeper the count stayed at 3: nothing was found, and a running step stopped
 # holding the machine awake.
+#
+# And the old place: a tree an older sclaude still runs keeps its state in
+# .feature/ until that sclaude is done (layout_migrate waits for it), and a
+# step running there would not hold the machine awake.
 sclaude_states() {
   local f
-  for f in "$HOME"/*/.sclaude/local/feature/state.json; do
+  for f in "$HOME"/*/.sclaude/local/feature/state.json "$HOME"/*/.feature/state.json; do
     [[ -f "$f" ]] && echo "$f"
   done
 }
@@ -566,6 +570,8 @@ count_dev() {
     seen[$pid]=1
     cwd=$(readlink -f "/proc/$pid/cwd" 2>/dev/null)
     log="$cwd/$DEV_LOG_REL"
+    # A server an older sclaude started logs in the old place.
+    [[ -f "$log" ]] || log="$cwd/.feature/dev.log"
     if [[ -n "$cwd" && -f "$log" ]]; then
       mtime=$(stat -c %Y "$log" 2>/dev/null || echo 0)
       grew "dev:$log" "$mtime" 1 prev && active=1

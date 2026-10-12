@@ -100,11 +100,15 @@ def split_separators(command):
 
 # What a `>` inside quotes becomes with tokenize(…, mask=True): not a
 # redirection, which is all a hook looking for redirections needs to know.
+# Brackets too: `echo "a)"` closes no group.
 QUOTED_GT = "\x01"
+QUOTED_OPEN = "\x02"
+QUOTED_CLOSE = "\x03"
+QUOTED = {">": QUOTED_GT, "(": QUOTED_OPEN, ")": QUOTED_CLOSE}
 
 
 def mask_quoted(command):
-    """The command with every `>` inside quotes replaced by QUOTED_GT.
+    """The command with every `>`, `(` and `)` inside quotes masked (QUOTED).
 
     The words come out of shlex with their quotes gone, so `git commit -m
     "a -> b"` looked like a redirection to a file called ` b`.
@@ -119,7 +123,7 @@ def mask_quoted(command):
         if quote:
             if ch == quote:
                 quote = ""
-            out.append(QUOTED_GT if ch == ">" else ch)
+            out.append(QUOTED.get(ch, ch))
         else:
             if ch in "'\"":
                 quote = ch
@@ -462,3 +466,41 @@ def script_call(words):
     if j >= len(words):
         return words
     return ["npm", "run"] + words[j:]
+
+
+# A shell handed the command as a string, or eval: the command is that string,
+# and it is judged the same way. A code review found `bash -c 'gh pr merge 5'`
+# and `eval gh pr merge 5` going through. Only the string is judged; a script
+# file the shell is pointed at is not read, and that is the limit of a hook.
+SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
+
+
+# The shell options that take the next word as their value: `bash -o pipefail
+# -c '…'` reads `pipefail` as the option's, and the `-c` after it still counts.
+SHELL_VALUED = ("-o", "+o", "-O", "+O")
+
+
+def inner_command(words):
+    """The command a shell or eval is told to run as a string, or None.
+
+    `words` must keep their paths: the string is checked again as a command of
+    its own, and `gh pr merge 5 --repo o/r` cut to last path parts was `r`.
+    Only the shell's own name may be bare.
+    """
+    if not words:
+        return None
+    if words[0] == "eval":
+        return " ".join(words[1:]) or None
+    if words[0] in SHELLS:
+        i = 1
+        while i < len(words):
+            w = words[i]
+            if w in SHELL_VALUED:
+                i += 2
+                continue
+            if w.startswith("-") and not w.startswith("--") and "c" in w[1:]:
+                return words[i + 1] if i + 1 < len(words) else None
+            if not w.startswith(("-", "+")):
+                return None
+            i += 1
+    return None

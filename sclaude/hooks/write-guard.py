@@ -24,7 +24,8 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _shell import GIT_VALUED, KEYWORDS, QUOTED_GT, strip_wrappers, tokenize, ungroup  # noqa: E402
+from _shell import (GIT_VALUED, KEYWORDS, QUOTED, inner_command, strip_wrappers,  # noqa: E402
+                    substitutions, tokenize, ungroup)
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
 READONLY_REASON = ("{dir} is sclaude's own checkout, and a session does not change "
@@ -146,8 +147,20 @@ def perl_inplace(flag):
     return False
 
 
+def moved(where, value):
+    """The directory `cd value` from `where` lands in, None when it cannot be told."""
+    value = os.path.expanduser(value)
+    if not value or "$" in value or "`" in value:
+        return None
+    if os.path.isabs(value):
+        return value
+    return None if where is None else os.path.join(where, value)
+
+
 def unmask(word):
-    return word.replace(QUOTED_GT, ">")
+    for ch, mask in QUOTED.items():
+        word = word.replace(mask, ch)
+    return word
 
 
 def calls(command, cwd):
@@ -304,15 +317,22 @@ def write_targets(command, cwd):
                     k += 1
                 out += [(w, where) for w in (plain if given else plain[1:])]
         elif name == "git":
-            # Past git's own options, to the subcommand.
-            k = 0
+            # Past git's own options, to the subcommand; -C and --work-tree
+            # move where the paths it names are, as for git_writes_in.
+            k, here = 0, where
             while k < len(rest) and rest[k].startswith("-"):
-                k += 2 if rest[k] in GIT_VALUED else 1
+                flag, has_value, value = rest[k].partition("=")
+                if flag in GIT_VALUED and not has_value:
+                    value = rest[k + 1] if k + 1 < len(rest) else ""
+                    k += 1
+                k += 1
+                if flag in ("-C", "--work-tree"):
+                    here = moved(here, unmask(value))
             sub = rest[k:k + 1]
             # checkout and restore write what they name; rm and mv change it in
             # the tree as their shell namesakes do.
             if sub in (["checkout"], ["restore"], ["rm"], ["mv"]):
-                out += [(w, where) for w in rest[k + 1:] if not w.startswith("-")]
+                out += [(w, here) for w in rest[k + 1:] if not w.startswith("-")]
     return [(unmask(w), where) for w, where in out]
 
 
@@ -356,7 +376,7 @@ def git_writes_in(command, cwd, inside):
     return False
 
 
-def refuses(payload, team, readonly):
+def refuses(payload, team, readonly, depth=0):
     """The reason to refuse this call, or None."""
     tool = payload.get("tool_name")
     data = payload.get("tool_input") or {}
@@ -378,6 +398,23 @@ def refuses(payload, team, readonly):
         return None
     if tool == "Bash":
         command = str(data.get("command", ""))
+        # What a substitution, a shell's -c string or eval runs writes as
+        # surely as the line itself: `bash -c "echo x > $RO/f"` passed.
+        nested = substitutions(command)
+        if nested is None:
+            nested = []
+        for words, where in calls(command, cwd) or []:
+            inner = inner_command([words[0].rsplit("/", 1)[-1]] + [unmask(w) for w in words[1:]])
+            if inner is not None:
+                nested.append((inner, where))
+        for inner in nested:
+            text, where = inner if isinstance(inner, tuple) else (inner, cwd)
+            if depth >= 3:
+                return "a command nested this deep cannot be judged"
+            reason = refuses({"tool_name": "Bash", "tool_input": {"command": text},
+                              "cwd": where or cwd}, team, readonly, depth + 1)
+            if reason:
+                return reason
         targets = write_targets(command, cwd)
         if targets is None:
             # Unparsable: refused only where it names a guarded place at all.

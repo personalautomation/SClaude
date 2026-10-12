@@ -52,8 +52,8 @@ import urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 from _friction import note
-from _shell import (GIT_VALUED, SEPARATORS, script_call, strip_keywords, strip_runners,
-                    strip_wrappers, substitutions, tokenize, ungroup)
+from _shell import (GIT_VALUED, SEPARATORS, inner_command, script_call, strip_keywords,
+                    strip_runners, strip_wrappers, substitutions, tokenize, ungroup)
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
 
@@ -706,42 +706,8 @@ def api_merge_refuses(words, raw):
     return None
 
 
-# A shell handed the command as a string, or eval: the command is that string,
-# and it is judged the same way. A code review found `bash -c 'gh pr merge 5'`
-# and `eval gh pr merge 5` going through. Only the string is judged; a script
-# file the shell is pointed at is not read, and that is the limit of a hook.
-SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
-
-
-# The shell options that take the next word as their value: `bash -o pipefail
-# -c '…'` reads `pipefail` as the option's, and the `-c` after it still counts.
-SHELL_VALUED = ("-o", "+o", "-O", "+O")
-
-
-def inner_command(words):
-    """The command a shell or eval is told to run as a string, or None.
-
-    `words` must keep their paths: the string is checked again as a command of
-    its own, and `gh pr merge 5 --repo o/r` cut to last path parts was `r`.
-    Only the shell's own name may be bare.
-    """
-    if not words:
-        return None
-    if words[0] == "eval":
-        return " ".join(words[1:]) or None
-    if words[0] in SHELLS:
-        i = 1
-        while i < len(words):
-            w = words[i]
-            if w in SHELL_VALUED:
-                i += 2
-                continue
-            if w.startswith("-") and not w.startswith("--") and "c" in w[1:]:
-                return words[i + 1] if i + 1 < len(words) else None
-            if not w.startswith(("-", "+")):
-                return None
-            i += 1
-    return None
+# A shell handed the command as a string, or eval: inner_command, in _shell.py,
+# which write-guard.py reads the same way.
 
 
 # Grouping brackets are taken off by ungroup(), in _shell.py: write-guard.py

@@ -59,15 +59,22 @@ scratch_hide() {
 # What a tree's .vercelignore must hold and does not, one line each. The CLI
 # reads .vercelignore and a short list of its own, never .gitignore or
 # .git/info/exclude, so a path git never sees still goes up with a deploy.
-# Two lines beyond the list: .env and .env.* are symlinks to the main
-# repository's files, which outside this machine point nowhere, and the build
-# dies; Vercel takes its own environment values. The rest are the list,
+# Beyond the list, the .env files git does not track: in a worktree they are
+# symlinks to the main repository's, which outside this machine point
+# nowhere, and the build dies; Vercel takes its own environment values. Only
+# those, by name: a pattern for every .env.* left out a committed
+# .env.production the build reads, and its NEXT_PUBLIC_ values with it. The
+# rest are the list,
 # anchored, without a trailing slash so a symlink is matched as well as a
 # directory. A line written with a trailing slash counts as the same.
 vercelignore_missing() {
-  local f="$1/.vercelignore" line p
-  for line in .env '.env.*'; do
-    grep -qxF -- "$line" "$f" 2>/dev/null || echo "$line"
+  local f="$1/.vercelignore" env name p
+  for env in "$1"/.env "$1"/.env.*; do
+    [[ -e "$env" || -L "$env" ]] || continue
+    name="$(basename "$env")"
+    [[ "$name" == ".env.example" ]] && continue
+    git -C "$1" ls-files --error-unmatch "$name" >/dev/null 2>&1 && continue
+    grep -qxF -e "/$name" -e "$name" "$f" 2>/dev/null || echo "/$name"
   done
   for p in "${SCRATCH_PATHS[@]}"; do
     grep -qxF -e "/$p" -e "/$p/" "$f" 2>/dev/null || echo "/$p"

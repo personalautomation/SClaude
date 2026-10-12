@@ -186,6 +186,14 @@ try:
     ignore = os.path.join(WT, ".vercelignore")
     if os.path.exists(ignore):
         os.remove(ignore)
+    # An untracked .env file, as link_env makes one, and a committed one the
+    # build reads.
+    os.symlink("/nonexistent/.env.dev", os.path.join(WT, ".env.dev"))
+    with open(os.path.join(WT, ".env.production"), "w") as fh:
+        fh.write("NEXT_PUBLIC_X=1\n")
+    subprocess.run(["git", "-C", WT, "add", ".env.production"], check=True)
+    subprocess.run(["git", "-C", WT, "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-qm", "env"], check=True)
     run_bash('write_vercelignore %s' % WT, tmp,
              modules=("ui", "state", "worktree", "scratch"))
     check_true("vercelignore-written-in-the-worktree", os.path.exists(ignore))
@@ -193,8 +201,9 @@ try:
         body = open(ignore, encoding="utf-8").read()
         # The symlinks are the point: outside this machine they lead nowhere and
         # the build dies.
-        check_true("vercelignore-excludes-env", ".env" in body)
-        check_true("vercelignore-excludes-env-variants", ".env.*" in body)
+        check_true("vercelignore-excludes-the-untracked-env", "/.env.dev" in body.splitlines())
+        # A committed one is the build's, and goes up.
+        check_true("vercelignore-keeps-the-committed-env", ".env.production" not in body)
         # sclaude's own working directory: the plan, the state, the logs and
         # the rendered terminal went up with every preview without it.
         check_true("vercelignore-excludes-sclaude-local", "/.sclaude/local" in body.splitlines())
@@ -211,7 +220,7 @@ try:
     run_bash('write_vercelignore %s' % WT, tmp,
              modules=("ui", "state", "worktree", "scratch"))
     lines = open(ignore, encoding="utf-8").read().splitlines()
-    check_true("vercelignore-keeps-the-last-line-whole", "node_modules" in lines and ".env" in lines)
+    check_true("vercelignore-keeps-the-last-line-whole", "node_modules" in lines and "/.env.dev" in lines)
 
     # A file already there keeps what it has, a hand edit included, and gets
     # only the lines it lacks: an old worktree's file is brought up to date
@@ -225,14 +234,16 @@ try:
     lines = open(ignore, encoding="utf-8").read().splitlines()
     check("vercelignore-hand-edit-kept", lines[:2], ["# edited by hand", ".env"])
     check("vercelignore-brought-up-to-date", sorted(lines[2:]),
-          [".env.*", "/.sclaude/local", "/.vercelignore"])
+          ["/.env.dev", "/.sclaude/local", "/.vercelignore"])
 
     # A line with a trailing slash counts as the same rule.
     with open(ignore, "w") as fh:
-        fh.write(".env\n.env.*\n/.sclaude/local/\n/.vercelignore\n")
+        fh.write("/.env.dev\n/.sclaude/local/\n/.vercelignore\n")
     run_bash('write_vercelignore %s' % WT, tmp,
              modules=("ui", "state", "worktree", "scratch"))
     check("vercelignore-slash-counts", open(ignore, encoding="utf-8").read().count(".sclaude/local"), 1)
+    # The untracked one goes again: later checks want a clean tree.
+    os.remove(os.path.join(WT, ".env.dev"))
 
     # --- one list for git and for Vercel (scratch.sh) -----------------------
     #

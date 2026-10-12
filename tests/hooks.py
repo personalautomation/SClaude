@@ -158,7 +158,7 @@ PLANNING = [
     ("echo \"git log | head; ok\" >> .sclaude/local/feature/friction.log", ALLOW),
     # The exact entry a live planning session lost: a timestamp and an
     # escaped backtick, neither of which runs anything that writes.
-    ("echo \"$(date -Iseconds) plan/145: a read was refused, since "
+    ("echo \"$(date -Iseconds) plan/45: a read was refused, since "
      "\\`supabase migration list\\` JSON carries versions only.\" "
      ">> .sclaude/local/feature/friction.log", ALLOW),
     ("cat >> .sclaude/local/feature/friction.log <<EOF\n$(date) refused\nEOF", ALLOW),

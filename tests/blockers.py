@@ -41,11 +41,11 @@ def blocked_by(*pairs):
 
 
 ISSUES = [
-    {"number": 151, "title": "Identity", "labels": [{"name": "Dev"}],
-     "assignees": [], "blockedBy": blocked_by((150, "CLOSED"), (127, "OPEN"))},
-    {"number": 150, "title": "Categories", "labels": [], "assignees": [],
+    {"number": 61, "title": "Alpha", "labels": [{"name": "Dev"}],
+     "assignees": [], "blockedBy": blocked_by((60, "CLOSED"), (37, "OPEN"))},
+    {"number": 60, "title": "Beta", "labels": [], "assignees": [],
      "blockedBy": blocked_by((140, "CLOSED"))},
-    {"number": 149, "title": "Free", "labels": [], "assignees": [],
+    {"number": 59, "title": "Gamma", "labels": [], "assignees": [],
      "blockedBy": {"nodes": [], "totalCount": 0}},
 ]
 
@@ -86,7 +86,7 @@ def run(cmd, d, stdin=""):
 
 # --- the parsing -------------------------------------------------------------
 
-check("open only", open_blockers(ISSUES[0]), [(127, "t127")])
+check("open only", open_blockers(ISSUES[0]), [(37, "t37")])
 check("closed only", open_blockers(ISSUES[1]), [])
 check("no links", open_blockers({"number": 1}), [])
 check("a plain list from gh", open_blockers(
@@ -97,21 +97,21 @@ check("a plain list from gh", open_blockers(
 
 d = stub_dir()
 script = os.path.join(LIB, "blockers.py")
-check("issue mode", run([sys.executable, script, "issue", "o/r", "151"], d),
-      ("127\tt127\n", 0))
+check("issue mode", run([sys.executable, script, "issue", "o/r", "61"], d),
+      ("37\tt37\n", 0))
 check("issue mode, nothing open",
-      run([sys.executable, script, "issue", "o/r", "150"], d), ("", 0))
+      run([sys.executable, script, "issue", "o/r", "60"], d), ("", 0))
 check("list mode, only the asked and blocked ones",
-      run([sys.executable, script, "list", "o/r", "151", "150", "149"], d),
-      ("151\t#127\n", 0))
+      run([sys.executable, script, "list", "o/r", "61", "60", "59"], d),
+      ("61\t#37\n", 0))
 check("list mode, not asked", run([sys.executable, script, "list", "o/r",
-                                   "150"], d), ("", 0))
+                                   "60"], d), ("", 0))
 
 broken = stub_dir(fail=True)
 check("gh failing is silent",
-      run([sys.executable, script, "issue", "o/r", "151"], broken), ("", 0))
+      run([sys.executable, script, "issue", "o/r", "61"], broken), ("", 0))
 check("gh failing is silent in a list",
-      run([sys.executable, script, "list", "o/r", "151"], broken), ("", 0))
+      run([sys.executable, script, "list", "o/r", "61"], broken), ("", 0))
 
 # --- the picker's rows -------------------------------------------------------
 
@@ -124,8 +124,8 @@ rows = [r.split("\t") for r in rows.splitlines()]
 check("picker row width", sorted({len(r) for r in rows}), [5])
 check("picker keeps number and title in place",
       [(r[1], r[2]) for r in rows],
-      [("151", "Identity"), ("150", "Categories"), ("149", "Free")])
-check("picker marks the blocked one", [r[4] for r in rows], ["#127", "", ""])
+      [("61", "Alpha"), ("60", "Beta"), ("59", "Gamma")])
+check("picker marks the blocked one", [r[4] for r in rows], ["#37", "", ""])
 
 # --- the question before a start ---------------------------------------------
 
@@ -139,14 +139,14 @@ GATE = ('BOLD=""; DIM=""; GREEN=""; OFF=""; LIB="%s"\n'
         'gh_repo() { echo o/r; }\n'
         'issue_blockers_gate NUMBER && echo START || echo STOP\n') % (LIB, LIB, LIB)
 
-out, _ = run(["bash", "-c", GATE.replace("NUMBER", "151")], d, "n\n")
-check("gate names the blocker", "W:  #127  t127" in out, True)
+out, _ = run(["bash", "-c", GATE.replace("NUMBER", "61")], d, "n\n")
+check("gate names the blocker", "W:  #37  t37" in out, True)
 check("gate stops on no", out.strip().splitlines()[-1], "STOP")
-out, _ = run(["bash", "-c", GATE.replace("NUMBER", "151")], d, "y\n")
+out, _ = run(["bash", "-c", GATE.replace("NUMBER", "61")], d, "y\n")
 check("gate starts on yes", out.strip().splitlines()[-1], "START")
-out, _ = run(["bash", "-c", GATE.replace("NUMBER", "150")], d, "")
+out, _ = run(["bash", "-c", GATE.replace("NUMBER", "60")], d, "")
 check("gate is silent with nothing open", out.strip(), "START")
-out, _ = run(["bash", "-c", GATE.replace("NUMBER", "151")], broken, "")
+out, _ = run(["bash", "-c", GATE.replace("NUMBER", "61")], broken, "")
 check("gate is silent when gh fails", out.strip(), "START")
 
 for name, want, got in failures:

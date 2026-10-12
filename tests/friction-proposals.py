@@ -49,10 +49,10 @@ both = [
     "\n",
     "2026-10-09 proposal (claude-md-fix-every-call-site): Fix every call.\n",
 ]
-got = fp.rows(both, "myapp", "145-x", "review")
+got = fp.rows(both, "myapp", "45-x", "review")
 check("two-rows", len(got or []), 2)
 check("row-default-class", got[0].split("\t"),
-      ["2026-10-09", "myapp", "145-x", "review", "claude-md-proposal",
+      ["2026-10-09", "myapp", "45-x", "review", "claude-md-proposal",
        "Proposal: A git option names the git version. "
        "(Drawn from #160: --diff-merges= (2.31) and --porcelain (2.41).)"])
 check("row-own-class", got[1].split("\t")[4], "claude-md-fix-every-call-site")
@@ -84,16 +84,16 @@ def functions(source, names):
 DEFER = functions(RUN, ["friction_defer_proposals"])
 tmp = tempfile.mkdtemp()
 try:
-    wt = os.path.join(tmp, "myapp-145-x")
+    wt = os.path.join(tmp, "myapp-45-x")
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     git = ["git", "-C", wt, "-c", "user.name=t", "-c", "user.email=t@t"]
-    subprocess.run(["git", "init", "-q", "-b", "feat/145-x", wt], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "feat/45-x", wt], check=True)
     with open(os.path.join(wt, ".gitignore"), "w") as fh:
         fh.write(".sclaude/local/feature/\n")
     subprocess.run(git + ["add", "-A"], check=True)
     subprocess.run(git + ["commit", "-qm", "init"], check=True)
     # No `maintainers` in the product: everybody keeps team/.
-    deferred = os.path.join(wt, ".sclaude", "team", "deferred", "145-x.tsv")
+    deferred = os.path.join(wt, ".sclaude", "team", "deferred", "45-x.tsv")
     state = os.path.join(wt, ".sclaude/local/feature", "state.json")
     log = os.path.join(wt, ".sclaude/local/feature", "friction.log")
 
@@ -104,7 +104,7 @@ try:
                   'LIB="%s"; REPO="%s/myapp"\ninfo() { :; }\n%s\n'
                   'export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t '
                   'GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t\n'
-                  'friction_defer_proposals "%s" 145-x review-21 review; echo "rc=$?"'
+                  'friction_defer_proposals "%s" 45-x review-21 review; echo "rc=$?"'
                   % (LIB, LIB, tmp, DEFER, wt))
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
         return out.stdout.strip().splitlines()[-1] if out.stdout.strip() else out.stderr
@@ -128,7 +128,7 @@ try:
     check("defer-rows-written", rows(), 2)
     tree = subprocess.run(["git", "-C", wt, "show", "--name-only", "--format=", "HEAD"],
                           capture_output=True, text=True).stdout.split()
-    check("defer-commit-holds-the-file", tree, [".sclaude/team/deferred/145-x.tsv"])
+    check("defer-commit-holds-the-file", tree, [".sclaude/team/deferred/45-x.tsv"])
     with open(state) as fh:
         node = (json.load(fh).get("friction") or {}).get("review-21") or {}
     check("defer-state-verdict", node.get("verdict"), "deferred")

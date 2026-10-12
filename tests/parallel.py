@@ -317,19 +317,19 @@ open(os.path.join(repo, "README"), "w").write("r\n")
 g("add", "-A")
 g("commit", "-qm", "start")
 prod = g("rev-parse", "HEAD")
-merge_feature("feat/150-categories", 159, "0084_a.sql")
+merge_feature("feat/40-alpha", 901, "0084_a.sql")
 open(os.path.join(repo, "hotfix"), "w").write("h\n")
 g("add", "-A")
 g("commit", "-qm", "fix: a hotfix straight on main")
-g("commit", "-q", "--allow-empty", "-m", "chore(db): promote migrations for 150-categories")
-merge_feature("feat/152-profile", 161, "0085_b.sql")
+g("commit", "-q", "--allow-empty", "-m", "chore(db): promote migrations for 40-alpha")
+merge_feature("feat/41-beta", 902, "0085_b.sql")
 out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo, prod, "main",
-                      "152-profile", "supabase/migrations"],
+                      "41-beta", "supabase/migrations"],
                      capture_output=True, text=True, env=dict(os.environ, PATH="/usr/bin:/bin")).stdout
 lines = out.strip().splitlines()
 check("riders-name-the-other-feature",
       [l.split("\t")[:3] + l.split("\t")[4:] for l in lines if l.startswith("feature")],
-      [["feature", "159", "150", "0084_a.sql"]])
+      [["feature", "901", "40", "0084_a.sql"]])
 check("riders-leave-out-the-feature-shipped", any("\t161\t" in l for l in lines), False)
 check("riders-name-a-direct-commit",
       [l.split("\t")[2] for l in lines if l.startswith("commit")], ["fix: a hotfix straight on main"])
@@ -365,13 +365,13 @@ def due():
 
 old_day = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
 today = datetime.date.today().isoformat()
-entry = "%s\tmyapp\t152-x\treview\tclaude-md-stale-docs\tProposal: grep the docs.\n" % old_day
-put(".sclaude/team/deferred/152-x.tsv", "# header\n" + entry)
+entry = "%s\tmyapp\t52-x\treview\tclaude-md-stale-docs\tProposal: grep the docs.\n" % old_day
+put(".sclaude/team/deferred/52-x.tsv", "# header\n" + entry)
 check("deferred-due-after-a-month-unreviewed", due(), "1 %s" % old_day)
 put(".sclaude/team/deferred/last-reviewed", today + "\n")
 check("deferred-not-due-when-reviewed-today", due(), None)
 os.remove(os.path.join(product, ".sclaude", "team", "deferred", "last-reviewed"))
-put(".sclaude/team/deferred/152-x.tsv", "# header\n")
+put(".sclaude/team/deferred/52-x.tsv", "# header\n")
 check("deferred-not-due-when-empty", due(), None)
 # A maintainer counts everybody's folders; somebody else only their own.
 put(".sclaude/people/bob/deferred/7-y.tsv", entry)

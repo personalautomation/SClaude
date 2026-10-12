@@ -120,10 +120,20 @@ environment_value() {
 # on Supabase, the CLI linked to its project — or unlinked, for a local one,
 # since `supabase db push` obeys a leftover ref and not .env.local. Returns 0
 # when both are where they should be.
+#
+#   environment_switch <tree> <name> [--over-file]
 environment_switch() {
   local wt="$1" name="$2" file ref password
   file="$(envs file "$wt" "$name")" || return 1
   [[ -f "$file" ]] || { warn "  $name: $file does not exist"; return 1; }
+  # A .env.local that is a file of the person's own, not a link, is theirs:
+  # replaced, it was gone, and no name could bring it back. Left alone, unless
+  # the caller kept it to put back (--over-file, after environment_snapshot).
+  if [[ -e "$wt/.env.local" && ! -L "$wt/.env.local" && "${3:-}" != "--over-file" ]]; then
+    warn "  $wt/.env.local is a file of its own, not a link to an environment: left as it is."
+    warn "  Move it to .env.<name> and name it under \"environments\" in .sclaude/config.json."
+    return 1
+  fi
   local before; before="$(readlink -f "$wt/.env.local" 2>/dev/null || true)"
   ln -sfn "$(readlink -f "$file")" "$wt/.env.local" || return 1
   # NEXT_PUBLIC_* is inlined at build time, so a .next built on the old file

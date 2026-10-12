@@ -477,8 +477,12 @@ def main():
             fh.write("MINE=1\n")
         with open(os.path.join(sw, "supabase", ".temp", "project-ref"), "w") as fh:
             fh.write("oldref\n")
+        # A switch alone leaves a file of the person's own where it is.
+        check("switch: a file of its own is left alone",
+              (run('environment_switch "%s" dev >/dev/null 2>&1 && echo switched || echo kept' % sw),
+               open(local).read()), ("kept", "MINE=1\n"))
         out = run('db_cli() { echo %s; }; s="$(environment_snapshot "%s")"; '
-                  'environment_switch "%s" dev >/dev/null; environment_current "%s"; '
+                  'environment_switch "%s" dev --over-file >/dev/null; environment_current "%s"; '
                   'environment_restore "%s" "$s" && echo restored; [ -e "$s" ] || echo gone'
                   % (stub, sw, sw, sw, sw))
         check("snapshot: switched, then restored", out.split(), ["dev", "restored", "gone"])

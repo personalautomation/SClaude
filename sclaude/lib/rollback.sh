@@ -539,7 +539,7 @@ rollback_apply_sql() {
     state_set "$state" rollback.db.status ahead 2>/dev/null || true
     return 0
   }
-  if ! environment_switch "$REPO" "$prod"; then
+  if ! environment_switch "$REPO" "$prod" --over-file; then
     switched=0
     warn "  could not switch to the production environment — nothing was run."
     state_set "$state" rollback.db.status ahead 2>/dev/null || true

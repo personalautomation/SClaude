@@ -175,8 +175,12 @@ cmd_deferred() {
   [[ -f "$PROMPTS/friction-deferred.md" ]] || die "no prompt for the deferred review"
   root="$(main_repo 2>/dev/null)" || die "run it inside a product's repository"
 
-  branch="sclaude/deferred-$(date +%F)"
-  wt="$root-deferred-$(date +%F)"
+  # The person in the name: folders are per person, and two people reviewing
+  # on the same day shared one branch, the second's commits going onto the
+  # first's pull request.
+  local who; who="$(developer_name 2>/dev/null)"; who="${who:-local}"
+  branch="sclaude/deferred-$who-$(date +%F)"
+  wt="$root-deferred-$who-$(date +%F)"
   git -C "$root" fetch -q origin main 2>/dev/null || true
   base="$(git -C "$root" rev-parse -q --verify origin/main 2>/dev/null || git -C "$root" rev-parse HEAD)"
   local made=""

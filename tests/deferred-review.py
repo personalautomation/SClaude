@@ -51,7 +51,7 @@ claude_launch() { printf '%%s' "${@: -1}" > "%(out)s"; [[ -z "${DIRTY:-}" ]] || 
 gh() { :; }
 cmd_deferred
 ''' % {"lib": LIB, "prompts": PROMPTS, "root": ROOT, "out": prompt_out}
-    env = dict(os.environ, DIRTY="1" if dirty else "")
+    env = dict(os.environ, DIRTY="1" if dirty else "", SCLAUDE_DEV="tester")
     return subprocess.run(["bash", "-c", script], cwd=repo, capture_output=True,
                           text=True, timeout=60, env=env).stdout
 
@@ -105,7 +105,7 @@ try:
 
     # A review pushed earlier the same day is continued, not reset to main:
     # the push after it still fits on top of what was pushed.
-    branch = "sclaude/deferred-" + subprocess.run(["date", "+%F"], capture_output=True,
+    branch = "sclaude/deferred-tester-" + subprocess.run(["date", "+%F"], capture_output=True,
                                                   text=True).stdout.strip()
     git(repo, "branch", "-q", branch, "origin/main")
     side = os.path.join(tmp, "side")

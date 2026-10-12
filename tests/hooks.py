@@ -798,21 +798,30 @@ def main():
     # A hook that breaks refuses rather than letting the call through: every
     # module it loads, broken in turn, and an empty core.json, which used to
     # read as a layer with no rules.
-    for hook, modules in (("forbidden-commands.py", ("hooks/_shell.py", "hooks/_friction.py",
-                                                     "lib/policy.py", "lib/envs.py",
-                                                     "policy/core.json")),
-                          ("no-code-in-planning.py", ("hooks/_shell.py", "hooks/_friction.py")),
-                          ("write-guard.py", ("hooks/_shell.py",))):
+    for hook, modules in (("forbidden-commands.py", ("hooks/_failsafe.py", "hooks/_shell.py",
+                                                     "hooks/_friction.py", "lib/policy.py",
+                                                     "lib/envs.py", "policy/core.json")),
+                          ("no-code-in-planning.py", ("hooks/_failsafe.py", "hooks/_shell.py",
+                                                      "hooks/_friction.py")),
+                          ("write-guard.py", ("hooks/_failsafe.py", "hooks/_shell.py"))):
         for module in modules:
             broken = tempfile.mkdtemp(prefix="hooks-broken-")
             try:
                 shutil.copytree(os.path.join(HOOKS, ".."), os.path.join(broken, "sclaude"))
                 with open(os.path.join(broken, "sclaude", module), "w") as fh:
                     fh.write("{}\n" if module.endswith(".json") else "raise RuntimeError('broken')\n")
+                os.makedirs(os.path.join(broken, "tree", ".sclaude", "local", "feature"))
                 out = subprocess.run([sys.executable, os.path.join(broken, "sclaude", "hooks", hook),
                                       "--step", "code"],
                                      input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}),
-                                     capture_output=True, text=True, timeout=20).stdout
+                                     capture_output=True, text=True, timeout=20,
+                                     env=dict(os.environ, CLAUDE_PROJECT_DIR=os.path.join(broken, "tree"))).stdout
+                # The breakage reaches the friction log, where a review sees it.
+                log = os.path.join(broken, "tree", ".sclaude", "local", "feature", "friction.log")
+                logged = os.path.exists(log) and "failsafe" in open(log).read()
+                if module not in ("hooks/_failsafe.py", "hooks/_friction.py") and not logged:
+                    failures.append(("broken", "%s with %s broken: friction log" % (hook, module),
+                                     "logged", "not logged"))
                 try:
                     decision = json.loads(out)["hookSpecificOutput"]
                 except (ValueError, KeyError, TypeError):

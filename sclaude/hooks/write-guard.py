@@ -25,8 +25,16 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # First, so that a module failing to load, or anything raising later, refuses
-# the call rather than letting it run (_failsafe.py).
-import _failsafe  # noqa: E402
+# the call rather than letting it run (_failsafe.py). And that one failing to
+# load refuses too, by hand: nothing else is there to.
+try:
+    import _failsafe  # noqa: E402
+except Exception as _exc:  # noqa: BLE001
+    print('{"hookSpecificOutput": {"hookEventName": "PreToolUse", '
+          '"permissionDecision": "deny", "permissionDecisionReason": '
+          '"sclaude\'s hook safety net (_failsafe.py) could not load, so this call is '
+          'refused.  Tell the human and stop \u2014 the next move is theirs."}}')
+    sys.exit(0)
 _failsafe.install("write guard (write-guard.py)")
 from _shell import (GIT_VALUED, KEYWORDS, QUOTED, inner_command, strip_wrappers,  # noqa: E402
                     substitutions, tokenize, ungroup)
@@ -454,6 +462,8 @@ def main():
         payload = json.load(sys.stdin)
     except ValueError:
         return 0
+    data = payload.get("tool_input") or {}
+    _failsafe.CONTEXT["subject"] = str(data.get("command") or data.get("file_path") or "")
     # A hook that raises exits non-zero, and Claude Code runs the call anyway.
     # Refused instead: an unreadable call near a guarded place is refused too.
     try:

@@ -52,8 +52,16 @@ import urllib.parse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 # First, so that a module failing to load, or anything raising later, refuses
-# the call rather than letting it run (_failsafe.py).
-import _failsafe  # noqa: E402
+# the call rather than letting it run (_failsafe.py). And that one failing to
+# load refuses too, by hand: nothing else is there to.
+try:
+    import _failsafe  # noqa: E402
+except Exception as _exc:  # noqa: BLE001
+    print('{"hookSpecificOutput": {"hookEventName": "PreToolUse", '
+          '"permissionDecision": "deny", "permissionDecisionReason": '
+          '"sclaude\'s hook safety net (_failsafe.py) could not load, so this call is '
+          'refused.  Tell the human and stop \u2014 the next move is theirs."}}')
+    sys.exit(0)
 _failsafe.install("ban check (forbidden-commands.py)")
 from _friction import note  # noqa: E402
 from _shell import (GIT_VALUED, SEPARATORS, inner_command, script_call, strip_keywords,  # noqa: E402
@@ -947,6 +955,7 @@ except ValueError:
 
 if payload.get("tool_name") == "Bash":
     command = str((payload.get("tool_input") or {}).get("command", ""))
+    _failsafe.CONTEXT["subject"] = command
     # A hook that raises exits non-zero, and Claude Code runs the command
     # anyway: an error here let every ban go. Refused instead, as a command
     # that cannot be parsed is: the step's bans outweigh convenience.

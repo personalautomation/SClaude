@@ -29,8 +29,16 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # First, so that a module failing to load, or anything raising later, refuses
-# the call rather than letting it run (_failsafe.py).
-import _failsafe  # noqa: E402
+# the call rather than letting it run (_failsafe.py). And that one failing to
+# load refuses too, by hand: nothing else is there to.
+try:
+    import _failsafe  # noqa: E402
+except Exception as _exc:  # noqa: BLE001
+    print('{"hookSpecificOutput": {"hookEventName": "PreToolUse", '
+          '"permissionDecision": "deny", "permissionDecisionReason": '
+          '"sclaude\'s hook safety net (_failsafe.py) could not load, so this call is '
+          'refused.  Tell the human and stop \u2014 the next move is theirs."}}')
+    sys.exit(0)
 _failsafe.install("planning guard (no-code-in-planning.py)")
 from _friction import note
 from _shell import HEREDOC, strip_heredocs, strip_wrappers, tokenize
@@ -452,6 +460,7 @@ except ValueError:
 
 tool = payload.get("tool_name", "")
 tool_input = payload.get("tool_input") or {}
+_failsafe.CONTEXT["subject"] = str(tool_input.get("command") or tool_input.get("file_path") or tool)
 
 if tool in ("Write", "Edit", "NotebookEdit"):
     if not allowed_path(str(tool_input.get("file_path", ""))):

@@ -230,8 +230,8 @@ def environment_is_protected(cwd, name):
 # the next step's server, checks and database calls would all work there
 # without anybody seeing it. A product's own switch script is named in its
 # policy; this is the one every product shares.
-ENV_SWITCH_REASON = ("this points .env.local at production's environment file, and the "
-                     "next step would work against production without knowing it")
+ENV_SWITCH_REASON = ("this points .env.local at a protected environment's file, and the "
+                     "next step would work against its real data without knowing it")
 
 
 def env_switch_refuses(words, raw, into=(), base=None):
@@ -256,25 +256,29 @@ def env_switch_refuses(words, raw, into=(), base=None):
         return ("main's .sclaude/config.json cannot be read, so which file is production's "
                 "cannot be told; nothing is put onto .env.local until it can")
     tree = project_dir()
-    prod = envs_lib.production(tree, data)
-    target = envs_lib.env_file(tree, prod, data) if prod else None
-    if not target:
+    # Every protected environment's file, not only the one production() can
+    # single out: a second protected one (staging with real data) was let in,
+    # and with two production-like entries production() named none, so even
+    # production's own file was.
+    names = envs_lib.environments(tree, data)
+    files = {n: envs_lib.env_file(tree, n, data) for n in names}
+    guarded = [f for n, f in files.items() if f and envs_lib.protected(tree, n, data)]
+    if not guarded:
         return None
+    real = {os.path.realpath(f) for f in guarded}
     # By the file itself first. The name alone decides only where it singles
-    # production out: environments in folders of their own share it
-    # (envs/dev/.env, envs/prod/.env), and every switch read as production.
-    files = [envs_lib.env_file(tree, n, data) for n in envs_lib.environments(tree, data)]
-    real = os.path.realpath(target)
-    name = os.path.basename(target)
-    unique = sum(1 for f in files if f and os.path.basename(f) == name) == 1
+    # one out: environments in folders of their own share it (envs/dev/.env,
+    # envs/prod/.env), and every switch read as production's.
+    unique = {os.path.basename(f) for f in guarded
+              if sum(1 for g in files.values() if g and os.path.basename(g) == os.path.basename(f)) == 1}
     # A relative path from where the call runs: `cd envs && ln -sf
     # prod/.env ../.env.local` named production's file from envs/.
     for p in sources:
         full = os.path.join(base or tree, os.path.expanduser(p))
         if os.path.exists(full):
-            if os.path.realpath(full) == real:
+            if os.path.realpath(full) in real:
                 return ENV_SWITCH_REASON
-        elif unique and os.path.basename(p) == name:
+        elif os.path.basename(p) in unique:
             return ENV_SWITCH_REASON
     return None
 

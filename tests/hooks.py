@@ -781,6 +781,19 @@ def main():
                               ("diff .env.prod .env.dev && cat .env.dev > .env.local", "allow")):
             if verdict(command) != want:
                 failures.append(("shared", command, want, verdict(command)))
+        # Every protected environment, not only the one taken for production.
+        open(os.path.join(tree, ".env.staging"), "w").close()
+        with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:
+            json.dump({"environments": {
+                "dev": {"env": ".env.dev"},
+                "staging": {"env": ".env.staging", "protected": True},
+                "prod": {"env": ".env.prod", "protected": True, "siteUrl": "https://a.example"},
+                "production": {"env": ".env.localdb", "protected": True, "siteUrl": "https://b.example"}}}, fh)
+        for command, want in (("ln -sfn .env.staging .env.local", "deny"),
+                              ("ln -sfn .env.prod .env.local", "deny"),
+                              ("ln -sfn .env.dev .env.local", "allow")):
+            if verdict(command) != want:
+                failures.append(("shared", command, want, verdict(command)))
         # Main's config unreadable: nothing is put onto .env.local.
         with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:
             fh.write('{"environments": {},}')

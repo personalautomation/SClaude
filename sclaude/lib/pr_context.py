@@ -920,14 +920,14 @@ def close_state(cwd, pr, repo):
         state = (c.get("conclusion") or c.get("state") or "").upper()
         if (status and status != "COMPLETED") or state in ("PENDING", "EXPECTED", ""):
             return "pending"
-    red = [c.get("name") or c.get("context") or "?" for c in rollup
-           if (c.get("conclusion") or c.get("state") or "").upper() not in GREEN]
+    # Once each: the findings verdict comes as a check run and a status.
+    red = list(dict.fromkeys(c.get("name") or c.get("context") or "?" for c in rollup
+                             if (c.get("conclusion") or c.get("state") or "").upper() not in GREEN))
     threads, _ = open_threads(cwd, pr, repo)
     mine, threads = split_yours(cwd, threads or [])
     if FINDINGS_CHECK in red and findings_explained(
             cwd, repo, view.get("headRefOid") or "", {t["url"] for t in threads}):
-        # Both copies: the workflow writes it as a check run and a status.
-        red = [r for r in red if r != FINDINGS_CHECK]
+        red.remove(FINDINGS_CHECK)
     why = []
     if red:
         why.append("red: " + ", ".join(red))

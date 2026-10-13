@@ -38,12 +38,8 @@ render_prompt() {
   # feature's checks to another's code. No tree — the status epilogue — has no
   # server, and the plain address is as good as any.
   local -x SCLAUDE_V_DEV_URL="http://localhost:3000"
-  # The deferred file the friction note points at (deferred.sh). The
-  # maintainer question is asked here, not in the subshell, which would throw
-  # its cached answer away and ask again on every render.
-  product_maintainer "${wt:-${REPO:-.}}" >/dev/null 2>&1 || true
-  local -x SCLAUDE_V_DEFERRED
-  SCLAUDE_V_DEFERRED="$(deferred_file "${wt:-${REPO:-.}}" "$slug")"
+  # The deferred file the friction note points at (deferred.sh).
+  local -x SCLAUDE_V_DEFERRED="$(deferred_file "${wt:-${REPO:-.}}" "$slug")"
   local -x SCLAUDE_V_DEV_PORT="3000"
   # The product's manuals as its config names them, for the prompts to say
   # where they are rather than one product's pages.
@@ -1667,11 +1663,12 @@ friction_push_project() {
 friction_propose_project() {
   local wt="$1" from="$2" branch="$3" new tmp pr commits
   new="sclaude/friction-${branch##*/}-$(date +%Y%m%d-%H%M%S)"
-  # The review's own commits only: a merge of main into the feature in the
-  # range would stop the cherry-pick, and main has its changes already.
-  commits="$(git -C "$wt" rev-list --reverse --no-merges "$from..HEAD" 2>/dev/null)"
   tmp="$(mktemp -d)"
   git -C "$wt" fetch -q origin main 2>/dev/null || true
+  # The review's own commits only: a merge of main into the feature puts
+  # main's commits in the range too, and picked onto main they come out empty
+  # and stop the cherry-pick.
+  commits="$(git -C "$wt" rev-list --reverse --no-merges HEAD "^$from" ^origin/main 2>/dev/null)"
   if git -C "$wt" worktree add -q -b "$new" "$tmp/tree" origin/main 2>/dev/null \
       && [[ -n "$commits" ]] \
       && git -C "$tmp/tree" cherry-pick $commits >/dev/null 2>&1 \
@@ -1894,20 +1891,36 @@ cmd_propose() {
 #   units_refresh
 units_refresh() {
   # Where install.sh writes them, which does not read XDG_CONFIG_HOME.
-  local units="$HOME/.config/systemd/user" src name want changed=""
+  local units="$HOME/.config/systemd/user" src name want link
+  local -a changed=()
   [[ -d "$units" && -d "$INSTRUMENTS/systemd" ]] || return 0
   for src in "$INSTRUMENTS"/systemd/*; do
     [[ -f "$src" ]] || continue
     name="$(basename "$src")"
     [[ -e "$units/$name" || -L "$units/$name" ]] || continue
     want="$(sed "s|@REPO@|$INSTRUMENTS|g" "$src")"
-    if [[ -L "$units/$name" || "$(cat "$units/$name" 2>/dev/null)" != "$want" ]]; then
-      rm -f "$units/$name"
-      printf '%s\n' "$want" > "$units/$name" && changed=1
+    # A link elsewhere is the person's own: a masked unit points at /dev/null.
+    if [[ -L "$units/$name" ]]; then
+      link="$(readlink -f "$units/$name" 2>/dev/null || true)"
+      [[ "$link" == "$INSTRUMENTS/systemd/$name" ]] || continue
+    elif [[ "$(cat "$units/$name" 2>/dev/null)" == "$want" ]]; then
+      continue
+    fi
+    rm -f "$units/$name"
+    printf '%s\n' "$want" > "$units/$name" && changed+=("$name")
+  done
+  (( ${#changed[@]} )) && command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl --user daemon-reload >/dev/null 2>&1 || return 0
+  # A reload alone leaves a running unit on its old lines, and one that
+  # crash-looped on the old file failed for good: each is started again, when
+  # it is enabled or running.
+  for name in "${changed[@]}"; do
+    systemctl --user reset-failed "$name" >/dev/null 2>&1 || true
+    if systemctl --user is-active -q "$name" 2>/dev/null \
+        || systemctl --user is-enabled -q "$name" 2>/dev/null; then
+      systemctl --user restart "$name" >/dev/null 2>&1 || true
     fi
   done
-  [[ -n "$changed" ]] && command -v systemctl >/dev/null 2>&1 \
-    && systemctl --user daemon-reload >/dev/null 2>&1
   return 0
 }
 

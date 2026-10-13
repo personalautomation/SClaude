@@ -57,6 +57,11 @@ try:
         fh.write("KillMode=process\n")
     refresh(inst, cfg)
     check("a changed unit is written again", "KillMode=process" in open(a).read(), True)
+
+    masked = os.path.join(units, "b.service")
+    os.symlink("/dev/null", masked)
+    refresh(inst, cfg)
+    check("a masked unit stays masked", os.readlink(masked), "/dev/null")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

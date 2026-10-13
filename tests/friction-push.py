@@ -51,6 +51,17 @@ try:
     frm = git(wt, "rev-parse", "HEAD")
     with open(os.path.join(wt, "rule.json"), "w") as fh:
         fh.write("{}\n")
+    # main moved on, and was merged into the feature before the fix: its
+    # commit is in the range and must not be picked again.
+    other = os.path.join(tmp, "other")
+    subprocess.run(["git", "clone", "-q", origin, other], check=True, capture_output=True)
+    with open(os.path.join(other, "main.txt"), "w") as fh:
+        fh.write("main\n")
+    git(other, "add", "main.txt")
+    git(other, "commit", "-q", "-m", "on main")
+    git(other, "push", "-q", "origin", "HEAD:main")
+    git(wt, "fetch", "-q", "origin")
+    git(wt, "merge", "-q", "--no-edit", "origin/main")
     git(wt, "add", "rule.json")
     git(wt, "commit", "-q", "-m", "the review's fix")
 
@@ -60,7 +71,7 @@ try:
     check("a branch of its own", len(new), 1)
     if new:
         log = git(origin, "log", "--format=%s", new[0])
-        check("it carries the fix, on main", log.split("\n"), ["the review's fix", "base"])
+        check("it carries the fix, on main", log.split("\n"), ["the review's fix", "on main", "base"])
     check("its pull request is named", "https://pr/9" in out, True)
     check("the merged branch is not pushed", "feat/12-x" in heads, False)
 

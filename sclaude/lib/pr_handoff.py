@@ -155,10 +155,11 @@ def checks_line(rollup):
         elif state not in GREEN:
             red.append(name)
     parts = []
+    # Once each: the findings verdict comes as a check run and a status.
     if red:
-        parts.append("⚠ red: " + ", ".join(red))
+        parts.append("⚠ red: " + ", ".join(dict.fromkeys(red)))
     if running:
-        parts.append("still running: " + ", ".join(running))
+        parts.append("still running: " + ", ".join(dict.fromkeys(running)))
     return "; ".join(parts) if parts else "✓ all %d green" % len(rollup)
 
 

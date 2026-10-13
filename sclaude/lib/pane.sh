@@ -116,6 +116,22 @@ claude_here() {
   return "$status"
 }
 
+# The emoji a tab title starts with, by the kind of session its name
+# (session_label) says it is, so the tabs tell the stages apart at a glance.
+# The name itself is left as it is: only the tab shows the emoji.
+pane_icon() {
+  case "$1" in
+    *friction*)         printf '🧱' ;;
+    *-fix-*)            printf '🔧' ;;
+    [0-9]*-plan/*)      printf '📝' ;;
+    [0-9]*-code/*)      printf '💻' ;;
+    [0-9]*-pr/*)        printf '📤' ;;
+    [0-9]*-review/*)    printf '🔍' ;;
+    [0-9]*-epilogue/*)  printf '🏁' ;;
+    [0-9]*-retro/*)     printf '🔁' ;;
+  esac
+}
+
 # One launch of claude, in a tab or in place. claude_launch around it adds the
 # return after a usage limit.
 claude_launch_once() {
@@ -129,6 +145,8 @@ claude_launch_once() {
   for ((i = 1; i < $#; i++)); do
     [[ "${!i}" == "-n" ]] && { name=$((i + 1)); title="${!name}"; break; }
   done
+  local icon; icon="$(pane_icon "$title")"
+  [[ -n "$icon" ]] && title="$icon $title"
 
   {
     echo "#!/usr/bin/env bash"

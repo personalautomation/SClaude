@@ -7,7 +7,9 @@
 #   * every review round is numbered, the first included: `4-1-review`;
 #   * a friction review carries the number of the session it reviews;
 #   * a fixing session goes under the step it fixes in;
-#   * the epilogue is 5, the retrospective 6.
+#   * the epilogue is 5, the retrospective 6;
+#   * a tab title starts with the emoji of its kind (pane_icon), a friction
+#     review of a fixing session counted as friction.
 #
 # Run it with: python3 tests/session_names.py
 import json
@@ -54,5 +56,19 @@ check("friction-fix", label("friction", "fix-preview-1"), "4-fix-preview-1-frict
 check("fix-local", label("fix", "fix-local-2"), "2-fix-local-2")
 check("epilogue", label("epilogue"), "5-epilogue")
 check("retro", label("retro"), "6-retro")
+
+
+def icon(title):
+    p = subprocess.run(["bash", "-c", 'source "%s/pane.sh"; pane_icon "$1"' % LIB, "bash", title],
+                       capture_output=True, text=True, timeout=30)
+    return p.stdout
+
+
+for title, want in (("1-plan/x", "📝"), ("2-2-code/x", "💻"), ("3-pr/x", "📤"),
+                    ("4-1-review/x", "🔍"), ("4-2-friction/x", "🧱"),
+                    ("4-fix-preview-1/x", "🔧"), ("4-fix-preview-1-friction/x", "🧱"),
+                    ("5-epilogue/x", "🏁"), ("6-retro/x", "🔁"),
+                    ("friction/deferred", "🧱"), ("demo/code", "")):
+    check("icon " + title, icon(title), want)
 
 sys.exit(1 if failed else 0)

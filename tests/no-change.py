@@ -11,7 +11,9 @@
 #   * `.sclaude/` goes to main past the hooks, even when main moved meanwhile;
 #   * the product files a friction review changed go to main when the person
 #     says so, and are left out when they said drop;
-#   * a second pass sends nothing twice.
+#   * a second pass sends nothing twice;
+#   * the product's push runs the project's hooks with the main repository's
+#     node_modules and .env files, which a bare checkout of main lacks.
 #
 # Run it with: python3 tests/no-change.py
 import json
@@ -50,11 +52,12 @@ def commit(wt, path, text, message):
     return git(wt, "rev-parse", "HEAD")
 
 
-def run(wt, call, answer="n"):
+def run(wt, call, answer="n", repo=""):
     script = ('for m in io ui state scratch worktree no_change; do source "%s/$m.sh"; done\n'
               'info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }\n'
               'ask() { printf -v "$2" %%s "%s"; }\n'
-              '%s; echo "RC $?"' % (LIB, answer, call))
+              'REPO="%s"\n'
+              '%s; echo "RC $?"' % (LIB, answer, repo, call))
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                           env=ENV, cwd=wt).stdout
 
@@ -129,6 +132,32 @@ with tempfile.TemporaryDirectory() as tmp:
     out = run(wt, 'no_change_settle "%s"' % wt, answer="y")
     check("settle with send succeeds", "RC 0" in out, True)
     check("a sent doc reaches main", main_show(origin, "docs/a.md"), "one\ntwo")
+
+    # The project's pre-push wants its dependencies and an environment.
+    origin, wt = setup(tmp, "hooked")
+    write(os.path.join(wt, ".githooks/pre-push"),
+          "#!/bin/sh\n[ -d node_modules/pkg ] && [ -e .env.local ] || "
+          "{ echo 'no deps or env' >&2; exit 1; }\n")
+    os.chmod(os.path.join(wt, ".githooks/pre-push"), 0o755)
+    git(wt, "add", "-A")
+    git(wt, "commit", "-q", "-m", "hooks")
+    git(wt, "push", "-q", "--no-verify", "origin", "HEAD:main")
+    git(wt, "config", "core.hooksPath", ".githooks")
+    frm = git(wt, "rev-parse", "HEAD")
+    to = commit(wt, "docs/a.md", "one\ntwo\n", "docs: a friction fix")
+    state(wt, friction={"plan-1": {"project_from": frm, "project_to": to}})
+    main_repo = os.path.join(tmp, "main-repo")
+    os.makedirs(os.path.join(main_repo, "node_modules/pkg"))
+    write(os.path.join(main_repo, ".env.dev"), "APP_ENV=dev\n")
+    os.symlink(os.path.join(main_repo, ".env.dev"), os.path.join(main_repo, ".env.local"))
+    out = run(wt, 'no_change_settle "%s"' % wt, answer="y")
+    check("a hooked push without deps is refused", "RC 1" in out, True)
+    check("the refusal says why", "no deps or env" in out, True)
+    out = run(wt, 'no_change_settle "%s"' % wt, answer="y", repo=main_repo)
+    check("a hooked push with the main repo's deps goes", "RC 0" in out, True)
+    check("the hooked doc reaches main", main_show(origin, "docs/a.md"), "one\ntwo")
+    check("main's own node_modules survives",
+          os.path.isdir(os.path.join(main_repo, "node_modules/pkg")), True)
 
     # A commit of the feature's own.
     origin, wt = setup(tmp, "own")

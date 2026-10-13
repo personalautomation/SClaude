@@ -89,7 +89,7 @@ no_change_feature() {
 #   no_change_send <wt> <base> <verify> <subject> <pathspec...>  → 0 sent or nothing to send, 1 failed
 no_change_send() {
   local wt="$1" base="$2" verify="$3" subject="$4"; shift 4
-  local branch tmp attempt sent=1 sha="" log
+  local branch tmp attempt sent=1 sha="" log line
   branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "the branch")"
   tmp="$(mktemp -d)"
   git -C "$wt" diff --full-index --binary "$base" HEAD -- "$@" > "$tmp/patch" 2>/dev/null
@@ -105,19 +105,33 @@ no_change_send() {
     git -C "$wt" fetch -q origin main 2>/dev/null || true
     git -C "$wt" worktree add -q --detach "$tmp/tree" origin/main >/dev/null 2>&1 || break
     git -C "$tmp/tree" apply --3way --index "$tmp/patch" >/dev/null 2>&1 || break
+    # The project's hooks run in this tree, and a bare checkout of main has
+    # neither its dependencies nor its .env files: the hooks then refused the
+    # push for want of a package and of an environment's name. They get the
+    # main repository's, as a feature's tree does (link_env) — a symlink for
+    # node_modules, since nothing here builds.
+    if [[ "$verify" == 1 && -n "${REPO:-}" ]]; then
+      [[ -d "$REPO/node_modules" ]] && ln -s "$REPO/node_modules" "$tmp/tree/node_modules"
+      link_env "$tmp/tree" >/dev/null 2>&1 || true
+    fi
     if git -C "$tmp/tree" diff --cached --quiet; then
       sent=0; break                       # main holds all of it already
     fi
     git -C "$tmp/tree" commit -q --no-verify -m "$subject" \
       -m "$branch carries no change of its own, so it has no pull request (no_change.sh in sclaude); what sclaude committed on it goes to main this way:" \
       -m "$log" >/dev/null 2>&1 || break
-    if GIT_TERMINAL_PROMPT=0 git -C "$tmp/tree" "${push[@]}" origin HEAD:main >/dev/null 2>&1; then
+    if GIT_TERMINAL_PROMPT=0 git -C "$tmp/tree" "${push[@]}" origin HEAD:main >"$tmp/push.log" 2>&1; then
       sha="$(git -C "$tmp/tree" rev-parse --short HEAD)"
       sent=0; break
     fi
     # Somebody pushed to main meanwhile, or a hook refused: once more, on top.
   done
   git -C "$wt" worktree remove --force "$tmp/tree" >/dev/null 2>&1 || true
+  # Why the push was refused, when it was: a hook says so in its last lines.
+  if [[ "$sent" != 0 && -s "$tmp/push.log" ]]; then
+    warn "  the push to main was refused; its last words:"
+    tail -n 8 "$tmp/push.log" | while IFS= read -r line; do warn "    $line"; done
+  fi
   rm -rf "$tmp"
   [[ "$sent" == 0 ]] || return 1
   [[ -n "$sha" ]] && info "  sent to main as $sha: $subject"

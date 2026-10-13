@@ -25,7 +25,7 @@ def check(name, got, want):
 def refresh(inst, cfg):
     script = ('source "%s/ui.sh" 2>/dev/null; source "%s/run.sh"; INSTRUMENTS="%s"; '
               'systemctl() { echo reload >> "%s/reloads"; }; units_refresh' % (LIB, LIB, inst, cfg))
-    subprocess.run(["bash", "-c", script], env=dict(os.environ, XDG_CONFIG_HOME=cfg), check=True)
+    subprocess.run(["bash", "-c", script], env=dict(os.environ, HOME=cfg), check=True)
 
 
 tmp = tempfile.mkdtemp()
@@ -36,7 +36,7 @@ try:
         with open(os.path.join(inst, "systemd", name), "w") as fh:
             fh.write(body)
     cfg = os.path.join(tmp, "cfg")
-    units = os.path.join(cfg, "systemd", "user")
+    units = os.path.join(cfg, ".config", "systemd", "user")
     os.makedirs(units)
     os.symlink(os.path.join(inst, "systemd", "a.service"), os.path.join(units, "a.service"))
 

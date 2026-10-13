@@ -926,7 +926,8 @@ def close_state(cwd, pr, repo):
     mine, threads = split_yours(cwd, threads or [])
     if FINDINGS_CHECK in red and findings_explained(
             cwd, repo, view.get("headRefOid") or "", {t["url"] for t in threads}):
-        red.remove(FINDINGS_CHECK)
+        # Both copies: the workflow writes it as a check run and a status.
+        red = [r for r in red if r != FINDINGS_CHECK]
     why = []
     if red:
         why.append("red: " + ", ".join(red))

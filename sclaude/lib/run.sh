@@ -38,8 +38,12 @@ render_prompt() {
   # feature's checks to another's code. No tree — the status epilogue — has no
   # server, and the plain address is as good as any.
   local -x SCLAUDE_V_DEV_URL="http://localhost:3000"
-  # The deferred file the friction note points at (deferred.sh).
-  local -x SCLAUDE_V_DEFERRED="$(deferred_file "${wt:-${REPO:-.}}" "$slug")"
+  # The deferred file the friction note points at (deferred.sh). The
+  # maintainer question is asked here, not in the subshell, which would throw
+  # its cached answer away and ask again on every render.
+  product_maintainer "${wt:-${REPO:-.}}" >/dev/null 2>&1 || true
+  local -x SCLAUDE_V_DEFERRED
+  SCLAUDE_V_DEFERRED="$(deferred_file "${wt:-${REPO:-.}}" "$slug")"
   local -x SCLAUDE_V_DEV_PORT="3000"
   # The product's manuals as its config names them, for the prompts to say
   # where they are rather than one product's pages.
@@ -1661,12 +1665,16 @@ friction_push_project() {
 # own from origin/main, pushed with a pull request: the feature's branch has
 # merged, and they would reach main no other way.
 friction_propose_project() {
-  local wt="$1" from="$2" branch="$3" new tmp pr
-  new="sclaude/friction-${branch##*/}-$(date +%Y%m%d-%H%M)"
+  local wt="$1" from="$2" branch="$3" new tmp pr commits
+  new="sclaude/friction-${branch##*/}-$(date +%Y%m%d-%H%M%S)"
+  # The review's own commits only: a merge of main into the feature in the
+  # range would stop the cherry-pick, and main has its changes already.
+  commits="$(git -C "$wt" rev-list --reverse --no-merges "$from..HEAD" 2>/dev/null)"
   tmp="$(mktemp -d)"
   git -C "$wt" fetch -q origin main 2>/dev/null || true
   if git -C "$wt" worktree add -q -b "$new" "$tmp/tree" origin/main 2>/dev/null \
-      && git -C "$tmp/tree" cherry-pick "$from..$(git -C "$wt" rev-parse HEAD)" >/dev/null 2>&1 \
+      && [[ -n "$commits" ]] \
+      && git -C "$tmp/tree" cherry-pick $commits >/dev/null 2>&1 \
       && git -C "$tmp/tree" push -q -u origin "$new" 2>/dev/null; then
     pr="$(cd "$tmp/tree" && gh pr create --base main --head "$new" --fill 2>/dev/null)" || pr=""
     info "  $branch has merged; the friction review's fix goes to main as ${pr:-$new (open its pull request by hand)}"
@@ -1676,6 +1684,8 @@ friction_propose_project() {
     warn "  Its commits are $from..HEAD in $wt: carry them to main by hand."
   fi
   git -C "$wt" worktree remove --force "$tmp/tree" >/dev/null 2>&1 || true
+  # Pushed, or carried by hand from $wt: the local copy is of no use either way.
+  git -C "$wt" branch -D "$new" >/dev/null 2>&1 || true
   rm -rf "$tmp"
 }
 
@@ -1883,7 +1893,8 @@ cmd_propose() {
 #
 #   units_refresh
 units_refresh() {
-  local units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" src name want changed=""
+  # Where install.sh writes them, which does not read XDG_CONFIG_HOME.
+  local units="$HOME/.config/systemd/user" src name want changed=""
   [[ -d "$units" && -d "$INSTRUMENTS/systemd" ]] || return 0
   for src in "$INSTRUMENTS"/systemd/*; do
     [[ -f "$src" ]] || continue

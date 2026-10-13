@@ -145,10 +145,11 @@ environment_switch() {
     password="$(envs value "$wt" "$name" "$(environment_key "$wt" database)" \
                 | python3 -c 'import sys, urllib.parse as u; print(u.unquote(u.urlsplit(sys.stdin.read().strip()).password or ""))' 2>/dev/null)"
     [[ -n "$password" ]] || { warn "  $name: no database URL in $file, so the Supabase CLI was not linked"; return 1; }
-    # The password goes to the CLI as an argument, never to the terminal;
-    # npx's own notice would echo the argv, so it is silenced.
-    ( cd "$wt" && npm_config_loglevel=silent $(db_cli "$wt" 2>/dev/null || echo "npx --yes supabase") \
-        link --project-ref "$ref" -p "$password" >/dev/null 2>&1 ) || return 1
+    # The password goes to the CLI through its environment: an argument
+    # would stand in /proc/<pid>/cmdline, readable to any local process.
+    ( cd "$wt" && SUPABASE_DB_PASSWORD="$password" npm_config_loglevel=silent \
+        $(db_cli "$wt" 2>/dev/null || echo "npx --yes supabase") \
+        link --project-ref "$ref" >/dev/null 2>&1 ) || return 1
   else
     rm -f "$wt/supabase/.temp/project-ref"
   fi

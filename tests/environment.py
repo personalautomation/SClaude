@@ -450,7 +450,7 @@ def main():
         calls = os.path.join(tmp, "cli-calls")
         stub = os.path.join(tmp, "stub-cli")
         with open(stub, "w") as fh:
-            fh.write('#!/bin/sh\necho "$*" >> %s\n'
+            fh.write('#!/bin/sh\necho "$* pw=$SUPABASE_DB_PASSWORD" >> %s\n'
                      '[ "$1" = link ] && mkdir -p supabase/.temp && echo "$3" > supabase/.temp/project-ref\n'
                      'exit 0\n' % calls)
         os.chmod(stub, 0o755)
@@ -460,7 +460,7 @@ def main():
                   'environment_current "%s"; environment_settled "%s"' % (stub, sw, sw, sw))
         check("switch: done and settled", out.split(), ["ok", "dev", "dev"])
         check("switch: the CLI was linked with the URL's password",
-              open(calls).read().strip(), "link --project-ref %s -p s@cret" % ref_of("cloudshared"))
+              open(calls).read().strip(), "link --project-ref %s pw=s@cret" % ref_of("cloudshared"))
         check("switch: a build of the old file is gone", os.path.exists(os.path.join(sw, ".next")), False)
         out = run('db_cli() { echo %s; }; environment_switch "%s" localdb && echo ok; '
                   'environment_settled "%s"' % (stub, sw, sw))

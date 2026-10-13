@@ -93,17 +93,19 @@ PY
   info "   It closes by itself if it finds nothing to act on. SCLAUDE_RETRO=off skips it."
   echo ""
 
+  # The rules first: a session refused here leaves no watcher and no open run.
+  local -a guard=()
+  local guard_out
+  guard_out="$(review_guard_settings "$wt")" \
+    || { warn "  The retrospective was not started: sclaude could not read its rules (see above)."; return 1; }
+  mapfile -t guard <<< "$guard_out"
+
   [[ -f "$fstate" ]] && session_runs "$fstate" retro open "$session"
   local project_before project_after
   project_before="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
 
   session_watch_start "" "$session" "$done_file" "$wt" retro
   local before_instruments; before_instruments="$(instruments_state)"
-  local -a guard=()
-  local guard_out
-  guard_out="$(review_guard_settings "$wt")" \
-    || { warn "  The retrospective was not started: sclaude could not read its rules (see above)."; return 1; }
-  mapfile -t guard <<< "$guard_out"
   ( cd "$wt" && claude_launch --session-id "$session" --model opus --effort medium \
       "${guard[@]}" \
       --permission-mode auto --add-dir "$INSTRUMENTS" --add-dir "$TERM_DIR" \

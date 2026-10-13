@@ -18,6 +18,7 @@ Over the month the friction reviews put two kinds of things in these files rathe
    - **lift** — a restriction that keeps getting in the way: an `allow` in `<rules>/policy.json`, or a fix to the product's code;
    - **ban for good** — it recurs, and it is my step every time: a `deny` in `<rules>/policy.json`, so its refusals stop reaching the log;
    - **write the rule** — a proposed `CLAUDE.md` line that keeps being needed: into the product's `CLAUDE.md`, by its own rules;
+   - **relax the rule** — class `claude-md-relax-…`, a rule review sessions found too strict, redundant or out of date because it kept producing findings that fixed nothing real: loosen or remove that line of the product's `CLAUDE.md` (or the rule it names), by the product's own rules;
    - **change sclaude's default** — class `sclaude-default`, or anything that is plainly wrong for every product: say what the preset should become. That is not done here: it is a deliberate pull request to sclaude, and the entry stays in the file until it is made;
    - **keep waiting** — too rare to decide; it stays in the file;
    - **drop** — no longer true (the code it was about has changed) or not worth a rule; it goes from the file.

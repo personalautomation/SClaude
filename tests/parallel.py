@@ -283,6 +283,10 @@ review = open(os.path.join(PROMPTS, "review.md")).read()
 check("review-writes-yours", ".sclaude/local/feature/review-yours" in review, True)
 check("review-says-resolve-yourself", "Resolve on GitHub yourself" in review, True)
 check("yours-file-name-agrees", ctx.YOURS_FILE in review, True)
+# A thread left as it is is proposed in so many words and, on a yes, resolved
+# by the session itself; review-yours is for the person's own hand only.
+check("review-proposes-resolving", "I want to resolve this comment on GitHub" in review, True)
+check("review-resolves-on-yes", "resolveReviewThread" in review, True)
 # A finding on a deferred file goes to review-yours, never to a fix: the prompt
 # names the folders deferred.sh treats as entries, and only those.
 deferred_sh = open(os.path.join(LIB, "deferred.sh")).read()

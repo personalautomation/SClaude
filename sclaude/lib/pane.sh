@@ -72,6 +72,16 @@ claude_launch() {
       --session-id|--resume) next=$((i + 1)); session="${!next}"; break ;;
     esac
   done
+  # The kind's emoji goes into the name itself (named_with_icon): claude sets
+  # the tab title from the session name, over whatever wt.exe was given.
+  local -a args=()
+  local named=""
+  for arg in "$@"; do
+    if [[ -n "$named" ]]; then args+=("$(named_with_icon "$arg")"); named=""; continue; fi
+    [[ "$arg" == "-n" ]] && named=1
+    args+=("$arg")
+  done
+  set -- "${args[@]}"
   claude_launch_once "$@"
   status=$?
   # Closed by the session watcher because the usage limit had reset, not
@@ -116,20 +126,34 @@ claude_here() {
   return "$status"
 }
 
-# The emoji a tab title starts with, by the kind of session its name
-# (session_label) says it is, so the tabs tell the stages apart at a glance.
-# The name itself is left as it is: only the tab shows the emoji.
+# The emoji of a session's kind, by what its name (session_label) says it is,
+# so the tabs tell the stages apart at a glance.
 pane_icon() {
   case "$1" in
     *friction*)             printf '🧱' ;;
     *-fix-*)                printf '🔧' ;;
-    [0-9]*-plan[/\(]*)      printf '📝' ;;
-    [0-9]*-code[/\(]*)      printf '💻' ;;
-    [0-9]*-pr[/\(]*)        printf '📤' ;;
-    [0-9]*-review[/\(]*)    printf '🔍' ;;
-    [0-9]*-epilogue[/\(]*)  printf '🏁' ;;
-    [0-9]*-retro[/\(]*)     printf '🔁' ;;
+    [0-9]*-plan[/\(\ ]*)    printf '📝' ;;
+    [0-9]*-code[/\(\ ]*)    printf '💻' ;;
+    [0-9]*-pr[/\(\ ]*)      printf '📤' ;;
+    [0-9]*-review[/\(\ ]*)  printf '🔍' ;;
+    [0-9]*-epilogue[/\(\ ]*) printf '🏁' ;;
+    [0-9]*-retro[/\(\ ]*)   printf '🔁' ;;
   esac
+}
+
+# A session name with its kind's emoji between the label and the slug:
+# `4-review(2)/12-login` is `4-review(2) 🔍/12-login`. In the name rather than
+# only in wt.exe's --title, because claude titles the tab with the session
+# name and the title given at the start does not survive; and before the
+# slash, because the tab cuts a long title at its end, where the slug is. A
+# name that has its emoji already, or no kind, is returned as it is.
+named_with_icon() {
+  local name="$1" icon head
+  [[ "$name" == */* && "${name%%/*}" != *" "* ]] || { printf '%s' "$name"; return; }
+  icon="$(pane_icon "$name")"
+  [[ -n "$icon" ]] || { printf '%s' "$name"; return; }
+  head="${name%%/*}"
+  printf '%s %s/%s' "$head" "$icon" "${name#*/}"
 }
 
 # One launch of claude, in a tab or in place. claude_launch around it adds the
@@ -145,8 +169,6 @@ claude_launch_once() {
   for ((i = 1; i < $#; i++)); do
     [[ "${!i}" == "-n" ]] && { name=$((i + 1)); title="${!name}"; break; }
   done
-  local icon; icon="$(pane_icon "$title")"
-  [[ -n "$icon" ]] && title="$icon $title"
 
   {
     echo "#!/usr/bin/env bash"

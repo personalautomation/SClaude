@@ -8,8 +8,9 @@
 #   * a friction review carries the number of the session it reviews;
 #   * a fixing session goes under the step it fixes in;
 #   * the epilogue is 5, the retrospective 6;
-#   * a tab title starts with the emoji of its kind (pane_icon), a friction
-#     review of a fixing session counted as friction.
+#   * the name carries the emoji of its kind before the slug
+#     (named_with_icon), a friction review of a fixing session counted as
+#     friction.
 #
 # Run it with: python3 tests/session_names.py
 import json
@@ -72,5 +73,21 @@ for title, want in (("1-plan/x", "📝"), ("2-code(2)/x", "💻"), ("3-pr/x", "�
                     ("5-epilogue/x", "🏁"), ("6-retro/x", "🔁"),
                     ("friction/deferred", "🧱"), ("demo/code", "")):
     check("icon " + title, icon(title), want)
+
+
+
+def named(name):
+    p = subprocess.run(["bash", "-c", 'source "%s/pane.sh"; named_with_icon "$1"' % LIB, "bash", name],
+                       capture_output=True, text=True, timeout=30)
+    return p.stdout
+
+
+# The emoji goes into the name, before the slug: claude titles the tab with
+# the name, and cuts it at the end.
+for name, want in (("4-review(2)/x", "4-review(2) 🔍/x"), ("1-plan/x", "1-plan 📝/x"),
+                   ("4-review(2) 🔍/x", "4-review(2) 🔍/x"), ("demo/code", "demo/code"),
+                   ("chat", "chat")):
+    check("named " + name, named(name), want)
+    check("icon kept " + name, icon(named(name)), icon(name))
 
 sys.exit(1 if failed else 0)

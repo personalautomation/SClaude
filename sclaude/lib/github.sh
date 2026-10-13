@@ -665,11 +665,22 @@ for number, run in enumerate(retro_runs, start=1):
         when(run.get("finished")),
     ))
 
+# The cycle counts six steps, as the menu does (step_label in steps.sh): the
+# four of ORDER, then the epilogue and the retrospective. Past step 4 the
+# state says `done`, and what follows is read from the runs above. Unlike the
+# menu this asks GitHub nothing, so a merge it cannot see leaves the feature
+# at "4/6 done" until the retrospective.
+TOTAL = len(ORDER) + 2
 if current == "done":
-    head = "all steps complete"
+    if s.get("no_change") or s.get("cleaned") or (retro_runs and retro_runs[-1].get("done")):
+        head = "all done"
+    elif retro_runs:
+        head = "step %d/%d retro" % (TOTAL, TOTAL)
+    else:
+        head = "step %d/%d done" % (len(ORDER), TOTAL)
 else:
     index = ORDER.index(current) + 1 if current in ORDER else 0
-    head = "step %d/%d %s" % (index, len(ORDER), TITLES.get(current, current))
+    head = "step %d/%d %s" % (index, TOTAL, TITLES.get(current, current))
 
 out = [
     "<!-- sclaude:%s -->" % slug,

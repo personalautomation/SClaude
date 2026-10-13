@@ -1821,7 +1821,9 @@ journalctl --user -u keepawake-telegram.service -f
 ## statusline.py
 
 Claude Code's status line. Three zones: on the left the sclaude session and
-the path, in the middle the branch, the session's name and the worktree, on the
+the path, in the middle the branch, the feature's pull request (`PR #812`, read
+from its state on every refresh, so a new one shows by itself), the session's
+name and the worktree, on the
 right the model, the effort, the context fill and the limits.
 
 The first element is the name sclaude gave the session, without its slug:

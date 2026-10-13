@@ -2,7 +2,8 @@
 """Custom statusline for Claude Code.
 
 Reads the statusLine JSON on stdin, prints one line laid out in three zones:
-left (the sclaude session, then the path), middle (git branch, session, worktree),
+left (the sclaude session, then the path), middle (git branch, the sclaude
+feature's pull request, session, worktree),
 right (model, effort, context, rate limits). Never raises: any surprise falls
 back to a bare path.
 
@@ -148,6 +149,25 @@ def dig(d, *path):
 NAME_MIN = 12
 
 
+def feature_pr(d):
+    """`#812`: the pull request of the sclaude feature this worktree holds.
+
+    Read on every refresh from the feature's state, which sclaude rewrites when
+    the pull request changes, so a new one shows up by itself. One small read
+    of a file in the worktree root; nothing at all outside sclaude.
+    """
+    root = dig(d, "workspace", "project_dir") or dig(d, "workspace", "current_dir") \
+        or d.get("cwd")
+    if not root:
+        return None
+    try:
+        with open(os.path.join(root, ".sclaude/local/feature/state.json")) as f:
+            pr = json.load(f).get("pr")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return "#%s" % pr if isinstance(pr, (int, str)) and str(pr).isdigit() else None
+
+
 def session_name(d):
     """The name for the middle zone; a sclaude session has its own at the left."""
     if sclaude_label(d):
@@ -209,10 +229,13 @@ def build(d, opts):
     if label:
         left = paint(label, YELLOW) + " " * opts.get("lgap", 1) + left
 
-    # --- middle: branch, session, worktree ---
+    # --- middle: branch, pull request, session, worktree ---
     mid = []
     if branch and not merged:
         mid.append(paint(ico("⎇") + branch, GREEN))
+    pr = feature_pr(d)
+    if pr:
+        mid.append(paint("PR " + pr, ORANGE))
     if opts["session"]:
         name = session_name(d)
         if name:

@@ -483,6 +483,21 @@ session_watch_stop
     git("update-ref", "refs/remotes/origin/b", "HEAD")
     check("close-head-ahead-is-fine",
           close(dict(base, headRefOid="0" * 40, statusCheckRollup=green), cwd=repo), "ok")
+    # Pushed, and GitHub still names the commit before as the head, with its
+    # green checks: wait, not close. A friction push after the last round was
+    # closed on in under a minute, and its review's threads were left behind.
+    older = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                           capture_output=True, text=True).stdout.strip()
+    git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "friction")
+    git("update-ref", "refs/remotes/origin/b", "HEAD")
+    check("close-stale-head-waits",
+          close(dict(base, headRefOid=older, statusCheckRollup=green), cwd=repo), "pending")
+    RECENT = pc.recent
+    pc.recent = lambda created, cwd: False
+    check("close-stale-head-for-long-is-said",
+          close(dict(base, headRefOid=older, statusCheckRollup=green), cwd=repo),
+          "open: PR #143 still names %s as its head, behind this branch" % older[:8])
+    pc.recent = RECENT
     check("close-merged", close(dict(base, state="MERGED", statusCheckRollup=red), 3), "ok")
     check("close-unreadable", close(None), "ok")
 

@@ -894,6 +894,21 @@ def unpushed(cwd, view):
     return int(count) if out.returncode == 0 and count.isdigit() else 0
 
 
+def behind_head(cwd, head):
+    """Whether `head` is an older commit of this branch: an ancestor of HEAD
+    and not HEAD itself. A head this tree does not have, or one that moved
+    ahead (GitHub's "Update branch"), is not."""
+    try:
+        local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True,
+                               text=True, timeout=30).stdout.strip()
+        if not local or local == head:
+            return False
+        return subprocess.run(["git", "merge-base", "--is-ancestor", head, "HEAD"], cwd=cwd,
+                              capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def close_state(cwd, pr, repo):
     """Whether step 4 may close, as one line: `ok`, `pending`, `open: <why>`,
     or `yours: <n>` when only threads the person decided to keep are open.
@@ -912,6 +927,18 @@ def close_state(cwd, pr, repo):
     ahead = unpushed(cwd, view)
     if ahead:
         return "open: %d commit(s) here are not pushed, so the pull request does not carry them" % ahead
+    # Pushed, and GitHub still names the commit before it as the head: for a
+    # few seconds after a push the pull request answers with the old head, its
+    # checks all green and its review long done. Once a friction review pushed
+    # its commit after the last round, this read `ok` within the same minute,
+    # step 4 closed, and the review of that push left two threads on a pull
+    # request nobody was watching any more.
+    head = view.get("headRefOid") or ""
+    if head and behind_head(cwd, head):
+        if recent(None, cwd):
+            return "pending"
+        return ("open: PR #%s still names %s as its head, behind this branch"
+                % (pr, head[:8]))
     rollup = view.get("statusCheckRollup") or []
     if not rollup:
         return "pending" if recent(view.get("createdAt"), cwd) else "ok"

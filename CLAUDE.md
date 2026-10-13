@@ -109,7 +109,21 @@ a message whose trailer block is broken.
 ## Tests
 
 `python3 tests/<name>.py` — each file is standalone and exits non-zero on
-failure. Run them all before committing:
+failure.
+
+Before a commit, run the tests that touch what changed: every test file that
+names a changed file (a test sources or runs the modules it guards by name).
+The whole suite takes minutes, most of it `tests/resume.py`, and a commit does
+not need it:
+
+```bash
+for f in $(git diff --name-only HEAD; git diff --name-only --cached); do
+  grep -l "$(basename "${f%.*}")" tests/*.py
+done | sort -u | while read -r t; do python3 "$t" >/dev/null || echo "FAIL $t"; done
+```
+
+Run them all before a push, which is what reaches every machine (auto-sync
+from `main`):
 
 ```bash
 for t in tests/*.py; do python3 "$t" >/dev/null || echo "FAIL $t"; done

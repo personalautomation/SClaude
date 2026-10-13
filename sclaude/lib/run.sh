@@ -1899,10 +1899,11 @@ units_refresh() {
     name="$(basename "$src")"
     [[ -e "$units/$name" || -L "$units/$name" ]] || continue
     want="$(sed "s|@REPO@|$INSTRUMENTS|g" "$src")"
-    # A link elsewhere is the person's own: a masked unit points at /dev/null.
+    # A masked unit is a link to /dev/null, and the person's: it stays. Any
+    # other link is an older install's, into this checkout or one since moved.
     if [[ -L "$units/$name" ]]; then
-      link="$(readlink -f "$units/$name" 2>/dev/null || true)"
-      [[ "$link" == "$INSTRUMENTS/systemd/$name" ]] || continue
+      link="$(readlink "$units/$name" 2>/dev/null || true)"
+      [[ "$link" == /dev/null ]] && continue
     elif [[ "$(cat "$units/$name" 2>/dev/null)" == "$want" ]]; then
       continue
     fi
@@ -1911,15 +1912,17 @@ units_refresh() {
   done
   (( ${#changed[@]} )) && command -v systemctl >/dev/null 2>&1 || return 0
   systemctl --user daemon-reload >/dev/null 2>&1 || return 0
-  # A reload alone leaves a running unit on its old lines, and one that
-  # crash-looped on the old file failed for good: each is started again, when
-  # it is enabled or running.
+  # A unit that crash-looped on the old file has failed for good: it is
+  # started again, when it is enabled to run. Nothing running is restarted —
+  # a bot or an editor restarted from here would take this very sclaude down
+  # with its cgroup, and a static unit (a timer's oneshot, an editor started
+  # on demand) is not to be started by hand. Those pick up the new lines at
+  # their next start.
   for name in "${changed[@]}"; do
+    systemctl --user is-failed -q "$name" 2>/dev/null || continue
     systemctl --user reset-failed "$name" >/dev/null 2>&1 || true
-    if systemctl --user is-active -q "$name" 2>/dev/null \
-        || systemctl --user is-enabled -q "$name" 2>/dev/null; then
-      systemctl --user restart "$name" >/dev/null 2>&1 || true
-    fi
+    [[ "$(systemctl --user is-enabled "$name" 2>/dev/null)" == enabled ]] \
+      && systemctl --user start --no-block "$name" >/dev/null 2>&1
   done
   return 0
 }

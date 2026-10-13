@@ -24,7 +24,9 @@ def check(name, got, want):
 
 def refresh(inst, cfg):
     script = ('source "%s/ui.sh" 2>/dev/null; source "%s/run.sh"; INSTRUMENTS="%s"; '
-              'systemctl() { echo reload >> "%s/reloads"; }; units_refresh' % (LIB, LIB, inst, cfg))
+              'systemctl() { echo "$*" >> "%s/reloads"; case "$2" in '
+              'is-failed) [ -e "%s/failed-$4" ] ;; is-enabled) echo enabled ;; esac; }; units_refresh'
+              % (LIB, LIB, inst, cfg, cfg))
     subprocess.run(["bash", "-c", script], env=dict(os.environ, HOME=cfg), check=True)
 
 
@@ -62,6 +64,30 @@ try:
     os.symlink("/dev/null", masked)
     refresh(inst, cfg)
     check("a masked unit stays masked", os.readlink(masked), "/dev/null")
+
+    def calls():
+        try:
+            with open(os.path.join(cfg, "reloads")) as fh:
+                return fh.read()
+        finally:
+            os.remove(os.path.join(cfg, "reloads"))
+
+    calls()
+    with open(os.path.join(inst, "systemd", "a.service"), "a") as fh:
+        fh.write("Restart=always\n")
+    refresh(inst, cfg)
+    check("a running unit is not restarted", "restart" in calls(), False)
+
+    with open(os.path.join(inst, "systemd", "a.service"), "a") as fh:
+        fh.write("RestartSec=5\n")
+    open(os.path.join(cfg, "failed-a.service"), "w").close()
+    refresh(inst, cfg)
+    check("a failed unit is started again", "start --no-block a.service" in calls(), True)
+
+    os.remove(a)
+    os.symlink(os.path.join(tmp, "moved", "systemd", "a.service"), a)
+    refresh(inst, cfg)
+    check("a link into a moved checkout is repaired", os.path.islink(a), False)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

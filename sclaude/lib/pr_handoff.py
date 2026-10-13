@@ -160,7 +160,8 @@ def checks_line(rollup):
         parts.append("⚠ red: " + ", ".join(dict.fromkeys(red)))
     if running:
         parts.append("still running: " + ", ".join(dict.fromkeys(running)))
-    return "; ".join(parts) if parts else "✓ all %d green" % len(rollup)
+    names = {c.get("name") or c.get("context") or "?" for c in rollup}
+    return "; ".join(parts) if parts else "✓ all %d green" % len(names)
 
 
 def regression_line(state):

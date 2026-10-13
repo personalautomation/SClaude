@@ -44,7 +44,8 @@ branch_behind() {
   # and rev-list on a non-existent ref is as silent as on matching ones.
   git -C "$REPO" rev-parse --verify --quiet "origin/main" >/dev/null || return 1
   git -C "$REPO" rev-parse --verify --quiet "$branch" >/dev/null || return 1
-  n="$(git -C "$REPO" rev-list --count "$branch..origin/main" 2>/dev/null)" || return 1
+  # Deferred entries alone do not make a branch stale (deferred_to_main).
+  n="$(deferred_rev_count "$REPO" "$branch..origin/main")" || return 1
   [[ "$n" =~ ^[0-9]+$ ]] || return 1
   echo "$n"
 }

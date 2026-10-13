@@ -1288,7 +1288,8 @@ run_friction() {
   if [[ -z "$reread" && -z "$pending" ]] \
      && friction_defer_proposals "$wt" "$slug" "$key" "$step"; then
     { cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log"; } || true
-    friction_push_project "$wt" "$deferred_from"
+    # Entries alone skip the pull request (deferred_to_main).
+    deferred_to_main "$wt" "$deferred_from" || friction_push_project "$wt" "$deferred_from"
     return 0
   fi
   # What is being reviewed, and which prompt says so.
@@ -1554,7 +1555,11 @@ PYEOF
   project_after="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
   if [[ -n "$project_before" && -n "$project_after" && "$project_before" != "$project_after" ]]; then
     changed=1
-    friction_push_project "$wt" "$project_before"
+    # Entries the review put off go to main by themselves (deferred_to_main);
+    # what else it committed follows them to the pull request.
+    deferred_to_main "$wt" "$project_before" || true
+    [[ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" == "$project_before" ]] \
+      || friction_push_project "$wt" "$project_before"
   fi
 
   # A session that never got going did not review anything — it refused to

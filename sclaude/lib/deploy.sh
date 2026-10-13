@@ -159,7 +159,8 @@ prod_drift_report() {
     return 0
   fi
 
-  n="$(git -C "$REPO" rev-list --count "$sha..$main" 2>/dev/null || echo 0)"
+  # Commits that only add deferred entries ship nothing (deferred_to_main).
+  n="$(deferred_rev_count "$REPO" "$sha..$main" || echo 0)"
   [[ "$n" =~ ^[0-9]+$ && "$n" -gt 0 ]] || return 0
   echo ""
   warn "Production is $n commit(s) behind origin/main — pushed, never shipped:"

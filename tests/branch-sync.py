@@ -65,10 +65,10 @@ try:
 
     def start(answer):
         script = ('BOLD=""; OFF=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""\n'
-                  'REPO=%s\nsource %s/io.sh; source %s/ui.sh; source %s/state.sh; source %s/worktree.sh\n'
+                  'REPO=%s\nsource %s/io.sh; source %s/ui.sh; source %s/state.sh; source %s/worktree.sh; source %s/deferred.sh\n'
                   'warn(){ echo "$*"; }; info(){ echo "$*"; }; unset ASK_DIR\n'
                   'ask() { echo "ASKED"; printf -v "$2" %%s "$ANSWER"; }\n'
-                  'sync_branch %s\n' % (repo, LIB, LIB, LIB, LIB, repo))
+                  'sync_branch %s\n' % (repo, LIB, LIB, LIB, LIB, LIB, repo))
         return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                               env=dict(os.environ, ANSWER=answer)).stdout
 

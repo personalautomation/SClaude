@@ -77,6 +77,143 @@ deferred_dirs() {
   return 0
 }
 
+# The deferred folders as git pathspecs, every person's: whatever is under
+# them is a log of entries and nothing else.
+DEFERRED_PATHSPECS=(':(glob).sclaude/team/deferred/**' ':(glob).sclaude/people/*/deferred/**')
+DEFERRED_EXCLUDES=(':(exclude,glob).sclaude/team/deferred/**' ':(exclude,glob).sclaude/people/*/deferred/**')
+
+# How many commits a range holds besides those that only touch the deferred
+# folders: what a staleness or drift count should see, since entries alone ship
+# nothing and are no reason to merge (deferred_to_main). Merges and empty
+# commits count, as in a plain rev-list --count.
+#
+#   deferred_rev_count <git dir> <rev-list args...>
+deferred_rev_count() {
+  local dir="$1"; shift
+  local total only
+  total="$(git -C "$dir" rev-list --count "$@" 2>/dev/null)" || return 1
+  only="$(grep -cvxFf \
+            <(git -C "$dir" rev-list --no-merges "$@" -- . "${DEFERRED_EXCLUDES[@]}" 2>/dev/null) \
+            <(git -C "$dir" rev-list --no-merges "$@" -- "${DEFERRED_PATHSPECS[@]}" 2>/dev/null))"
+  echo $(( total - ${only:-0} ))
+}
+
+# Takes the deferred entries the commits <from>..HEAD of a feature's tree put
+# on its branch, and sends them straight to origin's main.
+#
+# Entries reach the branch after its last review, or after its pull request
+# has merged — the friction reviews and the retrospective write them then —
+# and on the branch they cost a cycle each time: a merged branch went back to
+# step 3 for three lines of log, and a push to an open pull request after its
+# last round drew review findings nobody was left to answer. The entries are a
+# log the monthly review reads from main, they change nothing that runs, and
+# the person chose to let them skip the pull request: no review, and none of
+# the project's push hooks, which check code and the database and have nothing
+# to say about a log.
+#
+# The rows are merged into main's copy of each file rather than picked as
+# commits: main's copy may hold rows the branch does not, or the other way
+# round. The branch then drops what it sent: reset past the commits when they
+# held nothing else, or a commit that puts the folders back the way <from> had
+# them when they did. Either way the branch carries no change to the folders,
+# and its own merge cannot meet main's rows in a conflict.
+#
+# Left to the caller (returns 1): no entries in the range, a commit in it that
+# is already on origin, or an open pull request whose branch carried entries
+# before <from> — those reach main with that pull request, and rows sent ahead
+# of them would conflict with them at its merge.
+#
+#   deferred_to_main <tree> <from>  → 0 sent, 1 not for this, 2 failed
+deferred_to_main() {
+  local wt="$1" from="$2" branch head base files tmp sha="" only=1 n f
+  [[ -n "$from" ]] || return 1
+  head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)" || return 1
+  [[ "$head" != "$from" ]] || return 1
+  files="$(git -C "$wt" diff --name-only "$from" "$head" -- "${DEFERRED_PATHSPECS[@]}" 2>/dev/null)"
+  [[ -n "$files" ]] || return 1
+  branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  [[ -n "$branch" && "$branch" != "HEAD" && "$branch" != "main" ]] || return 1
+  git -C "$wt" fetch -q origin 2>/dev/null || return 2
+  n="$(git -C "$wt" rev-list --count "$from..$head" 2>/dev/null)" || return 1
+  if git -C "$wt" rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null; then
+    [[ "$(git -C "$wt" rev-list --count "$from..$head" "^refs/remotes/origin/$branch" 2>/dev/null)" == "$n" ]] \
+      || return 1
+  fi
+  if [[ "$( (cd "$wt" && branch_pr_state "$branch") )" != "MERGED" ]]; then
+    base="$(git -C "$wt" merge-base origin/main "$from" 2>/dev/null)" || return 1
+    [[ -z "$(git -C "$wt" diff --name-only "$base" "$from" -- "${DEFERRED_PATHSPECS[@]}" 2>/dev/null)" ]] \
+      || return 1
+  fi
+  [[ -z "$(git -C "$wt" log --format=%H "$from..$head" -- . "${DEFERRED_EXCLUDES[@]}" 2>/dev/null)" ]] \
+    || only=0
+
+  tmp="$(mktemp -d)"
+  local attempt sent=1
+  for attempt in 1 2; do
+    git -C "$wt" worktree remove --force "$tmp/tree" >/dev/null 2>&1 || true
+    (( attempt == 1 )) || git -C "$wt" fetch -q origin main 2>/dev/null || true
+    git -C "$wt" worktree add -q --detach "$tmp/tree" origin/main >/dev/null 2>&1 || break
+    while IFS= read -r f; do
+      [[ -n "$f" ]] || continue
+      # Gone on the branch: nothing of it to send.
+      git -C "$wt" cat-file -e "$head:$f" 2>/dev/null || continue
+      mkdir -p "$(dirname "$tmp/tree/$f")"
+      [[ -f "$tmp/tree/$f" ]] || : > "$tmp/tree/$f"
+      git -C "$wt" show "$head:$f" > "$tmp/branch-copy"
+      # main's rows as they are, then each row of the branch's copy that main
+      # does not hold as many times: a row may come back on purpose (the
+      # monthly review counts the repeats), so it is counted, not looked up.
+      awk 'NR == FNR { seen[$0]++; print; next } seen[$0] > 0 { seen[$0]--; next } { print }' \
+        "$tmp/tree/$f" "$tmp/branch-copy" > "$tmp/merged" && cat "$tmp/merged" > "$tmp/tree/$f"
+      git -C "$tmp/tree" add -- "$f"
+    done <<< "$files"
+    if git -C "$tmp/tree" diff --cached --quiet; then
+      sent=0; break                       # main holds every row already
+    fi
+    if [[ "$only" == 1 && "$n" == 1 ]]; then
+      git -C "$tmp/tree" commit -q --no-verify -C "$head" >/dev/null 2>&1 || break
+    else
+      git -C "$tmp/tree" commit -q --no-verify \
+        -m "chore(sclaude): carry deferred entries from $branch to main" \
+        -m "Entries put off on $branch after its review go to main directly (deferred_to_main in sclaude)." \
+        >/dev/null 2>&1 || break
+    fi
+    if GIT_TERMINAL_PROMPT=0 git -C "$tmp/tree" push -q --no-verify origin HEAD:main >/dev/null 2>&1; then
+      sha="$(git -C "$tmp/tree" rev-parse --short HEAD)"
+      sent=0; break
+    fi
+    # Somebody pushed to main meanwhile: once more, on top of theirs.
+  done
+  git -C "$wt" worktree remove --force "$tmp/tree" >/dev/null 2>&1 || true
+  rm -rf "$tmp"
+  if [[ "$sent" != 0 ]]; then
+    warn "  could not send the deferred entries on $branch to main — they stay on the branch"
+    return 2
+  fi
+  git -C "$wt" fetch -q origin main 2>/dev/null || true
+
+  # The branch drops what it sent.
+  if [[ "$only" == 1 ]]; then
+    git -C "$wt" reset -q --keep "$from" 2>/dev/null \
+      || warn "  the deferred entries are on main; $branch still carries them — reset it to ${from:0:8} by hand"
+  else
+    ( while IFS= read -r f; do
+        if git -C "$wt" cat-file -e "$from:$f" 2>/dev/null; then
+          git -C "$wt" checkout -q "$from" -- "$f"
+        else
+          git -C "$wt" rm -q -- "$f"
+        fi || exit 1
+      done <<< "$files"
+      git -C "$wt" commit -q --no-verify \
+           -m "chore(sclaude): leave the deferred entries to main" \
+           -m "They went to main directly (deferred_to_main in sclaude); the branch carries no change to the deferred folders, so its merge cannot conflict with them."
+    ) >/dev/null 2>&1 \
+      || warn "  the deferred entries are on main; put $branch's deferred folders back to ${from:0:8} by hand"
+  fi
+  info "  the deferred entries went to main${sha:+ as $sha}, past the pull request"
+  return 0
+}
+
 # Every entry file in those folders. One a line.
 deferred_files() {
   local d f

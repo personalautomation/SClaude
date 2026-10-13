@@ -830,7 +830,9 @@ sync_branch() {
   # origin means we work with what we have, as cmd_sync does.
   git -C "$REPO" fetch origin -q 2>/dev/null || true
 
-  behind="$(git -C "$REPO" rev-list --count "$branch..origin/main" 2>/dev/null)" || return 0
+  # Commits that only add deferred entries are not worth a merge
+  # (deferred_to_main): they come along with the next one that is.
+  behind="$(deferred_rev_count "$REPO" "$branch..origin/main")" || return 0
   # Empty or "0" means there is nothing to compare or nothing to merge in. A
   # non-number means rev-list did not work out: there is no origin/main, or the
   # branch did not resolve. We stay quiet — the step can do nothing about it, and

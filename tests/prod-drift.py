@@ -66,7 +66,7 @@ def report(repo, prod_line, linked=True):
     elif os.path.isdir(vercel):
         os.rmdir(vercel)
     script = 'REPO="%s"\n' % repo
-    for name in ("io", "project", "rollback", "deploy"):
+    for name in ("io", "project", "rollback", "deploy", "deferred"):
         script += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
     script += 'warn() { echo "W $*"; }; info() { echo "I $*"; }\n'
     script += "vercel_prod_current() { printf '%%s' '%s'; }\n" % prod_line

@@ -126,6 +126,10 @@ PY
     fi
   fi
 
+  # Deferred entries go to main by themselves (deferred_to_main): three lines
+  # of log once sent a merged feature round the whole cycle again.
+  [[ -n "$project_before" ]] && { deferred_to_main "$wt" "$project_before" || true; }
+
   # Whether the conversation changed the project's code. Kept in the state
   # rather than in a variable: a "no" to the clean-up, or a run cut off before
   # cmd_done got to it, brings `done` back later without a retrospective, and the

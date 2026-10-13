@@ -423,17 +423,21 @@ session_watch_stop
     with open(os.path.join(ctx_dir, sid + ".jsonl"), "w") as fh:
         fh.write(json.dumps(used(10, 50000)) + "\n" + json.dumps(used(3, 120000)) + "\n")
     script = 'source "%s/state.sh"\nsource "%s/scratch.sh"\nLIB="%s"\nREVIEW_CONTEXT_MAX_PCT=40\n' % (LIB, LIB, LIB)
-    script += functions(RUN, ["review_context", "review_context_log", "review_carry_on"])
+    script += functions(RUN, ["review_context", "review_context_log", "review_carry_on", "reversals_file"])
     script += '\nexport HOME="%s"\nheld="$(review_context "%s" "%s")"\necho "$held"\n' % (home, ctx_wt, sid)
     script += 'review_context_log "%s" feat "%s" "carried on" "$held" 2\n' % (ctx_wt, sid)
     script += 'review_carry_on 12\n'
+    reversals = os.path.join(ctx_wt, ".sclaude/local/feature/review-reversals")
+    with open(reversals, "w") as fh:
+        fh.write("https://x/pull/1#discussion_r1\tundoes abc\nhttps://x/pull/1#discussion_r2\tundoes def\n")
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30).stdout
+    check("reversals-emptied-once-counted", os.path.getsize(reversals), 0)
     check("context-joined", out.split("\n")[0], "120003 50010 13 1000000")
     check("carry-on-names-the-share", "Your context is at 12% — under the 40%" in out, True)
     try:
         with open(os.path.join(repo, ".sclaude/local/review-context.log")) as fh:
             row = fh.read().rstrip("\n").split("\t")
-        check("log-row", row[1:], ["feat", sid, "carried on", "120003", "50010", "13", "1000000", "2", "7"])
+        check("log-row", row[1:], ["feat", sid, "carried on", "120003", "50010", "13", "1000000", "2", "7", "2"])
     except OSError:
         check("log-row", "missing", "written")
     os.remove(shared)
@@ -451,6 +455,37 @@ session_watch_stop
         check("threshold-default", 'REVIEW_CONTEXT_MAX_PCT="${REVIEW_CONTEXT_MAX_PCT:-40}"' in fh.read(), True)
     check("prompt-four-passes", "Four such passes at most" in prompt, True)
     check("prompt-leaves-the-choice", "who takes them is the orchestrator's call" in prompt, True)
+    check("prompt-names-the-reversals-file",
+          ">> .sclaude/local/feature/review-reversals" in prompt
+          and 'echo "$1/.sclaude/local/feature/review-reversals"' in RUN, True)
+
+    # --- review-stats reads the log back --------------------------------------
+    spec = importlib.util.spec_from_file_location("review_stats", os.path.join(LIB, "review_stats.py"))
+    rs = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rs)
+    log = os.path.join(tmp, "review-context.log")
+    with open(log, "w") as fh:
+        for line in (
+            # One session: two rounds carried on, then done in its third.
+            ["t", "f", "A", "carried on", "80000", "50000", "8", "1000000", "1", "4", "0"],
+            ["t", "f", "A", "carried on", "110000", "50000", "11", "1000000", "2", "6", "1"],
+            ["t", "f", "A", "done", "140000", "50000", "14", "1000000", "2", "7", "1"],
+            # Another, one round, closed by a person.
+            ["t", "g", "B", "exit", "70000", "60000", "7", "1000000", "0", "2", "0"],
+            ["broken line"],
+        ):
+            fh.write("\t".join(line) + "\n")
+    data = rs.rows(log)
+    check("stats-rows", len(data), 4)
+    check("stats-segment", [rs.segment(r) for r in data], [1, 2, 3, 1])
+    text = rs.report(data)
+    check("stats-sessions", "2 review sessions, 4 rows" in text, True)
+    check("stats-door", "holds 55k before" in text, True)
+    check("stats-reversals-first", "first round of a session: 0 over 2" in text, True)
+    check("stats-reversals-later", "later rounds: 2 over 2 stretches (1.00 each)" in text, True)
+    check("stats-window", "1% of the window is 10k" in text, True)
+    check("stats-empty", rs.report([]), "No review sessions logged yet.")
+    check("stats-command", "review-stats)  cmd_review_stats ;;" in open(os.path.join(ROOT, "bin", "sclaude")).read(), True)
 
     # --- a fresh session sees open threads only --------------------------------
     spec = importlib.util.spec_from_file_location("pr_context", os.path.join(LIB, "pr_context.py"))

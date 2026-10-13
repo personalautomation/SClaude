@@ -64,6 +64,9 @@ breaks the other silently — grep before you edit:
   is read by `review_context` in `sclaude/lib/run.sh`, which decides by it
   whether a review round stays in the same session; `tests/review-round.py`
   runs both sides.
+- `.sclaude/local/feature/review-reversals` is named by `reversals_file` in
+  `run.sh` and spelled out in `sclaude/prompts/review.md`;
+  `tests/review-round.py` checks the two agree.
 
   *(The two entries above were added by Claude, not asked for line by line:
   they came with the parallel-features fixes of 2026-10-09, so that a later

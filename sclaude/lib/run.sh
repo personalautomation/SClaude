@@ -2427,18 +2427,24 @@ PY
 # One line per review session's end, in the main tree's .sclaude/local/,
 # where it outlives the feature's worktree; tab-separated:
 #
-#   <time> <feature> <session> <outcome> <tokens now> <tokens at start> <pct> <window> <rounds> <comments>
+#   <time> <feature> <session> <outcome> <tokens now> <tokens at start> <pct> <window> <rounds> <comments> <reversals>
 #
 # The outcome is "carried on" (the same session takes the next round), "fresh
 # session" (the threshold sent the next round elsewhere), "done" (sclaude
 # closed it on its done marker) or "exit" (a person did). rounds is how many
 # rounds the session closed, comments the threads the review handed it
-# (run_comments). It is what REVIEW_CONTEXT_MAX_PCT is to be judged by: what a
-# round costs, what a session costs before it starts, how tokens and the
-# share relate, and whether the sessions that carried on did worse.
+# (run_comments), reversals the findings the session declined since the last
+# row because they would undo a settled fix (reversals_file). It is what
+# REVIEW_CONTEXT_MAX_PCT is to be judged by — `sclaude review-stats` reads it:
+# what a round costs, what a session costs before it starts, how tokens and
+# the share relate, and whether the sessions that carried on did worse.
 review_context_log() {
-  local wt="$1" slug="$2" session="$3" outcome="$4" held="$5" rounds="$6" root comments
+  local wt="$1" slug="$2" session="$3" outcome="$4" held="$5" rounds="$6" root comments reversals
   root="$(scratch_root "$wt")" || return 0
+  # Counted and emptied: each row holds the stretch since the one before it.
+  reversals="$(grep -c . "$(reversals_file "$wt")" 2>/dev/null || true)"
+  [[ "$reversals" =~ ^[0-9]+$ ]] || reversals=0
+  : > "$(reversals_file "$wt")" 2>/dev/null || true
   comments="$(python3 - "$wt/.sclaude/local/feature/state.json" "$session" <<'PY' 2>/dev/null || true
 import json, sys
 with open(sys.argv[1]) as fh:
@@ -2448,9 +2454,25 @@ print(mine[-1].get("comments", "-") if mine else "-")
 PY
 )"
   mkdir -p "$root/.sclaude/local" 2>/dev/null || return 0
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$slug" "$session" "$outcome" \
-    "$(tr ' ' '\t' <<<"${held:-- - - -}")" "${rounds:--}" "${comments:--}" \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$slug" "$session" "$outcome" \
+    "$(tr ' ' '\t' <<<"${held:-- - - -}")" "${rounds:--}" "${comments:--}" "$reversals" \
     >> "$root/.sclaude/local/review-context.log" 2>/dev/null || true
+}
+
+# Where a review session notes a finding it declined because applying it would
+# undo a fix the pull request had already settled — one line each, the
+# thread's link and what it would undo. review.md asks for it; the count goes
+# into review_context_log, the measure of whether a long session still holds
+# on to what it settled.
+reversals_file() {
+  echo "$1/.sclaude/local/feature/review-reversals"
+}
+
+# What a product's review sessions cost, from review_context_log's log.
+cmd_review_stats() {
+  local root
+  root="$(main_repo 2>/dev/null)" || die "run it inside a product's repository"
+  python3 "$LIB/review_stats.py" "$root/.sclaude/local/review-context.log"
 }
 
 # What the same review session is told when it takes the next round.

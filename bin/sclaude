@@ -1159,11 +1159,11 @@ cmd_done() {
   # holding the port.
   remove_worktree "$wt" || die "could not remove the worktree"
 
-  # -d, not -D: it will refuse if the branch holds anything that has not reached
-  # main. git's own warning is muted — for a merged PR it is a false alarm, the
-  # merge happened on GitHub's side — while a real refusal is said in our own
-  # words.
-  if ! git -C "$REPO" branch -d "$branch" >/dev/null 2>&1; then
+  # Never a plain -D: a squash-merged branch goes when its tip is the merged
+  # PR's head, and one with commits past the PR stays (branch_delete_merged).
+  local kept=0
+  branch_delete_merged "$branch" || kept=$?
+  if [[ "$kept" == 1 ]]; then
     warn "  local branch $branch kept: it carries commits that are not in main"
     warn "  to force it: git branch -D $branch"
   fi

@@ -30,6 +30,23 @@ merged_pr_head() {
     --jq '.[0].headRefOid // empty' 2>/dev/null || true
 }
 
+# Deletes a local branch whose work is in main: `git branch -d`, and when git
+# refuses, -D if the local tip is the head of the branch's merged pull request.
+# A squash merge leaves the branch's commits out of main, so -d refuses every
+# squash-merged branch; the matching head says nothing is lost. A branch with
+# commits past its pull request is left alone.
+#
+#   branch_delete_merged <branch>  → 0 deleted, 2 deleted as squash-merged, 1 kept
+branch_delete_merged() {
+  local branch="$1" tip head
+  git -C "$REPO" branch -d "$branch" >/dev/null 2>&1 && return 0
+  tip="$(git -C "$REPO" rev-parse -q --verify "refs/heads/$branch" 2>/dev/null)" || return 1
+  head="$(cd "$REPO" && merged_pr_head "$branch")"
+  [[ -n "$head" && "$tip" == "$head" ]] || return 1
+  git -C "$REPO" branch -D "$branch" >/dev/null 2>&1 && return 2
+  return 1
+}
+
 # Sorts the local branches into buckets and prints a line per branch:
 #
 #   drop  <branch>  <reason>   — nothing left to hold, we offer to delete it
@@ -145,15 +162,13 @@ review_branches() {
 
   while IFS=$'\t' read -r _ branch reason; do
     [[ -z "$branch" ]] && continue
-    # -d, not -D: it will refuse if the branch holds anything that has not
-    # reached main. For a squash merge that is a false alarm: when the local
-    # tip is the head of the merged PR, nothing is lost and we force it
-    # without asking. Only commits beyond the PR go to the human.
-    if git -C "$REPO" branch -d "$branch" >/dev/null 2>&1; then
+    # Only commits beyond a merged PR go to the human (branch_delete_merged).
+    local rc=0
+    branch_delete_merged "$branch" || rc=$?
+    if [[ "$rc" == 0 ]]; then
       echo "  ${GREEN}deleted${OFF} $branch"
-    elif [[ "$(git -C "$REPO" rev-parse "refs/heads/$branch")" == "$(merged_pr_head "$branch")" ]]; then
-      git -C "$REPO" branch -D "$branch" >/dev/null \
-        && echo "  ${GREEN}deleted${OFF} $branch (squash-merged, the PR head matches)"
+    elif [[ "$rc" == 2 ]]; then
+      echo "  ${GREEN}deleted${OFF} $branch (squash-merged, the PR head matches)"
     else
       warn "  $branch — git refused: it carries commits in neither main nor a merged PR"
       ask "  Force-delete it (git branch -D)? [y/n] " answer yn

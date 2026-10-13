@@ -180,6 +180,20 @@ def clip(text, width):
     return out.rstrip() + "…"
 
 
+def folder_matches_branch(cwd, branch):
+    """True when the folder is the branch's worktree: `<repo>-<rest>` for `<prefix>/<rest>`.
+
+    An exact match of folder name and branch counts too.
+    """
+    if not cwd or not branch:
+        return False
+    folder = os.path.basename(cwd.rstrip(os.sep))
+    if folder == branch:
+        return True
+    rest = branch.split("/", 1)[1] if "/" in branch else ""
+    return bool(rest) and folder.endswith("-" + rest) and len(folder) > len(rest) + 1
+
+
 def build(d, opts):
     """Assemble the three zones under one set of degradation flags."""
     icons = opts["icons"]
@@ -190,7 +204,14 @@ def build(d, opts):
 
     # --- left: the sclaude step, then the path ---
     cwd = dig(d, "workspace", "current_dir") or d.get("cwd") or os.getcwd()
-    left = paint(ico("📁") + home_path(cwd), BLUE)
+    branch = git_branch(cwd, d.get("session_id"))
+    # A worktree folder named after its branch says the same thing twice; one
+    # merged segment replaces both the path and the branch.
+    merged = folder_matches_branch(cwd, branch)
+    if merged:
+        left = paint(ico("📁⎇") + branch, GREEN)
+    else:
+        left = paint(ico("📁") + home_path(cwd), BLUE)
     # Which step of the feature cycle this worktree is on. First thing on the
     # line because it is what says which of four jobs this session has.
     step = feature_step(cwd)
@@ -199,8 +220,7 @@ def build(d, opts):
 
     # --- middle: branch, session, worktree ---
     mid = []
-    branch = git_branch(cwd, d.get("session_id"))
-    if branch:
+    if branch and not merged:
         mid.append(paint(ico("⎇") + branch, GREEN))
     if opts["session"]:
         name = session_name(d)

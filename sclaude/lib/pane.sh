@@ -12,21 +12,32 @@
 # A tab rather than a split pane: claude gets the full width of the window, and
 # its tab carries the session name.
 #
-# Only Windows Terminal under WSL2 opens a tab. Everywhere else — ssh from Termius,
-# the terminal inside code-server — claude runs in place, as it always did.
-# The test is $WT_SESSION in this very environment rather than wt.exe merely
-# being on PATH: over ssh into the same WSL, wt.exe is there and works, and it
-# would open the tab on the desktop at home, where nobody is looking, while
-# sclaude waited for a session nobody could reach. ssh does not carry
-# $WT_SESSION, so that case falls through to the old way by itself.
+# Only under WSL2, on this machine's own console, is a tab opened. Everywhere
+# else — ssh from Termius, the terminal inside code-server — claude runs in
+# place, as it always did: over ssh into the same WSL, wt.exe is there and
+# works, and it would open the tab on the desktop at home, where nobody is
+# looking, while sclaude waited for a session nobody could reach.
+#
+# $WT_SESSION alone is not the test. A WSL console that Windows Terminal took
+# over from somewhere else (Ubuntu from the Start menu, wsl.exe run by hand)
+# has no $WT_SESSION, since nothing put it in WSLENV, and sessions ran in place
+# there although a tab was what was wanted. What a local console always has is
+# $WSL_INTEROP — init hands it to every process started through wsl.exe — and
+# what ssh and code-server have is their own marks: $SSH_CONNECTION/$SSH_TTY
+# and TERM_PROGRAM=vscode. $WT_SESSION, where present, settles it.
 #
 #   SCLAUDE_PANE=off   always in place.
 #   SCLAUDE_PANE_WAIT  seconds to wait for the tab to start (default 20).
 
 pane_available() {
   [[ "${SCLAUDE_PANE:-on}" != "off" ]] || return 1
-  [[ -n "${WT_SESSION:-}" && -n "${WSL_DISTRO_NAME:-}" ]] || return 1
+  [[ -n "${WSL_DISTRO_NAME:-}" ]] || return 1
   [[ -t 0 && -t 1 ]] || return 1
+  if [[ -z "${WT_SESSION:-}" ]]; then
+    [[ -n "${WSL_INTEROP:-}" ]] || return 1
+    [[ -z "${SSH_CONNECTION:-}${SSH_TTY:-}" ]] || return 1
+    [[ "${TERM_PROGRAM:-}" != "vscode" ]] || return 1
+  fi
   command -v wt.exe >/dev/null 2>&1
 }
 

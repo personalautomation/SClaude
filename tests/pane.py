@@ -4,8 +4,9 @@
 #
 # Guarded here, with stand-ins for wt.exe and claude:
 #
-#   * without $WT_SESSION, without a terminal, or with SCLAUDE_PANE=off, claude
-#     runs in place;
+#   * over ssh, in code-server, in a console that is not WSL's own, without a
+#     terminal, or with SCLAUDE_PANE=off, claude runs in place; a WSL console
+#     without $WT_SESSION still gets a tab;
 #   * in a pane, claude gets the same arguments — a prompt with `;`, quotes and
 #     newlines intact — the same working directory and the exported variables,
 #     but not this login's WSL_INTEROP; its exit status comes back;
@@ -104,7 +105,8 @@ echo "rc=$?"
                    PANE_TEST_PROMPT=PROMPT, PANE_TEST_FOO="a b;c",
                    WT_SESSION="test", WSL_DISTRO_NAME="Test",
                    WSL_INTEROP="/run/WSL/1_interop", TMPDIR=tmp)
-        env.pop("SCLAUDE_PANE", None)
+        for name in ("SCLAUDE_PANE", "SSH_CONNECTION", "SSH_TTY", "TERM_PROGRAM"):
+            env.pop(name, None)
         env.update(extra_env or {})
         env = {k: v for k, v in env.items() if v is not None}
         if not tty:
@@ -177,21 +179,31 @@ echo "rc=$?"
     check("recorded-status", "rc=4" in text, True)
     check("recorded-no-tab-log", [n for n in os.listdir(tmp) if n.endswith(".log")], [])
     check("recorded-tab-unmarked", "sclaude-skip" in text, False)
-    text = run(dict(recorded, PANE_TEST_RC="6", WT_SESSION=None))
+    text = run(dict(recorded, PANE_TEST_RC="6", WT_SESSION=None,
+                    SSH_CONNECTION="1.2.3.4 5 6.7.8.9 22"))
     got = seen() or {}
     check("recorded-here-argv", got.get("argv"), ["--session-id", "0000", "-n", "demo/code", PROMPT])
     check("recorded-here-status", "rc=6" in text, True)
     check("recorded-here-marked", "sclaude-skip;begin;0000" in text and "sclaude-skip;end" in text, True)
 
-    # --- in place: no Windows Terminal, no terminal, or switched off ---
-    for name, env, tty in (("no-wt", {"WT_SESSION": None}, True),
+    # --- a tab without $WT_SESSION: a WSL console Windows Terminal took over ---
+    text = run({"PANE_TEST_RC": "5", "WT_SESSION": None})
+    check("no-wt-local-tab", pane_count(), 1)
+    check("no-wt-local-status", "rc=5" in text, True)
+
+    # --- in place: ssh, code-server, not a WSL console, no terminal, or off ---
+    for name, env, tty in (("ssh", {"WT_SESSION": None, "SSH_CONNECTION": "1.2.3.4 5 6.7.8.9 22"}, True),
+                           ("ssh-tty", {"WT_SESSION": None, "SSH_TTY": "/dev/pts/3"}, True),
+                           ("code-server", {"WT_SESSION": None, "TERM_PROGRAM": "vscode"}, True),
+                           ("no-interop", {"WT_SESSION": None, "WSL_INTEROP": None}, True),
                            ("no-tty", {}, False),
                            ("off", {"SCLAUDE_PANE": "off"}, True)):
         text = run(dict(env, PANE_TEST_RC="3"), tty=tty)
         got = seen() or {}
         check("%s-no-pane" % name, pane_count(), 0)
         check("%s-ran" % name, got.get("argv", [None])[-1:], [PROMPT])
-        check("%s-interop-kept" % name, got.get("interop"), "/run/WSL/1_interop")
+        if "WSL_INTEROP" not in env:
+            check("%s-interop-kept" % name, got.get("interop"), "/run/WSL/1_interop")
         check("%s-status" % name, "rc=3" in text, True)
 
     # --- a pane that never starts: in place after the wait ---

@@ -165,7 +165,27 @@ def session_name(d):
     if not name:
         sid = d.get("session_id")
         name = sid[:8] if sid else None
-    return name or None
+    return drop_shown_slug(d, name) or None
+
+
+def drop_shown_slug(d, name):
+    """`1-plan/<slug>` as `1-plan` when the slug is on the line already.
+
+    sclaude names a session `<kind>/<slug>`, and its worktree and branch carry
+    the same slug: the folder ends in `-<slug>`, the branch in `/<slug>`.
+    """
+    if not name or "/" not in name:
+        return name
+    head, slug = name.rsplit("/", 1)
+    if not head or not slug:
+        return name
+    cwd = dig(d, "workspace", "current_dir") or d.get("cwd") or os.getcwd()
+    folder = os.path.basename(cwd.rstrip(os.sep))
+    branch = git_branch(cwd, d.get("session_id")) or ""
+    if folder == slug or folder.endswith("-" + slug) \
+            or branch == slug or branch.endswith("/" + slug):
+        return head
+    return name
 
 
 def clip(text, width):

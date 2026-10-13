@@ -283,6 +283,11 @@ review = open(os.path.join(PROMPTS, "review.md")).read()
 check("review-writes-yours", ".sclaude/local/feature/review-yours" in review, True)
 check("review-says-resolve-yourself", "Resolve on GitHub yourself" in review, True)
 check("yours-file-name-agrees", ctx.YOURS_FILE in review, True)
+# A finding on a deferred file goes to review-yours, never to a fix: the prompt
+# names the folders deferred.sh treats as entries, and only those.
+deferred_sh = open(os.path.join(LIB, "deferred.sh")).read()
+for folder in (".sclaude/team/deferred/", ".sclaude/people/*/deferred/"):
+    check("review-names-" + folder, folder in review and "(glob)%s**" % folder in deferred_sh, True)
 body = open(os.path.join(PROMPTS, "_friction-body.md")).read()
 check("friction-may-fix-the-project", "<worktree>" in body and "<branch>" in body, True)
 # The review runs in the feature's tree, with sclaude's checkout added to read.

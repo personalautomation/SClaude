@@ -93,7 +93,7 @@ feature_actions() {
   if [[ "$step" == "done" && "$(state_get "$state" no_change 2>/dev/null || true)" == "true" ]]; then
     labels+=("Finish up"$'\t'"no change to the code — cleanup")
   elif [[ "$step" == "done" ]]; then
-    labels+=("Finish up"$'\t'"all steps done — preview, production, cleanup")
+    labels+=("Finish up"$'\t'"$(step_label "$step" "$wt") — preview, production, cleanup")
   else
     labels+=("Continue"$'\t'"step $(step_label "$step")")
   fi
@@ -395,7 +395,7 @@ actions_menu() {
   while IFS=$'\t' read -r slug wt step; do
     [[ -z "$slug" ]] && continue
     slugs+=("$slug")
-    labels+=("$slug"$'\t'"$(step_label "$step")")
+    labels+=("$slug"$'\t'"$(step_label "$step" "$wt")")
   done <<< "$rows"
 
   local n="${#slugs[@]}"

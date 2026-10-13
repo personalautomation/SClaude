@@ -121,14 +121,14 @@ claude_here() {
 # The name itself is left as it is: only the tab shows the emoji.
 pane_icon() {
   case "$1" in
-    *friction*)         printf '🧱' ;;
-    *-fix-*)            printf '🔧' ;;
-    [0-9]*-plan/*)      printf '📝' ;;
-    [0-9]*-code/*)      printf '💻' ;;
-    [0-9]*-pr/*)        printf '📤' ;;
-    [0-9]*-review/*)    printf '🔍' ;;
-    [0-9]*-epilogue/*)  printf '🏁' ;;
-    [0-9]*-retro/*)     printf '🔁' ;;
+    *friction*)             printf '🧱' ;;
+    *-fix-*)                printf '🔧' ;;
+    [0-9]*-plan[/\(]*)      printf '📝' ;;
+    [0-9]*-code[/\(]*)      printf '💻' ;;
+    [0-9]*-pr[/\(]*)        printf '📤' ;;
+    [0-9]*-review[/\(]*)    printf '🔍' ;;
+    [0-9]*-epilogue[/\(]*)  printf '🏁' ;;
+    [0-9]*-retro[/\(]*)     printf '🔁' ;;
   esac
 }
 

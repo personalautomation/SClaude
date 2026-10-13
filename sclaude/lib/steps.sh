@@ -482,13 +482,71 @@ PYSTATUS
 
 step_title() { step_field "$1" 4; }
 
-# "step 2/4 — development", or "all steps done" for a closed feature.
+# Where a feature is in its cycle, for the menu and `sclaude status`: "2/6
+# development". The cycle shown has six steps, the four of STEPS and the two
+# sessions after them, the epilogue and the retrospective (session_label
+# numbers them 5 and 6 as well). Only the four are steps of the state: the
+# epilogue runs after the merge, and the retrospective inside `sclaude done`,
+# so a feature past step 4 is `done` in its state, and which of the rest it is
+# on is read from what they leave.
+#
+#   step_label <step> [worktree]
+#
+# A `done` feature, with its worktree:
+#   4/6 done, waiting for merge   the pull request is open
+#   5/6 epilogue                  merged, and an epilogue was broken off
+#   6/6 retro                     merged; the clean-up with its retro is next
+#   all done                      the retro has run, or the feature changed
+#                                 nothing and has no pull request
+# Without the worktree, or when GitHub does not answer, it is "4/6 done".
 step_label() {
-  if [[ "$1" == "done" ]]; then
-    echo "all steps done"
-  else
-    echo "$(($(step_index "$1") + 1))/${#STEPS[@]} $(step_title "$1")"
+  local total=$((${#STEPS[@]} + 2))
+  if [[ "$1" != "done" ]]; then
+    echo "$(($(step_index "$1") + 1))/$total $(step_title "$1")"
+    return
   fi
+  local wt="${2:-}" state branch merged="" slug estate
+  state="$wt/.sclaude/local/feature/state.json"
+  if [[ -z "$wt" || ! -f "$state" ]]; then
+    echo "${#STEPS[@]}/$total done"
+    return
+  fi
+  if [[ "$(state_get "$state" no_change 2>/dev/null || true)" == "true" ]]; then
+    echo "all done"
+    return
+  fi
+  branch="$(state_get "$state" branch 2>/dev/null || true)"
+  [[ -n "$branch" ]] && merged="$(branch_pr_state "$branch")"
+  case "$merged" in
+    OPEN) echo "${#STEPS[@]}/$total done, waiting for merge"; return ;;
+    MERGED) ;;
+    *) echo "${#STEPS[@]}/$total done"; return ;;
+  esac
+  if retro_ran "$state"; then
+    echo "all done"
+    return
+  fi
+  slug="$(state_get "$state" feature 2>/dev/null || true)"
+  estate="$(epilogue_dir)/$slug.json"
+  if [[ -n "$slug" && -f "$estate" ]] \
+     && [[ -n "$(state_get "$estate" session 2>/dev/null || true)" ]] \
+     && [[ "$(state_get "$estate" done 2>/dev/null || echo false)" != "true" ]]; then
+    echo "$((${#STEPS[@]} + 1))/$total epilogue"
+  else
+    echo "$total/$total retro"
+  fi
+}
+
+# Whether the feature's retrospective has run to its end: its last session
+# closed (session_runs finish).
+retro_ran() {
+  python3 - "$1" <<'PY' 2>/dev/null
+import json, sys
+with open(sys.argv[1]) as fh:
+    runs = ((json.load(fh).get("retro") or {}).get("runs")) or []
+runs = [r for r in runs if isinstance(r, dict)]
+sys.exit(0 if runs and runs[-1].get("done") else 1)
+PY
 }
 
 step_index() {
@@ -618,40 +676,45 @@ print("%s-%d" % (step, number) if number else step)
 PY
 }
 
-# A session's number in the feature, for its name (`claude -n`), which the
-# status line shows and cuts short: the number goes first so that what is cut
-# is the slug. The steps are 1 to 4 in STEPS order, the epilogue and the
-# retrospective follow them (session_label).
+# Where a session stands in the feature, for its name (`claude -n`): the
+# number of the step it belongs to and which conversation of that step it is.
+# The steps are 1 to 4 in STEPS order, the epilogue and the retrospective
+# follow them (session_label).
 #
-#   session_number <friction key>
+#   session_number <friction key>   ->   "<number> <round>"
 #
-# `plan-1` is `1`, and `plan-2`, a second conversation of the step, is `1-2`.
-# A review is numbered by its round even when it is the first, `4-1`, since
-# there are usually several. A fixing session (`fix-preview-2`) keeps its key
-# under the step it fixes in: `4-fix-preview-2`. A key naming no step is
-# returned as it is.
+# `plan-1` is `1 1`, and `plan-2`, a second conversation of the step, is
+# `1 2`. A fixing session (`fix-preview-2`) goes under the step it fixes in,
+# its stage kept: `4-fix-preview 2`. A key naming no step is returned as it
+# is, round 1.
 session_number() {
   local key="$1" step n=1 idx
-  if [[ "$key" =~ ^fix-([a-z]+)-[0-9]+$ ]]; then
+  if [[ "$key" =~ ^fix-([a-z]+)-([0-9]+)$ ]]; then
     idx="$(step_index "$(regression_fix_step "${BASH_REMATCH[1]}")")"
-    echo "$((idx + 1))-$key"
+    echo "$((idx + 1))-fix-${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
     return
   fi
   step="$key"
   [[ "$key" =~ ^([a-z]+)-([0-9]+)$ ]] && { step="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"; }
   idx="$(step_index "$step")"
   if [[ "$idx" -lt 0 ]]; then
-    echo "$key"
-  elif [[ "$step" == "review" || "$n" -gt 1 ]]; then
-    echo "$((idx + 1))-$n"
+    echo "$key 1"
   else
-    echo "$((idx + 1))"
+    echo "$((idx + 1)) $n"
   fi
 }
 
-# The name a feature's session goes by: `<number>-<kind>/<slug>`, e.g.
-# `1-plan/12-login`, `4-2-review/12-login`, `4-2-friction/12-login` for the
-# friction review of that review round, `5-epilogue/…`, `6-retro/…`.
+# A name with its round, which only a second conversation and later carry:
+# `4-review`, then `4-review(2)`.
+with_round() {
+  if [[ "$2" -gt 1 ]]; then echo "$1($2)"; else echo "$1"; fi
+}
+
+# The name a feature's session goes by: `<number>-<kind>(<round>)/<slug>`,
+# e.g. `1-plan/12-login`, `4-review(2)/12-login`, `4-friction(2)/12-login`
+# for the friction review of that review round, `5-epilogue/…`, `6-retro/…`.
+# One shape for every kind, so the round is always last: the status line
+# shows the part before the slash as it is.
 #
 #   session_label step <state> <step> <session>
 #   session_label friction <key>
@@ -660,10 +723,17 @@ session_number() {
 #
 # Called after the step's run is opened (step_run), so the session counts.
 session_label() {
+  local number round
   case "$1" in
-    step) echo "$(session_number "$(step_run_key "$2" "$3" "$4")")-$3" ;;
-    friction) echo "$(session_number "$2")-friction" ;;
-    fix) session_number "$2" ;;
+    step)
+      read -r number round <<< "$(session_number "$(step_run_key "$2" "$3" "$4")")"
+      with_round "$number-$3" "$round" ;;
+    friction)
+      read -r number round <<< "$(session_number "$2")"
+      with_round "$number-friction" "$round" ;;
+    fix)
+      read -r number round <<< "$(session_number "$2")"
+      with_round "$number" "$round" ;;
     epilogue) echo "$((${#STEPS[@]} + 1))-epilogue" ;;
     retro) echo "$((${#STEPS[@]} + 2))-retro" ;;
   esac

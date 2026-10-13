@@ -2,7 +2,7 @@
 """Custom statusline for Claude Code.
 
 Reads the statusLine JSON on stdin, prints one line laid out in three zones:
-left (the sclaude step, then the path), middle (git branch, session, worktree),
+left (the sclaude session, then the path), middle (git branch, session, worktree),
 right (model, effort, context, rate limits). Never raises: any surprise falls
 back to a bare path.
 
@@ -119,31 +119,17 @@ def git_branch(cwd, session_id):
     return branch or None
 
 
-# The four steps of the sclaude feature cycle, in order. The label is what the
-# statusline shows; the key is what .sclaude/local/feature/state.json holds.
-SCLAUDE_STEPS = ["plan", "code", "pr", "review"]
+# A session sclaude started: `claude -n <number>-<kind>(<round>)/<slug>`, e.g.
+# `1-plan/12-login` or `4-review(2)/12-login` (session_label in
+# sclaude/lib/steps.sh). The part before the slash says which job this session
+# has; the slug is the worktree's, and the folder or branch shows it already.
+SCLAUDE_NAME = re.compile(r"^(\d+-[a-z][a-z-]*(?:\(\d+\))?)/[^/]+$")
 
 
-def feature_step(cwd):
-    """`2-code` for a worktree under sclaude, else None.
-
-    Cheap enough to run per message: one stat and, at most, one small read of a
-    file that sits in the worktree root.
-    """
-    if not cwd:
-        return None
-    try:
-        with open(os.path.join(cwd, ".sclaude/local/feature", "state.json")) as f:
-            step = json.load(f).get("step")
-    except (OSError, ValueError, AttributeError):
-        return None
-    if step == "done":
-        # Every step passed; what is left — merge, promote, deploy — is his.
-        return "%d/%d done" % (len(SCLAUDE_STEPS), len(SCLAUDE_STEPS))
-    try:
-        return "%d-%s" % (SCLAUDE_STEPS.index(step) + 1, step)
-    except ValueError:
-        return None
+def sclaude_label(d):
+    """`4-review(2)` for a session sclaude named, else None."""
+    m = SCLAUDE_NAME.match(d.get("session_name") or "")
+    return m.group(1) if m else None
 
 
 def dig(d, *path):
@@ -161,35 +147,13 @@ NAME_MIN = 12
 
 
 def session_name(d):
+    """The name for the middle zone; a sclaude session has its own at the left."""
+    if sclaude_label(d):
+        return None
     name = d.get("session_name")
     if not name:
         sid = d.get("session_id")
         name = sid[:8] if sid else None
-    name = drop_shown_slug(d, name) or None
-    # The step at the left of the line may already say exactly this.
-    cwd = dig(d, "workspace", "current_dir") or d.get("cwd") or os.getcwd()
-    if name and name == feature_step(cwd):
-        return None
-    return name
-
-
-def drop_shown_slug(d, name):
-    """`1-plan/<slug>` as `1-plan` when the slug is on the line already.
-
-    sclaude names a session `<kind>/<slug>`, and its worktree and branch carry
-    the same slug: the folder ends in `-<slug>`, the branch in `/<slug>`.
-    """
-    if not name or "/" not in name:
-        return name
-    head, slug = name.rsplit("/", 1)
-    if not head or not slug:
-        return name
-    cwd = dig(d, "workspace", "current_dir") or d.get("cwd") or os.getcwd()
-    folder = os.path.basename(cwd.rstrip(os.sep))
-    branch = git_branch(cwd, d.get("session_id")) or ""
-    if folder == slug or folder.endswith("-" + slug) \
-            or branch == slug or branch.endswith("/" + slug):
-        return head
     return name
 
 
@@ -227,7 +191,7 @@ def build(d, opts):
     def ico(sym):
         return sym + " " if icons else ""
 
-    # --- left: the sclaude step, then the path ---
+    # --- left: the sclaude session, then the path ---
     cwd = dig(d, "workspace", "current_dir") or d.get("cwd") or os.getcwd()
     branch = git_branch(cwd, d.get("session_id"))
     # A worktree folder named after its branch says the same thing twice; one
@@ -237,11 +201,11 @@ def build(d, opts):
         left = paint(ico("📁⎇") + branch, GREEN)
     else:
         left = paint(ico("📁") + home_path(cwd), BLUE)
-    # Which step of the feature cycle this worktree is on. First thing on the
-    # line because it is what says which of four jobs this session has.
-    step = feature_step(cwd)
-    if step:
-        left = paint(step, YELLOW) + " " + left
+    # Which session of the feature cycle this is. First thing on the line
+    # because it is what says which job this session has.
+    label = sclaude_label(d)
+    if label:
+        left = paint(label, YELLOW) + " " * opts.get("lgap", 1) + left
 
     # --- middle: branch, session, worktree ---
     mid = []
@@ -297,7 +261,7 @@ def build(d, opts):
             pct = int(round(pct))
             right.append("%s%s" % (ico("📅"), paint("%d%%" % pct, fill_colour(pct))))
 
-    return left, middle, "  ".join(right)
+    return left, middle, (" " * opts.get("gap", 2)).join(right)
 
 
 def fits(left, middle, right):
@@ -330,6 +294,24 @@ def layout(left, middle, right, cols):
         return left + " " * (edge - lw - rw) + right
     # Middle follows the path directly; the slack all goes before the right zone.
     return left + "  " + middle + " " * (edge - lw - 2 - mw - rw) + right
+
+
+# Wider gaps between the fields, tried in order once the ladder has settled on
+# what to show: on a wide terminal the slack would otherwise all sit in the
+# middle, with the fields huddled at both ends. Spacing never costs a field.
+SPACING = [dict(gap=4, lgap=3), dict(gap=3, lgap=2)]
+
+
+def spaced(d, opts, cols):
+    """The chosen variant with the widest gaps that still fit, else None."""
+    for extra in SPACING:
+        try:
+            line = layout(*build(d, dict(opts, **extra)), cols)
+        except Exception:
+            return None
+        if line is not None:
+            return line
+    return None
 
 
 def main():
@@ -382,18 +364,18 @@ def main():
                         break
                     line = layout(left, middle, right, cols)
         if line is not None:
-            sys.stdout.write(line)
+            sys.stdout.write(spaced(d, opts, cols) or line)
             return
 
     # Nothing fit, or something went wrong: fall back to the bare path, keeping
-    # the step ahead of it — on a narrow terminal which of four jobs this
+    # the sclaude session ahead of it — on a narrow terminal which job this
     # session has is worth more than the path it runs in.
     try:
         cwd = dig(d, "workspace", "current_dir") or d.get("cwd") or os.getcwd()
         line = paint(home_path(cwd), BLUE)
-        step = feature_step(cwd)
-        if step and vislen(step) + 1 + vislen(line) <= cols:
-            line = paint(step, YELLOW) + " " + line
+        label = sclaude_label(d)
+        if label and vislen(label) + 1 + vislen(line) <= cols:
+            line = paint(label, YELLOW) + " " + line
         sys.stdout.write(line)
     except Exception:
         sys.stdout.write("")

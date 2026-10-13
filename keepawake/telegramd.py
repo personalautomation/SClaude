@@ -808,8 +808,8 @@ def features_of(repo):
             # button leading nowhere.
             break
         # We split on two spaces — that is how align_columns separates the
-        # columns. One will not do: a step's name is sometimes two words ("3/4
-        # pull request"), and splitting on spaces returned "3/4 pull" as the step
+        # columns. One will not do: a step's name is sometimes two words ("3/6
+        # pull request"), and splitting on spaces returned "3/6 pull" as the step
         # and "request" as the path to the worktree. That is exactly how it
         # looked in the card.
         parts = [c for c in re.split(r" {2,}", line.strip()) if c]

@@ -3,8 +3,8 @@
 # The names sclaude gives a feature's sessions (`claude -n`), numbered so the
 # status line, which cuts a long name short, still says which session it is:
 #
-#   * steps are 1-4 in STEPS order, a second conversation of a step is `1-2`;
-#   * every review round is numbered, the first included: `4-1-review`;
+#   * steps are 1-4 in STEPS order, a second conversation of a step is
+#     `1-plan(2)`: the round always comes last, and the first has none;
 #   * a friction review carries the number of the session it reviews;
 #   * a fixing session goes under the step it fixes in;
 #   * the epilogue is 5, the retrospective 6;
@@ -45,15 +45,17 @@ with tempfile.TemporaryDirectory() as tmp:
             "review": {"runs": [{"session": "r1"}, {"session": "r2"}]},
         }}, fh)
     check("plan", label("step", state, "plan", "p1"), "1-plan")
-    check("code-again", label("step", state, "code", "c2"), "2-2-code")
-    check("review-first", label("step", state, "review", "r1"), "4-1-review")
-    check("review-second", label("step", state, "review", "r2"), "4-2-review")
+    check("code-again", label("step", state, "code", "c2"), "2-code(2)")
+    check("review-first", label("step", state, "review", "r1"), "4-review")
+    check("review-second", label("step", state, "review", "r2"), "4-review(2)")
 
 check("friction-plan", label("friction", "plan-1"), "1-friction")
-check("friction-review", label("friction", "review-2"), "4-2-friction")
+check("friction-review", label("friction", "review-2"), "4-friction(2)")
 check("friction-old-key", label("friction", "code"), "2-friction")
-check("friction-fix", label("friction", "fix-preview-1"), "4-fix-preview-1-friction")
-check("fix-local", label("fix", "fix-local-2"), "2-fix-local-2")
+check("friction-fix", label("friction", "fix-preview-1"), "4-fix-preview-friction")
+check("friction-fix-again", label("friction", "fix-prod-3"), "4-fix-prod-friction(3)")
+check("fix-local", label("fix", "fix-local-2"), "2-fix-local(2)")
+check("fix-first", label("fix", "fix-preview-1"), "4-fix-preview")
 check("epilogue", label("epilogue"), "5-epilogue")
 check("retro", label("retro"), "6-retro")
 
@@ -64,9 +66,9 @@ def icon(title):
     return p.stdout
 
 
-for title, want in (("1-plan/x", "📝"), ("2-2-code/x", "💻"), ("3-pr/x", "📤"),
-                    ("4-1-review/x", "🔍"), ("4-2-friction/x", "🧱"),
-                    ("4-fix-preview-1/x", "🔧"), ("4-fix-preview-1-friction/x", "🧱"),
+for title, want in (("1-plan/x", "📝"), ("2-code(2)/x", "💻"), ("3-pr/x", "📤"),
+                    ("4-review/x", "🔍"), ("4-review(2)/x", "🔍"), ("4-friction(2)/x", "🧱"),
+                    ("4-fix-preview(2)/x", "🔧"), ("4-fix-preview-friction/x", "🧱"),
                     ("5-epilogue/x", "🏁"), ("6-retro/x", "🔁"),
                     ("friction/deferred", "🧱"), ("demo/code", "")):
     check("icon " + title, icon(title), want)

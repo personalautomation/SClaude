@@ -1820,20 +1820,25 @@ journalctl --user -u keepawake-telegram.service -f
 
 ## statusline.py
 
-Claude Code's status line. Three zones: on the left the feature's step and the
-path, in the middle the branch, the session's name and the worktree, on the right
-the model, the effort, the context fill and the limits.
+Claude Code's status line. Three zones: on the left the sclaude session and
+the path, in the middle the branch, the session's name and the worktree, on the
+right the model, the effort, the context fill and the limits.
 
-The first element is the `sclaude` cycle's step: `1-plan`, `2-code`, `3-pr`,
-`4-review`, and `4/4 done` when every step has been through and the PR is waiting
-for a merge. It is read from `.sclaude/local/feature/state.json`, so outside a worktree under
-the orchestrator nothing is shown. Any surprise — broken json, an unfamiliar step
-— simply removes the indicator without breaking the line.
+The first element is the name sclaude gave the session, without its slug:
+`1-plan`, `2-code`, `3-pr`, `4-review`, a later round as `4-review(2)`, a fixing
+session as `4-fix-preview`, then `4-friction`, `5-epilogue`, `6-retro`. The
+round always comes last, and the first has none (`session_label` in
+`sclaude/lib/steps.sh`). The slug is left out because the folder or the branch
+shows it already. Any other session keeps its name in the middle zone, and
+shows nothing on the left.
 
 The terminal's width is handled by a ladder of degradation: first the weekly
 limit goes, then the worktree, the session's name, the icons, the bars. In the
-narrowest variant the step and the path remain — which of the four kinds of work
+narrowest variant the sclaude session and the path remain — which kind of work
 the session is busy with matters more than the directory.
+Once the fields are chosen, the gaps between them widen as far as the width
+allows, so on a wide terminal the slack is spread out rather than all left in
+the middle. Spacing never costs a field.
 
 `settings.json` points at `~/.claude/statusline.py`; `install.sh` puts a symlink
 there, and that symlink is what makes the setting work after the machine is

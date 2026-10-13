@@ -232,7 +232,7 @@ review_skippable() {
 # the session as before. Ctrl-C leaves and loses nothing: the step has not
 # started. Everything it prints goes to stderr, since stdout is the answer.
 review_wait_state() {
-  local wt="$1" slug="$2" pr="$3" word waited=0 announced=0
+  local wt="$1" slug="$2" pr="$3" word waited=0 announced=0 start=$SECONDS
   [[ -n "$pr" && "$pr" != "null" ]] || { echo unknown; return 0; }
   command -v gh >/dev/null 2>&1 || { echo unknown; return 0; }
   local repo; repo="$(gh_repo 2>/dev/null || true)"
@@ -252,10 +252,10 @@ review_wait_state() {
       info "  Waiting for the automatic review of PR #$pr to finish." >&2
       info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug" >&2
     fi
-    [[ -t 2 ]] && printf '\r\033[2K  %sHuman in the loop%s — waiting for the review checks (%s so far, next check in %ss)' \
+    [[ -t 2 ]] && printf '\r\033[2K  %sHuman in the loop%s — waiting for the review checks (%s so far, next check in %ss, any key checks now)' \
       "$DIM" "$OFF" "$(regression_duration "$waited")" "$MERGE_POLL" >&2
-    sleep "$MERGE_POLL"
-    waited=$((waited + MERGE_POLL))
+    poll_pause "$MERGE_POLL"
+    waited=$((SECONDS - start))
   done
   [[ "$announced" -eq 1 && -t 2 ]] && printf '\r\033[2K' >&2
   echo "${word:-unknown}"

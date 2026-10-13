@@ -461,7 +461,7 @@ if qa_wait:
                "Please set the ticket status" in qa_wait)
     check_true("qa-wait-warns-about-unticked-criteria", "--unticked" in qa_wait)
     check_true("qa-wait-announces-the-merge-next", "Now waiting for the merge" in qa_wait)
-    check_true("qa-wait-polls-at-qa-poll", 'sleep "$QA_POLL"' in qa_wait)
+    check_true("qa-wait-polls-at-qa-poll", 'poll_pause "$QA_POLL"' in qa_wait)
 
 merge_wait = body_of(deploy, "merge_wait")
 check_true("merge-wait-exists", merge_wait is not None)
@@ -470,7 +470,7 @@ if merge_wait:
     # issue's number and answers QA in it.
     check_true("merge-wait-names-the-ticket",
                'PR #$pr${issue:+ (issue #$issue)}' in merge_wait)
-    check_true("merge-wait-polls-at-merge-poll", 'sleep "$MERGE_POLL"' in merge_wait)
+    check_true("merge-wait-polls-at-merge-poll", 'poll_pause "$MERGE_POLL"' in merge_wait)
 
 
 # --- the constant is shared --------------------------------------------------
@@ -482,6 +482,64 @@ if merge_wait:
 check_true("qa-done-guarded-in-offer",
            re.search(r'if \[\[ -n "\$issue" && "\$issue" != "null" && -n "\$QA_DONE" \]\]; then',
                      offer or "") is not None)
+
+
+# --- a key cuts the wait short ----------------------------------------------
+#
+# Someone who has just merged, or moved the issue to Done, presses a key and
+# the look happens now rather than at the end of the minute. Run for real, in
+# a pseudo-terminal: the key is read from /dev/tty, which a pipe does not have.
+# The arrow after the first key must be swallowed too, or it would answer the
+# next question.
+check_true("review-wait-polls-with-poll-pause",
+           'poll_pause "$MERGE_POLL"' in (body_of(run_sh, "review_wait_state") or ""))
+
+
+def pause_in_pty(keys):
+    import pty
+    import select
+    import time
+    lib = os.path.join(ROOT, "sclaude", "lib")
+    script = ('source "%s/ui.sh"; s=$SECONDS; poll_pause 20; '
+              'echo "PAUSED $((SECONDS - s))"; '
+              'read -rsn1 -t 1 left < /dev/tty && echo "LEFT" || echo "CLEAN"' % lib)
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execvp("bash", ["bash", "--norc", "-c", script])
+    out = b""
+    time.sleep(0.5)
+    if keys:
+        os.write(fd, keys)
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        ready, _, _ = select.select([fd], [], [], 0.5)
+        if not ready:
+            continue
+        try:
+            chunk = os.read(fd, 1024)
+        except OSError:
+            break
+        if not chunk:
+            break
+        out += chunk
+        if b"CLEAN" in out or b"LEFT" in out:
+            break
+    os.waitpid(pid, 0)
+    return out.decode("utf-8", "replace")
+
+
+pressed = pause_in_pty(b"x\x1b[A")
+m = re.search(r"PAUSED (\d+)", pressed)
+check_true("a-key-ends-the-pause", m is not None and int(m.group(1)) < 5)
+check_true("the-rest-of-the-key-is-swallowed", "CLEAN" in pressed)
+
+# Without a terminal on stdout or stderr it is a plain sleep: nothing on
+# screen says a key would do anything, and a pipe must not block on a tty.
+piped = subprocess.run(
+    ["bash", "-c", 'source "%s/sclaude/lib/ui.sh"; sleep() { echo "slept $1"; }; '
+                   'poll_pause 7' % ROOT],
+    capture_output=True, text=True, stdin=subprocess.DEVNULL)
+check("no-terminal-sleeps", piped.stdout.strip(), "slept 7")
 
 
 if failures:

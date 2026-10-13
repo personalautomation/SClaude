@@ -180,6 +180,35 @@ ask_once() {
   return "$__rc"
 }
 
+# The pause between two looks of a wait for a person — QA, the merge, the
+# review checks. Any key ends it early, so the look happens now.
+#
+#   poll_pause <seconds>
+#
+# A person who has just merged, or moved the issue to Done, should not sit out
+# the rest of a minute to see sclaude notice. The key is read from the terminal
+# without echo and swallowed together with whatever came with it — an arrow
+# sends several bytes, a word typed by mistake many more — so none of it is
+# left to answer the next question.
+#
+# Only with the status line on screen (stdout or stderr a terminal): without
+# one nobody is told that a key does anything, and a test or a pipe must not
+# block on the person's terminal. A terminal that cannot be read falls back to
+# a plain sleep, as does the end of input, which would otherwise return at once
+# and spin the loop.
+poll_pause() {
+  local secs="$1" key rc=0
+  if [[ -t 1 || -t 2 ]] && ( exec < /dev/tty ) 2>/dev/null; then
+    read -rsn1 -t "$secs" key < /dev/tty || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+      while read -rsn1 -t 0.05 key < /dev/tty; do :; done
+      return 0
+    fi
+    [[ "$rc" -gt 128 ]] && return 0
+  fi
+  sleep "$secs"
+}
+
 # Whether the human answered "yes", and whether "no". Exactly y, yes, n or no,
 # in any case — nothing else counts as either.
 #

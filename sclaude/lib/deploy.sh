@@ -985,7 +985,7 @@ qa_back_column() {
 # it names the unticked ones instead, and the merge question names them again.
 qa_wait() {
   local slug="$1" issue="$2" pr="$3" branch="${4:-}" wt="${5:-}"
-  local now prev said="" waited=0 logged=0 announced=0 unticked
+  local now prev said="" waited=0 logged=0 announced=0 unticked start=$SECONDS
 
   [[ -n "$issue" && "$issue" != "null" && -n "$QA_DONE" ]] || return 0
   now="$(issue_status_now "$issue" 2>/dev/null || true)"
@@ -1060,7 +1060,7 @@ qa_wait() {
       echo ""
     fi
     if [[ -t 1 ]]; then
-      printf '\r\033[2K  %sHuman in the loop%s — waiting for QA (%s so far, next check in %ss)' \
+      printf '\r\033[2K  %sHuman in the loop%s — waiting for QA (%s so far, next check in %ss, any key checks now)' \
         "$DIM" "$OFF" "$(regression_duration "$waited")" "$QA_POLL"
     elif [[ $((waited - logged)) -ge 300 || "$waited" -eq 0 ]]; then
       # Without a terminal, a line every five minutes: this ends up in a log
@@ -1068,8 +1068,9 @@ qa_wait() {
       info "  waiting for QA on issue #$issue ($(regression_duration "$waited"))"
       logged="$waited"
     fi
-    sleep "$QA_POLL"
-    waited=$((waited + QA_POLL))
+    # A key cuts the pause short, so the time is counted rather than added up.
+    poll_pause "$QA_POLL"
+    waited=$((SECONDS - start))
     if [[ -n "$branch" && "$(branch_pr_state "$branch")" == "MERGED" ]]; then
       [[ -t 1 ]] && printf '\r\033[2K'
       return 3
@@ -1091,7 +1092,7 @@ qa_wait() {
 # was closed without a merge — it can never be merged then, and waiting on it
 # would last for ever.
 merge_wait() {
-  local slug="$1" issue="$2" pr="$3" branch="$4" waited=0 logged=0
+  local slug="$1" issue="$2" pr="$3" branch="$4" waited=0 logged=0 start=$SECONDS
 
   [[ -n "$branch" ]] || return 1
   echo ""
@@ -1108,14 +1109,14 @@ merge_wait() {
       return 2
     fi
     if [[ -t 1 ]]; then
-      printf '\r\033[2K  %sHuman in the loop%s — waiting for the merge (%s so far, next check in %ss)' \
+      printf '\r\033[2K  %sHuman in the loop%s — waiting for the merge (%s so far, next check in %ss, any key checks now)' \
         "$DIM" "$OFF" "$(regression_duration "$waited")" "$MERGE_POLL"
     elif [[ $((waited - logged)) -ge 300 || "$waited" -eq 0 ]]; then
       info "  waiting for the merge of PR #$pr${issue:+ (issue #$issue)} ($(regression_duration "$waited"))"
       logged="$waited"
     fi
-    sleep "$MERGE_POLL"
-    waited=$((waited + MERGE_POLL))
+    poll_pause "$MERGE_POLL"
+    waited=$((SECONDS - start))
   done
   [[ -t 1 ]] && printf '\r\033[2K'
   echo "${GREEN}✓ PR #$pr merged.${OFF}"

@@ -21,8 +21,9 @@ import json
 import re
 import subprocess
 
-# The user request, as step 1 records it from the conversation. Heads its
-# comment. Issues created before the move carry it in the body instead, at the
+# The user request, as step 1 records it: the whole of it, the description's
+# requirements restated together with what the conversation decided, so that
+# the comment alone says what is being built. Heads its comment. Issues created before the move carry it in the body instead, at the
 # end of a "## User request" section.
 REQUEST = "<!-- sclaude:user-request -->"
 

@@ -18,7 +18,8 @@
 # That is why the feature brings its discussion along — the decisions taken
 # while building it ("Returned from QA", answers to questions) are where it
 # left its description — and why every level brings its "User request"
-# comment, the planner's record of what the description did not say.
+# comment, the planner's record of the whole request — what the description
+# asks for and what the conversation narrowed, changed or added to it.
 #
 # A separate file rather than an extension of issue_context.py: that one renders
 # a single issue for the planner — with the links around it, with the advice
@@ -201,8 +202,10 @@ def render_one(issue, index, room=MAX_DISCUSSION):
 
     request = issue_comments.find(comments, REQUEST)
     if request is not None:
-        out.append("**The \"User request\" comment** (not yours — what the "
-                   "planning step recorded beyond the description):")
+        out.append("**The \"User request\" comment** (not yours — the whole "
+                   "request as the planning step agreed it, the description's "
+                   "requirements included, with what it narrows or changes "
+                   "marked):")
         out.append("")
         out.append("<<<REQUEST")
         out.append(clipped(request))

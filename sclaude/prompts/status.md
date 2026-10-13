@@ -53,7 +53,7 @@ An issue's description is never edited, so this section is the only place where 
 
 Compare the description with what was actually built. The feature drifts from its description through:
 
-- the `User request` comment — what was decided while scoping it, beyond or against the description;
+- the `User request` comment — the whole request as agreed while scoping it, marking where it narrows or changes the description;
 - the discussion in the snapshot — QA hand-backs ("Returned from QA"), answers to questions, decisions taken during review; a later decision overrides an earlier one;
 - the pull request<if:pr-number> (#<pr-number>: `gh pr view <pr-number> --json body` and `gh pr view <pr-number> --comments`)</if:pr-number> — what the review changed;
 - the code itself, when the sources above disagree or leave it open.

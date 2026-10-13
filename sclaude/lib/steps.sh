@@ -52,6 +52,14 @@ QA_POLL="${QA_POLL:-60}"
 REVIEW_WAIT_MAX="${REVIEW_WAIT_MAX:-1800}"
 [[ "$REVIEW_WAIT_MAX" =~ ^[0-9]+$ ]] || REVIEW_WAIT_MAX=1800
 
+# The share of its context window, in percent, under which a review session
+# takes the next round itself rather than handing it to a fresh one (see
+# round_marker in run.sh). A share, as the status line shows it: with a
+# window of 1M tokens 40% is 400k. .sclaude/local/review-context.log keeps
+# what every review session ended on, to judge the figure by.
+REVIEW_CONTEXT_MAX_PCT="${REVIEW_CONTEXT_MAX_PCT:-40}"
+[[ "$REVIEW_CONTEXT_MAX_PCT" =~ ^[0-9]+$ ]] || REVIEW_CONTEXT_MAX_PCT=40
+
 # How many times the preview deploy is tried before the run gives up, and the
 # pause between tries in seconds.
 #

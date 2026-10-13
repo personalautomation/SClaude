@@ -627,6 +627,9 @@ run_step() {
     # The step's start, for the summary in the issue. We write it only for a new
     # session: for a resumed one the step began then, not now.
     state_set "$state" "steps.$step.started" "$(date -Iseconds)"
+    # The rounds a review session closed are counted per session (see
+    # review_context_log).
+    [[ "$step" == "review" ]] && state_set "$state" "steps.$step.rounds" null
     step_run "$wt" "$step" open "$session"
     [[ "$step" == "review" ]] && run_comments "$wt" "$session" "$pr"
     prompt="$(render_prompt "$step" "$slug" "$pr" "$issue" "$wt")"
@@ -702,11 +705,10 @@ session_ended() {
     return 0
   fi
   # The review round is over: the automatic review closed every finding this
-  # session fixed, and posted new ones. The new ones go to a session of their
-  # own, with none of this one's context — it has no old finding left to
-  # answer, and the conversation that fixed them is only weight now. This
-  # session's row in the issue says why it ended; the next one is a row of its
-  # own. See session_watch_start.
+  # session fixed, and posted new ones. While its context is light the same
+  # session takes them; once it is heavy they go to a session of their own,
+  # with none of this one's context. That session's row in the issue says why
+  # this one ended; the next one is a row of its own. See round_marker.
   if [[ "$step" == "review" && -s "$(round_marker "$wt")" ]]; then
     local round_note; round_note="$(head -c 300 "$(round_marker "$wt")")"
     rm -f "$(round_marker "$wt")"
@@ -714,6 +716,25 @@ session_ended() {
     stty sane 2>/dev/null || true
     session_report "$wt" "$session"
     plan_report "$wt" "$step"
+    local rounds; rounds="$(state_get "$state" "steps.$step.rounds" 2>/dev/null || true)"
+    [[ "$rounds" =~ ^[0-9]+$ ]] || rounds=0
+    rounds=$((rounds + 1))
+    local held pct
+    held="$(review_context "$wt" "$session")"
+    pct="$(awk '{print $3}' <<<"$held")"
+    if [[ "$pct" =~ ^[0-9]+$ && "$pct" -lt "$REVIEW_CONTEXT_MAX_PCT" ]]; then
+      state_set "$state" "steps.$step.rounds" "$rounds"
+      review_context_log "$wt" "$slug" "$session" "carried on" "$held" "$rounds"
+      echo ""
+      say "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
+      [[ -n "$round_note" ]] && info "  $round_note"
+      info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%): the same session takes the new findings."
+      review_yours_report "$wt" "$pr" || true
+      run_step "$wt" "$slug" "$step" "$(review_carry_on "$pct")"
+      return 0
+    fi
+    review_context_log "$wt" "$slug" "$session" "fresh session" "$held" "$rounds"
+    state_set "$state" "steps.$step.rounds" null
     step_run "$wt" "$step" end "$session" "fixes confirmed"
     local round_key; round_key="$(step_run_key "$state" "$step" "$session")"
     state_set "$state" "steps.$step.session" null
@@ -722,7 +743,11 @@ session_ended() {
     echo ""
     say "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
     [[ -n "$round_note" ]] && info "  $round_note"
-    info "  The new findings go to a fresh session, without this one's context."
+    if [[ "$pct" =~ ^[0-9]+$ ]]; then
+      info "  Its context is at ${pct}% (${REVIEW_CONTEXT_MAX_PCT}% or more): the new findings go to a fresh session."
+    else
+      info "  The new findings go to a fresh session, without this one's context."
+    fi
     review_yours_report "$wt" "$pr" || true
     if ! run_friction "$wt" "$slug" "$round_key"; then
       info "  The next round waits for it: $SELF $slug"
@@ -741,6 +766,12 @@ session_ended() {
     && SESSION_AUTO_CLOSED=1
   plan_report "$wt" "$step"
   [[ "$step" == "review" ]] && { review_yours_report "$wt" "$pr" || true; }
+  if [[ "$step" == "review" ]]; then
+    local closed_rounds; closed_rounds="$(state_get "$state" "steps.$step.rounds" 2>/dev/null || true)"
+    [[ "$closed_rounds" =~ ^[0-9]+$ ]] || closed_rounds=0
+    review_context_log "$wt" "$slug" "$session" "$([[ -n "$SESSION_AUTO_CLOSED" ]] && echo done || echo exit)" \
+      "$(review_context "$wt" "$session")" "$closed_rounds"
+  fi
   step_run "$wt" "$step" end "$session"
 
   # The friction review follows every session, not every step.
@@ -2352,11 +2383,81 @@ return_brief() {
 # A session cannot clear its own context — /clear and /compact are the
 # person's, and no tool reaches them — so the orchestrator does it. The
 # session writes round_marker and stops; the watcher below ends the claude
-# process, and run_step records the session as ended with "fixes confirmed"
-# and opens a fresh one, whose prompt carries the pull request as it stands —
-# the new findings, and only them, open.
+# process, and session_ended decides who takes the new findings.
+#
+# Not always a fresh session. A fresh one starts from nothing on a pull
+# request this one has been settling, and may undo what it settled; it pays
+# the door again, too — the plan, the snapshot, the rules. So while the
+# conversation holds less than REVIEW_CONTEXT_MAX_PCT of its window, the same
+# session is resumed with the new findings (review_carry_on). Past it, the
+# session is recorded as ended with "fixes confirmed" and a fresh one opens,
+# whose prompt carries the pull request as it stands — the new findings, and
+# only them, open. A round is closed only once every fix the session made is
+# confirmed, so the threshold never takes a session away from its own
+# unfinished work.
 round_marker() {
   echo "$1/.sclaude/local/feature/review-round"
+}
+
+# How full a review session's context is.
+#
+#   review_context <wt> <session>   → "<tokens now> <tokens at start> <pct> <window>"
+#
+# The tokens are read from the transcript (session_end.py context); the share
+# and the window from what the status line last left for the session
+# (CONTEXT_FILE in statusline.py), since only Claude Code knows the window. A
+# share it did not leave is "-": the round then rotates as it always did.
+review_context() {
+  local wt="$1" session="$2" tokens pct="" size="" file="/tmp/claude-statusline-context-$2"
+  tokens="$(python3 "$LIB/session_end.py" context "$(transcript_dir "$wt")/$session.jsonl" 2>/dev/null || true)"
+  [[ -n "$tokens" ]] || tokens="- -"
+  if [[ -s "$file" ]]; then
+    read -r pct size < <(python3 - "$file" <<'PY' 2>/dev/null || true
+import json, sys
+with open(sys.argv[1]) as fh:
+    d = json.load(fh)
+size = d.get("context_window_size")
+print("%d %s" % (round(d["used_percentage"]), size if isinstance(size, int) else "-"))
+PY
+)
+  fi
+  echo "$tokens ${pct:--} ${size:--}"
+}
+
+# One line per review session's end, in the main tree's .sclaude/local/,
+# where it outlives the feature's worktree; tab-separated:
+#
+#   <time> <feature> <session> <outcome> <tokens now> <tokens at start> <pct> <window> <rounds> <comments>
+#
+# The outcome is "carried on" (the same session takes the next round), "fresh
+# session" (the threshold sent the next round elsewhere), "done" (sclaude
+# closed it on its done marker) or "exit" (a person did). rounds is how many
+# rounds the session closed, comments the threads the review handed it
+# (run_comments). It is what REVIEW_CONTEXT_MAX_PCT is to be judged by: what a
+# round costs, what a session costs before it starts, how tokens and the
+# share relate, and whether the sessions that carried on did worse.
+review_context_log() {
+  local wt="$1" slug="$2" session="$3" outcome="$4" held="$5" rounds="$6" root comments
+  root="$(scratch_root "$wt")" || return 0
+  comments="$(python3 - "$wt/.sclaude/local/feature/state.json" "$session" <<'PY' 2>/dev/null || true
+import json, sys
+with open(sys.argv[1]) as fh:
+    runs = ((json.load(fh).get("steps") or {}).get("review") or {}).get("runs") or []
+mine = [r for r in runs if isinstance(r, dict) and r.get("session") == sys.argv[2]]
+print(mine[-1].get("comments", "-") if mine else "-")
+PY
+)"
+  mkdir -p "$root/.sclaude/local" 2>/dev/null || return 0
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$slug" "$session" "$outcome" \
+    "$(tr ' ' '\t' <<<"${held:-- - - -}")" "${rounds:--}" "${comments:--}" \
+    >> "$root/.sclaude/local/review-context.log" 2>/dev/null || true
+}
+
+# What the same review session is told when it takes the next round.
+#
+#   review_carry_on <pct>
+review_carry_on() {
+  printf '%s' "**The review round is closed, and this conversation takes the next one.** The automatic review confirmed every fix you made. Your context is at $1% — under the ${REVIEW_CONTEXT_MAX_PCT}% at which sclaude opens a fresh session — so the new findings are yours now: what this conversation settled stays in view while you fix them. Re-read the pull request (\`gh pr checks <pr>\`, \`gh pr view <pr> --comments\`, \`gh api repos/{owner}/{repo}/pulls/<pr>/comments\`); its open threads are your list. Work them as step 1 of the prompt says, through subagents. From here they are threads you are fixing, and the round ends by the same rules as before."
 }
 
 # A session whose work is done, closed without anybody typing /exit.

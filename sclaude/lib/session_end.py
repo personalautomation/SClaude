@@ -24,6 +24,7 @@
 #   session_end.py first <transcript>           → the text that ended the first
 #                                                 turn, before anybody answered
 #   session_end.py limit <transcript> [<after>] → the usage limit it stopped on
+#   session_end.py context <transcript>         → tokens held now and at the start
 #
 # `since` is seconds since the epoch: the marker's mtime. Silent on any
 # trouble — an unreadable transcript is "working" and an empty message.
@@ -189,6 +190,38 @@ def limit(path, after=0):
     return hit
 
 
+def context(path):
+    """How many tokens the conversation holds, as (now, at the start), or None.
+
+    The input of the last request the session made: what claude sent the
+    model, cached or not, which is the figure the status line shows as the
+    context in use. A subagent's requests are its own context and are left
+    out, and so is a message that cost nothing — the synthetic one a usage
+    limit ends a turn with carries zeros, and would read as an empty context.
+
+    The session itself cannot see this number, so the orchestrator reads it
+    to decide whether a review round goes on in the same conversation (see
+    review_context in run.sh). The start is what a session costs before it
+    has done anything — the tools, the system prompt, the step's prompt — and
+    is logged beside it, so a threshold can be judged against what is spent
+    on the work rather than on the door.
+    """
+    held = start = None
+    for entry in entries(path):
+        if entry.get("type") != "assistant" or entry.get("isSidechain"):
+            continue
+        usage = (entry.get("message") or {}).get("usage") or {}
+        try:
+            total = sum(int(usage.get(key) or 0) for key in (
+                "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+        except (TypeError, ValueError):
+            continue
+        if total:
+            held = total
+            start = start or total
+    return (held, start) if held else None
+
+
 def last(path):
     """The text the session wrote after the last thing it was handed.
 
@@ -289,6 +322,10 @@ def main():
         hit = limit(args[1], after)
         if hit:
             sys.stdout.write("%s %d %s\n" % hit)
+    elif len(args) == 2 and args[0] == "context":
+        held = context(args[1])
+        if held:
+            sys.stdout.write("%d %d\n" % held)
     elif len(args) == 2 and args[0] in ("last", "first"):
         text = (last if args[0] == "last" else first)(args[1])
         if text:

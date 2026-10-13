@@ -60,6 +60,11 @@ breaks the other silently — grep before you edit:
   links in its summary. Change that workflow's wording and this reads every
   red check as real again.
 
+- `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
+  is read by `review_context` in `sclaude/lib/run.sh`, which decides by it
+  whether a review round stays in the same session; `tests/review-round.py`
+  runs both sides.
+
   *(The two entries above were added by Claude, not asked for line by line:
   they came with the parallel-features fixes of 2026-10-09, so that a later
   edit to one side does not silently break the other.)*

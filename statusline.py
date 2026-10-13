@@ -339,6 +339,28 @@ def spaced(d, opts, cols):
     return None
 
 
+# Where the context in use is left for sclaude, per session. Only Claude Code
+# knows the window's size, and it tells the status line alone; the transcript
+# has the tokens but not what they are a share of. sclaude reads this file when
+# a review session ends (review_context in sclaude/lib/run.sh), to decide
+# whether the next round stays in the same conversation and to log the figure.
+CONTEXT_FILE = "/tmp/claude-statusline-context-%s"
+
+
+def remember_context(d):
+    sid = d.get("session_id")
+    used = dig(d, "context_window", "used_percentage")
+    if not sid or not isinstance(used, (int, float)):
+        return
+    size = dig(d, "context_window", "context_window_size")
+    try:
+        with open(CONTEXT_FILE % sid, "w") as f:
+            json.dump({"used_percentage": used,
+                       "context_window_size": size if isinstance(size, int) else None}, f)
+    except OSError:
+        pass
+
+
 def main():
     try:
         d = json.load(sys.stdin)
@@ -346,6 +368,7 @@ def main():
             d = {}
     except Exception:
         d = {}
+    remember_context(d)
 
     try:
         cols = int(os.environ.get("COLUMNS") or 80)

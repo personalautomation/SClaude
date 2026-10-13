@@ -23,7 +23,11 @@
 #     their replies, across pages; of the resolved ones it counts them all and
 #     lists in one line those on a file that still has an open thread, so a new
 #     finding that would undo an earlier fix can be seen as one;
-#   * the prompt names the same marker file the orchestrator watches.
+#   * the prompt names the same marker file the orchestrator watches;
+#   * a closed round stays in the same session while its context is under
+#     REVIEW_CONTEXT_MAX_PCT, and goes to a fresh one past it: the tokens
+#     come from the transcript, the share from what the status line left,
+#     and every review session's end is logged with both.
 #
 # Run it with: python3 tests/review-round.py
 import importlib.util
@@ -372,6 +376,81 @@ session_watch_stop
     check("prompt-names-the-marker", "> .sclaude/local/feature/review-round" in prompt, True)
     check("prompt-uses-subagents", "Fix through subagents" in prompt, True)
     check("code-watches-the-same-file", 'echo "$1/.sclaude/local/feature/review-round"' in RUN, True)
+
+    # --- the context a session holds: its own requests, not a subagent's ------
+    def used(tokens, cached=0, side=False):
+        e = {"type": "assistant", "timestamp": stamp(),
+             "message": {"stop_reason": "end_turn", "content": [],
+                         "usage": {"input_tokens": tokens, "cache_read_input_tokens": cached,
+                                   "cache_creation_input_tokens": 0, "output_tokens": 50}}}
+        if side:
+            e["isSidechain"] = True
+        return e
+
+    open(transcript, "w").close()
+    say(used(10, 50000), used(5, 70000), used(900000, side=True), used(0))
+    held = subprocess.run([sys.executable, END, "context", transcript],
+                          capture_output=True, text=True).stdout
+    check("context-now-and-start", held, "70005 50010\n")
+    open(transcript, "w").close()
+    check("context-none-when-empty",
+          subprocess.run([sys.executable, END, "context", transcript],
+                         capture_output=True, text=True).stdout, "")
+
+    # --- the status line leaves the share where sclaude reads it --------------
+    sid = "statusline-test-%d" % os.getpid()
+    shared = "/tmp/claude-statusline-context-%s" % sid
+    subprocess.run([sys.executable, os.path.join(ROOT, "statusline.py")],
+                   input=json.dumps({"session_id": sid, "context_window":
+                                     {"used_percentage": 12.6, "context_window_size": 1000000}}),
+                   capture_output=True, text=True, timeout=30)
+    try:
+        with open(shared) as fh:
+            check("statusline-leaves-the-share", json.load(fh),
+                  {"used_percentage": 12.6, "context_window_size": 1000000})
+    except OSError:
+        check("statusline-leaves-the-share", "missing", "written")
+
+    # --- review_context joins the two, review_context_log writes the line ------
+    repo = os.path.join(tmp, "repo")
+    subprocess.run(["git", "init", "-q", repo], check=True)
+    ctx_wt = os.path.join(repo, "wt")
+    os.makedirs(os.path.join(ctx_wt, ".sclaude/local/feature"))
+    with open(os.path.join(ctx_wt, ".sclaude/local/feature/state.json"), "w") as fh:
+        json.dump({"steps": {"review": {"runs": [{"session": sid, "comments": 7}]}}}, fh)
+    ctx_dir = os.path.join(home, ".claude", "projects", re.sub(r"[^a-zA-Z0-9]", "-", ctx_wt))
+    os.makedirs(ctx_dir)
+    with open(os.path.join(ctx_dir, sid + ".jsonl"), "w") as fh:
+        fh.write(json.dumps(used(10, 50000)) + "\n" + json.dumps(used(3, 120000)) + "\n")
+    script = 'source "%s/state.sh"\nsource "%s/scratch.sh"\nLIB="%s"\nREVIEW_CONTEXT_MAX_PCT=40\n' % (LIB, LIB, LIB)
+    script += functions(RUN, ["review_context", "review_context_log", "review_carry_on"])
+    script += '\nexport HOME="%s"\nheld="$(review_context "%s" "%s")"\necho "$held"\n' % (home, ctx_wt, sid)
+    script += 'review_context_log "%s" feat "%s" "carried on" "$held" 2\n' % (ctx_wt, sid)
+    script += 'review_carry_on 12\n'
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30).stdout
+    check("context-joined", out.split("\n")[0], "120003 50010 13 1000000")
+    check("carry-on-names-the-share", "Your context is at 12% — under the 40%" in out, True)
+    try:
+        with open(os.path.join(repo, ".sclaude/local/review-context.log")) as fh:
+            row = fh.read().rstrip("\n").split("\t")
+        check("log-row", row[1:], ["feat", sid, "carried on", "120003", "50010", "13", "1000000", "2", "7"])
+    except OSError:
+        check("log-row", "missing", "written")
+    os.remove(shared)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30).stdout
+    check("context-without-statusline", out.split("\n")[0], "120003 50010 - -")
+
+    # --- the round goes on in the same session under the threshold -------------
+    check("threshold-decides", '[[ "$pct" =~ ^[0-9]+$ && "$pct" -lt "$REVIEW_CONTEXT_MAX_PCT" ]]' in rot, True)
+    check("carry-on-resumes-with-a-word", 'run_step "$wt" "$slug" "$step" "$(review_carry_on "$pct")"' in rot, True)
+    carry = rot[rot.index('-lt "$REVIEW_CONTEXT_MAX_PCT" ]]; then'):rot.index("    fi\n")]
+    check("carry-on-keeps-the-session", "steps.$step.session" in carry or "end \"$session\"" in carry, False)
+    check("rotation-logged", 'review_context_log "$wt" "$slug" "$session" "fresh session"' in rot, True)
+    check("exit-logged", RUN.count('review_context_log "$wt" "$slug" "$session"'), 3)
+    with open(os.path.join(LIB, "steps.sh")) as fh:
+        check("threshold-default", 'REVIEW_CONTEXT_MAX_PCT="${REVIEW_CONTEXT_MAX_PCT:-40}"' in fh.read(), True)
+    check("prompt-four-passes", "Four such passes at most" in prompt, True)
+    check("prompt-leaves-the-choice", "who takes them is the orchestrator's call" in prompt, True)
 
     # --- a fresh session sees open threads only --------------------------------
     spec = importlib.util.spec_from_file_location("pr_context", os.path.join(LIB, "pr_context.py"))

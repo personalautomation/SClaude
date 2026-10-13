@@ -220,7 +220,7 @@ team_guard_entry() {
 # --readonly), and the team's rules stay the maintainers'.
 #
 # And they run in the product's tree now, so the step bans hold for them as
-# for any step: the merge, a deploy, a push to main, a migration onto a
+# for any step: the merge, a deploy, a push to the product's main, a migration onto a
 # protected database. In sclaude's checkout none of those reached a product;
 # in the tree they did, with no hook to refuse them. The same hook, under a
 # step no policy names (friction), and the policy's flags.

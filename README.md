@@ -77,7 +77,9 @@ A PreToolUse hook refuses the command as the session tries it
 (`sclaude/hooks/forbidden-commands.py`):
 
 - **merging a pull request**: "they decide when a PR goes to main";
-- **pushing to `main`**, force-pushing, skipping the pre-push hook;
+- **pushing to `main`** of the product (sclaude's own checkout goes to `main`
+  without a pull request, so a push to its `main` passes), force-pushing,
+  skipping the pre-push hook;
 - **promoting migrations to production**, **switching the environment to prod**;
 - **writing code during planning**: a separate hook, because a plan that has
   already edited files is not a plan;
@@ -223,10 +225,13 @@ lives elsewhere:
 | what one machine keeps about the product: terminal recordings | `.sclaude/local/` in the product, never committed, never deployed |
 | the person: name, database, projects for `wsl-update`, the Telegram bot, where records are gathered | `~/.config/sclaude/`, `~/.config/keepawake/env`, `~/.claude/sclaude/` |
 
-**Who changes the orchestrator.** Nobody's sessions do: friction reviews,
+**Who changes the orchestrator.** Not the review sessions: friction reviews,
 retrospectives and the monthly deferred review read sclaude's checkout and
-change the product (a hook keeps the checkout read-only to them). A change to
-sclaude's out-of-the-box behaviour is made deliberately. `MAINTAINERS` lists
+change the product (a hook keeps the checkout read-only to them). A step
+session whose plan reaches into sclaude may commit there and push to its
+`main` — the ban on pushing to `main` is the product's, and sclaude's checkout
+has no pull requests of its own. A change to sclaude's out-of-the-box
+behaviour is made deliberately. `MAINTAINERS` lists
 the git addresses allowed to commit it straight to `main`. Everybody else
 commits by hand, then runs `sclaude propose`: the commits move from `main` to
 a branch of their own, `dev/<name>`, and sclaude sends it as a pull request
@@ -254,7 +259,7 @@ the rest (`sclaude/lib/policy.py`):
 
 | layer | where | what it can do |
 |---|---|---|
-| sclaude's own rules | `sclaude/policy/core.json` | merging, pushing to `main`, `--force`, `--no-verify`, a pull request from step 2. Nobody lifts them |
+| sclaude's own rules | `sclaude/policy/core.json` | merging, pushing to the product's `main` (sclaude's own `main` takes a push), `--force`, `--no-verify`, a pull request from step 2. Nobody lifts them |
 | an integration's preset | `sclaude/policy/vercel.json`, `supabase.json` | the stack's usual dangers: a deploy, a migration into a protected database, Supabase's MCP writing tools. On when the product lists the integration, or, while it lists none, evidently uses it |
 | the product's team | `.sclaude/team/policy.json` | its own bans (`npm run db:promote`), its integrations, their settings (how to tell which database the tree is on); an `allow` lifts an integration's ban and stops the question |
 | one developer | `.sclaude/people/<name>/policy.json` | bans and permissions of their own; lifts nothing the team or an integration bans |
@@ -387,7 +392,7 @@ update leaves everybody on `main`; a branch of one's own, `dev/<name>` (the
 name comes from `developer.sh`), is for proposing a change to sclaude, and a
 non-maintainer's commits there go out as a pull request (see "Who changes the
 orchestrator"). sclaude never pushes its own checkout otherwise: the review
-sessions do not commit to it.
+sessions do not commit to it, and a step session that commits there pushes on its own.
 
 | File | What is in it |
 | --- | --- |

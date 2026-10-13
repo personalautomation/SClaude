@@ -624,6 +624,48 @@ def main():
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
+    # sclaude's own checkout goes to main without a pull request: a push to
+    # main there passes, --force and --no-verify do not, and neither does a
+    # push from it to a URL, one redirected to another repository, or one
+    # where the product is the checkout itself.
+    own = os.path.realpath(os.path.join(HOOKS, "..", ".."))
+    above, name = os.path.split(own)
+    product_tree = tempfile.mkdtemp(prefix="hooks-product-")
+    subprocess.run(["git", "init", "-q", "-b", "main", product_tree], check=True)
+    try:
+        own_cases = [
+            ("git -C " + own + " push origin main", None, None, ALLOW),
+            ("cd " + own + " && git push origin HEAD:main", None, None, ALLOW),
+            ("cd " + own + "/sclaude && git push -u origin main", None, None, ALLOW),
+            # `~` is the home directory, as bash has it; a quoted one is not.
+            ("git -C ~/" + name + " push origin main", None, {"HOME": above}, ALLOW),
+            ("cd ~/" + name + " && git push origin main", None, {"HOME": above}, ALLOW),
+            ("cd '~/" + name + "'; git push origin main", None, {"HOME": above}, DENY),
+            ("git -C " + own + " push --force origin main", None, None, DENY),
+            ("cd " + own + " && git push --no-verify origin main", None, None, DENY),
+            ("git -C " + own + " push origin +main", None, None, DENY),
+            ("git -C " + own + " push https://github.com/o/r.git main", None, None, DENY),
+            ("git -C " + own + " --git-dir=" + product_tree + "/.git push origin main",
+             None, None, DENY),
+            ("GIT_DIR=" + product_tree + "/.git git -C " + own + " push origin main",
+             None, None, DENY),
+            # A product that is the checkout itself keeps the ban.
+            ("git -C " + own + " push origin main", own, None, DENY),
+            # The product is still the product.
+            ("git push origin main", None, None, DENY),
+            ("git push", None, None, DENY),
+            ("git -C " + own + " status && git push origin main", None, None, DENY),
+        ]
+        for command, root, env, want in own_cases:
+            full = dict(env or {})
+            full["CLAUDE_PROJECT_DIR"] = product_tree
+            got = run("forbidden-commands.py", command, step="code", cwd=product_tree,
+                      root=root, env=full)
+            if got != want:
+                failures.append(("own", command, want, got))
+    finally:
+        shutil.rmtree(product_tree, ignore_errors=True)
+
     for command, step, want in BY_STEP:
         got = run("forbidden-commands.py", command, step=step)
         if got != want:

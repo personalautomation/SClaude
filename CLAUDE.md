@@ -87,8 +87,14 @@ in its `.sclaude/local/`, which git and every Vercel upload are kept out of
 `MAINTAINERS` lists the git addresses allowed to commit sclaude's core straight
 to `main`. Everybody else proposes a change on `dev/<name>` (the name comes
 from `developer_name` in `sclaude/lib/developer.sh`), which reaches `main`
-through a pull request. No session commits here: the review sessions change
-the product.
+through a pull request. The review sessions do not commit here: they change
+the product. A step session whose plan reaches into this checkout may commit
+here and push to `main` (`OWN_CHECKOUT` in `sclaude/hooks/forbidden-commands.py`).
+
+<!-- Provenance: changed by Claude at the owner's explicit decision on
+2026-10-13, after a code step's push to this checkout's main was refused
+twice and the person had to finish by hand. The old line said no session
+commits here. -->
 
 With `MAINTAINERS` absent everybody is a maintainer, which is what a copy used
 by one person wants.

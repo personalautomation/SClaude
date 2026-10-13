@@ -6,7 +6,8 @@
 # straight from sclaude's command line, and that is enough. Only what the flag
 # breaks on ends up here — verified live, not from the documentation:
 #
-#   * "push is allowed, but not to main". A rule with a `*` in the middle —
+#   * "push is allowed, but not to main" — the product's main; sclaude's own
+#     checkout is the exception, see OWN_CHECKOUT. A rule with a `*` in the middle —
 #     `Bash(git push * main)` — does not fire at all, and `git push` cannot be
 #     banned outright: step 2 pushes the branch, step 4 pushes review fixes. So
 #     the arguments have to be parsed, and that is a hook's work.
@@ -72,7 +73,8 @@ from _shell import (GIT_VALUED, SEPARATORS, call_form, closing_at, inner_command
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
 
-# The branch that must not be pushed to: it moves only by merging a PR.
+# The branch that must not be pushed to: it moves only by merging a PR. In
+# every repository but sclaude's own checkout (OWN_CHECKOUT).
 PROTECTED = "main"
 
 # The commands banned by prefix come from the session's policy: sclaude's
@@ -700,13 +702,19 @@ def expand(path, known, command):
         return None
 
 
+QUOTED_TILDE = re.compile(r"'[^']*~[^']*'|\"[^\"]*~[^\"]*\"")
+
+
 def follow_cd(where, words, known=None, command=""):
     """The directory after this segment, or None when it cannot be told.
 
-    Only a plain `cd <path>` is followed. No argument, `-`, `~`, a variable
-    nobody set to a literal earlier in the command, a subshell bracket or
-    pushd/popd make the directory unknown, and an unknown directory never
-    counts as scratch.
+    Only a plain `cd <path>` is followed. No argument, `-`, `~user`, a
+    variable nobody set to a literal earlier in the command, a subshell bracket
+    or pushd/popd make the directory unknown, and an unknown directory never
+    counts as scratch or as sclaude's own checkout. `~` and `~/…` are the home
+    directory, as bash expands them, unless the command quotes a tilde
+    anywhere: bash takes a quoted one literally, and the words here have lost
+    their quotes.
     """
     if not words:
         return where
@@ -720,6 +728,9 @@ def follow_cd(where, words, known=None, command=""):
     if len(words) != 2:
         return None
     path = words[1]
+    if (path == "~" or path.startswith("~/")) and command \
+            and not QUOTED_TILDE.search(command):
+        path = os.path.expanduser(path)
     if "$" in path and known:
         path = expand(path, known, command)
         if path is None:
@@ -735,6 +746,42 @@ def follow_cd(where, words, known=None, command=""):
 
 MAIN_REASON = ("main moves only by merging a pull request — that is "
                "the GitHub flow of this project")
+
+
+# sclaude's own checkout, which bin/sclaude knows as $INSTRUMENTS: the
+# repository this hook sits in, two levels up, found the way bin/sclaude finds
+# it. Its rule is the opposite of a product's: changes there go straight to
+# `main`, with no pull request. A code step once followed its plan into the
+# checkout, committed, and its push to main was refused twice; the person had
+# to finish by hand. So a push to `main` passes when the repository it runs in
+# is this checkout itself — the top of it, not a repository nested inside or a
+# worktree of it — and names one of its remotes rather than a path or URL.
+# --force and --no-verify are refused there as everywhere. A directory that
+# cannot be told, a repository named past the directory (--git-dir, GIT_DIR),
+# or a product that is this checkout get no exemption.
+OWN_CHECKOUT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                             "..", ".."))
+
+
+def toplevel(where):
+    """The top of the work tree a directory is in, or None."""
+    try:
+        done = subprocess.run(["git", "-C", where, "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return os.path.realpath(done.stdout.strip()) if done.returncode == 0 else None
+
+
+def own_push(where, remote, redirected=False):
+    """Is this a push from sclaude's own checkout to one of its remotes?"""
+    if not where or not remote or redirected or "/" in remote or ":" in remote:
+        return False
+    for product in (root, project_dir()):
+        product = os.path.realpath(product) if product else ""
+        if product == OWN_CHECKOUT or product.startswith(OWN_CHECKOUT + os.sep):
+            return False
+    return toplevel(where) == OWN_CHECKOUT
 
 
 def push_target(ref, known):
@@ -820,6 +867,9 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
     # A bare `git push` goes to origin as far as this can tell: in a scratch
     # repository it is as harmless as the same push with the remote named.
     if scratch_push(command, parts, where, remote[0] if remote else "origin", redirected):
+        return None
+    # The same for sclaude's own checkout, which goes to main without a PR.
+    if own_push(where, remote[0] if remote else "origin", redirected):
         return None
     for ref in refs[1:] if len(refs) > 1 else []:
         # `HEAD` or `@` alone is the branch checked out, pushed under its own
@@ -940,7 +990,7 @@ def api_merge_refuses(words, raw):
 # _shell.py: write-guard.py reads git calls the same way.
 
 
-def git_globals(raw, where):
+def git_globals(raw, where, command=""):
     """git's options before the subcommand, read off one call.
 
     `raw` is the call with its paths, starting at `git`. Returns how many words
@@ -958,7 +1008,7 @@ def git_globals(raw, where):
         else:
             i += 1
         if name == "-C":
-            where = follow_cd(where, ["cd", value]) if value else None
+            where = follow_cd(where, ["cd", value], command=command) if value else None
         elif name in ("--git-dir", "--work-tree", "-c", "--config-env"):
             redirected = True
     return i - 1, where, redirected
@@ -1042,7 +1092,7 @@ def refuses(command, step, cwd=None, depth=0):
                    for w in raw[len(raw) - len(words):]):
                 return ("core.hooksPath set on the command line bypasses .githooks/pre-push, "
                         "which exists precisely to catch the database drifting from the repo")
-            taken, here, also = git_globals(raw[len(raw) - len(words):], where)
+            taken, here, also = git_globals(raw[len(raw) - len(words):], where, command)
             words = words[:1] + words[1 + taken:]
         reason = (push_refuses(words, command, parts, here, raw,
                                redirected or also, known)

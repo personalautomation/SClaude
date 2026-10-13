@@ -1060,6 +1060,14 @@ after_step() {
       # how a gate teaches people to dread the question. The gate opens a
       # fixing session itself when the run is red, so there is nothing to say
       # here beyond where the feature now waits.
+      #
+      # Unless the feature changed nothing of its own: then there is nothing
+      # for the suite, the pull request or a deployment to be about, and the
+      # cycle ends here (no_change.sh).
+      if no_change_feature "$wt" >/dev/null; then
+        no_change_finish "$wt" "$slug"
+        return 0
+      fi
       if ! regression_gate "$wt" "$slug" local; then
         info "  The step waits for a green regression: $SELF $slug"
         return 0

@@ -121,7 +121,7 @@ INSTRUMENTS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 # half an orchestrator is worse than none.
 for _module in io ui steps state project environment developer branches worktree featuredb lock pane run \
                github plan deploy regression rollback watch picker abandon actions doctor deferred \
-               terminal retro scratch; do
+               terminal retro scratch no_change; do
   # shellcheck source=/dev/null
   source "$LIB/$_module.sh" || {
     echo "sclaude: cannot load $LIB/$_module.sh" >&2
@@ -400,7 +400,13 @@ cmd_resume() {
 
   if [[ "$step" == "done" ]]; then
     echo "Feature '$slug' has been through every step."
-    remind_prod "$wt" "$slug"
+    # Nothing to deploy for a feature with no change (no_change.sh): only the
+    # clean-up is left.
+    if [[ "$(state_get "$wt/.sclaude/local/feature/state.json" no_change 2>/dev/null || true)" == "true" ]]; then
+      cmd_done "$slug" || true
+    else
+      remind_prod "$wt" "$slug"
+    fi
     return 0
   fi
 
@@ -1053,19 +1059,29 @@ cmd_done() {
 
   IFS=$'\t' read -r merged pr < <(gh pr view "$branch" --repo "$(git -C "$REPO" remote get-url origin)" \
     --json state,number --jq '[.state, .number] | @tsv' 2>/dev/null) || true
-  if [[ "$merged" != "MERGED" ]]; then
+  # A feature with no change of its own has no pull request to wait for
+  # (no_change.sh). What sclaude committed on its branch goes where it belongs
+  # first: the branch is deleted below, and anything left on it with it.
+  local no_change; no_change="$(state_get "$wt/.sclaude/local/feature/state.json" no_change 2>/dev/null || true)"
+  if [[ "$no_change" == "true" ]]; then
+    no_change_settle "$wt" \
+      || die "something sclaude committed on $branch did not reach main — the clean-up waits for it: $SELF done $slug"
+  elif [[ "$merged" != "MERGED" ]]; then
     die "the PR for $branch is not merged (state: ${merged:-not found}). Cleaning up comes after the merge."
   fi
 
   # The retrospective, while everything it reads is still here (retro.sh). Before
   # the list below rather than after it, so the list stands right above the
-  # question it belongs to.
-  run_retro "$wt" "$slug" "$pr" "$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null || true)"
+  # question it belongs to. It reads a pull request, and a feature with no
+  # change has none.
+  [[ "$no_change" == "true" ]] \
+    || run_retro "$wt" "$slug" "$pr" "$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null || true)"
 
   # Code the retrospective changed is not cleaned up with the feature: the feature
   # goes back to step 3 for it by itself, and through the review, the preview,
   # QA and the merge after it. The clean-up waits for that merge.
-  local again; again="$(retro_changed_code "$wt" "$branch")"
+  local again=""
+  [[ "$no_change" == "true" ]] || again="$(retro_changed_code "$wt" "$branch")"
   if [[ -n "$again" ]]; then
     retro_reopen "$wt" "$pr" || die "could not reopen '$slug': see $wt/.sclaude/local/feature/state.json"
     echo ""
@@ -1161,8 +1177,14 @@ cmd_done() {
 
   # Never a plain -D: a squash-merged branch goes when its tip is the merged
   # PR's head, and one with commits past the PR stays (branch_delete_merged).
+  # Without a pull request there is no merged head to compare with: what the
+  # branch held is on main already, or was dropped at no_change_settle.
   local kept=0
-  branch_delete_merged "$branch" || kept=$?
+  if [[ "$no_change" == "true" ]]; then
+    no_change_branch_delete "$branch" || kept=1
+  else
+    branch_delete_merged "$branch" || kept=$?
+  fi
   if [[ "$kept" == 1 ]]; then
     warn "  local branch $branch kept: it carries commits that are not in main"
     warn "  to force it: git branch -D $branch"

@@ -90,7 +90,9 @@ feature_actions() {
   # same menu does with the checkbox cleared. A closed feature has nothing to
   # continue: only the epilogue is left there, and cmd_resume calls that one
   # too.
-  if [[ "$step" == "done" ]]; then
+  if [[ "$step" == "done" && "$(state_get "$state" no_change 2>/dev/null || true)" == "true" ]]; then
+    labels+=("Finish up"$'\t'"no change to the code — cleanup")
+  elif [[ "$step" == "done" ]]; then
     labels+=("Finish up"$'\t'"all steps done — preview, production, cleanup")
   else
     labels+=("Continue"$'\t'"step $(step_label "$step")")

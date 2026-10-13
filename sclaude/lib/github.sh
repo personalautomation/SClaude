@@ -192,6 +192,7 @@ issue_hold_open() {
 # The other half: the cycle is over, the issue closes. "shipped" when
 # production carries the feature and its regression is green, "declined" when
 # the human said no to production — the work is merged and accepted either way.
+# "unchanged" when the feature changed nothing in the code (no_change.sh).
 issue_close_done() {
   local issue="$1" outcome="${2:-shipped}" repo state
 
@@ -203,7 +204,9 @@ issue_close_done() {
   [[ "$state" == open ]] || return 0
 
   if gh issue close "$issue" --repo "$repo" --reason completed >/dev/null 2>&1; then
-    if [[ "$outcome" == declined ]]; then
+    if [[ "$outcome" == unchanged ]]; then
+      info "Issue #$issue closed — the feature changed nothing in the code, so it had no pull request."
+    elif [[ "$outcome" == declined ]]; then
       info "Issue #$issue closed — merged and accepted; production was declined."
       info "  Ship it later from ${REPO:-the repository}: vercel --prod"
     else
@@ -681,6 +684,10 @@ out = [
 line = "Branch `%s`" % s.get("branch", "")
 if s.get("pr"):
     line += " · PR #%s" % s["pr"]
+elif s.get("no_change"):
+    # no_change.sh: the cycle ended at step 2, and the empty rows above are
+    # steps it had no reason to take rather than steps it has not reached.
+    line += " · no change to the code: no pull request, review, preview or production"
 out.append(line)
 
 wt = s.get("worktree") or ""

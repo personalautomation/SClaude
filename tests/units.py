@@ -25,9 +25,11 @@ def check(name, got, want):
 def refresh(inst, cfg):
     script = ('source "%s/ui.sh" 2>/dev/null; source "%s/run.sh"; INSTRUMENTS="%s"; '
               'systemctl() { echo "$*" >> "%s/reloads"; case "$2" in '
-              'is-failed) [ -e "%s/failed-$4" ] ;; is-enabled) echo enabled ;; esac; }; units_refresh'
-              % (LIB, LIB, inst, cfg, cfg))
-    subprocess.run(["bash", "-c", script], env=dict(os.environ, HOME=cfg), check=True)
+              'is-failed) [ -e "%s/failed-$4" ] ;; is-active) [ -e "%s/active-$4" ] ;; '
+              'is-enabled) cat "%s/enabled-$3" 2>/dev/null || echo static ;; esac; }; '
+              'info() { echo "INFO $*"; }; units_refresh' % (LIB, LIB, inst, cfg, cfg, cfg, cfg))
+    return subprocess.run(["bash", "-c", script], env=dict(os.environ, HOME=cfg), check=True,
+                          capture_output=True, text=True).stdout
 
 
 tmp = tempfile.mkdtemp()
@@ -73,21 +75,63 @@ try:
             os.remove(os.path.join(cfg, "reloads"))
 
     calls()
-    with open(os.path.join(inst, "systemd", "a.service"), "a") as fh:
-        fh.write("Restart=always\n")
-    refresh(inst, cfg)
-    check("a running unit is not restarted", "restart" in calls(), False)
 
-    with open(os.path.join(inst, "systemd", "a.service"), "a") as fh:
-        fh.write("RestartSec=5\n")
-    open(os.path.join(cfg, "failed-a.service"), "w").close()
+    def touch(name):
+        open(os.path.join(cfg, name), "w").close()
+
+    def change(unit):
+        with open(os.path.join(inst, "systemd", unit), "a") as fh:
+            fh.write("# changed\n")
+
+    def reset():
+        for f in os.listdir(cfg):
+            if f.split("-")[0] in ("failed", "active", "enabled"):
+                os.remove(os.path.join(cfg, f))
+
+    change("a.service")
+    touch("active-a.service")
+    out = refresh(inst, cfg)
+    check("a running unit is not restarted", "restart a.service" in calls(), False)
+    check("it is named for the person", "systemctl --user restart a.service" in out, True)
+    reset()
+
+    change("a.service")
+    touch("failed-a.service")
     refresh(inst, cfg)
-    check("a failed unit is started again", "start --no-block a.service" in calls(), True)
+    check("a failed static unit is not started", "start --no-block a.service" in calls(), False)
+    reset()
+
+    change("a.service")
+    touch("failed-a.service")
+    with open(os.path.join(cfg, "enabled-a.service"), "w") as fh:
+        fh.write("enabled-runtime\n")
+    refresh(inst, cfg)
+    check("a failed enabled unit is started", "start --no-block a.service" in calls(), True)
+    reset()
+
+    with open(os.path.join(inst, "systemd", "a.socket"), "w") as fh:
+        fh.write("[Socket]\n")
+    with open(os.path.join(units, "a.socket"), "w") as fh:
+        fh.write("[Socket]\n")
+    change("a.service")
+    touch("failed-a.service")
+    refresh(inst, cfg)
+    log = calls()
+    check("a failed socket-started unit comes back by its socket",
+          ("reset-failed a.socket" in log, "start --no-block a.socket" in log), (True, True))
+    reset()
 
     os.remove(a)
     os.symlink(os.path.join(tmp, "moved", "systemd", "a.service"), a)
     refresh(inst, cfg)
     check("a link into a moved checkout is repaired", os.path.islink(a), False)
+
+    os.remove(a)
+    own = os.path.join(tmp, "mine.service")
+    open(own, "w").close()
+    os.symlink(own, a)
+    refresh(inst, cfg)
+    check("a unit of the person's own stays", os.path.islink(a), True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

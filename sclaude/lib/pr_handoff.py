@@ -155,13 +155,16 @@ def checks_line(rollup):
         elif state not in GREEN:
             red.append(name)
     parts = []
-    # Once each: the findings verdict comes as a check run and a status.
+    # The findings verdict comes as a check run and a status: it is one check.
+    doubled = max(0, sum(1 for c in rollup
+                         if FINDINGS_CHECK in (c.get("name"), c.get("context"))) - 1)
+    once = lambda names: [n for i, n in enumerate(names)
+                          if n != FINDINGS_CHECK or FINDINGS_CHECK not in names[:i]]
     if red:
-        parts.append("⚠ red: " + ", ".join(dict.fromkeys(red)))
+        parts.append("⚠ red: " + ", ".join(once(red)))
     if running:
-        parts.append("still running: " + ", ".join(dict.fromkeys(running)))
-    names = {c.get("name") or c.get("context") or "?" for c in rollup}
-    return "; ".join(parts) if parts else "✓ all %d green" % len(names)
+        parts.append("still running: " + ", ".join(once(running)))
+    return "; ".join(parts) if parts else "✓ all %d green" % (len(rollup) - doubled)
 
 
 def regression_line(state):

@@ -920,9 +920,10 @@ def close_state(cwd, pr, repo):
         state = (c.get("conclusion") or c.get("state") or "").upper()
         if (status and status != "COMPLETED") or state in ("PENDING", "EXPECTED", ""):
             return "pending"
-    # Once each: the findings verdict comes as a check run and a status.
-    red = list(dict.fromkeys(c.get("name") or c.get("context") or "?" for c in rollup
-                             if (c.get("conclusion") or c.get("state") or "").upper() not in GREEN))
+    red = [c.get("name") or c.get("context") or "?" for c in rollup
+           if (c.get("conclusion") or c.get("state") or "").upper() not in GREEN]
+    # The findings verdict comes as a check run and a status: it is one check.
+    red = [r for i, r in enumerate(red) if r != FINDINGS_CHECK or FINDINGS_CHECK not in red[:i]]
     threads, _ = open_threads(cwd, pr, repo)
     mine, threads = split_yours(cwd, threads or [])
     if FINDINGS_CHECK in red and findings_explained(

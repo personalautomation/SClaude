@@ -175,19 +175,25 @@ no_change_settle() {
   return "$failed"
 }
 
-# Closes step 2 of a feature with no change of its own, and the cycle with it.
+# Ends the cycle of a feature with no change of its own. With `code` it closes
+# step 2 as well, which is where the check stands; without it the feature is
+# arriving at step 3 with step 2 already closed — closed before the check
+# existed, or by a hand that skipped it — and nothing is closed but the cycle.
 #
-#   no_change_finish <wt> <slug>
+#   no_change_finish <wt> <slug> [code]
 no_change_finish() {
-  local wt="$1" slug="$2" state="$1/.sclaude/local/feature/state.json"
+  local wt="$1" slug="$2" closing="${3:-}" state="$1/.sclaude/local/feature/state.json"
   echo ""
   info "  Nothing on this branch is the feature's own work: the product here is main's."
-  info "  No local regression, pull request, review, preview or production to go through."
-
-  step_run "$wt" code close
-  state_set "$state" steps.code.auto_returns null 2>/dev/null || true
-  state_set "$state" steps.code.done true
-  state_set "$state" steps.code.finished "$(date -Iseconds)"
+  if [[ "$closing" == code ]]; then
+    info "  No local regression, pull request, review, preview or production to go through."
+    step_run "$wt" code close
+    state_set "$state" steps.code.auto_returns null 2>/dev/null || true
+    state_set "$state" steps.code.done true
+    state_set "$state" steps.code.finished "$(date -Iseconds)"
+  else
+    info "  No pull request, review, preview or production to go through."
+  fi
   state_set "$state" no_change true
   state_set "$state" step "done"
 

@@ -438,6 +438,14 @@ run_step() {
     fi
   fi
 
+  # A feature with no change of its own has no pull request to open
+  # (no_change.sh). after_step ends such a feature as step 2 closes; this is
+  # for one whose step 2 closed without that check, before it existed.
+  if [[ "$step" == "pr" && ( -z "$pr" || "$pr" == "null" ) ]] && no_change_feature "$wt" >/dev/null; then
+    no_change_finish "$wt" "$slug"
+    return 0
+  fi
+
   # Entering step 4 invalidates step 2's regression.
   #
   # Without this the gate at the end of the review is a no-op: step 2 closed
@@ -1065,7 +1073,7 @@ after_step() {
       # for the suite, the pull request or a deployment to be about, and the
       # cycle ends here (no_change.sh).
       if no_change_feature "$wt" >/dev/null; then
-        no_change_finish "$wt" "$slug"
+        no_change_finish "$wt" "$slug" code
         return 0
       fi
       if ! regression_gate "$wt" "$slug" local; then

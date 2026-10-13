@@ -618,6 +618,57 @@ print("%s-%d" % (step, number) if number else step)
 PY
 }
 
+# A session's number in the feature, for its name (`claude -n`), which the
+# status line shows and cuts short: the number goes first so that what is cut
+# is the slug. The steps are 1 to 4 in STEPS order, the epilogue and the
+# retrospective follow them (session_label).
+#
+#   session_number <friction key>
+#
+# `plan-1` is `1`, and `plan-2`, a second conversation of the step, is `1-2`.
+# A review is numbered by its round even when it is the first, `4-1`, since
+# there are usually several. A fixing session (`fix-preview-2`) keeps its key
+# under the step it fixes in: `4-fix-preview-2`. A key naming no step is
+# returned as it is.
+session_number() {
+  local key="$1" step n=1 idx
+  if [[ "$key" =~ ^fix-([a-z]+)-[0-9]+$ ]]; then
+    idx="$(step_index "$(regression_fix_step "${BASH_REMATCH[1]}")")"
+    echo "$((idx + 1))-$key"
+    return
+  fi
+  step="$key"
+  [[ "$key" =~ ^([a-z]+)-([0-9]+)$ ]] && { step="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"; }
+  idx="$(step_index "$step")"
+  if [[ "$idx" -lt 0 ]]; then
+    echo "$key"
+  elif [[ "$step" == "review" || "$n" -gt 1 ]]; then
+    echo "$((idx + 1))-$n"
+  else
+    echo "$((idx + 1))"
+  fi
+}
+
+# The name a feature's session goes by: `<number>-<kind>/<slug>`, e.g.
+# `1-plan/12-login`, `4-2-review/12-login`, `4-2-friction/12-login` for the
+# friction review of that review round, `5-epilogue/…`, `6-retro/…`.
+#
+#   session_label step <state> <step> <session>
+#   session_label friction <key>
+#   session_label fix <key>
+#   session_label epilogue|retro
+#
+# Called after the step's run is opened (step_run), so the session counts.
+session_label() {
+  case "$1" in
+    step) echo "$(session_number "$(step_run_key "$2" "$3" "$4")")-$3" ;;
+    friction) echo "$(session_number "$2")-friction" ;;
+    fix) session_number "$2" ;;
+    epilogue) echo "$((${#STEPS[@]} + 1))-epilogue" ;;
+    retro) echo "$((${#STEPS[@]} + 2))-retro" ;;
+  esac
+}
+
 # The key of the latest step session of the feature, by start: what a review
 # asked for by hand (`sclaude friction`) is about. The current step is the
 # wrong answer once a step has closed — its successor has no session yet —

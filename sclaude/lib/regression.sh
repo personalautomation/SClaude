@@ -1514,6 +1514,9 @@ regression_fix() {
   local fixes
   fixes="$(state_get "$state" "regression.$stage.fixes" 2>/dev/null || true)"
   state_set "$state" "regression.$stage.fixes" "${fixes:+$fixes }${session:0:8}"
+  # Its name: the row it takes in `fixes`, the number run_friction keys by.
+  local name
+  name="$(session_label fix "fix-$stage-$(( $(printf '%s' "$fixes" | wc -w) + 1 ))")/$slug"
 
   # And an outcome beside the id, opened as `open`.
   #
@@ -1545,12 +1548,12 @@ regression_fix() {
       "$stage" "$SCLAUDE_B_REGRESSION")"
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --resume "$session" \
         --model "$model" --effort "$effort" \
-        --permission-mode "$mode" "${extra[@]}" -n "$slug/fix-$stage" "$prompt" )
+        --permission-mode "$mode" "${extra[@]}" -n "$name" "$prompt" )
   else
     prompt="$(render_prompt "$step" "$slug" "$pr" "$issue" "$wt")"
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --session-id "$session" \
         --model "$model" --effort "$effort" \
-        --permission-mode "$mode" "${extra[@]}" -n "$slug/fix-$stage" "$prompt" )
+        --permission-mode "$mode" "${extra[@]}" -n "$name" "$prompt" )
   fi
   session_watch_stop
   fix_word_set "$state" "$stage" fix_finished "$(date -Iseconds)"

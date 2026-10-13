@@ -111,7 +111,7 @@ PY
       --permission-mode auto --add-dir "$INSTRUMENTS" --add-dir "$TERM_DIR" \
       --add-dir "$(cd "$wt" && term_dir)" \
       --add-dir "$HOME/.claude/projects" \
-      -n "retro/$slug" "$prompt" )
+      -n "$(session_label retro)/$slug" "$prompt" )
   session_watch_stop
   instruments_unchanged "$before_instruments" "retrospective" || true
   session_closed "$done_file" "$wt" "$session" \

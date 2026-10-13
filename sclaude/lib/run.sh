@@ -611,7 +611,7 @@ run_step() {
     session_watch_start "$wt" "$session" "" "" "$step"
     ( cd "$wt" && dev_env_load "$wt" && session_git_env "$session" && claude_launch --resume "$session" \
         --model "$model" --effort "$effort" \
-        --permission-mode "$mode" "${extra[@]}" -n "$slug/$step" ${opening:+"$opening"} )
+        --permission-mode "$mode" "${extra[@]}" -n "$(session_label step "$state" "$step" "$session")/$slug" ${opening:+"$opening"} )
     session_watch_stop
   else
     session="$(new_session_id)"
@@ -652,7 +652,7 @@ run_step() {
     session_watch_start "$wt" "$session" "" "" "$step"
     ( cd "$wt" && dev_env_load "$wt" && session_git_env "$session" && claude_launch --session-id "$session" \
         --model "$model" --effort "$effort" \
-        --permission-mode "$mode" "${extra[@]}" -n "$slug/$step" "$prompt" )
+        --permission-mode "$mode" "${extra[@]}" -n "$(session_label step "$state" "$step" "$session")/$slug" "$prompt" )
     session_watch_stop
   fi
 
@@ -1518,7 +1518,7 @@ PYEOF
     ( cd "$where" && claude_launch --resume "$session" --model opus --effort medium \
         "${guard[@]}" \
         --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$INSTRUMENTS" \
-        -n "friction/$slug" \
+        -n "$(session_label friction "$key")/$slug" \
         "Back in the friction review for feature '$slug'. Pick up where the conversation left off; re-read $reviewed if you need to." )
   else
     session="$(new_session_id)"
@@ -1541,7 +1541,7 @@ PYEOF
     ( cd "$where" && claude_launch --session-id "$session" --model opus --effort medium \
         "${guard[@]}" \
         --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$INSTRUMENTS" \
-        -n "friction/$slug" "$prompt" )
+        -n "$(session_label friction "$key")/$slug" "$prompt" )
   fi
   session_watch_stop
   instruments_unchanged "$before_instruments" "friction review" || true

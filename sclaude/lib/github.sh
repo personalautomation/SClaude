@@ -2054,7 +2054,7 @@ run_status() {
   if [[ -n "$estate" && "$session" == "$(state_get "$estate" session 2>/dev/null || true)" ]]; then
     info "   resuming the interrupted epilogue"
     ( cd "$REPO" && claude_launch --resume "$session" --model sonnet --effort medium \
-        --permission-mode auto "${extra[@]}" -n "status/$slug" \
+        --permission-mode auto "${extra[@]}" -n "$(session_label epilogue)/$slug" \
         "Back in the epilogue for feature '$slug'. Pick up where the conversation left off." )
   else
     if [[ -n "$estate" ]]; then
@@ -2072,13 +2072,13 @@ run_status() {
       state_set "$estate" preview "$preview"
       state_set "$estate" prod "$prod"
       ( cd "$REPO" && claude_launch --session-id "$session" --model sonnet --effort medium \
-          --permission-mode auto "${extra[@]}" -n "status/$slug" "$prompt" )
+          --permission-mode auto "${extra[@]}" -n "$(session_label epilogue)/$slug" "$prompt" )
     else
       # The state could not be created — we write the epilogue anyway: the
       # section in the issue matters more than the ability to return to an
       # interrupted session.
       ( cd "$REPO" && claude_launch --session-id "$session" --model sonnet --effort medium \
-          --permission-mode auto "${extra[@]}" -n "status/$slug" "$prompt" )
+          --permission-mode auto "${extra[@]}" -n "$(session_label epilogue)/$slug" "$prompt" )
     fi
   fi
   session_watch_stop

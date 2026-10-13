@@ -165,7 +165,12 @@ def session_name(d):
     if not name:
         sid = d.get("session_id")
         name = sid[:8] if sid else None
-    return drop_shown_slug(d, name) or None
+    name = drop_shown_slug(d, name) or None
+    # The step at the left of the line may already say exactly this.
+    cwd = dig(d, "workspace", "current_dir") or d.get("cwd") or os.getcwd()
+    if name and name == feature_step(cwd):
+        return None
+    return name
 
 
 def drop_shown_slug(d, name):

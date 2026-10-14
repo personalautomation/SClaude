@@ -149,10 +149,16 @@ try:
     pr_context.recent = lambda created, cwd: False
     check("no-checks-ever", state(world(rollup=[])), "unknown")
     pr_context.recent = saved
-    # The workflow-validation skip: green in seconds, nothing read.
-    check("review-did-not-run", state(world(findings=[{
-        "name": pr_context.FINDINGS_CHECK, "status": "completed",
-        "conclusion": "success", "external_id": "not-reviewed"}])), "unknown")
+    # The workflow-validation skip: green in seconds, nothing read. Nothing for
+    # a session to answer either — unless a person said something.
+    skipped = [{"name": pr_context.FINDINGS_CHECK, "status": "completed",
+                "conclusion": "success", "external_id": "not-reviewed"}]
+    check("review-did-not-run", state(world(findings=skipped)), "unreviewed")
+    check("review-did-not-run-person-spoke",
+          state(world(findings=skipped, comments=[{"user": person, "body": "why?"}])),
+          "dirty")
+    check("review-no-mark", state(world(findings=[dict(skipped[0], external_id="")])),
+          "unknown")
 
     # --- which check is the review --------------------------------------------
     # The job says "Review" and its workflow says "Claude"; the findings check

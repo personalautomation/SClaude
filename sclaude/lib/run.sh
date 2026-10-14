@@ -220,7 +220,7 @@ review_skippable() {
 
 # Wait for the automatic review of the pull request, then say how it went.
 #
-#   review_wait_state <wt> <slug> <pr>   → clean | dirty | unknown
+#   review_wait_state <wt> <slug> <pr>   → clean | unreviewed | dirty | unknown
 #
 # Step 4 used to open its session straight after step 3, while the review was
 # still running, and the session then waited on it or read an empty list. When
@@ -493,11 +493,22 @@ run_step() {
   # and skipping it sent the cycle straight back to QA with nothing changed,
   # round and round. The verdict is checked too, for a return the timer saw
   # before the rewind was written.
-  if [[ "$step" == "review" ]] && review_skippable "$wt" "$slug" \
-     && [[ "$(review_wait_state "$wt" "$slug" "$pr")" == "clean" ]]; then
+  #
+  # A review the workflow skipped on purpose ("unreviewed") closes the step too:
+  # a session could only say the review did not run. It is said here instead.
+  local review_word=""
+  [[ "$step" == "review" ]] && review_skippable "$wt" "$slug" \
+    && review_word="$(review_wait_state "$wt" "$slug" "$pr")"
+  if [[ "$review_word" == "clean" || "$review_word" == "unreviewed" ]]; then
     state_set "$state" "steps.$step.started" "$(date -Iseconds)"
-    state_set "$state" "steps.$step.skipped" "clean review"
-    say "${GREEN}✓ The automatic review of PR #$pr passed with no findings, no comments and every check green.${OFF}"
+    if [[ "$review_word" == "clean" ]]; then
+      state_set "$state" "steps.$step.skipped" "clean review"
+      say "${GREEN}✓ The automatic review of PR #$pr passed with no findings, no comments and every check green.${OFF}"
+    else
+      state_set "$state" "steps.$step.skipped" "review skipped by its workflow"
+      warn "  PR #$pr was NOT reviewed: the review workflow skipped it (marked not-reviewed)."
+      info "  Every check is green and nobody commented."
+    fi
     info "  Nothing to answer, so no review session is opened."
     after_step "$wt" "$slug" "$step"
     return 0
@@ -2054,8 +2065,15 @@ instruments_own_branch() {
 # Every one of them is named, one per session, with what it runs and for how
 # long: naming the first alone sent the person to close it only to meet the
 # next, and a bare pid says nothing about a process with no terminal of its own.
+#
+# sclaude is the command, not a word anywhere in the line: `sclaude …` itself or
+# `bash …/sclaude …`. A step session is `claude --resume … <prompt>`, and its
+# prompt names sclaude — matched by the word, every running step of another
+# feature read as a sclaude, and the tail of its prompt was printed as what it
+# runs. A recorder (`script -c sclaude …`) is left out the same way; the sclaude
+# it records is found under its own pid.
 instruments_others() {
-  local mysid pid sid etime args up=$$ ancestors=" " seen=" " found=""
+  local mysid pid sid etime args cmd rest up=$$ ancestors=" " seen=" " found=""
   mysid="$(ps -o sid= -p $$ 2>/dev/null | tr -d ' ')"
   while up="$(ps -o ppid= -p "$up" 2>/dev/null | tr -d ' ')" \
         && [[ "$up" =~ ^[0-9]+$ && "$up" -gt 1 ]]; do
@@ -2065,10 +2083,12 @@ instruments_others() {
     [[ -n "$mysid" && "$sid" == "$mysid" ]] && continue
     [[ "$ancestors" == *" $pid "* ]] && continue
     [[ "$seen" == *" $sid "* ]] && continue
-    if [[ "$args" =~ (^|[[:space:]/])sclaude([[:space:]]|$) ]]; then
-      seen+="$sid "
-      found+="${found:+, }pid $pid: sclaude${args##*sclaude}, up $etime"
-    fi
+    read -r cmd rest <<<"$args"
+    [[ "${cmd##*/}" == bash || "${cmd##*/}" == sh ]] && read -r cmd rest <<<"$rest"
+    [[ "${cmd##*/}" == sclaude ]] || continue
+    (( ${#rest} > 60 )) && rest="${rest:0:60}…"
+    seen+="$sid "
+    found+="${found:+, }pid $pid: sclaude${rest:+ $rest}, up $etime"
   done < <(ps -eo pid=,sid=,etime=,args= 2>/dev/null)
   [[ -n "$found" ]] || return 1
   echo "$found"

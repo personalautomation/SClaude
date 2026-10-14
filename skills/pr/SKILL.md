@@ -135,7 +135,12 @@ from a freshly fetched `origin/main` before development starts. Confirm the
 branch is not `main` and that it is still based on an up-to-date `origin/main`
 (`git fetch origin`, then `git log origin/main..HEAD` and
 `git log HEAD..origin/main`), and go to step 4. A branch that has fallen behind
-is worth saying out loud; it is the user's call whether to rebase.
+is worth saying out loud; it is the user's call whether to rebase. Under
+`sclaude` that call is already made before the session opens: it offers the
+person a merge of main, remembers a "no", and does not count commits that only
+add deferred entries (a `deferred/` folder under `.sclaude/`) — often its own,
+sent to main from this very branch. Say how far behind the branch is, if at
+all, and do not ask again.
 
 **Confirm the branch is not someone else's open pull request before adding to
 it.** `git log origin/main..HEAD --format='%s'` printing commits you did not

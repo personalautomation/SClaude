@@ -697,6 +697,9 @@ def review_state(cwd, pr, repo):
 
     clean    the review ran on the pushed head, left nothing open, every check
              is green, and no person has said anything: no session is needed.
+    unreviewed  as clean, except that the workflow skipped the review on
+             purpose (marked "not-reviewed"): nothing to answer, and nothing a
+             session could do to have it run.
     dirty    something to answer — a red check, an open finding, a comment.
     pending  checks are still running, or not registered yet: ask again later.
     unknown  this cannot be decided: the head is not pushed, the project has
@@ -762,7 +765,13 @@ def review_state(cwd, pr, repo):
         if threads is None or rest or not findings_explained(
                 cwd, repo, head, {t["url"] for t in rest}, latest):
             return "dirty"
-    if (latest.get("external_id") or "") != "reviewed":
+    # Marked "not-reviewed": the workflow skipped the review on purpose (its own
+    # file differs from main's). No session can make it run, and one opened for
+    # it only says so — so this is "unreviewed", which closes the step the way
+    # "clean" does, saying the pull request was not reviewed. Anything else
+    # without "reviewed" (an older workflow, no mark) stays "unknown".
+    mark = latest.get("external_id") or ""
+    if mark not in ("reviewed", "not-reviewed"):
         return "unknown"
 
     # What people said. The bot's own words are covered by the findings check
@@ -783,7 +792,7 @@ def review_state(cwd, pr, repo):
     for r in human(reviews):
         if (r.get("state") or "") == "CHANGES_REQUESTED" or (r.get("body") or "").strip():
             return "dirty"
-    return "clean"
+    return "clean" if mark == "reviewed" else "unreviewed"
 
 
 # The Claude review job that stopped on its quota: the subscription it runs

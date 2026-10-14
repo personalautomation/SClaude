@@ -294,6 +294,29 @@ for name in ("_friction-body.md", "friction.md", "friction-fix.md"):
           [p for p in ("commit it to `main`", "commits straight to `main`")
            if p in text], [])
 
+print("another sclaude is the command, not a word in a prompt")
+FAKE_PS = r"""
+ps() {
+  case "$*" in
+    *-eo*) cat <<'ROWS'
+  100   100 01:00 claude --resume abc --model opus run the sclaude review and fix the findings
+  200   200 02:00 script -q -c sclaude feat /tmp/rec
+  201   201 02:00 /bin/bash /home/x/.local/bin/sclaude feat
+  300   300 03:00 sclaude status
+  400   400 04:00 vim notes-about-sclaude.md
+ROWS
+    ;;
+    *-o\ sid=*) echo 1 ;;
+    *) return 1 ;;
+  esac
+}
+"""
+done = subprocess.run(
+    ["bash", "-c", "source %s/run.sh\n%s\ninstruments_others" % (LIB, FAKE_PS)],
+    capture_output=True, text=True, env=ENV)
+check("others-only-sclaude-commands", done.stdout.strip(),
+      "pid 201: sclaude feat, up 02:00, pid 300: sclaude status, up 03:00")
+
 if failures:
     print("\n%d failed: %s" % (len(failures), ", ".join(failures)))
     sys.exit(1)

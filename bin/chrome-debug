@@ -52,6 +52,18 @@ PROFILE=${CHROME_DEBUG_PROFILE:-"$HOME/.cache/chrome-devtools-mcp/visible-profil
 DEFAULT_URL="http://localhost:3000"
 LOG="$HOME/.cache/chrome-devtools-mcp/chrome.log"
 
+# A run from systemd — the bot's "Start" button — inherits no DISPLAY: a user
+# service gets a bare environment, not the one a WSLg terminal has. Chrome then
+# exits at once with "Missing X server or $DISPLAY", into a log nobody reads,
+# and the button looked like it did nothing. WSLg's sockets are at fixed
+# places, so they are named here when the environment does not.
+if [ -z "${DISPLAY:-}" ] && [ -S /tmp/.X11-unix/X0 ]; then
+  export DISPLAY=:0
+fi
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/wayland-0" ]; then
+  export WAYLAND_DISPLAY=wayland-0
+fi
+
 # Playwright puts every build in its own directory — chromium-1234, chromium-1250,
 # … — and leaves the previous one behind. A hardcoded path would therefore keep
 # launching the old build after an update, silently. Resolve the newest instead.

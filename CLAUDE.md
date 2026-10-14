@@ -85,6 +85,14 @@ breaks the other silently — grep before you edit:
   asked: the prompt acts on the codes, so a code changed on one side alone
   would send a session the wrong way without an error.)*
 
+- `.sclaude/local/feature/local-review-declined` and `local-review.md` are
+  named by `local_review_file` in `sclaude/lib/local_review.sh` and spelled
+  out in the `review-local` paragraph of `sclaude/prompts/review.md`;
+  `tests/local-review.py` renders the prompt and checks it.
+
+  *(Added by Claude on 2026-10-14 with the `review` key, so that a renamed
+  file on one side does not silently drop the declined findings.)*
+
 ## Public repository, private projects
 
 This repository is public (personalautomation/SClaude). The projects sclaude

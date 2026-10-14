@@ -81,10 +81,19 @@
     "            sessions put theirs in .sclaude/people/<name>/, and a hook",
     "            keeps them out of team/; a maintainer lifts a rule from there.",
     "            Absent or empty, everybody is a maintainer: what a project with",
-    "            one developer wants."
+    "            one developer wants.",
+    "review    — where the pull request's review runs: \"github\" (the",
+    "            review workflow in Actions; the default, and what any word",
+    "            sclaude does not know means), \"local\" (sclaude runs the same",
+    "            /code-review on this machine at step 4 and gives the findings",
+    "            to the session: tokens, but no Actions minutes) or \"off\".",
+    "            The last two open the pull request labelled no-review, the",
+    "            workflow's own switch, so it skips itself at no cost."
   ],
 
   "maintainers": ["lead@example.com"],
+
+  "review": "github",
 
   "commands": {
     "typecheck": "npm run typecheck",

@@ -761,14 +761,22 @@ def review_state(cwd, pr, repo):
     latest = findings_run(cwd, repo, head)
     if latest is None:
         return "unknown"
-    if not latest:
+    reviews = [c for c in rollup if names_review(c.get("name"))]
+    if not latest and reviews and all(
+            (c.get("conclusion") or c.get("state") or "").upper() == "SKIPPED" for c in reviews):
+        # The workflow skipped the review by its condition — the `no-review`
+        # label, which a project whose review is not GitHub's puts on every
+        # pull request (local_review.sh). No findings check will come: waiting
+        # for one cost the whole REVIEW_WAIT_MAX. What people said is still
+        # read below; nothing else is, so it is "unreviewed" at best.
+        mark = "not-reviewed"
+    elif not latest:
         # The review job may still be about to write it; a project without the
         # workflow never will. A review check in the rollup tells them apart.
-        reviewing = any(names_review(c.get("name")) for c in rollup)
-        return "pending" if reviewing else "unknown"
-    if (latest.get("status") or "") != "completed":
+        return "pending" if reviews else "unknown"
+    elif (latest.get("status") or "") != "completed":
         return "pending"
-    if (latest.get("conclusion") or "") != "success":
+    elif (latest.get("conclusion") or "") != "success":
         # Red only for threads the person kept or resolved by hand is nothing
         # for a session: close_state answers for those (see YOURS_FILE).
         threads, _ = open_threads(cwd, pr, repo)
@@ -781,7 +789,8 @@ def review_state(cwd, pr, repo):
     # it only says so — so this is "unreviewed", which closes the step the way
     # "clean" does, saying the pull request was not reviewed. Anything else
     # without "reviewed" (an older workflow, no mark) stays "unknown".
-    mark = latest.get("external_id") or ""
+    if latest:
+        mark = latest.get("external_id") or ""
     if mark not in ("reviewed", "not-reviewed"):
         return "unknown"
 

@@ -6,7 +6,11 @@ The orchestrator captured the PR state as of the start of this step — checks a
 
 <block:pr-context>
 
-1. Handle each comment individually. Where you agree, fix it. Where you don't, explain why to me and leave the decision to me; don't argue with the reviewer in comments under your own name.
+<if:review-local>**This project reviews on this machine, not on GitHub** (`review: local` in `.sclaude/config.json`). sclaude runs `/code-review` itself and gives you its findings as text, at the end of this message and in `.sclaude/local/feature/local-review.md`; they are not threads on the pull request. So nothing below about replying to a thread, resolving it, `review-yours` or `review-round` applies to them, and no automatic review follows a push: `sclaude checks` waits only for the checks. Otherwise handle each finding as below: fix it, through subagents, with its class — or tell me why not and leave the decision to me. When I decide to leave one as it is, append one line to `.sclaude/local/feature/local-review-declined` — its `path:line`, a tab, and my decision in a few words — so the next local review does not raise it again. A comment a person left on the pull request is still answered as below.
+
+Once every finding is fixed or decided, the fixes pushed and the checks green, finish as the end of this prompt says, marker included. sclaude then reviews the new commits on this machine, and brings any new findings back to this conversation.
+
+</if:review-local>1. Handle each comment individually. Where you agree, fix it. Where you don't, explain why to me and leave the decision to me; don't argue with the reviewer in comments under your own name.
 
    **A thread you would leave as it is, you propose to resolve, and resolve it yourself once I say yes.** Don't change the code for it. Ask me through `AskUserQuestion`, one question per thread, in so many words: "I want to resolve this comment on GitHub: <link> — <the finding in a line>. Leaving it because <why>." The options are to resolve it (first, `(Recommended)` when it is your advice), to fix it after all, and to leave it open for me to resolve by hand. When the why does not fit in a question — a trade-off, more than one way to go — write it out in your message before the question: each option and what it means for the business and for the people who use the product (what they would see, what it costs, what risk stays), not only for the code. The question then stays short and points at that text.
 

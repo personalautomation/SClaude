@@ -127,7 +127,7 @@ INSTRUMENTS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 # half an orchestrator is worse than none.
 for _module in io ui steps state project environment developer branches worktree featuredb lock pane run \
                github plan deploy regression rollback watch picker abandon actions doctor deferred \
-               terminal retro scratch no_change; do
+               terminal retro scratch no_change local_review; do
   # shellcheck source=/dev/null
   source "$LIB/$_module.sh" || {
     echo "sclaude: cannot load $LIB/$_module.sh" >&2

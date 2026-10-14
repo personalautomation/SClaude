@@ -60,6 +60,13 @@ render_prompt() {
     [[ -f "$wt/.sclaude/local/feature/db.env" && "$dbbase" =~ ^[0-9]+$ ]] \
       && SCLAUDE_V_DB_API="http://127.0.0.1:$((dbbase + 1))"
   fi
+  # Where the project's review runs (project_review_mode): step 3 opens the
+  # pull request labelled no-review unless it is GitHub's, and step 4 is told
+  # when the findings come from this machine rather than from threads.
+  local -x SCLAUDE_V_REVIEW_MODE SCLAUDE_V_NO_REVIEW="" SCLAUDE_V_REVIEW_LOCAL=""
+  SCLAUDE_V_REVIEW_MODE="$(project_review_mode "$wt")"
+  [[ "$SCLAUDE_V_REVIEW_MODE" != "github" ]] && SCLAUDE_V_NO_REVIEW=1
+  [[ "$SCLAUDE_V_REVIEW_MODE" == "local" ]] && SCLAUDE_V_REVIEW_LOCAL=1
   local -x SCLAUDE_B_ISSUE_CONTEXT=""
   local -x SCLAUDE_B_MANUAL_TOC=""
   local -x SCLAUDE_B_PR_CONTEXT=""
@@ -496,14 +503,33 @@ run_step() {
   #
   # A review the workflow skipped on purpose ("unreviewed") closes the step too:
   # a session could only say the review did not run. It is said here instead.
-  local review_word=""
-  [[ "$step" == "review" ]] && review_skippable "$wt" "$slug" \
+  #
+  # A project whose review is not GitHub's (project_review_mode) has its pull
+  # request labelled so the workflow skips itself; one that reviews on this
+  # machine is reviewed here, on the head the session would open on. Findings
+  # keep the session; none leave the step to the checks and the comments.
+  local review_word="" review_mode="" local_count=""
+  if [[ "$step" == "review" ]]; then
+    review_mode="$(project_review_mode "$wt")"
+    review_label_sync "$wt" "$pr"
+    [[ "$review_mode" == "local" ]] \
+      && { local_count="$(local_review "$wt" "$pr")" || local_count="failed"; }
+  fi
+  [[ "$step" == "review" ]] && [[ -z "$local_count" || "$local_count" == "0" ]] \
+    && review_skippable "$wt" "$slug" \
     && review_word="$(review_wait_state "$wt" "$slug" "$pr")"
   if [[ "$review_word" == "clean" || "$review_word" == "unreviewed" ]]; then
     state_set "$state" "steps.$step.started" "$(date -Iseconds)"
     if [[ "$review_word" == "clean" ]]; then
       state_set "$state" "steps.$step.skipped" "clean review"
       say "${GREEN}✓ The automatic review of PR #$pr passed with no findings, no comments and every check green.${OFF}"
+    elif [[ "$review_mode" == "local" ]]; then
+      state_set "$state" "steps.$step.skipped" "clean local review"
+      say "${GREEN}✓ The review on this machine found nothing in PR #$pr; every check is green and nobody commented.${OFF}"
+    elif [[ "$review_mode" == "off" ]]; then
+      state_set "$state" "steps.$step.skipped" "review off"
+      warn "  PR #$pr was NOT reviewed: the project's .sclaude/config.json turns the review off."
+      info "  Every check is green and nobody commented."
     else
       state_set "$state" "steps.$step.skipped" "review skipped by its workflow"
       warn "  PR #$pr was NOT reviewed: the review workflow skipped it (marked not-reviewed)."
@@ -555,6 +581,21 @@ run_step() {
   fi
 
   local -a extra; mapfile -t extra <<< "$settings"
+
+  # The local review's findings reach the session as sclaude's words: all of
+  # them to a fresh one, and to a resumed one only for a head it has not been
+  # told about yet — an interrupted session reopened on the same head has
+  # them already.
+  if [[ "$local_count" =~ ^[1-9] ]]; then
+    local lhead; lhead="$(local_review_head "$wt")"
+    if [[ -z "$session" || "$(state_get "$state" steps.review.local_told 2>/dev/null || true)" != "$lhead" ]]; then
+      told="$(printf '%s%s' "$(local_review_told "$wt")" "${told:+$'\n\n'$told}")"
+      state_set "$state" steps.review.local_told "$lhead"
+    fi
+  elif [[ "$local_count" == "failed" ]]; then
+    told="$(printf 'The review on this machine did not run on this head (its log: `%s`): say so in your report, and handle what the pull request itself shows.%s' \
+      "$(local_review_file "$wt" .log | sed "s|^$wt/||")" "${told:+$'\n\n'$told}")"
+  fi
 
   # A step's conversation needs a terminal, and without one we stop rather than
   # work around it.
@@ -2218,6 +2259,25 @@ review_close_gate() {
     sleep "$MERGE_POLL"
     waited=$((waited + MERGE_POLL))
   done
+  # A project that reviews on this machine: once GitHub has nothing open, the
+  # head the session left is reviewed here, and what that finds is open too.
+  # A review that did not run is put to the person rather than sent back to a
+  # session, which could do nothing about it and would end the same way.
+  if [[ "$word" == "ok" || "$word" == yours:* ]] && [[ "$(project_review_mode "$wt")" == "local" ]]; then
+    local count
+    count="$(local_review "$wt" "$pr")" || count="failed"
+    if [[ "$count" == "failed" ]]; then
+      warn ""
+      warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
+      ask "${BOLD}Close step 4 with this head unreviewed? [y/n] ${OFF}" answer yn
+      if ! is_yes "$answer"; then
+        info "  Left open. Come back with: $SELF $slug"
+        return 1
+      fi
+    elif [[ "$count" -gt 0 ]]; then
+      word="open: the review on this machine found $count new finding(s)"
+    fi
+  fi
   # Only the threads the person kept: no session, a wait for their hand. Once
   # they are resolved the pull request is asked again from the top — whatever
   # else is open by then takes the ordinary way.

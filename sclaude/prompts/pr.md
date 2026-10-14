@@ -17,7 +17,8 @@ Work through the `/pr` skill — invoke it. It differs from its usual course bec
   - a criterion with no footer anywhere — either it wasn't built or a commit was missing its footer. **Ask me before opening the pull request**; don't tick it, and don't quietly drop it from the list.
 
   Don't tick anything, here or in the issue, whatever the footers say. A tick is QA's word that the deployment does it, and a commit is not that check.
-- **Open the pull request as a draft**: add `--draft` to the skill's `gh pr create`. It stays a draft until QA has accepted every issue it closes; then the orchestrator marks it ready, which is what lets anybody merge it. Don't assign anyone either — the orchestrator assigns the PR to its author and clears that at the same moment.
+<if:no-review>- **Invoke the skill as `/pr no-review`.** This project's `.sclaude/config.json` sets `review` to `<review-mode>`: its review does not run in GitHub Actions, and the label keeps the workflow from starting there. That is my decision, made in the config, so the skill's rule that only I may ask for the label is met. Say in your report that the label is on because of the config.
+</if:no-review>- **Open the pull request as a draft**: add `--draft` to the skill's `gh pr create`. It stays a draft until QA has accepted every issue it closes; then the orchestrator marks it ready, which is what lets anybody merge it. Don't assign anyone either — the orchestrator assigns the PR to its author and clears that at the same moment.
 - The manuals (<manuals>) are updated here, as the skill requires. `.sclaude/local/feature/plan.md` is the source of what was promised.
 - **Once the manuals are written, ask whether this feature earns a regression test — and expect the answer to be no.**
 

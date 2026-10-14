@@ -115,6 +115,20 @@ project_migrations_dir() {
   project_get "database.migrations" "${1:-}" 2>/dev/null
 }
 
+# Who reviews the project's pull requests: `github` (the review workflow in
+# Actions, what every project had before this key), `local` (sclaude runs the
+# same /code-review on this machine, local_review.sh) or `off`. Absent, or a
+# word it does not know, is `github`: the review a project already has is not
+# switched off by a typo.
+project_review_mode() {
+  local mode
+  mode="$(project_get review "${1:-}" 2>/dev/null || true)"
+  case "$mode" in
+    local|off) echo "$mode" ;;
+    *) echo github ;;
+  esac
+}
+
 
 # --- the board ----------------------------------------------------------------
 #

@@ -159,6 +159,18 @@ try:
           "dirty")
     check("review-no-mark", state(world(findings=[dict(skipped[0], external_id="")])),
           "unknown")
+    # Skipped by the `no-review` label, as a project whose review is not
+    # GitHub's has it: the review job is SKIPPED and no findings check comes.
+    # Not "pending" — that waited the whole REVIEW_WAIT_MAX for nothing.
+    labelled = [green[0], dict(green[1], conclusion="SKIPPED")]
+    check("review-skipped-by-label", state(world(findings=[], rollup=labelled)),
+          "unreviewed")
+    check("review-skipped-by-label-person-spoke",
+          state(world(findings=[], rollup=labelled,
+                      comments=[{"user": person, "body": "why?"}])), "dirty")
+    check("review-skipped-by-label-red-check",
+          state(world(findings=[], rollup=[dict(green[0], conclusion="FAILURE"),
+                                           labelled[1]])), "dirty")
 
     # --- which check is the review --------------------------------------------
     # The job says "Review" and its workflow says "Claude"; the findings check

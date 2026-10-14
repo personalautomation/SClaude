@@ -127,8 +127,7 @@ with tempfile.TemporaryDirectory() as wt:
                           input=re.search(r"body=\"\$\(SCLAUDE_STEPS=.*?<<'PY'[^\n]*\n(.*?)\nPY\n",
                                           github, re.S).group(1),
                           env={**os.environ, "SCLAUDE_STEPS": "review=review\n"}).stdout
-    check("legend-under-table",
-          "\U0001F4AC review comments · \U0001F501 review rounds" in body, True)
+    check("no-legend-under-table", "review comments" in body or "review rounds" in body, False)
 
     # A friction review that stalled and was started again: both are named in
     # the cell, the stalled one first.

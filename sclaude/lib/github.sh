@@ -531,8 +531,6 @@ def fix_status_cell(stage, number):
 
 COMMENTS_ICON = "\U0001F4AC"
 ROUNDS_ICON = "\U0001F501"
-# Which icons the rows used, for the legend under the table.
-legend = set()
 
 rows = []
 for name in ORDER:
@@ -587,14 +585,13 @@ for name in ORDER:
             finished = run.get("finished")
         # What the automatic review handed a review session (run_comments),
         # and how many of its rounds the session worked (run_rounds). Icons
-        # rather than words keep the Step column narrow; the legend under the
-        # table says what they mean.
+        # rather than words keep the Step column narrow. No legend under the
+        # table: the person reading it asked for none.
         said = ""
         for field, icon in (("comments", COMMENTS_ICON), ("rounds", ROUNDS_ICON)):
             value = run.get(field)
             if isinstance(value, int):
                 said += " - %d %s" % (value, icon)
-                legend.add(field)
         rows.append("| %s | %s | %s | %s | %s | %s |" % (
             TITLES[name] + (" (%d)" % number if len(runs) > 1 else "") + said,
             run_status,
@@ -701,12 +698,6 @@ out = [
     *rows,
     "",
 ]
-if legend:
-    out[-1:-1] = [" · ".join(
-        "%s %s" % (icon, words) for field, icon, words in (
-            ("comments", COMMENTS_ICON, "review comments"),
-            ("rounds", ROUNDS_ICON, "review rounds"))
-        if field in legend), ""]
 
 line = "Branch `%s`" % s.get("branch", "")
 if s.get("pr"):

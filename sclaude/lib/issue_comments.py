@@ -169,7 +169,7 @@ def edit(cid, body, cwd=None):
     return done.returncode == 0
 
 
-# The two commands a session is given for keeping a comment of its own. Here
+# The commands a session is given for keeping a comment of its own. Here
 # rather than in each prompt so that the planning step and the epilogue are told
 # the same thing.
 def create_command(number):
@@ -179,3 +179,9 @@ def create_command(number):
 def edit_command(cid):
     return ("gh api -X PATCH repos/{owner}/{repo}/issues/comments/%s "
             "-F body=@-" % cid)
+
+
+# The epilogue deletes its status comment when the issue's state and labels
+# have come to say all of it.
+def delete_command(cid):
+    return "gh api -X DELETE repos/{owner}/{repo}/issues/comments/%s" % cid

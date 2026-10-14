@@ -1,6 +1,6 @@
 The feature "<feature>" has been through the whole cycle, and I've already answered all the deployment questions. Your job is to record the outcome in issue **#<issue>** and in all of its parents, so the state of an epic is visible at a glance without walking its children one by one — and, where the product no longer does what an issue's description says, how it actually behaves.
 
-This is the last session for this feature, and there's no code in it: the worktree was deleted along with the branch, and you're in the main repository. All you do is write one comment per issue via `gh` — never the issue's description. You may read code to check what the product does (see **Current behaviour** below), but you change nothing in the repository.
+This is the last session for this feature, and there's no code in it: the worktree was deleted along with the branch, and you're in the main repository. All you do is write at most one comment per issue via `gh` — never the issue's description. You may read code to check what the product does (see **Current behaviour** below), but you change nothing in the repository.
 
 ## What actually happened
 
@@ -16,7 +16,7 @@ So: a red stage is never something the labels alone tell a reader, and it is alw
 
 The commits that are on hosting: <deploy-shas>
 
-Name the production one in the feature's own comment — "In production as of `a3f19c2`" — and the preview one when there was no prod deploy. One short sha, not a list of commits: the pull request already holds those, and this is the only record that outlives the worktree, so the point is that somebody can check it later. Skip it entirely when the value above is "not recorded", and never put a sha in a parent's comment — an epic is read for where the epic stands.
+When the feature gets a comment (see **When the issue already says it** below), name the production one in it — "In production as of `a3f19c2`" — and the preview one when there was no prod deploy. One short sha, not a list of commits: the pull request already holds those, and the point is that somebody can check later which commit was live. Skip it entirely when the value above is "not recorded", and never put a sha in a parent's comment — an epic is read for where the epic stands.
 
 Your job is the words. Don't add or remove labels yourself.
 
@@ -28,7 +28,7 @@ The orchestrator walked it bottom-up and read each issue for you — here it is 
 
 ## What to write
 
-Every issue in the chain gets a **Current status** comment: a short answer to "what's the state of this right now". Write it in English, as the rest of the issue is.
+Every issue in the chain may get a **Current status** comment: a short answer to "what's the state of this right now" — unless the issue already gives that answer without it. Write it in English, as the rest of the issue is.
 
 The comment differs by level, and that's the main thing to understand:
 
@@ -42,6 +42,25 @@ The comment differs by level, and that's the main thing to understand:
 **A status in the description stays where it is.** A description may hold a `Current status` of its own — a human's paragraph, or a `<!-- sclaude:status -->` block from before the status moved to comments. Don't touch it; take what's still true from it into your comment.
 
 **Don't invent progress you didn't see.** Take the numbers about children from the snapshot above ("9 of 10 closed"), not from your head. If it's unclear how some child ended, say so in a line instead of filling it in.
+
+### When the issue already says it
+
+A reader who opens an issue sees, before any comment: whether it is open or closed, its labels, its sub-issues with GitHub's "N of M" progress, and in the timeline the pull request that closed it. The header line of each issue in the snapshot above — state, labels, sub-issues — is that view. A status that only repeats it is noise: one more comment to read in order to learn nothing. So write none when everything it would say is already there. Two common cases:
+
+- **The feature**, closed, labelled `deployed-prod`, no red label, its criteria ticked or absent: "it's in production" is what the closed issue and the label already say. The production sha alone is no reason for a comment — the pull request in the timeline leads to the merged commits.
+- **A parent** whose comment would come down to "3 of 5 children closed, the rest open": that is GitHub's own counter beside the list of sub-issues.
+
+A comment earns its place when it says something that view does not, for example:
+
+- a red stage — labels never say it alone (see above);
+- state and labels that mislead: the feature's issue closed without a production deploy, a merge still awaited while nothing on the issue shows it, a production rollback;
+- unticked acceptance criteria on a merged feature;
+- on a parent, what the counter hides: which closed children reached production and which only preview, a child whose outcome is unclear, what is left in words when the open children's titles do not say it;
+- a **Current behaviour** section the issue needs, or already has: the section stays, and the status heads it as always.
+
+When in doubt, write it: a superfluous comment costs a reader a few seconds, a missing one sends them through the children.
+
+**An existing comment that has become obvious** is stale or redundant either way. Read it **now** first (`gh api repos/{owner}/{repo}/issues/comments/<id> --jq .body`: a sibling's epilogue or I may have added to it since the snapshot). If it holds nothing beyond that view — no Current behaviour, nothing a human added that is still true — delete it with the command the snapshot gives for it, rather than rewrite it into a restatement of the labels. Otherwise rewrite it as below, keeping what is still worth saying.
 
 ## Current behaviour
 
@@ -94,7 +113,9 @@ The comment is yours alone, and it looks like this:
 …text, only where the issue needs it…
 ```
 
-The marker on the first line is how the next session finds it. Current status always comes first; Current behaviour follows it when the issue has one. A section that's already in the comment stays in it unless the description has become true again. The snapshot above gives, for each issue, either the status comment as it stands with the command that rewrites it, or the command that creates it. For each issue:
+The marker on the first line is how the next session finds it. Current status always comes first; Current behaviour follows it when the issue has one. A section that's already in the comment stays in it unless the description has become true again. The snapshot above gives, for each issue, either the status comment as it stands with the commands that rewrite or delete it, or the command that creates it.
+
+For each issue that needs a comment (see **When the issue already says it**):
 
 1. If the comment exists, read it **now**, not from the snapshot: `gh api repos/{owner}/{repo}/issues/comments/<id> --jq .body`. The snapshot was taken at session start, and a sibling feature's epilogue or I could have changed it since.
 2. Write the whole comment — both sections, the one you didn't change included — and feed it on stdin to the command from the snapshot — the `gh api -X PATCH …` one rewrites it in place, `gh issue comment <N> --body-file -` creates it. Never post a second status comment on an issue that has one.
@@ -103,7 +124,7 @@ Don't use `--comments` with `gh issue view`: it replaces the body with the comme
 
 The acceptance criteria are worth reading before you write — they're in the snapshot where the issue has them, in a comment of their own (or, on an older issue, in the description between `<!-- sclaude:ac -->` and `<!-- /sclaude:ac -->`). They say what the feature was supposed to do, and the boxes say whether anybody confirmed it — an unticked list on a merged feature is a fact about where this stands, and the comment you're writing is about exactly that. Report what you see; don't tick a box, and don't treat an unticked one as a failure: plenty of features merge before anyone gets to the list. The criteria comment isn't yours, and neither is the `User request` comment the planning step keeps.
 
-One status comment per issue, and no other comments. The orchestrator keeps its own progress summary in a comment of its own; yours exists because it's singular and says where things stand without reading the thread.
+At most one status comment per issue, and no other comments. The orchestrator keeps its own progress summary in a comment of its own; yours exists because it's singular and says where things stand without reading the thread.
 
 **When it doesn't work.** An issue won't open, `gh` errors, you lack edit rights — tell me in words and move on down the chain. One inaccessible issue is no reason to abandon the rest.
 
@@ -115,7 +136,7 @@ One status comment per issue, and no other comments. The orchestrator keeps its 
 
 When the comments are written, tell me in that one message — in your own words, but cover all of it:
 
-- the work in this session is done — one line per issue, the number and the gist of what you wrote in it, whether it has a Current behaviour section and why (written, rewritten, left as it was, not needed), and anything you couldn't update;
+- the work in this session is done — one line per issue, the number and the gist of what you wrote in it (or that it got no comment, or had its comment deleted, because its state and labels already say it — name what they say), whether it has a Current behaviour section and why (written, rewritten, left as it was, not needed), and anything you couldn't update;
 - that `sclaude` closes this session itself — or, when you left the marker out, that I should close Claude with `/exit`;
 - after that this feature is closed out: the `sclaude` orchestrator launches nothing more, and the next work starts with a new feature.
 

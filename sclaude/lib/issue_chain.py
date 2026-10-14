@@ -266,12 +266,17 @@ def discussion(issue, room=MAX_DISCUSSION):
 
 
 def status_comment(issue):
-    """The issue's status comment and the command that writes it."""
+    """The issue's status comment and the commands that write or delete it.
+
+    Neither is an order: an issue whose state and labels already say where it
+    stands gets no comment (status.md, "When the issue already says it").
+    """
     number = issue.get("number")
     found = issue_comments.find(issue.get("comments") or [], STATUS)
     cid = issue_comments.comment_id(found) if found else None
     if found is None or not cid:
-        return ["There is no status comment on #%s yet — create it: `%s`."
+        return ["There is no status comment on #%s yet. If it needs one, "
+                "create it: `%s`."
                 % (number, issue_comments.create_command(number))]
     return ["**The status comment, as it stands:**",
             "",
@@ -279,8 +284,10 @@ def status_comment(issue):
             (found.get("body") or "").strip(),
             "STATUS",
             "",
-            "Rewrite it in place, never add a second one: `%s`."
-            % issue_comments.edit_command(cid)]
+            "Rewrite it in place, never add a second one: `%s`. If the issue "
+            "already says all of it, delete it instead: `%s`."
+            % (issue_comments.edit_command(cid),
+               issue_comments.delete_command(cid))]
 
 
 def render(number, cwd=None):

@@ -63,6 +63,10 @@ joined = "\n".join(existing)
 check_true("status-shows-current-text", "On preview." in joined)
 check_true("status-edits-by-id", "issues/comments/55" in joined)
 check_true("status-does-not-create-a-second", "gh issue comment" not in joined)
+# An existing comment the state and labels have caught up with can go: the
+# session is given the command that deletes it, by the same id.
+check_true("status-deletes-by-id",
+           "gh api -X DELETE repos/{owner}/{repo}/issues/comments/55" in joined)
 
 # The chain's snapshot shows the description for reading and says it is not
 # edited, a legacy block included.
@@ -404,6 +408,11 @@ plan_md = io.open(os.path.join(prompts, "plan.md"), encoding="utf-8").read()
 status_md = io.open(os.path.join(prompts, "status.md"), encoding="utf-8").read()
 check_true("plan-prompt-spells-request-marker", REQUEST in plan_md)
 check_true("status-prompt-spells-status-marker", STATUS in status_md)
+# A status the issue already shows is not written: the prompt says so, and the
+# snapshot's create line is an offer rather than an order.
+check_true("status-prompt-skips-obvious",
+           "### When the issue already says it" in status_md)
+check_true("status-create-is-optional", "If it needs one" in "\n".join(none_yet))
 # Both headings of the one comment are spelled in its template, so the next
 # session finds the behaviour section where this one left it.
 # Without a pull request the paragraphs about it drop: <pr> is never empty

@@ -450,8 +450,8 @@ PY
 # tree is gone.
 #
 # Nothing beyond the usual is needed: the session writes comments —
-# `gh issue comment` and a `gh api` PATCH on its own comment — and neither is
-# banned anywhere. It no longer edits a description at all. To check what the
+# `gh issue comment`, and a `gh api` PATCH or DELETE on its own comment — and
+# none of those is banned anywhere. It no longer edits a description at all. To check what the
 # product does before writing "Current behaviour" it reads code — `git fetch`,
 # `git grep` and `git show` against origin/main, `gh pr diff` — and none of
 # those is banned either.

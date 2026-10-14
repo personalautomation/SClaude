@@ -1489,9 +1489,11 @@ remind_prod() {
   # Merged, and nothing to ship: the cycle ends with the issue and the clean-up.
   # Unless the merge took more than this tree held: then production is asked
   # about as usual, the preview and QA it skipped named in the question.
+  local merged_unchecked=0
   if [[ "$no_deploy" -eq 1 ]] && ! no_deploy_merged "$pr"; then
     no_deploy=0
     qa_skipped=1
+    merged_unchecked=1
     echo ""
     alarm "PR #$pr merged files outside $(printf '%s ' "${NO_DEPLOY[@]}")— or GitHub did not say which."
     alarm "  It went in without a regression, a preview or QA; production is asked about below."
@@ -1519,7 +1521,10 @@ remind_prod() {
   # branch protection and rulesets are refused, so the merge itself cannot be
   # held back — only the deploy that would follow it.
   local prod_note prod_ask
-  if [[ "$qa_skipped" -eq 1 ]]; then
+  if [[ "$merged_unchecked" -eq 1 ]]; then
+    prod_note="Merged as a change nothing deploys, but it carried more — no regression, preview or QA ran on it."
+    prod_ask="Ship to production anyway?"
+  elif [[ "$qa_skipped" -eq 1 ]]; then
     prod_note="Merged before this preview run went green — nobody passed it through '$QA_TO'."
     prod_ask="Ship to production anyway?"
   else

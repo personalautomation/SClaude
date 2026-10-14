@@ -815,23 +815,24 @@ if (!tg || !tg.initData) {
   if (%(full)s && tg.isVersionAtLeast('8.0')) { try { tg.requestFullscreen(); } catch (e) {} }
   if (tg.isVersionAtLeast('7.7')) tg.disableVerticalSwipes();
   fetch('/__sclaude/tg/auth', {method: 'POST', body: tg.initData, credentials: 'same-origin'})
-    .then((r) => r.ok ? location.replace('/__sclaude/select?f=' + %(label)s)
+    .then((r) => r.ok ? location.replace(%(label)s ? '/__sclaude/select?f=' + %(label)s : '/__sclaude/')
                       : say('The bot did not recognise you (' + r.status + ').'))
     .catch(() => say('The laptop did not answer.'));
 }
 """ % {"full": "true" if GATE_FULLSCREEN else "false", "label": json.dumps(label)}
     body = ("<h1>%s</h1><p id=msg>Opening…</p>"
             "<script src='https://telegram.org/js/telegram-web-app.js'></script>"
-            "<script>%s</script>" % (html.escape(label), script))
-    return page(label, body)
+            "<script>%s</script>" % (html.escape(label or "Features"), script))
+    return page(label or "Features", body)
 
 
 async def gate_own(method, target, headers, reader):
     """A response for the gate's open routes, or None for any other path."""
     url = urlsplit(target)
     if url.path == "/__sclaude/tg":
+        # No feature is the list of them all, the bot's first row.
         label = (parse_qs(url.query).get("f") or [""])[0]
-        if not LABEL.match(label):
+        if label and not LABEL.match(label):
             return respond("404 Not Found", page("Not found", "<p>No such feature.</p>"))
         return respond("200 OK", gate_bootstrap(label))
     if url.path == "/__sclaude/tg/auth":

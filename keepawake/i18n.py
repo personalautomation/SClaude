@@ -154,7 +154,8 @@ STRINGS = {
                           "⚠️ Phone access did not open:\n<pre>%(log)s</pre>\n"
                           "<i>Needed once: funnel allowed for the laptop in the tailnet "
                           "policy, and <code>sudo tailscale set --operator=$USER</code>.</i>"),
-    "chrome.browser":    ("Браузер:", "Browser:"),
+    "chrome.all":        ("Все фичи — localhost:3000", "All features — localhost:3000"),
+    "chrome.stopbrowser": ("⏹ Chrome", "⏹ Chrome"),
     "chrome.up":         ("✅ браузер запущен", "✅ browser running"),
     "chrome.down":       ("⏹ браузер не запущен", "⏹ browser not running"),
     "chrome.output":     ("<b>chrome-debug</b>\n<pre>%(body)s</pre>",

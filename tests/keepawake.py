@@ -1321,7 +1321,8 @@ with sandbox() as box:
                   "svc_docs", "repo:myapp", "feat:myapp:nothing",
                   "chrome_start", "code_start", "idle_keep", "noop",
                   "devopen:no-such-feature", "devstop:no-such-feature",
-                  "devstart:no-such-feature", "devphone:no-such-feature", "gate_stop"]
+                  "devstart:no-such-feature", "devphone:no-such-feature", "gate_stop",
+                  "chrome_stop"]
         from keepawake import docs as _docs
         routed += ["doc:" + k for k in _docs.SECTIONS]
         for data in routed:
@@ -1425,10 +1426,19 @@ if os.path.exists(cfg):
         check("a link to a tree that is gone is left out", "gone" in chrome_body, False)
         check_true("the proxy's state is named", "sclaude-proxy" in chrome_body)
 
-        rows = tg_menu.chrome_keyboard()
+        # The closed gate is stubbed, not read: on a machine where somebody
+        # has just opened phone access the real unit is running.
+        saved_gate = tg_menu.gate_running
+        tg_menu.gate_running = lambda: False
+        try:
+            rows = tg_menu.chrome_keyboard()
+        finally:
+            tg_menu.gate_running = saved_gate
         datas = [b.get("callback_data") for row in rows for b in row]
-        check_true("the first row is the browser",
-                   any(b["callback_data"].startswith("chrome_") for b in rows[0]))
+        check("the first block is the list of features: a caption, then where to open it",
+              (rows[0][0]["callback_data"], rows[1][0]["callback_data"],
+               rows[1][1].get("callback_data")),
+              ("noop", "chrome_start", "devphone:"))
         check_true("each feature can be opened", "devopen:sample-one" in datas)
         check("a stopped feature has no stop button", "devstop:sample-one" in datas, False)
         check_true("a stopped feature can be started", "devstart:sample-one" in datas)
@@ -1456,10 +1466,12 @@ if os.path.exists(cfg):
                   tg_menu.gate_origin(), "https://box.tail1.ts.net:8443")
             rows = tg_menu.chrome_keyboard()
             apps = [b["web_app"]["url"] for row in rows for b in row if "web_app" in b]
-            check("an open gate: 📱 is the Mini App", apps,
-                  ["https://box.tail1.ts.net:8443/__sclaude/tg?f=sample-one"])
-            check("an open gate: the Mini App button looks different",
-                  [b.get("style") for row in rows for b in row if "web_app" in b], ["success"])
+            check("an open gate: the phone buttons are the Mini App", apps,
+                  ["https://box.tail1.ts.net:8443/__sclaude/tg?f=",
+                   "https://box.tail1.ts.net:8443/__sclaude/tg?f=sample-one"])
+            check("an open gate: the Mini App buttons look different",
+                  [b.get("style") for row in rows for b in row if "web_app" in b],
+                  ["success", "success"])
             check("a refused colour is dropped, the rest kept",
                   tg_menu.unstyled({"inline_keyboard": [[{"text": "x", "style": "success",
                                                           "callback_data": "y"}]]}),

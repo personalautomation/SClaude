@@ -337,6 +337,9 @@ def check_gate(proxy_port, root):
         check("gate: it loads Telegram's script",
               "telegram.org/js/telegram-web-app.js" in body, True)
         check("gate: it asks for full screen", "requestFullscreen" in body, True)
+        status, _, body = request(port, host, "/__sclaude/tg")
+        check("gate: no feature is the list", ("200 OK" in status, "'/__sclaude/'" in body),
+              (True, True))
         status, _, _ = request(port, host, "/__sclaude/tg?f=../x")
         check("gate: a bad label is not echoed", status, "HTTP/1.1 404 Not Found")
 

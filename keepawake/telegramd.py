@@ -77,8 +77,16 @@ class Bot(object):
             # A button's colour (`style`) is recent in the Bot API. Should
             # Telegram refuse it, the same message goes again without colours
             # rather than not at all.
+            # Only a refusal that names the button: "message is not modified"
+            # is a 400 as well, and taking it for this one stripped the colour
+            # off a card that had simply not changed.
             styled = json.dumps(params.get("reply_markup") or {})
-            if exc.code != 400 or '"style"' not in styled:
+            try:
+                reason = exc.read().decode("utf-8", "replace").lower()
+            except Exception:
+                reason = ""
+            if exc.code != 400 or '"style"' not in styled \
+                    or not any(w in reason for w in ("style", "button")):
                 raise
             log.warning("%s refused a styled keyboard; sending it plain", method)
             params["reply_markup"] = unstyled(params["reply_markup"])
@@ -347,26 +355,35 @@ def parse_hhmm(text, now):
 
 
 def chrome_keyboard():
-    # The browser on the laptop in the first row, then one row per feature:
+    # The list of features first, then one block per feature:
     # every feature has a dev server of its own now, so "the dev server" no
     # longer names anything. 🌐 opens the feature in the laptop's Chrome —
     # a stopped one is started by sclaude-proxy on that very request — and ⏹
     # stops a running one, its database with it.
     browser_up = port_open(CHROME_PORT)
-
-    browser = [{"text": t("chrome.browser"), "callback_data": "noop"}]
-    if browser_up:
-        browser.append({"text": t("chrome.restart"), "callback_data": "chrome_restart"})
-        browser.append({"text": t("chrome.stop"), "callback_data": "chrome_stop"})
-    else:
-        browser.append({"text": t("chrome.start"), "callback_data": "chrome_start"})
-
-    rows = [browser]
-    # 📱 opens the feature inside Telegram. While the gate is down it is a
-    # callback that brings the gate up; once it is up, the same button is the
-    # Mini App itself — a second press, but nothing is on the internet before
-    # the first.
     origin = gate_origin() if gate_running() else ""
+
+    def phone(label):
+        # Two looks for two presses: a plain 🔒 that only opens the door, then
+        # a green 📲 that is the Mini App — so the button itself says that the
+        # first press does not show the page yet, and the second will.
+        if origin:
+            return {"text": t("chrome.phoneopen"), "style": "success",
+                    "web_app": {"url": "%s/__sclaude/tg?f=%s" % (origin, label)}}
+        return {"text": t("chrome.phone"), "callback_data": "devphone:" + label}
+
+    # The list of every feature first, laid out like a feature: a caption,
+    # then where to open it. 🌐 is the laptop's Chrome at localhost:3000,
+    # started if it is down; ⏹ closes that Chrome, and only while it runs.
+    rows = [[{"text": t("chrome.all"), "callback_data": "noop"}]]
+    first = [{"text": t("chrome.open"), "callback_data": "chrome_start"}, phone("")]
+    if browser_up:
+        first.append({"text": t("chrome.stopbrowser"), "callback_data": "chrome_stop"})
+    rows.append(first)
+    # The phone button opens the feature inside Telegram. While the gate is
+    # down it is a callback that brings the gate up; once it is up, the same
+    # button is the Mini App itself — a second press, but nothing is on the
+    # internet before the first.
     for label, _wt, _port, running in dev_features()[:FEATURE_ROWS]:
         # Telegram refuses callback data over 64 bytes; a feature with a name
         # that long is listed in the text and simply has no buttons.
@@ -376,15 +393,7 @@ def chrome_keyboard():
         # phone's width a button that carries both the name and an action cuts
         # the name off, and a bare 📱 next to it said nothing of what it does.
         rows.append([{"text": label, "callback_data": "noop"}])
-        row = [{"text": t("chrome.open"), "callback_data": "devopen:" + label}]
-        # Two looks for two presses: a plain 🔒 that only opens the door, then
-        # a green 📲 that is the Mini App — so the button itself says that the
-        # first press does not show the feature yet, and the second will.
-        if origin:
-            row.append({"text": t("chrome.phoneopen"), "style": "success",
-                        "web_app": {"url": "%s/__sclaude/tg?f=%s" % (origin, label)}})
-        else:
-            row.append({"text": t("chrome.phone"), "callback_data": "devphone:" + label})
+        row = [{"text": t("chrome.open"), "callback_data": "devopen:" + label}, phone(label)]
         if running:
             row.append({"text": t("chrome.featstop"), "callback_data": "devstop:" + label})
         else:
@@ -2035,8 +2044,9 @@ class Handler(object):
             # where to look.
             self.bot.edit(message_id, chrome_text(), chrome_keyboard())
         elif data_raw.startswith("devphone:"):
+            # An empty label is the list of every feature, the first row.
             label = data_raw.partition(":")[2]
-            if not [f for f in dev_features() if f[0] == label]:
+            if label and not [f for f in dev_features() if f[0] == label]:
                 self.bot.edit(message_id, chrome_text(), chrome_keyboard())
                 return
             run("systemctl --user start " + GATE_UNIT, timeout=60)
@@ -2047,8 +2057,9 @@ class Handler(object):
                 self.bot.edit(message_id, t("chrome.gatefail", log=escape(tail[-1500:])),
                               chrome_keyboard())
                 return
-            log.info("phone access opened for %s", label)
-            proxy_start(label)
+            log.info("phone access opened for %s", label or "the list")
+            if label:
+                proxy_start(label)
             self.bot.edit(message_id, chrome_text(), chrome_keyboard())
         elif data_raw == "gate_stop":
             run("systemctl --user stop " + GATE_UNIT, timeout=60)

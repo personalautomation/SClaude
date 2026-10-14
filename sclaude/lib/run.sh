@@ -637,6 +637,7 @@ run_step() {
     [[ "$step" == "review" ]] && state_set "$state" "steps.$step.rounds" null
     step_run "$wt" "$step" open "$session"
     [[ "$step" == "review" ]] && run_comments "$wt" "$session" "$pr"
+    [[ "$step" == "review" ]] && run_rounds "$wt" "$session" 1
     prompt="$(render_prompt "$step" "$slug" "$pr" "$issue" "$wt")"
     # QA's comments reach a fresh session too. They used to be read only on the
     # resume path, so a hand-back that arrived after the recorded session had
@@ -729,6 +730,8 @@ session_ended() {
     pct="$(awk '{print $3}' <<<"$held")"
     if [[ "$pct" =~ ^[0-9]+$ && "$pct" -lt "$REVIEW_CONTEXT_MAX_PCT" ]]; then
       state_set "$state" "steps.$step.rounds" "$rounds"
+      # The round it now starts counts too; run_step writes it to the issue.
+      run_rounds "$wt" "$session" "$((rounds + 1))"
       review_context_log "$wt" "$slug" "$session" "carried on" "$held" "$rounds"
       echo ""
       say "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
@@ -740,6 +743,8 @@ session_ended() {
     fi
     review_context_log "$wt" "$slug" "$session" "fresh session" "$held" "$rounds"
     state_set "$state" "steps.$step.rounds" null
+    # Every round it worked was closed, the last one included.
+    run_rounds "$wt" "$session" "$rounds"
     step_run "$wt" "$step" end "$session" "fixes confirmed"
     local round_key; round_key="$(step_run_key "$state" "$step" "$session")"
     state_set "$state" "steps.$step.session" null

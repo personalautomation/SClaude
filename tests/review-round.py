@@ -337,6 +337,9 @@ session_watch_stop
     check("rotation-records-the-reason", 'step_run "$wt" "$step" end "$session" "fixes confirmed"' in rot, True)
     check("rotation-forgets-the-session", 'state_set "$state" "steps.$step.session" null' in rot, True)
     check("rotation-writes-the-issue", 'issue_sync "$wt"' in rot, True)
+    check("rotation-counts-its-rounds", 'run_rounds "$wt" "$session" "$rounds"' in rot, True)
+    check("carry-on-counts-the-next-round", 'run_rounds "$wt" "$session" "$((rounds + 1))"' in rot, True)
+    check("fresh-review-is-round-one", '&& run_rounds "$wt" "$session" 1' in RUN, True)
     check("rotation-opens-a-fresh-session", 'run_step "$wt" "$slug" "$step"' in rot, True)
     # A round carried on in the same session resumes it through run_step, and
     # the issue row must show the comments that round added.

@@ -108,7 +108,27 @@ with tempfile.TemporaryDirectory() as wt:
     comments("r3333333", "1 0")
     comments("r3333333", "")      # unreadable: the count stays
     titles = [r.split("|")[1].strip() for r in render(path)]
-    check("comments-shown", titles[3:], ["review (1) - 9 comments", "review (2) - 1 comment"])
+    check("comments-shown", titles[3:], ["review (1) - 9 \U0001F4AC", "review (2) - 1 \U0001F4AC"])
+
+    # The rounds a session worked follow its comments: one when it opens, one
+    # more for every round it carried on into.
+    def rounds(session, n):
+        subprocess.run(["bash", "-c",
+                        'source "$1/state.sh"; source "$1/steps.sh"; run_rounds "$2" "$3" "$4"',
+                        "_", LIB, wt, session, str(n)], check=True)
+
+    rounds("r1111111", 1)
+    rounds("r1111111", 3)
+    rounds("r3333333", "x")       # not a number: nothing written
+    titles = [r.split("|")[1].strip() for r in render(path)]
+    check("rounds-shown", titles[3:],
+          ["review (1) - 9 \U0001F4AC - 3 \U0001F501", "review (2) - 1 \U0001F4AC"])
+    body = subprocess.run([sys.executable, "-", path], text=True, capture_output=True,
+                          input=re.search(r"body=\"\$\(SCLAUDE_STEPS=.*?<<'PY'[^\n]*\n(.*?)\nPY\n",
+                                          github, re.S).group(1),
+                          env={**os.environ, "SCLAUDE_STEPS": "review=review\n"}).stdout
+    check("legend-under-table",
+          "\U0001F4AC review comments · \U0001F501 review rounds" in body, True)
 
     # A friction review that stalled and was started again: both are named in
     # the cell, the stalled one first.

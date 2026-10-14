@@ -652,6 +652,30 @@ with open(path, "w") as fh:
 PY
 }
 
+# How many rounds of the automatic review a review session worked through:
+# one when it opens, one more each time it carries on into the next round
+# (session_ended). Shown beside its row in the issue, after the comments.
+#
+#   run_rounds <wt> <session> <rounds>
+run_rounds() {
+  local wt="$1" session="$2" rounds="$3"
+  [[ -n "$session" && "$rounds" =~ ^[0-9]+$ ]] || return 0
+  python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$rounds" <<'PY' 2>/dev/null || true
+import json, sys
+path, session, rounds = sys.argv[1:4]
+with open(path) as fh:
+    data = json.load(fh)
+runs = ((data.get("steps") or {}).get("review") or {}).get("runs") or []
+mine = [r for r in runs if isinstance(r, dict) and r.get("session") == session]
+if not mine:
+    sys.exit(0)
+mine[-1]["rounds"] = int(rounds)
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
+PY
+}
+
 step_run() {
   session_runs "$1/.sclaude/local/feature/state.json" "steps.$2" "$3" "${4:-}" "${5:-}"
 }

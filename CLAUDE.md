@@ -68,6 +68,10 @@ breaks the other silently — grep before you edit:
   `run.sh` and spelled out in `sclaude/prompts/review.md`;
   `tests/review-round.py` checks the two agree.
 
+- `as on r<id>`, the reply `sclaude/prompts/review.md` asks for when a
+  declined thread repeats an earlier one, is read by `CITED` in
+  `sclaude/lib/review_report.py`; `tests/review-report.py` checks both sides.
+
   *(The two entries above were added by Claude, not asked for line by line:
   they came with the parallel-features fixes of 2026-10-09, so that a later
   edit to one side does not silently break the other.)*

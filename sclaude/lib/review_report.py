@@ -21,7 +21,12 @@
 #     it), and the reversals the sessions declined (review-reversals). Both
 #     growing means the fixes are feeding the review;
 #   * what it costs — the review sessions' spend as the status line reports it
-#     (run_cost), their time, and the automatic review's own runs.
+#     (run_cost), their time, and the automatic review's own runs;
+#   * findings raised again after a decline — a finding that repeats one the
+#     author closed without a fix: near it in the same file, or cited by the
+#     reply that declined it again ("as on r<id>", sclaude/prompts/review.md).
+#     The review workflow is told the declined ones; this shows whether it
+#     listens.
 #
 # A thread is classified by what happened to it, never by reading it:
 #
@@ -30,19 +35,25 @@
 #              and written in review-yours (left for the person to resolve);
 #   open       everything else.
 #
-# A round is the automatic review that posted a thread, by its review id. A
-# review that posted nothing has no threads and so no row; the runs line below
-# counts every run.
+# A round is one run of the automatic review: a thread belongs to the last run
+# that started before it was posted. Not the review id GitHub gives a comment —
+# the review posts each inline comment as a review of its own, so that counted
+# every finding as a round. A run that found nothing is a round with nothing,
+# which is what convergence looks like. The rounds are summed per review
+# session (state.json), the run going to the session last started before it:
+# a session's push is what starts the run its findings come from.
 #
 # Silent on trouble, like pr_context.py: no gh, no network — it says what it
 # could not read and prints the rest.
 import datetime
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pr_context import RESOLVER_PREFIX, gh_json, is_claude_review, yours  # noqa: E402
+from pr_context import (RESOLVER_PREFIX, SKIP_SECONDS, gh_json,  # noqa: E402
+                        is_claude_review, yours)
 
 QUERY = """
 query($owner: String!, $name: String!, $number: Int!, $after: String) {
@@ -53,7 +64,7 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
         nodes {
           isResolved path line originalLine
           comments(first: 50) {
-            nodes { body createdAt url pullRequestReview { databaseId submittedAt } }
+            nodes { body createdAt url }
           }
         }
       }
@@ -62,14 +73,28 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
 }
 """
 
-# How close a new finding has to sit to an earlier fixed one, in lines, to
-# count as brought by that fix. A fix moves a few lines around; a finding a
-# screen away is about something else.
+# How close a new finding has to sit to an earlier one, in lines, to count as
+# about the same code. A fix moves a few lines around; a finding a screen away
+# is about something else.
 NEAR_LINES = 5
 
 # Below this share acted on, the review is mostly asking for things nobody
 # fixes (see the header).
 ACTED_ON_FLOOR = 0.4
+
+# How many settled findings, newest first, the share acted on is taken over.
+ACTED_ON_SAMPLE = 10
+
+# Without the runs (no gh run list), threads further apart than this start a
+# new round: one run posts its findings within minutes.
+ROUND_GAP = datetime.timedelta(minutes=10)
+
+# A discussion id in a thread link, and one cited in a reply ("as on r123").
+DISCUSSION = re.compile(r"discussion_r(\d+)")
+CITED = re.compile(r"(?:discussion_|\b)r(\d{6,})\b")
+
+# The per-run chain is cut to its two ends past this many runs.
+CHAIN_MAX = 30
 
 
 def parse(ts):
@@ -102,20 +127,22 @@ def threads(cwd, pr, repo):
             if not comments:
                 continue
             first = comments[0]
-            review = first.get("pullRequestReview") or {}
-            fixed = any((c.get("body") or "").lstrip().startswith(RESOLVER_PREFIX)
-                        for c in comments[1:])
+            replies = [c.get("body") or "" for c in comments[1:]]
+            fixed = any(b.lstrip().startswith(RESOLVER_PREFIX) for b in replies)
             if t.get("isResolved"):
                 fate = "fixed" if fixed else "no fix"
             else:
                 fate = "no fix" if first.get("url") in left else "open"
             line = t.get("line") or t.get("originalLine")
+            own = DISCUSSION.search(first.get("url") or "")
+            own = own.group(1) if own else None
             out.append({
+                "id": own,
+                "cites": {m for b in replies for m in CITED.findall(b)} - {own},
                 "path": t.get("path") or "?",
                 "line": line if isinstance(line, int) else None,
                 "created": parse(first.get("createdAt")),
-                "round": review.get("databaseId") or first.get("createdAt"),
-                "round_at": parse(review.get("submittedAt") or first.get("createdAt")),
+                "round": None,
                 "fate": fate,
                 "left_open": not t.get("isResolved") and first.get("url") in left,
             })
@@ -128,48 +155,82 @@ def threads(cwd, pr, repo):
     return out
 
 
+def review_runs(cwd, branch):
+    """The automatic review's runs on the branch, oldest first: [{start,
+    seconds, running}], or None when unreadable. A run shorter than
+    SKIP_SECONDS reviewed nothing (pr_context.py) and is left out."""
+    if not branch:
+        return None
+    # The limit is high on purpose: every comment starts the @mention
+    # workflow, and at 200 those runs pushed the review's own off the list.
+    data = gh_json(["run", "list", "--branch", branch, "--limit", "1000", "--json",
+                    "workflowName,createdAt,updatedAt,status"], cwd=cwd)
+    if not isinstance(data, list):
+        return None
+    out = []
+    for r in data:
+        name = r.get("workflowName") or ""
+        if not is_claude_review(name, name):
+            continue
+        a, b = parse(r.get("createdAt")), parse(r.get("updatedAt"))
+        if not a:
+            continue
+        running = (r.get("status") or "completed") != "completed"
+        seconds = (b - a).total_seconds() if b and b > a else 0.0
+        if running or seconds >= SKIP_SECONDS:
+            out.append({"start": a, "seconds": seconds, "running": running})
+    out.sort(key=lambda r: r["start"])
+    return out
+
+
+def rounds(found, runs):
+    """[{at, running, threads}] — one per review run, empty ones included;
+    sets each thread's "round" to its index. Without runs, threads are split
+    where ROUND_GAP passes between two of them."""
+    if runs:
+        out = [{"at": r["start"], "running": r["running"], "threads": []} for r in runs]
+        for t in found:
+            i = 0
+            for j, r in enumerate(runs):
+                if t["created"] and r["start"] <= t["created"]:
+                    i = j
+            t["round"] = i
+            out[i]["threads"].append(t)
+        return out
+    out, last = [], None
+    for t in found:
+        if not out or not (t["created"] and last and t["created"] - last <= ROUND_GAP):
+            out.append({"at": t["created"], "running": False, "threads": []})
+        t["round"] = len(out) - 1
+        out[-1]["threads"].append(t)
+        last = t["created"] or last
+    return out
+
+
+def near(a, b):
+    return (a["path"] == b["path"] and a["line"] is not None and b["line"] is not None
+            and abs(a["line"] - b["line"]) <= NEAR_LINES)
+
+
 def mark_near_fixes(found):
     """Marks each thread posted near a line an earlier round's fixed thread
     sat on, in the same file."""
     for i, t in enumerate(found):
-        t["near_fix"] = t["line"] is not None and any(
-            e["fate"] == "fixed" and e["path"] == t["path"] and e["line"] is not None
-            and e["round"] != t["round"] and abs(e["line"] - t["line"]) <= NEAR_LINES
-            for e in found[:i])
+        t["near_fix"] = any(e["fate"] == "fixed" and e["round"] != t["round"] and near(e, t)
+                            for e in found[:i])
 
 
-def rounds(found):
-    """[(when, [threads])] per automatic review that posted threads, in order."""
-    groups, order = {}, []
-    for t in found:
-        if t["round"] not in groups:
-            groups[t["round"]] = []
-            order.append(t["round"])
-        groups[t["round"]].append(t)
-    return [(groups[k][0]["round_at"], groups[k]) for k in order]
-
-
-def review_runs(cwd, branch):
-    """(runs, minutes) of the automatic review on the branch, or None."""
-    if not branch:
-        return None
-    data = gh_json(["run", "list", "--branch", branch, "--limit", "200", "--json",
-                    "workflowName,createdAt,updatedAt,conclusion"], cwd=cwd)
-    if not isinstance(data, list):
-        return None
-    runs = [r for r in data
-            if is_claude_review(r.get("workflowName") or "", r.get("workflowName") or "")]
-    seconds = 0.0
-    for r in runs:
-        a, b = parse(r.get("createdAt")), parse(r.get("updatedAt"))
-        if a and b and b > a:
-            seconds += (b - a).total_seconds()
-    return len(runs), seconds / 60
+def mark_repeats(found):
+    """Marks each thread that repeats an earlier declined one: cited by its
+    reply, or near it in the same file in a later round."""
+    for i, t in enumerate(found):
+        earlier = [e for e in found[:i] if e["fate"] == "no fix" and e["round"] != t["round"]]
+        t["cites_declined"] = any(e["id"] in t["cites"] for e in earlier if e["id"])
+        t["repeat"] = t["cites_declined"] or any(near(e, t) for e in earlier)
 
 
 def sessions(cwd):
-    """The review sessions from the feature's state: [{rounds, comments, costs,
-    seconds}], oldest first."""
+    """The review sessions from the feature's state, oldest first."""
     try:
         with open(os.path.join(cwd, ".sclaude/local/feature/state.json")) as fh:
             state = json.load(fh)
@@ -184,9 +245,22 @@ def sessions(cwd):
         a = parse(r.get("started"))
         b = parse(r.get("finished")) or (now if not r.get("done") and not r.get("outcome") else None)
         costs = [c for c in (r.get("costs") or []) if isinstance(c, (int, float))]
-        out.append({"rounds": r.get("rounds"), "comments": r.get("comments"), "costs": costs,
+        out.append({"start": a, "rounds": r.get("rounds"), "costs": costs,
                     "seconds": (b - a).total_seconds() if a and b and b > a else None})
     return out
+
+
+def by_session(groups, runs):
+    """[(label, session or None, [rounds])]: each round goes to the session
+    last started before it; rounds before the first go to "before"."""
+    rows = [("before", None, [])] + [(str(i), s, []) for i, s in enumerate(runs, start=1)]
+    for g in groups:
+        k = 0
+        for i, s in enumerate(runs, start=1):
+            if s["start"] and g["at"] and s["start"] <= g["at"]:
+                k = i
+        rows[k][2].append(g)
+    return [r for r in rows if r[1] is not None or r[2]]
 
 
 def hours(seconds):
@@ -198,6 +272,13 @@ def pct(part, whole):
     return "%d%%" % round(100.0 * part / whole) if whole else "-"
 
 
+def chain(per_round):
+    words = [str(n) for n in per_round]
+    if len(words) > CHAIN_MAX:
+        words = words[:5] + ["…"] + words[-(CHAIN_MAX - 5):]
+    return " ".join(words)
+
+
 def verdict(per_round, acted, near_last, last_found, open_now):
     """The trend in a sentence, from the figures alone."""
     words = []
@@ -206,18 +287,20 @@ def verdict(per_round, acted, near_last, last_found, open_now):
     if len(per_round) < 3:
         words.append("Too few rounds for a trend.")
     else:
-        head = sum(per_round[:2]) / 2.0
-        tail = sum(per_round[-2:]) / 2.0
+        # Two rounds at each end, three once there are enough to spare.
+        k = 3 if len(per_round) >= 8 else 2
+        head = sum(per_round[:k]) / float(k)
+        tail = sum(per_round[-k:]) / float(k)
         if per_round[-1] > per_round[-2] >= per_round[-3]:
             words.append("Not converging: findings per round are climbing.")
         elif tail <= head * 0.5:
-            words.append("Converging: the last two rounds found half or less of the first two.")
+            words.append("Converging: the last rounds found half or less of the first.")
         elif tail < head:
             words.append("Converging slowly.")
         else:
             words.append("Not converging: findings per round hold level.")
     if acted is not None and acted < ACTED_ON_FLOOR:
-        words.append("Under %d%% of the last rounds' findings were fixed: the review is mostly "
+        words.append("Under %d%% of the latest findings were fixed: the review is mostly "
                      "asking for what nobody fixes." % (ACTED_ON_FLOOR * 100))
     if last_found and near_last * 2 >= last_found:
         words.append("Half or more of the last round's findings sit on earlier fixes: "
@@ -225,6 +308,10 @@ def verdict(per_round, acted, near_last, last_found, open_now):
     if open_now == 0:
         words.append("Nothing is open.")
     return " ".join(words)
+
+
+def count(ts, fate):
+    return sum(1 for t in ts if t["fate"] == fate)
 
 
 def main():
@@ -240,43 +327,62 @@ def main():
     if found is None:
         print("  The review threads could not be read (gh, network or permissions).")
         found = []
+    bot = review_runs(cwd, branch)
+    groups = rounds(found, bot)
     mark_near_fixes(found)
-    groups = rounds(found)
+    mark_repeats(found)
+    people = sessions(cwd)
+
+    total = len(found)
+    fixed, nofix, opened = count(found, "fixed"), count(found, "no fix"), count(found, "open")
+    near_all = sum(1 for t in found if t["near_fix"])
+    repeats = [t for t in found if t["repeat"]]
+    # A round still running has not said all it will: left out of the trend.
+    done = [g for g in groups if not g["running"]]
+    per_round = [len(g["threads"]) for g in done]
 
     if groups:
         print("")
-        print("  %-3s %-12s %6s %6s %7s %5s %10s" % ("#", "posted", "found", "fixed", "no fix",
-                                                     "open", "near fix"))
-        per_round = []
-        for i, (when, ts) in enumerate(groups, start=1):
-            count = lambda fate: sum(1 for t in ts if t["fate"] == fate)  # noqa: E731
-            per_round.append(len(ts))
-            print("  %-3d %-12s %6d %6d %7d %5d %10d" % (
-                i, when.astimezone().strftime("%m-%d %H:%M") if when else "?",
-                len(ts), count("fixed"), count("no fix"), count("open"),
-                sum(1 for t in ts if t["near_fix"])))
-        total = len(found)
-        fixed = sum(1 for t in found if t["fate"] == "fixed")
-        nofix = sum(1 for t in found if t["fate"] == "no fix")
-        opened = sum(1 for t in found if t["fate"] == "open")
-        near = sum(1 for t in found if t["near_fix"])
-        print("  %-16s %6d %6d %7d %5d %10d" % ("total", total, fixed, nofix, opened, near))
+        print("  %-7s %-11s %6s %6s %4s %5s %5s %6s %4s %8s %7s" % (
+            "session", "started", "time", "cost", "runs", "found", "fixed", "no fix", "open",
+            "on fixes", "repeats"))
+        for label, s, gs in by_session(groups, people):
+            ts = [t for g in gs for t in g["threads"]]
+            print("  %-7s %-11s %6s %6s %4d %5d %5d %6d %4d %8d %7d" % (
+                label,
+                s["start"].astimezone().strftime("%m-%d %H:%M") if s and s["start"] else "",
+                hours(s["seconds"]) if s and s["seconds"] else "",
+                "$%.2f" % sum(s["costs"]) if s and s["costs"] else "",
+                len(gs), len(ts), count(ts, "fixed"), count(ts, "no fix"), count(ts, "open"),
+                sum(1 for t in ts if t["near_fix"]), sum(1 for t in ts if t["repeat"])))
+        seconds = sum(s["seconds"] or 0 for s in people)
+        costs = [c for s in people for c in s["costs"]]
+        print("  %-7s %-11s %6s %6s %4d %5d %5d %6d %4d %8d %7d" % (
+            "total", "", hours(seconds) if seconds else "",
+            "$%.2f" % sum(costs) if costs else "", len(groups), total, fixed, nofix, opened,
+            near_all, len(repeats)))
         print("")
-        print("  Findings per round: %s" % " → ".join(str(n) for n in per_round))
+        print("  Findings per review run, oldest first: %s%s" % (
+            chain(per_round), " (one more still running)" if len(done) < len(groups) else ""))
+    else:
+        print("  No review threads on the pull request.")
+
+    if found:
         left = sum(1 for t in found if t["left_open"])
         print("  Fixed: %d (%s). Closed without a fix: %d (%s)%s." % (
             fixed, pct(fixed, total), nofix, pct(nofix, total),
             ", %d of them waiting for you to resolve on GitHub" % left if left else ""))
-        # The share acted on, over the last two rounds whose findings are
-        # settled: an open finding has not been decided yet.
-        settled = [t for _, ts in groups[-2:] for t in ts if t["fate"] != "open"]
-        acted = (sum(1 for t in settled if t["fate"] == "fixed") / float(len(settled))
-                 if settled else None)
-        if acted is not None:
-            print("  Acted on in the last two rounds: %d%% of what was settled." % round(acted * 100))
-    else:
-        per_round, opened, near, acted, fixed = [], 0, 0, None, 0
-        print("  No review threads on the pull request.")
+    # The share acted on, over the newest settled findings: an open finding
+    # has not been decided yet.
+    settled = [t for t in found if t["fate"] != "open"][-ACTED_ON_SAMPLE:]
+    acted = (count(settled, "fixed") / float(len(settled))) if settled else None
+    if acted is not None:
+        print("  Acted on, of the last %d settled findings: %d%%." % (len(settled), round(acted * 100)))
+    if found:
+        again = sum(1 for t in repeats if t["fate"] == "no fix")
+        cited = sum(1 for t in repeats if t["cites_declined"])
+        print("  Raised again after a decline: %d finding%s (%d declined again, %d citing the "
+              "earlier thread)." % (len(repeats), "" if len(repeats) == 1 else "s", again, cited))
 
     # Back and forth.
     reversals = 0
@@ -288,36 +394,36 @@ def main():
     reversals += logged_reversals(log, slug) if slug and log else 0
     if found or reversals:
         print("  Back and forth: %d finding%s on lines an earlier round fixed; %d declined "
-              "as undoing a settled fix." % (near, "" if near == 1 else "s", reversals))
+              "as undoing a settled fix." % (near_all, "" if near_all == 1 else "s", reversals))
         spots = {}
         for t in found:
             spots.setdefault(t["path"], set()).add(t["round"])
         hot = sorted(((len(r), p) for p, r in spots.items() if len(r) >= 3), reverse=True)[:3]
         for n, p in hot:
-            print("    %s: findings in %d rounds" % (p, n))
+            print("    %s: findings in %d of %d rounds" % (p, n, len(groups)))
 
     # What it cost.
-    runs = sessions(cwd)
-    if runs:
-        costs = [c for r in runs for c in r["costs"]]
-        seconds = sum(r["seconds"] or 0 for r in runs)
-        worked = sum(r["rounds"] for r in runs if isinstance(r["rounds"], int))
-        line = "  Sessions: %d, %d round%s worked, %s" % (
-            len(runs), worked, "" if worked == 1 else "s", hours(seconds))
+    if people:
+        costs = [c for s in people for c in s["costs"]]
+        priced = [i for i, s in enumerate(people, start=1) if s["costs"]]
         if costs:
-            line += ", $%.2f" % sum(costs)
-            line += " (last round $%.2f)" % costs[-1]
-            if fixed:
-                line += ", $%.2f per fixed finding" % (sum(costs) / fixed)
+            # Per fixed finding, over the sessions that have a cost: the
+            # others were not priced, and their fixes would flatter it.
+            fixed_priced = sum(count([t for g in gs for t in g["threads"]], "fixed")
+                               for label, s, gs in by_session(groups, people)
+                               if s is not None and s["costs"])
+            line = "  Cost: $%.2f over %d of %d sessions, last launch $%.2f" % (
+                sum(costs), len(priced), len(people), costs[-1])
+            if fixed_priced:
+                line += ", $%.2f per finding fixed from their runs" % (sum(costs) / fixed_priced)
+            print(line + ".")
         else:
-            line += ", cost not recorded"
-        print(line)
-    bot = review_runs(cwd, branch)
+            print("  Cost: not recorded for any session.")
     if bot:
-        print("  Automatic review: %d run%s, %s of runner time" % (
-            bot[0], "" if bot[0] == 1 else "s", hours(bot[1] * 60)))
+        print("  Automatic review: %d run%s, %s of runner time." % (
+            len(bot), "" if len(bot) == 1 else "s", hours(sum(r["seconds"] for r in bot))))
 
-    last = groups[-1][1] if groups else []
+    last = done[-1]["threads"] if done else []
     print("")
     print("  " + verdict(per_round, acted, sum(1 for t in last if t["near_fix"]), len(last), opened))
     return 0

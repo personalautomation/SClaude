@@ -120,9 +120,14 @@ project_migrations_dir() {
 # same /code-review on this machine, local_review.sh) or `off`. Absent, or a
 # word it does not know, is `github`: the review a project already has is not
 # switched off by a typo.
+#
+# Read from the main checkout first, not the feature's tree: where the review
+# runs is a choice about the project's spending, made now (`sclaude config`),
+# and a feature branched last week must not go on with the old one until it
+# merges main. The tree's copy answers only where the main checkout has none.
 project_review_mode() {
   local mode
-  mode="$(project_get review "${1:-}" 2>/dev/null || true)"
+  mode="$(project_get review 2>/dev/null || project_get review "${1:-}" 2>/dev/null || true)"
   case "$mode" in
     local|off) echo "$mode" ;;
     *) echo github ;;

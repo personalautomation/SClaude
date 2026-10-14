@@ -127,7 +127,7 @@ INSTRUMENTS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 # half an orchestrator is worse than none.
 for _module in io ui steps state project environment developer branches worktree featuredb lock pane run \
                github plan deploy regression rollback watch picker abandon actions doctor deferred \
-               terminal retro scratch no_change local_review; do
+               terminal retro scratch no_change local_review config; do
   # shellcheck source=/dev/null
   source "$LIB/$_module.sh" || {
     echo "sclaude: cannot load $LIB/$_module.sh" >&2
@@ -588,6 +588,9 @@ cmd_menu() {
     else
       items+=("[ ] show actions after choosing"$'\t'"Enter on a feature continues it")
     fi
+    # The project's settings, last: visited rarely, and never in the way of
+    # the feature the menu is mostly opened for.
+    items+=("config"$'\t'"the project's .sclaude/config.json, explained")
 
     PICK_LIST_HINT="  ↑↓ move · Space toggle · Enter open · q cancel"
     choice="$(pick_list "Features in progress:" "${items[@]}")"; rc=$?
@@ -634,6 +637,10 @@ cmd_menu() {
     elif [[ "$choice" -eq "$n" ]]; then
       start_feature
       return 0
+    elif [[ "$choice" -eq $((n + 3)) ]]; then
+      cmd_config
+      PICK_LIST_START="$choice"
+      continue
     elif [[ "$choice" -eq $((n + 2)) ]]; then
       # Enter on the checkbox toggles it — the second natural key for the same
       # action. It destroys nothing, and so it does not ask.
@@ -661,15 +668,19 @@ cmd_menu() {
   done
   menu+="  $i)"$'\t'"new feature"$'\n'
   options+=("new feature")
-  local acts=$((i + 1))
+  local acts=$((i + 1)) conf=$((i + 2))
   menu+="  $acts)"$'\t'"actions for a feature"$'\n'
   options+=("actions for a feature")
+  menu+="  $conf)"$'\t'"config"$'\n'
+  options+=("config")
   align_columns "$menu"
 
   echo ""
-  ask "What are we doing? [1-$acts] " choice "pick:$acts" "${options[@]}"
+  ask "What are we doing? [1-$conf] " choice "pick:$conf" "${options[@]}"
   [[ "$choice" =~ ^[0-9]+$ ]] || die "a number, please"
-  if [[ "$choice" -eq "$acts" ]]; then
+  if [[ "$choice" -eq "$conf" ]]; then
+    cmd_config
+  elif [[ "$choice" -eq "$acts" ]]; then
     actions_menu "$rows"
   elif [[ "$choice" -eq "$i" ]]; then
     start_feature
@@ -1491,6 +1502,7 @@ ${BOLD}$SELF${OFF} — an orchestrator for the feature development cycle
   $SELF <name>          continue a feature from its current step
   $SELF status          a table of every feature and its step
   $SELF doctor          what this machine has and lacks, with the fix for each gap
+  $SELF config          the project's .sclaude/config.json, each section explained; sets the review mode
   $SELF dev [name]      start the dev server (no name — for the current directory)
   $SELF dev --stop [name]  stop the dev server of a feature (or of this directory)
   $SELF actions [name]  every action for one feature, in one list
@@ -1596,6 +1608,7 @@ main() {
     new)           shift; [[ -n "${1:-}" ]] && cmd_new "$1" || start_feature ;;
     status|ls)     cmd_status ;;
     doctor)        doctor_run ;;
+    config)        cmd_config ;;
     dev)           shift; cmd_dev "$@" ;;
     # The list of actions on a feature. In the terminal people arrive here from
     # the menu, by the checkbox; from a phone there is no checkbox — there is

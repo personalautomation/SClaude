@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+#
+# The `config` screen (sclaude/lib/config.sh, config_menu.py): every section of
+# the project's .sclaude/config.json with its value and its explanation.
+#
+# Guarded here:
+#
+#   * the explanations come from sclaude/config.example.json's README, and every
+#     section that README describes gets a row — a section added to the README
+#     appears on the screen without a second text to keep in step;
+#   * a section the file holds that sclaude does not read is shown too;
+#   * only a section with fixed choices is set, only to one of them, and the
+#     rest of the file survives the write;
+#   * the review mode is read from the main checkout before a feature's tree.
+#
+# Run it with: python3 tests/config-menu.py
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+LIB = os.path.join(ROOT, "sclaude", "lib")
+EXAMPLE = os.path.join(ROOT, "sclaude", "config.example.json")
+MENU = os.path.join(LIB, "config_menu.py")
+
+failures = []
+
+
+def check(name, got, want):
+    if got != want:
+        failures.append((name, want, got))
+
+
+def check_true(name, got):
+    if not got:
+        failures.append((name, "true", got))
+
+
+def menu(*args):
+    out = subprocess.run([sys.executable, MENU] + list(args), capture_output=True, text=True)
+    return out.returncode, out.stdout
+
+
+def write(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        json.dump(data, fh)
+
+
+tmp = tempfile.mkdtemp()
+try:
+    config = os.path.join(tmp, "repo", ".sclaude", "config.json")
+    write(config, {"commands": {"lint": "npm run lint"}, "regression": {"local": ["lint"]},
+                   "review": "local", "extra": 1})
+
+    with open(EXAMPLE) as fh:
+        example = json.load(fh)
+    # Every top-level key of the example but the README is a section the
+    # README must explain, or it would be missing from the screen.
+    sections = [k for k in example if k != "README"]
+
+    rc, out = menu("rows", config, EXAMPLE)
+    keys = [line.split("\t")[0] for line in out.splitlines()]
+    check("rows-rc", rc, 0)
+    for key in sections:
+        check_true("row-for-" + key, key in keys)
+    check_true("row-for-unknown", "extra" in keys)
+    rows = dict(line.split("\t", 1) for line in out.splitlines())
+    check_true("review-row-value", rows["review"].startswith("local — "))
+    check_true("commands-row-value", rows["commands"].startswith("lint — "))
+    check_true("unset-row", rows["manuals"].startswith("not set — "))
+    check_true("unknown-row-says-so", "not a section sclaude reads" in rows["extra"])
+
+    rc, out = menu("show", config, EXAMPLE, "review")
+    check_true("show-explains", "no-review" in out and '"local"' in out)
+
+    rc, out = menu("choices", "review")
+    check("review-choices", [l.split("\t")[0] for l in out.splitlines()],
+          ["github", "local", "off"])
+    rc, out = menu("choices", "commands")
+    check("structure-has-no-choices", out, "")
+
+    rc, _ = menu("set", config, "review", "off")
+    check("set-rc", rc, 0)
+    with open(config) as fh:
+        data = json.load(fh)
+    check("set-value", data["review"], "off")
+    check("set-keeps-rest", data["commands"], {"lint": "npm run lint"})
+    rc, _ = menu("set", config, "review", "sometimes")
+    check("set-refuses-unknown-value", rc, 1)
+    rc, _ = menu("set", config, "commands", "x")
+    check("set-refuses-structure", rc, 1)
+    with open(config) as fh:
+        check("refused-not-written", json.load(fh)["review"], "off")
+
+    # A file that is not JSON is never overwritten.
+    with open(config, "w") as fh:
+        fh.write("{broken")
+    rc, _ = menu("set", config, "review", "local")
+    check("broken-not-overwritten", rc, 1)
+    with open(config) as fh:
+        check("broken-kept", fh.read(), "{broken")
+
+    # The main checkout's choice outranks the one a feature's tree carries.
+    repo = os.path.join(tmp, "repo")
+    wt = os.path.join(tmp, "wt")
+    write(config, {"review": "local"})
+    write(os.path.join(wt, ".sclaude", "config.json"), {"review": "off"})
+    script = 'source "%s/project.sh"; REPO=%s; project_review_mode %s' % (LIB, repo, wt)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.strip()
+    check("main-checkout-first", out, "local")
+    write(config, {})
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.strip()
+    check("tree-when-main-has-none", out, "off")
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+if failures:
+    for name, want, got in failures:
+        print("FAIL %s: want %r, got %r" % (name, want, got))
+    sys.exit(1)
+print("ok")

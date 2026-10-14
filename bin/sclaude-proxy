@@ -762,9 +762,9 @@ async def handle(reader, writer):
 
 # --- the gate: the phone's entry from the internet ---------------------------
 #
-# `sclaude-proxy --gate` is what `tailscale funnel` publishes while the person
-# looks at a feature from Telegram (sclaude-gate.service, started by the bot's
-# 📱 button and by nothing else). It routes nothing itself: a request it lets
+# `sclaude-proxy --gate` is what `tailscale funnel` publishes for the phone's
+# Telegram Mini App (sclaude-gate.socket on 127.0.0.1:3001; the funnel stays on,
+# because Tailscale takes a minute and a half to carry a freshly enabled one). It routes nothing itself: a request it lets
 # in goes on to the proxy on :3000 as it came, so starting, routing and idling
 # stay in one process. Its own job is who: a page opened from the bot proves
 # itself with Telegram's signed initData once (tg_webapp.py) and then carries
@@ -775,8 +775,7 @@ async def handle(reader, writer):
 # checked a moment ago. A WebSocket upgrade is one exchange and stays whole.
 #
 # It ends itself after SCLAUDE_GATE_IDLE seconds with no connection open and
-# none new; the unit's ExecStopPost then takes the funnel down, so nothing of
-# the laptop stays on the internet once the phone has stopped looking.
+# none new, and the socket starts it again on the next one.
 import tg_webapp  # noqa: E402
 
 GATE_PORT = int(os.environ.get("SCLAUDE_GATE_PORT") or 3001)
@@ -802,28 +801,86 @@ def gate_cookie(header):
     return ""
 
 
+# The Mini App's own frame. Telegram shows no address bar in a Mini App and has
+# no way to turn one on, so the page the button opens draws one: a thin bar
+# with back, reload, the address (editable) and a way out of the frame, and the
+# feature in an iframe under it. Same origin, so the bar reads where the frame
+# is, SPA navigations included (polled: pushState fires no event outside).
+# The bar sits below Telegram's own floating buttons in full screen, from the
+# safe-area insets telegram-web-app.js publishes as CSS variables.
+# What a frame cannot hold — a provider's sign-in page that forbids framing —
+# opens with ⤢, which leaves the frame for the bare page.
+SHELL_STYLE = """
+html,body{margin:0;height:100%;background:var(--tg-theme-bg-color,#fff);
+font:14px system-ui,sans-serif;color:var(--tg-theme-text-color,#1c1917)}
+#shell{display:flex;flex-direction:column;height:100%}
+#bar{display:flex;gap:4px;align-items:center;padding:4px 6px;
+padding-top:calc(4px + var(--tg-safe-area-inset-top,0px) + var(--tg-content-safe-area-inset-top,0px));
+background:var(--tg-theme-secondary-bg-color,#f5f5f4);border-bottom:1px solid rgba(0,0,0,.12)}
+#bar button{border:0;background:none;font-size:18px;padding:4px 6px;color:inherit}
+#url{flex:1;min-width:0;border:0;border-radius:8px;padding:6px 8px;font:inherit;
+background:var(--tg-theme-bg-color,#fff);color:inherit}
+#frame{flex:1;border:0;width:100%}
+#msg{padding:24px 16px}
+"""
+
+
 def gate_bootstrap(label):
-    """The page the bot's button opens: set the view up, sign in, go on."""
+    """The page the bot's button opens: set the view up, sign in, show the
+    feature inside the address bar's frame."""
     script = """
 const tg = window.Telegram && window.Telegram.WebApp;
-const say = (text) => { document.getElementById('msg').textContent = text; };
+const msg = document.getElementById('msg');
+const start = %(label)s ? '/__sclaude/select?f=' + encodeURIComponent(%(label)s) : '/__sclaude/';
+function shell() {
+  msg.remove();
+  document.getElementById('shell').hidden = false;
+  const frame = document.getElementById('frame');
+  const url = document.getElementById('url');
+  const where = () => { try { const l = frame.contentWindow.location;
+    return l.pathname + l.search + l.hash; } catch (e) { return null; } };
+  let shown = '';
+  setInterval(() => { const w = where();
+    if (w && w !== shown && document.activeElement !== url) { shown = w; url.value = location.host + w; } }, 400);
+  document.getElementById('back').onclick = () => frame.contentWindow.history.back();
+  document.getElementById('reload').onclick = () => frame.contentWindow.location.reload();
+  document.getElementById('out').onclick = () => { location.href = where() || '/'; };
+  url.onkeydown = (e) => { if (e.key !== 'Enter') return;
+    let v = url.value.trim().replace(/^https?:\\/\\//, '');
+    if (v.startsWith(location.host)) v = v.slice(location.host.length);
+    if (!v.startsWith('/')) v = '/' + v;
+    frame.contentWindow.location.href = v; url.blur(); };
+  if (tg && tg.isVersionAtLeast('6.1')) {
+    tg.BackButton.show(); tg.BackButton.onClick(() => frame.contentWindow.history.back());
+  }
+  frame.src = start;
+}
 if (!tg || !tg.initData) {
-  say('Open this from the bot: the 📱 button next to the feature.');
+  msg.textContent = 'Open this from the bot: the phone button next to the feature.';
 } else {
   tg.ready();
   tg.expand();
   if (%(full)s && tg.isVersionAtLeast('8.0')) { try { tg.requestFullscreen(); } catch (e) {} }
   if (tg.isVersionAtLeast('7.7')) tg.disableVerticalSwipes();
   fetch('/__sclaude/tg/auth', {method: 'POST', body: tg.initData, credentials: 'same-origin'})
-    .then((r) => r.ok ? location.replace(%(label)s ? '/__sclaude/select?f=' + %(label)s : '/__sclaude/')
-                      : say('The bot did not recognise you (' + r.status + ').'))
-    .catch(() => say('The laptop did not answer.'));
+    .then((r) => r.ok ? shell() : (msg.textContent = 'The bot did not recognise you (' + r.status + ').'))
+    .catch(() => { msg.textContent = 'The laptop did not answer.'; });
 }
 """ % {"full": "true" if GATE_FULLSCREEN else "false", "label": json.dumps(label)}
-    body = ("<h1>%s</h1><p id=msg>Opening…</p>"
+    return ("<!doctype html><html><head><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover'>"
+            "<title>%s</title><style>%s</style></head><body>"
+            "<p id=msg>Opening %s…</p>"
+            "<div id=shell hidden><div id=bar>"
+            "<button id=back aria-label=Back>‹</button>"
+            "<button id=reload aria-label=Reload>⟳</button>"
+            "<input id=url inputmode=url autocapitalize=off autocorrect=off spellcheck=false>"
+            "<button id=out aria-label='Open without the bar'>⤢</button>"
+            "</div><iframe id=frame></iframe></div>"
             "<script src='https://telegram.org/js/telegram-web-app.js'></script>"
-            "<script>%s</script>" % (html.escape(label or "Features"), script))
-    return page(label or "Features", body)
+            "<script>%s</script></body></html>"
+            % (html.escape(label or "Features"), SHELL_STYLE,
+               html.escape(label or "the features"), script))
 
 
 async def gate_own(method, target, headers, reader):
@@ -909,11 +966,17 @@ async def gate_main():
                          "KEEPAWAKE_CHAT_ID in %s\n" % GATE_ENV)
         sys.exit(1)
     GATE.update(token=token, owner=int(owner), last=time.time())
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    # Loopback only: funnel connects from this machine, and nothing else may.
-    sock.bind(("127.0.0.1", GATE_PORT))
-    sock.listen(128)
+    if os.environ.get("LISTEN_PID") == str(os.getpid()) \
+            and int(os.environ.get("LISTEN_FDS") or 0) >= 1:
+        # sclaude-gate.socket holds the port; exiting when idle gives it back
+        # to systemd, which starts the gate again on the next connection.
+        sock = socket.socket(fileno=3)
+    else:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Loopback only: funnel connects from this machine, and nothing else may.
+        sock.bind(("127.0.0.1", GATE_PORT))
+        sock.listen(128)
     sock.setblocking(False)
     server = await asyncio.start_server(gate_handle, sock=sock, limit=HEAD_LIMIT)
     tick = min(TICK, max(GATE_IDLE / 4, 0.1))

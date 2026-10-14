@@ -1468,41 +1468,44 @@ its own and the address `main.localhost:3000` instead.
 
 ### A feature in Telegram, with no Tailscale on the phone
 
-The bot's chrome-debug card has a "🔒 Phone" button on each feature row. It opens the
-feature as a Telegram Mini App: full screen and inside Telegram, with nothing
-running on the phone but Telegram. A Mini App is a web view on a public HTTPS
-address, so for as long as the person looks, the laptop has one door on the
-internet:
+While phone access is on, the bot's chrome-debug card has a green "📲 Phone"
+button next to "🌐 Laptop": in the first row for the list of features, and in
+each feature's row. It opens the page as a Telegram Mini App. The page is full
+screen inside Telegram, with an address bar the gate draws itself (back,
+reload, the address, and ⤢ to leave the frame). The phone needs nothing but
+Telegram.
 
-- the first press starts `sclaude-gate.service`. That is `sclaude-proxy
-  --gate` on `127.0.0.1:3001`, and `tailscale funnel` publishes it as
-  `https://<node>.<tailnet>.ts.net:8443`. Before that press nothing is
-  published;
-- the button turns into a green "📲 Open" (`style: success`), and the
-  second press opens the feature. The page proves to the gate that it was
-  opened from this bot, by the account in `KEEPAWAKE_CHAT_ID` (Telegram's
-  signed `initData`, checked with the bot's token in
-  `sclaude/lib/tg_webapp.py`). It then carries the gate's cookie for 12 hours.
-  Every other request gets `403`;
-- the gate does no routing of its own. A request it lets in goes on to the
-  proxy on :3000, one request per connection;
-- after half an hour with no connection, or on "Close phone access", the gate
-  exits and the unit's `ExecStopPost` turns the funnel off.
+A Mini App is a web view on a public HTTPS address. The pieces:
 
-Needed once, by hand, because publishing to the internet is a person's decision:
+- `tailscale funnel` publishes `https://<node>.<tailnet>.ts.net:8443` and
+  forwards it to `sclaude-gate.socket` on `127.0.0.1:3001`;
+- `sclaude-proxy --gate` starts from that socket. It lets in only the account
+  in `KEEPAWAKE_CHAT_ID`: the page proves it with Telegram's signed
+  `initData`, checked with the bot's token in `sclaude/lib/tg_webapp.py`, and
+  then carries the gate's cookie for 12 hours. Anyone else gets `403`. The
+  gate does no routing of its own: a request it lets in goes on to the proxy
+  on :3000, one request per connection. It exits after half an hour idle, and
+  the socket brings it back;
+- the funnel stays on. When it is turned on, Tailscale's relays take about a
+  minute and a half to carry it, and the first ever funnel takes up to ten
+  minutes more for its public DNS name. Turning it on per visit meant a
+  phone that met "connection closed" every time.
+
+Phone access is turned on and off in the bot's Settings ("Phone access: on /
+off"). The first time needs, once, by hand:
 
 ```bash
-sudo tailscale set --operator=$USER    # lets the user unit run `tailscale funnel`
+sudo tailscale set --operator=$USER    # lets the bot run `tailscale funnel`
 ```
 
 Funnel also has to be allowed for the node in the tailnet policy (the
-`funnel` node attribute). The first `tailscale funnel` prints the link that
-turns it on. If something is missing, the bot shows the unit's log in place
-of the card.
+`funnel` node attribute). If it is not, the bot shows Tailscale's answer,
+with the link that turns it on.
 
 A product that signs people in through a provider with a redirect allow-list
 (Supabase Auth, OAuth apps) needs `https://<node>.<tailnet>.ts.net:8443` in
-that list, the same as it needs the `tailscale serve` name.
+that list, the same as it needs the `tailscale serve` name. A provider's
+sign-in page that refuses to be framed opens with ⤢.
 
 ## bin/chrome-debug
 

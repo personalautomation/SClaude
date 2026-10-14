@@ -337,6 +337,9 @@ def check_gate(proxy_port, root):
         check("gate: it loads Telegram's script",
               "telegram.org/js/telegram-web-app.js" in body, True)
         check("gate: it asks for full screen", "requestFullscreen" in body, True)
+        check("gate: it draws an address bar over the feature's frame",
+              all(x in body for x in ("id=url", "<iframe id=frame", "--tg-content-safe-area-inset-top")),
+              True)
         status, _, body = request(port, host, "/__sclaude/tg")
         check("gate: no feature is the list", ("200 OK" in status, "'/__sclaude/'" in body),
               (True, True))

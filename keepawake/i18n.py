@@ -135,23 +135,17 @@ STRINGS = {
                           "⏹ sclaude-proxy is not answering — features cannot be opened"),
     "chrome.open":       ("🌐 Ноутбук", "🌐 Laptop"),
     "chrome.featstop":   ("⏹ Остановить", "⏹ Stop"),
-    "chrome.phone":      ("🔒 Телефон", "🔒 Phone"),
-    "chrome.phoneopen":  ("📲 Открыть", "📲 Open"),
-    "chrome.gateup":     ("📲 Доступ с телефона открыт: зелёная «📲 Открыть» "
-                          "показывает фичу прямо в Telegram. Закроется сам через "
-                          "полчаса без просмотра.",
-                          "📲 Phone access is open: the green \u201c📲 Open\u201d "
-                          "shows the feature right in Telegram. It closes itself "
-                          "after half an hour unwatched."),
-    "chrome.gatedown":   ("🔒 Доступ с телефона закрыт. «🔒 Телефон» открывает его, "
-                          "затем зелёная «📲 Открыть» показывает фичу.",
-                          "🔒 Phone access is closed. \u201c🔒 Phone\u201d opens it, "
-                          "then the green \u201c📲 Open\u201d shows the feature."),
-    "chrome.gateclose":  ("🔒 Закрыть доступ с телефона", "🔒 Close phone access"),
-    "chrome.gatefail":   ("⚠️ Доступ с телефона не открылся:\n<pre>%(log)s</pre>\n"
+    "chrome.phoneopen":  ("📲 Телефон", "📲 Phone"),
+    "chrome.gateup":     ("📲 «Телефон» открывает фичу прямо в Telegram, "
+                          "с адресной строкой. Пускает только вас.",
+                          "📲 \u201cPhone\u201d opens the feature right in Telegram, "
+                          "with an address bar. Only you are let in."),
+    "chrome.gatedown":   ("🔒 Доступ с телефона выключен — включается в Настройках.",
+                          "🔒 Phone access is off — it is turned on in Settings."),
+    "chrome.gatefail":   ("⚠️ Доступ с телефона не включился:\n<pre>%(log)s</pre>\n"
                           "<i>Нужно один раз: funnel разрешён для ноутбука в политике "
                           "tailnet и <code>sudo tailscale set --operator=$USER</code>.</i>",
-                          "⚠️ Phone access did not open:\n<pre>%(log)s</pre>\n"
+                          "⚠️ Phone access did not turn on:\n<pre>%(log)s</pre>\n"
                           "<i>Needed once: funnel allowed for the laptop in the tailnet "
                           "policy, and <code>sudo tailscale set --operator=$USER</code>.</i>"),
     "chrome.all":        ("Все фичи — localhost:3000", "All features — localhost:3000"),
@@ -169,6 +163,14 @@ STRINGS = {
     "svc.repos":         ("📁 Репозиторий", "📁 Repository"),
     "svc.docs":          ("📖 Инструкции", "📖 Instructions"),
     "svc.lang":          ("🌍 Язык", "🌍 Language"),
+    "svc.phoneon":       ("📲 Доступ с телефона: включён", "📲 Phone access: on"),
+    "svc.phoneoff":      ("🔒 Доступ с телефона: выключен", "🔒 Phone access: off"),
+    "svc.phonewarm":     ("<b>Настройки</b>\n\n📲 Доступ с телефона включён. Tailscale "
+                          "начинает пропускать его примерно через 1,5 минуты; дальше "
+                          "«📲 Телефон» в карточке chrome-debug открывает фичу в Telegram.",
+                          "<b>Settings</b>\n\n📲 Phone access is on. Tailscale starts "
+                          "carrying it in about a minute and a half; then \u201c📲 Phone\u201d "
+                          "in the chrome-debug card opens the feature in Telegram."),
 
     # the language switch
     "lang.title":        ("<b>Язык</b>\nСейчас: <b>%(now)s</b>\n\n"

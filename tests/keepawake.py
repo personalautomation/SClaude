@@ -1322,7 +1322,7 @@ with sandbox() as box:
                   "chrome_start", "code_start", "idle_keep", "noop",
                   "devopen:no-such-feature", "devstop:no-such-feature",
                   "devstart:no-such-feature", "devphone:no-such-feature", "gate_stop",
-                  "chrome_stop"]
+                  "chrome_stop", "phone_toggle"]
         from keepawake import docs as _docs
         routed += ["doc:" + k for k in _docs.SECTIONS]
         for data in routed:
@@ -1426,19 +1426,20 @@ if os.path.exists(cfg):
         check("a link to a tree that is gone is left out", "gone" in chrome_body, False)
         check_true("the proxy's state is named", "sclaude-proxy" in chrome_body)
 
-        # The closed gate is stubbed, not read: on a machine where somebody
-        # has just opened phone access the real unit is running.
-        saved_gate = tg_menu.gate_running
-        tg_menu.gate_running = lambda: False
+        # Phone access is stubbed, not read: on this machine the funnel may
+        # well be on.
+        saved_origin = tg_menu.gate_origin
+        tg_menu.gate_origin = lambda: ""
         try:
             rows = tg_menu.chrome_keyboard()
+            off_settings = tg_menu.services_keyboard()
+            off_text = tg_menu.chrome_text()
         finally:
-            tg_menu.gate_running = saved_gate
+            tg_menu.gate_origin = saved_origin
         datas = [b.get("callback_data") for row in rows for b in row]
         check("the first block is the list of features: a caption, then where to open it",
-              (rows[0][0]["callback_data"], rows[1][0]["callback_data"],
-               rows[1][1].get("callback_data")),
-              ("noop", "chrome_start", "devphone:"))
+              (rows[0][0]["callback_data"], rows[1][0]["callback_data"]),
+              ("noop", "chrome_start"))
         check_true("each feature can be opened", "devopen:sample-one" in datas)
         check("a stopped feature has no stop button", "devstop:sample-one" in datas, False)
         check_true("a stopped feature can be started", "devstart:sample-one" in datas)
@@ -1446,46 +1447,52 @@ if os.path.exists(cfg):
         # The row caption is not a button: pressing it must do nothing.
         check_true("the row captions are marked noop", "noop" in datas)
 
-        # 📱: while the gate is down it is a callback that opens it, and nothing
-        # is on the internet; once the gate runs, the same button is the Mini
-        # App at the funnel's address, and a row closes the access again.
-        check_true("a closed gate: 📱 opens it", "devphone:sample-one" in datas)
-        check("a closed gate: no Mini App yet",
-              any("web_app" in b for row in rows for b in row), False)
-        check("a closed gate: nothing to close", "gate_stop" in datas, False)
+        # Phone access off: no phone buttons at all, the card points to
+        # Settings, and Settings offers to turn it on.
+        check("access off: no Mini App", any("web_app" in b for row in rows for b in row), False)
+        check_true("access off: the card points to Settings",
+                   tg_menu.t("chrome.gatedown") in off_text)
+        check_true("access off: Settings can turn it on",
+                   [tg_menu.t("svc.phoneoff"), "phone_toggle"] in
+                   [[b["text"], b["callback_data"]] for row in off_settings for b in row])
+
         saved_run = tg_menu.run
         try:
-            def gate_up(cmd, timeout=25):
-                if "is-active" in cmd and tg_menu.GATE_UNIT in cmd:
-                    return "active"
-                if "tailscale status" in cmd:
-                    return json.dumps({"Self": {"DNSName": "box.tail1.ts.net."}})
+            serve = {"TCP": {"8443": {"HTTPS": True}},
+                     "Web": {"box.tail1.ts.net:8443": {"Handlers": {"/": {
+                         "Proxy": "http://127.0.0.1:3001"}}}},
+                     "AllowFunnel": {"box.tail1.ts.net:8443": True}}
+
+            def funnel_on(cmd, timeout=25):
+                if "serve status" in cmd:
+                    return json.dumps(serve)
                 return saved_run(cmd, timeout)
-            tg_menu.run = gate_up
-            check("the funnel address is the node's name on :8443",
+            tg_menu.run = funnel_on
+            check("the funnel in front of the gate gives the origin",
                   tg_menu.gate_origin(), "https://box.tail1.ts.net:8443")
             rows = tg_menu.chrome_keyboard()
             apps = [b["web_app"]["url"] for row in rows for b in row if "web_app" in b]
-            check("an open gate: the phone buttons are the Mini App", apps,
+            check("access on: the phone buttons are the Mini App", apps,
                   ["https://box.tail1.ts.net:8443/__sclaude/tg?f=",
                    "https://box.tail1.ts.net:8443/__sclaude/tg?f=sample-one"])
-            check("an open gate: the Mini App buttons look different",
+            check("access on: the Mini App buttons look different",
                   [b.get("style") for row in rows for b in row if "web_app" in b],
                   ["success", "success"])
             check("a refused colour is dropped, the rest kept",
                   tg_menu.unstyled({"inline_keyboard": [[{"text": "x", "style": "success",
                                                           "callback_data": "y"}]]}),
                   {"inline_keyboard": [[{"text": "x", "callback_data": "y"}]]})
-            check_true("an open gate can be closed",
-                       "gate_stop" in [b.get("callback_data") for row in rows for b in row])
-            check_true("the card says the phone access is open",
+            check_true("access on: Settings can turn it off",
+                       tg_menu.t("svc.phoneon") in [b["text"] for row in
+                                                    tg_menu.services_keyboard() for b in row])
+            check_true("access on: the card says so",
                        tg_menu.t("chrome.gateup") in tg_menu.chrome_text())
-            tg_menu.run = lambda cmd, timeout=25: "" if "tailscale status" in cmd \
-                else gate_up(cmd, timeout)
-            check("no tailnet name: no Mini App, the callback stays",
-                  "devphone:sample-one" in [b.get("callback_data")
-                                            for row in tg_menu.chrome_keyboard() for b in row],
-                  True)
+            # The funnel on :8443 but pointing elsewhere is not the gate.
+            serve["Web"]["box.tail1.ts.net:8443"]["Handlers"]["/"]["Proxy"] = "http://127.0.0.1:9999"
+            check("a funnel to something else is not phone access", tg_menu.gate_origin(), "")
+            serve["Web"]["box.tail1.ts.net:8443"]["Handlers"]["/"]["Proxy"] = "http://127.0.0.1:3001"
+            serve["AllowFunnel"] = {}
+            check("served on the tailnet only is not phone access", tg_menu.gate_origin(), "")
         finally:
             tg_menu.run = saved_run
     finally:

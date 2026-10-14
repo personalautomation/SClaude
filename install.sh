@@ -79,8 +79,9 @@ unit sclaude-watch.service
 unit sclaude-watch.timer
 unit sclaude-proxy.socket
 unit sclaude-proxy.service
+unit sclaude-gate.socket
 unit sclaude-gate.service
-echo "units: $UNITS/keepawake{.service,.timer,-telegram.service}, code-server.service, sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}, sclaude-gate.service"
+echo "units: $UNITS/keepawake{.service,.timer,-telegram.service}, code-server.service, sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}, sclaude-gate{.socket,.service}"
 
 ln -sfn "$REPO/skills/pr" "$SKILLS/pr"
 echo "symlinked: $SKILLS/pr"
@@ -170,6 +171,17 @@ if command -v systemctl >/dev/null 2>&1; then
     echo "note: sclaude-proxy.socket did not start — something holds :3000:" >&2
     ss -ltnp 2>/dev/null | grep ':3000 ' >&2 || true
     echo "      stop it, then: systemctl --user enable --now sclaude-proxy.socket" >&2
+  fi
+
+  # The phone's gate: a loopback-only socket, harmless until a funnel points
+  # at it — which the bot's phone button does, once, by a person's choice. The
+  # service goes first: a gate from before the socket bound :3001 itself, and
+  # stopped is only stopped — the socket brings it back on demand.
+  systemctl --user stop sclaude-gate.service 2>/dev/null || true
+  if systemctl --user enable --now sclaude-gate.socket 2>/dev/null; then
+    echo "enabled: sclaude-gate.socket (127.0.0.1:3001, the phone's entry behind tailscale funnel)"
+  else
+    echo "note: sclaude-gate.socket did not start — something holds 127.0.0.1:3001" >&2
   fi
 
   # code-server deliberately does not come up at boot: it goes out by itself

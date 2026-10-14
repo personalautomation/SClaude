@@ -361,29 +361,24 @@ def chrome_keyboard():
     # a stopped one is started by sclaude-proxy on that very request — and ⏹
     # stops a running one, its database with it.
     browser_up = port_open(CHROME_PORT)
-    origin = gate_origin() if gate_running() else ""
+    origin = gate_origin()
 
     def phone(label):
-        # Two looks for two presses: a plain 🔒 that only opens the door, then
-        # a green 📲 that is the Mini App — so the button itself says that the
-        # first press does not show the page yet, and the second will.
-        if origin:
-            return {"text": t("chrome.phoneopen"), "style": "success",
-                    "web_app": {"url": "%s/__sclaude/tg?f=%s" % (origin, label)}}
-        return {"text": t("chrome.phone"), "callback_data": "devphone:" + label}
+        # The Mini App, green so it reads apart from the laptop's button.
+        # Only while phone access is on (Settings); off, there is none.
+        return [{"text": t("chrome.phoneopen"), "style": "success",
+                 "web_app": {"url": "%s/__sclaude/tg?f=%s" % (origin, label)}}] if origin else []
 
     # The list of every feature first, laid out like a feature: a caption,
     # then where to open it. 🌐 is the laptop's Chrome at localhost:3000,
     # started if it is down; ⏹ closes that Chrome, and only while it runs.
     rows = [[{"text": t("chrome.all"), "callback_data": "noop"}]]
-    first = [{"text": t("chrome.open"), "callback_data": "chrome_start"}, phone("")]
+    first = [{"text": t("chrome.open"), "callback_data": "chrome_start"}] + phone("")
     if browser_up:
         first.append({"text": t("chrome.stopbrowser"), "callback_data": "chrome_stop"})
     rows.append(first)
-    # The phone button opens the feature inside Telegram. While the gate is
-    # down it is a callback that brings the gate up; once it is up, the same
-    # button is the Mini App itself — a second press, but nothing is on the
-    # internet before the first.
+    # The phone button opens the feature inside Telegram, while phone access
+    # is on; it is turned on and off in Settings.
     for label, _wt, _port, running in dev_features()[:FEATURE_ROWS]:
         # Telegram refuses callback data over 64 bytes; a feature with a name
         # that long is listed in the text and simply has no buttons.
@@ -393,14 +388,12 @@ def chrome_keyboard():
         # phone's width a button that carries both the name and an action cuts
         # the name off, and a bare 📱 next to it said nothing of what it does.
         rows.append([{"text": label, "callback_data": "noop"}])
-        row = [{"text": t("chrome.open"), "callback_data": "devopen:" + label}, phone(label)]
+        row = [{"text": t("chrome.open"), "callback_data": "devopen:" + label}] + phone(label)
         if running:
             row.append({"text": t("chrome.featstop"), "callback_data": "devstop:" + label})
         else:
             row.append({"text": t("chrome.start"), "callback_data": "devstart:" + label})
         rows.append(row)
-    if origin:
-        rows.append([{"text": t("chrome.gateclose"), "callback_data": "gate_stop"}])
     rows.append([{"text": t("menu.back"), "callback_data": "menu_back"}])
     return rows
 
@@ -411,6 +404,9 @@ def services_keyboard():
          {"text": t("svc.docs"), "callback_data": "svc_docs"}],
         [{"text": t("svc.lang"), "callback_data": "svc_lang"},
          {"text": t("svc.restart"), "callback_data": "svc_restart"}],
+        # On and off in one button, its caption the current state.
+        [{"text": t("svc.phoneon") if gate_origin() else t("svc.phoneoff"),
+          "callback_data": "phone_toggle"}],
         [{"text": t("menu.back"), "callback_data": "menu_back"}],
     ]
 
@@ -552,25 +548,33 @@ def phone_origin():
 
 
 # The phone's entry from the internet, for a phone without Tailscale: the
-# gate (`sclaude-proxy --gate`) behind `tailscale funnel` on this port, up only
-# while sclaude-gate.service runs — the 📱 button starts it, and it ends itself
-# once nobody looks.
-GATE_UNIT = "sclaude-gate.service"
+# gate (`sclaude-proxy --gate`, socket-activated on 127.0.0.1:3001) behind
+# `tailscale funnel` on :8443. The funnel stays on: Tailscale's relays take
+# about a minute and a half to carry a funnel that has just been turned on, and
+# a phone that pressed the button met "connection closed" every time. What
+# stands at the door instead is the gate, which lets in only the bot's owner.
+GATE_LOCAL = "http://127.0.0.1:3001"
 GATE_FUNNEL_PORT = 8443
-
-
-def gate_running():
-    return run("systemctl --user is-active " + GATE_UNIT).strip() == "active"
+FUNNEL_ON = "tailscale funnel --bg --https=%d %s" % (GATE_FUNNEL_PORT, GATE_LOCAL)
+FUNNEL_OFF = "tailscale funnel --https=%d off" % GATE_FUNNEL_PORT
 
 
 def gate_origin():
-    """https://<node>.<tailnet>.ts.net:8443, or "" when Tailscale cannot say."""
+    """https://<node>.<tailnet>.ts.net:8443 while the funnel carries the gate,
+    "" while it does not — read from Tailscale, never remembered."""
     try:
-        status = json.loads(run("tailscale status --json", timeout=10) or "{}")
+        config = json.loads(run("tailscale serve status --json", timeout=10) or "{}")
     except ValueError:
         return ""
-    name = str((status.get("Self") or {}).get("DNSName") or "").rstrip(".")
-    return "https://%s:%d" % (name, GATE_FUNNEL_PORT) if name else ""
+    for hostport, allowed in (config.get("AllowFunnel") or {}).items():
+        host, _, port = hostport.rpartition(":")
+        if not allowed or port != str(GATE_FUNNEL_PORT):
+            continue
+        web = (config.get("Web") or {}).get(hostport) or {}
+        proxy = str((((web.get("Handlers") or {}).get("/")) or {}).get("Proxy", ""))
+        if proxy.rstrip("/").endswith(":3001"):
+            return "https://%s:%s" % (host, port)
+    return ""
 
 
 def proxy_start(label):
@@ -609,7 +613,7 @@ def chrome_text():
                        state=t("chrome.running") if running else t("chrome.stopped"),
                        local="http://%s.localhost:%d" % (label, DEV_PORT)))
     features = "\n".join(lines) if lines else t("chrome.nofeatures")
-    gate = t("chrome.gateup") if gate_running() else t("chrome.gatedown")
+    gate = t("chrome.gateup") if gate_origin() else t("chrome.gatedown")
     return t("chrome.title", state=state_label, proxy=proxy_label, gate=gate,
              features=features, port=CHROME_PORT)
 
@@ -2043,27 +2047,24 @@ class Handler(object):
             # a messenger, while the person has one question — did it start and
             # where to look.
             self.bot.edit(message_id, chrome_text(), chrome_keyboard())
-        elif data_raw.startswith("devphone:"):
-            # An empty label is the list of every feature, the first row.
-            label = data_raw.partition(":")[2]
-            if label and not [f for f in dev_features() if f[0] == label]:
-                self.bot.edit(message_id, chrome_text(), chrome_keyboard())
+        elif data_raw == "phone_toggle":
+            if gate_origin():
+                run(FUNNEL_OFF, timeout=30)
+                log.info("phone access turned off")
+                self.bot.edit(message_id, t("svc.title"), services_keyboard())
                 return
-            run("systemctl --user start " + GATE_UNIT, timeout=60)
-            if not gate_running():
-                # Most often the funnel: not allowed for this node in the
-                # tailnet policy, or this user is not Tailscale's operator.
-                tail = run("journalctl --user -u %s -n 8 --no-pager -o cat" % GATE_UNIT)
-                self.bot.edit(message_id, t("chrome.gatefail", log=escape(tail[-1500:])),
-                              chrome_keyboard())
+            # The gate needs nothing: its socket is always there.
+            out = run("systemctl --user start sclaude-gate.socket && " + FUNNEL_ON, timeout=60)
+            if not gate_origin():
+                # Most often: funnel not allowed for this node in the tailnet
+                # policy, or this user is not Tailscale's operator.
+                self.bot.edit(message_id, t("chrome.gatefail", log=escape(out[-1500:])),
+                              services_keyboard())
                 return
-            log.info("phone access opened for %s", label or "the list")
-            if label:
-                proxy_start(label)
-            self.bot.edit(message_id, chrome_text(), chrome_keyboard())
-        elif data_raw == "gate_stop":
-            run("systemctl --user stop " + GATE_UNIT, timeout=60)
-            log.info("phone access closed")
+            log.info("phone access turned on")
+            self.bot.edit(message_id, t("svc.phonewarm"), services_keyboard())
+        elif data_raw.startswith("devphone:") or data_raw == "gate_stop":
+            # Buttons of a card drawn before phone access moved to Settings.
             self.bot.edit(message_id, chrome_text(), chrome_keyboard())
         elif data_raw.startswith(("devopen:", "devstop:", "devstart:")):
             action, _, label = data_raw.partition(":")

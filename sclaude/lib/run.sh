@@ -2549,6 +2549,23 @@ cmd_review_report() {
   review_report "$wt" "$slug"
 }
 
+# `sclaude checks [<pr>]`: step 4's wait after a push, from the feature's
+# worktree; the pull request of the current branch when none is named. Its
+# exit code is the verdict: see wait_checks in pr_context.py. Not `die`, whose
+# 1 is the verdict "red": what stops it before the wait is "could not read".
+cmd_checks() {
+  local pr="${1:-}" wt repo
+  wt="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || { echo "could not read: not a git repository: $(pwd)"; exit 4; }
+  if [[ -z "$pr" ]]; then
+    pr="$(cd "$wt" && gh pr view --json number --jq .number 2>/dev/null)" \
+      || { echo "could not read: no pull request for this branch; name it, $SELF checks <pr>"; exit 4; }
+  fi
+  [[ "$pr" =~ ^[0-9]+$ ]] || { echo "could not read: not a pull request number: $pr"; exit 4; }
+  repo="$(REPO="$wt" gh_repo)"
+  exec python3 "$LIB/pr_context.py" --wait "$wt" "$pr" "$repo" "$REVIEW_WAIT_MAX"
+}
+
 # What the same review session is told when it takes the next round.
 #
 #   review_carry_on <pct>

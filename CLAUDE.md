@@ -76,6 +76,15 @@ breaks the other silently — grep before you edit:
   they came with the parallel-features fixes of 2026-10-09, so that a later
   edit to one side does not silently break the other.)*
 
+- `CHECKS_VERDICTS` in `sclaude/lib/pr_context.py` — the exit codes and first
+  words that `sclaude checks` ends on — is listed in `sclaude/prompts/review.md`,
+  which tells step 4 what each one means; `tests/checks-wait.py` checks the two
+  agree.
+
+  *(Added by Claude on 2026-10-14, as the plan for the bounded step 4 wait
+  asked: the prompt acts on the codes, so a code changed on one side alone
+  would send a session the wrong way without an error.)*
+
 ## Public repository, private projects
 
 This repository is public (personalautomation/SClaude). The projects sclaude

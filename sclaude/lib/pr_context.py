@@ -667,6 +667,22 @@ def is_claude_review(name, workflow=""):
 GREEN = ("SUCCESS", "NEUTRAL", "SKIPPED")
 
 
+def running(check):
+    """Whether a rollup entry has not finished: a check run not completed, or
+    a commit status still pending."""
+    status = (check.get("status") or "").upper()
+    state = (check.get("conclusion") or check.get("state") or "").upper()
+    return bool(status and status != "COMPLETED") or state in ("PENDING", "EXPECTED", "")
+
+
+def red_checks(rollup):
+    """The names of the finished checks that are not green, in rollup order."""
+    red = [c.get("name") or c.get("context") or "?" for c in rollup
+           if (c.get("conclusion") or c.get("state") or "").upper() not in GREEN]
+    # The findings verdict comes as a check run and a status: it is one check.
+    return [r for i, r in enumerate(red) if r != FINDINGS_CHECK or FINDINGS_CHECK not in red[:i]]
+
+
 # How long after a push GitHub may take to register a pull request's checks.
 CHECKS_GRACE_SECONDS = 300
 
@@ -732,13 +748,8 @@ def review_state(cwd, pr, repo):
     # latest of the two moments, and "unknown" after that.
     if not rollup:
         return "pending" if recent(view.get("createdAt"), cwd) else "unknown"
-    for c in rollup:
-        status = (c.get("status") or "").upper()
-        state = (c.get("conclusion") or c.get("state") or "").upper()
-        if status and status != "COMPLETED":
-            return "pending"
-        if state in ("PENDING", "EXPECTED", ""):
-            return "pending"
+    if any(running(c) for c in rollup):
+        return "pending"
     # Somebody's own review — a person writing a comment — is not in the
     # findings check, and neither is a red build. The findings check itself is
     # judged below, where it can be told whether its red is still true.
@@ -955,15 +966,9 @@ def close_state(cwd, pr, repo):
     rollup = view.get("statusCheckRollup") or []
     if not rollup:
         return "pending" if recent(view.get("createdAt"), cwd) else "ok"
-    for c in rollup:
-        status = (c.get("status") or "").upper()
-        state = (c.get("conclusion") or c.get("state") or "").upper()
-        if (status and status != "COMPLETED") or state in ("PENDING", "EXPECTED", ""):
-            return "pending"
-    red = [c.get("name") or c.get("context") or "?" for c in rollup
-           if (c.get("conclusion") or c.get("state") or "").upper() not in GREEN]
-    # The findings verdict comes as a check run and a status: it is one check.
-    red = [r for i, r in enumerate(red) if r != FINDINGS_CHECK or FINDINGS_CHECK not in red[:i]]
+    if any(running(c) for c in rollup):
+        return "pending"
+    red = red_checks(rollup)
     threads, _ = open_threads(cwd, pr, repo)
     mine, threads = split_yours(cwd, threads or [])
     if FINDINGS_CHECK in red and findings_explained(
@@ -991,6 +996,169 @@ def findings_run(cwd, repo, head):
         return None
     found = [r for r in (runs.get("check_runs") or []) if r.get("name") == FINDINGS_CHECK]
     return found[0] if found else {}
+
+
+# `sclaude checks`: the wait after a push in step 4, one command and bounded.
+#
+# The review check registers last: the review job waits for a gate job, so its
+# check appears only once the gate has finished, and the findings check later
+# still, from a job that waits for the review. `gh pr checks --watch` returns
+# when the checks it can see have finished, which right after a push is often
+# before either exists — and the session read the rest as final. A loop of the
+# session's own waiting for the review fixed that and opened two worse faults:
+# with no limit it waited for ever on a push that starts no review (`[skip
+# ci]`, the workflow disabled), and with one it stopped quietly, read the
+# checks it had as final, and the last push went unreviewed with nobody told.
+#
+# So the wait is two phases, each bounded by REVIEW_WAIT_MAX, and runs out
+# aloud: the review check appears on the pull request's head; then every
+# check has finished, the findings check among them. Its answer is a line
+# starting with one of the words in CHECKS_VERDICTS, and the exit code next to
+# it; sclaude/prompts/review.md tells the session what each means.
+CHECKS_GREEN, CHECKS_RED, CHECKS_NO_REVIEW, CHECKS_NOT_DONE, CHECKS_UNREADABLE = range(5)
+CHECKS_VERDICTS = {
+    CHECKS_GREEN: "green",
+    CHECKS_RED: "red",
+    CHECKS_NO_REVIEW: "no review",
+    CHECKS_NOT_DONE: "not finished",
+    CHECKS_UNREADABLE: "could not read",
+}
+# Reads that may fail in a row before the wait gives up: one blip in half an
+# hour of polling is not worth an answer, a network that stays down is.
+CHECKS_READ_RETRIES = 4
+# How many of the pull request's commits to look through for an earlier review.
+CHECKS_HISTORY = 20
+
+
+def reviewed_before(cwd, pr, repo):
+    """(review, findings): whether any of the pull request's commits carries a
+    review check, and a findings check. (True, True) when it cannot be read.
+
+    This is what tells a project with a review workflow from one without: the
+    head just pushed has no check yet in either, and waiting for a review that
+    never comes would cost the full REVIEW_WAIT_MAX on every push — the trap
+    names_review was once caught in. Step 4 answers a review, so its pull
+    request has had one on an earlier commit. Unreadable counts as reviewed:
+    the wait then still ends, and says no review came, where a wrong "no
+    review here" would call an unreviewed push finished.
+    """
+    view = gh_json(["pr", "view", str(pr), "--json", "commits"], cwd=cwd)
+    if view is None:
+        return True, True
+    oids = [c.get("oid") for c in (view.get("commits") or []) if c.get("oid")]
+    review = findings = False
+    for oid in reversed(oids[-CHECKS_HISTORY:]):
+        runs = gh_json(["api", "repos/%s/commits/%s/check-runs?per_page=100" % (repo, oid)],
+                       cwd=cwd)
+        if runs is None:
+            return True, True
+        names = [r.get("name") or "" for r in runs.get("check_runs") or []]
+        review = review or any(names_review(n) for n in names)
+        findings = findings or FINDINGS_CHECK in names
+        if review and findings:
+            break
+    return review, findings
+
+
+def wait_checks(cwd, pr, repo, limit, period, say=None, clock=None, sleep=None):
+    """Wait for the pull request's checks after a push; the exit code, and the
+    verdict line printed last. See CHECKS_VERDICTS for the codes.
+
+    Phase 1 waits up to `limit` seconds for a review check on the head
+    (names_review decides what is one); phase 2 waits up to `limit` more for
+    every check to finish and, where the project has one, for the findings
+    check's run on the head — it is written by a job that registers only after
+    the review, so the rollup alone can read "all finished" a minute too soon.
+    A review check that finished as skipped has no findings check to wait for.
+    """
+    import time
+    say = say or (lambda line: (sys.stdout.write(line + "\n"), sys.stdout.flush()))
+    clock = clock or time.monotonic
+    sleep = sleep or time.sleep
+
+    def span(seconds):
+        return "%d min" % round(seconds / 60) if seconds >= 60 else "%d s" % seconds
+
+    def table(rollup):
+        for name, state, *_rest in checks_table(rollup):
+            say("  %-12s %s" % (state or "PENDING", name))
+
+    def verdict(code, text, rollup=None):
+        if rollup:
+            table(rollup)
+        say("%s: %s" % (CHECKS_VERDICTS[code], text))
+        return code
+
+    expect_review, expect_findings = reviewed_before(cwd, pr, repo)
+    phase, started, failures, rollup, head = 1 if expect_review else 2, clock(), 0, [], ""
+    if expect_review:
+        say("Waiting up to %s for the review check to appear…" % span(limit))
+    else:
+        say("No review check on this pull request's commits: waiting only for the checks.")
+    while True:
+        view = gh_json(["pr", "view", str(pr), "--json",
+                        "headRefOid,statusCheckRollup,state,createdAt"], cwd=cwd)
+        if view is None:
+            failures += 1
+            if failures >= CHECKS_READ_RETRIES:
+                return verdict(CHECKS_UNREADABLE, "GitHub did not answer about PR #%s "
+                               "%d times in a row; the checks are unknown." % (pr, failures),
+                               rollup)
+        else:
+            failures = 0
+            if (view.get("state") or "") != "OPEN":
+                return verdict(CHECKS_UNREADABLE, "PR #%s is %s, not open."
+                               % (pr, (view.get("state") or "unknown").lower()))
+            ahead = unpushed(cwd, view)
+            if ahead:
+                return verdict(CHECKS_UNREADABLE, "%d commit(s) here are not pushed: "
+                               "push first, then wait." % ahead)
+            head = view.get("headRefOid") or ""
+            rollup = view.get("statusCheckRollup") or []
+            # For a few seconds after a push the pull request still names the
+            # commit before it, its checks long finished: see close_state.
+            stale = bool(head) and behind_head(cwd, head)
+            if stale and not recent(None, cwd):
+                return verdict(CHECKS_UNREADABLE, "PR #%s still names %s as its head, "
+                               "behind this branch." % (pr, head[:7]))
+            if not stale and phase == 1 and any(
+                    names_review(c.get("name") or c.get("context")) for c in rollup):
+                phase, started = 2, clock()
+                say("The review check is on %s; waiting up to %s for every check "
+                    "to finish…" % (head[:7], span(limit)))
+            if not stale and phase == 2 and finished(cwd, repo, head, rollup,
+                                                     expect_findings, view):
+                red = red_checks(rollup)
+                if red:
+                    return verdict(CHECKS_RED, "on %s: %s." % (head[:7], ", ".join(red)),
+                                   rollup)
+                return verdict(CHECKS_GREEN, "every check on %s has finished green."
+                               % head[:7], rollup)
+        if clock() - started >= limit:
+            sha = head[:7] or "the head"
+            if phase == 1:
+                return verdict(CHECKS_NO_REVIEW, "No review started on %s within %s — "
+                               "this push is not reviewed." % (sha, span(limit)), rollup)
+            return verdict(CHECKS_NOT_DONE, "The review on %s is still running or queued "
+                           "after %s — this push is not reviewed yet." % (sha, span(limit)),
+                           rollup)
+        sleep(period)
+
+
+def finished(cwd, repo, head, rollup, expect_findings, view):
+    """Whether every check on `head` has finished, the findings check included
+    where the project writes one."""
+    if not rollup:
+        # Not registered yet, or a project with no checks at all: see review_state.
+        return not recent(view.get("createdAt"), cwd)
+    if any(running(c) for c in rollup):
+        return False
+    reviews = [c for c in rollup if names_review(c.get("name") or c.get("context"))]
+    if not expect_findings or not reviews or all(
+            (c.get("conclusion") or c.get("state") or "").upper() == "SKIPPED" for c in reviews):
+        return True
+    run = findings_run(cwd, repo, head)
+    return bool(run) and (run.get("status") or "") == "completed"
 
 
 def findings_red_explained(cwd, pr, repo, view):
@@ -1154,6 +1322,20 @@ def main():
         except Exception:
             sys.stdout.write("ok\n")
         return 0
+    # `--wait <cwd> <pr> <repo> <seconds>`: `sclaude checks`, see wait_checks.
+    # SCLAUDE_CHECKS_PERIOD sets the seconds between reads.
+    if len(sys.argv) >= 6 and sys.argv[1] == "--wait":
+        import os
+        try:
+            period = float(os.environ.get("SCLAUDE_CHECKS_PERIOD") or 15)
+            return wait_checks(sys.argv[2], sys.argv[3], sys.argv[4],
+                               float(sys.argv[5]), period)
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            sys.stdout.write("%s: the wait broke off (%s); the checks are unknown.\n"
+                             % (CHECKS_VERDICTS[CHECKS_UNREADABLE], exc))
+            return CHECKS_UNREADABLE
     # `--state <cwd> <pr> <repo>`: one word, see review_state.
     if len(sys.argv) >= 5 and sys.argv[1] == "--state":
         try:

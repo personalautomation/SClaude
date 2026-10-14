@@ -62,6 +62,8 @@
 #   sclaude review-report <name>
 #                           whether the review is still worth it: rounds,
 #                           findings, fixes, back and forth, cost
+#   sclaude checks [pr]     step 4's wait after a push: the review check of
+#                           the pushed commit, then every check finished
 #   sclaude reset <name>    start the current step afresh, forgetting its
 #                           conversation
 #   sclaude epilogue [name] append the status to the issue if the epilogue was
@@ -1488,6 +1490,9 @@ ${BOLD}$SELF${OFF} — an orchestrator for the feature development cycle
   $SELF review-report <name>
                         rounds, findings fixed and closed without a fix, back and
                         forth, cost and trend: is the review still worth it
+  $SELF checks [pr]     wait after a push until the review check of the pushed
+                        commit has appeared and every check has finished, each
+                        wait bounded; the exit code says how it ended
   $SELF reset <name>    start the current step over, forgetting its conversation
   $SELF epilogue [name] write the status into the issue if the epilogue broke off
                         (the menu offers this by itself; the command is for a
@@ -1536,7 +1541,7 @@ main() {
     # answer nobody gives. Killed by its caller's timeout, it lived on as an
     # orphan polling the channel once a second, and held off every update of
     # instruments as "another sclaude" for as long as it lived.
-    status|ls|dev|news|doctor|_handoff|-h|--help|help|-*) unset ASK_DIR ;;
+    status|ls|dev|news|checks|doctor|_handoff|-h|--help|help|-*) unset ASK_DIR ;;
     *)
       # The same line decides what is recorded (terminal.sh): a conversation
       # is worth reading back, a report is not. First, so the record holds
@@ -1603,6 +1608,8 @@ main() {
     propose)       cmd_propose ;;
     review-stats)  cmd_review_stats ;;
     review-report) shift; cmd_review_report "$(slugify "${1:-}")" ;;
+    # The verdict is the exit code (see wait_checks): no `|| true` here.
+    checks)        shift; cmd_checks "${1:-}" ;;
     # A red run is an answer, not a script failure: || true so the shell does
     # not report one where the summary has already said everything.
     regression)    shift; cmd_regression "$(slugify "${1:-}")" || true ;;

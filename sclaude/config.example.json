@@ -82,7 +82,7 @@
     "            `token_hash`, `type` and `next` and verifies them. With it the",
     "            list at localhost:3000 and the bot's Mini App open a feature",
     "            signed in: sclaude-proxy asks the feature's Supabase for a",
-    "            magic-link token and sends the browser there. Who it signs in",
+    "            sign-in (recovery) token and sends the browser there. Who it signs in",
     "            as is each developer's own, never committed: the first line of",
     "            ~/.claude/sclaude/dev-login, else their git user.email. Never",
     "            on a protected environment.",

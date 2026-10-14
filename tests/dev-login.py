@@ -50,15 +50,18 @@ ASKED = []
 
 
 class GoTrue(http.server.BaseHTTPRequestHandler):
-    """generate_link: a token for anybody but refused@…, which gets a 422."""
+    """generate_link: a token for anybody but refused@… (a 422) and
+    nobody@… (a 404, as GoTrue answers recovery for an unknown user)."""
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         ASKED.append((self.path, self.headers.get("apikey"), body))
         if body.get("email") == "refused@example.com":
             out, code = {"msg": "nope"}, 422
+        elif body.get("email") == "nobody@example.com":
+            out, code = {"msg": "User not found"}, 404
         else:
-            out, code = {"hashed_token": "h4sh", "verification_type": "magiclink"}, 200
+            out, code = {"hashed_token": "h4sh", "verification_type": "recovery"}, 200
         data = json.dumps(out).encode()
         self.send_response(code)
         self.send_header("Content-Length", str(len(data)))
@@ -163,11 +166,11 @@ def main():
         query = parse_qs(got.query)
         check("the link is the product's route", got.path, "/auth/confirm")
         check("it carries the token", query.get("token_hash"), ["h4sh"])
-        check("and its type", query.get("type"), ["magiclink"])
+        check("and its type", query.get("type"), ["recovery"])
         check("and where to land", query.get("next"), ["/feed"])
         check("Supabase was asked for this address with the secret key",
               ASKED[-1], ("/auth/v1/admin/generate_link", "sb_secret_x",
-                          {"type": "magiclink", "email": "dev@example.com"}))
+                          {"type": "recovery", "email": "dev@example.com"}))
 
         write(login_file, "refused@example.com\n")
         try:
@@ -175,6 +178,13 @@ def main():
             check("a refusal from Supabase is reported", "linked", "refused")
         except dev_login.Refused as exc:
             check("a refusal from Supabase is reported", "422" in str(exc) and "nope" in str(exc), True)
+        write(login_file, "nobody@example.com\n")
+        try:
+            dev_login.link(main_wt)
+            check("an unknown address is refused, not created", "linked", "refused")
+        except dev_login.Refused as exc:
+            check("an unknown address is refused, naming the file",
+                  "nobody@example.com" in str(exc) and login_file in str(exc), True)
         write(login_file, "dev@example.com\n")
 
         write(own, "NEXT_PUBLIC_SUPABASE_URL=https://abcdefghijklmnopqrst.supabase.co\n"

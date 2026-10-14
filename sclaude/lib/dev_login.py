@@ -6,7 +6,7 @@
 # bin/sclaude-proxy), which keeps their cookies apart — and keeps the passwords
 # a browser saves apart too, so a new feature starts with none and the person
 # types theirs again. This signs in without one: sclaude-proxy's
-# /__sclaude/login asks the feature's own Supabase for a magic-link token
+# /__sclaude/login asks the feature's own Supabase for a sign-in token
 # (the admin API, with the secret key the feature's dev server already reads)
 # and sends the browser to the product's own route for email links, which
 # verifies the token and sets the product's cookies itself. No cookie format
@@ -30,9 +30,10 @@
 # The proxy answers the phone too, and one tap must not hand out a session on
 # somebody's real data.
 #
-# A user the database does not have is created by Supabase on the way (that is
-# what its magic link does for a new address), so a mistyped address shows up
-# as a new, empty account rather than an error.
+# The token is a recovery one, not a magic link: both sign in once verified,
+# but a magic link for an address the database does not have creates that
+# user on the way, and a mistyped address became a new, empty account on a
+# database others may share. Recovery is only issued for a user that exists.
 import json
 import os
 import subprocess
@@ -135,8 +136,8 @@ def supabase(wt):
 
 
 def token(url, secret, address, timeout=10):
-    """(hashed token, its type) of a fresh magic link for an address."""
-    body = json.dumps({"type": "magiclink", "email": address}).encode()
+    """(hashed token, its type) of a fresh sign-in link for an address."""
+    body = json.dumps({"type": "recovery", "email": address}).encode()
     req = urllib.request.Request(url + "/auth/v1/admin/generate_link", data=body, method="POST",
                                  headers={"apikey": secret, "Authorization": "Bearer " + secret,
                                           "Content-Type": "application/json"})
@@ -144,6 +145,9 @@ def token(url, secret, address, timeout=10):
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.load(resp)
     except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise Refused("this database has no user %s: put the address you sign in "
+                          "with in %s" % (address, LOGIN_FILE))
         try:
             said = json.load(exc)
             said = said.get("msg") or said.get("message") or said.get("error_description") or ""
@@ -159,7 +163,7 @@ def token(url, secret, address, timeout=10):
     if not isinstance(hashed, str) or not hashed:
         raise Refused("Supabase answered without a token")
     kind = props.get("verification_type")
-    return hashed, kind if isinstance(kind, str) and kind else "magiclink"
+    return hashed, kind if isinstance(kind, str) and kind else "recovery"
 
 
 def safe_next(value):

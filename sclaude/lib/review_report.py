@@ -30,9 +30,13 @@
 #
 # A thread is classified by what happened to it, never by reading it:
 #
-#   fixed      resolved, with the resolver's "Resolved automatically: …" reply;
-#   no fix     resolved any other way (the person's yes, or by hand), or open
-#              and written in review-yours (left for the person to resolve);
+#   no fix     resolved, and the last decision reply is the author's "Left as
+#              it is …" (DECLINE_PREFIX, the review workflow's own rule); or
+#              open and written in review-yours (left for the person to
+#              resolve);
+#   fixed      resolved any other way: the resolver's "Resolved automatically:
+#              …" reply, or none at all — a fixing session or a person closing
+#              a fixed finding writes nothing;
 #   open       everything else.
 #
 # A round is one run of the automatic review: a thread belongs to the last run
@@ -52,7 +56,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pr_context import (RESOLVER_PREFIX, SKIP_SECONDS, gh_json,  # noqa: E402
+from pr_context import (DECLINE_PREFIX, RESOLVER_PREFIX, SKIP_SECONDS, gh_json,  # noqa: E402
                         is_claude_review, yours)
 
 QUERY = """
@@ -64,7 +68,7 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
         nodes {
           isResolved path line originalLine
           comments(first: 50) {
-            nodes { body createdAt url }
+            nodes { author { __typename } body createdAt url }
           }
         }
       }
@@ -105,6 +109,19 @@ def parse(ts):
     return d if d.tzinfo else d.replace(tzinfo=datetime.timezone.utc)
 
 
+def declined(replies):
+    """Whether the thread's last decision reply is the author's decline."""
+    last = None
+    for c in replies:
+        body = (c.get("body") or "").lstrip()
+        if body.startswith(RESOLVER_PREFIX):
+            last = "fixed"
+        elif (body.startswith(DECLINE_PREFIX)
+              and ((c.get("author") or {}).get("__typename")) != "Bot"):
+            last = "declined"
+    return last == "declined"
+
+
 def threads(cwd, pr, repo):
     """Every review thread as a dict, oldest first, or None when unreadable."""
     if not repo or "/" not in repo:
@@ -128,9 +145,8 @@ def threads(cwd, pr, repo):
                 continue
             first = comments[0]
             replies = [c.get("body") or "" for c in comments[1:]]
-            fixed = any(b.lstrip().startswith(RESOLVER_PREFIX) for b in replies)
             if t.get("isResolved"):
-                fate = "fixed" if fixed else "no fix"
+                fate = "no fix" if declined(comments[1:]) else "fixed"
             else:
                 fate = "no fix" if first.get("url") in left else "open"
             line = t.get("line") or t.get("originalLine")

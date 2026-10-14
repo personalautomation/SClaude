@@ -302,6 +302,10 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
 # and the prefix says nothing the arrow does not.
 HEADLINE_CHARS = 200
 RESOLVER_PREFIX = "Resolved automatically: "
+# The author's decline: a reply starting so, from anyone but a Bot, counts the
+# thread as declined. Which reply decides is FINDINGS_DECLINED's rule, in the
+# project's .github/workflows/claude-code-review.yml; review_report.py follows it.
+DECLINE_PREFIX = "Left as it is"
 
 
 def headline(body):

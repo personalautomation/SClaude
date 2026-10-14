@@ -37,7 +37,8 @@ def URL(n):
     return "https://github.com/o/r/pull/7#discussion_r%d" % (BASE + n)
 
 
-def thread(n, at, path, line, resolved=False, fixed=False, reply="Leaving it: the person decided so."):
+def thread(n, at, path, line, resolved=False, fixed=False,
+           reply="Left as it is, at the author's decision: the person decided so."):
     # Every comment a review of its own, as the real review posts them.
     comments = [{"body": "**Finding %d**" % n, "createdAt": at, "url": URL(n)}]
     if fixed:
@@ -178,6 +179,34 @@ with tempfile.TemporaryDirectory() as wt:
     check("session-row", row and row[0][-7:], ["2", "7", "5", "2", "0", "2", "1"])
     check("trend", "Converging slowly." in text, True)
     check("fixes-feed-the-review", "the fixes are feeding the review" in text, True)
+
+# --- the fate of a resolved thread: the last decision reply decides ---------------
+def fate(*replies):
+    """A resolved thread's fate, each reply (body, author type)."""
+    comments = [{"body": "**F**", "createdAt": R1, "url": URL(500)}] + [
+        {"body": b, "author": {"__typename": kind}, "createdAt": R1, "url": URL(600 + i)}
+        for i, (b, kind) in enumerate(replies)]
+    saved = review_report.gh_json
+    review_report.gh_json = lambda args, cwd=None: {"data": {"repository": {"pullRequest": {
+        "reviewThreads": {"pageInfo": {"hasNextPage": False}, "nodes": [
+            {"isResolved": True, "path": "x.py", "line": 1, "comments": {"nodes": comments}}]}}}}}
+    try:
+        with tempfile.TemporaryDirectory() as wt:
+            return review_report.threads(wt, "7", "o/r")[0]["fate"]
+    finally:
+        review_report.gh_json = saved
+
+
+AUTO = ("Resolved automatically: fixed in abc1234. x", "Bot")
+LEFT = ("Left as it is, at the author's decision: no.", "User")
+check("resolved-without-reply", fate(), "fixed")
+check("resolved-with-chatter", fate(("Fixed in abc, thanks.", "User")), "fixed")
+check("declined", fate(LEFT), "no fix")
+check("declined-then-chatter", fate(LEFT, ("I disagree.", "User")), "no fix")
+check("auto-resolved-reopened-declined", fate(AUTO, LEFT), "no fix")
+check("declined-reopened-fixed", fate(LEFT, AUTO), "fixed")
+check("decline-from-a-bot", fate(("Left as it is, says a bot.", "Bot")), "fixed")
+check("decline-indented", fate(("  Left as it is: no.", "User")), "no fix")
 
 # --- the verdict alone ---------------------------------------------------------
 v = review_report.verdict

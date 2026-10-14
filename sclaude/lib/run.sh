@@ -695,6 +695,8 @@ session_ended() {
   # What the review handed this session over all its rounds, before its row
   # is written for the last time.
   [[ "$step" == "review" ]] && run_comments "$wt" "$session" "$pr"
+  # And what this launch of it cost, for the review report.
+  [[ "$step" == "review" ]] && run_cost "$wt" "$session"
 
   # A session that never got going did not work — it refused to start. Asking
   # "is the step finished?" after that means offering to close a step that never
@@ -738,6 +740,7 @@ session_ended() {
       [[ -n "$round_note" ]] && info "  $round_note"
       info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%): the same session takes the new findings."
       review_yours_report "$wt" "$pr" || true
+      review_report "$wt" "$slug"
       run_step "$wt" "$slug" "$step" "$(review_carry_on "$pct")"
       return 0
     fi
@@ -759,6 +762,7 @@ session_ended() {
       info "  The new findings go to a fresh session, without this one's context."
     fi
     review_yours_report "$wt" "$pr" || true
+    review_report "$wt" "$slug"
     if ! run_friction "$wt" "$slug" "$round_key"; then
       info "  The next round waits for it: $SELF $slug"
       return 0
@@ -776,6 +780,7 @@ session_ended() {
     && SESSION_AUTO_CLOSED=1
   plan_report "$wt" "$step"
   [[ "$step" == "review" ]] && { review_yours_report "$wt" "$pr" || true; }
+  [[ "$step" == "review" ]] && review_report "$wt" "$slug"
   if [[ "$step" == "review" ]]; then
     local closed_rounds; closed_rounds="$(state_get "$state" "steps.$step.rounds" 2>/dev/null || true)"
     [[ "$closed_rounds" =~ ^[0-9]+$ ]] || closed_rounds=0
@@ -2483,6 +2488,33 @@ cmd_review_stats() {
   local root
   root="$(main_repo 2>/dev/null)" || die "run it inside a product's repository"
   python3 "$LIB/review_stats.py" "$root/.sclaude/local/review-context.log"
+}
+
+# Whether another review round is worth it: rounds, findings fixed and closed
+# without a fix, findings on earlier fixes, reversals, cost and the trend.
+# Counted from the pull request and the feature's state, without a model.
+# Printed at the close of every review round and by `sclaude review-report`.
+#
+#   review_report <wt> <slug>
+review_report() {
+  local wt="$1" slug="$2" state pr repo root log=""
+  state="$wt/.sclaude/local/feature/state.json"
+  pr="$(state_get "$state" pr 2>/dev/null || true)"
+  [[ -n "$pr" && "$pr" != "null" ]] || return 0
+  repo="$(gh_repo 2>/dev/null || true)"
+  root="$(scratch_root "$wt" 2>/dev/null || true)"
+  [[ -n "$root" ]] && log="$root/.sclaude/local/review-context.log"
+  echo ""
+  python3 "$LIB/review_report.py" "$wt" "$pr" "$repo" \
+    "$(state_get "$state" branch 2>/dev/null || true)" "$slug" "$log" 2>/dev/null || true
+}
+
+cmd_review_report() {
+  require_repo
+  local slug="${1:-}" wt
+  [[ -n "$slug" ]] || die "name the feature: $SELF review-report <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+  review_report "$wt" "$slug"
 }
 
 # What the same review session is told when it takes the next round.

@@ -410,12 +410,13 @@ session_watch_stop
     shared = "/tmp/claude-statusline-context-%s" % sid
     subprocess.run([sys.executable, os.path.join(ROOT, "statusline.py")],
                    input=json.dumps({"session_id": sid, "context_window":
-                                     {"used_percentage": 12.6, "context_window_size": 1000000}}),
+                                     {"used_percentage": 12.6, "context_window_size": 1000000},
+                                     "cost": {"total_cost_usd": 3.25}}),
                    capture_output=True, text=True, timeout=30)
     try:
         with open(shared) as fh:
             check("statusline-leaves-the-share", json.load(fh),
-                  {"used_percentage": 12.6, "context_window_size": 1000000})
+                  {"used_percentage": 12.6, "context_window_size": 1000000, "cost_usd": 3.25})
     except OSError:
         check("statusline-leaves-the-share", "missing", "written")
 

@@ -676,6 +676,39 @@ with open(path, "w") as fh:
 PY
 }
 
+# What one launch of a review session cost, appended to its run's `costs`:
+# the spend the status line last left for it (CONTEXT_FILE in statusline.py),
+# less what the launches before it had already seen. Claude Code reports a
+# session's spend as a running total; whether a `--resume` starts it again
+# from zero or carries it on, the difference is what this launch added.
+#
+#   run_cost <wt> <session>
+run_cost() {
+  local wt="$1" session="$2"
+  [[ -n "$session" && -s "/tmp/claude-statusline-context-$session" ]] || return 0
+  python3 - "$wt/.sclaude/local/feature/state.json" "$session" "/tmp/claude-statusline-context-$session" <<'PY' 2>/dev/null || true
+import json, sys
+path, session, context = sys.argv[1:4]
+with open(context) as fh:
+    cost = json.load(fh).get("cost_usd")
+if not isinstance(cost, (int, float)):
+    sys.exit(0)
+with open(path) as fh:
+    data = json.load(fh)
+runs = ((data.get("steps") or {}).get("review") or {}).get("runs") or []
+mine = [r for r in runs if isinstance(r, dict) and r.get("session") == session]
+if not mine:
+    sys.exit(0)
+run = mine[-1]
+seen = run.get("cost_seen") or 0
+run["cost_seen"] = cost
+run.setdefault("costs", []).append(round(cost - seen if cost >= seen else cost, 4))
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
+PY
+}
+
 step_run() {
   session_runs "$1/.sclaude/local/feature/state.json" "steps.$2" "$3" "${4:-}" "${5:-}"
 }

@@ -59,6 +59,9 @@
 #   sclaude deferred        the monthly review of the friction put off
 #   sclaude propose         send a change to sclaude itself as a pull request
 #   sclaude review-stats    what this product's review sessions cost in context
+#   sclaude review-report <name>
+#                           whether the review is still worth it: rounds,
+#                           findings, fixes, back and forth, cost
 #   sclaude reset <name>    start the current step afresh, forgetting its
 #                           conversation
 #   sclaude epilogue [name] append the status to the issue if the epilogue was
@@ -1482,6 +1485,9 @@ ${BOLD}$SELF${OFF} — an orchestrator for the feature development cycle
   $SELF deferred        the monthly review of the friction put off (offered by itself)
   $SELF review-stats    what review sessions cost in context, to set the threshold
                         at which a round goes to a fresh session
+  $SELF review-report <name>
+                        rounds, findings fixed and closed without a fix, back and
+                        forth, cost and trend: is the review still worth it
   $SELF reset <name>    start the current step over, forgetting its conversation
   $SELF epilogue [name] write the status into the issue if the epilogue broke off
                         (the menu offers this by itself; the command is for a
@@ -1596,6 +1602,7 @@ main() {
     deferred)      cmd_deferred ;;
     propose)       cmd_propose ;;
     review-stats)  cmd_review_stats ;;
+    review-report) shift; cmd_review_report "$(slugify "${1:-}")" ;;
     # A red run is an answer, not a script failure: || true so the shell does
     # not report one where the summary has already said everything.
     regression)    shift; cmd_regression "$(slugify "${1:-}")" || true ;;

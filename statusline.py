@@ -353,10 +353,14 @@ def remember_context(d):
     if not sid or not isinstance(used, (int, float)):
         return
     size = dig(d, "context_window", "context_window_size")
+    # What the session has cost so far, for sclaude's review report (run_cost
+    # in sclaude/lib/steps.sh).
+    cost = dig(d, "cost", "total_cost_usd")
     try:
         with open(CONTEXT_FILE % sid, "w") as f:
             json.dump({"used_percentage": used,
-                       "context_window_size": size if isinstance(size, int) else None}, f)
+                       "context_window_size": size if isinstance(size, int) else None,
+                       "cost_usd": cost if isinstance(cost, (int, float)) else None}, f)
     except OSError:
         pass
 

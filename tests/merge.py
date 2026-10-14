@@ -309,7 +309,7 @@ if remind:
     # Which is only true if a successful offer updates the variable the rest of
     # the function branches on.
     check_true("a-merge-here-counts-as-merged",
-               re.search(r'merge_offer "\$slug" "\$pr" "\$issue"; then\n\s*merged="MERGED"',
+               re.search(r'merge_offer "\$slug" "\$pr" "\$issue"( "\$offer_mode")?; then\n\s*merged="MERGED"',
                          remind) is not None)
     # Not asked at all when the branch is already in main.
     check_true("offer-skipped-when-already-merged",

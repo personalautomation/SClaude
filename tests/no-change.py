@@ -15,8 +15,9 @@
 #   * the product's push runs the project's hooks with the main repository's
 #     node_modules and .env files, which a bare checkout of main lacks;
 #   * a branch that changes only what nothing deploys — `.github/`,
-#     `.sclaude/`, the project's `undeployed` globs — skips the regression and
-#     the deploys (no_deploy_feature); anything else, committed or not, does not.
+#     `.sclaude/`, `.githooks/`, `docs/`, the root's Markdown — skips the regression and
+#     the deploys (no_deploy_feature); anything else, committed or not, does not,
+#     and a merged pull request's files are read by the same globs (no_deploy_path).
 #
 # Run it with: python3 tests/no-change.py
 import json
@@ -56,7 +57,7 @@ def commit(wt, path, text, message):
 
 
 def run(wt, call, answer="n", repo=""):
-    script = ('for m in io ui state scratch worktree project no_change; do source "%s/$m.sh"; done\n'
+    script = ('for m in io ui state scratch worktree no_change; do source "%s/$m.sh"; done\n'
               'info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }\n'
               'ask() { printf -v "$2" %%s "%s"; }\n'
               'REPO="%s"\n'
@@ -208,15 +209,23 @@ with tempfile.TemporaryDirectory() as tmp:
     commit(wt, "app.txt", "feature\n", "feat: the feature")
     check("a workflow beside product code deploys", no_deploy(wt), False)
 
-    origin, wt = setup(tmp, "undeployed")
+    origin, wt = setup(tmp, "prose")
     commit(wt, "docs/a.md", "one\ntwo\n", "docs: a")
-    check("docs deploy unless the project says otherwise", no_deploy(wt), False)
-    commit(wt, ".sclaude/config.json", json.dumps({"undeployed": ["docs", "*.md"]}), "chore: config")
-    check("docs listed under undeployed deploy nothing", no_deploy(wt), True)
+    check("docs deploy nothing", no_deploy(wt), True)
+    commit(wt, ".githooks/pre-push", "exit 0\n", "chore: hook")
+    check("git hooks deploy nothing", no_deploy(wt), True)
     commit(wt, "README.md", "readme\n", "docs: readme")
-    check("a root *.md glob covers the root", no_deploy(wt), True)
+    check("the root's Markdown deploys nothing", no_deploy(wt), True)
     commit(wt, "app/notes.md", "deep\n", "feat: notes")
-    check("a root *.md glob leaves nested Markdown alone", no_deploy(wt), False)
+    check("Markdown deeper than the root deploys", no_deploy(wt), False)
+
+    # The merged pull request's files, read by the same globs.
+    for path, want in ((".github/workflows/a.yml", True), (".githooks/pre-push", True),
+                       ("docs/x/y.md", True), ("README.md", True), (".sclaude/team/p.json", True),
+                       ("app/notes.md", False), ("app/page.tsx", False), ("docsite/a.ts", False),
+                       (".github", True)):
+        got = "RC 0" in run(tmp, 'no_deploy_path "%s"' % path)
+        check("no_deploy_path %s" % path, got, want)
 
 for name, want, got in failures:
     print("FAIL %s: want %r, got %r" % (name, want, got))

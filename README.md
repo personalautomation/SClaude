@@ -116,6 +116,25 @@ confirmation run), each declared by the product rather than the orchestrator. A
 red run opens a fixing session, twice (`REGRESSION_MAX_ATTEMPTS=2`), then asks a
 human instead of looping for ever.
 
+A branch that changes only what neither the suite nor a deployment reads skips
+the local regression, the preview, QA and production: it goes through its pull
+request and review, then the merge. sclaude assumes these need no regression
+and no deploy, in every product (`NO_DEPLOY` in `sclaude/lib/no_change.sh`):
+
+| path | why |
+|---|---|
+| `.github/` | CI workflows and bot settings; they first run on the pull request |
+| `.sclaude/` | the orchestrator's own files |
+| `.githooks/` | local git hooks |
+| `docs/` | prose nothing builds |
+| `*.md` in the root | `README.md`, `CLAUDE.md` and the like; Markdown deeper in the tree may be content, so it counts |
+
+One file anywhere else and the branch takes the whole way. This is asked again
+at every gate rather than remembered, since a review round may fix code outside
+these paths, and after the merge the pull request's own files on GitHub are
+checked too: production is then asked about as usual. A product whose
+`docs/` is built into the site is the case this assumption gets wrong.
+
 ### Production rollback that refuses to trample somebody else
 
 A red production regression rolls the deployment back and re-runs the suite as a

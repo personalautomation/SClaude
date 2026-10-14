@@ -820,7 +820,9 @@ merge_offer() {
   local qa_checked=0
   # No `board.columns.done` in the project means no column will ever carry
   # QA's word — the same as an issue on no board, and treated the same.
-  if [[ "$mode" != nodeploy && -n "$issue" && "$issue" != "null" && -n "$QA_DONE" ]]; then
+  if [[ "$mode" == nodeploy ]]; then
+    :
+  elif [[ -n "$issue" && "$issue" != "null" && -n "$QA_DONE" ]]; then
     column="$(issue_status_now "$issue" 2>/dev/null || true)"
     if column_is "$column" "$QA_DONE"; then
       qa_checked=1
@@ -1384,9 +1386,12 @@ remind_prod() {
   fi
   # Without a deploy no QA hand-off makes the pull request ready, so it is
   # made ready here: a draft cannot be merged.
-  [[ "$no_deploy" -eq 1 && "${merged:-}" != "MERGED" ]] && pr_undraft "$pr"
-  if [[ "${merged:-}" != "MERGED" ]] \
-     && merge_offer "$slug" "$pr" "$issue" "$([[ "$no_deploy" -eq 1 ]] && echo nodeploy)"; then
+  local offer_mode=""
+  if [[ "$no_deploy" -eq 1 ]]; then
+    offer_mode=nodeploy
+    if [[ "${merged:-}" != "MERGED" ]]; then pr_undraft "$pr"; fi
+  fi
+  if [[ "${merged:-}" != "MERGED" ]] && merge_offer "$slug" "$pr" "$issue" "$offer_mode"; then
     merged="MERGED"
   fi
   # Declined, or GitHub named something in the way: the merge is then done on
@@ -1482,6 +1487,15 @@ remind_prod() {
   # because it looks at main. Both still hold.
 
   # Merged, and nothing to ship: the cycle ends with the issue and the clean-up.
+  # Unless the merge took more than this tree held: then production is asked
+  # about as usual, the preview and QA it skipped named in the question.
+  if [[ "$no_deploy" -eq 1 ]] && ! no_deploy_merged "$pr"; then
+    no_deploy=0
+    qa_skipped=1
+    echo ""
+    alarm "PR #$pr merged files outside $(printf '%s ' "${NO_DEPLOY[@]}")— or GitHub did not say which."
+    alarm "  It went in without a regression, a preview or QA; production is asked about below."
+  fi
   if [[ "$no_deploy" -eq 1 ]]; then
     run_status "$slug" "$issue" "$pr" "${merged:-}" 0 0 "$wt"
     issue_close_done "$issue" nodeploy

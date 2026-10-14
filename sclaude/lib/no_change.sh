@@ -231,9 +231,7 @@ no_change_branch_delete() {
 # --- a change nothing deploys --------------------------------------------------
 #
 # A branch whose change is all in files that neither the suite nor a deployment
-# reads: CI workflows, the orchestrator's own folder, and whatever the project
-# lists under `undeployed` in its config (git glob pathspecs from the top of
-# the tree: "docs", ".githooks", "*.md" for the root's own Markdown). It still
+# reads (NO_DEPLOY, the README's "Quality gates" names them for people). It still
 # goes through a pull request and a review, since that is where somebody reads
 # the change and where a workflow first runs. It skips the rest. One such
 # branch changed a single workflow file, and the local regression spent ten
@@ -242,20 +240,22 @@ no_change_branch_delete() {
 #
 # The tree decides, as in no_change_feature: commits and uncommitted work
 # alike, and a friction review's product fix counts here, since it ships with
-# the branch.
+# the branch. It is asked again at every gate rather than remembered, because
+# the review may fix things outside these paths: the step-4 regression then
+# runs, and so do the preview, QA and production. After the merge the pull
+# request's own files are checked as well (no_deploy_merged).
 
-NO_DEPLOY_ALWAYS=(.github .sclaude)
+# Git glob pathspecs from the top of the tree: CI, the orchestrator's folder,
+# local git hooks, prose. `*.md` is the root's own Markdown only; one deeper
+# may be content the product renders. Fixed here rather than per project: a
+# product whose docs/ is built into the site is the exception to say so for.
+NO_DEPLOY=(.github .sclaude .githooks docs '*.md')
 
 # The pathspec for what does deploy or what the suite reads, one item a line.
-#
-#   no_deploy_pathspec <wt>
 no_deploy_pathspec() {
-  local wt="$1" p
+  local p
   echo .
-  { printf '%s\n' "${NO_DEPLOY_ALWAYS[@]}"; project_get undeployed "$wt" 2>/dev/null || true; } \
-    | while IFS= read -r p; do
-        [[ -n "$p" ]] && printf ':(exclude,glob)%s\n' "$p"
-      done
+  for p in "${NO_DEPLOY[@]}"; do printf ':(exclude,glob)%s\n' "$p"; done
 }
 
 # Whether everything the branch changed is in files nothing deploys. A git that
@@ -265,12 +265,43 @@ no_deploy_pathspec() {
 no_deploy_feature() {
   local wt="$1" base changed untracked
   local -a spec
-  mapfile -t spec < <(no_deploy_pathspec "$wt")
+  mapfile -t spec < <(no_deploy_pathspec)
   git -C "$wt" fetch -q origin main 2>/dev/null || true
   base="$(git -C "$wt" merge-base HEAD origin/main 2>/dev/null)" || return 1
   changed="$(git -C "$wt" diff --name-only "$base" -- "${spec[@]}" 2>/dev/null)" || return 1
   untracked="$(git -C "$wt" ls-files --others --exclude-standard -- "${spec[@]}" 2>/dev/null)" || return 1
   [[ -z "$changed" && -z "$untracked" ]]
+}
+
+# Whether one path, as GitHub lists a pull request's files, is in NO_DEPLOY:
+# the same globs as no_deploy_pathspec, read by bash.
+no_deploy_path() {
+  local f="$1" p
+  for p in "${NO_DEPLOY[@]}"; do
+    if [[ "$p" == *'*'* ]]; then
+      # shellcheck disable=SC2053  # the glob is the point
+      [[ "$f" != */* && "$f" == $p ]] && return 0
+    else
+      [[ "$f" == "$p" || "$f" == "$p/"* ]] && return 0
+    fi
+  done
+  return 1
+}
+
+# Whether what the merged pull request carried is in NO_DEPLOY too. The tree
+# answered before the merge, but a review round may still have pushed code to
+# the branch from somewhere else, and the merge took it. GitHub silent is a no.
+#
+#   no_deploy_merged <pr>
+no_deploy_merged() {
+  local pr="$1" repo files f
+  [[ "$pr" =~ ^[0-9]+$ ]] || return 1
+  repo="$(gh_repo)" || return 1
+  files="$(gh pr view "$pr" --repo "$repo" --json files --jq '.files[].path' 2>/dev/null)" || return 1
+  [[ -n "$files" ]] || return 1
+  while IFS= read -r f; do
+    no_deploy_path "$f" || return 1
+  done <<< "$files"
 }
 
 # What the skipped part was, said once where it is skipped.
@@ -279,6 +310,6 @@ no_deploy_feature() {
 no_deploy_say() {
   echo ""
   info "  Nothing on this branch is deployed or read by the suite: it changes only"
-  info "  $(printf '%s/ ' "${NO_DEPLOY_ALWAYS[@]}")and what the project lists under 'undeployed'."
+  info "  ${NO_DEPLOY[*]} (the last is the root's own Markdown)."
   info "  $1"
 }

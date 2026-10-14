@@ -995,7 +995,12 @@ after_step() {
       # Red here keeps the step open: the preview QA will look at is built from
       # this tree, and handing QA a branch the suite already fails on wastes
       # the one check only a person can make.
-      if ! regression_gate "$wt" "$slug" local; then
+      #
+      # Not for a change nothing deploys (no_change.sh): there is no preview
+      # for QA, and the suite would test main's product.
+      if no_deploy_feature "$wt"; then
+        no_deploy_say "No local regression before the merge."
+      elif ! regression_gate "$wt" "$slug" local; then
         info "  The review waits for a green regression: $SELF $slug"
         return 0
       fi
@@ -1074,6 +1079,8 @@ after_step() {
 
       if [[ "$pr_state" == "MERGED" ]]; then
         info "  PR #${pr:-?} is merged — the review is done."
+      elif no_deploy_feature "$wt"; then
+        info "  Review closed. Next: the merge of PR #${pr:-?}, with no preview, QA or production."
       else
         # Which ticket QA will work in, beside which pull request. state_get
         # answers a missing issue with the string "null", and "issue #null" is
@@ -1118,11 +1125,16 @@ after_step() {
       # Unless the feature changed nothing of its own: then there is nothing
       # for the suite, the pull request or a deployment to be about, and the
       # cycle ends here (no_change.sh).
+      #
+      # And no regression for a change nothing deploys (no_change.sh): the
+      # suite would test main's product, which this branch does not touch.
       if no_change_feature "$wt" >/dev/null; then
         no_change_finish "$wt" "$slug" code
         return 0
       fi
-      if ! regression_gate "$wt" "$slug" local; then
+      if no_deploy_feature "$wt"; then
+        no_deploy_say "No local regression: the pull request and its review come next."
+      elif ! regression_gate "$wt" "$slug" local; then
         info "  The step waits for a green regression: $SELF $slug"
         return 0
       fi

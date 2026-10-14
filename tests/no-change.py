@@ -13,7 +13,10 @@
 #     says so, and are left out when they said drop;
 #   * a second pass sends nothing twice;
 #   * the product's push runs the project's hooks with the main repository's
-#     node_modules and .env files, which a bare checkout of main lacks.
+#     node_modules and .env files, which a bare checkout of main lacks;
+#   * a branch that changes only what nothing deploys — `.github/`,
+#     `.sclaude/`, the project's `undeployed` globs — skips the regression and
+#     the deploys (no_deploy_feature); anything else, committed or not, does not.
 #
 # Run it with: python3 tests/no-change.py
 import json
@@ -53,7 +56,7 @@ def commit(wt, path, text, message):
 
 
 def run(wt, call, answer="n", repo=""):
-    script = ('for m in io ui state scratch worktree no_change; do source "%s/$m.sh"; done\n'
+    script = ('for m in io ui state scratch worktree project no_change; do source "%s/$m.sh"; done\n'
               'info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }\n'
               'ask() { printf -v "$2" %%s "%s"; }\n'
               'REPO="%s"\n'
@@ -185,6 +188,35 @@ with tempfile.TemporaryDirectory() as tmp:
     origin, wt = setup(tmp, "empty")
     out = run(wt, 'no_change_feature "%s" >/dev/null' % wt)
     check("an empty branch is no change", "RC 0" in out, True)
+
+    # A change nothing deploys.
+    def no_deploy(wt):
+        return "RC 0" in run(wt, 'no_deploy_feature "%s"' % wt)
+
+    origin, wt = setup(tmp, "ci-only")
+    commit(wt, ".github/workflows/review.yml", "on: push\n", "ci: the review")
+    check("a workflow alone deploys nothing", no_deploy(wt), True)
+    commit(wt, ".sclaude/team/policy.json", '{"a": 2}\n', "chore: policy")
+    check("a workflow and .sclaude deploy nothing", no_deploy(wt), True)
+    write(os.path.join(wt, ".github/dependabot.yml"), "version: 2\n")
+    check("an uncommitted workflow deploys nothing", no_deploy(wt), True)
+    write(os.path.join(wt, "app.txt"), "new\n")
+    check("an untracked product file deploys", no_deploy(wt), False)
+
+    origin, wt = setup(tmp, "ci-and-app")
+    commit(wt, ".github/workflows/review.yml", "on: push\n", "ci: the review")
+    commit(wt, "app.txt", "feature\n", "feat: the feature")
+    check("a workflow beside product code deploys", no_deploy(wt), False)
+
+    origin, wt = setup(tmp, "undeployed")
+    commit(wt, "docs/a.md", "one\ntwo\n", "docs: a")
+    check("docs deploy unless the project says otherwise", no_deploy(wt), False)
+    commit(wt, ".sclaude/config.json", json.dumps({"undeployed": ["docs", "*.md"]}), "chore: config")
+    check("docs listed under undeployed deploy nothing", no_deploy(wt), True)
+    commit(wt, "README.md", "readme\n", "docs: readme")
+    check("a root *.md glob covers the root", no_deploy(wt), True)
+    commit(wt, "app/notes.md", "deep\n", "feat: notes")
+    check("a root *.md glob leaves nested Markdown alone", no_deploy(wt), False)
 
 for name, want, got in failures:
     print("FAIL %s: want %r, got %r" % (name, want, got))

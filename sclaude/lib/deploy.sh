@@ -790,7 +790,7 @@ PYMETHOD
 # next; deleting the remote here would leave that command tearing down half of
 # a thing it no longer recognises.
 merge_offer() {
-  local slug="$1" pr="$2" issue="$3"
+  local slug="$1" pr="$2" issue="$3" mode="${4:-}"
   local column ready obstacle method answer
 
   [[ -n "$pr" && "$pr" != "null" ]] || return 1
@@ -813,10 +813,14 @@ merge_offer() {
   # The same shape as the production question above, and for the same reason —
   # one question, with the warning inside it. A second prompt about the same
   # decision is answered the way repeated prompts always are.
+  #
+  # `nodeploy` is a change nothing deploys (no_change.sh): there is no preview
+  # for QA to look at, so their column is not waited for, and the review is
+  # what the merge rests on.
   local qa_checked=0
   # No `board.columns.done` in the project means no column will ever carry
   # QA's word — the same as an issue on no board, and treated the same.
-  if [[ -n "$issue" && "$issue" != "null" && -n "$QA_DONE" ]]; then
+  if [[ "$mode" != nodeploy && -n "$issue" && "$issue" != "null" && -n "$QA_DONE" ]]; then
     column="$(issue_status_now "$issue" 2>/dev/null || true)"
     if column_is "$column" "$QA_DONE"; then
       qa_checked=1
@@ -863,7 +867,12 @@ merge_offer() {
   # preview and main.
   local prompt
   echo ""
-  if [[ "$qa_checked" -eq 1 ]]; then
+  if [[ "$mode" == nodeploy ]]; then
+    say "${BOLD}PR #$pr changes nothing that deploys — no preview, no QA on one.${OFF}"
+    say "${DIM}It is clean: no conflicts, nothing GitHub is holding it for. The review${OFF}"
+    say "${DIM}is what this rests on.${OFF}"
+    prompt="Merge it now?"
+  elif [[ "$qa_checked" -eq 1 ]]; then
     say "${BOLD}QA passed issue #$issue — it is in '$QA_DONE'.${OFF}"
     say "${DIM}PR #$pr is clean: no conflicts, nothing GitHub is holding it for.${OFF}"
     prompt="Merge it now?"
@@ -900,7 +909,9 @@ merge_offer() {
     say "Acceptance criteria in issue #$issue:"
     while IFS= read -r line; do say "  $line"; done <<<"$criteria"
     unticked="$(python3 "$LIB/acceptance.py" --unticked "$issue" "${REPO:-.}" 2>/dev/null || true)"
-    if [[ -n "$unticked" && "$qa_checked" -eq 1 ]]; then
+    if [[ -n "$unticked" && "$mode" == nodeploy ]]; then
+      prompt="Not ticked in issue #$issue: $unticked. Merge anyway?"
+    elif [[ -n "$unticked" && "$qa_checked" -eq 1 ]]; then
       prompt="QA passed it, but not ticked in issue #$issue: $unticked. Merge anyway?"
     elif [[ -n "$unticked" ]]; then
       prompt="Merge it unchecked? Not ticked in issue #$issue either: $unticked."
@@ -1154,10 +1165,17 @@ remind_prod() {
   # Named once here: the prod block adds it to a commit, and the rollback reads
   # the same answer from the same place.
   local migrations_dir; migrations_dir="$(project_migrations_dir "$wt" || true)"
+  # A change nothing deploys (no_change.sh) has no preview for QA to look at
+  # and nothing for production to ship: of all below, only the merge is left.
+  local no_deploy=0
+  no_deploy_feature "$wt" && no_deploy=1
 
   echo ""
   if [[ "${merged:-}" == "MERGED" ]]; then
     echo "${BOLD}Feature $slug: PR #$pr is merged.${OFF}"
+  elif [[ "$no_deploy" -eq 1 ]]; then
+    echo "${BOLD}Feature $slug: PR #$pr is open.${OFF}"
+    echo "${DIM}Next: the merge, which is yours to do — nothing here deploys.${OFF}"
   else
     echo "${BOLD}Feature $slug: PR #$pr is open.${OFF}"
     echo "${DIM}Next: the preview, then QA, then the merge — the merge is yours to do.${OFF}"
@@ -1217,7 +1235,9 @@ remind_prod() {
   # without the first. Everywhere else it is unreachable without all three:
   # an open pull request stops at the fallback below, and a red preview
   # returns before it.
-  if deploy_unchanged "$wt" preview \
+  if [[ "$no_deploy" -eq 1 ]]; then
+    no_deploy_say "No preview, no QA on one, no production: the merge is what is left."
+  elif deploy_unchanged "$wt" preview \
      && [[ "$(regression_status "$wt" preview)" == "passed" ]]; then
     echo ""
     info "Preview already deployed at $(deploy_head "$wt" preview | cut -c1-8) — unchanged and green, skipping."
@@ -1286,7 +1306,7 @@ remind_prod() {
       info "  Carry on with: $SELF $slug"
       return 0
     fi
-  elif qa_missed "$issue" "${merged:-}" "$wt"; then
+  elif [[ "$no_deploy" -ne 1 ]] && qa_missed "$issue" "${merged:-}" "$wt"; then
     qa_skipped=1
   fi
 
@@ -1362,12 +1382,16 @@ remind_prod() {
         && info "PR #$pr was already handed over for the merge: ready, in the backlog, with its summary."
     fi
   fi
-  if [[ "${merged:-}" != "MERGED" ]] && merge_offer "$slug" "$pr" "$issue"; then
+  # Without a deploy no QA hand-off makes the pull request ready, so it is
+  # made ready here: a draft cannot be merged.
+  [[ "$no_deploy" -eq 1 && "${merged:-}" != "MERGED" ]] && pr_undraft "$pr"
+  if [[ "${merged:-}" != "MERGED" ]] \
+     && merge_offer "$slug" "$pr" "$issue" "$([[ "$no_deploy" -eq 1 ]] && echo nodeploy)"; then
     merged="MERGED"
   fi
   # Declined, or GitHub named something in the way: the merge is then done on
   # GitHub, and this notices it rather than ending the run with an errand.
-  if [[ "${merged:-}" != "MERGED" && "$preview_live" -eq 1 ]]; then
+  if [[ "${merged:-}" != "MERGED" ]] && [[ "$preview_live" -eq 1 || "$no_deploy" -eq 1 ]]; then
     local wait_rc=0
     merge_wait "$slug" "$issue" "$pr" "$branch" || wait_rc=$?
     [[ "$wait_rc" -eq 0 ]] && merged="MERGED"
@@ -1428,7 +1452,10 @@ remind_prod() {
     # Reached with no green preview up — the waits above need one — or with
     # no branch for merge_wait to ask about. Without a preview the next thing
     # is not the merge but the preview itself, since QA has nothing to look at.
-    if [[ "$preview_live" -ne 1 ]]; then
+    if [[ "$no_deploy" -eq 1 ]]; then
+      info "Waiting for the merge of PR #$pr${issue:+ (issue #$issue)}."
+      info "  Merge it, then run: $SELF done $slug"
+    elif [[ "$preview_live" -ne 1 ]]; then
       info "No green preview is up, so QA has nothing to look at yet."
       info "  QA and the merge come after it. Once the cause is fixed: $SELF $slug"
     else
@@ -1453,6 +1480,16 @@ remind_prod() {
   # the order that was: preview had to come before the clean-up because it
   # deploys the worktree's contents, and production had to come after the merge
   # because it looks at main. Both still hold.
+
+  # Merged, and nothing to ship: the cycle ends with the issue and the clean-up.
+  if [[ "$no_deploy" -eq 1 ]]; then
+    run_status "$slug" "$issue" "$pr" "${merged:-}" 0 0 "$wt"
+    issue_close_done "$issue" nodeploy
+    if ! cmd_done "$slug"; then
+      info "Later: $SELF done $slug"
+    fi
+    return 0
+  fi
 
   # The production question, sharpened when nobody passed the branch through QA.
   #

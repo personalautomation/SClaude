@@ -227,3 +227,58 @@ no_change_finish() {
 no_change_branch_delete() {
   git -C "$REPO" branch -D "$1" >/dev/null 2>&1
 }
+
+# --- a change nothing deploys --------------------------------------------------
+#
+# A branch whose change is all in files that neither the suite nor a deployment
+# reads: CI workflows, the orchestrator's own folder, and whatever the project
+# lists under `undeployed` in its config (git glob pathspecs from the top of
+# the tree: "docs", ".githooks", "*.md" for the root's own Markdown). It still
+# goes through a pull request and a review, since that is where somebody reads
+# the change and where a workflow first runs. It skips the rest. One such
+# branch changed a single workflow file, and the local regression spent ten
+# minutes on typecheck, build and e2e over what was main's product; the
+# preview, QA on it and production would have shipped main's product again.
+#
+# The tree decides, as in no_change_feature: commits and uncommitted work
+# alike, and a friction review's product fix counts here, since it ships with
+# the branch.
+
+NO_DEPLOY_ALWAYS=(.github .sclaude)
+
+# The pathspec for what does deploy or what the suite reads, one item a line.
+#
+#   no_deploy_pathspec <wt>
+no_deploy_pathspec() {
+  local wt="$1" p
+  echo .
+  { printf '%s\n' "${NO_DEPLOY_ALWAYS[@]}"; project_get undeployed "$wt" 2>/dev/null || true; } \
+    | while IFS= read -r p; do
+        [[ -n "$p" ]] && printf ':(exclude,glob)%s\n' "$p"
+      done
+}
+
+# Whether everything the branch changed is in files nothing deploys. A git that
+# cannot answer is a no: the ordinary way is the safe one.
+#
+#   no_deploy_feature <wt>
+no_deploy_feature() {
+  local wt="$1" base changed untracked
+  local -a spec
+  mapfile -t spec < <(no_deploy_pathspec "$wt")
+  git -C "$wt" fetch -q origin main 2>/dev/null || true
+  base="$(git -C "$wt" merge-base HEAD origin/main 2>/dev/null)" || return 1
+  changed="$(git -C "$wt" diff --name-only "$base" -- "${spec[@]}" 2>/dev/null)" || return 1
+  untracked="$(git -C "$wt" ls-files --others --exclude-standard -- "${spec[@]}" 2>/dev/null)" || return 1
+  [[ -z "$changed" && -z "$untracked" ]]
+}
+
+# What the skipped part was, said once where it is skipped.
+#
+#   no_deploy_say <what is skipped>
+no_deploy_say() {
+  echo ""
+  info "  Nothing on this branch is deployed or read by the suite: it changes only"
+  info "  $(printf '%s/ ' "${NO_DEPLOY_ALWAYS[@]}")and what the project lists under 'undeployed'."
+  info "  $1"
+}

@@ -192,7 +192,8 @@ issue_hold_open() {
 # The other half: the cycle is over, the issue closes. "shipped" when
 # production carries the feature and its regression is green, "declined" when
 # the human said no to production — the work is merged and accepted either way.
-# "unchanged" when the feature changed nothing in the code (no_change.sh).
+# "unchanged" when the feature changed nothing in the code, "nodeploy" when it
+# changed only what nothing deploys (both no_change.sh).
 issue_close_done() {
   local issue="$1" outcome="${2:-shipped}" repo state
 
@@ -206,6 +207,8 @@ issue_close_done() {
   if gh issue close "$issue" --repo "$repo" --reason completed >/dev/null 2>&1; then
     if [[ "$outcome" == unchanged ]]; then
       info "Issue #$issue closed — the feature changed nothing in the code, so it had no pull request."
+    elif [[ "$outcome" == nodeploy ]]; then
+      info "Issue #$issue closed — merged; the change is one nothing deploys."
     elif [[ "$outcome" == declined ]]; then
       info "Issue #$issue closed — merged and accepted; production was declined."
       info "  Ship it later from ${REPO:-the repository}: vercel --prod"
@@ -1461,6 +1464,25 @@ pr_board_set() {
     fi
   done <<< "$rows"
   return "$failed"
+}
+
+# Marks a draft pull request ready for review, so that it can be merged. For a
+# change nothing deploys (no_change.sh), which no QA hand-off ever makes ready.
+# Breaks nothing: a failure is a warning, and merge_offer names the draft.
+#
+#   pr_undraft <pr>
+pr_undraft() {
+  local pr="$1" repo
+  [[ "$pr" =~ ^[0-9]+$ ]] || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+  repo="$(gh_repo)" || return 0
+  [[ "$(gh pr view "$pr" --repo "$repo" --json isDraft --jq .isDraft 2>/dev/null)" == true ]] || return 0
+  if gh pr ready "$pr" --repo "$repo" >/dev/null 2>&1; then
+    info "PR #$pr marked ready for review."
+  else
+    warn "  could not mark PR #$pr ready — do it by hand (Ready for review)"
+  fi
+  return 0
 }
 
 # QA has accepted the work: hand the pull request over to whoever merges it.

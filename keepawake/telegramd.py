@@ -71,6 +71,20 @@ class Bot(object):
         # long Telegram holds the long poll. The values differ and must not be
         # confused: the socket has to outlive the long poll, otherwise every
         # empty poll would look like a dropped connection.
+        try:
+            return self._post(method, http_timeout, params)
+        except urllib.error.HTTPError as exc:
+            # A button's colour (`style`) is recent in the Bot API. Should
+            # Telegram refuse it, the same message goes again without colours
+            # rather than not at all.
+            styled = json.dumps(params.get("reply_markup") or {})
+            if exc.code != 400 or '"style"' not in styled:
+                raise
+            log.warning("%s refused a styled keyboard; sending it plain", method)
+            params["reply_markup"] = unstyled(params["reply_markup"])
+            return self._post(method, http_timeout, params)
+
+    def _post(self, method, http_timeout, params):
         url = API % (self.token, method)
         data = urllib.parse.urlencode(
             {k: (json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v)
@@ -193,6 +207,13 @@ class Bot(object):
 
 
 # --- keyboards --------------------------------------------------------------
+
+def unstyled(markup):
+    """The same reply_markup with every button's colour taken off."""
+    rows = [[{k: v for k, v in b.items() if k != "style"} for b in row]
+            for row in markup.get("inline_keyboard") or []]
+    return dict(markup, inline_keyboard=rows) if "inline_keyboard" in markup else markup
+
 
 def menu_keyboard():
     return [
@@ -356,8 +377,11 @@ def chrome_keyboard():
         # the name off, and a bare 📱 next to it said nothing of what it does.
         rows.append([{"text": label, "callback_data": "noop"}])
         row = [{"text": t("chrome.open"), "callback_data": "devopen:" + label}]
+        # Two looks for two presses: a plain 🔒 that only opens the door, then
+        # a green 📲 that is the Mini App — so the button itself says that the
+        # first press does not show the feature yet, and the second will.
         if origin:
-            row.append({"text": t("chrome.phone"),
+            row.append({"text": t("chrome.phoneopen"), "style": "success",
                         "web_app": {"url": "%s/__sclaude/tg?f=%s" % (origin, label)}})
         else:
             row.append({"text": t("chrome.phone"), "callback_data": "devphone:" + label})

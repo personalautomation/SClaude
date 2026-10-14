@@ -1458,6 +1458,12 @@ if os.path.exists(cfg):
             apps = [b["web_app"]["url"] for row in rows for b in row if "web_app" in b]
             check("an open gate: 📱 is the Mini App", apps,
                   ["https://box.tail1.ts.net:8443/__sclaude/tg?f=sample-one"])
+            check("an open gate: the Mini App button looks different",
+                  [b.get("style") for row in rows for b in row if "web_app" in b], ["success"])
+            check("a refused colour is dropped, the rest kept",
+                  tg_menu.unstyled({"inline_keyboard": [[{"text": "x", "style": "success",
+                                                          "callback_data": "y"}]]}),
+                  {"inline_keyboard": [[{"text": "x", "callback_data": "y"}]]})
             check_true("an open gate can be closed",
                        "gate_stop" in [b.get("callback_data") for row in rows for b in row])
             check_true("the card says the phone access is open",

@@ -1468,17 +1468,18 @@ its own and the address `main.localhost:3000` instead.
 
 ### A feature in Telegram, with no Tailscale on the phone
 
-The bot's chrome-debug card has a 📱 button on each feature row. It opens the
+The bot's chrome-debug card has a "🔒 Phone" button on each feature row. It opens the
 feature as a Telegram Mini App: full screen and inside Telegram, with nothing
 running on the phone but Telegram. A Mini App is a web view on a public HTTPS
 address, so for as long as the person looks, the laptop has one door on the
 internet:
 
-- the first 📱 press starts `sclaude-gate.service`. That is `sclaude-proxy
+- the first press starts `sclaude-gate.service`. That is `sclaude-proxy
   --gate` on `127.0.0.1:3001`, and `tailscale funnel` publishes it as
   `https://<node>.<tailnet>.ts.net:8443`. Before that press nothing is
   published;
-- the second press opens the feature. The page proves to the gate that it was
+- the button turns into a green "📲 Open" (`style: success`), and the
+  second press opens the feature. The page proves to the gate that it was
   opened from this bot, by the account in `KEEPAWAKE_CHAT_ID` (Telegram's
   signed `initData`, checked with the bot's token in
   `sclaude/lib/tg_webapp.py`). It then carries the gate's cookie for 12 hours.

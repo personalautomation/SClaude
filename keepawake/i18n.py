@@ -135,13 +135,18 @@ STRINGS = {
                           "⏹ sclaude-proxy is not answering — features cannot be opened"),
     "chrome.open":       ("🌐 Ноутбук", "🌐 Laptop"),
     "chrome.featstop":   ("⏹ Остановить", "⏹ Stop"),
-    "chrome.phone":      ("📱 Телефон", "📱 Phone"),
-    "chrome.gateup":     ("📱 Доступ с телефона открыт: «📱 Телефон» открывает фичу прямо "
-                          "в Telegram. Закроется сам через полчаса без просмотра.",
-                          "📱 Phone access is open: \u201c📱 Phone\u201d opens the feature right in "
-                          "Telegram. It closes itself after half an hour unwatched."),
-    "chrome.gatedown":   ("🔒 Доступ с телефона закрыт; «📱 Телефон» откроет его.",
-                          "🔒 Phone access is closed; \u201c📱 Phone\u201d opens it."),
+    "chrome.phone":      ("🔒 Телефон", "🔒 Phone"),
+    "chrome.phoneopen":  ("📲 Открыть", "📲 Open"),
+    "chrome.gateup":     ("📲 Доступ с телефона открыт: зелёная «📲 Открыть» "
+                          "показывает фичу прямо в Telegram. Закроется сам через "
+                          "полчаса без просмотра.",
+                          "📲 Phone access is open: the green \u201c📲 Open\u201d "
+                          "shows the feature right in Telegram. It closes itself "
+                          "after half an hour unwatched."),
+    "chrome.gatedown":   ("🔒 Доступ с телефона закрыт. «🔒 Телефон» открывает его, "
+                          "затем зелёная «📲 Открыть» показывает фичу.",
+                          "🔒 Phone access is closed. \u201c🔒 Phone\u201d opens it, "
+                          "then the green \u201c📲 Open\u201d shows the feature."),
     "chrome.gateclose":  ("🔒 Закрыть доступ с телефона", "🔒 Close phone access"),
     "chrome.gatefail":   ("⚠️ Доступ с телефона не открылся:\n<pre>%(log)s</pre>\n"
                           "<i>Нужно один раз: funnel разрешён для ноутбука в политике "

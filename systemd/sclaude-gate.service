@@ -1,0 +1,18 @@
+[Unit]
+Description=The phone's entry to features through Telegram (tailscale funnel, on demand)
+Documentation=file:@REPO@/README.md
+
+[Service]
+# Started by the bot's 📱 button and by nothing else: while it runs, a feature's
+# dev server is on the internet behind Telegram's sign-in (the gate in
+# bin/sclaude-proxy). It ends itself when nobody has looked for half an hour.
+ExecStart=%h/.local/bin/sclaude-proxy --gate
+# The funnel lives exactly as long as the gate. `tailscale funnel` needs the
+# node allowed to funnel in the tailnet policy and this user made the operator
+# (`sudo tailscale set --operator=$USER`); without them the start fails here and
+# the bot shows why.
+ExecStartPost=/usr/bin/env tailscale funnel --bg --https=8443 http://127.0.0.1:3001
+ExecStopPost=-/usr/bin/env tailscale funnel --https=8443 off
+Restart=no
+
+# No [Install] section: it is never enabled.

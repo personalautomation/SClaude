@@ -79,7 +79,8 @@ unit sclaude-watch.service
 unit sclaude-watch.timer
 unit sclaude-proxy.socket
 unit sclaude-proxy.service
-echo "units: $UNITS/keepawake{.service,.timer,-telegram.service}, code-server.service, sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}"
+unit sclaude-gate.service
+echo "units: $UNITS/keepawake{.service,.timer,-telegram.service}, code-server.service, sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}, sclaude-gate.service"
 
 ln -sfn "$REPO/skills/pr" "$SKILLS/pr"
 echo "symlinked: $SKILLS/pr"

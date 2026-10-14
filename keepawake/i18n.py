@@ -109,14 +109,14 @@ STRINGS = {
                           "to sleep on its own idle timer."),
 
     # chrome
-    "chrome.title":      ("<b>chrome-debug</b>\n%(state)s\n%(proxy)s\n\n"
+    "chrome.title":      ("<b>chrome-debug</b>\n%(state)s\n%(proxy)s\n%(gate)s\n\n"
                           "<b>Фичи</b>\n%(features)s\n\n"
                           "<i>Ссылка — для телефона; адрес под ней — для "
                           "браузера на ноутбуке. Остановленная фича запускается "
                           "сама, когда её открывают, а неоткрытая полчаса — "
                           "останавливается. Окно Chrome на ноутбуке, отладочный "
                           "порт %(port)s.</i>",
-                          "<b>chrome-debug</b>\n%(state)s\n%(proxy)s\n\n"
+                          "<b>chrome-debug</b>\n%(state)s\n%(proxy)s\n%(gate)s\n\n"
                           "<b>Features</b>\n%(features)s\n\n"
                           "<i>The link is for the phone; the address under it "
                           "is for the browser on the laptop. A stopped feature "
@@ -135,6 +135,20 @@ STRINGS = {
                           "⏹ sclaude-proxy is not answering — features cannot be opened"),
     "chrome.open":       ("🌐 %(name)s", "🌐 %(name)s"),
     "chrome.featstop":   ("⏹ Остановить", "⏹ Stop"),
+    "chrome.phone":      ("📱", "📱"),
+    "chrome.gateup":     ("📱 Доступ с телефона открыт: 📱 открывает фичу прямо "
+                          "в Telegram. Закроется сам через полчаса без просмотра.",
+                          "📱 Phone access is open: 📱 opens the feature right in "
+                          "Telegram. It closes itself after half an hour unwatched."),
+    "chrome.gatedown":   ("🔒 Доступ с телефона закрыт; 📱 откроет его.",
+                          "🔒 Phone access is closed; 📱 opens it."),
+    "chrome.gateclose":  ("🔒 Закрыть доступ с телефона", "🔒 Close phone access"),
+    "chrome.gatefail":   ("⚠️ Доступ с телефона не открылся:\n<pre>%(log)s</pre>\n"
+                          "<i>Нужно один раз: funnel разрешён для ноутбука в политике "
+                          "tailnet и <code>sudo tailscale set --operator=$USER</code>.</i>",
+                          "⚠️ Phone access did not open:\n<pre>%(log)s</pre>\n"
+                          "<i>Needed once: funnel allowed for the laptop in the tailnet "
+                          "policy, and <code>sudo tailscale set --operator=$USER</code>.</i>"),
     "chrome.browser":    ("Браузер:", "Browser:"),
     "chrome.up":         ("✅ браузер запущен", "✅ browser running"),
     "chrome.down":       ("⏹ браузер не запущен", "⏹ browser not running"),

@@ -36,6 +36,7 @@
 # hand it binds the port itself:
 #
 #   sclaude-proxy               listen on SCLAUDE_PROXY_PORT (3000)
+#   sclaude-proxy --gate        the phone's entry from the internet (see the gate)
 #
 # A feature nobody is running is started on the first request for it, and one
 # nobody has looked at for SCLAUDE_DEV_IDLE seconds (half an hour) is stopped,
@@ -759,6 +760,168 @@ async def handle(reader, writer):
                     pass
 
 
+# --- the gate: the phone's entry from the internet ---------------------------
+#
+# `sclaude-proxy --gate` is what `tailscale funnel` publishes while the person
+# looks at a feature from Telegram (sclaude-gate.service, started by the bot's
+# 📱 button and by nothing else). It routes nothing itself: a request it lets
+# in goes on to the proxy on :3000 as it came, so starting, routing and idling
+# stay in one process. Its own job is who: a page opened from the bot proves
+# itself with Telegram's signed initData once (tg_webapp.py) and then carries
+# the gate's cookie; anything without it gets a 403.
+#
+# One request per connection, always: funnel keeps its connections to this
+# port and would carry the next request — anybody's — down one that was
+# checked a moment ago. A WebSocket upgrade is one exchange and stays whole.
+#
+# It ends itself after SCLAUDE_GATE_IDLE seconds with no connection open and
+# none new; the unit's ExecStopPost then takes the funnel down, so nothing of
+# the laptop stays on the internet once the phone has stopped looking.
+import tg_webapp  # noqa: E402
+
+GATE_PORT = int(os.environ.get("SCLAUDE_GATE_PORT") or 3001)
+GATE_UPSTREAM = int(os.environ.get("SCLAUDE_GATE_UPSTREAM") or PORT)
+GATE_ENV = os.environ.get("SCLAUDE_GATE_ENV") or os.path.expanduser(
+    "~/.config/keepawake/env")
+GATE_IDLE = float(os.environ.get("SCLAUDE_GATE_IDLE") or 1800)
+GATE_COOKIE = "sclaude_tg"
+# The Mini App goes full screen, as close to an app of its own as Telegram
+# allows. Telegram then floats its close and menu buttons over the top of the
+# page; False keeps its header and only expands the sheet to full height.
+GATE_FULLSCREEN = True
+AUTH_BODY_LIMIT = 8192
+
+GATE = {"token": "", "owner": 0, "open": 0, "last": 0.0}
+
+
+def gate_cookie(header):
+    for part in header.split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == GATE_COOKIE:
+            return value.strip()
+    return ""
+
+
+def gate_bootstrap(label):
+    """The page the bot's button opens: set the view up, sign in, go on."""
+    script = """
+const tg = window.Telegram && window.Telegram.WebApp;
+const say = (text) => { document.getElementById('msg').textContent = text; };
+if (!tg || !tg.initData) {
+  say('Open this from the bot: the 📱 button next to the feature.');
+} else {
+  tg.ready();
+  tg.expand();
+  if (%(full)s && tg.isVersionAtLeast('8.0')) { try { tg.requestFullscreen(); } catch (e) {} }
+  if (tg.isVersionAtLeast('7.7')) tg.disableVerticalSwipes();
+  fetch('/__sclaude/tg/auth', {method: 'POST', body: tg.initData, credentials: 'same-origin'})
+    .then((r) => r.ok ? location.replace('/__sclaude/select?f=' + %(label)s)
+                      : say('The bot did not recognise you (' + r.status + ').'))
+    .catch(() => say('The laptop did not answer.'));
+}
+""" % {"full": "true" if GATE_FULLSCREEN else "false", "label": json.dumps(label)}
+    body = ("<h1>%s</h1><p id=msg>Opening…</p>"
+            "<script src='https://telegram.org/js/telegram-web-app.js'></script>"
+            "<script>%s</script>" % (html.escape(label), script))
+    return page(label, body)
+
+
+async def gate_own(method, target, headers, reader):
+    """A response for the gate's open routes, or None for any other path."""
+    url = urlsplit(target)
+    if url.path == "/__sclaude/tg":
+        label = (parse_qs(url.query).get("f") or [""])[0]
+        if not LABEL.match(label):
+            return respond("404 Not Found", page("Not found", "<p>No such feature.</p>"))
+        return respond("200 OK", gate_bootstrap(label))
+    if url.path == "/__sclaude/tg/auth":
+        try:
+            length = int(headers.get("content-length") or 0)
+        except ValueError:
+            length = -1
+        if method != "POST" or not 0 < length <= AUTH_BODY_LIMIT:
+            return respond("400 Bad Request", "")
+        try:
+            body = await asyncio.wait_for(reader.readexactly(length), 15)
+        except (asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError):
+            return respond("400 Bad Request", "")
+        if not tg_webapp.verify_init_data(body.decode("utf-8", "replace"),
+                                          GATE["token"], GATE["owner"]):
+            return respond("403 Forbidden", "")
+        return respond("204 No Content", "", (
+            "Set-Cookie: %s=%s; Path=/; Max-Age=%d; Secure; HttpOnly; SameSite=Lax"
+            % (GATE_COOKIE, tg_webapp.sign_cookie(GATE["token"]), tg_webapp.COOKIE_TTL),))
+    return None
+
+
+async def gate_handle(reader, writer):
+    upstream = None
+    GATE["open"] += 1
+    GATE["last"] = time.time()
+    try:
+        try:
+            head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 30)
+        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError,
+                asyncio.TimeoutError, ConnectionError):
+            return
+        method, target, headers = parse_head(head)
+        own = await gate_own(method, target, headers, reader)
+        if own is not None:
+            writer.write(own)
+            await writer.drain()
+            return
+        if not tg_webapp.cookie_valid(gate_cookie(headers.get("cookie", "")), GATE["token"]):
+            writer.write(respond("403 Forbidden", page(
+                "Closed", "<h1>Closed</h1><p>Open the feature from the bot: the 📱 "
+                "button next to it.</p>")))
+            await writer.drain()
+            return
+        try:
+            up_reader, upstream = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", GATE_UPSTREAM), 5)
+        except (OSError, asyncio.TimeoutError):
+            writer.write(respond("502 Bad Gateway", page(
+                "Down", "<h1>sclaude-proxy is not answering</h1>")))
+            await writer.drain()
+            return
+        if headers.get("upgrade", "").lower() != "websocket":
+            head = close_after(head)
+        upstream.write(head)
+        await asyncio.gather(pipe(reader, upstream), pipe(up_reader, writer))
+    finally:
+        GATE["open"] -= 1
+        GATE["last"] = time.time()
+        for w in (upstream, writer):
+            if w is not None:
+                try:
+                    w.close()
+                except (OSError, RuntimeError):
+                    pass
+
+
+async def gate_main():
+    env = tg_webapp.read_env(GATE_ENV)
+    token = env.get("KEEPAWAKE_BOT_TOKEN", "")
+    owner = env.get("KEEPAWAKE_CHAT_ID", "")
+    if not token or not owner.lstrip("-").isdigit():
+        sys.stderr.write("sclaude-proxy --gate: no KEEPAWAKE_BOT_TOKEN or "
+                         "KEEPAWAKE_CHAT_ID in %s\n" % GATE_ENV)
+        sys.exit(1)
+    GATE.update(token=token, owner=int(owner), last=time.time())
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # Loopback only: funnel connects from this machine, and nothing else may.
+    sock.bind(("127.0.0.1", GATE_PORT))
+    sock.listen(128)
+    sock.setblocking(False)
+    server = await asyncio.start_server(gate_handle, sock=sock, limit=HEAD_LIMIT)
+    tick = min(TICK, max(GATE_IDLE / 4, 0.1))
+    async with server:
+        while GATE["open"] or time.time() - GATE["last"] < GATE_IDLE:
+            await asyncio.sleep(tick)
+    sys.stderr.write("sclaude-proxy --gate: nobody looked for %ds; closing\n" % GATE_IDLE)
+
+
 def listening_socket():
     """systemd's socket when started by sclaude-proxy.socket, else our own."""
     if os.environ.get("LISTEN_PID") == str(os.getpid()) \
@@ -824,7 +987,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(gate_main() if sys.argv[1:2] == ["--gate"] else main())
     except KeyboardInterrupt:
         pass
     except OSError as exc:

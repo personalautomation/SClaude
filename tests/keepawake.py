@@ -1425,7 +1425,7 @@ if os.path.exists(cfg):
         check_true("the proxy's state is named", "sclaude-proxy" in chrome_body)
 
         rows = tg_menu.chrome_keyboard()
-        datas = [b["callback_data"] for row in rows for b in row]
+        datas = [b.get("callback_data") for row in rows for b in row]
         check_true("the first row is the browser",
                    any(b["callback_data"].startswith("chrome_") for b in rows[0]))
         check_true("each feature can be opened", "devopen:sample-one" in datas)
@@ -1433,6 +1433,41 @@ if os.path.exists(cfg):
         check("the last row goes back", rows[-1][0]["callback_data"], "menu_back")
         # The row caption is not a button: pressing it must do nothing.
         check_true("the row captions are marked noop", "noop" in datas)
+
+        # 📱: while the gate is down it is a callback that opens it, and nothing
+        # is on the internet; once the gate runs, the same button is the Mini
+        # App at the funnel's address, and a row closes the access again.
+        check_true("a closed gate: 📱 opens it", "devphone:sample-one" in datas)
+        check("a closed gate: no Mini App yet",
+              any("web_app" in b for row in rows for b in row), False)
+        check("a closed gate: nothing to close", "gate_stop" in datas, False)
+        saved_run = tg_menu.run
+        try:
+            def gate_up(cmd, timeout=25):
+                if "is-active" in cmd and tg_menu.GATE_UNIT in cmd:
+                    return "active"
+                if "tailscale status" in cmd:
+                    return json.dumps({"Self": {"DNSName": "box.tail1.ts.net."}})
+                return saved_run(cmd, timeout)
+            tg_menu.run = gate_up
+            check("the funnel address is the node's name on :8443",
+                  tg_menu.gate_origin(), "https://box.tail1.ts.net:8443")
+            rows = tg_menu.chrome_keyboard()
+            apps = [b["web_app"]["url"] for row in rows for b in row if "web_app" in b]
+            check("an open gate: 📱 is the Mini App", apps,
+                  ["https://box.tail1.ts.net:8443/__sclaude/tg?f=sample-one"])
+            check_true("an open gate can be closed",
+                       "gate_stop" in [b.get("callback_data") for row in rows for b in row])
+            check_true("the card says the phone access is open",
+                       tg_menu.t("chrome.gateup") in tg_menu.chrome_text())
+            tg_menu.run = lambda cmd, timeout=25: "" if "tailscale status" in cmd \
+                else gate_up(cmd, timeout)
+            check("no tailnet name: no Mini App, the callback stays",
+                  "devphone:sample-one" in [b.get("callback_data")
+                                            for row in tg_menu.chrome_keyboard() for b in row],
+                  True)
+        finally:
+            tg_menu.run = saved_run
     finally:
         tg_menu.DEV_REGISTRY = saved_registry
         shutil.rmtree(reg, ignore_errors=True)

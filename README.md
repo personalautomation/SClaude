@@ -1466,6 +1466,43 @@ A `npm run dev` started by hand in the main repository finds :3000 taken and
 moves to another port. `sclaude dev` in the main repository gives it a port of
 its own and the address `main.localhost:3000` instead.
 
+### A feature in Telegram, with no Tailscale on the phone
+
+The bot's chrome-debug card has a 📱 button on each feature row. It opens the
+feature as a Telegram Mini App: full screen and inside Telegram, with nothing
+running on the phone but Telegram. A Mini App is a web view on a public HTTPS
+address, so for as long as the person looks, the laptop has one door on the
+internet:
+
+- the first 📱 press starts `sclaude-gate.service`. That is `sclaude-proxy
+  --gate` on `127.0.0.1:3001`, and `tailscale funnel` publishes it as
+  `https://<node>.<tailnet>.ts.net:8443`. Before that press nothing is
+  published;
+- the second press opens the feature. The page proves to the gate that it was
+  opened from this bot, by the account in `KEEPAWAKE_CHAT_ID` (Telegram's
+  signed `initData`, checked with the bot's token in
+  `sclaude/lib/tg_webapp.py`). It then carries the gate's cookie for 12 hours.
+  Every other request gets `403`;
+- the gate does no routing of its own. A request it lets in goes on to the
+  proxy on :3000, one request per connection;
+- after half an hour with no connection, or on "Close phone access", the gate
+  exits and the unit's `ExecStopPost` turns the funnel off.
+
+Needed once, by hand, because publishing to the internet is a person's decision:
+
+```bash
+sudo tailscale set --operator=$USER    # lets the user unit run `tailscale funnel`
+```
+
+Funnel also has to be allowed for the node in the tailnet policy (the
+`funnel` node attribute). The first `tailscale funnel` prints the link that
+turns it on. If something is missing, the bot shows the unit's log in place
+of the card.
+
+A product that signs people in through a provider with a redirect allow-list
+(Supabase Auth, OAuth apps) needs `https://<node>.<tailnet>.ts.net:8443` in
+that list, the same as it needs the `tailscale serve` name.
+
 ## bin/chrome-debug
 
 Starts Chrome (from the Playwright build in `~/.cache/ms-playwright/`) with a

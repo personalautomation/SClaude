@@ -279,6 +279,114 @@ def check_peers(registry, stub, log):
         proc.wait(timeout=5)
 
 
+def raw_request(port, text):
+    """(status line, headers text, body) of raw bytes sent to a port."""
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+        s.sendall(text.encode())
+        data = b""
+        while True:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    head, _, body = data.partition(b"\r\n\r\n")
+    head = head.decode("latin-1")
+    return head.split("\r\n")[0], head, body.decode("utf-8", "replace")
+
+
+def check_gate(proxy_port, root):
+    """`sclaude-proxy --gate`: the phone's entry from the internet lets in only
+    the bot's owner, by Telegram's signed initData, and passes them on to the
+    proxy one request per connection."""
+    sys.path.insert(0, os.path.join(os.path.dirname(PROXY), "..", "sclaude", "lib"))
+    import tg_webapp
+    token, owner = "123:TEST-TOKEN", 4242
+    envfile = os.path.join(root, "gate.env")
+    with open(envfile, "w") as fh:
+        fh.write("KEEPAWAKE_BOT_TOKEN=%s\nKEEPAWAKE_CHAT_ID=%d\n" % (token, owner))
+
+    # No credentials: the gate does not open at all.
+    port = free_port()
+    proc = subprocess.run([sys.executable, PROXY, "--gate"], timeout=10,
+                          env=dict(os.environ, SCLAUDE_GATE_PORT=str(port),
+                                   SCLAUDE_GATE_ENV=os.path.join(root, "nothing.env")),
+                          stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    check("gate: no credentials, no gate", (proc.returncode, answers_on(port)), (1, False))
+
+    port = free_port()
+    proc = subprocess.Popen([sys.executable, PROXY, "--gate"],
+                            env=dict(os.environ, SCLAUDE_GATE_PORT=str(port),
+                                     SCLAUDE_GATE_UPSTREAM=str(proxy_port),
+                                     SCLAUDE_GATE_ENV=envfile, SCLAUDE_GATE_IDLE="2",
+                                     SCLAUDE_PROXY_TICK="0.2"),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        wait_for(lambda: answers_on(port), 5)
+        host = "box.tail1.ts.net:8443"
+
+        status, _, body = request(port, host, "/")
+        check("gate: a stranger is refused", status, "HTTP/1.1 403 Forbidden")
+        check("gate: a stranger sees no feature", ">a<" in body, False)
+        status, _, _ = request(port, host, "/__sclaude/")
+        check("gate: the list is closed too", status, "HTTP/1.1 403 Forbidden")
+        status, _, _ = request(port, host, "/", cookie="sclaude_tg=99999999999.forged")
+        check("gate: a forged cookie is refused", status, "HTTP/1.1 403 Forbidden")
+
+        status, _, body = request(port, host, "/__sclaude/tg?f=a")
+        check("gate: the bootstrap page is open", status, "HTTP/1.1 200 OK")
+        check("gate: it loads Telegram's script",
+              "telegram.org/js/telegram-web-app.js" in body, True)
+        check("gate: it asks for full screen", "requestFullscreen" in body, True)
+        status, _, _ = request(port, host, "/__sclaude/tg?f=../x")
+        check("gate: a bad label is not echoed", status, "HTTP/1.1 404 Not Found")
+
+        def auth(data):
+            return raw_request(port, "POST /__sclaude/tg/auth HTTP/1.1\r\nHost: %s\r\n"
+                               "Content-Length: %d\r\n\r\n%s" % (host, len(data), data))
+
+        now = int(time.time())
+        good = tg_webapp.sign_init_data(
+            {"auth_date": str(now), "user": json.dumps({"id": owner})}, token)
+        other = tg_webapp.sign_init_data(
+            {"auth_date": str(now), "user": json.dumps({"id": owner + 1})}, token)
+        stale = tg_webapp.sign_init_data(
+            {"auth_date": str(now - 3 * 86400), "user": json.dumps({"id": owner})}, token)
+        foreign = tg_webapp.sign_init_data(
+            {"auth_date": str(now), "user": json.dumps({"id": owner})}, "999:OTHER")
+        for name, data in (("somebody else", other), ("a stale sign-in", stale),
+                           ("another bot", foreign), ("tampered data", good.replace("4242", "4243"))):
+            check("gate: %s is refused" % name, auth(data)[0], "HTTP/1.1 403 Forbidden")
+
+        status, head, _ = auth(good)
+        check("gate: the owner signs in", status, "HTTP/1.1 204 No Content")
+        cookie = ""
+        for line in head.split("\r\n"):
+            if line.lower().startswith("set-cookie: sclaude_tg="):
+                cookie = line.split(":", 1)[1].strip().split(";")[0]
+        check("gate: the cookie is secure and hidden from scripts",
+              all(x in head for x in ("Secure", "HttpOnly")), True)
+
+        status, head, _ = request(port, host, "/__sclaude/select?f=a", cookie=cookie)
+        check("gate: the proxy picks the feature", status, "HTTP/1.1 303 See Other")
+        status, _, body = request(port, host, "/", cookie=cookie + "; sclaude_feature=a")
+        check("gate: the owner reaches the feature", body, "A %s" % host)
+
+        # Two requests on one connection: only the first is answered — the
+        # second would otherwise go through on a check made for the first.
+        req = ("GET / HTTP/1.1\r\nHost: %s\r\nCookie: %s; sclaude_feature=a\r\n\r\n"
+               % (host, cookie))
+        _, _, body = raw_request(port, req + req)
+        check("gate: one request per connection", body.count("A %s" % host), 1)
+
+        check("gate: it ends itself when nobody looks",
+              wait_for(lambda: proc.poll() is not None, 10), True)
+        check("gate: and exits cleanly", proc.returncode, 0)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+        proc.wait(timeout=5)
+
+
 def main():
     root = tempfile.mkdtemp(prefix="sclaude-proxy-")
     registry = os.path.join(root, "registry")
@@ -319,6 +427,8 @@ def main():
               "href='http://a.localhost:%d/'" % port in body, True)
         check("the proxy's own pages close the connection",
               "Connection: close" in head, True)
+
+        check_gate(port, root)
 
         # A feature with a database block of its own is offered its Studio —
         # enabled in the stub config and actually listening, at base + 3 — but

@@ -341,15 +341,27 @@ def chrome_keyboard():
         browser.append({"text": t("chrome.start"), "callback_data": "chrome_start"})
 
     rows = [browser]
+    # 📱 opens the feature inside Telegram. While the gate is down it is a
+    # callback that brings the gate up; once it is up, the same button is the
+    # Mini App itself — a second press, but nothing is on the internet before
+    # the first.
+    origin = gate_origin() if gate_running() else ""
     for label, _wt, _port, running in dev_features()[:FEATURE_ROWS]:
         # Telegram refuses callback data over 64 bytes; a feature with a name
         # that long is listed in the text and simply has no buttons.
-        if len("devopen:" + label) > 64:
+        if len("devphone:" + label) > 64:
             continue
         row = [{"text": t("chrome.open", name=label), "callback_data": "devopen:" + label}]
+        if origin:
+            row.append({"text": t("chrome.phone"),
+                        "web_app": {"url": "%s/__sclaude/tg?f=%s" % (origin, label)}})
+        else:
+            row.append({"text": t("chrome.phone"), "callback_data": "devphone:" + label})
         if running:
             row.append({"text": t("chrome.featstop"), "callback_data": "devstop:" + label})
         rows.append(row)
+    if origin:
+        rows.append([{"text": t("chrome.gateclose"), "callback_data": "gate_stop"}])
     rows.append([{"text": t("menu.back"), "callback_data": "menu_back"}])
     return rows
 
@@ -500,6 +512,42 @@ def phone_origin():
     return "http://%s:%d" % (host, DEV_PORT)
 
 
+# The phone's entry from the internet, for a phone without Tailscale: the
+# gate (`sclaude-proxy --gate`) behind `tailscale funnel` on this port, up only
+# while sclaude-gate.service runs — the 📱 button starts it, and it ends itself
+# once nobody looks.
+GATE_UNIT = "sclaude-gate.service"
+GATE_FUNNEL_PORT = 8443
+
+
+def gate_running():
+    return run("systemctl --user is-active " + GATE_UNIT).strip() == "active"
+
+
+def gate_origin():
+    """https://<node>.<tailnet>.ts.net:8443, or "" when Tailscale cannot say."""
+    try:
+        status = json.loads(run("tailscale status --json", timeout=10) or "{}")
+    except ValueError:
+        return ""
+    name = str((status.get("Self") or {}).get("DNSName") or "").rstrip(".")
+    return "https://%s:%d" % (name, GATE_FUNNEL_PORT) if name else ""
+
+
+def gate_warm(label):
+    """Ask the proxy to start the feature now, while the phone is still
+    opening: the request itself would, but later. Not followed: the answer is
+    a redirect to <label>.localhost, which is nothing to fetch from here."""
+    import http.client
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", DEV_PORT, timeout=5)
+        conn.request("GET", "/__sclaude/start?f=" + urllib.parse.quote(label))
+        conn.getresponse().read()
+        conn.close()
+    except (OSError, http.client.HTTPException):
+        pass
+
+
 def chrome_text():
     # We remind of the features' addresses: the Chrome window stands on the
     # laptop, and from a phone a person needs not so much the browser itself as
@@ -520,7 +568,8 @@ def chrome_text():
                        state=t("chrome.running") if running else t("chrome.stopped"),
                        local="http://%s.localhost:%d" % (label, DEV_PORT)))
     features = "\n".join(lines) if lines else t("chrome.nofeatures")
-    return t("chrome.title", state=state_label, proxy=proxy_label,
+    gate = t("chrome.gateup") if gate_running() else t("chrome.gatedown")
+    return t("chrome.title", state=state_label, proxy=proxy_label, gate=gate,
              features=features, port=CHROME_PORT)
 
 
@@ -1952,6 +2001,26 @@ class Handler(object):
             # chrome-debug's output is written for a terminal and reads badly in
             # a messenger, while the person has one question — did it start and
             # where to look.
+            self.bot.edit(message_id, chrome_text(), chrome_keyboard())
+        elif data_raw.startswith("devphone:"):
+            label = data_raw.partition(":")[2]
+            if not [f for f in dev_features() if f[0] == label]:
+                self.bot.edit(message_id, chrome_text(), chrome_keyboard())
+                return
+            run("systemctl --user start " + GATE_UNIT, timeout=60)
+            if not gate_running():
+                # Most often the funnel: not allowed for this node in the
+                # tailnet policy, or this user is not Tailscale's operator.
+                tail = run("journalctl --user -u %s -n 8 --no-pager -o cat" % GATE_UNIT)
+                self.bot.edit(message_id, t("chrome.gatefail", log=escape(tail[-1500:])),
+                              chrome_keyboard())
+                return
+            log.info("phone access opened for %s", label)
+            gate_warm(label)
+            self.bot.edit(message_id, chrome_text(), chrome_keyboard())
+        elif data_raw == "gate_stop":
+            run("systemctl --user stop " + GATE_UNIT, timeout=60)
+            log.info("phone access closed")
             self.bot.edit(message_id, chrome_text(), chrome_keyboard())
         elif data_raw.startswith("devopen:") or data_raw.startswith("devstop:"):
             action, _, label = data_raw.partition(":")

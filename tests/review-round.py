@@ -338,6 +338,11 @@ session_watch_stop
     check("rotation-forgets-the-session", 'state_set "$state" "steps.$step.session" null' in rot, True)
     check("rotation-writes-the-issue", 'issue_sync "$wt"' in rot, True)
     check("rotation-opens-a-fresh-session", 'run_step "$wt" "$slug" "$step"' in rot, True)
+    # A round carried on in the same session resumes it through run_step, and
+    # the issue row must show the comments that round added.
+    resume = RUN[RUN.index('claude_launch --resume "$session"') - 600:RUN.index('claude_launch --resume "$session"')]
+    check("resume-writes-the-issue",
+          resume.index('run_comments "$wt" "$session" "$pr"') < resume.index('issue_sync "$wt"'), True)
     check("every-step-launch-watched",
           RUN.count('    session_watch_start "$wt" "$session" "" "" "$step"\n'), 2)
     check("both-launches-unwatched", RUN.count("    session_watch_stop\n"), 2)

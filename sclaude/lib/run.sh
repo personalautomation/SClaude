@@ -616,6 +616,11 @@ run_step() {
     RUN_STEP_LAUNCHED=1
     step_run "$wt" "$step" open "$session"
     [[ "$step" == "review" ]] && run_comments "$wt" "$session" "$pr"
+    # The issue hears of it too, as on the fresh path below. A review session
+    # that carries on into its next round comes back through here, its row now
+    # counting the findings that round brought; without this the issue kept the
+    # first round's count until the session finally ended.
+    issue_sync "$wt"
     session_watch_start "$wt" "$session" "" "" "$step"
     ( cd "$wt" && dev_env_load "$wt" && session_git_env "$session" && claude_launch --resume "$session" \
         --model "$model" --effort "$effort" \

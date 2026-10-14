@@ -33,6 +33,8 @@
 #
 #   "envKeys": {"supabaseUrl": "SUPABASE_URL", "database": "DATABASE_URL"}
 #
+# and `secretKey` (SUPABASE_SECRET_KEY), which only dev_login.py reads.
+#
 # Used by environment.sh through the command line below, and by
 # forbidden-commands.py as a module.
 #

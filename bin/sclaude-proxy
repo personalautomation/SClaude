@@ -14,6 +14,8 @@
 #   localhost:3000 (any host)   the feature the `sclaude_feature` cookie names,
 #                               or the list of features to choose from
 #   /__sclaude/                 the list, whatever the host
+#   /__sclaude/login?f=<feature> that feature, signed in as the developer
+#                               when the project asks for it (dev_login.py)
 #
 # Which feature lives where is read, never remembered. sclaude links
 # ~/.claude/sclaude/dev/<feature> to the worktree, and the worktree's
@@ -66,7 +68,7 @@ import socket
 import subprocess
 import sys
 import time
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 # realpath, not just abspath: install.sh symlinks this file into
 # ~/.local/bin, and resolving through that link is how "../sclaude/lib" still
@@ -74,6 +76,7 @@ from urllib.parse import parse_qs, urlsplit
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)),
                                 "..", "sclaude", "lib"))
 import feature_db  # noqa: E402 — PORT_SLOTS, the single source of truth
+import dev_login  # noqa: E402
 
 PORT = int(os.environ.get("SCLAUDE_PROXY_PORT") or 3000)
 BIND = os.environ.get("SCLAUDE_PROXY_BIND") or "0.0.0.0"
@@ -302,6 +305,7 @@ td.path{color:#78716c;font-size:13px;word-break:break-all}
 td.sub{padding-left:22px;font-size:13px}
 .up{color:#15803d}.down{color:#a8a29e}
 a{color:#1d4ed8}
+a.alt{font-size:12px;color:#78716c;margin-left:6px}
 code{font-size:13px}
 pre{font-size:12px;background:#f5f5f4;padding:8px 10px;border-radius:6px;
 white-space:pre-wrap;word-break:break-all}
@@ -319,15 +323,16 @@ def page(title, body):
 
 
 def probe_features():
-    """[(label, wt, live dev server?, [(name, port), …live services])] — every
-    blocking connect() a listing needs, gathered in one pass off the event
-    loop (see gather_listing). A feature's own services are probed only once
-    each, same cost `answers` already pays for the dev server itself."""
+    """[(label, wt, live dev server?, [(name, port), …live services],
+    sign-in offered?)] — every blocking connect() and git call a listing
+    needs, gathered in one pass off the event loop (see gather_listing). A
+    feature's own services are probed only once each, same cost `answers`
+    already pays for the dev server itself."""
     out = []
     for label, wt, fport, base in features():
         live = [(name, sport) for name, sport in services(label, wt, base)
                 if answers(sport)]
-        out.append((label, wt, answers(fport), live))
+        out.append((label, wt, answers(fport), live, dev_login.offered(wt)))
     return out
 
 
@@ -338,15 +343,21 @@ def listing(host, probed, note=""):
     local = is_local(host)
     port = host.rsplit(":", 1)[1] if ":" in host and not host.endswith("]") else ""
     rows = []
-    for label, wt, live, live_services in probed:
+    for label, wt, live, live_services, login in probed:
         if local:
-            href = "http://%s.localhost%s/" % (label, ":" + port if port else "")
+            plain = "http://%s.localhost%s/" % (label, ":" + port if port else "")
         else:
-            href = "/__sclaude/select?f=%s" % label
+            plain = "/__sclaude/select?f=%s" % label
+        # Signed in by default where the project asks for it; signing out
+        # afterwards is the product's own button, and the plain address is
+        # one link away.
+        href = "/__sclaude/login?f=%s" % label if login else plain
+        other = (" <a class=alt href='%s'>without signing in</a>" % html.escape(plain)
+                 if login else "")
         rows.append(
-            "<tr><td><a href='%s'>%s</a></td><td class='%s'>%s</td>"
+            "<tr><td><a href='%s'>%s</a>%s</td><td class='%s'>%s</td>"
             "<td class=path>%s</td></tr>" % (
-                html.escape(href), html.escape(label),
+                html.escape(href), html.escape(label), other,
                 "up" if live else "down",
                 "running" if live else "not running",
                 html.escape(wt)))
@@ -611,9 +622,65 @@ def respond(status, body, extra=()):
     return ("\r\n".join(head) + "\r\n\r\n").encode("latin-1") + data
 
 
-async def own_page(target, host):
+# The cookie @supabase/ssr keeps a session in: sb-<ref>-auth-token, split
+# into .0, .1, … when it is long. Only its name is looked at.
+SESSION_COOKIE = re.compile(r"^sb-.+-auth-token(\.\d+)?$")
+
+
+def signed_in(header):
+    return any(SESSION_COOKIE.match(part.strip().partition("=")[0])
+               for part in header.split(";"))
+
+
+async def login_page(url, host, headers):
+    """/__sclaude/login: open a feature, signed in as the developer.
+
+    Done on the feature's own host, where its cookies are: a browser that
+    already holds a session there keeps it — the developer's, or another user
+    somebody signed in as on purpose — and is only sent on. Off this machine
+    every feature shares one host (the cookie routes it), so a session cookie
+    there may be another feature's and says nothing: the phone always signs
+    in afresh. A project with no devLogin gets the feature as it is."""
+    query = parse_qs(url.query)
+    label = (query.get("f") or [""])[0] or host_label(host)
+    nxt = dev_login.safe_next((query.get("next") or ["/"])[0])
+    found = feature(label)
+    if not found:
+        return respond("404 Not Found",
+                       await gather_listing(host, "No such feature: %s" % label))
+    wt, fport, _base = found
+    local = is_local(host)
+    port = host.rsplit(":", 1)[1] if ":" in host and not host.endswith("]") else ""
+    origin = "http://%s.localhost%s" % (label, ":" + port if port else "")
+    if local and host_label(host) != label:
+        # To the feature's host first, which is where its cookies are read.
+        return respond("303 See Other", "", (
+            "Location: %s/__sclaude/login?%s" % (origin, urlencode({"next": nxt})),))
+    routed = () if local else (
+        "Set-Cookie: %s=%s; Path=/; SameSite=Lax" % (COOKIE, label),)
+    offered = await asyncio.to_thread(dev_login.offered, wt)
+    if not offered or (local and signed_in(headers.get("cookie", ""))):
+        return respond("303 See Other", "", ("Location: %s" % nxt,) + routed)
+    # Its database comes up with its server: until it answers there is no
+    # Supabase to ask, and the page reloads this same address.
+    if not await asyncio.to_thread(answers, fport):
+        return status_page(label, wt, start_state(label, wt))
+    try:
+        where = await asyncio.to_thread(dev_login.link, wt, nxt)
+    except dev_login.Refused as exc:
+        return respond("409 Conflict", page("Not signed in", (
+            "<h1>%s: not signed in</h1><p>%s.</p><p><a href='%s'>Open it without "
+            "signing in</a></p>") % (html.escape(label), html.escape(str(exc)),
+                                    html.escape(nxt if not local else origin + nxt))),
+            routed)
+    return respond("303 See Other", "", ("Location: %s" % where,) + routed)
+
+
+async def own_page(target, host, headers=None):
     """The response to a /__sclaude/ request."""
     url = urlsplit(target)
+    if url.path == "/__sclaude/login":
+        return await login_page(url, host, headers or {})
     if url.path == "/__sclaude/select":
         label = (parse_qs(url.query).get("f") or [""])[0]
         if not feature(label):
@@ -706,7 +773,7 @@ async def handle(reader, writer):
         host = headers.get("host", "")
 
         if target.startswith("/__sclaude/") or target == "/__sclaude":
-            writer.write(await own_page(target, host))
+            writer.write(await own_page(target, host, headers))
             await writer.drain()
             return
 
@@ -831,7 +898,7 @@ def gate_bootstrap(label):
     script = """
 const tg = window.Telegram && window.Telegram.WebApp;
 const msg = document.getElementById('msg');
-const start = %(label)s ? '/__sclaude/select?f=' + encodeURIComponent(%(label)s) : '/__sclaude/';
+const start = %(label)s ? '/__sclaude/login?f=' + encodeURIComponent(%(label)s) : '/__sclaude/';
 function shell() {
   msg.remove();
   document.getElementById('shell').hidden = false;
@@ -1050,9 +1117,10 @@ OWN_FILE = os.path.realpath(__file__)
 
 
 def own_mtime():
-    """The newest of its own file and the library module it imports."""
+    """The newest of its own file and the library modules it imports."""
     times = []
-    for path in (OWN_FILE, os.path.realpath(getattr(feature_db, "__file__", OWN_FILE))):
+    for path in (OWN_FILE,) + tuple(os.path.realpath(getattr(m, "__file__", OWN_FILE))
+                                    for m in (feature_db, dev_login, dev_login.envs)):
         try:
             times.append(os.stat(path).st_mtime)
         except OSError:

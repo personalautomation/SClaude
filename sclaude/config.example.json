@@ -74,8 +74,18 @@
     "            `deployed` marks one with no fixed address, such as previews,",
     "            which a local dev server does not run against. `envKeys`",
     "            renames the keys read from the files: `supabaseUrl`",
-    "            (NEXT_PUBLIC_SUPABASE_URL) and `database`",
-    "            (POSTGRES_URL_NON_POOLING).",
+    "            (NEXT_PUBLIC_SUPABASE_URL), `database`",
+    "            (POSTGRES_URL_NON_POOLING) and `secretKey`",
+    "            (SUPABASE_SECRET_KEY, for devLogin).",
+    "devLogin  — sign a feature's browser in with one click. `path` is the",
+    "            product's route for email links, the one that takes",
+    "            `token_hash`, `type` and `next` and verifies them. With it the",
+    "            list at localhost:3000 and the bot's Mini App open a feature",
+    "            signed in: sclaude-proxy asks the feature's Supabase for a",
+    "            magic-link token and sends the browser there. Who it signs in",
+    "            as is each developer's own, never committed: the first line of",
+    "            ~/.claude/sclaude/dev-login, else their git user.email. Never",
+    "            on a protected environment.",
     "maintainers — the git addresses of the people who keep this project's",
     "            shared sclaude rules, in .sclaude/team/. Everybody else's",
     "            sessions put theirs in .sclaude/people/<name>/, and a hook",
@@ -114,6 +124,8 @@
     { "path": "docs/help.md", "what": "user-facing — what a person can do" },
     { "path": "docs/technical.md", "what": "technical — where things apply" }
   ],
+
+  "devLogin": { "path": "/auth/confirm" },
 
   "environments": {
     "localdb": { "env": ".env.localdb" },

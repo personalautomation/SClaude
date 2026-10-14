@@ -363,6 +363,8 @@ def chrome_keyboard():
             row.append({"text": t("chrome.phone"), "callback_data": "devphone:" + label})
         if running:
             row.append({"text": t("chrome.featstop"), "callback_data": "devstop:" + label})
+        else:
+            row.append({"text": t("chrome.start"), "callback_data": "devstart:" + label})
         rows.append(row)
     if origin:
         rows.append([{"text": t("chrome.gateclose"), "callback_data": "gate_stop"}])
@@ -538,9 +540,11 @@ def gate_origin():
     return "https://%s:%d" % (name, GATE_FUNNEL_PORT) if name else ""
 
 
-def gate_warm(label):
-    """Ask the proxy to start the feature now, while the phone is still
-    opening: the request itself would, but later. Not followed: the answer is
+def proxy_start(label):
+    """Ask the proxy to start the feature now — for ▶️, and for 📱 while the
+    phone is still opening, where the first request would, but later. It goes
+    through the proxy rather than `sclaude dev` so that the proxy knows it is
+    starting and shows that page meanwhile. Not followed: the answer is
     a redirect to <label>.localhost, which is nothing to fetch from here."""
     import http.client
     try:
@@ -2020,13 +2024,13 @@ class Handler(object):
                               chrome_keyboard())
                 return
             log.info("phone access opened for %s", label)
-            gate_warm(label)
+            proxy_start(label)
             self.bot.edit(message_id, chrome_text(), chrome_keyboard())
         elif data_raw == "gate_stop":
             run("systemctl --user stop " + GATE_UNIT, timeout=60)
             log.info("phone access closed")
             self.bot.edit(message_id, chrome_text(), chrome_keyboard())
-        elif data_raw.startswith("devopen:") or data_raw.startswith("devstop:"):
+        elif data_raw.startswith(("devopen:", "devstop:", "devstart:")):
             action, _, label = data_raw.partition(":")
             found = [f for f in dev_features() if f[0] == label]
             if not found:
@@ -2040,6 +2044,8 @@ class Handler(object):
                 # itself makes sclaude-proxy start it.
                 run("chrome-debug " + shlex.quote("http://%s.localhost:%d/" % (label, DEV_PORT)),
                     timeout=60)
+            elif action == "devstart":
+                proxy_start(label)
             else:
                 run("cd " + shlex.quote(wt) + " && sclaude dev --stop", timeout=90)
             self.bot.edit(message_id, chrome_text(), chrome_keyboard())

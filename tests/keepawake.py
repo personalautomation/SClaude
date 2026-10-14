@@ -1320,7 +1320,8 @@ with sandbox() as box:
                   "menu_back", "menu_code", "svc_repos", "svc_sclaude",
                   "svc_docs", "repo:myapp", "feat:myapp:nothing",
                   "chrome_start", "code_start", "idle_keep", "noop",
-                  "devopen:no-such-feature", "devstop:no-such-feature"]
+                  "devopen:no-such-feature", "devstop:no-such-feature",
+                  "devstart:no-such-feature", "devphone:no-such-feature", "gate_stop"]
         from keepawake import docs as _docs
         routed += ["doc:" + k for k in _docs.SECTIONS]
         for data in routed:
@@ -1430,6 +1431,7 @@ if os.path.exists(cfg):
                    any(b["callback_data"].startswith("chrome_") for b in rows[0]))
         check_true("each feature can be opened", "devopen:sample-one" in datas)
         check("a stopped feature has no stop button", "devstop:sample-one" in datas, False)
+        check_true("a stopped feature can be started", "devstart:sample-one" in datas)
         check("the last row goes back", rows[-1][0]["callback_data"], "menu_back")
         # The row caption is not a button: pressing it must do nothing.
         check_true("the row captions are marked noop", "noop" in datas)

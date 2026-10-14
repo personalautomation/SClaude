@@ -351,7 +351,11 @@ def chrome_keyboard():
         # that long is listed in the text and simply has no buttons.
         if len("devphone:" + label) > 64:
             continue
-        row = [{"text": t("chrome.open", name=label), "callback_data": "devopen:" + label}]
+        # The name gets a row of its own, a caption like the browser's: on a
+        # phone's width a button that carries both the name and an action cuts
+        # the name off, and a bare 📱 next to it said nothing of what it does.
+        rows.append([{"text": label, "callback_data": "noop"}])
+        row = [{"text": t("chrome.open"), "callback_data": "devopen:" + label}]
         if origin:
             row.append({"text": t("chrome.phone"),
                         "web_app": {"url": "%s/__sclaude/tg?f=%s" % (origin, label)}})

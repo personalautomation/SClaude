@@ -107,7 +107,7 @@ One status comment per issue, and no other comments. The orchestrator keeps its 
 
 **When it doesn't work.** An issue won't open, `gh` errors, you lack edit rights — tell me in words and move on down the chain. One inaccessible issue is no reason to abandon the rest.
 
-**How this session ends.** You're not a step of the cycle but its epilogue: the steps are over, the pull request is closed, the worktree is gone, and the orchestrator launches nothing after you.
+**How this session ends.** You're not a step of the cycle but its epilogue: the steps are over, <if:pr-number>the pull request is closed, </if:pr-number>the worktree is gone, and the orchestrator launches nothing after you.
 
 <include:report>
 

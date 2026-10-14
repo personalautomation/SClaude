@@ -214,6 +214,32 @@ check("prompt-names-the-branch", "own branch, `<branch>`" in prompt, True)
 with open(os.path.join(LIB, "retro.sh")) as fh:
     check("branch-passed-to-prompt", 'SCLAUDE_V_BRANCH=' in fh.read(), True)
 
+# --- a feature with no change of its own has a retrospective too -------------------
+#
+# Once a feature did all of its work in sclaude's own checkout, ended as one
+# with no change (no_change.sh), and `done` skipped the retrospective because
+# there was no pull request to read.
+check("done-runs-retro-for-no-change",
+      re.search(r'\n\s*run_retro "\$wt" "\$slug" "\$pr" "\$issue"\n', body) is not None, True)
+check("done-retro-before-settle",
+      0 <= body.find("run_retro ") < body.find('no_change_settle "$wt"'), True)
+check("done-reopens-no-change-with-own-work",
+      'state_set "$state" no_change null' in body
+      and "step_rewind_to \"$wt\" pr pr review" in body, True)
+sys.path.insert(0, LIB)
+import render_prompt
+values = {"feature": "f", "pr": "\u2014", "pr-number": "", "no-change": "1",
+          "issue": "9", "branch": "feat/f", "worktree": "/w", "instruments": "/i",
+          "terminal": "", "terminal-raw": "/r", "transcripts": "/t",
+          "done-marker": "/d"}
+no_pr = render_prompt.render(prompt, os.path.join(ROOT, "sclaude", "prompts"), values, {})
+check("no-change-prompt-names-no-pr", "#\u2014" not in no_pr and "pull request #" not in no_pr, True)
+check("no-change-prompt-names-the-issue", "The issue #9" in no_pr, True)
+values.update({"pr": "5", "pr-number": "5", "no-change": ""})
+with_pr = render_prompt.render(prompt, os.path.join(ROOT, "sclaude", "prompts"), values, {})
+check("merged-prompt-unchanged", "is merged, and" in with_pr
+      and "The pull request #5 and the issue #9" in with_pr, True)
+
 if failures:
     for name, want, got in failures:
         print("FAIL %s: want %r, got %r" % (name, want, got))

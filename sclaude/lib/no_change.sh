@@ -211,7 +211,17 @@ no_change_finish() {
   state_set "$state" no_change true
   state_set "$state" step "done"
 
-  issue_close_done "$(state_get "$state" issue 2>/dev/null || true)" unchanged
+  # The cycle's end, said where a merged feature says it: the status in the
+  # issue and its parents, and the end date on the board. A feature with no
+  # change here may still have done real work, in comments or in another
+  # checkout; once one did all of its work in sclaude's own, and its issue
+  # closed with neither.
+  local issue; issue="$(state_get "$state" issue 2>/dev/null || true)"
+  [[ "$issue" == "null" ]] && issue=""
+  run_status "$slug" "$issue" "" "" 0 0 "$wt" || true
+  [[ -n "$issue" ]] && { issue_end_date "$(gh_repo)" "$issue" || true; }
+
+  issue_close_done "$issue" unchanged
   issue_sync "$wt"
   echo ""
   echo "${GREEN}Feature '$slug' is complete without a change to the code.${OFF}"

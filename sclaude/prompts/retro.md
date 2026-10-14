@@ -1,10 +1,10 @@
-The feature "<feature>" is merged, and `sclaude` is about to remove its worktree, its branch and everything in `.sclaude/local/feature/`. Before it asks me, hold a retrospective of the whole feature with me while all of it is still on disk.
+The feature "<feature>" <if:pr-number>is merged</if:pr-number><if:no-change>has ended without a change of its own in this repository, so it has no pull request</if:no-change>, and `sclaude` is about to remove its worktree, its branch and everything in `.sclaude/local/feature/`. Before it asks me, hold a retrospective of the whole feature with me while all of it is still on disk.
 
 **What to read.**
 
 <if:terminal>- `<terminal>` — the `sclaude` terminal as I saw it, from its first run on this feature to this one: everything `sclaude` printed — each session's last message and every change to the plan among it — and everything I typed. The sessions' own screens are not in it; a session that ran in this same window is one bracketed line naming it. Runs are separated by `=====` headings saying when each started. A run that went through the menu to another feature is included whole; skip the parts about other features. This is your main source — read all of it, in chunks if it is long.
 </if:terminal>- `<worktree>/.sclaude/local/feature/` — `state.json` (steps, sessions, regression attempts, friction verdicts), `plan.md`, the friction logs, `review-yours` if present.
-- The pull request #<pr><if:issue> and the issue #<issue></if:issue>, with `gh`, if you need what was said there.
+- <if:pr-number>The pull request #<pr-number><if:issue> and the issue #<issue></if:issue></if:pr-number><if:no-change>The issue #<issue></if:no-change>, with `gh`, if you need what was said there.
 - The session transcripts, only when you need what happened inside a session or there is no recording of the terminal — they are large: `<transcripts>/<session id>.jsonl`, the ids are in `state.json`. The raw terminal recordings are listed in `<terminal-raw>`.
 
 **What to answer.** Three sections, in this order:
@@ -19,7 +19,7 @@ Also say, in a line or two, what went well and is worth keeping.
 
 Change nothing while you look: no edits, no commits, no comments, no messages. Afterwards, do only what I ask for in this conversation. Nothing you do changes `sclaude` itself: `<instruments>` is its checkout, read-only to you (a hook refuses writes there). What you find in section 3 is acted on in the product: a permission or ban the product should have goes into its policy (`.sclaude/team/policy.json` for its maintainers, `.sclaude/people/<name>/policy.json` for everybody else), and a preset of sclaude's that looks wrong for every product goes into the product's deferred file there, `deferred.tsv`, with class `sclaude-default` and one line on what it should become. Changing sclaude's defaults is a deliberate pull request to sclaude, never a side effect of this conversation.
 
-A fix to the project is committed on this feature's own branch, `<branch>`, in `<worktree>` — no branch, worktree or pull request of your own for it. When this session ends, `sclaude` sees commits there that the merged pull request did not carry and sends the feature back to its pull-request step: that step opens the new pull request, the review step takes the automatic review's findings, and the preview, QA and the merge follow as for the feature itself. Once a fix went out from a branch of its own, and the review's findings on it sat with nothing in `sclaude` knowing the pull request existed.
+A fix to the project is committed on this feature's own branch, `<branch>`, in `<worktree>` — no branch, worktree or pull request of your own for it. When this session ends, `sclaude` sees commits there that <if:pr-number>the merged pull request did not carry</if:pr-number><if:no-change>are the feature's own work</if:no-change> and sends the feature back to its pull-request step: that step opens the new pull request, the review step takes the automatic review's findings, and the preview, QA and the merge follow as for the feature itself. Once a fix went out from a branch of its own, and the review's findings on it sat with nothing in `sclaude` knowing the pull request existed.
 
 **How this ends.** Give the three sections as your last message.
 

@@ -1763,6 +1763,13 @@ status_outcome() {
   local pr="$1" merged="$2" preview="$3" prod="$4" preview_red="${5:-0}" prod_red="${6:-0}"
   local pr_text
 
+  # A feature with no change of its own (no_change.sh) has no pull request,
+  # and nothing of it was deployed: "Pull request #null" would be the sentence.
+  if [[ -z "$pr" || "$pr" == "null" ]]; then
+    echo "There was no pull request: the feature left no change of its own in this repository, so nothing was merged or deployed here. What it did is in the issue's comments — its plan and its step reports; work done outside this repository is named there too."
+    return 0
+  fi
+
   if [[ "$merged" == "MERGED" ]]; then
     pr_text="Pull request #$pr is merged; branch and worktree are gone."
   else

@@ -1065,23 +1065,46 @@ cmd_done() {
 
   IFS=$'\t' read -r merged pr < <(gh pr view "$branch" --repo "$(git -C "$REPO" remote get-url origin)" \
     --json state,number --jq '[.state, .number] | @tsv' 2>/dev/null) || true
-  # A feature with no change of its own has no pull request to wait for
-  # (no_change.sh). What sclaude committed on its branch goes where it belongs
-  # first: the branch is deleted below, and anything left on it with it.
   local no_change; no_change="$(state_get "$wt/.sclaude/local/feature/state.json" no_change 2>/dev/null || true)"
-  if [[ "$no_change" == "true" ]]; then
-    no_change_settle "$wt" \
-      || die "something sclaude committed on $branch did not reach main — the clean-up waits for it: $SELF done $slug"
-  elif [[ "$merged" != "MERGED" ]]; then
-    die "the PR for $branch is not merged (state: ${merged:-not found}). Cleaning up comes after the merge."
-  fi
+  local issue; issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null || true)"
+  [[ "$no_change" == "true" || "$merged" == "MERGED" ]] \
+    || die "the PR for $branch is not merged (state: ${merged:-not found}). Cleaning up comes after the merge."
 
   # The retrospective, while everything it reads is still here (retro.sh). Before
   # the list below rather than after it, so the list stands right above the
-  # question it belongs to. It reads a pull request, and a feature with no
-  # change has none.
-  [[ "$no_change" == "true" ]] \
-    || run_retro "$wt" "$slug" "$pr" "$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null || true)"
+  # question it belongs to.
+  #
+  # A feature with no change of its own has one too: such a feature may have
+  # done all of its work elsewhere — once, all of it in sclaude's own checkout —
+  # and skipping the retrospective there skipped the one look back it had.
+  run_retro "$wt" "$slug" "$pr" "$issue"
+
+  # A retrospective that committed the feature's own work on a branch with no
+  # change has given it a change: the feature goes to its pull-request step,
+  # the way a merged one goes back there (retro_reopen).
+  # Only for its commits: uncommitted work is no_change_settle's to refuse.
+  local state="$wt/.sclaude/local/feature/state.json" retro_to
+  retro_to="$(state_get "$state" retro.project_to 2>/dev/null || true)"
+  if [[ "$no_change" == "true" && -n "$retro_to" && "$retro_to" != "null" ]] \
+     && [[ -z "$(worktree_dirt "$wt")" ]] && ! no_change_feature "$wt" >/dev/null; then
+    state_set "$state" no_change null
+    step_rewind_to "$wt" pr pr review
+    state_set "$state" steps.pr.session null 2>/dev/null || true
+    issue_hold_open "$issue"
+    issue_sync "$wt"
+    echo ""
+    say "${BOLD}'$slug' now carries work of its own on $branch — it goes on to step '$(step_title pr)' for it.${OFF}"
+    cmd_resume "$slug"
+    return 0
+  fi
+
+  # A feature with no change of its own has no pull request to wait for
+  # (no_change.sh). What sclaude committed on its branch goes where it belongs
+  # first: the branch is deleted below, and anything left on it with it.
+  if [[ "$no_change" == "true" ]]; then
+    no_change_settle "$wt" \
+      || die "something sclaude committed on $branch did not reach main — the clean-up waits for it: $SELF done $slug"
+  fi
 
   # Code the retrospective changed is not cleaned up with the feature: the feature
   # goes back to step 3 for it by itself, and through the review, the preview,

@@ -488,6 +488,21 @@ check_true("green-preview-unchanged",
 check_true("prod-unchanged",
            "the feature is in production" in outcome("7", "MERGED", "1", "1"))
 
+# A feature with no change of its own (no_change.sh) gets a status too, and
+# without a pull request to name: "Pull request # is not merged" was the
+# sentence it would otherwise get.
+for empty in ("", "null"):
+    nc = outcome(empty, "", "0", "0")
+    check_true("no-change-outcome-has-no-pr-%s" % (empty or "empty"),
+               "Pull request #" not in nc and "no pull request" in nc)
+no_change_sh = io.open(os.path.join(lib, "no_change.sh"), encoding="utf-8").read()
+finish = re.search(r'^no_change_finish\(\) \{.*?^\}', no_change_sh, re.M | re.S).group(0)
+check_true("no-change-finish-writes-the-status",
+           'run_status "$slug" "$issue" "" "" 0 0 "$wt"' in finish)
+check_true("no-change-finish-sets-the-end-date", "issue_end_date" in finish)
+check_true("no-change-status-before-close",
+           finish.find("run_status") < finish.find("issue_close_done"))
+
 
 # --- a red production keeps its label and gains a mark -----------------------
 #

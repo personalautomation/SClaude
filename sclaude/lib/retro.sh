@@ -73,7 +73,15 @@ PY
   session="$(new_session_id)"
   done_file="${TMPDIR:-/tmp}/sclaude-retro-$slug.done"
 
+  # The pull request's number, or nothing: a feature with no change of its own
+  # (no_change.sh) has none, and render_prompt fills an empty <pr> with a dash.
+  local pr_number="$pr" no_change=""
+  [[ "$pr_number" == "null" ]] && pr_number=""
+  [[ "$(state_get "$fstate" no_change 2>/dev/null || true)" == "true" ]] && no_change=1
+
   prompt="$(SCLAUDE_V_TERMINAL="${terminal:-}" \
+    SCLAUDE_V_PR_NUMBER="$pr_number" \
+    SCLAUDE_V_NO_CHANGE="$no_change" \
     SCLAUDE_V_TERMINAL_RAW="$wt/.sclaude/local/feature/terminal" \
     SCLAUDE_V_TRANSCRIPTS="$(transcript_dir "$wt")" \
     SCLAUDE_V_WORKTREE="$wt" \

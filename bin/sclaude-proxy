@@ -837,8 +837,10 @@ function shell() {
   document.getElementById('shell').hidden = false;
   const frame = document.getElementById('frame');
   const url = document.getElementById('url');
+  // about:blank and error pages are not an address worth showing.
   const where = () => { try { const l = frame.contentWindow.location;
-    return l.pathname + l.search + l.hash; } catch (e) { return null; } };
+    return l.protocol.startsWith('http') ? l.pathname + l.search + l.hash : null; }
+    catch (e) { return null; } };
   let shown = '';
   setInterval(() => { const w = where();
     if (w && w !== shown && document.activeElement !== url) { shown = w; url.value = location.host + w; } }, 400);
@@ -912,6 +914,42 @@ async def gate_own(method, target, headers, reader):
     return None
 
 
+def frameable(head):
+    """A response head with the bans on framing taken out.
+
+    The Mini App shows a feature inside its own frame (the address bar), and
+    a product that guards itself against clickjacking — X-Frame-Options, a
+    CSP frame-ancestors — would refuse it. Only on the gate's way: the
+    product's own headers are unchanged everywhere else, and past the gate
+    is only the bot's owner. A Report-Only policy blocks nothing and stays."""
+    lines = head.decode("latin-1").split("\r\n")
+    out = [lines[0]]
+    for line in lines[1:]:
+        name, sep, value = line.partition(":")
+        key = name.strip().lower()
+        if key == "x-frame-options":
+            continue
+        if key == "content-security-policy" and sep:
+            kept = [d for d in value.split(";")
+                    if d.strip() and not d.strip().lower().startswith("frame-ancestors")]
+            if not kept:
+                continue
+            line = "%s:%s" % (name, ";".join(kept))
+        out.append(line)
+    return "\r\n".join(out).encode("latin-1")
+
+
+async def gate_relay(up_reader, writer):
+    """The upstream's answer, its head made frameable, then the rest as is."""
+    try:
+        head = await up_reader.readuntil(b"\r\n\r\n")
+    except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError):
+        return
+    writer.write(frameable(head[:-4]) + b"\r\n\r\n")
+    await writer.drain()
+    await pipe(up_reader, writer)
+
+
 async def gate_handle(reader, writer):
     upstream = None
     GATE["open"] += 1
@@ -945,7 +983,7 @@ async def gate_handle(reader, writer):
         if headers.get("upgrade", "").lower() != "websocket":
             head = close_after(head)
         upstream.write(head)
-        await asyncio.gather(pipe(reader, upstream), pipe(up_reader, writer))
+        await asyncio.gather(pipe(reader, upstream), gate_relay(up_reader, writer))
     finally:
         GATE["open"] -= 1
         GATE["last"] = time.time()

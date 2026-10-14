@@ -254,6 +254,18 @@ def check_peers(registry, stub, log):
     finally:
         mod.REGISTRY = registry
         shutil.rmtree(old, ignore_errors=True)
+    head = ("HTTP/1.1 200 OK\r\nX-Frame-Options: DENY\r\n"
+            "Content-Security-Policy: default-src 'self'; frame-ancestors 'none'\r\n"
+            "Content-Security-Policy-Report-Only: frame-ancestors 'none'\r\n"
+            "Content-Type: text/html").encode()
+    got = mod.frameable(head).decode()
+    check("gate: the framing ban is taken out",
+          ("X-Frame-Options" in got, "Content-Security-Policy: default-src 'self'" in got,
+           "Report-Only: frame-ancestors" in got, "Content-Type: text/html" in got),
+          (False, True, True, True))
+    check("gate: a policy of frame-ancestors alone goes whole",
+          mod.frameable(b"HTTP/1.1 200 OK\r\nContent-Security-Policy: frame-ancestors 'none'"),
+          b"HTTP/1.1 200 OK")
     for peer, want in (("127.0.0.1", True), ("::1", True), ("::ffff:127.0.0.1", True),
                        ("100.72.15.17", True), ("::ffff:100.101.2.3", True),
                        ("fd7a:115c:a1e0::1", True), ("192.168.1.20", False),

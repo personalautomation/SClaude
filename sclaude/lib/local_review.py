@@ -36,58 +36,47 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pr_context import (DECLINE_PREFIX, LOCAL_SIGNATURE, RESOLVER_PREFIX, gh,  # noqa: E402
-                        gh_json, headline, split_yours)
+                        headline, review_threads, split_yours, yours)
 
-HEADING = re.compile(r"^###\s+(.+?):(\d+)\s+—\s+(.*)$")
+# A finding's heading as the prompt asks for it, `### <path>:<line> — <title>`,
+# and the ways a model drifts from it: the path in backticks, a range of
+# lines, a hyphen or en dash for the em dash.
+HEADING = re.compile(r"^###\s+`?(.+?):(\d+)(?:[-–]\d+)?`?\s+[—–-]\s+(.*)$")
 RESOLVED = re.compile(r"^\s*RESOLVED:\s*(r\d+)\s*(?:—|-|:)?\s*(.*)$")
 COUNT = re.compile(r"^\s*FINDINGS:\s*(\d+)\s*$")
 
-QUERY = """
-query($owner: String!, $name: String!, $number: Int!, $after: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $after) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          id isResolved path line originalLine
-          comments(first: 50) { nodes { body url } }
-        }
-      }
-    }
-  }
-}
-"""
-
 
 def threads(cwd, pr, repo):
-    """Every review thread: {id, rid, resolved, path, line, url, bodies}; None
-    when GitHub cannot be read."""
-    owner, name = repo.split("/", 1)
-    out, after = [], None
-    while True:
-        args = ["api", "graphql", "-f", "query=%s" % QUERY, "-F", "owner=%s" % owner,
-                "-F", "name=%s" % name, "-F", "number=%s" % pr]
-        if after:
-            args += ["-f", "after=%s" % after]
-        data = gh_json(args, cwd=cwd)
-        try:
-            page = data["data"]["repository"]["pullRequest"]["reviewThreads"]
-        except (TypeError, KeyError):
-            return None
-        for t in page.get("nodes") or []:
-            comments = ((t.get("comments") or {}).get("nodes")) or []
-            if not comments:
-                continue
-            url = comments[0].get("url") or ""
-            rid = re.search(r"discussion_r(\d+)", url)
-            out.append({"id": t.get("id"), "rid": "r" + rid.group(1) if rid else "",
-                        "resolved": bool(t.get("isResolved")), "path": t.get("path") or "?",
-                        "line": t.get("line") or t.get("originalLine") or "?", "url": url,
-                        "bodies": [c.get("body") or "" for c in comments]})
-        info = page.get("pageInfo") or {}
-        if not info.get("hasNextPage"):
-            return out
-        after = info.get("endCursor")
+    """Every review thread: {id, rid, resolved, review, path, line, url,
+    bodies}; None when GitHub cannot be read. `review` marks a thread a
+    review opened — the workflow's bot or a local run, by its signature —
+    as against one a person opened, which no review may resolve."""
+    nodes = review_threads(cwd, pr, repo)
+    if nodes is None:
+        return None
+    out = []
+    for t in nodes:
+        comments = ((t.get("comments") or {}).get("nodes")) or []
+        if not comments:
+            continue
+        first = comments[0]
+        url = first.get("url") or ""
+        rid = re.search(r"discussion_r(\d+)", url)
+        out.append({"id": t.get("id"), "rid": "r" + rid.group(1) if rid else "",
+                    "resolved": bool(t.get("isResolved")),
+                    "review": (((first.get("author") or {}).get("__typename")) == "Bot"
+                               or LOCAL_SIGNATURE in (first.get("body") or "")),
+                    "path": t.get("path") or "?",
+                    "line": t.get("line") or t.get("originalLine") or "?", "url": url,
+                    "bodies": [c.get("body") or "" for c in comments]})
+    return out
+
+
+def checkable(cwd, found):
+    """The open threads a review run may judge and resolve: a review's own,
+    less the ones the person keeps to resolve by hand (review-yours)."""
+    kept = yours(cwd)
+    return [t for t in found if not t["resolved"] and t["review"] and t["url"] not in kept]
 
 
 def decline_of(t):
@@ -109,9 +98,14 @@ def open_count(cwd, found):
 
 
 def prompt(cwd, pr, repo):
-    found = threads(cwd, pr, repo) or []
+    found = threads(cwd, pr, repo)
+    if found is None:
+        # Without the earlier findings the run would post the declined ones
+        # again as new: better not to run at all.
+        sys.stderr.write("GitHub could not be read: the review threads are unknown\n")
+        return 1
     out = []
-    still = [t for t in found if not t["resolved"]]
+    still = checkable(cwd, found)
     if still:
         out.append("Findings on this pull request that are still open — check each against "
                    "the code as it is now, and for every one the code no longer has (the fix "
@@ -123,7 +117,7 @@ def prompt(cwd, pr, repo):
             out.append("- %s · %s:%s — %s" % (t["rid"], t["path"], t["line"],
                                               headline(t["bodies"][0])))
         out.append("")
-    left = [(t, decline_of(t)) for t in found if t["resolved"]]
+    left = [(t, decline_of(t)) for t in found if t["resolved"] and t["review"]]
     declined = [(t, why) for t, why in left if why]
     if declined:
         out.append("Findings the author decided to leave as they are, with the reason — do not "
@@ -183,7 +177,13 @@ def post(cwd, pr, repo, head, f):
     # line of its own, so the body names it.
     body = "Line %d (outside the diff).\n\n%s" % (f["line"], body)
     base[base.index("-f") + 1] = "body=%s" % body
-    return gh(base + ["-f", "subject_type=file"], cwd) is not None
+    if gh(base + ["-f", "subject_type=file"], cwd) is not None:
+        return True
+    # A file the pull request does not change takes no review comment at
+    # all. In the conversation the finding is at least read; it has no
+    # thread to resolve, as on GitHub a finding the workflow could not place.
+    return gh(["pr", "comment", str(pr), "--body", "`%s:%d` (not in this pull request's diff)."
+               "\n\n%s" % (f["path"], f["line"], body)], cwd) is not None
 
 
 def resolve(cwd, t, how, head):
@@ -202,6 +202,12 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal):
         found, resolved, count = parse(fh.read())
     if count is None:
         return 1
+    if count != len(found):
+        # Headings the parser did not take would be findings dropped without
+        # a word, and the head recorded as reviewed: refuse the answer.
+        sys.stderr.write("the answer counts %d finding(s) but %d heading(s) were read\n"
+                         % (count, len(found)))
+        return 1
     before = threads(cwd, pr, repo)
     if before is None:
         sys.stderr.write("GitHub could not be read; nothing posted\n")
@@ -218,11 +224,14 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal):
         # reviews the same head again rather than losing what this one found.
         return 1
     closed = 0
-    by_rid = {t["rid"]: t for t in before if not t["resolved"]}
+    by_rid = {t["rid"]: t for t in checkable(cwd, before)}
     for rid, how in resolved.items():
         if rid in by_rid and resolve(cwd, by_rid[rid], how, head):
             closed += 1
-    row = {"at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+    # When the run started, as the workflow's runs are dated: the report puts
+    # a thread in the last run started before it was posted.
+    began = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=int(seconds))
+    row = {"at": began.isoformat(timespec="seconds"),
            "seconds": int(seconds), "base": base, "head": head,
            "new": posted, "lost": lost, "resolved": closed}
     with open(journal, "a", encoding="utf-8") as fh:

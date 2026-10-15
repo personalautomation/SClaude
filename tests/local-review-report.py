@@ -81,6 +81,7 @@ try:
     review_report.threads = lambda cwd, pr, repo: [thread(1, 10, "fixed"), thread(2, 10, "no fix"),
                                                    thread(3, 11, "fixed"), thread(4, 12, "open")]
     review_report.review_runs = lambda cwd, branch: failures.append(("workflow-runs-read", "", ""))
+    review_report.review_mode = lambda cwd: "local"
     sys.argv = ["review_report.py", wt, "7", "o/r", "feature"]
     buf = io.StringIO()
     with redirect_stdout(buf):
@@ -90,6 +91,17 @@ try:
     check_true("report-per-round", "oldest first: 2 1 1" in out)
     check_true("report-local-runs", "Local review: 3 runs" in out and "no Actions minutes" in out)
     check_true("report-fates", "Fixed: 2 (50%). Closed without a fix: 1 (25%)" in out)
+
+    # Switched back to the workflow: a journal left from the local rounds is
+    # not read, the workflow's runs are.
+    review_report.review_mode = lambda cwd: "github"
+    asked = []
+    review_report.review_runs = lambda cwd, branch: asked.append(branch) or []
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        review_report.main()
+    check("github-mode-reads-workflow-runs", asked, ["feature"])
+    check_true("github-mode-not-local", "reviewed on this machine" not in buf.getvalue())
 
     # --- the door the pull request is read through --------------------------
     import pr_context
@@ -101,6 +113,10 @@ try:
     pr_context.review_mode = lambda cwd: "local"
     got = pr_context.gh_json(["pr", "view", "7", "--json", "statusCheckRollup"])
     check("local-drops-actions", [c.get("name") for c in got["statusCheckRollup"]], ["Vercel"])
+    # The findings check also comes as a check run made through the API: it
+    # names no workflow, only itself.
+    check("local-drops-findings-run", pr_context.without_actions(
+        [{"name": pr_context.FINDINGS_CHECK, "workflowName": "", "conclusion": "FAILURE"}]), [])
     got = pr_context.gh_json(["api", "repos/o/r/commits/x/check-runs"])
     check("local-other-calls-untouched", len(got["statusCheckRollup"]), 3)
     pr_context.review_mode = lambda cwd: "github"

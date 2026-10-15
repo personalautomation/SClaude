@@ -2245,36 +2245,44 @@ review_close_gate() {
   repo="$(gh_repo 2>/dev/null || true)"
   [[ -n "$repo" ]] || return 0
   # A project that reviews on this machine: the review the workflow would run
-  # after the session's push runs here, before the pull request is asked —
-  # it resolves the threads the push fixed and posts what it finds, and then
-  # the threads are read as on GitHub. A head not pushed is left to the
-  # question below, which says so. A review that did not run is put to the
+  # after the session's push runs here, once the pull request has nothing
+  # open but review threads — it resolves the ones the push fixed and posts
+  # what it finds, and the pull request is asked again. Not before: a red
+  # check or an unpushed commit sends the work back anyway, and a review of
+  # it would be paid for nothing. A review that did not run is put to the
   # person rather than sent back to a session, which could do nothing about
   # it and would end the same way.
-  if [[ "$(project_review_mode "$wt")" == "local" ]] \
-     && [[ "$(git -C "$wt" rev-parse '@{upstream}' 2>/dev/null)" == "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" ]]; then
-    local count
-    count="$(local_review "$wt" "$pr")" || count="failed"
-    if [[ "$count" == "failed" ]]; then
-      warn ""
-      warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
-      ask "${BOLD}Go on with this head unreviewed? [y/n] ${OFF}" answer yn
-      if ! is_yes "$answer"; then
-        info "  Left open. Come back with: $SELF $slug"
-        return 1
-      fi
-    elif [[ "$count" -gt 0 ]]; then
-      # The report printed as the session ended was made before this run:
-      # once more with it, where the person decides whether to go on fixing.
-      review_report "$wt" "$slug"
-    fi
-  fi
+  local local_due=0
+  [[ "$(project_review_mode "$wt")" == "local" ]] && local_due=1
   while :; do
     word="$(python3 "$LIB/pr_context.py" --close "$wt" "$pr" "$repo" 2>/dev/null || true)"
     if [[ "$word" == open:*red:* ]] && review_quota_rerun "$wt" "$slug" "$pr" "$repo"; then
       continue
     fi
-    [[ "$word" == "pending" ]] || break
+    if [[ "$word" != "pending" ]]; then
+      if [[ "$local_due" -eq 1 ]] && [[ "$word" == "ok" || "$word" == yours:* \
+            || "$word" =~ ^open:\ [0-9]+\ review\ thread\(s\)\ open$ ]]; then
+        local_due=0
+        local count
+        count="$(local_review "$wt" "$pr")" || count="failed"
+        if [[ "$count" == "failed" ]]; then
+          warn ""
+          warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
+          ask "${BOLD}Go on with this head unreviewed? [y/n] ${OFF}" answer yn
+          if ! is_yes "$answer"; then
+            info "  Left open. Come back with: $SELF $slug"
+            return 1
+          fi
+        elif [[ "$count" -gt 0 ]]; then
+          # The report printed as the session ended was made before this
+          # run: once more with it, where the person decides whether to go
+          # on fixing.
+          review_report "$wt" "$slug"
+        fi
+        continue
+      fi
+      break
+    fi
     if [[ "$waited" -ge "$REVIEW_WAIT_MAX" ]]; then
       word="open: the automatic review of PR #$pr has not finished"
       break

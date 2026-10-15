@@ -101,9 +101,19 @@ if args[:2] == ["api", "graphql"]:
     print(json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {
         "pageInfo": {"hasNextPage": False}, "nodes": nodes}}}}}))
     sys.exit(0)
+if args[:2] == ["pr", "view"] and "headRefOid" in " ".join(args):
+    import subprocess
+    print(subprocess.run(["git", "rev-parse", "refs/remotes/origin/feature"],
+                         capture_output=True, text=True).stdout.strip())
+    sys.exit(0)
+if args[:2] == ["pr", "comment"]:
+    if "nowhere" in args[-1]:
+        sys.exit(1)
+    data.setdefault("conversation", []).append(args[-1])
+    save(); sys.exit(0)
 if args[:1] == ["api"] and args[1].endswith("/comments") and field("body"):
     path = field("path")
-    if path == "nowhere" or (path == "fileonly" and field("line")):
+    if path in ("nowhere", "elsewhere") or (path == "fileonly" and field("line")):
         sys.exit(1)
     n = data["next"]; data["next"] += 1
     data["threads"].append({"id": "T%d" % n, "isResolved": False, "path": path,
@@ -277,6 +287,67 @@ try:
     check_true("file-level-names-line",
                threads()[-1]["comments"][0]["body"].startswith("Line 9 (outside the diff)."))
     prompts()
+
+    # A file the pull request does not change takes no review comment: the
+    # finding goes to the conversation, and the run is recorded.
+    write(os.path.join(repo, "a.txt"), "e2\n")
+    git("commit", "-qam", "more2", cwd=repo)
+    git("push", "-q", cwd=repo)
+    out, _, rc = review("### elsewhere:4 — a caller breaks\nx\n\nFINDINGS: 1\n")
+    check("outside-pr-recorded", rc, 0)
+    with open(world) as fh:
+        check_true("outside-pr-in-conversation",
+                   "`elsewhere:4` (not in this pull request's diff)" in json.load(fh)["conversation"][-1])
+    prompts()
+
+    # Headings as models drift from the format are read all the same; a
+    # count the headings do not add up to is refused, not half recorded.
+    sys.path.insert(0, LIB)
+    import local_review
+    found, _, count = local_review.parse(
+        "### `src/a.ts:12` — backticks\nx\n### src/b.ts:3-9 — a range\ny\n"
+        "### src/c.ts:7 - a hyphen\nz\nFINDINGS: 3\n")
+    check("headings-drift", [(f["path"], f["line"]) for f in found],
+          [("src/a.ts", 12), ("src/b.ts", 3), ("src/c.ts", 7)])
+    write(os.path.join(repo, "a.txt"), "e3\n")
+    git("commit", "-qam", "more3", cwd=repo)
+    git("push", "-q", cwd=repo)
+    with open(journal) as fh:
+        before = fh.read()
+    _, _, rc = review("### a.txt:1 — one\nx\n\n## Something else\n\nFINDINGS: 2\n")
+    check("count-mismatch-fails", rc, 1)
+    with open(journal) as fh:
+        check("count-mismatch-not-recorded", fh.read(), before)
+    prompts()
+
+    # A thread a person opened, and one the person keeps to resolve by hand,
+    # are not the review's to judge: not handed to it, not resolved by it.
+    with open(world) as fh:
+        data = json.load(fh)
+    data["threads"].append({"id": "TP", "isResolved": False, "path": "a.txt", "line": 1,
+                            "comments": [{"body": "why this way?", "url":
+                                          "https://github.com/o/r/pull/7#discussion_r900"}]})
+    kept = data["threads"][0]["comments"][0]["url"]
+    with open(world, "w") as fh:
+        json.dump(data, fh)
+    write(os.path.join(repo, ".sclaude", "local", "feature", "review-yours"), kept + "\tmine\n")
+    out, _, rc = review("RESOLVED: r900 — answered\nRESOLVED: r101 — gone\n\nFINDINGS: 0\n")
+    check("person-thread-rc", rc, 0)
+    third = prompts()
+    check_true("person-thread-not-handed", "r900" not in third and "r101 ·" not in third)
+    t = {x["id"]: x for x in threads()}
+    check("person-thread-not-resolved", t["TP"]["isResolved"], False)
+    check("kept-thread-not-resolved", t["T1"]["isResolved"], False)
+    os.remove(os.path.join(repo, ".sclaude", "local", "feature", "review-yours"))
+
+    # The journal dates a run by its start, as the workflow's runs are dated.
+    with open(journal) as fh:
+        last = json.loads(fh.read().splitlines()[-1])
+    import datetime
+    began = datetime.datetime.fromisoformat(last["at"])
+    check_true("journal-dated-at-start",
+               began <= datetime.datetime.now(datetime.timezone.utc)
+               - datetime.timedelta(seconds=last["seconds"]) + datetime.timedelta(seconds=5))
 
     # No count in the answer, or nothing GitHub would take: nothing recorded,
     # so the next run reviews the same head again.

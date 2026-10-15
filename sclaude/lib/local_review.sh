@@ -82,10 +82,10 @@ local_review() {
   head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)" || return 1
   repo="$(REPO="$wt" gh_repo 2>/dev/null || true)"
   [[ -n "$repo" ]] || { warn "  No GitHub repository for $wt: the local review did not run." >&2; return 1; }
-  # A thread is posted on a commit GitHub has: a head not pushed yet cannot
-  # carry one.
-  if [[ "$(git -C "$wt" rev-parse '@{upstream}' 2>/dev/null)" != "$head" ]]; then
-    warn "  ${head:0:7} is not pushed: the local review posts on commits GitHub has. Push, then run $SELF again." >&2
+  # A thread is posted on a commit of the pull request: a head it does not
+  # carry yet cannot take one.
+  if ! local_review_pushed "$wt" "$pr"; then
+    warn "  ${head:0:7} is not the head of PR #$pr: the local review posts on what the pull request carries. Push, then run $SELF again." >&2
     return 1
   fi
   if python3 "$LIB/local_review.py" cached "$journal" "$head" 2>/dev/null; then
@@ -105,8 +105,11 @@ local_review() {
   info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${base:0:7}..${head:0:7}." >&2
   info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
 
+  local earlier
+  earlier="$(python3 "$LIB/local_review.py" prompt "$wt" "$pr" "$repo" 2>>"$(local_review_file "$wt" .log)")" \
+    || { warn "  GitHub did not say which findings are open: the local review did not run." >&2; return 1; }
   local began=$SECONDS
-  out="$(cd "$wt" && claude -p "$(local_review_prompt "$wt" "$pr" "$repo" "$head" "$scope")" \
+  out="$(cd "$wt" && claude -p "$(local_review_prompt "$pr" "$head" "$scope" "$earlier")" \
            --model "$LOCAL_REVIEW_MODEL" \
            --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
              "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
@@ -133,10 +136,9 @@ local_review() {
 # own, so that a local review reads what an Actions one would; what it is told
 # about earlier findings is read from the pull request (local_review.py prompt).
 #
-#   local_review_prompt <wt> <pr> <repo> <head> <scope>
+#   local_review_prompt <pr> <head> <scope> <earlier>
 local_review_prompt() {
-  local wt="$1" pr="$2" repo="$3" head="$4" scope="$5" earlier
-  earlier="$(python3 "$LIB/local_review.py" prompt "$wt" "$pr" "$repo" 2>/dev/null || true)"
+  local pr="$1" head="$2" scope="$3" earlier="$4"
   cat <<TEXT
 You are reviewing pull request #${pr:-?} unattended, on the developer's machine. Nobody will answer a question and nothing will wake you: when you end your turn the run is over, so collect every agent's result within this turn.
 
@@ -184,6 +186,17 @@ with open(path, "w") as fh:
     json.dump(data, fh, indent=2, ensure_ascii=False)
     fh.write("\n")
 PY
+}
+
+# Whether the tree's HEAD is the head of the pull request: what a thread can
+# be posted on. Asked of GitHub rather than of the upstream, which a branch
+# made from origin/main keeps pointing at until somebody pushes with -u.
+#
+#   local_review_pushed <wt> <pr>
+local_review_pushed() {
+  local wt="$1" pr="$2" remote
+  remote="$(cd "$wt" && gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null)" || return 1
+  [[ -n "$remote" && "$remote" == "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" ]]
 }
 
 # The head the last local review covered, or nothing.

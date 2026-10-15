@@ -57,7 +57,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pr_context import (DECLINE_PREFIX, RESOLVER_PREFIX, SKIP_SECONDS, gh_json,  # noqa: E402
-                        is_claude_review, yours)
+                        is_claude_review, review_mode, yours)
 
 QUERY = """
 query($owner: String!, $name: String!, $number: Int!, $after: String) {
@@ -364,8 +364,10 @@ def main():
     cwd, pr, repo = sys.argv[1:4]
     branch, slug, log = (sys.argv[4:7] + ["", "", ""])[:3]
 
-    bot = local_runs(cwd)
-    local = bot is not None
+    # By the project's mode, as the summary for QA decides (pr_handoff.py),
+    # not by whether a journal is left over from an earlier mode.
+    local = review_mode(cwd) == "local"
+    bot = (local_runs(cwd) or []) if local else None
     found = threads(cwd, pr, repo)
     print("Review report — PR #%s%s" % (pr, ", reviewed on this machine" if local else ""))
     if found is None:

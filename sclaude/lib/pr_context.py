@@ -141,10 +141,12 @@ def review_mode(cwd):
 
 def without_actions(rollup):
     """The rollup without what GitHub Actions wrote: its check runs, which
-    name their workflow, and the findings status its review workflow posts."""
+    name their workflow, and the findings check its review workflow posts —
+    as a status (`context`) and as a check run made through the API, which
+    names no workflow (`name`)."""
     return [c for c in rollup if isinstance(c, dict)
             and not c.get("workflowName")
-            and (c.get("context") or "") != FINDINGS_CHECK]
+            and (c.get("name") or c.get("context") or "") != FINDINGS_CHECK]
 
 
 def duration(started, finished):
@@ -340,8 +342,8 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
       reviewThreads(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          isResolved isOutdated path line originalLine
-          comments(first: 50) { nodes { author { login } body createdAt url } }
+          id isResolved isOutdated path line originalLine
+          comments(first: 50) { nodes { author { login __typename } body createdAt url } }
         }
       }
     }
@@ -375,11 +377,13 @@ def headline(body):
     return line if len(line) <= HEADLINE_CHARS else line[:HEADLINE_CHARS - 1] + "…"
 
 
-def open_threads(cwd, pr, repo):
+def review_threads(cwd, pr, repo):
+    """Every review thread of the pull request as GitHub gives it
+    (THREADS_QUERY), all pages; None when it cannot be read."""
     if not repo or "/" not in repo:
-        return None, []
+        return None
     owner, name = repo.split("/", 1)
-    threads, resolved, after = [], [], None
+    nodes, after = [], None
     while True:
         args = ["api", "graphql", "-f", "query=%s" % THREADS_QUERY,
                 "-F", "owner=%s" % owner, "-F", "name=%s" % name,
@@ -390,34 +394,43 @@ def open_threads(cwd, pr, repo):
         try:
             page = data["data"]["repository"]["pullRequest"]["reviewThreads"]
         except (TypeError, KeyError):
-            return None, []
-        for t in page.get("nodes") or []:
-            comments = [{"author": ((c.get("author") or {}).get("login")) or "?",
-                         "body": (c.get("body") or "").strip()}
-                        for c in ((t.get("comments") or {}).get("nodes") or [])]
-            path = t.get("path") or "?"
-            line = t.get("line") or t.get("originalLine") or "?"
-            if t.get("isResolved"):
-                resolved.append({
-                    "path": path, "line": line,
-                    "finding": headline(comments[0]["body"] if comments else ""),
-                    "resolution": headline(comments[-1]["body"]
-                                           if len(comments) > 1 else ""),
-                })
-                continue
-            first = ((t.get("comments") or {}).get("nodes") or [{}])[0] or {}
-            threads.append({
-                "path": path,
-                "line": line,
-                "outdated": bool(t.get("isOutdated")),
-                "created": first.get("createdAt") or "",
-                "url": first.get("url") or "",
-                "comments": comments,
-            })
+            return None
+        nodes += page.get("nodes") or []
         info = page.get("pageInfo") or {}
         if not info.get("hasNextPage"):
-            return threads, resolved
+            return nodes
         after = info.get("endCursor")
+
+
+def open_threads(cwd, pr, repo):
+    nodes = review_threads(cwd, pr, repo)
+    if nodes is None:
+        return None, []
+    threads, resolved = [], []
+    for t in nodes:
+        comments = [{"author": ((c.get("author") or {}).get("login")) or "?",
+                     "body": (c.get("body") or "").strip()}
+                    for c in ((t.get("comments") or {}).get("nodes") or [])]
+        path = t.get("path") or "?"
+        line = t.get("line") or t.get("originalLine") or "?"
+        if t.get("isResolved"):
+            resolved.append({
+                "path": path, "line": line,
+                "finding": headline(comments[0]["body"] if comments else ""),
+                "resolution": headline(comments[-1]["body"]
+                                       if len(comments) > 1 else ""),
+            })
+            continue
+        first = ((t.get("comments") or {}).get("nodes") or [{}])[0] or {}
+        threads.append({
+            "path": path,
+            "line": line,
+            "outdated": bool(t.get("isOutdated")),
+            "created": first.get("createdAt") or "",
+            "url": first.get("url") or "",
+            "comments": comments,
+        })
+    return threads, resolved
 
 
 # Threads the person decided to leave as they are.

@@ -99,7 +99,12 @@
     "            account logged in here, and gives the findings to the session:",
     "            tokens, but no Actions minutes) or \"off\".",
     "            The last two open the pull request labelled no-review, the",
-    "            workflow's own switch, so it skips itself at no cost."
+    "            workflow's own switch, so it skips itself at no cost.",
+    "            \"local\" is for running out of Actions minutes, so nothing",
+    "            on Actions counts in it: their checks on a pull request are",
+    "            not read. What they checked is the regression's `local` stage,",
+    "            run here before steps 2 and 4 close; list in it everything",
+    "            the project's CI workflows ran."
   ],
 
   "maintainers": ["lead@example.com"],

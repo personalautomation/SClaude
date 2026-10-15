@@ -27,6 +27,7 @@
 # the prompt keeps its previous instruction. issue_sync and pr_milestone are
 # built the same way.
 import json
+import os
 import re
 import subprocess
 import sys
@@ -88,9 +89,62 @@ def gh_json(args, cwd=None):
     if out is None:
         return None
     try:
-        return json.loads(out)
+        data = json.loads(out)
     except ValueError:
         return None
+    # A project reviewed on this machine does not run its flow on GitHub
+    # Actions at all — it chose that because the minutes ran out, and with
+    # none left every workflow still starts and fails at once, red. So no
+    # verdict of the cycle may rest on them: the checks are taken out of the
+    # pull request as read here, its one door, and what is left is what does
+    # not run on Actions (a Vercel deployment). What the Actions checks did
+    # is the regression's `local` stage, which sclaude runs itself.
+    if (args[:2] == ["pr", "view"] and isinstance(data, dict)
+            and "statusCheckRollup" in data and review_mode(cwd) == "local"):
+        data["statusCheckRollup"] = without_actions(data.get("statusCheckRollup") or [])
+    return data
+
+
+_MODES = {}
+
+
+def review_mode(cwd):
+    """`github`, `local` or `off`: `review` in .sclaude/config.json, read the
+    way project_review_mode in project.sh reads it — the main checkout first,
+    the tree only where the main checkout has no such key."""
+    key = cwd or os.getcwd()
+    if key in _MODES:
+        return _MODES[key]
+    roots = []
+    try:
+        common = subprocess.run(["git", "rev-parse", "--path-format=absolute",
+                                 "--git-common-dir"], cwd=cwd, capture_output=True,
+                                text=True, timeout=30).stdout.strip()
+        if common:
+            roots.append(os.path.dirname(common))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    roots.append(key)
+    mode = "github"
+    for root in roots:
+        try:
+            with open(os.path.join(root, ".sclaude", "config.json")) as fh:
+                value = json.load(fh).get("review")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if value is not None:
+            mode = value if value in ("local", "off") else "github"
+            break
+    _MODES[key] = mode
+    return mode
+
+
+def without_actions(rollup):
+    """The rollup without what GitHub Actions wrote: its check runs, which
+    name their workflow, and the findings status its review workflow posts."""
+    return [c for c in rollup if isinstance(c, dict)
+            and not c.get("workflowName")
+            and (c.get("context") or "") != FINDINGS_CHECK]
 
 
 def duration(started, finished):
@@ -746,7 +800,8 @@ def review_state(cwd, pr, repo):
     # ever, and waiting on it would cost the whole REVIEW_WAIT_MAX on every
     # feature. So an empty list is "pending" only for a few minutes after the
     # latest of the two moments, and "unknown" after that.
-    if not rollup:
+    local = review_mode(cwd) == "local"
+    if not rollup and not local:
         return "pending" if recent(view.get("createdAt"), cwd) else "unknown"
     if any(running(c) for c in rollup):
         return "pending"
@@ -758,11 +813,16 @@ def review_state(cwd, pr, repo):
         if state not in GREEN and (c.get("name") or c.get("context") or "") != FINDINGS_CHECK:
             return "dirty"
 
-    latest = findings_run(cwd, repo, head)
+    # Reviewed on this machine: sclaude ran that review before asking, and no
+    # findings check is written on GitHub. With nothing to wait for and no
+    # Actions check counted, only what people said is left to read below.
+    latest = {} if local else findings_run(cwd, repo, head)
     if latest is None:
         return "unknown"
     reviews = [c for c in rollup if names_review(c.get("name"))]
-    if not latest and reviews and all(
+    if local:
+        mark = "not-reviewed"
+    elif not latest and reviews and all(
             (c.get("conclusion") or c.get("state") or "").upper() == "SKIPPED" for c in reviews):
         # The workflow skipped the review by its condition — the `no-review`
         # label, which a project whose review is not GitHub's puts on every
@@ -973,7 +1033,7 @@ def close_state(cwd, pr, repo):
         return ("open: PR #%s still names %s as its head, behind this branch"
                 % (pr, head[:8]))
     rollup = view.get("statusCheckRollup") or []
-    if not rollup:
+    if not rollup and review_mode(cwd) != "local":
         return "pending" if recent(view.get("createdAt"), cwd) else "ok"
     if any(running(c) for c in rollup):
         return "pending"
@@ -1098,9 +1158,16 @@ def wait_checks(cwd, pr, repo, limit, period, say=None, clock=None, sleep=None):
         say("%s: %s" % (CHECKS_VERDICTS[code], text))
         return code
 
-    expect_review, expect_findings = reviewed_before(cwd, pr, repo)
+    # Reviewed on this machine: no review check will come, and the checks
+    # Actions would run are not read at all (gh_json); what is left is waited
+    # for, and an empty list is finished rather than not registered yet.
+    local = review_mode(cwd) == "local"
+    expect_review, expect_findings = (False, False) if local else reviewed_before(cwd, pr, repo)
     phase, started, failures, rollup, head = 1 if expect_review else 2, clock(), 0, [], ""
-    if expect_review:
+    if local:
+        say("This project reviews on this machine: GitHub Actions checks are not read, "
+            "only the others are waited for.")
+    elif expect_review:
         say("Waiting up to %s for the review check to appear…" % span(limit))
     else:
         say("No review check on this pull request's commits: waiting only for the checks.")
@@ -1159,7 +1226,8 @@ def finished(cwd, repo, head, rollup, expect_findings, view):
     where the project writes one."""
     if not rollup:
         # Not registered yet, or a project with no checks at all: see review_state.
-        return not recent(view.get("createdAt"), cwd)
+        # Reviewed on this machine, nothing more is coming.
+        return review_mode(cwd) == "local" or not recent(view.get("createdAt"), cwd)
     if any(running(c) for c in rollup):
         return False
     reviews = [c for c in rollup if names_review(c.get("name") or c.get("context"))]

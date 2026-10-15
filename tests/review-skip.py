@@ -168,6 +168,25 @@ try:
     check("review-skipped-by-label-person-spoke",
           state(world(findings=[], rollup=labelled,
                       comments=[{"user": person, "body": "why?"}])), "dirty")
+    # Reviewed on this machine: GitHub Actions does not count at all, since
+    # the mode exists for when its minutes ran out and every workflow fails
+    # at once. Its checks are dropped as the pull request is read, and with
+    # nothing else to wait for the people's word decides.
+    actions_red = [dict(green[0], workflowName="Checks", conclusion="FAILURE"),
+                   dict(green[1], conclusion="FAILURE"),
+                   {"context": pr_context.FINDINGS_CHECK, "state": "FAILURE"}]
+    check("without-actions", pr_context.without_actions(
+        actions_red + [{"name": "Vercel", "status": "COMPLETED", "conclusion": "SUCCESS"}]),
+        [{"name": "Vercel", "status": "COMPLETED", "conclusion": "SUCCESS"}])
+    saved_mode = pr_context.review_mode
+    pr_context.review_mode = lambda cwd: "local"
+    check("local-no-checks-is-unreviewed", state(world(findings=[], rollup=[])), "unreviewed")
+    check("local-person-spoke", state(world(findings=[], rollup=[],
+                                            comments=[{"user": person, "body": "why?"}])),
+          "dirty")
+    check("local-other-check-red", state(world(findings=[], rollup=[
+        {"name": "Vercel", "status": "COMPLETED", "conclusion": "FAILURE"}])), "dirty")
+    pr_context.review_mode = saved_mode
     check("review-skipped-by-label-red-check",
           state(world(findings=[], rollup=[dict(green[0], conclusion="FAILURE"),
                                            labelled[1]])), "dirty")

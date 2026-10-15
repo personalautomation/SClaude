@@ -117,6 +117,35 @@ try:
 
     os.remove(journal)
     check("no-journal", review_report.local_rounds(wt), (None, None))
+
+    # --- the door the pull request is read through --------------------------
+    # In `local` the checks GitHub Actions ran are gone from every reading of
+    # the pull request; anything else read through gh_json is untouched.
+    import pr_context
+    rollup = [{"name": "Checks", "workflowName": "Checks", "conclusion": "FAILURE"},
+              {"context": pr_context.FINDINGS_CHECK, "state": "FAILURE"},
+              {"name": "Vercel", "workflowName": "", "conclusion": "SUCCESS"}]
+    pr_context.gh = lambda args, cwd=None: json.dumps({"statusCheckRollup": rollup})
+    pr_context.review_mode = lambda cwd: "local"
+    got = pr_context.gh_json(["pr", "view", "7", "--json", "statusCheckRollup"])
+    check("local-drops-actions", [c.get("name") for c in got["statusCheckRollup"]], ["Vercel"])
+    got = pr_context.gh_json(["api", "repos/o/r/commits/x/check-runs"])
+    check("local-other-calls-untouched", len(got["statusCheckRollup"]), 3)
+    pr_context.review_mode = lambda cwd: "github"
+    got = pr_context.gh_json(["pr", "view", "7", "--json", "statusCheckRollup"])
+    check("github-keeps-actions", len(got["statusCheckRollup"]), 3)
+
+    # And the mode itself: the main checkout first, as project.sh reads it.
+    del pr_context.review_mode
+    import importlib
+    importlib.reload(pr_context)
+    repo = os.path.join(tmp, "repo")
+    subprocess.run(["git", "init", "-q", repo], check=True)
+    write(os.path.join(repo, ".sclaude", "config.json"), json.dumps({"review": "local"}))
+    check("mode-from-main", pr_context.review_mode(repo), "local")
+    tree = os.path.join(tmp, "tree")
+    write(os.path.join(tree, ".sclaude", "config.json"), json.dumps({"review": "off"}))
+    check("mode-from-tree-outside-git", pr_context.review_mode(tree), "off")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

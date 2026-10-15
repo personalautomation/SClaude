@@ -265,10 +265,14 @@ qa_accept_here() { echo "accepted:$2" >> "%s"; [[ "${ACCEPT_FAILS:-}" ]] && retu
 poll_pause() { POLL_KEY=a; }
 qa_accept_offer() { return 0; }
 '''
-    out, rc, _ = run(tmp, ["In QA", "Done"], watch=dict(armed),
+    out, rc, _ = run(tmp, ["In QA", "In QA", "Done"], watch=dict(armed),
                      extra=keyed + "project_flow_mode() { echo both; }")
     check("both-key-accepts", accepted(), ["accepted:key"])
     check_true("both-names-the-key", "press a here" in out)
+    # QA moved it during the pause: the key does not answer over their move.
+    out, rc, _ = run(tmp, ["In QA", "In progress"], watch=dict(armed),
+                     extra=keyed + "project_flow_mode() { echo both; }")
+    check("both-key-after-a-hand-back", (rc, accepted()), (2, []))
     out, rc, _ = run(tmp, ["In QA", "Done"], watch=dict(armed),
                      extra=keyed + "project_flow_mode() { echo github; }")
     check("github-ignores-the-key", accepted(), [])

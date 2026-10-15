@@ -502,6 +502,13 @@ def tick_all(number, cwd=None):
     if issue is None:
         return "unreadable"
     own, text = source(issue)
+    # A pair broken by a hand edit reads as no criteria at all; said apart
+    # here, so an acceptance does not go through quietly with none ticked.
+    start = text.find(AC_OPEN) if own is not None else -1
+    if own is not None and (
+            (start >= 0 and text.find(AC_CLOSE, start + len(AC_OPEN)) < 0)
+            or (start < 0 and AC_CLOSE in text)):
+        return "torn"
     found = parse(text)
     if not found:
         return "nothing"

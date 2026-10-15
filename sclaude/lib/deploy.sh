@@ -832,7 +832,9 @@ PYMETHOD
 }
 
 # Offers the merge when QA has passed and GitHub says the way is clear; says
-# what is in the way when it is not. Returns 0 if the merge happened.
+# what is in the way when it is not. Returns 0 if the merge happened, 2 when
+# it was put and answered — a person said no, or GitHub refused the merge —
+# and 1 when it was not offered at all.
 #
 # The QA condition is the whole point of the timing. "In Done" is a person's
 # statement that they looked at the deployment and it was good — the one thing
@@ -857,7 +859,6 @@ merge_offer() {
   [[ -n "$pr" && "$pr" != "null" ]] || return 1
   command -v gh >/dev/null 2>&1 || return 1
   who="$(project_flow_mode merge)"
-  [[ "$who" != github ]] || return 1
 
   # QA's word, where there is a board to carry it.
   #
@@ -921,6 +922,9 @@ merge_offer() {
     info "  $obstacle."
     return 1
   fi
+  # What is in the way is worth saying in every mode; the question is not
+  # sclaude's to ask when the merge is clicked on GitHub.
+  [[ "$who" != github ]] || return 1
 
   method="$(merge_method)"
 
@@ -985,13 +989,18 @@ merge_offer() {
   echo ""
   say "  gh pr merge $pr $method"
   echo ""
-  if [[ "$who" == auto ]]; then
+  # Auto answers only on QA's word (or for a change nothing deploys, where
+  # the review is the whole check). Without it — no issue, no board, gh
+  # silent about the column — the question is put to a person as before:
+  # an empty answer about the board is not a pass.
+  if [[ "$who" == auto ]] && [[ "$qa_checked" -eq 1 || "$mode" == nodeploy ]]; then
     say "${BOLD}Merging: \`merge\` is auto in .sclaude/config.json.${OFF}"
   else
+    [[ "$who" == auto ]] && info "  \`merge\` is auto, but nothing says QA passed it — so it is asked."
     ask "${BOLD}$prompt [y/n] ${OFF}" answer yn
     if ! is_yes "$answer"; then
       info "→ Merge: skipped. It stays yours to do."
-      return 1
+      return 2
     fi
   fi
 
@@ -999,7 +1008,7 @@ merge_offer() {
     echo ""
     warn "  ✗ The merge did not go through — GitHub refused it."
     info "  Nothing here changed; merge it on GitHub and carry on with: $SELF $slug"
-    return 1
+    return 2
   fi
 
   echo ""
@@ -1048,11 +1057,16 @@ qa_back_column() {
 # be read or written — and the wait goes on for a person to move it.
 qa_accept_here() {
   local issue="$1" how="$2" word who
+  # The move first: boxes ticked and a comment saying "accepted" on an issue
+  # the board kept in In QA would claim what did not happen.
+  issue_move_status "$issue" "$QA_TO" "$QA_DONE"
+  column_is "$(issue_status_now "$issue" 2>/dev/null || true)" "$QA_DONE" || return 1
   word="$(python3 "$LIB/acceptance.py" --tick "$issue" "${REPO:-.}" 2>/dev/null || true)"
   case "$word" in
     ticked) info "  Every acceptance criterion in issue #$issue is ticked." ;;
     already|nothing) ;;
     body) warn "  The criteria of issue #$issue are in its description, which sclaude never writes — tick them there." ;;
+    torn) warn "  The criteria comment on issue #$issue lost one of its markers — nothing ticked; tick them on GitHub." ;;
     *) warn "  Could not tick the criteria in issue #$issue${word:+ ($word)} — tick them on GitHub." ;;
   esac
   if [[ "$how" == auto ]]; then
@@ -1063,8 +1077,7 @@ qa_accept_here() {
   fi
   gh issue comment "$issue" --repo "$(gh_repo)" --body "Accepted $who" >/dev/null 2>&1 \
     || warn "  Could not comment on issue #$issue that sclaude accepted it."
-  issue_move_status "$issue" "$QA_TO" "$QA_DONE"
-  column_is "$(issue_status_now "$issue" 2>/dev/null || true)" "$QA_DONE"
+  return 0
 }
 
 # The question behind `a`: the criteria as they stand, then yes or no. A key
@@ -1131,7 +1144,6 @@ qa_wait() {
   [[ "$(watch_verdict "$slug")" == "returned" ]] && return 2
 
   mode="$(project_flow_mode qa "$wt")"
-  [[ "$mode" == both ]] && keys=", a accepts here"
 
   # The column before this look, which is what tells a hand-back from an issue
   # that never reached QA at all. The watch file holds the one observed when QA
@@ -1209,6 +1221,8 @@ qa_wait() {
       info "  the column moves. Resume with: $SELF $slug"
       echo ""
     fi
+    keys=""
+    [[ "$mode" == both ]] && column_is "$now" "$QA_TO" && keys=", a accepts here"
     if [[ -t 1 ]]; then
       printf '\r\033[2K  %sHuman in the loop%s — waiting for QA (%s so far, next check in %ss, any key checks now%s)' \
         "$DIM" "$OFF" "$(regression_duration "$waited")" "$QA_POLL" "$keys"
@@ -1221,9 +1235,14 @@ qa_wait() {
     # A key cuts the pause short, so the time is counted rather than added up.
     poll_pause "$QA_POLL"
     waited=$((SECONDS - start))
-    if [[ "$mode" == both && "$POLL_KEY" == [aA] ]] && column_is "$now" "$QA_TO"; then
+    # Read again before asking: QA may have moved the issue during the pause,
+    # and their move is not one to answer over.
+    if [[ "$mode" == both && "$POLL_KEY" == [aA] ]] \
+       && column_is "$(issue_status_now "$issue" 2>/dev/null || true)" "$QA_TO"; then
       [[ -t 1 ]] && printf '\r\033[2K'
-      qa_accept_offer "$issue" && qa_accept_here "$issue" key
+      if qa_accept_offer "$issue" && ! qa_accept_here "$issue" key; then
+        warn "  Issue #$issue is not in '$QA_DONE' — nothing ticked; move it on the board."
+      fi
     fi
     if [[ -n "$branch" && "$(branch_pr_state "$branch")" == "MERGED" ]]; then
       [[ -t 1 ]] && printf '\r\033[2K'
@@ -1254,7 +1273,7 @@ qa_wait() {
 #   merge_wait <slug> <issue> <pr> <branch> [offer-mode]
 merge_wait() {
   local slug="$1" issue="$2" pr="$3" branch="$4" offer_mode="${5:-}"
-  local waited=0 logged=0 start=$SECONDS mode auto_tried=0 keys=""
+  local waited=0 logged=0 start=$SECONDS mode auto_tried=0 keys="" offered
 
   [[ -n "$branch" ]] || return 1
   mode="$(project_flow_mode merge)"
@@ -1283,13 +1302,22 @@ merge_wait() {
     fi
     poll_pause "$MERGE_POLL"
     waited=$((SECONDS - start))
+    # Auto stops trying once the merge was put and answered (2): a refusal
+    # repeated every poll is noise. Not offered (1) — the column read empty,
+    # GitHub still computing — is tried again on the next poll.
     if [[ "$mode" == both && "$POLL_KEY" == [mM] ]]; then
       [[ -t 1 ]] && printf '\r\033[2K'
-      merge_offer "$slug" "$pr" "$issue" "$offer_mode" && return 0
+      offered=0
+      merge_offer "$slug" "$pr" "$issue" "$offer_mode" || offered=$?
+      [[ "$offered" -eq 0 ]] && return 0
+      [[ "$offered" -eq 1 ]] \
+        && info "  Nothing to merge from here yet: QA has not passed it, or GitHub has not called it ready."
     elif [[ "$mode" == auto && "$auto_tried" -eq 0 && "$(merge_readiness "$pr")" == ready ]]; then
-      auto_tried=1
       [[ -t 1 ]] && printf '\r\033[2K'
-      merge_offer "$slug" "$pr" "$issue" "$offer_mode" && return 0
+      offered=0
+      merge_offer "$slug" "$pr" "$issue" "$offer_mode" || offered=$?
+      [[ "$offered" -eq 0 ]] && return 0
+      [[ "$offered" -eq 2 ]] && auto_tried=1
     fi
   done
   [[ -t 1 ]] && printf '\r\033[2K'

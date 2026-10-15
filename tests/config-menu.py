@@ -134,6 +134,13 @@ try:
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.split()
         check("flow-mode-%s" % (value or "absent"), out,
               [want, "both" if want == "github" else want])
+    # The flow and the screen agree on what an absent key means: the defaults
+    # live in two files, and this is what ties them.
+    write(config, {})
+    script = 'source "%s/project.sh"; REPO=%s; project_flow_mode qa; project_flow_mode merge' % (LIB, repo)
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.split()
+    check("flow-default-is-the-screen-default", out,
+          [menu("default", "qa")[1].strip(), menu("default", "merge")[1].strip()])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

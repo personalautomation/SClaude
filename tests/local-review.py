@@ -20,10 +20,11 @@
 #     open by an interrupted session stays open — nothing counts as fixed for
 #     not being raised again. An answer with no count, or a head not pushed,
 #     records nothing;
-#   * the person's word that the review has done enough: `s` during a pass
-#     lets it be posted and sends no capped follow-up, a word said already
-#     runs no pass at all, and `x` twice at the terminal stops the pass with
-#     nothing of it posted or recorded;
+#   * the person's word that the search for findings is over: `s` during a
+#     pass lets it be posted and sends no capped follow-up, `x` twice at the
+#     terminal stops the pass with nothing of it posted or recorded, and
+#     either way a later head is only checked against the open findings,
+#     with nothing new posted;
 #   * the step prompts render with the review's mode and without it.
 #
 # Run it with: python3 tests/local-review.py
@@ -521,35 +522,48 @@ try:
     check("enough-pass-rc", rc, 0)
     check("enough-pass-one-pass", prompts().count("---\n"), 1)
     check("enough-pass-posted", len(threads()) - posted_before, 2)
-    check_true("enough-pass-said", "you said it is enough" in err)
-    # Stopped already (`x x`): a new head gets no pass at all, only the count.
-    write(state, '{"steps": {"review": {"enough": "now"}}}\n')
-    write(os.path.join(repo, "a.txt"), "enough again\n")
-    git("commit", "-qam", "enough again", cwd=repo)
-    git("push", "-q", cwd=repo)
-    out, err, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo))
-    check("enough-said-rc", rc, 0)
-    check("enough-said-no-pass", prompts(), "")
-    check_true("enough-said-count", out.strip().isdigit())
-    # `s` said already: a new head still gets its one pass, and no capped
-    # follow-up — a regression fix pushed after step 4 closed is reviewed.
-    write(state, '{"steps": {"review": {"enough": "pass"}}}\n')
-    write(os.path.join(repo, "a.txt"), "after enough\n")
-    git("commit", "-qam", "after enough", cwd=repo)
-    git("push", "-q", cwd=repo)
-    queue(batch("f1", 2), batch("f2", 1))
-    out, err, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo), {"LOCAL_REVIEW_CAP": "2"})
-    check("enough-pass-new-head-rc", rc, 0)
-    check("enough-pass-new-head-one-pass", prompts().count("---\n"), 1)
+    check_true("enough-pass-said", "you ended the search" in err)
+    # Once the search is over (`s` or `x x`), a new head is only checked:
+    # the model is told not to run /code-review, a thread it judges fixed is
+    # resolved, and whatever it reports as new anyway is not posted.
+    # The capped follow-up the word above sent away left its answer queued.
     shutil.rmtree(os.path.join(tmp, "answers"), ignore_errors=True)
+    for said in ("now", "pass"):
+        write(state, '{"steps": {"review": {"enough": "%s"}}}\n' % said)
+        write(os.path.join(repo, "a.txt"), "verify %s\n" % said)
+        git("commit", "-qam", "verify " + said, cwd=repo)
+        git("push", "-q", cwd=repo)
+        # One of the review's own: a thread a person opened is not the
+        # review's to resolve.
+        first = [t for t in threads() if not t.get("isResolved")
+                 and pr_context.signed_locally(t["comments"][0]["body"])][-1]
+        rid = "r" + first["comments"][0]["url"].rsplit("_r", 1)[1]
+        write(os.path.join(tmp, "answer"),
+              "### a.txt:1 — sneaked in\nx\n\nRESOLVED: %s — fixed\nFINDINGS: 1\n" % rid)
+        posted_before = len(threads())
+        out, err, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo))
+        sent = prompts()
+        check("verify-%s-rc" % said, rc, 0)
+        check("verify-%s-one-call" % said, sent.count("---\n"), 1)
+        check_true("verify-%s-no-code-review" % said, "do not invoke the `code-review` skill" in sent)
+        check_true("verify-%s-told-open" % said, rid in sent)
+        check("verify-%s-nothing-new" % said, len(threads()) - posted_before, 0)
+        check_true("verify-%s-resolved" % said,
+                   [t for t in threads() if t["id"] == first["id"]][0]["isResolved"])
+        check_true("verify-%s-count" % said, out.strip().isdigit())
+    write(os.path.join(tmp, "answer"), "FINDINGS: 0\n")
 
     # `x` twice at the terminal stops a pass now: nothing of it is posted or
-    # recorded, the word is kept as `now`, and the count is still answered.
+    # recorded, the word is kept as `now`, and the count of what is open is
+    # still answered — for the review session to take.
     import fcntl
     import pty
     import select
     import termios
     write(state, "{}\n")
+    write(os.path.join(repo, "a.txt"), "stop now\n")
+    git("commit", "-qam", "stop now", cwd=repo)
+    git("push", "-q", cwd=repo)
     write(os.path.join(tmp, "during"), "sleep 30\n")
     write(os.path.join(tmp, "answer"), batch("never", 1))
     with open(journal) as fh:

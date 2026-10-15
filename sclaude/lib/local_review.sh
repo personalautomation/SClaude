@@ -161,20 +161,22 @@ local_review() {
     scope="the whole pull request: \`git diff $base..$head\`"
   fi
 
-  # Stopped with `x x`, in this round or before a Ctrl-C: no new pass, only
-  # the count of what is open, for the caller to close step 4 with. `s` is
-  # not this: a head it reaches still gets its one pass (see below).
-  if [[ "$(review_enough "$wt")" == now ]]; then
-    info "  You stopped the review: no new pass on ${head:0:7}." >&2
-    python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null || return 1
-    return 0
-  fi
+  # Once the person said the search is over (review_enough), a head is only
+  # checked: which open findings its commits fixed, nothing new looked for.
+  local verify=""
+  [[ -n "$(review_enough "$wt")" ]] && verify=1
   command -v claude >/dev/null 2>&1 || { warn "  No claude on this machine: the local review did not run." >&2; return 1; }
-  info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${base:0:7}..${head:0:7}." >&2
-  info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
-  if keys_usable; then
-    info "  Enough rounds? s: stop after this pass — its findings are posted, then step 4 closes" >&2
-    info "  with what is open. x twice: stop now, dropping only this pass; what is posted stays." >&2
+  if [[ -n "$verify" ]]; then
+    info "  Checking the fixes on PR #${pr:-?} ($LOCAL_REVIEW_MODEL): ${base:0:7}..${head:0:7}." >&2
+    info "  You ended the search for new findings, so this only resolves the ones the commits fixed." >&2
+  else
+    info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${base:0:7}..${head:0:7}." >&2
+    info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
+    if keys_usable; then
+      info "  Enough rounds? s: this pass is the last that looks for new findings. x twice: stop it now," >&2
+      info "  dropping only what it found so far. Either way what is open goes to the review session," >&2
+      info "  and sclaude asks you before it checks the fixes." >&2
+    fi
   fi
 
   local earlier began new more cap pass=1
@@ -186,13 +188,27 @@ local_review() {
       count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
       break
     fi
+    # Nothing open to check: no model to ask, the head is recorded as read.
+    # The open findings are the block local_review.py prompt heads "still
+    # open"; the rest of what it says (declined, fixed) is no work here.
+    if [[ -n "$verify" && "$earlier" != *"still open"* ]]; then
+      printf 'FINDINGS: 0\n' > "$answer"
+      read -r count new more < <(python3 "$LIB/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
+                                   "$base" "$head" 0 "$journal" 0 verify 2>>"$(local_review_file "$wt" .log)") \
+        || count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
+      break
+    fi
+    local text
+    if [[ -n "$verify" ]]; then text="$(local_review_verify_prompt "$pr" "$head" "$scope" "$earlier")"
+    else text="$(local_review_prompt "$pr" "$head" "$scope" "$earlier")"
+    fi
     began=$SECONDS
     # In the background, so that the wait can take the keys above: a review
     # that goes round after round is where the person decides it is enough.
     # A background job of a script ignores Ctrl-C, so the trap passes it on.
     # Into a file of its own until it ends: a pass stopped half-way leaves
     # the last whole answer where it was.
-    ( cd "$wt" && exec claude -p "$(local_review_prompt "$pr" "$head" "$scope" "$earlier")" \
+    ( cd "$wt" && exec claude -p "$text" \
              --model "$LOCAL_REVIEW_MODEL" \
              --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
                "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
@@ -202,20 +218,21 @@ local_review() {
     local pid=$!
     trap 'kill -TERM "$pid" 2>/dev/null; stty echo < /dev/tty 2>/dev/null; exit 130' INT TERM HUP
     local stopped=0
-    local_review_wait "$wt" "$pid" "$pass" "$began" || stopped=1
+    local_review_wait "$wt" "$pid" "$pass" "$began" "$verify" || stopped=1
     trap - INT TERM HUP
     if [[ "$stopped" -eq 1 ]]; then
       rm -f "$answer.part"
-      warn "  Stopped pass $pass as you said; what earlier passes and rounds posted stays open on PR #$pr." >&2
+      warn "  Stopped pass $pass as you said; what earlier passes and rounds posted stays open on PR #$pr" >&2
+      warn "  and goes to the review session." >&2
       count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
       break
     fi
     mv -f "$answer.part" "$answer"
     # The last pass allowed records no "more": the head is done with what it
     # has, rather than read again on every later call.
-    cap="$LOCAL_REVIEW_CAP"; [[ "$pass" -ge "$LOCAL_REVIEW_PASSES" ]] && cap=0
+    cap="$LOCAL_REVIEW_CAP"; [[ "$pass" -ge "$LOCAL_REVIEW_PASSES" || -n "$verify" ]] && cap=0
     if ! read -r count new more < <(python3 "$LIB/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
-                                      "$base" "$head" "$((SECONDS - began))" "$journal" "$cap" \
+                                      "$base" "$head" "$((SECONDS - began))" "$journal" "$cap" ${verify:+verify} \
                                       2>>"$(local_review_file "$wt" .log)") || [[ -z "${count:-}" ]]; then
       # A later pass that fails leaves the earlier ones recorded: the head
       # counts as reviewed with what they posted.
@@ -231,7 +248,7 @@ local_review() {
     # By what the pass found, not what GitHub took: a capped pass with a
     # finding refused is still capped.
     if [[ "${more:-0}" == 1 && -n "$(review_enough "$wt")" ]]; then
-      info "  That pass found the cap, but you said it is enough: no pass $((pass + 1))." >&2
+      info "  That pass found the cap, but you ended the search: no pass $((pass + 1))." >&2
       break
     fi
     if [[ "${more:-0}" != 1 ]]; then
@@ -252,18 +269,20 @@ local_review() {
 
 # Wait for a pass of the local review, taking the person's keys meanwhile.
 #
-#   local_review_wait <wt> <pid> <pass> <began>
+#   local_review_wait <wt> <pid> <pass> <began> [verify]
 #
-# The keys say the review has done enough (review_enough): `s` lets this pass
-# finish and be posted, then stops; pressed again it takes that back. `x`
-# stops the pass now — what it had found is not posted, since a finding exists
-# only in the answer the pass ends with — and so wants pressing twice. Nothing
+# The keys end the search for new findings (review_enough): `s` lets this
+# pass finish and be posted, and it is the last to look; pressed again it
+# takes that back. `x` stops the pass now — what it had found is not posted,
+# since a finding exists only in the answer the pass ends with — and so wants
+# pressing twice. Either way what is open goes to the review session. Nothing
 # here goes to Telegram: it is for whoever sits at this terminal, and a
 # question every round would be noise on the phone. Without a terminal it is
 # a plain wait. Everything goes to stderr: local_review answers on stdout.
+# A check of the fixes (verify) takes no keys: the search is over already.
 # Returns 1 when the person stopped the pass.
 local_review_wait() {
-  local wt="$1" pid="$2" pass="$3" began="$4" armed=0 armed_at=0 said hint t tty=""
+  local wt="$1" pid="$2" pass="$3" began="$4" verify="${5:-}" armed=0 armed_at=0 said hint t tty=""
   said="$(review_enough "$wt")"
   # No echo while it waits: a key pressed between two reads would otherwise
   # land on the status line.
@@ -276,18 +295,20 @@ local_review_wait() {
     [[ "$armed" -eq 1 && $((SECONDS - armed_at)) -ge 5 ]] && armed=0
     if [[ -n "$tty" ]]; then
       t=$((SECONDS - began))
-      if [[ "$armed" -eq 1 ]]; then
+      if [[ -n "$verify" ]]; then
+        hint="checking the fixes only"
+      elif [[ "$armed" -eq 1 ]]; then
         hint="x again: stop now and drop this pass · any other key: carry on"
       elif [[ "$said" == pass ]]; then
-        hint="step 4 closes after this pass (s takes it back) · x x: stop now"
+        hint="the last pass for new findings (s takes it back) · x x: stop now"
       else
-        hint="s: enough after this pass · x x: stop now"
+        hint="s: last pass for new findings · x x: stop now"
       fi
       printf '\r\033[2K  %sHuman in the loop%s — local review, pass %s (%dm%02ds) · %s' \
         "$DIM" "$OFF" "$pass" $((t / 60)) $((t % 60)) "$hint" >&2
     fi
     poll_pause 1
-    [[ -n "$POLL_KEY" ]] || continue
+    [[ -n "$POLL_KEY" && -z "$verify" ]] || continue
     case "$POLL_KEY" in
       x|X)
         if [[ "$armed" -eq 1 ]]; then
@@ -309,20 +330,18 @@ local_review_wait() {
   return 0
 }
 
-# The person's word that the review has done enough: step 4 then closes with
-# whatever the rounds so far left open, rather than hand it to one more
-# session. Kept in the feature's state until step 4 closes (after_step) or is
-# rewound or closed by a merge, so a Ctrl-C or a session closing in between
-# does not forget it.
+# The person's word that the review has found enough: the search for new
+# findings is over. What is open still goes to a review session — those
+# findings are paid for — but no review starts by itself after it: the gate
+# asks the person whether to check the session's fixes, and that check only
+# judges the open findings (local_review_verify_prompt), so the rounds end
+# instead of finding something new each time. Kept in the feature's state
+# until step 4 closes (after_step) or is rewound or closed by a merge, so a
+# Ctrl-C or a session in between does not forget it.
 #
-#   pass  every head still gets one review pass, its findings posted, and no
-#         session is opened for them: what `s` says, and what `x x` turns
-#         into once step 4 has closed on it, so a regression fix pushed after
-#         is not left unreviewed;
-#   now   no pass at all on the head it was said on: what `x x` says.
+#   pass  said with `s`: the pass running when it was said was the last;
+#   now   said with `x x`: that pass was stopped. Otherwise the same.
 #
-#   review_enough <wt>           pass | now | nothing
-#   review_enough_set <wt> <how> pass, now, or empty to take it back
 review_enough() {
   local said
   said="$(state_get "$1/.sclaude/local/feature/state.json" steps.review.enough 2>/dev/null || true)"
@@ -332,6 +351,43 @@ review_enough() {
 
 review_enough_set() {
   state_set "$1/.sclaude/local/feature/state.json" steps.review.enough "${2:-null}" 2>/dev/null || true
+}
+
+# How many review threads are open on the pull request, read from it: no
+# pass runs.
+#
+#   local_review_count <wt> <pr>   → <count>; 1 when GitHub cannot be read
+local_review_count() {
+  local wt="$1" pr="$2" repo
+  repo="$(REPO="$wt" gh_repo 2>/dev/null || true)"
+  [[ -n "$repo" ]] || return 1
+  python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$(local_review_file "$wt" -rounds.jsonl)" 2>/dev/null
+}
+
+# Whether the tree's HEAD has had its local review already: a call to
+# local_review would then run nothing.
+local_review_done() {
+  local head
+  head="$(git -C "$1" rev-parse HEAD 2>/dev/null)" || return 1
+  python3 "$LIB/local_review.py" cached "$(local_review_file "$1" -rounds.jsonl)" "$head" 2>/dev/null
+}
+
+# What the headless check is told once the search for new findings is over:
+# only the open findings, against the commits since the last review — no
+# /code-review, so a round of fixes costs a read of its diff, not a review.
+#
+#   local_review_verify_prompt <pr> <head> <scope> <earlier>
+local_review_verify_prompt() {
+  local pr="$1" head="$2" scope="$3" earlier="$4"
+  cat <<TEXT
+You are checking fixes on pull request #${pr:-?} unattended, on the developer's machine. Nobody will answer a question and nothing will wake you: when you end your turn the run is over.
+
+The search for new findings on this pull request is over. Do not review the code for anything else, and do not invoke the \`code-review\` skill. Your one job: read $scope (the tree is checked out at $head), then judge each finding below against the code as it is here.
+
+$earlier
+
+Post nothing to GitHub and change no file: sclaude resolves the threads from your answer. Answer with nothing else: a \`RESOLVED: <id> — <how, in a sentence>\` line for each finding the code no longer has, and last a line of its own, \`FINDINGS: 0\`.
+TEXT
 }
 
 # What the headless review is told. The scope sentence follows the workflow's

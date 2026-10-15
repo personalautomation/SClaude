@@ -512,18 +512,15 @@ run_step() {
   if [[ "$step" == "review" ]]; then
     review_mode="$(project_review_mode "$wt")"
     review_label_sync "$wt" "$pr"
-    [[ "$review_mode" == "local" ]] \
-      && { local_count="$(local_review "$wt" "$pr")" || local_count="failed"; }
-  fi
-  # The person said, during a round's review or wait, that the review has
-  # done enough (review_enough): no session for what it left. after_step's
-  # gate decides what that leaves open, and asks about anything else.
-  if [[ "$step" == "review" && -n "$(review_enough "$wt")" ]]; then
-    [[ "$(state_get "$state" "steps.$step.started" 2>/dev/null || true)" =~ ^(|null)$ ]] \
-      && state_set "$state" "steps.$step.started" "$(date -Iseconds)"
-    info "  You said the review has done enough, so no review session is opened."
-    after_step "$wt" "$slug" "$step"
-    return 0
+    # Once the person ended the search (review_enough), nothing is reviewed
+    # on the way in: what is open goes to the session, and a check of its
+    # fixes waits for the person's word (review_close_gate). Unreadable, the
+    # pull request's own state decides below.
+    if [[ "$review_mode" == "local" && -n "$(review_enough "$wt")" ]]; then
+      local_count="$(local_review_count "$wt" "$pr")" || local_count=""
+    elif [[ "$review_mode" == "local" ]]; then
+      local_count="$(local_review "$wt" "$pr")" || local_count="failed"
+    fi
   fi
   [[ "$step" == "review" ]] && [[ -z "$local_count" || "$local_count" == "0" ]] \
     && review_skippable "$wt" "$slug" \
@@ -2282,13 +2279,28 @@ review_close_gate() {
             || "$word" =~ ^open:\ [0-9]+\ review\ thread\(s\)\ open$ ]]; then
         local_due=0
         local count
+        # The search ended: the session's fixes are checked only when the
+        # person says so — a pass is paid for, and they stopped the review
+        # to stop paying for rounds.
+        if [[ -n "$(review_enough "$wt")" ]] && ! local_review_done "$wt"; then
+          count="$(local_review_count "$wt" "$pr")" || count="?"
+          echo ""
+          info "  You ended the search for new findings; $count thread(s) are open on PR #$pr."
+          ask "${BOLD}Check the fixes with a review pass? It resolves the threads they fixed and looks for nothing new. [y/n] ${OFF}" answer yn
+          if ! is_yes "$answer"; then
+            ask "${BOLD}Close step 4 now, with $count thread(s) left open as they are? [y/n] ${OFF}" answer yn
+            if ! is_yes "$answer"; then
+              info "  Left open. Come back with: $SELF $slug"
+              return 1
+            fi
+            [[ "$count" =~ ^[0-9]+$ ]] \
+              && state_set "$wt/.sclaude/local/feature/state.json" steps.review.left_open "$count" 2>/dev/null
+            say "${BOLD}Step 4 closes as you said, with the threads as they are.${OFF}"
+            return 0
+          fi
+        fi
         count="$(local_review "$wt" "$pr")" || count="failed"
-        if [[ "$count" == "failed" && -n "$(review_enough "$wt")" ]]; then
-          # The person has said to stop: not asked again whether to go on.
-          warn "  The review on this machine could not say what is open; its log: $(local_review_file "$wt" .log)"
-          review_enough_close "$wt" "$pr" ""
-          return 0
-        elif [[ "$count" == "failed" ]]; then
+        if [[ "$count" == "failed" ]]; then
           warn ""
           warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
           ask "${BOLD}Go on with this head unreviewed? [y/n] ${OFF}" answer yn
@@ -2301,10 +2313,6 @@ review_close_gate() {
           # run: once more with it, where the person decides whether to go
           # on fixing.
           review_report "$wt" "$slug"
-          if [[ -n "$(review_enough "$wt")" ]]; then
-            review_enough_close "$wt" "$pr" "$count"
-            return 0
-          fi
           # Open by its own count, not by asking GitHub again: a finding in
           # the conversation, or one still waiting to be posted, is no thread
           # for the pull request to show.
@@ -2324,40 +2332,42 @@ review_close_gate() {
       info "  The automatic review of PR #$pr is still running; step 4 closes once it has finished."
       info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug"
     fi
-    # `s` here as in the local review: the review finishes and posts, and
-    # step 4 then closes with what it left rather than open another round.
+    # `s` here as in the local review, for the review in Actions: what it
+    # posts now is the last search — a session still takes what was open
+    # before, but what the reviews after it find new is left on the pull
+    # request (see below). A local review takes its keys itself.
     # Read once a wait, and kept here after: a python per poll for a hint.
     [[ "$said_read" -eq 1 ]] || { said="$(review_enough "$wt")"; said_read=1; }
     if [[ -t 1 ]]; then
-      local hint="s: enough after this review" what="the review"
-      [[ "$local_due" -eq 1 ]] && what="the checks"
-      [[ -n "$said" ]] && hint="step 4 closes after this review (s takes it back)"
-      printf '\r\033[2K  %sHuman in the loop%s — waiting for %s of PR #%s (%s so far) · %s' \
-        "$DIM" "$OFF" "$what" "$pr" "$(regression_duration "$waited")" "$hint"
+      local hint="s: last review for new findings" what="the review"
+      [[ "$local_due" -eq 1 ]] && { what="the checks"; hint=""; }
+      [[ -n "$said" && -n "$hint" ]] && hint="the last review for new findings (s takes it back)"
+      printf '\r\033[2K  %sHuman in the loop%s — waiting for %s of PR #%s (%s so far)%s' \
+        "$DIM" "$OFF" "$what" "$pr" "$(regression_duration "$waited")" "${hint:+ · $hint}"
     fi
     local began=$SECONDS
     poll_pause "$MERGE_POLL"
     waited=$((waited + SECONDS - began))
     # Cleared before the next look: what that prints starts a line of its own.
     [[ -t 1 ]] && printf '\r\033[2K'
-    if [[ "$POLL_KEY" == [sS] ]]; then
+    if [[ "$POLL_KEY" == [sS] && "$local_due" -eq 0 ]]; then
       if [[ -n "$said" ]]; then said=""; review_enough_set "$wt" ""
       else said=pass; review_enough_set "$wt" pass
       fi
     fi
   done
-  if [[ -n "$(review_enough "$wt")" && "$word" == open:* ]]; then
-    if [[ "$word" =~ ^open:\ ([0-9]+)\ review\ thread\(s\)\ open$ ]]; then
-      review_enough_close "$wt" "$pr" "${BASH_REMATCH[1]}"
+  # The search ended (review_enough), with the review in Actions: it cannot
+  # be told to only check the fixes, so what it posted after the last session
+  # began is left on the pull request; what that session had and did not
+  # settle goes the ordinary way. A local review posts nothing new by then.
+  if [[ -n "$(review_enough "$wt")" && "$word" =~ ^open:\ [0-9]+\ review\ thread\(s\)\ open$ ]]; then
+    local split older newer
+    split="$(python3 "$LIB/pr_context.py" --open-since "$wt" "$pr" "$repo" \
+               "$(review_session_since "$wt")" 2>/dev/null || true)"
+    read -r older newer <<<"$split"
+    if [[ "${older:-}" == "0" && "${newer:-0}" -gt 0 ]]; then
+      review_enough_close "$wt" "$pr" "$newer"
       return 0
-    fi
-    # The word was about the review's findings; a red check or an unpushed
-    # commit is not a finding, and goes the ordinary way. Taken back, so a
-    # session opened for it is not closed again on entry. A review that has
-    # not finished keeps it: the person is still waiting for that review.
-    if [[ "$word" != *"has not finished"* ]]; then
-      warn "  You said the review has done enough, but that covers its findings only."
-      review_enough_set "$wt" ""
     fi
   fi
   # Only the threads the person kept: no session, a wait for their hand. Once
@@ -2389,24 +2399,33 @@ review_close_gate() {
   return 0
 }
 
-# Step 4 closes on the person's word that the review has done enough
-# (review_enough), with the findings the rounds so far left: they stay open
-# threads on the pull request, nothing is resolved or dropped for it.
+# Step 4 closes with the findings the review in Actions posted after the
+# person ended the search (review_enough): they stay open threads on the
+# pull request, nothing is resolved or dropped for it.
 #
 #   review_enough_close <wt> <pr> <count>
 review_enough_close() {
   local wt="$1" pr="$2" count="$3"
-  [[ "$count" =~ ^[0-9]+$ ]] \
-    && state_set "$wt/.sclaude/local/feature/state.json" steps.review.left_open "$count" 2>/dev/null
-  # `x x` was about the pass it stopped: a commit pushed after this close —
-  # a regression fix — still gets its one pass.
-  [[ "$(review_enough "$wt")" == now ]] && review_enough_set "$wt" pass
-  say "${BOLD}Step 4 closes as you said: the review has done enough.${OFF}"
-  if [[ "$count" =~ ^[0-9]+$ ]]; then
-    info "  $count finding(s) stay open on PR #$pr as they are — on GitHub, for whoever takes them up."
-  else
-    info "  What the rounds found stays open on PR #$pr as it is."
-  fi
+  state_set "$wt/.sclaude/local/feature/state.json" steps.review.left_open "$count" 2>/dev/null
+  say "${BOLD}Step 4 closes: you ended the search for new findings.${OFF}"
+  info "  $count finding(s) the review posted after that stay open on PR #$pr as they are."
+}
+
+# When the review step's current session began: its first run's start, or
+# nothing. What --open-since splits the open threads by.
+#
+#   review_session_since <wt>
+review_session_since() {
+  local state="$1/.sclaude/local/feature/state.json" session
+  session="$(state_get "$state" steps.review.session 2>/dev/null || true)"
+  python3 - "$state" "$session" <<'PY' 2>/dev/null || true
+import json, sys
+with open(sys.argv[1]) as fh:
+    runs = ((json.load(fh).get("steps") or {}).get("review") or {}).get("runs") or []
+starts = [r.get("started") or "" for r in runs
+          if isinstance(r, dict) and r.get("session") == sys.argv[2]]
+print(min((s for s in starts if s), default=""))
+PY
 }
 
 # The review threads the person decided to leave as they are, and that are
@@ -2483,21 +2502,12 @@ review_yours_wait() {
 #     session, as a round marker would have given it.
 review_reopen() {
   local wt="$1" slug="$2" pr="$3" repo="$4" waited="$5"
-  local state="$wt/.sclaude/local/feature/state.json" session since split older newer
+  local state="$wt/.sclaude/local/feature/state.json" since split older newer
   if [[ "$waited" -ge "$REVIEW_WAIT_MAX" ]]; then
     info "  Nothing to fix until it has finished. Come back with: $SELF $slug"
     return 0
   fi
-  session="$(state_get "$state" steps.review.session 2>/dev/null || true)"
-  since="$(python3 - "$state" "$session" <<'PY' 2>/dev/null || true
-import json, sys
-with open(sys.argv[1]) as fh:
-    runs = ((json.load(fh).get("steps") or {}).get("review") or {}).get("runs") or []
-starts = [r.get("started") or "" for r in runs
-          if isinstance(r, dict) and r.get("session") == sys.argv[2]]
-print(min((s for s in starts if s), default=""))
-PY
-)"
+  since="$(review_session_since "$wt")"
   split="$(python3 "$LIB/pr_context.py" --open-since "$wt" "$pr" "$repo" "$since" 2>/dev/null || true)"
   read -r older newer <<<"$split"
   if [[ "${older:-}" == "0" && "${newer:-0}" -gt 0 ]]; then

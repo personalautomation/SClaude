@@ -19,7 +19,7 @@
 #   local_review.py since <journal> <head>        the commit the next run starts from
 #   local_review.py prompt <cwd> <pr> <repo> <journal>  the part of the review's prompt
 #                                                 about earlier findings
-#   local_review.py record <cwd> <pr> <repo> <answer> <base> <head> <seconds> <journal> [cap]
+#   local_review.py record <cwd> <pr> <repo> <answer> <base> <head> <seconds> <journal> [cap] [verify]
 #                                                 post the run's new findings, resolve
 #                                                 the ones it judged fixed, print how
 #                                                 many are open, how many it posted,
@@ -283,11 +283,16 @@ def resolve(cwd, t, how, head):
               cwd) is not None
 
 
-def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0"):
+def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mode=""):
     with open(answer_path, encoding="utf-8") as fh:
         found, resolved, count = parse(fh.read())
     if count is None:
         return 1
+    if mode == "verify":
+        # A check of the fixes after the search was ended: whatever it
+        # reports as new anyway is not posted — the person said the search
+        # is over, and a new thread would start the rounds again.
+        found, count = [], 0
     if count != len(found):
         # Headings the parser did not take would be findings dropped without
         # a word, and the head recorded as reviewed: refuse the answer.
@@ -387,7 +392,7 @@ def main(argv):
         return 0
     if cmd == "prompt" and len(args) == 4:
         return prompt(*args)
-    if cmd in ("record",) and len(args) in (8, 9):
+    if cmd in ("record",) and len(args) in (8, 9, 10):
         return record(*args)
     if cmd == "open" and len(args) == 4:
         # Waiting findings first: posted now, they are threads below.

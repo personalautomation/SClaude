@@ -98,6 +98,7 @@ source "%s/pane.sh"
 cd "%s"
 claude_launch --session-id 0000 -n "demo/code" "$PANE_TEST_PROMPT"
 echo "rc=$?"
+echo "in-pane=[${SCLAUDE_IN_PANE:-}]"
 ''' % (LIB, wt)
         env = dict(os.environ,
                    PATH=bin_dir + os.pathsep + os.environ["PATH"],
@@ -166,6 +167,8 @@ echo "rc=$?"
     check("pane-no-interop", got.get("interop"), None)
     check("pane-status", "rc=7" in text, True)
     check("pane-says-where", "in a new tab" in text, True)
+    # The tab closed with the session's last message: session_ended prints it.
+    check("pane-marked", "in-pane=[1]" in text, True)
     check("pane-cleaned-up", [n for n in os.listdir(tmp) if n.startswith("sclaude-pane.")], [])
 
     # --- a recorded run: the tab is not recorded, a session in place is
@@ -205,6 +208,7 @@ echo "rc=$?"
         if "WSL_INTEROP" not in env:
             check("%s-interop-kept" % name, got.get("interop"), "/run/WSL/1_interop")
         check("%s-status" % name, "rc=3" in text, True)
+        check("%s-not-marked" % name, "in-pane=[]" in text, True)
 
     # --- a pane that never starts: in place after the wait ---
     text = run({"PANE_TEST_WT": "never", "SCLAUDE_PANE_WAIT": "1"})

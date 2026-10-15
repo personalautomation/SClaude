@@ -159,6 +159,11 @@ named_with_icon() {
 # One launch of claude, in a tab or in place. claude_launch around it adds the
 # return after a usage limit.
 claude_launch_once() {
+  # Whether the session's screen is gone with it: a tab closes when claude
+  # exits, and its last message with it; in place it stays on the screen.
+  # session_ended prints it again for a tab (session_report). Exported, since
+  # a code reload replaces this process between the exit and that point.
+  export SCLAUDE_IN_PANE=""
   if ! pane_available; then
     claude_here "$@"
     return
@@ -213,6 +218,7 @@ claude_launch_once() {
     waited=$((waited + 1))
   done
   pid="$(cat "$dir/pid")"
+  SCLAUDE_IN_PANE=1
 
   info "   claude is running in a new tab ($title)."
   info "   Ctrl-C here ends that session, the same as /exit there."

@@ -60,7 +60,9 @@ try:
         subprocess.run(["bash", "-c", body + 'run_local_round %s s1' % wt], check=True)
     with open(os.path.join(feature, "state.json")) as fh:
         run = json.load(fh)["steps"]["review"]["runs"][0]
-    check("issue-rounds", run.get("rounds"), 2)
+    # Opened with its first round counted; each local review that brings it
+    # back adds one.
+    check("issue-rounds", run.get("rounds"), 3)
 
     # --- the report ---------------------------------------------------------------
     import review_report
@@ -70,6 +72,17 @@ try:
                              for i in range(3)) + "\n")
     runs = review_report.local_runs(wt)
     check("runs", [r["start"].hour for r in runs], [10, 11, 12])
+    # Passes over one range are one review run.
+    with open(journal, "a") as fh:
+        for minute in ("05", "09"):
+            fh.write(json.dumps({"at": "2026-10-15T12:%s:00+00:00" % minute, "seconds": 120,
+                                 "base": "x", "head": "h2", "new": 1}) + "\n")
+    runs = review_report.local_runs(wt)
+    check("passes-one-run", ([r["start"].hour for r in runs], runs[-1]["seconds"]),
+          ([10, 11, 12], 540.0))
+    write(journal, "\n".join(json.dumps({"at": "2026-10-15T1%d:00:00+00:00" % i, "seconds": 300,
+                                         "base": "x", "head": "h%d" % i, "new": 1, "resolved": 0})
+                             for i in range(3)) + "\n")
 
     def at(h):
         return datetime.datetime(2026, 10, 15, h, 5, tzinfo=datetime.timezone.utc)

@@ -16,12 +16,14 @@
 #
 #   local_review.py cached <journal> <head>       exit 0 when <head> is the last reviewed
 #   local_review.py base <journal>                the last reviewed head, or nothing
-#   local_review.py prompt <cwd> <pr> <repo>      the part of the review's prompt about
-#                                                 earlier findings
-#   local_review.py record <cwd> <pr> <repo> <answer> <base> <head> <seconds> <journal>
+#   local_review.py since <journal> <head>        the commit the next run starts from
+#   local_review.py prompt <cwd> <pr> <repo> <journal>  the part of the review's prompt
+#                                                 about earlier findings
+#   local_review.py record <cwd> <pr> <repo> <answer> <base> <head> <seconds> <journal> [cap]
 #                                                 post the run's new findings, resolve
 #                                                 the ones it judged fixed, print how
-#                                                 many are open and how many it posted;
+#                                                 many are open, how many it posted,
+#                                                 and 1 when it found the cap (more left);
 #                                                 exit 1 when the answer
 #                                                 has no count or nothing could be posted
 #   local_review.py open <cwd> <pr> <repo> <journal>  post what waits to be posted,
@@ -34,6 +36,7 @@ import datetime
 import json
 import os
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -46,6 +49,31 @@ from pr_context import (LOCAL_SIGNATURE, RESOLVER_PREFIX, decline_of, gh,  # noq
 HEADING = re.compile(r"^###\s+`?(.+?):(\d+)(?:[-–]\d+)?`?\s+[—–-]\s+(.*)$")
 RESOLVED = re.compile(r"^\s*RESOLVED:\s*(r\d+)\s*(?:—|-|:)?\s*(.*)$")
 COUNT = re.compile(r"^\s*FINDINGS:\s*(\d+)\s*$")
+
+
+def gh_try(args, cwd):
+    """(gh's output or None, whether GitHub refused the request as invalid).
+    A refusal (422) is an answer about the request — a line outside the
+    diff, a file outside the pull request — and the next form is tried; any
+    other failure (a timeout, a 5xx, no network) may have been taken after
+    all, so nothing else is posted for it now."""
+    try:
+        done = subprocess.run(["gh"] + args, cwd=cwd, capture_output=True, text=True,
+                              timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None, False
+    if done.returncode == 0:
+        return done.stdout, False
+    text = (done.stderr or "") + (done.stdout or "")
+    return None, ("422" in text or "Validation Failed" in text or "Unprocessable" in text)
+
+
+def already(found, f):
+    """Whether a thread for this finding is there already: on its file, with
+    its title. A post that timed out may have been taken."""
+    mark = "**%s**" % f["title"]
+    return any(t["path"] == f["path"] and mark in (t["bodies"][0] if t["bodies"] else "")
+               for t in found or [])
 
 
 def threads(cwd, pr, repo):
@@ -89,7 +117,7 @@ def open_count(cwd, found):
     return len(split_yours(cwd, still)[1])
 
 
-def prompt(cwd, pr, repo):
+def prompt(cwd, pr, repo, journal):
     found = threads(cwd, pr, repo)
     if found is None:
         # Without the earlier findings the run would post the declined ones
@@ -125,6 +153,12 @@ def prompt(cwd, pr, repo):
         out.append("")
         for t, why in declined:
             out.append("- %s:%s — %s (%s)" % (t["path"], t["line"], headline(t["bodies"][0]), why))
+        out.append("")
+    waiting = pending_of(journal)
+    if waiting:
+        out.append("Findings already reported that are still waiting to be posted — do not "
+                   "report them again: %s." % "; ".join(
+                       "%s:%s — %s" % (f["path"], f["line"], f["title"]) for f in waiting))
         out.append("")
     fixed = [t for t, why in left if not why]
     if fixed:
@@ -169,15 +203,21 @@ def post(cwd, pr, repo, head, f):
     body = "**%s**\n\n%s\n\n%s · %s</sub>" % (f["title"], f["body"], LOCAL_SIGNATURE, head[:7])
     base = ["api", "repos/%s/pulls/%s/comments" % (repo, pr), "-f", "body=%s" % body,
             "-f", "commit_id=%s" % head, "-f", "path=%s" % f["path"]]
-    if gh(base + ["-F", "line=%d" % f["line"], "-f", "side=RIGHT"], cwd) is not None:
+    out, refused = gh_try(base + ["-F", "line=%d" % f["line"], "-f", "side=RIGHT"], cwd)
+    if out is not None:
         return "thread"
+    if not refused:
+        return None
     # GitHub takes a line only inside the diff's hunks, and a finding often
     # points at unchanged code beside them. On the file the thread has no
     # line of its own, so the body names it.
     body = "Line %d (outside the diff).\n\n%s" % (f["line"], body)
     base[base.index("-f") + 1] = "body=%s" % body
-    if gh(base + ["-f", "subject_type=file"], cwd) is not None:
+    out, refused = gh_try(base + ["-f", "subject_type=file"], cwd)
+    if out is not None:
         return "thread"
+    if not refused:
+        return None
     # A file the pull request does not change takes no review comment at all.
     # In the conversation it has no thread to resolve, so it is not signed as
     # the review's own: there it is a comment to answer, what people said,
@@ -204,9 +244,21 @@ def flush(cwd, pr, repo, journal):
             pending = json.load(fh)
     except (OSError, ValueError):
         return 0, 0
-    left = [f for f in pending if not post(cwd, pr, repo, f["head"], f)]
+    found = threads(cwd, pr, repo)
+    if found is None:
+        return 0, len(pending)
+    left = [f for f in pending
+            if not already(found, f) and not post(cwd, pr, repo, f["head"], f)]
     keep(path, left)
     return len(pending) - len(left), len(left)
+
+
+def pending_of(journal):
+    try:
+        with open(unposted_file(journal), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return []
 
 
 def keep(path, pending):
@@ -231,7 +283,7 @@ def resolve(cwd, t, how, head):
               cwd) is not None
 
 
-def record(cwd, pr, repo, answer_path, base, head, seconds, journal):
+def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0"):
     with open(answer_path, encoding="utf-8") as fh:
         found, resolved, count = parse(fh.read())
     if count is None:
@@ -249,6 +301,8 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal):
     posted = talked = 0
     lost = []
     for f in found:
+        if already(before, f):
+            continue
         where = post(cwd, pr, repo, head, f)
         if where:
             posted += 1
@@ -263,13 +317,7 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal):
     # Some did: the run stands, and the rest wait in a file of their own, to
     # be posted on the next call (flush) and counted open until they are.
     _, waiting = flush(cwd, pr, repo, journal)
-    path = unposted_file(journal)
-    try:
-        with open(path, encoding="utf-8") as fh:
-            pending = json.load(fh)
-    except (OSError, ValueError):
-        pending = []
-    keep(path, pending + lost)
+    keep(unposted_file(journal), pending_of(journal) + lost)
     closed = 0
     by_rid = {t["rid"]: t for t in checkable(cwd, before)}
     for rid, how in resolved.items():
@@ -280,14 +328,17 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal):
     began = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=int(seconds))
     row = {"at": began.isoformat(timespec="seconds"),
            "seconds": int(seconds), "base": base, "head": head,
-           "new": posted, "lost": len(lost), "resolved": closed}
+           "new": posted, "lost": len(lost), "resolved": closed,
+           # Found as many as the cap: likely stopped with more unsaid, so this
+           # head is not done — the next call reads the same range again.
+           "more": int(cap) > 0 and count >= int(cap)}
     with open(journal, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     after = threads(cwd, pr, repo)
     # Open: the threads, the findings still waiting to be posted, and the ones
     # posted to the conversation now, which have no thread to count them.
     still = open_count(cwd, after if after is not None else before)
-    print("%d %d" % (still + waiting + len(lost) + talked, posted))
+    print("%d %d %d" % (still + waiting + len(lost) + talked, posted, 1 if row["more"] else 0))
     return 0
 
 
@@ -315,15 +366,28 @@ def main(argv):
         return 2
     cmd, args = argv[0], argv[1:]
     if cmd == "cached" and len(args) == 2:
+        # Reviewed, and not left with more to read (a capped pass that the
+        # next one never followed, an interrupted review).
         last = rows(args[0])
-        return 0 if last and last[-1]["head"] == args[1] else 1
+        return 0 if last and last[-1]["head"] == args[1] and not last[-1].get("more") else 1
     if cmd == "base" and len(args) == 1:
         last = rows(args[0])
         print(last[-1]["head"] if last else "")
         return 0
-    if cmd == "prompt" and len(args) == 3:
+    if cmd == "since" and len(args) == 2:
+        # Where the next run starts: the last head reviewed, or — when that
+        # head is this one and was left with more — the same range again.
+        last = rows(args[0])
+        if not last:
+            print("")
+        elif last[-1]["head"] == args[1] and last[-1].get("more"):
+            print(last[-1].get("base") or "")
+        else:
+            print(last[-1]["head"])
+        return 0
+    if cmd == "prompt" and len(args) == 4:
         return prompt(*args)
-    if cmd == "record" and len(args) == 8:
+    if cmd in ("record",) and len(args) in (8, 9):
         return record(*args)
     if cmd == "open" and len(args) == 4:
         # Waiting findings first: posted now, they are threads below.

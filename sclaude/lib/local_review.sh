@@ -101,8 +101,10 @@ local_review() {
     python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null || return 1
     return 0
   fi
-  last="$(local_review_head "$wt")"
-  if [[ -n "$last" ]] && git -C "$wt" merge-base --is-ancestor "$last" "$head" 2>/dev/null; then
+  # From the last head reviewed — or, when this head was left with more to
+  # read (a capped pass whose follow-up never ran), over the same range again.
+  last="$(python3 "$LIB/local_review.py" since "$journal" "$head" 2>/dev/null || true)"
+  if [[ -n "$last" && "$last" != "$head" ]] && git -C "$wt" merge-base --is-ancestor "$last" "$head" 2>/dev/null; then
     base="$last"
     scope="the commits since the last review: \`git diff $base..$head\`"
   else
@@ -114,10 +116,10 @@ local_review() {
   info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${base:0:7}..${head:0:7}." >&2
   info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
 
-  local earlier began new pass=1
+  local earlier began new more cap pass=1
   answer="$(local_review_file "$wt" -answer.md)"
   while :; do
-    if ! earlier="$(python3 "$LIB/local_review.py" prompt "$wt" "$pr" "$repo" 2>>"$(local_review_file "$wt" .log)")"; then
+    if ! earlier="$(python3 "$LIB/local_review.py" prompt "$wt" "$pr" "$repo" "$journal" 2>>"$(local_review_file "$wt" .log)")"; then
       warn "  GitHub did not say which findings are open: the local review did not run pass $pass." >&2
       [[ "$pass" -gt 1 ]] || return 1
       count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
@@ -132,9 +134,12 @@ local_review() {
                "Bash(git push:*)" "Bash(git commit:*)" \
              2>"$(local_review_file "$wt" .log)")"
     printf '%s\n' "$out" > "$answer"
-    if ! read -r count new < <(python3 "$LIB/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
-                                 "$base" "$head" "$((SECONDS - began))" "$journal" \
-                                 2>>"$(local_review_file "$wt" .log)") || [[ -z "${count:-}" ]]; then
+    # The last pass allowed records no "more": the head is done with what it
+    # has, rather than read again on every later call.
+    cap="$LOCAL_REVIEW_CAP"; [[ "$pass" -ge "$LOCAL_REVIEW_PASSES" ]] && cap=0
+    if ! read -r count new more < <(python3 "$LIB/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
+                                      "$base" "$head" "$((SECONDS - began))" "$journal" "$cap" \
+                                      2>>"$(local_review_file "$wt" .log)") || [[ -z "${count:-}" ]]; then
       # A later pass that fails leaves the earlier ones recorded: the head
       # counts as reviewed with what they posted.
       if [[ "$pass" -gt 1 ]]; then
@@ -146,13 +151,15 @@ local_review() {
       warn "  Its answer: $answer; the next \`$SELF\` reviews this head again." >&2
       return 1
     fi
-    if [[ "$new" -lt "$LOCAL_REVIEW_CAP" || "$pass" -ge "$LOCAL_REVIEW_PASSES" ]]; then
-      [[ "$new" -ge "$LOCAL_REVIEW_CAP" ]] \
-        && warn "  Pass $pass still posted $new; stopping at $LOCAL_REVIEW_PASSES passes — more may be left unsaid." >&2
+    # By what the pass found, not what GitHub took: a capped pass with a
+    # finding refused is still capped.
+    if [[ "${more:-0}" != 1 ]]; then
+      [[ "$pass" -ge "$LOCAL_REVIEW_PASSES" && "$new" -ge "$LOCAL_REVIEW_CAP" ]] \
+        && warn "  Pass $pass still found the cap; stopping at $LOCAL_REVIEW_PASSES passes — more may be left unsaid." >&2
       break
     fi
     pass=$((pass + 1))
-    info "  That pass posted $new (the cap is $LOCAL_REVIEW_CAP): reading ${base:0:7}..${head:0:7} again for the rest, pass $pass." >&2
+    info "  That pass found the cap ($LOCAL_REVIEW_CAP): reading ${base:0:7}..${head:0:7} again for the rest, pass $pass." >&2
   done
   if [[ "$count" -eq 0 ]]; then
     info "  The local review leaves nothing open on PR #$pr." >&2
@@ -192,9 +199,10 @@ then a \`RESOLVED: <id> — <how, in a sentence>\` line for each earlier open fi
 TEXT
 }
 
-# One more round handed to a review session, for its row in the issue: the
-# threads it was given are counted by run_comments, as on GitHub; the rounds
-# there are the workflow's runs it worked through, here the local ones.
+# One more round handed to a resumed review session, for its row in the
+# issue: the threads it was given are counted by run_comments, as on GitHub;
+# the rounds are the reviews it worked through, the first counted when it
+# opened (run_rounds), one more for each local review that brought it back.
 #
 #   run_local_round <wt> <session>
 run_local_round() {
@@ -210,8 +218,7 @@ mine = [r for r in runs if isinstance(r, dict) and r.get("session") == session]
 if not mine:
     sys.exit(0)
 run = mine[-1]
-run["local_rounds"] = (run.get("local_rounds") or 0) + 1
-run["rounds"] = run["local_rounds"]
+run["rounds"] = (run.get("rounds") if isinstance(run.get("rounds"), int) else 0) + 1
 with open(path, "w") as fh:
     json.dump(data, fh, indent=2, ensure_ascii=False)
     fh.write("\n")

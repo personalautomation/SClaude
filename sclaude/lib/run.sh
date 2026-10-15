@@ -692,7 +692,6 @@ run_step() {
     step_run "$wt" "$step" open "$session"
     [[ "$step" == "review" ]] && run_comments "$wt" "$session" "$pr"
     [[ "$step" == "review" ]] && run_rounds "$wt" "$session" 1
-    [[ "$local_round" -eq 1 ]] && run_local_round "$wt" "$session"
     prompt="$(render_prompt "$step" "$slug" "$pr" "$issue" "$wt")"
     # QA's comments reach a fresh session too. They used to be read only on the
     # resume path, so a hand-back that arrived after the recorded session had
@@ -2284,6 +2283,11 @@ review_close_gate() {
           # run: once more with it, where the person decides whether to go
           # on fixing.
           review_report "$wt" "$slug"
+          # Open by its own count, not by asking GitHub again: a finding in
+          # the conversation, or one still waiting to be posted, is no thread
+          # for the pull request to show.
+          word="open: the review on this machine leaves $count finding(s) open"
+          break
         fi
         continue
       fi

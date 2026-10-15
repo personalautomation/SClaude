@@ -84,12 +84,6 @@ claude_launch() {
   set -- "${args[@]}"
   claude_launch_once "$@"
   status=$?
-  # Whether the session's screen is gone with it: a tab closes when claude
-  # exits, and its last message with it; in place it stays on the screen.
-  # session_ended prints it again for a tab (session_report). A file named
-  # by the session, not a variable: the caller runs this in a subshell, and
-  # a code reload replaces the process between the exit and that point.
-  [[ -n "$session" ]] && pane_mark "$session" "$SCLAUDE_IN_PANE"
   # Closed by the session watcher because the usage limit had reset, not
   # ended: opened again where it stopped. The arguments are the first
   # launch's up to and including `-n <name>`, which every caller passes
@@ -114,6 +108,13 @@ claude_launch() {
     claude_launch_once "${again[@]}" "$CLAUDE_LIMIT_RESUME"
     status=$?
   done
+  # Whether the session's screen is gone with it: a tab closes when claude
+  # exits, and its last message with it; in place it stays on the screen.
+  # session_ended prints it again for a tab (session_report). Marked after
+  # the last launch, the one the person left. A file named by the session,
+  # not a variable: the caller runs this in a subshell, and a code reload
+  # replaces the process between the exit and that point.
+  [[ -n "$session" ]] && pane_mark "$session" "$SCLAUDE_IN_PANE"
   return "$status"
 }
 

@@ -206,8 +206,19 @@ def local_runs(cwd):
     path = os.path.join(cwd, LOCAL_JOURNAL)
     if not os.path.exists(path):
         return None
-    return [{"start": parse(row["at"]), "seconds": float(row.get("seconds") or 0),
-             "running": False} for row in journal_rows(path)]
+    # The passes over one range — a capped pass and the ones that follow it
+    # for the rest — are one review, as the workflow's run is one however
+    # many findings it brings: one run, from the first pass's start.
+    out, last = [], None
+    for row in journal_rows(path):
+        key = (row.get("base"), row.get("head"))
+        if out and key == last:
+            out[-1]["seconds"] += float(row.get("seconds") or 0)
+            continue
+        out.append({"start": parse(row["at"]), "seconds": float(row.get("seconds") or 0),
+                    "running": False})
+        last = key
+    return out
 
 
 def rounds(found, runs):

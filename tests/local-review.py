@@ -113,9 +113,13 @@ if args[:2] == ["pr", "comment"]:
     save(); sys.exit(0)
 if args[:1] == ["api"] and args[1].endswith("/comments") and field("body"):
     path = field("path")
-    if (path == "elsewhere" or (path == "nowhere" and os.path.exists(world + ".down"))
-            or (path == "fileonly" and field("line"))):
-        sys.exit(1)
+    # GitHub refuses a line outside the diff, or a file outside the pull
+    # request, with a 422; "nowhere" while the world is down fails as a
+    # network does, without one.
+    if path == "nowhere" and os.path.exists(world + ".down"):
+        sys.stderr.write("connection reset\n"); sys.exit(1)
+    if path == "elsewhere" or (path == "fileonly" and field("line")):
+        sys.stderr.write("HTTP 422: Validation Failed\n"); sys.exit(1)
     n = data["next"]; data["next"] += 1
     data["threads"].append({"id": "T%d" % n, "isResolved": False, "path": path,
                             "line": int(field("line")) if field("line") else None,
@@ -364,10 +368,23 @@ try:
     check("partial-counts-waiting", out.strip(), str(open_before + 2))
     pending = os.path.join(repo, ".sclaude", "local", "feature", "local-review-unposted.json")
     check("partial-kept", os.path.exists(pending), True)
+    # Waiting, it is not to be reported again by the next run.
+    out_prompt = subprocess.run([sys.executable, os.path.join(LIB, "local_review.py"), "prompt",
+                                 repo, "7", "o/r", journal], cwd=repo, capture_output=True,
+                                text=True, env=dict(os.environ, GH_WORLD=world,
+                                                    PATH=stubs + os.pathsep + os.environ["PATH"])).stdout
+    check_true("partial-told-waiting", "nowhere:2 — refused" in out_prompt)
     os.remove(world + ".down")
     out, _, rc = review("FINDINGS: 0\n")
     check("partial-posted-later", [t["path"] for t in threads()][-1:], ["nowhere"])
     check("partial-no-longer-waiting", os.path.exists(pending), False)
+    # A post that timed out may have been taken: a finding whose thread is
+    # there already is not posted a second time.
+    write(pending, json.dumps([{"path": "nowhere", "line": 2, "title": "refused", "body": "y",
+                                "head": git("rev-parse", "HEAD", cwd=repo)}]))
+    before_n = len(threads())
+    review("FINDINGS: 0\n")
+    check("no-duplicate-thread", len(threads()), before_n)
     check("partial-cached-count", out.strip(), str(open_before + 2))
     prompts()
 
@@ -412,6 +429,24 @@ try:
             check_true(name + "-told-first-pass", "p1 0" in sent.split("---\n")[1])
         else:
             check_true(name + "-warned", "stopping at 2 passes" in err)
+    shutil.rmtree(os.path.join(tmp, "answers"), ignore_errors=True)
+
+    # A capped pass whose follow-up was interrupted: the head is not done,
+    # and the next call reads the same range again rather than nothing.
+    write(os.path.join(repo, "a.txt"), "cut\n")
+    git("commit", "-qam", "cut", cwd=repo)
+    git("push", "-q", cwd=repo)
+    prev = git("rev-parse", "HEAD~1", cwd=repo)
+    cut = git("rev-parse", "HEAD", cwd=repo)
+    queue(batch("c1", 2), "interrupted\n")
+    _, _, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo), {"LOCAL_REVIEW_CAP": "2"})
+    prompts()
+    check("cut-first-pass-stands", rc, 0)
+    _, _, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo), {"LOCAL_REVIEW_CAP": "2"})
+    again = prompts()
+    check("cut-not-cached", again.count("---\n"), 1)
+    check_true("cut-same-range", "git diff %s..%s" % (prev, cut) in again)
+    check_true("cut-told-first-pass", "c1 0" in again)
     shutil.rmtree(os.path.join(tmp, "answers"), ignore_errors=True)
 
     # No count in the answer, or nothing GitHub would take: nothing recorded,

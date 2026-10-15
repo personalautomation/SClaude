@@ -274,6 +274,8 @@ try:
     out, _, rc = review("### fileonly:9 — on the file\nx\n\nFINDINGS: 1\n")
     check("file-level-count", (out.strip(), rc), ("2", 0))
     check("file-level-thread", threads()[-1]["path"], "fileonly")
+    check_true("file-level-names-line",
+               threads()[-1]["comments"][0]["body"].startswith("Line 9 (outside the diff)."))
     prompts()
 
     # No count in the answer, or nothing GitHub would take: nothing recorded,

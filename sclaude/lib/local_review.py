@@ -178,6 +178,11 @@ def post(cwd, pr, repo, head, f):
             "-f", "commit_id=%s" % head, "-f", "path=%s" % f["path"]]
     if gh(base + ["-F", "line=%d" % f["line"], "-f", "side=RIGHT"], cwd) is not None:
         return True
+    # GitHub takes a line only inside the diff's hunks, and a finding often
+    # points at unchanged code beside them. On the file the thread has no
+    # line of its own, so the body names it.
+    body = "Line %d (outside the diff).\n\n%s" % (f["line"], body)
+    base[base.index("-f") + 1] = "body=%s" % body
     return gh(base + ["-f", "subject_type=file"], cwd) is not None
 
 

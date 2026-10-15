@@ -21,7 +21,8 @@
 #   local_review.py record <cwd> <pr> <repo> <answer> <base> <head> <seconds> <journal>
 #                                                 post the run's new findings, resolve
 #                                                 the ones it judged fixed, print how
-#                                                 many are open; exit 1 when the answer
+#                                                 many are open and how many it posted;
+#                                                 exit 1 when the answer
 #                                                 has no count or nothing could be posted
 #   local_review.py open <cwd> <pr> <repo>        how many threads are open now
 #
@@ -237,7 +238,7 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal):
     with open(journal, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     after = threads(cwd, pr, repo)
-    print(open_count(cwd, after if after is not None else before))
+    print("%d %d" % (open_count(cwd, after if after is not None else before), posted))
     return 0
 
 

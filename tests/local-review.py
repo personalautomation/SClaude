@@ -131,8 +131,12 @@ try:
     calls = os.path.join(tmp, "claude.calls")
     write(os.path.join(stubs, "gh"), GH, 0o755)
     # claude: records its prompt, answers with whatever the answer file holds.
+    # With answers queued in answers/, one per call, oldest first.
     write(os.path.join(stubs, "claude"),
-          '#!/bin/sh\nprintf "%%s\\n---\\n" "$2" >> "%s"\ncat "%s/answer"\n' % (calls, tmp), 0o755)
+          '#!/bin/sh\nprintf "%%s\\n---\\n" "$2" >> "%s"\n'
+          'q="%s/answers"; f=$(ls "$q" 2>/dev/null | head -n 1)\n'
+          'if [ -n "$f" ]; then cat "$q/$f"; rm "$q/$f"; else cat "%s/answer"; fi\n'
+          % (calls, tmp, tmp), 0o755)
 
     remote = os.path.join(tmp, "o", "r.git")
     os.makedirs(remote)
@@ -157,14 +161,15 @@ try:
     config = os.path.join(repo, ".sclaude", "config.json")
     journal = os.path.join(repo, ".sclaude", "local", "feature", "local-review-rounds.jsonl")
 
-    def run_bash(script):
+    def run_bash(script, env_extra=None):
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""; SELF=sclaude\n'
         for name in ("io", "ui", "state", "project", "picker", "local_review"):
             body += 'source "%s/%s.sh"\n' % (LIB, name)
         body += 'LIB="%s"\nwarn() { echo "$*" >&2; }\ninfo() { echo "$*"; }\n' % LIB
         body += script
-        env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"], GH_WORLD=world)
+        env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"], GH_WORLD=world,
+                   **(env_extra or {}))
         out = subprocess.run(["bash", "-c", body], cwd=repo, capture_output=True,
                              text=True, timeout=60, env=env)
         return out.stdout, out.stderr, out.returncode
@@ -348,6 +353,40 @@ try:
     check_true("journal-dated-at-start",
                began <= datetime.datetime.now(datetime.timezone.utc)
                - datetime.timedelta(seconds=last["seconds"]) + datetime.timedelta(seconds=5))
+
+    # A pass that posts the cap or more is followed by another over the same
+    # range, told what was just posted, until one posts less — or the passes
+    # run out.
+    def queue(*answers):
+        q = os.path.join(tmp, "answers")
+        os.makedirs(q, exist_ok=True)
+        for i, a in enumerate(answers):
+            write(os.path.join(q, "%02d" % i), a)
+
+    def batch(tag, n):
+        return "".join("### a.txt:1 — %s %d\nx\n\n" % (tag, i) for i in range(n)) + "FINDINGS: %d\n" % n
+
+    for name, passes, answers, want_calls in (
+            ("cap-reruns", "5", (batch("p1", 2), batch("p2", 2), batch("p3", 1)), 3),
+            ("cap-passes-limit", "2", (batch("q1", 2), batch("q2", 2), batch("q3", 1)), 2)):
+        write(os.path.join(repo, "a.txt"), name + "\n")
+        git("commit", "-qam", name, cwd=repo)
+        git("push", "-q", cwd=repo)
+        shutil.rmtree(os.path.join(tmp, "answers"), ignore_errors=True)
+        queue(*answers)
+        posted_before = len(threads())
+        out, err, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo),
+                                {"LOCAL_REVIEW_CAP": "2", "LOCAL_REVIEW_PASSES": passes})
+        sent = prompts()
+        check(name + "-rc", rc, 0)
+        check(name + "-passes", sent.count("---\n"), want_calls)
+        check(name + "-posted", len(threads()) - posted_before, 5 if want_calls == 3 else 4)
+        if want_calls == 3:
+            # The second pass is told what the first just posted.
+            check_true(name + "-told-first-pass", "p1 0" in sent.split("---\n")[1])
+        else:
+            check_true(name + "-warned", "stopping at 2 passes" in err)
+    shutil.rmtree(os.path.join(tmp, "answers"), ignore_errors=True)
 
     # No count in the answer, or nothing GitHub would take: nothing recorded,
     # so the next run reviews the same head again.

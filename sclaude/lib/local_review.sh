@@ -29,6 +29,13 @@
 # How the headless review runs. The workflow's own choice: Opus at `medium`.
 LOCAL_REVIEW_MODEL="${LOCAL_REVIEW_MODEL:-opus}"
 LOCAL_REVIEW_LEVEL="${LOCAL_REVIEW_LEVEL:-medium}"
+# A pass that posts this many new findings or more has likely stopped at the
+# review's own cap with more left unsaid, so the same range is read again,
+# told what was just posted, for the next batch — what the workflow does by
+# leaving a capped run's commit unmarked. At most LOCAL_REVIEW_PASSES passes
+# a head, so a review that keeps finding cannot hold the step for ever.
+LOCAL_REVIEW_CAP="${LOCAL_REVIEW_CAP:-10}"
+LOCAL_REVIEW_PASSES="${LOCAL_REVIEW_PASSES:-5}"
 
 # The local review's own files, beside the feature's other scratch. The
 # findings are not among them: they are threads on the pull request.
@@ -105,25 +112,46 @@ local_review() {
   info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${base:0:7}..${head:0:7}." >&2
   info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
 
-  local earlier
-  earlier="$(python3 "$LIB/local_review.py" prompt "$wt" "$pr" "$repo" 2>>"$(local_review_file "$wt" .log)")" \
-    || { warn "  GitHub did not say which findings are open: the local review did not run." >&2; return 1; }
-  local began=$SECONDS
-  out="$(cd "$wt" && claude -p "$(local_review_prompt "$pr" "$head" "$scope" "$earlier")" \
-           --model "$LOCAL_REVIEW_MODEL" \
-           --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
-             "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
-           --disallowedTools "Edit" "Write" "NotebookEdit" "Bash(gh:*)" \
-             "Bash(git push:*)" "Bash(git commit:*)" \
-           2>"$(local_review_file "$wt" .log)")"
+  local earlier began new pass=1
   answer="$(local_review_file "$wt" -answer.md)"
-  printf '%s\n' "$out" > "$answer"
-  if ! count="$(python3 "$LIB/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
-                  "$base" "$head" "$((SECONDS - began))" "$journal" 2>>"$(local_review_file "$wt" .log)")"; then
-    warn "  The local review was not recorded: no findings count in its answer, or GitHub took none of them." >&2
-    warn "  Its answer: $answer; the next \`$SELF\` reviews this head again." >&2
-    return 1
-  fi
+  while :; do
+    if ! earlier="$(python3 "$LIB/local_review.py" prompt "$wt" "$pr" "$repo" 2>>"$(local_review_file "$wt" .log)")"; then
+      warn "  GitHub did not say which findings are open: the local review did not run pass $pass." >&2
+      [[ "$pass" -gt 1 ]] || return 1
+      count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" 2>/dev/null)" || return 1
+      break
+    fi
+    began=$SECONDS
+    out="$(cd "$wt" && claude -p "$(local_review_prompt "$pr" "$head" "$scope" "$earlier")" \
+             --model "$LOCAL_REVIEW_MODEL" \
+             --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
+               "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
+             --disallowedTools "Edit" "Write" "NotebookEdit" "Bash(gh:*)" \
+               "Bash(git push:*)" "Bash(git commit:*)" \
+             2>"$(local_review_file "$wt" .log)")"
+    printf '%s\n' "$out" > "$answer"
+    if ! read -r count new < <(python3 "$LIB/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
+                                 "$base" "$head" "$((SECONDS - began))" "$journal" \
+                                 2>>"$(local_review_file "$wt" .log)") || [[ -z "${count:-}" ]]; then
+      # A later pass that fails leaves the earlier ones recorded: the head
+      # counts as reviewed with what they posted.
+      if [[ "$pass" -gt 1 ]]; then
+        warn "  Pass $pass of the local review was not recorded; the first $((pass - 1)) stand." >&2
+        count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" 2>/dev/null)" || return 1
+        break
+      fi
+      warn "  The local review was not recorded: no findings count in its answer, or GitHub took none of them." >&2
+      warn "  Its answer: $answer; the next \`$SELF\` reviews this head again." >&2
+      return 1
+    fi
+    if [[ "$new" -lt "$LOCAL_REVIEW_CAP" || "$pass" -ge "$LOCAL_REVIEW_PASSES" ]]; then
+      [[ "$new" -ge "$LOCAL_REVIEW_CAP" ]] \
+        && warn "  Pass $pass still posted $new; stopping at $LOCAL_REVIEW_PASSES passes — more may be left unsaid." >&2
+      break
+    fi
+    pass=$((pass + 1))
+    info "  That pass posted $new (the cap is $LOCAL_REVIEW_CAP): reading ${base:0:7}..${head:0:7} again for the rest, pass $pass." >&2
+  done
   if [[ "$count" -eq 0 ]]; then
     info "  The local review leaves nothing open on PR #$pr." >&2
   else

@@ -107,13 +107,14 @@ if args[:2] == ["pr", "view"] and "headRefOid" in " ".join(args):
                          capture_output=True, text=True).stdout.strip())
     sys.exit(0)
 if args[:2] == ["pr", "comment"]:
-    if "nowhere" in args[-1]:
+    if "nowhere" in args[-1] and os.path.exists(world + ".down"):
         sys.exit(1)
     data.setdefault("conversation", []).append(args[-1])
     save(); sys.exit(0)
 if args[:1] == ["api"] and args[1].endswith("/comments") and field("body"):
     path = field("path")
-    if path in ("nowhere", "elsewhere") or (path == "fileonly" and field("line")):
+    if (path == "elsewhere" or (path == "nowhere" and os.path.exists(world + ".down"))
+            or (path == "fileonly" and field("line"))):
         sys.exit(1)
     n = data["next"]; data["next"] += 1
     data["threads"].append({"id": "T%d" % n, "isResolved": False, "path": path,
@@ -298,11 +299,16 @@ try:
     write(os.path.join(repo, "a.txt"), "e2\n")
     git("commit", "-qam", "more2", cwd=repo)
     git("push", "-q", cwd=repo)
+    open_before = sum(1 for t in threads() if not t["isResolved"])
     out, _, rc = review("### elsewhere:4 — a caller breaks\nx\n\nFINDINGS: 1\n")
     check("outside-pr-recorded", rc, 0)
+    # It has no thread to count it, so this run counts it open: the step
+    # must not close as if the review found nothing.
+    check("outside-pr-counted-open", out.strip(), str(open_before + 1))
     with open(world) as fh:
-        check_true("outside-pr-in-conversation",
-                   "`elsewhere:4` (not in this pull request's diff)" in json.load(fh)["conversation"][-1])
+        said = json.load(fh)["conversation"][-1]
+    check_true("outside-pr-in-conversation", "`elsewhere:4` (not in this pull request's diff)" in said)
+    check("outside-pr-not-signed", pr_context.signed_locally(said), False)
     prompts()
 
     # Headings as models drift from the format are read all the same; a
@@ -340,10 +346,30 @@ try:
     check("person-thread-rc", rc, 0)
     third = prompts()
     check_true("person-thread-not-handed", "r900" not in third and "r101 ·" not in third)
+    check_true("kept-thread-told-declined", "(mine)" in third)
     t = {x["id"]: x for x in threads()}
     check("person-thread-not-resolved", t["TP"]["isResolved"], False)
     check("kept-thread-not-resolved", t["T1"]["isResolved"], False)
     os.remove(os.path.join(repo, ".sclaude", "local", "feature", "review-yours"))
+
+    # Some findings posted, one refused: the run stands, the refused one
+    # waits, counted open, and goes up on the next call.
+    write(os.path.join(repo, "a.txt"), "e4\n")
+    git("commit", "-qam", "more4", cwd=repo)
+    git("push", "-q", cwd=repo)
+    open(world + ".down", "w").close()
+    open_before = sum(1 for t in threads() if not t["isResolved"])
+    out, _, rc = review("### a.txt:1 — taken\nx\n\n### nowhere:2 — refused\ny\n\nFINDINGS: 2\n")
+    check("partial-rc", rc, 0)
+    check("partial-counts-waiting", out.strip(), str(open_before + 2))
+    pending = os.path.join(repo, ".sclaude", "local", "feature", "local-review-unposted.json")
+    check("partial-kept", os.path.exists(pending), True)
+    os.remove(world + ".down")
+    out, _, rc = review("FINDINGS: 0\n")
+    check("partial-posted-later", [t["path"] for t in threads()][-1:], ["nowhere"])
+    check("partial-no-longer-waiting", os.path.exists(pending), False)
+    check("partial-cached-count", out.strip(), str(open_before + 2))
+    prompts()
 
     # The journal dates a run by its start, as the workflow's runs are dated.
     with open(journal) as fh:
@@ -397,7 +423,9 @@ try:
         before = fh.read()
     _, _, rc = review("I could not finish.\n")
     check("no-count-fails", rc, 1)
+    open(world + ".down", "w").close()
     _, _, rc = review("### nowhere:1 — lost\nx\n\nFINDINGS: 1\n")
+    os.remove(world + ".down")
     check("nothing-posted-fails", rc, 1)
     with open(journal) as fh:
         check("failures-not-recorded", fh.read(), before)

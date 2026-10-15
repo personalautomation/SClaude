@@ -38,7 +38,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import acceptance  # noqa: E402
 import issue_comments  # noqa: E402
-from pr_context import FINDINGS_CHECK, GREEN, gh, gh_json, review_mode  # noqa: E402
+from pr_context import FINDINGS_CHECK, GREEN, gh, gh_json, pr_view, review_mode  # noqa: E402
 from review_report import local_runs  # noqa: E402
 
 
@@ -199,8 +199,7 @@ def summary(cwd, pr, state_path, done, numbers):
     except (OSError, ValueError):
         state = {}
     repo = repo_of(cwd)
-    view = gh_json(["pr", "view", str(pr), "--json",
-                    "headRefOid,statusCheckRollup"], cwd=cwd) or {}
+    view = pr_view(cwd, pr, "headRefOid,statusCheckRollup") or {}
     head = view.get("headRefOid") or ""
 
     rows = []
@@ -219,8 +218,9 @@ def summary(cwd, pr, state_path, done, numbers):
                      % ("⚠ " if unresolved else "", total, total - unresolved, unresolved)))
     # Reviewed on this machine: its findings are threads like the workflow's,
     # counted above, but its runs are in its journal, not on the commits.
-    runs = local_runs(cwd) if review_mode(cwd) == "local" else None
-    if runs is not None:
+    local = review_mode(cwd) == "local"
+    runs = (local_runs(cwd) or []) if local else None
+    if local:
         rows.append(("Last review", "on this machine, %d run%s, the last at %s"
                      % (len(runs), "" if len(runs) == 1 else "s",
                         runs[-1]["start"].strftime("%Y-%m-%d %H:%M UTC")) if runs

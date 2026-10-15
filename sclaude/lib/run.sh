@@ -836,7 +836,9 @@ session_ended() {
   # Left by the person in a tab of its own: the tab closed with its last
   # message, which is often the one that says what is left — once a review
   # session's account of what it resolved and what it waits for went with it.
-  [[ -z "$SESSION_AUTO_CLOSED" && -n "${SCLAUDE_IN_PANE:-}" ]] && session_report "$wt" "$session"
+  if pane_marked "$session" && [[ -z "$SESSION_AUTO_CLOSED" ]]; then
+    session_report "$wt" "$session"
+  fi
   plan_report "$wt" "$step"
   [[ "$step" == "review" ]] && { review_yours_report "$wt" "$pr" || true; }
   [[ "$step" == "review" ]] && review_report "$wt" "$slug"

@@ -8,7 +8,7 @@
 #   * run_local_round adds a round to the review session handed one, for its
 #     row in the issue;
 #   * in `local` the checks GitHub Actions ran are dropped from every reading
-#     of the pull request (gh_json), and the mode is read from the main
+#     of the pull request (pr_view), and the mode is read from the main
 #     checkout first;
 #   * the local review's own words are not taken for a person's.
 #
@@ -111,16 +111,16 @@ try:
     real_gh, real_mode = pr_context.gh, pr_context.review_mode
     pr_context.gh = lambda args, cwd=None: json.dumps({"statusCheckRollup": rollup})
     pr_context.review_mode = lambda cwd: "local"
-    got = pr_context.gh_json(["pr", "view", "7", "--json", "statusCheckRollup"])
+    got = pr_context.pr_view(None, 7, "statusCheckRollup")
     check("local-drops-actions", [c.get("name") for c in got["statusCheckRollup"]], ["Vercel"])
     # The findings check also comes as a check run made through the API: it
     # names no workflow, only itself.
     check("local-drops-findings-run", pr_context.without_actions(
         [{"name": pr_context.FINDINGS_CHECK, "workflowName": "", "conclusion": "FAILURE"}]), [])
-    got = pr_context.gh_json(["api", "repos/o/r/commits/x/check-runs"])
-    check("local-other-calls-untouched", len(got["statusCheckRollup"]), 3)
-    pr_context.review_mode = lambda cwd: "github"
     got = pr_context.gh_json(["pr", "view", "7", "--json", "statusCheckRollup"])
+    check("raw-read-untouched", len(got["statusCheckRollup"]), 3)
+    pr_context.review_mode = lambda cwd: "github"
+    got = pr_context.pr_view(None, 7, "statusCheckRollup")
     check("github-keeps-actions", len(got["statusCheckRollup"]), 3)
     pr_context.gh, pr_context.review_mode = real_gh, real_mode
 

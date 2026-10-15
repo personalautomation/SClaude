@@ -84,6 +84,12 @@ claude_launch() {
   set -- "${args[@]}"
   claude_launch_once "$@"
   status=$?
+  # Whether the session's screen is gone with it: a tab closes when claude
+  # exits, and its last message with it; in place it stays on the screen.
+  # session_ended prints it again for a tab (session_report). A file named
+  # by the session, not a variable: the caller runs this in a subshell, and
+  # a code reload replaces the process between the exit and that point.
+  [[ -n "$session" ]] && pane_mark "$session" "$SCLAUDE_IN_PANE"
   # Closed by the session watcher because the usage limit had reset, not
   # ended: opened again where it stopped. The arguments are the first
   # launch's up to and including `-n <name>`, which every caller passes
@@ -156,14 +162,24 @@ named_with_icon() {
   printf '%s %s/%s' "$head" "$icon" "${name#*/}"
 }
 
+# The mark a session that ran in a tab leaves for session_ended.
+#
+#   pane_mark <session> <1 or empty>   set or clear it
+#   pane_marked <session>              true once, when it was set; clears it
+pane_mark() {
+  local file="${TMPDIR:-/tmp}/sclaude-in-pane-$1"
+  if [[ -n "$2" ]]; then : > "$file"; else rm -f "$file"; fi
+}
+pane_marked() {
+  local file="${TMPDIR:-/tmp}/sclaude-in-pane-$1"
+  [[ -e "$file" ]] || return 1
+  rm -f "$file"
+}
+
 # One launch of claude, in a tab or in place. claude_launch around it adds the
 # return after a usage limit.
 claude_launch_once() {
-  # Whether the session's screen is gone with it: a tab closes when claude
-  # exits, and its last message with it; in place it stays on the screen.
-  # session_ended prints it again for a tab (session_report). Exported, since
-  # a code reload replaces this process between the exit and that point.
-  export SCLAUDE_IN_PANE=""
+  SCLAUDE_IN_PANE=""
   if ! pane_available; then
     claude_here "$@"
     return

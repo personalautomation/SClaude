@@ -24,7 +24,8 @@
 #                                                 many are open and how many it posted;
 #                                                 exit 1 when the answer
 #                                                 has no count or nothing could be posted
-#   local_review.py open <cwd> <pr> <repo>        how many threads are open now
+#   local_review.py open <cwd> <pr> <repo> <journal>  post what waits to be posted,
+#                                                 then say how many are open
 #
 # The journal (local-review-rounds.jsonl) is one line per run: when, how long,
 # which range, how many new and resolved. It is what the report counts rounds
@@ -36,8 +37,8 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pr_context import (DECLINE_PREFIX, LOCAL_SIGNATURE, RESOLVER_PREFIX, gh,  # noqa: E402
-                        headline, review_threads, split_yours, yours)
+from pr_context import (LOCAL_SIGNATURE, RESOLVER_PREFIX, decline_of, gh,  # noqa: E402
+                        headline, review_threads, signed_locally, split_yours, yours)
 
 # A finding's heading as the prompt asks for it, `### <path>:<line> — <title>`,
 # and the ways a model drifts from it: the path in backticks, a range of
@@ -66,10 +67,11 @@ def threads(cwd, pr, repo):
         out.append({"id": t.get("id"), "rid": "r" + rid.group(1) if rid else "",
                     "resolved": bool(t.get("isResolved")),
                     "review": (((first.get("author") or {}).get("__typename")) == "Bot"
-                               or LOCAL_SIGNATURE in (first.get("body") or "")),
+                               or signed_locally(first.get("body"))),
                     "path": t.get("path") or "?",
                     "line": t.get("line") or t.get("originalLine") or "?", "url": url,
-                    "bodies": [c.get("body") or "" for c in comments]})
+                    "bodies": [c.get("body") or "" for c in comments],
+                    "decision": decline_of(comments[1:])})
     return out
 
 
@@ -78,17 +80,6 @@ def checkable(cwd, found):
     less the ones the person keeps to resolve by hand (review-yours)."""
     kept = yours(cwd)
     return [t for t in found if not t["resolved"] and t["review"] and t["url"] not in kept]
-
-
-def decline_of(t):
-    """The author's decision on a declined thread, or None."""
-    for body in reversed(t["bodies"][1:]):
-        text = body.lstrip()
-        if text.startswith(RESOLVER_PREFIX):
-            return None
-        if text.startswith(DECLINE_PREFIX):
-            return text.split(":", 1)[-1].strip() or "left as it is"
-    return None
 
 
 def open_count(cwd, found):
@@ -118,8 +109,15 @@ def prompt(cwd, pr, repo):
             out.append("- %s · %s:%s — %s" % (t["rid"], t["path"], t["line"],
                                               headline(t["bodies"][0])))
         out.append("")
-    left = [(t, decline_of(t)) for t in found if t["resolved"] and t["review"]]
-    declined = [(t, why) for t, why in left if why]
+    # Declined: resolved with the author's decision, or still open and kept
+    # in review-yours for the person to resolve by hand — not handed to the
+    # run above, so said here, or it would raise them again.
+    kept = yours(cwd)
+    declined = [(t, t["decision"]) for t in found
+                if t["review"] and t["resolved"] and t["decision"]]
+    declined += [(t, kept[t["url"]] or t["decision"] or "left as it is") for t in found
+                 if t["review"] and not t["resolved"] and t["url"] in kept]
+    left = [(t, t["decision"]) for t in found if t["resolved"] and t["review"]]
     if declined:
         out.append("Findings the author decided to leave as they are, with the reason — do not "
                    "report one of them again, reworded or on another line, unless the code it "
@@ -166,25 +164,60 @@ def parse(answer):
 
 
 def post(cwd, pr, repo, head, f):
-    """One finding as a thread on its line, else on its file; False when
-    GitHub would take neither."""
+    """One finding as a thread on its line, else on its file, else in the
+    conversation: "thread", "conversation", or None when GitHub took none."""
     body = "**%s**\n\n%s\n\n%s · %s</sub>" % (f["title"], f["body"], LOCAL_SIGNATURE, head[:7])
     base = ["api", "repos/%s/pulls/%s/comments" % (repo, pr), "-f", "body=%s" % body,
             "-f", "commit_id=%s" % head, "-f", "path=%s" % f["path"]]
     if gh(base + ["-F", "line=%d" % f["line"], "-f", "side=RIGHT"], cwd) is not None:
-        return True
+        return "thread"
     # GitHub takes a line only inside the diff's hunks, and a finding often
     # points at unchanged code beside them. On the file the thread has no
     # line of its own, so the body names it.
     body = "Line %d (outside the diff).\n\n%s" % (f["line"], body)
     base[base.index("-f") + 1] = "body=%s" % body
     if gh(base + ["-f", "subject_type=file"], cwd) is not None:
-        return True
-    # A file the pull request does not change takes no review comment at
-    # all. In the conversation the finding is at least read; it has no
-    # thread to resolve, as on GitHub a finding the workflow could not place.
-    return gh(["pr", "comment", str(pr), "--body", "`%s:%d` (not in this pull request's diff)."
-               "\n\n%s" % (f["path"], f["line"], body)], cwd) is not None
+        return "thread"
+    # A file the pull request does not change takes no review comment at all.
+    # In the conversation it has no thread to resolve, so it is not signed as
+    # the review's own: there it is a comment to answer, what people said,
+    # and step 4 does not close past it.
+    text = ("`%s:%d` (not in this pull request's diff) — **%s**\n\n%s\n\n"
+            "_From the review run on this machine, on %s._"
+            % (f["path"], f["line"], f["title"], f["body"], head[:7]))
+    if gh(["pr", "comment", str(pr), "--body", text], cwd) is not None:
+        return "conversation"
+    return None
+
+
+def unposted_file(journal):
+    """Findings GitHub would not take, kept to be posted on the next call."""
+    return os.path.join(os.path.dirname(journal), "local-review-unposted.json")
+
+
+def flush(cwd, pr, repo, journal):
+    """Post what an earlier run could not, on the head it was found on.
+    (posted, still pending)."""
+    path = unposted_file(journal)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            pending = json.load(fh)
+    except (OSError, ValueError):
+        return 0, 0
+    left = [f for f in pending if not post(cwd, pr, repo, f["head"], f)]
+    keep(path, left)
+    return len(pending) - len(left), len(left)
+
+
+def keep(path, pending):
+    if not pending:
+        if os.path.exists(path):
+            os.remove(path)
+        return
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(pending, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 
 def resolve(cwd, t, how, head):
@@ -213,17 +246,30 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal):
     if before is None:
         sys.stderr.write("GitHub could not be read; nothing posted\n")
         return 1
-    posted = lost = 0
+    posted = talked = 0
+    lost = []
     for f in found:
-        if post(cwd, pr, repo, head, f):
+        where = post(cwd, pr, repo, head, f)
+        if where:
             posted += 1
+            talked += where == "conversation"
         else:
-            lost += 1
+            lost.append(dict(f, head=head))
             sys.stderr.write("could not post %s:%s — %s\n" % (f["path"], f["line"], f["title"]))
     if lost and not posted:
         # Nothing reached GitHub: the run is not recorded, so the next one
         # reviews the same head again rather than losing what this one found.
         return 1
+    # Some did: the run stands, and the rest wait in a file of their own, to
+    # be posted on the next call (flush) and counted open until they are.
+    _, waiting = flush(cwd, pr, repo, journal)
+    path = unposted_file(journal)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            pending = json.load(fh)
+    except (OSError, ValueError):
+        pending = []
+    keep(path, pending + lost)
     closed = 0
     by_rid = {t["rid"]: t for t in checkable(cwd, before)}
     for rid, how in resolved.items():
@@ -234,15 +280,21 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal):
     began = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=int(seconds))
     row = {"at": began.isoformat(timespec="seconds"),
            "seconds": int(seconds), "base": base, "head": head,
-           "new": posted, "lost": lost, "resolved": closed}
+           "new": posted, "lost": len(lost), "resolved": closed}
     with open(journal, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     after = threads(cwd, pr, repo)
-    print("%d %d" % (open_count(cwd, after if after is not None else before), posted))
+    # Open: the threads, the findings still waiting to be posted, and the ones
+    # posted to the conversation now, which have no thread to count them.
+    still = open_count(cwd, after if after is not None else before)
+    print("%d %d" % (still + waiting + len(lost) + talked, posted))
     return 0
 
 
 def rows(journal):
+    """The journal's runs, oldest first: each a dict with at least `at` (the
+    run's start, ISO) and `head`. The one reader of the file; the report
+    reads it through here."""
     out = []
     try:
         with open(journal, encoding="utf-8") as fh:
@@ -251,7 +303,7 @@ def rows(journal):
                     row = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(row, dict) and row.get("head"):
+                if isinstance(row, dict) and row.get("head") and row.get("at"):
                     out.append(row)
     except OSError:
         pass
@@ -273,11 +325,13 @@ def main(argv):
         return prompt(*args)
     if cmd == "record" and len(args) == 8:
         return record(*args)
-    if cmd == "open" and len(args) == 3:
-        found = threads(*args)
+    if cmd == "open" and len(args) == 4:
+        # Waiting findings first: posted now, they are threads below.
+        _, waiting = flush(args[0], args[1], args[2], args[3])
+        found = threads(*args[:3])
         if found is None:
             return 1
-        print(open_count(args[0], found))
+        print(open_count(args[0], found) + waiting)
         return 0
     return 2
 

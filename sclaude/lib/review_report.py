@@ -56,8 +56,9 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pr_context import (DECLINE_PREFIX, RESOLVER_PREFIX, SKIP_SECONDS, gh_json,  # noqa: E402
-                        is_claude_review, review_mode, yours)
+from pr_context import (SKIP_SECONDS, decline_of, gh_json, is_claude_review,  # noqa: E402
+                        review_mode, yours)
+from local_review import rows as journal_rows  # noqa: E402
 
 QUERY = """
 query($owner: String!, $name: String!, $number: Int!, $after: String) {
@@ -110,16 +111,9 @@ def parse(ts):
 
 
 def declined(replies):
-    """Whether the thread's last decision reply is the author's decline."""
-    last = None
-    for c in replies:
-        body = (c.get("body") or "").lstrip()
-        if body.startswith(RESOLVER_PREFIX):
-            last = "fixed"
-        elif (body.startswith(DECLINE_PREFIX)
-              and ((c.get("author") or {}).get("__typename")) != "Bot"):
-            last = "declined"
-    return last == "declined"
+    """Whether the thread's last decision reply is the author's decline
+    (pr_context.decline_of, the one copy of the rule)."""
+    return decline_of(replies) is not None
 
 
 def threads(cwd, pr, repo):
@@ -207,22 +201,13 @@ LOCAL_JOURNAL = ".sclaude/local/feature/local-review-rounds.jsonl"
 
 def local_runs(cwd):
     """The local review's runs, oldest first, shaped as review_runs gives the
-    workflow's; None when the feature has no journal."""
-    out = []
-    try:
-        with open(os.path.join(cwd, LOCAL_JOURNAL), encoding="utf-8") as fh:
-            for line in fh:
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                at = parse(row.get("at")) if isinstance(row, dict) else None
-                if at:
-                    out.append({"start": at, "seconds": float(row.get("seconds") or 0),
-                                "running": False})
-    except OSError:
+    workflow's; None when the feature has no journal. Read by the journal's
+    own reader (local_review.rows), so both agree on what a run is."""
+    path = os.path.join(cwd, LOCAL_JOURNAL)
+    if not os.path.exists(path):
         return None
-    return out
+    return [{"start": parse(row["at"]), "seconds": float(row.get("seconds") or 0),
+             "running": False} for row in journal_rows(path)]
 
 
 def rounds(found, runs):

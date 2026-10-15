@@ -92,15 +92,24 @@ def gh_json(args, cwd=None):
         data = json.loads(out)
     except ValueError:
         return None
-    # A project reviewed on this machine does not run its flow on GitHub
-    # Actions at all — it chose that because the minutes ran out, and with
-    # none left every workflow still starts and fails at once, red. So no
-    # verdict of the cycle may rest on them: the checks are taken out of the
-    # pull request as read here, its one door, and what is left is what does
-    # not run on Actions (a Vercel deployment). What the Actions checks did
-    # is the regression's `local` stage, which sclaude runs itself.
-    if (args[:2] == ["pr", "view"] and isinstance(data, dict)
-            and "statusCheckRollup" in data and review_mode(cwd) == "local"):
+    return data
+
+
+def pr_view(cwd, pr, fields):
+    """`gh pr view <pr> --json <fields>`, the pull request as every verdict of
+    the cycle reads it; None when GitHub cannot be read.
+
+    A project reviewed on this machine does not run its flow on GitHub
+    Actions at all — it chose that because the minutes ran out, and with
+    none left every workflow still starts and fails at once, red. So no
+    verdict may rest on them: their checks are taken out of the rollup here,
+    and what is left is what does not run on Actions (a deployment). What the
+    Actions checks did is the regression's `local` stage, which sclaude runs
+    itself. Read the pull request's checks through this, never around it.
+    """
+    data = gh_json(["pr", "view", str(pr), "--json", fields], cwd=cwd)
+    if (isinstance(data, dict) and "statusCheckRollup" in data
+            and review_mode(cwd) == "local"):
         data["statusCheckRollup"] = without_actions(data.get("statusCheckRollup") or [])
     return data
 
@@ -250,8 +259,7 @@ def render_new(cwd, pr, repo, since):
     if not pr or mark is None:
         return ""
 
-    view = gh_json(["pr", "view", str(pr), "--json",
-                    "statusCheckRollup,comments,headRefOid"], cwd=cwd)
+    view = pr_view(cwd, pr, "statusCheckRollup,comments,headRefOid")
     if view is None:
         return ""
 
@@ -366,6 +374,31 @@ DECLINE_PREFIX = "Left as it is"
 # machine posts (local_review.py): it posts under the person's account, and
 # this is how its words are told from theirs.
 LOCAL_SIGNATURE = "<sub>Local review"
+
+
+def decline_of(comments):
+    """The author's decision on a thread, from its replies, or None: the last
+    decision reply decides, the resolver's "Resolved automatically" (fixed)
+    or a "Left as it is" from anyone but a Bot (declined). FINDINGS_DECLINED's
+    rule in the project's review workflow; review_report.py and the local
+    review read it here. Each comment is {"body", "author": {"__typename"}}."""
+    last = None
+    for c in comments:
+        body = (c.get("body") or "").lstrip()
+        if body.startswith(RESOLVER_PREFIX):
+            last = None
+        elif (body.startswith(DECLINE_PREFIX)
+              and ((c.get("author") or {}).get("__typename")) != "Bot"):
+            last = body.split(":", 1)[-1].strip() if ":" in body else "left as it is"
+    return last
+
+
+def signed_locally(body):
+    """Whether a comment is the local review's own: its last line begins with
+    LOCAL_SIGNATURE. Not a mere mention — a person's quote-reply carries the
+    finding, signature and all, above their own words."""
+    lines = [l.strip() for l in (body or "").splitlines() if l.strip()]
+    return bool(lines) and lines[-1].startswith(LOCAL_SIGNATURE)
 
 
 def headline(body):
@@ -555,9 +588,7 @@ def render(cwd, pr, repo):
     if not pr:
         return ""
 
-    view = gh_json(["pr", "view", str(pr), "--json",
-                    "statusCheckRollup,reviewDecision,mergeable,comments,"
-                    "title,url,headRefOid"], cwd=cwd)
+    view = pr_view(cwd, pr, "statusCheckRollup,reviewDecision,mergeable,comments,title,url,headRefOid")
     if view is None:
         return ""
 
@@ -796,8 +827,7 @@ def review_state(cwd, pr, repo):
     Conservative on purpose. A wrong "clean" skips the only look at review
     comments the cycle has; a wrong "unknown" costs one session.
     """
-    view = gh_json(["pr", "view", str(pr), "--json",
-                    "headRefOid,statusCheckRollup,createdAt"], cwd=cwd)
+    view = pr_view(cwd, pr, "headRefOid,statusCheckRollup,createdAt")
     if view is None:
         return "unknown"
     head = view.get("headRefOid") or ""
@@ -818,8 +848,13 @@ def review_state(cwd, pr, repo):
     # feature. So an empty list is "pending" only for a few minutes after the
     # latest of the two moments, and "unknown" after that.
     local = review_mode(cwd) == "local"
+    # Just after a push nothing may be registered yet, a deployment check
+    # included; past that, an empty list is "no checks" — which a project
+    # reviewed here, with Actions left out, may well have.
+    if not rollup and recent(view.get("createdAt"), cwd):
+        return "pending"
     if not rollup and not local:
-        return "pending" if recent(view.get("createdAt"), cwd) else "unknown"
+        return "unknown"
     if any(running(c) for c in rollup):
         return "pending"
     # Somebody's own review — a person writing a comment — is not in the
@@ -879,7 +914,7 @@ def review_state(cwd, pr, repo):
     def human(rows):
         return [r for r in (rows or []) if isinstance(r, dict)
                 and ((r.get("user") or {}).get("type") or "") != "Bot"
-                and LOCAL_SIGNATURE not in (r.get("body") or "")]
+                and not signed_locally(r.get("body"))]
 
     base = "repos/%s" % repo
     comments = gh_json(["api", "%s/issues/%s/comments" % (base, pr), "--paginate"], cwd=cwd)
@@ -966,7 +1001,7 @@ def quota_reset(text, now=None):
 def review_quota(cwd, pr, repo):
     """(run id, reset) for a Claude review job on the PR that failed on its
     quota, or None. `reset` is seconds since the epoch, 0 when unknown."""
-    view = gh_json(["pr", "view", str(pr), "--json", "statusCheckRollup"], cwd=cwd)
+    view = pr_view(cwd, pr, "statusCheckRollup")
     if view is None:
         return None
     for c in view.get("statusCheckRollup") or []:
@@ -1033,8 +1068,7 @@ def close_state(cwd, pr, repo):
     resolved. Whatever cannot be read is `ok` — the step closed on a human's
     word before this existed, and a network fault must not hold it shut.
     """
-    view = gh_json(["pr", "view", str(pr), "--json",
-                    "headRefOid,statusCheckRollup,state,createdAt"], cwd=cwd)
+    view = pr_view(cwd, pr, "headRefOid,statusCheckRollup,state,createdAt")
     if view is None or (view.get("state") or "") != "OPEN":
         return "ok"
     ahead = unpushed(cwd, view)
@@ -1053,8 +1087,10 @@ def close_state(cwd, pr, repo):
         return ("open: PR #%s still names %s as its head, behind this branch"
                 % (pr, head[:8]))
     rollup = view.get("statusCheckRollup") or []
+    if not rollup and recent(view.get("createdAt"), cwd):
+        return "pending"
     if not rollup and review_mode(cwd) != "local":
-        return "pending" if recent(view.get("createdAt"), cwd) else "ok"
+        return "ok"
     if any(running(c) for c in rollup):
         return "pending"
     red = red_checks(rollup)
@@ -1179,8 +1215,8 @@ def wait_checks(cwd, pr, repo, limit, period, say=None, clock=None, sleep=None):
         return code
 
     # Reviewed on this machine: no review check will come, and the checks
-    # Actions would run are not read at all (gh_json); what is left is waited
-    # for, and an empty list is finished rather than not registered yet.
+    # Actions would run are not read at all (pr_view); what is left is waited
+    # for, as any project's checks are.
     local = review_mode(cwd) == "local"
     expect_review, expect_findings = (False, False) if local else reviewed_before(cwd, pr, repo)
     phase, started, failures, rollup, head = 1 if expect_review else 2, clock(), 0, [], ""
@@ -1192,8 +1228,7 @@ def wait_checks(cwd, pr, repo, limit, period, say=None, clock=None, sleep=None):
     else:
         say("No review check on this pull request's commits: waiting only for the checks.")
     while True:
-        view = gh_json(["pr", "view", str(pr), "--json",
-                        "headRefOid,statusCheckRollup,state,createdAt"], cwd=cwd)
+        view = pr_view(cwd, pr, "headRefOid,statusCheckRollup,state,createdAt")
         if view is None:
             failures += 1
             if failures >= CHECKS_READ_RETRIES:
@@ -1246,8 +1281,7 @@ def finished(cwd, repo, head, rollup, expect_findings, view):
     where the project writes one."""
     if not rollup:
         # Not registered yet, or a project with no checks at all: see review_state.
-        # Reviewed on this machine, nothing more is coming.
-        return review_mode(cwd) == "local" or not recent(view.get("createdAt"), cwd)
+        return not recent(view.get("createdAt"), cwd)
     if any(running(c) for c in rollup):
         return False
     reviews = [c for c in rollup if names_review(c.get("name") or c.get("context"))]

@@ -178,8 +178,10 @@ try:
     check("without-actions", pr_context.without_actions(
         actions_red + [{"name": "Vercel", "status": "COMPLETED", "conclusion": "SUCCESS"}]),
         [{"name": "Vercel", "status": "COMPLETED", "conclusion": "SUCCESS"}])
-    saved_mode = pr_context.review_mode
+    saved_mode, saved_recent = pr_context.review_mode, pr_context.recent
     pr_context.review_mode = lambda cwd: "local"
+    # Long after the push: an empty list is "no checks", not "not yet".
+    pr_context.recent = lambda created, cwd: False
     check("local-no-checks-is-unreviewed", state(world(findings=[], rollup=[])), "unreviewed")
     check("local-person-spoke", state(world(findings=[], rollup=[],
                                             comments=[{"user": person, "body": "why?"}])),
@@ -192,6 +194,17 @@ try:
     signed = {"user": person, "body": "**x**\n\n%s · abc</sub>" % pr_context.LOCAL_SIGNATURE}
     check("local-signed-not-a-person", state(world(findings=[], rollup=[], inline=[signed])),
           "unreviewed")
+    # A person's quote-reply carries the signature above their own words: it
+    # is theirs.
+    quoted = {"user": person, "body": "> **x**\n> %s · abc</sub>\n\nplease also do y"
+              % pr_context.LOCAL_SIGNATURE}
+    check("local-quote-reply-is-a-person", state(world(findings=[], rollup=[], inline=[quoted])),
+          "dirty")
+    # Just after a push even a project reviewed here waits for the checks
+    # that are not Actions' — a deployment registers seconds later.
+    pr_context.recent = lambda created, cwd: True
+    check("local-just-pushed-waits", state(world(findings=[], rollup=[])), "pending")
+    pr_context.recent = saved_recent
     pr_context.review_mode = saved_mode
     check("review-skipped-by-label-red-check",
           state(world(findings=[], rollup=[dict(green[0], conclusion="FAILURE"),

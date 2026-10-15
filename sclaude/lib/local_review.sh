@@ -43,6 +43,8 @@ LOCAL_REVIEW_PASSES="${LOCAL_REVIEW_PASSES:-5}"
 #   local-review-rounds.jsonl   one line per run: when, how long, the range,
 #                               how many posted and resolved — the rounds the
 #                               report counts, and the head last reviewed
+#   local-review-unposted.json  findings GitHub would not take yet, posted on
+#                               the next call and counted open until then
 #   local-review-answer.md      the last run's answer, as the model gave it
 #   local-review.log            the last run's stderr
 local_review_file() {
@@ -96,7 +98,7 @@ local_review() {
     return 1
   fi
   if python3 "$LIB/local_review.py" cached "$journal" "$head" 2>/dev/null; then
-    python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" 2>/dev/null || return 1
+    python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null || return 1
     return 0
   fi
   last="$(local_review_head "$wt")"
@@ -118,7 +120,7 @@ local_review() {
     if ! earlier="$(python3 "$LIB/local_review.py" prompt "$wt" "$pr" "$repo" 2>>"$(local_review_file "$wt" .log)")"; then
       warn "  GitHub did not say which findings are open: the local review did not run pass $pass." >&2
       [[ "$pass" -gt 1 ]] || return 1
-      count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" 2>/dev/null)" || return 1
+      count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
       break
     fi
     began=$SECONDS
@@ -137,7 +139,7 @@ local_review() {
       # counts as reviewed with what they posted.
       if [[ "$pass" -gt 1 ]]; then
         warn "  Pass $pass of the local review was not recorded; the first $((pass - 1)) stand." >&2
-        count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" 2>/dev/null)" || return 1
+        count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
         break
       fi
       warn "  The local review was not recorded: no findings count in its answer, or GitHub took none of them." >&2

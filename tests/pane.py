@@ -96,9 +96,9 @@ info() { echo "INFO $*"; }
 [[ -n "${PANE_TEST_PRELOAD:-}" ]] && source "$PANE_TEST_PRELOAD"
 source "%s/pane.sh"
 cd "%s"
-claude_launch --session-id 0000 -n "demo/code" "$PANE_TEST_PROMPT"
+( claude_launch --session-id 0000 -n "demo/code" "$PANE_TEST_PROMPT" )
 echo "rc=$?"
-echo "in-pane=[${SCLAUDE_IN_PANE:-}]"
+( pane_marked 0000 ) && echo "in-pane=[1]" || echo "in-pane=[]"
 ''' % (LIB, wt)
         env = dict(os.environ,
                    PATH=bin_dir + os.pathsep + os.environ["PATH"],

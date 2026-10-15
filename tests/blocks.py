@@ -191,11 +191,36 @@ try:
     check("unpushed-silent-when-only-behind", out.strip(), "")
 
     # A local commit on top: diverged, the case that stopped a pull halfway.
+    # Seen with no fetch: a commit made here is on no older origin/main.
     git("commit", "-q", "--allow-empty", "-m", "local only", cwd=REPO)
     out, _, _ = run_bash('main_unpushed %s' % REPO, tmp)
     check_true("unpushed-names-the-local-commit", "local only" in out)
     check("unpushed-hides-what-origin-has", "theirs" in out, False)
+
+    # --- prod_main_unready: the stop itself -----------------------------------
+    #
+    # Production stops on that commit, and says what it is and what to do,
+    # without pushing, rebasing or dropping anything.
+    stop = 'alarm() { echo "ALARM $*"; }\nprod_main_unready %s; echo "rc=$?"' % REPO
+    out, err, _ = run_bash(stop, tmp)
+    check_true("stop-on-unpushed", "rc=0" in out and "local only" in out)
+    check_true("stop-says-push", "push origin main" in out)
+    check("stop-no-rebase-advice", "--rebase" in out, False)
     git("reset", "-q", "--hard", "HEAD~1", cwd=REPO)
+    out, _, _ = run_bash(stop, tmp)
+    check("stop-silent-when-level", out.strip(), "rc=1")
+    # A change not committed is in what `vercel --prod` uploads, as unpushed.
+    with open(os.path.join(REPO, "edited.txt"), "w") as fh:
+        fh.write("x\n")
+    out, _, _ = run_bash(stop, tmp)
+    check_true("stop-on-uncommitted", "rc=0" in out and "edited.txt" in out and "stash" in out)
+    os.remove(os.path.join(REPO, "edited.txt"))
+    # And sclaude's own scratch in the tree is not a change to stop for.
+    os.makedirs(os.path.join(REPO, ".sclaude", "local"), exist_ok=True)
+    with open(os.path.join(REPO, ".sclaude", "local", "x"), "w") as fh:
+        fh.write("x\n")
+    out, _, _ = run_bash(stop, tmp)
+    check("stop-ignores-scratch", out.strip(), "rc=1")
 
     # The pulls in the production blocks never merge: with pull.rebase=false
     # set somewhere a plain pull would make a merge commit and ship it.
@@ -203,14 +228,23 @@ try:
     check("prod-pulls-are-ff-only",
           re.findall(r'"git pull[^"]*"', deploy_src),
           ['"git pull --ff-only"', '"git pull --ff-only"'])
-    # Its fetch empties the range rollback_remember_migrations reads, so in
-    # remind_prod it comes after the rollback notes, as prod_riders does; and
-    # it fetches as prod_riders does, with no prompt and a bound.
+    # In remind_prod the stop comes after the rollback notes and before the
+    # riders, whose fetch empties the range the notes read; it returns before
+    # any production block; and main_unpushed fetches nothing.
     prod = deploy_src[deploy_src.index("remind_prod() {"):]
-    check_true("unpushed-after-rollback-notes",
-               prod.index('rollback_remember_migrations "$wt"') < prod.index('main_unpushed "$REPO"'))
-    check_true("unpushed-fetch-bounded",
-               'GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$repo" fetch' in deploy_src)
+    notes = prod.index('rollback_remember_migrations "$wt"')
+    stop_at = prod.index('if prod_main_unready "$REPO"; then')
+    check_true("stop-after-notes-before-riders",
+               notes < stop_at < prod.index('riders="$(prod_riders'))
+    check_true("stop-returns-before-the-blocks",
+               "return 0" in prod[stop_at:prod.index("\n    fi", stop_at)]
+               and prod.index("\n    fi", stop_at) < prod.index("run_block", stop_at))
+    unpushed_src = deploy_src[deploy_src.index("main_unpushed() {"):]
+    check("unpushed-no-fetch", "fetch" in unpushed_src[:unpushed_src.index("\n}")], False)
+    # A run stopped there and run again after main was brought level finds
+    # the branch's range empty: the migrations noted before still count.
+    check_true("migrations-kept-across-a-stop",
+               "deploy.prod.migrations" in prod[:notes])
 
     # --- worktree_dirt -------------------------------------------------------
     #

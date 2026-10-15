@@ -134,12 +134,11 @@ prod_drift_report() {
   local main line url sha n migrations_dir promote=""
   if git -C "$REPO" rev-parse --verify --quiet main >/dev/null \
      && git -C "$REPO" rev-parse --verify --quiet origin/main >/dev/null; then
-    n="$(git -C "$REPO" rev-list --count origin/main..main 2>/dev/null || echo 0)"
-    if [[ "$n" =~ ^[0-9]+$ && "$n" -gt 0 ]]; then
+    line="$(main_unpushed "$REPO")"
+    if [[ -n "$line" ]]; then
       echo ""
-      warn "main has $n commit(s) that were never pushed to origin:"
-      git -C "$REPO" log --format='  %h %s' origin/main..main 2>/dev/null | head -10 \
-        | while IFS= read -r line; do info "$line"; done
+      warn "main has $(wc -l <<< "$line") commit(s) that were never pushed to origin:"
+      say_lines "$line"
       info "  To push them: git -C $REPO push origin main"
     fi
   fi
@@ -394,19 +393,61 @@ run_block() {
   return 0
 }
 
-# The commits main holds in the main tree that origin does not, one line each.
+# The commits main holds in the main tree that origin does not, as
+# "<sha> <subject>" lines; nothing when main is level with origin or only
+# behind it.
 #
-# `vercel --prod` ships the main tree, so such a commit would go to production
-# without ever having been pushed — and a plain `git pull` refuses outright
-# once origin has moved on too, halfway through a block the person has already
-# said yes to. Asked after a fetch, so that a stale origin/main does not hide
-# the divergence. Silent when main is level with origin or only behind it.
+# No fetch. A commit made here is missing from every older origin/main, so a
+# stale ref hides none of them; a fetch would only hold the production
+# question up, and empty the origin/main...HEAD ranges a later run reads (the
+# branch's migrations among them).
 main_unpushed() {
-  local repo="$1"
-  # As prod_riders fetches: no prompt for credentials, and a bound on a slow
-  # network, so the production question is never held behind either.
-  GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$repo" fetch -q origin main 2>/dev/null || true
-  git -C "$repo" log --oneline origin/main..HEAD 2>/dev/null
+  git -C "$1" log --format='%h %s' origin/main..main 2>/dev/null
+}
+
+# Lines for the person, ten at most, each through info so that a question
+# relayed elsewhere carries them too.
+#
+#   say_lines <lines>
+say_lines() {
+  local lines="$1" n line
+  [[ -n "$lines" ]] || return 0
+  n="$(wc -l <<< "$lines")"
+  head -10 <<< "$lines" | while IFS= read -r line; do info "    $line"; done
+  [[ "$n" -gt 10 ]] && info "    … and $((n - 10)) more"
+  return 0
+}
+
+# Whether production must stop because main in the main tree is not what
+# origin holds, said; silent, and 1, when it can go.
+#
+#   prod_main_unready <repo>
+#
+# `vercel --prod` uploads that tree. A commit origin lacks, or a change not
+# committed at all, would ship unpushed and unreviewed, and either can stop
+# the block's pull halfway through a yes. Neither is pushed, rebased, stashed
+# or dropped on the person's behalf: whether it belongs on origin is theirs to
+# say.
+prod_main_unready() {
+  local repo="$1" commits dirt
+  commits="$(main_unpushed "$repo")"
+  dirt="$(worktree_dirt "$repo")"
+  [[ -n "$commits$dirt" ]] || return 1
+  echo ""
+  alarm "Production — main in $repo is not what origin holds:"
+  if [[ -n "$commits" ]]; then
+    info "  Commits origin does not have:"
+    say_lines "$commits"
+    info "  Push them (git -C $repo push origin main), or drop them — whether they"
+    info "  belong on origin is yours to say. If origin has moved on as well, bring"
+    info "  main level with it first, as you would any branch."
+  fi
+  if [[ -n "$dirt" ]]; then
+    info "  Changes not committed:"
+    say_lines "$dirt"
+    info "  Commit and push them, or put them away (git -C $repo stash)."
+  fi
+  return 0
 }
 
 # The branch's migrations, onto the database the previews run on.
@@ -1179,6 +1220,15 @@ remind_prod() {
   [[ "$issue" == "null" ]] && issue=""
   [[ -n "$branch" ]] && merged="$(branch_pr_state "$branch")"
   branch_has_migrations "$wt" && migrations=1
+  # Or noted by an earlier run (rollback_remember_migrations): one stopped
+  # before production and run again once main was brought level finds the
+  # range empty, the merge pulled down by then, and would ship without the
+  # promote the branch needs. Promoting what is applied already changes
+  # nothing.
+  [[ -z "$migrations" ]] \
+    && [[ -n "$(state_get "$wt/.sclaude/local/feature/state.json" deploy.prod.migrations 2>/dev/null \
+                | grep -v '^null$')" ]] \
+    && migrations=1
   # Named once here: the prod block adds it to a commit, and the rollback reads
   # the same answer from the same place.
   local migrations_dir; migrations_dir="$(project_migrations_dir "$wt" || true)"
@@ -1565,40 +1615,24 @@ remind_prod() {
   #
   # Both are best-effort and silent: a note that could not be filed costs a
   # rollback its certainty, never the deploy.
+  #
+  # Then main in the main tree is checked (prod_main_unready): a stop there
+  # leaves the issue open and the tree in place, so the same command picks
+  # production up once main is level, and is not a decline. Then what rides
+  # along, whose fetch of main empties the range rollback_remember_migrations
+  # reads — so in this order. See prod_riders.py: on 2026-10-09 one feature
+  # shipped another's migration without a word about it.
+  local riders="" rider_issues=""
   if ! deploy_unchanged "$wt" prod; then
     rollback_remember_previous "$wt"
     [[ -n "$migrations" ]] && rollback_remember_migrations "$wt"
-  fi
 
-  # Commits on main that origin lacks stop production before its question.
-  # They would ship unpushed, and once origin has moved on as well the block's
-  # pull refuses halfway through a yes. Not pushed on the person's behalf and
-  # not rebased away — whether they belong on origin is theirs to say — and not
-  # a decline either: the issue stays open and the tree stays, so the same
-  # command picks production up again once main is level.
-  #
-  # After the rollback notes above, like the riders below: main_unpushed
-  # fetches main, which empties the range rollback_remember_migrations reads.
-  # Taking the notes and then stopping costs nothing — the next run takes
-  # them again, and an empty range keeps the migrations noted now.
-  if ! deploy_unchanged "$wt" prod; then
-    local unpushed; unpushed="$(main_unpushed "$REPO")"
-    if [[ -n "$unpushed" ]]; then
-      echo ""
-      alarm "Production — main in $REPO has commits origin does not:"
-      sed 's/^/    /' <<< "$unpushed" >&2
-      info "  Push them, or drop them, then run: $SELF $slug"
-      info "  To push: git -C $REPO pull --rebase && git -C $REPO push"
+    if prod_main_unready "$REPO"; then
+      info "  Then run: $SELF $slug"
       run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" 0 "$wt"
       return 0
     fi
-  fi
 
-  # What rides along. After the two notes above: fetching main empties the
-  # range rollback_remember_migrations reads. See prod_riders.py — on
-  # 2026-10-09 one feature shipped another's migration without a word about it.
-  local riders="" rider_issues=""
-  if ! deploy_unchanged "$wt" prod; then
     riders="$(prod_riders "$wt" "$slug")"
     prod_riders_say "$riders"
     rider_issues="$(awk -F'\t' '$1 == "feature" && $3 != "-" { gsub(",", " ", $3); print $3 }' \

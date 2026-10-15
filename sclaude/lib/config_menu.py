@@ -26,7 +26,8 @@ import sys
 CHOICES = {
     "review": [
         ("github", "the review workflow in GitHub Actions: runner minutes and its token"),
-        ("local", "sclaude runs /code-review on this machine, your Claude account"),
+        ("local", "sclaude runs /code-review on this machine, your Claude account; "
+                  "the repository's Actions workflows are switched off"),
         ("off", "no review; step 4 answers only the checks and people"),
     ],
 }

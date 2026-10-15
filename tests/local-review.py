@@ -101,6 +101,12 @@ if args[:2] == ["api", "graphql"]:
     print(json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {
         "pageInfo": {"hasNextPage": False}, "nodes": nodes}}}}}))
     sys.exit(0)
+if args[:2] == ["api", "repos/{owner}/{repo}/actions/workflows"]:
+    # What --jq leaves: the active ones under .github/workflows.
+    print("11\tChecks\n12\tClaude Code Review")
+    sys.exit(0)
+if args[:1] == ["workflow"]:
+    sys.exit(0)
 if args[:2] == ["pr", "view"] and "headRefOid" in " ".join(args):
     import subprocess
     print(subprocess.run(["git", "rev-parse", "refs/remotes/origin/feature"],
@@ -209,6 +215,26 @@ try:
     check_true("off-labels", "pr edit 7 --add-label no-review" in gh_log())
     run_bash('REPO=%s; review_label_sync %s null' % (repo, repo))
     check("no-pr-no-label", gh_log(), "")
+
+    # --- Actions with the mode --------------------------------------------------
+    #
+    # `local` switches the repository's workflows off (they fail without
+    # minutes and mail about it), `github` switches back on the ones it
+    # switched off, `off` touches nothing.
+    disabled = os.path.join(repo, ".sclaude", "local", "actions-disabled")
+    gh_log()
+    run_bash('review_actions_sync %s off' % repo)
+    check("actions-off-mode-untouched", gh_log(), "")
+    run_bash('review_actions_sync %s local' % repo)
+    log = gh_log()
+    check_true("actions-local-disables", "workflow disable 11" in log and "workflow disable 12" in log)
+    check_true("actions-local-remembers", os.path.exists(disabled))
+    run_bash('review_actions_sync %s github' % repo)
+    log = gh_log()
+    check_true("actions-github-enables-those", "workflow enable 11" in log and "workflow enable 12" in log)
+    check("actions-github-forgets", os.path.exists(disabled), False)
+    run_bash('review_actions_sync %s github' % repo)
+    check("actions-github-nothing-to-enable", "workflow enable" in gh_log(), False)
 
     # --- the review -----------------------------------------------------------
     mode("local")

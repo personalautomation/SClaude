@@ -103,6 +103,7 @@ config_section() {
   if python3 "$LIB/config_menu.py" set "$file" "$key" "${values[$choice]}"; then
     say "${GREEN}✓ $key: ${values[$choice]}${OFF} — in $file"
     info "  Commit it in the project: the file is the project's."
+    [[ "$key" == "review" ]] && review_actions_sync "$REPO" "${values[$choice]}"
   else
     warn "  Not changed."
   fi

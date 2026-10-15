@@ -73,6 +73,55 @@ review_label_sync() {
   return 0
 }
 
+# Switch the repository's own GitHub Actions workflows off for `review: local`,
+# and back on for `github` — the ones this switched off, and no others.
+#
+#   review_actions_sync <repo root> <mode>
+#
+# `local` is for when the Actions minutes ran out, and with none left every
+# workflow still starts on each push and fails at once — a red run and an
+# email each time, about nothing in the code. A disabled workflow does not
+# start. This is the repository's setting (`gh workflow disable`), not a
+# change to the workflow files, which stay as the project keeps them. Only
+# the ones in .github/workflows: what GitHub runs for itself (Dependabot) is
+# not the project's to switch. Which ones were switched off is kept in the
+# main tree's scratch, so `github` turns back on exactly those, not a
+# workflow somebody disabled for a reason of their own. `off` changes
+# nothing: no review is not no CI.
+review_actions_sync() {
+  local root="$1" mode="$2" list id name
+  command -v gh >/dev/null 2>&1 || return 0
+  list="$root/.sclaude/local/actions-disabled"
+  case "$mode" in
+    local)
+      mkdir -p "$(dirname "$list")" 2>/dev/null || return 0
+      while IFS=$'\t' read -r id name; do
+        [[ -n "$id" ]] || continue
+        if (cd "$root" && gh workflow disable "$id" >/dev/null 2>&1); then
+          printf '%s\t%s\n' "$id" "$name" >> "$list"
+          info "  GitHub Actions: \"$name\" switched off — it fails without minutes and mails about it."
+        else
+          warn "  GitHub Actions: could not switch \"$name\" off (gh workflow disable $id)."
+        fi
+      done < <(cd "$root" && gh api "repos/{owner}/{repo}/actions/workflows" --paginate \
+                 --jq '.workflows[] | select(.state == "active" and (.path | startswith(".github/workflows/"))) | "\(.id)\t\(.name)"' 2>/dev/null)
+      ;;
+    github)
+      [[ -s "$list" ]] || return 0
+      while IFS=$'\t' read -r id name; do
+        [[ -n "$id" ]] || continue
+        if (cd "$root" && gh workflow enable "$id" >/dev/null 2>&1); then
+          info "  GitHub Actions: \"$name\" switched back on."
+        else
+          warn "  GitHub Actions: could not switch \"$name\" back on (gh workflow enable $id)."
+        fi
+      done < "$list"
+      rm -f "$list"
+      ;;
+  esac
+  return 0
+}
+
 # Review the tree's HEAD on this machine, unless that head has been reviewed
 # already; print how many review threads are open.
 #

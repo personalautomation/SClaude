@@ -105,7 +105,10 @@
     "            on Actions counts in it: their checks on a pull request are",
     "            not read. What they checked is the regression's `local` stage,",
     "            run here before steps 2 and 4 close; list in it everything",
-    "            the project's CI workflows ran."
+    "            the project's CI workflows ran. Set from `sclaude config`,",
+    "            \"local\" also switches the repository's Actions workflows",
+    "            off (they would fail on every push, and mail about it), and",
+    "            \"github\" switches back on the ones it switched off."
   ],
 
   "maintainers": ["lead@example.com"],

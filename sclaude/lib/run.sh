@@ -586,11 +586,13 @@ run_step() {
   # them to a fresh one, and to a resumed one only for a head it has not been
   # told about yet — an interrupted session reopened on the same head has
   # them already.
+  local local_told_count=""
   if [[ "$local_count" =~ ^[1-9] ]]; then
     local lhead; lhead="$(local_review_head "$wt")"
     if [[ -z "$session" || "$(state_get "$state" steps.review.local_told 2>/dev/null || true)" != "$lhead" ]]; then
       told="$(printf '%s%s' "$(local_review_told "$wt")" "${told:+$'\n\n'$told}")"
       state_set "$state" steps.review.local_told "$lhead"
+      local_told_count="$local_count"
     fi
   elif [[ "$local_count" == "failed" ]]; then
     told="$(printf 'The review on this machine did not run on this head (its log: `%s`): say so in your report, and handle what the pull request itself shows.%s' \
@@ -668,6 +670,7 @@ run_step() {
     RUN_STEP_LAUNCHED=1
     step_run "$wt" "$step" open "$session"
     [[ "$step" == "review" ]] && run_comments "$wt" "$session" "$pr"
+    run_local_findings "$wt" "$session" "$local_told_count"
     # The issue hears of it too, as on the fresh path below. A review session
     # that carries on into its next round comes back through here, its row now
     # counting the findings that round brought; without this the issue kept the
@@ -690,6 +693,7 @@ run_step() {
     step_run "$wt" "$step" open "$session"
     [[ "$step" == "review" ]] && run_comments "$wt" "$session" "$pr"
     [[ "$step" == "review" ]] && run_rounds "$wt" "$session" 1
+    run_local_findings "$wt" "$session" "$local_told_count"
     prompt="$(render_prompt "$step" "$slug" "$pr" "$issue" "$wt")"
     # QA's comments reach a fresh session too. They used to be read only on the
     # resume path, so a hand-back that arrived after the recorded session had
@@ -2276,6 +2280,9 @@ review_close_gate() {
       fi
     elif [[ "$count" -gt 0 ]]; then
       word="open: the review on this machine found $count new finding(s)"
+      # The report printed as the session ended was made before this run:
+      # once more with it, where the person decides whether to go on fixing.
+      review_report "$wt" "$slug"
     fi
   fi
   # Only the threads the person kept: no session, a wait for their hand. Once

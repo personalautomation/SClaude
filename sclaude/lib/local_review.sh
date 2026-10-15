@@ -39,6 +39,10 @@ LOCAL_REVIEW_LEVEL="${LOCAL_REVIEW_LEVEL:-medium}"
 #                          (path:line, a tab, the decision), written by the
 #                          review session as review.md tells it
 #   local-review.log       the last run's stderr
+#   local-review-rounds.jsonl  one line per run, for the review report and the
+#                          issue (review_report.py, run_local_findings):
+#                          {"at", "seconds", "base", "head", "count",
+#                           "findings": [{"path", "line", "title"}]}
 local_review_file() {
   echo "$1/.sclaude/local/feature/local-review$2"
 }
@@ -95,6 +99,7 @@ local_review() {
   info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${head:0:7}, ${base:0:7}..${head:0:7}." >&2
   info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
 
+  local began=$SECONDS
   out="$(cd "$wt" && claude -p "$(local_review_prompt "$wt" "$pr" "$base" "$head" "$scope")" \
            --model "$LOCAL_REVIEW_MODEL" \
            --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
@@ -115,6 +120,7 @@ local_review() {
   } > "$(local_review_file "$wt" .md)"
   [[ "$count" -gt 0 ]] && { cat "$(local_review_file "$wt" .md)"; echo; } >> "$(local_review_file "$wt" -seen.md)"
   echo "$head $count" > "$(local_review_file "$wt" -head)"
+  local_review_journal "$wt" "$base" "$head" "$count" "$((SECONDS - began))"
   if [[ "$count" -eq 0 ]]; then
     info "  The local review found nothing on ${head:0:7}." >&2
   else
@@ -174,6 +180,59 @@ local_review_told() {
   printf '**The review ran on this machine** (`review: local` in `.sclaude/config.json`). Its findings, also in `%s`:\n\n' \
     "${file#"$wt"/}"
   cat "$file"
+}
+
+# One line in the rounds journal for the run just recorded: the findings are
+# read back from local-review.md by their headings, `### <path>:<line> — …`.
+# Best-effort: a journal that cannot be written loses a figure, not the review.
+#
+#   local_review_journal <wt> <base> <head> <count> <seconds>
+local_review_journal() {
+  python3 - "$(local_review_file "$1" .md)" "$(local_review_file "$1" -rounds.jsonl)" \
+    "$2" "$3" "$4" "$5" <<'PY' 2>/dev/null || true
+import datetime, json, re, sys
+md, journal, base, head, count, seconds = sys.argv[1:7]
+heading = re.compile(r"^###\s+(.+?):(\d+)\s+—\s+(.*)$")
+findings = []
+with open(md, encoding="utf-8") as fh:
+    for line in fh:
+        m = heading.match(line.rstrip("\n"))
+        if m:
+            findings.append({"path": m.group(1), "line": int(m.group(2)),
+                             "title": m.group(3).strip()})
+row = {"at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+       "seconds": int(seconds), "base": base, "head": head, "count": int(count),
+       "findings": findings}
+with open(journal, "a", encoding="utf-8") as fh:
+    fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+PY
+}
+
+# Add the findings of a local review run to the review session that was told
+# them, for its row in the issue: what run_comments counts from the threads
+# on GitHub, and one more round handed to it.
+#
+#   run_local_findings <wt> <session> <count>
+run_local_findings() {
+  local wt="$1" session="$2" count="$3"
+  [[ -n "$session" && "$count" =~ ^[0-9]+$ ]] || return 0
+  python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$count" <<'PY' 2>/dev/null || true
+import json, sys
+path, session, count = sys.argv[1:4]
+with open(path) as fh:
+    data = json.load(fh)
+runs = ((data.get("steps") or {}).get("review") or {}).get("runs") or []
+mine = [r for r in runs if isinstance(r, dict) and r.get("session") == session]
+if not mine:
+    sys.exit(0)
+run = mine[-1]
+run["comments"] = (run.get("comments") if isinstance(run.get("comments"), int) else 0) + int(count)
+run["local_rounds"] = (run.get("local_rounds") or 0) + 1
+run["rounds"] = run["local_rounds"]
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
+PY
 }
 
 # The head the last local review covered, or nothing.

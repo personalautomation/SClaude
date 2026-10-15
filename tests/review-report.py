@@ -222,7 +222,9 @@ with open(os.path.join(LIB, "run.sh")) as fh:
     RUN = fh.read()
 with open(os.path.join(ROOT, "bin", "sclaude")) as fh:
     BIN = fh.read()
-check("printed-at-every-round-close", RUN.count('review_report "$wt" "$slug"'), 4)
+# Four for the rounds of the review on GitHub, and one more where the review
+# on this machine finds something after a session (review_close_gate).
+check("printed-at-every-round-close", RUN.count('review_report "$wt" "$slug"'), 5)
 check("cost-taken-at-session-end", '[[ "$step" == "review" ]] && run_cost "$wt" "$session"' in RUN, True)
 with open(os.path.join(ROOT, "sclaude", "prompts", "review.md")) as fh:
     check("prompt-cites-declines", "`as on r<id>`" in fh.read(), True)

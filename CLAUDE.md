@@ -85,16 +85,16 @@ breaks the other silently — grep before you edit:
   asked: the prompt acts on the codes, so a code changed on one side alone
   would send a session the wrong way without an error.)*
 
-- `.sclaude/local/feature/local-review-declined` and `local-review.md` are
-  named by `local_review_file` in `sclaude/lib/local_review.sh` and spelled
-  out in the `review-local` paragraph of `sclaude/prompts/review.md`;
-  `tests/local-review.py` renders the prompt and checks it. The declined file
-  and `local-review-rounds.jsonl` are read again by `LOCAL_DECLINED` and
-  `LOCAL_JOURNAL` in `sclaude/lib/review_report.py`;
-  `tests/local-review-report.py` writes with one side and reads with the other.
+- `LOCAL_SIGNATURE` in `sclaude/lib/pr_context.py` ends every finding and
+  reply a review run on this machine posts (`local_review.py`), and is how
+  `review_state` tells them from what the person wrote under the same
+  account; `tests/review-skip.py` and `tests/local-review.py` check both
+  sides. `local-review-rounds.jsonl` is named in `local_review.sh` and read
+  by `LOCAL_JOURNAL` in `review_report.py`; `tests/local-review-report.py`
+  reads what the other side wrote.
 
-  *(Added by Claude on 2026-10-14 with the `review` key, so that a renamed
-  file on one side does not silently drop the declined findings.)*
+  *(Added by Claude on 2026-10-15 with the `review` key, so that a change to
+  one side does not silently turn the review's words into a person's.)*
 
 ## Public repository, private projects
 

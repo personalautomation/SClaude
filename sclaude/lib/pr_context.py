@@ -360,6 +360,10 @@ RESOLVER_PREFIX = "Resolved automatically: "
 # thread as declined. Which reply decides is FINDINGS_DECLINED's rule, in the
 # project's .github/workflows/claude-code-review.yml; review_report.py follows it.
 DECLINE_PREFIX = "Left as it is"
+# The last line of every finding and resolving reply a review run on this
+# machine posts (local_review.py): it posts under the person's account, and
+# this is how its words are told from theirs.
+LOCAL_SIGNATURE = "<sub>Local review"
 
 
 def headline(body):
@@ -857,9 +861,12 @@ def review_state(cwd, pr, repo):
     # What people said. The bot's own words are covered by the findings check
     # above — its inline findings are what it counts, and its "No issues found"
     # summary is not a request for anything.
+    # A review run on this machine posts under the person's own account; its
+    # findings and replies carry LOCAL_SIGNATURE, and are the review's words.
     def human(rows):
         return [r for r in (rows or []) if isinstance(r, dict)
-                and ((r.get("user") or {}).get("type") or "") != "Bot"]
+                and ((r.get("user") or {}).get("type") or "") != "Bot"
+                and LOCAL_SIGNATURE not in (r.get("body") or "")]
 
     base = "repos/%s" % repo
     comments = gh_json(["api", "%s/issues/%s/comments" % (base, pr), "--paginate"], cwd=cwd)

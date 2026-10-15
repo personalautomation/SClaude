@@ -582,17 +582,16 @@ run_step() {
 
   local -a extra; mapfile -t extra <<< "$settings"
 
-  # The local review's findings reach the session as sclaude's words: all of
-  # them to a fresh one, and to a resumed one only for a head it has not been
-  # told about yet — an interrupted session reopened on the same head has
-  # them already.
-  local local_told_count=""
+  # The local review's findings are threads on the pull request, so they reach
+  # the session as the workflow's do: in the snapshot of a fresh one, and as
+  # news to a resumed one (review_news). What is counted here is the round —
+  # one per reviewed head handed to a session, as the workflow's runs are.
+  local local_round=0
   if [[ "$local_count" =~ ^[1-9] ]]; then
     local lhead; lhead="$(local_review_head "$wt")"
     if [[ -z "$session" || "$(state_get "$state" steps.review.local_told 2>/dev/null || true)" != "$lhead" ]]; then
-      told="$(printf '%s%s' "$(local_review_told "$wt")" "${told:+$'\n\n'$told}")"
       state_set "$state" steps.review.local_told "$lhead"
-      local_told_count="$local_count"
+      local_round=1
     fi
   elif [[ "$local_count" == "failed" ]]; then
     told="$(printf 'The review on this machine did not run on this head (its log: `%s`): say so in your report, and handle what the pull request itself shows.%s' \
@@ -670,7 +669,7 @@ run_step() {
     RUN_STEP_LAUNCHED=1
     step_run "$wt" "$step" open "$session"
     [[ "$step" == "review" ]] && run_comments "$wt" "$session" "$pr"
-    run_local_findings "$wt" "$session" "$local_told_count"
+    [[ "$local_round" -eq 1 ]] && run_local_round "$wt" "$session"
     # The issue hears of it too, as on the fresh path below. A review session
     # that carries on into its next round comes back through here, its row now
     # counting the findings that round brought; without this the issue kept the
@@ -693,7 +692,7 @@ run_step() {
     step_run "$wt" "$step" open "$session"
     [[ "$step" == "review" ]] && run_comments "$wt" "$session" "$pr"
     [[ "$step" == "review" ]] && run_rounds "$wt" "$session" 1
-    run_local_findings "$wt" "$session" "$local_told_count"
+    [[ "$local_round" -eq 1 ]] && run_local_round "$wt" "$session"
     prompt="$(render_prompt "$step" "$slug" "$pr" "$issue" "$wt")"
     # QA's comments reach a fresh session too. They used to be read only on the
     # resume path, so a hand-back that arrived after the recorded session had
@@ -2245,6 +2244,31 @@ review_close_gate() {
   command -v gh >/dev/null 2>&1 || return 0
   repo="$(gh_repo 2>/dev/null || true)"
   [[ -n "$repo" ]] || return 0
+  # A project that reviews on this machine: the review the workflow would run
+  # after the session's push runs here, before the pull request is asked —
+  # it resolves the threads the push fixed and posts what it finds, and then
+  # the threads are read as on GitHub. A head not pushed is left to the
+  # question below, which says so. A review that did not run is put to the
+  # person rather than sent back to a session, which could do nothing about
+  # it and would end the same way.
+  if [[ "$(project_review_mode "$wt")" == "local" ]] \
+     && [[ "$(git -C "$wt" rev-parse '@{upstream}' 2>/dev/null)" == "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" ]]; then
+    local count
+    count="$(local_review "$wt" "$pr")" || count="failed"
+    if [[ "$count" == "failed" ]]; then
+      warn ""
+      warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
+      ask "${BOLD}Go on with this head unreviewed? [y/n] ${OFF}" answer yn
+      if ! is_yes "$answer"; then
+        info "  Left open. Come back with: $SELF $slug"
+        return 1
+      fi
+    elif [[ "$count" -gt 0 ]]; then
+      # The report printed as the session ended was made before this run:
+      # once more with it, where the person decides whether to go on fixing.
+      review_report "$wt" "$slug"
+    fi
+  fi
   while :; do
     word="$(python3 "$LIB/pr_context.py" --close "$wt" "$pr" "$repo" 2>/dev/null || true)"
     if [[ "$word" == open:*red:* ]] && review_quota_rerun "$wt" "$slug" "$pr" "$repo"; then
@@ -2263,28 +2287,6 @@ review_close_gate() {
     sleep "$MERGE_POLL"
     waited=$((waited + MERGE_POLL))
   done
-  # A project that reviews on this machine: once GitHub has nothing open, the
-  # head the session left is reviewed here, and what that finds is open too.
-  # A review that did not run is put to the person rather than sent back to a
-  # session, which could do nothing about it and would end the same way.
-  if [[ "$word" == "ok" || "$word" == yours:* ]] && [[ "$(project_review_mode "$wt")" == "local" ]]; then
-    local count
-    count="$(local_review "$wt" "$pr")" || count="failed"
-    if [[ "$count" == "failed" ]]; then
-      warn ""
-      warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
-      ask "${BOLD}Close step 4 with this head unreviewed? [y/n] ${OFF}" answer yn
-      if ! is_yes "$answer"; then
-        info "  Left open. Come back with: $SELF $slug"
-        return 1
-      fi
-    elif [[ "$count" -gt 0 ]]; then
-      word="open: the review on this machine found $count new finding(s)"
-      # The report printed as the session ended was made before this run:
-      # once more with it, where the person decides whether to go on fixing.
-      review_report "$wt" "$slug"
-    fi
-  fi
   # Only the threads the person kept: no session, a wait for their hand. Once
   # they are resolved the pull request is asked again from the top — whatever
   # else is open by then takes the ordinary way.

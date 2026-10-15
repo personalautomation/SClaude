@@ -199,28 +199,16 @@ def review_runs(cwd, branch):
     return out
 
 
-# The local review's journal and the findings the person declined in it
-# (sclaude/lib/local_review.sh, `review: local`): there are no threads on the
-# pull request to read, so the same figures are made from these.
+# A review run on this machine (`review: local`, local_review.py) posts its
+# findings as threads, read above like the workflow's; its runs are not
+# workflow runs, so they are read from its journal instead.
 LOCAL_JOURNAL = ".sclaude/local/feature/local-review-rounds.jsonl"
-LOCAL_DECLINED = ".sclaude/local/feature/local-review-declined"
-DECLINED_LINE = re.compile(r"^(.+?):(\d+)\t")
 
 
-def local_rounds(cwd):
-    """(findings, runs) as threads() and review_runs() give them, from the
-    local review's journal; (None, None) when the feature has none.
-
-    A finding's fate, with no thread to say it:
-
-      no fix   near a line the person declined (local-review-declined);
-      open     reported by the last run: nothing has reviewed past it yet;
-      fixed    reported by an earlier run, a later run having read the fixes.
-               The local review is told not to repeat what it reported, so
-               this counts "not raised again" as fixed — the same trust the
-               GitHub mode gives a thread resolved with no reply.
-    """
-    rows = []
+def local_runs(cwd):
+    """The local review's runs, oldest first, shaped as review_runs gives the
+    workflow's; None when the feature has no journal."""
+    out = []
     try:
         with open(os.path.join(cwd, LOCAL_JOURNAL), encoding="utf-8") as fh:
             for line in fh:
@@ -228,39 +216,13 @@ def local_rounds(cwd):
                     row = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(row, dict) and parse(row.get("at")):
-                    rows.append(row)
+                at = parse(row.get("at")) if isinstance(row, dict) else None
+                if at:
+                    out.append({"start": at, "seconds": float(row.get("seconds") or 0),
+                                "running": False})
     except OSError:
-        return None, None
-    if not rows:
-        return None, None
-    declined = []
-    try:
-        with open(os.path.join(cwd, LOCAL_DECLINED), encoding="utf-8") as fh:
-            for line in fh:
-                m = DECLINED_LINE.match(line)
-                if m:
-                    declined.append({"path": m.group(1), "line": int(m.group(2))})
-    except OSError:
-        pass
-    found, runs = [], []
-    for i, row in enumerate(rows):
-        at = parse(row.get("at"))
-        runs.append({"start": at, "seconds": float(row.get("seconds") or 0), "running": False})
-        for k, f in enumerate(row.get("findings") or []):
-            if not isinstance(f, dict):
-                continue
-            t = {"id": "%d.%d" % (i, k), "cites": set(), "path": f.get("path") or "?",
-                 "line": f.get("line") if isinstance(f.get("line"), int) else None,
-                 "created": at, "round": None, "left_open": False}
-            if any(near(d, t) for d in declined):
-                t["fate"] = "no fix"
-            elif i == len(rows) - 1:
-                t["fate"] = "open"
-            else:
-                t["fate"] = "fixed"
-            found.append(t)
-    return found, runs
+        return None
+    return out
 
 
 def rounds(found, runs):
@@ -402,16 +364,14 @@ def main():
     cwd, pr, repo = sys.argv[1:4]
     branch, slug, log = (sys.argv[4:7] + ["", "", ""])[:3]
 
-    found, bot = local_rounds(cwd)
-    local = found is not None
-    if local:
-        print("Review report — PR #%s, reviewed on this machine" % pr)
-    else:
-        found = threads(cwd, pr, repo)
-        print("Review report — PR #%s" % pr)
-        if found is None:
-            print("  The review threads could not be read (gh, network or permissions).")
-            found = []
+    bot = local_runs(cwd)
+    local = bot is not None
+    found = threads(cwd, pr, repo)
+    print("Review report — PR #%s%s" % (pr, ", reviewed on this machine" if local else ""))
+    if found is None:
+        print("  The review threads could not be read (gh, network or permissions).")
+        found = []
+    if not local:
         bot = review_runs(cwd, branch)
     groups = rounds(found, bot)
     mark_near_fixes(found)
@@ -450,13 +410,11 @@ def main():
         print("  Findings per review run, oldest first: %s%s" % (
             chain(per_round), " (one more still running)" if len(done) < len(groups) else ""))
     else:
-        print("  No local review has run yet." if local
-              else "  No review threads on the pull request.")
+        print("  No review threads on the pull request.")
 
     if found:
         left = sum(1 for t in found if t["left_open"])
-        print("  %s: %d (%s). Closed without a fix: %d (%s)%s." % (
-            "Not raised again (fixed)" if local else "Fixed",
+        print("  Fixed: %d (%s). Closed without a fix: %d (%s)%s." % (
             fixed, pct(fixed, total), nofix, pct(nofix, total),
             ", %d of them waiting for you to resolve on GitHub" % left if left else ""))
     # The share acted on, over the newest settled findings: an open finding

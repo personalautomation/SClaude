@@ -13,9 +13,10 @@
 #
 #   github  the workflow, as before; nothing here applies.
 #   local   sclaude runs the same /code-review on this machine, headless, on
-#           the commits step 4 opens on, and again on each head a review
-#           session leaves. Its findings go to the session as text, not as
-#           threads on the pull request. Tokens only, no runner minutes.
+#           the head step 4 opens on and again on each head a review session
+#           leaves, and posts its findings as threads on the pull request,
+#           as the workflow does (local_review.py). Tokens only, no runner
+#           minutes.
 #   off     no review at all; step 4 answers only the checks and what people
 #           wrote.
 #
@@ -29,20 +30,14 @@
 LOCAL_REVIEW_MODEL="${LOCAL_REVIEW_MODEL:-opus}"
 LOCAL_REVIEW_LEVEL="${LOCAL_REVIEW_LEVEL:-medium}"
 
-# Where a feature keeps the local review's results, beside its other scratch.
+# The local review's own files, beside the feature's other scratch. The
+# findings are not among them: they are threads on the pull request.
 #
-#   local-review.md        the findings on the last head reviewed, as text
-#   local-review-head      "<sha> <count>": that head and how many it found
-#   local-review-seen.md   every finding reported on this pull request so far,
-#                          for the next run not to repeat
-#   local-review-declined  the ones the person decided to leave, one per line
-#                          (path:line, a tab, the decision), written by the
-#                          review session as review.md tells it
-#   local-review.log       the last run's stderr
-#   local-review-rounds.jsonl  one line per run, for the review report and the
-#                          issue (review_report.py, run_local_findings):
-#                          {"at", "seconds", "base", "head", "count",
-#                           "findings": [{"path", "line", "title"}]}
+#   local-review-rounds.jsonl   one line per run: when, how long, the range,
+#                               how many posted and resolved — the rounds the
+#                               report counts, and the head last reviewed
+#   local-review-answer.md      the last run's answer, as the model gave it
+#   local-review.log            the last run's stderr
 local_review_file() {
   echo "$1/.sclaude/local/feature/local-review$2"
 }
@@ -70,25 +65,36 @@ review_label_sync() {
 }
 
 # Review the tree's HEAD on this machine, unless that head has been reviewed
-# already; print how many findings it has.
+# already; print how many review threads are open.
 #
 #   local_review <wt> <pr>   → <count> on stdout; 1 when the review did not run
 #
 # The first run reads the whole pull request (origin/main...HEAD); later runs
 # read only the commits since the last head reviewed, as the workflow's review
-# reads a push, and are told what was reported and declined before. Everything
-# it says goes to stderr: stdout is the count.
+# reads a push, and check at the new head every thread still open — resolving
+# the ones the code no longer has. The count is of every open thread, old and
+# new, less the ones the person keeps to resolve by hand: a session that fixed
+# half of them and was interrupted finds the other half open on GitHub.
+# Everything it says goes to stderr: stdout is the count.
 local_review() {
-  local wt="$1" pr="$2" head last lsha lcount base scope out count
+  local wt="$1" pr="$2" head last base scope out count answer repo
+  local journal; journal="$(local_review_file "$wt" -rounds.jsonl)"
   head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)" || return 1
-  last="$(cat "$(local_review_file "$wt" -head)" 2>/dev/null || true)"
-  read -r lsha lcount <<<"$last"
-  if [[ "${lsha:-}" == "$head" && "${lcount:-}" =~ ^[0-9]+$ ]]; then
-    echo "$lcount"
+  repo="$(REPO="$wt" gh_repo 2>/dev/null || true)"
+  [[ -n "$repo" ]] || { warn "  No GitHub repository for $wt: the local review did not run." >&2; return 1; }
+  # A thread is posted on a commit GitHub has: a head not pushed yet cannot
+  # carry one.
+  if [[ "$(git -C "$wt" rev-parse '@{upstream}' 2>/dev/null)" != "$head" ]]; then
+    warn "  ${head:0:7} is not pushed: the local review posts on commits GitHub has. Push, then run $SELF again." >&2
+    return 1
+  fi
+  if python3 "$LIB/local_review.py" cached "$journal" "$head" 2>/dev/null; then
+    python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" 2>/dev/null || return 1
     return 0
   fi
-  if [[ -n "${lsha:-}" ]] && git -C "$wt" merge-base --is-ancestor "$lsha" "$head" 2>/dev/null; then
-    base="$lsha"
+  last="$(local_review_head "$wt")"
+  if [[ -n "$last" ]] && git -C "$wt" merge-base --is-ancestor "$last" "$head" 2>/dev/null; then
+    base="$last"
     scope="the commits since the last review: \`git diff $base..$head\`"
   else
     base="$(git -C "$wt" merge-base origin/main "$head" 2>/dev/null)" || return 1
@@ -96,129 +102,75 @@ local_review() {
   fi
 
   command -v claude >/dev/null 2>&1 || { warn "  No claude on this machine: the local review did not run." >&2; return 1; }
-  info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${head:0:7}, ${base:0:7}..${head:0:7}." >&2
+  info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${base:0:7}..${head:0:7}." >&2
   info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
 
   local began=$SECONDS
-  out="$(cd "$wt" && claude -p "$(local_review_prompt "$wt" "$pr" "$base" "$head" "$scope")" \
+  out="$(cd "$wt" && claude -p "$(local_review_prompt "$wt" "$pr" "$repo" "$head" "$scope")" \
            --model "$LOCAL_REVIEW_MODEL" \
            --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
              "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
            --disallowedTools "Edit" "Write" "NotebookEdit" "Bash(gh:*)" \
              "Bash(git push:*)" "Bash(git commit:*)" \
            2>"$(local_review_file "$wt" .log)")"
-  count="$(printf '%s\n' "$out" | local_review_count)"
-  if [[ -z "$count" ]]; then
-    warn "  The local review ended without a findings count; nothing recorded." >&2
-    warn "  Its last words: $(printf '%s\n' "$out" | tail -n 3 | tr '\n' ' ')" >&2
+  answer="$(local_review_file "$wt" -answer.md)"
+  printf '%s\n' "$out" > "$answer"
+  if ! count="$(python3 "$LIB/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
+                  "$base" "$head" "$((SECONDS - began))" "$journal" 2>>"$(local_review_file "$wt" .log)")"; then
+    warn "  The local review was not recorded: no findings count in its answer, or GitHub took none of them." >&2
+    warn "  Its answer: $answer; the next \`$SELF\` reviews this head again." >&2
     return 1
   fi
-
-  {
-    printf '## Local review of %s..%s — %s finding(s)\n\n' "${base:0:7}" "${head:0:7}" "$count"
-    printf '%s\n' "$out" | sed -E '/^[[:space:]]*FINDINGS:[[:space:]]*[0-9]+[[:space:]]*$/d'
-  } > "$(local_review_file "$wt" .md)"
-  [[ "$count" -gt 0 ]] && { cat "$(local_review_file "$wt" .md)"; echo; } >> "$(local_review_file "$wt" -seen.md)"
-  echo "$head $count" > "$(local_review_file "$wt" -head)"
-  local_review_journal "$wt" "$base" "$head" "$count" "$((SECONDS - began))"
   if [[ "$count" -eq 0 ]]; then
-    info "  The local review found nothing on ${head:0:7}." >&2
+    info "  The local review leaves nothing open on PR #$pr." >&2
   else
-    info "  The local review found $count on ${head:0:7}: $(local_review_file "$wt" .md)" >&2
+    info "  The local review leaves $count thread(s) open on PR #$pr." >&2
   fi
   echo "$count"
 }
 
-# The count from the review's answer: its last `FINDINGS: <n>` line.
-local_review_count() {
-  sed -nE 's/^[[:space:]]*FINDINGS:[[:space:]]*([0-9]+)[[:space:]]*$/\1/p' | tail -n 1
-}
-
 # What the headless review is told. The scope sentence follows the workflow's
-# own, so that a local review reads what an Actions one would.
+# own, so that a local review reads what an Actions one would; what it is told
+# about earlier findings is read from the pull request (local_review.py prompt).
 #
-#   local_review_prompt <wt> <pr> <base> <head> <scope>
+#   local_review_prompt <wt> <pr> <repo> <head> <scope>
 local_review_prompt() {
-  local wt="$1" pr="$2" base="$3" head="$4" scope="$5" seen declined
-  seen="$(local_review_file "$wt" -seen.md)"
-  declined="$(local_review_file "$wt" -declined)"
-  cat <<EOF
+  local wt="$1" pr="$2" repo="$3" head="$4" scope="$5" earlier
+  earlier="$(python3 "$LIB/local_review.py" prompt "$wt" "$pr" "$repo" 2>/dev/null || true)"
+  cat <<TEXT
 You are reviewing pull request #${pr:-?} unattended, on the developer's machine. Nobody will answer a question and nothing will wake you: when you end your turn the run is over, so collect every agent's result within this turn.
 
 Invoke the \`code-review\` skill with the Skill tool, with these arguments on one line:
 
     $LOCAL_REVIEW_LEVEL <scope>
 
-where <scope> is plain words saying: review $scope; review every changed file in it, none left out as unimportant, generated files may be skimmed; the tree is checked out at $head, so read the code as it is here; do not run the app, or any build or test.
-EOF
-  [[ -s "$seen" ]] && cat <<EOF
-Add to the scope: findings already reported on this pull request are in \`${seen#"$wt"/}\`; do not report one of them again unless the code it rests on changed so that it is new.
-EOF
-  [[ -s "$declined" ]] && cat <<EOF
-Add to the scope: the author decided to leave the findings in \`${declined#"$wt"/}\` as they are, each with the reason; do not report one of them again, reworded or on another line, unless the code it rests on changed so that the reason no longer holds — then say which change.
-EOF
-  cat <<EOF
+where <scope> is plain words saying: review $scope; review every changed file in it, none left out as unimportant, generated files may be skimmed; the tree is checked out at $head, so read the code as it is here; do not run the app, or any build or test.${earlier:+ Add to the scope, verbatim, what follows about earlier findings.}
+TEXT
+  [[ -n "$earlier" ]] && printf '\n%s\n' "$earlier"
+  cat <<TEXT
 
-Post nothing to GitHub and change no file: the findings go to a person through your answer.
+Post nothing to GitHub and change no file: sclaude posts your findings from your answer.
 
-When the skill is done, answer with its findings and nothing else, one per section:
+When the skill is done, answer with nothing else. First the new findings, one per section:
 
 ### <path>:<line> — <the finding in one line>
 <the failure scenario: concrete inputs or state, and the wrong result>
 
-and end with a line of its own, \`FINDINGS: <n>\`, the number of findings above — \`FINDINGS: 0\` when there are none.
-EOF
+then a \`RESOLVED: <id> — <how, in a sentence>\` line for each earlier open finding the code no longer has, and last a line of its own, \`FINDINGS: <n>\`, the number of new findings above — \`FINDINGS: 0\` when there are none.
+TEXT
 }
 
-# What a review session is told about the local review's findings on HEAD.
+# One more round handed to a review session, for its row in the issue: the
+# threads it was given are counted by run_comments, as on GitHub; the rounds
+# there are the workflow's runs it worked through, here the local ones.
 #
-#   local_review_told <wt>
-local_review_told() {
-  local wt="$1" file
-  file="$(local_review_file "$wt" .md)"
-  [[ -s "$file" ]] || return 0
-  printf '**The review ran on this machine** (`review: local` in `.sclaude/config.json`). Its findings, also in `%s`:\n\n' \
-    "${file#"$wt"/}"
-  cat "$file"
-}
-
-# One line in the rounds journal for the run just recorded: the findings are
-# read back from local-review.md by their headings, `### <path>:<line> — …`.
-# Best-effort: a journal that cannot be written loses a figure, not the review.
-#
-#   local_review_journal <wt> <base> <head> <count> <seconds>
-local_review_journal() {
-  python3 - "$(local_review_file "$1" .md)" "$(local_review_file "$1" -rounds.jsonl)" \
-    "$2" "$3" "$4" "$5" <<'PY' 2>/dev/null || true
-import datetime, json, re, sys
-md, journal, base, head, count, seconds = sys.argv[1:7]
-heading = re.compile(r"^###\s+(.+?):(\d+)\s+—\s+(.*)$")
-findings = []
-with open(md, encoding="utf-8") as fh:
-    for line in fh:
-        m = heading.match(line.rstrip("\n"))
-        if m:
-            findings.append({"path": m.group(1), "line": int(m.group(2)),
-                             "title": m.group(3).strip()})
-row = {"at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-       "seconds": int(seconds), "base": base, "head": head, "count": int(count),
-       "findings": findings}
-with open(journal, "a", encoding="utf-8") as fh:
-    fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-PY
-}
-
-# Add the findings of a local review run to the review session that was told
-# them, for its row in the issue: what run_comments counts from the threads
-# on GitHub, and one more round handed to it.
-#
-#   run_local_findings <wt> <session> <count>
-run_local_findings() {
-  local wt="$1" session="$2" count="$3"
-  [[ -n "$session" && "$count" =~ ^[0-9]+$ ]] || return 0
-  python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$count" <<'PY' 2>/dev/null || true
+#   run_local_round <wt> <session>
+run_local_round() {
+  local wt="$1" session="$2"
+  [[ -n "$session" ]] || return 0
+  python3 - "$wt/.sclaude/local/feature/state.json" "$session" <<'PY' 2>/dev/null || true
 import json, sys
-path, session, count = sys.argv[1:4]
+path, session = sys.argv[1:3]
 with open(path) as fh:
     data = json.load(fh)
 runs = ((data.get("steps") or {}).get("review") or {}).get("runs") or []
@@ -226,7 +178,6 @@ mine = [r for r in runs if isinstance(r, dict) and r.get("session") == session]
 if not mine:
     sys.exit(0)
 run = mine[-1]
-run["comments"] = (run.get("comments") if isinstance(run.get("comments"), int) else 0) + int(count)
 run["local_rounds"] = (run.get("local_rounds") or 0) + 1
 run["rounds"] = run["local_rounds"]
 with open(path, "w") as fh:
@@ -237,7 +188,5 @@ PY
 
 # The head the last local review covered, or nothing.
 local_review_head() {
-  local sha
-  read -r sha _ < "$(local_review_file "$1" -head)" 2>/dev/null || return 0
-  echo "$sha"
+  python3 "$LIB/local_review.py" base "$(local_review_file "$1" -rounds.jsonl)" 2>/dev/null || true
 }

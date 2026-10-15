@@ -1,27 +1,31 @@
 #!/usr/bin/env python3
 #
-# The figures of a review on this machine (`review: local`), which has no
-# threads on the pull request to count:
+# The figures of a review run on this machine (`review: local`), which posts
+# its findings as threads like the workflow but runs nowhere GitHub records:
 #
-#   * local_review_journal writes one line per run, its findings read back
-#     from the headings of local-review.md;
-#   * run_local_findings adds a run's findings and one round to the review
-#     session told them, for its row in the issue;
-#   * review_report.py reads the journal instead of the threads: a finding of
-#     an earlier run not raised again is fixed, one near a declined line is
-#     not, the last run's are open, and a later finding near a declined one
-#     is a repeat.
+#   * review_report.py counts the threads as always, and takes the rounds from
+#     the local review's journal instead of the workflow's runs;
+#   * run_local_round adds a round to the review session handed one, for its
+#     row in the issue;
+#   * in `local` the checks GitHub Actions ran are dropped from every reading
+#     of the pull request (gh_json), and the mode is read from the main
+#     checkout first;
+#   * the local review's own words are not taken for a person's.
 #
 # Run it with: python3 tests/local-review-report.py
+import datetime
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import redirect_stdout
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
+sys.path.insert(0, LIB)
 
 failures = []
 
@@ -36,15 +40,6 @@ def check_true(name, got):
         failures.append((name, "true", got))
 
 
-def run_bash(script, cwd):
-    body = "set -uo pipefail\n"
-    for name in ("io", "ui", "state", "project", "local_review"):
-        body += 'source "%s/%s.sh"\n' % (LIB, name)
-    body += script
-    out = subprocess.run(["bash", "-c", body], cwd=cwd, capture_output=True, text=True, timeout=60)
-    return out.stdout, out.stderr, out.returncode
-
-
 def write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as fh:
@@ -57,74 +52,51 @@ try:
     feature = os.path.join(wt, ".sclaude", "local", "feature")
     journal = os.path.join(feature, "local-review-rounds.jsonl")
 
-    # --- the journal ------------------------------------------------------------
-    write(os.path.join(feature, "local-review.md"),
-          "## Local review of a..b — 2 finding(s)\n\n"
-          "### src/a.ts:10 — null slips through\nWith x empty, y.\n\n"
-          "### src/b.ts:3 — wrong order\nSorted after the cut.\n")
-    run_bash('local_review_journal %s aaa bbb 2 42' % wt, wt)
-    with open(journal) as fh:
-        rows = [json.loads(l) for l in fh]
-    check("journal-one-row", len(rows), 1)
-    check("journal-findings", [(f["path"], f["line"]) for f in rows[0]["findings"]],
-          [("src/a.ts", 10), ("src/b.ts", 3)])
-    check("journal-figures", (rows[0]["base"], rows[0]["head"], rows[0]["count"],
-                              rows[0]["seconds"]), ("aaa", "bbb", 2, 42))
-
     # --- the issue row ------------------------------------------------------------
     write(os.path.join(feature, "state.json"), json.dumps(
         {"steps": {"review": {"runs": [{"session": "s1", "rounds": 1}]}}}))
-    run_bash('run_local_findings %s s1 2' % wt, wt)
-    run_bash('run_local_findings %s s1 3' % wt, wt)
-    run_bash('run_local_findings %s s1 ""' % wt, wt)
+    body = 'source "%s/local_review.sh"\n' % LIB
+    for _ in range(2):
+        subprocess.run(["bash", "-c", body + 'run_local_round %s s1' % wt], check=True)
     with open(os.path.join(feature, "state.json")) as fh:
         run = json.load(fh)["steps"]["review"]["runs"][0]
-    check("issue-comments", run.get("comments"), 5)
     check("issue-rounds", run.get("rounds"), 2)
 
     # --- the report ---------------------------------------------------------------
-    def row(at, findings):
-        return json.dumps({"at": at, "seconds": 300, "base": "x", "head": "y",
-                           "count": len(findings),
-                           "findings": [{"path": p, "line": l, "title": "t"} for p, l in findings]})
-
-    write(journal, "\n".join([
-        row("2026-10-15T10:00:00+00:00", [("src/a.ts", 10), ("src/b.ts", 3), ("src/c.ts", 50)]),
-        row("2026-10-15T11:00:00+00:00", [("src/c.ts", 52)]),
-        row("2026-10-15T12:00:00+00:00", [("src/d.ts", 1)]),
-    ]) + "\n")
-    write(os.path.join(feature, "local-review-declined"), "src/c.ts:50\tleave it\n")
-
-    sys.path.insert(0, LIB)
     import review_report
-    found, runs = review_report.local_rounds(wt)
-    check("runs", len(runs), 3)
-    fates = {(t["path"], t["line"]): t["fate"] for t in found}
-    check("earlier-not-raised-is-fixed", fates[("src/a.ts", 10)], "fixed")
-    check("declined-is-no-fix", fates[("src/c.ts", 50)], "no fix")
-    check("near-declined-is-no-fix", fates[("src/c.ts", 52)], "no fix")
-    check("last-run-is-open", fates[("src/d.ts", 1)], "open")
-    review_report.rounds(found, runs)
-    review_report.mark_repeats(found)
-    check("repeat-after-decline",
-          [t["repeat"] for t in found if (t["path"], t["line"]) == ("src/c.ts", 52)], [True])
+    check("no-journal", review_report.local_runs(wt), None)
+    write(journal, "\n".join(json.dumps({"at": "2026-10-15T1%d:00:00+00:00" % i, "seconds": 300,
+                                         "base": "x", "head": "h%d" % i, "new": 1, "resolved": 0})
+                             for i in range(3)) + "\n")
+    runs = review_report.local_runs(wt)
+    check("runs", [r["start"].hour for r in runs], [10, 11, 12])
 
-    out = subprocess.run([sys.executable, os.path.join(LIB, "review_report.py"), wt, "7", ""],
-                         capture_output=True, text=True).stdout
+    def at(h):
+        return datetime.datetime(2026, 10, 15, h, 5, tzinfo=datetime.timezone.utc)
+
+    def thread(n, h, fate):
+        return {"id": str(n), "cites": set(), "path": "a.ts", "line": n * 20,
+                "created": at(h), "round": None, "fate": fate, "left_open": False}
+
+    review_report.threads = lambda cwd, pr, repo: [thread(1, 10, "fixed"), thread(2, 10, "no fix"),
+                                                   thread(3, 11, "fixed"), thread(4, 12, "open")]
+    review_report.review_runs = lambda cwd, branch: failures.append(("workflow-runs-read", "", ""))
+    sys.argv = ["review_report.py", wt, "7", "o/r", "feature"]
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        review_report.main()
+    out = buf.getvalue()
     check_true("report-says-local", "reviewed on this machine" in out)
-    check_true("report-per-round", "oldest first: 3 1 1" in out)
+    check_true("report-per-round", "oldest first: 2 1 1" in out)
     check_true("report-local-runs", "Local review: 3 runs" in out and "no Actions minutes" in out)
-
-    os.remove(journal)
-    check("no-journal", review_report.local_rounds(wt), (None, None))
+    check_true("report-fates", "Fixed: 2 (50%). Closed without a fix: 1 (25%)" in out)
 
     # --- the door the pull request is read through --------------------------
-    # In `local` the checks GitHub Actions ran are gone from every reading of
-    # the pull request; anything else read through gh_json is untouched.
     import pr_context
     rollup = [{"name": "Checks", "workflowName": "Checks", "conclusion": "FAILURE"},
               {"context": pr_context.FINDINGS_CHECK, "state": "FAILURE"},
               {"name": "Vercel", "workflowName": "", "conclusion": "SUCCESS"}]
+    real_gh, real_mode = pr_context.gh, pr_context.review_mode
     pr_context.gh = lambda args, cwd=None: json.dumps({"statusCheckRollup": rollup})
     pr_context.review_mode = lambda cwd: "local"
     got = pr_context.gh_json(["pr", "view", "7", "--json", "statusCheckRollup"])
@@ -134,11 +106,9 @@ try:
     pr_context.review_mode = lambda cwd: "github"
     got = pr_context.gh_json(["pr", "view", "7", "--json", "statusCheckRollup"])
     check("github-keeps-actions", len(got["statusCheckRollup"]), 3)
+    pr_context.gh, pr_context.review_mode = real_gh, real_mode
 
     # And the mode itself: the main checkout first, as project.sh reads it.
-    del pr_context.review_mode
-    import importlib
-    importlib.reload(pr_context)
     repo = os.path.join(tmp, "repo")
     subprocess.run(["git", "init", "-q", repo], check=True)
     write(os.path.join(repo, ".sclaude", "config.json"), json.dumps({"review": "local"}))

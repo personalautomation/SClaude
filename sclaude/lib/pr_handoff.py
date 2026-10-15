@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import acceptance  # noqa: E402
 import issue_comments  # noqa: E402
 from pr_context import FINDINGS_CHECK, GREEN, gh, gh_json, review_mode  # noqa: E402
-from review_report import local_rounds  # noqa: E402
+from review_report import local_runs  # noqa: E402
 
 
 def repo_of(cwd):
@@ -210,24 +210,22 @@ def summary(cwd, pr, state_path, done, numbers):
     returns = state.get("qa_returns") or 0
     rows.append(("Returned to development", "%d time%s" % (returns, "" if returns == 1 else "s")))
     rows.append(("Acceptance criteria", "<br>".join(acceptance_line(cwd, n) for n in numbers)))
-    found, runs = local_rounds(cwd) if review_mode(cwd) == "local" else (None, None)
-    if found is not None:
-        # Reviewed on this machine: the journal is the record, not threads.
-        unresolved = sum(1 for t in found if t["fate"] == "open")
-        rows.append(("Review findings", "%s%d found on this machine, %d closed, %d open"
-                     % ("⚠ " if unresolved else "", len(found), len(found) - unresolved,
-                        unresolved)))
+    counted = threads(cwd, pr, repo) if repo else None
+    if counted is None:
+        rows.append(("Review findings", "unknown"))
+    else:
+        total, unresolved = counted
+        rows.append(("Review findings", "%s%d found, %d resolved, %d open"
+                     % ("⚠ " if unresolved else "", total, total - unresolved, unresolved)))
+    # Reviewed on this machine: its findings are threads like the workflow's,
+    # counted above, but its runs are in its journal, not on the commits.
+    runs = local_runs(cwd) if review_mode(cwd) == "local" else None
+    if runs is not None:
         rows.append(("Last review", "on this machine, %d run%s, the last at %s"
                      % (len(runs), "" if len(runs) == 1 else "s",
-                        runs[-1]["start"].strftime("%Y-%m-%d %H:%M UTC"))))
+                        runs[-1]["start"].strftime("%Y-%m-%d %H:%M UTC")) if runs
+                     else "none on this machine yet"))
     else:
-        counted = threads(cwd, pr, repo) if repo else None
-        if counted is None:
-            rows.append(("Review findings", "unknown"))
-        else:
-            total, unresolved = counted
-            rows.append(("Review findings", "%s%d found, %d resolved, %d open"
-                         % ("⚠ " if unresolved else "", total, total - unresolved, unresolved)))
         rows.append(("Last review", review_line(cwd, repo, head) if repo and head else "unknown"))
     rows.append(("Checks", checks_line(view.get("statusCheckRollup") or [])))
     rows.append(("Regression", regression_line(state)))

@@ -626,9 +626,6 @@ step_rewind_to() {
 run_comments() {
   local wt="$1" session="$2" pr="$3" repo
   [[ -n "$pr" && "$pr" != "null" && -n "$session" ]] || return 0
-  # A project reviewed on this machine has no threads to count: its findings
-  # are added as they are told (run_local_findings in local_review.sh).
-  [[ "$(project_review_mode "$wt")" == "local" ]] && return 0
   repo="$(gh_repo 2>/dev/null || true)"
   [[ -n "$repo" ]] || return 0
   python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$LIB/pr_context.py" "$wt" "$pr" "$repo" <<'PY' 2>/dev/null || true

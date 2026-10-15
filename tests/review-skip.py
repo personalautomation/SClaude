@@ -186,6 +186,12 @@ try:
           "dirty")
     check("local-other-check-red", state(world(findings=[], rollup=[
         {"name": "Vercel", "status": "COMPLETED", "conclusion": "FAILURE"}])), "dirty")
+    # Its findings and replies go out under the person's account, signed: they
+    # are the review's words, not the person's. A thread still open is caught
+    # by the threads, not here.
+    signed = {"user": person, "body": "**x**\n\n%s · abc</sub>" % pr_context.LOCAL_SIGNATURE}
+    check("local-signed-not-a-person", state(world(findings=[], rollup=[], inline=[signed])),
+          "unreviewed")
     pr_context.review_mode = saved_mode
     check("review-skipped-by-label-red-check",
           state(world(findings=[], rollup=[dict(green[0], conclusion="FAILURE"),

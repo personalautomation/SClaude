@@ -394,6 +394,21 @@ run_block() {
   return 0
 }
 
+# The commits main holds in the main tree that origin does not, one line each.
+#
+# `vercel --prod` ships the main tree, so such a commit would go to production
+# without ever having been pushed — and a plain `git pull` refuses outright
+# once origin has moved on too, halfway through a block the person has already
+# said yes to. Asked after a fetch, so that a stale origin/main does not hide
+# the divergence. Silent when main is level with origin or only behind it.
+main_unpushed() {
+  local repo="$1"
+  # As prod_riders fetches: no prompt for credentials, and a bound on a slow
+  # network, so the production question is never held behind either.
+  GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$repo" fetch -q origin main 2>/dev/null || true
+  git -C "$repo" log --oneline origin/main..HEAD 2>/dev/null
+}
+
 # The branch's migrations, onto the database the previews run on.
 #
 # From the worktree, because that is where they are: until the merge they are
@@ -1537,6 +1552,7 @@ remind_prod() {
   # not asked — and unlike preview there is no second door, by design: shipping
   # an unchanged main to prod is not a thing anybody needs a shortcut for, and
   # `vercel --prod` from $REPO is the honest way to do it deliberately.
+
   # What a rollback would need, recorded while it can still be worked out.
   #
   # Both answers move the moment the block below runs. The deployment now
@@ -1552,6 +1568,30 @@ remind_prod() {
   if ! deploy_unchanged "$wt" prod; then
     rollback_remember_previous "$wt"
     [[ -n "$migrations" ]] && rollback_remember_migrations "$wt"
+  fi
+
+  # Commits on main that origin lacks stop production before its question.
+  # They would ship unpushed, and once origin has moved on as well the block's
+  # pull refuses halfway through a yes. Not pushed on the person's behalf and
+  # not rebased away — whether they belong on origin is theirs to say — and not
+  # a decline either: the issue stays open and the tree stays, so the same
+  # command picks production up again once main is level.
+  #
+  # After the rollback notes above, like the riders below: main_unpushed
+  # fetches main, which empties the range rollback_remember_migrations reads.
+  # Taking the notes and then stopping costs nothing — the next run takes
+  # them again, and an empty range keeps the migrations noted now.
+  if ! deploy_unchanged "$wt" prod; then
+    local unpushed; unpushed="$(main_unpushed "$REPO")"
+    if [[ -n "$unpushed" ]]; then
+      echo ""
+      alarm "Production — main in $REPO has commits origin does not:"
+      sed 's/^/    /' <<< "$unpushed" >&2
+      info "  Push them, or drop them, then run: $SELF $slug"
+      info "  To push: git -C $REPO pull --rebase && git -C $REPO push"
+      run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" 0 "$wt"
+      return 0
+    fi
   fi
 
   # What rides along. After the two notes above: fetching main empties the
@@ -1586,7 +1626,7 @@ remind_prod() {
     # loud rather than papering over with a guess: the block is assembled from
     # what is declared, and a missing promote leaves the migrations unshipped
     # where a guessed one would run something nobody named.
-    local -a prod_cmds=("cd $REPO" "git pull")
+    local -a prod_cmds=("cd $REPO" "git pull --ff-only")
     local promote_cmd schema_path
     promote_cmd="$(project_get database.promote "$wt" || true)"
     schema_path="$(project_get database.schemaFile "$wt" || true)"
@@ -1631,7 +1671,7 @@ remind_prod() {
       "${prod_note:-The branch adds no migrations.}" \
       "$prod_ask" \
       "cd $REPO" \
-      "git pull" \
+      "git pull --ff-only" \
       "vercel --prod"; then
       prod_done=1
       deploy_remember "$wt" prod

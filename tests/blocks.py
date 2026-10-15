@@ -171,6 +171,47 @@ try:
         'run_block "T" "" "Go?" "cd %s" >/dev/null; pwd' % REPO, tmp)
     check("block-cd-does-not-leak", out.strip().split("\n")[-1], tmp)
 
+    # --- main_unpushed --------------------------------------------------------
+    #
+    # Decides whether production stops before its question. Silent wrongly, and
+    # the block ships commits nobody pushed or fails on its pull after the yes;
+    # loud wrongly, and a level main is refused production.
+
+    other = os.path.join(tmp, "other")
+    subprocess.run(["git", "clone", "-q", origin, other], capture_output=True, check=False)
+    git("config", "user.email", "t@t", cwd=other)
+    git("config", "user.name", "T", cwd=other)
+    out, _, _ = run_bash('main_unpushed %s' % REPO, tmp)
+    check("unpushed-silent-when-level", out.strip(), "")
+
+    # Behind only: what a plain pull fast-forwards, nothing to stop for.
+    git("commit", "-q", "--allow-empty", "-m", "theirs", cwd=other)
+    git("push", "-q", "origin", "HEAD:main", cwd=other)
+    out, _, _ = run_bash('main_unpushed %s' % REPO, tmp)
+    check("unpushed-silent-when-only-behind", out.strip(), "")
+
+    # A local commit on top: diverged, the case that stopped a pull halfway.
+    git("commit", "-q", "--allow-empty", "-m", "local only", cwd=REPO)
+    out, _, _ = run_bash('main_unpushed %s' % REPO, tmp)
+    check_true("unpushed-names-the-local-commit", "local only" in out)
+    check("unpushed-hides-what-origin-has", "theirs" in out, False)
+    git("reset", "-q", "--hard", "HEAD~1", cwd=REPO)
+
+    # The pulls in the production blocks never merge: with pull.rebase=false
+    # set somewhere a plain pull would make a merge commit and ship it.
+    deploy_src = open(os.path.join(LIB, "deploy.sh")).read()
+    check("prod-pulls-are-ff-only",
+          re.findall(r'"git pull[^"]*"', deploy_src),
+          ['"git pull --ff-only"', '"git pull --ff-only"'])
+    # Its fetch empties the range rollback_remember_migrations reads, so in
+    # remind_prod it comes after the rollback notes, as prod_riders does; and
+    # it fetches as prod_riders does, with no prompt and a bound.
+    prod = deploy_src[deploy_src.index("remind_prod() {"):]
+    check_true("unpushed-after-rollback-notes",
+               prod.index('rollback_remember_migrations "$wt"') < prod.index('main_unpushed "$REPO"'))
+    check_true("unpushed-fetch-bounded",
+               'GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$repo" fetch' in deploy_src)
+
     # --- worktree_dirt -------------------------------------------------------
     #
     # What the human is shown before the worktree is destroyed. The orchestrator's

@@ -134,6 +134,24 @@ project_review_mode() {
   esac
 }
 
+# Who gives QA's word (`qa`) and who merges (`merge`): `github` (a person, on
+# GitHub; sclaude waits), `both` (the same, or a key pressed in sclaude's wait
+# does it from here) or `auto` (sclaude does it itself and waits for nobody).
+# Absent or unknown, each is what it was before the keys existed: QA on
+# GitHub, and a merge sclaude offers beside the one on GitHub. Read like
+# `review`, the main checkout first: a choice made now, not when a branch
+# was cut.
+#
+#   project_flow_mode <qa|merge> [wt]
+project_flow_mode() {
+  local key="$1" mode
+  mode="$(project_get "$key" 2>/dev/null || project_get "$key" "${2:-}" 2>/dev/null || true)"
+  case "$mode" in
+    github|both|auto) echo "$mode" ;;
+    *) [[ "$key" == merge ]] && echo both || echo github ;;
+  esac
+}
+
 
 # --- the board ----------------------------------------------------------------
 #

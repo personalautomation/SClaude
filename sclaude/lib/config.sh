@@ -8,9 +8,9 @@
 #
 # Every section is listed with what it holds now and what it is for, in the
 # words of sclaude/config.example.json (config_menu.py reads them from there).
-# A section with fixed choices — `review` — is set here; the rest are
-# structures the screen shows and the person edits in the file, which the last
-# row opens.
+# A section with fixed choices — `review`, `qa`, `merge` — is set here; the
+# rest are structures the screen shows and the person edits in the file, which
+# the last row opens.
 #
 # The file is the project's, committed in the product: a change made here is
 # a change in the main checkout's working tree, to commit like any other.
@@ -87,7 +87,7 @@ config_section() {
     return 0
   fi
 
-  now="$(project_get "$key" 2>/dev/null || true)"
+  now="$(project_get "$key" 2>/dev/null || python3 "$LIB/config_menu.py" default "$key")"
   local start=0 i
   for i in "${!values[@]}"; do
     [[ "${values[$i]}" == "$now" ]] && start="$i"

@@ -19,7 +19,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "sclaude", "lib"))
 from acceptance import (AC_CLOSE, AC_OPEN, NOTE, PLACEHOLDER, merge_section,
                         parse, plan_content, plan_section, plan_verdict,
-                        render, section, status, sync, unticked, extend)
+                        render, section, status, sync, unticked, extend,
+                        tick_all)
 import issue_comments  # noqa: E402
 
 failures = []
@@ -419,6 +420,31 @@ stub(None)
 check("status-no-gh", status("71"), "")
 check("unticked-no-gh", unticked("71"), "")
 
+
+# --- tick_all: QA accepted from sclaude ---------------------------------------
+#
+# Only the boxes change: the wording and a note QA left stay.
+edited = []
+acceptance.issue_comments.edit = \
+    lambda cid, text, cwd=None: edited.append((cid, text)) or True
+stub(issue(human, (6, comment("- [x] AC1. Confirmed.\n  QA: a note.\n"
+                               "- [ ] AC2. Not yet."))))
+check("tick-word", tick_all("71"), "ticked")
+check("tick-edits-our-comment", edited[-1][0], "6")
+check("tick-all-ticked", [d for _, _, d in parse(edited[-1][1])], [True, True])
+check_true("tick-keeps-the-note", "QA: a note." in edited[-1][1])
+check_true("tick-keeps-the-wording", "AC2. Not yet." in edited[-1][1])
+stub(issue(human, (6, comment("- [x] AC1. Confirmed."))))
+check("tick-already", tick_all("71"), "already")
+stub(issue(human))
+check("tick-nothing", tick_all("71"), "nothing")
+stub(issue(body("- [ ] AC1. In the old body.")))
+check("tick-never-writes-a-body", tick_all("71"), "body")
+stub(None)
+check("tick-no-gh", tick_all("71"), "unreadable")
+stub(issue(human, (6, comment("- [ ] AC1. Not yet."))))
+acceptance.issue_comments.edit = lambda cid, text, cwd=None: False
+check("tick-refused", tick_all("71"), "refused")
 
 # --- extend: criteria step 2 added, appended after the session ----------------
 #

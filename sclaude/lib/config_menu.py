@@ -11,6 +11,7 @@
 #   config_menu.py show <config> <example> <key>   the explanation and the value
 #   config_menu.py choices <key>                   value<TAB>meaning, for a key
 #                                                  the screen can set itself
+#   config_menu.py default <key>                   what an absent key means
 #   config_menu.py set <config> <key> <value>      write one such value
 #
 # Only a section with fixed choices is set from the screen; the rest are
@@ -22,7 +23,7 @@ import re
 import sys
 
 # The sections a person can set from the screen, with what each value means.
-# The first is what an absent key means.
+# The first is what an absent key means, unless DEFAULTS says otherwise.
 CHOICES = {
     "review": [
         ("github", "the review workflow in GitHub Actions: runner minutes and its token"),
@@ -30,7 +31,26 @@ CHOICES = {
                   "the repository's Actions workflows are switched off"),
         ("off", "no review; step 4 answers only the checks and people"),
     ],
+    "qa": [
+        ("github", "QA moves the issue to Done on the board; sclaude waits"),
+        ("both", "the same, or press a in the wait: sclaude ticks every "
+                 "criterion and moves the issue itself"),
+        ("auto", "nobody is waited for: a green preview is accepted at once"),
+    ],
+    "merge": [
+        ("github", "the pull request is merged on GitHub; sclaude waits"),
+        ("both", "the same, or sclaude asks, and m in the wait merges from here"),
+        ("auto", "nobody is waited for: merged once QA passed and GitHub allows it"),
+    ],
 }
+
+# An absent key that means something other than its first choice: the merge
+# sclaude offered before `merge` existed.
+DEFAULTS = {"merge": "both"}
+
+
+def default(key):
+    return DEFAULTS.get(key) or (CHOICES[key][0][0] if key in CHOICES else "")
 
 # A README line that opens a section: its key, a run of spaces, a dash.
 SECTION = re.compile(r"^([a-z][a-zA-Z]*)\s+— (.*)$")
@@ -68,7 +88,7 @@ def load(config):
 def summary(key, value):
     """The value in a few words, for the row."""
     if value is None:
-        return CHOICES[key][0][0] + " (not set)" if key in CHOICES else "not set"
+        return default(key) + " (not set)" if key in CHOICES else "not set"
     if isinstance(value, str):
         return value
     if key == "regression" and isinstance(value, dict):
@@ -145,6 +165,8 @@ def main(argv):
         show(argv[1], argv[2], argv[3])
     elif len(argv) >= 2 and argv[0] == "choices":
         choices(argv[1])
+    elif len(argv) >= 2 and argv[0] == "default":
+        print(default(argv[1]))
     elif len(argv) >= 4 and argv[0] == "set":
         return set_value(argv[1], argv[2], argv[3])
     else:

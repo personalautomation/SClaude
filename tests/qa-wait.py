@@ -37,7 +37,7 @@ def check_true(name, got):
 
 
 def run(tmp, columns, watch=None, unticked="", board=True, names=None,
-        merged_after=None):
+        merged_after=None, extra=""):
     """Run qa_wait over a scripted sequence of columns.
 
     Returns (stdout + stderr, exit code, watch file contents or None).
@@ -97,9 +97,10 @@ branch_pr_state() {
   echo "$n" > "%s.calls"
   if [[ -n "%s" && "$n" -ge "%s" ]]; then echo MERGED; else echo OPEN; fi
 }
+%s
 qa_wait demo 71 208 feat/demo
 echo "rc=$?"
-''' % (seq, seq, seq, seq, seq, merged_after or "", merged_after or 0)
+''' % (seq, seq, seq, seq, seq, merged_after or "", merged_after or 0, extra)
     env = dict(os.environ, HOME=home, QA_POLL="1")
     try:
         out = subprocess.run(["bash", "-c", body], capture_output=True,
@@ -228,6 +229,50 @@ try:
     out, rc, _ = run(tmp, ["In QA", "", "", "Done"], watch=dict(armed))
     check("silence-mid-wait-keeps-waiting", rc, 0)
     check_true("silence-is-not-unexpected", "unexpected" not in out)
+
+    # --- accepted from sclaude (`qa`) ---------------------------------------
+    #
+    # The board move is stubbed: it records itself, and the column read after
+    # it is what the scripted sequence says next.
+    moved = os.path.join(tmp, "moved")
+    accept = ('''
+qa_accept_here() { echo "accepted:$2" >> "%s"; [[ "${ACCEPT_FAILS:-}" ]] && return 1; return 0; }
+''' % moved)
+
+    def accepted():
+        if not os.path.exists(moved):
+            return []
+        with open(moved) as fh:
+            calls = fh.read().split()
+        os.remove(moved)
+        return calls
+
+    out, rc, _ = run(tmp, ["In QA", "Done"], watch=dict(armed),
+                     extra=accept + "project_flow_mode() { echo auto; }")
+    check("auto-returns-zero", rc, 0)
+    check("auto-accepts-once", accepted(), ["accepted:auto"])
+    check_true("auto-says-so", "qa` is auto" in out)
+    check_true("auto-does-not-wait", "Waiting for QA" not in out)
+
+    out, rc, _ = run(tmp, ["In QA", "In QA", "Done"], watch=dict(armed),
+                     extra=accept + "ACCEPT_FAILS=1; project_flow_mode() { echo auto; }")
+    check("auto-refused-waits-for-the-board", rc, 0)
+    check("auto-refused-tried-once", accepted(), ["accepted:auto"])
+    check_true("auto-refused-says-so", "waiting for QA on the board instead" in out)
+
+    # With `both`, a pressed and confirmed accepts; github ignores the key.
+    keyed = accept + '''
+poll_pause() { POLL_KEY=a; }
+qa_accept_offer() { return 0; }
+'''
+    out, rc, _ = run(tmp, ["In QA", "Done"], watch=dict(armed),
+                     extra=keyed + "project_flow_mode() { echo both; }")
+    check("both-key-accepts", accepted(), ["accepted:key"])
+    check_true("both-names-the-key", "press a here" in out)
+    out, rc, _ = run(tmp, ["In QA", "Done"], watch=dict(armed),
+                     extra=keyed + "project_flow_mode() { echo github; }")
+    check("github-ignores-the-key", accepted(), [])
+    check_true("github-does-not-name-the-key", "press a here" not in out)
 
 finally:
     shutil.rmtree(tmp, ignore_errors=True)

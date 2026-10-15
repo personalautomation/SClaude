@@ -4,7 +4,8 @@
 # what it does when it may not.
 #
 # The merge is the one part of the cycle that belongs to a person, and that
-# does not change here — nothing merges without a yes. What is under test is
+# does not change here — nothing merges without a yes, unless the project set
+# `merge` to auto in its config. What is under test is
 # the judgement around the question: offering a merge that GitHub would refuse
 # wastes the answer, and offering one before QA has looked claims a check
 # nobody performed. Both failures are silent, which is why they are worth a
@@ -250,6 +251,25 @@ if offer:
     # worktree, the local branch and the remote one together, and it is what
     # the human is sent to next.
     check_true("no-delete-branch", "--delete-branch" not in offer)
+
+    # `merge`: github keeps the question out of sclaude; auto answers it, on
+    # the same conditions — after QA's column and GitHub's readiness.
+    check_true("offer-reads-the-merge-mode", 'project_flow_mode merge' in offer)
+    check_true("github-mode-never-asks",
+               re.search(r'\[\[ "\$who" != github \]\] \|\| return 1', offer) is not None
+               and offer.find('!= github ]] || return 1') < offer.find("issue_status_now"))
+    check_true("auto-merges-after-readiness",
+               offer.find('"$ready" != "ready"') < offer.find('"$who" == auto'))
+    check_true("auto-does-not-ask",
+               re.search(r'if \[\[ "\$who" == auto \]\]; then\s*\n\s*say[^\n]*\n\s*else\s*\n\s*ask ',
+                         offer) is not None)
+
+mwait = body_of(deploy, "merge_wait") or ""
+check_true("merge-wait-m-merges-from-here",
+           '"$mode" == both && "$POLL_KEY" == [mM]' in mwait and "merge_offer" in mwait)
+check_true("merge-wait-auto-tries-once", "auto_tried=1" in mwait)
+check_true("merge-wait-gets-the-offer-mode",
+           'merge_wait "$slug" "$issue" "$pr" "$branch" "$offer_mode"' in deploy)
 
 
 # --- one preview block, two callers -----------------------------------------

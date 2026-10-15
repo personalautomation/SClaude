@@ -22,8 +22,9 @@
 # never written.
 #
 # The issue is also where QA works: it is the business record of the feature,
-# the pull request a technical one. The boxes in the comment are ticked there,
-# and the merge question reads them from there.
+# the pull request a technical one. The boxes in the comment are ticked there —
+# by QA, or all at once by sclaude when the project lets it accept (`qa` in
+# its config, --tick) — and the merge question reads them from there.
 #
 # Every later step reads the criteria from that one place rather than carrying
 # a copy. A copy would be the thing that goes stale: the human edits the comment
@@ -482,6 +483,47 @@ def status(number, cwd=None):
                      for cid, text, done in parse(fetch_text(number, cwd)))
 
 
+def tick_all(number, cwd=None):
+    """Tick every criterion in our comment: QA accepted from sclaude. A word.
+
+    "ticked"     — the boxes that were empty are ticked now;
+    "already"    — every box was ticked;
+    "nothing"    — the issue has no criteria to tick;
+    "body"       — the criteria live in the description of an issue from
+                   before the move, which is never written;
+    "unreadable" — gh could not give us the issue;
+    "torn"       — our comment has one marker without the other;
+    "refused"    — gh would not take the edit.
+
+    Only the boxes change. The wording and any note QA left stay as they are,
+    the same promise sync() and extend() keep.
+    """
+    issue = fetch(number, cwd)
+    if issue is None:
+        return "unreadable"
+    own, text = source(issue)
+    found = parse(text)
+    if not found:
+        return "nothing"
+    if all(done for _, _, done in found):
+        return "already"
+    if own is None:
+        return "body"
+    lines = [BOX.sub(r"\1x]", line, count=1) if CRITERION.match(line) else line
+             for line in section(text).split("\n")]
+    new = merge_section(text, lines)
+    if new is None:
+        return "torn"
+    cid = issue_comments.comment_id(own)
+    if cid is None or not issue_comments.edit(cid, new, cwd):
+        return "refused"
+    return "ticked"
+
+
+# The empty box of a criterion line, for tick_all.
+BOX = re.compile(r"^(\s*-\s*\[) \]")
+
+
 def unticked(number, cwd=None):
     """The identifiers QA has not ticked yet, as "AC2, AC5", or ""."""
     return ", ".join(cid for cid, _, done in parse(fetch_text(number, cwd))
@@ -492,7 +534,7 @@ def main():
     argv = sys.argv[1:]
     mode = None
     if argv and argv[0] in ("--sync", "--extend", "--status", "--unticked",
-                            "--verdict"):
+                            "--verdict", "--tick"):
         mode, argv = argv[0], argv[1:]
     try:
         if mode == "--verdict":
@@ -514,6 +556,10 @@ def main():
             return 0 if word in ("written", "extended", "unchanged",
                                  "nothing") else 1
         cwd = argv[1] if len(argv) > 1 else None
+        if mode == "--tick":
+            word = tick_all(number, cwd)
+            sys.stdout.write(word + "\n")
+            return 0 if word in ("ticked", "already", "nothing") else 1
         if mode == "--status":
             sys.stdout.write(status(number, cwd))
         elif mode == "--unticked":
@@ -521,7 +567,7 @@ def main():
         else:
             sys.stdout.write(render(number, cwd))
     except Exception:
-        return 1 if mode in ("--sync", "--extend", "--verdict") else 0
+        return 1 if mode in ("--sync", "--extend", "--verdict", "--tick") else 0
     return 0
 
 

@@ -187,6 +187,14 @@ workflow finished without reviewing anything (`sclaude/lib/pr_context.py`). The
 question itself defaults to *no*, and reads "Merge it **unchecked**?" when QA
 never saw the feature.
 
+A product may hand either decision back to sclaude, in `.sclaude/config.json`
+or from `sclaude config`. `qa` and `merge` each take `github` (a person, on
+GitHub; sclaude waits), `both` (the same, or a key in sclaude's wait — `a`
+accepts the issue, `m` merges) and `auto` (sclaude does it and waits for
+nobody). Absent, QA is `github` and the merge `both`, which is how the cycle
+worked before the keys existed. An acceptance given by sclaude says so in a
+comment on the issue.
+
 **No staging between preview and production.** Preview is the last stop.
 
 ### Where the claims come from
@@ -611,6 +619,8 @@ Nothing ticks a box except a person. A tick is the claim that somebody looked at
 a deployment and it was right, and that is the one thing in this cycle no part
 of it can establish for itself — the same reason `In QA` → `Done` is a human's
 move. A step that could tick its own criteria would be marking its own homework.
+The one exception is a product's own choice: with `qa` set to `both` or `auto`
+sclaude ticks every box when it accepts the issue, and comments that it did.
 
 A feature planned before any of this existed has no section and no criteria.
 Every reader handles that by saying so rather than by inventing them: the block

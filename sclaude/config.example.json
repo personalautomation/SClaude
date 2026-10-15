@@ -108,8 +108,27 @@
     "            the project's CI workflows ran. Set from `sclaude config`,",
     "            \"local\" also switches the repository's Actions workflows",
     "            off (they would fail on every push, and mail about it), and",
-    "            \"github\" switches back on the ones it switched off."
+    "            \"github\" switches back on the ones it switched off.",
+    "qa        — who accepts the feature once its preview is green:",
+    "            \"github\" (QA moves the issue to Done on the board and",
+    "            sclaude waits for it; the default), \"both\" (the same, or",
+    "            `a` pressed in sclaude's wait: it ticks every acceptance",
+    "            criterion in the issue and moves it to Done itself) or",
+    "            \"auto\" (sclaude does that at once and waits for nobody: the",
+    "            preview regression is the only check). The issue gets a",
+    "            comment saying sclaude accepted it, so the board's history",
+    "            does not read as a person's look.",
+    "merge     — who merges the pull request once QA passed: \"github\"",
+    "            (somebody clicks it on GitHub; sclaude waits), \"both\" (the",
+    "            same, or sclaude asks, and `m` pressed in its wait merges from",
+    "            here; the default) or \"auto\" (sclaude merges as soon as QA",
+    "            passed and GitHub allows it, and carries on). Never before",
+    "            QA: with `qa` on github, auto still waits for the board."
   ],
+
+  "qa": "github",
+
+  "merge": "both",
 
   "maintainers": ["lead@example.com"],
 

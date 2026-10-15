@@ -690,8 +690,8 @@ qa_accepted() {
 
 # --- the merge, when QA has passed and nothing is in the way -----------------
 #
-# The merge is the human's step, and it stays theirs: nothing below merges on
-# its own. What changes is where the decision is put in front of them. Until
+# The merge is the human's step, and it stays theirs unless the project set
+# `merge` to auto: nothing else below merges on its own. What changes is where the decision is put in front of them. Until
 # now the cycle reached this point and printed "Merge PR #N, then run: sclaude
 # done" — a instruction to go elsewhere, do a thing, and come back. Whenever QA
 # has already passed the issue and GitHub says the pull request is clean, that
@@ -845,12 +845,19 @@ PYMETHOD
 # branch and the remote one together, and it is what the human is told to run
 # next; deleting the remote here would leave that command tearing down half of
 # a thing it no longer recognises.
+#
+# `merge` in the project's config (project_flow_mode) decides who says yes:
+# `github` keeps the question out of sclaude altogether — the merge is clicked
+# there, and merge_wait waits for it; `auto` answers it without asking, on
+# the same conditions; `both` asks.
 merge_offer() {
   local slug="$1" pr="$2" issue="$3" mode="${4:-}"
-  local column ready obstacle method answer
+  local column ready obstacle method answer who
 
   [[ -n "$pr" && "$pr" != "null" ]] || return 1
   command -v gh >/dev/null 2>&1 || return 1
+  who="$(project_flow_mode merge)"
+  [[ "$who" != github ]] || return 1
 
   # QA's word, where there is a board to carry it.
   #
@@ -978,10 +985,14 @@ merge_offer() {
   echo ""
   say "  gh pr merge $pr $method"
   echo ""
-  ask "${BOLD}$prompt [y/n] ${OFF}" answer yn
-  if ! is_yes "$answer"; then
-    info "→ Merge: skipped. It stays yours to do."
-    return 1
+  if [[ "$who" == auto ]]; then
+    say "${BOLD}Merging: \`merge\` is auto in .sclaude/config.json.${OFF}"
+  else
+    ask "${BOLD}$prompt [y/n] ${OFF}" answer yn
+    if ! is_yes "$answer"; then
+      info "→ Merge: skipped. It stays yours to do."
+      return 1
+    fi
   fi
 
   if ! gh pr merge "$pr" --repo "$(gh_repo)" "$method"; then
@@ -999,7 +1010,9 @@ merge_offer() {
 # --- waiting for QA, then for the merge ---------------------------------------
 #
 # The order at the end of the cycle is review → preview → QA → merge →
-# production. The first two are sclaude's; QA and the merge are people's, and
+# production. The first two are sclaude's; QA and the merge are people's —
+# unless `qa` or `merge` in the project's config says otherwise (both: a key
+# in the wait does it from here; auto: sclaude does it at once) — and
 # sclaude waits for each with the session it already has rather than exiting
 # and leaving a person to remember `sclaude <feature>`. Each wait says which
 # event it is waiting for, and moves on the moment that event happens.
@@ -1021,6 +1034,51 @@ qa_back_column() {
   column_is "$column" "$QA_FROM" && return 0
   column_is "$column" "$PROGRESS_FROM" && return 0
   return 1
+}
+
+# QA's word given from sclaude rather than on the board — `qa` is `both` and a
+# person pressed `a` in the wait, or it is `auto`. The issue then reads as if
+# QA had worked in it: every criterion ticked, and the issue moved from In QA
+# to Done. A comment says who accepted it, since a column moved and boxes
+# ticked under the gh account would otherwise read as a person having looked.
+#
+#   qa_accept_here <issue> <key|auto>
+#
+# Returns 0 once the issue is in Done, 1 when it is not — the board could not
+# be read or written — and the wait goes on for a person to move it.
+qa_accept_here() {
+  local issue="$1" how="$2" word who
+  word="$(python3 "$LIB/acceptance.py" --tick "$issue" "${REPO:-.}" 2>/dev/null || true)"
+  case "$word" in
+    ticked) info "  Every acceptance criterion in issue #$issue is ticked." ;;
+    already|nothing) ;;
+    body) warn "  The criteria of issue #$issue are in its description, which sclaude never writes — tick them there." ;;
+    *) warn "  Could not tick the criteria in issue #$issue${word:+ ($word)} — tick them on GitHub." ;;
+  esac
+  if [[ "$how" == auto ]]; then
+    who="automatically: \`qa\` is \`auto\` in .sclaude/config.json, and the preview regression was green. Nobody looked at the preview."
+  else
+    declare -F developer_name >/dev/null && who="$(developer_name 2>/dev/null || true)"
+    who="from sclaude${who:+ by $who}, in the wait for QA."
+  fi
+  gh issue comment "$issue" --repo "$(gh_repo)" --body "Accepted $who" >/dev/null 2>&1 \
+    || warn "  Could not comment on issue #$issue that sclaude accepted it."
+  issue_move_status "$issue" "$QA_TO" "$QA_DONE"
+  column_is "$(issue_status_now "$issue" 2>/dev/null || true)" "$QA_DONE"
+}
+
+# The question behind `a`: the criteria as they stand, then yes or no. A key
+# alone is too easy to press by accident in a wait that lasts hours.
+qa_accept_offer() {
+  local issue="$1" criteria line answer
+  criteria="$(python3 "$LIB/acceptance.py" --status "$issue" "${REPO:-.}" 2>/dev/null || true)"
+  echo ""
+  if [[ -n "$criteria" ]]; then
+    say "Acceptance criteria in issue #$issue:"
+    while IFS= read -r line; do say "  $line"; done <<<"$criteria"
+  fi
+  ask "${BOLD}Accept issue #$issue: tick every criterion and move it to '$QA_DONE'? [y/n] ${OFF}" answer yn
+  is_yes "$answer"
 }
 
 # Wait until QA has decided about the issue.
@@ -1052,9 +1110,15 @@ qa_back_column() {
 # The acceptance criteria do not gate Done. GitHub Projects cannot refuse a
 # status change, so a gate would have to undo a person's move after the fact;
 # it names the unticked ones instead, and the merge question names them again.
+#
+# `qa` in the project's config decides who may give the word besides the
+# board (project_flow_mode): with `both`, `a` pressed during the wait accepts
+# from here; with `auto`, an issue in In QA is accepted at once, once — if the
+# board refuses the move, the wait goes on as with `github`.
 qa_wait() {
   local slug="$1" issue="$2" pr="$3" branch="${4:-}" wt="${5:-}"
   local now prev said="" waited=0 logged=0 announced=0 unticked start=$SECONDS
+  local mode auto_tried=0 keys=""
 
   [[ -n "$issue" && "$issue" != "null" && -n "$QA_DONE" ]] || return 0
   now="$(issue_status_now "$issue" 2>/dev/null || true)"
@@ -1065,6 +1129,9 @@ qa_wait() {
   # still is — so without this the move would look like one that never left a
   # back column.
   [[ "$(watch_verdict "$slug")" == "returned" ]] && return 2
+
+  mode="$(project_flow_mode qa "$wt")"
+  [[ "$mode" == both ]] && keys=", a accepts here"
 
   # The column before this look, which is what tells a hand-back from an issue
   # that never reached QA at all. The watch file holds the one observed when QA
@@ -1118,19 +1185,33 @@ qa_wait() {
       prev="$now"
     fi
 
+    if [[ "$mode" == auto && "$auto_tried" -eq 0 ]] && column_is "$now" "$QA_TO"; then
+      auto_tried=1
+      [[ -t 1 && "$announced" -eq 1 ]] && printf '\r\033[2K'
+      echo ""
+      say "${BOLD}Accepting issue #$issue: \`qa\` is auto, and the preview regression is green.${OFF}"
+      if qa_accept_here "$issue" auto; then
+        now="$QA_DONE"
+        continue
+      fi
+      warn "  It is not in '$QA_DONE' — waiting for QA on the board instead."
+    fi
+
     if [[ "$announced" -eq 0 ]]; then
       announced=1
       echo ""
       say "${BOLD}Waiting for QA on issue #$issue.${OFF}"
       info "  QA checks the acceptance criteria in the issue and moves it to '$QA_DONE'."
+      [[ "$mode" == both ]] \
+        && info "  Or press a here to accept it from sclaude: every criterion ticked, the issue moved."
       info "  The merge of PR #$pr comes after that."
       info "  Ctrl-C to leave — the QA watch keeps looking, and Telegram will say when"
       info "  the column moves. Resume with: $SELF $slug"
       echo ""
     fi
     if [[ -t 1 ]]; then
-      printf '\r\033[2K  %sHuman in the loop%s — waiting for QA (%s so far, next check in %ss, any key checks now)' \
-        "$DIM" "$OFF" "$(regression_duration "$waited")" "$QA_POLL"
+      printf '\r\033[2K  %sHuman in the loop%s — waiting for QA (%s so far, next check in %ss, any key checks now%s)' \
+        "$DIM" "$OFF" "$(regression_duration "$waited")" "$QA_POLL" "$keys"
     elif [[ $((waited - logged)) -ge 300 || "$waited" -eq 0 ]]; then
       # Without a terminal, a line every five minutes: this ends up in a log
       # somebody reads later.
@@ -1140,6 +1221,10 @@ qa_wait() {
     # A key cuts the pause short, so the time is counted rather than added up.
     poll_pause "$QA_POLL"
     waited=$((SECONDS - start))
+    if [[ "$mode" == both && "$POLL_KEY" == [aA] ]] && column_is "$now" "$QA_TO"; then
+      [[ -t 1 ]] && printf '\r\033[2K'
+      qa_accept_offer "$issue" && qa_accept_here "$issue" key
+    fi
     if [[ -n "$branch" && "$(branch_pr_state "$branch")" == "MERGED" ]]; then
       [[ -t 1 ]] && printf '\r\033[2K'
       return 3
@@ -1160,12 +1245,24 @@ qa_wait() {
 # Returns 0 once merged, 1 with no branch to ask about, 2 when the pull request
 # was closed without a merge — it can never be merged then, and waiting on it
 # would last for ever.
+#
+# `merge` in the project's config (project_flow_mode) adds a way out: with
+# `both`, `m` pressed here puts the merge question again; with `auto`, the
+# merge is made the first time GitHub calls the pull request ready — once, so
+# a refusal is not repeated every poll. <offer-mode> is merge_offer's.
+#
+#   merge_wait <slug> <issue> <pr> <branch> [offer-mode]
 merge_wait() {
-  local slug="$1" issue="$2" pr="$3" branch="$4" waited=0 logged=0 start=$SECONDS
+  local slug="$1" issue="$2" pr="$3" branch="$4" offer_mode="${5:-}"
+  local waited=0 logged=0 start=$SECONDS mode auto_tried=0 keys=""
 
   [[ -n "$branch" ]] || return 1
+  mode="$(project_flow_mode merge)"
+  [[ "$mode" == both ]] && keys=", m merges here"
   echo ""
   info "Waiting for the merge of PR #$pr${issue:+ (issue #$issue)}; merge it on GitHub."
+  [[ "$mode" == both ]] && info "  Or press m here to merge it from sclaude."
+  [[ "$mode" == auto ]] && info "  \`merge\` is auto: sclaude merges it itself once GitHub calls it ready."
   info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug"
   echo ""
   local pr_state
@@ -1178,14 +1275,22 @@ merge_wait() {
       return 2
     fi
     if [[ -t 1 ]]; then
-      printf '\r\033[2K  %sHuman in the loop%s — waiting for the merge (%s so far, next check in %ss, any key checks now)' \
-        "$DIM" "$OFF" "$(regression_duration "$waited")" "$MERGE_POLL"
+      printf '\r\033[2K  %sHuman in the loop%s — waiting for the merge (%s so far, next check in %ss, any key checks now%s)' \
+        "$DIM" "$OFF" "$(regression_duration "$waited")" "$MERGE_POLL" "$keys"
     elif [[ $((waited - logged)) -ge 300 || "$waited" -eq 0 ]]; then
       info "  waiting for the merge of PR #$pr${issue:+ (issue #$issue)} ($(regression_duration "$waited"))"
       logged="$waited"
     fi
     poll_pause "$MERGE_POLL"
     waited=$((SECONDS - start))
+    if [[ "$mode" == both && "$POLL_KEY" == [mM] ]]; then
+      [[ -t 1 ]] && printf '\r\033[2K'
+      merge_offer "$slug" "$pr" "$issue" "$offer_mode" && return 0
+    elif [[ "$mode" == auto && "$auto_tried" -eq 0 && "$(merge_readiness "$pr")" == ready ]]; then
+      auto_tried=1
+      [[ -t 1 ]] && printf '\r\033[2K'
+      merge_offer "$slug" "$pr" "$issue" "$offer_mode" && return 0
+    fi
   done
   [[ -t 1 ]] && printf '\r\033[2K'
   echo "${GREEN}✓ PR #$pr merged.${OFF}"
@@ -1463,7 +1568,7 @@ remind_prod() {
   # GitHub, and this notices it rather than ending the run with an errand.
   if [[ "${merged:-}" != "MERGED" ]] && [[ "$preview_live" -eq 1 || "$no_deploy" -eq 1 ]]; then
     local wait_rc=0
-    merge_wait "$slug" "$issue" "$pr" "$branch" || wait_rc=$?
+    merge_wait "$slug" "$issue" "$pr" "$branch" "$offer_mode" || wait_rc=$?
     [[ "$wait_rc" -eq 0 ]] && merged="MERGED"
     # Closed without a merge: there is nothing left to wait for, and the
     # reminder below would tell the person to merge a pull request that no

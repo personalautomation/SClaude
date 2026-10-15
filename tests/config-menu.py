@@ -115,6 +115,25 @@ try:
     write(config, {})
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.strip()
     check("tree-when-main-has-none", out, "off")
+
+    # qa and merge: three words each; an absent merge is the offer sclaude
+    # made before the key existed.
+    for key in ("qa", "merge"):
+        rc, out = menu("choices", key)
+        check("%s-choices" % key, [l.split("\t")[0] for l in out.splitlines()],
+              ["github", "both", "auto"])
+    check("qa-default", menu("default", "qa")[1].strip(), "github")
+    check("merge-default", menu("default", "merge")[1].strip(), "both")
+    write(config, {})
+    rows = dict(l.split("\t", 1) for l in menu("rows", config, EXAMPLE)[1].splitlines())
+    check_true("merge-row-default", rows.get("merge", "").startswith("both (not set)"))
+    check_true("qa-row-explained", "who accepts" in rows.get("qa", ""))
+    for value, want in (("", "github"), ("auto", "auto"), ("sometimes", "github")):
+        write(config, {"qa": value, "merge": value} if value else {})
+        script = 'source "%s/project.sh"; REPO=%s; project_flow_mode qa; project_flow_mode merge' % (LIB, repo)
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.split()
+        check("flow-mode-%s" % (value or "absent"), out,
+              [want, "both" if want == "github" else want])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

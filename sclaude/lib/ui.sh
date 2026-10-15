@@ -196,12 +196,18 @@ ask_once() {
 # block on the person's terminal. A terminal that cannot be read falls back to
 # a plain sleep, as does the end of input, which would otherwise return at once
 # and spin the loop.
+#
+# The first key pressed is left in POLL_KEY (empty after a plain timeout), for
+# a wait that gives a key a meaning of its own: `a` in the QA wait, `m` in the
+# merge wait.
 poll_pause() {
-  local secs="$1" key rc=0
+  local secs="$1" key rest rc=0
+  POLL_KEY=""
   if [[ -t 1 || -t 2 ]] && ( exec < /dev/tty ) 2>/dev/null; then
     read -rsn1 -t "$secs" key < /dev/tty || rc=$?
     if [[ "$rc" -eq 0 ]]; then
-      while read -rsn1 -t 0.05 key < /dev/tty; do :; done
+      POLL_KEY="$key"
+      while read -rsn1 -t 0.05 rest < /dev/tty; do :; done
       return 0
     fi
     [[ "$rc" -gt 128 ]] && return 0

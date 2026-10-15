@@ -582,11 +582,11 @@ session_watch_stop
         body += functions(RUN, ["review_close_gate", "review_enough_close"])
         body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5\n'
                  'gh_repo() { echo o/r; }\nproject_review_mode() { echo %s; }\n'
-                 'local_review() { echo %s; }\nreview_report() { :; }\n'
+                 'local_review() { [[ %s == failed ]] && return 1; echo %s; }\nreview_report() { :; }\n'
                  'review_quota_rerun() { return 1; }\n'
                  'ask() { echo ASKED; return 1; }\nsay() { echo "$*"; }\n'
                  'info() { echo "$*"; }\nwarn() { echo "$*"; }\n'
-                 'review_close_gate %s x 143; echo "RC=$?"\n') % (fake, mode, count, wt)
+                 'review_close_gate %s x 143; echo "RC=$?"\n') % (fake, mode, count, count, wt)
         out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=60,
                              env=dict(os.environ, PATH=os.environ["PATH"]), stdin=subprocess.DEVNULL)
         with open(state) as fh:
@@ -603,6 +603,11 @@ session_watch_stop
     out, left = enough_gate("now", "open: red: build", 0, mode="github")
     check("enough-not-for-red", "ASKED" in out and "covers its findings only" in out, True)
     check("enough-taken-back-for-red", left["steps"]["review"].get("enough"), None)
+    out, left = enough_gate("now", "open: 3 review thread(s) open", "failed")
+    check("enough-failed-not-asked", "RC=0" in out and "ASKED" not in out, True)
+    check("enough-now-becomes-pass", left["steps"]["review"].get("enough"), "pass")
+    out, left = enough_gate("pass", "open: the automatic review of PR #143 has not finished", 0, mode="github")
+    check("enough-kept-while-unfinished", left["steps"]["review"].get("enough"), "pass")
 
     # --- step 4 closes only once the review is done with the head -------------
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,

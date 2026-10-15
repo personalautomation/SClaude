@@ -203,7 +203,7 @@ ask_once() {
 poll_pause() {
   local secs="$1" key rest rc=0
   POLL_KEY=""
-  if [[ -t 1 || -t 2 ]] && ( exec < /dev/tty ) 2>/dev/null; then
+  if keys_usable; then
     read -rsn1 -t "$secs" key < /dev/tty || rc=$?
     if [[ "$rc" -eq 0 ]]; then
       POLL_KEY="$key"
@@ -213,6 +213,13 @@ poll_pause() {
     [[ "$rc" -gt 128 ]] && return 0
   fi
   sleep "$secs"
+}
+
+# Whether a wait can take keys: a status line on screen (stdout or stderr a
+# terminal) and a terminal to read them from. Checked in a subshell, as in
+# ask_once, so a missing terminal prints nothing.
+keys_usable() {
+  [[ -t 1 || -t 2 ]] && ( exec < /dev/tty ) 2>/dev/null
 }
 
 # Whether the human answered "yes", and whether "no". Exactly y, yes, n or no,

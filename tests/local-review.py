@@ -522,7 +522,8 @@ try:
     check("enough-pass-one-pass", prompts().count("---\n"), 1)
     check("enough-pass-posted", len(threads()) - posted_before, 2)
     check_true("enough-pass-said", "you said it is enough" in err)
-    # Said already: a new head gets no pass at all, only the count.
+    # Stopped already (`x x`): a new head gets no pass at all, only the count.
+    write(state, '{"steps": {"review": {"enough": "now"}}}\n')
     write(os.path.join(repo, "a.txt"), "enough again\n")
     git("commit", "-qam", "enough again", cwd=repo)
     git("push", "-q", cwd=repo)
@@ -530,6 +531,16 @@ try:
     check("enough-said-rc", rc, 0)
     check("enough-said-no-pass", prompts(), "")
     check_true("enough-said-count", out.strip().isdigit())
+    # `s` said already: a new head still gets its one pass, and no capped
+    # follow-up — a regression fix pushed after step 4 closed is reviewed.
+    write(state, '{"steps": {"review": {"enough": "pass"}}}\n')
+    write(os.path.join(repo, "a.txt"), "after enough\n")
+    git("commit", "-qam", "after enough", cwd=repo)
+    git("push", "-q", cwd=repo)
+    queue(batch("f1", 2), batch("f2", 1))
+    out, err, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo), {"LOCAL_REVIEW_CAP": "2"})
+    check("enough-pass-new-head-rc", rc, 0)
+    check("enough-pass-new-head-one-pass", prompts().count("---\n"), 1)
     shutil.rmtree(os.path.join(tmp, "answers"), ignore_errors=True)
 
     # `x` twice at the terminal stops a pass now: nothing of it is posted or
@@ -587,6 +598,10 @@ try:
     check("stop-now-nothing-posted", len(threads()) - posted_before, 0)
     with open(journal) as fh:
         check("stop-now-not-recorded", fh.read(), before)
+    answer_file = os.path.join(repo, ".sclaude", "local", "feature", "local-review-answer.md")
+    with open(answer_file) as fh:
+        check_true("stop-now-keeps-last-answer", "never" not in fh.read())
+    check("stop-now-no-part", os.path.exists(answer_file + ".part"), False)
     with open(state) as fh:
         check("stop-now-kept", json.load(fh)["steps"]["review"]["enough"], "now")
     prompts()

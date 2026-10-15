@@ -519,7 +519,8 @@ run_step() {
   # done enough (review_enough): no session for what it left. after_step's
   # gate decides what that leaves open, and asks about anything else.
   if [[ "$step" == "review" && -n "$(review_enough "$wt")" ]]; then
-    state_set "$state" "steps.$step.started" "$(date -Iseconds)"
+    [[ "$(state_get "$state" "steps.$step.started" 2>/dev/null || true)" =~ ^(|null)$ ]] \
+      && state_set "$state" "steps.$step.started" "$(date -Iseconds)"
     info "  You said the review has done enough, so no review session is opened."
     after_step "$wt" "$slug" "$step"
     return 0
@@ -2256,7 +2257,7 @@ instruments_sync() {
 # Its answer, as `pr_context.py --close` gives it: `ok`, `pending` or
 # `open: <why>`. Anything unreadable is `ok`.
 review_close_gate() {
-  local wt="$1" slug="$2" pr="$3" word waited=0 announced=0 answer repo
+  local wt="$1" slug="$2" pr="$3" word waited=0 announced=0 answer repo said="" said_read=0
   [[ -n "$pr" && "$pr" != "null" ]] || return 0
   command -v gh >/dev/null 2>&1 || return 0
   repo="$(gh_repo 2>/dev/null || true)"
@@ -2282,7 +2283,12 @@ review_close_gate() {
         local_due=0
         local count
         count="$(local_review "$wt" "$pr")" || count="failed"
-        if [[ "$count" == "failed" ]]; then
+        if [[ "$count" == "failed" && -n "$(review_enough "$wt")" ]]; then
+          # The person has said to stop: not asked again whether to go on.
+          warn "  The review on this machine could not say what is open; its log: $(local_review_file "$wt" .log)"
+          review_enough_close "$wt" "$pr" ""
+          return 0
+        elif [[ "$count" == "failed" ]]; then
           warn ""
           warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
           ask "${BOLD}Go on with this head unreviewed? [y/n] ${OFF}" answer yn
@@ -2320,22 +2326,26 @@ review_close_gate() {
     fi
     # `s` here as in the local review: the review finishes and posts, and
     # step 4 then closes with what it left rather than open another round.
+    # Read once a wait, and kept here after: a python per poll for a hint.
+    [[ "$said_read" -eq 1 ]] || { said="$(review_enough "$wt")"; said_read=1; }
     if [[ -t 1 ]]; then
-      local hint="s: enough after this review"
-      [[ -n "$(review_enough "$wt")" ]] && hint="step 4 closes after this review (s takes it back)"
-      printf '\r\033[2K  %sHuman in the loop%s — waiting for the review of PR #%s (%s so far) · %s' \
-        "$DIM" "$OFF" "$pr" "$(regression_duration "$waited")" "$hint"
+      local hint="s: enough after this review" what="the review"
+      [[ "$local_due" -eq 1 ]] && what="the checks"
+      [[ -n "$said" ]] && hint="step 4 closes after this review (s takes it back)"
+      printf '\r\033[2K  %sHuman in the loop%s — waiting for %s of PR #%s (%s so far) · %s' \
+        "$DIM" "$OFF" "$what" "$pr" "$(regression_duration "$waited")" "$hint"
     fi
     local began=$SECONDS
     poll_pause "$MERGE_POLL"
     waited=$((waited + SECONDS - began))
+    # Cleared before the next look: what that prints starts a line of its own.
+    [[ -t 1 ]] && printf '\r\033[2K'
     if [[ "$POLL_KEY" == [sS] ]]; then
-      if [[ -n "$(review_enough "$wt")" ]]; then review_enough_set "$wt" ""
-      else review_enough_set "$wt" pass
+      if [[ -n "$said" ]]; then said=""; review_enough_set "$wt" ""
+      else said=pass; review_enough_set "$wt" pass
       fi
     fi
   done
-  [[ "$announced" -eq 1 && -t 1 ]] && printf '\r\033[2K'
   if [[ -n "$(review_enough "$wt")" && "$word" == open:* ]]; then
     if [[ "$word" =~ ^open:\ ([0-9]+)\ review\ thread\(s\)\ open$ ]]; then
       review_enough_close "$wt" "$pr" "${BASH_REMATCH[1]}"
@@ -2343,9 +2353,12 @@ review_close_gate() {
     fi
     # The word was about the review's findings; a red check or an unpushed
     # commit is not a finding, and goes the ordinary way. Taken back, so a
-    # session opened for it is not closed again on entry.
-    warn "  You said the review has done enough, but that covers its findings only."
-    review_enough_set "$wt" ""
+    # session opened for it is not closed again on entry. A review that has
+    # not finished keeps it: the person is still waiting for that review.
+    if [[ "$word" != *"has not finished"* ]]; then
+      warn "  You said the review has done enough, but that covers its findings only."
+      review_enough_set "$wt" ""
+    fi
   fi
   # Only the threads the person kept: no session, a wait for their hand. Once
   # they are resolved the pull request is asked again from the top — whatever
@@ -2383,9 +2396,17 @@ review_close_gate() {
 #   review_enough_close <wt> <pr> <count>
 review_enough_close() {
   local wt="$1" pr="$2" count="$3"
-  state_set "$wt/.sclaude/local/feature/state.json" steps.review.left_open "$count" 2>/dev/null || true
+  [[ "$count" =~ ^[0-9]+$ ]] \
+    && state_set "$wt/.sclaude/local/feature/state.json" steps.review.left_open "$count" 2>/dev/null
+  # `x x` was about the pass it stopped: a commit pushed after this close —
+  # a regression fix — still gets its one pass.
+  [[ "$(review_enough "$wt")" == now ]] && review_enough_set "$wt" pass
   say "${BOLD}Step 4 closes as you said: the review has done enough.${OFF}"
-  info "  $count finding(s) stay open on PR #$pr as they are — on GitHub, for whoever takes them up."
+  if [[ "$count" =~ ^[0-9]+$ ]]; then
+    info "  $count finding(s) stay open on PR #$pr as they are — on GitHub, for whoever takes them up."
+  else
+    info "  What the rounds found stays open on PR #$pr as it is."
+  fi
 }
 
 # The review threads the person decided to leave as they are, and that are

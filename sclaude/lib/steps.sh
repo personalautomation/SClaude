@@ -606,6 +606,8 @@ step_rewind_to() {
     state_set "$state" "steps.$s.done" false
     state_set "$state" "steps.$s.finished" null
   done
+  # The person's "enough" was about the round it was said in (review_enough).
+  state_set "$state" steps.review.enough null 2>/dev/null || true
 
   state_set "$state" step "$target"
 }
@@ -870,6 +872,7 @@ step_close_merged() {
       state_set "$state" "steps.$s.finished" "$now"
     fi
   done
+  state_set "$state" steps.review.enough null 2>/dev/null || true
   state_set "$state" step "done"
   state_set "$state" reopened null 2>/dev/null || true
   state_set "$state" reopened_pr null 2>/dev/null || true

@@ -161,17 +161,18 @@ local_review() {
     scope="the whole pull request: \`git diff $base..$head\`"
   fi
 
-  # Said already, in an earlier round or before a Ctrl-C: no new pass, only
-  # the count of what is open, for the caller to close step 4 with.
-  if [[ -n "$(review_enough "$wt")" ]]; then
-    info "  You said the review has done enough: no new pass on ${head:0:7}." >&2
+  # Stopped with `x x`, in this round or before a Ctrl-C: no new pass, only
+  # the count of what is open, for the caller to close step 4 with. `s` is
+  # not this: a head it reaches still gets its one pass (see below).
+  if [[ "$(review_enough "$wt")" == now ]]; then
+    info "  You stopped the review: no new pass on ${head:0:7}." >&2
     python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null || return 1
     return 0
   fi
   command -v claude >/dev/null 2>&1 || { warn "  No claude on this machine: the local review did not run." >&2; return 1; }
   info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${base:0:7}..${head:0:7}." >&2
   info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
-  if [[ -t 2 ]] && ( exec < /dev/tty ) 2>/dev/null; then
+  if keys_usable; then
     info "  Enough rounds? s: stop after this pass — its findings are posted, then step 4 closes" >&2
     info "  with what is open. x twice: stop now, dropping only this pass; what is posted stays." >&2
   fi
@@ -189,23 +190,27 @@ local_review() {
     # In the background, so that the wait can take the keys above: a review
     # that goes round after round is where the person decides it is enough.
     # A background job of a script ignores Ctrl-C, so the trap passes it on.
+    # Into a file of its own until it ends: a pass stopped half-way leaves
+    # the last whole answer where it was.
     ( cd "$wt" && exec claude -p "$(local_review_prompt "$pr" "$head" "$scope" "$earlier")" \
              --model "$LOCAL_REVIEW_MODEL" \
              --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
                "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
              --disallowedTools "Edit" "Write" "NotebookEdit" "Bash(gh:*)" \
                "Bash(git push:*)" "Bash(git commit:*)" \
-             >"$answer" 2>"$(local_review_file "$wt" .log)" </dev/null ) &
+             >"$answer.part" 2>"$(local_review_file "$wt" .log)" </dev/null ) &
     local pid=$!
     trap 'kill -TERM "$pid" 2>/dev/null; stty echo < /dev/tty 2>/dev/null; exit 130' INT TERM HUP
     local stopped=0
     local_review_wait "$wt" "$pid" "$pass" "$began" || stopped=1
     trap - INT TERM HUP
     if [[ "$stopped" -eq 1 ]]; then
+      rm -f "$answer.part"
       warn "  Stopped pass $pass as you said; what earlier passes and rounds posted stays open on PR #$pr." >&2
       count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
       break
     fi
+    mv -f "$answer.part" "$answer"
     # The last pass allowed records no "more": the head is done with what it
     # has, rather than read again on every later call.
     cap="$LOCAL_REVIEW_CAP"; [[ "$pass" -ge "$LOCAL_REVIEW_PASSES" ]] && cap=0
@@ -262,7 +267,7 @@ local_review_wait() {
   said="$(review_enough "$wt")"
   # No echo while it waits: a key pressed between two reads would otherwise
   # land on the status line.
-  if [[ -t 2 ]] && ( exec < /dev/tty ) 2>/dev/null; then
+  if keys_usable; then
     tty=1
     stty -echo < /dev/tty 2>/dev/null
   fi
@@ -306,8 +311,15 @@ local_review_wait() {
 
 # The person's word that the review has done enough: step 4 then closes with
 # whatever the rounds so far left open, rather than hand it to one more
-# session. Kept in the feature's state until step 4 closes (after_step), so a
-# Ctrl-C or a session closing in between does not forget it.
+# session. Kept in the feature's state until step 4 closes (after_step) or is
+# rewound or closed by a merge, so a Ctrl-C or a session closing in between
+# does not forget it.
+#
+#   pass  every head still gets one review pass, its findings posted, and no
+#         session is opened for them: what `s` says, and what `x x` turns
+#         into once step 4 has closed on it, so a regression fix pushed after
+#         is not left unreviewed;
+#   now   no pass at all on the head it was said on: what `x x` says.
 #
 #   review_enough <wt>           pass | now | nothing
 #   review_enough_set <wt> <how> pass, now, or empty to take it back

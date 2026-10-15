@@ -515,6 +515,15 @@ run_step() {
     [[ "$review_mode" == "local" ]] \
       && { local_count="$(local_review "$wt" "$pr")" || local_count="failed"; }
   fi
+  # The person said, during a round's review or wait, that the review has
+  # done enough (review_enough): no session for what it left. after_step's
+  # gate decides what that leaves open, and asks about anything else.
+  if [[ "$step" == "review" && -n "$(review_enough "$wt")" ]]; then
+    state_set "$state" "steps.$step.started" "$(date -Iseconds)"
+    info "  You said the review has done enough, so no review session is opened."
+    after_step "$wt" "$slug" "$step"
+    return 0
+  fi
   [[ "$step" == "review" ]] && [[ -z "$local_count" || "$local_count" == "0" ]] \
     && review_skippable "$wt" "$slug" \
     && review_word="$(review_wait_state "$wt" "$slug" "$pr")"
@@ -1207,6 +1216,9 @@ after_step() {
   state_set "$state" "steps.$step.auto_returns" null 2>/dev/null || true
   state_set "$state" "steps.$step.done" true
   state_set "$state" "steps.$step.finished" "$(date -Iseconds)"
+  # The person's "enough" was about this round of step 4: a review the
+  # feature is sent back to starts without it.
+  [[ "$step" == "review" ]] && state_set "$state" steps.review.enough null
   # The step closed for real, so it is no longer a reopened one. The mark
   # describes a pass rather than the feature: left behind, it would keep a
   # merged PR from ever closing this step again.
@@ -2283,6 +2295,10 @@ review_close_gate() {
           # run: once more with it, where the person decides whether to go
           # on fixing.
           review_report "$wt" "$slug"
+          if [[ -n "$(review_enough "$wt")" ]]; then
+            review_enough_close "$wt" "$pr" "$count"
+            return 0
+          fi
           # Open by its own count, not by asking GitHub again: a finding in
           # the conversation, or one still waiting to be posted, is no thread
           # for the pull request to show.
@@ -2302,9 +2318,35 @@ review_close_gate() {
       info "  The automatic review of PR #$pr is still running; step 4 closes once it has finished."
       info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug"
     fi
-    sleep "$MERGE_POLL"
-    waited=$((waited + MERGE_POLL))
+    # `s` here as in the local review: the review finishes and posts, and
+    # step 4 then closes with what it left rather than open another round.
+    if [[ -t 1 ]]; then
+      local hint="s: enough after this review"
+      [[ -n "$(review_enough "$wt")" ]] && hint="step 4 closes after this review (s takes it back)"
+      printf '\r\033[2K  %sHuman in the loop%s — waiting for the review of PR #%s (%s so far) · %s' \
+        "$DIM" "$OFF" "$pr" "$(regression_duration "$waited")" "$hint"
+    fi
+    local began=$SECONDS
+    poll_pause "$MERGE_POLL"
+    waited=$((waited + SECONDS - began))
+    if [[ "$POLL_KEY" == [sS] ]]; then
+      if [[ -n "$(review_enough "$wt")" ]]; then review_enough_set "$wt" ""
+      else review_enough_set "$wt" pass
+      fi
+    fi
   done
+  [[ "$announced" -eq 1 && -t 1 ]] && printf '\r\033[2K'
+  if [[ -n "$(review_enough "$wt")" && "$word" == open:* ]]; then
+    if [[ "$word" =~ ^open:\ ([0-9]+)\ review\ thread\(s\)\ open$ ]]; then
+      review_enough_close "$wt" "$pr" "${BASH_REMATCH[1]}"
+      return 0
+    fi
+    # The word was about the review's findings; a red check or an unpushed
+    # commit is not a finding, and goes the ordinary way. Taken back, so a
+    # session opened for it is not closed again on entry.
+    warn "  You said the review has done enough, but that covers its findings only."
+    review_enough_set "$wt" ""
+  fi
   # Only the threads the person kept: no session, a wait for their hand. Once
   # they are resolved the pull request is asked again from the top — whatever
   # else is open by then takes the ordinary way.
@@ -2332,6 +2374,18 @@ review_close_gate() {
     return 1
   fi
   return 0
+}
+
+# Step 4 closes on the person's word that the review has done enough
+# (review_enough), with the findings the rounds so far left: they stay open
+# threads on the pull request, nothing is resolved or dropped for it.
+#
+#   review_enough_close <wt> <pr> <count>
+review_enough_close() {
+  local wt="$1" pr="$2" count="$3"
+  state_set "$wt/.sclaude/local/feature/state.json" steps.review.left_open "$count" 2>/dev/null || true
+  say "${BOLD}Step 4 closes as you said: the review has done enough.${OFF}"
+  info "  $count finding(s) stay open on PR #$pr as they are — on GitHub, for whoever takes them up."
 }
 
 # The review threads the person decided to leave as they are, and that are

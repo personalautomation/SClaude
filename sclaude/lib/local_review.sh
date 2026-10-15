@@ -161,9 +161,20 @@ local_review() {
     scope="the whole pull request: \`git diff $base..$head\`"
   fi
 
+  # Said already, in an earlier round or before a Ctrl-C: no new pass, only
+  # the count of what is open, for the caller to close step 4 with.
+  if [[ -n "$(review_enough "$wt")" ]]; then
+    info "  You said the review has done enough: no new pass on ${head:0:7}." >&2
+    python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null || return 1
+    return 0
+  fi
   command -v claude >/dev/null 2>&1 || { warn "  No claude on this machine: the local review did not run." >&2; return 1; }
   info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${base:0:7}..${head:0:7}." >&2
   info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
+  if [[ -t 2 ]] && ( exec < /dev/tty ) 2>/dev/null; then
+    info "  Enough rounds? s: stop after this pass — its findings are posted, then step 4 closes" >&2
+    info "  with what is open. x twice: stop now, dropping only this pass; what is posted stays." >&2
+  fi
 
   local earlier began new more cap pass=1
   answer="$(local_review_file "$wt" -answer.md)"
@@ -175,14 +186,26 @@ local_review() {
       break
     fi
     began=$SECONDS
-    out="$(cd "$wt" && claude -p "$(local_review_prompt "$pr" "$head" "$scope" "$earlier")" \
+    # In the background, so that the wait can take the keys above: a review
+    # that goes round after round is where the person decides it is enough.
+    # A background job of a script ignores Ctrl-C, so the trap passes it on.
+    ( cd "$wt" && exec claude -p "$(local_review_prompt "$pr" "$head" "$scope" "$earlier")" \
              --model "$LOCAL_REVIEW_MODEL" \
              --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
                "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
              --disallowedTools "Edit" "Write" "NotebookEdit" "Bash(gh:*)" \
                "Bash(git push:*)" "Bash(git commit:*)" \
-             2>"$(local_review_file "$wt" .log)")"
-    printf '%s\n' "$out" > "$answer"
+             >"$answer" 2>"$(local_review_file "$wt" .log)" </dev/null ) &
+    local pid=$!
+    trap 'kill -TERM "$pid" 2>/dev/null; stty echo < /dev/tty 2>/dev/null; exit 130' INT TERM HUP
+    local stopped=0
+    local_review_wait "$wt" "$pid" "$pass" "$began" || stopped=1
+    trap - INT TERM HUP
+    if [[ "$stopped" -eq 1 ]]; then
+      warn "  Stopped pass $pass as you said; what earlier passes and rounds posted stays open on PR #$pr." >&2
+      count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
+      break
+    fi
     # The last pass allowed records no "more": the head is done with what it
     # has, rather than read again on every later call.
     cap="$LOCAL_REVIEW_CAP"; [[ "$pass" -ge "$LOCAL_REVIEW_PASSES" ]] && cap=0
@@ -202,6 +225,10 @@ local_review() {
     fi
     # By what the pass found, not what GitHub took: a capped pass with a
     # finding refused is still capped.
+    if [[ "${more:-0}" == 1 && -n "$(review_enough "$wt")" ]]; then
+      info "  That pass found the cap, but you said it is enough: no pass $((pass + 1))." >&2
+      break
+    fi
     if [[ "${more:-0}" != 1 ]]; then
       [[ "$pass" -ge "$LOCAL_REVIEW_PASSES" && "$new" -ge "$LOCAL_REVIEW_CAP" ]] \
         && warn "  Pass $pass still found the cap; stopping at $LOCAL_REVIEW_PASSES passes — more may be left unsaid." >&2
@@ -216,6 +243,83 @@ local_review() {
     info "  The local review leaves $count thread(s) open on PR #$pr." >&2
   fi
   echo "$count"
+}
+
+# Wait for a pass of the local review, taking the person's keys meanwhile.
+#
+#   local_review_wait <wt> <pid> <pass> <began>
+#
+# The keys say the review has done enough (review_enough): `s` lets this pass
+# finish and be posted, then stops; pressed again it takes that back. `x`
+# stops the pass now — what it had found is not posted, since a finding exists
+# only in the answer the pass ends with — and so wants pressing twice. Nothing
+# here goes to Telegram: it is for whoever sits at this terminal, and a
+# question every round would be noise on the phone. Without a terminal it is
+# a plain wait. Everything goes to stderr: local_review answers on stdout.
+# Returns 1 when the person stopped the pass.
+local_review_wait() {
+  local wt="$1" pid="$2" pass="$3" began="$4" armed=0 armed_at=0 said hint t tty=""
+  said="$(review_enough "$wt")"
+  # No echo while it waits: a key pressed between two reads would otherwise
+  # land on the status line.
+  if [[ -t 2 ]] && ( exec < /dev/tty ) 2>/dev/null; then
+    tty=1
+    stty -echo < /dev/tty 2>/dev/null
+  fi
+  while kill -0 "$pid" 2>/dev/null; do
+    # `x` once only arms the stop, for five seconds or until another key.
+    [[ "$armed" -eq 1 && $((SECONDS - armed_at)) -ge 5 ]] && armed=0
+    if [[ -n "$tty" ]]; then
+      t=$((SECONDS - began))
+      if [[ "$armed" -eq 1 ]]; then
+        hint="x again: stop now and drop this pass · any other key: carry on"
+      elif [[ "$said" == pass ]]; then
+        hint="step 4 closes after this pass (s takes it back) · x x: stop now"
+      else
+        hint="s: enough after this pass · x x: stop now"
+      fi
+      printf '\r\033[2K  %sHuman in the loop%s — local review, pass %s (%dm%02ds) · %s' \
+        "$DIM" "$OFF" "$pass" $((t / 60)) $((t % 60)) "$hint" >&2
+    fi
+    poll_pause 1
+    [[ -n "$POLL_KEY" ]] || continue
+    case "$POLL_KEY" in
+      x|X)
+        if [[ "$armed" -eq 1 ]]; then
+          review_enough_set "$wt" now
+          kill -TERM "$pid" 2>/dev/null
+          wait "$pid" 2>/dev/null
+          [[ -n "$tty" ]] && { printf '\r\033[2K' >&2; stty echo < /dev/tty 2>/dev/null; }
+          return 1
+        fi
+        armed=1; armed_at=$SECONDS; continue ;;
+      s|S)
+        if [[ "$said" == pass ]]; then said=""; else said=pass; fi
+        review_enough_set "$wt" "$said" ;;
+    esac
+    armed=0
+  done
+  wait "$pid" 2>/dev/null
+  [[ -n "$tty" ]] && { printf '\r\033[2K' >&2; stty echo < /dev/tty 2>/dev/null; }
+  return 0
+}
+
+# The person's word that the review has done enough: step 4 then closes with
+# whatever the rounds so far left open, rather than hand it to one more
+# session. Kept in the feature's state until step 4 closes (after_step), so a
+# Ctrl-C or a session closing in between does not forget it.
+#
+#   review_enough <wt>           pass | now | nothing
+#   review_enough_set <wt> <how> pass, now, or empty to take it back
+review_enough() {
+  local said
+  said="$(state_get "$1/.sclaude/local/feature/state.json" steps.review.enough 2>/dev/null || true)"
+  [[ "$said" == pass || "$said" == now ]] && echo "$said"
+  return 0
+}
+
+review_enough_set() {
+  state_set "$1/.sclaude/local/feature/state.json" steps.review.enough "${2:-null}" 2>/dev/null || true
 }
 
 # What the headless review is told. The scope sentence follows the workflow's

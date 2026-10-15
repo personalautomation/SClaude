@@ -565,6 +565,45 @@ session_watch_stop
           and 'claude_launch --resume "$session"' in fix, True)
     check("green-forgets-the-fixer", 'state_set "$state" "regression.$stage.fix_session" null' in REG, True)
 
+    # --- the person's word that the review has done enough ------------------
+    # review_close_gate with what it reads stubbed: pr_context.py answers a
+    # fixed word, local_review a fixed count, and `ask` must not be reached.
+    def enough_gate(said, word, count, mode="local"):
+        wt = os.path.join(tmp, "enough-wt")
+        fake = os.path.join(tmp, "enough-lib")
+        os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"), exist_ok=True)
+        os.makedirs(fake, exist_ok=True)
+        state = os.path.join(wt, ".sclaude", "local", "feature", "state.json")
+        with open(state, "w") as fh:
+            json.dump({"steps": {"review": {"enough": said}}} if said else {}, fh)
+        with open(os.path.join(fake, "pr_context.py"), "w") as fh:
+            fh.write("print(%r)\n" % word)
+        body = 'source "%s/state.sh"\nsource "%s/local_review.sh"\n' % (LIB, LIB)
+        body += functions(RUN, ["review_close_gate", "review_enough_close"])
+        body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5\n'
+                 'gh_repo() { echo o/r; }\nproject_review_mode() { echo %s; }\n'
+                 'local_review() { echo %s; }\nreview_report() { :; }\n'
+                 'review_quota_rerun() { return 1; }\n'
+                 'ask() { echo ASKED; return 1; }\nsay() { echo "$*"; }\n'
+                 'info() { echo "$*"; }\nwarn() { echo "$*"; }\n'
+                 'review_close_gate %s x 143; echo "RC=$?"\n') % (fake, mode, count, wt)
+        out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=60,
+                             env=dict(os.environ, PATH=os.environ["PATH"]), stdin=subprocess.DEVNULL)
+        with open(state) as fh:
+            left = json.load(fh)
+        return out.stdout, left
+
+    out, left = enough_gate("pass", "open: 3 review thread(s) open", 4)
+    check("enough-local-closes", "RC=0" in out and "ASKED" not in out, True)
+    check("enough-local-left", left["steps"]["review"].get("left_open"), 4)
+    out, _ = enough_gate("", "open: 3 review thread(s) open", 4)
+    check("no-word-asks", "ASKED" in out and "RC=1" in out, True)
+    out, left = enough_gate("pass", "open: 2 review thread(s) open", 0, mode="github")
+    check("enough-github-closes", "RC=0" in out and "ASKED" not in out, True)
+    out, left = enough_gate("now", "open: red: build", 0, mode="github")
+    check("enough-not-for-red", "ASKED" in out and "covers its findings only" in out, True)
+    check("enough-taken-back-for-red", left["steps"]["review"].get("enough"), None)
+
     # --- step 4 closes only once the review is done with the head -------------
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
                           capture_output=True, text=True).stdout.strip()

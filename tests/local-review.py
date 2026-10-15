@@ -20,6 +20,10 @@
 #     open by an interrupted session stays open — nothing counts as fixed for
 #     not being raised again. An answer with no count, or a head not pushed,
 #     records nothing;
+#   * the person's word that the review has done enough: `s` during a pass
+#     lets it be posted and sends no capped follow-up, a word said already
+#     runs no pass at all, and `x` twice at the terminal stops the pass with
+#     nothing of it posted or recorded;
 #   * the step prompts render with the review's mode and without it.
 #
 # Run it with: python3 tests/local-review.py
@@ -145,9 +149,10 @@ try:
     # With answers queued in answers/, one per call, oldest first.
     write(os.path.join(stubs, "claude"),
           '#!/bin/sh\nprintf "%%s\\n---\\n" "$2" >> "%s"\n'
+          '[ -f "%s/during" ] && . "%s/during"\n'
           'q="%s/answers"; f=$(ls "$q" 2>/dev/null | head -n 1)\n'
           'if [ -n "$f" ]; then cat "$q/$f"; rm "$q/$f"; else cat "%s/answer"; fi\n'
-          % (calls, tmp, tmp), 0o755)
+          % (calls, tmp, tmp, tmp, tmp), 0o755)
 
     remote = os.path.join(tmp, "o", "r.git")
     os.makedirs(remote)
@@ -498,6 +503,93 @@ try:
     _, err, rc = review("FINDINGS: 0\n")
     check("unpushed-fails", rc, 1)
     check("unpushed-no-run", prompts(), "")
+
+    # --- the person's word that the review has done enough ------------------
+    # Said during a pass (the stub stands in for the `s` key): that pass is
+    # posted, and the cap it found does not send the review round again.
+    state = os.path.join(repo, ".sclaude", "local", "feature", "state.json")
+    write(state, "{}\n")
+    write(os.path.join(repo, "a.txt"), "enough\n")
+    git("commit", "-qam", "enough", cwd=repo)
+    git("push", "-q", cwd=repo)
+    queue(batch("e1", 2), batch("e2", 1))
+    write(os.path.join(tmp, "during"),
+          'printf \'{"steps": {"review": {"enough": "pass"}}}\\n\' > "%s"\n' % state)
+    posted_before = len(threads())
+    out, err, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo), {"LOCAL_REVIEW_CAP": "2"})
+    os.remove(os.path.join(tmp, "during"))
+    check("enough-pass-rc", rc, 0)
+    check("enough-pass-one-pass", prompts().count("---\n"), 1)
+    check("enough-pass-posted", len(threads()) - posted_before, 2)
+    check_true("enough-pass-said", "you said it is enough" in err)
+    # Said already: a new head gets no pass at all, only the count.
+    write(os.path.join(repo, "a.txt"), "enough again\n")
+    git("commit", "-qam", "enough again", cwd=repo)
+    git("push", "-q", cwd=repo)
+    out, err, rc = run_bash('REPO=%s; local_review %s 7' % (repo, repo))
+    check("enough-said-rc", rc, 0)
+    check("enough-said-no-pass", prompts(), "")
+    check_true("enough-said-count", out.strip().isdigit())
+    shutil.rmtree(os.path.join(tmp, "answers"), ignore_errors=True)
+
+    # `x` twice at the terminal stops a pass now: nothing of it is posted or
+    # recorded, the word is kept as `now`, and the count is still answered.
+    import fcntl
+    import pty
+    import select
+    import termios
+    write(state, "{}\n")
+    write(os.path.join(tmp, "during"), "sleep 30\n")
+    write(os.path.join(tmp, "answer"), batch("never", 1))
+    with open(journal) as fh:
+        before = fh.read()
+    posted_before = len(threads())
+    body = "set -uo pipefail\n"
+    body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""; SELF=sclaude\n'
+    for name in ("io", "ui", "state", "project", "picker", "local_review"):
+        body += 'source "%s/%s.sh"\n' % (LIB, name)
+    body += 'LIB="%s"\nwarn() { echo "$*" >&2; }\ninfo() { echo "$*"; }\n' % LIB
+    body += 'REPO=%s; n="$(local_review %s 7)"; echo "COUNT=$n"\n' % (repo, repo)
+    master, slave = pty.openpty()
+
+    def own_tty():
+        os.setsid()
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+    env = dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"], GH_WORLD=world)
+    proc = subprocess.Popen(["bash", "-c", body], cwd=repo, stdin=slave, stdout=slave,
+                            stderr=slave, env=env, preexec_fn=own_tty, close_fds=True)
+    os.close(slave)
+    seen = b""
+
+    def read_until(marker, secs):
+        global seen
+        end = time.time() + secs
+        while marker not in seen and time.time() < end:
+            ready, _, _ = select.select([master], [], [], 0.2)
+            if ready:
+                try:
+                    seen += os.read(master, 4096)
+                except OSError:
+                    break
+        return marker in seen
+
+    import time
+    check_true("stop-now-hint", read_until(b"x x: stop now", 20))
+    os.write(master, b"x")
+    time.sleep(1.5)
+    os.write(master, b"x")
+    check_true("stop-now-count", read_until(b"COUNT=", 15))
+    proc.wait(timeout=15)
+    os.close(master)
+    os.remove(os.path.join(tmp, "during"))
+    check_true("stop-now-said", b"Stopped pass 1 as you said" in seen)
+    check("stop-now-nothing-posted", len(threads()) - posted_before, 0)
+    with open(journal) as fh:
+        check("stop-now-not-recorded", fh.read(), before)
+    with open(state) as fh:
+        check("stop-now-kept", json.load(fh)["steps"]["review"]["enough"], "now")
+    prompts()
 
     # --- the prompts ------------------------------------------------------------
     def render(step, **values):

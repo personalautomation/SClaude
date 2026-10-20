@@ -600,7 +600,7 @@ try:
         return marker in seen
 
     import time
-    check_true("stop-now-hint", read_until(b"x x: stop now", 20))
+    check_true("stop-now-hint", read_until(b"[x x] stop now", 20))
     os.write(master, b"x")
     time.sleep(1.5)
     os.write(master, b"x")

@@ -259,7 +259,8 @@ review_wait_state() {
       info "  Waiting for the automatic review of PR #$pr to finish." >&2
       info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug" >&2
     fi
-    [[ -t 2 ]] && printf '\r\033[2K  %sHuman in the loop%s — waiting for the review checks (%s so far, next check in %ss, any key checks now)' \
+    # Not "Human in the loop": that marks the waits that need the person.
+    [[ -t 2 ]] && printf '\r\033[2K  %sRunning by itself%s — waiting for the review checks (%s so far, next check in %ss, any key checks now)' \
       "$DIM" "$OFF" "$(regression_duration "$waited")" "$MERGE_POLL" >&2
     poll_pause "$MERGE_POLL"
     waited=$((SECONDS - start))
@@ -314,7 +315,7 @@ review_quota_rerun() {
     >/dev/null 2>&1 || true
   while now="$(date +%s)"; (( now < due )); do
     left=$(( due - now ))
-    [[ -t 2 ]] && printf '\r\033[2K  %sHuman in the loop%s — the review reruns in %s' \
+    [[ -t 2 ]] && printf '\r\033[2K  %sRunning by itself%s — the review reruns in %s' \
       "$DIM" "$OFF" "$(regression_duration "$left")" >&2
     sleep $(( left < 60 ? left : 60 ))
   done
@@ -2339,10 +2340,10 @@ review_close_gate() {
     # Read once a wait, and kept here after: a python per poll for a hint.
     [[ "$said_read" -eq 1 ]] || { said="$(review_enough "$wt")"; said_read=1; }
     if [[ -t 1 ]]; then
-      local hint="s: last review for new findings" what="the review"
+      local hint="only if you want to step in: ${BOLD}[s]${OFF} last review for new findings" what="the review"
       [[ "$local_due" -eq 1 ]] && { what="the checks"; hint=""; }
-      [[ -n "$said" && -n "$hint" ]] && hint="the last review for new findings (s takes it back)"
-      printf '\r\033[2K  %sHuman in the loop%s — waiting for %s of PR #%s (%s so far)%s' \
+      [[ -n "$said" && -n "$hint" ]] && hint="the last review for new findings · ${BOLD}[s]${OFF} takes it back"
+      printf '\r\033[2K  %sRunning by itself%s — waiting for %s of PR #%s (%s so far)%s' \
         "$DIM" "$OFF" "$what" "$pr" "$(regression_duration "$waited")" "${hint:+ · $hint}"
     fi
     local began=$SECONDS

@@ -173,9 +173,10 @@ local_review() {
     info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${base:0:7}..${head:0:7}." >&2
     info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
     if keys_usable; then
-      info "  Enough rounds? s: this pass is the last that looks for new findings. x twice: stop it now," >&2
-      info "  dropping only what it found so far. Either way what is open goes to the review session," >&2
-      info "  and sclaude asks you before it checks the fixes." >&2
+      info "  It needs nothing from you. To step in, press a key while it runs — no Enter, nothing shows:" >&2
+      info "    [s]    this pass is the last that looks for new findings (s again takes it back)" >&2
+      info "    [x x]  stop it now, dropping only what this pass found so far" >&2
+      info "  Either way what is open goes to the review session, and sclaude asks you before it checks the fixes." >&2
     fi
   fi
 
@@ -216,7 +217,7 @@ local_review() {
                "Bash(git push:*)" "Bash(git commit:*)" \
              >"$answer.part" 2>"$(local_review_file "$wt" .log)" </dev/null ) &
     local pid=$!
-    trap 'kill -TERM "$pid" 2>/dev/null; stty echo < /dev/tty 2>/dev/null; exit 130' INT TERM HUP
+    trap 'kill -TERM "$pid" 2>/dev/null; stty echo < /dev/tty 2>/dev/null; printf '"'"'\033[?25h'"'"' >&2; exit 130' INT TERM HUP
     local stopped=0
     local_review_wait "$wt" "$pid" "$pass" "$began" "$verify" || stopped=1
     trap - INT TERM HUP
@@ -285,10 +286,12 @@ local_review_wait() {
   local wt="$1" pid="$2" pass="$3" began="$4" verify="${5:-}" armed=0 armed_at=0 said hint t tty=""
   said="$(review_enough "$wt")"
   # No echo while it waits: a key pressed between two reads would otherwise
-  # land on the status line.
+  # land on the status line. No cursor either: blinking after the last key in
+  # the hint, it read as that option being picked, or as a field to type in.
   if keys_usable; then
     tty=1
     stty -echo < /dev/tty 2>/dev/null
+    printf '\033[?25l' >&2
   fi
   while kill -0 "$pid" 2>/dev/null; do
     # `x` once only arms the stop, for five seconds or until another key.
@@ -298,13 +301,15 @@ local_review_wait() {
       if [[ -n "$verify" ]]; then
         hint="checking the fixes only"
       elif [[ "$armed" -eq 1 ]]; then
-        hint="x again: stop now and drop this pass · any other key: carry on"
+        hint="press ${BOLD}[x]${OFF} again: stop now and drop this pass · any other key: carry on"
       elif [[ "$said" == pass ]]; then
-        hint="the last pass for new findings (s takes it back) · x x: stop now"
+        hint="the last pass for new findings · ${BOLD}[s]${OFF} takes it back · ${BOLD}[x x]${OFF} stop now"
       else
-        hint="s: last pass for new findings · x x: stop now"
+        hint="only if you want to step in: ${BOLD}[s]${OFF} last pass for new findings · ${BOLD}[x x]${OFF} stop now"
       fi
-      printf '\r\033[2K  %sHuman in the loop%s — local review, pass %s (%dm%02ds) · %s' \
+      # Not "Human in the loop", as the waits that need the person say: this
+      # one goes on by itself, and the keys are there only to step in.
+      printf '\r\033[2K  %sRunning by itself%s — local review, pass %s (%dm%02ds) · %s' \
         "$DIM" "$OFF" "$pass" $((t / 60)) $((t % 60)) "$hint" >&2
     fi
     poll_pause 1
@@ -315,7 +320,7 @@ local_review_wait() {
           review_enough_set "$wt" now
           kill -TERM "$pid" 2>/dev/null
           wait "$pid" 2>/dev/null
-          [[ -n "$tty" ]] && { printf '\r\033[2K' >&2; stty echo < /dev/tty 2>/dev/null; }
+          [[ -n "$tty" ]] && { printf '\r\033[2K\033[?25h' >&2; stty echo < /dev/tty 2>/dev/null; }
           return 1
         fi
         armed=1; armed_at=$SECONDS; continue ;;
@@ -326,7 +331,7 @@ local_review_wait() {
     armed=0
   done
   wait "$pid" 2>/dev/null
-  [[ -n "$tty" ]] && { printf '\r\033[2K' >&2; stty echo < /dev/tty 2>/dev/null; }
+  [[ -n "$tty" ]] && { printf '\r\033[2K\033[?25h' >&2; stty echo < /dev/tty 2>/dev/null; }
   return 0
 }
 

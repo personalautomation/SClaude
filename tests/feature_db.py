@@ -12,6 +12,7 @@
 # Run it with: python3 tests/feature_db.py
 import json
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -249,6 +250,28 @@ def ensure_cases():
         check("the setup does not run twice", open(seeded).read().count("run"), 1)
         check("migrations are applied every time",
               len([c for c in calls(root) if c.startswith("migration up")]), 2)
+
+        # The id kept to what the Supabase CLI keeps, 40 characters of
+        # [a-zA-Z0-9_.-]: the containers carry that form, so a longer id names
+        # a container that is not there. A longer one ends in a hash, so two
+        # labels alike in their first 40 characters get two stacks.
+        none = "docker() { return 1; }\n"
+        one = feature_tree(root, "153-a-feature-label-long-enough/to-cut")
+        two = feature_tree(root, "153-a-feature-label-long-enough/to-cut-too")
+        first = bash(root, none + 'db_project_id "%s"' % one).strip()
+        check("a long id fits the CLI's 40", len(first) <= 40 and
+              re.fullmatch(r"[a-zA-Z0-9_.-]+", first) is not None, True)
+        check("a long id keeps its start", first.startswith("myapp-153-a-feature-label"), True)
+        check("labels alike in 40 characters get two ids",
+              first != bash(root, none + 'db_project_id "%s"' % two).strip(), True)
+        check("the id is recorded", state(one).get("db", {}).get("project_id"), first)
+        check("a short id is left whole", bash(root, none + 'db_project_id "%s"' % a).strip(),
+              "myapp-a")
+        # A stack started under the plain cut keeps its name.
+        old = feature_tree(root, "153-a-feature-label-long-enough-started-before")
+        check("a stack under the plain cut keeps it",
+              bash(root, 'db_project_id "%s"' % old).strip(),
+              "myapp-153-a-feature-label-long-enough-started-before"[:40])
 
         # A second feature: another block.
         b = feature_tree(root, "b")

@@ -465,7 +465,9 @@ on one local stack see each other's schema — a migration written in one lands
 under the other — and a `db reset` in one wipes the other's data. So when a
 feature's environment is the project's local one, `ensure_dev` first starts a
 stack for it alone: its own `project_id` (Docker names containers and volumes
-after it), its own block of ten ports from 55000, only the containers the
+after it — the project's id and the feature's label, kept to the 40
+characters the Supabase CLI keeps, a longer one cut short and ending in a hash,
+and recorded in the state as `db.project_id`), its own block of ten ports from 55000, only the containers the
 project needs. For a typical web app that is a handful of containers and a
 few hundred MB, up in under a minute the first time. It is filled once: with a copy of the main local
 database's data when the project sets `copyFromMain` and the main stack is up —

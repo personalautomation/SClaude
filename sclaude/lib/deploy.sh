@@ -163,8 +163,13 @@ prod_drift_report() {
   [[ "$n" =~ ^[0-9]+$ && "$n" -gt 0 ]] || return 0
   echo ""
   warn "Production is $n commit(s) behind origin/main — pushed, never shipped:"
-  git -C "$REPO" log --format='  %h %s' "$sha..$main" 2>/dev/null | head -10 \
-    | while IFS= read -r line; do info "$line"; done
+  # The list leaves out the same commits the count does, or it shows more
+  # commits than the line above says there are.
+  git -C "$REPO" log --format='%H  %h %s' "$sha..$main" 2>/dev/null \
+    | awk -v only="$(deferred_only_revs "$REPO" "$sha..$main")" '
+        BEGIN { n = split(only, a, "\n"); for (i = 1; i <= n; i++) skip[a[i]] }
+        !($1 in skip) { sub(/^[^ ]+ /, ""); print }' \
+    | head -10 | while IFS= read -r line; do info "$line"; done
   [[ "$n" -gt 10 ]] && info "  … and $((n - 10)) more"
   migrations_dir="$(project_migrations_dir "$REPO" || true)"
   if [[ -n "$migrations_dir" ]] \

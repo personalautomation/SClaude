@@ -103,6 +103,16 @@ with tempfile.TemporaryDirectory() as tmp:
     check("behind-says-how-to-ship", "vercel --prod" in out, True)
     check("no-migrations-no-promote", "db:promote" in out, False)
 
+    # A commit with deferred entries alone ships nothing: left out of the
+    # count, and out of the list under it, or the list names more commits
+    # than the count says.
+    entry = commit(repo, "chore: a deferred entry", ".sclaude/team/deferred/friction.jsonl")
+    git(repo, "push", "-q", "origin", "main")
+    out = report(repo, line(shipped))
+    check("entries-not-counted", "Production is 1 commit(s) behind origin/main" in out, True)
+    check("entries-not-listed", entry[:7] in out, False)
+    check("listed-what-is-counted", "%s fix: straight to main" % fix[:7] in out, True)
+
     commit(repo, "feat(db): a table", "db/migrations/0001.sql")
     git(repo, "push", "-q", "origin", "main")
     out = report(repo, line(shipped))

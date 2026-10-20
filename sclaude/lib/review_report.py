@@ -416,8 +416,14 @@ def main():
             fixed, pct(fixed, total), nofix, pct(nofix, total),
             ", %d of them waiting for you to resolve on GitHub" % left if left else ""))
     # The share acted on, over the newest settled findings: an open finding
-    # has not been decided yet.
-    settled = [t for t in found if t["fate"] != "open"][-ACTED_ON_SAMPLE:]
+    # has not been decided yet. Nor has its round: a decline is a reply posted
+    # as the finding is read, a fix closes its thread only after the fixing
+    # session has run, so a round still being worked settles its declines
+    # first, and the report printed as its findings arrive read them as the
+    # whole of it ("Fixed: 0", and the verdict below the floor).
+    unsettled = {t["round"] for t in found if t["fate"] == "open"}
+    settled = [t for t in found
+               if t["fate"] != "open" and t["round"] not in unsettled][-ACTED_ON_SAMPLE:]
     acted = (count(settled, "fixed") / float(len(settled))) if settled else None
     if acted is not None:
         print("  Acted on, of the last %d settled findings: %d%%." % (len(settled), round(acted * 100)))

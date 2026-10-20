@@ -92,10 +92,21 @@ deferred_rev_count() {
   local dir="$1"; shift
   local total only
   total="$(git -C "$dir" rev-list --count "$@" 2>/dev/null)" || return 1
-  only="$(grep -cvxFf \
-            <(git -C "$dir" rev-list --no-merges "$@" -- . "${DEFERRED_EXCLUDES[@]}" 2>/dev/null) \
-            <(git -C "$dir" rev-list --no-merges "$@" -- "${DEFERRED_PATHSPECS[@]}" 2>/dev/null))"
+  only="$(deferred_only_revs "$dir" "$@" | grep -c .)"
   echo $(( total - ${only:-0} ))
+}
+
+# The commits of a range that only touch the deferred folders, one full sha a
+# line: the ones deferred_rev_count leaves out, so that a list printed under
+# the count can leave out the same ones.
+#
+#   deferred_only_revs <git dir> <rev-list args...>
+deferred_only_revs() {
+  local dir="$1"; shift
+  grep -vxFf \
+    <(git -C "$dir" rev-list --no-merges "$@" -- . "${DEFERRED_EXCLUDES[@]}" 2>/dev/null) \
+    <(git -C "$dir" rev-list --no-merges "$@" -- "${DEFERRED_PATHSPECS[@]}" 2>/dev/null)
+  return 0
 }
 
 # Takes the deferred entries the commits <from>..HEAD of a feature's tree put

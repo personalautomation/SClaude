@@ -116,12 +116,37 @@ PY
 
 # The stack's project_id: the project's own, suffixed with the feature's label,
 # so `docker ps` says whose containers they are.
+#
+# Kept to what the Supabase CLI keeps before naming anything: characters
+# outside [a-zA-Z0-9_.-] become "_", and the whole is cut to 40 characters.
+# The containers carry the CLI's form, so a longer id names a container that
+# does not exist — a long feature label made the copy of the main database
+# fail with "No such container". A longer id is cut short of 40 and ends in a
+# hash of the whole, or two labels alike in their first 40 characters would
+# share one stack.
+#
+# Recorded in the state as db.project_id the first time, and read from there
+# afterwards. A stack started before the hash, under the CLI's plain cut, is
+# found by its container and keeps that name: a new one would leave it, with
+# its data, behind.
 db_project_id() {
-  local wt="$1" own label
+  local wt="$1" state="$1/.sclaude/local/feature/state.json" own label id cut
+  id="$(state_get "$state" db.project_id 2>/dev/null)"
+  [[ -n "$id" ]] && { echo "$id"; return 0; }
   own="$(sed -n 's/^project_id *= *"\([^"]*\)".*/\1/p' "$wt/supabase/config.toml" | head -1)"
-  label="$(state_get "$wt/.sclaude/local/feature/state.json" dev.label 2>/dev/null)"
+  label="$(state_get "$state" dev.label 2>/dev/null)"
   [[ -n "$label" ]] || label="$(basename "$wt")"
-  echo "${own:-project}-$label"
+  id="$(sed -E 's/[^a-zA-Z0-9_.-]+/_/g' <<<"${own:-project}-$label")"
+  if (( ${#id} > 40 )); then
+    cut="${id:0:40}"
+    if docker inspect "$(db_container "$cut")" >/dev/null 2>&1; then
+      id="$cut"
+    else
+      id="${id:0:31}-$(printf '%s' "$id" | sha1sum | cut -c1-8)"
+    fi
+  fi
+  [[ -f "$state" ]] && state_set "$state" db.project_id "$id"
+  echo "$id"
 }
 
 # .sclaude/local/feature/supabase/supabase: the rewritten config, and a symlink for
@@ -369,7 +394,8 @@ db_copy_main() {
   [[ "$(project_get database.local.copyFromMain "$wt" 2>/dev/null)" == "true" ]] || return 1
   own="$(sed -n 's/^project_id *= *"\([^"]*\)".*/\1/p' "$wt/supabase/config.toml" | head -1)"
   [[ -n "$own" ]] || return 1
-  main="$(db_container "$own")"
+  own="$(sed -E 's/[^a-zA-Z0-9_.-]+/_/g' <<<"$own")"
+  main="$(db_container "${own:0:40}")"
   feature="$(db_container "$(db_project_id "$wt")")"
   # A Docker started a moment ago (docker_ensure) is still bringing the main
   # stack's containers back, and a copy refused now is refused for good: the
@@ -384,6 +410,12 @@ db_copy_main() {
     sleep 2
     tries=$((tries + 1))
   done
+  # Asked before the dump, so the warning names the cause: a load into a
+  # container that is not there only said "loading the copy failed".
+  if ! docker inspect "$feature" >/dev/null 2>&1; then
+    warn "  database: no container $feature for this feature's stack — filling from the seed instead"
+    return 1
+  fi
   info "  database: copying the main local database into it…"
   # To a file first, and checked, rather than piped straight in: a dump that
   # fails half way — the main stack stopping mid-copy, a permission refused —

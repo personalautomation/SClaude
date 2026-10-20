@@ -164,7 +164,9 @@ with tempfile.TemporaryDirectory() as wt:
     check("per-run", "Findings per review run, oldest first: 4 3 3 (one more still running)" in text, True)
     check("closed-without-fix",
           "Fixed: 5 (50%). Closed without a fix: 3 (30%), 1 of them waiting for you" in text, True)
-    check("acted-on", "Acted on, of the last 8 settled findings: 62%." in text, True)
+    # The last round still has open findings: its decline is left out until
+    # its fixes have had their chance (5 of 7, not 5 of 8).
+    check("acted-on", "Acted on, of the last 7 settled findings: 71%." in text, True)
     check("raised-again",
           "Raised again after a decline: 2 findings (2 declined again, 1 citing the earlier thread)."
           in text, True)

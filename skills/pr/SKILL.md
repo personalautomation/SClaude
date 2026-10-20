@@ -95,7 +95,7 @@ Three cases worth naming, because they look like noise and are not:
   behind.
 - **`.sclaude/local/feature/` under the `sclaude` orchestrator** — the working directory of
   the feature being developed: `plan.md`, and the orchestrator's own state. It
-  belongs in the project's `.gitignore` and must never be committed, so it is
+  is ignored (by `.gitignore` or `.git/info/exclude`) and must never be committed, so it is
   not a question to bring to the user. Two things are worth checking rather
   than assuming: that no commit on the branch carries it
   (`git log origin/main..HEAD --name-only | grep .sclaude/local/feature`), and that it is
@@ -161,8 +161,8 @@ them.
 Otherwise, branch off an up-to-date `origin/main`, named for the change:
 `feat/<slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>`, `refactor/<slug>`.
 
-If the work is already sitting as local commits on `main` — the old habit — move
-them across and put `main` back where the remote has it:
+If the work is already sitting as local commits on `main`, move them across and
+put `main` back where the remote has it:
 
 ```bash
 git branch feat/<slug>
@@ -270,12 +270,12 @@ A commit nobody asked for — a refactor you judged necessary, a typo — carrie
 Every commit you write ends with two more footers, after the `Requirement:` ones:
 
 ```
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01CLGjeqxyJyrW5RpBepHADE
+Co-Authored-By: Claude <model> <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_<id>
 ```
 
-- **`Co-Authored-By:` names the model that actually wrote the commit** — `Claude
-  Opus 5`, `Claude Sonnet 5`, whichever is running — not a generic "Claude". The
+- **`Co-Authored-By:` names the model that actually wrote the commit** — the
+  exact name the harness gives for whichever is running — not a generic "Claude". The
   branch usually carries commits from more than one, and which one wrote a
   particular diff is the sort of thing nobody can reconstruct afterwards.
 - **`Claude-Session:` is the URL of the session it was written in.** It is what
@@ -302,8 +302,10 @@ Group the tree into coherent commits rather than one heap.
 **Check every commit the PR will carry, not just the ones you wrote.** A branch
 often picks up commits from elsewhere — work that was sitting on local `main`,
 say. Run `git log origin/main..HEAD --format='%s'` and confirm each line parses
-as `type(scope): description`. Rewrite any that does not (`git rebase -i`) —
-these commits have not been merged, so the message is still yours to fix. Say in
+as `type(scope): description`. Rewrite any that does not — these commits have
+not been merged, so the message is still yours to fix. The session has no
+editor to drive `git rebase -i`: amend the tip with `git commit --amend`, and
+reach earlier commits with a scripted `GIT_SEQUENCE_EDITOR`. Say in
 your report that you did.
 
 An inherited commit will have no `Requirement:` footers. Add them in the same
@@ -342,7 +344,8 @@ PR exists unlabelled and the review has already started:
 gh pr create --base main --title "<title>" --body-file <file> --label no-review
 ```
 
-Never `--force`. Never `gh pr merge`.
+Never `--force` this push, and never `gh pr merge`. (The one force-push this
+skill knows is step 3's repair of a wrong branch, and only on the user's yes.)
 
 **If the PR closes an issue that sits in a milestone, put the PR in the same
 one.** The issue and its PR are one piece of work, and a milestone that holds
@@ -481,8 +484,8 @@ its model.
 ```markdown
 ## Sessions
 
-- Claude Opus 5 — https://claude.ai/code/session_01CLGjeqxyJyrW5RpBepHADE
-- Claude Sonnet 5 — https://claude.ai/code/session_01GBqMPAVHhjhEUirTmMY3wq
+- Claude <model> — https://claude.ai/code/session_<id>
+- Claude <other model> — https://claude.ai/code/session_<other id>
 ```
 
 Leave the section out when no commit on the branch carries a session URL. Do not
@@ -501,7 +504,7 @@ the user's steps.
 <feature>` checks the merge with GitHub, then removes the worktree and both
 branches, asking before each. Say the branch is ready for it and stop.
 
-Everywhere else, the old order holds. Merging is the user's step, so you learn
+Everywhere else: merging is the user's step, so you learn
 it happened by being told, or by looking:
 
 ```bash

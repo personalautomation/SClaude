@@ -123,6 +123,8 @@ ul.ticks.xs li { font-size: 14px; }
 .flow.mini .card.reserve { border: 1.5px dashed color-mix(in srgb, var(--cloud) 60%, transparent); }
 .flow.mini ul.ticks li::before { background: currentColor; opacity: .45; }
 ul.ticks.x li::before { background: var(--human); height: 2px; transform: rotate(45deg); box-shadow: none; }
+ul.ticks li.plus::before, ul.ticks li.plus::after { background: var(--auto); }
+ul.ticks li.plus::after { content: ""; position: absolute; left: 7px; top: calc(.5em - 5px); width: 2px; height: 12px; }
 
 .tight .card { padding: 10px 14px; gap: 2px; }
 .tight .card p { font-size: 15px; }
@@ -230,9 +232,9 @@ table.t td:first-child { font-weight: 600; }
     <div class="col" style="gap:12px">
       <p class="k">What I learned</p>
       <ul class="ticks">
-        <li>Different models do give genuinely different perspectives.</li>
-        <li>Less context means fewer tokens.</li>
-                <li>Agents polished corner cases no user would ever reach.</li>
+        <li class="plus">Different models do give genuinely different perspectives.</li>
+        <li class="plus">Less context means fewer tokens.</li>
+        <li>Agents polished corner cases no user would ever reach.</li>
         <li>Code size and token cost grew faster than the value. Past a certain complexity AI struggles; strict frameworks help.</li>
         <li>Then a startup asked for the same: one model in every role was voices inside one head. One idea survived: <b>manage the context, and the tokens follow.</b></li>
       </ul>

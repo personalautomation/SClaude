@@ -123,6 +123,8 @@ ul.ticks.xs li { font-size: 14px; }
 .flow.mini .card.reserve { border: 1.5px dashed color-mix(in srgb, var(--cloud) 60%, transparent); }
 .flow.mini ul.ticks li::before { background: currentColor; opacity: .45; }
 ul.ticks.x li::before { background: var(--human); height: 2px; transform: rotate(45deg); box-shadow: none; }
+ul.ticks li.plus::before, ul.ticks li.plus::after { background: var(--auto); }
+ul.ticks li.plus::after { content: ""; position: absolute; left: 7px; top: calc(.5em - 5px); width: 2px; height: 12px; }
 
 .tight .card { padding: 10px 14px; gap: 2px; }
 .tight .card p { font-size: 15px; }

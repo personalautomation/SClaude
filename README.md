@@ -157,8 +157,9 @@ still a human call"* — and their reported effect is the argument for it: befor
 What is left to you is the decision, and sclaude prepares it. Before asking
 whether to merge, it shows the acceptance criteria as QA left them, the checks,
 and the review's findings with what was done about each — including the case
-where the review check is green but reviewed nothing. The question defaults to
-*no*, and reads "Merge it **unchecked**?" when QA never saw the feature.
+where the review check is green but reviewed nothing. The question has no
+default: it waits for a yes or a no, and reads "Merge it **unchecked**?" when
+QA never saw the feature.
 
 A product may hand either decision back to sclaude, in `.sclaude/config.json`
 or from `sclaude config`. `qa` and `merge` each take `github` (a person does it

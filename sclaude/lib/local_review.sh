@@ -180,7 +180,8 @@ local_review() {
     fi
   fi
 
-  local earlier began new more cap pass=1
+  local earlier began new more cap pass=1 round
+  round="$(python3 "$LIB/local_review.py" round "$journal" "$head" 2>/dev/null || echo 1)"
   answer="$(local_review_file "$wt" -answer.md)"
   while :; do
     if ! earlier="$(python3 "$LIB/local_review.py" prompt "$wt" "$pr" "$repo" "$journal" 2>>"$(local_review_file "$wt" .log)")"; then
@@ -219,7 +220,7 @@ local_review() {
     local pid=$!
     trap 'kill -TERM "$pid" 2>/dev/null; stty echo < /dev/tty 2>/dev/null; printf '"'"'\033[?25h'"'"' >&2; exit 130' INT TERM HUP
     local stopped=0
-    local_review_wait "$wt" "$pid" "$pass" "$began" "$verify" || stopped=1
+    local_review_wait "$wt" "$pid" "$pass" "$began" "$verify" "$round" || stopped=1
     trap - INT TERM HUP
     if [[ "$stopped" -eq 1 ]]; then
       rm -f "$answer.part"
@@ -270,7 +271,7 @@ local_review() {
 
 # Wait for a pass of the local review, taking the person's keys meanwhile.
 #
-#   local_review_wait <wt> <pid> <pass> <began> [verify]
+#   local_review_wait <wt> <pid> <pass> <began> [verify] [round]
 #
 # The keys end the search for new findings (review_enough): `s` lets this
 # pass finish and be posted, and it is the last to look; pressed again it
@@ -283,7 +284,10 @@ local_review() {
 # A check of the fixes (verify) takes no keys: the search is over already.
 # Returns 1 when the person stopped the pass.
 local_review_wait() {
-  local wt="$1" pid="$2" pass="$3" began="$4" verify="${5:-}" armed=0 armed_at=0 said hint t tty=""
+  local wt="$1" pid="$2" pass="$3" began="$4" verify="${5:-}" round="${6:-1}" armed=0 armed_at=0 said hint t tty="" which
+  # The round counts heads reviewed; a pass is another read of this head,
+  # after one that found the cap, so the first pass goes unsaid.
+  which="round $round"; [[ "$pass" -gt 1 ]] && which+=", pass $pass"
   said="$(review_enough "$wt")"
   # No echo while it waits: a key pressed between two reads would otherwise
   # land on the status line. No cursor either: blinking after the last key in
@@ -309,8 +313,8 @@ local_review_wait() {
       fi
       # Not "Human in the loop", as the waits that need the person say: this
       # one goes on by itself, and the keys are there only to step in.
-      printf '\r\033[2K  %sRunning by itself%s — local review, pass %s (%dm%02ds) · %s' \
-        "$DIM" "$OFF" "$pass" $((t / 60)) $((t % 60)) "$hint" >&2
+      printf '\r\033[2K  %sRunning by itself%s — local review, %s (%dm%02ds) · %s' \
+        "$DIM" "$OFF" "$which" $((t / 60)) $((t % 60)) "$hint" >&2
     fi
     poll_pause 1
     [[ -n "$POLL_KEY" && -z "$verify" ]] || continue

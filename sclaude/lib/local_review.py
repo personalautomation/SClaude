@@ -17,6 +17,8 @@
 #   local_review.py cached <journal> <head>       exit 0 when <head> is the last reviewed
 #   local_review.py base <journal>                the last reviewed head, or nothing
 #   local_review.py since <journal> <head>        the commit the next run starts from
+#   local_review.py round <journal> <head>        which round reviewing <head> is: one
+#                                                 more than the other heads reviewed
 #   local_review.py prompt <cwd> <pr> <repo> <journal>  the part of the review's prompt
 #                                                 about earlier findings
 #   local_review.py record <cwd> <pr> <repo> <answer> <base> <head> <seconds> <journal> [cap] [verify]
@@ -389,6 +391,11 @@ def main(argv):
             print(last[-1].get("base") or "")
         else:
             print(last[-1]["head"])
+        return 0
+    if cmd == "round" and len(args) == 2:
+        # A round is a head: the passes over one head, and a capped head read
+        # again later, are the same round.
+        print(len({r["head"] for r in rows(args[0]) if r["head"] != args[1]}) + 1)
         return 0
     if cmd == "prompt" and len(args) == 4:
         return prompt(*args)

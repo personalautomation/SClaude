@@ -609,6 +609,9 @@ try:
     os.close(master)
     os.remove(os.path.join(tmp, "during"))
     check_true("stop-now-said", b"Stopped pass 1 as you said" in seen)
+    heads = {json.loads(line)["head"] for line in before.splitlines() if line.strip()}
+    check_true("status-says-round", ("local review, round %d (" % (len(heads) + 1)).encode() in seen)
+    check("status-no-first-pass", b"pass 1 (" in seen, False)
     check("stop-now-nothing-posted", len(threads()) - posted_before, 0)
     with open(journal) as fh:
         check("stop-now-not-recorded", fh.read(), before)
@@ -619,6 +622,20 @@ try:
     with open(state) as fh:
         check("stop-now-kept", json.load(fh)["steps"]["review"]["enough"], "now")
     prompts()
+
+    # A round is a head: two passes over one head count once, and the head
+    # being reviewed is the next round whether or not a pass of it is in.
+    rounds = os.path.join(tmp, "rounds.jsonl")
+    write(rounds, "".join(json.dumps({"at": "t", "head": h}) + "\n" for h in ("a", "b", "b", "c")))
+
+    def round_of(head):
+        return subprocess.run([sys.executable, os.path.join(LIB, "local_review.py"), "round",
+                               rounds, head], capture_output=True, text=True).stdout.strip()
+    check("round-new-head", round_of("d"), "4")
+    check("round-capped-head", round_of("c"), "3")
+    check("round-empty-journal", subprocess.run(
+        [sys.executable, os.path.join(LIB, "local_review.py"), "round", os.path.join(tmp, "none"), "a"],
+        capture_output=True, text=True).stdout.strip(), "1")
 
     # --- the prompts ------------------------------------------------------------
     def render(step, **values):

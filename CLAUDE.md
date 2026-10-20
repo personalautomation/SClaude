@@ -161,6 +161,20 @@ from `main`):
 for t in tests/*.py; do python3 "$t" >/dev/null || echo "FAIL $t"; done
 ```
 
+## The README before a push
+
+Before every push, bring `README.md` up to date with what the push carries: a
+new command, key, switch or behaviour a user meets goes in, and one that
+changed or went away is corrected there. Read the commits being pushed
+(`git log origin/main..HEAD`) against the README, and commit the update in the
+same push. A push with nothing a user would notice needs no edit, but the check
+is still made.
+
+The README is for people using the tools: what each does, and what they do
+with it. How a part works inside and why goes to `docs/sclaude.md` or
+`docs/keepawake.md`, which are updated the same way when the push changes
+something they describe.
+
 Shell files have no test runner of their own; check them with `bash -n`.
 
 ## Editing shell scripts while they run

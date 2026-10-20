@@ -384,10 +384,11 @@ PY
 
 # --- the epilogue's state ----------------------------------------------------
 #
-# The epilogue — the session that appends "Current status" to the issue and its
-# parents — is the only thing with nowhere to keep its state in the feature's
-# tree: by that minute the tree has been removed by the cleanup along with
-# state.json. And it can be interrupted exactly like everything else — and was
+# The epilogue — the session that writes "Current status" to the issue and its
+# parents — is the only thing with nowhere reliable to keep its state in the
+# feature's tree. It runs before the cleanup, but one that broke off is finished
+# later (`sclaude epilogue`), possibly after the cleanup has removed the tree
+# along with state.json. And it can be interrupted exactly like everything else — and was
 # interrupted silently: the feature is already `done`, the menu will not show
 # it, and nobody learns that the section in the issue stayed as it was.
 #

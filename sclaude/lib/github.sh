@@ -2075,8 +2075,8 @@ run_status() {
   info "   chain: $(tr '\n' ' ' <<< "$numbers")${labels:+ · labels: $labels}"
   echo ""
 
-  # Our own state goes in the main repository: the feature's tree is gone, and
-  # there is nowhere to write into .sclaude/local/feature/state.json. The details are in
+  # Our own state goes outside the feature's tree: an epilogue finished later
+  # may find the tree gone, and .sclaude/local/feature/state.json with it. The details are in
   # epilogue_state (state.sh).
   #
   # We name the session ourselves and write the id BEFORE launching: otherwise an

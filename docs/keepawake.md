@@ -1,0 +1,187 @@
+# How keepawake works, and why
+
+The README covers what keepawake does, its commands and its set-up. This is
+how it decides, and the traps it was built around.
+
+## Who holds the machine awake
+
+**Holders come in two kinds, and the difference is what they prove.**
+
+*Hard* ones mean a person is at the machine right now: a live SSH session, an
+open code-server tab, traffic going through the tailnet. Sleep does not come at
+all, the timer is not counted with them, and no questions are asked.
+
+*Soft* ones mean work is going on but there may be nobody around: a busy
+`claude`, a running dev server, a running code-server service. They give an hour,
+and half an hour before the end the bot asks whether to extend.
+
+**Soft ones divide in two again, and that is not a formality.** `claude`,
+`sclaude` and VS Code prove work: the transcript, the step's state and the edit
+journal grow because somebody — a person or an agent — is doing something. The
+dev server and the code-server service prove only their own existence: the dev
+server's log grows from the requests of a forgotten open tab (an HMR reconnect,
+the page polling its own API), and the service is alive simply because it was
+switched on once. Their sign never goes out, so the deadline moved an hour
+forward every minute: the laptop did not sleep for days, the "it will sleep in
+half an hour" warning never had time to reach the threshold, and the question
+about forgotten holders is asked only about hard ones. Such holders now hold only
+when there is somebody alive at the machine — recent input in a terminal or a
+code-server tab, or noticeable load. This does not lose the person: at the laptop
+itself Windows does not sleep because of the mouse and keyboard, while from a
+phone the hard holders hold — tailnet traffic, an SSH session, a code-server tab.
+
+With nobody there, Windows sleeps by its own settings.
+
+Extending does not accumulate: while a single holder is alive, the deadline is
+always "an hour from now". Otherwise three short connections would leave the
+laptop awake for three hours after all of them had closed.
+
+Once an hour, if hard holders are holding while there are no traces of work — an
+hour without a single keystroke and an unoccupied machine — the bot asks whether
+a session has been forgotten and offers to stop the services or to sleep.
+
+**"An hour without a single keystroke" is counted by both of a terminal's
+stamps.** A tty has two, and neither can be trusted on its own: `mtime` is moved
+by a program's **output**, so a forgotten tab with `tail -f` or a dev server
+prints into the void and looks like work — because of which the question about a
+forgotten session was never asked at all, in exactly the case it was created for.
+`atime` is moved by reading from the terminal, that is by what a person typed,
+but an automaton feeding input into a pty moves it too. So the smaller of the
+stamps is taken: nobody is there only when both are silent. This does not lose a
+live session — what is typed moves `atime`, and the shell's echo immediately
+moves `mtime`, so for a person at work both are fresh at once. The rule does not
+extend to code-server's heartbeat: that is an ordinary file, and `mtime` there
+means exactly what it says.
+
+## Files
+
+| File | What is in it |
+| --- | --- |
+| `bin/keepawake` | the holder detector, `status`, manual extension |
+| `keepawake/state.py` | the state under `flock`, atomic writes, the "should we hold" decision |
+| `keepawake/telegramd.py` | the bot: the menu, the half-hour warning, the commands |
+| `keepawake/i18n.py` | the bot's strings in Russian and English |
+| `keepawake/docs.py` | the docs the bot prints on a button |
+| `bin/code-server-start` | opens the repository chosen in the bot |
+| `bin/code-server-proxy` | the localhost forward, address from code-server's config |
+| `windows/KeepAwake.ps1` | `SetThreadExecutionState` and the polling loop on the Windows side |
+| `windows/KeepAwake.vbs` | a hidden manual start, should it be needed |
+| `bin/keepawake-windows` | starts and stops the Windows side from WSL |
+| `systemd/keepawake.timer` | the minute-by-minute polling of holders |
+| `systemd/keepawake-telegram.service` | the bot's daemon |
+| `systemd/code-server.service` | VS Code in the browser, tailnet only, on demand |
+| `systemd/code-server-local.socket` | the same server for the Windows browser |
+
+## Between WSL and Windows
+
+**The counting happens in WSL, the executing in Windows.** The state file lies on
+the Windows drive (`C:\Users\<user>\.keepawake\state.json`) because PowerShell
+reads it — and reads it at the moment WSL may already have stopped. The other
+direction, reading from Windows over `\\wsl$`, breaks exactly when it is needed.
+
+Time in the file is whole Unix-epoch UTC seconds only. `date +%s`, `time.time()`
+and `[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()` give the same integer, and the
+comparison does not depend on the switch to summer time — otherwise on the last
+Sunday of October, when the local hour repeats twice, the system would be an hour
+out.
+
+**Fail-safe everywhere.** The Windows side keeps the system awake only if the
+file was read, the schema's version is its own, the deadline is in the future and
+`updated_ts` is younger than fifteen minutes. The last is the protection against
+"WSL died and the file remained": the detector runs once a minute and refreshes
+the stamp even when nothing has changed. Any failure means "release": failing to
+sleep is a battery flattened overnight, sleeping too early is pressing a
+button.
+
+**A button carries the deadline it was sent for** (`extend:1757000000`). Without
+that, a press on yesterday's notification would extend the hold at an arbitrary
+moment the next day; the window is now checked, and a stale button answers with
+an alert.
+
+## Driving sclaude from the bot
+
+**The `sclaude` cycle can be driven from the bot too.** Not by emulating a
+terminal but by dividing the roles: the orchestrator stays the orchestrator, the
+bot shows its questions and passes the answers on, and the step's own
+conversation goes to the Claude mobile app.
+
+A question lives in a file rather than in a process (`sclaude/lib/io.sh`): the
+orchestrator lays it out in `.git/sclaude/ask.json` and waits for an answer from
+two places at once — the terminal where the question was asked, and the channel.
+Whoever answers first has answered. Hence **hot switching**: a feature was begun
+at the laptop, reached "Is step 'development' finished?", was left — and answered
+from a phone; the live process in the terminal prints the answer after the prompt
+and carries on by itself. The same in reverse: an answer in the terminal clears
+the question, and the bot removes the buttons on the next turn.
+
+**At the laptop a question arrives silently.** It is sent anyway — one can step
+away mid-step, and then the message is already waiting in the chat — but while
+the person is sitting at that very terminal it does not buzz the phone
+(`disable_notification`): the question is on the screen as it is, and that is
+where it is answered.
+
+Presence is measured by the terminal of the process that asked the question: its
+`pid` already travels in the channel, and the controlling terminal is found from
+it. Not "the freshest terminal of all", as in the `bin/keepawake` detector — a
+forgotten neighbouring tab has nothing to do with this question. We look at
+`atime` rather than `mtime`, and that is not pedantry: a tty's `mtime` is moved
+by a program's **output**, so `ask` itself, having printed the prompt, would
+declare the person present — every question in a row would go out silent, those
+asked from the bot included. `atime` is moved only by a successful read from the
+terminal, that is by what was really typed, and idle turns of `read -t` do not
+touch it. The threshold is five minutes: reading a long question or thinking over
+an answer, a person stays silent for a minute or two without going anywhere. Any
+uncertainty is resolved in favour of sound: no `pid`, no terminal (a launch from
+the bot goes through `setsid`), `/proc` will not read — the message arrives as
+usual.
+
+The question declares the answer's form itself — as `ask`'s third argument
+rather than by parsing the prompt: guessing from `[y/N]` would diverge from the
+code at the first edit to the text. `yn` and `yn:yes` give two buttons (the first
+being the one Enter gives in the terminal), `pick:N` gives a button per option
+and for a large N asks for a number as text, as in the terminal; with no form the
+answer arrives as an ordinary message. What was printed before the question
+travels with it: a "Publish?" without the list of commands `run_block` shows in
+the terminal would be agreement to who knows what.
+
+A step with no terminal is refused. It used to go into the background instead
+(`claude --bg`, the conversation continuing in the Claude app over Remote
+Control), and that was written for an entrance nobody uses: ssh through Termius
+gives a real tty, so does the terminal inside code-server, and nothing
+automated starts a step at all — `sclaude-watch` only polls GitHub and prints
+`sclaude <slug>` for a human to run, while the Telegram bot is read-only by its
+own documentation. So no terminal means `sclaude` was invoked by something that
+was never meant to invoke it: `ssh host sclaude <feature>` without `-t`, a
+systemd unit, a cron line, a pipe. Carrying on there is worse than stopping —
+the step runs where nobody is watching, `after_step` is never reached, and the
+next step and the friction review never happen, while the orchestrator returns
+as though it had done its work. It now says all of that and starts nothing.
+
+The two entrances do not get in each other's way. An open step session cannot be
+opened a second time — the check asks `claude agents --json` rather than looking
+for a process in `ps`: a session started without arguments does not show its UUID
+in the command line, and the old `pgrep` did not see it at all. The channel is
+also occupied by one orchestrator: whoever comes second gives way and asks the
+terminal, otherwise it would overwrite the first's question and that one would
+hang, waiting for an answer that would no longer go to it. A question that
+outlived its owner (killed with Ctrl-C, an ssh session dropped) is not shown by
+the bot — it checks the `pid` and removes it.
+
+Termius and code-server have not gone anywhere: a full-screen `claude` is real
+there, and for long stretches of work by hand that is still more convenient.
+
+## Two Windows traps
+
+Both cost debugging and both are pinned down in the code.
+
+`schtasks` refuses with "Access is denied" on any logon trigger: `ONLOGON` counts
+as privileged, while PowerShell started from WSL is unprivileged. So systemd
+inside WSL brings the Windows side up (`keepawake-windows`) — and shuts it down
+when the distribution stops: while WSL is not running there is nobody to hold
+for, and there must be no deviation from Windows' own rules.
+
+PowerShell 5.1 reads UTF-8 **without a BOM** as ANSI. Any non-ASCII byte then
+decodes to something else, string lengths drift apart, the parser loses block
+boundaries, and the script dies on `Missing closing '}'` at a spot where
+everything is written correctly. `install.sh` copies the file with a BOM — do not
+change that to a plain `cp`.

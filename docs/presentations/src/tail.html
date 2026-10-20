@@ -1,0 +1,70 @@
+  </div>
+</div>
+
+<nav class="nav" aria-label="Slides">
+  <button type="button" id="prev" aria-label="Previous slide">&larr; Prev</button>
+  <span class="count" id="count">1 / 1</span>
+  <button type="button" id="next" aria-label="Next slide">Next &rarr;</button>
+  <div class="progress" aria-hidden="true"><i id="bar"></i></div>
+  <span class="hint hide-narrow">&larr; &rarr; or Space</span>
+  {{OTHER}}
+</nav>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var stage = document.getElementById('stage');
+  var viewport = document.getElementById('viewport');
+  var count = document.getElementById('count');
+  var bar = document.getElementById('bar');
+  var mark = '{{MARK}}';
+  var i = 0;
+
+  slides.forEach(function (s, n) {
+    s.id = 's' + (n + 1);
+    var no = document.createElement('span');
+    no.className = 'pageno';
+    no.textContent = (n + 1) + ' / ' + slides.length;
+    s.appendChild(no);
+    if (mark && n > 0) {
+      var dm = document.createElement('span');
+      dm.className = 'deckmark';
+      dm.textContent = mark;
+      s.appendChild(dm);
+    }
+  });
+
+  function narrow() { return window.matchMedia('(max-width: 820px)').matches; }
+
+  function fit() {
+    if (narrow()) { stage.style.transform = ''; return; }
+    var w = viewport.clientWidth, h = viewport.clientHeight;
+    var s = Math.min((w - 32) / 1280, (h - 24) / 720);
+    stage.style.transform = 'scale(' + Math.max(s, 0.2) + ')';
+  }
+
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, k) { s.classList.toggle('on', k === i); });
+    count.textContent = (i + 1) + ' / ' + slides.length;
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    try { history.replaceState(null, '', '#s' + (i + 1)); } catch (e) {}
+  }
+
+  document.getElementById('prev').addEventListener('click', function () { show(i - 1); });
+  document.getElementById('next').addEventListener('click', function () { show(i + 1); });
+  document.addEventListener('keydown', function (e) {
+    if (narrow() || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (['ArrowRight', 'PageDown', ' ', 'Enter'].indexOf(e.key) >= 0) { e.preventDefault(); show(i + 1); }
+    else if (['ArrowLeft', 'PageUp', 'Backspace'].indexOf(e.key) >= 0) { e.preventDefault(); show(i - 1); }
+    else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(slides.length - 1); }
+  });
+  window.addEventListener('resize', fit);
+
+  var m = /^#s(\d+)$/.exec(location.hash || '');
+  show(m ? parseInt(m[1], 10) - 1 : 0);
+  fit();
+  if (m && narrow()) { var t = document.getElementById('s' + m[1]); if (t) t.scrollIntoView(); }
+})();
+</script>

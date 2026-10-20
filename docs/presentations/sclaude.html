@@ -1,0 +1,835 @@
+<title>sclaude in Depth</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: a 1280x720 slide canvas scaled to the window on desktop; below 820px the slides stack into one scrolling column. */
+:root {
+  --paper: #EEF1F5;
+  --surface: #FFFFFF;
+  --ink: #131B2C;
+  --muted: #586379;
+  --line: #D6DCE6;
+  --signal: #C97A0A;
+  --signal-soft: #FBEFD9;
+  --auto: #0C7A6B;
+  --auto-soft: #DDF1EC;
+  --human: #C2452F;
+  --human-soft: #FBE4DE;
+  --cloud: #2F57C9;
+  --cloud-soft: #E2E9FB;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0D1320; --surface: #161F31; --ink: #E7EBF2; --muted: #9AA5BA; --line: #2A3650;
+    --signal: #F0A93B; --signal-soft: #3A2C14; --auto: #4CC7B4; --auto-soft: #11332F;
+    --human: #F07F69; --human-soft: #3B1F1A; --cloud: #86A4F5; --cloud-soft: #1A2647;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0D1320; --surface: #161F31; --ink: #E7EBF2; --muted: #9AA5BA; --line: #2A3650;
+  --signal: #F0A93B; --signal-soft: #3A2C14; --auto: #4CC7B4; --auto-soft: #11332F;
+  --human: #F07F69; --human-soft: #3B1F1A; --cloud: #86A4F5; --cloud-soft: #1A2647;
+  color-scheme: dark;
+}
+
+html, body { height: 100%; }
+body { background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 14px; }
+
+.viewport { position: fixed; inset: 0 0 56px 0; display: grid; place-items: center; overflow: hidden; }
+.stage { width: 1280px; height: 720px; transform-origin: center center; flex: none; }
+.slide {
+  display: none; position: relative; width: 1280px; height: 720px; box-sizing: border-box;
+  padding: 52px 72px 44px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 6px; overflow: hidden; flex-direction: column; gap: 22px;
+  box-shadow: 0 30px 60px -40px rgba(10, 20, 40, .45);
+  font-size: 19px; line-height: 1.45;
+}
+.slide.on { display: flex; }
+.slide > .pageno { position: absolute; right: 30px; bottom: 20px; font: 500 13px var(--mono); color: var(--muted); }
+.slide > .deckmark { position: absolute; left: 72px; bottom: 20px; font: 500 12px var(--mono); color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+
+.eyebrow { font: 600 14px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--signal); }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; letter-spacing: -.01em; }
+h1 { font-size: 76px; line-height: .98; font-weight: 800; }
+h2 { font-size: 44px; line-height: 1.05; font-weight: 700; }
+h3 { font-size: 22px; line-height: 1.15; font-weight: 700; }
+p { margin: 0; }
+.head { display: flex; flex-direction: column; gap: 10px; }
+.lede { font-size: 21px; color: var(--muted); max-width: 62ch; }
+.muted { color: var(--muted); }
+.small { font-size: 16px; }
+.xs { font-size: 14px; }
+.mono { font-family: var(--mono); }
+b, strong { font-weight: 600; }
+a { color: var(--cloud); }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+
+.grow { flex: 1; min-height: 0; }
+.row { display: flex; gap: 18px; }
+.col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.g2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.g5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.split { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 32px; }
+
+.card { background: var(--paper); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card p { font-size: 16.5px; line-height: 1.42; color: var(--muted); }
+.card p.punch { color: var(--ink); }
+.card.line { background: transparent; border: 1px solid var(--line); }
+.card.auto { background: var(--auto-soft); }
+.card.human { background: var(--human-soft); }
+.card.cloud { background: var(--cloud-soft); }
+.card.signal { background: var(--signal-soft); }
+.k { font: 600 13px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.card.auto .k { color: var(--auto); } .card.human .k { color: var(--human); }
+.card.cloud .k { color: var(--cloud); } .card.signal .k { color: var(--signal); }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; font: 600 12.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 4px 9px; border-radius: 999px; background: var(--paper); color: var(--muted); white-space: nowrap; }
+.chip.auto { background: var(--auto-soft); color: var(--auto); }
+.chip.human { background: var(--human-soft); color: var(--human); }
+.chip.cloud { background: var(--cloud-soft); color: var(--cloud); }
+.chip.signal { background: var(--signal-soft); color: var(--signal); }
+.card > .chip { align-self: flex-start; margin-top: auto; }
+.card.auto > .chip, .card.human > .chip, .card.signal > .chip, .card.cloud > .chip { background: var(--surface); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+
+.quote { border-left: 3px solid var(--signal); padding: 4px 0 4px 18px; font-size: 18px; }
+.quote cite a, .src a { color: inherit; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.quote cite a:hover, .src a:hover { color: var(--signal); }
+.quote cite { display: block; margin-top: 6px; font: 500 13px var(--mono); color: var(--muted); font-style: normal; }
+.punch { font-family: var(--display); font-size: 30px; line-height: 1.12; font-weight: 700; text-wrap: balance; }
+.punch em { font-style: normal; color: var(--signal); }
+
+ul.ticks { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 9px; }
+ul.ticks li { padding-left: 26px; position: relative; font-size: 17.5px; }
+ul.ticks li::before { content: ""; position: absolute; left: 2px; top: .5em; width: 12px; height: 2px; background: var(--signal); }
+ul.ticks.small li { font-size: 15.5px; }
+ul.ticks.xs { gap: 4px; }
+ul.ticks.xs li { font-size: 14px; }
+.flow.mini .card { padding: 12px 16px; gap: 4px; }
+.flow.mini h3 { font-size: 17px; }
+.flow.mini .card { border: 1px solid transparent; }
+.flow.mini .card.auto { border-color: color-mix(in srgb, var(--auto) 35%, transparent); }
+.flow.mini .card.human { border-color: color-mix(in srgb, var(--human) 30%, transparent); }
+.flow.mini .card:not(.auto):not(.cloud):not(.human) { border-color: var(--line); }
+.flow.mini .card.reserve { border: 1.5px dashed color-mix(in srgb, var(--cloud) 60%, transparent); }
+.flow.mini ul.ticks li::before { background: currentColor; opacity: .45; }
+ul.ticks.x li::before { background: var(--human); height: 2px; transform: rotate(45deg); box-shadow: none; }
+
+.tight .card { padding: 10px 14px; gap: 2px; }
+.tight .card p { font-size: 15px; }
+.lanes { display: grid; grid-template-columns: 150px repeat(4, minmax(0, 1fr)); column-gap: 16px; row-gap: 0; }
+.lanes > .card { margin-bottom: 8px; padding: 12px 16px; gap: 4px; }
+.lanes > .card p { font-size: 15px; }
+.lanes .lane { font: 600 12.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--signal); padding: 9px 0; border-top: 1px solid var(--line); }
+.lanes .cell { font-size: 15px; line-height: 1.38; color: var(--muted); padding: 9px 0; border-top: 1px solid var(--line); min-width: 0; }
+.lanes .cell.hot { color: var(--ink); }
+.lanes .tool { display: none; }
+.rows { display: grid; grid-template-columns: 150px repeat(3, minmax(0, 1fr)); gap: 16px 18px; align-content: start; }
+.rowlabel { display: flex; flex-direction: column; gap: 4px; justify-content: center; border-right: 2px solid var(--line); padding-right: 12px; }
+.arrow { color: var(--muted); font: 600 22px var(--mono); display: grid; place-items: center; }
+.flow { display: grid; align-items: stretch; gap: 10px; }
+
+table.t { width: 100%; border-collapse: collapse; font-size: 16.5px; }
+table.t th { text-align: left; font: 600 12.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 0 12px 10px 0; border-bottom: 1px solid var(--line); }
+table.t td { padding: 11px 12px 11px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.t td:first-child { font-weight: 600; }
+.tablewrap { overflow-x: auto; }
+
+.big { font-family: var(--display); font-weight: 800; font-size: 64px; line-height: 1; font-variant-numeric: tabular-nums; }
+
+.bar { height: 14px; border-radius: 999px; background: var(--paper); overflow: hidden; display: flex; }
+.bar > span { display: block; height: 100%; }
+
+.cover { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.cover .muted, .cover .lede { color: color-mix(in srgb, var(--paper) 70%, var(--ink)); }
+.cover > .pageno, .cover > .deckmark { color: color-mix(in srgb, var(--paper) 55%, var(--ink)); }
+
+/* Navigation bar */
+.nav { position: fixed; left: 0; right: 0; bottom: 0; height: 56px; padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; align-items: center; gap: 14px; font: 500 13px var(--mono); color: var(--muted); background: var(--paper); }
+.nav button { font: 600 13px var(--mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+.nav button:hover { border-color: var(--signal); }
+.nav .progress { flex: 1; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.nav .progress > i { display: block; height: 100%; width: 0; background: var(--signal); transition: width .25s ease; }
+.nav .count { font-variant-numeric: tabular-nums; min-width: 64px; text-align: center; }
+.nav .hint { white-space: nowrap; }
+.nav a { color: var(--ink); white-space: nowrap; }
+
+@media (min-width: 821px) { body { overflow: hidden; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* Phone and narrow windows: every slide in one column, read by scrolling */
+@media (max-width: 820px) {
+  html, body { height: auto; }
+  .viewport { position: static; display: block; overflow: visible; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 16px 24px; }
+  .stage { width: auto; height: auto; transform: none !important; display: flex; flex-direction: column; gap: 16px; }
+  .slide, .slide.on { display: flex; width: auto; height: auto; padding: 28px 20px 48px; font-size: 16px; gap: 18px; }
+  h1 { font-size: 44px; } h2 { font-size: 29px; } h3 { font-size: 19px; }
+  .lede { font-size: 17px; } .punch { font-size: 22px; } .big { font-size: 44px; }
+  .g2, .g3, .g4, .g5, .split { grid-template-columns: minmax(0, 1fr); }
+  .row { flex-direction: column; }
+  .lanes, .rows { grid-template-columns: minmax(0, 1fr); }
+  .rowlabel { border-right: 0; padding-top: 8px; }
+  .lanes > div:empty { display: none; }
+  .lanes .tool { display: block; font: 600 12px var(--mono); color: var(--ink); }
+  .flow { grid-template-columns: minmax(0, 1fr) !important; }
+  .flow > .arrow { transform: rotate(90deg); }
+  .slide > .deckmark { left: 20px; }
+  .nav { display: none; }
+  .hide-narrow { display: none !important; }
+}
+</style>
+
+<div class="viewport" id="viewport">
+  <div class="stage" id="stage">
+
+<!-- 1 · cover -->
+<section class="slide cover">
+  <div class="eyebrow">sclaude · in depth · 2026</div>
+  <div class="grow" style="display:flex;flex-direction:column;justify-content:center;gap:28px">
+    <h1>Manageable<br>AI coding</h1>
+    <p class="lede" style="max-width:54ch">From AI experiments to a controlled, repeatable engineering workflow. The orchestrator owns the process; the model does what the process asks.</p>
+    <div class="chips">
+      <span class="chip signal">Doable</span><span class="chip auto">Controllable</span><span class="chip cloud">Affordable</span>
+    </div>
+  </div>
+  <div class="row" style="justify-content:space-between;align-items:flex-end">
+    <p class="mono xs muted">Companion to "Build on a laptop. Run it from a phone."</p>
+    <p class="mono xs muted">Ilia Poliakov</p>
+  </div>
+</section>
+
+<!-- 2 · what we tried first -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Why · where this started</div>
+    <h2>What we tried first, with plenty of budget</h2>
+    <p class="lede">I first met the problem in a large organisation that paid for several models and agents.</p>
+  </div>
+  <div class="split grow">
+    <div class="card line" style="gap:14px">
+      <div class="k">The multi-agent setup</div>
+      <div class="g2">
+        <div class="card"><b>Claude</b><p>architect</p></div>
+        <div class="card"><b>GPT</b><p>reviewer</p></div>
+        <div class="card"><b>Copilot</b><p>tests</p></div>
+        <div class="card"><b>Other agents</b><p>fixes, docs</p></div>
+      </div>
+      <p class="small muted">All agents in one chat, each checking the others. Pleasant to watch, and of little use by the end.</p>
+    </div>
+    <div class="col" style="gap:12px">
+      <p class="k">What I learned</p>
+      <ul class="ticks">
+        <li>Different models do give genuinely different perspectives.</li>
+        <li>Less context means fewer tokens.</li>
+                <li>Agents polished corner cases no user would ever reach.</li>
+        <li>Code size and token cost grew faster than the value. Past a certain complexity AI struggles; strict frameworks help.</li>
+        <li>Then a startup asked for the same: one model in every role was voices inside one head. One idea survived: <b>manage the context, and the tokens follow.</b></li>
+      </ul>
+      <p class="punch" style="margin-top:auto">We did not roll it out. <em>Speed is addictive; control has to be designed.</em></p>
+    </div>
+  </div>
+</section>
+
+<!-- 3 · why an orchestrator -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Why · the durable lesson</div>
+    <h2>Do not make the model the process engine</h2>
+    <p class="lede">Prompts are not guarantees. Even with explicit instructions and IMPORTANT warnings, a model invents statuses, switches language and ignores predefined options, and over time the process drifts. So the process moved into code.</p>
+  </div>
+  <div class="g4">
+    <div class="card signal"><div class="k">1 · Controlled context</div><p style="color:var(--ink)">A session per stage, with an explicit hand-off. Less irrelevant context, fewer tokens.</p></div>
+    <div class="card signal"><div class="k">2 · Controlled models</div><p style="color:var(--ink)">The strongest model for judgement, a cheaper one for the PR, none for deploys and gates.</p></div>
+    <div class="card human"><div class="k">3 · Hard constraints</div><p style="color:var(--ink)">Allowed actions are enforced, not requested. The agent cannot leave the path.</p></div>
+    <div class="card cloud"><div class="k">4 · Feedback loops</div><p style="color:var(--ink)">Where the agent struggles is logged and turned into a better rule.</p></div>
+  </div>
+  <div class="split grow">
+    <div class="col" style="justify-content:space-between">
+      <div class="chips"><span class="chip signal">Lower token spend</span><span class="chip human">Control</span><span class="chip cloud">Predictable process</span><span class="chip auto">Scales without load on the team</span></div>
+      <p class="punch" style="font-size:26px">Less spectacular than a chat of agents. <em>The more work moves into the orchestrator, the cheaper each feature gets.</em></p>
+    </div>
+    <div class="col" style="gap:10px">
+      <div class="quote small">"AI doesn't fix a team; it amplifies what's already there."<cite><a href="https://cloud.google.com/blog/products/ai-machine-learning/announcing-the-2025-dora-report" target="_blank" rel="noopener">Google, 2025 DORA report</a></cite></div>
+      <div class="quote small">"Workflows offer predictability and consistency for well-defined tasks."<cite><a href="https://www.anthropic.com/engineering/building-effective-agents" target="_blank" rel="noopener">Anthropic, Building effective agents</a></cite></div>
+    </div>
+  </div>
+</section>
+
+<!-- knowledge as capital -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Why · knowledge as capital</div>
+    <h2>Process, prompts and lessons become company capital</h2>
+    <p class="lede">Today each developer keeps their own prompts, workarounds and tricks, and the tools change faster than anyone writes a tutorial. Here all of it lives in git, where it compounds instead of walking out of the door.</p>
+  </div>
+  <div class="g3 grow">
+    <div class="card signal">
+      <div class="k">What is kept</div>
+      <ul class="ticks small">
+        <li><b>The process:</b> stages, gates, prompts</li>
+        <li><b>The rules:</b> what each step may and may not do</li>
+        <li><b>The friction:</b> every refusal, reviewed and decided</li>
+        <li><b>The lessons:</b> retrospectives and the rules they produced</li>
+      </ul>
+    </div>
+    <div class="card auto">
+      <div class="k">How it spreads</div>
+      <ul class="ticks small">
+        <li>A fix reaches every developer at their next command</li>
+        <li>A personal rule that proves itself becomes the team's</li>
+        <li>A new hire starts with everything the team has learned; <span class="mono">sclaude doctor</span> sets up the machine</li>
+      </ul>
+    </div>
+    <div class="card cloud">
+      <div class="k">How it teaches</div>
+      <ul class="ticks small">
+        <li>Each retrospective tells the developer, from their own run, how to work better</li>
+        <li>"What went well" surfaces best practices, with evidence</li>
+        <li>Whoever lags gets coached from facts, not in a meeting</li>
+      </ul>
+    </div>
+  </div>
+  <div class="g3">
+    <div class="quote small">"Quality internal platforms provide the shared capabilities needed to scale the benefits of AI across an organization."<cite><a href="https://cloud.google.com/blog/products/ai-machine-learning/introducing-doras-inaugural-ai-capabilities-model" target="_blank" rel="noopener">Google, DORA AI Capabilities Model</a></cite></div>
+    <div class="quote small">"Check CLAUDE.md into git so your team can contribute. The file compounds in value over time."<cite><a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Anthropic, Claude Code best practices</a></cite></div>
+    <div class="quote small">The same idea in Claude Code itself: <span class="mono">/insights</span> reads your recent sessions and reports friction points and suggestions.<cite><a href="https://code.claude.com/docs/en/costs#analyze-your-usage-patterns" target="_blank" rel="noopener">Claude Code docs, Manage costs</a></cite></div>
+  </div>
+</section>
+
+<!-- 4 · what the orchestrator does -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Why · division of labour</div>
+    <h2>The model handles judgement. The orchestrator handles the rest.</h2>
+  </div>
+  <div class="split grow">
+    <div class="g2" style="align-content:start">
+      <div class="card auto"><p style="color:var(--ink)">Remembers which step every feature is on, and resumes after any interruption</p></div>
+      <div class="card auto"><p style="color:var(--ink)">Gathers the context for each step and renders its prompt</p></div>
+      <div class="card auto"><p style="color:var(--ink)">Sets up a sandbox per feature: worktree, dev server, database</p></div>
+      <div class="card auto"><p style="color:var(--ink)">Runs the tests locally, on the preview and on production</p></div>
+      <div class="card auto"><p style="color:var(--ink)">Deploys, and rolls production back when it goes red</p></div>
+      <div class="card auto"><p style="color:var(--ink)">Keeps the issue, the pull request and the board up to date</p></div>
+    </div>
+    <div class="col" style="justify-content:center;gap:18px">
+      <div class="chips"><span class="chip auto">Same operation every run</span><span class="chip auto">No interpretation</span><span class="chip auto">Zero tokens</span></div>
+      <p class="punch">If a script can do it, <em>the model should not.</em></p>
+      <p class="small muted">The token budget goes to planning, writing and reviewing code, which is where a model is actually better than a script.</p>
+      <div class="quote small">"…finding the smallest possible set of high-signal tokens…"<cite><a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents" target="_blank" rel="noopener">Anthropic, Effective context engineering</a></cite></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 · the fixed path -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">How a feature flows</div>
+    <h2>One feature, one fixed path</h2>
+  </div>
+  <div class="flow" style="grid-template-columns: repeat(5, minmax(0,1fr));">
+    <div class="card line"><div class="k">Start</div><h3>Issue</h3><p>The orchestrator gathers the parent issues and the product manuals.</p></div>
+    <div class="card auto"><div class="k">1 · Plan</div><p style="color:var(--ink)">Propose the scope, wait for a person to confirm, then plan with acceptance criteria.</p><p class="xs">read-only</p></div>
+    <div class="card auto"><div class="k">2 · Code</div><p style="color:var(--ink)">Build and test in its own sandbox, checking the result in a real browser.</p><p class="xs">ends: approval + green tests</p></div>
+    <div class="card auto"><div class="k">3 · Pull request</div><p style="color:var(--ink)">Update the manuals, write it up, open it.</p><p class="xs">ends: a real PR</p></div>
+    <div class="card cloud"><div class="k">GitHub review</div><p style="color:var(--ink)">An AI reviewer and CI checks run on the pull request.</p></div>
+    <div class="card auto"><div class="k">4 · Review</div><p style="color:var(--ink)">Fix what the review and the checks found, round by round.</p><p class="xs">ends: green preview tests</p></div>
+    <div class="card line"><div class="k">Preview</div><p style="color:var(--ink)">Deploy the branch, run the regression against it.</p></div>
+    <div class="card human"><div class="k">QA · a person</div><p style="color:var(--ink)">Checks the preview and ticks the criteria in the issue.</p></div>
+    <div class="card human"><div class="k">Merge · a person</div><p style="color:var(--ink)">Sees criteria, checks and findings in one place.</p></div>
+    <div class="card line"><div class="k">Production</div><p style="color:var(--ink)">Deploy, run the production tests, roll back if red.</p></div>
+  </div>
+  <div class="card signal">
+    <p style="color:var(--ink)"><b>Then:</b> an epilogue writes the outcome into the issue and every parent, so an epic shows where it stands. A retrospective reads the whole run and proposes what to do better.</p>
+  </div>
+</section>
+
+<!-- 3cs -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">The safety model</div>
+    <h2>Contain. Curate. Control.</h2>
+    <p class="lede"><a href="https://www.docker.com/blog/the-3cs-a-framework-for-ai-agent-security/" target="_blank" rel="noopener">Docker's three layers</a> for agent security, applied to a whole coding workflow. Each one is a separate answer to "what if the agent gets it wrong?"</p>
+  </div>
+  <div class="g3 grow">
+    <div class="card signal">
+      <div class="k">Contain</div>
+      <h3>Limit the blast radius</h3>
+      <p>A mistake stays inside one feature.</p>
+      <ul class="ticks small">
+        <li>A copy of the repository and a branch per feature</li>
+        <li>Its own dev server, address and database</li>
+        <li>Its own preview; production is never a feature's target</li>
+        <li>A failed release rolls back without touching anyone else's</li>
+      </ul>
+      <span class="chip signal">more &rarr; the next slide</span>
+    </div>
+    <div class="card auto">
+      <div class="k">Curate</div>
+      <h3>Construct the agent's world</h3>
+      <p>Before a session starts, the orchestrator decides what it gets.</p>
+      <ul class="ticks small">
+        <li>The context for this stage, and nothing stale</li>
+        <li>The tools and permissions this stage needs</li>
+        <li>The model and effort the stage is worth</li>
+        <li>The instructions: sclaude's, the team's, the developer's</li>
+      </ul>
+      <span class="chip auto">more &rarr; the steps</span>
+    </div>
+    <div class="card human">
+      <div class="k">Control</div>
+      <h3>Enforce at the moment of action</h3>
+      <p>Rules are executable, not advisory.</p>
+      <ul class="ticks small">
+        <li>Hooks refuse a forbidden command as the agent tries it</li>
+        <li>Merge, main and production stay a person's call</li>
+        <li>Every refusal is logged</li>
+        <li>and reviewed: the feedback loop</li>
+      </ul>
+      <span class="chip human">more &rarr; start tight</span>
+    </div>
+  </div>
+  <div class="g2">
+    <div class="quote small">"Curation isn't approval. It is construction."<cite><a href="https://www.docker.com/blog/the-3cs-a-framework-for-ai-agent-security/" target="_blank" rel="noopener">Docker, The 3Cs framework</a></cite></div>
+    <div class="quote small">"Unlike CLAUDE.md instructions which are advisory, hooks are deterministic and guarantee the action happens."<cite><a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Anthropic, Claude Code best practices</a></cite></div>
+  </div>
+</section>
+
+<!-- 6b · contain -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">How a feature flows · contain</div>
+    <h2>Every feature in a sandbox of its own</h2>
+    <p class="lede">The first C, contain the blast radius. With an agent per feature a developer runs several in parallel, and in one shared checkout they collide: one migration wipes another's data, one sign-in signs you out of the next.</p>
+  </div>
+  <div class="g4">
+    <div class="card auto"><div class="k">Its own code</div><h3>A worktree</h3><p>A separate copy of the repository on its own branch. Edits meet only in the pull request.</p></div>
+    <div class="card auto"><div class="k">Its own address</div><h3><span class="mono" style="font-size:16px">feature.localhost</span></h3><p>A dev server per feature behind its own address, so cookies and sign-ins stay apart.</p></div>
+    <div class="card auto"><div class="k">Its own database</div><h3>Supabase in Docker</h3><p>Filled from the main local database or the seed. A migration reaches nothing else.</p></div>
+    <div class="card cloud"><div class="k">Its own preview</div><h3>Vercel per branch</h3><p>QA checks each feature at its own deployed address, never on a shared staging server.</p></div>
+  </div>
+  <div class="split grow" style="align-items:end">
+    <ul class="ticks small">
+      <li>Idle for half an hour: stopped, database included, data kept; it starts again on the next visit</li>
+      <li>No Docker running: sclaude starts it, and falls back to the shared database only when it cannot, saying so</li>
+      <li>Removed with the feature when it is done; production is never a feature's target</li>
+    </ul>
+    <p class="punch" style="font-size:26px">Parallel work <em>without a shared mess.</em></p>
+  </div>
+</section>
+
+<!-- 6 · steps table -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">How a feature flows · curate: pay for thinking</div>
+    <h2>Each step gets its own model, permissions and exit</h2>
+    <p class="lede">The second C, curate: for every step the orchestrator builds the agent's world, its context, tools, model and instructions.</p>
+  </div>
+  <div class="tablewrap grow">
+    <table class="t">
+      <thead><tr><th>Step</th><th>Model</th><th>May do</th><th>Closes only on</th></tr></thead>
+      <tbody>
+        <tr><td>1 · Plan</td><td class="mono">Opus · high</td><td>Discuss and write the plan; no code at all</td><td>A plan a person approved, with criteria</td></tr>
+        <tr><td>2 · Code</td><td class="mono">Opus · medium</td><td>Implement, check in Chrome, commit</td><td>A person's yes and green tests</td></tr>
+        <tr><td>3 · Pull request</td><td class="mono">Sonnet · medium</td><td>Manuals and the pull request</td><td>A pull request that exists on GitHub</td></tr>
+        <tr><td>4 · Review</td><td class="mono">Opus · medium</td><td>Fix findings, deploy the preview</td><td>Nothing left open, preview tests green</td></tr>
+        <tr><td>5 · Epilogue</td><td class="mono">Sonnet · medium</td><td>Write the outcome into the issues</td><td>The session actually ran</td></tr>
+        <tr><td>6 · Retro</td><td class="mono">Opus · medium</td><td>What was missed, what to improve</td><td>The session finished</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="g3">
+    <p class="small muted">Every step starts a fresh session. Only the approved plan, with its criteria, is carried forward. Nothing stale leaks into the next step.</p>
+    <p class="small muted">A step closes on evidence, never on a model saying "done". Ctrl-C, a usage limit or a closed laptop closes nothing; the conversation resumes.</p>
+    <div class="quote small">"Explore first, then plan, then code."<cite><a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Anthropic, Claude Code best practices</a></cite></div>
+  </div>
+</section>
+
+<!-- token secrets -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">How a feature flows · token secrets</div>
+    <h2>Six habits that cut the token bill</h2>
+    <p class="lede">The kind of know-how that used to live in one person's head. Most of it is built into the flow; the rest is shared as team practice.</p>
+  </div>
+  <div class="g3 grow">
+    <div class="card signal"><div class="k">1 · The cache lives an hour</div><p>A subscription keeps the prompt cache for an hour (five minutes on credits or an API key). Warm, the context is re-read at a tenth of the price or less; cold, it is paid in full. <b style="color:var(--ink)">Take on no more parallel features than you can answer within the hour.</b></p><span class="chip signal">team habit</span></div>
+    <div class="card"><div class="k">2 · A fresh session per step</div><p>Stale context is paid for on every message. Starting clean costs nothing; compacting a long conversation is itself a large request.</p><span class="chip auto">built in</span></div>
+    <div class="card"><div class="k">3 · The right model per step</div><p>Opus where judgement matters, Sonnet for the pull request and the write-up, no model at all for deploys and gates.</p><span class="chip auto">built in</span></div>
+    <div class="card"><div class="k">4 · Scripts before tokens</div><p>Deterministic work runs as scripts. A hook can cut a ten-thousand-line log to its failures before the model reads it.</p><span class="chip auto">built in</span></div>
+    <div class="card"><div class="k">5 · Lean always-on context</div><p>CLI tools rather than MCP servers; workflow instructions as skills that load on demand; CLAUDE.md under 200 lines.</p><span class="chip signal">team habit</span></div>
+    <div class="card"><div class="k">6 · Delegate the noisy parts</div><p>Sub-agents keep long outputs out of the main context. Agent teams cost about seven times a single session.</p><span class="chip auto">built in</span></div>
+  </div>
+  <p class="xs muted src">Sources: <a href="https://code.claude.com/docs/en/costs" target="_blank" rel="noopener">Claude Code docs, Manage costs</a> · <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching" target="_blank" rel="noopener">Anthropic, Prompt caching</a>.</p>
+</section>
+
+<!-- 11 · bad days -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">How a feature flows · the bad days</div>
+    <h2>Built for the bad days too</h2>
+  </div>
+  <div class="split grow">
+    <div class="col tight" style="gap:10px">
+      <div class="flow" style="grid-template-columns: 1fr 26px 1fr 26px 1fr;">
+        <div class="card line"><b>Regression is red</b><p>local, preview or production</p></div><div class="arrow">&rarr;</div>
+        <div class="card auto"><b>A fixing session, twice</b><p>starting where the cause is</p></div><div class="arrow">&rarr;</div>
+        <div class="card human"><b>Still red? Ask a person</b><p>no endless loops</p></div>
+      </div>
+      <div class="flow" style="grid-template-columns: 1fr 26px 1fr 26px 1fr;">
+        <div class="card line"><b>Production is red</b><p>right after the release</p></div><div class="arrow">&rarr;</div>
+        <div class="card line"><b>Roll back first</b><p>unless someone shipped since</p></div><div class="arrow">&rarr;</div>
+        <div class="card line"><b>Confirm separately</b><p>a clean check after rollback</p></div>
+      </div>
+      <div class="flow" style="grid-template-columns: 1fr 26px 1fr 26px 1fr;">
+        <div class="card human"><b>QA sends it back</b><p>criteria left unticked</p></div><div class="arrow">&rarr;</div>
+        <div class="card line"><b>Rewind the cycle</b><p>to the step that must change</p></div><div class="arrow">&rarr;</div>
+        <div class="card line"><b>Back through QA</b><p>same criteria, same issue</p></div>
+      </div>
+      <div class="flow" style="grid-template-columns: 1fr 26px 1fr 26px 1fr;">
+        <div class="card line"><b>A closed laptop</b><p>or a dropped connection</p></div><div class="arrow">&rarr;</div>
+        <div class="card auto"><b>Pick up where it stopped</b><p>the same conversation</p></div><div class="arrow">&rarr;</div>
+        <div class="card line"><b>State kept outside</b><p>nothing lost or redone</p></div>
+      </div>
+    </div>
+    <div class="card cloud" style="justify-content:center;gap:16px">
+      <div class="k">The rule behind all four</div>
+      <p class="punch" style="font-size:26px">Every branch ends in something you can check, or in a question to a person.</p>
+      <p class="small muted">Never in a loop, never in silence. The orchestrator handles it, so nobody has to remember it.</p>
+      <div class="quote small">"After two failed corrections, /clear and write a better initial prompt."<cite><a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Anthropic, Claude Code best practices</a></cite></div>
+    </div>
+  </div>
+</section>
+
+<!-- 12 · AI review -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Review and decisions · AI review done deliberately</div>
+    <h2>How sclaude avoids the four ways review goes wrong</h2>
+  </div>
+  <div class="tablewrap grow">
+    <table class="t">
+      <thead><tr><th style="width:20%">Failure</th><th>What sclaude does about it</th></tr></thead>
+      <tbody>
+        <tr><td>Finds nothing</td><td>The review must actually run on the latest commit. A green check that reviewed nothing is shown as such, and the step waits for a running review.</td></tr>
+        <tr><td>Endless rounds</td><td>A decision a person made is recorded as "left as it is" and the next review is told not to raise it again. A fix that would undo an earlier fix is stopped and put to the person.</td></tr>
+        <tr><td>Burns tokens</td><td>One round per session: a fresh, small context with only the threads still open. Fixes go to sub-agents, and suggested new abstractions are weighed against the review surface they add.</td></tr>
+        <tr><td>Stalls on a person</td><td>The agent fixes and replies. The person only sees the few findings it disagrees with, as an explicit yes or no question.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="g2">
+    <p class="small muted">Review runs in GitHub Actions or on the developer's own machine. Findings that are real but out of scope go to the monthly review rather than being fixed now or lost.</p>
+    <div class="quote small">"Tell the reviewer to flag only gaps that affect correctness or the stated requirements."<cite><a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Anthropic, Claude Code best practices</a></cite></div>
+  </div>
+</section>
+
+<!-- 13 · decision surface -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Review and decisions · where people come in</div>
+    <h2>AI reviews. The person gets the decision surface.</h2>
+    <p class="lede">The goal is not another review layer. It is to compress the evidence before a human decision.</p>
+  </div>
+  <div class="split grow">
+    <div class="card line">
+      <div class="k">Collected by GitHub and the orchestrator</div>
+      <ul class="ticks">
+        <li>Acceptance criteria, as QA left them</li>
+        <li>CI and test results, preview included</li>
+        <li>AI review findings, and what was done about each</li>
+        <li>Merge conflicts and branch status</li>
+        <li>Proof that the required review actually ran</li>
+      </ul>
+    </div>
+    <div class="card cover" style="border-radius:10px;justify-content:center;align-items:center;text-align:center;gap:18px">
+      <div class="eyebrow">One decision</div>
+      <p class="punch" style="color:var(--paper);font-size:38px">Ready to merge?</p>
+      <div class="chips" style="justify-content:center"><span class="chip auto">Merge</span><span class="chip human">Request changes</span></div>
+      <p class="xs" style="color:var(--line)">No default answer. It reads "Merge it unchecked?" when QA never saw the feature.</p>
+    </div>
+  </div>
+  <div class="g2">
+  <div class="quote small">"Before, 16% of PRs got substantive review comments. Now 54% do." The same split: the agent reviews, approval stays human.<cite><a href="https://claude.com/blog/code-review" target="_blank" rel="noopener">Anthropic, Code Review for Claude Code</a></cite></div>
+  <div class="quote small">"A good harness should not necessarily aim to fully eliminate human input, but to direct it to where our input is most important."<cite><a href="https://martinfowler.com/articles/harness-engineering.html" target="_blank" rel="noopener">Birgitta Böckeler, Harness engineering</a></cite></div>
+  </div>
+</section>
+
+<!-- 9 · start tight -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Control · the main know-how 1 of 4</div>
+    <h2>Start with the tools locked down, on purpose</h2>
+    <p class="lede">An agent with every tool open starts steering the work: it picks the scope, merges what it likes, touches what it should not. Then the model controls development, not us.</p>
+  </div>
+  <div class="g3 grow">
+    <div class="card human">
+      <div class="k">Refused as it happens</div>
+      <ul class="ticks x small">
+        <li>Writing code while planning</li>
+        <li>Merging: a person's decision</li>
+        <li>Pushing to main, force-push, skipping hooks</li>
+        <li>Promoting migrations, switching to production</li>
+        <li>Resolving a person's review decision alone</li>
+        <li>Deploying to production without asking: no default answer, and "anyway" when QA never saw it</li>
+      </ul>
+    </div>
+    <div class="col" style="gap:8px">
+      <p class="k">Rules come in layers</p>
+      <div class="card line" style="padding:10px 14px;gap:2px"><b>sclaude core</b><p>Merge, main, force. Nobody lifts these.</p></div>
+      <div class="card line" style="padding:10px 14px;gap:2px"><b>Integration presets</b><p>The usual dangers of Vercel and Supabase.</p></div>
+      <div class="card line" style="padding:10px 14px;gap:2px"><b>The product's team</b><p>Its own bans; may lift a preset's.</p></div>
+      <div class="card line" style="padding:10px 14px;gap:2px"><b>One developer</b><p>Personal additions; lifts nothing above.</p></div>
+    </div>
+    <div class="col" style="justify-content:space-between">
+      <div class="card line">
+        <div class="k">But locks alone fail too</div>
+        <p>A ban that blocks real work makes people fight the tool, switch it off or work around it. Locking down works only when someone reads what the locks caught.</p>
+      </div>
+      <p class="punch" style="font-size:24px">Tight by default. <em>Loosened by evidence, never by habit.</em></p>
+      <p class="small muted">The third C, control: executable rules, then a loop that reads what they caught.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 10b · three loops -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Feedback loops · the main know-how · 2 of 4</div>
+    <h2>Three feedback loops, three horizons</h2>
+  </div>
+  <div class="tablewrap grow">
+    <table class="t">
+      <thead><tr><th style="width:17%">Loop</th><th style="width:15%">When</th><th style="width:22%">What it reads</th><th style="width:22%">What it decides</th><th>Where the change goes</th></tr></thead>
+      <tbody>
+        <tr><td><span class="chip cloud">Friction review</span></td><td>After every step that hit a ban</td><td>Each refusal, as it happened</td><td>Lift the ban, keep it as deliberate, or defer it</td><td>The product's rules, committed on the feature's branch. Ships with its pull request; the next step already runs with it</td></tr>
+        <tr><td><span class="chip signal">Monthly review</span></td><td>Once a month</td><td>Everything deferred, counted by class across features</td><td>Lift, ban for good, write a rule, relax a rule, or keep waiting</td><td>Team rules and the product's CLAUDE.md. A change for every product becomes a pull request to sclaude</td></tr>
+        <tr><td><span class="chip auto">Retrospective</span></td><td>Each feature, before cleanup</td><td>The terminal recording of the whole run, the plan, the state</td><td>What was missed, how the person could work better, what sclaude could do better</td><td>Missed work: back through the cycle from step 3. Process lessons: the person and the team. Tool lessons: to the maintainers</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="g2">
+    <p class="small muted">One refusal is an anecdote; the same class in five features is a pattern. The monthly review decides on the count, not on how convincing one entry reads.</p>
+    <div class="quote">"Whenever an issue happens multiple times, the feedforward and feedback controls should be improved."<cite><a href="https://martinfowler.com/articles/harness-engineering.html" target="_blank" rel="noopener">Birgitta Böckeler, Harness engineering</a></cite></div>
+  </div>
+</section>
+
+<!-- 10c · retro -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Feedback loops · the main know-how · 3 of 4</div>
+    <h2>The retrospective is how the team learns</h2>
+    <p class="lede">Before a feature's sandbox is removed, a session reads everything the developer saw and typed during the whole feature, and gives three answers.</p>
+  </div>
+  <div class="g3">
+    <div class="card"><div class="k">1 · What you may have missed</div><p>A warning that scrolled past, a promise a session did not keep, a follow-up never filed. Acted on while the sandbox still exists.</p></div>
+    <div class="card"><div class="k">2 · How you could work better</div><p>Where you waited, where you went round the same loop, where an earlier or clearer answer would have saved a session.</p></div>
+    <div class="card"><div class="k">3 · What sclaude could do better</div><p>A misleading message, a stalled step, work a session did that a script could have done. Named down to the file.</p></div>
+  </div>
+  <div class="split grow">
+    <div class="card signal">
+      <div class="k">Plus: what went well</div>
+      <p style="color:var(--ink)">Each retro also names what worked and is worth keeping. Across a team, that is how best practices surface: from real features, with evidence, without a meeting.</p>
+    </div>
+    <div class="card line">
+      <div class="k">The rule: facts only</div>
+      <p>Every point quotes a line from the recording or names a file and field. An empty section is a fine answer. Nothing is padded to look useful.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 10d · who goes where -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Feedback loops · the main know-how · 4 of 4</div>
+    <h2>Where a lesson ends up, and who decides</h2>
+    <p class="lede">A lesson starts with one person and climbs only as far as it proves itself.</p>
+  </div>
+  <div class="flow" style="grid-template-columns: 1fr 34px 1fr 34px 1fr;">
+    <div class="card cloud"><div class="k">One developer</div><h3>A personal rule</h3><p>Their friction review or retro writes it to their own rules in the product. It travels with their pull request.</p><span class="chip">decided by the developer</span></div>
+    <div class="arrow">&rarr;</div>
+    <div class="card signal"><div class="k">The product's team</div><h3>A team rule</h3><p>Once it proves itself, a product maintainer lifts it into the team's rules. Now everyone on the product works that way.</p><span class="chip">decided by a maintainer</span></div>
+    <div class="arrow">&rarr;</div>
+    <div class="card auto"><div class="k">Every product</div><h3>A sclaude default</h3><p>A lesson that holds everywhere is collected as a proposal and goes to sclaude as a deliberate pull request. Every machine gets it on its next command.</p><span class="chip">decided by sclaude's maintainers</span></div>
+  </div>
+  <div class="split grow" style="align-items:end">
+    <p class="punch">Nothing changes the process by accident. <em>Everything that should change it, can.</em></p>
+    <p class="small muted">Review sessions never edit sclaude itself: a hook keeps them out. They change the product, and leave sclaude's maintainers a note.</p>
+  </div>
+</section>
+
+<!-- 14 · phone -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">The channel · away from the desk</div>
+    <h2>The phone is a channel to the orchestrator</h2>
+  </div>
+  <div class="split grow">
+    <div class="col" style="gap:14px">
+      <div class="card line"><div class="k">One question, two places</div><p>Each question goes to the terminal and to Telegram at once; the first answer counts and the terminal carries on by itself. Silent while you sit at that terminal.</p></div>
+      <div class="card cloud"><div class="k">Web preview on the phone</div><p style="color:var(--ink)">The feature running on the laptop opens full screen inside Telegram, with an address bar and no Tailscale on the phone. Only your account gets in.</p></div>
+      <div class="card line"><div class="k">The right context with it</div><p>A "Publish?" arrives with the commands it would run. Agreeing to an unseen action is not an option.</p></div>
+    </div>
+    <div class="col" style="gap:14px">
+      <p class="k">Who does what</p>
+      <div class="card signal"><b>The orchestrator</b><p>stays on the laptop and keeps the state</p></div>
+      <div class="card cloud"><b>The Telegram bot</b><p>shows its questions, passes the answers back, opens features on the phone</p></div>
+      <div class="card auto"><b>The Claude app</b><p>carries the step's own conversation</p></div>
+      <p class="small muted">Termius and code-server remain for long hands-on stretches.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 16 · team and evidence -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Scaling to a team</div>
+    <h2>One copy for everybody. One record per feature.</h2>
+  </div>
+  <div class="g4">
+    <div class="card"><div class="k">Nobody forks</div><p>Every command pulls the latest version first. A fix reaches the whole team at their next command.</p></div>
+    <div class="card"><div class="k">One config file</div><p>Tests, manuals, environments, board and maintainers live in the product, set up by a guided <span class="mono">sclaude new</span>.</p></div>
+    <div class="card"><div class="k">Onboarding</div><p><span class="mono">sclaude doctor</span> lists what a machine lacks and the command that fixes each gap.</p></div>
+    <div class="card"><div class="k">Private by design</div><p>Recordings and working state stay on the machine; never in git or a deployment.</p></div>
+  </div>
+  <div class="split grow">
+    <div class="card line">
+      <div class="k">Every feature leaves a record</div>
+      <ul class="ticks small">
+        <li>Time per step, test attempts and what failed</li>
+        <li>Friction: what the rules refused, and what each review decided</li>
+        <li>Review findings and the responses</li>
+        <li>How far it shipped, and who ran it</li>
+      </ul>
+    </div>
+    <div class="col" style="justify-content:center;gap:12px">
+      <p class="punch" style="font-size:26px">Evidence, <em>not status meetings.</em></p>
+      <p class="small muted">The lead reads a summary table in each issue. Across features the records give the four DORA metrics from real cycles, gathered into a team repository if the product names one.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 17 · what it took -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">What it took</div>
+    <h2>A simple idea, made explicit exception by exception</h2>
+  </div>
+  <div class="g4">
+    <div class="card"><div class="big">~42k</div><p>lines of orchestrator, bot and machine tooling</p></div>
+    <div class="card"><div class="big">~22k</div><p>lines of tests</p></div>
+    <div class="card"><div class="big">69</div><p>test suites, run before every push</p></div>
+    <div class="card"><div class="big">6</div><p>steps, each with its own model and permissions</p></div>
+  </div>
+  <div class="split grow">
+    <div class="col">
+      <p class="k">Observed in the team</p>
+      <div class="row" style="gap:28px">
+        <div class="col" style="gap:4px"><div class="big" style="font-size:48px;color:var(--auto)">10–20%</div><p class="small muted">productivity improvement</p></div>
+        <div class="col" style="gap:4px"><div class="big" style="font-size:48px;color:var(--auto)">~5%</div><p class="small muted">fewer tokens in the first weeks</p></div>
+      </div>
+      <p class="xs muted mono">Project observations, not universal benchmarks.</p>
+    </div>
+    <div class="col" style="justify-content:center">
+      <p class="punch">AI speed is easy to buy. <em>Control is what has to be designed.</em></p>
+      <p class="small muted src">Principles used: <a href="https://www.docker.com/blog/the-3cs-a-framework-for-ai-agent-security/" target="_blank" rel="noopener">Docker 3Cs</a> · <a href="https://www.anthropic.com/engineering/building-effective-agents" target="_blank" rel="noopener">Anthropic workflows</a> and <a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents" target="_blank" rel="noopener">context engineering</a> · <a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Claude Code best practices</a> · <a href="https://martinfowler.com/articles/harness-engineering.html" target="_blank" rel="noopener">Böckeler on harness engineering</a> · <a href="https://cloud.google.com/blog/products/ai-machine-learning/announcing-the-2025-dora-report" target="_blank" rel="noopener">DORA</a>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 18 · close -->
+<section class="slide cover">
+  <div class="eyebrow">Manageable means</div>
+  <div class="grow" style="display:flex;flex-direction:column;justify-content:center;gap:34px">
+    <div class="g3">
+      <div class="col"><h2 style="color:var(--signal)">Doable</h2><p class="muted">Runs on the laptops a team already has, on free tiers, installed with one script.</p></div>
+      <div class="col"><h2 style="color:var(--signal)">Controllable</h2><p class="muted">A fixed path, gates on evidence, rules that hold, people at every decision.</p></div>
+      <div class="col"><h2 style="color:var(--signal)">Affordable</h2><p class="muted">Tokens spent on thinking only. Everything repeatable is a script.</p></div>
+    </div>
+    <p class="lede" style="max-width:64ch">The orchestrator owns the process. AI does what the process asks. Building it is closer to project management than to programming: design the flow, set the constraints, track the deviations, resolve the conflicts between rules.</p>
+  </div>
+  <div class="row" style="justify-content:space-between;align-items:flex-end">
+    <a href="startup-ai-stack.html" target="_blank" rel="noopener" style="color:var(--signal);font:600 15px var(--mono)">&larr; The stack and the phone workflow</a>
+    <p class="mono xs muted">github.com/personalautomation/SClaude · MIT</p>
+  </div>
+</section>
+  </div>
+</div>
+
+<nav class="nav" aria-label="Slides">
+  <button type="button" id="prev" aria-label="Previous slide">&larr; Prev</button>
+  <span class="count" id="count">1 / 1</span>
+  <button type="button" id="next" aria-label="Next slide">Next &rarr;</button>
+  <div class="progress" aria-hidden="true"><i id="bar"></i></div>
+  <span class="hint hide-narrow">&larr; &rarr; or Space</span>
+  <a href="startup-ai-stack.html" target="_blank" rel="noopener">&larr; stack deck</a>
+</nav>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var stage = document.getElementById('stage');
+  var viewport = document.getElementById('viewport');
+  var count = document.getElementById('count');
+  var bar = document.getElementById('bar');
+  var mark = 'sclaude · in depth';
+  var i = 0;
+
+  slides.forEach(function (s, n) {
+    s.id = 's' + (n + 1);
+    var no = document.createElement('span');
+    no.className = 'pageno';
+    no.textContent = (n + 1) + ' / ' + slides.length;
+    s.appendChild(no);
+    if (mark && n > 0) {
+      var dm = document.createElement('span');
+      dm.className = 'deckmark';
+      dm.textContent = mark;
+      s.appendChild(dm);
+    }
+  });
+
+  function narrow() { return window.matchMedia('(max-width: 820px)').matches; }
+
+  function fit() {
+    if (narrow()) { stage.style.transform = ''; return; }
+    var w = viewport.clientWidth, h = viewport.clientHeight;
+    var s = Math.min((w - 32) / 1280, (h - 24) / 720);
+    stage.style.transform = 'scale(' + Math.max(s, 0.2) + ')';
+  }
+
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, k) { s.classList.toggle('on', k === i); });
+    count.textContent = (i + 1) + ' / ' + slides.length;
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    try { history.replaceState(null, '', '#s' + (i + 1)); } catch (e) {}
+  }
+
+  document.getElementById('prev').addEventListener('click', function () { show(i - 1); });
+  document.getElementById('next').addEventListener('click', function () { show(i + 1); });
+  document.addEventListener('keydown', function (e) {
+    if (narrow() || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (['ArrowRight', 'PageDown', ' ', 'Enter'].indexOf(e.key) >= 0) { e.preventDefault(); show(i + 1); }
+    else if (['ArrowLeft', 'PageUp', 'Backspace'].indexOf(e.key) >= 0) { e.preventDefault(); show(i - 1); }
+    else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(slides.length - 1); }
+  });
+  window.addEventListener('resize', fit);
+
+  var m = /^#s(\d+)$/.exec(location.hash || '');
+  show(m ? parseInt(m[1], 10) - 1 : 0);
+  fit();
+  if (m && narrow()) { var t = document.getElementById('s' + m[1]); if (t) t.scrollIntoView(); }
+})();
+</script>

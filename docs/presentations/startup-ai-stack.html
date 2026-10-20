@@ -1,0 +1,808 @@
+<title>Laptop-to-Phone AI Stack</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: a 1280x720 slide canvas scaled to the window on desktop; below 820px the slides stack into one scrolling column. */
+:root {
+  --paper: #EEF1F5;
+  --surface: #FFFFFF;
+  --ink: #131B2C;
+  --muted: #586379;
+  --line: #D6DCE6;
+  --signal: #C97A0A;
+  --signal-soft: #FBEFD9;
+  --auto: #0C7A6B;
+  --auto-soft: #DDF1EC;
+  --human: #C2452F;
+  --human-soft: #FBE4DE;
+  --cloud: #2F57C9;
+  --cloud-soft: #E2E9FB;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0D1320; --surface: #161F31; --ink: #E7EBF2; --muted: #9AA5BA; --line: #2A3650;
+    --signal: #F0A93B; --signal-soft: #3A2C14; --auto: #4CC7B4; --auto-soft: #11332F;
+    --human: #F07F69; --human-soft: #3B1F1A; --cloud: #86A4F5; --cloud-soft: #1A2647;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0D1320; --surface: #161F31; --ink: #E7EBF2; --muted: #9AA5BA; --line: #2A3650;
+  --signal: #F0A93B; --signal-soft: #3A2C14; --auto: #4CC7B4; --auto-soft: #11332F;
+  --human: #F07F69; --human-soft: #3B1F1A; --cloud: #86A4F5; --cloud-soft: #1A2647;
+  color-scheme: dark;
+}
+
+html, body { height: 100%; }
+body { background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 14px; }
+
+.viewport { position: fixed; inset: 0 0 56px 0; display: grid; place-items: center; overflow: hidden; }
+.stage { width: 1280px; height: 720px; transform-origin: center center; flex: none; }
+.slide {
+  display: none; position: relative; width: 1280px; height: 720px; box-sizing: border-box;
+  padding: 52px 72px 44px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 6px; overflow: hidden; flex-direction: column; gap: 22px;
+  box-shadow: 0 30px 60px -40px rgba(10, 20, 40, .45);
+  font-size: 19px; line-height: 1.45;
+}
+.slide.on { display: flex; }
+.slide > .pageno { position: absolute; right: 30px; bottom: 20px; font: 500 13px var(--mono); color: var(--muted); }
+.slide > .deckmark { position: absolute; left: 72px; bottom: 20px; font: 500 12px var(--mono); color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+
+.eyebrow { font: 600 14px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--signal); }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; letter-spacing: -.01em; }
+h1 { font-size: 76px; line-height: .98; font-weight: 800; }
+h2 { font-size: 44px; line-height: 1.05; font-weight: 700; }
+h3 { font-size: 22px; line-height: 1.15; font-weight: 700; }
+p { margin: 0; }
+.head { display: flex; flex-direction: column; gap: 10px; }
+.lede { font-size: 21px; color: var(--muted); max-width: 62ch; }
+.muted { color: var(--muted); }
+.small { font-size: 16px; }
+.xs { font-size: 14px; }
+.mono { font-family: var(--mono); }
+b, strong { font-weight: 600; }
+a { color: var(--cloud); }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+
+.grow { flex: 1; min-height: 0; }
+.row { display: flex; gap: 18px; }
+.col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.g2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.g3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.g4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.g5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.split { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 32px; }
+
+.card { background: var(--paper); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card p { font-size: 16.5px; line-height: 1.42; color: var(--muted); }
+.card p.punch { color: var(--ink); }
+.card.line { background: transparent; border: 1px solid var(--line); }
+.card.auto { background: var(--auto-soft); }
+.card.human { background: var(--human-soft); }
+.card.cloud { background: var(--cloud-soft); }
+.card.signal { background: var(--signal-soft); }
+.k { font: 600 13px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.card.auto .k { color: var(--auto); } .card.human .k { color: var(--human); }
+.card.cloud .k { color: var(--cloud); } .card.signal .k { color: var(--signal); }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; font: 600 12.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; padding: 4px 9px; border-radius: 999px; background: var(--paper); color: var(--muted); white-space: nowrap; }
+.chip.auto { background: var(--auto-soft); color: var(--auto); }
+.chip.human { background: var(--human-soft); color: var(--human); }
+.chip.cloud { background: var(--cloud-soft); color: var(--cloud); }
+.chip.signal { background: var(--signal-soft); color: var(--signal); }
+.card > .chip { align-self: flex-start; margin-top: auto; }
+.card.auto > .chip, .card.human > .chip, .card.signal > .chip, .card.cloud > .chip { background: var(--surface); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+
+.quote { border-left: 3px solid var(--signal); padding: 4px 0 4px 18px; font-size: 18px; }
+.quote cite a, .src a { color: inherit; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.quote cite a:hover, .src a:hover { color: var(--signal); }
+.quote cite { display: block; margin-top: 6px; font: 500 13px var(--mono); color: var(--muted); font-style: normal; }
+.punch { font-family: var(--display); font-size: 30px; line-height: 1.12; font-weight: 700; text-wrap: balance; }
+.punch em { font-style: normal; color: var(--signal); }
+
+ul.ticks { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 9px; }
+ul.ticks li { padding-left: 26px; position: relative; font-size: 17.5px; }
+ul.ticks li::before { content: ""; position: absolute; left: 2px; top: .5em; width: 12px; height: 2px; background: var(--signal); }
+ul.ticks.small li { font-size: 15.5px; }
+ul.ticks.xs { gap: 4px; }
+ul.ticks.xs li { font-size: 14px; }
+.flow.mini .card { padding: 12px 16px; gap: 4px; }
+.flow.mini h3 { font-size: 17px; }
+.flow.mini .card { border: 1px solid transparent; }
+.flow.mini .card.auto { border-color: color-mix(in srgb, var(--auto) 35%, transparent); }
+.flow.mini .card.human { border-color: color-mix(in srgb, var(--human) 30%, transparent); }
+.flow.mini .card:not(.auto):not(.cloud):not(.human) { border-color: var(--line); }
+.flow.mini .card.reserve { border: 1.5px dashed color-mix(in srgb, var(--cloud) 60%, transparent); }
+.flow.mini ul.ticks li::before { background: currentColor; opacity: .45; }
+ul.ticks.x li::before { background: var(--human); height: 2px; transform: rotate(45deg); box-shadow: none; }
+
+.tight .card { padding: 10px 14px; gap: 2px; }
+.tight .card p { font-size: 15px; }
+.lanes { display: grid; grid-template-columns: 150px repeat(4, minmax(0, 1fr)); column-gap: 16px; row-gap: 0; }
+.lanes > .card { margin-bottom: 8px; padding: 12px 16px; gap: 4px; }
+.lanes > .card p { font-size: 15px; }
+.lanes .lane { font: 600 12.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--signal); padding: 9px 0; border-top: 1px solid var(--line); }
+.lanes .cell { font-size: 15px; line-height: 1.38; color: var(--muted); padding: 9px 0; border-top: 1px solid var(--line); min-width: 0; }
+.lanes .cell.hot { color: var(--ink); }
+.lanes .tool { display: none; }
+.rows { display: grid; grid-template-columns: 150px repeat(3, minmax(0, 1fr)); gap: 16px 18px; align-content: start; }
+.rowlabel { display: flex; flex-direction: column; gap: 4px; justify-content: center; border-right: 2px solid var(--line); padding-right: 12px; }
+.arrow { color: var(--muted); font: 600 22px var(--mono); display: grid; place-items: center; }
+.flow { display: grid; align-items: stretch; gap: 10px; }
+
+table.t { width: 100%; border-collapse: collapse; font-size: 16.5px; }
+table.t th { text-align: left; font: 600 12.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 0 12px 10px 0; border-bottom: 1px solid var(--line); }
+table.t td { padding: 11px 12px 11px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.t td:first-child { font-weight: 600; }
+.tablewrap { overflow-x: auto; }
+
+.big { font-family: var(--display); font-weight: 800; font-size: 64px; line-height: 1; font-variant-numeric: tabular-nums; }
+
+.bar { height: 14px; border-radius: 999px; background: var(--paper); overflow: hidden; display: flex; }
+.bar > span { display: block; height: 100%; }
+
+.cover { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.cover .muted, .cover .lede { color: color-mix(in srgb, var(--paper) 70%, var(--ink)); }
+.cover > .pageno, .cover > .deckmark { color: color-mix(in srgb, var(--paper) 55%, var(--ink)); }
+
+/* Navigation bar */
+.nav { position: fixed; left: 0; right: 0; bottom: 0; height: 56px; padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; align-items: center; gap: 14px; font: 500 13px var(--mono); color: var(--muted); background: var(--paper); }
+.nav button { font: 600 13px var(--mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+.nav button:hover { border-color: var(--signal); }
+.nav .progress { flex: 1; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.nav .progress > i { display: block; height: 100%; width: 0; background: var(--signal); transition: width .25s ease; }
+.nav .count { font-variant-numeric: tabular-nums; min-width: 64px; text-align: center; }
+.nav .hint { white-space: nowrap; }
+.nav a { color: var(--ink); white-space: nowrap; }
+
+@media (min-width: 821px) { body { overflow: hidden; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* Phone and narrow windows: every slide in one column, read by scrolling */
+@media (max-width: 820px) {
+  html, body { height: auto; }
+  .viewport { position: static; display: block; overflow: visible; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 16px 24px; }
+  .stage { width: auto; height: auto; transform: none !important; display: flex; flex-direction: column; gap: 16px; }
+  .slide, .slide.on { display: flex; width: auto; height: auto; padding: 28px 20px 48px; font-size: 16px; gap: 18px; }
+  h1 { font-size: 44px; } h2 { font-size: 29px; } h3 { font-size: 19px; }
+  .lede { font-size: 17px; } .punch { font-size: 22px; } .big { font-size: 44px; }
+  .g2, .g3, .g4, .g5, .split { grid-template-columns: minmax(0, 1fr); }
+  .row { flex-direction: column; }
+  .lanes, .rows { grid-template-columns: minmax(0, 1fr); }
+  .rowlabel { border-right: 0; padding-top: 8px; }
+  .lanes > div:empty { display: none; }
+  .lanes .tool { display: block; font: 600 12px var(--mono); color: var(--ink); }
+  .flow { grid-template-columns: minmax(0, 1fr) !important; }
+  .flow > .arrow { transform: rotate(90deg); }
+  .slide > .deckmark { left: 20px; }
+  .nav { display: none; }
+  .hide-narrow { display: none !important; }
+}
+</style>
+
+<div class="viewport" id="viewport">
+  <div class="stage" id="stage">
+
+<!-- 1 · cover -->
+<section class="slide cover">
+  <div class="eyebrow">Architecture for PoC &amp; MVP teams · 2026</div>
+  <div class="grow" style="display:flex;flex-direction:column;justify-content:center;gap:28px">
+    <h1>Build on a laptop.<br>Run it from a phone.</h1>
+    <p class="lede" style="max-width:52ch">A ready toolkit for startups, PoCs and MVPs: a stack chosen for speed, an orchestrator that keeps AI development controlled and cheap, and a phone channel so the work never waits for the desk.</p>
+  </div>
+  <div class="row" style="justify-content:space-between;align-items:flex-end">
+    <div class="chips">
+      <span class="chip signal">Next.js · Supabase · Vercel · GitHub</span>
+      <span class="chip auto">Claude Code · sclaude</span>
+      <span class="chip cloud">Tailscale · Termius · Telegram</span>
+    </div>
+    <p class="mono xs muted">Ilia Poliakov</p>
+  </div>
+</section>
+
+<!-- 2 · criteria and architecture -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Choosing the architecture</div>
+    <h2>Five criteria, four places, one flow</h2>
+  </div>
+  <div class="g5">
+    <div class="card signal"><div class="k">01</div><h3>Days to first user</h3><p>Hosting, auth, database and deploys come ready-made.</p></div>
+    <div class="card signal"><div class="k">02</div><h3>Near-zero cost until traction</h3><p>Free tiers carry a PoC. The main line item is the AI subscription.</p></div>
+    <div class="card signal"><div class="k">03</div><h3>No ops team</h3><p>Managed platforms, rollback in one step, previews instead of staging.</p></div>
+    <div class="card signal"><div class="k">04</div><h3>AI-native</h3><p>Mainstream tools the models know well, so the agent's first pass is right more often.</p></div>
+    <div class="card signal"><div class="k">05</div><h3>Easy to grow or throw away</h3><p>Standard Postgres and React. No lock-in that blocks the next stage.</p></div>
+  </div>
+  <div class="flow mini grow" style="grid-template-columns: 1.3fr 26px 1fr 26px 1fr 26px 1fr;">
+    <div class="card auto">
+      <div class="k">Laptop · WSL2 or Apple Container</div>
+      <h3>Where the work runs</h3>
+      <ul class="ticks xs">
+        <li>Claude Code sessions, driven by <b>sclaude</b></li>
+        <li>A worktree, dev server and database per feature</li>
+        <li>A real Chrome the agent checks its work in</li>
+        <li>keepawake: sleeps only when idle</li>
+      </ul>
+    </div>
+    <div class="arrow">&harr;</div>
+    <div class="card cloud reserve">
+      <div class="k">Phone · when away</div>
+      <h3>The way back in</h3>
+      <ul class="ticks xs">
+        <li>Claude app: the conversation</li>
+        <li>Telegram bot: answers, results</li>
+        <li>Tailscale + Termius: the spare key</li>
+      </ul>
+    </div>
+    <div class="arrow">&rarr;</div>
+    <div class="card">
+      <div class="k">GitHub</div>
+      <h3>Where the process lives</h3>
+      <ul class="ticks xs">
+        <li>Issues, board, criteria</li>
+        <li>Pull requests, AI review</li>
+      </ul>
+    </div>
+    <div class="arrow">&rarr;</div>
+    <div class="card human">
+      <div class="k">Cloud</div>
+      <h3>Where users meet it</h3>
+      <ul class="ticks xs">
+        <li>Vercel: previews, production, rollback</li>
+        <li>Supabase: Postgres, auth, storage</li>
+      </ul>
+    </div>
+  </div>
+  <p class="small muted">Speed first, cost second; scale is a problem a PoC is happy to have later. No servers of our own and no staging: the laptop the developer already has is the build machine.</p>
+</section>
+
+<!-- 5 · product stack -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Why each tool · the product</div>
+    <h2>Four managed services instead of an ops team</h2>
+  </div>
+  <div class="lanes">
+    <div></div>
+    <div class="card"><div class="k">Front + back end</div><h3>Next.js</h3><p>UI and API in one codebase, one language.</p></div>
+    <div class="card"><div class="k">Data</div><h3>Supabase</h3><p>Postgres plus sign-in, storage and an API. Runs locally in Docker too.</p></div>
+    <div class="card"><div class="k">Hosting</div><h3>Vercel</h3><p>A preview address per branch, production, rollback in seconds.</p></div>
+    <div class="card"><div class="k">Process</div><h3>GitHub</h3><p>Issues, board, pull requests and CI next to the code.</p></div>
+
+    <div class="lane">Built for AI</div>
+    <div class="cell hot"><span class="tool">Next.js</span>Small files keep the agent's context clear. The framework's conventions tell the model where things live and how to build them.</div>
+    <div class="cell"><span class="tool">Supabase</span>Plain SQL and Postgres, which models know well. One feature, one local database.</div>
+    <div class="cell"><span class="tool">Vercel</span>A deploy is a git push. Each preview is where QA checks the agent's work.</div>
+    <div class="cell"><span class="tool">GitHub</span>The agent works issues and pull requests through the gh CLI, which <a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Anthropic calls</a> the most context-efficient way in.</div>
+
+    <div class="lane">Free to start</div>
+    <div class="cell"><span class="tool">Next.js</span>Open source.</div>
+    <div class="cell"><span class="tool">Supabase</span>A free tier that can carry a product almost into production.</div>
+    <div class="cell"><span class="tool">Vercel</span>A free tier for previews and a first production.</div>
+    <div class="cell"><span class="tool">GitHub</span>Free for a small team.</div>
+
+    <div class="lane">Standard, no lock-in</div>
+    <div class="cell"><span class="tool">Next.js</span>The most common React framework. Runs on any Node host.</div>
+    <div class="cell"><span class="tool">Supabase</span>Standard Postgres: dump it and move to any provider.</div>
+    <div class="cell"><span class="tool">Vercel</span>Any host that runs Next.js or a container can replace it.</div>
+    <div class="cell"><span class="tool">GitHub</span>Git is portable; the history moves with you.</div>
+  </div>
+  <div class="card signal" style="flex-direction:row;gap:20px;align-items:center">
+    <div class="k" style="flex:none">Why Postgres</div>
+    <p style="color:var(--ink)">One database for both transactional and analytical load, deep tuning, access rules down to the row (RLS), and point-in-time history out of its write-ahead log. A PoC will not outgrow it.</p>
+  </div>
+</section>
+
+<!-- 16 · why an orchestrator -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">The main pain · AI that does not stay in line</div>
+    <h2>Prompts are not guarantees. An orchestrator is.</h2>
+    <p class="lede">Even with explicit instructions and plenty of IMPORTANT warnings, a model will invent a new status, switch language or skip a predefined option. A production workflow needs more than good intentions.</p>
+  </div>
+  <div class="flow" style="grid-template-columns: repeat(13, auto); justify-content:start; align-items:center;">
+    <span class="chip auto">Plan</span><span class="arrow">&rarr;</span>
+    <span class="chip auto">Code</span><span class="arrow">&rarr;</span>
+    <span class="chip auto">Pull request</span><span class="arrow">&rarr;</span>
+    <span class="chip auto">AI review</span><span class="arrow">&rarr;</span>
+    <span class="chip human">QA</span><span class="arrow">&rarr;</span>
+    <span class="chip human">Merge</span><span class="arrow">&rarr;</span>
+    <span class="chip">Production</span>
+  </div>
+  <div class="g4 grow">
+    <div class="card signal"><div class="k">Fewer tokens</div><h3>Context, models, scripts</h3><p>Each stage is a fresh session with only its context. Cheaper models where the top one is not needed. Deploys, tests and bookkeeping run as scripts, at zero tokens.</p></div>
+    <div class="card human"><div class="k">Control</div><h3>Tools are banned, not discouraged</h3><p>Each step gets only the tools it needs; merging, main and production are refused as they happen. AI cannot drift out of control, so neither can the work.</p></div>
+    <div class="card cloud"><div class="k">Predictability</div><h3>One fixed path</h3><p>The same stages, gates and hand-offs on every feature. A step closes on evidence, never on a model saying "done".</p></div>
+    <div class="card auto"><div class="k">Scale</div><h3>No load on the team</h3><p>One copy for everyone, updated on their next command. The process runs itself; nobody polices it in meetings.</p></div>
+  </div>
+  <div class="split" style="align-items:center">
+    <p class="small muted src"><b style="color:var(--ink)">Also for the CTO:</b> a sandbox per feature, so a mistake stays small (next slide); one record per feature, so DORA metrics come from real cycles; rules the team improves from evidence. In the industry's words: <b style="color:var(--ink)">spec-driven development</b> with <a href="https://www.docker.com/blog/the-3cs-a-framework-for-ai-agent-security/" target="_blank" rel="noopener">Docker's 3Cs</a> as the safety model.</p>
+    <a class="card cover" href="sclaude.html" target="_blank" rel="noopener" style="border-radius:10px;text-decoration:none;gap:6px">
+      <span class="eyebrow">Companion deck</span>
+      <span style="color:var(--paper);font:700 20px var(--display)">sclaude in depth: the flow, the gates, the feedback loops &rarr;</span>
+    </a>
+  </div>
+</section>
+
+<!-- knowledge as capital -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">The third pain · know-how that walks out of the door</div>
+    <h2>Process, prompts and lessons become company capital</h2>
+    <p class="lede">Today each developer keeps their own prompts, workarounds and tricks, and the tools change faster than anyone writes a tutorial. Here all of it lives in git, where it compounds instead of walking out of the door.</p>
+  </div>
+  <div class="g3 grow">
+    <div class="card signal">
+      <div class="k">What is kept</div>
+      <ul class="ticks small">
+        <li><b>The process:</b> stages, gates, prompts</li>
+        <li><b>The rules:</b> what each step may and may not do</li>
+        <li><b>The friction:</b> every refusal, reviewed and decided</li>
+        <li><b>The lessons:</b> retrospectives and the rules they produced</li>
+      </ul>
+    </div>
+    <div class="card auto">
+      <div class="k">How it spreads</div>
+      <ul class="ticks small">
+        <li>A fix reaches every developer at their next command</li>
+        <li>A personal rule that proves itself becomes the team's</li>
+        <li>A new hire starts with everything the team has learned; <span class="mono">sclaude doctor</span> sets up the machine</li>
+      </ul>
+    </div>
+    <div class="card cloud">
+      <div class="k">How it teaches</div>
+      <ul class="ticks small">
+        <li>Each retrospective tells the developer, from their own run, how to work better</li>
+        <li>"What went well" surfaces best practices, with evidence</li>
+        <li>Whoever lags gets coached from facts, not in a meeting</li>
+      </ul>
+    </div>
+  </div>
+  <div class="g3">
+    <div class="quote small">"Quality internal platforms provide the shared capabilities needed to scale the benefits of AI across an organization."<cite><a href="https://cloud.google.com/blog/products/ai-machine-learning/introducing-doras-inaugural-ai-capabilities-model" target="_blank" rel="noopener">Google, DORA AI Capabilities Model</a></cite></div>
+    <div class="quote small">"Check CLAUDE.md into git so your team can contribute. The file compounds in value over time."<cite><a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Anthropic, Claude Code best practices</a></cite></div>
+    <div class="quote small">The same idea in Claude Code itself: <span class="mono">/insights</span> reads your recent sessions and reports friction points and suggestions.<cite><a href="https://code.claude.com/docs/en/costs#analyze-your-usage-patterns" target="_blank" rel="noopener">Claude Code docs, Manage costs</a></cite></div>
+  </div>
+</section>
+
+<!-- token secrets -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Know-how in practice · token secrets</div>
+    <h2>Six habits that cut the token bill</h2>
+    <p class="lede">The kind of know-how that used to live in one person's head. Most of it is built into the flow; the rest is shared as team practice.</p>
+  </div>
+  <div class="g3 grow">
+    <div class="card signal"><div class="k">1 · The cache lives an hour</div><p>A subscription keeps the prompt cache for an hour (five minutes on credits or an API key). Warm, the context is re-read at a tenth of the price or less; cold, it is paid in full. <b style="color:var(--ink)">Take on no more parallel features than you can answer within the hour.</b></p><span class="chip signal">team habit</span></div>
+    <div class="card"><div class="k">2 · A fresh session per step</div><p>Stale context is paid for on every message. Starting clean costs nothing; compacting a long conversation is itself a large request.</p><span class="chip auto">built in</span></div>
+    <div class="card"><div class="k">3 · The right model per step</div><p>Opus where judgement matters, Sonnet for the pull request and the write-up, no model at all for deploys and gates.</p><span class="chip auto">built in</span></div>
+    <div class="card"><div class="k">4 · Scripts before tokens</div><p>Deterministic work runs as scripts. A hook can cut a ten-thousand-line log to its failures before the model reads it.</p><span class="chip auto">built in</span></div>
+    <div class="card"><div class="k">5 · Lean always-on context</div><p>CLI tools rather than MCP servers; workflow instructions as skills that load on demand; CLAUDE.md under 200 lines.</p><span class="chip signal">team habit</span></div>
+    <div class="card"><div class="k">6 · Delegate the noisy parts</div><p>Sub-agents keep long outputs out of the main context. Agent teams cost about seven times a single session.</p><span class="chip auto">built in</span></div>
+  </div>
+  <p class="xs muted src">Sources: <a href="https://code.claude.com/docs/en/costs" target="_blank" rel="noopener">Claude Code docs, Manage costs</a> · <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching" target="_blank" rel="noopener">Anthropic, Prompt caching</a>.</p>
+</section>
+
+<!-- 16b · feature isolation -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">The second pain · parallel features</div>
+    <h2>Three features at once, and none of them can break another</h2>
+    <p class="lede">With an agent per feature, a developer runs several features in parallel. In one shared checkout they collide: one migration wipes another's data, signing in to one feature signs you out of the next, two dev servers fight over a port.</p>
+  </div>
+  <div class="g4">
+    <div class="card auto"><div class="k">Its own code</div><h3>A worktree</h3><p>A separate copy of the repository on its own branch. Edits never meet until the pull request.</p></div>
+    <div class="card auto"><div class="k">Its own address</div><h3><span class="mono" style="font-size:16px">feature.localhost</span></h3><p>A dev server per feature behind one address each, so cookies and sign-ins stay apart too.</p></div>
+    <div class="card auto"><div class="k">Its own database</div><h3>Supabase in Docker</h3><p>Filled from the main local database or the seed, removed with the feature. A migration reaches nothing else.</p></div>
+    <div class="card cloud"><div class="k">Its own preview</div><h3>Vercel per branch</h3><p>QA checks each feature at its own deployed address, never on a shared staging server.</p></div>
+  </div>
+  <div class="col grow" style="gap:10px;justify-content:center">
+    <p class="k">On one laptop, at the same time (example)</p>
+    <div class="row" style="align-items:center;gap:10px;flex-wrap:wrap"><b class="mono" style="font-size:14px;min-width:170px">checkout-redesign</b><span class="chip auto" style="text-transform:none;letter-spacing:0">worktree · feat/checkout-redesign</span><span class="chip auto" style="text-transform:none;letter-spacing:0">checkout-redesign.localhost:3000</span><span class="chip auto">own database</span><span class="chip cloud">own preview</span><span class="xs muted mono">step 2 · code</span></div>
+    <div class="row" style="align-items:center;gap:10px;flex-wrap:wrap"><b class="mono" style="font-size:14px;min-width:170px">invite-flow</b><span class="chip auto" style="text-transform:none;letter-spacing:0">worktree · feat/invite-flow</span><span class="chip auto" style="text-transform:none;letter-spacing:0">invite-flow.localhost:3000</span><span class="chip auto">own database</span><span class="chip cloud">own preview</span><span class="xs muted mono">step 4 · review</span></div>
+    <div class="row" style="align-items:center;gap:10px;flex-wrap:wrap"><b class="mono" style="font-size:14px;min-width:170px">pricing-page</b><span class="chip auto" style="text-transform:none;letter-spacing:0">worktree · feat/pricing-page</span><span class="chip auto" style="text-transform:none;letter-spacing:0">pricing-page.localhost:3000</span><span class="chip auto">own database</span><span class="chip cloud">own preview</span><span class="xs muted mono">in QA</span></div>
+  </div>
+  <div class="split" style="align-items:end">
+    <p class="small muted">A feature nobody has opened for half an hour is stopped, database included, with its data kept, and starts again on the next visit. Production is never a feature's target.</p>
+    <p class="punch" style="font-size:26px">Parallel work <em>without a shared mess.</em></p>
+  </div>
+</section>
+
+<!-- 14 · a day away from the desk -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">What it looks like · one feature, end to end</div>
+    <h2>Step away from the desk. The work keeps going.</h2>
+    <p class="lede">Went for coffee and Claude has a question? Not a problem. Everything is ready to continue from wherever you are.</p>
+  </div>
+  <div class="flow grow" style="grid-template-columns: repeat(6, minmax(0,1fr));">
+    <div class="card signal"><div class="k">09:00 · desk</div><h3>Start</h3><p>Pick the issue. sclaude sets up a sandbox, the agent proposes the scope.</p><span class="chip">laptop</span></div>
+    <div class="card signal"><div class="k">09:30 · desk</div><h3>Plan</h3><p>Correct the scope, approve the plan and its acceptance criteria.</p><span class="chip">laptop</span></div>
+    <div class="card cloud"><div class="k">10:15 · coffee</div><h3>"Step done?"</h3><p>The question reaches the phone. Open the feature, look, tap Yes. Tests run, the PR opens.</p><span class="chip cloud">Telegram</span></div>
+    <div class="card auto"><div class="k">12:30 · lunch</div><h3>Review</h3><p>The agent fixes the findings and asks about the one it disagrees with. Answer in a line.</p><span class="chip auto">Claude app</span></div>
+    <div class="card human"><div class="k">15:00 · anywhere</div><h3>QA, merge</h3><p>QA ticks the criteria on the preview. You see one summary and decide on the merge.</p><span class="chip human">a person</span></div>
+    <div class="card auto"><div class="k">15:10</div><h3>Production</h3><p>Deploy, production tests, automatic rollback if they fail.</p><span class="chip auto">orchestrator</span></div>
+  </div>
+  <p class="small muted">Back at the desk there is nothing to catch up on. In theory a whole feature can be run from the phone alone. We do not recommend it: the desk is still the place for deep work. The hours are illustrative.</p>
+</section>
+
+<!-- 15 · AI review -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">The other bicycle everyone builds</div>
+    <h2>AI review is where the know-how moved</h2>
+  </div>
+  <div class="row" style="gap:28px;align-items:flex-end">
+    <div class="col" style="gap:2px"><div class="big" style="font-size:48px;color:var(--human)">+91%</div><p class="xs muted">time spent in code review</p></div>
+    <div class="col" style="gap:2px"><div class="big" style="font-size:48px;color:var(--human)">+154%</div><p class="xs muted">larger pull requests</p></div>
+    <div class="col" style="gap:2px"><div class="big" style="font-size:48px;color:var(--human)">+9%</div><p class="xs muted">bug rate</p></div>
+    <p class="xs muted src" style="flex:1;min-width:0">Alongside AI adoption, per Google's 2025 DORA report, as summarised by <a href="https://mikemason.ca/writing/ai-coding-agents-jan-2026/" target="_blank" rel="noopener">Mike Mason, Jan 2026</a>. The agent writes faster than people can check.</p>
+  </div>
+  <div class="g4 grow">
+    <div class="card line"><div class="k">Too loose</div><h3>Finds nothing</h3><p>Real bugs pass through, and the review becomes a formality.</p></div>
+    <div class="card line"><div class="k">Too strict</div><h3>Endless rounds</h3><p>Imaginary bugs get fixed for ever. Each fix invites the next finding.</p></div>
+    <div class="card line"><div class="k">Too clever</div><h3>Burns tokens</h3><p>Multi-agent, multi-pass reviews find more, at a price a PoC cannot justify.</p></div>
+    <div class="card line"><div class="k">A person only</div><h3>Stalls</h3><p>The agent ships in minutes, the reviewer in days. The whole flow waits.</p></div>
+  </div>
+  <div class="split" style="align-items:center">
+    <div class="card signal">
+      <p style="color:var(--ink)"><b>Our answer:</b> the agent reviews and fixes in bounded rounds, a person's decisions are not raised again, and the person sees one decision surface. The sclaude deck shows how.</p>
+    </div>
+    <div class="quote small">"Chasing every finding leads to over-engineering."<cite><a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Anthropic, Claude Code best practices</a></cite></div>
+  </div>
+</section>
+
+<!-- 7 · where development runs -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">The channel · where development actually runs</div>
+    <h2>In a startup, the laptop is the server</h2>
+    <p class="lede">The orchestrator runs the work on the laptop. The phone is only a channel to it, and the laptop was never built to be reached.</p>
+  </div>
+  <div class="g2">
+    <div class="card line">
+      <div class="k">Corporations</div>
+      <h3>VMs, virtual desktops, VPS</h3>
+      <p>Always on and reachable, with an IT team behind them. That costs money every month, and a two-person PoC rarely gets one.</p>
+    </div>
+    <div class="card signal">
+      <div class="k">Startups</div>
+      <h3>Personal or company laptops</h3>
+      <p>Windows 11 with WSL2, or macOS with Apple Container instead of a VM. Free and fast, but it was never designed to be reached from outside.</p>
+    </div>
+  </div>
+  <p class="k" style="margin-top:4px">Which leaves three problems to solve, on the next slide</p>
+  <div class="g3 grow">
+    <div class="card"><h3>1 · Reaching it</h3><p>The dev environment sits behind the laptop, inside WSL or a container. Its address is not reachable from a phone. Usually solved with Tailscale or similar.</p></div>
+    <div class="card"><h3>2 · Keeping it awake</h3><p>A closed laptop sleeps and remote work stops. Keeping it awake all the time wears out the battery and costs power.</p></div>
+    <div class="card"><h3>3 · Using it from 6 inches</h3><p>An SSH client on top of a VPN works, but a terminal on a phone screen is slow for anything routine.</p></div>
+  </div>
+</section>
+
+<!-- 6 · AI + access layer -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Why each tool · the workplace</div>
+    <h2>The agent, the machine and the way in</h2>
+    <p class="lede">The answer to the three problems: Tailscale reaches the laptop, keepawake keeps it up, the Claude app and the Telegram bot make the phone usable.</p>
+  </div>
+  <div class="rows grow">
+    <div class="rowlabel"><span class="k" style="color:var(--signal)">On the laptop</span><p class="xs muted">where the work runs</p></div>
+    <div class="card signal"><div class="k">The agent</div><h3>Claude Code</h3><p>Does the typing. Hooks make the rules executable.</p></div>
+    <div class="card signal"><div class="k">The process</div><h3>sclaude</h3><p>Our orchestrator. Runs a feature from issue to production so every developer works the same way. Its own deck follows.</p></div>
+    <div class="card signal"><div class="k">The machine</div><h3>Laptop + WSL2 + keepawake</h3><p>Already paid for. WSL2 on Windows 11, or Apple Container on macOS, keeps the dev environment apart from the host. keepawake holds it awake only while there is work.</p></div>
+
+    <div class="rowlabel"><span class="k" style="color:var(--cloud)">From the phone</span><p class="xs muted">the way in</p></div>
+    <div class="card cloud"><div class="k">The conversation</div><h3>Claude app</h3><p>Continues the session the laptop started. Plans, answers, instructions.</p></div>
+    <div class="card cloud"><div class="k">The remote control</div><h3>Telegram bot</h3><p>Everyday actions as buttons, in an app everyone already has. No VPN on the phone.</p></div>
+    <div class="card cloud"><div class="k">The spare key</div><h3>Tailscale + Termius</h3><p>A private network with no open ports, and SSH with a key that never leaves the phone. For the rare moments that need a real shell.</p></div>
+  </div>
+</section>
+
+<!-- 8 · the mobile cycle, layers 1 and 2 -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">The channel · layers 1 and 2</div>
+    <h2>The Claude app covers the conversation. The full kit covers the rest.</h2>
+    <p class="lede">A desk session shows up in the Claude mobile app, with remote control always allowed. Everything else on the laptop needs a way in.</p>
+  </div>
+  <div class="g3 grow">
+    <div class="card auto">
+      <div class="k">Layer 1 · Claude app does well</div>
+      <ul class="ticks small">
+        <li>Continue the session the laptop started</li>
+        <li>Read the plan, correct the scope, approve it</li>
+        <li>Answer the agent's questions and permission prompts</li>
+        <li>Give the next instruction on the way to a meeting</li>
+      </ul>
+    </div>
+    <div class="card human">
+      <div class="k">Layer 1 · it cannot reach</div>
+      <ul class="ticks x small">
+        <li>A command line on the machine</li>
+        <li>Our orchestrator and its questions</li>
+        <li>The feature on its test server</li>
+        <li>Test tools, logs, a quick edit</li>
+        <li>Anything unusual on the way</li>
+      </ul>
+    </div>
+    <div class="card cloud">
+      <div class="k">Layer 2 · the full kit</div>
+      <ul class="ticks small">
+        <li><b>Tailscale:</b> one private network; SSH listens only there, never on a café's Wi-Fi</li>
+        <li><b>Termius:</b> SSH with a key made on the phone; sclaude, full-screen Claude, any command</li>
+        <li><b>code-server:</b> VS Code in the phone's browser, started on demand</li>
+      </ul>
+    </div>
+  </div>
+  <div class="g2">
+    <p class="small"><b>The kit is good for</b> <span class="muted">long hands-on stretches, anything stuck or non-standard. It is the spare key that always works.</span></p>
+    <p class="small"><b>Too heavy for</b> <span class="muted">"does the page look right?", "restart the server", "yes, the step is done": seconds of intent, minutes of setup, three apps and a VPN.</span></p>
+  </div>
+</section>
+
+<!-- 10 · the 80% rule -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">The channel · what people actually do</div>
+    <h2>Most phone moments are look, tap, done</h2>
+  </div>
+  <div class="split grow">
+    <div class="col" style="gap:22px">
+      <div class="col" style="gap:8px">
+        <div class="row" style="justify-content:space-between"><b>Look at the result or press a button</b><span class="mono">~80%</span></div>
+        <div class="bar"><span style="width:80%;background:var(--signal)"></span></div>
+        <p class="small muted">Open the web preview of the feature, restart something, answer "is the step done?", extend the laptop's awake time.</p>
+      </div>
+      <div class="col" style="gap:8px">
+        <div class="row" style="justify-content:space-between"><b>Talk to the agent</b><span class="mono">~15%</span></div>
+        <div class="bar"><span style="width:15%;background:var(--auto)"></span></div>
+        <p class="small muted">Correct a plan, give the next instruction. The Claude app does this.</p>
+      </div>
+      <div class="col" style="gap:8px">
+        <div class="row" style="justify-content:space-between"><b>Something stuck or unusual</b><span class="mono">~5%</span></div>
+        <div class="bar"><span style="width:5%;background:var(--cloud)"></span></div>
+        <p class="small muted">Tailscale and Termius, as on the previous slide.</p>
+      </div>
+      <p class="xs muted mono">Shares are my working estimate from daily use, not a measured benchmark.</p>
+    </div>
+    <div class="card signal" style="justify-content:center;gap:16px">
+      <p class="punch">The 80% deserves a client of its own. <em>Almost every developer had already built one.</em></p>
+      <p class="small muted">Each in their own way, and each paid for in time and tokens. The next slide is what I found.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 2 · the problem -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">What I found in the team</div>
+    <h2>Every developer had built the same bicycle</h2>
+    <p class="lede">I looked at the helper tooling each developer had made for themselves. Nearly everyone had spent time and tokens on the same few things, each in their own way.</p>
+  </div>
+  <div class="g3 grow">
+    <div class="card signal">
+      <div class="k">Rebuilt most often</div>
+      <h3>Switching to the phone</h3>
+      <p>Every AI client can mirror a desktop session to mobile. It is not enough: people also need a shell, the orchestrator, test servers, test tools, a basic editor, whatever the moment calls for.</p>
+    </div>
+    <div class="card line">
+      <div class="k">Rebuilt quietly</div>
+      <h3>Keeping the laptop alive</h3>
+      <p>A sleeping laptop ends remote work. A laptop that never sleeps burns power and battery. Everyone found a different workaround.</p>
+    </div>
+    <div class="card line">
+      <div class="k">Rebuilt expensively</div>
+      <h3>AI code review</h3>
+      <p>The know-how of AI development now sits in review. Each person tuned their own prompts and settled on a different trade-off between missed bugs and wasted tokens.</p>
+    </div>
+  </div>
+  <div class="split" style="align-items:center">
+    <p class="punch">A company can provide this <em>once</em>, centrally, and let everyone contribute back.</p>
+    <p class="small muted">That is what this stack and its tooling are: the common flow, found across individual setups, then automated and shared. First stop: a Telegram client for the 80%.</p>
+  </div>
+</section>
+
+<!-- 11 · the telegram client -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">The channel · layer 3</div>
+    <h2>The Telegram client: a channel to the orchestrator</h2>
+  </div>
+  <div class="split grow">
+    <div class="g2" style="align-content:start">
+      <div class="card"><h3>Answers sclaude</h3><p>Every question goes to the terminal and the bot at once. Whichever you answer first counts, and the laptop carries on by itself.</p></div>
+      <div class="card cloud"><h3>Web preview on the phone</h3><p>One tap opens the feature running on the laptop full-screen inside Telegram, with an address bar, no Tailscale on the phone. Only your account gets in.</p></div>
+      <div class="card"><h3>Shows every feature</h3><p>What each step is doing, with links to its issue and pull request.</p></div>
+      <div class="card"><h3>Starts and stops</h3><p>Dev servers, the browser, code-server, the laptop's awake time, all from buttons.</p></div>
+    </div>
+    <div class="card line" style="gap:14px">
+      <div class="k">A feature card, as the bot shows it</div>
+      <div class="col" style="gap:10px">
+        <div class="row" style="align-items:center;gap:10px"><span class="dot" style="background:var(--auto)"></span><span><b>checkout-redesign</b> · step 2, code</span></div>
+        <p class="xs muted" style="padding-left:20px">running</p>
+        <div class="row" style="align-items:center;gap:10px"><span class="dot" style="background:var(--signal)"></span><span><b>invite-flow</b> · step 1, plan</span></div>
+        <p class="xs muted" style="padding-left:20px">waiting for you: "Approve the plan?"</p>
+        <div class="row" style="align-items:center;gap:10px"><span class="dot" style="background:var(--muted)"></span><span><b>pricing-page</b> · in QA</span></div>
+        <p class="xs muted" style="padding-left:20px">idle until QA ticks the criteria</p>
+      </div>
+      <div class="chips" style="margin-top:auto">
+        <span class="chip signal">Yes</span><span class="chip">No</span><span class="chip cloud">Open on phone</span><span class="chip">Extend 1h</span>
+      </div>
+      <p class="xs muted mono">Illustrative example. The bot answers in the language of your Telegram client.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 12 · classic vs sclaude path -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Same task, two paths</div>
+    <h2>The classic path and the sclaude path</h2>
+  </div>
+  <div class="tablewrap grow">
+    <table class="t">
+      <thead><tr><th style="width:24%">The moment</th><th style="width:44%">Classic: VPN + SSH</th><th>With the bot</th></tr></thead>
+      <tbody>
+        <tr><td>See the feature</td><td class="muted">Turn on Tailscale, recall the IP and port, open the browser</td><td>Tap <b>Open on phone</b></td></tr>
+        <tr><td>Restart the dev server</td><td class="muted">Termius, SSH in, find the terminal, stop it, start it again</td><td>Tap <b>Stop</b>, then <b>Open</b>: it starts on the visit</td></tr>
+        <tr><td>"Is the step done?"</td><td class="muted">SSH in, attach to the session, type the answer</td><td>Tap <b>Yes</b>. The terminal at home continues</td></tr>
+        <tr><td>Laptop about to sleep</td><td class="muted">Walk back to it, or lose the session</td><td>The bot asks 30 minutes ahead. Tap <b>Extend</b></td></tr>
+        <tr><td>Where is everything?</td><td class="muted">Check each terminal tab in turn</td><td>One card per feature: running, waiting, idle</td></tr>
+        <tr><td>Something odd</td><td class="muted">The classic path</td><td>Still the classic path. It is kept as the backup</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small muted">The video walkthrough follows this same structure: each task done the classic way, then the sclaude way.</p>
+</section>
+
+<!-- 13 · keepawake -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Keeping the laptop available</div>
+    <h2>keepawake: awake while there is work, asleep when there is none</h2>
+  </div>
+  <div class="split grow">
+    <div class="col" style="gap:14px">
+      <div class="card line"><div class="k">A person is there</div><p>An SSH session, an open editor tab or traffic over Tailscale holds the laptop awake for as long as it lasts.</p></div>
+      <div class="card line"><div class="k">Work with nobody watching</div><p>A busy agent or a running dev server holds it an hour at a time. Thirty minutes before the end the bot asks whether to extend.</p></div>
+      <div class="card line"><div class="k">Probably forgotten</div><p>An hour held with no sign of anybody, and the bot asks whether a session was left open.</p></div>
+    </div>
+    <div class="col" style="justify-content:space-between">
+      <p class="punch">When in doubt, it lets go. <em>An early sleep costs one tap. A laptop that never sleeps costs a battery.</em></p>
+      <div class="card signal">
+        <div class="k">Why it matters for the budget</div>
+        <p>It lets a six-year-old laptop do the job a paid VPS would, three features in parallel included. Electricity and battery wear are the only running costs, and keepawake keeps both down.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 18 · economics -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">What it costs to adopt</div>
+    <h2>Low cost to run, and nothing to unlearn</h2>
+  </div>
+  <div class="g3">
+    <div class="card"><div class="k">Infrastructure</div><div class="big">≈ 0</div><p>Free tiers of Vercel, Supabase, GitHub, Tailscale and Telegram carry a PoC. The laptops are already paid for.</p></div>
+    <div class="card"><div class="k">Main line item</div><div class="big">AI</div><p>The Claude subscription per developer. Lean context per step is what keeps it in check.</p></div>
+    <div class="card"><div class="k">Onboarding</div><div class="big">1 script</div><p><span class="mono">install.sh</span>, then <span class="mono">sclaude doctor</span> lists what a machine still lacks and the command that fixes each gap.</p></div>
+  </div>
+  <div class="g2 grow">
+    <div class="card line"><div class="k">Fits well</div><p>Small teams with their own product: Next.js on Supabase and Vercel, developers on Windows with WSL2 or on Linux. Open source under MIT.</p></div>
+    <div class="card line"><div class="k">Know before you start</div><p>sclaude runs on Linux and WSL2 today. macOS teams can use the same stack with Apple Container; the orchestrator does not run there yet.</p></div>
+  </div>
+</section>
+
+<!-- 19 · close -->
+<section class="slide cover">
+  <div class="eyebrow">In summary</div>
+  <div class="grow" style="display:flex;flex-direction:column;justify-content:center;gap:30px">
+    <h1 style="font-size:64px">Find the flow everyone repeats.<br>Automate it once.<br>Keep people on the decisions.</h1>
+    <div class="g3" style="max-width:1000px">
+      <p class="muted small"><b style="color:var(--paper)">Architecture</b><br>managed services chosen for speed and for the model</p>
+      <p class="muted small"><b style="color:var(--paper)">Mobility</b><br>Claude app, Telegram bot, VPN + SSH as the backup</p>
+      <p class="muted small"><b style="color:var(--paper)">Process</b><br>sclaude: one fixed path, gates, a person at every decision</p>
+    </div>
+  </div>
+  <div class="row" style="justify-content:space-between;align-items:flex-end">
+    <a href="sclaude.html" target="_blank" rel="noopener" style="color:var(--signal);font:600 15px var(--mono)">Next: sclaude in depth &rarr;</a>
+    <p class="mono xs muted">github.com/personalautomation/SClaude</p>
+  </div>
+</section>
+<!-- 18b · sources -->
+<section class="slide">
+  <div class="head">
+    <div class="eyebrow">Sources</div>
+    <h2>What the claims stand on</h2>
+  </div>
+  <div class="g2 grow src" style="align-content:start">
+    <div class="card line"><div class="k">AI and delivery</div><p><a href="https://cloud.google.com/blog/products/ai-machine-learning/announcing-the-2025-dora-report" target="_blank" rel="noopener">Google, 2025 DORA report</a>: AI amplifies what a team already is.<br><a href="https://mikemason.ca/writing/ai-coding-agents-jan-2026/" target="_blank" rel="noopener">Mike Mason, Coherence through orchestration</a>: review time, PR size and bug rates alongside AI adoption.</p></div>
+    <div class="card line"><div class="k">Working with agents</div><p><a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Anthropic, Claude Code best practices</a>: plan before code, fresh context, hooks over instructions, CLI tools, review that does not chase every finding.</p></div>
+    <div class="card line"><div class="k">Review</div><p><a href="https://claude.com/blog/code-review" target="_blank" rel="noopener">Anthropic, Code Review for Claude Code</a>: substantive review comments went from 16% to 54% of pull requests; approval stays a human call.</p></div>
+    <div class="card line"><div class="k">Safety and control</div><p><a href="https://www.docker.com/blog/the-3cs-a-framework-for-ai-agent-security/" target="_blank" rel="noopener">Docker, The 3Cs</a>: contain, curate, control.<br><a href="https://martinfowler.com/articles/harness-engineering.html" target="_blank" rel="noopener">Birgitta Böckeler, Harness engineering</a>: feedforward and feedback controls around a coding agent.</p></div>
+  </div>
+  <p class="xs muted mono">Team figures in these decks are project observations, not benchmarks. The 80/15/5 split is a working estimate.</p>
+</section>
+
+  </div>
+</div>
+
+<nav class="nav" aria-label="Slides">
+  <button type="button" id="prev" aria-label="Previous slide">&larr; Prev</button>
+  <span class="count" id="count">1 / 1</span>
+  <button type="button" id="next" aria-label="Next slide">Next &rarr;</button>
+  <div class="progress" aria-hidden="true"><i id="bar"></i></div>
+  <span class="hint hide-narrow">&larr; &rarr; or Space</span>
+  <a href="sclaude.html" target="_blank" rel="noopener">sclaude deck &rarr;</a>
+</nav>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var stage = document.getElementById('stage');
+  var viewport = document.getElementById('viewport');
+  var count = document.getElementById('count');
+  var bar = document.getElementById('bar');
+  var mark = 'AI stack for PoC & MVP';
+  var i = 0;
+
+  slides.forEach(function (s, n) {
+    s.id = 's' + (n + 1);
+    var no = document.createElement('span');
+    no.className = 'pageno';
+    no.textContent = (n + 1) + ' / ' + slides.length;
+    s.appendChild(no);
+    if (mark && n > 0) {
+      var dm = document.createElement('span');
+      dm.className = 'deckmark';
+      dm.textContent = mark;
+      s.appendChild(dm);
+    }
+  });
+
+  function narrow() { return window.matchMedia('(max-width: 820px)').matches; }
+
+  function fit() {
+    if (narrow()) { stage.style.transform = ''; return; }
+    var w = viewport.clientWidth, h = viewport.clientHeight;
+    var s = Math.min((w - 32) / 1280, (h - 24) / 720);
+    stage.style.transform = 'scale(' + Math.max(s, 0.2) + ')';
+  }
+
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, k) { s.classList.toggle('on', k === i); });
+    count.textContent = (i + 1) + ' / ' + slides.length;
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    try { history.replaceState(null, '', '#s' + (i + 1)); } catch (e) {}
+  }
+
+  document.getElementById('prev').addEventListener('click', function () { show(i - 1); });
+  document.getElementById('next').addEventListener('click', function () { show(i + 1); });
+  document.addEventListener('keydown', function (e) {
+    if (narrow() || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (['ArrowRight', 'PageDown', ' ', 'Enter'].indexOf(e.key) >= 0) { e.preventDefault(); show(i + 1); }
+    else if (['ArrowLeft', 'PageUp', 'Backspace'].indexOf(e.key) >= 0) { e.preventDefault(); show(i - 1); }
+    else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(slides.length - 1); }
+  });
+  window.addEventListener('resize', fit);
+
+  var m = /^#s(\d+)$/.exec(location.hash || '');
+  show(m ? parseInt(m[1], 10) - 1 : 0);
+  fit();
+  if (m && narrow()) { var t = document.getElementById('s' + m[1]); if (t) t.scrollIntoView(); }
+})();
+</script>

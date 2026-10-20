@@ -17,6 +17,22 @@ they live here, symlinked into `~/.local/bin` and `~/.claude/skills`.
 How the parts work inside, and why they were built that way, is in
 [`docs/sclaude.md`](docs/sclaude.md) and [`docs/keepawake.md`](docs/keepawake.md).
 
+## Presentations
+
+Two slide decks for whoever decides whether a team should adopt all this —
+a CTO, a lead — rather than for the developer installing it:
+
+| deck | what it covers |
+|---|---|
+| [`startup-ai-stack.html`](docs/presentations/startup-ai-stack.html) | the stack for a PoC or an MVP and why each tool is in it; the whole development cycle from a phone: the Claude app, the Telegram bot, Tailscale and Termius as the spare key, keepawake |
+| [`sclaude.html`](docs/presentations/sclaude.html) | sclaude in depth: the fixed path of a feature, gates on evidence, rules in hooks, the friction review, the retrospective and the monthly review, AI review, the team setup |
+
+Each is one self-contained page: open it in a browser and page through with
+the arrow keys; on a phone the slides stack into one column. GitHub shows the
+file's source, so open it from a checkout. The decks are built from
+`docs/presentations/src/` by `python3 docs/presentations/build.py`; edit the
+sources and rebuild rather than editing the built pages.
+
 Everything written in this repository is in English; see `CLAUDE.md` for the
 rule and its three deliberate exceptions.
 

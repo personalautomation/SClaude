@@ -202,22 +202,50 @@ skipped, and sclaude says so where it would have acted:
 
 | what | what it gives you | without it |
 |---|---|---|
-| a Node app with `npm run dev` that listens on `PORT` (Next.js is what it is built on) | a dev server per feature at its own address, Claude checking its work in a browser | no dev server or browser check; the cycle still runs |
+| a Node app with `npm run dev` that listens on `PORT` (Next.js is what it is built on); on WSL, Node through nvm, which `wsl-update` keeps current | a dev server per feature at its own address, Claude checking its work in a browser | no dev server or browser check; the cycle still runs |
 | a test suite the product names in `.sclaude/config.json` | the local, preview and production test gates | no test gates |
 | an automatic Claude review on the product's pull requests (a `claude-code-review.yml` workflow) | the findings step 4 works through | step 4 has no findings to work from |
 | a GitHub project board | the issue moving through `In progress`, `In QA`, `Done`; QA's hand-back | QA's verdict cannot be read from the board |
 | Vercel (`vercel` CLI, logged in) | previews and production from sclaude, production rollback | no preview, QA on a deployment or production step |
 | Supabase | per-environment databases, migrations promoted and rolled back with care | no database handling |
-| Docker | a Supabase database of its own for every feature | features share the local database |
-| Chrome from Playwright (`chrome-debug`) | Claude sees the feature in a real browser | Claude cannot look at what it built |
+| Docker (on WSL, Docker Desktop: sclaude starts it itself when it is not running) | a Supabase database of its own for every feature | features share the local database |
+| Chrome from Playwright (`chrome-debug`); on WSL its window comes up on the Windows desktop through WSLg | Claude sees the feature in a real browser | Claude cannot look at what it built |
+| the chrome-devtools MCP server, attached to `chrome-debug` (below) | the tools Claude drives that Chrome with; sclaude allows them in every step, and step 2 checks its work through them | Claude cannot look at what it built |
 | `script` and `tmux` | the terminal recording the retrospective reads | the retrospective works without it |
 
-**Optional.** For working away from the laptop: [Tailscale](https://tailscale.com)
-to reach features and the machine from a phone, a Telegram bot of your own for
-sclaude's questions and keepawake, Termius for SSH and code-server for an editor
-in the phone's browser. On WSL, keepawake keeps Windows from sleeping while you
-work from the phone. These machine tools are not installed unless you ask for
-them: `./install.sh --extras`.
+The MCP server is connected once, for every project, and attaches to the
+browser `chrome-debug` opens rather than starting one of its own:
+
+```bash
+claude mcp add --scope user chrome-devtools -- npx -y chrome-devtools-mcp@latest --browserUrl http://127.0.0.1:9222
+```
+
+**Optional.** For working away from the laptop:
+
+| where | what | what it gives you |
+|---|---|---|
+| the machine | [Tailscale](https://tailscale.com); on WSL, installed inside WSL, not on Windows | features, SSH and code-server reachable from the phone over your tailnet |
+| the machine | a Telegram bot of your own | sclaude's questions and keepawake on the phone |
+| the machine | code-server | an editor in the phone's browser |
+| the phone | the Tailscale app, signed in to the same account | the phone in the tailnet: features at their addresses, SSH, code-server |
+| the phone | [Termius](https://termius.com) | SSH into the machine, to run sclaude and Claude from the phone |
+| the phone | Telegram | the bot: questions, status, the feature cards |
+
+With Tailscale Funnel the bot's "📲 Phone" button opens
+a feature as a Telegram Mini App on a phone without Tailscale (see
+[below](#a-feature-in-telegram-with-no-tailscale-on-the-phone)). On WSL,
+keepawake keeps Windows from sleeping while you work from the phone.
+`./install.sh --extras` sets up the machine's side of the bot, keepawake and
+code-server; Tailscale, code-server itself and the phone's apps you install
+yourself ([keepawake, Configuration](#configuration)).
+
+Claude Code plugins are your own choice; sclaude needs none of them. The
+Vercel plugin is handy in sessions, while sclaude itself deploys and rolls back
+through the `vercel` CLI. The Supabase plugin may be installed too: sclaude's
+Supabase rules (`sclaude/policy/supabase.json`) deny its tools that apply
+migrations, deploy edge functions or create, pause, restore and delete
+projects and branches: a schema change goes as a migration file, through the
+cycle.
 
 `sclaude doctor` checks the required part, and inside a product the parts that
 product uses.

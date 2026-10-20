@@ -314,6 +314,14 @@ os.environ["SCLAUDE_DEVELOPER"] = "alice"
 check("developer-recorded", record(FULL, "done")["developer"], "alice")
 os.environ.pop("SCLAUDE_DEVELOPER")
 
+# The product comes from metrics_append when the state does not carry it,
+# which it never did: every record said "repo": null.
+os.environ["SCLAUDE_REPO"] = "/home/x/from-env"
+check("record-repo-from-env", record({}, "done")["repo"], "/home/x/from-env")
+check("record-repo-state-wins", record({"repo": "/home/x/s"}, "done")["repo"], "/home/x/s")
+del os.environ["SCLAUDE_REPO"]
+
+
 # --- publishing to the team's repository -------------------------------------
 #
 # A bare repository plays the team's; two machines publish into it. Each
@@ -350,32 +358,50 @@ try:
                              capture_output=True, text=True)
         return out.stdout.split()
 
+    A, B = "/home/x/app", "/home/x/other"
+
+    def rec(n, repo=A):
+        return json.dumps({"n": n, "repo": repo}, separators=(",", ":"))
+
     check("publish-nothing-configured",
-          publish("alice", url="", log=machine("a1", ['{"n":1}']),
+          publish("alice", "", A, log=machine("a1", [rec(1)]),
                   cache=os.path.join(pub, "c0")), True)
     check_true("publish-nothing-configured-no-clone",
                not os.path.exists(os.path.join(pub, "c0")))
 
-    check("publish-alice", publish("alice", url=team, log=machine("a1", ['{"n":1}']),
+    check("publish-alice", publish("alice", team, A, log=machine("a1", [rec(1)]),
                                    cache=os.path.join(pub, "ca")), True)
-    check("publish-bob", publish("bob", url=team, log=machine("b1", ['{"n":9}']),
+    check("publish-bob", publish("bob", team, A, log=machine("b1", [rec(9)]),
                                  cache=os.path.join(pub, "cb")), True)
     check("publish-files-per-developer", (published("alice"), published("bob")),
-          (['{"n":1}'], ['{"n":9}']))
+          ([rec(1)], [rec(9)]))
     # Alice's second machine, with its own cache and one record of its own.
-    check("publish-second-machine", publish("alice", url=team,
-                                            log=machine("a2", ['{"n":2}']),
+    check("publish-second-machine", publish("alice", team, A,
+                                            log=machine("a2", [rec(2)]),
                                             cache=os.path.join(pub, "ca2")), True)
-    check("publish-union-in-order", published("alice"), ['{"n":1}', '{"n":2}'])
+    check("publish-union-in-order", published("alice"), [rec(1), rec(2)])
     before = subprocess.run(["git", "-C", team, "rev-parse", "main"],
                             capture_output=True, text=True).stdout
-    publish("alice", url=team, log=machine("a1", ['{"n":1}']), cache=os.path.join(pub, "ca"))
+    publish("alice", team, A, log=machine("a1", [rec(1)]), cache=os.path.join(pub, "ca"))
     after = subprocess.run(["git", "-C", team, "rev-parse", "main"],
                            capture_output=True, text=True).stdout
     check("publish-idempotent", after, before)
-    check("publish-no-developer", publish("", url=team, log=machine("x", ['{"n":5}']),
+    check("publish-no-developer", publish("", team, A, log=machine("x", [rec(5)]),
                                           cache=os.path.join(pub, "cx")), True)
     check_true("publish-no-developer-no-clone", not os.path.exists(os.path.join(pub, "cx")))
+
+    # Carol works on two products; only this product's records reach its
+    # team's repository. A record without a repo belongs to no product.
+    check("publish-one-product", publish("carol", team, A,
+                                         log=machine("c1", [rec(3), rec(4, B), json.dumps({"n": 6})]),
+                                         cache=os.path.join(pub, "cc")), True)
+    check("publish-only-that-product", published("carol"), [rec(3)])
+    check("publish-other-product-nothing",
+          publish("dave", team, A, log=machine("d1", [rec(7, B)]),
+                  cache=os.path.join(pub, "cd")), True)
+    check_true("publish-other-product-no-clone", not os.path.exists(os.path.join(pub, "cd")))
+    from metrics import cache_for
+    check_true("publish-cache-per-remote", cache_for("u1") != cache_for("u2"))
 finally:
     shutil.rmtree(pub, ignore_errors=True)
 

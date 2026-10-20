@@ -425,6 +425,12 @@ STRINGS = {
     "cmd.timeout":       ("команда не ответила за %(sec)d с",
                           "command did not answer in %(sec)d s"),
     "cmd.error":         ("ошибка: %(err)s", "error: %(err)s"),
+    # The starts of sclaude's options that mean a refusal: "Go back" in the
+    # action list, "none, go back" in the feature picker. Matched, not shown,
+    # and in both languages at once — the bot does not know which one a list
+    # was drawn in. sclaude prints English today.
+    "option.back":       ("назад", "go back"),
+    "option.none":       ("ничего", "none, go back"),
 }
 
 _lang = DEFAULT

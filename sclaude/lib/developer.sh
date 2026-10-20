@@ -16,6 +16,12 @@
 # from here.
 #
 #   $SCLAUDE_DEV         explicit, and beats everything.
+#   git sclaude.developer
+#                        explicit too, and seen by every process: a variable
+#                        set in ~/.profile is not, so systemd units and the
+#                        bot (which runs `sclaude status`, the watcher
+#                        `sclaude _handoff`) named somebody else — with a
+#                        noreply address, a number and a login.
 #   git user.email       its local part. Already set on every machine that
 #                        commits, so nothing new has to be configured.
 #   nothing              an empty name, which is not an error.
@@ -46,9 +52,20 @@ developer_sanitize() {
     | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
 }
 
+# The configured name, from the orchestrator's repository first, like the
+# address: `git config --global sclaude.developer <name>` is the usual way.
+developer_configured() {
+  if [[ -n "${INSTRUMENTS:-}" && -d "$INSTRUMENTS" ]]; then
+    git -C "$INSTRUMENTS" config sclaude.developer 2>/dev/null || true
+  else
+    git config sclaude.developer 2>/dev/null || true
+  fi
+}
+
 # The name, or nothing.
 developer_name() {
   local raw="${SCLAUDE_DEV:-}"
+  [[ -n "$raw" ]] || raw="$(developer_configured)"
   if [[ -z "$raw" ]]; then
     raw="$(developer_email)"
     raw="${raw%%@*}"

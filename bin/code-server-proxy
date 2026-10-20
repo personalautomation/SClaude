@@ -15,6 +15,17 @@ CONFIG="$HOME/.config/code-server/config.yaml"
 TARGET=$(sed -n 's/^bind-addr:[[:space:]]*//p' "$CONFIG" 2>/dev/null | head -1)
 [[ -z "$TARGET" ]] && TARGET="127.0.0.1:8080"
 
+# 127.0.0.1:8080 is both code-server's default bind-addr and this forward's own
+# socket (code-server-local.socket): forwarding there would be forwarding into
+# itself, every connection looping until it times out. install.sh does not
+# enable the socket for such a server; say so here too, rather than loop.
+case "$TARGET" in
+  127.0.0.1:8080|localhost:8080|0.0.0.0:8080|"[::]:8080"|"[::1]:8080")
+    echo "code-server-proxy: code-server listens on $TARGET, which is this forward's own port;" >&2
+    echo "  open it directly, or put bind-addr in $CONFIG on the tailnet address" >&2
+    exit 1 ;;
+esac
+
 # Wait until the server opens its port. Requires= brings it up, but systemd
 # considers the service started immediately, while the port opens a second or
 # two later — without the wait the first request after idling was cut off, and

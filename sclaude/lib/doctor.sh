@@ -94,7 +94,7 @@ doctor_identity() {
     doctor_ok "developer name '$name' (prefixes test data, names your branch and records)"
   else
     doctor_warn "no developer name — test data and records are not marked as yours" \
-      "set git user.email, or SCLAUDE_DEV"
+      "git config --global sclaude.developer <name>, or set git user.email"
   fi
   branch="$(git -C "$INSTRUMENTS" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   if developer_is_maintainer; then
@@ -292,13 +292,22 @@ doctor_project_checks() {
 
 doctor_machine() {
   doctor_section "This machine"
-  local platform unit
+  local platform unit extras=0
+  local -a units=(sclaude-watch.timer)
   platform="$(python3 "$INSTRUMENTS/keepawake/state.py" platform 2>/dev/null || echo "?")"
   doctor_ok "platform: $platform"
+  # The machine tools come with ./install.sh --extras, which links keepawake;
+  # without them their units are not missing, only not chosen.
+  if [[ -L "$HOME/.local/bin/keepawake" ]]; then
+    extras=1
+    units+=(keepawake.timer keepawake-telegram.service
+            "keepawake-$([[ "$platform" == wsl ]] && echo windows || echo linux).service")
+  else
+    doctor_ok "extras not installed (keepawake, its bot, code-server: ./install.sh --extras)"
+  fi
 
   if command -v systemctl >/dev/null 2>&1; then
-    for unit in keepawake.timer sclaude-watch.timer keepawake-telegram.service \
-                "keepawake-$([[ "$platform" == wsl ]] && echo windows || echo linux).service"; do
+    for unit in "${units[@]}"; do
       if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
         doctor_ok "$unit"
       else
@@ -312,7 +321,7 @@ doctor_machine() {
         "sudo loginctl enable-linger $USER"
     fi
   else
-    doctor_warn "no systemctl — keepawake and the QA watch cannot run"
+    doctor_warn "no systemctl — the QA watch and the extras cannot run"
   fi
 
   # The same test as install.sh's polkit_present: the rule itself where rules.d
@@ -323,7 +332,7 @@ doctor_machine() {
      || { [[ ! -r "$(dirname "$rule")" ]] && [[ -f "$HOME/.config/sclaude/polkit-rule" ]]; }; then
     have_rule=1
   fi
-  if [[ "$platform" == linux && "$have_rule" -eq 0 ]]; then
+  if [[ "$extras" -eq 1 && "$platform" == linux && "$have_rule" -eq 0 ]]; then
     doctor_warn "keepawake holds idle only; a closed lid still sleeps" \
       "./install.sh --polkit adds the rule that allows it (asks for sudo)"
   fi

@@ -24,6 +24,7 @@
 # unreadable state, a directory that cannot be created, a disk that is full —
 # nothing is written and nothing is said beyond the return code. Losing a
 # measurement must never stand in the way of cleaning up a merged feature.
+import hashlib
 import json
 import os
 import subprocess
@@ -175,7 +176,9 @@ def record(state, outcome):
     started = state.get("started")
     out = {
         "feature": state.get("feature"),
-        "repo": state.get("repo"),
+        # The product's main checkout, handed over by metrics_append; the state
+        # itself does not carry it.
+        "repo": state.get("repo") or os.environ.get("SCLAUDE_REPO") or None,
         # Who ran the cycle — developer.sh's name, handed over by
         # metrics_append. None rather than "" where nobody could be named, for
         # the same reason as every other absence in this record.
@@ -258,33 +261,37 @@ def append(state_path, outcome, path=None):
 
 # --- a team's records in one place ------------------------------------------
 #
-# The log above is one machine's. A team that wants to look at its cycles
-# together names a git repository of its own in this file; each developer's
-# records are published there as <developer>.jsonl, one file per person, so two
-# people publishing at once never touch the same lines and a merge never
-# conflicts. One `jq` over the directory is the team's picture.
+# The log above is one machine's. A product whose team wants to look at its
+# cycles together names a git repository of its own under `metrics` in its
+# `.sclaude/config.json`; each developer's records of that product are
+# published there as <developer>.jsonl, one file per person, so two people
+# publishing at once never touch the same lines and a merge never conflicts.
+# One `jq` over the directory is the team's picture.
+#
+# The product's key, not this machine's: the remote used to be one file per
+# person (~/.config/sclaude/metrics-remote), and somebody working on two
+# products published both products' records into one team's repository —
+# where one team saw the other's feature names and paths. Now each product's
+# records go only where that product says, and a product that says nothing
+# keeps them on this machine.
 #
 # Deliberately not the instruments repository: everybody installs from that
 # one, and a record carries feature names and repository paths that belong to
-# the team, not to everybody who can read the orchestrator. And deliberately
-# nothing by default: no file, no publishing — the records stay on this
-# machine, as they always did.
-REMOTE_FILE = os.path.join(os.environ.get("XDG_CONFIG_HOME") or "~/.config",
-                           "sclaude", "metrics-remote")
+# the team, not to everybody who can read the orchestrator.
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or "~/.cache",
                      "sclaude", "metrics")
 
 
-def remote_url():
+def cache_for(url):
+    """A clone per remote: two products' teams never share a working copy."""
+    return os.path.join(CACHE, hashlib.sha1(url.encode("utf-8")).hexdigest()[:12])
+
+
+def of_repo(line, repo):
     try:
-        with open(os.path.expanduser(REMOTE_FILE)) as fh:
-            for line in fh:
-                line = line.split("#", 1)[0].strip()
-                if line:
-                    return line
-    except OSError:
-        pass
-    return ""
+        return json.loads(line).get("repo") == repo
+    except (ValueError, AttributeError):
+        return False
 
 
 def git(cwd, *args):
@@ -293,26 +300,28 @@ def git(cwd, *args):
                           text=True, timeout=60, env=env)
 
 
-def publish(developer, url=None, log=None, cache=None):
-    """Put this machine's records into <developer>.jsonl in the team's repo.
+def publish(developer, url, repo, log=None, cache=None):
+    """Put this machine's records of `repo` into <developer>.jsonl at `url`.
 
-    The file there becomes the union of what it held and what this machine
-    has, in order, without duplicates — so a developer on two machines keeps
-    the records of both. True when there was nothing to do or it was pushed.
+    Only the records whose `repo` is this product's: the log holds every
+    product's, and the remote is one team's. The file there becomes the union
+    of what it held and what this machine has, in order, without duplicates —
+    so a developer on two machines keeps the records of both. True when there
+    was nothing to do or it was pushed.
     """
-    url = url if url is not None else remote_url()
-    if not developer or not url:
+    if not developer or not url or not repo:
         return True
     source = os.path.expanduser(log or log_path())
     try:
         with open(source, encoding="utf-8") as fh:
-            mine = [line.rstrip("\n") for line in fh if line.strip()]
+            mine = [line.rstrip("\n") for line in fh
+                    if line.strip() and of_repo(line, repo)]
     except OSError:
         return True
     if not mine:
         return True
 
-    cache = os.path.expanduser(cache or CACHE)
+    cache = os.path.expanduser(cache or cache_for(url))
     try:
         if not os.path.isdir(os.path.join(cache, ".git")):
             os.makedirs(os.path.dirname(cache), exist_ok=True)
@@ -352,8 +361,8 @@ def publish(developer, url=None, log=None, cache=None):
 
 
 def main():
-    if len(sys.argv) >= 3 and sys.argv[1] == "publish":
-        return 0 if publish(sys.argv[2]) else 1
+    if len(sys.argv) >= 5 and sys.argv[1] == "publish":
+        return 0 if publish(sys.argv[2], sys.argv[3], sys.argv[4]) else 1
     if len(sys.argv) < 3:
         return 0
     return 0 if append(sys.argv[1], sys.argv[2],

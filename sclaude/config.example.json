@@ -57,6 +57,12 @@
     "            at the start and the end. `issue` is the label and type a new",
     "            issue gets. Every key optional: a column not named is a move",
     "            not made, and nothing here is assumed about your board.",
+    "metrics   — a git repository of the team's own where each developer's",
+    "            cycle records of this product are published, one",
+    "            <developer>.jsonl per person. Only this product's records",
+    "            go there; a developer working on two products publishes",
+    "            each to its own team. Absent, the records stay on the",
+    "            developer's machine (~/.claude/sclaude/cycles.jsonl).",
     "doctor    — what the project asks of a developer's machine beyond what",
     "            sclaude checks: each `check` runs in the project's root, and",
     "            `sclaude doctor` shows ✓ when it exits 0, or ! with its last",
@@ -193,6 +199,8 @@
     "dates": { "start": "Start date", "end": "Target date" },
     "issue": { "label": "Dev", "type": "Feature" }
   },
+
+  "metrics": "git@github.com:your-team/sclaude-metrics.git",
 
   "doctor": [
     {

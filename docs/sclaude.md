@@ -1030,14 +1030,20 @@ lines of JSON answer a question in one command; a schema would have to be
 decided now, before anybody has looked at the data, and that is the wrong order.
 
 Each record names who ran the cycle (`developer`, from `developer.sh`; `null`
-where nobody could be named). A team that wants its cycles in one place names a
-git repository of its own in `~/.config/sclaude/metrics-remote`; each
-developer's records are then published there as `<developer>.jsonl` after every
-record — one file per person, so publishing never conflicts, and a second
-machine of the same person adds its lines rather than replacing the first's.
-Not this repository, on purpose: the records carry the team's feature names and
-paths, and instruments is shared by everybody who installs it. No file, no
-publishing.
+where nobody could be named) and the product (`repo`, its main checkout). A
+product whose team wants its cycles in one place names a git repository of its
+own under `metrics` in its `.sclaude/config.json`; each developer's records of
+that product — only that product's — are then published there as
+`<developer>.jsonl` after every record. One file per person, so publishing never
+conflicts, and a second machine of the same person adds its lines rather than
+replacing the first's. A clone per remote is kept under `~/.cache/sclaude/metrics/`.
+
+The remote used to be one file per person (`~/.config/sclaude/metrics-remote`),
+and somebody working on two products published both into one team's
+repository, where one team saw the other's feature names and paths. Now each
+product's records go only where that product says. Not this repository, on
+purpose: the records carry the team's feature names and paths, and instruments
+is shared by everybody who installs it. No key, no publishing.
 
 `outcome` is what keeps a finished feature and an abandoned one apart — `done`
 against `dropped` — and they must never be averaged together: an abandoned

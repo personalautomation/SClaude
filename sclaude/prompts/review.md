@@ -63,7 +63,7 @@ The orchestrator captured the PR state as of the start of this step — checks a
 
    A non-zero exit from `gh pr checks` means "there are red checks", not "the command failed".
 
-2. If you changed code, run the checks the change calls for before pushing: `npm run typecheck`, `npm run lint`, plus whatever further checks the project's `CLAUDE.md` asks for after the kind of change you made. If you changed nothing, there's nothing to run: step 2 does not close until the full regression is green, and the code hasn't changed since.
+2. If you changed code, run the checks the change calls for before pushing: the project's own `typecheck` and `lint`, the commands named under `commands` in `.sclaude/config.json` (whichever of the two it names), plus whatever further checks the project's `CLAUDE.md` asks for after the kind of change you made. If you changed nothing, there's nothing to run: step 2 does not close until the full regression is green, and the code hasn't changed since.
 
 3. Commit fixes to the same branch following the project's commit rules, and push. A review fix isn't something I asked for, so it usually needs no `Requirement:` footer — unless the comment exposed a real requirement we missed.
 

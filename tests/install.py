@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 #
-# A bench for install.sh's one question: keepawake's polkit rule on plain Linux.
+# A bench for install.sh: what it installs by default and with --extras, what
+# it says without systemd, code-server's local port, and its one question —
+# keepawake's polkit rule on plain Linux.
 #
 # The real install.sh runs with a temporary HOME, the platform forced to plain
 # Linux, and stubs for systemctl, loginctl and sudo ahead of everything on PATH
@@ -15,6 +17,13 @@
 #   --polkit            the rule not written, or keepawake-linux not restarted
 #                       and still holding idle only until the next boot.
 #   already in place    asked again on every re-run of an idempotent installer.
+#   Enter               taken for an answer: sclaude has no defaults.
+#   sclaude only        a newcomer given a Telegram bot and an editor server
+#                       they did not ask for, or a machine that had them losing
+#                       them on a plain re-run.
+#   no systemd          the installer stopping half-way without a word.
+#   code-server :8080   the forward enabled on code-server's own default port:
+#                       the server failing with EADDRINUSE every 10 s.
 #
 # Run it with: python3 tests/install.py
 import os
@@ -39,7 +48,7 @@ def check(name, got, want):
         print("        got:  %r" % (got,))
 
 
-def world(tmp):
+def world(tmp, systemd=True):
     home = os.path.join(tmp, "home")
     stubs = os.path.join(tmp, "stubs")
     etc = os.path.join(tmp, "etc", "polkit-1", "rules.d")
@@ -47,7 +56,7 @@ def world(tmp):
         os.makedirs(d, exist_ok=True)
     calls = os.path.join(tmp, "systemctl.calls")
     for name, body in (
-            ("systemctl", 'echo "$*" >> %s\nexit 0\n' % calls),
+            ("systemctl", 'echo "$*" >> %s\nexit %d\n' % (calls, 0 if systemd else 1)),
             ("loginctl", 'echo yes\n'),
             ("sudo", '"$@"\n'),
             ("cmd.exe", 'exit 127\n')):
@@ -62,18 +71,24 @@ def world(tmp):
     return env, os.path.join(etc, "49-keepawake.rules"), calls
 
 
-def run(env, *args, answer=None):
-    """install.sh with stdin from a pipe, or from a terminal typing `answer`."""
+def run(env, *args, answer=None, extras=True, rc=None):
+    """install.sh with stdin from a pipe, or from a terminal typing `answer`
+    (a list types one answer per question asked). --extras unless told not to;
+    `rc`, a list, receives the exit code."""
+    args = (["--extras"] if extras else []) + list(args)
     if answer is None:
-        done = subprocess.run([INSTALL] + list(args), env=env, capture_output=True,
+        done = subprocess.run([INSTALL] + args, env=env, capture_output=True,
                               text=True, stdin=subprocess.DEVNULL, timeout=120)
+        if rc is not None:
+            rc.append(done.returncode)
         return done.stdout + done.stderr
+    answers = [answer] if isinstance(answer, str) else list(answer)
     primary, secondary = pty.openpty()
-    proc = subprocess.Popen([INSTALL] + list(args), env=env, stdin=secondary,
+    proc = subprocess.Popen([INSTALL] + args, env=env, stdin=secondary,
                             stdout=secondary, stderr=secondary, close_fds=True)
     os.close(secondary)
     out = b""
-    sent = False
+    sent = 0
     deadline = time.time() + 120
     while time.time() < deadline:
         try:
@@ -83,9 +98,9 @@ def run(env, *args, answer=None):
         if not chunk:
             break
         out += chunk
-        if not sent and b"Add it now?" in out:
-            os.write(primary, (answer + "\n").encode())
-            sent = True
+        if sent < len(answers) and out.count(b"Add it now?") > sent:
+            os.write(primary, (answers[sent] + "\n").encode())
+            sent += 1
     proc.wait(timeout=30)
     os.close(primary)
     return out.decode(errors="replace")
@@ -121,10 +136,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("no-polkit-writes-nothing", os.path.exists(rule), False)
 
     print("asked in a terminal")
-    out = run(env, answer="")
+    out = run(env, answer=["", "maybe", "n"])
     check("tty-undo-before-question",
           -1 < out.find("sudo rm %s" % rule) < out.find("Add it now?"), True)
-    check("tty-enter-is-no", os.path.exists(rule), False)
+    check("tty-enter-asks-again", out.count("Add it now?"), 3)
+    check("tty-no-writes-nothing", os.path.exists(rule), False)
     out = run(env, answer="y")
     check("tty-yes-writes", os.path.exists(rule), True)
     if os.path.exists(rule):
@@ -151,7 +167,7 @@ with tempfile.TemporaryDirectory() as tmp:
         out = run(env, answer="y")
         check("unreadable-with-note-not-asked", "Add it now?" in out, False)
         os.remove(os.path.join(env["HOME"], ".config", "sclaude", "polkit-rule"))
-        out = run(env, answer="")
+        out = run(env, answer="n")
         check("unreadable-without-note-asks", "Add it now?" in out, True)
     finally:
         os.chmod(etc_dir, 0o755)
@@ -161,6 +177,50 @@ with tempfile.TemporaryDirectory() as tmp:
     out = run(env, "--polkit")
     check("flag-writes-without-asking",
           (os.path.exists(rule), "Add it now?" in out), (True, False))
+
+    print("sclaude only")
+    env, rule, calls = world(os.path.join(tmp, "core"))
+    out = run(env, extras=False)
+    bin_ = os.path.join(env["HOME"], ".local", "bin")
+    units = os.path.join(env["HOME"], ".config", "systemd", "user")
+    check("core-links-sclaude", os.path.islink(os.path.join(bin_, "sclaude")), True)
+    check("core-enables-the-watch", "enable --now sclaude-watch.timer" in open(calls).read(), True)
+    check("core-no-keepawake", os.path.lexists(os.path.join(bin_, "keepawake")), False)
+    check("core-no-bot-unit", os.path.exists(os.path.join(units, "keepawake-telegram.service")), False)
+    check("core-no-code-server", os.path.lexists(os.path.join(bin_, "code-server-start")), False)
+    check("core-no-polkit-question", "polkit" in out, False)
+    check("core-names-the-flag", "./install.sh --extras" in out, True)
+    run(env)
+    out = run(env, "--no-polkit", extras=False)
+    check("extras-kept-on-a-plain-rerun",
+          ("extras: kept" in out,
+           os.path.exists(os.path.join(units, "keepawake-telegram.service"))), (True, True))
+
+    print("no systemd")
+    env, rule, calls = world(os.path.join(tmp, "nosystemd"), systemd=False)
+    code = []
+    out = run(env, extras=False, rc=code)
+    check("nosystemd-says-so", "systemd's user manager does not answer" in out, True)
+    check("nosystemd-names-the-fix", "re-run ./install.sh" in out, True)
+    check("nosystemd-enables-nothing", "enable" in open(calls).read(), False)
+    check("nosystemd-still-links", os.path.islink(os.path.join(env["HOME"], ".local", "bin", "sclaude")), True)
+    check("nosystemd-exits-nonzero", code, [1])
+    env["KEEPAWAKE_PLATFORM"] = "wsl"
+    out = run(env, extras=False)
+    check("nosystemd-wsl-names-wsl-conf", "systemd=true" in out and "wsl --shutdown" in out, True)
+
+    print("code-server's local port")
+    for name, bind, want in (("default", None, False),
+                             ("loopback-8080", "127.0.0.1:8080", False),
+                             ("tailnet", "100.64.0.1:8080", True)):
+        env, rule, calls = world(os.path.join(tmp, "cs-" + name))
+        cfg = os.path.join(env["HOME"], ".config", "code-server")
+        os.makedirs(cfg)
+        with open(os.path.join(cfg, "config.yaml"), "w") as fh:
+            fh.write("password: x\n" + ("bind-addr: %s\n" % bind if bind else ""))
+        run(env, "--no-polkit")
+        check("code-server-%s-socket" % name,
+              "enable --now code-server-local.socket" in open(calls).read(), want)
 
 if failures:
     print("\n%d failed: %s" % (len(failures), ", ".join(failures)))

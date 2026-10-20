@@ -3,23 +3,34 @@
 # Lays out symlinks to this repository's scripts and skills and sets up the
 # systemd user units. Idempotent: run it as many times as you like.
 #
-# Two platforms: WSL, where keepawake holds Windows awake from the Windows side
-# and wsl-update keeps the distribution current, and plain Linux, where
-# keepawake-linux holds this machine awake itself. Everything else is the same
-# on both.
+# By default only sclaude: the orchestrator, its watcher, proxy and gate, the
+# pr skill, the status line. The machine tools that grew up next to it —
+# keepawake and its Telegram bot, code-server, wsl-update, the Windows side —
+# come with --extras. Somebody who came for sclaude does not expect them.
 #
-#   ./install.sh               ask about the optional parts where they apply
-#   ./install.sh --polkit      add keepawake's polkit rule without asking
+# The extras have two platforms: WSL, where keepawake holds Windows awake from
+# the Windows side and wsl-update keeps the distribution current, and plain
+# Linux, where keepawake-linux holds this machine awake itself.
+#
+#   ./install.sh               sclaude only (and the extras, if an earlier
+#                              install put them in)
+#   ./install.sh --extras      sclaude and the machine tools
+#   ./install.sh --polkit      the extras, and keepawake's polkit rule
+#                              without asking
 #   ./install.sh --no-polkit   do not add it, and do not ask
 #
 set -euo pipefail
 
 POLKIT_CHOICE=ask
+EXTRAS=0
 for arg in "$@"; do
   case "$arg" in
-    --polkit)    POLKIT_CHOICE=yes ;;
+    --extras)    EXTRAS=1 ;;
+    --polkit)    POLKIT_CHOICE=yes; EXTRAS=1 ;;  # the rule is keepawake's
     --no-polkit) POLKIT_CHOICE=no ;;
-    -h|--help)   sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # The comment at the top, however long it grows.
+    -h|--help)   awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' \
+                   "${BASH_SOURCE[0]}"; exit 0 ;;
     *)           echo "install.sh: unknown option $arg (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -31,6 +42,14 @@ SKILLS="$HOME/.claude/skills"
 CLAUDE="$HOME/.claude"
 
 mkdir -p "$BIN" "$UNITS" "$SKILLS" "$CLAUDE"
+
+# A machine an earlier install gave the extras keeps them on a plain re-run:
+# leaving its keepawake and bot units unwritten would let them drift from the
+# repository without a word.
+if [[ $EXTRAS -eq 0 && -L "$BIN/keepawake" ]]; then
+  EXTRAS=1
+  echo "extras: kept — an earlier install put them in"
+fi
 
 # A systemd unit, written into $UNITS with this checkout's path put in for
 # @REPO@: the checkout may live under any name, and a unit cannot find it any
@@ -50,38 +69,73 @@ WSL=0
 [[ "$(python3 "$REPO/keepawake/state.py" platform 2>/dev/null)" == wsl ]] && WSL=1
 echo "platform: $([[ $WSL -eq 1 ]] && echo WSL || echo Linux)"
 
-for tool in sclaude sclaude-notify sclaude-watch sclaude-proxy keepawake chrome-debug \
-            code-server-start code-server-proxy; do
-  ln -sfn "$REPO/bin/$tool" "$BIN/$tool"
-done
-echo "symlinked: sclaude, sclaude-notify, sclaude-watch, sclaude-proxy, keepawake, chrome-debug, code-server-* in $BIN"
-
-if [[ $WSL -eq 1 ]]; then
-  ln -sfn "$REPO/bin/wsl-update"        "$BIN/wsl-update"
-  ln -sfn "$REPO/bin/keepawake-windows" "$BIN/keepawake-windows"
-  unit wsl-update.service
-  unit wsl-update.timer
-  unit keepawake-windows.service
-  echo "symlinked (WSL): wsl-update, keepawake-windows and their units"
+# systemd's user manager runs sclaude's watcher, proxy and gate, and every
+# extra. `command -v systemctl` is not enough: WSL ships the binary without
+# systemd running (no systemd=true in /etc/wsl.conf), and then the first
+# `systemctl --user` fails and set -e stops the install half-way without a
+# word. Asked once here, and what to do said plainly.
+SYSTEMD=0
+if command -v systemctl >/dev/null 2>&1 \
+   && systemctl --user show-environment >/dev/null 2>&1; then
+  SYSTEMD=1
 else
-  ln -sfn "$REPO/bin/keepawake-linux"             "$BIN/keepawake-linux"
-  unit keepawake-linux.service
-  echo "symlinked (Linux): keepawake-linux and its unit"
+  echo "" >&2
+  echo "error: systemd's user manager does not answer (systemctl --user)." >&2
+  echo "       sclaude needs it for its watcher, proxy and gate." >&2
+  if [[ $WSL -eq 1 ]]; then
+    echo "       In WSL, turn systemd on: put these two lines in /etc/wsl.conf" >&2
+    echo "         [boot]" >&2
+    echo "         systemd=true" >&2
+    echo "       then run 'wsl --shutdown' from Windows, open WSL again and re-run" >&2
+    echo "       ./install.sh." >&2
+  else
+    echo "       Use a distribution that boots with systemd, log in to a session" >&2
+    echo "       of your own (not su or sudo), and re-run ./install.sh." >&2
+  fi
+  echo "       The links below are laid out anyway; no unit is enabled." >&2
+  echo "" >&2
 fi
 
-unit code-server.service
-unit code-server-local.socket
-unit code-server-local.service
-unit keepawake.service
-unit keepawake.timer
-unit keepawake-telegram.service
+for tool in sclaude sclaude-notify sclaude-watch sclaude-proxy chrome-debug; do
+  ln -sfn "$REPO/bin/$tool" "$BIN/$tool"
+done
+echo "symlinked: sclaude, sclaude-notify, sclaude-watch, sclaude-proxy, chrome-debug in $BIN"
+
 unit sclaude-watch.service
 unit sclaude-watch.timer
 unit sclaude-proxy.socket
 unit sclaude-proxy.service
 unit sclaude-gate.socket
 unit sclaude-gate.service
-echo "units: $UNITS/keepawake{.service,.timer,-telegram.service}, code-server.service, sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}, sclaude-gate{.socket,.service}"
+echo "units: $UNITS/sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}, sclaude-gate{.socket,.service}"
+
+if [[ $EXTRAS -eq 1 ]]; then
+  for tool in keepawake code-server-start code-server-proxy; do
+    ln -sfn "$REPO/bin/$tool" "$BIN/$tool"
+  done
+  echo "symlinked (extras): keepawake, code-server-* in $BIN"
+
+  if [[ $WSL -eq 1 ]]; then
+    ln -sfn "$REPO/bin/wsl-update"        "$BIN/wsl-update"
+    ln -sfn "$REPO/bin/keepawake-windows" "$BIN/keepawake-windows"
+    unit wsl-update.service
+    unit wsl-update.timer
+    unit keepawake-windows.service
+    echo "symlinked (WSL): wsl-update, keepawake-windows and their units"
+  else
+    ln -sfn "$REPO/bin/keepawake-linux"             "$BIN/keepawake-linux"
+    unit keepawake-linux.service
+    echo "symlinked (Linux): keepawake-linux and its unit"
+  fi
+
+  unit code-server.service
+  unit code-server-local.socket
+  unit code-server-local.service
+  unit keepawake.service
+  unit keepawake.timer
+  unit keepawake-telegram.service
+  echo "units (extras): $UNITS/keepawake{.service,.timer,-telegram.service}, code-server{.service,-local.socket,-local.service}"
+fi
 
 ln -sfn "$REPO/skills/pr" "$SKILLS/pr"
 echo "symlinked: $SKILLS/pr"
@@ -98,65 +152,56 @@ echo "hooks: $REPO/githooks"
 
 # --- keepawake: the Windows side and the secrets -----------------------------
 
-# The secrets directory. We do not touch the env file itself: an installer must
-# never overwrite somebody's token.
-mkdir -p "$HOME/.config/keepawake"
-chmod 700 "$HOME/.config/keepawake"
-if [[ ! -f "$HOME/.config/keepawake/env" ]]; then
-  echo "note: fill in ~/.config/keepawake/env (a sample is at $REPO/keepawake/env.example)" >&2
-else
-  # We fix the permissions rather than only complaining about them: at start-up
-  # the daemon refuses to work with a file the group can read, and getting a
-  # refusal instead of a fix is a poor substitute for one chmod. We do not touch
-  # the contents.
-  chmod 600 "$HOME/.config/keepawake/env"
-fi
-
-# The PowerShell script is copied to the Windows drive rather than symlinked:
-# over \\wsl$ it would be unreachable exactly when it is needed — with WSL
-# stopped.
-WINUSER=""
-[[ $WSL -eq 1 ]] && WINUSER="$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r')"
-if [[ $WSL -eq 0 ]]; then
-  : # nothing on a Windows drive to install
-elif [[ -n "$WINUSER" && -d "/mnt/c/Users/$WINUSER" ]]; then
-  WINDIR="/mnt/c/Users/$WINUSER/.keepawake"
-  mkdir -p "$WINDIR"
-  # With a BOM rather than a cp: PowerShell 5.1 reads UTF-8 without a BOM as
-  # ANSI, so any non-ASCII byte decodes to something else, string lengths drift
-  # apart, and the script dies on "Missing closing }" where everything is written
-  # correctly. The script is ASCII today, but the BOM costs nothing and removes
-  # the whole class of failure.
-  printf '\xEF\xBB\xBF' > "$WINDIR/KeepAwake.ps1"
-  cat "$REPO/windows/KeepAwake.ps1" >> "$WINDIR/KeepAwake.ps1"
-  echo "copied: $WINDIR/KeepAwake.ps1 (UTF-8 with a BOM)"
-
-  # systemd inside WSL starts the Windows side rather than the Windows startup
-  # folder: while the distribution is not running there is nobody to hold for,
-  # and a process hanging there is not wanted. We remove the old startup shortcut
-  # if it is left over from an earlier version.
-  STARTUP="/mnt/c/Users/$WINUSER/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup"
-  if [[ -f "$STARTUP/KeepAwake.vbs" ]]; then
-    rm -f "$STARTUP/KeepAwake.vbs"
-    echo "removed: $STARTUP/KeepAwake.vbs (systemd starts it now)"
-  fi
-else
-  echo "note: no Windows profile found — keepawake's Windows side is not installed" >&2
-fi
-
-if command -v systemctl >/dev/null 2>&1; then
-  systemctl --user daemon-reload
-  systemctl --user enable --now keepawake.timer
-  echo "enabled: keepawake.timer"
-  if [[ $WSL -eq 1 ]]; then
-    systemctl --user enable --now wsl-update.timer
-    echo "enabled: wsl-update.timer"
-    systemctl --user enable --now keepawake-windows.service
-    echo "enabled: keepawake-windows.service (the hold on the Windows side)"
+if [[ $EXTRAS -eq 1 ]]; then
+  # The secrets directory. We do not touch the env file itself: an installer must
+  # never overwrite somebody's token.
+  mkdir -p "$HOME/.config/keepawake"
+  chmod 700 "$HOME/.config/keepawake"
+  if [[ ! -f "$HOME/.config/keepawake/env" ]]; then
+    echo "note: fill in ~/.config/keepawake/env (a sample is at $REPO/keepawake/env.example)" >&2
   else
-    systemctl --user enable --now keepawake-linux.service
-    echo "enabled: keepawake-linux.service (the hold on this machine)"
+    # We fix the permissions rather than only complaining about them: at start-up
+    # the daemon refuses to work with a file the group can read, and getting a
+    # refusal instead of a fix is a poor substitute for one chmod. We do not touch
+    # the contents.
+    chmod 600 "$HOME/.config/keepawake/env"
   fi
+
+  # The PowerShell script is copied to the Windows drive rather than symlinked:
+  # over \\wsl$ it would be unreachable exactly when it is needed — with WSL
+  # stopped.
+  WINUSER=""
+  [[ $WSL -eq 1 ]] && WINUSER="$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r')"
+  if [[ $WSL -eq 0 ]]; then
+    : # nothing on a Windows drive to install
+  elif [[ -n "$WINUSER" && -d "/mnt/c/Users/$WINUSER" ]]; then
+    WINDIR="/mnt/c/Users/$WINUSER/.keepawake"
+    mkdir -p "$WINDIR"
+    # With a BOM rather than a cp: PowerShell 5.1 reads UTF-8 without a BOM as
+    # ANSI, so any non-ASCII byte decodes to something else, string lengths drift
+    # apart, and the script dies on "Missing closing }" where everything is written
+    # correctly. The script is ASCII today, but the BOM costs nothing and removes
+    # the whole class of failure.
+    printf '\xEF\xBB\xBF' > "$WINDIR/KeepAwake.ps1"
+    cat "$REPO/windows/KeepAwake.ps1" >> "$WINDIR/KeepAwake.ps1"
+    echo "copied: $WINDIR/KeepAwake.ps1 (UTF-8 with a BOM)"
+
+    # systemd inside WSL starts the Windows side rather than the Windows startup
+    # folder: while the distribution is not running there is nobody to hold for,
+    # and a process hanging there is not wanted. We remove the old startup shortcut
+    # if it is left over from an earlier version.
+    STARTUP="/mnt/c/Users/$WINUSER/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup"
+    if [[ -f "$STARTUP/KeepAwake.vbs" ]]; then
+      rm -f "$STARTUP/KeepAwake.vbs"
+      echo "removed: $STARTUP/KeepAwake.vbs (systemd starts it now)"
+    fi
+  else
+    echo "note: no Windows profile found — keepawake's Windows side is not installed" >&2
+  fi
+fi
+
+if [[ $SYSTEMD -eq 1 ]]; then
+  systemctl --user daemon-reload
   # Harmless with nothing to watch: the sweep exits at once when
   # ~/.claude/sclaude/watch is empty or absent, which is the usual state.
   systemctl --user enable --now sclaude-watch.timer
@@ -184,36 +229,63 @@ if command -v systemctl >/dev/null 2>&1; then
     echo "note: sclaude-gate.socket did not start — something holds 127.0.0.1:3001" >&2
   fi
 
-  # code-server deliberately does not come up at boot: it goes out by itself
-  # after 59 minutes of idling (idle-timeout-seconds in config.yaml), and
-  # autostart would bring back to life what was just deliberately shut down. It
-  # is brought up by a button in the bot.
-  if [[ -f "$HOME/.config/code-server/config.yaml" ]]; then
-    echo "on demand: code-server ($(awk '/bind-addr/{print $2}' "$HOME/.config/code-server/config.yaml")) — by a button in the bot"
-    # The local port for the Windows browser: Windows is not in the tailnet,
-    # because Tailscale runs inside WSL and the tailnet address is unreachable
-    # from it. On contact the socket will bring the server up too — Requires in
-    # code-server-local.service.
-    systemctl --user enable --now code-server-local.socket
-    echo "enabled: code-server-local.socket (localhost:8080, brings the server up on demand)"
-  else
-    echo "note: no ~/.config/code-server/config.yaml — code-server is not configured" >&2
+  if [[ $EXTRAS -eq 1 ]]; then
+    systemctl --user enable --now keepawake.timer
+    echo "enabled: keepawake.timer"
+    if [[ $WSL -eq 1 ]]; then
+      systemctl --user enable --now wsl-update.timer
+      echo "enabled: wsl-update.timer"
+      systemctl --user enable --now keepawake-windows.service
+      echo "enabled: keepawake-windows.service (the hold on the Windows side)"
+    else
+      systemctl --user enable --now keepawake-linux.service
+      echo "enabled: keepawake-linux.service (the hold on this machine)"
+    fi
+    # code-server deliberately does not come up at boot: it goes out by itself
+    # after 59 minutes of idling (idle-timeout-seconds in config.yaml), and
+    # autostart would bring back to life what was just deliberately shut down. It
+    # is brought up by a button in the bot.
+    if [[ -f "$HOME/.config/code-server/config.yaml" ]]; then
+      bind="$(sed -n 's/^bind-addr:[[:space:]]*//p' "$HOME/.config/code-server/config.yaml" | head -1)"
+      echo "on demand: code-server (${bind:-127.0.0.1:8080, its default}) — by a button in the bot"
+      # The local port for the Windows browser: Windows is not in the tailnet,
+      # because Tailscale runs inside WSL and the tailnet address is unreachable
+      # from it. On contact the socket will bring the server up too — Requires in
+      # code-server-local.service.
+      #
+      # Only for a server bound elsewhere. 127.0.0.1:8080 is code-server's own
+      # default: a server left on it (or on every address) needs no forward to
+      # be reached from localhost, and the socket would take its port — the
+      # server failing with EADDRINUSE every 10 s, and the proxy forwarding
+      # into its own socket.
+      case "${bind:-127.0.0.1:8080}" in
+        127.0.0.1:8080|localhost:8080|0.0.0.0:8080|\[::\]:8080|\[::1\]:8080)
+          systemctl --user disable --now code-server-local.socket 2>/dev/null || true
+          echo "note: code-server listens on localhost:8080 itself — the local forward is not enabled" >&2
+          echo "      (put bind-addr on the tailnet address to reach it from a phone)" >&2
+          ;;
+        *)
+          systemctl --user enable --now code-server-local.socket
+          echo "enabled: code-server-local.socket (localhost:8080, brings the server up on demand)"
+          ;;
+      esac
+    else
+      echo "note: no ~/.config/code-server/config.yaml — code-server is not configured" >&2
+    fi
+
+    # We enable the daemon only with the token filled in: a service falling into a
+    # restart loop straight after installation is a poor first impression and
+    # rubbish in the journal.
+    if [[ -s "$HOME/.config/keepawake/env" ]] \
+       && grep -q '^KEEPAWAKE_BOT_TOKEN=.\+' "$HOME/.config/keepawake/env" 2>/dev/null; then
+      systemctl --user enable --now keepawake-telegram.service
+      echo "enabled: keepawake-telegram.service"
+    else
+      echo "note: keepawake-telegram is not enabled — there is no token in ~/.config/keepawake/env" >&2
+    fi
   fi
 
-  # We enable the daemon only with the token filled in: a service falling into a
-  # restart loop straight after installation is a poor first impression and
-  # rubbish in the journal.
-  if [[ -s "$HOME/.config/keepawake/env" ]] \
-     && grep -q '^KEEPAWAKE_BOT_TOKEN=.\+' "$HOME/.config/keepawake/env" 2>/dev/null; then
-    systemctl --user enable --now keepawake-telegram.service
-    echo "enabled: keepawake-telegram.service"
-  else
-    echo "note: keepawake-telegram is not enabled — there is no token in ~/.config/keepawake/env" >&2
-  fi
-
-  systemctl --user list-timers keepawake.timer sclaude-watch.timer --no-pager || true
-else
-  echo "systemctl not found — skipped timer setup" >&2
+  systemctl --user list-timers sclaude-watch.timer $([[ $EXTRAS -eq 1 ]] && echo keepawake.timer) --no-pager || true
 fi
 
 # systemctl --user lives only while there is a user session. Closing the last
@@ -233,7 +305,7 @@ if command -v dpkg >/dev/null 2>&1; then
 else
   command -v sshd >/dev/null 2>&1 || [[ -x /usr/sbin/sshd ]] || NO_SSHD=1
 fi
-if [[ -n "${NO_SSHD:-}" ]]; then
+if [[ $EXTRAS -eq 1 && -n "${NO_SSHD:-}" ]]; then
   echo "note: openssh-server is not installed — mobile SSH sessions are impossible;" >&2
   echo "      see the \"keepawake\" section in the README" >&2
 fi
@@ -295,6 +367,7 @@ polkit_add() {
 }
 
 polkit_offer() {
+  [[ $EXTRAS -eq 1 ]] || return 0
   [[ $WSL -eq 0 ]] || return 0
   command -v loginctl >/dev/null 2>&1 || return 0
   [[ -d "$(dirname "$(dirname "$POLKIT_RULE")")" ]] || return 0
@@ -339,12 +412,17 @@ polkit_offer() {
     echo "  No terminal to ask in: run ./install.sh --polkit to add it." >&2
     return 0
   fi
+  # No default, as everywhere in sclaude: asked again until it is a yes or a
+  # no. End of input is a no — there is nobody left to answer.
   local answer=""
-  read -rp "  Add it now? [y/N] " answer || answer=""
-  case "$answer" in
-    y|Y|yes|YES|Yes) polkit_add ;;
-    *) echo "  Not added. Later: ./install.sh --polkit" ;;
-  esac
+  while :; do
+    read -rp "  Add it now? [y/n] " answer || { answer=n; echo; }
+    case "${answer,,}" in
+      y|yes) polkit_add; break ;;
+      n|no)  echo "  Not added. Later: ./install.sh --polkit"; break ;;
+      *)     echo "  Please answer y or n." ;;
+    esac
+  done
 }
 
 polkit_offer
@@ -354,5 +432,13 @@ case ":$PATH:" in
   *) echo "note: $BIN is not on PATH — add it in your shell rc" >&2 ;;
 esac
 
+if [[ $EXTRAS -eq 0 ]]; then
+  echo "extras: not installed — keepawake, its Telegram bot, code-server, wsl-update"
+  echo "        come with ./install.sh --extras"
+fi
+
 echo ""
 echo "next: run 'sclaude doctor' — it checks what is still missing and names the fix"
+# Without systemd the install is not whole, and a script running it should
+# know: the error above said what to do.
+[[ $SYSTEMD -eq 1 ]] || exit 1

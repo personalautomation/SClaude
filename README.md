@@ -192,7 +192,7 @@ further a product is from it, the more of sclaude it simply goes without.
 
 | what | why |
 |---|---|
-| Linux or WSL2, with systemd | the commands are bash; the QA watch, the per-feature proxy and keepawake are systemd user units. macOS is not supported |
+| Linux or WSL2, with systemd | the commands are bash; the QA watch and the per-feature proxy are systemd user units. On WSL, systemd has to be switched on (`systemd=true` in `/etc/wsl.conf`); `install.sh` says how if it is not. macOS is not supported |
 | git, python3 | everything sclaude does goes through them |
 | the `claude` CLI, with auto mode and Bash allowed | every step is a Claude Code session; without those settings steps 2–4 stop on permission prompts |
 | a GitHub repository and `gh`, logged in with the `project` scope | issues, pull requests, the board and QA's verdicts all live on GitHub |
@@ -216,7 +216,8 @@ skipped, and sclaude says so where it would have acted:
 to reach features and the machine from a phone, a Telegram bot of your own for
 sclaude's questions and keepawake, Termius for SSH and code-server for an editor
 in the phone's browser. On WSL, keepawake keeps Windows from sleeping while you
-work from the phone.
+work from the phone. These machine tools are not installed unless you ask for
+them: `./install.sh --extras`.
 
 `sclaude doctor` checks the required part, and inside a product the parts that
 product uses.
@@ -229,11 +230,17 @@ cd ~/sclaude && ./install.sh
 ```
 
 The checkout may live under any name. `install.sh` can be run as often as you
-like: it links the commands into `~/.local/bin`, the skills into
+like: it links sclaude's commands into `~/.local/bin`, the skills into
 `~/.claude/skills` and the status line into `~/.claude`, installs and enables
-the systemd timers for WSL or plain Linux, and wires up this repository's git
-hooks. Re-run it after pulling a change to a systemd unit. `~/.local/bin` has
-to be in `PATH` (it usually is).
+sclaude's systemd units, and wires up this repository's git hooks. Re-run it
+after pulling a change to a systemd unit. `~/.local/bin` has to be in `PATH`
+(it usually is). Without a working systemd it lays out the links, enables
+nothing, says what to do, and exits with an error.
+
+By default that is sclaude alone. The machine tools that grew up next to it —
+[keepawake](#binkeepawake) and its Telegram bot, code-server,
+[wsl-update](#binwsl-update) — come with `./install.sh --extras`. A machine
+that already has them keeps them on a plain re-run.
 
 Then run `sclaude doctor`. It lists what the machine still lacks and the command
 that fixes each gap. Run inside a product, it also runs the checks the product
@@ -252,11 +259,11 @@ whole team at their next command. What is the team's own lives elsewhere:
 | what | where |
 |---|---|
 | the orchestrator, its prompts, `MAINTAINERS` | here, one copy for everybody |
-| the product and the team's process: tests, manuals, production, migrations, the GitHub board, its maintainers | `.sclaude/config.json` in the product's repository, committed |
+| the product and the team's process: tests, manuals, production, migrations, the GitHub board, its maintainers, where its records are gathered | `.sclaude/config.json` in the product's repository, committed |
 | the team's sclaude rules for the product | `.sclaude/team/` in the product, committed, written by its maintainers |
 | one developer's sclaude rules for the product | `.sclaude/people/<name>/` in the product, committed |
 | what one machine keeps about the product: a feature's working files, terminal recordings | `.sclaude/local/` in the product, never committed, never deployed |
-| the person: name, database choice, the Telegram bot, where records are gathered | `~/.config/sclaude/`, `~/.config/keepawake/env`, `~/.claude/sclaude/` |
+| the person: name, database choice, the Telegram bot, their cycle records | `git config sclaude.developer`, `~/.config/sclaude/`, `~/.config/keepawake/env`, `~/.claude/sclaude/` |
 
 In the product everything lives in one folder, `.sclaude/`. The one file at the
 root is `.vercelignore`, because Vercel reads it nowhere else; sclaude keeps it
@@ -313,8 +320,10 @@ A step may also get extra instructions from the product or from you:
 `.sclaude/team/prompts/<step>.md` and `.sclaude/people/<name>/prompts/<step>.md`
 are appended after sclaude's own prompt for that step.
 
-**Who you are.** The part of your `git config user.email` before the `@`
-(`SCLAUDE_DEV` overrides it). It names your branch, marks your records, and is
+**Who you are.** The part of your `git config user.email` before the `@`, or
+the name you set with `git config --global sclaude.developer <name>` (and
+`SCLAUDE_DEV` overrides both for one shell). Prefer the git setting to an
+environment variable: the Telegram bot and the background units see it too. It names your branch, marks your records, and is
 passed to the product's tests as `SCLAUDE_DEV`, so tests that create data on a
 shared database can mark it as yours and clean up only their own.
 
@@ -322,8 +331,9 @@ shared database can mark it as yours and clean up only their own.
 so each person makes their own with @BotFather. See [keepawake](#binkeepawake).
 
 **Gathering the team's records.** Optional: name a git repository of the team's
-in `~/.config/sclaude/metrics-remote`, and each person's cycle records are
-published there as `<name>.jsonl`.
+under `metrics` in the product's `.sclaude/config.json`, and each person's cycle
+records of that product are published there as `<name>.jsonl`. Only that
+product's: somebody working on two products publishes each to its own team.
 
 ## bin/sclaude
 
@@ -438,7 +448,7 @@ is stopped, database included (data kept), and starts again on the next visit.
 | variable | effect |
 |---|---|
 | `SCLAUDE_ENV` | the environment to use, instead of the remembered answer |
-| `SCLAUDE_DEV` | your name, instead of the one from your git email |
+| `SCLAUDE_DEV` | your name, instead of `sclaude.developer` or the one from your git email |
 | `SCLAUDE_NO_SYNC=1` | do not pull the latest sclaude before a command |
 | `SCLAUDE_NO_RELOAD=1` | do not switch to newer sclaude code after a long session |
 | `SCLAUDE_TERM=off` | do not record the terminal (recordings are kept 60 days) |
@@ -554,6 +564,8 @@ each step, without pulling the window in front of whatever you are looking at.
 
 ## bin/wsl-update
 
+Installed with `./install.sh --extras`, under WSL only.
+
 The daily update of the tooling in WSL2: apt, nvm and Node, global npm packages,
 Claude Code and its plugins, Playwright's Chromium, code-server. It also reports
 outdated dependencies for the projects listed in `~/.config/sclaude/projects`
@@ -574,6 +586,8 @@ journalctl --user -u wsl-update.service
 ```
 
 ## bin/keepawake
+
+Installed with `./install.sh --extras`.
 
 Keeps the machine awake while there is work going on, so it can continue from a
 phone while the laptop stands closed. Under WSL it holds Windows awake; on plain
@@ -624,10 +638,11 @@ with `systemd-inhibit`. By default a background service may only stop the
 machine sleeping *when idle*: a closed lid or an explicit suspend still sleeps
 it, and the hold log says so once.
 
-`install.sh` offers to change that on plain Linux, and only there. It explains
+`install.sh --extras` offers to change that on plain Linux, and only there. It explains
 when the rule is worth having (a laptop you close while working from a phone),
-shows the command that removes it, and asks. `./install.sh --polkit` adds it
-without asking, `--no-polkit` skips the question. To remove it later:
+shows the command that removes it, and asks for a yes or a no.
+`./install.sh --polkit` adds it without asking, `--no-polkit` skips the
+question. To remove it later:
 
 ```bash
 sudo rm /etc/polkit-1/rules.d/49-keepawake.rules && systemctl --user restart keepawake-linux.service
@@ -689,7 +704,10 @@ user name. No port forwarding or firewall rule is needed: Tailscale runs inside
 WSL, so the phone reaches it directly.
 
 code-server opens in the phone's browser at `http://<tailscale-ip>:8080`; the
-password is in `~/.config/code-server/config.yaml`.
+password is in `~/.config/code-server/config.yaml`. Put its `bind-addr` on the
+Tailscale address: `install.sh` then also opens `localhost:8080` for the
+laptop's browser. A code-server left on its default `127.0.0.1:8080` gets no
+such forward — it already answers there.
 
 ```bash
 journalctl --user -u keepawake-telegram.service -f   # the bot's log
@@ -715,3 +733,9 @@ them — and with them the QA section of the pull request the `pr` skill builds.
 The hook asks git itself what it will see, and compares.
 
 `install.sh` points this repository at it through `core.hooksPath`.
+
+## Contributing, and the licence
+
+[CONTRIBUTING.md](CONTRIBUTING.md) is the short way in: connecting a product,
+what lives in its `.sclaude/`, proposing a change to sclaude and running the
+tests. sclaude is under the [MIT licence](LICENSE).

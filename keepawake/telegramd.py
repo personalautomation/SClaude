@@ -39,7 +39,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from keepawake import docs, state
-from keepawake.i18n import DEFAULT, current, set_lang, ssh_holders, t
+from keepawake.i18n import DEFAULT, STRINGS, current, set_lang, ssh_holders, t
 from keepawake.state import (HOLD_SECONDS, local_label, locked, needs_warning,
                              read, touch)
 
@@ -263,7 +263,6 @@ def is_menu_button(text):
     # language of that moment. The language may have changed since — Telegram
     # reports it in every update — while the person's old button stayed as it
     # was. So we compare against both variants rather than the current one.
-    from keepawake.i18n import STRINGS
     return text in STRINGS["menu.button"]
 
 
@@ -1001,11 +1000,12 @@ def pending_ask(repo):
     return data
 
 
-# The labels of the options that mean a refusal. The orchestrator prints them:
-# "Go back" in the action list, "none, go back" in the feature picker. We match
-# on the start of the string and in both languages — the list is drawn in
-# English, but translations of it are still to come.
-BACK_OPTIONS = ("go back", "none, go back", "назад", "ничего")
+# The labels of the options that mean a refusal, from i18n: "Go back" in the
+# action list, "none, go back" in the feature picker. We match on the start of
+# the string and in both languages — the list is drawn in English, but
+# translations of it are still to come.
+BACK_OPTIONS = tuple(text for key in ("option.back", "option.none")
+                     for text in reversed(STRINGS[key]))
 
 
 def is_back_option(label):
@@ -1167,7 +1167,7 @@ def clip_bytes(text, limit):
     # Telegram's ceiling on a button's text is in bytes, not characters.
     # Counting in characters works exactly up to the first non-ASCII one: 59
     # characters is 110 bytes, twice the ceiling. The labels are English today,
-    # but BACK_OPTIONS already holds Russian, and translations of the list are
+    # but BACK_OPTIONS already matches Russian, and translations of the list are
     # still to come.
     #
     # We cut by code points rather than by slicing bytes: a slice tears a

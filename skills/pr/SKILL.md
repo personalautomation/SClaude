@@ -312,12 +312,12 @@ guessing at somebody else's conversation.
 
 ### 6. Run the checks
 
-Before opening the PR:
-
-```bash
-npm run typecheck
-npm run lint
-```
+Before opening the PR, run the project's own type check and lint. Their
+commands are the project's, not this skill's: `commands.typecheck` and
+`commands.lint` in `.sclaude/config.json` where the project has one, otherwise
+the matching scripts in its `package.json` (for a Node project usually
+`npm run typecheck` and `npm run lint`) or what its `CLAUDE.md` names. Run the
+ones that exist; a project with neither has nothing to run here.
 
 And whatever further checks the project's `CLAUDE.md` asks for after the kind
 of change you made — they are the project's, not this skill's.
@@ -442,8 +442,8 @@ for nothing beyond "fix this", say that plainly rather than inventing a list.
 ### How to verify
 
 The steps somebody actually takes: what to click or run, and what they should
-see. Name the checks you ran and their result (`npm run typecheck`, `npm run
-lint`, and any `check:*` the change called for), and say when a check was *not*
+see. Name the checks you ran and their result (the type check, the lint, and any
+further check the change called for, each by its command), and say when a check was *not*
 needed and why. For a change that is not user-visible, say so here too.
 
 ### Notes

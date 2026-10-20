@@ -532,14 +532,21 @@ feature_worktree() {
 metrics_append() {
   local wt="$1" outcome="$2" state="$1/.sclaude/local/feature/state.json"
   [[ -f "$state" ]] || return 0
-  SCLAUDE_DEVELOPER="$(developer_name 2>/dev/null || true)" \
+  # The product, named in the record: the state never carried it, and every
+  # record said "repo": null — nothing to tell two products' records apart by.
+  local repo="${REPO:-}"
+  [[ -n "$repo" ]] || repo="$(cd "$wt" 2>/dev/null && main_repo)" || repo=""
+  SCLAUDE_DEVELOPER="$(developer_name 2>/dev/null || true)" SCLAUDE_REPO="$repo" \
     python3 "$LIB/metrics.py" "$state" "$outcome" 2>/dev/null || true
-  # To the team's own repository, where it named one (metrics.py, REMOTE_FILE).
-  # In the background: a push over the network has no business delaying the
-  # clean-up of a merged feature, and a failure only means the next record
-  # carries this one along with it.
-  local dev; dev="$(developer_name 2>/dev/null || true)"
-  if [[ -n "$dev" && -z "${SCLAUDE_NO_SYNC:-}" ]]; then
-    ( python3 "$LIB/metrics.py" publish "$dev" >/dev/null 2>&1 & )
+  # To the product team's own repository, where its .sclaude/config.json names
+  # one under `metrics` — this product's records only (metrics.py). In the
+  # background: a push over the network has no business delaying the clean-up
+  # of a merged feature, and a failure only means the next record carries this
+  # one along with it.
+  local dev url
+  dev="$(developer_name 2>/dev/null || true)"
+  url="$(project_get metrics "$repo" 2>/dev/null || true)"
+  if [[ -n "$dev" && -n "$url" && -n "$repo" && -z "${SCLAUDE_NO_SYNC:-}" ]]; then
+    ( python3 "$LIB/metrics.py" publish "$dev" "$url" "$repo" >/dev/null 2>&1 & )
   fi
 }

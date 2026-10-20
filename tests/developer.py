@@ -12,6 +12,8 @@
 #
 #   $SCLAUDE_DEV wins           a bench or a profile cannot pick a name.
 #   git user.email              everybody is anonymous on a machine that commits.
+#   git sclaude.developer       a name set in ~/.profile only, and the bot and
+#                               the systemd units naming somebody else.
 #   nothing set                 an error where today's behaviour was wanted.
 #   sanitising                  pwtest-ilia.p-...@example.com, dev/Ilia/x.
 #   MAINTAINERS present         a stranger commits the orchestrator to main.
@@ -80,6 +82,11 @@ with tempfile.TemporaryDirectory() as tmp:
           run("developer_name", repo, {"SCLAUDE_DEV": "alice"}), "alice")
     check("env-sanitised-slash-and-case",
           run("developer_name", repo, {"SCLAUDE_DEV": "Bob/Smith."}), "bob-smith")
+    git(repo, "config", "sclaude.developer", "Carol")
+    check("git-key-beats-email", run("developer_name", repo), "carol")
+    check("env-beats-git-key",
+          run("developer_name", repo, {"SCLAUDE_DEV": "alice"}), "alice")
+    git(repo, "config", "--unset", "sclaude.developer")
     check("sanitise-collapses-and-trims",
           run("developer_sanitize '..a__b..'", repo), "a-b")
 

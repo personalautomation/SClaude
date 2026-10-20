@@ -48,9 +48,10 @@ Two things to know when you use it:
   dispatch the review workflow from `main` with the PR number.
 
 **This is for product repositories, not for tooling.** sclaude's own checkout — the
-user's own scripts and skills — is committed and pushed straight to `main` every
-time, without a branch, a PR, or asking. A change to this very skill ships that
-way.
+user's own scripts and skills — never goes through this skill. Who commits there
+straight to `main` and who proposes on `dev/<name>` is decided by its `MAINTAINERS`
+file, as that checkout's `CLAUDE.md` describes. A change to this very skill ships
+that way.
 
 ## GitHub flow
 

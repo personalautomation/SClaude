@@ -72,18 +72,18 @@ breaks the other silently — grep before you edit:
   declined thread repeats an earlier one, is read by `CITED` in
   `sclaude/lib/review_report.py`; `tests/review-report.py` checks both sides.
 
-  *(The two entries above were added by Claude, not asked for line by line:
+  <!-- The two entries above were added by Claude, not asked for line by line:
   they came with the parallel-features fixes of 2026-10-09, so that a later
-  edit to one side does not silently break the other.)*
+  edit to one side does not silently break the other. -->
 
 - `CHECKS_VERDICTS` in `sclaude/lib/pr_context.py` — the exit codes and first
   words that `sclaude checks` ends on — is listed in `sclaude/prompts/review.md`,
   which tells step 4 what each one means; `tests/checks-wait.py` checks the two
   agree.
 
-  *(Added by Claude on 2026-10-14, as the plan for the bounded step 4 wait
+  <!-- Added by Claude on 2026-10-14, as the plan for the bounded step 4 wait
   asked: the prompt acts on the codes, so a code changed on one side alone
-  would send a session the wrong way without an error.)*
+  would send a session the wrong way without an error. -->
 
 - `LOCAL_SIGNATURE` in `sclaude/lib/pr_context.py` ends every finding and
   reply a review run on this machine posts (`local_review.py`), and is how
@@ -93,8 +93,8 @@ breaks the other silently — grep before you edit:
   by `LOCAL_JOURNAL` in `review_report.py`; `tests/local-review-report.py`
   reads what the other side wrote.
 
-  *(Added by Claude on 2026-10-15 with the `review` key, so that a change to
-  one side does not silently turn the review's words into a person's.)*
+  <!-- Added by Claude on 2026-10-15 with the `review` key, so that a change to
+  one side does not silently turn the review's words into a person's. -->
 
 ## Public repository, private projects
 

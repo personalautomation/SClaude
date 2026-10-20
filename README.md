@@ -24,8 +24,8 @@ a CTO, a lead — rather than for the developer installing it:
 
 | deck | what it covers |
 |---|---|
-| [`startup-ai-stack.html`](docs/presentations/startup-ai-stack.html) | the stack for a PoC or an MVP and why each tool is in it; the whole development cycle from a phone: the Claude app, the Telegram bot, Tailscale and Termius as the spare key, keepawake |
-| [`sclaude.html`](docs/presentations/sclaude.html) | sclaude in depth: the fixed path of a feature, gates on evidence, rules in hooks, the friction review, the retrospective and the monthly review, AI review, the team setup |
+| [`sclaude_in_details.html`](docs/presentations/sclaude_in_details.html) | sclaude in depth: the fixed path of a feature, gates on evidence, rules in hooks, the friction review, the retrospective and the monthly review, AI review, the team setup |
+| [`sclaude_instruments.html`](docs/presentations/sclaude_instruments.html) | the stack for a PoC or an MVP and why each tool is in it; the whole development cycle from a phone: the Claude app, the Telegram bot, Tailscale and Termius as the spare key, keepawake |
 
 Each is one self-contained page: open it in a browser and page through with
 the arrow keys; on a phone the slides stack into one column. GitHub shows the

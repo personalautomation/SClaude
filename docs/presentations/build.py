@@ -18,18 +18,18 @@ SRC = HERE / "src"
 
 DECKS = [
     # file, title, the mark at the foot of each slide, the link to the other deck
-    ("startup-ai-stack.html", "Laptop-to-Phone AI Stack", "AI stack for PoC & MVP",
-     '<a href="{{SCLAUDE}}" target="_blank" rel="noopener">sclaude deck &rarr;</a>'),
-    ("sclaude.html", "sclaude in Depth", "sclaude · in depth",
+    ("sclaude_in_details.html", "sclaude in Depth", "sclaude · in depth",
      '<a href="{{STACK}}" target="_blank" rel="noopener">&larr; stack deck</a>'),
+    ("sclaude_instruments.html", "Laptop-to-Phone AI Stack", "AI stack for PoC & MVP",
+     '<a href="{{SCLAUDE}}" target="_blank" rel="noopener">sclaude deck &rarr;</a>'),
 ]
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", type=Path, default=HERE)
-    ap.add_argument("--stack-url", default="startup-ai-stack.html")
-    ap.add_argument("--sclaude-url", default="sclaude.html")
+    ap.add_argument("--stack-url", default="sclaude_instruments.html")
+    ap.add_argument("--sclaude-url", default="sclaude_in_details.html")
     args = ap.parse_args()
 
     head = (SRC / "head.html").read_text()

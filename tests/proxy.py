@@ -405,7 +405,39 @@ def check_gate(proxy_port, root):
         proc.wait(timeout=5)
 
 
+def check_heal_path():
+    """A saved PATH naming a Node nvm has since uninstalled reaches the one installed."""
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+    loader = SourceFileLoader("sclaude_proxy", PROXY)
+    mod = module_from_spec(spec_from_loader("sclaude_proxy", loader))
+    loader.exec_module(mod)
+    home = tempfile.mkdtemp(prefix="proxy-nvm-")
+    try:
+        versions = os.path.join(home, ".nvm", "versions", "node")
+        for version in ("v24.9.0", "v24.22.0"):
+            os.makedirs(os.path.join(versions, version, "bin"))
+        gone = os.path.join(versions, "v24.21.0", "bin")
+        there = os.path.join(versions, "v24.9.0", "bin")
+        newest = os.path.join(versions, "v24.22.0", "bin")
+        elsewhere = os.path.join(home, "no-such", "bin")
+        check("heal_path: a Node that is gone becomes the newest installed",
+              mod.heal_path(os.pathsep.join(["/usr/bin", gone, "/bin"])),
+              os.pathsep.join(["/usr/bin", newest, "/bin"]))
+        check("heal_path: a Node that is still there is kept, older or not",
+              mod.heal_path(there), there)
+        check("heal_path: a missing directory outside nvm is left alone",
+              mod.heal_path(elsewhere), elsewhere)
+        shutil.rmtree(versions)
+        os.makedirs(versions)
+        check("heal_path: with no Node installed the entry stays as it was",
+              mod.heal_path(gone), gone)
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
 def main():
+    check_heal_path()
     root = tempfile.mkdtemp(prefix="sclaude-proxy-")
     registry = os.path.join(root, "registry")
     os.makedirs(registry)

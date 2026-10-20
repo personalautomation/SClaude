@@ -398,10 +398,44 @@ def run_env():
         with open(os.path.join(REGISTRY, ".path")) as fh:
             path = fh.read().strip()
         if path:
-            env["PATH"] = path
+            env["PATH"] = heal_path(path)
     except OSError:
         pass
     return env
+
+
+def heal_path(path):
+    """The saved PATH with each Node that is gone swapped for the one that is there.
+
+    The PATH is saved by whoever last ran `sclaude dev` from a shell, and names
+    one Node by version: ~/.nvm/versions/node/v24.21.0/bin. wsl-update installs
+    the next release and uninstalls the old one, so the saved directory stops
+    existing the morning after — and with it npm. On 2026-10-20 every lazy start
+    died at `setsid: failed to execute npm` until somebody ran sclaude by hand.
+
+    So an entry under an nvm `versions/node/` directory that no longer exists is
+    replaced by the newest version installed beside it. Nothing else is touched:
+    a missing directory elsewhere on the PATH is not the proxy's to guess at."""
+    def version_key(name):
+        try:
+            return tuple(int(part) for part in name.lstrip("v").split("."))
+        except ValueError:
+            return ()
+
+    healed = []
+    for entry in path.split(os.pathsep):
+        versions = os.path.dirname(os.path.dirname(entry))
+        if (os.path.basename(entry) == "bin" and not os.path.isdir(entry)
+                and versions.endswith(os.path.join("versions", "node"))):
+            try:
+                installed = [name for name in os.listdir(versions)
+                             if os.path.isdir(os.path.join(versions, name, "bin"))]
+            except OSError:
+                installed = []
+            if installed:
+                entry = os.path.join(versions, max(installed, key=version_key), "bin")
+        healed.append(entry)
+    return os.pathsep.join(healed)
 
 
 class NotStarted:

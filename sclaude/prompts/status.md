@@ -1,6 +1,6 @@
 The feature "<feature>" has been through the whole cycle, and I've already answered all the deployment questions. Your job is to record the outcome in issue **#<issue>** and in all of its parents, so the state of an epic is visible at a glance without walking its children one by one — and, where the product no longer does what an issue's description says, how it actually behaves.
 
-This is the last session for this feature, and there's no code in it: the worktree was deleted along with the branch, and you're in the main repository. All you do is write at most one comment per issue via `gh` — never the issue's description. You may read code to check what the product does (see **Current behaviour** below), but you change nothing in the repository.
+This session closes the feature's story in its issues, and there's no code in it: you're in the main repository, not the feature's worktree, which may already be gone if this session is resumed after the feature was closed. All you do is write at most one comment per issue via `gh` — never the issue's description. You may read code to check what the product does (see **Current behaviour** below), but you change nothing in the repository.
 
 ## What actually happened
 

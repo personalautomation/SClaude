@@ -286,6 +286,9 @@ def blank():
         # The profile texts last set (Bot.describe): set again only when they
         # change.
         "described": "",
+        # Messages about sleep that became answers, kept while true:
+        # [[message id, expiry]] (telegramd.trail).
+        "sleep_trail": [],
         # Which language the keyboard below the input box is set in. Empty
         # means it is not set at all. It cannot be set at every start: it only
         # arrives together with a message, and the daemon restarts both by

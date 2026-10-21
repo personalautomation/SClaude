@@ -850,6 +850,7 @@ class FakeBot(object):
 
     def edit(self, mid, text, kb=None):
         self.edits.append((mid, text))
+        return not self.offline
 
     def unbutton(self, mid):
         self.unbuttoned.append(mid)
@@ -2453,9 +2454,71 @@ with sandbox() as box:
     check("released elsewhere — it will sleep",
           bot.edits, [(31, telegramd.t("sleep.accepted"))])
     bot = FakeBot()
-    warned(until_ts=now_w - 4000, warned_for_ts=now_w - 4000)
+    warned(until_ts=now_w - 5, warned_for_ts=now_w - 5)
     tg_settle.settle_warning(bot, read(), now_w)
-    check("an hour past its deadline it goes", bot.deletes, [31])
+    check("past its deadline it goes", bot.deletes, [31])
+
+    # No message about sleep outlives its truth: an answer goes at its
+    # deadline, and every earlier one with a new warning.
+    with state.locked() as st:
+        st["sleep_trail"] = []
+    tg_settle.trail(41, now_w + 600)
+    tg_settle.trail(42, now_w - 1)
+    bot = FakeBot()
+    tg_settle.sweep_trail(bot, now_w)
+    check("an answer past its deadline goes", (bot.deletes, read()["sleep_trail"]),
+          ([42], [[41, now_w + 600]]))
+    with state.locked() as st:
+        st.update(dict(until_ts=now_w + 1200, warned_for_ts=0, warn_message_id=0,
+                       decision="", updated_ts=now_w))
+    bot = FakeBot()
+    real_needs = tg_settle.needs_warning
+    tg_settle.needs_warning = lambda data, now: True
+    try:
+        tg_settle.check_warning(bot)
+    finally:
+        tg_settle.needs_warning = real_needs
+    check("a new warning takes every earlier one away",
+          (41 in bot.deletes, read()["sleep_trail"]), (True, []))
+    # A press keeps its answer only while true.
+    warned()
+    bot = FakeBot()
+    tg_settle.Handler(bot).callback({"id": "c", "data": "sleep:%d" % (now_w + 600),
+                                     "message": {"message_id": 31}})
+    check_true("a press's answer is kept while Windows counts its idle time",
+               [e[0] for e in read()["sleep_trail"]] == [31]
+               and read()["sleep_trail"][0][1] >= now_w + tg_settle.IDLE_SLEPT_KEEP)
+    check("and lets the hard hold go too", read().get("hard_hold"), False)
+    # A later reply about sleep takes the earlier one away.
+    bot = FakeBot()
+    tg_settle.Handler(bot).cmd_extend()
+    check("an /extend reply replaces the earlier answer",
+          (31 in bot.deletes, [e[0] for e in read()["sleep_trail"]]), (True, [777]))
+    # A reply about sleep takes the open warning away too, and an unsent one
+    # takes nothing.
+    with state.locked() as st:
+        st["sleep_trail"] = [[61, now_w + 600]]
+        st["warn_message_id"] = 62
+    bot = FakeBot()
+    tg_settle.said_sleep(bot, 0, now_w + 600)
+    check("an unsent reply replaces nothing", bot.deletes, [])
+    tg_settle.said_sleep(bot, 63, now_w + 600)
+    check("a reply replaces the earlier line and the open warning",
+          (sorted(bot.deletes), read()["warn_message_id"],
+           [e[0] for e in read()["sleep_trail"]]), ([61, 62], 0, [63]))
+    with state.locked() as st:
+        st["sleep_trail"] = []
+    # The network down: the line is kept to be tried again.
+    with state.locked() as st:
+        st["sleep_trail"] = [[51, now_w - 1]]
+    bot = FakeBot()
+    bot.offline = True
+    bot.delete = lambda mid: False
+    tg_settle.sweep_trail(bot, now_w)
+    check("a line the network kept stays to be tried again",
+          read()["sleep_trail"], [[51, now_w - 1]])
+    with state.locked() as st:
+        st["sleep_trail"] = []
     bot = FakeBot()
     warned()
     tg_settle.Handler(bot).callback({"id": "c", "data": "extend:%d" % (now_w + 600),

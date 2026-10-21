@@ -454,8 +454,6 @@ STRINGS = {
     "sleep.accepted":    ("😴 Хорошо, ноутбук уснёт как обычно.",
                           "😴 Fine, the laptop will sleep as usual."),
     "sleep.stale":       ("Это сообщение устарело", "This message is out of date"),
-    "sleep.staletext":   ("⏰ <i>Сообщение устарело.</i>",
-                          "⏰ <i>Message is out of date.</i>"),
     "extended.plain":    ("Продлено до <b>%(at)s</b>.",
                           "Extended until <b>%(at)s</b>."),
 

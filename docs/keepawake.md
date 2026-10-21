@@ -187,8 +187,13 @@ edited into what it did, without buttons, and stays as a line of history, as an
 answered question does.
 
 The bot's own questions are settled the same way: the sleep warning becomes
-"extended until" or "will sleep" when the deadline moved without a press on it,
-and goes an hour past its deadline; the question about forgotten holders goes
+"extended until" or "will sleep" when the deadline moved, by a press or without
+one, and goes once its deadline has passed. No message about sleep outlives its
+truth: each answer — to the warning, /extend, /sleep, the keepawake menu, the
+question about forgotten holders — is kept with its expiry (`sleep_trail` in the
+state) and goes when it passes, within Telegram's 48 hours for deleting; a new
+answer or warning takes every earlier one away, so the chat shows at most the
+one that holds now. A line the network kept is tried again on the next turn. The question about forgotten holders goes
 once nothing holds, someone typed, or no session is left; the "until what time?"
 prompt becomes the answer, or goes with its input box when the person leaves it.
 

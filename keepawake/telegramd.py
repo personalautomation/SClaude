@@ -249,12 +249,15 @@ class Bot(object):
             log.warning("setChatMenuButton: %s", exc)
 
     def edit(self, message_id, text, keyboard=None):
+        # Whether the edit went through.
         try:
             self.call("editMessageText", chat_id=self.chat_id,
                       message_id=message_id, text=text, parse_mode="HTML",
                       reply_markup={"inline_keyboard": keyboard} if keyboard else None)
+            return True
         except Exception as exc:
             log.warning("did not edit: %s", exc)
+            return False
 
     # --- topics -------------------------------------------------------------
     #
@@ -305,6 +308,9 @@ class Bot(object):
                             message_id=message_id)
             return bool(out.get("result"))
         except Exception as exc:
+            # Already gone — deleted by hand, or with its topic — is gone.
+            if "not found" in (getattr(exc, "telegram", "") or str(exc).lower()):
+                return True
             log.warning("did not delete: %s", exc)
             return False
 
@@ -326,10 +332,11 @@ def retire(bot, message_id):
     # delete only for 48 hours; past that the message is edited instead, and
     # the edit takes its buttons away — a press on a dead question must not be
     # possible.
+    # Returns whether the message is gone or edited: False is the network's,
+    # and a caller that keeps the id can try again.
     if not message_id:
-        return
-    if not bot.delete(message_id):
-        bot.edit(message_id, t("msg.stale"))
+        return True
+    return bool(bot.delete(message_id) or bot.edit(message_id, t("msg.stale")))
 
 
 def unstyled(markup):
@@ -488,18 +495,22 @@ def settle_awaiting(bot, text=None, keyboard=None):
     with locked() as st:
         ids = st.get("awaiting_ids") or {}
         st["awaiting_ids"] = {}
+    # Returns the message that carries the answer, if any.
     menu, prompt = ids.get("menu") or 0, ids.get("prompt") or 0
+    said = 0
     if text and menu:
         bot.edit(menu, text, keyboard)
         # Answered, the menu it stood in is a line of history now (see
         # Handler.result), not a screen for the next one to replace.
         forget_screen(menu)
+        said = menu
     elif text:
-        bot.send(text, keyboard)
+        said = bot.send(text, keyboard)
     else:
         forget_screen(menu)
         retire(bot, menu)
     retire(bot, prompt)
+    return said
 
 
 def forget_screen(message_id):
@@ -2229,7 +2240,8 @@ class Handler(object):
             log.info("\"stay awake until\" %s: deadline until %s", text, until)
             # The question becomes its answer, and the typed time goes with the
             # input box, as an answer to sclaude's question does.
-            settle_awaiting(self.bot, t("extended.plain", at=local_for_lang(until)))
+            said = settle_awaiting(self.bot, t("extended.plain", at=local_for_lang(until)))
+            said_sleep(self.bot, said, read().get("until_ts") or 0)
             self.bot.delete(msg.get("message_id") or 0)
             return
 
@@ -2442,13 +2454,15 @@ class Handler(object):
     def cmd_extend(self, now=0):
         until = hold_for(HOLD_SECONDS, now or int(time.time()))
         log.info("the /extend command: deadline until %s", until)
-        self.bot.send(t("extended.plain", at=local_for_lang(until)))
+        said_sleep(self.bot, self.bot.send(t("extended.plain", at=local_for_lang(until))),
+                   read().get("until_ts") or 0)
 
     def cmd_sleep(self, now=0):
         release_hold(now or int(time.time()))
         log.info("the /sleep command: hold released, refusal for %d min",
                  state.REFUSAL_HOLDS // 60)
-        self.bot.send(t("awake.released"))
+        said_sleep(self.bot, self.bot.send(t("awake.released")),
+                   (now or int(time.time())) + IDLE_SLEPT_KEEP)
 
     def cmd_awake(self, now=0):
         self.screen(awake_text(), awake_keyboard())
@@ -2504,10 +2518,12 @@ class Handler(object):
             log.info("the extend button for %d min: deadline until %s", seconds // 60, until)
             # The menu has done its job: it becomes the line saying so.
             self.result(message_id, t("extended.plain", at=local_for_lang(until)))
+            said_sleep(self.bot, message_id, read().get("until_ts") or 0)
         elif data_raw == "awake_forever":
             until = hold_for(FOREVER_SECONDS, now)
             log.info("the \"stay awake\" button: indefinite, deadline until %s", until)
             self.result(message_id, t("awake.forever.ok"))
+            said_sleep(self.bot, message_id, read().get("until_ts") or 0)
         elif data_raw == "awake_until":
             with locked() as st:
                 st["awaiting"] = "awake_until"
@@ -2541,6 +2557,7 @@ class Handler(object):
             log.info("the \"let it sleep\" button: hold released, refusal for %d min",
                      state.REFUSAL_HOLDS // 60)
             self.result(message_id, t("awake.released"))
+            said_sleep(self.bot, message_id, now + IDLE_SLEPT_KEEP)
         elif data_raw == "menu_status":
             self.result(message_id, status_text())
         elif data_raw == "menu_chrome":
@@ -2578,6 +2595,8 @@ class Handler(object):
                 st["idle_asked_ts"] = now
             log.info("forgotten holders: let it sleep, hold released")
             self.bot.edit(message_id, t("idle.slept"))
+            # About sleep too: it goes once Windows has had its idle time.
+            said_sleep(self.bot, message_id, now + IDLE_SLEPT_KEEP)
         elif data_raw in ("chrome_start", "chrome_restart", "chrome_stop"):
             if data_raw == "chrome_stop":
                 run("chrome-debug --stop")
@@ -2873,27 +2892,33 @@ class Handler(object):
                 # started again.
                 log.warning("the decision %r is stale: stamp %s, in the state %s",
                             action, stamp, live_until)
+                # The alert says why; the message goes at once (after the
+                # lock), being about a window that is over.
                 self.bot.answer(cid, t("sleep.stale"), alert=True)
-                self.bot.edit(message_id, t("sleep.staletext"))
-                return
-            if action == "extend":
-                state.extend(st, now, manual=True)
-                state.touch(st, now)
-                st["decision"] = "extend"
-                st["decision_ts"] = now
-                until = st["until_local"]
-                text = t("sleep.extended", at=local_for_lang(until))
+                stale = True
             else:
-                # Not "sleep now" but "stop holding": Windows will count its
-                # own fifteen minutes of idling as usual.
-                st["until_ts"] = now
-                st["until_local"] = local_label(now)
-                st["decision"] = "sleep"
-                st["decision_ts"] = now
-                state.drop_manual(st)
-                state.touch(st, now)
-                until = None
-                text = t("sleep.accepted")
+                stale = False
+                if action == "extend":
+                    state.extend(st, now, manual=True)
+                    state.touch(st, now)
+                    st["decision"] = "extend"
+                    st["decision_ts"] = now
+                    until = st["until_local"]
+                    text = t("sleep.extended", at=local_for_lang(until))
+                else:
+                    # Not "sleep now" but "stop holding": Windows will count its
+                    # own fifteen minutes of idling as usual. Released by
+                    # release_hold, after the lock, so no copy of its fields
+                    # drifts from it.
+                    until = None
+                    text = t("sleep.accepted")
+                expires = (now + IDLE_SLEPT_KEEP) if until is None else st["until_ts"]
+        if stale:
+            if not retire(self.bot, message_id):
+                trail(message_id, now)
+            return
+        if until is None:
+            release_hold(now)
         # We write after the lock: there is no reason to hold a flock on the
         # state file for the sake of a log entry.
         if until is None:
@@ -2901,8 +2926,10 @@ class Handler(object):
         else:
             log.info("the warning: extend, deadline until %s", until)
         # We remove the keyboard: there will be nothing left to press a second
-        # time.
+        # time. The answer stays while true: until the new deadline, or, let
+        # go, while Windows counts its idle time.
         self.bot.edit(message_id, text)
+        said_sleep(self.bot, message_id, expires)
 
 
 # --- forgotten hard holders --------------------------------------------------
@@ -3656,34 +3683,88 @@ def open_card(bot, name, slug):
     return True if load_record(repo, slug).get("card") else None
 
 
-# How long a warning nobody pressed stays after its deadline. The buttons still
-# work past it — Windows counts its own idling before sleep — but by an hour on
-# the warning is about a night that is over.
-WARN_KEEP_AFTER = 3600
+# How long "the hold is released, it will sleep" stays: Windows sleeps after
+# its own idle time, and by then the line is history.
+IDLE_SLEPT_KEEP = 1800
+# The longest a line about sleep is kept: deleted inside Telegram's 48 hours.
+TRAIL_MAX = 40 * 3600
+
+
+def trail(message_id, expires):
+    # A message about sleep that has become an answer — "extended until",
+    # "will sleep" — stays only while it is true: until its deadline, or until
+    # the next warning, whichever is first (sweep_trail). Kept in the state as
+    # sleep_trail: [message id, expiry].
+    # Within Telegram's 48 hours, past which a message can no longer be
+    # deleted, only edited into a dead line.
+    if not message_id:
+        return
+    expires = min(int(expires), int(time.time()) + TRAIL_MAX)
+    with locked() as st:
+        kept = [e for e in st.get("sleep_trail") or [] if e[0] != message_id]
+        st["sleep_trail"] = kept + [[message_id, expires]]
+
+
+def said_sleep(bot, message_id, expires):
+    # A reply that moved the deadline or let it go: it is what holds now, and
+    # every earlier line about sleep is no longer true — the open warning
+    # included, which would otherwise be settled into a second such line.
+    # Not sent, it replaces nothing.
+    if not message_id:
+        return
+    sweep_trail(bot, int(time.time()), everything=True)
+    warn = read().get("warn_message_id") or 0
+    if warn and warn != message_id:
+        if not retire(bot, warn):
+            trail(warn, 0)
+        with locked() as st:
+            if st.get("warn_message_id") == warn:
+                st["warn_message_id"] = 0
+    trail(message_id, expires)
+
+
+def sweep_trail(bot, now, everything=False):
+    # The chat holds no message about sleep that is no longer true: those past
+    # their deadline go, and with a new warning every earlier one goes.
+    trail_now = read().get("sleep_trail") or []
+    gone = [e for e in trail_now if everything or e[1] <= now]
+    if not gone:
+        return
+    # One the network kept is tried again on the next turn.
+    done = [e for e in gone if retire(bot, e[0])]
+    if not done:
+        return
+    with locked() as st:
+        st["sleep_trail"] = [e for e in st.get("sleep_trail") or [] if e not in done]
 
 
 def settle_warning(bot, data, now):
     # The warning's message once its deadline has moved without a press on it:
     # extended from elsewhere (a command, the menu, the detector seeing work)
     # becomes "extended until", released becomes "will sleep" — the answers its
-    # own buttons would have given. Left alone, it goes an hour after the
-    # deadline.
+    # own buttons would have given — and both stay only while true (trail).
+    # Left alone, it goes once its deadline has passed: it is no longer true.
     msg = data.get("warn_message_id") or 0
     if not msg:
         return
     warned = data.get("warned_for_ts") or 0
     until = data.get("until_ts") or 0
-    if until == warned and now < warned + WARN_KEEP_AFTER:
+    # Past its deadline it is no longer true, whatever happened since: a later
+    # move is a fresh hold after the laptop slept and woke, and the warning was
+    # simply not answered.
+    if now >= warned:
+        if not retire(bot, msg):
+            trail(msg, now)     # the network's: tried again next turn
+    elif until == warned:
         return
-    # Extended from elsewhere only if seen before the deadline: the loop turns
-    # every 25 s, so a later one is a fresh hold after the laptop slept and
-    # woke, and the warning was simply not answered.
-    if until > warned and now < warned:
+    elif until > warned:
         bot.edit(msg, t("sleep.extended", at=local_for_lang(data.get("until_local"))))
-    elif until < warned and data.get("decision") == "sleep":
+        trail(msg, until)
+    elif data.get("decision") == "sleep":
         bot.edit(msg, t("sleep.accepted"))
-    else:
-        retire(bot, msg)
+        trail(msg, now + IDLE_SLEPT_KEEP)
+    elif not retire(bot, msg):
+        trail(msg, now)
     with locked() as st:
         if st.get("warn_message_id") == msg:
             st["warn_message_id"] = 0
@@ -3695,6 +3776,7 @@ def check_warning(bot):
     # The old warning is settled first: the next one may be about to go out for
     # the new deadline, and the old must not stand above it with live buttons.
     settle_warning(bot, data, now)
+    sweep_trail(bot, now)
     data = read()
     if not needs_warning(data, now):
         return
@@ -3711,6 +3793,8 @@ def check_warning(bot):
         # within half an hour.
         log.warning("the warning did not send — we will retry on the next turn")
         return
+    # The warning is the one message about sleep: every earlier one goes.
+    sweep_trail(bot, now, everything=True)
     with locked() as st:
         # We record the deadline the warning was for. Extending will move
         # until_ts, the mark will stop matching — and the next warning will come

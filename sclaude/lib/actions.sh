@@ -77,6 +77,7 @@ friction_count() {
 feature_actions() {
   require_repo
   local slug="$1" wt state step pr issue branch behind fcount
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
   state="$wt/.sclaude/local/feature/state.json"
   step="$(state_get "$state" step || echo "?")"

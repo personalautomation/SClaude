@@ -82,8 +82,13 @@ finally:
 
 with open(os.path.join(ROOT, "bin", "sclaude")) as fh:
     SCLAUDE = fh.read()
-check("done-calls-it",
-      "cleaned up.${OFF}\"\n  side_worktrees_offer\n}" in SCLAUDE, True)
+# Before the feature's own worktree goes: its questions are the feature's last,
+# and the feature's topic in the bot is deleted with the worktree.
+done = SCLAUDE[SCLAUDE.index("cmd_done() {"):]
+done = done[:done.index("\n}\n")]
+check("done-calls-it", "  side_worktrees_offer\n" in done, True)
+check("done-offers-before-removing",
+      done.index("  side_worktrees_offer\n") < done.index('  remove_worktree "$wt"'), True)
 
 if failures:
     for name, want, got in failures:

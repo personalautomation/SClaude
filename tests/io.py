@@ -42,6 +42,14 @@ def run_bash(script, cwd, stdin="", timeout=20):
     return out.stdout, out.stderr, out.returncode
 
 
+def unsweep(d):
+    # ask_closed sweeps week-old records once a day, by this stamp.
+    try:
+        os.unlink(os.path.join(d, ".swept"))
+    except OSError:
+        pass
+
+
 def answer_after(path, reply, delay, ask_id=None):
     # Writes an answer into the channel after delay seconds — the same thing the
     # bot will do when the human presses a button.
@@ -189,6 +197,179 @@ def main():
         # otherwise the bot would show buttons for what has already been answered
         # at the laptop.
         check("terminal-retracted", os.path.exists(os.path.join(d, "ask.json")), False)
+        # The question leaves a record of how it ended, for the bot to turn
+        # its message into the answer (ask_closed).
+        closed = os.path.join(d, "closed")
+        records = [json.load(open(os.path.join(closed, n), encoding="utf-8"))
+                   for n in os.listdir(closed)] if os.path.isdir(closed) else []
+        check("terminal-closed-record",
+              [(r.get("reply"), r.get("from")) for r in records], [("y", "stdin")])
+        check("terminal-closed-id", bool(records and records[0].get("id")), True)
+
+        # A yes/no reply that is neither is not an answer: the question is laid
+        # out again, and the chat must lose the old message rather than show it
+        # answered with "maybe".
+        d = os.path.join(tmp, "refused")
+        os.makedirs(d)
+        run_bash('ASK_DIR=%s; ask "Go on? [y/n] " answer yn' % d, tmp,
+                 stdin="maybe\ny\n")
+        closed = os.path.join(d, "closed")
+        records = [json.load(open(os.path.join(closed, n), encoding="utf-8"))
+                   for n in os.listdir(closed)]
+        check("refused-no-record", [r.get("reply") for r in records], ["y"])
+
+        # A number outside a pick:N list is refused and asked again too.
+        d_pick = os.path.join(tmp, "pick-refused")
+        os.makedirs(d_pick)
+        run_bash('ASK_DIR=%s; ask "Which? [1-3] " answer "pick:3"' % d_pick, tmp, stdin="7\n")
+        d_pick_ok = os.path.join(tmp, "pick-taken")
+        os.makedirs(d_pick_ok)
+        run_bash('ASK_DIR=%s; ask "Which? [1-9] " answer "pick:9"' % d_pick_ok, tmp, stdin="08\n")
+        d_pick_norm = os.path.join(tmp, "pick-normalized")
+        os.makedirs(d_pick_norm)
+        out_pick, _, _ = run_bash('ASK_DIR=%s; ask "Which? [1-9] " answer "pick:9"; echo "[$answer]"'
+                                  % d_pick_norm, tmp, stdin="08\n")
+        check("pick-normalized-for-caller", out_pick.strip().endswith("[8]"), True)
+        # Without a channel too.
+        out_pick, _, _ = run_bash('unset ASK_DIR; ask "Which? [1-9] " answer "pick:9"; echo "[$answer]"',
+                                  tmp, stdin="08\n")
+        check("pick-normalized-without-channel", out_pick.strip().endswith("[8]"), True)
+        # A number too long for the shell's arithmetic does not wrap into an option.
+        d_pick_long = os.path.join(tmp, "pick-long")
+        os.makedirs(d_pick_long)
+        out_pick, _, _ = run_bash('ASK_DIR=%s; ask "Which? [1-9] " answer "pick:9"; echo "[$answer]"'
+                                  % d_pick_long, tmp, stdin="18446744073709551617\n")
+        check("pick-overflow-is-no-option", out_pick.strip().endswith("[0]"), True)
+        check("pick-overflow-not-recorded",
+              os.listdir(os.path.join(d_pick_long, "closed"))
+              if os.path.isdir(os.path.join(d_pick_long, "closed")) else [], [])
+        # Enter on a list is not shown as an answer: most lists refuse it.
+        d_pick_empty = os.path.join(tmp, "pick-empty")
+        os.makedirs(d_pick_empty)
+        run_bash('ASK_DIR=%s; ask "Which? [1-2] " answer "pick:2"' % d_pick_empty,
+                 tmp, stdin="\n")
+        check("pick-empty-not-recorded", len(os.listdir(os.path.join(d_pick_empty, "closed")))
+              if os.path.isdir(os.path.join(d_pick_empty, "closed")) else 0, 0)
+        check("pick-in-range-recorded",
+              len(os.listdir(os.path.join(d_pick_ok, "closed")))
+              if os.path.isdir(os.path.join(d_pick_ok, "closed")) else 0, 1)
+        check("pick-out-of-range-no-record",
+              os.listdir(os.path.join(d_pick, "closed")) if os.path.isdir(
+                  os.path.join(d_pick, "closed")) else [], [])
+
+        # A week-old record is cleared by the next one: a machine without the
+        # bot would otherwise keep them all.
+        old_rec = os.path.join(closed, "old.json")
+        with open(old_rec, "w") as fh:
+            fh.write("{}")
+        os.utime(old_rec, (time.time() - 8 * 86400,) * 2)
+        fresh_rec = os.path.join(closed, "fresh.json")
+        with open(fresh_rec, "w") as fh:
+            fh.write("{}")
+        os.utime(fresh_rec, (time.time() - 6 * 86400,) * 2)
+        # The sweep runs once a day; the questions above have just run it.
+        unsweep(d)
+        run_bash('ASK_DIR=%s; ask "Again? [y/n] " answer yn' % d, tmp, stdin="n\n")
+        check("closed-week-old-pruned", os.path.exists(old_rec), False)
+        check("closed-six-days-kept", os.path.exists(fresh_rec), True)
+
+        # --- a feature's own channel ---------------------------------------
+        #
+        # Features run in parallel; each asks in ask/<slug>/, so that two of
+        # them can both reach the phone. A name that is not a plain slug stays
+        # in the repository's channel rather than becoming a path.
+        d = os.path.join(tmp, "features")
+        os.makedirs(d)
+        run_bash('ASK_DIR=%s; f(){ local ASK_SLUG=login-fix; ask_publish "q? " yn >/dev/null; }; '
+                 'f; ask_publish "repo q? " yn >/dev/null' % d, tmp)
+        check("feature-channel",
+              json.load(open(os.path.join(d, "ask", "login-fix", "ask.json")))["prompt"], "q? ")
+        check("binding-ends-with-function",
+              json.load(open(os.path.join(d, "ask.json")))["prompt"], "repo q? ")
+        run_bash('ASK_DIR=%s; ASK_SLUG=../x; ask_publish "odd? " yn >/dev/null' % d, tmp)
+        check("odd-slug-stays-in-repo-channel",
+              json.load(open(os.path.join(d, "ask.json")))["prompt"], "odd? ")
+
+        # Removing the worktree ends the feature for the bot: the record is
+        # read while the worktree is there and left in the channel's end mark,
+        # and the binding ends with it.
+        wt = os.path.join(tmp, "wt")
+        os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"))
+        with open(os.path.join(wt, ".sclaude", "local", "feature", "telegram.json"), "w") as fh:
+            fh.write('{"thread": 5}')
+        out, _, _ = run_bash('ASK_DIR=%s; ASK_SLUG=login-fix; r="$(ask_record %s)"; '
+                             'ask_feature_end "$r"; echo "[$ASK_SLUG]"' % (d, wt), tmp)
+        check("end-mark-carries-record",
+              json.load(open(os.path.join(d, "ask", "login-fix", "ended"))), {"thread": 5})
+        check("end-unbinds", out.strip(), "[]")
+        # An outer function still bound to the feature asks in the repository's
+        # channel once the feature has ended.
+        out, _, _ = run_bash('ASK_DIR=%s; outer(){ local ASK_SLUG=login-fix; inner; '
+                             'ask_channel; }; inner(){ local ASK_SLUG=login-fix; '
+                             'ask_feature_end ""; }; outer' % d, tmp)
+        check("ended-feature-asks-in-repo", out.strip(), d)
+        # A feature of the same name begun later in the same process asks in
+        # its own channel again.
+        out, _, _ = run_bash('ASK_DIR=%s; ASK_SLUG=again; ask_feature_end ""; '
+                             'ASK_SLUG=again; ask_feature_begin; ask_channel' % d, tmp)
+        check("begin-after-end-same-process", out.strip(), os.path.join(d, "ask", "again"))
+        run_bash('ASK_DIR=%s; ask_feature_end "x"' % d, tmp)
+        check("no-feature-no-mark", os.path.exists(os.path.join(d, "ended")), False)
+
+        # drop asks everything before it removes anything: the feature's topic
+        # goes with its worktree, and a question after that would have nowhere
+        # to go.
+        with open(os.path.join(LIB, "abandon.sh"), encoding="utf-8") as fh:
+            abandon = fh.read()
+        body = abandon[abandon.index("cmd_abandon() {"):]
+        body = body[:body.index("\n}\n")]
+        check("drop-asks-before-removing",
+              body.rindex('ask "') < body.index('remove_worktree "$wt"'), True)
+        # Deleting a pull request's head branch closes it on GitHub: the pull
+        # request is asked about first, and closed first.
+        check("drop-asks-pr-before-origin",
+              body.index("Close pull request") < body.index("Delete origin/"), True)
+        work = body[body.index("and now the work"):]
+        check("drop-keeps-github-when-worktree-stayed",
+              'want_tree" -eq 1 && "$wt_gone" -eq 0' in work, True)
+        check("drop-closes-pr-before-deleting-origin",
+              work.index('want_pr" -eq 1') < work.index('want_origin" -eq 1'), True)
+
+        # code_reload execs into _session-ended from inside a step: the step's
+        # last questions must still go to the feature's channel.
+        with open(os.path.join(os.path.dirname(LIB), "..", "bin", "sclaude"), encoding="utf-8") as fh:
+            sclaude_src = fh.read()
+        ended_fn = sclaude_src[sclaude_src.index("cmd_session_ended() {"):]
+        ended_fn = ended_fn[:ended_fn.index("\n}\n")]
+        check("session-ended-binds-feature", 'local ASK_SLUG="$slug"' in ended_fn, True)
+
+        # A new feature under an ended feature's name clears the old mark; and
+        # the week-old sweep never takes a channel with a question open.
+        e = os.path.join(tmp, "begin")
+        os.makedirs(os.path.join(e, "ask", "foo"))
+        open(os.path.join(e, "ask", "foo", "ended"), "w").close()
+        run_bash('ASK_DIR=%s; ASK_SLUG=foo; ask_feature_begin' % e, tmp)
+        check("begin-sets-old-mark-aside",
+              (os.path.exists(os.path.join(e, "ask", "foo", "ended")),
+               any(n.startswith("ended-") for n in os.listdir(os.path.join(e, "ask", "foo")))),
+              (False, True))
+        os.makedirs(os.path.join(e, "ask", "bar"))
+        mark = os.path.join(e, "ask", "bar", "ended")
+        open(mark, "w").close()
+        open(os.path.join(e, "ask", "bar", "ask.json"), "w").close()
+        os.utime(mark, (time.time() - 8 * 86400,) * 2)
+        unsweep(e)
+        run_bash('ASK_DIR=%s; ask_closed abc y tty' % e, tmp)
+        check("sweep-spares-open-question", os.path.exists(os.path.join(e, "ask", "bar", "ask.json")), True)
+
+        # A finished feature's channel the bot never cleared goes a week on.
+        mark = os.path.join(d, "ask", "login-fix", "ended")
+        os.utime(mark, (time.time() - 8 * 86400,) * 2)
+        os.unlink(os.path.join(d, "ask", "login-fix", "ask.json"))
+        unsweep(d)
+        run_bash('ASK_DIR=%s; ask_closed abc y tty' % d, tmp)
+        check("ended-channel-pruned",
+              os.path.exists(os.path.join(d, "ask", "login-fix")), False)
 
         # --- an answer from the channel -----------------------------------
         #
@@ -212,6 +393,10 @@ def main():
         # by itself.
         check("remote-answer-cleaned",
               os.path.exists(os.path.join(d, "answer.json")), False)
+        closed = os.path.join(d, "closed")
+        check("remote-closed-from-channel",
+              [json.load(open(os.path.join(closed, n))).get("from")
+               for n in os.listdir(closed)], ["channel"])
 
         # An answer from the phone goes through the same normalisation as one
         # typed by hand: " YES " is a yes once trimmed.
@@ -392,7 +577,7 @@ def main():
         check("an empty label removes the whole list", "options" in q, False)
         check("the form is intact in doing so", q.get("form"), "pick:3")
 
-        total = 38
+        total = 67
         for name, want, got in failures:
             print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))
         print("%d/%d passed" % (total - len(failures), total))

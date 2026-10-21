@@ -564,8 +564,9 @@ your own, comma-separated.
 
 ### A feature in Telegram, with no Tailscale on the phone
 
-While phone access is on, the bot's chrome-debug card has a "📲 Phone" button for
-the list of features and for each feature. It opens the feature full screen
+While phone access is on, each feature's card (in its topic) has a "📲 Phone"
+button, and the bot's chrome-debug card has one for the list of every feature.
+It opens the feature full screen
 inside Telegram, with an address bar of its own. The phone needs nothing but
 Telegram.
 
@@ -656,13 +657,14 @@ keepawake release         # let go now
 
 `keepawake status` prints two sections, `HOLD` and `HEALTH`.
 
-**The Telegram bot.** Extend and status; a card for Chrome and the features (a
-link for the phone, the address for the laptop, buttons to open or stop each);
-code-server links; a sclaude section where you can start or continue a feature
-and see what each step is doing (🟢 running, 🟡 waiting for you, ⚪ idle,
-⚫ not started), with links to its issue and pull request; and "Docs" — how to
-use and install all this. It answers in Russian to a Russian Telegram client and
-in English to everyone else.
+**The Telegram bot.** In the main chat: extend and status; Chrome and the list
+of every feature (a link for the phone, the address for the laptop); code-server
+links; a sclaude section with the repositories, their features with what each
+step is doing (🟢 running, 🟡 waiting for you, ⚪ idle, ⚫ not started) and a new
+feature; and "Docs" — how to use and install all this. The chat keeps one menu:
+a new one replaces the last, and a menu that did something becomes a line saying
+what it did. It answers in Russian to a Russian Telegram client and in English
+to everyone else.
 
 **Answering sclaude from the phone.** Every question sclaude asks goes to the
 terminal and to the bot at once, and whichever you answer first counts. Start a
@@ -670,6 +672,26 @@ feature at the laptop, walk away, answer from the phone: the terminal carries on
 by itself. While you are sitting at the terminal the question arrives silently,
 so the phone does not buzz for something already on your screen. Claude's own
 conversation in a step continues in the Claude mobile app.
+
+Once a question is answered — by a button, by text or in the terminal — its
+message becomes the question with the answer; one that closed unanswered is
+deleted.
+
+**A topic per feature.** With Threaded Mode on for your bot (the @BotFather mini
+app: Bot Settings → Threads Settings; also turn on "Disallow users to create new
+threads"), each feature has a topic of its own: pressing a feature in the sclaude
+section opens it, and its questions go there, so features running in parallel do
+not ask over one another. The topic starts with the feature's card — its step,
+issue and pull request, ▶️ continue the step, ⚙️ actions, its dev server (open on
+the laptop or the phone, start, stop) and 💻 code-server on its worktree — and
+"Menu" in the topic brings a fresh card. Typing an answer inside a topic answers
+that feature; in the main chat, with several questions open there, answer one
+with Telegram's Reply on its message. The menu, the sleep warning and questions not about a feature stay
+in the main chat. When `sclaude done` or `drop` cleans a feature up, its topic is
+deleted, everything in it included; `drop` therefore asks all its questions
+before it removes anything. Without Threaded Mode everything stays in one
+chat, as before. If `getMe` still says `has_topics_enabled: false` after the
+switch, change any classic setting (`/setjoingroups`) to refresh it.
 
 **code-server starts on demand** — from a button in the bot, by following its
 local link, or with `systemctl --user start code-server` — and stops itself

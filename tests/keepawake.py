@@ -781,22 +781,85 @@ with sandbox() as box:
 # while parsing an update and deciding are pure functions of the parsed JSON,
 # which is what makes them checkable.
 class FakeBot(object):
+    made = 0
+
     def __init__(self):
         self.sent = []
         self.edits = []
         self.answers = []
         self.anchors = []
         self.asks = []
+        self.deletes = []
+        self.unbuttoned = []
+        self.threads = []
+        self.topics = {}
+        self.renames = []
+        self.deleted_topics = []
+        self.pins = []
+        self.no_topics = False
         self.chat_id = 12345
+        self.thread = 0
+        self.last_error = ""
+        # Set to make sends fail as the network does, not as a lost topic.
+        self.offline = False
 
-    def send(self, text, kb=None, quiet=False):
+    def send(self, text, kb=None, quiet=False, thread=None):
         # quiet as the third element rather than a separate list: the checks
         # take sent[i][0] and [1], and an appended tail does not touch them.
+        # The topic is kept apart for the same reason.
+        thread = self.thread if thread is None else thread
+        if self.offline:
+            self.last_error = "timed out"
+            return 0
+        if thread and thread not in self.topics:
+            self.last_error = "bad request: message thread not found"
+            return 0
+        self.last_error = ""
         self.sent.append((text, kb, quiet))
+        self.threads.append(thread)
         return 777
+
+    def create_topic(self, name):
+        if self.no_topics:
+            # Threaded Mode is off.
+            self.last_error = "bad request: the chat is not a forum"
+            return 0
+        if self.offline:
+            self.last_error = "timed out"
+            return 0
+        # Unique across every FakeBot: a topic made again must not take a
+        # neighbour's id.
+        FakeBot.made += 1
+        thread = 900 + FakeBot.made
+        self.topics[thread] = name
+        return thread
+
+    def pin(self, mid):
+        self.pins.append(mid)
+
+    def rename_topic(self, thread, name):
+        self.renames.append((thread, name))
+        self.topics[thread] = name
+
+    def delete_topic(self, thread):
+        if self.offline:
+            return False
+        self.deleted_topics.append(thread)
+        self.topics.pop(thread, None)
+        return True
 
     def edit(self, mid, text, kb=None):
         self.edits.append((mid, text))
+
+    def unbutton(self, mid):
+        self.unbuttoned.append(mid)
+
+    def delete(self, mid):
+        # Whether Telegram let it go: a message older than 48 hours is not.
+        if not mid:
+            return False
+        self.deletes.append(mid)
+        return not getattr(self, "too_old", False)
 
     def answer(self, cid, text=None, alert=False):
         self.answers.append((text, alert))
@@ -812,6 +875,9 @@ class FakeBot(object):
         pass
 
     def menu_button(self):
+        pass
+
+    def describe(self):
         pass
 
 
@@ -1241,19 +1307,17 @@ with sandbox() as box:
                    not any("/home/u" in l for l in labels))
 
         # Every feature button addresses its own feature — otherwise a press
-        # would open somebody else's. A feature's row is now two buttons: the
-        # wide one drives the step, the narrow one leads to the list of actions
-        # on the same feature.
+        # would open somebody else's. A feature's row is one button now: it
+        # takes the feature's card to the feature's topic, where the step and
+        # the actions are.
         datas = [b["callback_data"] for row in telegramd.features_keyboard("myapp")
-                 for b in row if b["callback_data"].startswith("go:")]
+                 for b in row if b["callback_data"].startswith("topic:")]
         check("a callback for every feature", len(datas), 2)
         check_true("the callback carries the repository and the feature",
-                   datas[0] == "go:myapp:34-sample-site")
-        acts = [b["callback_data"] for row in telegramd.features_keyboard("myapp")
-                for b in row if b["callback_data"].startswith("acts:")]
-        check("an actions button for every feature", len(acts), 2)
-        check_true("the actions button carries the same feature",
-                   acts[0] == "acts:myapp:34-sample-site")
+                   datas and datas[0] == "topic:myapp:34-sample-site")
+        check("no actions button in the list",
+              [b for row in telegramd.features_keyboard("myapp") for b in row
+               if b["callback_data"].startswith("acts:")], [])
     finally:
         telegramd.known_repos = saved_known
         telegramd.run = saved_run
@@ -1293,7 +1357,7 @@ with sandbox() as box:
         # there is somewhere to go from here.
         labels = [b["text"] for row in rows for b in row]
         targets = [b["callback_data"] for row in rows for b in row]
-        check("there are no feature buttons", [x for x in targets if x.startswith("feat:")], [])
+        check("there are no feature buttons", [x for x in targets if x.startswith("topic:")], [])
         check_true("the way out to the repositories", "svc_repos" in targets)
         check_true("the way out to the main menu", "menu_back" in targets)
     finally:
@@ -1429,7 +1493,7 @@ if os.path.exists(cfg):
         # Phone access is stubbed, not read: on this machine the funnel may
         # well be on.
         saved_origin = tg_menu.gate_origin
-        tg_menu.gate_origin = lambda: ""
+        tg_menu.gate_origin = lambda *a: ""
         try:
             rows = tg_menu.chrome_keyboard()
             off_settings = tg_menu.services_keyboard()
@@ -1440,9 +1504,9 @@ if os.path.exists(cfg):
         check("the first block is the list of features: a caption, then where to open it",
               (rows[0][0]["callback_data"], rows[1][0]["callback_data"]),
               ("noop", "chrome_start"))
-        check_true("each feature can be opened", "devopen:sample-one" in datas)
-        check("a stopped feature has no stop button", "devstop:sample-one" in datas, False)
-        check_true("a stopped feature can be started", "devstart:sample-one" in datas)
+        # A feature's own buttons are on its card in its topic now.
+        check("no feature's own buttons here",
+              [d for d in datas if d and d.startswith(("devopen:", "devstart:", "devstop:"))], [])
         check("the last row goes back", rows[-1][0]["callback_data"], "menu_back")
         # The row caption is not a button: pressing it must do nothing.
         check_true("the row captions are marked noop", "noop" in datas)
@@ -1472,12 +1536,11 @@ if os.path.exists(cfg):
                   tg_menu.gate_origin(), "https://box.tail1.ts.net:8443")
             rows = tg_menu.chrome_keyboard()
             apps = [b["web_app"]["url"] for row in rows for b in row if "web_app" in b]
-            check("access on: the phone buttons are the Mini App", apps,
-                  ["https://box.tail1.ts.net:8443/__sclaude/tg?f=",
-                   "https://box.tail1.ts.net:8443/__sclaude/tg?f=sample-one"])
+            check("access on: the phone button is the Mini App of every feature", apps,
+                  ["https://box.tail1.ts.net:8443/__sclaude/tg?f="])
             check("access on: the Mini App buttons look different",
                   [b.get("style") for row in rows for b in row if "web_app" in b],
-                  ["success", "success"])
+                  ["success"])
             check("a refused colour is dropped, the rest kept",
                   tg_menu.unstyled({"inline_keyboard": [[{"text": "x", "style": "success",
                                                           "callback_data": "y"}]]}),
@@ -2210,6 +2273,1058 @@ with Pty() as term:
 # A question with no terminal — a launch from the bot — always with sound.
 check("a question with no terminal — with sound", asks_quiet(os.getpid()), False)
 
+# --- a question's message outlives the question no longer -------------------
+#
+# Once a question closes, its message in the chat becomes its answer — answered
+# here, in the terminal or by text — or, when nobody answered, it goes. The
+# orchestrator tells how it ended in closed/<id>.json (ask_closed in io.sh);
+# the bot's own questions are settled from the state.
+
+from keepawake import telegramd as tg_settle
+
+
+def channel_repo(root, name="repo"):
+    repo = os.path.join(root, name)
+    os.makedirs(os.path.join(repo, ".git", "sclaude", "closed"))
+    return repo
+
+
+def lay_question(repo, qid, prompt="Ship it? [y/n] ", form="yn", options=None):
+    question = {"prompt": prompt, "form": form, "context": "", "id": qid,
+                "pid": os.getpid()}
+    if options:
+        question["options"] = options
+    with open(os.path.join(repo, ".git", "sclaude", "ask.json"), "w") as fh:
+        json.dump(question, fh)
+
+
+def close_question(repo, qid, reply=None, source="tty"):
+    # What the orchestrator does when the question ends: a record when it was
+    # answered, then the question leaves the channel.
+    d = os.path.join(repo, ".git", "sclaude")
+    if reply is not None:
+        with open(os.path.join(d, "closed", qid + ".json"), "w") as fh:
+            json.dump({"id": qid, "reply": reply, "from": source}, fh)
+    try:
+        os.unlink(os.path.join(d, "ask.json"))
+    except OSError:
+        pass
+
+
+with sandbox() as box:
+    repo = channel_repo(box.dir)
+    old_repos = tg_settle.known_repos
+    tg_settle.known_repos = lambda: [repo]
+    try:
+        # Answered in the terminal: the question becomes its answer.
+        bot = FakeBot()
+        lay_question(repo, "q1")
+        tg_settle.check_asks(bot)
+        check("the question was sent", len(bot.sent), 1)
+        check("its message is remembered",
+              read()["ask_shown"]["repo"]["msg"], 777)
+        close_question(repo, "q1", "y")
+        tg_settle.check_asks(bot)
+        check("a question answered in the terminal is edited", len(bot.edits), 1)
+        edited = bot.edits[0] if bot.edits else (0, "")
+        check("into its answer, in the same message", edited[0], 777)
+        check_true("the answer reads as the button would",
+                   telegramd.t("ask.yes") in edited[1])
+        check_true("and says where it came from",
+                   telegramd.t("ask.by.terminal") in edited[1])
+        check("nothing was deleted", bot.deletes, [])
+        check("the record is read once",
+              os.listdir(os.path.join(repo, ".git", "sclaude", "closed")), [])
+        check("the repository is forgotten", read()["ask_shown"], {})
+
+        # Closed without an answer: the session died, or the reply was refused.
+        bot = FakeBot()
+        lay_question(repo, "q2")
+        tg_settle.check_asks(bot)
+        close_question(repo, "q2")
+        tg_settle.check_asks(bot)
+        check("an unanswered question is deleted", bot.deletes, [777])
+        check("and not edited", bot.edits, [])
+
+        # Older than 48 hours: Telegram refuses the delete, the buttons go.
+        bot = FakeBot()
+        bot.too_old = True
+        lay_question(repo, "q3")
+        tg_settle.check_asks(bot)
+        close_question(repo, "q3")
+        tg_settle.check_asks(bot)
+        check("a message too old to delete is edited",
+              bot.edits, [(777, telegramd.t("msg.stale"))])
+
+        # Two questions between two turns: the first is answered above the
+        # second rather than left with live buttons.
+        bot = FakeBot()
+        lay_question(repo, "q4", "Delete them? [y/n] ")
+        tg_settle.check_asks(bot)
+        close_question(repo, "q4", "y")
+        lay_question(repo, "q5", "Force-delete it? [y/n] ")
+        tg_settle.check_asks(bot)
+        check("the first of a chain is answered", len(bot.edits), 1)
+        check("the second is sent", len(bot.sent), 2)
+        check("the second is the one remembered",
+              read()["ask_shown"]["repo"]["id"], "q5")
+
+        # A press on the open question: its message becomes the answer.
+        h = tg_settle.Handler(bot)
+        h.callback({"id": "c", "data": "answer:repo:n",
+                    "message": {"message_id": 777}})
+        check_true("a press replaces the question with its answer",
+                   bot.edits and telegramd.t("ask.no") in bot.edits[-1][1])
+        check("the press is answered plainly", bot.answers[-1], (None, False))
+        check("the message is let go", read()["ask_shown"]["repo"]["msg"], 0)
+        # The question lingers in the channel a moment: it is not sent again.
+        tg_settle.check_asks(bot)
+        check("an answered question is not sent twice", len(bot.sent), 2)
+        os.unlink(os.path.join(repo, ".git", "sclaude", "answer.json"))
+        close_question(repo, "q5", "n", "channel")
+        edits = len(bot.edits)
+        tg_settle.check_asks(bot)
+        check("its record later changes nothing", len(bot.edits), edits)
+
+        # A press on an old message must not answer the question open now.
+        bot = FakeBot()
+        h = tg_settle.Handler(bot)
+        lay_question(repo, "q6")
+        tg_settle.check_asks(bot)
+        h.callback({"id": "c", "data": "answer:repo:y",
+                    "message": {"message_id": 555}})
+        check("a press on an old message says it is closed",
+              bot.answers[-1], (telegramd.t("ask.gone"), False))
+        check("and the old message goes", bot.deletes, [555])
+        check("and nothing is answered",
+              os.path.exists(os.path.join(repo, ".git", "sclaude", "answer.json")),
+              False)
+
+        # A typed answer: the question becomes it, the typed message goes.
+        h.message({"text": "y", "message_id": 900})
+        check("a typed answer edits the question", bot.edits[-1:], [(777, bot.edits[-1][1] if bot.edits else "")])
+        check("and deletes what was typed", bot.deletes[-1:], [900])
+        check("and sends nothing new", len(bot.sent), 1)
+        os.unlink(os.path.join(repo, ".git", "sclaude", "answer.json"))
+        close_question(repo, "q6")
+
+        # A question remembered before message ids were kept is not resent.
+        bot = FakeBot()
+        lay_question(repo, "q7")
+        with state.locked() as st:
+            st["ask_shown"] = {"repo": "q7"}
+        tg_settle.check_asks(bot)
+        check("an old-format stamp still counts as shown", bot.sent, [])
+        close_question(repo, "q7")
+        tg_settle.check_asks(bot)
+        check("and its unknown message is left alone", bot.deletes, [])
+
+        # The repository is gone: its question will never close the usual way.
+        bot = FakeBot()
+        lay_question(repo, "q8")
+        tg_settle.check_asks(bot)
+        tg_settle.known_repos = lambda: []
+        tg_settle.check_asks(bot)
+        check("a vanished repository's question goes", bot.deletes, [777])
+    finally:
+        tg_settle.known_repos = old_repos
+
+    # The warning before sleep, once its deadline moved without a press on it.
+    def warned(**kw):
+        now_w = int(time.time())
+        with state.locked() as st:
+            st.update(dict(until_ts=now_w + 600, warned_for_ts=now_w + 600,
+                           warn_message_id=31, decision="", updated_ts=now_w))
+            st.update(kw)
+
+    now_w = int(time.time())
+    warned()
+    bot = FakeBot()
+    tg_settle.settle_warning(bot, read(), now_w)
+    check("a live warning is left alone", (bot.edits, bot.deletes), ([], []))
+    warned(until_ts=now_w + 7200, until_local="21:00")
+    tg_settle.settle_warning(bot, read(), now_w)
+    check_true("extended elsewhere — the warning says so",
+               bot.edits and bot.edits[-1][0] == 31)
+    check("and is let go", read()["warn_message_id"], 0)
+    bot = FakeBot()
+    warned(until_ts=now_w - 5, decision="sleep")
+    tg_settle.settle_warning(bot, read(), now_w)
+    check("released elsewhere — it will sleep",
+          bot.edits, [(31, telegramd.t("sleep.accepted"))])
+    bot = FakeBot()
+    warned(until_ts=now_w - 4000, warned_for_ts=now_w - 4000)
+    tg_settle.settle_warning(bot, read(), now_w)
+    check("an hour past its deadline it goes", bot.deletes, [31])
+    bot = FakeBot()
+    warned()
+    tg_settle.Handler(bot).callback({"id": "c", "data": "extend:%d" % (now_w + 600),
+                                     "message": {"message_id": 31}})
+    check("a press on the warning lets it go", read()["warn_message_id"], 0)
+
+    # The question about forgotten holders goes once it is moot.
+    with state.locked() as st:
+        st.update(dict(hard_hold=False, idle_message_id=41))
+    bot = FakeBot()
+    tg_settle.check_idle_hold(bot)
+    check("nothing holds — the idle question goes", bot.deletes, [41])
+    check("and is forgotten", read()["idle_message_id"], 0)
+
+    # The time question: answered, it becomes the answer; left, it goes.
+    state.write(blank())
+    bot = FakeBot()
+    h = tg_settle.Handler(bot)
+    h.callback({"id": "a", "data": "awake_until", "message": {"message_id": 51}})
+    check("both messages of the time question are kept",
+          read()["awaiting_ids"], {"menu": 51, "prompt": 778})
+    h.message({"text": "nonsense", "message_id": 60})
+    check("asking again drops the previous box and the bad time", bot.deletes, [778, 60])
+    h.message({"text": "23:30", "message_id": 61})
+    check("the answer takes the question's place", [e[0] for e in bot.edits[-1:]], [51])
+    check("the box and the typed time go", bot.deletes[-2:], [778, 61])
+    check("nothing is left to sweep", read()["awaiting_ids"], {})
+    h.callback({"id": "a", "data": "awake_until", "message": {"message_id": 52}})
+    h.message({"text": "/status", "message_id": 62})
+    tg_settle.check_awaiting(bot)
+    check("a command leaves the question, and it goes",
+          bot.deletes[-2:], [52, 778])
+    h.callback({"id": "a", "data": "awake_until", "message": {"message_id": 53}})
+    h.callback({"id": "b", "data": "menu_back", "message": {"message_id": 53}})
+    deleted = list(bot.deletes)
+    tg_settle.check_awaiting(bot)
+    check("'back' keeps the message it turned into the menu",
+          bot.deletes[len(deleted):], [778])
+
+
+# --- a topic per feature -----------------------------------------------------
+#
+# Features run in parallel, each with its own channel (ask/<slug>/), and each
+# feature's questions go to its own topic in the chat. The repository's own
+# questions stay in the main chat. What the bot knows of a feature lives in the
+# feature's worktree; the topic is deleted when the clean-up is through.
+
+from keepawake import telegramd as tg_topic
+
+
+def feature_channel(repo, slug):
+    d = os.path.join(repo, ".git", "sclaude", "ask", slug)
+    os.makedirs(os.path.join(d, "closed"), exist_ok=True)
+    return d
+
+
+def feature_tree(repo, slug):
+    tree = os.path.join(os.path.dirname(repo), "%s-%s" % (os.path.basename(repo), slug))
+    d = os.path.join(tree, ".sclaude", "local", "feature")
+    os.makedirs(d, exist_ok=True)
+    # As git writes it in a worktree: it names the repository it belongs to.
+    with open(os.path.join(tree, ".git"), "w") as fh:
+        fh.write("gitdir: %s/.git/worktrees/%s-%s\n" % (repo, os.path.basename(repo), slug))
+    with open(os.path.join(d, "state.json"), "w") as fh:
+        json.dump({"step": "development"}, fh)
+    return d
+
+
+def reply_in(channel):
+    try:
+        with open(os.path.join(channel, "answer.json")) as fh:
+            return json.load(fh).get("reply")
+    except (OSError, ValueError):
+        return None
+
+
+def lay_in(channel, qid, prompt="Ship it? [y/n] ", form="yn"):
+    with open(os.path.join(channel, "ask.json"), "w") as fh:
+        json.dump({"prompt": prompt, "form": form, "context": "", "id": qid,
+                   "pid": os.getpid()}, fh)
+
+
+def unlay(channel):
+    for f in ("ask.json", "answer.json"):
+        try:
+            os.unlink(os.path.join(channel, f))
+        except OSError:
+            pass
+
+
+# The name: the slug first, since a phone shows about thirty characters of it,
+# the repository after it while there is room, and a cut slug marked.
+check("a short slug keeps the repository",
+      tg_topic.topic_name("shop", "login-fix"), "login-fix · shop")
+long_slug = "redirect-after-login-on-safari-when-the-cookie-is-stale"
+check_true("a long slug drops the repository",
+           "shop" not in tg_topic.topic_name("shop", long_slug))
+check_true("and is cut to the limit",
+           len(tg_topic.topic_name("shop", long_slug)) <= tg_topic.TOPIC_NAME_MAX)
+check_true("a cut is marked", tg_topic.topic_name("shop", long_slug).endswith("…"))
+check("a message in the main chat is in no topic",
+      tg_topic.message_thread({"message_thread_id": 5}), 0)
+check("a message in a topic is in it",
+      tg_topic.message_thread({"message_thread_id": 5, "is_topic_message": True}), 5)
+
+with sandbox() as box:
+    root = os.path.join(box.dir, "home")
+    repo = os.path.join(root, "shop")
+    os.makedirs(os.path.join(repo, ".git", "sclaude"))
+    old_repos, old_path, old_run = tg_topic.known_repos, tg_topic.repo_path, tg_topic.run
+    tg_topic.known_repos = lambda: [repo]
+    # The card asks `sclaude status` and systemctl; neither is under test here.
+    tg_topic.run = lambda cmd, timeout=25: ""
+    tg_topic.repo_path = lambda name: repo if name == "shop" else None
+    try:
+        a, b = feature_channel(repo, "a"), feature_channel(repo, "b")
+        tree_a, tree_b = feature_tree(repo, "a"), feature_tree(repo, "b")
+        bot = FakeBot()
+        lay_in(a, "qa")
+        lay_in(b, "qb")
+        lay_in(os.path.join(repo, ".git", "sclaude"), "qr", "Feature name: ", "")
+        tg_topic.check_asks(bot)
+        # Each new topic opens with the feature's card.
+        check("three questions at once all go out, two topics with their cards",
+              len(bot.sent), 5)
+        rec_a = json.load(open(os.path.join(tree_a, "telegram.json")))
+        rec_b = json.load(open(os.path.join(tree_b, "telegram.json")))
+        check("the feature's record is in its worktree", rec_a["shown"]["id"], "qa")
+        check("its topic too", rec_a["thread"] in bot.topics, True)
+        check("the daemon's state keeps only the repository's question",
+              sorted(read()["ask_shown"]), ["shop"])
+        check("the repository's question stays in the main chat",
+              sorted(bot.threads), sorted([0] + [rec_a["thread"], rec_b["thread"]] * 2))
+        check("the topic is named after the feature", bot.topics[rec_a["thread"]],
+              "a · shop")
+
+        # Typed in a feature's topic, text answers that feature — though
+        # three questions are open.
+        h = tg_topic.Handler(bot)
+        h.message({"text": "y", "message_id": 70, "is_topic_message": True,
+                   "message_thread_id": rec_b["thread"]})
+        check("a typed answer in a topic reaches its feature", reply_in(b), "y")
+        check("and no other channel", reply_in(a), None)
+        # In the main chat, the features' questions in their topics do not
+        # count: the text answers the one question the main chat shows.
+        h.message({"text": "y", "message_id": 71})
+        check("main-chat text leaves the topics' questions", reply_in(a), None)
+        check("and answers the main chat's",
+              reply_in(os.path.join(repo, ".git", "sclaude")), "y")
+        os.unlink(os.path.join(repo, ".git", "sclaude", "answer.json"))
+
+        # A press answers the channel its message shows.
+        rec_a["shown"]["msg"] = 801
+        with open(os.path.join(tree_a, "telegram.json"), "w") as fh:
+            json.dump(rec_a, fh)
+        h.callback({"id": "c", "data": "answer:shop:n", "message": {"message_id": 801}})
+        check("a press reaches the feature its message shows", reply_in(a), "n")
+        check("not the repository's channel",
+              reply_in(os.path.join(repo, ".git", "sclaude")), None)
+        deletes = list(bot.deletes)
+        h.callback({"id": "c", "data": "answer:shop:n", "message": {"message_id": 801}})
+        check("a second press on the answer deletes nothing", bot.deletes, deletes)
+        check("and is answered plainly", bot.answers[-1], (None, False))
+
+        # The topic deleted by hand: the next question makes a new one.
+        bot2 = FakeBot()
+        unlay(a)
+        tg_topic.check_asks(bot2)
+        lay_in(a, "qa2")
+        tg_topic.check_asks(bot2)
+        rec_a2 = json.load(open(os.path.join(tree_a, "telegram.json")))
+        check_true("a deleted topic is made again", rec_a2["thread"] != rec_a["thread"])
+        check("and the question arrives in it", bot2.threads[-1], rec_a2["thread"])
+
+        # Without Threaded Mode everything goes to the main chat.
+        bot3 = FakeBot()
+        bot3.no_topics = True
+        c = feature_channel(repo, "c")
+        lay_in(c, "qc")
+        tg_topic.check_asks(bot3)
+        check("no topics — the main chat", bot3.threads, [0])
+
+        with state.locked() as st:
+            st["topics_off_until"] = 0     # the refusal above is remembered
+        check("nothing is kept outside a worktree",
+              os.path.exists(os.path.join(c, "telegram.json")), False)
+        # A feature channel with no worktree gets no topic: there would be
+        # nowhere to keep it.
+        bot3b = FakeBot()
+        d = feature_channel(repo, "d")
+        lay_in(d, "qd")
+        tg_topic.check_asks(bot3b)
+        check("no worktree — no topic", (bot3b.topics, bot3b.threads), ({}, [0]))
+        unlay(d)
+
+        # The clean-up: the worktree's removal leaves the record in the
+        # channel's end mark (ask_feature_end), and the bot deletes the topic
+        # named there and the channel at once.
+        unlay(a)
+        bot4 = FakeBot()
+        bot4.topics = dict(bot2.topics)
+        tg_topic.check_asks(bot4)
+        tg_topic.check_topics(bot4)
+        check("a live feature keeps its topic", bot4.deleted_topics, [])
+        record = open(os.path.join(tree_a, "telegram.json")).read()
+        shutil.rmtree(os.path.dirname(os.path.dirname(os.path.dirname(tree_a))))
+        with open(os.path.join(a, "ended"), "w") as fh:
+            fh.write(record)
+        tg_topic.check_topics(bot4)
+        check("the end mark deletes the topic", bot4.deleted_topics, [rec_a2["thread"]])
+        check("and the channel", os.path.exists(a), False)
+
+        # A worktree removed by hand: the channel goes after the grace, the
+        # topic cannot — its id went with the worktree.
+        unlay(b)
+        tg_topic.check_asks(bot4)
+        shutil.rmtree(os.path.dirname(os.path.dirname(os.path.dirname(tree_b))))
+        tg_topic.check_topics(bot4)
+        check("a channel changed just now stays", os.path.exists(b), True)
+        os.utime(b, (time.time() - tg_topic.TOPIC_GRACE - 1,) * 2)
+        tg_topic.check_topics(bot4)
+        check("a worktree gone by hand loses its channel", os.path.exists(b), False)
+        check("and nothing is deleted blind", bot4.deleted_topics, [rec_a2["thread"]])
+
+        # --- the feature's card ----------------------------------------------
+        e = feature_channel(repo, "e")
+        tree_e = feature_tree(repo, "e")
+        bot5 = FakeBot()
+        h5 = tg_topic.Handler(bot5)
+        # From the feature list: the card goes to the feature's topic, pinned,
+        # and the list says where it went.
+        h5.callback({"id": "c", "data": "topic:shop:e", "message": {"message_id": 600}})
+        rec_e = json.load(open(os.path.join(tree_e, "telegram.json")))
+        check("the list opens the feature's topic", rec_e["thread"] in bot5.topics, True)
+        check("its card is the topic's first message",
+              (bot5.threads, bot5.sent and rec_e["card"]), ([rec_e["thread"]], 777))
+        check("and is not pinned — a pin announces itself in the main chat",
+              bot5.pins, [])
+        check_true("the list says where the card went",
+                   "📌" in bot5.edits[-1][1] and bot5.edits[-1][0] == 600)
+        card = bot5.sent[-1][1]
+        datas = [b.get("callback_data") for row in card for b in row]
+        check_true("the card's buttons name the feature",
+                   "fc:go:shop/e" in datas and "fc:acts:shop/e" in datas)
+        check("in a topic there is no way back to the list",
+              [d for d in datas if d and d.startswith("repo:")], [])
+        # Pressed again from the list: a fresh card at the bottom, the old goes.
+        old_card = rec_e["card"]
+        h5.callback({"id": "c", "data": "topic:shop:e", "message": {"message_id": 600}})
+        check("one topic for the feature", len(bot5.topics), 1)
+        check("the old card goes", bot5.deletes[-1], old_card)
+        # "Menu" typed in the topic: a fresh card, and what was typed goes.
+        before = len(bot5.sent)
+        h5.message({"text": "/menu", "message_id": 610, "is_topic_message": True,
+                    "message_thread_id": rec_e["thread"]})
+        check("/menu in a topic brings the card", len(bot5.sent), before + 1)
+        check("and what was typed goes", bot5.deletes[-1], 610)
+        # A card button whose data could not carry the key: the topic tells.
+        bot5.thread = rec_e["thread"]
+        h5.callback({"id": "c", "data": "fc:refresh", "message": {"message_id": 620}})
+        check("a key-less card button acts on the topic's feature",
+              bot5.edits[-1][0], 620)
+        check_true("and redraws the card, not 'gone'",
+                   tg_topic.t("feat.gone", slug="?") != bot5.edits[-1][1])
+        bot5.thread = 0
+        # The dev server buttons act on this feature's server.
+        acted = []
+        saved_dev, saved_act = tg_topic.feature_dev, tg_topic.dev_act
+        tg_topic.feature_dev = lambda r, sl: ("e-label", 3001, False)
+        tg_topic.dev_act = lambda action, label, wt: acted.append((action, label))
+        try:
+            h5.callback({"id": "c", "data": "fc:start:shop/e", "message": {"message_id": 621}})
+            card = bot5.edits[-1]
+        finally:
+            tg_topic.feature_dev, tg_topic.dev_act = saved_dev, saved_act
+        check("start starts this feature's server", acted, [("start", "e-label")])
+        # A long key does not fit 64 bytes: the button names its action only.
+        check("a long key is left to the topic",
+              tg_topic.card_data("go", "shop/" + "x" * 70), "fc:go")
+        # Without Threaded Mode the card takes the list's place, with a way back.
+        bot6 = FakeBot()
+        bot6.no_topics = True
+        f = feature_channel(repo, "f")
+        feature_tree(repo, "f")
+        tg_topic.Handler(bot6).callback({"id": "c", "data": "topic:shop:f",
+                                         "message": {"message_id": 700}})
+        check("no topics — the card stands in the list's place", bot6.edits[-1][0], 700)
+
+        with state.locked() as st:
+            st["topics_off_until"] = 0     # the refusal above is remembered
+
+        # --- one menu screen in the chat -------------------------------------
+        # No open question: a word typed here would be taken for its answer.
+        for slug_x, ch_x in tg_topic.ask_channels(repo):
+            unlay(ch_x)
+        with state.locked() as st:
+            st["screens"] = {}
+        bot7 = FakeBot()
+        h7 = tg_topic.Handler(bot7)
+        sent = iter([801, 802, 803, 804])
+        bot7.send = lambda text, kb=None, quiet=False, thread=None: next(sent)
+        h7.message({"text": "/menu", "message_id": 90})
+        h7.message({"text": "/menu", "message_id": 91})
+        check("a new menu replaces the previous one", bot7.deletes, [90, 91, 801])
+        h7.message({"text": "what now", "message_id": 92})
+        check("an unknown word's menu replaces it too", bot7.deletes[-1], 802)
+        check("and the word stays", 92 in bot7.deletes, False)
+        # A menu that did something becomes what it did, without buttons, and
+        # the next screen leaves that line be.
+        h7.callback({"id": "c", "data": "menu_status", "message": {"message_id": 803}})
+        check("an answered menu loses its buttons", bot7.edits[-1][0], 803)
+        h7.message({"text": "/menu", "message_id": 93})
+        check("the next screen leaves the answer be", 803 in bot7.deletes, False)
+
+        # --- the review's corner cases ---------------------------------------
+        # A send that fails as the network does keeps the topic: no second one,
+        # and the question is sent again on the next turn.
+        g = feature_channel(repo, "g")
+        tree_g = feature_tree(repo, "g")
+        bot8 = FakeBot()
+        tg_topic.feature_topic(bot8, "shop", "g")
+        thread_g = json.load(open(os.path.join(tree_g, "telegram.json")))["thread"]
+        lay_in(g, "qg")
+        bot8.offline = True
+        tg_topic.check_asks(bot8)
+        check("a failed send makes no second topic",
+              json.load(open(os.path.join(tree_g, "telegram.json")))["thread"], thread_g)
+        check("and remembers no message", "shown" in json.load(
+            open(os.path.join(tree_g, "telegram.json"))), False)
+        bot8.offline = False
+        tg_topic.check_asks(bot8)
+        check("the next turn sends it", bot8.threads[-1], thread_g)
+        unlay(g)
+
+        # The end mark stays until the topic is really gone.
+        record = open(os.path.join(tree_g, "telegram.json")).read()
+        shutil.rmtree(os.path.dirname(os.path.dirname(os.path.dirname(tree_g))))
+        with open(os.path.join(g, "ended"), "w") as fh:
+            fh.write(record)
+        bot8.offline = True
+        tg_topic.check_topics(bot8)
+        check("a failed topic delete keeps the mark",
+              os.path.exists(os.path.join(g, "ended")), True)
+        bot8.offline = False
+        tg_topic.check_topics(bot8)
+        check("the next turn deletes the topic", bot8.deleted_topics, [thread_g])
+        check("and then the channel", os.path.exists(g), False)
+
+        # The last question settled before the worktree went: answered, it is
+        # replaced by its answer even with no worktree to remember it in.
+        h_ch = feature_channel(repo, "h")
+        tree_h = feature_tree(repo, "h")
+        bot9 = FakeBot()
+        bot9.no_topics = True
+        lay_in(h_ch, "qh", "Remove all of it? [y/n] ")
+        tg_topic.check_asks(bot9)
+        record = open(os.path.join(tree_h, "telegram.json")).read()
+        with open(os.path.join(h_ch, "closed", "qh.json"), "w") as fh:
+            json.dump({"id": "qh", "reply": "y", "from": "tty"}, fh)
+        unlay(h_ch)
+        shutil.rmtree(os.path.dirname(os.path.dirname(os.path.dirname(tree_h))))
+        with open(os.path.join(h_ch, "ended"), "w") as fh:
+            fh.write(record)
+        tg_topic.check_asks(bot9)
+        tg_topic.check_topics(bot9)
+        check_true("the last question becomes its answer",
+                   bot9.edits and tg_topic.t("ask.yes") in bot9.edits[-1][1])
+        check("rather than being deleted", bot9.deletes, [])
+
+        with state.locked() as st:
+            st["topics_off_until"] = 0     # the refusal above is remembered
+
+        # A mark left by an earlier feature of the same name is not this one's.
+        i_ch = feature_channel(repo, "i")
+        feature_tree(repo, "i")
+        open(os.path.join(i_ch, "ended"), "w").close()
+        tg_topic.check_topics(FakeBot())
+        check("a stale mark under a live worktree goes, the channel stays",
+              (os.path.exists(os.path.join(i_ch, "ended")), os.path.exists(i_ch)),
+              (False, True))
+
+        # A record is not written into a worktree that is being removed.
+        tree_j = feature_tree(repo, "j")
+        path_j = tg_topic.record_path(repo, "j")
+        shutil.rmtree(os.path.dirname(os.path.dirname(os.path.dirname(tree_j))))
+        saved_path = tg_topic.record_path
+        tg_topic.record_path = lambda r, sl: path_j
+        try:
+            tg_topic.save_record(repo, "j", {"thread": 1})
+        finally:
+            tg_topic.record_path = saved_path
+        check("a removed worktree is not made again",
+              os.path.exists(os.path.dirname(path_j)), False)
+
+        # Text typed in a topic while "until when?" waits in the main chat is
+        # the topic's, not the time.
+        with state.locked() as st:
+            st["awaiting"] = "awake_until"
+            st["awaiting_thread"] = 0
+        bot10 = FakeBot()
+        tg_topic.Handler(bot10).message({"text": "my-branch", "message_id": 95,
+                                         "is_topic_message": True,
+                                         "message_thread_id": rec_e["thread"]})
+        check("text in a topic is not taken for the time", bot10.asks, [])
+        check("the wait goes on", read()["awaiting"], "awake_until")
+        with state.locked() as st:
+            st["awaiting"] = ""
+
+        # A card outside a topic whose buttons could not carry the feature
+        # finds it by its message.
+        with state.locked() as st:
+            st["main_cards"] = {"700": "shop/f", "701": "shop/e"}
+        bot11 = FakeBot()
+        tg_topic.Handler(bot11).callback({"id": "c", "data": "fc:refresh",
+                                          "message": {"message_id": 701}})
+        check_true("a key-less button on a main-chat card finds its feature",
+                   bot11.edits and bot11.edits[-1][1] != tg_topic.t("feat.gone", slug="?"))
+
+        # --- the second review's cases ---------------------------------------
+        # A worktree of "shop-admin" is not a feature of "shop".
+        other = os.path.join(root, "shop-admin")
+        os.makedirs(os.path.join(other, ".git"))
+        feature_tree(other, "x")
+        check("a neighbour repository's worktree is not this one's feature",
+              "admin-x" in tg_topic.feature_records(repo), False)
+
+        # Neither yes nor no typed to a yes/no question stays a question.
+        k = feature_channel(repo, "k")
+        feature_tree(repo, "k")
+        bot12 = FakeBot()
+        lay_in(k, "qk")
+        tg_topic.check_asks(bot12)
+        thread_k = tg_topic.load_record(repo, "k")["thread"]
+        edits = len(bot12.edits)
+        tg_topic.Handler(bot12).message({"text": "maybe", "message_id": 96,
+                                         "is_topic_message": True,
+                                         "message_thread_id": thread_k})
+        check("'maybe' to a yes/no question is not shown as its answer",
+              len(bot12.edits), edits)
+        check("and the question's message stays known",
+              bool((tg_topic.get_shown("shop/k") or {}).get("msg")), True)
+        unlay(k)
+
+        # A mark set aside for a new feature of the same name still deletes the
+        # old topic, and leaves the channel to the new feature.
+        with open(os.path.join(k, "ended-1"), "w") as fh:
+            json.dump({"thread": 4242}, fh)
+        bot13 = FakeBot()
+        bot13.topics[4242] = "old"
+        # On the questions' pass: before the channel's records are read.
+        tg_topic.check_asks(bot13)
+        check("an old feature's topic goes by its set-aside mark",
+              bot13.deleted_topics, [4242])
+        check("and the channel stays", (os.path.exists(k),
+              os.path.exists(os.path.join(k, "ended-1"))), (True, False))
+
+        # A copied entry the bot has settled since is history, not deleted.
+        with open(os.path.join(k, "ended"), "w") as fh:
+            json.dump({"shown": {"id": "gone", "msg": 555}}, fh)
+        shutil.rmtree(os.path.join(root, "shop-k"))
+        bot14 = FakeBot()
+        tg_topic.check_topics(bot14)
+        check("a settled message is left alone at the end", bot14.deletes, [])
+
+        # Without Threaded Mode the refusal is remembered.
+        with state.locked() as st:
+            st["topics_off_until"] = 0
+        bot15 = FakeBot()
+        bot15.no_topics = True
+        made = []
+        def refuse(nm):
+            made.append(nm)
+            bot15.last_error = "bad request: the chat is not a forum"
+            return 0
+        bot15.create_topic = refuse
+        feature_tree(repo, "m")
+        tg_topic.feature_topic(bot15, "shop", "m")
+        tg_topic.feature_topic(bot15, "shop", "m")
+        check("a refused topic is not asked for again at once", len(made), 1)
+        with state.locked() as st:
+            st["topics_off_until"] = 0
+
+        # The feature list keeps within Telegram's 64 bytes.
+        saved_feats, saved_choice = tg_topic.features_of_name, tg_topic.repo_choice
+        tg_topic.features_of_name = lambda n: ([("s" * 50, "1/6 plan", ""),
+                                                ("t" * 70, "1/6 plan", "")], "")
+        tg_topic.repo_choice = lambda: "/home/u/" + "r" * 20
+        try:
+            datas = [b["callback_data"] for row in tg_topic.features_keyboard("r" * 20)
+                     for b in row]
+        finally:
+            tg_topic.features_of_name, tg_topic.repo_choice = saved_feats, saved_choice
+        check("every button's data fits", all(len(d.encode()) <= 64 for d in datas), True)
+        check("a long repository is left out of the data", "topic::" + "s" * 50 in datas, True)
+
+        # --- the third review's cases ----------------------------------------
+        n = feature_channel(repo, "n")
+        feature_tree(repo, "n")
+        bot16 = FakeBot()
+        # Ids of its own: other features' messages in this sandbox are 777.
+        ids16 = iter(range(5000, 5100))
+        plain_send = bot16.send
+        bot16.send = lambda text, kb=None, quiet=False, thread=None: (
+            plain_send(text, kb, quiet, thread) and next(ids16))
+        lay_in(n, "q1", "Delete them? [y/n] ")
+        tg_topic.check_asks(bot16)
+        m1 = tg_topic.get_shown("shop/n")["msg"]
+        # Answered at the laptop, and the next question laid out before the
+        # bot's turn: a press on the first must not answer the second.
+        unlay(n)
+        with open(os.path.join(n, "closed", "q1.json"), "w") as fh:
+            json.dump({"id": "q1", "reply": "y", "from": "tty"}, fh)
+        lay_in(n, "q2", "Force-delete it? [y/n] ")
+        h16 = tg_topic.Handler(bot16)
+        h16.callback({"id": "c", "data": "answer:shop:y", "message": {"message_id": m1}})
+        check("a press does not answer a question it was not shown", reply_in(n), None)
+        check("it says the question is closed", bot16.answers[-1], (tg_topic.t("ask.gone"), False))
+        check("and leaves the message for the loop to answer", bot16.deletes, [])
+        tg_topic.check_asks(bot16)
+        check_true("the loop turns it into the laptop's answer",
+                   any(e[0] == m1 and tg_topic.t("ask.by.terminal") in e[1] for e in bot16.edits))
+        unlay(n)
+
+        # The last question with no record left: its buttons go, its text stays.
+        with open(os.path.join(n, "ended"), "w") as fh:
+            json.dump({"shown": {"id": "lost", "msg": 556}}, fh)
+        shutil.rmtree(os.path.join(root, "shop-n"))
+        bot17 = FakeBot()
+        tg_topic.check_topics(bot17)
+        check("no record — the buttons go, the message stays",
+              (bot17.unbuttoned, bot17.deletes), ([556], []))
+
+        # A photo in a feature's topic is not a request for the menu.
+        bot18 = FakeBot()
+        tg_topic.Handler(bot18).message({"message_id": 97, "is_topic_message": True,
+                                         "message_thread_id": rec_e["thread"],
+                                         "photo": [{}]})
+        check("a photo in a topic stays, no card", (bot18.deletes, bot18.sent), ([], []))
+
+        # --- the fourth review's cases ---------------------------------------
+        # The end of a feature leaves what a new feature of the same name has
+        # written meanwhile.
+        o = feature_channel(repo, "o")
+        open(os.path.join(o, "ended"), "w").close()
+        lay_in(o, "new-one")
+        tg_topic.clear_channel(o)
+        check("clearing a channel keeps a new question",
+              (os.path.exists(os.path.join(o, "ask.json")),
+               os.path.exists(os.path.join(o, "ended"))), (True, False))
+        unlay(o)
+        tg_topic.clear_channel(o)
+        check("and an emptied channel goes", os.path.exists(o), False)
+
+        # --- the fifth review's cases ----------------------------------------
+        # Typed text answers only the question the chat shows.
+        q = feature_channel(repo, "q")
+        feature_tree(repo, "q")
+        bot19 = FakeBot()
+        ids19 = iter(range(6000, 6100))
+        plain19 = bot19.send
+        bot19.send = lambda text, kb=None, quiet=False, thread=None: (
+            plain19(text, kb, quiet, thread) and next(ids19))
+        lay_in(q, "q1", "Branch name: ", "")
+        tg_topic.check_asks(bot19)
+        thread_q = tg_topic.load_record(repo, "q")["thread"]
+        unlay(q)
+        lay_in(q, "q2", "Something else: ", "")
+        tg_topic.Handler(bot19).message({"text": "main", "message_id": 98,
+                                         "is_topic_message": True,
+                                         "message_thread_id": thread_q})
+        check("typed text does not answer a question not yet shown", reply_in(q), None)
+        unlay(q)
+
+        # The short list form is only for the remembered repository.
+        saved_feats, saved_choice = tg_topic.features_of_name, tg_topic.repo_choice
+        tg_topic.features_of_name = lambda n: ([("s" * 50, "1/6 plan", "")], "")
+        tg_topic.repo_choice = lambda: "/elsewhere/other"
+        try:
+            datas = [b["callback_data"] for row in tg_topic.features_keyboard("r" * 20)
+                     for b in row]
+        finally:
+            tg_topic.features_of_name, tg_topic.repo_choice = saved_feats, saved_choice
+        check("no short form for a repository not remembered",
+              [d for d in datas if d.startswith("topic:")], [])
+
+        # A screen in a topic replaces that topic's screen, not the main chat's.
+        with state.locked() as st:
+            st["screens"] = {}
+        bot20 = FakeBot()
+        ids20 = iter(range(7000, 7100))
+        plain20 = bot20.send
+        bot20.send = lambda text, kb=None, quiet=False, thread=None: (
+            plain20(text, kb, quiet, thread) and next(ids20))
+        h20 = tg_topic.Handler(bot20)
+        h20.message({"text": "/settings", "message_id": 99})
+        bot20.thread = 77
+        h20.message({"text": "/settings", "message_id": 100})
+        check("a topic's screen leaves the main chat's", 7000 in bot20.deletes, False)
+
+        # --- the sixth review's cases ----------------------------------------
+        # Text in the main chat answers no question the chat has not shown.
+        r_ch = feature_channel(repo, "r")
+        feature_tree(repo, "r")
+        lay_in(r_ch, "unseen")
+        tg_topic.Handler(FakeBot()).message({"text": "y", "message_id": 101})
+        check("text answers no question not yet shown", reply_in(r_ch), None)
+        unlay(r_ch)
+
+        # A worktree whose .git names its repository by a relative path.
+        tree_rel = os.path.join(root, "shop-rel")
+        os.makedirs(os.path.join(tree_rel, ".sclaude", "local", "feature"))
+        with open(os.path.join(tree_rel, ".sclaude", "local", "feature", "telegram.json"), "w") as fh:
+            fh.write("{}")
+        with open(os.path.join(tree_rel, ".git"), "w") as fh:
+            fh.write("gitdir: ../shop/.git/worktrees/shop-rel\n")
+        check("a relative gitdir is the worktree's", "rel" in tg_topic.feature_records(repo), True)
+
+        # A question in a feature's topic does not repeat the card above it.
+        body = tg_topic.ask_text("shop", {"prompt": "Which?", "form": "", "feature": "e"},
+                                 in_topic=True)
+        check("no card inside a question in a topic",
+              tg_topic.t("feat.gone", slug="e") in body, False)
+
+        # --- the control review's cases --------------------------------------
+        no = tg_topic.answered_text("shop", {"prompt": "Delete?", "form": "yn"}, "n")
+        check("a 'no' carries one mark, its own", ("✅" in no, tg_topic.t("ask.no") in no),
+              (False, True))
+        typed = tg_topic.answered_text("shop", {"prompt": "Name?", "form": ""}, "x")
+        check_true("any other answer is marked answered", "✅ " in typed)
+
+        # A warning unanswered through the night is not "extended" next morning.
+        now_n = int(time.time())
+        with state.locked() as st:
+            st.update(dict(until_ts=now_n + 3600, warned_for_ts=now_n - 30000,
+                           warn_message_id=33, decision=""))
+        bot21 = FakeBot()
+        tg_topic.settle_warning(bot21, read(), now_n)
+        check("a warning past its night goes rather than claim an extension",
+              (bot21.edits, bot21.deletes), ([], [33]))
+
+        # Text for a question laid out but not shown yet: not "closed".
+        s_ch = feature_channel(repo, "s")
+        feature_tree(repo, "s")
+        # Every other question in this sandbox closed: one open, one target.
+        for slug_x, ch_x in tg_topic.ask_channels(repo):
+            unlay(ch_x)
+        lay_in(s_ch, "unshown")
+        bot22 = FakeBot()
+        tg_topic.Handler(bot22).message({"text": "y", "message_id": 102})
+        # Not shown anywhere yet: no topic to point to, it may still come here.
+        check("main-chat text for a feature's unshown question says it is coming",
+              bot22.sent[-1][0] if bot22.sent else "", tg_topic.t("ask.notyet"))
+        unlay(s_ch)
+
+        # --- the ninth review's case -----------------------------------------
+        # A topic not made for a passing reason: the question waits for the
+        # next turn rather than settling in the main chat.
+        with state.locked() as st:
+            st["topics_off_until"] = 0
+        t_ch = feature_channel(repo, "t")
+        feature_tree(repo, "t")
+        lay_in(t_ch, "qt")
+        bot23 = FakeBot()
+        bot23.offline = True
+        tg_topic.check_asks(bot23)
+        check("a passing failure to make a topic sends nothing to the main chat",
+              bot23.sent, [])
+        bot23.offline = False
+        tg_topic.check_asks(bot23)
+        check_true("the next turn makes the topic and asks there",
+                   bot23.threads and bot23.threads[-1] != 0)
+        unlay(t_ch)
+
+        # --- the tenth review's cases ----------------------------------------
+        check("'+2' is not an option", tg_topic.option_in_range({"form": "pick:3"}, "+2"), False)
+        check("'2' is", tg_topic.option_in_range({"form": "pick:3"}, " 2 "), True)
+        for slug_x, ch_x in tg_topic.ask_channels(repo):
+            unlay(ch_x)
+        u = feature_channel(repo, "u")
+        feature_tree(repo, "u")
+        lay_in(u, "qu", "Branch name: ", "")
+        bot24 = FakeBot()
+        tg_topic.check_asks(bot24)
+        tg_topic.Handler(bot24).message({"text": "a note", "message_id": 103})
+        check("a word in the main chat does not answer a question in a topic",
+              (reply_in(u), bot24.sent[-1][0]), (None, tg_topic.t("ask.intopic")))
+        unlay(u)
+
+        # --- the eleventh review's cases -------------------------------------
+        # A feature's question in its topic does not keep text typed in the
+        # main chat from answering the main chat's own question.
+        for slug_x, ch_x in tg_topic.ask_channels(repo):
+            unlay(ch_x)
+        v = feature_channel(repo, "v")
+        feature_tree(repo, "v")
+        lay_in(v, "qv")
+        root_ch = os.path.join(repo, ".git", "sclaude")
+        lay_in(root_ch, "qname", "Feature name: ", "")
+        bot25 = FakeBot()
+        ids25 = iter(range(8000, 8100))
+        plain25 = bot25.send
+        bot25.send = lambda text, kb=None, quiet=False, thread=None: (
+            plain25(text, kb, quiet, thread) and next(ids25))
+        tg_topic.check_asks(bot25)
+        tg_topic.Handler(bot25).message({"text": "new-thing", "message_id": 104})
+        check("main-chat text answers the main chat's question",
+              (reply_in(root_ch), reply_in(v)), ("new-thing", None))
+        unlay(root_ch)
+
+        # A topic renewed after being deleted by hand shows its open question
+        # again.
+        rec_v = tg_topic.load_record(repo, "v")
+        check_true("the question is shown in the topic", (rec_v.get("shown") or {}).get("thread"))
+        tg_topic.feature_topic(bot25, "shop", "v", renew=True)
+        check("renewing forgets the lost message", "shown" in tg_topic.load_record(repo, "v"), False)
+        unlay(v)
+
+        # --- the twelfth review's cases --------------------------------------
+        # A feature's question not shown yet does not keep main-chat text from
+        # answering the main chat's own question.
+        for slug_x, ch_x in tg_topic.ask_channels(repo):
+            unlay(ch_x)
+        w = feature_channel(repo, "w")
+        feature_tree(repo, "w")
+        lay_in(os.path.join(repo, ".git", "sclaude"), "qname2", "Feature name: ", "")
+        bot26 = FakeBot()
+        tg_topic.check_asks(bot26)
+        lay_in(w, "unshown-w")
+        tg_topic.Handler(bot26).message({"text": "other-thing", "message_id": 105})
+        check("an unshown feature question does not block the main chat's",
+              reply_in(os.path.join(repo, ".git", "sclaude")), "other-thing")
+        unlay(os.path.join(repo, ".git", "sclaude"))
+        unlay(w)
+
+        # A finished channel goes with a killed writer's leftovers in it.
+        x_ch = feature_channel(repo, "x")
+        open(os.path.join(x_ch, "closed", ".abc.123"), "w").close()
+        open(os.path.join(x_ch, "answer.json.99"), "w").close()
+        check("leftovers do not keep a finished channel", tg_topic.clear_channel(x_ch), True)
+
+        # --- the thirteenth review's cases -----------------------------------
+        # A bad time goes with its box: the chat keeps only the new prompt.
+        with state.locked() as st:
+            st["awaiting"] = "awake_until"
+            st["awaiting_thread"] = 0
+        bot27 = FakeBot()
+        tg_topic.Handler(bot27).message({"text": "abc", "message_id": 106})
+        check("a bad time typed goes", 106 in bot27.deletes, True)
+        with state.locked() as st:
+            st["awaiting"] = ""
+        # A try for a feature gone while it waited does not stay.
+        tg_topic.TOPIC_TRIED["gone-repo/none"] = (0, 0)
+        tg_topic.check_asks(FakeBot())
+        check("gone features leave no tries", "gone-repo/none" in tg_topic.TOPIC_TRIED, False)
+
+        # --- the fourteenth review's cases -----------------------------------
+        # A photo while "until when?" waits is not a bad time.
+        with state.locked() as st:
+            st["awaiting"] = "awake_until"
+            st["awaiting_thread"] = 0
+        bot28 = FakeBot()
+        tg_topic.Handler(bot28).message({"photo": [{}], "message_id": 107})
+        check("a photo is not taken for a time", (bot28.deletes, bot28.asks), ([], []))
+        with state.locked() as st:
+            st["awaiting"] = ""
+        # A typed reply that is no answer goes; the question is asked again.
+        main_ch = os.path.join(repo, ".git", "sclaude")
+        for slug_x, ch_x in tg_topic.ask_channels(repo):
+            unlay(ch_x)
+        lay_in(main_ch, "qmaybe")
+        bot29 = FakeBot()
+        tg_topic.check_asks(bot29)
+        tg_topic.Handler(bot29).message({"text": "maybe", "message_id": 108})
+        check("a reply that is no answer goes", 108 in bot29.deletes, True)
+        unlay(main_ch)
+        # Offline, a feature from the list does not get a card in the main chat.
+        with state.locked() as st:
+            st["topics_off_until"] = 0
+        feature_tree(repo, "y")
+        bot30 = FakeBot()
+        bot30.offline = True
+        tg_topic.Handler(bot30).callback({"id": "a", "data": "topic:%s:y" % os.path.basename(repo),
+                                          "message": {"message_id": 109}})
+        check("offline, the list stays and says so",
+              [e[1].endswith(tg_topic.t("feat.topiclater")) for e in bot30.edits], [True])
+        # Past the wait, a refusal that may never pass gives way to the main chat.
+        tg_topic.CARD_TRIED[tg_topic.channel_key(os.path.basename(repo), "y")] = (0, int(time.time()))
+        tg_topic.Handler(bot30).callback({"id": "a", "data": "topic:%s:y" % os.path.basename(repo),
+                                          "message": {"message_id": 110}})
+        check("past the wait, the card is drawn here",
+              bot30.edits[-1][1].endswith(tg_topic.t("feat.topiclater")), False)
+        # --- the sixteenth review's cases ------------------------------------
+        # A failure long ago does not spend a new blip's wait.
+        tg_topic.CARD_TRIED[tg_topic.channel_key(os.path.basename(repo), "y")] = (0, 0)
+        tg_topic.Handler(bot30).callback({"id": "a", "data": "topic:%s:y" % os.path.basename(repo),
+                                          "message": {"message_id": 112}})
+        check("an old failure starts no fallback",
+              bot30.edits[-1][1].endswith(tg_topic.t("feat.topiclater")), True)
+        # A renewed topic keeps a question shown in the main chat.
+        rec_y = tg_topic.load_record(repo, "y")
+        rec_y.update(thread=0, shown={"id": "qy", "msg": 55, "thread": 0})
+        tg_topic.save_record(repo, "y", rec_y)
+        bot32 = FakeBot()
+        tg_topic.feature_topic(bot32, os.path.basename(repo), "y", renew=True)
+        check("the main chat's copy stays known",
+              tg_topic.load_record(repo, "y").get("shown", {}).get("msg"), 55)
+        # --- the seventeenth review's cases ----------------------------------
+        # Two questions in the main chat: the one replied to takes the text.
+        for slug_x, ch_x in tg_topic.ask_channels(repo):
+            unlay(ch_x)
+        z1, z2 = feature_channel(repo, "z1"), feature_channel(repo, "z2")
+        lay_in(z1, "qz1", "Branch name: ", "")
+        lay_in(z2, "qz2", "Branch name: ", "")
+        bot33 = FakeBot()
+        bot33.no_topics = True
+        ids33 = iter(range(401, 500))
+        real_send = bot33.send
+        bot33.send = lambda *a, **k: real_send(*a, **k) and next(ids33)
+        tg_topic.check_asks(bot33)
+        shown_z2 = (tg_topic.get_shown(tg_topic.channel_key(os.path.basename(repo), "z2")) or {}).get("msg")
+        tg_topic.Handler(bot33).message({"text": "loose", "message_id": 113})
+        check("two open, no reply: asked which", bot33.sent[-1][0], tg_topic.t("ask.which"))
+        n33 = len(bot33.sent)
+        tg_topic.Handler(bot33).message({"text": "stray", "message_id": 117,
+                                         "reply_to_message": {"message_id": 99999}})
+        check("a reply to neither: asked which",
+              (len(bot33.sent) - n33, bot33.sent[-1][0], reply_in(z1), reply_in(z2)),
+              (1, tg_topic.t("ask.which"), None, None))
+        tg_topic.Handler(bot33).message({"text": "fix-z2", "message_id": 114,
+                                         "reply_to_message": {"message_id": shown_z2}})
+        check("the reply answers its question", (reply_in(z1), reply_in(z2)), (None, "fix-z2"))
+        # --- the eighteenth review's cases -----------------------------------
+        # One of two on screen: text without a reply answers it. The
+        # repository's own question is laid out after the turn, not shown yet.
+        unlay(z1)
+        unlay(z2)
+        lay_in(z1, "qz1b", "Branch name: ", "")
+        tg_topic.check_asks(bot33)
+        main_q = os.path.join(repo, ".git", "sclaude")
+        lay_in(main_q, "qmain-late", "Name: ", "")
+        tg_topic.Handler(bot33).message({"text": "only-z1", "message_id": 115})
+        check("the one on screen takes the text", (reply_in(z1), reply_in(main_q)),
+              ("only-z1", None))
+        unlay(z1)
+        unlay(main_q)
+        with state.locked() as st:
+            st["topics_off_until"] = 0
+        # An out-of-range number typed for a list stays unanswered here.
+        lay_in(main_ch, "qpick", "Which one? [1-3] ", "pick:3")
+        bot31 = FakeBot()
+        tg_topic.check_asks(bot31)
+        tg_topic.Handler(bot31).message({"text": "12", "message_id": 111})
+        check("a number off the list is not sent on",
+              (reply_in(main_ch), bot31.sent[-1][0]), (None, tg_topic.t("ask.nooption")))
+        # A word goes on: a list may take one ("Enter to leave it out").
+        tg_topic.Handler(bot31).message({"text": "skip", "message_id": 116})
+        check("a word is passed for a list", reply_in(main_ch), "skip")
+        check("and is not shown answered before the orchestrator takes it",
+              (bot31.edits, 116 in bot31.deletes), ([], True))
+        unlay(main_ch)
+        # A feature's question in the main chat names its feature.
+        check_true("the main chat's copy names the feature",
+                   tg_topic.feature_card(os.path.basename(repo), "y")
+                   in tg_topic.ask_text(os.path.basename(repo), {"prompt": "Remove? "}, slug="y"))
+    finally:
+        tg_topic.known_repos, tg_topic.repo_path = old_repos, old_path
+        tg_topic.run = old_run
+
+
 # ------------------------------------- idling by a tty's two stamps
 
 # A tty has two stamps, and one is not enough. mtime is moved by a program's
@@ -2387,21 +3502,14 @@ _bare = _tg.ask_text("myapp", {"form": "pick:2", "prompt": "Which one?",
                                 "context": _ctx})
 check_true("the list stayed with numeric buttons", "1)  Continue" in _bare)
 
-# The feature list's buttons: the wide one drives the step, the narrow one leads
-# to the actions on the same feature. That is the Telegram form of the terminal's
-# checkbox, unfolded across the width.
+# The feature list's buttons: one per feature, taking its card to its topic,
+# where the step and the actions are.
 _feat_rows = [r for r in _tg.features_keyboard("myapp")
-              if len(r) == 2 and r[1]["callback_data"].startswith("acts:")]
-if _feat_rows:
-    _row = _feat_rows[0]
-    _slug = _row[1]["callback_data"].split(":", 2)[2]
-    check("the wide feature button drives the step",
-          _row[0]["callback_data"], "go:myapp:%s" % _slug)
-    check("the narrow feature button leads to the actions",
-          _row[1]["callback_data"], "acts:myapp:%s" % _slug)
-    check_true("the narrow button has no caption", len(_row[1]["text"]) <= 4)
-    check_true("the feature's name is trimmed to half a row",
-               len(_row[0]["text"]) <= 40)
+              if r[0]["callback_data"].startswith("topic:")]
+for _row in _feat_rows[:1]:
+    check("a feature's row is one button", len(_row), 1)
+    check_true("the button names the feature",
+               _row[0]["callback_data"].split(":", 2)[2] in _row[0]["text"])
 
 # A question about a particular feature is shown with its card. There is nothing
 # in the orchestrator to assemble it with — whether the session is alive is known
@@ -2482,7 +3590,7 @@ try:
     check_true("the ninth feature is named in the text", "feat-9" in _nine)
     check("there are still eight buttons",
           len([r for r in _tg.features_keyboard("myapp")
-               if len(r) == 2 and r[1]["callback_data"].startswith("acts:")]), 8)
+               if r[0]["callback_data"].startswith("topic:")]), 8)
     # Eight features fit whole — there must then be no extra line.
     _tg.features_of_name = lambda n: (
         [("feat-%d" % i, "2/4 development", "/wt/%d" % i) for i in range(1, 9)], "")
@@ -2538,6 +3646,12 @@ try:
           _want)
 finally:
     shutil.rmtree(_home, ignore_errors=True)
+
+# The bot's profile texts fit Telegram's limits in both languages: over them
+# setMyDescription is refused and the profile keeps its stale text.
+from keepawake.i18n import STRINGS as _PROFILE
+check("the description fits 512", all(len(x) <= 512 for x in _PROFILE["bot.description"]), True)
+check("the short description fits 120", all(len(x) <= 120 for x in _PROFILE["bot.short"]), True)
 
 # ------------------------------------------------------------- the outcome
 

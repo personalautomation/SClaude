@@ -1073,8 +1073,14 @@ the human agrees to a clean-up after the merge, where there is nothing to lose;
 here every "yes" destroys something nobody asked to have destroyed, and their
 costs differ: a worktree with uncommitted work cannot be recovered by anything,
 whereas a closed issue can be reopened. So each action is asked about separately,
-in order from the irreversible to the reversible, and refusing one does not
-cancel the rest: sometimes the branches need tearing down while the issue stays.
+and refusing one does not cancel the rest: sometimes the branches need tearing
+down while the issue stays. Every question comes first and the work after it, in
+order from the irreversible to the reversible: the feature's questions go to its
+Telegram topic, which goes with the worktree, and a person who changes their mind
+halfway stops with everything still in place. The pull request is asked about
+before the branch in `origin`, and closed before it is deleted: deleting a pull
+request's head branch closes it on GitHub, so a pull request kept open keeps its
+branch.
 
 What exactly the feature has, the script works out before the first question and
 shows as a table: asking "remove the worktree?" without showing that a branch, a

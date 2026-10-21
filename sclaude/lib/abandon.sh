@@ -119,6 +119,7 @@ abandon_traces() {
 cmd_abandon() {
   require_repo
   local slug="${1:-}" wt state traces answer
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF drop <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
   state="$wt/.sclaude/local/feature/state.json"
@@ -153,9 +154,15 @@ cmd_abandon() {
   echo ""
   warn "None of this comes back. Each step below is asked separately."
 
-  # The order runs from the irreversible to the reversible. A human who changes
-  # their mind partway down the list loses less than if the issue had been closed
-  # first while the worktree with the work stayed hanging without it.
+  # Every question first, then the work. The questions are the feature's and go
+  # to its topic in the bot, and the topic goes with the worktree — so nothing
+  # may be asked once the worktree is removed. It also means nothing is done
+  # until the whole list has been answered: a human who changes their mind
+  # halfway stops with everything still in place.
+  #
+  # The work runs from the irreversible to the reversible. A failure partway
+  # down the list then loses less than if the issue had been closed first while
+  # the worktree with the work stayed hanging without it.
 
   # --- uncommitted work --------------------------------------------------
   local dirty; dirty="$(worktree_dirt "$wt")"
@@ -165,15 +172,82 @@ cmd_abandon() {
     printf '%s\n' "$dirty"
   fi
 
+  # 1 is a yes, 2 a no, 0 a question that was never asked.
+  local want_tree=0 want_branch=0 want_origin=0 want_pr=0 want_issue=0
+
   # --- worktree ----------------------------------------------------------
+  echo ""
+  ask "${BOLD}Remove the worktree $wt? [y/n] ${OFF}" answer yn
+  is_yes "$answer" && want_tree=1
+
+  # --- the local branch --------------------------------------------------
   #
+  # Asked only along with the tree: git refuses to delete a branch that a live
+  # worktree stands on, and with the tree kept the question would be in vain.
+  if [[ -n "$branch" ]] && git -C "$REPO" show-ref --verify --quiet "refs/heads/$branch"; then
+    echo ""
+    if [[ "$want_tree" -eq 0 ]]; then
+      info "  local branch $branch kept: its worktree is still there."
+    else
+      ask "${BOLD}Delete the local branch $branch? [y/n] ${OFF}" answer yn
+      is_yes "$answer" && want_branch=1 || want_branch=2
+    fi
+  fi
+
+  # --- the pull request --------------------------------------------------
+  #
+  # We close rather than delete: deleting a PR through the API is not possible at
+  # all, and there is no need — a closed PR remains the history of the decision
+  # not to do this work.
+  if [[ -n "$repo" ]] && command -v gh >/dev/null 2>&1; then
+    if [[ -z "$pr" && -n "$branch" ]]; then
+      pr="$(gh pr list --repo "$repo" --head "$branch" --state open --limit 1 \
+              --json number --jq '.[0].number' 2>/dev/null)" || pr=""
+    fi
+    if [[ -n "$pr" ]] \
+       && [[ "$(gh pr view "$pr" --repo "$repo" --json state --jq .state 2>/dev/null)" == "OPEN" ]]; then
+      echo ""
+      ask "${BOLD}Close pull request #$pr? [y/n] ${OFF}" answer yn
+      is_yes "$answer" && want_pr=1 || want_pr=2
+    fi
+  fi
+
+  # --- the branch in origin ----------------------------------------------
+  #
+  # After the pull request: deleting a pull request's head branch closes it on
+  # GitHub, so a pull request kept open keeps its branch too.
+  if [[ -n "$branch" ]] \
+     && git -C "$REPO" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    echo ""
+    if [[ "$want_pr" -eq 2 ]]; then
+      info "  origin/$branch kept: pull request #$pr stays open on it."
+    else
+      ask "${BOLD}Delete origin/$branch on GitHub? [y/n] ${OFF}" answer yn
+      is_yes "$answer" && want_origin=1 || want_origin=2
+    fi
+  fi
+
+  # --- the issue ---------------------------------------------------------
+  #
+  # "Not planned" rather than "completed": the issue is closed because the work
+  # was decided against, and in a milestone's report these two outcomes must not
+  # look the same.
+  if [[ -n "$repo" ]] && command -v gh >/dev/null 2>&1; then
+    if [[ -n "$issue" ]] \
+       && [[ "$(gh issue view "$issue" --repo "$repo" --json state --jq .state 2>/dev/null)" == "OPEN" ]]; then
+      echo ""
+      ask "${BOLD}Close issue #$issue as not planned? [y/n] ${OFF}" answer yn
+      is_yes "$answer" && want_issue=1 || want_issue=2
+    fi
+  fi
+
+  # --- and now the work, in the same order --------------------------------
+  echo ""
   # We shut the dev server down only along with the tree: it was started for it,
   # and there is no reason to leave it holding a port in a deleted directory. If
   # the tree is kept, we do not touch the server either: the work goes on.
   local wt_gone=0
-  echo ""
-  ask "${BOLD}Remove the worktree $wt? [y/n] ${OFF}" answer yn
-  if is_yes "$answer"; then
+  if [[ "$want_tree" -eq 1 ]]; then
     # The cycle's record, while there is still a state to read it from. Here
     # rather than at the top of the command because the tree may well be kept:
     # a feature whose worktree survives has not finished, and a record written
@@ -194,103 +268,68 @@ cmd_abandon() {
     info "  worktree kept."
   fi
 
-  # --- the local branch --------------------------------------------------
-  #
-  # Only after the tree is gone: git refuses to delete a branch that a live
-  # worktree stands on, and without this the question would be asked in vain.
-  if [[ -n "$branch" ]] && git -C "$REPO" show-ref --verify --quiet "refs/heads/$branch"; then
-    echo ""
+  if [[ "$want_branch" -eq 1 ]]; then
     if [[ "$wt_gone" -eq 0 ]]; then
       info "  local branch $branch kept: its worktree is still there."
+    # -D straight away: -d would refuse here almost always — an abandoned branch
+    # is precisely one with commits that never reached main — and its refusal
+    # would have to be re-asked with a second question about the same thing.
+    # The human has already seen in the table how many commits the branch has,
+    # and agreed to exactly that.
+    elif git -C "$REPO" branch -D "$branch" >/dev/null 2>&1; then
+      echo "  ${GREEN}deleted${OFF} $branch"
     else
-      ask "${BOLD}Delete the local branch $branch? [y/n] ${OFF}" answer yn
-      if is_yes "$answer"; then
-        # -D straight away: -d would refuse here almost always — an abandoned
-        # branch is precisely one with commits that never reached main — and its
-        # refusal would have to be re-asked with a second question about the same
-        # thing. The human has already seen in the table how many commits the
-        # branch has, and agreed to exactly that.
-        if git -C "$REPO" branch -D "$branch" >/dev/null 2>&1; then
-          echo "  ${GREEN}deleted${OFF} $branch"
-        else
-          warn "  could not delete $branch"
-        fi
-      else
-        info "  local branch kept."
-      fi
+      warn "  could not delete $branch"
     fi
+  elif [[ "$want_branch" -eq 2 ]]; then
+    info "  local branch kept."
   fi
 
-  # --- the branch in origin ----------------------------------------------
-  if [[ -n "$branch" ]] \
-     && git -C "$REPO" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
-    echo ""
-    ask "${BOLD}Delete origin/$branch on GitHub? [y/n] ${OFF}" answer yn
-    if is_yes "$answer"; then
-      # The output is muted: .githooks/pre-push does not tell deleting a branch
-      # from an ordinary push and dumps a report of checks that has nothing to do
-      # with the deletion.
-      if git -C "$REPO" push origin --delete "$branch" >/dev/null 2>&1; then
-        echo "  ${GREEN}deleted${OFF} origin/$branch"
-        git -C "$REPO" fetch origin --prune >/dev/null 2>&1
-      else
-        warn "  could not delete origin/$branch — the PR may still be holding it"
-      fi
+  # The worktree was to go and stayed: the feature is still in progress, and
+  # its pull request, branch and issue stay with it whatever was answered.
+  if [[ "$want_tree" -eq 1 && "$wt_gone" -eq 0 ]]; then
+    [[ "$want_pr" -eq 1 ]] && info "  PR #$pr kept open: the worktree stayed."
+    [[ "$want_origin" -eq 1 ]] && info "  origin/$branch kept: the worktree stayed."
+    [[ "$want_issue" -eq 1 ]] && info "  issue #$issue kept open: the worktree stayed."
+    want_pr=0 want_origin=0 want_issue=0
+  fi
+
+  if [[ "$want_pr" -eq 1 ]]; then
+    if gh pr close "$pr" --repo "$repo" \
+         --comment "Closed: the feature was abandoned before the merge." \
+         >/dev/null 2>&1; then
+      echo "  ${GREEN}closed${OFF} PR #$pr"
     else
-      info "  origin/$branch kept."
+      warn "  could not close PR #$pr — close it by hand"
     fi
+  elif [[ "$want_pr" -eq 2 ]]; then
+    info "  PR #$pr kept open."
   fi
 
-  # --- the pull request --------------------------------------------------
-  #
-  # We close rather than delete: deleting a PR through the API is not possible at
-  # all, and there is no need — a closed PR remains the history of the decision
-  # not to do this work.
-  if [[ -n "$repo" ]] && command -v gh >/dev/null 2>&1; then
-    if [[ -z "$pr" && -n "$branch" ]]; then
-      pr="$(gh pr list --repo "$repo" --head "$branch" --state open --limit 1 \
-              --json number --jq '.[0].number' 2>/dev/null)" || pr=""
+  if [[ "$want_origin" -eq 1 ]]; then
+    # The output is muted: .githooks/pre-push does not tell deleting a branch
+    # from an ordinary push and dumps a report of checks that has nothing to do
+    # with the deletion.
+    if git -C "$REPO" push origin --delete "$branch" >/dev/null 2>&1; then
+      echo "  ${GREEN}deleted${OFF} origin/$branch"
+      git -C "$REPO" fetch origin --prune >/dev/null 2>&1
+    else
+      warn "  could not delete origin/$branch — the PR may still be holding it"
     fi
-    if [[ -n "$pr" ]] \
-       && [[ "$(gh pr view "$pr" --repo "$repo" --json state --jq .state 2>/dev/null)" == "OPEN" ]]; then
-      echo ""
-      ask "${BOLD}Close pull request #$pr? [y/n] ${OFF}" answer yn
-      if is_yes "$answer"; then
-        if gh pr close "$pr" --repo "$repo" \
-             --comment "Closed: the feature was abandoned before the merge." \
-             >/dev/null 2>&1; then
-          echo "  ${GREEN}closed${OFF} PR #$pr"
-        else
-          warn "  could not close PR #$pr — close it by hand"
-        fi
-      else
-        info "  PR #$pr kept open."
-      fi
-    fi
+  elif [[ "$want_origin" -eq 2 ]]; then
+    info "  origin/$branch kept."
   fi
 
-  # --- the issue ---------------------------------------------------------
-  #
-  # "Not planned" rather than "completed": the issue is closed because the work
-  # was decided against, and in a milestone's report these two outcomes must not
-  # look the same.
-  if [[ -n "$repo" ]] && command -v gh >/dev/null 2>&1; then
-    if [[ -n "$issue" ]] \
-       && [[ "$(gh issue view "$issue" --repo "$repo" --json state --jq .state 2>/dev/null)" == "OPEN" ]]; then
-      echo ""
-      ask "${BOLD}Close issue #$issue as not planned? [y/n] ${OFF}" answer yn
-      if is_yes "$answer"; then
-        if gh issue close "$issue" --repo "$repo" --reason "not planned" \
-             --comment "Closed: the feature was abandoned before the merge." \
-             >/dev/null 2>&1; then
-          echo "  ${GREEN}closed${OFF} issue #$issue"
-        else
-          warn "  could not close issue #$issue — close it by hand"
-        fi
-      else
-        info "  issue #$issue kept open."
-      fi
+  if [[ "$want_issue" -eq 1 ]]; then
+    if gh issue close "$issue" --repo "$repo" --reason "not planned" \
+         --comment "Closed: the feature was abandoned before the merge." \
+         >/dev/null 2>&1; then
+      echo "  ${GREEN}closed${OFF} issue #$issue"
+    else
+      warn "  could not close issue #$issue — close it by hand"
     fi
+  elif [[ "$want_issue" -eq 2 ]]; then
+    info "  issue #$issue kept open."
   fi
 
   # An abandoned feature's waiting epilogue is a trace of the same kind as the

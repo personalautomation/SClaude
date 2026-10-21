@@ -40,6 +40,31 @@ STRINGS = {
     # Command descriptions — the same text as the hints in the list when
     # typing "/". Written from the use, not the mechanics: a person reads them
     # to choose, not to find out what is inside.
+    # The bot's profile: the description before the first message ("What
+    # can this bot do?", 512 characters at most) and the short one on its
+    # page (120). Set at start when they or the bot changed (Bot.describe),
+    # so they follow the bot; an edit in @BotFather stays until then.
+    "bot.description":   ("Работа с ноутбуком с телефона.\n\n"
+                          "• sclaude: у каждой фичи свой топик — её вопросы, "
+                          "карточка с шагом, ▶️ продолжить, ⚙️ действия, "
+                          "dev-сервер и code-server на её worktree.\n"
+                          "• keepawake: ноутбук не спит, пока идёт работа; "
+                          "за полчаса до сна бот спросит.\n"
+                          "• В главном меню — статус, Chrome, code-server, "
+                          "список фич и новая фича.",
+                          "Your laptop, from the phone.\n\n"
+                          "• sclaude: every feature has its own topic — its "
+                          "questions, a card with its step, ▶️ continue, "
+                          "⚙️ actions, its dev server and code-server on its "
+                          "worktree.\n"
+                          "• keepawake: the laptop stays awake while work goes "
+                          "on; half an hour before sleep the bot asks.\n"
+                          "• The main menu has status, Chrome, code-server, "
+                          "the feature list and a new feature."),
+    "bot.short":         ("Фичи sclaude по топикам, сон ноутбука и dev-серверы — "
+                          "с телефона.",
+                          "sclaude features by topic, the laptop's sleep and dev "
+                          "servers — from the phone."),
     "cmd.menu":          ("Главное меню", "Main menu"),
     "cmd.awake":         ("Не спать: на час, до времени, совсем",
                           "Stay awake: an hour, until a time, forever"),
@@ -167,10 +192,12 @@ STRINGS = {
     "svc.phoneoff":      ("🔒 Доступ с телефона: выключен", "🔒 Phone access: off"),
     "svc.phonewarm":     ("<b>Настройки</b>\n\n📲 Доступ с телефона включён. Tailscale "
                           "начинает пропускать его примерно через 1,5 минуты; дальше "
-                          "«📲 Телефон» в карточке chrome-debug открывает фичу в Telegram.",
+                          "«📲 Телефон» в карточке фичи (в её топике) открывает её в "
+                          "Telegram, а в карточке chrome-debug — список всех фич.",
                           "<b>Settings</b>\n\n📲 Phone access is on. Tailscale starts "
                           "carrying it in about a minute and a half; then \u201c📲 Phone\u201d "
-                          "in the chrome-debug card opens the feature in Telegram."),
+                          "on a feature's card (in its topic) opens it in Telegram, and "
+                          "on the chrome-debug card the list of every feature."),
 
     # the language switch
     "lang.title":        ("<b>Язык</b>\nСейчас: <b>%(now)s</b>\n\n"
@@ -277,6 +304,26 @@ STRINGS = {
                           "<b>%(repo)s</b> / <b>%(slug)s</b>%(links)s\n"
                           "Step: %(step)s\n"
                           "Worktree: <code>%(wt)s</code>%(session)s"),
+    # The feature's card in its topic: the dev server and code-server lines.
+    "card.dev":          ("\n\n🖥 Dev-сервер: %(state)s\n%(link)s · <code>%(local)s</code>",
+                          "\n\n🖥 Dev server: %(state)s\n%(link)s · <code>%(local)s</code>"),
+    "card.phonelink":    ("с телефона", "from the phone"),
+    "card.nodev":        ("\n\n🖥 Dev-сервера у фичи ещё нет.",
+                          "\n\n🖥 The feature has no dev server yet."),
+    "card.code":         ("\n💻 code-server: <a href=\"%(url)s\">открыть worktree</a> · "
+                          "<code>%(local)s</code>",
+                          "\n💻 code-server: <a href=\"%(url)s\">open the worktree</a> · "
+                          "<code>%(local)s</code>"),
+    "card.nocode":       ("\n💻 code-server погашен.", "\n💻 code-server is stopped."),
+    "card.codestart":    ("💻 code-server", "💻 code-server"),
+    # What the feature list becomes once a feature's card went to its topic,
+    # and once a new feature was started: the menu, answered.
+    "feat.topiclater":   ("\n\n⏳ Топик фичи пока не открылся — нажмите ещё раз чуть позже.",
+                          "\n\n⏳ The feature's topic did not open yet — press again in a moment."),
+    "feat.opened":       ("📌 <b>%(slug)s</b> — карточка в топике фичи.",
+                          "📌 <b>%(slug)s</b> — the card is in the feature's topic."),
+    "feat.newstarted":   ("✨ Новая фича в <b>%(repo)s</b> — вопросы придут сюда.",
+                          "✨ A new feature in <b>%(repo)s</b> — its questions come here."),
     "feat.gone":         ("Фича <b>%(slug)s</b> больше не в работе.",
                           "Feature <b>%(slug)s</b> is no longer in progress."),
     "feat.continue":     ("▶️ Продолжить", "▶️ Continue"),
@@ -284,12 +331,6 @@ STRINGS = {
     # checkbox here — there is nothing to press space with — so it gets a button
     # of its own.
     "feat.actions":      ("⚙️ Действия", "⚙️ Actions"),
-    # The same thing in the feature list, where the button shares a line with
-    # the feature's name. Without a word: Telegram splits the line evenly
-    # between buttons, and a caption next to the cog would take exactly as much
-    # room from the feature's name as it occupied itself, adding nothing — the
-    # cog is recognisable as it is.
-    "feat.acts.short":   ("⚙️", "⚙️"),
     "feat.new":          ("✨ Новая фича", "✨ New feature"),
     # The state of a step's session. "Waiting" is blocked: claude has asked for
     # permission or put a question, and without an answer the step will not
@@ -320,14 +361,36 @@ STRINGS = {
     "ask.yes":           ("✅ Да", "✅ Yes"),
     "ask.no":            ("❌ Нет", "❌ No"),
     "ask.text":          ("Ответьте сообщением.", "Reply with a message."),
-    "ask.sent":          ("Ответ отправлен: <b>%(reply)s</b>",
-                          "Answer sent: <b>%(reply)s</b>"),
+    # What the question's message becomes once it is answered, wherever from:
+    # the question and its answer, without buttons.
+    "ask.answered":      ("<b>%(repo)s</b>: <i>%(prompt)s</i>\n<b>%(reply)s</b>",
+                          "<b>%(repo)s</b>: <i>%(prompt)s</i>\n<b>%(reply)s</b>"),
+    "ask.by.terminal":   ("ответ из терминала", "answered in the terminal"),
     # The question may have closed while the person was thinking: it was
-    # answered in the terminal. Staying silent about that will not do —
-    # otherwise it is unclear why the button did nothing.
-    "ask.gone":          ("На этот вопрос уже ответили — из терминала.",
-                          "That question has already been answered — from the "
-                          "terminal."),
+    # answered in the terminal, or its session ended. Staying silent about that
+    # will not do — otherwise it is unclear why the button did nothing.
+    # Text typed in the main chat while the open questions are in topics.
+    "ask.intopic":       ("Открытые вопросы — в топиках фич. Ответьте там; "
+                          "если топик удалён, откройте фичу из списка.",
+                          "The open questions are in the features' topics. Answer "
+                          "there; if a topic was deleted, open the feature from "
+                          "the list."),
+    "ask.which":         ("Открытых вопросов здесь несколько — ответьте на нужный "
+                          "через «Ответить» на его сообщении.",
+                          "Several questions are open here — answer one with "
+                          "\u201cReply\u201d on its message."),
+    "ask.nooption":      ("Такого варианта в списке нет — выберите номер из него.",
+                          "The list has no such option — pick a number from it."),
+    # Text typed for a question the orchestrator has laid out but the bot has
+    # not shown yet: it is not closed, it is on its way.
+    "ask.notyet":        ("Вопрос сейчас придёт — ответьте на него.",
+                          "The question is on its way — answer it once it shows."),
+    "ask.gone":          ("Этот вопрос уже закрыт.",
+                          "That question is already closed."),
+    # What a message with buttons becomes when it can no longer be deleted:
+    # Telegram lets a bot delete only for 48 hours, and editing is the rest.
+    "msg.stale":         ("⏹ <i>Больше не актуально.</i>",
+                          "⏹ <i>No longer relevant.</i>"),
     "ask.pick":          ("Выберите пункт номером в ответном сообщении.",
                           "Reply with the number of the item you want."),
 

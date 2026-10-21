@@ -22,6 +22,7 @@
 # without a dialogue belongs here.
 import collections
 import datetime
+import glob
 import json
 import logging
 import os
@@ -63,6 +64,14 @@ class Bot(object):
         self.chat_id = int(chat_id)
         self.offset = 0
         self.stopped = False
+        # The topic the update being handled came from. Replies go back there:
+        # a /status typed in a feature's topic is answered in that topic rather
+        # than in the main chat. 0 outside handling — what the loop sends by
+        # itself names its topic explicitly.
+        self.thread = 0
+        # What Telegram said to the last send that failed, lowercased; "" after
+        # one that went through.
+        self.last_error = ""
 
     # --- transport ----------------------------------------------------------
 
@@ -85,12 +94,22 @@ class Bot(object):
                 reason = exc.read().decode("utf-8", "replace").lower()
             except Exception:
                 reason = ""
+            # Kept on the error: the caller may need to know what exactly was
+            # refused — "message thread not found" is not a network failure.
+            exc.telegram = reason
             if exc.code != 400 or '"style"' not in styled \
                     or not any(w in reason for w in ("style", "button")):
                 raise
             log.warning("%s refused a styled keyboard; sending it plain", method)
             params["reply_markup"] = unstyled(params["reply_markup"])
-            return self._post(method, http_timeout, params)
+            try:
+                return self._post(method, http_timeout, params)
+            except urllib.error.HTTPError as again:
+                try:
+                    again.telegram = again.read().decode("utf-8", "replace").lower()
+                except Exception:
+                    again.telegram = ""
+                raise
 
     def _post(self, method, http_timeout, params):
         url = API % (self.token, method)
@@ -103,7 +122,7 @@ class Bot(object):
 
     # --- messages -----------------------------------------------------------
 
-    def send(self, text, keyboard=None, quiet=False):
+    def send(self, text, keyboard=None, quiet=False, thread=None):
         # quiet is a message without a sound. Not "do not send": it arrives and
         # sits in the chat, it simply does not buzz the phone. Needed where the
         # person is already looking at the same thing in the terminal — see
@@ -117,10 +136,16 @@ class Bot(object):
         try:
             out = self.call("sendMessage", chat_id=self.chat_id, text=text,
                             parse_mode="HTML",
+                            # None: where the update being handled came from;
+                            # 0: the main chat, whatever is being handled.
+                            message_thread_id=(self.thread if thread is None
+                                               else thread) or None,
                             disable_notification="true" if quiet else None,
                             reply_markup={"inline_keyboard": keyboard} if keyboard else None)
+            self.last_error = ""
             return (out.get("result") or {}).get("message_id", 0)
         except Exception as exc:
+            self.last_error = getattr(exc, "telegram", "") or str(exc).lower()
             log.warning("did not send: %s", exc)
             return 0
 
@@ -139,6 +164,7 @@ class Bot(object):
         try:
             out = self.call("sendMessage", chat_id=self.chat_id, text=text,
                             parse_mode="HTML",
+                            message_thread_id=self.thread or None,
                             reply_markup={"force_reply": True,
                                           "input_field_placeholder": placeholder})
             return (out.get("result") or {}).get("message_id", 0)
@@ -180,6 +206,32 @@ class Bot(object):
         except Exception as exc:
             log.warning("setMyCommands: %s", exc)
 
+    def describe(self):
+        # The profile's texts, from i18n in both languages: Russian for a
+        # Russian client, English for everyone else, as the bot answers.
+        # Set here rather than by hand in @BotFather, where they went stale.
+        # Not critical, like the commands.
+        # Only when they changed: four calls at every start hold up the first
+        # poll when the network is slow.
+        # By bot too: a new token is a bot with an empty profile.
+        texts = repr([self.token.split(":")[0], STRINGS["bot.description"], STRINGS["bot.short"]])
+        if read().get("described") == texts:
+            return
+        done = True
+        for code, half in (("ru", 0), (None, 1)):
+            for method, field, key in (
+                    ("setMyDescription", "description", "bot.description"),
+                    ("setMyShortDescription", "short_description", "bot.short")):
+                # Each on its own: one refused leaves the other to be set.
+                try:
+                    self.call(method, language_code=code, **{field: STRINGS[key][half]})
+                except Exception as exc:
+                    done = False
+                    log.warning("%s: %s", method, exc)
+        if done:
+            with locked() as st:
+                st["described"] = texts
+
     def menu_button(self):
         # Create commands and Telegram puts a blue button with their list on
         # the left of the input box by itself. The chat then had two entrances
@@ -204,6 +256,58 @@ class Bot(object):
         except Exception as exc:
             log.warning("did not edit: %s", exc)
 
+    # --- topics -------------------------------------------------------------
+    #
+    # Editing and deleting a message need no topic: a message id is unique in
+    # the whole chat, whichever topic the message is in. Only what is sent
+    # names one.
+
+    def create_topic(self, name):
+        try:
+            out = self.call("createForumTopic", chat_id=self.chat_id, name=name)
+            self.last_error = ""
+            return (out.get("result") or {}).get("message_thread_id", 0)
+        except Exception as exc:
+            self.last_error = getattr(exc, "telegram", "") or str(exc).lower()
+            log.warning("no topic was made: %s", exc)
+            return 0
+
+    def delete_topic(self, thread):
+        # Whether the topic is gone — deleted now, or before, by hand. False
+        # only when it may still be there: the network, Telegram's limits.
+        try:
+            self.call("deleteForumTopic", chat_id=self.chat_id,
+                      message_thread_id=thread)
+            return True
+        except Exception as exc:
+            log.warning("the topic was not deleted: %s", exc)
+            # Gone already, by hand, or topics are off: nothing left to
+            # delete. Any other failure is tried again on the next turn; the
+            # orchestrator clears a mark left a week (io.sh).
+            reason = getattr(exc, "telegram", "")
+            return any(w in reason for w in TOPIC_GONE)
+
+    def unbutton(self, message_id):
+        # The message's text stays, its buttons go.
+        try:
+            self.call("editMessageReplyMarkup", chat_id=self.chat_id,
+                      message_id=message_id)
+        except Exception as exc:
+            log.warning("the buttons stayed: %s", exc)
+
+    def delete(self, message_id):
+        # Returns whether the message is gone. Telegram refuses a bot's delete
+        # once the message is 48 hours old — see retire for what happens then.
+        if not message_id:
+            return False
+        try:
+            out = self.call("deleteMessage", chat_id=self.chat_id,
+                            message_id=message_id)
+            return bool(out.get("result"))
+        except Exception as exc:
+            log.warning("did not delete: %s", exc)
+            return False
+
     def answer(self, callback_id, text=None, alert=False):
         # We answer first thing: Telegram gives about ten seconds for this,
         # otherwise a spinner hangs on the person's phone until the timeout.
@@ -215,6 +319,18 @@ class Bot(object):
 
 
 # --- keyboards --------------------------------------------------------------
+
+def retire(bot, message_id):
+    # A message whose question died without an answer: it is deleted, so the
+    # chat keeps only what is still waiting for the person. Telegram lets a bot
+    # delete only for 48 hours; past that the message is edited instead, and
+    # the edit takes its buttons away — a press on a dead question must not be
+    # possible.
+    if not message_id:
+        return
+    if not bot.delete(message_id):
+        bot.edit(message_id, t("msg.stale"))
+
 
 def unstyled(markup):
     """The same reply_markup with every button's colour taken off."""
@@ -336,6 +452,85 @@ def release_hold(now):
         touch(st, now)
 
 
+# --- the bot's own questions ---------------------------------------------------
+#
+# Besides sclaude's questions the bot asks three of its own: the warning before
+# sleep, the question about forgotten holders, and "until what time?" with its
+# input box. Each outlives its point the same way — the person answered
+# elsewhere, or the situation moved on — and is then settled like sclaude's:
+# replaced by what happened, or deleted. The state keeps their message ids:
+# warn_message_id, idle_message_id, and awaiting_ids for the time question,
+# which is two messages (the "back" button and the input box).
+
+def let_go(message_id):
+    # A press edits the message it came from into something else — a menu, a
+    # result — so it no longer shows the question it was tracked for, and the
+    # loop must not delete it for that question's sake.
+    if not message_id:
+        return
+    data = read()
+    ids = data.get("awaiting_ids") or {}
+    if message_id not in (data.get("warn_message_id"), data.get("idle_message_id")) \
+            and message_id not in ids.values():
+        return
+    with locked() as st:
+        for key in ("warn_message_id", "idle_message_id"):
+            if st.get(key) == message_id:
+                st[key] = 0
+        st["awaiting_ids"] = {k: v for k, v in (st.get("awaiting_ids") or {}).items()
+                              if v != message_id}
+
+
+def settle_awaiting(bot, text=None, keyboard=None):
+    # The time question has ended. With text it was answered: its message
+    # becomes the answer and the input box goes. Without, it was left — by a
+    # command, the menu, or a neighbouring button — and both go.
+    with locked() as st:
+        ids = st.get("awaiting_ids") or {}
+        st["awaiting_ids"] = {}
+    menu, prompt = ids.get("menu") or 0, ids.get("prompt") or 0
+    if text and menu:
+        bot.edit(menu, text, keyboard)
+        # Answered, the menu it stood in is a line of history now (see
+        # Handler.result), not a screen for the next one to replace.
+        forget_screen(menu)
+    elif text:
+        bot.send(text, keyboard)
+    else:
+        forget_screen(menu)
+        retire(bot, menu)
+    retire(bot, prompt)
+
+
+def forget_screen(message_id):
+    # The screen has become a line of history: the next screen leaves it be.
+    screens = read().get("screens") or {}
+    places = [p for p, m in screens.items() if m == message_id]
+    if places:
+        with locked() as st:
+            screens = st.get("screens") or {}
+            for p in places:
+                screens.pop(p, None)
+            st["screens"] = screens
+
+
+def forget_screen_place(thread):
+    # A deleted topic's screen went with it.
+    if str(thread) in (read().get("screens") or {}):
+        with locked() as st:
+            screens = st.get("screens") or {}
+            screens.pop(str(thread), None)
+            st["screens"] = screens
+
+
+def check_awaiting(bot):
+    # The wait is cleared in many places that have no bot at hand (hold_for,
+    # release_hold, a command), so its messages are swept here, on the turn.
+    data = read()
+    if data.get("awaiting_ids") and not data.get("awaiting"):
+        settle_awaiting(bot)
+
+
 def parse_hhmm(text, now):
     # "until 23:30" is today's time; if it has already passed, tomorrow was
     # meant. Otherwise a "stay awake until 7:00" sent at night would mean a
@@ -353,46 +548,29 @@ def parse_hhmm(text, now):
     return int(target.timestamp())
 
 
-def chrome_keyboard():
-    # The list of features first, then one block per feature:
-    # every feature has a dev server of its own now, so "the dev server" no
-    # longer names anything. 🌐 opens the feature in the laptop's Chrome —
-    # a stopped one is started by sclaude-proxy on that very request — and ⏹
-    # stops a running one, its database with it.
-    browser_up = port_open(CHROME_PORT)
-    origin = gate_origin()
+def phone_button(origin, label):
+    # The Mini App, green so it reads apart from the laptop's button. Only
+    # while phone access is on (Settings); off, there is none.
+    return [{"text": t("chrome.phoneopen"), "style": "success",
+             "web_app": {"url": "%s/__sclaude/tg?f=%s" % (origin, label)}}] if origin else []
 
-    def phone(label):
-        # The Mini App, green so it reads apart from the laptop's button.
-        # Only while phone access is on (Settings); off, there is none.
-        return [{"text": t("chrome.phoneopen"), "style": "success",
-                 "web_app": {"url": "%s/__sclaude/tg?f=%s" % (origin, label)}}] if origin else []
+
+def chrome_keyboard(config=None):
+    # The laptop's browser and every feature at once. A feature's own
+    # buttons — open, phone, start, stop — are on its card in its topic.
+    browser_up = port_open(CHROME_PORT)
+    origin = gate_origin(config)
 
     # The list of every feature first, laid out like a feature: a caption,
     # then where to open it. 🌐 is the laptop's Chrome at localhost:3000,
     # started if it is down; ⏹ closes that Chrome, and only while it runs.
     rows = [[{"text": t("chrome.all"), "callback_data": "noop"}]]
-    first = [{"text": t("chrome.open"), "callback_data": "chrome_start"}] + phone("")
+    first = [{"text": t("chrome.open"), "callback_data": "chrome_start"}] + phone_button(origin, "")
     if browser_up:
         first.append({"text": t("chrome.stopbrowser"), "callback_data": "chrome_stop"})
     rows.append(first)
-    # The phone button opens the feature inside Telegram, while phone access
-    # is on; it is turned on and off in Settings.
-    for label, _wt, _port, running in dev_features()[:FEATURE_ROWS]:
-        # Telegram refuses callback data over 64 bytes; a feature with a name
-        # that long is listed in the text and simply has no buttons.
-        if len("devphone:" + label) > 64:
-            continue
-        # The name gets a row of its own, a caption like the browser's: on a
-        # phone's width a button that carries both the name and an action cuts
-        # the name off, and a bare 📱 next to it said nothing of what it does.
-        rows.append([{"text": label, "callback_data": "noop"}])
-        row = [{"text": t("chrome.open"), "callback_data": "devopen:" + label}] + phone(label)
-        if running:
-            row.append({"text": t("chrome.featstop"), "callback_data": "devstop:" + label})
-        else:
-            row.append({"text": t("chrome.start"), "callback_data": "devstart:" + label})
-        rows.append(row)
+    # A feature's own buttons — open, phone, start, stop — are on its card in
+    # its topic now; here the browser and the list of every feature remain.
     rows.append([{"text": t("menu.back"), "callback_data": "menu_back"}])
     return rows
 
@@ -465,8 +643,6 @@ CHROME_PORT = int(os.environ.get("CHROME_DEBUG_PORT", "9222"))
 # Where sclaude registers each feature's tree for the proxy: one symlink per
 # feature, the tree's .sclaude/local/feature/state.json holding its port.
 DEV_REGISTRY = os.path.expanduser("~/.claude/sclaude/dev")
-# More rows than this and the card stops fitting a phone's screen.
-FEATURE_ROWS = 8
 
 
 def dev_features():
@@ -523,7 +699,15 @@ def wsl_ip():
     return ""
 
 
-def phone_origin():
+def serve_config():
+    """`tailscale serve status`, parsed; {} when it does not answer."""
+    try:
+        return json.loads(run("tailscale serve status --json", timeout=10) or "{}")
+    except ValueError:
+        return {}
+
+
+def phone_origin(config=None):
     """Where a phone opens features: the `tailscale serve` HTTPS name when it
     fronts the proxy's port, the node's tailnet address otherwise.
 
@@ -532,10 +716,8 @@ def phone_origin():
     back to the address they came from, and Supabase Auth refuses to redirect
     to an IP whatever its allow-list says. HTTPS also makes the page a secure
     context, which push notifications need."""
-    try:
-        config = json.loads(run("tailscale serve status --json", timeout=10) or "{}")
-    except ValueError:
-        config = {}
+    if config is None:
+        config = serve_config()
     for hostport, web in (config.get("Web") or {}).items():
         handler = ((web or {}).get("Handlers") or {}).get("/") or {}
         if str(handler.get("Proxy", "")).rstrip("/").endswith(":%d" % DEV_PORT):
@@ -558,13 +740,11 @@ FUNNEL_ON = "tailscale funnel --bg --https=%d %s" % (GATE_FUNNEL_PORT, GATE_LOCA
 FUNNEL_OFF = "tailscale funnel --https=%d off" % GATE_FUNNEL_PORT
 
 
-def gate_origin():
+def gate_origin(config=None):
     """https://<node>.<tailnet>.ts.net:8443 while the funnel carries the gate,
     "" while it does not — read from Tailscale, never remembered."""
-    try:
-        config = json.loads(run("tailscale serve status --json", timeout=10) or "{}")
-    except ValueError:
-        return ""
+    if config is None:
+        config = serve_config()
     for hostport, allowed in (config.get("AllowFunnel") or {}).items():
         host, _, port = hostport.rpartition(":")
         if not allowed or port != str(GATE_FUNNEL_PORT):
@@ -592,7 +772,13 @@ def proxy_start(label):
         pass
 
 
-def chrome_text():
+def chrome_screen():
+    """(text, keyboard) of the Chrome screen, from one look at tailscale."""
+    config = serve_config()
+    return chrome_text(config), chrome_keyboard(config)
+
+
+def chrome_text(config=None):
     # We remind of the features' addresses: the Chrome window stands on the
     # laptop, and from a phone a person needs not so much the browser itself as
     # the link a feature opens at.
@@ -601,7 +787,9 @@ def chrome_text():
     # From a phone: the tailnet, which has no *.localhost to name a feature
     # by, so the link goes through the proxy's own page that picks the feature
     # with a cookie.
-    phone = phone_origin()
+    if config is None:
+        config = serve_config()
+    phone = phone_origin(config)
     # From the laptop: the feature's own name. Telegram makes no link of
     # localhost in any form, so it is shown to copy rather than to tap.
     lines = []
@@ -612,7 +800,7 @@ def chrome_text():
                        state=t("chrome.running") if running else t("chrome.stopped"),
                        local="http://%s.localhost:%d" % (label, DEV_PORT)))
     features = "\n".join(lines) if lines else t("chrome.nofeatures")
-    gate = t("chrome.gateup") if gate_origin() else t("chrome.gatedown")
+    gate = t("chrome.gateup") if gate_origin(config) else t("chrome.gatedown")
     return t("chrome.title", state=state_label, proxy=proxy_label, gate=gate,
              features=features, port=CHROME_PORT)
 
@@ -954,21 +1142,59 @@ def repos_keyboard():
 # first has answered — which is why a step begun at the laptop continues from a
 # phone without a restart, and the other way round.
 #
-# The channel lives in the repository's .git/sclaude/: one for all worktrees, so
-# a question is found even before the feature is created. The format is in
-# sclaude/lib/io.sh.
+# The channels live in the repository's .git/sclaude/: one for all worktrees, so
+# a question is found even before the feature is created. The repository's own
+# channel is that directory; each feature in progress has its own below it, in
+# ask/<slug>/, so that features running in parallel can all ask at once. The
+# format is in sclaude/lib/io.sh (ask_channel).
+#
+# A channel is named in the state by its key: the repository's name for the
+# repository's channel, "<repository>/<slug>" for a feature's.
 
 
 def ask_dir(repo):
     return os.path.join(repo, ".git", "sclaude")
 
 
-def pending_ask(repo):
-    # The repository's open question, or None. We read without locks: the file
+def ask_channels(repo):
+    """[(slug, directory)] — the repository's channel first, slug empty."""
+    root = ask_dir(repo)
+    found = [("", root)]
+    try:
+        names = sorted(os.listdir(os.path.join(root, "ask")))
+    except OSError:
+        return found
+    for slug in names:
+        path = os.path.join(root, "ask", slug)
+        if not slug.startswith(".") and os.path.isdir(path):
+            found.append((slug, path))
+    return found
+
+
+def channel_key(name, slug):
+    return "%s/%s" % (name, slug) if slug else name
+
+
+def split_key(key):
+    name, _, slug = key.partition("/")
+    return name, slug
+
+
+def channel_dir(key):
+    # The directory behind a key, or "" when the repository is not known.
+    name, slug = split_key(key)
+    repo = repo_path(name)
+    if not repo:
+        return ""
+    return os.path.join(ask_dir(repo), "ask", slug) if slug else ask_dir(repo)
+
+
+def pending_ask(channel):
+    # The channel's open question, or None. We read without locks: the file
     # is written through mv, that is it appears whole. JSON that will not parse
     # means "it is being rewritten right now" — we will come back on the next
     # turn.
-    path = os.path.join(ask_dir(repo), "ask.json")
+    path = os.path.join(channel, "ask.json")
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -991,7 +1217,7 @@ def pending_ask(repo):
             os.kill(int(pid), 0)
         except (OSError, ValueError, TypeError):
             log.info("an orphaned question in %s (pid %s is dead) — removing it",
-                     os.path.basename(repo), pid)
+                     channel, pid)
             try:
                 os.unlink(path)
             except OSError:
@@ -1015,14 +1241,21 @@ def is_back_option(label):
     return any(low.startswith(b) for b in BACK_OPTIONS)
 
 
-def answered_option(repo, reply):
-    # The label of the option behind an answer's number. Needed to tell leaving
-    # the list from a real action: a number says nothing by itself, while the
-    # question is still in the channel and carries its labels.
-    question = pending_ask(repo)
-    if not question:
-        return ""
-    options = question.get("options") or []
+# The replies is_yes and is_no take in sclaude/lib/ui.sh, in any case.
+YES_WORDS = ("y", "yes")
+NO_WORDS = ("n", "no")
+
+
+def option_in_range(question, reply):
+    # Whether a reply to a pick:N question is one ask_once takes as an answer:
+    # one of its N options in ASCII digits (int() would also take "+2", "1_0"
+    # and other scripts' digits).
+    reply = str(reply).strip()
+    return bool(re.fullmatch(r"[0-9]+", reply)) and 1 <= int(reply) <= _pick_n(question)
+
+
+def option_label(options, reply):
+    options = options or []
     try:
         i = int(str(reply).strip())
     except (TypeError, ValueError):
@@ -1032,7 +1265,7 @@ def answered_option(repo, reply):
     return ""
 
 
-def answer_ask(repo, reply):
+def answer_ask(channel, reply):
     # The answer to the orchestrator. We write through a temporary file and
     # rename: the reading side must not see half an answer.
     #
@@ -1048,10 +1281,10 @@ def answer_ask(repo, reply):
     # asked, and the orchestrator took the stale reply for an answer to it. The
     # reading side compares the ids and drops what was meant for another
     # question.
-    question = pending_ask(repo)
+    question = pending_ask(channel)
     if not question:
         return False
-    d = ask_dir(repo)
+    d = channel
     tmp = os.path.join(d, "answer.json.%d" % os.getpid())
     try:
         os.makedirs(d, exist_ok=True)
@@ -1067,6 +1300,162 @@ def answer_ask(repo, reply):
             pass
         return False
     return True
+
+
+# --- what happens to a question's message ------------------------------------
+#
+# A question's message must not outlive the question with its buttons still on
+# it. Once the question closes, the message becomes its answer — whether it was
+# answered here, in the terminal, or by text — or, when nobody answered (the
+# session died, the reply was refused and the question asked again), it is
+# deleted. The state remembers which message shows which question under
+# "ask_shown": the repository's name → the question's stamp, the message id, and
+# what is needed to write the answer once the question itself is gone.
+#
+# How the question ended is told by the orchestrator in closed/<id>.json (see
+# ask_closed in sclaude/lib/io.sh).
+
+CLOSED_DIR = "closed"
+
+# The question's prompt in its answered message. The context is not repeated
+# there: it explained the question, and the answer no longer needs it.
+ASK_PROMPT_MAX = 300
+
+
+def closed_asks(channel):
+    # The records of closed questions: id → (path, record).
+    d = os.path.join(channel, CLOSED_DIR)
+    found = {}
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return found
+    for name in names:
+        # A leading dot is a record still being written.
+        if name.startswith(".") or not name.endswith(".json"):
+            continue
+        path = os.path.join(d, name)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                record = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(record, dict) and record.get("id"):
+            found[record["id"]] = (path, record)
+    return found
+
+
+def shown_asks():
+    # Before the message id was kept the value was the bare stamp. Such a
+    # question is still known as shown — it must not be sent twice — but its
+    # message cannot be reached.
+    found = {}
+    for name, value in (read().get("ask_shown") or {}).items():
+        found[name] = value if isinstance(value, dict) \
+            else {"id": value, "msg": 0, "legacy": True}
+    return found
+
+
+# Where the message showing a channel's question is remembered. A feature's
+# keeps it in the feature's record in its worktree (load_record), with its
+# topic. The repository's own channel keeps it in the daemon's state
+# ("ask_shown"), and so does a feature channel with no worktree — one removed by
+# hand while a question was open — since otherwise the question would be sent
+# again on every turn.
+
+def in_worktree(key, repo=None):
+    # repo when the caller has it: finding it again is a scan of $HOME.
+    name, slug = split_key(key)
+    if slug and repo is None:
+        repo = repo_path(name)
+    return (repo, slug) if slug and repo and feature_dir(repo, slug) else (None, None)
+
+
+def get_shown(key, repo=None):
+    repo, slug = in_worktree(key, repo)
+    if repo:
+        return load_record(repo, slug).get("shown") or None
+    return shown_asks().get(key)
+
+
+def put_shown(key, entry, repo=None):
+    # entry None forgets the channel's message.
+    repo, slug = in_worktree(key, repo)
+    if repo:
+        record = load_record(repo, slug)
+        if entry:
+            record["shown"] = entry
+        else:
+            record.pop("shown", None)
+        save_record(repo, slug, record)
+        return
+    with locked() as st:
+        shown = st.get("ask_shown") or {}
+        if entry:
+            shown[key] = entry
+        else:
+            shown.pop(key, None)
+        st["ask_shown"] = shown
+
+
+def repo_keys(name, repo=None):
+    """Every channel key of the repository: its own and its features'."""
+    repo = repo or repo_path(name)
+    if not repo:
+        return [name]
+    return [channel_key(name, slug) for slug, _ in ask_channels(repo)]
+
+
+def forget_ask(key, message_id, repo=None):
+    # The question's message has been dealt with by whoever is calling: it was
+    # edited into its answer here. The stamp stays — the question lingers in
+    # the channel for up to a second, and without the stamp the next turn would
+    # send it again — only the message is let go. Returns the entry, or None
+    # when this message no longer shows the channel's question.
+    entry = get_shown(key, repo)
+    if not isinstance(entry, dict) or not message_id \
+            or entry.get("msg") != message_id:
+        return None
+    put_shown(key, dict(entry, msg=0, answered=message_id), repo)
+    return entry
+
+
+def answered_text(repo_name, question, reply, source=""):
+    # The question and the answer it got, for the question's own message.
+    # A number is shown as the option it chose and y/n as the buttons say it:
+    # "3" says nothing a day later.
+    question = question or {}
+    reply = str(reply or "").strip()
+    # The yes/no buttons' labels carry their own mark (✅ / ❌); any other
+    # answer gets the ✅ of "answered".
+    shown = option_label(question.get("options"), reply)
+    marked = False
+    if not shown and (question.get("form") or "").startswith("yn"):
+        if reply.lower() in YES_WORDS:
+            shown, marked = t("ask.yes"), True
+        elif reply.lower() in NO_WORDS:
+            shown, marked = t("ask.no"), True
+    prompt = clip(strip_ansi(question.get("prompt") or "").strip(), ASK_PROMPT_MAX)
+    text = t("ask.answered", repo=escape(repo_name), prompt=escape(prompt),
+             reply=escape(shown or reply or "—") if marked
+             else "✅ " + escape(shown or reply or "—"))
+    if source in ("tty", "stdin"):
+        text += "\n<i>%s</i>" % t("ask.by.terminal")
+    return text
+
+
+def settle_ask(bot, name, entry, record):
+    # The question in entry has closed: its message becomes the answer, or
+    # goes. An edit makes no sound, so a question that went out silently is
+    # answered silently too.
+    msg = entry.get("msg") or 0
+    if not msg:
+        return
+    if record and record.get("reply") is not None:
+        bot.edit(msg, answered_text(name, entry, record.get("reply"),
+                                    record.get("from") or ""))
+    else:
+        retire(bot, msg)
 
 
 def ask_keyboard(repo_name, question):
@@ -1196,7 +1585,7 @@ def _pick_n(question):
         return -1
 
 
-def ask_text(repo_name, question):
+def ask_text(repo_name, question, in_topic=False, slug=""):
     body = ""
 
     # A question about a particular feature is shown with its card — the very
@@ -1209,7 +1598,10 @@ def ask_text(repo_name, question):
     # The usual "<repository> is asking" line is then unnecessary: the card starts
     # with the repository's and the feature's name, and repeating them means
     # pushing the buttons further down.
-    slug = (question.get("feature") or "").strip()
+    # In the feature's topic the card is already there, just above.
+    # slug is the channel's: a feature's question sent to the main chat for
+    # want of a topic names its feature too.
+    slug = "" if in_topic else ((question.get("feature") or "").strip() or slug)
     if slug:
         body += feature_card(repo_name, slug) + "\n\n"
 
@@ -1386,8 +1778,7 @@ def feature_state(repo, slug):
     # A feature's whole state — the very file with which the orchestrator ties
     # the steps together. An empty dictionary if there is no feature: the card
     # will then show what it knows from the table.
-    wt = os.path.join(os.path.dirname(repo), "%s-%s" % (os.path.basename(repo), slug))
-    path = state_path(wt)
+    path = state_path(feature_wt(repo, slug))
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -1444,8 +1835,9 @@ def start_sclaude(repo, args):
     log.info("started sclaude %s in %s", " ".join(args), repo)
 
 
-def feature_card(name, slug):
-    feats, _ = features_of_name(name)
+def feature_card(name, slug, feats=None):
+    if feats is None:
+        feats, _ = features_of_name(name)
     row = next((r for r in feats if r[0] == slug), None)
     if not row:
         return t("feat.gone", slug=escape(slug))
@@ -1460,22 +1852,6 @@ def feature_card(name, slug):
              links=links_line(feature_links(repo, slug)) if repo else "")
 
 
-def feature_keyboard(name, slug):
-    # A feature's card: continue the step, actions on it, refresh, back.
-    #
-    # "Actions" is the same thing the checkbox below the feature list opens in
-    # the terminal. The checkbox does not carry over here: there is no space bar
-    # in a chat, and a button on the card speaks for itself more clearly than
-    # any toggle.
-    return [
-        [{"text": t("feat.continue"), "callback_data": "go:%s:%s" % (name, slug)}],
-        [{"text": t("feat.actions"), "callback_data": "acts:%s:%s" % (name, slug)}],
-        [{"text": t("repo.refresh"), "callback_data": "feat:%s:%s" % (name, slug)},
-         {"text": t("repo.torepos"), "callback_data": "repo:" + name}],
-        [{"text": t("menu.back"), "callback_data": "menu_back"}],
-    ]
-
-
 # How many features get buttons. Eight: more rows do not fit on a phone's
 # screen, and below them there are still "new feature" and three exits. Those
 # that did not fit are named in a line in repo_text — they must not disappear
@@ -1484,21 +1860,9 @@ FEATURE_BUTTONS = 8
 
 
 def features_keyboard(name):
-    # The second level: the selected repository's features. A row per feature,
-    # and two buttons in the row — like the checkbox in the terminal, only
-    # unfolded across the width.
-    #
-    # In the terminal "what Enter does" is switched by the checkbox below the
-    # list. Here there is nothing to switch: an inline keyboard has neither a
-    # space bar nor a state that would survive a press. What it does have is the
-    # row's width — and the two purposes lay themselves out along it side by
-    # side, with no mode at all: the wide button drives the step, the narrow one
-    # opens the list of actions on the same feature.
-    #
-    # Both targets already exist and both check the feature's busyness
-    # themselves, so only the addresses are here: go: starts the step, acts:
-    # the action list. The card stops being a transfer point but does not go
-    # anywhere: both handlers end with it, showing the outcome.
+    # The second level: the selected repository's features, a button each.
+    # The step and the actions on a feature are on its card, in its topic, and
+    # the button takes it there (the topic: callback).
     rows = []
     feats, _ = features_of_name(name)
     for slug, step, _wt in feats[:FEATURE_BUTTONS]:
@@ -1508,10 +1872,17 @@ def features_keyboard(name):
         # will take half the row however briefly it is labelled. A short label on
         # the left does not change that — but it does stop the label being
         # truncated beyond recognition at half width.
-        rows.append([
-            {"text": label[:40], "callback_data": "go:%s:%s" % (name, slug)},
-            {"text": t("feat.acts.short"), "callback_data": "acts:%s:%s" % (name, slug)},
-        ])
+        # Telegram refuses the whole keyboard for one button over 64 bytes.
+        # The remembered repository may be left out of the data — the press
+        # finds it again; any other, and a feature longer still, get a button
+        # that does nothing rather than vanish from a list that counts them.
+        data = "topic:%s:%s" % (name, slug)
+        if len(data.encode("utf-8")) > 64 and name == os.path.basename(repo_choice()):
+            data = "topic::" + slug
+        if len(data.encode("utf-8")) > 64:
+            # Still listed, as the header counts it: open it from the terminal.
+            data = "noop"
+        rows.append([{"text": label[:60], "callback_data": data}])
     rows.append([{"text": t("feat.new"), "callback_data": "newfeat:" + name}])
     # Two exits, not one. "To the repositories" is a step one level up within
     # the section; "Back" goes to the main menu, which is where people arrive
@@ -1825,11 +2196,19 @@ class Handler(object):
     def message(self, msg):
         text = (msg.get("text") or "").strip()
         now = int(time.time())
+        # The topic it was typed in, and the feature that topic is, looked up
+        # once: the lookup reads every worktree's record.
+        thread = message_thread(msg)
+        fkey = topic_channel(thread) if thread else ""
 
         # We are waiting for a time for "stay awake until" — but a command
         # always beats the wait, otherwise there would be no way out of a
-        # dialogue begun by mistake except the right answer.
-        if (read().get("awaiting") == "awake_until"
+        # dialogue begun by mistake except the right answer. And only where it
+        # was asked: text typed in a feature's topic meanwhile is that
+        # feature's, an answer to its question.
+        data = read()
+        if (text and data.get("awaiting") == "awake_until"
+                and (data.get("awaiting_thread") or 0) == thread
                 and not text.startswith("/") and not is_menu_button(text)):
             until_ts = parse_hhmm(text, now)
             if not until_ts:
@@ -1837,12 +2216,21 @@ class Handler(object):
                 # We ask again with the box ready too: the person has already
                 # missed the format, and making them open the keyboard by hand a
                 # second time is exactly what the buttons save them from.
-                self.bot.ask(t("awake.badtime"), t("awake.hint"))
+                #
+                # The previous box goes: two prompts for one time is the same
+                # question twice.
+                retire(self.bot, (read().get("awaiting_ids") or {}).get("prompt"))
+                self.bot.delete(msg.get("message_id") or 0)
+                prompt = self.bot.ask(t("awake.badtime"), t("awake.hint"))
+                with locked() as st:
+                    st["awaiting_ids"] = dict(st.get("awaiting_ids") or {}, prompt=prompt)
                 return
             until = hold_for(until_ts - now, now)
             log.info("\"stay awake until\" %s: deadline until %s", text, until)
-            self.bot.send(t("extended.plain", at=local_for_lang(until)),
-                          awake_keyboard())
+            # The question becomes its answer, and the typed time goes with the
+            # input box, as an answer to sclaude's question does.
+            settle_awaiting(self.bot, t("extended.plain", at=local_for_lang(until)))
+            self.bot.delete(msg.get("message_id") or 0)
             return
 
         # An answer to an orchestrator's question that expects text rather than
@@ -1859,13 +2247,103 @@ class Handler(object):
         # to leave a conversation begun by mistake without answering the
         # question.
         if text and not text.startswith("/") and not is_menu_button(text):
-            waiting = [r for r in known_repos() if pending_ask(r)]
+            # Typed in a feature's topic, the text answers that feature's
+            # question; typed in the main chat, it answers when one question in
+            # all is open — with two, there is no telling which was meant.
+            # In the main chat, only the questions shown in it: a feature's
+            # question in its topic is not what text typed here answers.
+            opened = open_channels()
+            if thread:
+                waiting = [(k, d) for k, d in opened if k == fkey]
+            else:
+                # The repository's own questions, and a feature's only once
+                # shown here (no topic to be had): one not shown yet is on its
+                # way to its topic.
+                waiting = []
+                for k, d in opened:
+                    entry_k = get_shown(k)
+                    if not split_key(k)[1] or (entry_k and not entry_k.get("thread")):
+                        waiting.append((k, d))
+            # The question the text replies to, if it replies to one of them;
+            # otherwise, with several, the one on screen here — a question not
+            # shown yet, or answered by a button, is not one the person sees.
+            to = (msg.get("reply_to_message") or {}).get("message_id") or 0
+            replied = [(k, d) for k, d in waiting
+                       if to and (get_shown(k) or {}).get("msg") == to]
+            if replied:
+                waiting = replied
+            elif len(waiting) > 1:
+                on_screen = [(k, d) for k, d in waiting if (get_shown(k) or {}).get("msg")]
+                # A reply to some other message names none of them: which?
+                if len(on_screen) != 1 or to:
+                    # None on screen: closed by a button, unless one is still
+                    # on its way.
+                    coming = any(not get_shown(k) for k, _ in waiting)
+                    self.bot.send(t("ask.which" if on_screen
+                                    else "ask.notyet" if coming else "ask.gone"))
+                    return
+                waiting = on_screen
+            if not thread and not waiting and opened:
+                # Pointed to a topic only when a question is shown in one: one
+                # not shown yet may still come here, if no topic is to be had.
+                intopic = any((get_shown(k) or {}).get("thread") for k, _ in opened)
+                self.bot.send(t("ask.intopic" if intopic else "ask.notyet"))
+                return
             if len(waiting) == 1:
-                repo = waiting[0]
-                if answer_ask(repo, text):
-                    self.bot.send(t("ask.sent", reply=escape(text)))
-                else:
+                key, channel = waiting[0]
+                name = split_key(key)[0]
+                question = pending_ask(channel)
+                # As with a press: the text answers the question the chat
+                # shows, not one laid out since that the bot has not shown yet.
+                # And only a shown one: before the bot's turn shows a question,
+                # nobody has seen it to answer it.
+                entry = get_shown(key) or {}
+                mark = (question.get("id") or question.get("asked") or 0) if question else None
+                if question and (not entry or (not entry.get("legacy")
+                                                and entry.get("id") != mark)):
+                    # Open, but not on screen yet: the bot shows it on its turn.
+                    self.bot.send(t("ask.notyet"))
+                    return
+                if entry.get("answered"):
+                    # Answered by a button a moment ago: the orchestrator is
+                    # taking that answer, and this text must not replace it.
                     self.bot.send(t("ask.gone"))
+                    return
+                # A number the list does not have: the orchestrator would
+                # refuse it in the terminal, out of sight, and the question
+                # would go. It stays here, and the person picks again. A word
+                # goes on: a list may take one ("Enter to leave it out" is
+                # anything but a number, and Telegram sends no empty text).
+                if ((question or {}).get("form") or "").startswith("pick:") \
+                        and text.strip().isdigit() and not option_in_range(question, text):
+                    self.bot.delete(msg.get("message_id") or 0)
+                    self.bot.send(t("ask.nooption"))
+                    return
+                if not answer_ask(channel, text):
+                    self.bot.send(t("ask.gone"))
+                    return
+                # The answer takes the question's place, as a press does, and
+                # the typed message goes: otherwise the chat holds the question
+                # with its buttons, the reply below it and a confirmation below
+                # that. A bot may delete incoming messages in a private chat.
+                # A reply that is not one of the question's answers — neither
+                # yes nor no, a word for a list — is the orchestrator's to
+                # judge: it asks again, takes the word ("Enter to leave it
+                # out"), or refuses. The loop settles the message by its
+                # record then (settle_ask); the typed reply goes now. Shown as
+                # answered at once, a refused one would keep "✅ maybe".
+                form = ((question or {}).get("form") or "")
+                if (form.startswith("yn") and text.strip().lower() not in YES_WORDS + NO_WORDS) \
+                        or (form.startswith("pick:") and not option_in_range(question, text)):
+                    self.bot.delete(msg.get("message_id") or 0)
+                    return
+                answered = answered_text(name, question, text)
+                entry = forget_ask(key, (get_shown(key) or {}).get("msg"))
+                if entry:
+                    self.bot.edit(entry["msg"], answered)
+                    self.bot.delete(msg.get("message_id") or 0)
+                else:
+                    self.bot.send(answered)
                 return
 
         # Any command clears an open question about the time: the person has
@@ -1876,17 +2354,35 @@ class Handler(object):
             with locked() as st:
                 st["awaiting"] = ""
 
+        # We cut off both the arguments and the @bot_name: Telegram appends it
+        # itself when a command is chosen from the suggestions in a group.
+        name = text.split()[0].split("@")[0].lstrip("/").lower() if text else ""
+
+        # In a feature's topic the menu is the feature's card: "Menu", /menu
+        # and text that answered nothing bring a fresh one to the bottom of the
+        # topic, and what was typed goes. Other commands answer as anywhere.
+        # Without text — a photo, a file, a voice note — a message is not
+        # addressed to the bot at all, and stays.
+        if not text:
+            return
+        if fkey and (is_menu_button(text) or not text.startswith("/")
+                     or name in ("menu", "start")):
+            if post_card(self.bot, *split_key(fkey)):
+                self.bot.delete(msg.get("message_id") or 0)
+                return
+
+        # A command or "Menu" has done its job once its screen is up; left in
+        # the chat, each is one more line between the screens.
+        if is_menu_button(text) or text.startswith("/"):
+            self.bot.delete(msg.get("message_id") or 0)
         if is_menu_button(text):
             return self.cmd_menu()
         if not text.startswith("/"):
-            self.bot.send(t("cmd.unknown"), menu_keyboard())
+            self.screen(t("cmd.unknown"), menu_keyboard())
             return
-        # We cut off both the arguments and the @bot_name: Telegram appends it
-        # itself when a command is chosen from the suggestions in a group.
-        name = text.split()[0].split("@")[0].lstrip("/").lower()
         found = COMMANDS.get(name)
         if not found:
-            self.bot.send(t("cmd.unknown"), menu_keyboard())
+            self.screen(t("cmd.unknown"), menu_keyboard())
             return
         getattr(self, found[0])(now)
 
@@ -1898,8 +2394,47 @@ class Handler(object):
     # from there the person goes on pressing as though they had come through the
     # menu.
 
+    def screen(self, text, keyboard=None):
+        # A menu screen sent anew — by a command, "Menu", or a word the bot
+        # did not know. The chat keeps one: the previous screen goes once the
+        # new one is there, so a day of /menu does not stack a dozen menus.
+        # Screens move by edits from there; only these sends make new ones.
+        # One per place: a command typed in a feature's topic answers there,
+        # and replaces that topic's screen, not the main chat's.
+        msg = self.bot.send(text, keyboard)
+        if msg:
+            self.adopt(msg)
+        return msg
+
+    def adopt(self, message_id):
+        # A message that has become a menu screen where it stands: the screen
+        # of its place, replacing the previous one, as a sent screen does.
+        place = str(self.bot.thread or 0)
+        with locked() as st:
+            screens = st.get("screens") or {}
+            old = screens.get(place) or 0
+            screens[place] = message_id
+            st["screens"] = screens
+            # The screen replaced asked "until what time?": the question goes
+            # with it, as a command leaves it.
+            asking = old and (st.get("awaiting_ids") or {}).get("menu") == old
+            if asking:
+                st["awaiting"] = ""
+        if asking:
+            settle_awaiting(self.bot)
+        elif old and old != message_id:
+            retire(self.bot, old)
+
+    def result(self, message_id, text):
+        # A menu has been answered: a button did something rather than lead
+        # elsewhere. The screen becomes what was done, without buttons — a
+        # line of history, as an answered question is — and the next screen
+        # leaves it be.
+        self.bot.edit(message_id, text)
+        forget_screen(message_id)
+
     def cmd_menu(self, now=0):
-        self.bot.send(menu_title(), menu_keyboard())
+        self.screen(menu_title(), menu_keyboard())
 
     def cmd_status(self, now=0):
         self.bot.send(status_text())
@@ -1907,23 +2442,22 @@ class Handler(object):
     def cmd_extend(self, now=0):
         until = hold_for(HOLD_SECONDS, now or int(time.time()))
         log.info("the /extend command: deadline until %s", until)
-        self.bot.send(t("extended.plain", at=local_for_lang(until)),
-                      awake_keyboard())
+        self.bot.send(t("extended.plain", at=local_for_lang(until)))
 
     def cmd_sleep(self, now=0):
         release_hold(now or int(time.time()))
         log.info("the /sleep command: hold released, refusal for %d min",
                  state.REFUSAL_HOLDS // 60)
-        self.bot.send(t("awake.released"), menu_keyboard())
+        self.bot.send(t("awake.released"))
 
     def cmd_awake(self, now=0):
-        self.bot.send(awake_text(), awake_keyboard())
+        self.screen(awake_text(), awake_keyboard())
 
     def cmd_chrome(self, now=0):
-        self.bot.send(chrome_text(), chrome_keyboard())
+        self.screen(*chrome_screen())
 
     def cmd_code(self, now=0):
-        self.bot.send(code_text(), code_keyboard())
+        self.screen(code_text(), code_keyboard())
 
     def cmd_sclaude(self, now=0):
         # As with the button: we open straight on the remembered repository and
@@ -1931,12 +2465,12 @@ class Handler(object):
         chosen = repo_choice()
         if chosen:
             name = os.path.basename(chosen)
-            self.bot.send(repo_text(name), features_keyboard(name))
+            self.screen(repo_text(name), features_keyboard(name))
         else:
-            self.bot.send(t("repo.pick"), repos_keyboard())
+            self.screen(t("repo.pick"), repos_keyboard())
 
     def cmd_settings(self, now=0):
-        self.bot.send(t("svc.title"), services_keyboard())
+        self.screen(t("svc.title"), services_keyboard())
 
     def callback(self, cq):
         cid = cq.get("id")
@@ -1944,8 +2478,16 @@ class Handler(object):
         message_id = ((cq.get("message") or {}).get("message_id")) or 0
         now = int(time.time())
 
+        # An answer to an orchestrator's question answers the press itself:
+        # when the question is gone the press says so in a toast, and a press
+        # can be answered only once. Writing the answer is a file and a rename,
+        # well inside the ten seconds Telegram gives.
+        if data_raw.startswith("answer:"):
+            return self.answer_button(cid, data_raw, message_id)
+
         # The answer first thing, otherwise a spinner turns on the phone.
         self.bot.answer(cid)
+        let_go(message_id)
 
         # The sleep buttons only, and by an explicit prefix. A check for "has a
         # colon" would intercept repo: and feat: as well — they appeared later,
@@ -1960,18 +2502,16 @@ class Handler(object):
             seconds = int(data_raw.split(":", 1)[1])
             until = hold_for(seconds, now)
             log.info("the extend button for %d min: deadline until %s", seconds // 60, until)
-            # We leave the menu: having extended by an hour, people often want
-            # to add more at once, and there is no reason to go back to the main
-            # menu for that.
-            self.bot.edit(message_id, t("extended.plain", at=local_for_lang(until)),
-                          awake_keyboard())
+            # The menu has done its job: it becomes the line saying so.
+            self.result(message_id, t("extended.plain", at=local_for_lang(until)))
         elif data_raw == "awake_forever":
             until = hold_for(FOREVER_SECONDS, now)
             log.info("the \"stay awake\" button: indefinite, deadline until %s", until)
-            self.bot.edit(message_id, t("awake.forever.ok"), awake_keyboard())
+            self.result(message_id, t("awake.forever.ok"))
         elif data_raw == "awake_until":
             with locked() as st:
                 st["awaiting"] = "awake_until"
+                st["awaiting_thread"] = self.bot.thread
             log.info("the \"stay awake until\" button: waiting for a time")
             # We leave the "back" button: having changed their mind, people
             # leave the question with one press rather than by typing /menu —
@@ -1982,7 +2522,13 @@ class Handler(object):
             # inline, and ForceReply cannot be put into inline markup, a message
             # has one reply_markup. Splitting was unavoidable, but leaving with
             # one press is preserved.
-            self.bot.ask(t("awake.ask.now"), t("awake.hint"))
+            #
+            # The messages of an earlier press go: the question is asked anew.
+            for old in (read().get("awaiting_ids") or {}).values():
+                retire(self.bot, old)
+            prompt = self.bot.ask(t("awake.ask.now"), t("awake.hint"))
+            with locked() as st:
+                st["awaiting_ids"] = {"menu": message_id, "prompt": prompt}
         elif data_raw == "awake_release":
             # The same as "Let it sleep" in the warning.
             release_hold(now)
@@ -1994,18 +2540,18 @@ class Handler(object):
                     st["awaiting"] = ""
             log.info("the \"let it sleep\" button: hold released, refusal for %d min",
                      state.REFUSAL_HOLDS // 60)
-            self.bot.edit(message_id, t("awake.released"), menu_keyboard())
+            self.result(message_id, t("awake.released"))
         elif data_raw == "menu_status":
-            self.bot.edit(message_id, status_text(), menu_keyboard())
+            self.result(message_id, status_text())
         elif data_raw == "menu_chrome":
-            self.bot.edit(message_id, chrome_text(), chrome_keyboard())
+            self.bot.edit(message_id, *chrome_screen())
         elif data_raw == "menu_code":
             self.bot.edit(message_id, code_text(), code_keyboard())
         elif data_raw in ("code_start", "code_restart", "code_stop"):
             verb = {"code_start": "start", "code_restart": "restart",
                     "code_stop": "stop"}[data_raw]
             run("systemctl --user %s code-server.service" % verb)
-            self.bot.edit(message_id, code_text(), code_keyboard())
+            self.result(message_id, code_text())
         elif data_raw == "menu_services":
             self.bot.edit(message_id, t("svc.title"), services_keyboard())
         elif data_raw == "menu_back":
@@ -2046,12 +2592,12 @@ class Handler(object):
             # chrome-debug's output is written for a terminal and reads badly in
             # a messenger, while the person has one question — did it start and
             # where to look.
-            self.bot.edit(message_id, chrome_text(), chrome_keyboard())
+            self.result(message_id, chrome_text())
         elif data_raw == "phone_toggle":
             if gate_origin():
                 run(FUNNEL_OFF, timeout=30)
                 log.info("phone access turned off")
-                self.bot.edit(message_id, t("svc.title"), services_keyboard())
+                self.result(message_id, t("chrome.gatedown"))
                 return
             # The gate needs nothing: its socket is always there.
             out = run("systemctl --user start sclaude-gate.socket && " + FUNNEL_ON, timeout=60)
@@ -2062,29 +2608,20 @@ class Handler(object):
                               services_keyboard())
                 return
             log.info("phone access turned on")
-            self.bot.edit(message_id, t("svc.phonewarm"), services_keyboard())
+            self.result(message_id, t("svc.phonewarm"))
         elif data_raw.startswith("devphone:") or data_raw == "gate_stop":
             # Buttons of a card drawn before phone access moved to Settings.
-            self.bot.edit(message_id, chrome_text(), chrome_keyboard())
+            self.bot.edit(message_id, *chrome_screen())
         elif data_raw.startswith(("devopen:", "devstop:", "devstart:")):
             action, _, label = data_raw.partition(":")
             found = [f for f in dev_features() if f[0] == label]
             if not found:
                 # Merged or abandoned since the card was drawn.
-                self.bot.edit(message_id, chrome_text(), chrome_keyboard())
+                self.bot.edit(message_id, *chrome_screen())
                 return
             _label, wt, _port, _running = found[0]
-            if action == "devopen":
-                # A tab in the laptop's Chrome, which starts the browser if it
-                # is down. A stopped feature needs nothing more: the request
-                # itself makes sclaude-proxy start it.
-                run("chrome-debug " + shlex.quote("http://%s.localhost:%d/" % (label, DEV_PORT)),
-                    timeout=60)
-            elif action == "devstart":
-                proxy_start(label)
-            else:
-                run("cd " + shlex.quote(wt) + " && sclaude dev --stop", timeout=90)
-            self.bot.edit(message_id, chrome_text(), chrome_keyboard())
+            dev_act(action[3:], label, wt)
+            self.result(message_id, chrome_text())
         elif data_raw == "svc_sclaude":
             # We open straight on the remembered repository: most often a
             # person comes back to the same project, and a needless choice is no
@@ -2116,7 +2653,7 @@ class Handler(object):
             # language — we replace it, otherwise its caption would diverge from
             # the rest of the interface.
             relabel_anchor(self.bot)
-            self.bot.edit(message_id, lang_text(), lang_keyboard())
+            self.result(message_id, lang_text())
         elif data_raw == "svc_docs":
             self.bot.edit(message_id, t("docs.menu"), docs_keyboard())
         elif data_raw.startswith("doc:"):
@@ -2151,63 +2688,38 @@ class Handler(object):
             if was != path and code_running():
                 run("systemctl --user restart code-server.service")
             self.bot.edit(message_id, repo_text(name), features_keyboard(name))
-        elif data_raw.startswith("feat:"):
+        elif data_raw.startswith(("topic:", "feat:")):
+            # A feature from the list: its card goes to its topic, made if
+            # need be, and the list says where it went. Without Threaded Mode
+            # the card takes the list's place, as it did before topics.
+            # feat: is the same press from a list drawn before topics.
             _, name, slug = data_raw.split(":", 2)
-            self.bot.edit(message_id, feature_card(name, slug),
-                          feature_keyboard(name, slug))
-        elif data_raw.startswith("acts:"):
-            # The list of actions on a feature. Started the same way as a step:
-            # the orchestrator goes into the background, and the list arrives as
-            # a question in the channel — as buttons labelled by the options.
-            _, name, slug = data_raw.split(":", 2)
-            repo = repo_path(name)
-            if not repo:
-                self.bot.edit(message_id, t("repo.norepos"), repos_keyboard())
-                return
-            # We do not touch a busy feature for the same reason as with
-            # "Continue": a second orchestrator on the same feature is two
-            # conversations about one thing.
-            session, _step = feature_session(repo, slug)
-            if session and session_state(session) in ("working", "blocked", "busy"):
-                self.bot.edit(message_id, t("feat.busy"),
-                              feature_keyboard(name, slug))
-                return
-            start_sclaude(repo, ["actions", slug])
-            # We do not draw the card here. The action list will arrive in its
-            # own message and bring it along — above the buttons. The previous
-            # edit left a copy of it in the chat with the "Continue" and
-            # "Actions" buttons, and after the question was answered that copy
-            # was the last one: the list disappeared, and above it stood a menu
-            # the person had already left.
-            #
-            # We leave the feature list — what was pressed. It stays correct
-            # even once the person closes the action list.
-            self.bot.edit(message_id, repo_text(name), features_keyboard(name))
-
-        elif data_raw.startswith("go:"):
-            # Starting or continuing a step. The orchestrator decides what to
-            # do itself: `sclaude <feature>` returns to the current step, and if
-            # the step's session is already open it will refuse — by the
-            # session_holder check shared by both entrances.
-            _, name, slug = data_raw.split(":", 2)
-            repo = repo_path(name)
-            if not repo:
-                self.bot.edit(message_id, t("repo.norepos"), repos_keyboard())
-                return
-            # busy belongs here too: the card shows it as "running" (🟢), and
-            # not blocking on it means starting a second orchestrator on the same
-            # feature — exactly what this check stands against.
-            session, _step = feature_session(repo, slug)
-            if session and session_state(session) in ("working", "blocked", "busy"):
-                self.bot.edit(message_id, t("feat.busy"),
-                              feature_keyboard(name, slug))
-                return
-            start_sclaude(repo, [slug])
-            feats, _ = features_of_name(name)
-            row = next((r for r in feats if r[0] == slug), None)
-            self.bot.edit(message_id,
-                          t("feat.started", step=escape(row[1] if row else slug)),
-                          feature_keyboard(name, slug))
+            # topic::<slug> — the remembered repository, too long for the
+            # data (features_keyboard).
+            name = name or os.path.basename(repo_choice())
+            opened = open_card(self.bot, name, slug)
+            if opened:
+                self.result(message_id, t("feat.opened", slug=escape(slug)))
+            elif opened is None:
+                # The network's: the list stays, for a press once it is back.
+                self.bot.edit(message_id, repo_text(name) + t("feat.topiclater"),
+                              features_keyboard(name))
+            else:
+                # A card outside a topic: a button whose data could not carry
+                # the feature finds it by this message (card_press).
+                with locked() as st:
+                    cards = st.get("main_cards") or {}
+                    cards.pop(str(message_id), None)
+                    cards[str(message_id)] = channel_key(name, slug)
+                    # The last few: older cards have long scrolled away.
+                    st["main_cards"] = dict(list(cards.items())[-MAIN_CARDS:])
+                self.bot.edit(message_id, *card(name, slug, in_topic=False))
+        elif data_raw.startswith("fc:"):
+            self.card_press(data_raw, message_id)
+        elif data_raw.startswith(("go:", "acts:")):
+            # A card or list drawn before topics.
+            verb, name, slug = data_raw.split(":", 2)
+            self.card_press("fc:%s:%s" % (verb, channel_key(name, slug)), message_id)
         elif data_raw.startswith("newfeat:"):
             # A new feature: the conversation goes on through the channel from
             # here — the orchestrator will ask for a name (or offer issues), and
@@ -2218,38 +2730,108 @@ class Handler(object):
                 self.bot.edit(message_id, t("repo.norepos"), repos_keyboard())
                 return
             start_sclaude(repo, ["new"])
-            self.bot.edit(message_id, repo_text(name), features_keyboard(name))
-        elif data_raw.startswith("answer:"):
-            # An answer to an orchestrator's question. Three fields rather than
-            # two: we separate the repository's name from the answer at the
-            # first colon from the left — the answer itself may contain
-            # anything.
-            _, name, reply = data_raw.split(":", 2)
-            repo = repo_path(name)
-            if not repo:
-                self.bot.edit(message_id, t("repo.norepos"), repos_keyboard())
-                return
-            # We learn what exactly was chosen before sending: afterwards the
-            # question is cleared, and there will be nowhere left to read it
-            # from.
-            chosen = answered_option(repo, reply)
-            if answer_ask(repo, reply):
-                # "Answer sent: 9" is honest but useless where the answer was
-                # an exit. The person pressed "back" and has a right to see what
-                # they were leaving: the repository's feature list. The other
-                # answers stay as they were — work follows them, and its output
-                # will come in due course.
-                if is_back_option(chosen):
-                    self.bot.edit(message_id, repo_text(name),
-                                  features_keyboard(name))
-                else:
-                    self.bot.edit(message_id, t("ask.sent", reply=escape(reply)))
-            else:
-                self.bot.edit(message_id, t("ask.gone"))
+            self.result(message_id, t("feat.newstarted", repo=escape(name)))
         elif data_raw == "svc_restart":
             self.restart(message_id)
         else:
             log.warning("unknown callback: %s", data_raw)
+
+    def card_press(self, data_raw, message_id):
+        # A button on a feature's card. The feature is named in the data, or,
+        # when its name did not fit, by the topic the card stands in.
+        parts = data_raw.split(":", 2)
+        action = parts[1]
+        key = parts[2] if len(parts) > 2 else topic_channel(self.bot.thread)
+        if not key:
+            key = (read().get("main_cards") or {}).get(str(message_id), "")
+        name, slug = split_key(key)
+        repo = repo_path(name) if slug else None
+        if not repo or not feature_dir(repo, slug):
+            self.bot.edit(message_id, t("feat.gone", slug=escape(slug or "?")))
+            return
+        note, feats = "", None
+        if action in ("go", "acts"):
+            # We do not touch a busy feature: a second orchestrator on the same
+            # feature is two conversations about one thing. busy belongs here
+            # too: the card shows it as running (🟢).
+            session, _step = feature_session(repo, slug)
+            if session and session_state(session) in ("working", "blocked", "busy"):
+                note = t("feat.busy")
+            elif action == "go":
+                # The orchestrator decides what to do itself: `sclaude <feature>`
+                # returns to the current step.
+                start_sclaude(repo, [slug])
+                # Once, for the note and the card both: it is `sclaude status`.
+                feats, _ = features_of_name(name)
+                row = next((r for r in feats if r[0] == slug), None)
+                note = t("feat.started", step=escape(row[1] if row else slug))
+            else:
+                # The list of actions arrives as a question in this topic.
+                start_sclaude(repo, ["actions", slug])
+        elif action in ("open", "start", "stop"):
+            dev = feature_dev(repo, slug)
+            if dev:
+                dev_act(action, dev[0], feature_wt(repo, slug))
+        elif action == "code":
+            run("systemctl --user start code-server.service")
+            # The card redrawn at once would still call it stopped.
+            for _ in range(10):
+                if code_running():
+                    break
+                time.sleep(0.5)
+        self.bot.edit(message_id, *card(name, slug, note, in_topic=bool(self.bot.thread),
+                                        feats=feats))
+
+    def answer_button(self, cid, data_raw, message_id):
+        # An answer to an orchestrator's question. Three fields rather than
+        # two: we separate the repository's name from the answer at the first
+        # colon from the left — the answer itself may contain anything.
+        _, name, reply = data_raw.split(":", 2)
+        repo = repo_path(name)
+        if not repo:
+            self.bot.answer(cid)
+            self.bot.edit(message_id, t("repo.norepos"), repos_keyboard())
+            return
+        # The press carries the repository, not the question or the feature:
+        # the message it came from says which. Each open question is shown by
+        # one message, and a press on any other is a press on a closed one —
+        # without this a button on an old message would answer whatever the
+        # repository asks now.
+        if press_answered(name, message_id, repo):
+            self.bot.answer(cid)
+            return
+        key = press_channel(name, message_id, repo)
+        channel = channel_dir(key) if key else ""
+        # We learn what exactly was chosen before sending: afterwards the
+        # question is cleared, and there will be nowhere left to read it from.
+        question = pending_ask(channel) if channel else None
+        chosen = option_label((question or {}).get("options"), reply)
+        # The message shows one question; the channel may hold the next one
+        # by now — answered at the laptop, "Delete them?" is followed at once
+        # by "Force-delete it?", and the bot learns of it only on its turn. A
+        # press must not answer a question it was not shown.
+        entry = get_shown(key, repo) if key else None
+        mark = (question.get("id") or question.get("asked") or 0) if question else None
+        if not channel or (entry and not entry.get("legacy") and entry.get("id") != mark) \
+                or not answer_ask(channel, reply):
+            self.bot.answer(cid, t("ask.gone"))
+            # A message the loop knows of is settled by it — into the answer
+            # given at the laptop. Only one it has no record of goes now.
+            if not key:
+                retire(self.bot, message_id)
+            return
+        self.bot.answer(cid)
+        forget_ask(key, message_id, repo)
+        # "1" is honest but useless where the answer was an exit. The person
+        # pressed "back" and has a right to see what they were leaving: the
+        # repository's feature list. The other answers replace the question
+        # — work follows them, and its output will come in due course.
+        if is_back_option(chosen) and not self.bot.thread:
+            self.bot.edit(message_id, repo_text(name), features_keyboard(name))
+            # A menu now, and the main chat keeps one.
+            self.adopt(message_id)
+        else:
+            self.bot.edit(message_id, answered_text(name, question, reply))
 
     def restart(self, message_id):
         # The daemon restarts itself, and this is the case where the order
@@ -2357,11 +2939,22 @@ def check_idle_hold(bot):
     # interrupting it with a question is not the thing to do.
     now = int(time.time())
     data = read()
+    idle = data.get("idle_seconds") or 0
+    # The previous question is moot once nothing holds, or somebody typed —
+    # the session was not forgotten after all — or no session is left to have
+    # forgotten. It goes rather than wait for a press that would change
+    # nothing.
+    asked_msg = data.get("idle_message_id") or 0
+    if asked_msg and (not data.get("hard_hold") or idle < IDLE_SECONDS_THRESHOLD
+                      or idle >= IDLE_UNKNOWN):
+        retire(bot, asked_msg)
+        with locked() as st:
+            if st.get("idle_message_id") == asked_msg:
+                st["idle_message_id"] = 0
     if not data.get("hard_hold"):
         return
     if data.get("busy"):
         return
-    idle = data.get("idle_seconds") or 0
     if idle < IDLE_SECONDS_THRESHOLD:
         return
     # 999999 is the detector's placeholder for "no interactive sessions at
@@ -2382,11 +2975,15 @@ def check_idle_hold(bot):
         # for 0 minutes" is worse than writing nothing at all: the number is the
         # first thing people read.
         return
-    bot.send(t("idle.warn", since=local_label(since),
-               held=human_span(now - since), idle=human_span(idle),
-               who=reasons_lines(hold_reasons(data, now))), idle_keyboard())
+    # An hour on the same question is asked again: the earlier one goes, so
+    # the chat holds it once.
+    retire(bot, read().get("idle_message_id") or 0)
+    msg = bot.send(t("idle.warn", since=local_label(since),
+                     held=human_span(now - since), idle=human_span(idle),
+                     who=reasons_lines(hold_reasons(data, now))), idle_keyboard())
     with locked() as st:
         st["idle_asked_ts"] = now
+        st["idle_message_id"] = msg
     log.info("asked about forgotten hard holders (idle %d s)", idle)
 
 
@@ -2423,43 +3020,681 @@ def check_asks(bot):
     #
     # It can be answered both from here and in the terminal: the first answer
     # clears the question, and the second source learns of it by the file's
-    # disappearance.
-    shown = read().get("ask_shown") or {}
-    changed = False
+    # disappearance. Its message then changes — see settle_ask.
+    #
+    # A feature's questions go to the feature's topic (feature_topic), so that
+    # features running in parallel do not ask over one another in one stream.
+    present = set()
     for repo in known_repos():
         name = os.path.basename(repo)
-        question = pending_ask(repo)
-        if not question:
-            # The question is closed — we forget the stamp, otherwise the
-            # dictionary grows for ever and the next question in the same second
-            # would count as shown.
-            if name in shown:
-                shown.pop(name); changed = True
-            continue
-        # id is on questions laid out by this version; asked is the fallback
-        # key for a question left over from the previous one (the daemon and the
-        # orchestrator are updated separately, and they can diverge by one
-        # restart).
-        mark = question.get("id") or question.get("asked") or 0
-        if shown.get(name) == mark:
-            continue
-        # Silent if the person is right now at the terminal where the question
-        # was asked: they can already see it on the screen and will answer there.
-        # The message goes out anyway — one can step away mid-step, and then it
-        # is already waiting in the chat.
-        bot.send(ask_text(name, question), ask_keyboard(name, question),
-                 quiet=at_terminal(question))
-        shown[name] = mark
-        changed = True
-        log.info("showed the sclaude question from %s: %r", name,
-                 (question.get("prompt") or "")[:60])
-    if changed:
+        for slug, channel in ask_channels(repo):
+            key = channel_key(name, slug)
+            present.add(key)
+            check_channel(bot, key, name, slug, channel, repo)
+    # A feature gone while it waited for its topic leaves its try behind: the
+    # daemon runs for weeks.
+    for tried in [k for k in TOPIC_TRIED if k not in present]:
+        TOPIC_TRIED.pop(tried, None)
+    # A repository deleted or renamed will never close its question the usual
+    # way. (A feature's message goes with its topic — see check_topics.)
+    # Also a feature's entry kept in the state while it had no worktree: once a
+    # worktree of that name exists, its record is read instead, and the state's
+    # entry would never be settled.
+    state_shown = shown_asks()
+    stale = [k for k in state_shown if k not in present
+             or (split_key(k)[1] and in_worktree(k)[0])]
+    for key in stale:
+        retire(bot, state_shown[key].get("msg") or 0)
+    if stale:
+        # From the state directly: put_shown would write to a worktree that
+        # has since appeared under the same name.
         with locked() as st:
+            shown = st.get("ask_shown") or {}
+            for key in stale:
+                shown.pop(key, None)
             st["ask_shown"] = shown
+
+
+def check_channel(bot, key, name, slug, channel, repo):
+    # Marks of an earlier feature of the same name, set aside when the new one
+    # began (ask_feature_begin): their topics go first — before the records
+    # below are read, one of which may be that feature's last answer.
+    if slug:
+        for old in glob.glob(os.path.join(glob.escape(channel), ENDED_MARK + "-*")):
+            if end_feature(bot, name, slug, channel, old):
+                try:
+                    os.unlink(old)
+                except OSError:
+                    pass
+    question = pending_ask(channel)
+    # A feature whose clean-up is through, or whose worktree is going: its
+    # last message and its records are end_feature's (check_topics), which
+    # settles them with the topic. The worktree goes before the mark is
+    # written, and records read in between would be lost to it.
+    if slug and not question and (os.path.exists(os.path.join(channel, ENDED_MARK))
+                                  or (not feature_dir(repo, slug)
+                                      and not shown_asks().get(key))):
+        return
+    # id is on questions laid out by this version; asked is the fallback key
+    # for a question left over from the previous one (the daemon and the
+    # orchestrator are updated separately, and they can diverge by one
+    # restart).
+    mark = (question.get("id") or question.get("asked") or 0) if question else None
+    closed = closed_asks(channel)
+    entry = get_shown(key, repo)
+    # The shown question has closed — or another has taken its place between
+    # two turns, as in "Delete them?" followed at once by "Force-delete it?".
+    # Either way its message is settled before the next question goes out, so
+    # the answer stands above the question that follows from it.
+    if entry and entry.get("id") != mark:
+        settle_ask(bot, name, entry, closed.get(entry.get("id"), (None, None))[1])
+        put_shown(key, None, repo)
+        entry = None
+    # Every record is read once. The open question's own record stays: it is
+    # written a moment before the question leaves the channel.
+    for qid, (path, _) in closed.items():
+        if qid != mark:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+    if not question or entry:
+        return
+    # Silent if the person is right now at the terminal where the question was
+    # asked: they can already see it on the screen and will answer there. The
+    # message goes out anyway — one can step away mid-step, and then it is
+    # already waiting in the chat.
+    thread = feature_topic(bot, name, slug) if slug else 0
+    # No topic though the feature has a worktree and topics are on: the
+    # network or a rate limit. The next turn tries again — sent to the main
+    # chat now, the question would stay there, mixed with other features'.
+    if slug and not thread and topic_pending(repo, slug, TOPIC_TRIED, key):
+        return
+    if thread:
+        TOPIC_TRIED.pop(key, None)
+    text = ask_text(name, question, in_topic=bool(thread), slug=slug)
+    keyboard = ask_keyboard(name, question)
+    quiet = at_terminal(question)
+    msg = bot.send(text, keyboard, quiet=quiet, thread=thread)
+    if not msg and thread and topic_lost(bot):
+        # The topic is gone — the person deleted it by hand. A new one is
+        # made once; failing that the question goes to the main chat, since a
+        # question that does not arrive stalls the step. Any other failure is
+        # the network's: the topic is still there, and the next turn retries.
+        thread = feature_topic(bot, name, slug, renew=True)
+        if thread:
+            msg = bot.send(text, keyboard, quiet=quiet, thread=thread)
+        if not msg:
+            # The main chat, with the card that names the feature.
+            thread = 0
+            msg = bot.send(ask_text(name, question, slug=slug), keyboard, quiet=quiet, thread=0)
+    if not msg:
+        return
+    put_shown(key, {"id": mark, "msg": msg, "thread": thread,
+                    "prompt": question.get("prompt") or "",
+                    "form": question.get("form") or "",
+                    "options": question.get("options") or []}, repo)
+    log.info("showed the sclaude question from %s: %r", key,
+             (question.get("prompt") or "")[:60])
+
+
+# --- a topic per feature -------------------------------------------------------
+#
+# The bot runs in Threaded Mode (set in @BotFather), and each feature that asks
+# something gets a topic of its own in the private chat; the menu, the sleep
+# warning and the repository's own questions stay in the main chat. Without
+# the mode creating a topic fails, and everything goes to the main chat as it
+# did before.
+#
+# What the bot knows of a feature — its topic, the message showing its open
+# question — is the feature's, and lives with it, in the worktree only: under
+# .sclaude/local/feature/, which git and every upload leave out. A feature asks
+# in its channel only while its worktree exists (ask_channel in io.sh).
+#
+# The topic goes with the worktree, everything in it included: remove_worktree
+# reads the record before the worktree goes and leaves it in the channel's
+# "ended" mark (ask_feature_end), and the bot deletes the topic named there and
+# the channel. Telegram does not let a bot close a topic in a private chat —
+# only delete it.
+
+FEATURE_RECORD = "telegram.json"
+ENDED_MARK = "ended"
+
+# The name's length. Telegram allows 128 characters, but a phone shows a topic
+# list and a topic's header in about thirty: the slug comes first so that its
+# start is what shows, and the repository's name after it, dropped when the
+# slug leaves it no room.
+TOPIC_NAME_MAX = 48
+# How long a question waits for its feature's topic before the main chat takes
+# it: a refusal that is not "not a forum" may never pass, and a question that
+# never shows stalls the step.
+TOPIC_WAIT = 120
+# A feature's failed tries to make or reach its topic: key → (first, last).
+# In memory: a restart starts the wait afresh, which is all it should do.
+TOPIC_TRIED = {}
+# A pause in failures this long, and the next one starts a new wait.
+TOPIC_QUIET = 600
+# The same for a feature opened from the list, by its key.
+CARD_TRIED = {}
+
+
+def topic_pending(repo, slug, tried, tag):
+    # A topic is to be had — the feature has a worktree, Threaded Mode is on —
+    # but was not made or reached: the network or a rate limit. True for
+    # TOPIC_WAIT from the first such try (kept in tried under tag); after that
+    # a refusal that may never pass gives way to the main chat.
+    #
+    # The wait is the feature's, not each question's: a refusal that lasts
+    # holds up its first question only. Tries stop counting after a quiet
+    # spell, so a blip a day later waits afresh.
+    now = int(time.time())
+    # A try quiet this long is spent: its feature reached its topic, or went.
+    for old in [k for k, (_, last) in tried.items() if now - last > TOPIC_QUIET]:
+        tried.pop(old, None)
+    if not (repo and feature_dir(repo, slug)) or now < (read().get("topics_off_until") or 0):
+        return False
+    first, _ = tried.get(tag) or (now, now)
+    tried[tag] = (first, now)
+    return now - first < TOPIC_WAIT
+
+
+# How long a topic delete is retried before its end mark is let go.
+TOPIC_DELETE_FOR = 86400
+# Telegram's refusals that mean a topic is not there to delete.
+TOPIC_GONE = ("thread not found", "topic_id_invalid", "topic_deleted", "not a forum")
+# How many cards outside topics (Threaded Mode off) keep their feature known.
+MAIN_CARDS = 20
+# How long a refusal to make a topic ("the chat is not a forum") is believed.
+TOPICS_OFF_RETRY = 600
+TOPIC_NAME_SLUG_MIN = 16
+# A feature whose worktree is gone without the clean-up saying so — removed by
+# hand — loses its channel this long after it last changed. Its topic stays: its
+# id went with the worktree. Not at once, so that a channel being written while
+# the worktree is created is not taken for one.
+TOPIC_GRACE = 600
+
+
+def topic_lost(bot):
+    # The last call failed because its topic is gone, not for the network.
+    return any(w in (bot.last_error or "") for w in TOPIC_GONE)
+
+
+def topic_name(name, slug):
+    tail = " · " + name
+    room = TOPIC_NAME_MAX - len(tail)
+    if room < TOPIC_NAME_SLUG_MIN or len(slug) > room:
+        tail = ""
+        room = TOPIC_NAME_MAX
+    if len(slug) > room:
+        slug = slug[:room - 1].rstrip("-_.") + "…"
+    return slug + tail
+
+
+def feature_wt(repo, slug):
+    return os.path.join(os.path.dirname(repo), "%s-%s" % (os.path.basename(repo), slug))
+
+
+def feature_dir(repo, slug):
+    # The feature's own directory in its worktree, "" while there is none.
+    # Only the current layout: io.sh keeps the record there alone, and a tree
+    # still on the old .feature/ asks in the main chat until it moves.
+    d = os.path.join(feature_wt(repo, slug), ".sclaude/local/feature")
+    return d if os.path.isdir(d) else ""
+
+
+def record_path(repo, slug):
+    # "" while the feature has no worktree: there is then nowhere to keep it.
+    d = feature_dir(repo, slug)
+    return os.path.join(d, FEATURE_RECORD) if d else ""
+
+
+def load_record(repo, slug):
+    path = record_path(repo, slug)
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_record(repo, slug, record):
+    path = record_path(repo, slug)
+    if not path:
+        return
+    tmp = "%s.%d" % (path, os.getpid())
+    # No makedirs: record_path has just found the directory, and making it
+    # again would bring back a worktree that remove_worktree is deleting this
+    # very moment — `sclaude new` would then find the path taken.
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(record, fh, ensure_ascii=False)
+        os.replace(tmp, path)
+    except OSError as exc:
+        log.warning("the record of %s was not written: %s", slug, exc)
+
+
+def feature_topic(bot, name, slug, renew=False):
+    # The feature's topic, made on its first question. 0 when there is none
+    # to be had: Threaded Mode is off, or the network failed. renew drops a
+    # topic the person deleted by hand.
+    repo = repo_path(name)
+    if not repo or not feature_dir(repo, slug):
+        return 0
+    record = load_record(repo, slug)
+    thread = 0 if renew else (record.get("thread") or 0)
+    if renew and (record.get("shown") or {}).get("thread"):
+        # The question shown in the lost topic went with it: forgotten, it is
+        # sent again into the new one on the loop's next turn. One shown in
+        # the main chat is still there, and stays the loop's to settle.
+        record.pop("shown", None)
+    if not thread:
+        # Threaded Mode off: Telegram says the chat is not a forum. That is
+        # remembered for a while rather than asked again for every question
+        # and every press.
+        now = int(time.time())
+        if now < (read().get("topics_off_until") or 0):
+            return 0
+        thread = bot.create_topic(topic_name(name, slug))
+        if not thread:
+            if "not a forum" in bot.last_error:
+                with locked() as st:
+                    st["topics_off_until"] = now + TOPICS_OFF_RETRY
+            return 0
+        log.info("a topic for %s/%s: %s", name, slug, thread)
+        record.pop("card", None)
+        record["thread"] = thread
+        save_record(repo, slug, record)
+        # A topic opens with its feature's card (post_card).
+        post_card(bot, name, slug)
+    return thread
+
+
+def open_channels():
+    """[(key, directory)] of every channel with an open question."""
+    found = []
+    for repo in known_repos():
+        name = os.path.basename(repo)
+        for slug, channel in ask_channels(repo):
+            if pending_ask(channel):
+                found.append((channel_key(name, slug), channel))
+    return found
+
+
+def press_channel(name, message_id, repo=None):
+    # The channel key a press on a question's message answers, or "" when the
+    # message shows no open question. A question remembered before message ids
+    # were kept has none to match, and a press then answers the repository's
+    # channel, as every press did before.
+    for key in repo_keys(name, repo):
+        entry = get_shown(key, repo) or {}
+        if message_id and entry.get("msg") == message_id:
+            return key
+    if (get_shown(name) or {}).get("legacy"):
+        return name
+    return ""
+
+
+def press_answered(name, message_id, repo=None):
+    # Whether the press is a second one on a question just answered here: its
+    # message already shows the answer, and must neither be answered again nor
+    # deleted as closed.
+    return any(message_id and (get_shown(k, repo) or {}).get("answered") == message_id
+               for k in repo_keys(name, repo))
+
+
+def message_thread(msg):
+    # The topic a message is in, 0 for the main chat. A message in the main
+    # chat may carry a thread id too — that of the message it replies to — so
+    # only is_topic_message counts.
+    return (msg.get("message_thread_id") or 0) if msg.get("is_topic_message") else 0
+
+
+def feature_records(repo):
+    """[slug] of the repository's features that have a record of the bot's.
+
+    By the name alone "app-admin-x" is as much feature "admin-x" of "app" as
+    feature "x" of "app-admin"; the worktree's .git file, which names the
+    repository it belongs to, settles it."""
+    name = os.path.basename(repo)
+    prefix = name + "-"
+    own = os.path.join(os.path.realpath(repo), ".git", "worktrees") + os.sep
+    found = []
+    pattern = os.path.join(glob.escape(os.path.dirname(repo)), glob.escape(prefix) + "*",
+                           ".sclaude", "local", "feature", FEATURE_RECORD)
+    for path in sorted(glob.glob(pattern)):
+        tree = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(path))))
+        try:
+            with open(os.path.join(tree, ".git"), encoding="utf-8") as fh:
+                gitdir = fh.read().strip().partition("gitdir:")[2].strip()
+        except OSError:
+            continue
+        # git 2.48+ may write it relative to the worktree.
+        if not os.path.realpath(os.path.join(tree, gitdir)).startswith(own):
+            continue
+        found.append(os.path.basename(tree)[len(prefix):])
+    return found
+
+
+def topic_channel(thread):
+    # The feature key whose topic this is, or "". A topic made from the menu
+    # has no channel until the feature asks something, so the records in the
+    # worktrees are what is searched.
+    if not thread:
+        return ""
+    for repo in known_repos():
+        name = os.path.basename(repo)
+        for slug in feature_records(repo):
+            if load_record(repo, slug).get("thread") == thread:
+                return channel_key(name, slug)
+    return ""
+
+
+def check_topics(bot):
+    # A finished feature's topic goes, with everything in it, and its channel
+    # with it: at once when its worktree's removal left the mark. A channel whose
+    # worktree went without one (removed by hand) goes after TOPIC_GRACE; its
+    # topic cannot, its id having gone with the worktree.
+    now = int(time.time())
+    for repo in known_repos():
+        name = os.path.basename(repo)
+        for slug, channel in ask_channels(repo):
+            if not slug:
+                continue
+            if pending_ask(channel):
+                continue
+            mark = os.path.join(channel, ENDED_MARK)
+            if os.path.exists(mark):
+                if feature_dir(repo, slug):
+                    # A new feature under the same name, made before the bot
+                    # came to the old one's mark: the old topic goes, the
+                    # channel stays.
+                    if end_feature(bot, name, slug, channel, mark):
+                        try:
+                            os.unlink(mark)
+                        except OSError:
+                            pass
+                    continue
+                if not end_feature(bot, name, slug, channel, mark):
+                    continue
+            elif feature_dir(repo, slug):
+                continue
+            else:
+                try:
+                    if now - os.stat(channel).st_mtime < TOPIC_GRACE:
+                        continue
+                except OSError:
+                    continue
+                log.warning("the worktree of %s/%s went without a clean-up — "
+                            "its topic is left for deleting by hand", name, slug)
+            if clear_channel(channel):
+                log.info("the feature %s/%s is gone — its channel removed", name, slug)
+
+
+def clear_channel(channel):
+    # File by file rather than rmtree: a feature of the same name may have
+    # begun while the topic was being deleted, and its question laid out here
+    # (ask.json, and a mark set aside) keeps the directory. Everything else
+    # goes, temporary leftovers of a killed writer included. Returns whether
+    # the directory is gone.
+    keep = ("ask.json",)
+    closed = os.path.join(channel, CLOSED_DIR)
+    for d in (closed, channel):
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for name in names:
+            path = os.path.join(d, name)
+            if d == channel and (name in keep or name.startswith(ENDED_MARK + "-")):
+                continue
+            if os.path.isfile(path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+    for d in (closed, channel):
+        try:
+            os.rmdir(d)
+        except OSError:
+            pass
+    return not os.path.exists(channel)
+
+
+def end_feature(bot, name, slug, channel, mark):
+    # The worktree's removal left the record in the mark. Its last question's
+    # message is settled first — it may stand in the main chat, where no topic
+    # takes it away — then the topic goes. False while the topic may still be
+    # there: the mark stays, and the next turn tries again.
+    try:
+        with open(mark, encoding="utf-8") as fh:
+            record = json.load(fh) or {}
+    except (OSError, ValueError):
+        record = {}
+    if not isinstance(record, dict):
+        record = {}
+    entry = record.get("shown")
+    if isinstance(entry, dict) and entry.get("msg") and not entry.get("thread"):
+        # In the main chat only: one in the topic goes with it, below.
+        # Only with its closed record: the mark is a copy taken when the
+        # worktree went, and the bot may have settled that message since —
+        # consuming the record — in which case it is history now, not to be
+        # deleted.
+        closed = closed_asks(channel).get(entry.get("id"))
+        if closed:
+            settle_ask(bot, name, entry, closed[1])
+        else:
+            # Without the record there is no telling whether the message is
+            # still the question or already its answer: its text stays, its
+            # buttons go — they would answer nothing either way.
+            bot.unbutton(entry["msg"])
+    if isinstance(entry, dict):
+        record.pop("shown")
+        # Whole or not at all: the mark holds the only copy of the topic id.
+        tmp = "%s.%d" % (mark, os.getpid())
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(record, fh)
+            os.replace(tmp, mark)
+        except OSError:
+            pass
+    thread = record.get("thread") or 0
+    if thread and not bot.delete_topic(thread):
+        try:
+            age = time.time() - os.stat(mark).st_mtime
+        except OSError:
+            age = 0
+        if age < TOPIC_DELETE_FOR:
+            return False
+        log.warning("the topic %s of %s/%s would not go for a day — left for "
+                    "deleting by hand", thread, name, slug)
+    if thread:
+        forget_screen_place(thread)
+    return True
+
+
+# --- the feature's card ---------------------------------------------------------
+#
+# In a feature's topic there is nothing to choose: the topic is the feature. So
+# the topic carries one card with everything about the feature — its step, its
+# session, its links, its dev server and code-server — and the buttons act on it
+# with no "which feature?" in between. The card is the topic's first message;
+# "Menu" or /menu typed in the topic brings a fresh one to the bottom and the
+# old one goes, so the topic holds one. It is not pinned: a pin in a topic of a
+# private chat announces itself in the main chat, once per topic.
+#
+# Its buttons carry the feature's key when it fits Telegram's 64 bytes, and
+# the topic they were pressed in otherwise, or the main chat's record of the
+# card (card_data, card_press).
+
+def dev_act(action, label, wt):
+    # open, start or stop a feature's dev server.
+    if action == "open":
+        # A tab in the laptop's Chrome, which starts the browser if it is down.
+        # A stopped feature needs nothing more: the request itself makes
+        # sclaude-proxy start it.
+        run("chrome-debug " + shlex.quote("http://%s.localhost:%d/" % (label, DEV_PORT)),
+            timeout=60)
+    elif action == "start":
+        proxy_start(label)
+    elif action == "stop":
+        run("cd " + shlex.quote(wt) + " && sclaude dev --stop", timeout=90)
+
+
+def feature_dev(repo, slug):
+    """(label, port, running) of the feature's dev server, or None."""
+    real = os.path.realpath(feature_wt(repo, slug))
+    for label, wt, port, running in dev_features():
+        if os.path.realpath(wt) == real:
+            return label, port, running
+    return None
+
+
+def card_data(action, key):
+    data = "fc:%s:%s" % (action, key)
+    return data if len(data.encode("utf-8")) <= 64 else "fc:" + action
+
+
+def card(name, slug, note="", in_topic=True, feats=None):
+    """(text, keyboard) of the feature's card. The dev server, code-server and
+    the phone gate are each looked at once: every look is a process or a
+    socket, on the loop that answers getUpdates."""
+    text = feature_card(name, slug, feats)
+    key = channel_key(name, slug)
+    rows = [[{"text": t("feat.continue"), "callback_data": card_data("go", key)},
+             {"text": t("feat.actions"), "callback_data": card_data("acts", key)}]]
+    repo = repo_path(name)
+    if repo and feature_dir(repo, slug):
+        dev = feature_dev(repo, slug)
+        if dev:
+            label, _port, running = dev
+            serve = serve_config()
+            text += t("card.dev",
+                      state=t("chrome.running") if running else t("chrome.stopped"),
+                      link='<a href="%s/__sclaude/select?f=%s">%s</a>' % (
+                          phone_origin(serve), label, t("card.phonelink")),
+                      local="http://%s.localhost:%d" % (label, DEV_PORT))
+            row = [{"text": t("chrome.open"), "callback_data": card_data("open", key)}]
+            row += phone_button(gate_origin(serve), label)
+            if running:
+                row.append({"text": t("chrome.featstop"), "callback_data": card_data("stop", key)})
+            else:
+                row.append({"text": t("chrome.start"), "callback_data": card_data("start", key)})
+            rows.append(row)
+        else:
+            text += t("card.nodev")
+        # code-server opens the worktree itself with ?folder=, whichever
+        # project it was started on.
+        folder = "/?folder=" + urllib.parse.quote(feature_wt(repo, slug))
+        last = []
+        if code_running():
+            text += t("card.code", url=code_url() + folder,
+                      local="http://127.0.0.1:8080" + folder)
+        else:
+            text += t("card.nocode")
+            last.append({"text": t("card.codestart"), "callback_data": card_data("code", key)})
+        last.append({"text": t("repo.refresh"), "callback_data": card_data("refresh", key)})
+        rows.append(last)
+    if note:
+        text += "\n\n" + note
+    # Outside a topic — Threaded Mode off — the card stands where the feature
+    # list was, and the way back to the list is needed.
+    if not in_topic:
+        rows.append([{"text": t("repo.torepos"), "callback_data": "repo:" + name}])
+    return text, rows
+
+
+def post_card(bot, name, slug):
+    # A fresh card at the bottom of the feature's topic; the previous one
+    # goes. Returns the card's message id, 0 when there is no topic.
+    repo = repo_path(name)
+    if not repo:
+        return 0
+    record = load_record(repo, slug)
+    thread = record.get("thread") or 0
+    if not thread:
+        return 0
+    text, keyboard = card(name, slug)
+    msg = bot.send(text, keyboard, quiet=True, thread=thread)
+    if not msg:
+        return 0
+    retire(bot, record.get("card") or 0)
+    record["card"] = msg
+    save_record(repo, slug, record)
+    return msg
+
+
+def open_card(bot, name, slug):
+    # The feature's card in its topic, the topic made if need be. Returns
+    # whether it is there — False without Threaded Mode or a worktree.
+    # A topic made just now already opens with its card.
+    # None when the topic is to be had but the network failed: the card is
+    # not drawn outside the topic for that.
+    repo = repo_path(name)
+    had = bool(repo and load_record(repo, slug).get("thread"))
+
+    key = channel_key(name, slug)
+
+    def missed():
+        return None if topic_pending(repo, slug, CARD_TRIED, key) else False
+
+    if not feature_topic(bot, name, slug):
+        return missed()
+    CARD_TRIED.pop(key, None)
+    # A new topic opens with its card — unless that send failed.
+    if not had and load_record(repo, slug).get("card"):
+        return True
+    if post_card(bot, name, slug):
+        return True
+    if not topic_lost(bot):
+        return None
+    # The topic was deleted by hand: a new one, which opens with its card.
+    if not feature_topic(bot, name, slug, renew=True):
+        return missed()
+    return True if load_record(repo, slug).get("card") else None
+
+
+# How long a warning nobody pressed stays after its deadline. The buttons still
+# work past it — Windows counts its own idling before sleep — but by an hour on
+# the warning is about a night that is over.
+WARN_KEEP_AFTER = 3600
+
+
+def settle_warning(bot, data, now):
+    # The warning's message once its deadline has moved without a press on it:
+    # extended from elsewhere (a command, the menu, the detector seeing work)
+    # becomes "extended until", released becomes "will sleep" — the answers its
+    # own buttons would have given. Left alone, it goes an hour after the
+    # deadline.
+    msg = data.get("warn_message_id") or 0
+    if not msg:
+        return
+    warned = data.get("warned_for_ts") or 0
+    until = data.get("until_ts") or 0
+    if until == warned and now < warned + WARN_KEEP_AFTER:
+        return
+    # Extended from elsewhere only if seen before the deadline: the loop turns
+    # every 25 s, so a later one is a fresh hold after the laptop slept and
+    # woke, and the warning was simply not answered.
+    if until > warned and now < warned:
+        bot.edit(msg, t("sleep.extended", at=local_for_lang(data.get("until_local"))))
+    elif until < warned and data.get("decision") == "sleep":
+        bot.edit(msg, t("sleep.accepted"))
+    else:
+        retire(bot, msg)
+    with locked() as st:
+        if st.get("warn_message_id") == msg:
+            st["warn_message_id"] = 0
 
 
 def check_warning(bot):
     now = int(time.time())
+    data = read()
+    # The old warning is settled first: the next one may be about to go out for
+    # the new deadline, and the old must not stand above it with live buttons.
+    settle_warning(bot, data, now)
     data = read()
     if not needs_warning(data, now):
         return
@@ -2529,6 +3764,7 @@ def main():
     # while doing so.
     bot.commands()
     bot.menu_button()
+    bot.describe()
 
     # If we were restarted by a button, report it into that same message. That
     # same message carries the reply keyboard: setting it with a separate "I have
@@ -2578,6 +3814,7 @@ def main():
                         log.warning("a foreign chat: %s", (msg.get("chat") or {}).get("id"))
                         continue
                     remember_lang(msg.get("from"))
+                    bot.thread = message_thread(msg)
                     handler.message(msg)
                 elif "callback_query" in upd:
                     cq = upd["callback_query"]
@@ -2586,9 +3823,12 @@ def main():
                         log.warning("a foreign chat in the callback: %s", chat_id)
                         continue
                     remember_lang(cq.get("from"))
+                    bot.thread = message_thread(cq.get("message") or {})
                     handler.callback(cq)
             except Exception as exc:
                 log.exception("handling the update: %s", exc)
+            finally:
+                bot.thread = 0
 
         try:
             check_warning(bot)
@@ -2608,6 +3848,16 @@ def main():
             check_asks(bot)
         except Exception as exc:
             log.exception("checking sclaude's questions: %s", exc)
+
+        try:
+            check_awaiting(bot)
+        except Exception as exc:
+            log.exception("sweeping the time question: %s", exc)
+
+        try:
+            check_topics(bot)
+        except Exception as exc:
+            log.exception("checking the feature topics: %s", exc)
 
     log.info("the daemon has stopped")
 

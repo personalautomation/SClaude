@@ -305,6 +305,11 @@ cmd_new() {
   git -C "$REPO" worktree add "$wt" -b "$branch" origin/main || die "could not create the worktree"
 
   mkdir -p "$wt/.sclaude/local/feature"
+  # From here the questions are the feature's and go to its channel, and so to
+  # its topic in the bot (ask_channel). Not before: the bot keeps the topic in
+  # the worktree, and the name and the issue were asked before there was one.
+  local ASK_SLUG="$slug"
+  ask_feature_begin
   python3 - "$wt/.sclaude/local/feature/state.json" "$slug" "$branch" "$wt" "$issue" <<'PY'
 import json, sys, datetime
 path, slug, branch, wt, issue = sys.argv[1:6]
@@ -336,6 +341,7 @@ PY
 cmd_resume() {
   require_repo
   local slug="$1" wt step
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
   step="$(state_get "$wt/.sclaude/local/feature/state.json" step)" || die "corrupted state: $wt/.sclaude/local/feature/state.json"
 
@@ -707,6 +713,7 @@ cmd_menu() {
 cmd_issue() {
   require_repo
   local slug="${1:-}" wt state issue
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF issue <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
   state="$wt/.sclaude/local/feature/state.json"
@@ -731,6 +738,7 @@ cmd_issue() {
 cmd_replan() {
   require_repo
   local slug="${1:-}" wt state step answer
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF replan <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
   state="$wt/.sclaude/local/feature/state.json"
@@ -783,6 +791,7 @@ cmd_replan() {
 cmd_return() {
   require_repo
   local slug="${1:-}" wt state step
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF return <name> [reason]"
   shift
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
@@ -810,6 +819,7 @@ cmd_return() {
 cmd_friction() {
   require_repo
   local slug="${1:-}" wt
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF friction <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
 
@@ -867,6 +877,7 @@ cmd_friction() {
 cmd_regression() {
   require_repo
   local slug="${1:-}" wt
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF regression <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
 
@@ -953,6 +964,7 @@ cmd_epilogue() {
 cmd_reset() {
   require_repo
   local slug="${1:-}" wt state step answer
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF reset <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug (list them with: $SELF status)"
   state="$wt/.sclaude/local/feature/state.json"
@@ -1046,6 +1058,9 @@ cmd_reset() {
 cmd_session_ended() {
   require_repo
   local slug="${1:-}" step="${2:-}" session="${3:-}" wt
+  # code_reload execs into this from inside a step: the binding of the process
+  # it replaced is gone, and the step's last questions are still the feature's.
+  local ASK_SLUG="$slug"
   [[ -n "$slug" && -n "$step" && -n "$session" ]] || die "usage: $SELF _session-ended <name> <step> <session>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
   session_ended "$wt" "$slug" "$step" "$session"
@@ -1070,6 +1085,7 @@ cmd_handoff() {
 cmd_done() {
   require_repo
   local slug="${1:-}" wt branch merged pr answer
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF done <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
   branch="$(state_get "$wt/.sclaude/local/feature/state.json" branch)" || die "the state carries no branch"
@@ -1188,6 +1204,12 @@ cmd_done() {
   ask "${BOLD}Remove all of it? [y/n] ${OFF}" answer yn
   is_yes "$answer" || { info "Cancelled."; return 1; }
 
+  # The side worktrees' questions, right after the agreement and before
+  # anything is done: they are the feature's last (its topic in the bot goes
+  # with its worktree), and they may wait long for an answer — a person who
+  # leaves one unanswered leaves the feature as it was, not half cleaned.
+  side_worktrees_offer
+
   # We append the summary before the clean-up: state.json lives inside the
   # worktree and will disappear with it, and there will be nothing left to
   # assemble it from.
@@ -1250,7 +1272,6 @@ cmd_done() {
   fi
 
   echo "${GREEN}Feature '$slug' cleaned up.${OFF}"
-  side_worktrees_offer
 }
 
 # Checking a branch against main. The only place where a feature learns that the
@@ -1267,6 +1288,7 @@ cmd_done() {
 cmd_sync() {
   require_repo
   local slug="${1:-}" wt branch behind ahead answer
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF sync <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
   branch="$(state_get "$wt/.sclaude/local/feature/state.json" branch)" || die "the state carries no branch"
@@ -1376,6 +1398,7 @@ cmd_news() {
 cmd_preview() {
   require_repo
   local slug="${1:-}" wt
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF preview <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
 
@@ -1408,6 +1431,7 @@ cmd_preview() {
 cmd_rollback() {
   require_repo
   local slug="${1:-}" wt
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF rollback <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug
   A feature that has been cleaned up keeps no record of what it shipped.

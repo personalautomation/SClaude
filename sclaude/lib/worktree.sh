@@ -699,11 +699,22 @@ stop_dev() {
 # Removes a feature's worktree, its server and its database with it. Fails only
 # when git refused and left the work in place.
 #
-# One failure is not a refusal: git has deleted everything it knew and dropped
-# the tree from its list, and rmdir found a file written after that. Whoever
-# wrote it has been stopped by now, so what is left is its leftovers and nothing
-# else, and they go the same way.
+# Removing it ends the feature for the bot as well: its Telegram topic goes
+# (ask_feature_end in io.sh). The bot's record of the topic lives in the
+# worktree, so it is read before the worktree goes.
 remove_worktree() {
+  local wt="$1" record=""
+  declare -F ask_record >/dev/null && record="$(ask_record "$wt")"
+  remove_worktree_tree "$wt" || return 1
+  declare -F ask_feature_end >/dev/null && ask_feature_end "$record"
+  return 0
+}
+
+# The removal itself. One failure is not a refusal: git has deleted everything
+# it knew and dropped the tree from its list, and rmdir found a file written
+# after that. Whoever wrote it has been stopped by now, so what is left is its
+# leftovers and nothing else, and they go the same way.
+remove_worktree_tree() {
   local wt="$1" out
   stop_dev "$wt"
   out="$(git -C "$REPO" worktree remove --force "$wt" 2>&1)" && return 0
@@ -719,8 +730,8 @@ remove_worktree() {
 }
 
 # Worktrees a session made beside the feature's, for a pull request of their
-# own, once that pull request is merged. Offered at the end of `done`, one
-# question each.
+# own, once that pull request is merged. Offered by `done` before it removes the
+# feature's own worktree, one question each.
 #
 # A session sometimes opens a side pull request from a worktree it makes itself:
 # once a review moved a workflow fix into a pull request of its own from

@@ -42,14 +42,40 @@ ASK_POLL=1
 # see.
 #
 # It is set by whoever opens the conversation — main in bin/sclaude, once per
-# launch, and always in the main repository's .git/sclaude/. A feature's
-# directory will not do for this, tempting as it is: the question about the name
-# is asked before the feature's tree exists, and the bot looks for questions by
-# repository without knowing about their worktrees. One channel per repository —
-# and the live-owner check in
-# ask_publish.
+# launch, and always in the main repository's .git/sclaude/: the repository's
+# channel, under the main repository's .git rather than in a worktree, since the
+# question about the name is asked before the feature's tree exists. A feature's
+# questions go to its own channel beside it (ask_channel).
 ask_dir() {
   echo "${ASK_DIR:-}"
+}
+
+# The channel a question goes to: the feature's own, when the conversation is
+# about one, or the repository's.
+#
+# Features run in parallel, each under its own orchestrator, and one channel per
+# repository let only one of them reach the phone: the second found the channel
+# busy and asked the terminal alone. So a function that works on a feature
+# declares `local ASK_SLUG="$slug"`, and everything it calls asks in
+# ask/<slug>/ — bash's dynamic scope ends the binding with the function, so a
+# menu asked after it is the repository's again. The bot reads the feature
+# from the directory's name and shows its questions in the feature's topic.
+#
+# Questions asked before there is a feature — its name, the start menu — stay
+# in the repository's channel.
+ask_channel() {
+  local dir; dir="$(ask_dir)"
+  [[ -n "$dir" ]] || return 0
+  # A name that is not a plain slug stays in the repository's channel rather
+  # than becoming a path: cmd_done takes its argument as typed.
+  # A feature whose clean-up has ended asks in the repository's channel: an
+  # outer function still bound to it (the action list `done` was chosen from)
+  # would otherwise lay a question out where the bot is deleting everything.
+  if [[ "${ASK_SLUG:-}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && "$ASK_SLUG" != "${ASK_ENDED:-}" ]]; then
+    echo "$dir/ask/$ASK_SLUG"
+  else
+    echo "$dir"
+  fi
 }
 
 # --- the accumulated context -------------------------------------------------
@@ -110,14 +136,14 @@ ask_publish() {
   local prompt="$1" form="${2:-}" dir file tmp
   shift 2 2>/dev/null || shift $#
   local -a options=("$@")
-  dir="$(ask_dir)"
+  dir="$(ask_channel)"
   [[ -n "$dir" ]] || return 1
   mkdir -p "$dir" 2>/dev/null || return 1
 
   file="$dir/ask.json"
 
-  # There is one channel per repository, and there may turn out to be two
-  # orchestrators: one started at the laptop, the other by a button in the bot.
+  # One channel may turn out to have two orchestrators — the repository's, or
+  # one feature's: one started at the laptop, the other by a button in the bot.
   # The second used to overwrite the first's question, and that one hung for
   # ever — the answer was no longer going to it. Verified live: two `sclaude new`
   # in a row, and the second's question stays in the channel.
@@ -245,15 +271,127 @@ ask_log() {
 }
 
 ask_retract() {
-  local dir; dir="$(ask_dir)"
+  local dir; dir="$(ask_channel)"
   [[ -n "$dir" ]] || return 0
   rm -f "$dir/ask.json" "$dir/answer.json"
+}
+
+# --- the end of a feature ----------------------------------------------------
+#
+# The bot keeps what it knows of a feature — its Telegram topic, the message
+# showing its open question — in the feature's worktree, in
+# .sclaude/local/feature/telegram.json, which git and every upload leave out,
+# and nowhere else. The topic goes with the worktree: remove_worktree reads the
+# record while it is still there and, once the worktree is gone, hands it to the
+# bot in the channel's "ended" mark — the one moment anything of it leaves the
+# worktree. The bot deletes the topic, everything in it, and the channel.
+#
+# So a feature asks nothing once its worktree is removed: `done` and `drop` ask
+# all their questions first. ask_feature_end also ends the binding, so a
+# question that slips in after it goes to the repository's channel rather than
+# to a topic that is being deleted.
+#
+# The names are read by FEATURE_RECORD and ENDED_MARK in keepawake/telegramd.py.
+ask_record() {
+  # The channel is touched as well: the bot counts a worktree gone without a
+  # clean-up from the channel's last change, and the removal about to start
+  # is a clean-up whose mark comes after it.
+  local dir; dir="$(ask_channel)"
+  [[ -n "$dir" && "$dir" != "$(ask_dir)" && -d "$dir" ]] && touch "$dir" 2>/dev/null
+  cat "$1/.sclaude/local/feature/telegram.json" 2>/dev/null || true
+}
+
+# A feature begins: a mark left by an earlier feature of the same name, which
+# the bot has not come to yet, is that one's, and must not end this one. It is
+# set aside rather than dropped — it holds the only copy of the old topic's id,
+# and the bot still deletes that topic by it.
+ask_feature_begin() {
+  # The ended name is cleared first: ask_channel would otherwise give the
+  # repository's channel for a feature that ended earlier in this process.
+  [[ -n "${ASK_SLUG:-}" && "${ASK_ENDED:-}" == "$ASK_SLUG" ]] && ASK_ENDED=""
+  local dir; dir="$(ask_channel)"
+  [[ -n "$dir" && "$dir" != "$(ask_dir)" ]] || return 0
+  # Touched once set aside: mv keeps the old time, and the week-old sweep
+  # would take a mark from a feature that ended long ago before the bot came.
+  local aside; aside="$dir/ended-$(date +%s)"
+  [[ -f "$dir/ended" ]] && mv -f "$dir/ended" "$aside" 2>/dev/null && touch "$aside"
+  return 0
+}
+
+ask_feature_end() {
+  local record="${1:-}" dir; dir="$(ask_channel)"
+  [[ -n "$dir" && "$dir" != "$(ask_dir)" ]] || return 0
+  # Whole or not at all, as every file the bot reads here: an empty mark read
+  # mid-write would end the feature with no topic to delete.
+  mkdir -p "$dir" 2>/dev/null && printf '%s' "$record" > "$dir/.ended.$$" 2>/dev/null \
+    && mv -f "$dir/.ended.$$" "$dir/ended" 2>/dev/null
+  # Global, not local: every binding to this feature up the call stack ends
+  # with it (ask_channel), not only the innermost one.
+  ASK_ENDED="$ASK_SLUG"
+  ASK_SLUG=""
+  return 0
+}
+
+# How a question ended, left for whoever showed it elsewhere.
+#
+#   ask_closed <id> <reply> <from>
+#
+# The bot shows the question in a chat, and once it closes, the message there
+# must change: an answered question is replaced by its answer, one that died
+# unanswered is deleted. The disappearance of ask.json says only that it closed,
+# not how — and the answer itself is gone with answer.json. So an answered
+# question leaves a record in closed/<id>.json, written before ask_retract, so
+# that the reading side never sees the question gone without it. No record
+# means no answer: the session was killed, or the reply was refused and the
+# question is about to be asked again.
+#
+# One file per question rather than one shared file: two questions in a row
+# ("Delete them?", "Force-delete it?") can both close between two turns of the
+# bot, and each needs its own answer. The bot deletes the records it has read.
+#
+# A machine without the bot would keep every record for ever, so each new one
+# also clears those older than a week. A day was too short: a bot stopped over
+# a long weekend would come back to find the answers gone and delete questions
+# that had been answered.
+ask_closed() {
+  local id="$1" dir root; dir="$(ask_channel)"; root="$(ask_dir)"
+  [[ -n "$dir" && "$id" =~ ^[A-Za-z0-9]+$ ]] || return 0
+  # Every channel's, the features' too. Empty directories stay: `mkdir -p`
+  # does not refresh an old one's time, so no age tells one about to be
+  # written into from one left behind, and an empty directory costs nothing.
+  # Once a day is enough for a week-old sweep, not once per answer.
+  if [[ -z "$(find "$root/.swept" -mmin -1440 2>/dev/null)" ]]; then
+  touch "$root/.swept" 2>/dev/null
+  find "$root" -path '*/closed/*' -type f -mmin +10080 -delete 2>/dev/null
+  [[ -d "$root/ask" ]] && find "$root/ask" -mindepth 2 -maxdepth 2 -name 'ended-*' \
+    -mmin +10080 -delete 2>/dev/null
+  # A finished feature's channel the bot never came to clear (it was not
+  # running) goes a week after the clean-up.
+  # Never one with a question open: that is a feature asking again under the
+  # same name.
+  local ended
+  while IFS= read -r -d '' ended; do
+    [[ -e "$ended/ask.json" ]] || rm -rf -- "$ended"
+  done < <([[ -d "$root/ask" ]] && find "$root/ask" -mindepth 2 -maxdepth 2 -name ended \
+             -mmin +10080 -printf '%h\0' 2>/dev/null)
+  fi
+  mkdir -p "$dir/closed" 2>/dev/null || return 0
+  ASK_REPLY="$2" ASK_FROM="$3" python3 - "$dir/closed" "$id" <<'PY' || true
+import json, os, sys, time
+d, qid = sys.argv[1], sys.argv[2]
+tmp = os.path.join(d, '.%s.%d' % (qid, os.getpid()))
+with open(tmp, 'w') as fh:
+    json.dump({'id': qid, 'reply': os.environ.get('ASK_REPLY', ''),
+               'from': os.environ.get('ASK_FROM', ''), 'at': int(time.time())},
+              fh, ensure_ascii=False)
+os.replace(tmp, os.path.join(d, qid + '.json'))
+PY
 }
 
 # The id of the question standing in the channel right now. Empty when there is
 # no question, or when it was laid out by a version that did not stamp one.
 ask_id() {
-  local dir file; dir="$(ask_dir)"
+  local dir file; dir="$(ask_channel)"
   [[ -n "$dir" ]] || return 0
   file="$dir/ask.json"
   [[ -f "$file" ]] || return 0
@@ -284,7 +422,7 @@ PY
 # is accepted: otherwise updating one half would silence the other.
 ask_answer() {
   local want="${1:-}"
-  local dir file; dir="$(ask_dir)"
+  local dir file; dir="$(ask_channel)"
   [[ -n "$dir" ]] || return 1
   file="$dir/answer.json"
   [[ -f "$file" ]] || return 1

@@ -60,6 +60,19 @@ breaks the other silently — grep before you edit:
   links in its summary. Change that workflow's wording and this reads every
   red check as real again.
 
+- `closed/<id>.json` in a question channel (`.git/sclaude/` or a feature's
+  `.git/sclaude/ask/<slug>/`) — how a question ended — is written by
+  `ask_closed` in `sclaude/lib/io.sh` and read by `CLOSED_DIR`/`closed_asks` in
+  `keepawake/telegramd.py`, which turns the question's message into the answer
+  by it; without the record the message is deleted as unanswered.
+  `tests/io.py` checks what is written, `tests/keepawake.py` what is read.
+- The feature channel `.git/sclaude/ask/<slug>/` (`ask_channel` in `io.sh`,
+  `ask_channels` in `telegramd.py`), the bot's record of a feature
+  `telegram.json` and the clean-up's `ended` mark (`ask_record`,
+  `ask_feature_end` in `io.sh`; `FEATURE_RECORD`, `ENDED_MARK` in
+  `telegramd.py`) are named on both sides; `tests/io.py` and
+  `tests/keepawake.py` check each side.
+
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/run.sh`, which decides by it
   whether a review round stays in the same session; `tests/review-round.py`

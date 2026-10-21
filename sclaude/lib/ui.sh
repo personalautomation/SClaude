@@ -45,6 +45,21 @@ ask() {
   done
 }
 
+# A number typed for a pick:N list, in base 10: callers compare it with plain
+# arithmetic, to which "08" is a bad octal number rather than option 8. Every
+# path of ask_once hands its reply through here, with a channel or without.
+# A number longer than nine digits after the zeros is 0, an option no list
+# has: in 64-bit arithmetic it would wrap around into one that exists.
+pick_norm() {
+  if [[ "$1" == pick:* && "$2" =~ ^0*[0-9]{1,9}$ ]]; then
+    echo "$((10#$2))"
+  elif [[ "$1" == pick:* && "$2" =~ ^[0-9]+$ ]]; then
+    echo 0
+  else
+    printf '%s\n' "$2"
+  fi
+}
+
 ask_once() {
   local __prompt="$1" __var="$2" __form="${3:-}" __rc=0 __reply="" __outside=""
   local __published=""
@@ -74,7 +89,7 @@ ask_once() {
     else
       read -rp "$__prompt" __reply || __rc=$?
     fi
-    printf -v "$__var" '%s' "$(clean_reply "$__reply")"
+    printf -v "$__var" '%s' "$(pick_norm "$__form" "$(clean_reply "$__reply")")"
     return "$__rc"
   fi
 
@@ -93,7 +108,7 @@ ask_once() {
       read -rp "$__prompt" __reply || __rc=$?
     fi
     ask_forget
-    printf -v "$__var" '%s' "$(clean_reply "$__reply")"
+    printf -v "$__var" '%s' "$(pick_norm "$__form" "$(clean_reply "$__reply")")"
     return "$__rc"
   fi
 
@@ -174,9 +189,30 @@ ask_once() {
   done
 
   ask_log "$__prompt" "$__from" "$__reply" "$__in"
+  # A yes/no reply that is neither is not an answer: ask lays the same question
+  # out again, and the chat must lose the old message rather than show it
+  # answered with "maybe".
+  # So is a number outside a pick:N list, which the caller refuses.
+  local __clean __answered=1; __clean="$(clean_reply "$__reply")"
+  if [[ "$__form" == yn* ]]; then
+    is_yes "$__clean" || is_no "$__clean" || __answered=0
+  elif [[ "$__form" =~ ^pick:([0-9]+)$ ]]; then
+    # Kept before the next match, which overwrites BASH_REMATCH.
+    local __n="${BASH_REMATCH[1]}"
+    __clean="$(pick_norm "$__form" "$__clean")"
+    # Only one of its options. An empty reply, which most lists refuse, is not
+    # shown as an answer either; the one list that takes it ("Enter to leave
+    # it out") then loses a line of history, not a decision.
+    if [[ "$__clean" =~ ^[0-9]+$ ]]; then
+      (( __clean >= 1 && __clean <= 10#$__n )) || __answered=0
+    else
+      __answered=0
+    fi
+  fi
+  [[ "$__answered" -eq 1 ]] && ask_closed "$__id" "$__clean" "$__from"
   ask_retract
   ask_forget
-  printf -v "$__var" '%s' "$(clean_reply "$__reply")"
+  printf -v "$__var" '%s' "$__clean"
   return "$__rc"
 }
 

@@ -112,7 +112,85 @@ Whoever answers first has answered. Hence **hot switching**: a feature was begun
 at the laptop, reached "Is step 'development' finished?", was left — and answered
 from a phone; the live process in the terminal prints the answer after the prompt
 and carries on by itself. The same in reverse: an answer in the terminal clears
-the question, and the bot removes the buttons on the next turn.
+the question, and the bot settles its message on the next turn.
+
+**A question's message does not outlive the question.** Answered anywhere — by a
+button, by text, in the terminal — the message becomes the question with its
+answer and loses its buttons; a typed answer is deleted, since the question now
+shows it. Closed unanswered — the session was killed, a yes/no reply was neither
+and the question is asked again, a word a list refused, the repository is gone —
+the message is deleted. A typed reply the bot cannot tell an answer (neither yes
+nor no, a word for a list) goes on to the orchestrator, which judges it, and the
+message is settled by the record; a number the list lacks is held back with a
+note instead, since the orchestrator would refuse it out of sight.
+The disappearance of `ask.json` says only that the question closed, so an
+answered one leaves `.git/sclaude/closed/<id>.json` (reply and source) before it
+goes; the bot reads and deletes those records, and the orchestrator clears any
+older than a week for machines where the bot does not run. Telegram lets a bot
+delete only for 48 hours; an older message is edited to "no longer relevant"
+instead. The message id is dropped once the message is settled.
+
+A press carries the repository, not the question, so a press on an older message
+would answer whatever the repository asks now. The bot compares the message with
+the one showing the open question and answers any other with "already closed".
+
+**A channel and a topic per feature.** Features run in parallel, each under its
+own orchestrator, and one channel per repository let only one of them reach the
+phone: the second found it busy and asked the terminal alone. A function working
+on a feature declares `local ASK_SLUG="$slug"`, and its questions go to
+`.git/sclaude/ask/<slug>/` (`ask_channel` in `sclaude/lib/io.sh`); bash's dynamic
+scope ends the binding with the function. The binding begins only once the
+feature's worktree exists: the name and the GitHub issue `sclaude new` asks about
+go to the repository's channel. The bot reads the feature from the
+directory's name and, with Threaded Mode on in @BotFather, shows its questions in
+a topic of its own (`createForumTopic` in the private chat), named slug first —
+a phone shows about thirty characters of it — and the repository after it while
+the name stays within 48. A press is routed by the message it came from, and text
+typed in a topic answers that topic's feature; in the main chat text answers the
+question it replies to (Telegram's Reply), or the one question shown there —
+with several and no reply, the bot asks which. Replies to a command typed in a topic go back
+to that topic.
+
+What the bot knows of a feature — its topic and the message showing its open
+question — lives in the feature's worktree and nowhere else, in
+`.sclaude/local/feature/telegram.json`, which git and uploads leave out. The
+topic goes with the worktree: `remove_worktree` reads the record while the
+worktree is there and, once it is gone, leaves it in the channel's `ended` mark
+(`ask_record`, `ask_feature_end`), which also ends the binding. The bot deletes
+the topic — Telegram deletes every message in it with it — and the channel. So a
+feature asks nothing once its worktree is removed: `done` makes its offer about
+side worktrees first, and `drop` asks all its questions (worktree, branches, pull
+request, issue) before it does any of it. A worktree removed by hand takes the
+topic's id with it: its channel goes ten minutes later, and the topic is left to
+delete by hand. Telegram does not let a bot close a topic in a private chat, only
+delete it. The daemon's state keeps the repository channels' messages, and a
+feature channel's only while it has no worktree.
+
+**The menu, split by where it is.** In a feature's topic there is nothing to
+choose: the topic is the feature, so the menu there is the feature's card —
+step, session, links, dev server, code-server (`?folder=` opens the worktree,
+whichever project the server started on) — with buttons that act on it
+directly. The card is the topic's first message; "Menu", `/menu` or text that
+answered nothing bring a fresh one, and the old goes. It is not pinned: a pin in
+a topic of a private chat announces itself in the main chat. A card's buttons
+name the feature in their data when it fits 64 bytes and leave it to the topic
+otherwise. The main chat keeps what is not about one feature: sleep, status,
+Chrome and the list of features, code-server, the repositories and their
+features — a press on one opens its topic — and Settings. Without Threaded Mode
+the card stands where the feature list was, with a way back to it.
+
+The main chat holds one menu at a time, and so does each topic (`screens`, by
+thread): a menu sent anew —
+by a command, "Menu", or a word the bot did not know — replaces the last, and the
+typed command goes. A menu that did something rather than lead elsewhere is
+edited into what it did, without buttons, and stays as a line of history, as an
+answered question does.
+
+The bot's own questions are settled the same way: the sleep warning becomes
+"extended until" or "will sleep" when the deadline moved without a press on it,
+and goes an hour past its deadline; the question about forgotten holders goes
+once nothing holds, someone typed, or no session is left; the "until what time?"
+prompt becomes the answer, or goes with its input box when the person leaves it.
 
 **At the laptop a question arrives silently.** It is sent anyway — one can step
 away mid-step, and then the message is already waiting in the chat — but while

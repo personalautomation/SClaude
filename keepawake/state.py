@@ -257,6 +257,8 @@ def blank():
         "busy": 0,
         # When we last asked about forgotten hard holders.
         "idle_asked_ts": 0,
+        # The message that asked it, so a moot question can be taken back.
+        "idle_message_id": 0,
         # Since when a hard holder has been holding without a break — so the
         # question can honestly say "it has not slept for this long".
         "hard_since": 0,
@@ -266,6 +268,24 @@ def blank():
         # a button in that same menu, and a question asked before the restart
         # would otherwise stay unanswered for ever.
         "awaiting": "",
+        # The messages that ask for it: "menu" carries the "back" button,
+        # "prompt" the input box. Both go once the wait ends.
+        "awaiting_ids": {},
+        # The topic the wait was asked in, 0 for the main chat: text typed in
+        # another topic is not the time.
+        "awaiting_thread": 0,
+        # The menu screen each place holds — "0" the main chat, a topic's
+        # thread id otherwise; a new one sent there replaces it.
+        "screens": {},
+        # Cards shown outside topics (Threaded Mode off): message id → feature
+        # key, for buttons whose data had no room for it.
+        "main_cards": {},
+        # Until when a refusal to make a feature topic stands (Threaded Mode
+        # off in @BotFather); topics are not asked for before then.
+        "topics_off_until": 0,
+        # The profile texts last set (Bot.describe): set again only when they
+        # change.
+        "described": "",
         # Which language the keyboard below the input box is set in. Empty
         # means it is not set at all. It cannot be set at every start: it only
         # arrives together with a message, and the daemon restarts both by

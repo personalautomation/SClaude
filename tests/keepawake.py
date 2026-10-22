@@ -568,6 +568,11 @@ bare = subprocess.run(
 plain = re.sub(r"\x1b\[[0-9;]*m", "", bare)
 sys_line = next((l for l in plain.splitlines() if "HEALTH" in l), "")
 check_true("status prints the HEALTH section", bool(sys_line))
+# An apostrophe inside a single-quoted printf once ran the heading of the
+# human's commands into the lines below it: they vanished, and a stray "\s"
+# was left in the status in Telegram.
+for line in ("   The human's commands", "• manual extension", "• decision by button"):
+    check_true("status prints %r" % line.strip(), line in plain)
 win_line = next((l for l in plain.splitlines() if "Windows" in l and "•" in l), "")
 if os.path.exists("/mnt/c/Windows/System32/tasklist.exe"):
     # Neither the traffic light nor the section's line must report the Windows
@@ -1205,6 +1210,59 @@ with sandbox() as box:
     check("the language is taken from the press", telegramd.current(), "en")
     telegramd.remember_lang({"language_code": "ru-RU"})
     check("without a pin the client leads again", telegramd.current(), "ru")
+
+    # The profile texts ("What can this bot do?") and the commands are picked
+    # by Telegram from the language of the app. A pinned language goes into
+    # both slots, or a Russian app kept showing Russian to a person who had
+    # chosen English.
+    class Profile(telegramd.Bot):
+        def __init__(self):
+            self.token, self.calls = "1:x", []
+
+        def call(self, method, **params):
+            cmds = params.get("commands") or [{}]
+            self.calls.append((method, params.get("language_code"),
+                               params.get("description") or params.get("short_description")
+                               or cmds[0].get("description")))
+
+    def profile(pin):
+        state.write(blank())
+        if pin:
+            telegramd.set_lang(pin)
+            with state.locked() as st:
+                st["lang"], st["lang_pinned"] = pin, True
+        p = Profile()
+        p.commands()
+        p.describe()
+        return {(m, code): text for m, code, text in p.calls}
+
+    desc, short = telegramd.STRINGS["bot.description"], telegramd.STRINGS["bot.short"]
+    got = profile(None)
+    check("unpinned: a Russian app reads Russian",
+          got[("setMyDescription", "ru")], desc[0])
+    check("unpinned: every other app reads English",
+          got[("setMyDescription", None)], desc[1])
+    check("unpinned: commands in both languages",
+          (got[("setMyCommands", "ru")], got[("setMyCommands", None)]),
+          telegramd.STRINGS["cmd.menu"])
+    got = profile("en")
+    check("pinned en: a Russian app reads English",
+          (got[("setMyDescription", "ru")], got[("setMyShortDescription", "ru")]),
+          (desc[1], short[1]))
+    check("pinned en: a Russian app lists the commands in English",
+          got[("setMyCommands", "ru")], telegramd.STRINGS["cmd.menu"][1])
+    got = profile("ru")
+    check("pinned ru: every other app reads Russian",
+          got[("setMyDescription", None)], desc[0])
+    # The switch itself sets them again, without waiting for a restart.
+    state.write(blank())
+    bot_d = FakeBot()
+    bot_d.describe = lambda: bot_d.sent.append("described")
+    bot_d.commands = lambda: bot_d.sent.append("commands")
+    telegramd.Handler(bot_d).callback(
+        dict(id="l3", data="lang:en", message={"message_id": 1}, **en))
+    check("a language switch sets the profile again",
+          {"described", "commands"} <= set(bot_d.sent), True)
 
     # The language screen marks the current choice with exactly one dot —
     # otherwise it is unclear what is chosen at all.

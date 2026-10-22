@@ -936,7 +936,7 @@ cmd_status() {
   # The human's commands are not holders, but they move the deadline too, and
   # without them "why until 11pm when a single claude is running" cannot be
   # explained.
-  printf '\n   The human\'s commands\n'
+  printf "\n   The human's commands\n"
   if [[ -n "$manual" && "$manual" != "0" ]] && (( manual > now )) && (( manual <= until )); then
     printf '   • manual extension — until %s, then the usual calculation\n' \
       "$(date -d "@$manual" '+%H:%M %d.%m')"

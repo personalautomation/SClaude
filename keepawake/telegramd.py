@@ -58,6 +58,20 @@ BACKOFF_MAX = 60
 log = logging.getLogger("keepawake")
 
 
+
+def profile_halves():
+    # Which half of an i18n pair goes into each language slot of the profile
+    # of the bot — its description and its commands. Telegram picks the slot
+    # by the language of the app, which the bot cannot see past; the bot has
+    # one reader, though. A language pinned in the settings therefore fills both
+    # slots, or a Russian app kept showing Russian to a person who had chosen
+    # English. None is the default slot, every language without its own.
+    halves = {"ru": 0, None: 1}
+    if read().get("lang_pinned"):
+        halves = dict.fromkeys(halves, 0 if current() == "ru" else 1)
+    return halves
+
+
 class Bot(object):
     def __init__(self, token, chat_id):
         self.token = token
@@ -198,13 +212,16 @@ class Bot(object):
         # keyboard has been hidden. The button in the input box that Telegram
         # creates for them is removed by menu_button. Not critical — they must
         # not be a reason to die.
-        try:
-            self.call("setMyCommands", commands=[
-                {"command": name, "description": t(key)}
-                for name, (_method, key) in COMMANDS.items()
-                if name != "start"])
-        except Exception as exc:
-            log.warning("setMyCommands: %s", exc)
+        # Per language, like the profile texts: written once in the language of
+        # the start, they listed Russian under an English bot.
+        for code, half in profile_halves().items():
+            try:
+                self.call("setMyCommands", language_code=code, commands=[
+                    {"command": name, "description": STRINGS[key][half]}
+                    for name, (_method, key) in COMMANDS.items()
+                    if name != "start"])
+            except Exception as exc:
+                log.warning("setMyCommands: %s", exc)
 
     def describe(self):
         # The profile's texts, from i18n in both languages: Russian for a
@@ -214,11 +231,15 @@ class Bot(object):
         # Only when they changed: four calls at every start hold up the first
         # poll when the network is slow.
         # By bot too: a new token is a bot with an empty profile.
-        texts = repr([self.token.split(":")[0], STRINGS["bot.description"], STRINGS["bot.short"]])
-        if read().get("described") == texts:
+        data = read()
+        pinned = current() if data.get("lang_pinned") else None
+        halves = profile_halves()
+        texts = repr([self.token.split(":")[0], pinned,
+                      STRINGS["bot.description"], STRINGS["bot.short"]])
+        if data.get("described") == texts:
             return
         done = True
-        for code, half in (("ru", 0), (None, 1)):
+        for code, half in halves.items():
             for method, field, key in (
                     ("setMyDescription", "description", "bot.description"),
                     ("setMyShortDescription", "short_description", "bot.short")):
@@ -2672,6 +2693,9 @@ class Handler(object):
             # language — we replace it, otherwise its caption would diverge from
             # the rest of the interface.
             relabel_anchor(self.bot)
+            # And the profile texts and commands, which follow a pinned language.
+            self.bot.commands()
+            self.bot.describe()
             self.result(message_id, lang_text())
         elif data_raw == "svc_docs":
             self.bot.edit(message_id, t("docs.menu"), docs_keyboard())

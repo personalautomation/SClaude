@@ -125,11 +125,11 @@ cmd_abandon() {
   state="$wt/.sclaude/local/feature/state.json"
 
   # Everything needed from the state is read now, in one go. state.json lies
-  # inside the worktree and disappears with it on the very first agreement —
-  # while the questions about the PR and the issue come after. While they were
-  # read in place, they silently came back empty, and an abandoned feature left
-  # an open PR and an open issue behind it: precisely the traces this command is
-  # written for.
+  # inside the worktree and goes with it, and the work below removes the tree
+  # before it closes the PR and the issue. While they were read in place —
+  # when the tree went at its own answer, before the other questions — they
+  # silently came back empty, and an abandoned feature left an open PR and an
+  # open issue behind it: precisely the traces this command is written for.
   local branch issue pr repo
   branch="$(state_get "$state" branch || true)"
   issue="$(state_get "$state" issue || true)"

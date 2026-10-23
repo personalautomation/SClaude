@@ -10,6 +10,7 @@
 # checked here with a hammer: a thousand reads against two writing processes.
 #
 # Run it with: python3 tests/keepawake.py
+import calendar
 import datetime
 import glob
 import json
@@ -44,9 +45,18 @@ def check_true(name, got):
         failures.append((name, "true", got))
 
 
+# The real state file must not be touched: it governs a live machine's sleep,
+# and holds what the bot keeps — phone access asked for, the messages it
+# tracks. Every check runs on a state of its own, those outside a sandbox
+# block too: a part of this file ran on the real one, and a check that set
+# phone_on_at to 0 there had the bot close phone access at its next start.
+DEFAULT_STATE = tempfile.mkdtemp(prefix="keepawake-test-default-")
+os.environ["KEEPAWAKE_STATE"] = os.path.join(DEFAULT_STATE, "state.json")
+os.environ["KEEPAWAKE_LOCK"] = os.path.join(DEFAULT_STATE, ".lock")
+
+
 class sandbox(object):
-    # The real state file must not be touched: it governs a live machine's
-    # sleep.
+    # A fresh state for a block of checks; the file's own default after it.
     def __enter__(self):
         self.dir = tempfile.mkdtemp(prefix="keepawake-test-")
         self.path = os.path.join(self.dir, "state.json")
@@ -55,8 +65,8 @@ class sandbox(object):
         return self
 
     def __exit__(self, *exc):
-        os.environ.pop("KEEPAWAKE_STATE", None)
-        os.environ.pop("KEEPAWAKE_LOCK", None)
+        os.environ["KEEPAWAKE_STATE"] = os.path.join(DEFAULT_STATE, "state.json")
+        os.environ["KEEPAWAKE_LOCK"] = os.path.join(DEFAULT_STATE, ".lock")
         return False
 
 
@@ -658,8 +668,14 @@ if os.path.isdir("/mnt/c/Windows"):
         os.environ["PATH"] = "/usr/bin:/bin"
         check_true("the Windows user's name is found without cmd.exe in PATH",
                    bool(state.win_user()))
-        check_true("the state's path is assembled without cmd.exe",
-                   state.state_path().startswith("/mnt/c/Users/"))
+        # The path the bot would use, computed only: the test's own state
+        # stands in for it everywhere else.
+        own_state = os.environ.pop("KEEPAWAKE_STATE", None)
+        try:
+            check_true("the state's path is assembled without cmd.exe",
+                       state.state_path().startswith("/mnt/c/Users/"))
+        finally:
+            os.environ["KEEPAWAKE_STATE"] = own_state
     finally:
         os.environ["PATH"] = saved_path
 
@@ -895,6 +911,11 @@ with sandbox() as box:
     # Public DNS is never asked: a funnel's name counts as published unless
     # a check says otherwise.
     telegramd.name_published = lambda host: True
+    # The probe answers at once here; the loop runs it in a thread.
+    telegramd.PROBE_ASYNC = False
+    # Nor is the machine's funnel ever looked at for the after-boot switch:
+    # it would be turned off for real. The check that tests it says so.
+    telegramd.BOOT_LOOKED[0] = True
 
     bot = FakeBot()
     handler = telegramd.Handler(bot)
@@ -1350,6 +1371,17 @@ with sandbox() as box:
         check("the worktree separately", feats[0][2], "/home/u/myapp-34")
         check("the table's header did not get into the features",
               any(f[0] == "FEATURE" for f in feats), False)
+        # A tree being removed (stop_dev's mark) is no longer offered: its
+        # card would lead into a directory git is deleting.
+        closing_wt = tempfile.mkdtemp()
+        os.makedirs(os.path.join(closing_wt, ".sclaude", "local", "feature"))
+        open(os.path.join(closing_wt, ".sclaude", "local", "feature",
+                          telegramd.CLOSING_MARK), "w").close()
+        telegramd.run = lambda cmd, timeout=25: sample.replace("/home/u/myapp-pw", closing_wt)
+        check("a feature being removed is left out",
+              [f[0] for f in telegramd.features_of("/tmp/whatever")[0]], ["34-sample-site"])
+        shutil.rmtree(closing_wt)
+        telegramd.run = lambda cmd, timeout=25: sample
 
         labels = [b["text"] for row in telegramd.features_keyboard("myapp")
                   for b in row]
@@ -1527,6 +1559,14 @@ try:
         check("/phone turns access on and says it is waiting", bot_p.sent[-1][0],
               tg_menu.t("svc.phonewait"))
         check_true("and remembers the message to change", bool(tg_menu.read().get("phone_wait")))
+        # A second /phone while the address is not yet published waits
+        # with the first rather than starting over.
+        tg_menu.gate_origin = lambda c=None, ready=True, look=False: (
+            "" if ready else "https://box.tail1.ts.net:8443")
+        bot_p = FakeBot()
+        tg_menu.Handler(bot_p).cmd_phone()
+        check("/phone while waiting says so", bot_p.sent[-1][0], tg_menu.t("svc.phonestill"))
+        tg_menu.gate_origin = lambda *a: ""
         tg_menu.phone_on = lambda: (False, "funnel not allowed")
         bot_p = FakeBot()
         tg_menu.Handler(bot_p).cmd_phone()
@@ -1676,7 +1716,41 @@ if os.path.exists(cfg):
                 tg_menu.PUBLISHED.update(host="", ok=False)
                 check("waited too long: the app is offered anyway", tg_menu.gate_origin(),
                       "https://box.tail1.ts.net:8443")
+                # Turned on from the terminal: no wait in the chat, and the
+                # count runs from when access was turned on.
+                with tg_menu.locked() as st:
+                    st["phone_wait"] = None
+                    st["phone_on_at"] = int(time.time()) - 86400
+                tg_menu.PUBLISHED.update(host="", ok=False)
+                check("on from the terminal: an old turn-on does not count as waiting",
+                      tg_menu.gate_origin(None, True, True), "")
+                tg_menu.PUBLISHED.update(host="box.tail1.ts.net", ok=False, at=0,
+                                         since=time.time() - 3600)
+                check("on from the terminal, waited too long: offered too",
+                      tg_menu.gate_origin(None, True, True), "https://box.tail1.ts.net:8443")
+                with tg_menu.locked() as st:
+                    st["phone_wait"] = {"msg": 4322, "since": int(time.time()) - 3600}
+                    st.pop("published", None)
+                # A button or a menu never waits on the network: it takes the
+                # loop's last answer.
+                asked = []
+                tg_menu.name_published = lambda host: asked.append(host) or False
+                tg_menu.PUBLISHED.update(host="box.tail1.ts.net", ok=False, at=0)
+                with tg_menu.locked() as st:
+                    st["published"] = {"host": "box.tail1.ts.net", "ok": False}
+                check("a menu asks no DNS while it waits", (tg_menu.gate_origin(), asked), ("", []))
+                tg_menu.gate_origin(None, True, True)
+                check("the loop does", asked, ["box.tail1.ts.net"])
+                # And leaves its answer where another process — the gate
+                # serving the menu page — reads it, over that one's own.
+                with tg_menu.locked() as st:
+                    st["published"] = {"host": "box.tail1.ts.net", "ok": True}
+                check("another process takes the loop's answer", tg_menu.gate_origin(),
+                      "https://box.tail1.ts.net:8443")
+                check("and asks nothing itself", asked, ["box.tail1.ts.net"])
             finally:
+                with tg_menu.locked() as st:
+                    st.pop("published", None)
                 tg_menu.name_published = saved_pub
                 tg_menu.PUBLISHED.update(host="", ok=False)
                 tg_menu.PHONE_SEEN[0] = None
@@ -1692,14 +1766,26 @@ if os.path.exists(cfg):
                     ran.append(cmd), json.dumps(serve) if "serve status" in cmd else "")[1]
                 with tg_menu.locked() as st:
                     st["phone_on_at"] = int(time.time()) - 3600
+                tg_menu.BOOT_LOOKED[0] = False
                 tg_menu.phone_off_after_boot()
                 check_true("on from before the boot: turned off", tg_menu.FUNNEL_OFF in ran)
                 del ran[:]
                 with tg_menu.locked() as st:
                     st["phone_on_at"] = int(time.time())
+                tg_menu.BOOT_LOOKED[0] = False
                 tg_menu.phone_off_after_boot()
                 check("asked for since the boot: left on", tg_menu.FUNNEL_OFF in ran, False)
+                # Tailscale not answering yet: nothing decided, asked again later.
+                tg_menu.BOOT_LOOKED[0] = False
+                tg_menu.run = lambda cmd, timeout=25: (ran.append(cmd), "")[1]
+                with tg_menu.locked() as st:
+                    st["phone_on_at"] = 0
+                del ran[:]
+                tg_menu.phone_off_after_boot()
+                check("tailscale silent: no decision yet",
+                      (tg_menu.FUNNEL_OFF in ran, tg_menu.BOOT_LOOKED[0]), (False, False))
             finally:
+                tg_menu.BOOT_LOOKED[0] = True
                 tg_menu.boot_time = saved_boot
                 tg_menu.run = funnel_on
             # The funnel on :8443 but pointing elsewhere is not the gate.
@@ -2820,6 +2906,22 @@ with sandbox() as box:
         check("and answers the main chat's",
               reply_in(os.path.join(repo, ".git", "sclaude")), "y")
         os.unlink(os.path.join(repo, ".git", "sclaude", "answer.json"))
+        # Shown in the repository's new-feature topic, "Feature name:" is
+        # answered there: that topic has no feature of its own yet.
+        with tg_topic.locked() as st:
+            # Shown afresh there: the text above answered it in the main chat.
+            st["ask_shown"]["shop"]["thread"] = 977
+            st["ask_shown"]["shop"].pop("answered", None)
+        h.message({"text": "ok", "message_id": 73})
+        check("main-chat text leaves the question shown in the new-feature topic",
+              reply_in(os.path.join(repo, ".git", "sclaude")), None)
+        h.message({"text": "login-fix", "message_id": 72, "is_topic_message": True,
+                   "message_thread_id": 977})
+        check("a name typed in the new-feature topic answers its question",
+              reply_in(os.path.join(repo, ".git", "sclaude")), "login-fix")
+        os.unlink(os.path.join(repo, ".git", "sclaude", "answer.json"))
+        with tg_topic.locked() as st:
+            st["ask_shown"]["shop"]["thread"] = 0
 
         # A press answers the channel its message shows.
         rec_a["shown"]["msg"] = 801
@@ -2998,11 +3100,23 @@ with sandbox() as box:
             check_true("starting a new feature makes its topic", new_thread in bot_n.topics)
             ch_repo = tg_topic.ask_dir(repo)
             os.makedirs(ch_repo, exist_ok=True)
+            # Another orchestrator's question in the repository's channel is
+            # the main chat's, the topic waiting or not.
+            saved_new = tg_topic.asks_for_new
+            tg_topic.asks_for_new = lambda pid: False
+            lay_in(ch_repo, "qo", prompt="Which feature? ", form="text")
+            tg_topic.check_asks(bot_n)
+            check("another orchestrator's question stays in the main chat",
+                  bot_n.threads[-1], 0)
+            unlay(ch_repo)
+            tg_topic.check_asks(bot_n)
+            tg_topic.asks_for_new = lambda pid: True
             lay_in(ch_repo, "qn", prompt="Name? ", form="text")
             tg_topic.check_asks(bot_n)
             check("its unnamed questions go to that topic", bot_n.threads[-1], new_thread)
             unlay(ch_repo)
             tg_topic.check_asks(bot_n)
+            tg_topic.asks_for_new = saved_new
             feature_tree(repo, "n")
             feature_channel(repo, "n")
             check("the named feature takes the topic over",
@@ -3959,6 +4073,68 @@ finally:
 from keepawake.i18n import STRINGS as _PROFILE
 check("the description fits 512", all(len(x) <= 512 for x in _PROFILE["bot.description"]), True)
 check("the short description fits 120", all(len(x) <= 120 for x in _PROFILE["bot.short"]), True)
+
+# The loop's probe runs off the loop: the first look starts it and answers
+# "not yet", a later one takes its answer.
+telegramd.PROBE_ASYNC = True
+telegramd.PROBE.clear()
+telegramd.PUBLISHED.update(host="", ok=False, at=0)
+_probed = threading.Event()
+telegramd.name_published = lambda host: _probed.set() or True
+check("the first look does not wait on the probe", telegramd.published("h.ts.net", look=True), False)
+_probed.wait(5)
+for _ in range(50):
+    if telegramd.PROBE.get("h.ts.net") is not None:
+        break
+    time.sleep(0.05)
+check("a later look takes its answer", telegramd.published("h.ts.net", look=True), True)
+telegramd.PROBE_ASYNC = False
+telegramd.PUBLISHED.update(host="", ok=False, at=0)
+with telegramd.locked() as st:
+    st.pop("published", None)
+
+# sclaude-notify --in finds the feature's topic in the bot's own record.
+with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "bin", "sclaude-notify")) as fh:
+    _notify = fh.read()
+check("sclaude-notify reads the bot's feature record",
+      ("/.sclaude/local/feature/" + telegramd.FEATURE_RECORD in _notify, '.get("thread")' in _notify),
+      (True, True))
+check("and knows a lost topic by the bot's own words",
+      [w for w in telegramd.TOPIC_GONE if 'b"%s"' % w not in _notify], [])
+
+# An answer is given only to the question its caller checked: the one read
+# again here can already be the next.
+_ch = tempfile.mkdtemp()
+with open(os.path.join(_ch, "ask.json"), "w") as fh:
+    json.dump({"prompt": "Remove all of it? ", "form": "yn", "id": "q-next",
+               "pid": os.getpid()}, fh)
+check("an answer meant for another question is refused",
+      telegramd.answer_ask(_ch, "n", "q-ship"), False)
+check("and none is written", os.path.exists(os.path.join(_ch, "answer.json")), False)
+check("the checked one is answered", telegramd.answer_ask(_ch, "n", "q-next"), True)
+shutil.rmtree(_ch)
+
+# The card's cache line: the session's last request plus the TTL it wrote,
+# read from its transcript as the status line reads it.
+_projects = tempfile.mkdtemp()
+_saved_projects = telegramd.CLAUDE_PROJECTS
+telegramd.CLAUDE_PROJECTS = _projects
+try:
+    os.makedirs(os.path.join(_projects, "-home-u-app"))
+    with open(os.path.join(_projects, "-home-u-app", "s1.jsonl"), "w") as fh:
+        fh.write(json.dumps({"type": "assistant", "timestamp": "2026-10-23T10:00:00.000Z",
+                             "message": {"model": "claude-opus-5-5", "usage": {
+                                 "input_tokens": 5, "cache_creation": {
+                                     "ephemeral_1h_input_tokens": 100}}}}) + "\n")
+    at = calendar.timegm((2026, 10, 23, 10, 0, 0, 0, 0, 0))
+    check("an hour's cache ten minutes on has fifty left",
+          telegramd.cache_left("s1", now=at + 600), 3000)
+    check("and none once the hour is out", telegramd.cache_left("s1", now=at + 4000), 0)
+    check("a session with no transcript says nothing", telegramd.cache_left("nope"), None)
+finally:
+    telegramd.CLAUDE_PROJECTS = _saved_projects
+    shutil.rmtree(_projects)
 
 # ------------------------------------------------------------- the outcome
 

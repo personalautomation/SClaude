@@ -10,5 +10,8 @@ After=sclaude-gate.socket
 # the socket brings it back on the next connection.
 ExecStart=%h/.local/bin/sclaude-proxy --gate
 Restart=on-failure
+# The menu page starts sessions (▶️ Continue, ✨ new feature) from inside this
+# process; the gate exiting when idle must not take them with it.
+KillMode=process
 
 # No [Install] section: what is enabled is the socket.

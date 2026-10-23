@@ -176,8 +176,23 @@ note to the feature's topic in the order they came, each a message of its own an
 without a sound, and deletes it once sent (`keepawake/notices.py`); a message is
 never edited, so the topic keeps the history. A note the network kept back waits
 for the next turn, one older than a day is dropped, and the notes go with the
-channel when the feature ends. The module is separate from `telegramd.py`, which
+channel when the feature ends. Notes go to the main chat only when the chat has
+no topics; with a topic not made yet, or the feature going, they wait
+(`note_topic`). A send that failed because the topic was deleted by hand makes
+the topic again, and what waits goes there. The module is separate from `telegramd.py`, which
 passes it the channels and the way to a topic.
+
+The topic also follows what sclaude is doing. Every line `say`, `info`, `warn`
+and `alarm` print while sclaude works on a feature is appended to the channel's
+`notes/feed.tsv` (`ask_feed`, no process of its own per line); each turn the bot
+takes the file by renaming it and sends what gathered as one message, shorter
+than the terminal: headlines, warnings and alarms, not the indented detail under
+them, nor the lines an open question already carries. It is silent unless a
+warning or an alarm is in it and the person is not at the terminal that printed
+it — the same test of the terminal's last keystroke that keeps questions silent
+at the laptop. The feed goes only to the topic: with none yet the file waits,
+lines a failed send took go back to it for an hour (`FEED_KEEP`), and a long
+batch is cut by whole lines, never through an HTML entity.
 
 **The menu, split by where it is.** In a feature's topic there is nothing to
 choose: the topic is the feature, so the menu there is the feature's card —
@@ -316,7 +331,38 @@ message into "phone access is on" when it is ready; past fifteen minutes it
 offers the app anyway and logs why. The loop (`check_phone`) notices every
 change, made from the chat, the app (another process) or the terminal, and
 redraws what offers the app: the Menu button, the commands, the menu screens
-and the cards in the topics.
+and the cards in the topics. The probe itself — DNS, then a TLS request through
+the relay, up to some fifteen seconds — runs in a thread (`PROBE`), so presses
+are not held behind it; the loop leaves its answer in the state
+(`published`), where the gate, another process, reads it rather than keep a
+first answer of its own for life. The fifteen minutes count from the wait the
+chat showed, or, for access turned on from the terminal, from the loop's first
+look that found the name unreachable.
+
+**The page stands on a feature.** Opened from a topic (`?f=`), the app's
+Sclaude, Chrome and Code-server are that feature's (`home_feature`); opened by
+the Menu button, which knows no topic, it stands on the feature sclaude worked
+on last (`guess_home`). The feature's actions are sclaude's own question
+(`sclaude actions`): the page shows it with its buttons and answers it through
+the channel (`answer_page`), naming the question it answers so an answer cannot
+land on the next one; options are grouped by where they lead (`ACT_*`). A
+feature at work — a session in any state but idle, or an orchestrator waiting on
+a question (`feature_busy`) — gets no second orchestrator from Continue or the
+actions, in the chat or on the page.
+
+**Cards follow their session.** A topic's card is a message drawn once, so the
+loop looks once a minute (`check_card_states`) at each card's session and
+redraws the card when its state changed from the one it shows (`card_state` in
+the record, written wherever a card is drawn). One `claude agents` answer serves
+the whole pass; when Claude Code does not answer, nothing is redrawn. The
+minutes left of the session's prompt cache (`cache_left`, the status line's
+reckoning) are on the page only, drawn at each press.
+
+**A feature going is gone for the menus.** `stop_dev` marks the worktree
+`closing` before git spends a minute deleting it; the menus leave such a
+feature out (`CLOSING_MARK`). A question still waiting about a feature that
+another process has ended sees the end mark (`ask_ended_mark`), withdraws and
+ends its sclaude: an open question would keep the bot from deleting the topic.
 
 **Off unless asked for.** Tailscale keeps a funnel across reboots, and a door to
 the internet nobody remembers opening is one to close: at start the bot turns

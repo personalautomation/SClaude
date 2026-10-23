@@ -446,6 +446,10 @@ def check_gate(proxy_port, root):
               ("200 OK" in status, '"/__code/"' in body), (True, True))
         status, _, _ = request(port, host, "/__sclaude/tg?p=%2Fsomewhere")
         check("gate: and no other path of its own", status, "HTTP/1.1 404 Not Found")
+        status, _, body = request(port, host,
+                                  "/__sclaude/tg?p=%2F__code%2F%3C%2Fscript%3E%3Cscript%3Ex%3C%2Fscript%3E")
+        check("gate: a code-server path that could close the script is refused",
+              (status, "<script>x" in body), ("HTTP/1.1 404 Not Found", False))
 
         # The menu page: open, its calls checked one by one by initData.
         status, head, body = raw_request(port, "GET /__sclaude/menu HTTP/1.1\r\nHost: %s\r\n\r\n"

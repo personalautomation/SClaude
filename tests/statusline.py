@@ -65,6 +65,10 @@ check("sidechain skipped",
 check("expired, dollars", piece(transcript(entry(4000, written=500))), "off ~$0.80")
 check("expired, percent", piece(transcript(entry(4000, written=500)), rate=5.0), "off ~4%")
 check("no transcript", sl.cache_piece({}, None), None)
+# The write far back, past the first tail read: the tail grows to it.
+check("1h write past the first tail",
+      piece(transcript(entry(700, written=500),
+                       *[entry(600, tokens=n) for n in range(600)])), "50m")
 
 
 def tick(sid, cost, pct, window=2_000_000_000):

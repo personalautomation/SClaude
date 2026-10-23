@@ -127,14 +127,33 @@ def last_request(path):
     """
     if not path:
         return None
-    try:
-        with open(path, "rb") as f:
-            f.seek(0, os.SEEK_END)
-            size = f.tell()
-            f.seek(max(0, size - TRANSCRIPT_TAIL))
-            lines = f.read().splitlines()
-    except OSError:
-        return None
+    # From the end, in a tail that grows only while the answer is not in it:
+    # the status line draws on every turn, and the last request is usually in
+    # the last few lines.
+    tail = TRANSCRIPT_TAIL >> 4
+    while True:
+        try:
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - tail))
+                lines = f.read().splitlines()
+        except OSError:
+            return None
+        whole = tail >= size or tail >= TRANSCRIPT_TAIL
+        if not whole:
+            lines = lines[1:]     # the first may be cut mid-line
+        found = scan_requests(lines)
+        if found is not None and (found[2] is not None or whole):
+            return found[:2] + (found[2] or TTL_5M,)
+        if whole:
+            return None
+        tail <<= 2
+
+
+def scan_requests(lines):
+    """(epoch, usage, ttl or None) from transcript lines, newest first; None
+    when no request is among them. ttl None: no cache write among them."""
     found = None
     for raw in reversed(lines):
         if b'"assistant"' not in raw or b'"usage"' not in raw:
@@ -158,7 +177,7 @@ def last_request(path):
             return found + (TTL_1H,)
         if written.get("ephemeral_5m_input_tokens"):
             return found + (TTL_5M,)
-    return found + (TTL_5M,) if found else None
+    return found + (None,) if found else None
 
 
 def prefix_tokens(usage):
@@ -208,11 +227,13 @@ def remember_spend(d):
         return rate
     # resets_at is rounded to the minute: a second of jitter is not a new window.
     window = int(window) // 60
-    if s.get("window") != window:
+    fresh_window = s.get("window") != window
+    if fresh_window:
         s.update(window=window, start_pct=pct, spend=0.0)
     sessions = s.get("sessions") or {}
     # A session seen for the first time spent its money before we watched:
     # when within the window is unknown, so it counts from here on.
+    known = sid in sessions
     delta = cost - sessions.get(sid, cost)
     if delta > 0:
         s["spend"] = s.get("spend", 0.0) + delta
@@ -220,6 +241,8 @@ def remember_spend(d):
     # Sessions gone for a day are not coming back.
     stamp = time.time()
     seen = s.get("seen") or {}
+    # Kept alive an hour at a time: it only has to outlast a day's absence.
+    stale = stamp - seen.get(sid, 0) > 3600
     seen[sid] = stamp
     for old in [k for k, t in seen.items() if stamp - t > 86400]:
         seen.pop(old, None)
@@ -228,6 +251,10 @@ def remember_spend(d):
     moved = pct - s.get("start_pct", pct)
     if s["spend"] >= RATE_MIN_SPEND and moved >= RATE_MIN_PCT:
         rate = s["rate"] = moved / s["spend"]
+    # Written only when the spend or the window moved: every session draws
+    # its line on every turn, and they share the file.
+    if delta <= 0 and known and not fresh_window and not stale:
+        return rate
     tmp = "%s.%d" % (SPEND_FILE, os.getpid())
     try:
         with open(tmp, "w") as f:

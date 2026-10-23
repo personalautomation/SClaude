@@ -862,7 +862,7 @@ regression_run_body() {
 # ask whether Telegram is set up.
 regression_notify_start() {
   local slug="$1" stage="$2" base="$3"
-  "$INSTRUMENTS/bin/sclaude-notify" --quiet "$slug: regression started on $stage${base:+ ($base)}" 2>/dev/null || true
+  notify_feature "$slug" --quiet "$slug: regression started on $stage${base:+ ($base)}" 2>/dev/null || true
 }
 
 regression_notify_done() {
@@ -884,9 +884,9 @@ regression_notify_done() {
     printf '%s/%s parts, %s\n' "$passed" "$count" "$(regression_duration "$elapsed")"
     [[ -n "$tail" ]] && printf '\n%s\n' "$tail"
   } | if [[ -n "$failed" ]]; then
-        "$INSTRUMENTS/bin/sclaude-notify" 2>/dev/null || true
+        notify_feature "$slug" 2>/dev/null || true
       else
-        "$INSTRUMENTS/bin/sclaude-notify" --quiet 2>/dev/null || true
+        notify_feature "$slug" --quiet 2>/dev/null || true
       fi
 }
 
@@ -1108,7 +1108,7 @@ regression_gate() {
       failed_part="$(state_get "$state" "regression.$stage.failed_at" 2>/dev/null || true)"
       [[ -n "$failed_part" && "$failed_part" != "null" ]] || failed_part="a part"
       info "  Failed on: $failed_part. The log is .sclaude/local/feature/regression.log"
-      "$INSTRUMENTS/bin/sclaude-notify" "$slug: regression still red on $stage
+      notify_feature "$slug" "$slug: regression still red on $stage
 $attempts fixing session(s) did not help — it needs you.
 Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
 
@@ -1209,7 +1209,7 @@ Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
       echo ""
       info "  Nothing was changed, and the attempt was not counted."
       info "  The note is .sclaude/local/feature/regression.blocked; carry on with: $SELF $slug"
-      "$INSTRUMENTS/bin/sclaude-notify" "$slug: $stage regression blocked from outside
+      notify_feature "$slug" "$slug: $stage regression blocked from outside
 The fixing session found the cause outside the branch and changed nothing.
 Note: .sclaude/local/feature/regression.blocked" 2>/dev/null || true
       return 1

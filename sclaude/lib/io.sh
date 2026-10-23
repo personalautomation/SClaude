@@ -270,6 +270,21 @@ ask_log() {
     >> "$dir/answers.log" 2>/dev/null || true
 }
 
+# Where to see that the feature this process asks about was ended by another: its
+# channel holds the end mark, which only the clean-up writes. A question left
+# waiting there — the action list opened from the phone, and the feature then
+# dropped in the terminal — has nobody to answer it any more, and its open
+# question keeps the bot from deleting the topic. The clean-up of this process
+# itself is not it: ask_feature_end moved its questions to the repository.
+#
+# Prints the mark's path, nothing when no feature is bound: a question looks
+# it up once and tests the file on each turn of its wait.
+ask_ended_mark() {
+  [[ -n "${ASK_SLUG:-}" && "$ASK_SLUG" != "${ASK_ENDED:-}" ]] || return 0
+  local dir; dir="$(ask_channel)"
+  [[ -n "$dir" ]] && printf '%s\n' "$dir/ended"
+}
+
 ask_retract() {
   local dir; dir="$(ask_channel)"
   [[ -n "$dir" ]] || return 0
@@ -408,6 +423,45 @@ ask_notice() {
     && mv -f "$notes/.new.$$" "$notes/$(date +%s)-$$-$RANDOM.txt" 2>/dev/null \
     && printf '%s' "$sum" > "$notes/.last"
   return 0
+}
+
+# What sclaude prints about a feature, for its topic: every line said, warned
+# or noted while bound to a feature (ASK_SLUG) is appended to
+# notes/feed.tsv, and the bot sends what gathered
+# as one shorter message a turn (keepawake/notices.py, FEED_FILE). One line
+# per call — the time, the level, the printing process, the text — written
+# without a process of its own: sclaude prints hundreds of lines.
+#
+#   ask_feed <level> <text>      level: say, info, warn, alarm
+ask_feed() {
+  local level="$1" text="$2" dir
+  # Unbound, or bound to a feature this process has ended: no forks for it.
+  [[ -n "$text" && -n "${ASK_SLUG:-}" && "$ASK_SLUG" != "${ASK_ENDED:-}" ]] || return 0
+  # The path as ask_channel makes it, written out: a subshell per printed
+  # line is what this function exists to avoid.
+  [[ -n "${ASK_DIR:-}" && "$ASK_SLUG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 0
+  dir="$ASK_DIR/ask/$ASK_SLUG"
+  # A feature ended elsewhere: its channel is the bot's to delete, and lines
+  # written into it now would bring it back.
+  [[ -e "$dir/ended" ]] && return 0
+  [[ -d "$dir/notes" ]] || mkdir -p "$dir/notes" 2>/dev/null || return 0
+  text="${text//$'\t'/ }"
+  printf '%s\t%s\t%s\t%s\n' "${EPOCHSECONDS:-0}" "$level" "$$" "${text//$'\n'/ ⏎ }" \
+    >> "$dir/notes/feed.tsv" 2>/dev/null
+  return 0
+}
+
+# A line to the phone about a feature, in the feature's topic
+# (sclaude-notify --in its worktree); the main chat when it has none.
+# The worktree from list_features rather than feature_worktree, which also
+# attaches the terminal.
+#
+#   notify_feature <slug> [--quiet] <text>      or the text on stdin
+notify_feature() {
+  local slug="$1" wt=""
+  shift
+  wt="$(list_features 2>/dev/null | awk -F'\t' -v want="$slug" '$1 == want { print $2; exit }')"
+  "${INSTRUMENTS:-}/bin/sclaude-notify" ${wt:+--in "$wt"} "$@"
 }
 
 # The id of the question standing in the channel right now. Empty when there is

@@ -177,6 +177,19 @@ with tempfile.TemporaryDirectory() as wt:
     check("brief-is-the-newest-row", lines[1],
           " · ".join("%s %s" % (m, n) for m, n in zip(review_report.BRIEF_ROWS, row2)))
     check_true = lambda name, ok: check(name, bool(ok), True)
+    # Threads that could not be read give no status: its zeros would tell
+    # the phone a review with open findings is clean.
+    os.remove(brief_file)
+    saved_threads = review_report.threads
+    review_report.threads = lambda cwd, pr, repo: None
+    os.environ[review_report.BRIEF_ENV] = brief_file
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            review_report.main()
+    finally:
+        del os.environ[review_report.BRIEF_ENV]
+        review_report.threads = saved_threads
+    check("brief-not-from-unread-threads", os.path.exists(brief_file), False)
     zeros = dict.fromkeys(review_report.BRIEF_ROWS, 0)
     check("brief-skips-a-session-not-run-yet",
           review_report.newest([("1", dict(zeros, runs=2)), ("2", zeros)])[0], "1")

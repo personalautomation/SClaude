@@ -204,6 +204,10 @@ STRINGS = {
                           "publish the address on the internet — usually a few minutes. "
                           "This message changes when it is ready; until then the app "
                           "will not open."),
+    "svc.phonestill":    ("⏳ Доступ уже включается: жду, пока Tailscale опубликует адрес. "
+                          "Сообщение выше изменится, когда всё будет готово.",
+                          "⏳ Phone access is already turning on: waiting for Tailscale to "
+                          "publish the address. The message above changes when it is ready."),
     "svc.phoneready":    ("📲 <b>Доступ с телефона включён.</b>\n"
                           "• <b>☰ Menu</b> у поля ввода открывает меню-приложение;\n"
                           "• <b>📲 Открыть в приложении</b> на карточке фичи открывает его "
@@ -280,12 +284,14 @@ STRINGS = {
     # On the menu page, which has no laptop link: only the button brings it up.
     "code.stoppedpage":  ("⏹ погашен — ▶️ поднимает его", "⏹ down — ▶️ brings it up"),
     # The same on the menu page, where the gate's button opens it.
-    "code.titlepage":    ("<b>code-server</b>\n%(state)s\n%(folder)s\n\n"
-                          "<i>Гаснет сам после часа простоя. Пароль — в "
-                          "~/.config/code-server/config.yaml</i>",
-                          "<b>code-server</b>\n%(state)s\n%(folder)s\n\n"
-                          "<i>Stops by itself after an hour idle. The password "
-                          "is in ~/.config/code-server/config.yaml</i>"),
+    "code.titlepage":    ("<b>code-server</b>\n%(state)s\n%(folder)s\n%(password)s\n\n"
+                          "<i>Гаснет сам после часа простоя.</i>",
+                          "<b>code-server</b>\n%(state)s\n%(folder)s\n%(password)s\n\n"
+                          "<i>Stops by itself after an hour idle.</i>"),
+    # Only on the menu page: a page is not kept in the chat's history.
+    "code.password":     ("Пароль: <code>%(pw)s</code>", "Password: <code>%(pw)s</code>"),
+    "code.nopassword":   ("Пароль — в ~/.config/code-server/config.yaml",
+                          "The password is in ~/.config/code-server/config.yaml"),
     "code.folder":       ("Открыт: <b>%(name)s</b>", "Open in: <b>%(name)s</b>"),
     "code.reopen":       ("📂 Открыть %(name)s", "📂 Open %(name)s"),
     "code.restart":      ("🔄 Перезапуск", "🔄 Restart"),
@@ -342,6 +348,22 @@ STRINGS = {
     # The feature's card in its topic: the dev server and code-server lines.
     "card.dev":          ("\n\n🖥 Dev-сервер: %(state)s\n%(link)s · <code>%(local)s</code>",
                           "\n\n🖥 Dev server: %(state)s\n%(link)s · <code>%(local)s</code>"),
+    "chrome.featpage":   ("<b>chrome-debug</b>\n%(state)s\n\n🖥 <b>%(slug)s</b>: %(dev)s\n\n"
+                          "<i>Открыть фичу в Chrome на ноутбуке или здесь; остановленная "
+                          "поднимется сама. Запуск и остановка dev-сервера — в её карточке "
+                          "(Sclaude).</i>",
+                          "<b>chrome-debug</b>\n%(state)s\n\n🖥 <b>%(slug)s</b>: %(dev)s\n\n"
+                          "<i>Open the feature in the laptop's Chrome or here; a stopped one "
+                          "starts by itself. Starting and stopping its dev server is on its "
+                          "card (Sclaude).</i>"),
+    "chrome.featnodev":  ("dev-сервера ещё нет", "no dev server yet"),
+    "menu.here":         ("\n📍 %(slug)s", "\n📍 %(slug)s"),
+    "menu.otherhome":    ("📍 Другая фича", "📍 Another feature"),
+    "menu.choosehome":   ("📍 Выбрать фичу", "📍 Choose a feature"),
+    "menu.pickhome":     ("На какой фиче стоять? Sclaude, Chrome и Code-server будут о ней.",
+                          "Which feature should the menu stand on? Sclaude, Chrome and "
+                          "Code-server will be about it."),
+    "menu.machine":      ("💻 Весь ноутбук", "💻 The whole machine"),
     "card.devpage":      ("\n\n🖥 Dev-сервер: %(state)s", "\n\n🖥 Dev server: %(state)s"),
     "card.codepage":     ("\n💻 code-server запущен.", "\n💻 code-server is running."),
     "card.phonelink":    ("с телефона", "from the phone"),
@@ -371,6 +393,39 @@ STRINGS = {
                           "✨ A new feature in <b>%(repo)s</b> — its questions come here."),
     "feat.gone":         ("Фича <b>%(slug)s</b> больше не в работе.",
                           "Feature <b>%(slug)s</b> is no longer in progress."),
+    # The card's buttons on the menu page, where they stand without the
+    # card's lines beside them: each says what it acts on.
+    "page.onlaptop":     ("🌐 Открыть браузер на ноутбуке", "🌐 Open the browser on the laptop"),
+    "page.closechrome":  ("⏹ Закрыть Chrome", "⏹ Close Chrome"),
+    "page.onphone":      ("📲 Показать приложение на телефоне", "📲 Show app on Phone"),
+    "page.continue":     ("▶️ Продолжить шаг", "▶️ Continue the step"),
+    "page.continuestep": ("▶️ Продолжить шаг %(step)s", "▶️ Continue step %(step)s"),
+    "page.finish":       ("⏩ Дальше: preview → QA → merge", "⏩ Next: preview → QA → merge"),
+    "page.actions":      ("⚙️ Другие действия с фичей", "⚙️ Other feature actions"),
+    "page.devstop":      ("⏹ Остановить dev-сервер", "⏹ Stop the dev server"),
+    "page.devstart":     ("▶️ Запустить dev-сервер", "▶️ Start the dev server"),
+    "page.refresh":      ("🔄 Обновить карточку", "🔄 Refresh the card"),
+    # The feature's actions on the menu page, grouped by where each leads.
+    "act.title":         ("⚙️ <b>Действия с фичей</b> %(slug)s", "⚙️ <b>Feature actions</b> %(slug)s"),
+    "act.steps":         ("план · код · PR · ревью · после merge · ретро",
+                          "plan · code · PR · review · after the merge · retro"),
+    "act.now":           ("Сейчас: <b>%(step)s</b>", "Now: <b>%(step)s</b>"),
+    "act.back":          ("⏪ Назад, к шагу %(n)s", "⏪ Back to step %(n)s"),
+    "act.reopen":        ("⏪ Заново открыть шаг %(n)s", "⏪ Reopen step %(n)s"),
+    "act.stay":          ("🔁 На текущем шаге", "🔁 On the current step"),
+    "act.forward":       ("⏩ Вперёд", "⏩ Forward"),
+    "act.after":         ("🧹 После merge", "🧹 After the merge"),
+    "act.end":           ("🗑 Закончить фичу", "🗑 End the feature"),
+    "act.cancel":        ("‹ Ничего не делать", "‹ Do nothing"),
+    "page.answered":     ("✅ Ответ: %(reply)s", "✅ Answered: %(reply)s"),
+    "page.waiting":      ("sclaude ещё не спросил. Через пару секунд — «Обновить».",
+                          "sclaude has not asked yet. Give it a few seconds, then Refresh."),
+    "page.gone":         ("На этот вопрос уже ответили — в терминале или в чате.",
+                          "This question was already answered — in the terminal or the chat."),
+    "page.typed":        ("Этот вопрос ждёт ответа текстом: ответьте в топике фичи.",
+                          "This question takes a typed answer: answer it in the feature's topic."),
+    "page.question":     ("🔄 Обновить", "🔄 Refresh"),
+    "page.tocard":       ("‹ К карточке", "‹ Back to the card"),
     "feat.continue":     ("▶️ Продолжить", "▶️ Continue"),
     # The same list of actions the checkbox opens in the terminal. There is no
     # checkbox here — there is nothing to press space with — so it gets a button
@@ -387,9 +442,19 @@ STRINGS = {
     "feat.blocked":      ("\n\n🟡 Шаг ждёт ответа — откройте приложение Claude.",
                           "\n\n🟡 The step is waiting for you — open the Claude "
                           "app."),
+    "feat.cache":        ("\n💾 Кэш сессии: ещё %(m)s мин.",
+                          "\n💾 Session cache: %(m)s min left."),
+    "feat.cachegone":    ("\n💾 Кэш сессии истёк: следующий запрос запишет его заново.",
+                          "\n💾 The session cache has expired: the next request writes it again."),
     "feat.idle":         ("\n\n⚪ Сессия шага открыта, но простаивает.",
                           "\n\n⚪ The step's session is open but idle."),
-    "feat.nosession":    ("\n\n⚫ Шаг не запущен.", "\n\n⚫ The step is not running."),
+    # No Claude session for the step is open: what that means depends on
+    # whether a step is left — ▶️ opens one mid-step, and after the last there
+    # is none to open.
+    "feat.nosession":    ("\n\n⚫ Сессия Claude не открыта — ▶️ «Продолжить» её откроет.",
+                          "\n\n⚫ No Claude session is open — ▶️ Continue opens one."),
+    "feat.nosessiondone": ("\n\n⚫ Сессия Claude не открыта: шаги пройдены.",
+                           "\n\n⚫ No Claude session is open: the steps are done."),
     "feat.started":      ("Запускаю шаг <b>%(step)s</b> — разговор откроется в "
                           "приложении Claude.",
                           "Starting step <b>%(step)s</b> — the conversation "

@@ -233,10 +233,15 @@ def main():
         locked = os.path.join(root, "wt-locked")
         subprocess.run(["git", "-C", g, "worktree", "add", "-q", "-b", "locked", locked], **quiet)
         subprocess.run(["git", "-C", g, "worktree", "lock", locked], **quiet)
+        os.makedirs(os.path.join(locked, ".sclaude/local/feature"))
         check("remove_worktree refuses a tree git still lists",
               bash(root, 'REPO="%s"; remove_worktree "%s" 2>/dev/null || echo refused'
                    % (g, locked)), "refused")
         check("and leaves it in place", os.path.isdir(locked), True)
+        # Its closing mark goes back off: the work goes on, and the bot's menu
+        # hides a closing tree.
+        check("and no longer marked closing",
+              os.path.exists(os.path.join(locked, ".sclaude/local/feature", "closing")), False)
 
         # Reinstalling dependencies stops this tree's server and drops the
         # Turbopack cache. Once both survived the reinstall, and every

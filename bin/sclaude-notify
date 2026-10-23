@@ -5,6 +5,12 @@
 #   sclaude-notify "regression failed"        with a sound
 #   sclaude-notify --quiet "regression started"   silent, sits in the chat
 #   echo "..." | sclaude-notify                   the text on stdin
+#   sclaude-notify --in <worktree> "..."          to that feature's topic
+#
+# With --in the message goes to the feature's topic (the thread in its
+# worktree's .sclaude/local/feature/telegram.json, which the bot keeps), so a
+# feature's regression is told where its questions are; the main chat when the
+# feature has no topic, or the topic has gone.
 #
 # Why a separate sender rather than the daemon: keepawake-telegram is a long
 # poll that owns getUpdates, and a regression run has no business waking it.
@@ -23,11 +29,15 @@ set -uo pipefail
 
 ENV_FILE="$HOME/.config/keepawake/env"
 
-quiet=""
-if [[ "${1:-}" == "--quiet" ]]; then
-  quiet=1
-  shift
-fi
+quiet="" feature=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --quiet) quiet=1; shift ;;
+    # Last with no value, shift 2 would shift nothing and loop for ever.
+    --in) feature="${2:-}"; shift; [[ $# -gt 0 ]] && shift ;;
+    *) break ;;
+  esac
+done
 
 # The text: arguments if there are any, otherwise stdin. The pipe form is what
 # a regression summary uses — it is already several lines by the time it gets
@@ -61,14 +71,24 @@ chat="${chat%\"}"; chat="${chat#\"}"
 # arrive and did not, and swallowing that in silence is how a regression summary
 # disappears without anybody learning it was ever sent. Standard library only —
 # this runs on a machine where nothing was installed for it.
-python3 - "$token" "$chat" "$text" "${quiet:-}" <<'PY' || exit 0
+python3 - "$token" "$chat" "$text" "${quiet:-}" "$feature" <<'PY' || exit 0
 import html
 import json
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
-token, chat, text, quiet = sys.argv[1:5]
+token, chat, text, quiet, feature = sys.argv[1:6]
+
+# The feature's topic, when it has one: the bot keeps its id in the worktree.
+thread = 0
+if feature:
+    try:
+        with open(feature + "/.sclaude/local/feature/telegram.json") as fh:
+            thread = int((json.load(fh) or {}).get("thread") or 0)
+    except (OSError, ValueError, TypeError):
+        thread = 0
 
 # Everything is escaped, and formatting is applied here rather than accepted
 # from the caller. What comes through this script is test output: names like
@@ -91,10 +111,33 @@ if quiet:
     params["disable_notification"] = "true"
 
 url = "https://api.telegram.org/bot%s/sendMessage" % token
-req = urllib.request.Request(url, data=urllib.parse.urlencode(params).encode())
-try:
+
+
+def send(params):
+    req = urllib.request.Request(url, data=urllib.parse.urlencode(params).encode())
     with urllib.request.urlopen(req, timeout=15) as resp:
-        out = json.load(resp)
+        return json.load(resp)
+
+
+try:
+    out = None
+    if thread:
+        # A topic gone — deleted by hand, or topics turned off — answers 400
+        # in the words TOPIC_GONE in keepawake/telegramd.py lists: the main
+        # chat then. Any other refusal — a rate limit, a server error — is
+        # not a lost topic, and the message is not moved for it.
+        gone = (b"thread not found", b"topic_id_invalid", b"topic_deleted", b"not a forum")
+        try:
+            out = send(dict(params, message_thread_id=thread))
+        except urllib.error.HTTPError as exc:
+            body = exc.read()
+            if exc.code != 400 or not any(w in body.lower() for w in gone):
+                # Read once already; the report below reads it again.
+                exc.read = lambda: body
+                raise
+            out = None
+    if out is None:
+        out = send(params)
     if not out.get("ok"):
         sys.stderr.write("sclaude-notify: telegram refused: %s\n"
                          % out.get("description", "no reason given"))

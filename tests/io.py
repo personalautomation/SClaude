@@ -436,6 +436,20 @@ def main():
         # left standing, so that taking the foreign answer would be the only way
         # it could be answered at all. A real "n" typed at once would win the
         # race by speed and would hide the defect.
+        # A question about a feature that another process has since ended
+        # goes, and its asker with it: nobody is left to answer it, and the
+        # open question would keep the bot from deleting the topic.
+        e = os.path.join(tmp, "ended-elsewhere")
+        os.makedirs(os.path.join(e, "ask", "gone"))
+        out, err, rc = run_bash(
+            'ASK_DIR=%s; ASK_SLUG=gone; ( sleep 1.5; echo "{}" > %s/ask/gone/ended ) & '
+            'ask "Which one? [1-2] " answer pick:2; echo "[went on]"' % (e, e),
+            tmp, stdin="", timeout=15)
+        check("ended-elsewhere-stops-asking",
+              ("[went on]" in out, rc != 0, "has ended elsewhere" in err,
+               os.path.exists(os.path.join(e, "ask", "gone", "ask.json"))),
+              (False, True, True, False))
+
         d = os.path.join(tmp, "foreign")
         os.makedirs(d)
         answer_after(os.path.join(d, "answer.json"), "y", 1, ask_id="from-an-older-question")

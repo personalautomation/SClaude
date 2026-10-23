@@ -373,7 +373,7 @@ def brief(pr, session, verdict_line):
     if not session:
         return "Review — PR %s: no review run yet.\n%s\n" % (pr, verdict_line)
     label, values = session
-    # No "#": Telegram makes a hashtag of #195. The findings from before the
+    # No "#": Telegram makes a hashtag of "#N". The findings from before the
     # first session have the label "before" in the table.
     return "Review — PR %s, %s\n%s\n%s\n" % (
         pr, "before the sessions" if label == "before" else "session " + label, " · ".join("%s %d" % (row, values[row]) for row in BRIEF_ROWS),
@@ -393,6 +393,7 @@ def main():
     local = review_mode(cwd) == "local"
     bot = (local_runs(cwd) or []) if local else None
     found = threads(cwd, pr, repo)
+    threads_failed = found is None
     print("Review report — PR #%s%s" % (pr, ", reviewed on this machine" if local else ""))
     if found is None:
         print("  The review threads could not be read (gh, network or permissions).")
@@ -510,7 +511,8 @@ def main():
     print("")
     print("  " + said)
     path = os.environ.get(BRIEF_ENV, "")
-    if path:
+    # Zeros from threads nobody could read are not a status to send.
+    if path and not threads_failed:
         try:
             with open(path, "w") as fh:
                 fh.write(brief(pr, newest(columns), said))

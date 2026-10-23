@@ -170,13 +170,13 @@ fi
 # stand right above it in the terminal — and without them "Publish?" is agreement
 # to who knows what. ask_note (io.sh) accumulates, and the next ask clears it.
 # This does not affect the terminal: the lines are printed as they always
-# were.
+# were. ask_feed (io.sh) also hands them to the feature's topic.
 die()  { echo "${RED}$*${OFF}" >&2; exit 1; }
-warn() { ask_note "$*"; echo "${YELLOW}$*${OFF}" >&2; }
+warn() { ask_note "$*"; ask_feed warn "$*"; echo "${YELLOW}$*${OFF}" >&2; }
 # Red rather than yellow: not a caution but an exception to the flow itself —
 # something that should not have happened and that the human must notice.
-alarm() { ask_note "$*"; echo "${RED}$*${OFF}" >&2; }
-info() { ask_note "$*"; echo "${DIM}$*${OFF}"; }
+alarm() { ask_note "$*"; ask_feed alarm "$*"; echo "${RED}$*${OFF}" >&2; }
+info() { ask_note "$*"; ask_feed info "$*"; echo "${DIM}$*${OFF}"; }
 
 # Printing without formatting but with remembering — for what the human must see
 # next to the question. A plain echo will not do for that: it puts nothing into
@@ -186,7 +186,7 @@ info() { ask_note "$*"; echo "${DIM}$*${OFF}"; }
 # run this way — without it the "Publish?" button is agreement to who knows what.
 # `cmd_menu` prints the feature list this way, and without it the choice buttons
 # arrive as the unlabelled digits "1 2 3 4".
-say() { ask_note "$*"; echo "$*"; }
+say() { ask_note "$*"; ask_feed say "$*"; echo "$*"; }
 
 # --- commands ----------------------------------------------------------------
 

@@ -720,6 +720,9 @@ remove_worktree_tree() {
   out="$(git -C "$REPO" worktree remove --force "$wt" 2>&1)" && return 0
   if git -C "$REPO" worktree list --porcelain | grep -qxF "worktree $wt"; then
     printf '%s\n' "$out" >&2
+    # The tree stays, and the work in it goes on: the bot's menu and the dev
+    # server take it back.
+    rm -f "$wt/.sclaude/local/feature/closing"
     return 1
   fi
   stop_own_dev "$wt"

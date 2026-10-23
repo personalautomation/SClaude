@@ -92,6 +92,10 @@ notices.check(bot, [("shop", "feat-a", channel)], topic, log)
 check("a note not sent stays for the next turn", len(laid()), 2)
 
 bot = FakeBot()
+notices.check(bot, [("shop", "feat-a", channel)], lambda name, slug: None, log)
+check("no topic yet: the notes wait, not the main chat", (bot.sent, len(laid())), ([], 2))
+
+bot = FakeBot()
 del topics[:]
 notices.check(bot, [("shop", "feat-a", channel)], topic, log)
 check("the notes go to the feature's topic, oldest first, each a message",
@@ -109,6 +113,98 @@ os.utime(old, (time.time() - notices.NOTE_KEEP - 60,) * 2)
 bot = FakeBot()
 notices.check(bot, [("shop", "feat-a", channel)], topic, log)
 check("a note older than a day is dropped, not sent", (bot.sent, laid()), ([], []))
+
+# --- the feed: what sclaude prints, shorter, a message a turn ------------------------
+def feed(level, text, slug="feat-a"):
+    script = ('source "%s/io.sh"\nASK_DIR="%s"\nASK_SLUG="%s"\nASK_ENDED=""\n'
+              'ask_feed "$1" "$2"' % (LIB, os.path.join(box, "sclaude"), slug))
+    subprocess.run(["bash", "-c", script, "_", level, text], check=True, timeout=20)
+
+
+feed("say", "\x1b[1mReview round closed\x1b[0m")
+feed("info", "  its context is at 40%")
+feed("info", "Local regression: running e2e")
+feed("warn", "  ✗ e2e failed")
+feed("say", "Check the fixes with a review pass?")
+feed("say", "Feature name:", slug="")
+check("the repository's own lines are not fed",
+      os.path.exists(os.path.join(box, "sclaude", notices.NOTES_DIR)), False)
+bot = FakeBot()
+sounds = []
+notices.check(bot, [("shop", "feat-a", channel)], topic, log,
+              at_terminal=lambda pid: sounds.append(pid) or False,
+              shown=lambda ch: "Check the fixes with a review pass? [y/n]")
+check("one message for what gathered", len(bot.sent), 1)
+text, thread, quiet = bot.sent[0]
+check("headlines, not the indented detail, and no colour codes",
+      text, "🖥 Review round closed\nLocal regression: running e2e\n⚠️ ✗ e2e failed")
+check("a warning sounds when nobody is at the terminal", quiet, False)
+check("and goes to the feature's topic", thread, 31)
+check("the feed is taken: nothing is sent twice",
+      os.path.exists(os.path.join(notes, notices.FEED_FILE)), False)
+
+feed("warn", "✗ e2e failed")
+bot = FakeBot()
+notices.check(bot, [("shop", "feat-a", channel)], topic, log, at_terminal=lambda pid: True)
+check("at the terminal nothing sounds", bot.sent[0][2], True)
+feed("info", "Deploying the preview")
+bot = FakeBot()
+notices.check(bot, [("shop", "feat-a", channel)], topic, log, at_terminal=lambda pid: False)
+check("progress is silent", bot.sent[0][2], True)
+feed("info", "Deploying the preview")
+bot = FakeBot()
+notices.check(bot, [("shop", "feat-a", channel)], lambda name, slug: 0, log)
+check("with no topic the feed stays out of the main chat", bot.sent, [])
+check("a line only inside the question's context is still sent",
+      notices.feed_message([("say", "1", "Done")], "PR 7 is Done, merged")[0], "🖥 Done")
+# An empty note is dropped, not refused by Telegram every turn ahead of
+# the rest.
+with open(os.path.join(notes, "000-empty.txt"), "w") as fh:
+    fh.write("  \n ")
+bot = FakeBot()
+notices.check(bot, [("shop", "feat-a", channel)], topic, log)
+check("an empty note is dropped", (bot.sent, os.path.exists(os.path.join(notes, "000-empty.txt"))),
+      ([], False))
+
+# No topic yet: the lines wait for it. A send that fails: they go back.
+feed("warn", "✗ e2e failed")
+bot = FakeBot()
+notices.check(bot, [("shop", "feat-a", channel)], lambda name, slug: None, log)
+check("no topic yet: the feed waits in its file",
+      (bot.sent, os.path.exists(os.path.join(notes, notices.FEED_FILE))), ([], True))
+bot = FakeBot(fail=True)
+notices.check(bot, [("shop", "feat-a", channel)], topic, log)
+check("a feed not sent is kept for the next turn",
+      [line[2] for line in notices.take_feed(channel)], ["✗ e2e failed"])
+# Not sent for an hour: let go rather than kept for ever.
+feed("warn", "old news")
+check("lines put back past FEED_KEEP are let go",
+      notices.take_feed(channel, now=time.time() + notices.FEED_KEEP + 60), [])
+lost_calls = []
+feed("warn", "✗ e2e failed")
+notices.check(FakeBot(fail=True), [("shop", "feat-a", channel)], topic, log,
+              lost=lambda name, slug: lost_calls.append((name, slug)))
+check("a failed send asks for the topic again", lost_calls, [("shop", "feat-a")])
+notices.take_feed(channel)
+
+# Cut to fit a message, never through an entity: Telegram refuses the markup.
+long_text, _ = notices.feed_message([("say", "1", "&" * 1000)] * 13)
+check("a long feed fits a message", len(long_text) <= notices.NOTE_MAX, True)
+check("cut between entities, the rest counted",
+      (long_text.split("\n")[-2].endswith("&amp;…"), long_text.endswith("<i>… 12 more</i>")),
+      (True, True))
+check("long runs are counted, not sent whole",
+      notices.feed_message([("info", "1", "line %d" % i) for i in range(20)])[0].splitlines()[-1],
+      "<i>… 8 more</i>")
+
+# A feature ended elsewhere gets no feed: its channel is being deleted.
+open(os.path.join(channel, "ended"), "w").close()
+os.remove(os.path.join(notes, notices.FEED_FILE)) if os.path.exists(
+    os.path.join(notes, notices.FEED_FILE)) else None
+feed("info", "removed the worktree")
+check("an ended feature's channel gets no feed",
+      os.path.exists(os.path.join(notes, notices.FEED_FILE)), False)
+os.remove(os.path.join(channel, "ended"))
 
 # A feature's channel is removed whole when it ends, its notes with it.
 notice("Review — PR #7, session 4")

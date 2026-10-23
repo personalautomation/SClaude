@@ -787,7 +787,7 @@ rollback_confirm() {
   warn "The rollback did not mend production: the suite is red against it too."
   info "  Something outside this feature is wrong — the release before it was"
   info "  green when it shipped. Look now rather than carrying on."
-  "$INSTRUMENTS/bin/sclaude-notify" "$slug: rolled production back and it is STILL red.
+  "${INSTRUMENTS:-}/bin/sclaude-notify" --in "$wt" "$slug: rolled production back and it is STILL red.
 The previous release does not fix it — something else is wrong.
 Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
   return 1

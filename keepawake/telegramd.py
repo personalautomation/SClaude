@@ -32,6 +32,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -40,6 +41,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from keepawake import docs, notices, state
+import statusline
 from keepawake.i18n import DEFAULT, STRINGS, current, set_lang, ssh_holders, t
 from keepawake.state import (HOLD_SECONDS, local_label, locked, needs_warning,
                              read, touch)
@@ -304,6 +306,9 @@ class Bot(object):
                       reply_markup={"inline_keyboard": keyboard} if keyboard else None)
             return True
         except Exception as exc:
+            # The message already shows that text: it is as asked.
+            if "not modified" in str(exc):
+                return True
             log.warning("did not edit: %s", exc)
             return False
 
@@ -655,7 +660,10 @@ def code_app_button(origin, folder=""):
     # gate starts nothing.
     if not origin or not code_running():
         return []
-    path = "/__code/" + ("?folder=" + urllib.parse.quote(folder) if folder else "")
+    # Always a folder: without one code-server reopens whatever was open in
+    # it last, not the repository the screen names (code_folder).
+    folder = folder or repo_choice() or os.path.expanduser("~")
+    path = "/__code/?folder=" + urllib.parse.quote(folder)
     return [{"text": t("code.app"), "style": "success", "web_app": {
         "url": "%s/__sclaude/tg?p=%s" % (origin, urllib.parse.quote(path, safe=""))}}]
 
@@ -857,6 +865,7 @@ def phone_on():
     out = run(start + FUNNEL_ON, timeout=60)
     with locked() as st:
         st["phone_on_at"] = int(time.time())
+        st.pop("published", None)
     return bool(gate_origin(None, False)), out
 
 
@@ -869,7 +878,7 @@ def phone_on():
 # The name is asked of the zone's own nameserver, which keeps no answer: a
 # resolver asked too early would itself remember "no such name" for minutes.
 # DNS over HTTPS stands in when that fails.
-PUBLISHED = {"host": "", "at": 0.0, "ok": False}
+PUBLISHED = {"host": "", "at": 0.0, "ok": False, "since": 0.0}
 # How often a name not yet published is asked again.
 PUBLISH_RECHECK = 10
 # Past this the app is offered anyway, and the log says so.
@@ -879,61 +888,144 @@ PUBLISH_WAIT_MAX = 900
 def doh(name, rtype):
     """The answers of DNS over HTTPS for a name, as data strings."""
     url = "https://dns.google/resolve?name=%s&type=%s" % (urllib.parse.quote(name), rtype)
-    with urllib.request.urlopen(url, timeout=5) as resp:
+    with urllib.request.urlopen(url, timeout=3) as resp:
         data = json.load(resp)
     return [a.get("data", "") for a in data.get("Answer") or []]
 
 
-def dns_has(server, name):
-    """True when the nameserver at server has an A record for name: one
-    question over UDP, no recursion asked."""
+def dns_addresses(server, name):
+    """The A records the nameserver at server has for name: one question over
+    UDP, no recursion asked."""
     import socket
     qid = os.urandom(2)
     query = (qid + b"\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
              + b"".join(bytes([len(p)]) + p.encode() for p in name.split("."))
              + b"\x00\x00\x01\x00\x01")
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.settimeout(3)
+        sock.settimeout(2)
         sock.sendto(query, (server, 53))
         data = sock.recv(4096)
-    if data[:2] != qid or len(data) < 8:
+    if data[:2] != qid or len(data) < 12:
         raise OSError("not the answer to this question")
-    return (data[3] & 0x0F) == 0 and int.from_bytes(data[6:8], "big") > 0
+    if data[3] & 0x0F:
+        return []
+
+    def skip_name(i):
+        while data[i]:
+            if data[i] & 0xC0 == 0xC0:
+                return i + 2
+            i += data[i] + 1
+        return i + 1
+
+    i = skip_name(12) + 4
+    found = []
+    for _ in range(int.from_bytes(data[6:8], "big")):
+        i = skip_name(i)
+        rtype, rlen = int.from_bytes(data[i:i + 2], "big"), int.from_bytes(data[i + 8:i + 10], "big")
+        i += 10
+        if rtype == 1 and rlen == 4:
+            found.append(".".join(str(b) for b in data[i:i + 4]))
+        i += rlen
+    return found
 
 
-def name_published(host):
+def funnel_answers(host, port, address):
+    """True when the funnel at address carries a request to the gate: TLS
+    under the funnel's name, and an HTTP answer back. A relay that has not
+    taken the funnel up yet accepts the connection and drops the handshake."""
     import socket
+    import ssl
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((address, port), timeout=5) as raw:
+            with context.wrap_socket(raw, server_hostname=host) as tls:
+                tls.settimeout(5)
+                tls.sendall(("GET /__sclaude/menu HTTP/1.1\r\nHost: %s:%d\r\n"
+                             "Connection: close\r\n\r\n" % (host, port)).encode())
+                return tls.recv(16).startswith(b"HTTP/")
+    except (OSError, ssl.SSLError):
+        return False
+
+
+def name_published(host, port=None):
+    """Whether a phone can reach the funnel now: its name in public DNS, and
+    the relay at that address carrying it. The name alone is not enough — a
+    funnel off for a few minutes keeps its name, and the relay takes a minute
+    or more to carry it again."""
+    import socket
+    port = port or GATE_FUNNEL_PORT
     zone = ".".join(host.split(".")[-2:])
     try:
         server = socket.gethostbyname(doh(zone, "NS")[0].rstrip("."))
-        return dns_has(server, host)
+        addresses = dns_addresses(server, host)
     except (OSError, ValueError, IndexError):
-        pass
-    try:
-        return bool(doh(host, "A"))
-    except (OSError, ValueError):
-        return False
+        addresses = []
+    if not addresses:
+        # No answer from the zone's own server — an error, or a referral or
+        # an empty answer, which raise nothing: a public resolver then.
+        try:
+            addresses = [a for a in doh(host, "A") if a.count(".") == 3]
+        except (OSError, ValueError):
+            addresses = []
+    return any(funnel_answers(host, port, a) for a in addresses[:2])
 
 
-def published(host):
+# The loop's probe, run in a thread: {host: None while running, else the
+# answer not yet taken}. Off in tests, which want the answer at once.
+PROBE = {}
+PROBE_ASYNC = True
+
+
+def published(host, look=False):
     """Whether a phone can find the funnel's name: asked again every
-    PUBLISH_RECHECK seconds until it can, then remembered while it lasts."""
+    PUBLISH_RECHECK seconds until it can, then remembered while it lasts.
+    Only the loop asks (look): a lookup is seconds of network, and a button
+    or a menu takes the loop's last answer — the first one in a process
+    excepted, which has none to take."""
+    if not look:
+        # The loop's answer, from the state where it leaves it: the gate
+        # serving the menu page is another process, and its own first answer
+        # would otherwise stand for the life of that process.
+        shared = read().get("published") or {}
+        if shared.get("host") == host:
+            return bool(shared.get("ok"))
     if PUBLISHED["host"] == host and PUBLISHED["ok"]:
         return True
     now = time.time()
-    if PUBLISHED["host"] == host and now - PUBLISHED["at"] < PUBLISH_RECHECK:
+    if PUBLISHED["host"] == host and (not look or now - PUBLISHED["at"] < PUBLISH_RECHECK):
         return False
-    ok = name_published(host)
-    since = (read().get("phone_wait") or {}).get("since") or 0
+    if look and PROBE_ASYNC:
+        # Off the loop: the probes take up to some fifteen seconds, and
+        # every press would wait on them. The answer is taken on a later turn.
+        probe = PROBE.get(host)
+        if probe is None:
+            PROBE[host] = None
+            threading.Thread(target=lambda: PROBE.__setitem__(host, name_published(host)),
+                             daemon=True).start()
+            return False
+        if PROBE[host] is None:
+            return False          # still probing
+        ok = PROBE.pop(host)
+    else:
+        ok = name_published(host)
+    # Counted from the wait the chat showed, or else from this process's
+    # first look that found the name not yet reachable — access turned on
+    # from the terminal shows no wait, and would otherwise never be offered.
+    if PUBLISHED["host"] != host or PUBLISHED["ok"]:
+        PUBLISHED["since"] = now
+    since = (read().get("phone_wait") or {}).get("since") or PUBLISHED["since"]
     if not ok and since and now - since > PUBLISH_WAIT_MAX:
         log.warning("%s is still not in public DNS after %d s: offering the app anyway",
                     host, PUBLISH_WAIT_MAX)
         ok = True
     PUBLISHED.update(host=host, at=now, ok=ok)
+    if look:
+        with locked() as st:
+            st["published"] = {"host": host, "ok": ok}
     return ok
 
 
-def gate_origin(config=None, ready=True):
+def gate_origin(config=None, ready=True, look=False):
     """https://<node>.<tailnet>.ts.net:8443 while the funnel carries the gate,
     "" while it does not — read from Tailscale, never remembered. With
     ready, also "" until a phone can find the name (published); without,
@@ -947,10 +1039,15 @@ def gate_origin(config=None, ready=True):
         web = (config.get("Web") or {}).get(hostport) or {}
         proxy = str((((web.get("Handlers") or {}).get("/")) or {}).get("Proxy", ""))
         if proxy.rstrip("/").endswith(":3001"):
-            if ready and not published(host):
+            if ready and not published(host, look):
                 return ""
             return "https://%s:%s" % (host, port)
     PUBLISHED.update(host="", ok=False)
+    # The funnel is off: the loop's last answer goes too, or a funnel set up
+    # again by hand would read as published before it is.
+    if read().get("published"):
+        with locked() as st:
+            st.pop("published", None)
     return ""
 
 
@@ -1000,7 +1097,21 @@ def code_folder():
     return os.path.basename(choice) if choice else "~"
 
 
-def code_keyboard():
+def code_password():
+    """code-server's password from its config, or ""."""
+    path = os.path.expanduser("~/.config/code-server/config.yaml")
+    try:
+        for line in open(path):
+            if line.strip().startswith("password:"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def code_keyboard(folder=""):
+    # folder: the worktree the 📲 button opens, when the menu page stands on
+    # a feature.
     running = code_running()
     row = []
     if running:
@@ -1009,13 +1120,13 @@ def code_keyboard():
     else:
         row.append({"text": t("code.start"), "callback_data": "code_start"})
     rows = [row]
-    app = code_app_button(gate_origin())
+    app = code_app_button(gate_origin(), folder)
     if app:
         rows.append(app)
     return rows + [[{"text": t("menu.back"), "callback_data": "menu_back"}]]
 
 
-def code_text():
+def code_text(folder_name=""):
     state_label = (t("code.running") if code_running()
                    else t("code.stoppedpage") if ON_PAGE else t("code.stopped"))
     # There are two addresses, and that is not duplication. Tailscale runs
@@ -1032,8 +1143,12 @@ def code_text():
     # error. To the Windows browser the addresses are equivalent, and only this
     # one is clickable.
     if ON_PAGE:
+        # The page is not kept in the chat's history, and is let in for the
+        # owner only: the password can be shown where it is typed.
+        pw = code_password()
         return t("code.titlepage", state=state_label,
-                 folder=t("code.folder", name=escape(code_folder())))
+                 folder=t("code.folder", name=escape(folder_name or code_folder())),
+                 password=t("code.password", pw=escape(pw)) if pw else t("code.nopassword"))
     return t("code.title", state=state_label,
              folder=t("code.folder", name=escape(code_folder())),
              url=code_url(), local="http://127.0.0.1:8080")
@@ -1198,7 +1313,11 @@ def ensure_anchor(bot):
     # what is already on the screen is an extra step in exactly the place where
     # the person came for the menu anyway.
     bot.anchor(t("anchor.hint"))
-    bot.send(*chat_menu())
+    # A screen like any other: what it offers follows phone access
+    # (redraw_screens).
+    msg = bot.send(*chat_menu())
+    if msg:
+        Handler(bot).adopt(msg)
     with locked() as st:
         st["anchor_lang"] = current()
     log.info("the menu keyboard is set, language=%s", current())
@@ -1299,8 +1418,18 @@ def features_of(repo):
             # The columns: name, step, worktree. The path is not needed on the
             # button — it is long and eats the whole width on a phone, while the
             # table is there in full in the text below the buttons.
-            rows.append((parts[0], parts[1], parts[2] if len(parts) > 2 else ""))
+            wt = parts[2] if len(parts) > 2 else ""
+            if wt and closing(wt):
+                continue
+            rows.append((parts[0], parts[1], wt))
     return rows, out
+
+
+def closing(wt):
+    """Whether a feature's worktree is being removed: stop_dev marks it before
+    the minute git takes to delete it, and from then on the feature is gone
+    for the menu — a card offered then leads into a tree half deleted."""
+    return os.path.exists(os.path.join(wt, ".sclaude", "local", "feature", CLOSING_MARK))
 
 
 def docs_keyboard():
@@ -1466,7 +1595,7 @@ def option_label(options, reply):
     return ""
 
 
-def answer_ask(channel, reply):
+def answer_ask(channel, reply, want=None):
     # The answer to the orchestrator. We write through a temporary file and
     # rename: the reading side must not see half an answer.
     #
@@ -1482,8 +1611,12 @@ def answer_ask(channel, reply):
     # asked, and the orchestrator took the stale reply for an answer to it. The
     # reading side compares the ids and drops what was meant for another
     # question.
+    #
+    # want: the id of the question the caller checked. The question read here
+    # can already be the next one, and the answer is then refused rather than
+    # stamped with that one's id.
     question = pending_ask(channel)
-    if not question:
+    if not question or (want and (question.get("id") or "") != want):
         return False
     d = channel
     tmp = os.path.join(d, "answer.json.%d" % os.getpid())
@@ -1642,7 +1775,16 @@ def answered_text(repo_name, question, reply, source=""):
              else "✅ " + escape(shown or reply or "—"))
     if source in ("tty", "stdin"):
         text += "\n<i>%s</i>" % t("ask.by.terminal")
+    # What was printed before the question is what happened on the laptop;
+    # it stays, folded, rather than going with the buttons.
+    context = strip_ansi(question.get("context") or "").strip()
+    if context:
+        text += "\n<blockquote expandable>%s</blockquote>" % escape(clip(context, ANSWER_CONTEXT_MAX))
     return text
+
+
+# How much of a question's context its answered message keeps.
+ANSWER_CONTEXT_MAX = 1500
 
 
 def settle_ask(bot, name, entry, record):
@@ -1938,16 +2080,30 @@ def at_terminal(question):
 # --- the state of steps' sessions --------------------------------------------
 
 
+# One answer serves a press: a card asks for the sessions several times over
+# (its session, the one in its worktree, its state), and each ask is a Node
+# process.
+AGENTS_FRESH = 3
+_AGENTS = {"at": 0.0, "list": [], "ok": False}
+
+
 def agents():
     # Live claude sessions, interactive and background. It needs no terminal, so
     # it is available to the daemon too. Empty on any trouble: no claude, no
     # answer, broken JSON — the card simply will not show the state.
+    now = time.time()
+    if now - _AGENTS["at"] < AGENTS_FRESH:
+        return _AGENTS["list"]
     out = run("claude agents --json", timeout=20)
     try:
         data = json.loads(out)
     except ValueError:
-        return []
-    return data if isinstance(data, list) else []
+        data = None
+    # ok: whether Claude Code answered — an empty list is then no sessions,
+    # not a call that failed.
+    _AGENTS.update(at=time.time(), list=data if isinstance(data, list) else [],
+                   ok=isinstance(data, list))
+    return _AGENTS["list"]
 
 
 def session_state(session_id, cache=None):
@@ -1964,6 +2120,46 @@ def session_state(session_id, cache=None):
         if isinstance(a, dict) and a.get("sessionId") == session_id:
             return a.get("state") or a.get("status") or "idle"
     return ""
+
+
+# Where Claude Code keeps each session's transcript, a directory per project.
+CLAUDE_PROJECTS = os.path.expanduser("~/.claude/projects")
+
+
+def feature_busy(repo, slug):
+    """Whether the feature is at work: its session in any state but idle, or
+    its orchestrator alive and waiting on a question — between steps there
+    is no session, and a second orchestrator would be two conversations
+    about one thing all the same."""
+    if pending_ask(os.path.join(ask_dir(repo), "ask", slug)):
+        return True
+    session, _step = feature_session(repo, slug)
+    return bool(session) and session_state(session) not in ("", "idle")
+
+
+def cache_left(session_id, now=None):
+    """Seconds the session's prompt cache has left — 0 once it has expired —
+    or None when its transcript says nothing. The same reckoning as the
+    status line's: the last request's time plus the TTL it was written with."""
+    if not session_id:
+        return None
+    paths = glob.glob(os.path.join(CLAUDE_PROJECTS, "*",
+                                   glob.escape(session_id) + ".jsonl"))
+    last = statusline.last_request(paths[0]) if paths else None
+    if not last:
+        return None
+    when, _usage, ttl = last
+    return max(0, when + ttl - (time.time() if now is None else now))
+
+
+def cache_note(session_id):
+    """The card's line on the session's cache, "" when nothing is known."""
+    left = cache_left(session_id)
+    if left is None:
+        return ""
+    if not left:
+        return t("feat.cachegone")
+    return t("feat.cache", m=int((left + 59) // 60))
 
 
 def state_path(wt):
@@ -1990,10 +2186,32 @@ def feature_state(repo, slug):
 
 def feature_session(repo, slug):
     # The session id of the feature's current step, and the step itself.
+    #
+    # Past the four steps — the epilogue, the retrospective — a session is
+    # kept elsewhere than under steps, and a feature with one open read as
+    # having none: "not running", and Continue free to open a second
+    # conversation beside it. A live Claude session working in the feature's
+    # worktree is the feature's, whatever the state names.
     data = feature_state(repo, slug)
     step = data.get("step") or ""
     node = (data.get("steps") or {}).get(step) or {}
-    return (node.get("session") or ""), step
+    session = node.get("session") or ""
+    if not session or not session_state(session):
+        live = session_in(feature_wt(repo, slug))
+        session = live or session
+    return session, step
+
+
+def session_in(wt):
+    """The id of a live Claude session working in the worktree, or ""."""
+    if not wt:
+        return ""
+    root = os.path.realpath(wt)
+    for a in agents():
+        cwd = os.path.realpath(a.get("cwd") or "") if isinstance(a, dict) else ""
+        if cwd == root or cwd.startswith(root + os.sep):
+            return a.get("sessionId") or ""
+    return ""
 
 
 def feature_links(repo, slug):
@@ -2045,9 +2263,21 @@ def feature_card(name, slug, feats=None):
     repo = repo_path(name)
     session, _step = feature_session(repo, slug) if repo else ("", "")
     state = session_state(session)
-    note = {"working": t("feat.working"), "blocked": t("feat.blocked"),
-            "busy": t("feat.working"), "idle": t("feat.idle")}.get(
-                state, t("feat.nosession"))
+    # Claude Code names the states its own way and adds to them: "waiting" is
+    # a session that asks the person something. A state not known here is
+    # still an open session, never "none is open".
+    if not state:
+        note = (t("feat.nosessiondone") if " done" in row[1] or row[1].startswith("all done")
+                else t("feat.nosession"))
+    else:
+        note = {"working": t("feat.working"), "busy": t("feat.working"),
+                "blocked": t("feat.blocked"), "waiting": t("feat.blocked")}.get(
+                    state, t("feat.idle"))
+        # How long the open session stays cheap to go on with: on the page,
+        # drawn anew at each press. A card in the chat would keep the minutes
+        # it was drawn with.
+        if ON_PAGE:
+            note += cache_note(session)
     return t("feat.card", repo=escape(name), slug=escape(slug),
              step=escape(row[1]), wt=escape(row[2] or "—"), session=note,
              links=links_line(feature_links(repo, slug)) if repo else "")
@@ -2461,7 +2691,11 @@ class Handler(object):
             # question in its topic is not what text typed here answers.
             opened = open_channels()
             if thread:
-                waiting = [(k, d) for k, d in opened if k == fkey]
+                # The feature's own, or a question shown in this topic: the
+                # repository's new-feature topic has no feature key, and its
+                # "Feature name:" is answered there.
+                waiting = [(k, d) for k, d in opened if (fkey and k == fkey)
+                           or (get_shown(k) or {}).get("thread") == thread]
             else:
                 # The repository's own questions, and a feature's only once
                 # shown here (no topic to be had): one not shown yet is on its
@@ -2469,7 +2703,11 @@ class Handler(object):
                 waiting = []
                 for k, d in opened:
                     entry_k = get_shown(k)
-                    if not split_key(k)[1] or (entry_k and not entry_k.get("thread")):
+                    # Shown in a topic — the repository's own too, in its
+                    # new-feature topic — it is answered there.
+                    if entry_k and entry_k.get("thread"):
+                        continue
+                    if not split_key(k)[1] or entry_k:
                         waiting.append((k, d))
             # The question the text replies to, if it replies to one of them;
             # otherwise, with several, the one on screen here — a question not
@@ -2526,7 +2764,7 @@ class Handler(object):
                     self.bot.delete(msg.get("message_id") or 0)
                     self.bot.send(t("ask.nooption"))
                     return
-                if not answer_ask(channel, text):
+                if not answer_ask(channel, text, (question or {}).get("id")):
                     self.bot.send(t("ask.gone"))
                     return
                 # The answer takes the question's place, as a press does, and
@@ -2681,6 +2919,11 @@ class Handler(object):
         # chat's short menu offers it by a button.
         if gate_origin():
             return self.cmd_menu(now)
+        if gate_origin(None, False):
+            # Already on, the address not yet published: the waiting
+            # message changes when it is.
+            self.bot.send(t("svc.phonestill"))
+            return
         on, out = phone_on()
         if not on:
             self.bot.send(t("chrome.gatefail", log=escape(out[-1500:])))
@@ -2980,9 +3223,9 @@ class Handler(object):
         if action in ("go", "acts"):
             # We do not touch a busy feature: a second orchestrator on the same
             # feature is two conversations about one thing. busy belongs here
-            # too: the card shows it as running (🟢).
-            session, _step = feature_session(repo, slug)
-            if session and session_state(session) in ("working", "blocked", "busy"):
+            # too: the card shows it as running (🟢). So does any state but
+            # idle: one Claude Code adds later is not a free feature.
+            if feature_busy(repo, slug):
                 note = t("feat.busy")
             elif action == "go":
                 # The orchestrator decides what to do itself: `sclaude <feature>`
@@ -3046,7 +3289,7 @@ class Handler(object):
         entry = get_shown(key, repo) if key else None
         mark = (question.get("id") or question.get("asked") or 0) if question else None
         if not channel or (entry and not entry.get("legacy") and entry.get("id") != mark) \
-                or not answer_ask(channel, reply):
+                or not answer_ask(channel, reply, (question or {}).get("id")):
             self.bot.answer(cid, t("ask.gone"))
             # A message the loop knows of is settled by it — into the answer
             # given at the laptop. Only one it has no record of goes now.
@@ -3246,6 +3489,16 @@ def sleep_reason(data, now):
     return t("why.nobody")
 
 
+def channel_context(channel):
+    """The lines an open question in the channel carries with it."""
+    try:
+        with open(os.path.join(channel, "ask.json")) as fh:
+            ask = json.load(fh) or {}
+    except (OSError, ValueError):
+        return ""
+    return "%s\n%s" % (ask.get("context") or "", ask.get("prompt") or "")
+
+
 def check_asks(bot):
     # An orchestrator's open question is exactly what hot switching is.
     #
@@ -3348,7 +3601,13 @@ def check_channel(bot, key, name, slug, channel, repo):
     # already waiting in the chat.
     # The repository's own questions while a feature is being started from the
     # bot are that feature's first ones: they go to its new topic.
-    thread = feature_topic(bot, name, slug) if slug else new_topic_of(name)
+    # Only a start from the bot: one at a terminal asks there, and its
+    # repository's questions stay in the main chat. And only `sclaude new`'s:
+    # the topic outlives a start given up, and another orchestrator's
+    # question ("Which feature?") is the main chat's.
+    thread = (feature_topic(bot, name, slug) if slug
+              else 0 if tty_of_pid(question.get("pid")) or not asks_for_new(question.get("pid"))
+              else new_topic_of(name))
     # No topic though the feature has a worktree and topics are on: the
     # network or a rate limit. The next turn tries again — sent to the main
     # chat now, the question would stay there, mixed with other features'.
@@ -3407,6 +3666,9 @@ def check_channel(bot, key, name, slug, channel, repo):
 
 FEATURE_RECORD = "telegram.json"
 ENDED_MARK = "ended"
+# Set in the worktree by stop_dev (sclaude/lib/worktree.sh) when its removal
+# begins, and honoured by sclaude-proxy too.
+CLOSING_MARK = "closing"
 
 # The name's length. Telegram allows 128 characters, but a phone shows a topic
 # list and a topic's header in about thirty: the slug comes first so that its
@@ -3509,6 +3771,7 @@ def load_record(repo, slug):
 
 
 def save_record(repo, slug, record):
+    _TOPIC_KEYS.clear()       # a thread may have just been written
     path = record_path(repo, slug)
     if not path:
         return
@@ -3575,6 +3838,17 @@ def feature_topic(bot, name, slug, renew=False):
 # {name: {"thread": id, "since": ts}}. One nobody took over goes after
 # NEW_TOPIC_KEEP, unless a question is still open in it.
 NEW_TOPIC_KEEP = 12 * 3600
+
+
+def asks_for_new(pid):
+    """Whether the process asking is `sclaude new` — the start the new-feature
+    topic was made for."""
+    try:
+        with open("/proc/%d/cmdline" % int(pid or 0), "rb") as fh:
+            args = fh.read().split(b"\0")
+    except (OSError, ValueError):
+        return False
+    return any(os.path.basename(a) == b"sclaude" for a in args) and b"new" in args
 
 
 def new_feature_topic(bot, name):
@@ -3652,7 +3926,9 @@ def check_new_topics(bot):
     now = int(time.time())
     for name, entry in list((read().get("new_topics") or {}).items()):
         repo = repo_path(name)
-        born = new_worktrees(repo, entry.get("since") or 0) if repo else []
+        # A feature that already has a topic is not the one this was made for.
+        born = [slug for slug in (new_worktrees(repo, entry.get("since") or 0) if repo else [])
+                if not load_record(repo, slug).get("thread")]
         if born:
             feature_topic(bot, name, born[0])
             continue
@@ -3731,18 +4007,35 @@ def feature_records(repo):
     return found
 
 
+# One search serves a message: it reads every worktree's record, and one
+# message asks for its topic several times (the text, the menu it draws).
+TOPIC_FRESH = 5
+_TOPIC_KEYS = {}
+
+
 def topic_channel(thread):
     # The feature key whose topic this is, or "". A topic made from the menu
     # has no channel until the feature asks something, so the records in the
     # worktrees are what is searched.
     if not thread:
         return ""
+    now = time.time()
+    at, key = _TOPIC_KEYS.get(thread, (0.0, ""))
+    if now - at < TOPIC_FRESH:
+        return key
+    key = ""
     for repo in known_repos():
         name = os.path.basename(repo)
         for slug in feature_records(repo):
             if load_record(repo, slug).get("thread") == thread:
-                return channel_key(name, slug)
-    return ""
+                key = channel_key(name, slug)
+                break
+        if key:
+            break
+    # Kept found or not: save_record forgets it all, so a topic just adopted
+    # is not missed for the seconds a "none" would stand.
+    _TOPIC_KEYS[thread] = (now, key)
+    return key
 
 
 def check_topics(bot):
@@ -3912,16 +4205,34 @@ def card_data(action, key):
     return data if len(data.encode("utf-8")) <= 64 else "fc:" + action
 
 
-def card(name, slug, note="", in_topic=True, feats=None):
+def card(name, slug, note="", in_topic=True, feats=None, config=None):
     """(text, keyboard) of the feature's card. The dev server, code-server and
     the phone gate are each looked at once: every look is a process or a
-    socket, on the loop that answers getUpdates."""
+    socket, on the loop that answers getUpdates. config: tailscale's, when
+    the caller draws several cards."""
+    if ON_PAGE and feats is None:
+        # Read once: the page's Continue is named by the step.
+        feats, _ = features_of_name(name)
     text = feature_card(name, slug, feats)
+    if not ON_PAGE:
+        # Whatever draws the chat's card — the loop, /menu, a press — says
+        # which session state it shows, for check_card_states to compare.
+        shown_state(name, slug)
     key = channel_key(name, slug)
-    serve = serve_config()
+    serve = serve_config() if config is None else config
     origin = gate_origin(serve)
-    rows = [[{"text": t("feat.continue"), "callback_data": card_data("go", key)},
-             {"text": t("feat.actions"), "callback_data": card_data("acts", key)}]]
+    # On the page the buttons stand alone, and say what they act on: one to
+    # a row, Continue first and named by where the feature is.
+    named = (lambda chat, page: t(page) if ON_PAGE else t(chat))
+    if ON_PAGE:
+        step = next((r[1] for r in feats or [] if r[0] == slug), "")
+        go = (t("page.finish") if " done" in step or step.startswith("all done")
+              else t("page.continuestep", step=step) if step else t("page.continue"))
+        rows = [[{"text": go, "callback_data": card_data("go", key)}],
+                [{"text": t("page.actions"), "callback_data": card_data("acts", key)}]]
+    else:
+        rows = [[{"text": t("feat.continue"), "callback_data": card_data("go", key)},
+                 {"text": t("feat.actions"), "callback_data": card_data("acts", key)}]]
     repo = repo_path(name)
     if repo and feature_dir(repo, slug):
         dev = feature_dev(repo, slug)
@@ -3933,29 +4244,42 @@ def card(name, slug, note="", in_topic=True, feats=None):
                       link='<a href="%s/__sclaude/select?f=%s">%s</a>' % (
                           phone_origin(serve), label, t("card.phonelink")),
                       local="http://%s.localhost:%d" % (label, DEV_PORT))
-            row = [{"text": t("chrome.open"), "callback_data": card_data("open", key)}]
-            row += phone_button(origin, label)
-            if running:
-                row.append({"text": t("chrome.featstop"), "callback_data": card_data("stop", key)})
+            row = [{"text": named("chrome.open", "page.onlaptop"),
+                    "callback_data": card_data("open", key)}]
+            here = phone_button(origin, label)
+            if ON_PAGE:
+                for b in here:
+                    b["text"] = t("page.onphone")
+            row += here
+            switch = ({"text": named("chrome.featstop", "page.devstop"),
+                       "callback_data": card_data("stop", key)} if running else
+                      {"text": named("chrome.start", "page.devstart"),
+                       "callback_data": card_data("start", key)})
+            if ON_PAGE:
+                # A row each: where to open it, and starting or stopping it.
+                rows += [[b] for b in row] + [[switch]]
             else:
-                row.append({"text": t("chrome.start"), "callback_data": card_data("start", key)})
-            rows.append(row)
+                rows.append(row + [switch])
         else:
             text += t("card.nodev")
         # code-server opens the worktree itself with ?folder=, whichever
         # project it was started on.
         folder = "/?folder=" + urllib.parse.quote(feature_wt(repo, slug))
         last = []
-        if code_running():
-            text += t("card.codepage") if ON_PAGE else t(
-                "card.code", url=code_url() + folder, local="http://127.0.0.1:8080" + folder)
+        if ON_PAGE:
+            # The page has code-server's own screen, on this feature's
+            # worktree: nothing of it on the card.
+            pass
+        elif code_running():
+            text += t("card.code", url=code_url() + folder, local="http://127.0.0.1:8080" + folder)
             last += code_app_button(origin, feature_wt(repo, slug))
         else:
             text += t("card.nocode")
-            # Started in its own section, where it is stopped and restarted
-            # too; the card only leads there.
-            last.append({"text": t("card.codestart"), "callback_data": "menu_code"})
-        last.append({"text": t("repo.refresh"), "callback_data": card_data("refresh", key)})
+            # In a topic the card is the topic's one message: starting it
+            # there keeps the card in place.
+            last.append({"text": t("card.codestart"), "callback_data": card_data("code", key)})
+        last.append({"text": named("repo.refresh", "page.refresh"),
+                     "callback_data": card_data("refresh", key)})
         rows.append(last)
     if note:
         text += "\n\n" + note
@@ -4022,10 +4346,24 @@ def open_card(bot, name, slug):
     return True if load_record(repo, slug).get("card") else None
 
 
+def note_topic(bot, name, slug):
+    """Where a feature's notes go: its topic; the main chat (0) only when
+    the chat has no topics; None while neither — a topic not made yet, the
+    network, a feature whose worktree has gone."""
+    repo = repo_path(name)
+    if not repo or not feature_dir(repo, slug):
+        return None
+    thread = feature_topic(bot, name, slug)
+    if thread:
+        return thread
+    return 0 if time.time() < (read().get("topics_off_until") or 0) else None
+
+
 def redraw_cards(bot):
     # Every card in a feature's topic, drawn again: what it offers depends on
     # phone access (one button to the app, or the actions themselves), and a
     # card left as it was offers what does not work.
+    serve = serve_config()
     for repo in known_repos():
         name = os.path.basename(repo)
         feats = None
@@ -4035,7 +4373,72 @@ def redraw_cards(bot):
                 continue
             if feats is None:
                 feats, _ = features_of_name(name)
-            bot.edit(msg, *card(name, slug, feats=feats))
+            bot.edit(msg, *card(name, slug, feats=feats, config=serve))
+
+
+def shown_state(name, slug, state=None):
+    """Record the session state a chat card of the feature now shows."""
+    repo = repo_path(name)
+    if not repo or not feature_dir(repo, slug):
+        return
+    if state is None:
+        state = session_state(feature_session(repo, slug)[0])
+    record = load_record(repo, slug)
+    if (record.get("card_state") or "") != state:
+        record["card_state"] = state
+        save_record(repo, slug, record)
+
+
+# How often the cards in the topics are checked against their sessions.
+CARD_LOOK = 60
+_CARD_LOOKED = [0.0]
+
+
+def check_card_states(bot, now=None):
+    """A topic's card drawn again when its session changed: none, running,
+    waiting for the person, idle. A card is a message, drawn once; left as
+    it was it says "no session is open" beside one working."""
+    now = time.time() if now is None else now
+    if now - _CARD_LOOKED[0] < CARD_LOOK:
+        return
+    _CARD_LOOKED[0] = now
+    # Unanswered, every session would read as none and every card turn to
+    # "no session is open" for a minute.
+    agents()
+    if not _AGENTS["ok"]:
+        return
+    # The one answer serves the whole pass: a later call past AGENTS_FRESH,
+    # mid-way, could fail and read every session as none.
+    _AGENTS["at"] = float("inf")
+    try:
+        redraw_changed_cards(bot)
+    finally:
+        _AGENTS["at"] = time.time()
+
+
+def redraw_changed_cards(bot):
+    for repo in known_repos():
+        name = os.path.basename(repo)
+        feats = None
+        for slug in feature_records(repo):
+            if not feature_dir(repo, slug):
+                continue
+            record = load_record(repo, slug)
+            msg = record.get("card") or 0
+            if not msg:
+                continue
+            session, _step = feature_session(repo, slug)
+            state = session_state(session)
+            if state == (record.get("card_state") or ""):
+                continue
+            if feats is None:
+                feats, _ = features_of_name(name)
+            if not bot.edit(msg, *card(name, slug, feats=feats)):
+                # Not drawn: what the card shows is still the old state, and
+                # the next look tries again.
+                shown_state(name, slug, record.get("card_state") or "")
+            else:
+                shown_state(name, slug, state)
 
 
 def redraw_screens(bot):
@@ -4077,12 +4480,29 @@ def boot_time():
     return 0
 
 
+# Whether tailscale has answered since this process started: until it has,
+# a funnel kept from before the boot cannot be told from none.
+BOOT_LOOKED = [False]
+
+
 def phone_off_after_boot():
     # Phone access is off unless asked for since the machine started:
     # Tailscale keeps a funnel across reboots, and a door to the internet
     # nobody remembers opening is one to close. A restart of the bot alone
-    # leaves it as it was.
-    if not gate_origin(None, False):
+    # leaves it as it was. Tried at start and on the loop's turns until
+    # tailscale answers: the bot may start before tailscaled does, and a
+    # funnel first seen later would pass for one asked for.
+    if BOOT_LOOKED[0]:
+        return
+    out = run("tailscale serve status --json", timeout=10)
+    if not out.strip():
+        return
+    BOOT_LOOKED[0] = True
+    try:
+        config = json.loads(out)
+    except ValueError:
+        config = {}
+    if not gate_origin(config, False):
         return
     if (read().get("phone_on_at") or 0) >= boot_time():
         return
@@ -4100,8 +4520,9 @@ def wait_for_phone(message_id):
 def check_phone(bot):
     # Phone access changes from the chat, from the menu page (another
     # process) and from the terminal; the loop catches every one of them.
+    phone_off_after_boot()
     config = serve_config()
-    on = bool(gate_origin(config))
+    on = bool(gate_origin(config, True, True))
     if PHONE_SEEN[0] is None:
         PHONE_SEEN[0] = on
     elif on != PHONE_SEEN[0]:
@@ -4378,7 +4799,11 @@ def main():
             notices.check(bot, [(os.path.basename(repo), slug, channel)
                                 for repo in known_repos()
                                 for slug, channel in ask_channels(repo) if slug],
-                          lambda name, slug: feature_topic(bot, name, slug), log)
+                          lambda name, slug: note_topic(bot, name, slug), log,
+                          at_terminal=lambda pid: at_terminal({"pid": pid}),
+                          shown=channel_context,
+                          lost=lambda name, slug: topic_lost(bot)
+                          and feature_topic(bot, name, slug, renew=True))
         except Exception as exc:
             log.exception("sending sclaude's notes: %s", exc)
 
@@ -4397,6 +4822,11 @@ def main():
             check_new_topics(bot)
         except Exception as exc:
             log.exception("checking the feature topics: %s", exc)
+
+        try:
+            check_card_states(bot)
+        except Exception as exc:
+            log.exception("checking the cards' sessions: %s", exc)
 
     log.info("the daemon has stopped")
 

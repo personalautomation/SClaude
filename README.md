@@ -571,6 +571,18 @@ screen, with an address bar of its own, and code-server opens on the worktree
 the same way. The phone needs nothing but Telegram; Telegram Web on a computer
 works too.
 
+Opened from a feature's topic, the app stands on that feature: 📋 Sclaude is its
+card, 🌐 Chrome and 💻 Code-server open it and its worktree (code-server's screen
+shows its password), and "📍 Choose a feature" moves to another or to the whole
+machine. The card in the app has a button to a row: ▶️ continue the step, named
+by where the feature is; ⚙️ other feature actions, chosen right there and grouped
+by the step each leads back or on to, with the current step marked; 🌐 open the
+browser on the laptop; 📲 show the app here; and starting or stopping its dev
+server. Under the session's state it says how many minutes its prompt cache has
+left — going on with the session past them pays to write the whole conversation
+into the cache again. Continue and the actions start nothing beside a step at
+work or a question waiting for you.
+
 It works through `tailscale funnel`, which publishes
 `https://<node>.<tailnet>.ts.net:8443`. A gate in front lets in only your
 Telegram account (the one in `KEEPAWAKE_CHAT_ID`), checked by Telegram's own
@@ -697,17 +709,22 @@ not ask over one another. The topic starts with the feature's card — its step,
 issue and pull request, ▶️ continue the step, ⚙️ actions, its dev server (open on
 the laptop or the phone, start, stop) and 💻 code-server on its worktree; with
 phone access on these are in the app, and the card has one button to it — and
-"Menu" in the topic brings a fresh card. A new feature gets its topic as soon as
+"Menu" in the topic brings a fresh card. The card follows its session — within a
+minute of it starting, waiting for you or going idle. A new feature gets its topic as soon as
 it is started, and the topic takes the feature's name once it has one. After each review round the topic also
 gets where the review stands: the last review session's runs, findings, fixed,
 closed without a fix, still open, on earlier fixes and raised again, with the
 report's verdict — a message of its own each round, so the topic keeps the
-history. Typing an answer inside a topic answers
+history. And it follows what sclaude is doing there — steps, regressions,
+deploys — in short messages, silent unless something went wrong while you are
+away from the laptop. Typing an answer inside a topic answers
 that feature; in the main chat, with several questions open there, answer one
 with Telegram's Reply on its message. The menu, the sleep warning and questions not about a feature stay
-in the main chat. When `sclaude done` or `drop` cleans a feature up, its topic is
-deleted, everything in it included; `drop` therefore asks all its questions
-before it removes anything. Without Threaded Mode everything stays in one
+in the main chat. When `sclaude done` or `drop` cleans a feature up, it leaves the menus
+as soon as its worktree starts going, and its topic is deleted, everything in it
+included; `drop` therefore asks all its questions before it removes anything. A
+question still open about it elsewhere — the action list opened from the phone —
+is withdrawn, and its sclaude ends. Without Threaded Mode everything stays in one
 chat, as before. If `getMe` still says `has_topics_enabled: false` after the
 switch, change any classic setting (`/setjoingroups`) to refresh it.
 

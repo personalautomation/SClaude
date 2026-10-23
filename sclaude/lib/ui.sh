@@ -147,7 +147,17 @@ ask_once() {
   # byte (see clean_reply).
   [[ -n "$__in" ]] && stty iutf8 < /dev/tty 2>/dev/null
 
+  local __ended; __ended="$(ask_ended_mark)"
   while :; do
+    if [[ -n "$__ended" && -f "$__ended" ]]; then
+      # The feature is gone: the question goes, and so does this process — a
+      # caller handed an empty reply would only ask again.
+      printf '\n%s\n' "The feature $ASK_SLUG has ended elsewhere: nothing left to answer here." >&2
+      ask_retract
+      ask_forget
+      kill -TERM "$$" 2>/dev/null
+      exit 143
+    fi
     if [[ -n "$__in" ]]; then
       # read holds the pause itself: -t returns control after exactly ASK_POLL
       # if the human has typed nothing.

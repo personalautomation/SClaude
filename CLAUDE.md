@@ -71,11 +71,21 @@ breaks the other silently — grep before you edit:
   `telegram.json` and the clean-up's `ended` mark (`ask_record`,
   `ask_feature_end` in `io.sh`; `FEATURE_RECORD`, `ENDED_MARK` in
   `telegramd.py`) are named on both sides; `tests/io.py` and
+  `tests/keepawake.py` check each side. `bin/sclaude-notify --in` reads the
+  topic from that record's `thread` too; `tests/keepawake.py` checks it
+  names the same file.
+- `.sclaude/local/feature/closing` — a worktree whose removal has begun — is
+  written by `stop_dev` in `sclaude/lib/worktree.sh` (and taken back off when
+  git refuses the removal), and honoured by `sclaude-proxy` (no lazy start)
+  and by `CLOSING_MARK` in `keepawake/telegramd.py` (the menu offers the
+  feature no more); `tests/ports.py`, `tests/proxy.py` and
   `tests/keepawake.py` check each side.
 - `notes/` in a feature's channel — messages that ask nothing, such as where
   the review stands after each round — is written by `ask_notice` in
   `sclaude/lib/io.sh` and read by `NOTES_DIR` in `keepawake/notices.py`;
-  `tests/notices.py` runs both sides. The text itself is the file that
+  `tests/notices.py` runs both sides. So does `notes/feed.tsv` — what sclaude
+  prints about a feature, one tab-separated line each — written by `ask_feed`
+  in `io.sh` and read by `FEED_FILE` in `notices.py`. The text itself is the file that
   `SCLAUDE_REPORT_BRIEF` names to `sclaude/lib/review_report.py`
   (`review_report` in `run.sh`).
 

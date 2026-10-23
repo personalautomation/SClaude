@@ -310,7 +310,7 @@ review_quota_rerun() {
     info "  sclaude runs it again at $(date -d "@$due" +%H:%M), once the limit has reset; no session is needed for it."
     info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug"
   } >&2
-  "${INSTRUMENTS:-}/bin/sclaude-notify" --quiet \
+  "${INSTRUMENTS:-}/bin/sclaude-notify" --in "$wt" --quiet \
     "$slug: the automatic review of PR #$pr ran out of Claude quota; sclaude reruns it at $(date -d "@$due" +%H:%M)." \
     >/dev/null 2>&1 || true
   while now="$(date +%s)"; (( now < due )); do
@@ -2470,7 +2470,7 @@ review_yours_wait() {
   # person sent the gate round again, asking GitHub the same thing for ever.
   review_yours_report "$wt" "$pr" "$repo" \
     || warn "  Threads you decided to leave are still open on PR #$pr — resolve them there."
-  "${INSTRUMENTS:-}/bin/sclaude-notify" \
+  "${INSTRUMENTS:-}/bin/sclaude-notify" --in "$wt" \
     "$slug: PR #$pr waits for you — resolve on GitHub the review threads you decided to leave as they are." \
     >/dev/null 2>&1 || true
   while :; do
@@ -2846,7 +2846,7 @@ session_watch_start() {
               due=$(( $(date +%s) + ${LIMIT_RETRY:-1800} ))
             fi
             [[ -x "${INSTRUMENTS:-}/bin/sclaude-notify" ]] \
-              && "$INSTRUMENTS/bin/sclaude-notify" "$label: Claude hit its ${htype//_/-} limit. sclaude resumes the session by itself at $(date -d "@$due" +%H:%M)." \
+              && "$INSTRUMENTS/bin/sclaude-notify" ${wt:+--in "$wt"} "$label: Claude hit its ${htype//_/-} limit. sclaude resumes the session by itself at $(date -d "@$due" +%H:%M)." \
                    >/dev/null 2>&1 || true
           fi
           if (( $(date +%s) >= due )); then

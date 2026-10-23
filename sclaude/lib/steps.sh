@@ -502,6 +502,7 @@ step_title() { step_field "$1" 4; }
 #
 # A `done` feature, with its worktree:
 #   4/6 done, waiting for merge   the pull request is open
+#   4/6 done, local regression running   the suite after the step is running
 #   5/6 epilogue                  merged, and an epilogue was broken off
 #   6/6 retro                     merged; the clean-up with its retro is next
 #   all done                      the retro has run, or the feature changed
@@ -525,8 +526,17 @@ step_label() {
   fi
   branch="$(state_get "$state" branch 2>/dev/null || true)"
   [[ -n "$branch" ]] && merged="$(branch_pr_state "$branch")"
+  local running
   case "$merged" in
-    OPEN) echo "${#STEPS[@]}/$total done, waiting for merge"; return ;;
+    OPEN)
+      # Only here: it is a python start, for every feature the menu lists.
+      running="$(regression_running "$state")"
+      if [[ -n "$running" ]]; then
+        echo "${#STEPS[@]}/$total done, $running regression running"
+      else
+        echo "${#STEPS[@]}/$total done, waiting for merge"
+      fi
+      return ;;
     MERGED) ;;
     *) echo "${#STEPS[@]}/$total done"; return ;;
   esac
@@ -543,6 +553,29 @@ step_label() {
   else
     echo "$total/$total retro"
   fi
+}
+
+# The stage whose regression is running now, or nothing: a step closes
+# before the regression after it, and "waiting for merge" would be untrue for
+# the ten minutes the suite runs. A run killed midway leaves "running" behind,
+# so one started more than three hours ago no longer counts.
+regression_running() {
+  python3 - "$1" <<'PY' 2>/dev/null
+import datetime, json, sys
+with open(sys.argv[1]) as fh:
+    stages = json.load(fh).get("regression") or {}
+now = datetime.datetime.now(datetime.timezone.utc)
+for stage, run in stages.items():
+    if not isinstance(run, dict) or run.get("status") != "running":
+        continue
+    try:
+        started = datetime.datetime.fromisoformat(run.get("started") or "")
+    except ValueError:
+        continue
+    if started.tzinfo and (now - started).total_seconds() < 3 * 3600:
+        print(stage)
+        break
+PY
 }
 
 # Whether the feature's retrospective has run to its end: its last session

@@ -520,8 +520,13 @@ check_true("unhandled-part-not-skipped",
 # silently, since the calls are deliberately wrapped in `|| true`.
 check_true("notifier-resolved-by-path",
            re.search(r'^\s*sclaude-notify ', regression, re.M) is None)
+# Through notify_feature (io.sh), which sends it to the feature's topic and
+# itself addresses the notifier by path.
 check_true("notifier-uses-instruments",
-           '"$INSTRUMENTS/bin/sclaude-notify"' in regression)
+           'notify_feature "$slug"' in regression
+           and '"${INSTRUMENTS:-}/bin/sclaude-notify"'
+           in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                                "sclaude", "lib", "io.sh")).read())
 
 # What the watcher found is consumed once. Left uncleared, the same QA
 # comments were prepended to every later resume — and suppressed the accurate
@@ -1375,6 +1380,13 @@ check_true("prod-restore-after-the-block",
            re.search(r'^\s+fi\n\s+if \[\[ -n "\$snapshot" \]\]; then\n\s+environment_restore',
                      prod_block, re.M) is not None)
 check_true("prod-restore-not-a-block-command", "prod_cmds+=(\"environment_restore" not in deploy)
+
+# --in with no value after it: an option loop that cannot shift spins for ever.
+notify_run = subprocess.run(
+    [os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "sclaude-notify"),
+     "--in"], input="text", capture_output=True, text=True, timeout=10,
+    env=dict(os.environ, HOME=tempfile.mkdtemp()))
+check_true("notify-in-without-value-returns", notify_run.returncode == 0)
 
 if failures:
     for name, want, got in failures:

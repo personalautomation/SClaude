@@ -302,6 +302,12 @@ session_watch_stop
           "Done.\n\n- all closed;\n- sclaude goes on.\n\nReady. Then the preview.\n")
     check("closed-said-after-the-report",
           "No /exit needed" in RUN[RUN.index("session_report() {"):], True)
+    report = RUN[RUN.index("session_report() {"):]
+    report = report[:report.index("\n}\n")]
+    check("report-stays-in-the-terminal", "say " in report, False)
+    # The topic reads which step ended and which began, nothing more.
+    check("step-start-fed", 'ask_feed say "Step $(($(step_index "$step") + 1))/${#STEPS[@]} started' in RUN, True)
+    check("step-end-named", '"Step $(($(step_index "$step") + 1))/${#STEPS[@]} finished' in RUN, True)
 
     # --- the ended session is recorded with its reason ------------------------
     state = os.path.join(wt, ".sclaude/local/feature", "state.json")

@@ -722,7 +722,8 @@ that feature; in the main chat, with several questions open there, answer one
 with Telegram's Reply on its message. The menu, the sleep warning and questions not about a feature stay
 in the main chat. When `sclaude done` or `drop` cleans a feature up, it leaves the menus
 as soon as its worktree starts going, and its topic is deleted, everything in it
-included; `drop` therefore asks all its questions before it removes anything. A
+included, so the chat's "All" view is cleared of it too (Telegram lets the bot
+delete only messages under 48 hours old); `drop` therefore asks all its questions before it removes anything. A
 question still open about it elsewhere — the action list opened from the phone —
 is withdrawn, and its sclaude ends. Without Threaded Mode everything stays in one
 chat, as before. If `getMe` still says `has_topics_enabled: false` after the

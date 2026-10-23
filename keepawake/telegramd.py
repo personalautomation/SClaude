@@ -139,7 +139,13 @@ class Bot(object):
              for k, v in params.items() if v is not None}).encode()
         req = urllib.request.Request(url, data=data)
         with urllib.request.urlopen(req, timeout=http_timeout) as resp:
-            return json.load(resp)
+            out = json.load(resp)
+        # Here rather than in send: every way a message reaches a topic passes
+        # through, the retry without colours included.
+        if method.startswith("send") and params.get("message_thread_id"):
+            remember_in_topic(params["message_thread_id"],
+                              (out.get("result") or {}).get("message_id"))
+        return out
 
     # --- messages -----------------------------------------------------------
 
@@ -342,6 +348,10 @@ class Bot(object):
     def delete_topic(self, thread):
         # Whether the topic is gone — deleted now, or before, by hand. False
         # only when it may still be there: the network, Telegram's limits.
+        # Its messages first: in a private chat the topic goes, but what was
+        # said in it stays in the chat's "All" view.
+        if not clear_topic_messages(self, thread):
+            return False
         try:
             self.call("deleteForumTopic", chat_id=self.chat_id,
                       message_thread_id=thread)
@@ -3738,6 +3748,62 @@ def topic_pending(repo, slug, tried, tag):
     return now - first < TOPIC_WAIT
 
 
+# Every message in a feature's topic, the bot's and the person's, one id a
+# line in a file named by the topic. Deleting a topic in a private chat leaves
+# its messages standing in the "All" view, so delete_topic deletes them first.
+# Telegram lets a bot delete only what is under 48 hours old: older ones stay.
+TOPIC_LEDGER_DIR = "topics"
+# deleteMessages takes at most this many ids a call.
+DELETE_BATCH = 100
+
+
+def topic_ledger(thread):
+    base = os.environ.get("KEEPAWAKE_TOPICS") or os.path.join(
+        state.linux_state_dir(), TOPIC_LEDGER_DIR)
+    return os.path.join(base, "%d" % int(thread))
+
+
+def remember_in_topic(thread, message_id):
+    if not thread or not message_id:
+        return
+    try:
+        path = topic_ledger(thread)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("%d\n" % int(message_id))
+    except (OSError, TypeError, ValueError) as exc:
+        log.warning("a message of topic %s was not recorded: %s", thread, exc)
+
+
+def clear_topic_messages(bot, thread):
+    # Whether nothing recorded is left to delete. False only on a failure
+    # worth another try (the network): a refusal — a message too old, gone
+    # already — is retried id by id, and what still will not go is left.
+    path = topic_ledger(thread)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            ids = sorted({int(line) for line in fh if line.strip().isdigit()})
+    except OSError:
+        return True
+    for i in range(0, len(ids), DELETE_BATCH):
+        batch = ids[i:i + DELETE_BATCH]
+        try:
+            bot.call("deleteMessages", chat_id=bot.chat_id, message_ids=batch)
+        except urllib.error.HTTPError as exc:
+            log.warning("deleteMessages refused (%s); deleting one by one",
+                        getattr(exc, "telegram", "") or exc)
+            for mid in batch:
+                bot.delete(mid)
+        except Exception as exc:
+            log.warning("the messages of topic %s were not deleted: %s", thread, exc)
+            return False
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    return True
+
+
 # How long a topic delete is retried before its end mark is let go.
 TOPIC_DELETE_FOR = 86400
 # Telegram's refusals that mean a topic is not there to delete.
@@ -4804,6 +4870,7 @@ def main():
                         continue
                     remember_lang(msg.get("from"))
                     bot.thread = message_thread(msg)
+                    remember_in_topic(bot.thread, msg.get("message_id"))
                     handler.message(msg)
                 elif "callback_query" in upd:
                     cq = upd["callback_query"]

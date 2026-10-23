@@ -479,6 +479,8 @@ run_step() {
 
   echo ""
   echo "${BOLD}${BLUE}── $slug · step $(($(step_index "$step") + 1))/${#STEPS[@]}: $(step_title "$step") ──${OFF}"
+  # The topic gets the fact alone; the banner is drawn for a terminal.
+  ask_feed say "Step $(($(step_index "$step") + 1))/${#STEPS[@]} started: $(step_title "$step")"
   # Where to look at it, before anything else: with a server per feature,
   # localhost:3000 is the list of features, and the feature's own address is
   # the one thing a person needs from this header.
@@ -838,7 +840,7 @@ session_ended() {
   # nobody is at the session's end to answer. See done_marker.
   SESSION_AUTO_CLOSED=""
   session_closed "$(done_marker "$wt")" "$wt" "$session" \
-    "Session done — sclaude closed it." \
+    "Step $(($(step_index "$step") + 1))/${#STEPS[@]} finished: $(step_title "$step")" \
     && SESSION_AUTO_CLOSED=1
   # Left by the person in a tab of its own: the tab closed with its last
   # message, which is often the one that says what is left — once a review
@@ -2926,17 +2928,21 @@ session_closed() {
 # out by session_end.py, and the line after it says why: whatever the cut
 # missed, the person reads that the session is closed.
 #
+# All of it is for this terminal only, so echo rather than say: the message
+# itself never reaches the feature's topic, and the two headings around it
+# would arrive there bare, the /exit one about a terminal the reader is not at.
+#
 #   session_report <wt> <session>
 session_report() {
   local text
   text="$(python3 "$LIB/session_end.py" last "$(transcript_dir "$1")/$2.jsonl" 2>/dev/null || true)"
   [[ -n "$text" ]] || return 0
   echo ""
-  say "${BOLD}Its last message:${OFF}"
+  echo "${BOLD}Its last message:${OFF}"
   echo ""
   printf '%s\n' "$text" | sed 's/^/  /'
   echo ""
-  say "${BOLD}No /exit needed — sclaude carries on.${OFF}"
+  echo "${BOLD}No /exit needed — sclaude carries on.${OFF}"
 }
 
 # The plan, printed in the orchestrator's terminal when it is new to the person

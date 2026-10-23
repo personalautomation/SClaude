@@ -53,6 +53,8 @@ def check_true(name, got):
 DEFAULT_STATE = tempfile.mkdtemp(prefix="keepawake-test-default-")
 os.environ["KEEPAWAKE_STATE"] = os.path.join(DEFAULT_STATE, "state.json")
 os.environ["KEEPAWAKE_LOCK"] = os.path.join(DEFAULT_STATE, ".lock")
+# The ids of the messages in each topic, which the bot deletes with it.
+os.environ["KEEPAWAKE_TOPICS"] = os.path.join(DEFAULT_STATE, "topics")
 
 
 class sandbox(object):
@@ -4215,6 +4217,65 @@ try:
 finally:
     telegramd.CLAUDE_PROJECTS = _saved_projects
     shutil.rmtree(_projects)
+
+# --------------------------------------- a topic's messages go with the topic
+#
+# In a private chat a deleted topic leaves its messages in the "All" view, so
+# every message sent into a topic is recorded, and deleted before the topic.
+import io
+import urllib.request
+from keepawake import telegramd as tg_ledger
+
+_calls = []
+_refuse = set()
+
+
+class _Reply(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _fake_urlopen(req, timeout=None):
+    import urllib.parse as _parse
+    method = req.full_url.rsplit("/", 1)[1]
+    params = dict(_parse.parse_qsl(req.data.decode()))
+    _calls.append((method, params))
+    if method in _refuse:
+        raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {},
+                                     io.BytesIO(b'{"description": "message can\'t be deleted"}'))
+    return _Reply(json.dumps({"ok": True, "result": {"message_id": 40 + len(_calls)}}).encode())
+
+
+_saved_urlopen = urllib.request.urlopen
+urllib.request.urlopen = _fake_urlopen
+try:
+    lbot = tg_ledger.Bot("t:k", 1)
+    lbot.send("in the topic", thread=7)
+    lbot.send("in the main chat", thread=0)
+    lbot.send("another in the topic", thread=7)
+    tg_ledger.remember_in_topic(7, 5)  # the person's message, from the poll
+    with open(tg_ledger.topic_ledger(7)) as fh:
+        check("a topic's messages are recorded, the main chat's are not",
+              fh.read().split(), ["41", "43", "5"])
+    _calls[:] = []
+    check("the topic goes", lbot.delete_topic(7), True)
+    check("its messages are deleted before it",
+          [(m, p.get("message_ids")) for m, p in _calls],
+          [("deleteMessages", "[5, 41, 43]"), ("deleteForumTopic", None)])
+    check("and the record with them", os.path.exists(tg_ledger.topic_ledger(7)), False)
+    # A batch Telegram refuses whole is tried id by id.
+    tg_ledger.remember_in_topic(8, 9)
+    _calls[:] = []
+    _refuse.add("deleteMessages")
+    lbot.delete_topic(8)
+    check("a refused batch goes one by one",
+          [m for m, _ in _calls], ["deleteMessages", "deleteMessage", "deleteForumTopic"])
+finally:
+    urllib.request.urlopen = _saved_urlopen
+    _refuse.clear()
 
 # ------------------------------------------------------------- the outcome
 

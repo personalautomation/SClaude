@@ -160,7 +160,12 @@ question — lives in the feature's worktree and nowhere else, in
 topic goes with the worktree: `remove_worktree` reads the record while the
 worktree is there and, once it is gone, leaves it in the channel's `ended` mark
 (`ask_record`, `ask_feature_end`), which also ends the binding. The bot deletes
-the topic — Telegram deletes every message in it with it — and the channel. So a
+the topic's messages, then the topic, then the channel. The messages go by id:
+in a private chat a deleted topic leaves them standing in the chat's "All" view.
+So every message sent into a topic or typed there is recorded, one id a line,
+in `~/.local/state/keepawake/topics/<thread>` (`remember_in_topic`), and
+`delete_topic` sends them to `deleteMessages` first. Telegram lets a bot delete
+only messages under 48 hours old; older ones stay in "All". So a
 feature asks nothing once its worktree is removed: `done` makes its offer about
 side worktrees first, and `drop` asks all its questions (worktree, branches, pull
 request, issue) before it does any of it. A worktree removed by hand takes the

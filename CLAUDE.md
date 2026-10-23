@@ -89,6 +89,13 @@ breaks the other silently — grep before you edit:
   `SCLAUDE_REPORT_BRIEF` names to `sclaude/lib/review_report.py`
   (`review_report` in `run.sh`).
 
+- The record of a topic's messages, `~/.local/state/keepawake/topics/<thread>`
+  (`KEEPAWAKE_TOPICS` in tests), is named once, by `topic_ledger` in
+  `keepawake/state.py`. It is written by `remember_in_topic` in
+  `keepawake/telegramd.py` and by `bin/sclaude-notify`, which sends past the
+  bot and imports the function, and read by `clear_topic_messages`, which
+  deletes them with the topic; `tests/keepawake.py` runs both writers.
+
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/run.sh`, which decides by it
   whether a review round stays in the same session; `tests/review-round.py`

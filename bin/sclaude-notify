@@ -71,15 +71,19 @@ chat="${chat%\"}"; chat="${chat#\"}"
 # arrive and did not, and swallowing that in silence is how a regression summary
 # disappears without anybody learning it was ever sent. Standard library only —
 # this runs on a machine where nothing was installed for it.
-python3 - "$token" "$chat" "$text" "${quiet:-}" "$feature" <<'PY' || exit 0
+# The checkout this script lives in, through the link in ~/.local/bin: the
+# bot's record of a topic is named by its code, which is imported from there.
+root="$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")"
+python3 - "$token" "$chat" "$text" "${quiet:-}" "$feature" "$root" <<'PY' || exit 0
 import html
 import json
+import os
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 
-token, chat, text, quiet, feature = sys.argv[1:6]
+token, chat, text, quiet, feature, root = sys.argv[1:7]
 
 # The feature's topic, when it has one: the bot keeps its id in the worktree.
 thread = 0
@@ -129,6 +133,18 @@ try:
         gone = (b"thread not found", b"topic_id_invalid", b"topic_deleted", b"not a forum")
         try:
             out = send(dict(params, message_thread_id=thread))
+            # Into the bot's record of the topic, which it deletes with the
+            # topic: a deleted topic leaves its messages in the chat's "All"
+            # view. The path is the bot's own (keepawake/state.py).
+            try:
+                sys.path.insert(0, root)
+                from keepawake.state import topic_ledger
+                ledger = topic_ledger(thread)
+                os.makedirs(os.path.dirname(ledger), exist_ok=True)
+                with open(ledger, "a") as fh:
+                    fh.write("%d\n" % int((out.get("result") or {}).get("message_id")))
+            except Exception:
+                pass
         except urllib.error.HTTPError as exc:
             body = exc.read()
             if exc.code != 400 or not any(w in body.lower() for w in gone):

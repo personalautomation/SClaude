@@ -419,6 +419,80 @@ regression_duration() {
   fi
 }
 
+# The specs that failed, from the log of the part's last attempt, for the line
+# that says the run is red: "failed on e2e" alone names a ten-minute suite, and
+# the title a spec was given is what tells a reader what broke.
+#
+# From the summary Playwright ends a run with, whichever reporter wrote the
+# rest: it lists each spec that failed in the end, once, without its time, and
+# keeps the flaky ones — failed, then passed on a retry — in a block of their
+# own, which is not read:
+#
+#     2 failed
+#       [chromium] › e2e/login.spec.ts:14:5 › Login › signs in ──────────
+#       [chromium] › e2e/cart.spec.ts:8:3 › adds an item ────────────────
+#     1 flaky
+#
+# A run cut off before its summary falls back to the `list` reporter's lines,
+# "✘  12 [chromium] › e2e/login.spec.ts:14:5 › Login › signs in (3.2s)", minus
+# those of a spec that passed on a retry after them. Either reads as
+# "Login › signs in (login.spec.ts:14)": the first three, and how many more;
+# nothing for a part whose log has neither.
+#
+#   regression_failed_specs <log> <first line of the attempt>
+regression_failed_specs() {
+  python3 - "$1" "${2:-1}" <<'PY' 2>/dev/null || true
+import re, sys
+
+path, start = sys.argv[1], int(sys.argv[2])
+try:
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        lines = fh.read().splitlines()[start - 1:]
+except OSError:
+    sys.exit(0)
+lines = [re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line) for line in lines]
+
+# "[project] › path:line:col › title", the project optional, the path ending
+# at the first " › " so that a space inside it is the path's.
+SPEC = re.compile(r"^(?:\[[^\]]*\] › )?(?:.*/)?([^/]+?):(\d+)(?::\d+)? › (.+)$")
+
+
+def named(text):
+    m = SPEC.match(text.strip())
+    return "%s (%s:%s)" % (m.group(3), m.group(1), m.group(2)) if m else text.strip()
+
+
+names = []
+summary = None
+for i, line in enumerate(lines):
+    if re.match(r"^\s+\d+ failed\s*$", line):
+        summary = i
+if summary is not None:
+    for line in lines[summary + 1:]:
+        if not re.match(r"^\s{4,}\S", line):
+            break
+        names.append(named(re.sub(r"\s*─+\s*$", "", line)))
+else:
+    MARK = re.compile(r"^\s+([✓✘])\s+\d+\s+(.*?)(?:\s+\(retry #\d+\))?(?:\s+\([\d.]+(?:ms|s|m|h)\))?\s*$")
+    last = {}
+    for line in lines:
+        m = MARK.match(line)
+        if m:
+            spec = named(m.group(2))
+            last.pop(spec, None)
+            last[spec] = m.group(1)
+    names = [spec for spec, mark in last.items() if mark == "✘"]
+
+seen = []
+for name in names:
+    if name not in seen:
+        seen.append(name)
+if seen:
+    more = " (+%d more)" % (len(seen) - 3) if len(seen) > 3 else ""
+    print("; ".join(seen[:3]) + more)
+PY
+}
+
 # Rewrites one part's line in the list printed at the start of a run.
 #
 # The list stands above the cursor: the part being marked is as many lines up
@@ -601,7 +675,7 @@ regression_run_body() {
   local wt="$1" slug="$2" stage="$3" only="${4:-}"
   local state="$wt/.sclaude/local/feature/state.json"
   local log="$wt/.sclaude/local/feature/regression.log"
-  local base parts part cmd failed="" passed=0
+  local base parts part cmd failed="" failed_specs="" passed=0
   local started part_started part_total rc retried from
   # The tree under test, taken before the run rather than after it: a change
   # made while the suite ran was not tested, and must not be called green.
@@ -801,6 +875,7 @@ regression_run_body() {
     else
       regression_line "$stage" "$parts" "$part" failed "$part_total" "$wt"
       failed="$part"
+      failed_specs="$(regression_failed_specs "$log" "$from")"
       # We stop at the first failure. The parts are ordered cheapest first, and
       # a failing typecheck makes everything after it noise — the session that
       # comes next has one thing to fix, not a page of consequences.
@@ -842,7 +917,7 @@ regression_run_body() {
     state_set "$state" "regression.$stage.status" failed
     state_set "$state" "regression.$stage.failed_at" "$failed"
     state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
-    warn "  ── $passed/$count, $(regression_duration "$elapsed") · failed on $failed"
+    warn "  ── $passed/$count, $(regression_duration "$elapsed") · failed on $failed${failed_specs:+: $failed_specs}"
     info "     log: .sclaude/local/feature/regression.log"
     regression_notify_done "$slug" "$stage" "$failed" "$passed" "$count" "$elapsed" "$log"
     return 1

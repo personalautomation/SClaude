@@ -163,8 +163,11 @@ worktree is there and, once it is gone, leaves it in the channel's `ended` mark
 the topic's messages, then the topic, then the channel. The messages go by id:
 in a private chat a deleted topic leaves them standing in the chat's "All" view.
 So every message sent into a topic or typed there is recorded, one id a line,
-in `~/.local/state/keepawake/topics/<thread>` (`remember_in_topic`), and
-`delete_topic` sends them to `deleteMessages` first. Telegram lets a bot delete
+in `~/.local/state/keepawake/topics/<thread>` (`topic_ledger` in `state.py`):
+by the bot (`remember_in_topic`) and by `sclaude-notify`, which sends past it.
+`delete_topic` sends them to `deleteMessages` first, having taken the record
+aside by a rename, so an id `sclaude-notify` appends meanwhile starts a new one
+and is deleted on the next turn rather than lost. Telegram lets a bot delete
 only messages under 48 hours old; older ones stay in "All". So a
 feature asks nothing once its worktree is removed: `done` makes its offer about
 side worktrees first, and `drop` asks all its questions (worktree, branches, pull

@@ -1363,6 +1363,51 @@ if wedged:
     check("not-wedged-when-nothing-failed",
           server_wedged("=== e2e ===\n  61 passed (7.0m)\n"), False)
 
+# The red line names the specs that failed, by their titles.
+specs_fn = re.search(r"^regression_failed_specs\(\) \{.*?^\}", regression, re.S | re.M)
+check_true("failed-specs-helper-exists", specs_fn is not None)
+
+
+def failed_specs(log_text, start=1):
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "regression.log")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(log_text)
+        script = specs_fn.group(0) + '\nregression_failed_specs "$1" "$2"'
+        return subprocess.run(["bash", "-c", script, "_", path, str(start)],
+                              capture_output=True, text=True).stdout
+
+
+if specs_fn:
+    SUMMARY = ("  ✘  2 [chromium] › e2e/login.spec.ts:14:5 › Login › signs in (1.5m)\n"
+               "  ✘  5 [chromium] › e2e/flaky.spec.ts:1:1 › flaky (2.1s)\n"
+               "  ✓  6 [chromium] › e2e/flaky.spec.ts:1:1 › flaky (retry #1) (1.0s)\n"
+               "  2 failed\n"
+               "    [chromium] › e2e/login.spec.ts:14:5 › Login › signs in ─────────\n"
+               "    [chromium] › e2e/my dir/cart.spec.ts:8:3 › a; b ──────\n"
+               "  1 flaky\n"
+               "    [chromium] › e2e/flaky.spec.ts:1:1 › flaky ─────\n"
+               "  59 passed (7.2m)\n")
+    check("failed-specs-from-the-summary", failed_specs(SUMMARY),
+          "Login › signs in (login.spec.ts:14); a; b (cart.spec.ts:8)\n")
+    check("failed-specs-through-colours",
+          failed_specs("  \x1b[31m2 failed\x1b[39m\n"
+                       "    \x1b[31m[chromium] › a.spec.ts:3:1 › red\x1b[39m\n"), "red (a.spec.ts:3)\n")
+    check("failed-specs-counts-the-rest",
+          failed_specs("  5 failed\n" + "".join("    [chromium] › s.spec.ts:%d:1 › t%d\n" % (i, i)
+                                                 for i in range(1, 6))),
+          "t1 (s.spec.ts:1); t2 (s.spec.ts:2); t3 (s.spec.ts:3) (+2 more)\n")
+    # Cut off before the summary: the list lines, a spec retried green left out.
+    check("failed-specs-without-a-summary", failed_specs(SUMMARY[:SUMMARY.index("  2 failed")]),
+          "Login › signs in (login.spec.ts:14)\n")
+    check("failed-specs-only-this-attempt",
+          failed_specs("  1 failed\n    a.spec.ts:1:1 › early\n=== again ===\n"
+                       "  1 failed\n    b.spec.ts:2:1 › late\n", start=4),
+          "late (b.spec.ts:2)\n")
+    check("failed-specs-silent-without-playwright", failed_specs("error TS2304\n"), "")
+check_true("red-line-names-the-specs",
+           "failed on $failed${failed_specs:+: $failed_specs}" in regression)
+
 # Once, local, e2e — and a retried part's time is not the suite's.
 check_true("retry-only-local-e2e-once",
            '"$stage" == "local" && "$part" == "e2e" && -z "$retried"' in regression)

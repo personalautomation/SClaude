@@ -4169,6 +4169,53 @@ check("sclaude-notify reads the bot's feature record",
       (True, True))
 check("and knows a lost topic by the bot's own words",
       [w for w in telegramd.TOPIC_GONE if 'b"%s"' % w not in _notify], [])
+# And records what it sends to a topic where the bot deletes it from: run
+# against a fake Telegram, the id it was given lands in the bot's record.
+_tg_dir = tempfile.mkdtemp(prefix="keepawake-test-notify-")
+_srv_code = (
+    "import http.server, json, sys\n"
+    "class H(http.server.BaseHTTPRequestHandler):\n"
+    "    def do_POST(self):\n"
+    "        self.rfile.read(int(self.headers['Content-Length']))\n"
+    "        body = json.dumps({'ok': True, 'result': {'message_id': 4321}}).encode()\n"
+    "        self.send_response(200); self.end_headers(); self.wfile.write(body)\n"
+    "    def log_message(self, *a): pass\n"
+    "s = http.server.HTTPServer(('127.0.0.1', 0), H)\n"
+    "print(s.server_address[1], flush=True)\n"
+    "s.handle_request()\n")
+_srv = subprocess.Popen([sys.executable, "-c", _srv_code], stdout=subprocess.PIPE, text=True)
+try:
+    _port = _srv.stdout.readline().strip()
+    _home = os.path.join(_tg_dir, "home")
+    os.makedirs(os.path.join(_home, ".config/keepawake"))
+    with open(os.path.join(_home, ".config/keepawake/env"), "w") as fh:
+        fh.write("KEEPAWAKE_BOT_TOKEN=t:k\nKEEPAWAKE_CHAT_ID=1\n")
+    _wt = os.path.join(_tg_dir, "wt")
+    os.makedirs(os.path.join(_wt, ".sclaude/local/feature"))
+    with open(os.path.join(_wt, ".sclaude/local/feature", telegramd.FEATURE_RECORD), "w") as fh:
+        json.dump({"thread": 77}, fh)
+    _notify_src = _notify.replace("https://api.telegram.org/bot%s/sendMessage",
+                                  "http://127.0.0.1:%s/bot%%s/sendMessage" % _port)
+    _bin = os.path.join(_tg_dir, "bin")
+    os.makedirs(_bin)
+    with open(os.path.join(_bin, "sclaude-notify"), "w") as fh:
+        fh.write(_notify_src)
+    # Beside a copy of the checkout, as the link resolves to one.
+    os.symlink(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "keepawake"),
+               os.path.join(_tg_dir, "keepawake"))
+    _env = dict(os.environ, HOME=_home, KEEPAWAKE_TOPICS=os.path.join(_tg_dir, "topics"))
+    subprocess.run(["bash", os.path.join(_bin, "sclaude-notify"), "--in", _wt, "hello"],
+                   env=_env, timeout=30)
+    os.environ["KEEPAWAKE_TOPICS"], _saved_topics = _env["KEEPAWAKE_TOPICS"], os.environ["KEEPAWAKE_TOPICS"]
+    try:
+        _ledger = telegramd.topic_ledger(77)
+        check("sclaude-notify records its message where the bot reads",
+              open(_ledger).read() if os.path.exists(_ledger) else None, "4321\n")
+    finally:
+        os.environ["KEEPAWAKE_TOPICS"] = _saved_topics
+finally:
+    _srv.kill()
+    shutil.rmtree(_tg_dir, ignore_errors=True)
 
 # A feature started at the terminal that has asked nothing has no record of
 # the bot's, and is still found by its state.
@@ -4266,6 +4313,24 @@ try:
           [(m, p.get("message_ids")) for m, p in _calls],
           [("deleteMessages", "[5, 41, 43]"), ("deleteForumTopic", None)])
     check("and the record with them", os.path.exists(tg_ledger.topic_ledger(7)), False)
+    # A message recorded while the bot deletes is not lost with the record.
+    tg_ledger.remember_in_topic(9, 1)
+    _late = {"done": False}
+    _orig_call = lbot.call
+
+    def _call_and_append(method, **params):
+        if method == "deleteMessages" and not _late["done"]:
+            _late["done"] = True
+            tg_ledger.remember_in_topic(9, 2)
+        return _orig_call(method, **params)
+    lbot.call = _call_and_append
+    _calls[:] = []
+    check("a topic written to meanwhile is not taken yet", lbot.delete_topic(9), False)
+    check("and the late id is kept", open(tg_ledger.topic_ledger(9)).read(), "2\n")
+    check("the next turn deletes it", lbot.delete_topic(9), True)
+    check("both were deleted",
+          [p.get("message_ids") for m, p in _calls if m == "deleteMessages"], ["[1]", "[2]"])
+    lbot.call = _orig_call
     # A batch Telegram refuses whole is tried id by id.
     tg_ledger.remember_in_topic(8, 9)
     _calls[:] = []

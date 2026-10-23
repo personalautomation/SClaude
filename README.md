@@ -715,8 +715,9 @@ it is started, and the topic takes the feature's name once it has one. After eac
 gets where the review stands: the last review session's runs, findings, fixed,
 closed without a fix, still open, on earlier fixes and raised again, with the
 report's verdict — a message of its own each round, so the topic keeps the
-history. And it follows what sclaude is doing there — steps, regressions,
-deploys — in short messages, silent unless something went wrong while you are
+history. And it follows what sclaude is doing there — which step started
+and which finished, regressions (a red one names the specs that failed, by
+their titles), deploys — in short messages, silent unless something went wrong while you are
 away from the laptop. Typing an answer inside a topic answers
 that feature; in the main chat, with several questions open there, answer one
 with Telegram's Reply on its message. The menu, the sleep warning and questions not about a feature stay

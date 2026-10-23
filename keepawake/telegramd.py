@@ -3749,18 +3749,13 @@ def topic_pending(repo, slug, tried, tag):
 
 
 # Every message in a feature's topic, the bot's and the person's, one id a
-# line in a file named by the topic. Deleting a topic in a private chat leaves
-# its messages standing in the "All" view, so delete_topic deletes them first.
+# line in a file named by the topic (state.topic_ledger; bin/sclaude-notify
+# appends to it as well). Deleting a topic in a private chat leaves its
+# messages standing in the "All" view, so delete_topic deletes them first.
 # Telegram lets a bot delete only what is under 48 hours old: older ones stay.
-TOPIC_LEDGER_DIR = "topics"
+topic_ledger = state.topic_ledger
 # deleteMessages takes at most this many ids a call.
 DELETE_BATCH = 100
-
-
-def topic_ledger(thread):
-    base = os.environ.get("KEEPAWAKE_TOPICS") or os.path.join(
-        state.linux_state_dir(), TOPIC_LEDGER_DIR)
-    return os.path.join(base, "%d" % int(thread))
 
 
 def remember_in_topic(thread, message_id):
@@ -3779,12 +3774,26 @@ def clear_topic_messages(bot, thread):
     # Whether nothing recorded is left to delete. False only on a failure
     # worth another try (the network): a refusal — a message too old, gone
     # already — is retried id by id, and what still will not go is left.
+    #
+    # Taken aside by a rename before it is read: sclaude-notify may append to
+    # the record meanwhile, and an id written between the read and the unlink
+    # would be lost. What it writes after the rename starts the record anew,
+    # and is read on the next turn. A copy taken aside and not cleared — the
+    # network, a kill — is read again with it.
     path = topic_ledger(thread)
     try:
-        with open(path, encoding="utf-8") as fh:
-            ids = sorted({int(line) for line in fh if line.strip().isdigit()})
+        os.replace(path, "%s.%d" % (path, time.time_ns()))
     except OSError:
-        return True
+        pass
+    taken = glob.glob(glob.escape(path) + ".*")
+    ids = set()
+    for one in taken:
+        try:
+            with open(one, encoding="utf-8") as fh:
+                ids.update(int(line) for line in fh if line.strip().isdigit())
+        except OSError:
+            pass
+    ids = sorted(ids)
     for i in range(0, len(ids), DELETE_BATCH):
         batch = ids[i:i + DELETE_BATCH]
         try:
@@ -3797,11 +3806,12 @@ def clear_topic_messages(bot, thread):
         except Exception as exc:
             log.warning("the messages of topic %s were not deleted: %s", thread, exc)
             return False
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
-    return True
+    for one in taken:
+        try:
+            os.unlink(one)
+        except OSError:
+            pass
+    return not os.path.exists(path)
 
 
 # How long a topic delete is retried before its end mark is let go.

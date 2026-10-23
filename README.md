@@ -784,8 +784,15 @@ journalctl --user -u keepawake-telegram.service -f   # the bot's log
 Claude Code's status line. On the left, the sclaude session (`1-plan`,
 `4-review(2)`, `4-fix-preview`, `5-epilogue`, …) and the path; in the middle the
 branch, the feature's pull request, the session's name and the worktree; on the
-right the model, the effort, how full the context is, and the usage limits. On a
-narrow terminal the least important fields drop out first.
+right the model, the effort, how full the context is, the prompt cache, and the
+usage limits. On a narrow terminal the least important fields drop out first.
+
+`💾 37m` is how long the prompt cache has left: past it, the next message pays
+to write the whole context into the cache again. Once it has expired the field
+says what that costs — `off ~4%` of the five-hour limit, or `off ~$0.80` until
+the status line has seen enough spend to know what a percent is worth. That
+rate is learnt across all sessions on the machine, and use outside Claude Code
+moves the limit too, so the share is an estimate on the high side.
 
 `install.sh` links it to `~/.claude/statusline.py`, which `settings.json` points
 at.

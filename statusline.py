@@ -10,6 +10,7 @@ back to a bare path.
 Symlinked to ~/.claude/statusline.py by this repository's install.sh — that is
 the path settings.json names, so the symlink is what keeps the setting working.
 """
+import calendar
 import json
 import os
 import re
@@ -84,6 +85,179 @@ def fmt_reset(epoch):
         return None
     h, m = left // 3600, (left % 3600) // 60
     return "%dh%02dm" % (h, m) if h else "%dm" % m
+
+
+# How long the prompt cache outlives the last request, by the TTL it was
+# written with.
+TTL_5M, TTL_1H = 300, 3600
+
+# How far back in the transcript the last request is looked for. A turn's
+# tool output can be large; this is several of them.
+TRANSCRIPT_TAIL = 1 << 20
+
+# Base input price, $ per million tokens, by model id prefix; the most
+# specific prefix first. A cache write costs 1.25x that with a 5-minute TTL,
+# 2x with a 1-hour one.
+INPUT_PRICE = [
+    ("claude-fable", 10.0), ("claude-mythos", 10.0),
+    ("claude-opus-5-5", 4.0), ("claude-opus", 5.0),
+    ("claude-sonnet-4", 3.0), ("claude-sonnet", 2.0),
+    ("claude-haiku-5", 0.10), ("claude-haiku", 1.0),
+]
+WRITE_FACTOR = {TTL_5M: 1.25, TTL_1H: 2.0}
+
+
+def parse_ts(ts):
+    """ISO-8601 `2026-10-23T11:08:44.451Z` as epoch seconds, else None."""
+    try:
+        base, _, frac = ts.rstrip("Z").partition(".")
+        t = calendar.timegm(time.strptime(base, "%Y-%m-%dT%H:%M:%S"))
+        return t + (float("0." + frac) if frac.isdigit() else 0.0)
+    except (AttributeError, ValueError, OverflowError):
+        return None
+
+
+def last_request(path):
+    """(epoch, usage, ttl) of the main conversation's last request, else None.
+
+    The time is when its answer was written; the cache was read or written by
+    that request and lives for the TTL from then. The TTL is that of the last
+    request that wrote to the cache: one that only read it keeps the TTL the
+    cache already had. Subagents (sidechains) keep caches of their own.
+    """
+    if not path:
+        return None
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - TRANSCRIPT_TAIL))
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    found = None
+    for raw in reversed(lines):
+        if b'"assistant"' not in raw or b'"usage"' not in raw:
+            continue
+        try:
+            e = json.loads(raw)
+        except ValueError:
+            continue
+        if e.get("type") != "assistant" or e.get("isSidechain"):
+            continue
+        usage = dig(e, "message", "usage")
+        if not isinstance(usage, dict) or dig(e, "message", "model") == "<synthetic>":
+            continue
+        if found is None:
+            when = parse_ts(e.get("timestamp"))
+            if when is None:
+                continue
+            found = (when, usage)
+        written = usage.get("cache_creation") or {}
+        if written.get("ephemeral_1h_input_tokens"):
+            return found + (TTL_1H,)
+        if written.get("ephemeral_5m_input_tokens"):
+            return found + (TTL_5M,)
+    return found + (TTL_5M,) if found else None
+
+
+def prefix_tokens(usage):
+    """The tokens the next request sends ahead of its new input: all of the last one."""
+    return sum(usage.get(k) or 0 for k in (
+        "input_tokens", "cache_creation_input_tokens",
+        "cache_read_input_tokens", "output_tokens"))
+
+
+def rewrite_cost(model, tokens, ttl):
+    """Dollars to write `tokens` into the cache again, else None for an unknown model."""
+    for prefix, price in INPUT_PRICE:
+        if (model or "").startswith(prefix):
+            return tokens * price * WRITE_FACTOR[ttl] / 1e6
+    return None
+
+
+# Spend across every session on this machine, against the five-hour limit, so
+# that dollars can be told as a share of it. The limit is not in dollars and
+# Claude Code does not say what a percent is worth; this file learns it from
+# how far the percentage moves while the sessions spend. Use outside Claude
+# Code moves the percentage too, which makes the figure an estimate on the
+# high side.
+SPEND_FILE = "/tmp/claude-statusline-spend.json"
+
+# Below these the rate is mostly rounding.
+RATE_MIN_SPEND = 0.5
+RATE_MIN_PCT = 1.0
+
+
+def remember_spend(d):
+    """Add this session's new spend to the window's; return % per dollar, else None."""
+    sid = d.get("session_id")
+    cost = dig(d, "cost", "total_cost_usd")
+    five = dig(d, "rate_limits", "five_hour") or {}
+    pct, window = five.get("used_percentage"), five.get("resets_at")
+    try:
+        with open(SPEND_FILE) as f:
+            s = json.load(f)
+        if not isinstance(s, dict):
+            s = {}
+    except (OSError, ValueError):
+        s = {}
+    rate = s.get("rate")
+    if not sid or not isinstance(cost, (int, float)) \
+            or not isinstance(pct, (int, float)) or not window:
+        return rate
+    # resets_at is rounded to the minute: a second of jitter is not a new window.
+    window = int(window) // 60
+    if s.get("window") != window:
+        s.update(window=window, start_pct=pct, spend=0.0)
+    sessions = s.get("sessions") or {}
+    # A session seen for the first time spent its money before we watched:
+    # when within the window is unknown, so it counts from here on.
+    delta = cost - sessions.get(sid, cost)
+    if delta > 0:
+        s["spend"] = s.get("spend", 0.0) + delta
+    sessions[sid] = cost
+    # Sessions gone for a day are not coming back.
+    stamp = time.time()
+    seen = s.get("seen") or {}
+    seen[sid] = stamp
+    for old in [k for k, t in seen.items() if stamp - t > 86400]:
+        seen.pop(old, None)
+        sessions.pop(old, None)
+    s.update(sessions=sessions, seen=seen)
+    moved = pct - s.get("start_pct", pct)
+    if s["spend"] >= RATE_MIN_SPEND and moved >= RATE_MIN_PCT:
+        rate = s["rate"] = moved / s["spend"]
+    tmp = "%s.%d" % (SPEND_FILE, os.getpid())
+    try:
+        with open(tmp, "w") as f:
+            json.dump(s, f)
+        os.replace(tmp, SPEND_FILE)
+    except OSError:
+        pass
+    return rate
+
+
+def cache_piece(d, rate):
+    """`37m` until the cache expires, or what it costs to rebuild once it has.
+
+    The rebuild is told as a share of the five-hour limit (`~4%`) once a rate
+    is known, else in dollars. None when there is nothing to say.
+    """
+    last = last_request(d.get("transcript_path"))
+    if not last:
+        return None
+    when, usage, ttl = last
+    left = when + ttl - time.time()
+    if left > 0:
+        mins = int((left + 59) // 60)
+        return paint("%dm" % mins, WARN if left < 120 else GREY)
+    cost = rewrite_cost(dig(d, "model", "id"), prefix_tokens(usage), ttl)
+    if cost is None:
+        return paint("off", HOT)
+    if rate:
+        return paint("off ~%.0f%%" % max(1, round(cost * rate)), HOT)
+    return paint("off ~$%.2f" % cost, HOT)
 
 
 def home_path(p):
@@ -263,7 +437,11 @@ def build(d, opts):
             shown = "%s %s" % (bar(used, bw), shown)
         right.append(ico("⬢") + shown)
 
-    five = dig(d, "rate_limits", "five_hour")
+    # Worked out once in main(): it reads the transcript.
+    if opts.get("cache"):
+        right.append(ico("💾") + opts["cache"])
+
+    five =dig(d, "rate_limits", "five_hour")
     if opts["limit"] and isinstance(five, dict):
         piece = []
         when = fmt_reset(five.get("resets_at"))
@@ -373,6 +551,10 @@ def main():
     except Exception:
         d = {}
     remember_context(d)
+    try:
+        cache = cache_piece(d, remember_spend(d))
+    except Exception:
+        cache = None
 
     try:
         cols = int(os.environ.get("COLUMNS") or 80)
@@ -382,19 +564,23 @@ def main():
 
     # Degradation ladder: first variant that fits wins.
     ladder = [
-        dict(week=True,  worktree=True,  session=True,  barw=10, icons=True, bars=True, limit=True),
+        dict(cache=True,  week=True,  worktree=True,  session=True,  barw=10, icons=True, bars=True, limit=True),
         # The weekly limit outranks the worktree, wide bars and the session
         # name: they go first, and the name is cut before it is dropped.
-        dict(week=True,  worktree=False, session=True,  barw=8,  icons=True, bars=True, limit=True),
-        dict(week=True,  worktree=False, session=True,  barw=5,  icons=True, bars=True, limit=True),
-        dict(week=True,  worktree=False, session=False, barw=5,  icons=True, bars=True, limit=True),
-        dict(week=False, worktree=False, session=False, barw=5,  icons=True, bars=True, limit=True),
-        dict(week=False, worktree=False, session=False, barw=4,  icons=False, bars=True, limit=True),
-        dict(week=False, worktree=False, session=False, barw=3,  icons=False, bars=True, limit=True),
+        dict(cache=True,  week=True,  worktree=False, session=True,  barw=8,  icons=True, bars=True, limit=True),
+        dict(cache=True,  week=True,  worktree=False, session=True,  barw=5,  icons=True, bars=True, limit=True),
+        dict(cache=True,  week=True,  worktree=False, session=False, barw=5,  icons=True, bars=True, limit=True),
+        dict(cache=True,  week=False, worktree=False, session=False, barw=5,  icons=True, bars=True, limit=True),
+        dict(cache=True,  week=False, worktree=False, session=False, barw=4,  icons=False, bars=True, limit=True),
+        dict(cache=True,  week=False, worktree=False, session=False, barw=3,  icons=False, bars=True, limit=True),
         # Below here the bars themselves go; percentages carry the meaning.
-        dict(week=False, worktree=False, session=False, barw=0,  icons=False, bars=False, limit=True),
-        dict(week=False, worktree=False, session=False, barw=0,  icons=False, bars=False, limit=False),
+        dict(cache=True,  week=False, worktree=False, session=False, barw=0,  icons=False, bars=False, limit=True),
+        dict(cache=False, week=False, worktree=False, session=False, barw=0,  icons=False, bars=False, limit=False),
     ]
+    # The cache countdown is short and says when the next message gets
+    # expensive: it stays until only the bare fields are left.
+    for opts in ladder:
+        opts["cache"] = cache if opts["cache"] else None
 
     for opts in ladder:
         try:

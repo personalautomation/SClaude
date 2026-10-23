@@ -158,9 +158,24 @@ with tempfile.TemporaryDirectory() as wt:
     # --- the printed report --------------------------------------------------
     sys.argv = ["review_report.py", wt, "7", "o/r", "feat", "x", log]
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        review_report.main()
+    brief_file = os.path.join(wt, "brief.txt")
+    os.environ[review_report.BRIEF_ENV] = brief_file
+    try:
+        with contextlib.redirect_stdout(out):
+            review_report.main()
+    finally:
+        del os.environ[review_report.BRIEF_ENV]
     text = out.getvalue()
+    with open(brief_file) as fh:
+        brief = fh.read()
+    # The phone's copy: where review stands, the newest session only.
+    lines = brief.splitlines()
+    check("brief-title", lines[0], "Review — PR #7, session 2")
+    row2 = [l.split() for l in text.splitlines() if l.split()[:1] == ["2"]][0][-7:]
+    check("brief-is-the-newest-row", lines[1],
+          " · ".join("%s %s" % (m, n) for m, n in zip(review_report.BRIEF_ROWS, row2)))
+    check_true = lambda name, ok: check(name, bool(ok), True)
+    check_true("brief-verdict", "Converging slowly." in brief)
     check("per-run", "Findings per review run, oldest first: 4 3 3 (one more still running)" in text, True)
     check("closed-without-fix",
           "Fixed: 5 (50%). Closed without a fix: 3 (30%), 1 of them waiting for you" in text, True)

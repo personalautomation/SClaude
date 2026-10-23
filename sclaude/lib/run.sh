@@ -2710,8 +2710,14 @@ review_report() {
   root="$(scratch_root "$wt" 2>/dev/null || true)"
   [[ -n "$root" ]] && log="$root/.sclaude/local/review-context.log"
   echo ""
-  python3 "$LIB/review_report.py" "$wt" "$pr" "$repo" \
+  # The newest session's numbers go to the feature's topic as well, a message
+  # per round (ask_notice).
+  local brief; brief="$(mktemp)"
+  SCLAUDE_REPORT_BRIEF="$brief" python3 "$LIB/review_report.py" "$wt" "$pr" "$repo" \
     "$(state_get "$state" branch 2>/dev/null || true)" "$slug" "$log" 2>/dev/null || true
+  local ASK_SLUG="$slug"
+  ask_notice "$(cat "$brief" 2>/dev/null)"
+  rm -f "$brief"
 }
 
 cmd_review_report() {

@@ -352,6 +352,25 @@ def count(ts, fate):
     return sum(1 for t in ts if t["fate"] == fate)
 
 
+# Where review stands, for a phone: the newest session's numbers, written to
+# the file this names when it is set. sclaude sends it to the feature's topic
+# in Telegram after every round (review_report in run.sh), each round a
+# message of its own: the topic keeps the history, each message says only
+# what is new.
+BRIEF_ENV = "SCLAUDE_REPORT_BRIEF"
+BRIEF_ROWS = ("runs", "found", "fixed", "no fix", "open", "on fixes", "repeats")
+
+
+def brief(pr, newest, verdict_line):
+    """The status update: newest is (session label, {measure: n}) or None."""
+    if not newest:
+        return "Review — PR #%s: no review threads yet.\n%s\n" % (pr, verdict_line)
+    label, values = newest
+    return "Review — PR #%s, session %s\n%s\n%s\n" % (
+        pr, label, " · ".join("%s %d" % (row, values[row]) for row in BRIEF_ROWS),
+        verdict_line)
+
+
 def main():
     if len(sys.argv) < 4:
         print("usage: review_report.py <worktree> <pr> <repo> [branch] [feature] [log]",
@@ -383,6 +402,7 @@ def main():
     # A round still running has not said all it will: left out of the trend.
     done = [g for g in groups if not g["running"]]
     per_round = [len(g["threads"]) for g in done]
+    columns = []
 
     if groups:
         print("")
@@ -391,19 +411,21 @@ def main():
             "on fixes", "repeats"))
         for label, s, gs in by_session(groups, people):
             ts = [t for g in gs for t in g["threads"]]
-            print("  %-7s %-11s %6s %6s %4d %5d %5d %6d %4d %8d %7d" % (
+            values = (len(gs), len(ts), count(ts, "fixed"), count(ts, "no fix"),
+                      count(ts, "open"), sum(1 for t in ts if t["near_fix"]),
+                      sum(1 for t in ts if t["repeat"]))
+            columns.append((label, dict(zip(BRIEF_ROWS, values))))
+            print("  %-7s %-11s %6s %6s %4d %5d %5d %6d %4d %8d %7d" % ((
                 label,
                 s["start"].astimezone().strftime("%m-%d %H:%M") if s and s["start"] else "",
                 hours(s["seconds"]) if s and s["seconds"] else "",
-                "$%.2f" % sum(s["costs"]) if s and s["costs"] else "",
-                len(gs), len(ts), count(ts, "fixed"), count(ts, "no fix"), count(ts, "open"),
-                sum(1 for t in ts if t["near_fix"]), sum(1 for t in ts if t["repeat"])))
+                "$%.2f" % sum(s["costs"]) if s and s["costs"] else "") + values))
         seconds = sum(s["seconds"] or 0 for s in people)
         costs = [c for s in people for c in s["costs"]]
-        print("  %-7s %-11s %6s %6s %4d %5d %5d %6d %4d %8d %7d" % (
+        values = (len(groups), total, fixed, nofix, opened, near_all, len(repeats))
+        print("  %-7s %-11s %6s %6s %4d %5d %5d %6d %4d %8d %7d" % ((
             "total", "", hours(seconds) if seconds else "",
-            "$%.2f" % sum(costs) if costs else "", len(groups), total, fixed, nofix, opened,
-            near_all, len(repeats)))
+            "$%.2f" % sum(costs) if costs else "") + values))
         print("")
         print("  Findings per review run, oldest first: %s%s" % (
             chain(per_round), " (one more still running)" if len(done) < len(groups) else ""))
@@ -475,8 +497,16 @@ def main():
             "this machine's time, no Actions minutes" if local else "runner time"))
 
     last = done[-1]["threads"] if done else []
+    said = verdict(per_round, acted, sum(1 for t in last if t["near_fix"]), len(last), opened)
     print("")
-    print("  " + verdict(per_round, acted, sum(1 for t in last if t["near_fix"]), len(last), opened))
+    print("  " + said)
+    path = os.environ.get(BRIEF_ENV, "")
+    if path:
+        try:
+            with open(path, "w") as fh:
+                fh.write(brief(pr, columns[-1] if columns else None, said))
+        except OSError:
+            pass
     return 0
 
 

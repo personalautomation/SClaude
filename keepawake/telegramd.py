@@ -39,7 +39,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from keepawake import docs, state
+from keepawake import docs, notices, state
 from keepawake.i18n import DEFAULT, STRINGS, current, set_lang, ssh_holders, t
 from keepawake.state import (HOLD_SECONDS, local_label, locked, needs_warning,
                              read, touch)
@@ -3492,7 +3492,9 @@ def clear_channel(channel):
     # the directory is gone.
     keep = ("ask.json",)
     closed = os.path.join(channel, CLOSED_DIR)
-    for d in (closed, channel):
+    # Notes not yet sent go with the feature: their topic is going too.
+    notes = os.path.join(channel, notices.NOTES_DIR)
+    for d in (closed, notes, channel):
         try:
             names = os.listdir(d)
         except OSError:
@@ -3506,7 +3508,7 @@ def clear_channel(channel):
                     os.unlink(path)
                 except OSError:
                     pass
-    for d in (closed, channel):
+    for d in (closed, notes, channel):
         try:
             os.rmdir(d)
         except OSError:
@@ -3956,6 +3958,15 @@ def main():
             check_asks(bot)
         except Exception as exc:
             log.exception("checking sclaude's questions: %s", exc)
+
+        # Where a feature's review stands, after each round: to its topic.
+        try:
+            notices.check(bot, [(os.path.basename(repo), slug, channel)
+                                for repo in known_repos()
+                                for slug, channel in ask_channels(repo) if slug],
+                          lambda name, slug: feature_topic(bot, name, slug), log)
+        except Exception as exc:
+            log.exception("sending sclaude's notes: %s", exc)
 
         try:
             check_awaiting(bot)

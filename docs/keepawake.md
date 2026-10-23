@@ -166,6 +166,19 @@ delete by hand. Telegram does not let a bot close a topic in a private chat, onl
 delete it. The daemon's state keeps the repository channels' messages, and a
 feature channel's only while it has no worktree.
 
+**Notes: what the topic is told without being asked.** After each review round
+sclaude also says where the review stands: `review_report` in `run.sh` has
+`review_report.py` write the newest session's numbers to the file
+`SCLAUDE_REPORT_BRIEF` names, and `ask_notice` (`sclaude/lib/io.sh`) lays that
+text in the feature channel's `notes/`, skipping a text the same as the last one
+— the report is printed at more than one point of a round. The bot sends every
+note to the feature's topic in the order they came, each a message of its own and
+without a sound, and deletes it once sent (`keepawake/notices.py`); a message is
+never edited, so the topic keeps the history. A note the network kept back waits
+for the next turn, one older than a day is dropped, and the notes go with the
+channel when the feature ends. The module is separate from `telegramd.py`, which
+passes it the channels and the way to a topic.
+
 **The menu, split by where it is.** In a feature's topic there is nothing to
 choose: the topic is the feature, so the menu there is the feature's card —
 step, session, links, dev server, code-server (`?folder=` opens the worktree,

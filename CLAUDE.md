@@ -72,6 +72,12 @@ breaks the other silently — grep before you edit:
   `ask_feature_end` in `io.sh`; `FEATURE_RECORD`, `ENDED_MARK` in
   `telegramd.py`) are named on both sides; `tests/io.py` and
   `tests/keepawake.py` check each side.
+- `notes/` in a feature's channel — messages that ask nothing, such as where
+  the review stands after each round — is written by `ask_notice` in
+  `sclaude/lib/io.sh` and read by `NOTES_DIR` in `keepawake/notices.py`;
+  `tests/notices.py` runs both sides. The text itself is the file that
+  `SCLAUDE_REPORT_BRIEF` names to `sclaude/lib/review_report.py`
+  (`review_report` in `run.sh`).
 
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/run.sh`, which decides by it

@@ -388,6 +388,28 @@ os.replace(tmp, os.path.join(d, qid + '.json'))
 PY
 }
 
+# A message for the feature's topic that asks nothing — the review's numbers
+# after a round. Laid in notes/ of the feature's channel, one file each; the
+# bot sends them in order, each as a message of its own, and deletes the file
+# (NOTES_DIR in keepawake/notices.py). The same text as the last one is not
+# laid again: the report is printed at more than one point of a round.
+#
+#   ask_notice <text>
+ask_notice() {
+  local text="$1" dir notes sum
+  dir="$(ask_channel)"
+  [[ -n "$dir" && "$dir" != "$(ask_dir)" && -n "$text" ]] || return 0
+  notes="$dir/notes"
+  mkdir -p "$notes" 2>/dev/null || return 0
+  sum="$(printf '%s' "$text" | sha1sum | cut -c1-40)"
+  [[ "$(cat "$notes/.last" 2>/dev/null)" == "$sum" ]] && return 0
+  # Whole or not at all, as every file the bot reads here.
+  printf '%s' "$text" > "$notes/.new.$$" 2>/dev/null \
+    && mv -f "$notes/.new.$$" "$notes/$(date +%s)-$$-$RANDOM.txt" 2>/dev/null \
+    && printf '%s' "$sum" > "$notes/.last"
+  return 0
+}
+
 # The id of the question standing in the channel right now. Empty when there is
 # no question, or when it was laid out by a version that did not stamp one.
 ask_id() {

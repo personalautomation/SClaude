@@ -72,6 +72,10 @@ def profile_halves():
     return halves
 
 
+# The Menu button as the list of commands.
+MENU_COMMANDS = {"type": "commands"}
+
+
 class Bot(object):
     def __init__(self, token, chat_id):
         self.token = token
@@ -207,19 +211,27 @@ class Bot(object):
         except Exception as exc:
             log.warning("the keyboard did not appear: %s", exc)
 
-    def commands(self):
+    def commands(self, online=None):
         # The bot's commands: a second route to the menu, in case the reply
         # keyboard has been hidden. The button in the input box that Telegram
         # creates for them is removed by menu_button. Not critical — they must
         # not be a reason to die.
         # Per language, like the profile texts: written once in the language of
         # the start, they listed Russian under an English bot.
+        #
+        # Only what the chat's menu offers at the moment: without phone
+        # access that is the hold and turning access on (chat_menu); with it,
+        # everything but /phone, the sections leading to the app.
+        if online is None:
+            online = bool(gate_origin())
+        shown = OFFLINE_COMMANDS if not online else [
+            name for name in COMMANDS if name != "phone"]
         for code, half in profile_halves().items():
             try:
                 self.call("setMyCommands", language_code=code, commands=[
                     {"command": name, "description": STRINGS[key][half]}
                     for name, (_method, key) in COMMANDS.items()
-                    if name != "start"])
+                    if name != "start" and name in shown])
             except Exception as exc:
                 log.warning("setMyCommands: %s", exc)
 
@@ -264,10 +276,25 @@ class Bot(object):
         # A language mismatch goes away with it: Telegram takes the blue
         # button's caption from the phone's locale rather than from our strings,
         # and a Russian "Menu" caption used to hang over an English menu.
-        try:
-            self.call("setChatMenuButton", menu_button={"type": "default"})
-        except Exception as exc:
-            log.warning("setChatMenuButton: %s", exc)
+        #
+        # While phone access is on, the button opens the menu as a Mini App
+        # instead (webmenu.py, behind the gate) — an experiment. Its caption
+        # is ours then, in the language of this moment. Without access it is
+        # the list of commands, said outright: "default" means "no value of
+        # its own", and a chat or a bot with none kept showing the app that
+        # could no longer open.
+        origin = gate_origin()
+        button = ({"type": "web_app", "text": t("menu.button"),
+                   "web_app": {"url": origin + "/__sclaude/menu"}}
+                  if origin else MENU_COMMANDS)
+        # Set for this chat as well as for all: a change of the default
+        # reaches an open Telegram app only when it opens the chat anew,
+        # while one made for the chat is sent to it at once.
+        for target in ({}, {"chat_id": self.chat_id}):
+            try:
+                self.call("setChatMenuButton", menu_button=button, **target)
+            except Exception as exc:
+                log.warning("setChatMenuButton: %s", exc)
 
     def edit(self, message_id, text, keyboard=None):
         # Whether the edit went through.
@@ -295,6 +322,15 @@ class Bot(object):
             self.last_error = getattr(exc, "telegram", "") or str(exc).lower()
             log.warning("no topic was made: %s", exc)
             return 0
+
+    def rename_topic(self, thread, name):
+        try:
+            self.call("editForumTopic", chat_id=self.chat_id,
+                      message_thread_id=thread, name=name)
+            return True
+        except Exception as exc:
+            log.warning("the topic was not renamed: %s", exc)
+            return False
 
     def delete_topic(self, thread):
         # Whether the topic is gone — deleted now, or before, by hand. False
@@ -368,13 +404,15 @@ def unstyled(markup):
 
 
 def menu_keyboard():
+    # Each thing in one place. The status is on the Keepawake screen, under
+    # the hold it explains; the repository is chosen in Sclaude; a feature's
+    # dev server and code-server folder are on its card.
     return [
         [{"text": t("menu.extend"), "callback_data": "menu_extend"},
-         {"text": t("menu.status"), "callback_data": "menu_status"}],
-        [{"text": t("menu.chrome"), "callback_data": "menu_chrome"},
-         {"text": t("menu.code"), "callback_data": "menu_code"}],
-        [{"text": t("menu.sclaude"), "callback_data": "svc_sclaude"},
-         {"text": t("menu.settings"), "callback_data": "menu_services"}],
+         {"text": t("menu.sclaude"), "callback_data": "svc_sclaude"}],
+        [{"text": t("menu.code"), "callback_data": "menu_code"},
+         {"text": t("menu.chrome"), "callback_data": "menu_chrome"}],
+        [{"text": t("menu.settings"), "callback_data": "menu_services"}],
     ]
 
 
@@ -414,6 +452,24 @@ def menu_title():
     return t("menu.title", host=escape(host_name()))
 
 
+def chat_menu(thread=0):
+    """(text, keyboard) of the menu in the chat. The menu itself is the Mini
+    App (webmenu.py); the chat offers the way there. While phone access is
+    off the app cannot open, so the chat keeps what must work without it:
+    the hold, and turning phone access on. In a feature's topic the app
+    opens on that feature."""
+    origin = gate_origin()
+    if not origin:
+        return t("menu.offline", host=escape(host_name())), [
+            [{"text": t("menu.extend"), "callback_data": "menu_extend"}],
+            [{"text": t("svc.phoneoff"), "callback_data": "phone_toggle"}]]
+    key = topic_channel(thread)
+    url = origin + "/__sclaude/menu" + (
+        "?f=" + urllib.parse.quote(key, safe="") if key else "")
+    return t("menu.inapp", host=escape(host_name())), [
+        [{"text": t("menu.open"), "web_app": {"url": url}}]]
+
+
 def awake_keyboard():
     return [
         [{"text": t("awake.h1"), "callback_data": "awake:3600"},
@@ -443,6 +499,12 @@ def awake_text():
     if state.manual_until(data, now):
         text += t("awake.manual")
     return text
+
+
+def keepawake_text():
+    # The hold and, under it, the status that explains it: one screen for
+    # deciding whether to extend.
+    return awake_text() + "\n\n" + status_text()
 
 
 def hold_for(seconds, now):
@@ -587,6 +649,17 @@ def phone_button(origin, label):
              "web_app": {"url": "%s/__sclaude/tg?f=%s" % (origin, label)}}] if origin else []
 
 
+def code_app_button(origin, folder=""):
+    # code-server inside the Mini App, through the gate's /__code/ (an
+    # experiment). Only while phone access is on and code-server is up: the
+    # gate starts nothing.
+    if not origin or not code_running():
+        return []
+    path = "/__code/" + ("?folder=" + urllib.parse.quote(folder) if folder else "")
+    return [{"text": t("code.app"), "style": "success", "web_app": {
+        "url": "%s/__sclaude/tg?p=%s" % (origin, urllib.parse.quote(path, safe=""))}}]
+
+
 def chrome_keyboard(config=None):
     # The laptop's browser and every feature at once. A feature's own
     # buttons — open, phone, start, stop — are on its card in its topic.
@@ -609,12 +682,11 @@ def chrome_keyboard(config=None):
 
 def services_keyboard():
     return [
-        [{"text": t("svc.repos"), "callback_data": "svc_repos"},
-         {"text": t("svc.docs"), "callback_data": "svc_docs"}],
         [{"text": t("svc.lang"), "callback_data": "svc_lang"},
-         {"text": t("svc.restart"), "callback_data": "svc_restart"}],
+         {"text": t("svc.docs"), "callback_data": "svc_docs"}],
+        [{"text": t("svc.restart"), "callback_data": "svc_restart"}],
         # On and off in one button, its caption the current state.
-        [{"text": t("svc.phoneon") if gate_origin() else t("svc.phoneoff"),
+        [{"text": t("svc.phoneon") if gate_origin(None, False) else t("svc.phoneoff"),
           "callback_data": "phone_toggle"}],
         [{"text": t("menu.back"), "callback_data": "menu_back"}],
     ]
@@ -763,18 +835,109 @@ def phone_origin(config=None):
 # The phone's entry from the internet, for a phone without Tailscale: the
 # gate (`sclaude-proxy --gate`, socket-activated on 127.0.0.1:3001) behind
 # `tailscale funnel` on :8443. The funnel stays on: Tailscale's relays take
-# about a minute and a half to carry a funnel that has just been turned on, and
-# a phone that pressed the button met "connection closed" every time. What
+# minutes to carry a funnel that has just been turned on — its name leaves the
+# public DNS while it is off, and comes back only after a while (five minutes
+# once) — and a phone that pressed the button met "connection closed" every time. What
 # stands at the door instead is the gate, which lets in only the bot's owner.
-GATE_LOCAL = "http://127.0.0.1:3001"
+GATE_PORT = 3001
+GATE_LOCAL = "http://127.0.0.1:%d" % GATE_PORT
 GATE_FUNNEL_PORT = 8443
 FUNNEL_ON = "tailscale funnel --bg --https=%d %s" % (GATE_FUNNEL_PORT, GATE_LOCAL)
 FUNNEL_OFF = "tailscale funnel --https=%d off" % GATE_FUNNEL_PORT
 
 
-def gate_origin(config=None):
+def phone_on():
+    """Turn phone access on: (on, what the commands said). The gate's
+    socket is started unless something already answers on its port — the
+    gate itself, run by hand — which would make the socket fail to bind.
+    On means the funnel is set up; the app opens once the address is
+    published (gate_origin)."""
+    PUBLISHED.update(host="", ok=False)
+    start = "" if port_open(GATE_PORT) else "systemctl --user start sclaude-gate.socket && "
+    out = run(start + FUNNEL_ON, timeout=60)
+    with locked() as st:
+        st["phone_on_at"] = int(time.time())
+    return bool(gate_origin(None, False)), out
+
+
+# A funnel just turned on is not reachable at once: Tailscale publishes its
+# name in public DNS only after a while (five minutes once), and a phone that
+# asks before then is told the name does not exist — and keeps that answer for
+# five minutes more. So nothing offers the app until the name is there: the
+# chat says it is waiting, and changes that message when it is ready.
+#
+# The name is asked of the zone's own nameserver, which keeps no answer: a
+# resolver asked too early would itself remember "no such name" for minutes.
+# DNS over HTTPS stands in when that fails.
+PUBLISHED = {"host": "", "at": 0.0, "ok": False}
+# How often a name not yet published is asked again.
+PUBLISH_RECHECK = 10
+# Past this the app is offered anyway, and the log says so.
+PUBLISH_WAIT_MAX = 900
+
+
+def doh(name, rtype):
+    """The answers of DNS over HTTPS for a name, as data strings."""
+    url = "https://dns.google/resolve?name=%s&type=%s" % (urllib.parse.quote(name), rtype)
+    with urllib.request.urlopen(url, timeout=5) as resp:
+        data = json.load(resp)
+    return [a.get("data", "") for a in data.get("Answer") or []]
+
+
+def dns_has(server, name):
+    """True when the nameserver at server has an A record for name: one
+    question over UDP, no recursion asked."""
+    import socket
+    qid = os.urandom(2)
+    query = (qid + b"\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+             + b"".join(bytes([len(p)]) + p.encode() for p in name.split("."))
+             + b"\x00\x00\x01\x00\x01")
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.settimeout(3)
+        sock.sendto(query, (server, 53))
+        data = sock.recv(4096)
+    if data[:2] != qid or len(data) < 8:
+        raise OSError("not the answer to this question")
+    return (data[3] & 0x0F) == 0 and int.from_bytes(data[6:8], "big") > 0
+
+
+def name_published(host):
+    import socket
+    zone = ".".join(host.split(".")[-2:])
+    try:
+        server = socket.gethostbyname(doh(zone, "NS")[0].rstrip("."))
+        return dns_has(server, host)
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        return bool(doh(host, "A"))
+    except (OSError, ValueError):
+        return False
+
+
+def published(host):
+    """Whether a phone can find the funnel's name: asked again every
+    PUBLISH_RECHECK seconds until it can, then remembered while it lasts."""
+    if PUBLISHED["host"] == host and PUBLISHED["ok"]:
+        return True
+    now = time.time()
+    if PUBLISHED["host"] == host and now - PUBLISHED["at"] < PUBLISH_RECHECK:
+        return False
+    ok = name_published(host)
+    since = (read().get("phone_wait") or {}).get("since") or 0
+    if not ok and since and now - since > PUBLISH_WAIT_MAX:
+        log.warning("%s is still not in public DNS after %d s: offering the app anyway",
+                    host, PUBLISH_WAIT_MAX)
+        ok = True
+    PUBLISHED.update(host=host, at=now, ok=ok)
+    return ok
+
+
+def gate_origin(config=None, ready=True):
     """https://<node>.<tailnet>.ts.net:8443 while the funnel carries the gate,
-    "" while it does not — read from Tailscale, never remembered."""
+    "" while it does not — read from Tailscale, never remembered. With
+    ready, also "" until a phone can find the name (published); without,
+    the funnel's set-up alone counts, as for turning it off."""
     if config is None:
         config = serve_config()
     for hostport, allowed in (config.get("AllowFunnel") or {}).items():
@@ -784,7 +947,10 @@ def gate_origin(config=None):
         web = (config.get("Web") or {}).get(hostport) or {}
         proxy = str((((web.get("Handlers") or {}).get("/")) or {}).get("Proxy", ""))
         if proxy.rstrip("/").endswith(":3001"):
+            if ready and not published(host):
+                return ""
             return "https://%s:%s" % (host, port)
+    PUBLISHED.update(host="", ok=False)
     return ""
 
 
@@ -811,30 +977,18 @@ def chrome_screen():
 
 
 def chrome_text(config=None):
-    # We remind of the features' addresses: the Chrome window stands on the
-    # laptop, and from a phone a person needs not so much the browser itself as
-    # the link a feature opens at.
+    # The laptop's browser and the proxy it opens features through. Each
+    # feature's addresses and dev server are on its card, and phone access
+    # in Settings. config is kept for the callers that look at tailscale once.
     state_label = t("chrome.up") if port_open(CHROME_PORT) else t("chrome.down")
     proxy_label = t("chrome.proxyup") if port_open(DEV_PORT) else t("chrome.proxydown")
-    # From a phone: the tailnet, which has no *.localhost to name a feature
-    # by, so the link goes through the proxy's own page that picks the feature
-    # with a cookie.
-    if config is None:
-        config = serve_config()
-    phone = phone_origin(config)
-    # From the laptop: the feature's own name. Telegram makes no link of
-    # localhost in any form, so it is shown to copy rather than to tap.
-    lines = []
-    for label, _wt, _port, running in dev_features():
-        link = "%s/__sclaude/select?f=%s" % (phone, label)
-        lines.append(t("chrome.feature",
-                       link='<a href="%s">%s</a>' % (link, label),
-                       state=t("chrome.running") if running else t("chrome.stopped"),
-                       local="http://%s.localhost:%d" % (label, DEV_PORT)))
-    features = "\n".join(lines) if lines else t("chrome.nofeatures")
-    gate = t("chrome.gateup") if gate_origin(config) else t("chrome.gatedown")
-    return t("chrome.title", state=state_label, proxy=proxy_label, gate=gate,
-             features=features, port=CHROME_PORT)
+    return t("chrome.title", state=state_label, proxy=proxy_label, port=CHROME_PORT)
+
+
+# True while a screen is drawn for the Mini App (webmenu.py). There the
+# tailnet's addresses lead nowhere — the phone has no Tailscale — and the
+# gate's buttons on the same screen stand in for them.
+ON_PAGE = False
 
 
 def code_folder():
@@ -854,11 +1008,16 @@ def code_keyboard():
         row.append({"text": t("code.stop"), "callback_data": "code_stop"})
     else:
         row.append({"text": t("code.start"), "callback_data": "code_start"})
-    return [row, [{"text": t("menu.back"), "callback_data": "menu_back"}]]
+    rows = [row]
+    app = code_app_button(gate_origin())
+    if app:
+        rows.append(app)
+    return rows + [[{"text": t("menu.back"), "callback_data": "menu_back"}]]
 
 
 def code_text():
-    state_label = t("code.running") if code_running() else t("code.stopped")
+    state_label = (t("code.running") if code_running()
+                   else t("code.stoppedpage") if ON_PAGE else t("code.stopped"))
     # There are two addresses, and that is not duplication. Tailscale runs
     # inside WSL, so the tailnet address lives on its interface: a phone reaches
     # it through the tunnel, while Windows itself does not — it is not in the
@@ -872,6 +1031,9 @@ def code_text():
     # inside an explicit <a href>, which is additionally rejected with a 400
     # error. To the Windows browser the addresses are equivalent, and only this
     # one is clickable.
+    if ON_PAGE:
+        return t("code.titlepage", state=state_label,
+                 folder=t("code.folder", name=escape(code_folder())))
     return t("code.title", state=state_label,
              folder=t("code.folder", name=escape(code_folder())),
              url=code_url(), local="http://127.0.0.1:8080")
@@ -1007,7 +1169,14 @@ def report_restart(bot):
     with locked() as st:
         st["restart_notify"] = 0
         st["restart_from_pid"] = 0
-    bot.edit(mid, t("svc.restarted"), services_keyboard())
+    if data.get("restart_page"):
+        # Asked for from the menu page: the line in the chat is its trace,
+        # and a Settings menu under it would be a second menu to keep true.
+        with locked() as st:
+            st["restart_page"] = False
+        bot.edit(mid, "📱 " + t("svc.restarted"))
+    else:
+        bot.edit(mid, t("svc.restarted"), services_keyboard())
     log.info("reported the restart in message %s", mid)
     # Editing an old message does not set the keyboard below the input box:
     # editMessageText's reply_markup is inline only. We set it separately.
@@ -1029,7 +1198,7 @@ def ensure_anchor(bot):
     # what is already on the screen is an extra step in exactly the place where
     # the person came for the menu anyway.
     bot.anchor(t("anchor.hint"))
-    bot.send(menu_title(), menu_keyboard())
+    bot.send(*chat_menu())
     with locked() as st:
         st["anchor_lang"] = current()
     log.info("the menu keyboard is set, language=%s", current())
@@ -2209,6 +2378,8 @@ def remember_lang(frm):
 # ways to open the menu.
 COMMANDS = collections.OrderedDict([
     ("menu",     ("cmd_menu",     "cmd.menu")),
+    # Second: without phone access it is the way back to the app.
+    ("phone",    ("cmd_phone",    "cmd.phone")),
     ("status",   ("cmd_status",   "cmd.status")),
     ("awake",    ("cmd_awake",    "cmd.awake")),
     ("extend",   ("cmd_extend",   "cmd.extend")),
@@ -2219,6 +2390,9 @@ COMMANDS = collections.OrderedDict([
     ("settings", ("cmd_settings", "cmd.settings")),
 ])
 COMMANDS["start"] = COMMANDS["menu"]
+# The commands listed while phone access is off. The rest still answer when
+# typed, with the same short menu.
+OFFLINE_COMMANDS = ("menu", "phone", "status", "awake", "extend", "sleep")
 
 
 class Handler(object):
@@ -2411,11 +2585,11 @@ class Handler(object):
         if is_menu_button(text):
             return self.cmd_menu()
         if not text.startswith("/"):
-            self.screen(t("cmd.unknown"), menu_keyboard())
+            self.screen(t("cmd.unknown"), chat_menu(self.bot.thread)[1])
             return
         found = COMMANDS.get(name)
         if not found:
-            self.screen(t("cmd.unknown"), menu_keyboard())
+            self.screen(t("cmd.unknown"), chat_menu(self.bot.thread)[1])
             return
         getattr(self, found[0])(now)
 
@@ -2467,7 +2641,7 @@ class Handler(object):
         forget_screen(message_id)
 
     def cmd_menu(self, now=0):
-        self.screen(menu_title(), menu_keyboard())
+        self.screen(*chat_menu(self.bot.thread))
 
     def cmd_status(self, now=0):
         self.bot.send(status_text())
@@ -2486,26 +2660,33 @@ class Handler(object):
                    (now or int(time.time())) + IDLE_SLEPT_KEEP)
 
     def cmd_awake(self, now=0):
-        self.screen(awake_text(), awake_keyboard())
+        self.screen(keepawake_text(), awake_keyboard())
 
+    # The sections live in the Mini App; their commands lead there, as /menu
+    # does, and without phone access to what the chat keeps.
     def cmd_chrome(self, now=0):
-        self.screen(*chrome_screen())
+        self.cmd_menu(now)
 
     def cmd_code(self, now=0):
-        self.screen(code_text(), code_keyboard())
+        self.cmd_menu(now)
 
     def cmd_sclaude(self, now=0):
-        # As with the button: we open straight on the remembered repository and
-        # ask only when we remember none.
-        chosen = repo_choice()
-        if chosen:
-            name = os.path.basename(chosen)
-            self.screen(repo_text(name), features_keyboard(name))
-        else:
-            self.screen(t("repo.pick"), repos_keyboard())
+        self.cmd_menu(now)
 
     def cmd_settings(self, now=0):
-        self.screen(t("svc.title"), services_keyboard())
+        self.cmd_menu(now)
+
+    def cmd_phone(self, now=0):
+        # The way back to the app when phone access is off: typed, as the
+        # chat's short menu offers it by a button.
+        if gate_origin():
+            return self.cmd_menu(now)
+        on, out = phone_on()
+        if not on:
+            self.bot.send(t("chrome.gatefail", log=escape(out[-1500:])))
+            return
+        log.info("phone access turned on by /phone")
+        wait_for_phone(self.bot.send(t("svc.phonewait")))
 
     def callback(self, cq):
         cid = cq.get("id")
@@ -2532,7 +2713,7 @@ class Handler(object):
             return self.decision(data_raw, message_id, cid, now)
 
         if data_raw == "menu_extend":
-            self.bot.edit(message_id, awake_text(), awake_keyboard())
+            self.bot.edit(message_id, keepawake_text(), awake_keyboard())
         elif data_raw.startswith("awake:"):
             seconds = int(data_raw.split(":", 1)[1])
             until = hold_for(seconds, now)
@@ -2599,7 +2780,7 @@ class Handler(object):
             if read().get("awaiting"):
                 with locked() as st:
                     st["awaiting"] = ""
-            self.bot.edit(message_id, menu_title(), menu_keyboard())
+            self.bot.edit(message_id, *chat_menu(self.bot.thread))
         elif data_raw == "noop":
             pass          # a row caption, not a button
         elif data_raw == "idle_keep":
@@ -2634,21 +2815,22 @@ class Handler(object):
             # where to look.
             self.result(message_id, chrome_text())
         elif data_raw == "phone_toggle":
-            if gate_origin():
+            if gate_origin(None, False):
                 run(FUNNEL_OFF, timeout=30)
                 log.info("phone access turned off")
+                phone_changed(self.bot, False)
                 self.result(message_id, t("chrome.gatedown"))
                 return
-            # The gate needs nothing: its socket is always there.
-            out = run("systemctl --user start sclaude-gate.socket && " + FUNNEL_ON, timeout=60)
-            if not gate_origin():
+            on, out = phone_on()
+            if not on:
                 # Most often: funnel not allowed for this node in the tailnet
                 # policy, or this user is not Tailscale's operator.
                 self.bot.edit(message_id, t("chrome.gatefail", log=escape(out[-1500:])),
                               services_keyboard())
                 return
             log.info("phone access turned on")
-            self.result(message_id, t("svc.phonewarm"))
+            self.result(message_id, t("svc.phonewait"))
+            wait_for_phone(message_id)
         elif data_raw.startswith("devphone:") or data_raw == "gate_stop":
             # Buttons of a card drawn before phone access moved to Settings.
             self.bot.edit(message_id, *chrome_screen())
@@ -2772,8 +2954,10 @@ class Handler(object):
             if not repo:
                 self.bot.edit(message_id, t("repo.norepos"), repos_keyboard())
                 return
+            thread = new_feature_topic(self.bot, name)
             start_sclaude(repo, ["new"])
-            self.result(message_id, t("feat.newstarted", repo=escape(name)))
+            self.result(message_id, t("feat.newtopicat" if thread else "feat.newstarted",
+                                      repo=escape(name)))
         elif data_raw == "svc_restart":
             self.restart(message_id)
         else:
@@ -2815,6 +2999,12 @@ class Handler(object):
             dev = feature_dev(repo, slug)
             if dev:
                 dev_act(action, dev[0], feature_wt(repo, slug))
+            # The proxy starts the server on its own time: the card redrawn
+            # at once would still call it stopped.
+            for _ in range(20 if dev and action == "start" else 0):
+                if (feature_dev(repo, slug) or (0, 0, False))[2]:
+                    break
+                time.sleep(0.5)
         elif action == "code":
             run("systemctl --user start code-server.service")
             # The card redrawn at once would still call it stopped.
@@ -2895,6 +3085,7 @@ class Handler(object):
         with locked() as st:
             st["restart_notify"] = message_id
             st["restart_from_pid"] = pid
+            st["restart_page"] = False
         subprocess.Popen(
             ["bash", "-c",
              "sleep 2; systemctl --user restart keepawake-telegram.service"],
@@ -3155,7 +3346,9 @@ def check_channel(bot, key, name, slug, channel, repo):
     # asked: they can already see it on the screen and will answer there. The
     # message goes out anyway — one can step away mid-step, and then it is
     # already waiting in the chat.
-    thread = feature_topic(bot, name, slug) if slug else 0
+    # The repository's own questions while a feature is being started from the
+    # bot are that feature's first ones: they go to its new topic.
+    thread = feature_topic(bot, name, slug) if slug else new_topic_of(name)
     # No topic though the feature has a worktree and topics are on: the
     # network or a rate limit. The next turn tries again — sent to the main
     # chat now, the question would stay there, mixed with other features'.
@@ -3172,7 +3365,11 @@ def check_channel(bot, key, name, slug, channel, repo):
         # made once; failing that the question goes to the main chat, since a
         # question that does not arrive stalls the step. Any other failure is
         # the network's: the topic is still there, and the next turn retries.
-        thread = feature_topic(bot, name, slug, renew=True)
+        if slug:
+            thread = feature_topic(bot, name, slug, renew=True)
+        else:
+            drop_new_topic(name)
+            thread = 0
         if thread:
             msg = bot.send(text, keyboard, quiet=quiet, thread=thread)
         if not msg:
@@ -3348,6 +3545,13 @@ def feature_topic(bot, name, slug, renew=False):
         now = int(time.time())
         if now < (read().get("topics_off_until") or 0):
             return 0
+        thread = adopt_new_topic(bot, name, slug)
+        if thread:
+            record.pop("card", None)
+            record["thread"] = thread
+            save_record(repo, slug, record)
+            post_card(bot, name, slug)
+            return thread
         thread = bot.create_topic(topic_name(name, slug))
         if not thread:
             if "not a forum" in bot.last_error:
@@ -3361,6 +3565,104 @@ def feature_topic(bot, name, slug, renew=False):
         # A topic opens with its feature's card (post_card).
         post_card(bot, name, slug)
     return thread
+
+
+# A new feature's topic, made when it is started from the bot. Its first
+# questions — the name, the issue — come before the feature has a name, from
+# the repository's own channel, and would otherwise land in the main chat. They
+# go to this topic instead, and the first feature of that repository to need a
+# topic afterwards takes it over, renamed. One per repository, in the state:
+# {name: {"thread": id, "since": ts}}. One nobody took over goes after
+# NEW_TOPIC_KEEP, unless a question is still open in it.
+NEW_TOPIC_KEEP = 12 * 3600
+
+
+def new_feature_topic(bot, name):
+    """The new-feature topic of this repository, made now; 0 without topics."""
+    old = (read().get("new_topics") or {}).get(name)
+    if old and old.get("thread"):
+        return old["thread"]
+    if int(time.time()) < (read().get("topics_off_until") or 0):
+        return 0
+    thread = bot.create_topic(t("feat.newtopic", repo=name)[:TOPIC_NAME_MAX])
+    if thread:
+        with locked() as st:
+            topics = st.get("new_topics") or {}
+            topics[name] = {"thread": thread, "since": int(time.time())}
+            st["new_topics"] = topics
+        log.info("a new-feature topic for %s: %s", name, thread)
+    return thread
+
+
+def new_topic_of(name):
+    return ((read().get("new_topics") or {}).get(name) or {}).get("thread") or 0
+
+
+def drop_new_topic(name):
+    with locked() as st:
+        topics = st.get("new_topics") or {}
+        entry = topics.pop(name, None)
+        st["new_topics"] = topics
+    return entry
+
+
+def adopt_new_topic(bot, name, slug):
+    """The repository's new-feature topic, renamed for this feature, when the
+    feature is the one it was made for: its worktree appeared after the topic.
+    0 otherwise."""
+    entry = (read().get("new_topics") or {}).get(name) or {}
+    repo = repo_path(name)
+    # A worktree's .git is a file written once, when the worktree is made;
+    # the directories in it change with every write.
+    try:
+        born = os.stat(os.path.join(feature_wt(repo, slug), ".git")).st_mtime if repo else 0
+    except OSError:
+        born = 0
+    if not entry.get("thread") or born < (entry.get("since") or 0) - 60:
+        return 0
+    drop_new_topic(name)
+    bot.rename_topic(entry["thread"], topic_name(name, slug))
+    log.info("the new-feature topic %s is %s/%s's now", entry["thread"], name, slug)
+    return entry["thread"]
+
+
+def new_worktrees(repo, since):
+    """Slugs of the repository's features whose worktree appeared after since."""
+    prefix = os.path.basename(repo) + "-"
+    out = []
+    for git in glob.glob(os.path.join(glob.escape(os.path.dirname(repo)),
+                                      glob.escape(prefix) + "*", ".git")):
+        slug = os.path.basename(os.path.dirname(git))[len(prefix):]
+        try:
+            born = os.stat(git).st_mtime
+        except OSError:
+            continue
+        if born >= since - 60 and feature_dir(repo, slug):
+            out.append(slug)
+    return out
+
+
+def check_new_topics(bot):
+    # The feature a topic was made for takes it as soon as its worktree is
+    # there, not at its first question: a start may ask nothing after the
+    # name, and the topic would go on calling it "new feature".
+    #
+    # A start abandoned before the feature got a name leaves its topic: it
+    # goes once nothing is asked in it any more.
+    now = int(time.time())
+    for name, entry in list((read().get("new_topics") or {}).items()):
+        repo = repo_path(name)
+        born = new_worktrees(repo, entry.get("since") or 0) if repo else []
+        if born:
+            feature_topic(bot, name, born[0])
+            continue
+        if now - (entry.get("since") or 0) < NEW_TOPIC_KEEP:
+            continue
+        if repo and pending_ask(ask_dir(repo)):
+            continue
+        if bot.delete_topic(entry.get("thread") or 0):
+            drop_new_topic(name)
+            log.info("the unused new-feature topic of %s is gone", name)
 
 
 def open_channels():
@@ -3616,6 +3918,8 @@ def card(name, slug, note="", in_topic=True, feats=None):
     socket, on the loop that answers getUpdates."""
     text = feature_card(name, slug, feats)
     key = channel_key(name, slug)
+    serve = serve_config()
+    origin = gate_origin(serve)
     rows = [[{"text": t("feat.continue"), "callback_data": card_data("go", key)},
              {"text": t("feat.actions"), "callback_data": card_data("acts", key)}]]
     repo = repo_path(name)
@@ -3623,14 +3927,14 @@ def card(name, slug, note="", in_topic=True, feats=None):
         dev = feature_dev(repo, slug)
         if dev:
             label, _port, running = dev
-            serve = serve_config()
-            text += t("card.dev",
+            text += t("card.devpage", state=t("chrome.running") if running
+                      else t("chrome.stopped")) if ON_PAGE else t("card.dev",
                       state=t("chrome.running") if running else t("chrome.stopped"),
                       link='<a href="%s/__sclaude/select?f=%s">%s</a>' % (
                           phone_origin(serve), label, t("card.phonelink")),
                       local="http://%s.localhost:%d" % (label, DEV_PORT))
             row = [{"text": t("chrome.open"), "callback_data": card_data("open", key)}]
-            row += phone_button(gate_origin(serve), label)
+            row += phone_button(origin, label)
             if running:
                 row.append({"text": t("chrome.featstop"), "callback_data": card_data("stop", key)})
             else:
@@ -3643,15 +3947,24 @@ def card(name, slug, note="", in_topic=True, feats=None):
         folder = "/?folder=" + urllib.parse.quote(feature_wt(repo, slug))
         last = []
         if code_running():
-            text += t("card.code", url=code_url() + folder,
-                      local="http://127.0.0.1:8080" + folder)
+            text += t("card.codepage") if ON_PAGE else t(
+                "card.code", url=code_url() + folder, local="http://127.0.0.1:8080" + folder)
+            last += code_app_button(origin, feature_wt(repo, slug))
         else:
             text += t("card.nocode")
-            last.append({"text": t("card.codestart"), "callback_data": card_data("code", key)})
+            # Started in its own section, where it is stopped and restarted
+            # too; the card only leads there.
+            last.append({"text": t("card.codestart"), "callback_data": "menu_code"})
         last.append({"text": t("repo.refresh"), "callback_data": card_data("refresh", key)})
         rows.append(last)
     if note:
         text += "\n\n" + note
+    # In a topic, with phone access on, the card's actions live in the Mini
+    # App (an experiment): one button opens the menu page on this feature,
+    # and what is done there leaves its line here.
+    if in_topic and origin:
+        return text, [[{"text": t("card.app"), "web_app": {
+            "url": "%s/__sclaude/menu?f=%s" % (origin, urllib.parse.quote(key, safe=""))}}]]
     # Outside a topic — Threaded Mode off — the card stands where the feature
     # list was, and the way back to the list is needed.
     if not in_topic:
@@ -3707,6 +4020,99 @@ def open_card(bot, name, slug):
     if not feature_topic(bot, name, slug, renew=True):
         return missed()
     return True if load_record(repo, slug).get("card") else None
+
+
+def redraw_cards(bot):
+    # Every card in a feature's topic, drawn again: what it offers depends on
+    # phone access (one button to the app, or the actions themselves), and a
+    # card left as it was offers what does not work.
+    for repo in known_repos():
+        name = os.path.basename(repo)
+        feats = None
+        for slug in feature_records(repo):
+            msg = load_record(repo, slug).get("card") or 0
+            if not msg or not feature_dir(repo, slug):
+                continue
+            if feats is None:
+                feats, _ = features_of_name(name)
+            bot.edit(msg, *card(name, slug, feats=feats))
+
+
+def redraw_screens(bot):
+    # The menu screen of each place, drawn again as the chat's menu: offline
+    # it is the hold and the way to turn access on, online the way to the
+    # app — and an old one would offer the other.
+    for place, msg in (read().get("screens") or {}).items():
+        if msg:
+            bot.edit(msg, *chat_menu(int(place)))
+
+
+# Whether phone access was on when this process last looked; None before the
+# first look.
+PHONE_SEEN = [None]
+
+
+def phone_changed(bot, on):
+    # Everything that offers the app follows phone access: the Menu button,
+    # the list of commands, the menu screens, the feature cards.
+    PHONE_SEEN[0] = on
+    if on:
+        # Turned on from the terminal too: it counts as asked for.
+        with locked() as st:
+            st["phone_on_at"] = max(st.get("phone_on_at") or 0, boot_time())
+    bot.menu_button()
+    bot.commands(online=on)
+    redraw_screens(bot)
+    redraw_cards(bot)
+    log.info("phone access is %s: the menu, the commands and the cards follow",
+             "on" if on else "off")
+
+
+def boot_time():
+    """When this machine (for WSL, its VM) started, by the kernel."""
+    with open("/proc/stat") as fh:
+        for line in fh:
+            if line.startswith("btime "):
+                return int(line.split()[1])
+    return 0
+
+
+def phone_off_after_boot():
+    # Phone access is off unless asked for since the machine started:
+    # Tailscale keeps a funnel across reboots, and a door to the internet
+    # nobody remembers opening is one to close. A restart of the bot alone
+    # leaves it as it was.
+    if not gate_origin(None, False):
+        return
+    if (read().get("phone_on_at") or 0) >= boot_time():
+        return
+    run(FUNNEL_OFF, timeout=30)
+    log.info("phone access was on from before the machine started: turned off")
+
+
+def wait_for_phone(message_id):
+    # The message saying phone access is coming: check_phone turns it into
+    # "it is on" once a phone can reach it.
+    with locked() as st:
+        st["phone_wait"] = {"msg": message_id or 0, "since": int(time.time())}
+
+
+def check_phone(bot):
+    # Phone access changes from the chat, from the menu page (another
+    # process) and from the terminal; the loop catches every one of them.
+    config = serve_config()
+    on = bool(gate_origin(config))
+    if PHONE_SEEN[0] is None:
+        PHONE_SEEN[0] = on
+    elif on != PHONE_SEEN[0]:
+        phone_changed(bot, on)
+    wait = read().get("phone_wait")
+    if wait and (on or not gate_origin(config, False)):
+        # Ready — or turned off again before it was.
+        with locked() as st:
+            st["phone_wait"] = None
+        if on and wait.get("msg"):
+            bot.edit(wait["msg"], t("svc.phoneready"))
 
 
 # How long "the hold is released, it will sleep" stays: Windows sleeps after
@@ -3869,12 +4275,20 @@ def main():
         set_lang(saved)
     log.info("the daemon has started, chat_id=%s, language=%s", chat, current())
 
+    try:
+        phone_off_after_boot()
+    except Exception as exc:
+        log.warning("phone access after a boot: %s", exc)
+
     # The commands are a cheap second route to the menu: typed by hand when the
     # buttons are out of reach. They do not occupy the button in the input box
     # while doing so.
     bot.commands()
     bot.menu_button()
     bot.describe()
+    # What they were set up for: a change from here on is check_phone's,
+    # even one made before the loop's first look.
+    PHONE_SEEN[0] = bool(gate_origin())
 
     # If we were restarted by a button, report it into that same message. That
     # same message carries the reply keyboard: setting it with a separate "I have
@@ -3974,7 +4388,13 @@ def main():
             log.exception("sweeping the time question: %s", exc)
 
         try:
+            check_phone(bot)
+        except Exception as exc:
+            log.exception("checking phone access: %s", exc)
+
+        try:
             check_topics(bot)
+            check_new_topics(bot)
         except Exception as exc:
             log.exception("checking the feature topics: %s", exc)
 

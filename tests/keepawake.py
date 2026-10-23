@@ -11,6 +11,7 @@
 #
 # Run it with: python3 tests/keepawake.py
 import datetime
+import glob
 import json
 import os
 import re
@@ -877,8 +878,8 @@ class FakeBot(object):
     def anchor(self, text):
         self.anchors.append(text)
 
-    def commands(self):
-        pass
+    def commands(self, online=None):
+        self.listed = online
 
     def menu_button(self):
         pass
@@ -891,6 +892,9 @@ with sandbox() as box:
     os.environ["KEEPAWAKE_BOT_TOKEN"] = "test:token"
     os.environ["KEEPAWAKE_CHAT_ID"] = "12345"
     from keepawake import telegramd
+    # Public DNS is never asked: a funnel's name counts as published unless
+    # a check says otherwise.
+    telegramd.name_published = lambda host: True
 
     bot = FakeBot()
     handler = telegramd.Handler(bot)
@@ -1072,7 +1076,7 @@ with sandbox() as box:
     before = len(bot7.sent)
     h7.message({"text": "/nosuchcommand"})
     check("an unknown command answers", len(bot7.sent), before + 1)
-    check("an unknown command gives the menu", bot7.sent[-1][1], telegramd.menu_keyboard())
+    check("an unknown command gives the menu", bot7.sent[-1][1], telegramd.chat_menu()[1])
 
     # A command beats an open question about a time — otherwise there would be
     # no way out of a dialogue begun by mistake except the right answer.
@@ -1492,10 +1496,66 @@ check_true("code-server at the top level", "menu_code" in top)
 check_true("sclaude at the top level", "svc_sclaude" in top)
 check_true("chrome at the top level", "menu_chrome" in top)
 
-# And they are not duplicated in the settings.
+# The chat's menu is the way to the Mini App. Without phone access the app
+# cannot open, and the chat keeps the hold and the way to turn access on.
+saved_origin = tg_menu.gate_origin
+try:
+    tg_menu.gate_origin = lambda *a: ""
+    offline = [b.get("callback_data") for row in tg_menu.chat_menu()[1] for b in row]
+    check("access off: the chat keeps the hold and the switch", offline,
+          ["menu_extend", "phone_toggle"])
+    tg_menu.gate_origin = lambda *a: "https://box.tail1.ts.net:8443"
+    online = [b for row in tg_menu.chat_menu()[1] for b in row]
+    check("access on: one button, to the app", [b.get("web_app", {}).get("url") for b in online],
+          ["https://box.tail1.ts.net:8443/__sclaude/menu"])
+    saved_topic = tg_menu.topic_channel
+    tg_menu.topic_channel = lambda thread: "shop/feat-a" if thread == 77 else ""
+    try:
+        check("in a feature's topic the app opens on that feature",
+              tg_menu.chat_menu(77)[1][0][0]["web_app"]["url"],
+              "https://box.tail1.ts.net:8443/__sclaude/menu?f=shop%2Ffeat-a")
+    finally:
+        tg_menu.topic_channel = saved_topic
+    # /phone turns access on from the chat, and says so; with access on it
+    # is the way to the app, as /menu.
+    tg_menu.gate_origin = lambda *a: ""
+    saved_on = tg_menu.phone_on
+    tg_menu.phone_on = lambda: (True, "")
+    try:
+        bot_p = FakeBot()
+        tg_menu.Handler(bot_p).cmd_phone()
+        check("/phone turns access on and says it is waiting", bot_p.sent[-1][0],
+              tg_menu.t("svc.phonewait"))
+        check_true("and remembers the message to change", bool(tg_menu.read().get("phone_wait")))
+        tg_menu.phone_on = lambda: (False, "funnel not allowed")
+        bot_p = FakeBot()
+        tg_menu.Handler(bot_p).cmd_phone()
+        check_true("/phone says why it could not", "funnel not allowed" in bot_p.sent[-1][0])
+    finally:
+        tg_menu.phone_on = saved_on
+    check_true("/phone is a command", "phone" in tg_menu.COMMANDS)
+
+    # The list of commands is what the chat's menu offers at the moment.
+    class Listed(tg_menu.Bot):
+        def call(self, method, http_timeout=15, **params):
+            if method == "setMyCommands" and params.get("language_code") is None:
+                self.listed = [c["command"] for c in params["commands"]]
+    listed = Listed("t:k", 1)
+    listed.commands(online=False)
+    check("access off: only the hold, the status and the way to access",
+          listed.listed, ["menu", "phone", "status", "awake", "extend", "sleep"])
+    listed.commands(online=True)
+    check("access on: the sections, and no /phone",
+          ("chrome" in listed.listed, "phone" in listed.listed), (True, False))
+finally:
+    tg_menu.gate_origin = saved_origin
+
+# Each thing in one place: the status is on the Keepawake screen, the
+# repository is chosen in Sclaude only.
+check("no separate status button", "menu_status" in top, False)
 inner = [b["callback_data"] for row in tg_menu.services_keyboard() for b in row]
 check("sclaude is not duplicated in the settings", "svc_sclaude" in inner, False)
-check_true("the repository stayed in the settings", "svc_repos" in inner)
+check("the repository is not chosen in the settings", "svc_repos" in inner, False)
 
 # code-server's password must not reach the message: it would settle in the
 # chat's history and on Telegram's servers for ever.
@@ -1507,29 +1567,20 @@ if os.path.exists(cfg):
             secret = line.split(":", 1)[1].strip()
     if secret:
         check("the password does not reach the card", secret in tg_menu.code_text(), False)
-    # The Chrome card reminds you which address to look at the project on: the
-    # browser's window stands on the laptop, and a person on a phone needs the
-    # link rather than the browser itself.
-    # The Chrome card lists every feature sclaude has registered, each with a
-    # link for the phone and the address for the laptop, read from the same
-    # registry the proxy reads.
+    # The Chrome card is the browser and the proxy: each feature's addresses
+    # are on its card, not repeated here.
     reg = tempfile.mkdtemp(prefix="keepawake-test-registry-")
     wt = tempfile.mkdtemp(prefix="keepawake-test-feature-")
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
         json.dump({"dev": {"label": "sample-one", "port": 1}}, fh)
     os.symlink(wt, os.path.join(reg, "sample-one"))
-    os.symlink("/nonexistent", os.path.join(reg, "gone"))
     saved_registry = tg_menu.DEV_REGISTRY
     tg_menu.DEV_REGISTRY = reg
     try:
         chrome_body = tg_menu.chrome_text()
-        # The phone has no *.localhost: its link goes through the proxy's page
-        # that picks the feature with a cookie — at the tailscale serve name
-        # when there is one, since only a name survives a sign-in.
-        check_true("the phone link picks the feature through the proxy",
-                   'href="%s/__sclaude/select?f=sample-one"' % tg_menu.phone_origin()
-                   in chrome_body)
+        check("no feature is listed on the Chrome card", "sample-one" in chrome_body, False)
+        check_true("the proxy's state is named", "sclaude-proxy" in chrome_body)
         saved_run = tg_menu.run
         try:
             tg_menu.run = lambda cmd, timeout=25: json.dumps({"Web": {
@@ -1542,12 +1593,6 @@ if os.path.exists(cfg):
                        tg_menu.phone_origin().endswith(":%d" % tg_menu.DEV_PORT))
         finally:
             tg_menu.run = saved_run
-        check_true("the laptop address is the feature's own name",
-                   "<code>http://sample-one.localhost:%d</code>" % tg_menu.DEV_PORT
-                   in chrome_body)
-        check_true("a feature whose server is down says so", "⏹" in chrome_body)
-        check("a link to a tree that is gone is left out", "gone" in chrome_body, False)
-        check_true("the proxy's state is named", "sclaude-proxy" in chrome_body)
 
         # Phone access is stubbed, not read: on this machine the funnel may
         # well be on.
@@ -1556,7 +1601,6 @@ if os.path.exists(cfg):
         try:
             rows = tg_menu.chrome_keyboard()
             off_settings = tg_menu.services_keyboard()
-            off_text = tg_menu.chrome_text()
         finally:
             tg_menu.gate_origin = saved_origin
         datas = [b.get("callback_data") for row in rows for b in row]
@@ -1570,11 +1614,9 @@ if os.path.exists(cfg):
         # The row caption is not a button: pressing it must do nothing.
         check_true("the row captions are marked noop", "noop" in datas)
 
-        # Phone access off: no phone buttons at all, the card points to
-        # Settings, and Settings offers to turn it on.
+        # Phone access off: no phone buttons at all, and Settings offers to
+        # turn it on.
         check("access off: no Mini App", any("web_app" in b for row in rows for b in row), False)
-        check_true("access off: the card points to Settings",
-                   tg_menu.t("chrome.gatedown") in off_text)
         check_true("access off: Settings can turn it on",
                    [tg_menu.t("svc.phoneoff"), "phone_toggle"] in
                    [[b["text"], b["callback_data"]] for row in off_settings for b in row])
@@ -1607,8 +1649,59 @@ if os.path.exists(cfg):
             check_true("access on: Settings can turn it off",
                        tg_menu.t("svc.phoneon") in [b["text"] for row in
                                                     tg_menu.services_keyboard() for b in row])
-            check_true("access on: the card says so",
-                       tg_menu.t("chrome.gateup") in tg_menu.chrome_text())
+            # Until the name is in public DNS a phone cannot find it: the app
+            # is not offered, and the message about it waits.
+            saved_pub = tg_menu.name_published
+            try:
+                tg_menu.name_published = lambda host: False
+                tg_menu.PUBLISHED.update(host="", ok=False)
+                check("not yet published: no app", tg_menu.gate_origin(), "")
+                check("but the funnel counts for turning it off",
+                      tg_menu.gate_origin(None, False), "https://box.tail1.ts.net:8443")
+                with tg_menu.locked() as st:
+                    st["phone_wait"] = {"msg": 4321, "since": int(time.time())}
+                tg_menu.PHONE_SEEN[0] = False
+                bot_w = FakeBot()
+                tg_menu.check_phone(bot_w)
+                check("the waiting message stays while it waits", bot_w.edits, [])
+                tg_menu.name_published = lambda host: True
+                tg_menu.PUBLISHED.update(at=0)
+                tg_menu.check_phone(bot_w)
+                check_true("published: the waiting message says it is on",
+                           (4321, tg_menu.t("svc.phoneready")) in bot_w.edits)
+                check("and is forgotten", tg_menu.read().get("phone_wait"), None)
+                with tg_menu.locked() as st:
+                    st["phone_wait"] = {"msg": 4322, "since": int(time.time()) - 3600}
+                tg_menu.name_published = lambda host: False
+                tg_menu.PUBLISHED.update(host="", ok=False)
+                check("waited too long: the app is offered anyway", tg_menu.gate_origin(),
+                      "https://box.tail1.ts.net:8443")
+            finally:
+                tg_menu.name_published = saved_pub
+                tg_menu.PUBLISHED.update(host="", ok=False)
+                tg_menu.PHONE_SEEN[0] = None
+                with tg_menu.locked() as st:
+                    st["phone_wait"] = None
+            # Phone access is off unless asked for since the machine started.
+            saved_boot = tg_menu.boot_time
+            ran = []
+            try:
+                tg_menu.boot_time = lambda: int(time.time()) - 60
+                # Recorded, never run: the funnel here is the test's, not the machine's.
+                tg_menu.run = lambda cmd, timeout=25: (
+                    ran.append(cmd), json.dumps(serve) if "serve status" in cmd else "")[1]
+                with tg_menu.locked() as st:
+                    st["phone_on_at"] = int(time.time()) - 3600
+                tg_menu.phone_off_after_boot()
+                check_true("on from before the boot: turned off", tg_menu.FUNNEL_OFF in ran)
+                del ran[:]
+                with tg_menu.locked() as st:
+                    st["phone_on_at"] = int(time.time())
+                tg_menu.phone_off_after_boot()
+                check("asked for since the boot: left on", tg_menu.FUNNEL_OFF in ran, False)
+            finally:
+                tg_menu.boot_time = saved_boot
+                tg_menu.run = funnel_on
             # The funnel on :8443 but pointing elsewhere is not the gate.
             serve["Web"]["box.tail1.ts.net:8443"]["Handlers"]["/"]["Proxy"] = "http://127.0.0.1:9999"
             check("a funnel to something else is not phone access", tg_menu.gate_origin(), "")
@@ -2890,6 +2983,99 @@ with sandbox() as box:
         check("an answered menu loses its buttons", bot7.edits[-1][0], 803)
         h7.message({"text": "/menu", "message_id": 93})
         check("the next screen leaves the answer be", 803 in bot7.deletes, False)
+
+        # --- a new feature's topic ------------------------------------------
+        # Started from the bot, a new feature asks for its name before it has
+        # one, in the repository's channel; those questions go to a topic made
+        # for it, and the named feature takes that topic over.
+        saved_start = tg_topic.start_sclaude
+        tg_topic.start_sclaude = lambda repo_, args: None
+        try:
+            bot_n = FakeBot()
+            tg_topic.Handler(bot_n).callback({"id": "c", "data": "newfeat:shop",
+                                              "message": {"message_id": 710}})
+            new_thread = tg_topic.new_topic_of("shop")
+            check_true("starting a new feature makes its topic", new_thread in bot_n.topics)
+            ch_repo = tg_topic.ask_dir(repo)
+            os.makedirs(ch_repo, exist_ok=True)
+            lay_in(ch_repo, "qn", prompt="Name? ", form="text")
+            tg_topic.check_asks(bot_n)
+            check("its unnamed questions go to that topic", bot_n.threads[-1], new_thread)
+            unlay(ch_repo)
+            tg_topic.check_asks(bot_n)
+            feature_tree(repo, "n")
+            feature_channel(repo, "n")
+            check("the named feature takes the topic over",
+                  tg_topic.feature_topic(bot_n, "shop", "n"), new_thread)
+            check("renamed for it", bot_n.renames[-1],
+                  (new_thread, tg_topic.topic_name("shop", "n")))
+            check("and the repository has none waiting", tg_topic.new_topic_of("shop"), 0)
+
+            # Phone access changing redraws the cards in the topics: what a
+            # card offers depends on it.
+            card_n = json.load(open(os.path.join(os.path.dirname(repo), "shop-n",
+                                                 ".sclaude", "local", "feature",
+                                                 "telegram.json")))["card"]
+            saved_gate = tg_topic.gate_origin
+            try:
+                tg_topic.PHONE_SEEN[0] = None
+                tg_topic.gate_origin = lambda *a: ""
+                bot_c = FakeBot()
+                tg_topic.check_phone(bot_c)
+                check("the first look changes nothing", bot_c.edits, [])
+                with tg_topic.locked() as st:
+                    st["screens"] = {"0": 777}
+                tg_topic.gate_origin = lambda *a: "https://box.tail1.ts.net:8443"
+                tg_topic.check_phone(bot_c)
+                check_true("access turned on redraws the card", card_n in [e[0] for e in bot_c.edits])
+                check_true("and the main chat's menu, now the way to the app",
+                           (777, tg_topic.chat_menu(0)[0]) in bot_c.edits)
+                check("and lists the commands for it", bot_c.listed, True)
+                edits = len(bot_c.edits)
+                tg_topic.check_phone(bot_c)
+                check("no change, no redraw", len(bot_c.edits), edits)
+            finally:
+                tg_topic.gate_origin = saved_gate
+                tg_topic.PHONE_SEEN[0] = None
+
+            # A feature older than the topic is not the one it was made for.
+            tg_topic.new_feature_topic(bot_n, "shop")
+            waiting = tg_topic.new_topic_of("shop")
+            old_tree = feature_tree(repo, "o")
+            feature_channel(repo, "o")
+            git_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(old_tree))), ".git")
+            os.utime(git_file, (time.time() - 3600, time.time() - 3600))
+            check_true("an older feature gets a topic of its own",
+                       tg_topic.feature_topic(bot_n, "shop", "o") != waiting)
+            check("and the new one keeps waiting", tg_topic.new_topic_of("shop"), waiting)
+
+            # A start that asks nothing after the name: the topic is taken
+            # over as soon as the worktree is there.
+            with state.locked() as st:
+                st["new_topics"]["shop"]["since"] = int(time.time()) - 5
+            feature_tree(repo, "q")
+            tg_topic.check_new_topics(bot_n)
+            check("a new worktree takes the topic without a question",
+                  json.load(open(os.path.join(os.path.dirname(repo), "shop-q",
+                                              ".sclaude", "local", "feature",
+                                              "telegram.json")))["thread"], waiting)
+            check("and it is renamed", bot_n.renames[-1],
+                  (waiting, tg_topic.topic_name("shop", "q")))
+            tg_topic.new_feature_topic(bot_n, "shop")
+            waiting = tg_topic.new_topic_of("shop")
+
+            # Nobody took it over: it goes after a while. (Every worktree here
+            # is made older than it, or one would take it over.)
+            gone_since = int(time.time()) - tg_topic.NEW_TOPIC_KEEP - 1
+            for git in glob.glob(os.path.join(os.path.dirname(repo), "shop-*", ".git")):
+                os.utime(git, (gone_since - 3600, gone_since - 3600))
+            with state.locked() as st:
+                st["new_topics"]["shop"]["since"] = gone_since
+            tg_topic.check_new_topics(bot_n)
+            check_true("an abandoned new-feature topic is deleted", waiting in bot_n.deleted_topics)
+            check("and forgotten", tg_topic.new_topic_of("shop"), 0)
+        finally:
+            tg_topic.start_sclaude = saved_start
 
         # --- the review's corner cases ---------------------------------------
         # A send that fails as the network does keeps the topic: no second one,

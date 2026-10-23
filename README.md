@@ -247,9 +247,9 @@ claude mcp add --scope user chrome-devtools -- npx -y chrome-devtools-mcp@latest
 | the phone | [Termius](https://termius.com) | SSH into the machine, to run sclaude and Claude from the phone |
 | the phone | Telegram | the bot: questions, status, the feature cards |
 
-With Tailscale Funnel the bot's "📲 Phone" button opens
-a feature as a Telegram Mini App on a phone without Tailscale (see
-[below](#a-feature-in-telegram-with-no-tailscale-on-the-phone)). On WSL,
+With Tailscale Funnel the bot's menu, a feature and code-server open as a
+Telegram Mini App on a phone without Tailscale (see
+[below](#the-bot-as-an-app-in-telegram-with-no-tailscale-on-the-phone)). On WSL,
 keepawake keeps Windows from sleeping while you work from the phone.
 `./install.sh --extras` sets up the machine's side of the bot, keepawake and
 code-server; Tailscale, code-server itself and the phone's apps you install
@@ -562,21 +562,28 @@ your own, comma-separated.
 
 `sclaude dev` in the main checkout serves it at `main.localhost:3000`.
 
-### A feature in Telegram, with no Tailscale on the phone
+### The bot as an app in Telegram, with no Tailscale on the phone
 
-While phone access is on, each feature's card (in its topic) has a "📲 Phone"
-button, and the bot's chrome-debug card has one for the list of every feature.
-It opens the feature full screen
-inside Telegram, with an address bar of its own. The phone needs nothing but
-Telegram.
+While phone access is on, the bot's menu is a Telegram Mini App: "☰ Menu" by
+the input box opens it, and "📲 Open in the app" on a feature's card opens it on
+that feature. Inside it, a feature's "📲 Phone" opens the feature itself full
+screen, with an address bar of its own, and code-server opens on the worktree
+the same way. The phone needs nothing but Telegram; Telegram Web on a computer
+works too.
 
 It works through `tailscale funnel`, which publishes
 `https://<node>.<tailnet>.ts.net:8443`. A gate in front lets in only your
 Telegram account (the one in `KEEPAWAKE_CHAT_ID`), checked by Telegram's own
 signature, and sends everyone else away with `403`.
 
-Turn it on and off in the bot's Settings ("Phone access"). The first time needs,
-once:
+Phone access is off until you turn it on, and off again after the machine
+restarts. Turning it on takes a few minutes — sometimes five — before Tailscale
+publishes the address; the bot says it is waiting, offers the app nowhere until
+then, and changes that message when the app can open. Turning it off from the
+app asks first and closes the app.
+
+Turn it on with `/phone` or the chat's "Phone access" button, off in the app's
+Settings. The first time needs, once:
 
 ```bash
 sudo tailscale set --operator=$USER    # lets the bot run `tailscale funnel`
@@ -657,14 +664,19 @@ keepawake release         # let go now
 
 `keepawake status` prints two sections, `HOLD` and `HEALTH`.
 
-**The Telegram bot.** In the main chat: extend and status; Chrome and the list
-of every feature (a link for the phone, the address for the laptop); code-server
-links; a sclaude section with the repositories, their features with what each
-step is doing (🟢 running, 🟡 waiting for you, ⚪ idle, ⚫ not started) and a new
-feature; and "Docs" — how to use and install all this. The chat keeps one menu:
-a new one replaces the last, and a menu that did something becomes a line saying
-what it did. It answers in Russian to a Russian Telegram client and in English
-to everyone else.
+**The Telegram bot.** With phone access on, the menu is an app inside Telegram
+("☰ Menu" by the input box): 💤 Keepawake — extend, until a time, release, and
+why the machine is or is not sleeping; 📋 Sclaude — the repositories, their
+features with what each step is doing (🟢 running, 🟡 waiting for you, ⚪ idle,
+⚫ not started) and a new feature; 💻 Code-server; 🌐 Chrome and the list of every
+feature; ⚙️ Settings — language, docs, restarting the bot, phone access. Each
+screen says under it what it is for. What you start there leaves a 📱 line in
+the chat — in the feature's topic when it is about a feature — and what only
+shows something leaves nothing. sclaude's questions stay in the chat as buttons,
+and an answered one becomes its answer. Without phone access `/menu` in the chat
+keeps what works without it: the hold, and turning access on; the command list
+follows. It answers in Russian to a Russian Telegram client and in English to
+everyone else.
 
 **Answering sclaude from the phone.** Every question sclaude asks goes to the
 terminal and to the bot at once, and whichever you answer first counts. Start a
@@ -683,8 +695,10 @@ threads"), each feature has a topic of its own: pressing a feature in the sclaud
 section opens it, and its questions go there, so features running in parallel do
 not ask over one another. The topic starts with the feature's card — its step,
 issue and pull request, ▶️ continue the step, ⚙️ actions, its dev server (open on
-the laptop or the phone, start, stop) and 💻 code-server on its worktree — and
-"Menu" in the topic brings a fresh card. After each review round the topic also
+the laptop or the phone, start, stop) and 💻 code-server on its worktree; with
+phone access on these are in the app, and the card has one button to it — and
+"Menu" in the topic brings a fresh card. A new feature gets its topic as soon as
+it is started, and the topic takes the feature's name once it has one. After each review round the topic also
 gets where the review stands: the last review session's runs, findings, fixed,
 closed without a fix, still open, on earlier fixes and raised again, with the
 report's verdict — a message of its own each round, so the topic keeps the

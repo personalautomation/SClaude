@@ -26,11 +26,19 @@ STRINGS = {
     "menu.title":        ("<b>%(host)s</b>\nЧто делаем?",
                           "<b>%(host)s</b>\nWhat shall we do?"),
     "menu.extend":       ("💤 Keepawake", "💤 Keepawake"),
-    "menu.status":       ("📊 Статус", "📊 Status"),
     "menu.chrome":       ("🌐 Chrome", "🌐 Chrome"),
     "menu.sclaude":      ("📋 Sclaude", "📋 Sclaude"),
     "menu.code":         ("💻 Code-server", "💻 Code-server"),
     "menu.settings":     ("⚙️ Настройки", "⚙️ Settings"),
+    # The menu in the chat: the way to the Mini App, or, while phone access
+    # is off, what has to work without it.
+    "menu.inapp":        ("<b>%(host)s</b>\nМеню — в приложении.",
+                          "<b>%(host)s</b>\nThe menu is in the app."),
+    "menu.open":         ("☰ Открыть меню", "☰ Open the menu"),
+    "menu.offline":      ("<b>%(host)s</b>\nДоступ с телефона выключен, и меню-приложение "
+                          "не откроется. Здесь — удержание и включение доступа (или /phone).",
+                          "<b>%(host)s</b>\nPhone access is off, so the menu app will "
+                          "not open. Here: the hold, and turning access on (or /phone)."),
     "menu.back":         ("‹ Назад", "‹ Back"),
     "menu.button":       ("☰ Меню", "☰ Menu"),
     "anchor.hint":       ("Кнопка <b>☰ Меню</b> под полем ввода открывает "
@@ -76,6 +84,8 @@ STRINGS = {
                           "Code-server: start and restart"),
     "cmd.sclaude":       ("Фичи в работе по репозиториям",
                           "Features in progress, by repository"),
+    "cmd.phone":         ("Включить доступ с телефона — меню-приложение",
+                          "Turn phone access on — the menu app"),
     "cmd.settings":      ("Язык, инструкции, перезапуск бота",
                           "Language, docs, restart the bot"),
     "cmd.status":        ("Кто держит и сколько осталось",
@@ -117,6 +127,13 @@ STRINGS = {
     # A short line for the second message — the one that raises the input box.
     # The long question already stands above, and repeating it whole means
     # writing the same thing to the person twice in a row.
+    # "Until a time" on the menu page, which has a time field of its own.
+    "awake.askpage":     ("До которого часа не спать? Время сегодняшнее; если оно "
+                          "уже прошло — завтрашнее.",
+                          "Until what time should it stay awake? Today's time; "
+                          "one already past means tomorrow."),
+    "awake.badtimepage": ("Не понял время — нужно <code>ЧЧ:ММ</code>.",
+                          "I did not understand that time — it takes <code>HH:MM</code>."),
     "awake.ask.now":     ("👇 Время сюда:", "👇 Time here:"),
     "awake.hint":        ("ЧЧ:ММ, например 23:30", "HH:MM, e.g. 23:30"),
     "awake.badtime":     ("Не понял время. Нужен формат <code>ЧЧ:ММ</code>, "
@@ -134,26 +151,16 @@ STRINGS = {
                           "to sleep on its own idle timer."),
 
     # chrome
-    "chrome.title":      ("<b>chrome-debug</b>\n%(state)s\n%(proxy)s\n%(gate)s\n\n"
-                          "<b>Фичи</b>\n%(features)s\n\n"
-                          "<i>Ссылка — для телефона; адрес под ней — для "
-                          "браузера на ноутбуке. Остановленная фича запускается "
-                          "сама, когда её открывают, а неоткрытая полчаса — "
-                          "останавливается. Окно Chrome на ноутбуке, отладочный "
-                          "порт %(port)s.</i>",
-                          "<b>chrome-debug</b>\n%(state)s\n%(proxy)s\n%(gate)s\n\n"
-                          "<b>Features</b>\n%(features)s\n\n"
-                          "<i>The link is for the phone; the address under it "
-                          "is for the browser on the laptop. A stopped feature "
-                          "starts when it is opened, and one nobody opens for "
-                          "half an hour stops. The Chrome window is on the "
-                          "laptop, debug port %(port)s.</i>"),
-    "chrome.feature":    ("• %(link)s — %(state)s\n   <code>%(local)s</code>",
-                          "• %(link)s — %(state)s\n   <code>%(local)s</code>"),
+    "chrome.title":      ("<b>chrome-debug</b>\n%(state)s\n%(proxy)s\n\n"
+                          "<i>«Ноутбук» открывает список фич в Chrome на ноутбуке, "
+                          "«Телефон» — здесь. Сами фичи — в их карточках (Sclaude). "
+                          "Отладочный порт %(port)s.</i>",
+                          "<b>chrome-debug</b>\n%(state)s\n%(proxy)s\n\n"
+                          "<i>\u201cLaptop\u201d opens the list of features in Chrome on "
+                          "the laptop, \u201cPhone\u201d opens it here. The features "
+                          "themselves are on their cards (Sclaude). Debug port %(port)s.</i>"),
     "chrome.running":    ("✅ работает", "✅ running"),
     "chrome.stopped":    ("⏹ остановлена", "⏹ stopped"),
-    "chrome.nofeatures": ("Ни у одной фичи ещё нет dev-сервера.",
-                          "No feature has a dev server yet."),
     "chrome.proxyup":    ("✅ sclaude-proxy отвечает на :3000",
                           "✅ sclaude-proxy answering on :3000"),
     "chrome.proxydown":  ("⏹ sclaude-proxy не отвечает — фичи не открыть",
@@ -161,12 +168,12 @@ STRINGS = {
     "chrome.open":       ("🌐 Ноутбук", "🌐 Laptop"),
     "chrome.featstop":   ("⏹ Остановить", "⏹ Stop"),
     "chrome.phoneopen":  ("📲 Телефон", "📲 Phone"),
-    "chrome.gateup":     ("📲 «Телефон» открывает фичу прямо в Telegram, "
-                          "с адресной строкой. Пускает только вас.",
-                          "📲 \u201cPhone\u201d opens the feature right in Telegram, "
-                          "with an address bar. Only you are let in."),
-    "chrome.gatedown":   ("🔒 Доступ с телефона выключен — включается в Настройках.",
-                          "🔒 Phone access is off — it is turned on in Settings."),
+    "chrome.gatedown":   ("🔒 <b>Доступ с телефона выключен.</b> Меню-приложение и "
+                          "кнопки 📲 не откроются. /menu оставляет здесь удержание, "
+                          "/phone включает доступ обратно.",
+                          "🔒 <b>Phone access is off.</b> The menu app and the 📲 "
+                          "buttons will not open. /menu keeps the hold here, and /phone "
+                          "turns access back on."),
     "chrome.gatefail":   ("⚠️ Доступ с телефона не включился:\n<pre>%(log)s</pre>\n"
                           "<i>Нужно один раз: funnel разрешён для ноутбука в политике "
                           "tailnet и <code>sudo tailscale set --operator=$USER</code>.</i>",
@@ -185,19 +192,31 @@ STRINGS = {
 
     # settings
     "svc.title":         ("<b>Настройки</b>", "<b>Settings</b>"),
-    "svc.repos":         ("📁 Репозиторий", "📁 Repository"),
     "svc.docs":          ("📖 Инструкции", "📖 Instructions"),
     "svc.lang":          ("🌍 Язык", "🌍 Language"),
     "svc.phoneon":       ("📲 Доступ с телефона: включён", "📲 Phone access: on"),
     "svc.phoneoff":      ("🔒 Доступ с телефона: выключен", "🔒 Phone access: off"),
-    "svc.phonewarm":     ("<b>Настройки</b>\n\n📲 Доступ с телефона включён. Tailscale "
-                          "начинает пропускать его примерно через 1,5 минуты; дальше "
-                          "«📲 Телефон» в карточке фичи (в её топике) открывает её в "
-                          "Telegram, а в карточке chrome-debug — список всех фич.",
-                          "<b>Settings</b>\n\n📲 Phone access is on. Tailscale starts "
-                          "carrying it in about a minute and a half; then \u201c📲 Phone\u201d "
-                          "on a feature's card (in its topic) opens it in Telegram, and "
-                          "on the chrome-debug card the list of every feature."),
+    "svc.phonewait":     ("⏳ <b>Включаю доступ с телефона.</b> Жду, пока Tailscale "
+                          "опубликует адрес в интернете, — обычно несколько минут. "
+                          "Это сообщение изменится, когда всё будет готово; до тех пор "
+                          "приложение не откроется.",
+                          "⏳ <b>Turning phone access on.</b> Waiting for Tailscale to "
+                          "publish the address on the internet — usually a few minutes. "
+                          "This message changes when it is ready; until then the app "
+                          "will not open."),
+    "svc.phoneready":    ("📲 <b>Доступ с телефона включён.</b>\n"
+                          "• <b>☰ Menu</b> у поля ввода открывает меню-приложение;\n"
+                          "• <b>📲 Открыть в приложении</b> на карточке фичи открывает его "
+                          "сразу на этой фиче;\n"
+                          "• кнопки 📲 открывают страницу фичи и code-server прямо в Telegram.\n"
+                          "Пускает только вас.",
+                          "📲 <b>Phone access is on.</b>\n"
+                          "• <b>☰ Menu</b> by the input box opens the menu app;\n"
+                          "• <b>📲 Open in the app</b> on a feature's card opens it on "
+                          "that feature;\n"
+                          "• the 📲 buttons open a feature's page and code-server right "
+                          "in Telegram.\n"
+                          "Only you are let in."),
 
     # the language switch
     "lang.title":        ("<b>Язык</b>\nСейчас: <b>%(now)s</b>\n\n"
@@ -229,6 +248,13 @@ STRINGS = {
     "docs.holders":      ("🔒 Держатели", "🔒 Holders"),
     "docs.files":        ("📂 Файлы и службы", "📂 Files and services"),
     "docs.trouble":      ("🔧 Если что-то не так", "🔧 Troubleshooting"),
+    # The menu page (an experiment) asks before phone access goes: the page
+    # itself goes through it.
+    "svc.phoneoffask":   ("Выключить доступ с телефона? Это приложение закроется — "
+                          "снова включить можно будет только из чата.",
+                          "Turn phone access off? This app closes with it, and it "
+                          "can be turned back on only from the chat."),
+    "svc.phoneoffyes":   ("🔒 Выключить", "🔒 Turn off"),
     "svc.restart":       ("🔁 Перезапуск демона", "🔁 Restart daemon"),
     "svc.restarting":    ("🔁 Перезапускаюсь…\nСообщу, когда поднимусь.",
                           "🔁 Restarting…\nI will report once I am back."),
@@ -251,6 +277,15 @@ STRINGS = {
                           "с ноутбука",
                           "⏹ down — opening the laptop link brings it back"),
     "code.start":        ("▶️ Запустить", "▶️ Start"),
+    # On the menu page, which has no laptop link: only the button brings it up.
+    "code.stoppedpage":  ("⏹ погашен — ▶️ поднимает его", "⏹ down — ▶️ brings it up"),
+    # The same on the menu page, where the gate's button opens it.
+    "code.titlepage":    ("<b>code-server</b>\n%(state)s\n%(folder)s\n\n"
+                          "<i>Гаснет сам после часа простоя. Пароль — в "
+                          "~/.config/code-server/config.yaml</i>",
+                          "<b>code-server</b>\n%(state)s\n%(folder)s\n\n"
+                          "<i>Stops by itself after an hour idle. The password "
+                          "is in ~/.config/code-server/config.yaml</i>"),
     "code.folder":       ("Открыт: <b>%(name)s</b>", "Open in: <b>%(name)s</b>"),
     "code.reopen":       ("📂 Открыть %(name)s", "📂 Open %(name)s"),
     "code.restart":      ("🔄 Перезапуск", "🔄 Restart"),
@@ -307,6 +342,8 @@ STRINGS = {
     # The feature's card in its topic: the dev server and code-server lines.
     "card.dev":          ("\n\n🖥 Dev-сервер: %(state)s\n%(link)s · <code>%(local)s</code>",
                           "\n\n🖥 Dev server: %(state)s\n%(link)s · <code>%(local)s</code>"),
+    "card.devpage":      ("\n\n🖥 Dev-сервер: %(state)s", "\n\n🖥 Dev server: %(state)s"),
+    "card.codepage":     ("\n💻 code-server запущен.", "\n💻 code-server is running."),
     "card.phonelink":    ("с телефона", "from the phone"),
     "card.nodev":        ("\n\n🖥 Dev-сервера у фичи ещё нет.",
                           "\n\n🖥 The feature has no dev server yet."),
@@ -316,12 +353,20 @@ STRINGS = {
                           "<code>%(local)s</code>"),
     "card.nocode":       ("\n💻 code-server погашен.", "\n💻 code-server is stopped."),
     "card.codestart":    ("💻 code-server", "💻 code-server"),
+    # Mini App buttons (an experiment): the menu page on this feature, and
+    # code-server through the gate, without Tailscale on the phone.
+    "card.app":          ("📲 Открыть в приложении", "📲 Open in the app"),
+    "code.app":          ("📲 code-server здесь", "📲 code-server here"),
     # What the feature list becomes once a feature's card went to its topic,
     # and once a new feature was started: the menu, answered.
     "feat.topiclater":   ("\n\n⏳ Топик фичи пока не открылся — нажмите ещё раз чуть позже.",
                           "\n\n⏳ The feature's topic did not open yet — press again in a moment."),
     "feat.opened":       ("📌 <b>%(slug)s</b> — карточка в топике фичи.",
                           "📌 <b>%(slug)s</b> — the card is in the feature's topic."),
+    # A new feature's topic before it has a name, and what the menu says.
+    "feat.newtopic":     ("✨ Новая фича · %(repo)s", "✨ New feature · %(repo)s"),
+    "feat.newtopicat":   ("✨ Новая фича в <b>%(repo)s</b> — вопросы придут в её топик.",
+                          "✨ A new feature in <b>%(repo)s</b> — its questions come to its topic."),
     "feat.newstarted":   ("✨ Новая фича в <b>%(repo)s</b> — вопросы придут сюда.",
                           "✨ A new feature in <b>%(repo)s</b> — its questions come here."),
     "feat.gone":         ("Фича <b>%(slug)s</b> больше не в работе.",
@@ -490,6 +535,93 @@ STRINGS = {
     # action list, "none, go back" in the feature picker. Matched, not shown,
     # and in both languages at once — the bot does not know which one a list
     # was drawn in. sclaude prints English today.
+    # The menu page's notes under each screen: where one is, what the
+    # buttons do, and what changes after them.
+    "help.menu":         ("Всё, что можно сделать с ноутбуком с телефона. "
+                          "💤 Keepawake — уснёт ли ноутбук. 📋 Sclaude — проекты и их фичи. "
+                          "💻 Code-server — редактор. 🌐 Chrome — браузер на ноутбуке. "
+                          "⚙️ Настройки — язык, доступ с телефона, сам бот.\n"
+                          "Всё, что вы здесь запускаете, оставляет строку в чате.",
+                          "Everything you can do with the laptop from the phone. "
+                          "💤 Keepawake — whether the laptop sleeps. 📋 Sclaude — the "
+                          "projects and their features. 💻 Code-server — the editor. "
+                          "🌐 Chrome — the browser on the laptop. ⚙️ Settings — language, "
+                          "phone access, the bot itself.\n"
+                          "Whatever you start here leaves a line in the chat."),
+    "help.keepawake":    ("Может ли ноутбук уснуть. Он не спит, пока его держит что-то из "
+                          "списка ниже, и до срока, который вы дали здесь. ☕ — ещё столько "
+                          "времени с этой минуты; 🕒 — до нужного часа; ♾ — пока не "
+                          "отпустите сами; 🛑 — отпустить: Windows усыпит его по своему "
+                          "таймеру простоя.",
+                          "Whether the laptop may sleep. It stays awake while something in "
+                          "the list below holds it, and until the deadline you give here. "
+                          "☕ — that much more time from now; 🕒 — until a time of day; "
+                          "♾ — until you release it yourself; 🛑 — release it: Windows "
+                          "puts it to sleep on its own idle timer."),
+    "help.until":        ("Ноутбук не уснёт до этого времени. Потом вернутся обычные "
+                          "правила: держатели дают час с последней активности.",
+                          "The laptop stays awake until this time. Then the usual rules "
+                          "come back: holders give an hour from their last activity."),
+    "help.code":         ("code-server — VS Code в браузере, работает на ноутбуке. "
+                          "▶️ 🔄 ⏹ — запустить, перезапустить, остановить. 📲 открывает "
+                          "его здесь, через шлюз бота: Tailscale на телефоне не нужен. "
+                          "Открывает репозиторий, выбранный в Sclaude, спрашивает свой "
+                          "пароль и сам гаснет после часа без дела.",
+                          "code-server is VS Code in the browser, running on the laptop. "
+                          "▶️ 🔄 ⏹ — start, restart, stop it. 📲 opens it here, through "
+                          "the bot's gate: no Tailscale needed on the phone. It opens the "
+                          "repository chosen in Sclaude, asks for its own password and "
+                          "stops by itself after an hour unused."),
+    "help.chrome":       ("Chrome с отладочным портом на ноутбуке — им Claude пользуется "
+                          "для проверок. 🌐 «Ноутбук» открывает там список фич, 📲 "
+                          "«Телефон» — тот же список здесь, ⏹ закрывает браузер. Страница "
+                          "каждой фичи — в её карточке в Sclaude.",
+                          "Chrome with a debug port on the laptop — what Claude uses for "
+                          "its checks. 🌐 Laptop opens the list of features there, 📲 "
+                          "Phone opens the same list here, ⏹ closes the browser. Each "
+                          "feature's page is on its card in Sclaude."),
+    "help.sclaude":      ("Фичи в работе в этом репозитории и шаг каждой. Фича открывает "
+                          "свою карточку; ✨ запускает новую — её вопросы придут в её "
+                          "собственный топик в чате. Выбранный здесь репозиторий открывает "
+                          "и code-server.",
+                          "The features in progress in this repository, each with its "
+                          "step. A feature opens its card; ✨ starts a new one — its "
+                          "questions come to a topic of its own in the chat. The "
+                          "repository chosen here is also the one code-server opens."),
+    "help.repos":        ("Какой репозиторий показывает Sclaude и открывает code-server. "
+                          "Если code-server запущен, выбор другого перезапустит его на нём.",
+                          "Which repository Sclaude shows and code-server opens. Choosing "
+                          "another restarts a running code-server on it."),
+    "help.card":         ("Одна фича. ▶️ «Продолжить» — sclaude берётся за текущий шаг; "
+                          "⚙️ «Действия» — список того, что с ней можно сделать. Вопросы "
+                          "и того и другого придут в топик фичи. Dev-сервер — её "
+                          "запущенное приложение: 🌐 открывает его в Chrome на ноутбуке, "
+                          "📲 — здесь, ▶️ ⏹ запускают и останавливают. Каждое действие "
+                          "оставляет строку в топике фичи.",
+                          "One feature. ▶️ Continue — sclaude takes up the current step; "
+                          "⚙️ Actions — the list of what can be done with it. The "
+                          "questions of both come to the feature's topic. The dev server "
+                          "is its running app: 🌐 opens it in the laptop's Chrome, 📲 "
+                          "here, ▶️ ⏹ start and stop it. Each action leaves a line in the "
+                          "feature's topic."),
+    "help.settings":     ("🌍 Язык бота и этого приложения. 📖 Инструкции — как устроен "
+                          "keepawake. 🔁 Перезапуск — бот перезапустится и отчитается в "
+                          "чате. Доступ с телефона открывает это приложение и кнопки 📲 из "
+                          "интернета, пуская только вас; без него приложение закроется, и "
+                          "в чате останется короткое меню.",
+                          "🌍 The language of the bot and this app. 📖 Instructions — how "
+                          "keepawake works. 🔁 Restart — the bot restarts and reports back "
+                          "in the chat. Phone access opens this app and the 📲 buttons "
+                          "from the internet, letting only you in; without it this app "
+                          "closes and the chat keeps a short menu."),
+    "help.lang":         ("На каком языке говорят бот и это приложение. Русский или "
+                          "английский закрепляют выбор; «Как в Telegram» берёт язык "
+                          "вашего приложения Telegram.",
+                          "Which language the bot and this app speak. Russian or English "
+                          "fixes the choice; Follow Telegram takes your Telegram app's "
+                          "language."),
+    "help.docs":         ("Как устроен keepawake, по разделам.",
+                          "How keepawake works, section by section."),
     "option.back":       ("назад", "go back"),
     "option.none":       ("ничего", "none, go back"),
 }

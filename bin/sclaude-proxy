@@ -64,11 +64,12 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import socket
 import subprocess
 import sys
 import time
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
 
 # realpath, not just abspath: install.sh symlinks this file into
 # ~/.local/bin, and resolving through that link is how "../sclaude/lib" still
@@ -643,10 +644,10 @@ async def reaper():
             sys.stderr.write("sclaude-proxy: idle check failed: %s\n" % exc)
 
 
-def respond(status, body, extra=()):
+def respond(status, body, extra=(), kind="text/html; charset=utf-8"):
     data = body.encode("utf-8")
     head = ["HTTP/1.1 %s" % status,
-            "Content-Type: text/html; charset=utf-8",
+            "Content-Type: %s" % kind,
             "Content-Length: %d" % len(data),
             "Cache-Control: no-store",
             # Every page of ours closes its connection: see the note at the top
@@ -926,13 +927,13 @@ background:var(--tg-theme-bg-color,#fff);color:inherit}
 """
 
 
-def gate_bootstrap(label):
+def gate_bootstrap(label, path=""):
     """The page the bot's button opens: set the view up, sign in, show the
     feature inside the address bar's frame."""
     script = """
 const tg = window.Telegram && window.Telegram.WebApp;
 const msg = document.getElementById('msg');
-const start = %(label)s ? '/__sclaude/login?f=' + encodeURIComponent(%(label)s) : '/__sclaude/';
+const start = %(path)s || (%(label)s ? '/__sclaude/login?f=' + encodeURIComponent(%(label)s) : '/__sclaude/');
 function shell() {
   msg.remove();
   document.getElementById('shell').hidden = false;
@@ -969,7 +970,8 @@ if (!tg || !tg.initData) {
     .then((r) => r.ok ? shell() : (msg.textContent = 'The bot did not recognise you (' + r.status + ').'))
     .catch(() => { msg.textContent = 'The laptop did not answer.'; });
 }
-""" % {"full": "true" if GATE_FULLSCREEN else "false", "label": json.dumps(label)}
+""" % {"full": "true" if GATE_FULLSCREEN else "false", "label": json.dumps(label),
+       "path": json.dumps(path)}
     return ("<!doctype html><html><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover'>"
             "<title>%s</title><style>%s</style></head><body>"
@@ -982,8 +984,202 @@ if (!tg || !tg.initData) {
             "</div><iframe id=frame></iframe></div>"
             "<script src='https://telegram.org/js/telegram-web-app.js'></script>"
             "<script>%s</script></body></html>"
-            % (html.escape(label or "Features"), SHELL_STYLE,
-               html.escape(label or "the features"), script))
+            % (html.escape(label or ("code-server" if path else "Features")), SHELL_STYLE,
+               html.escape(label or ("code-server" if path else "the features")), script))
+
+
+async def post_body(method, headers, reader):
+    """A POST's body, small and whole, or None."""
+    try:
+        length = int(headers.get("content-length") or 0)
+    except ValueError:
+        length = -1
+    if method != "POST" or not 0 < length <= AUTH_BODY_LIMIT:
+        return None
+    try:
+        return await asyncio.wait_for(reader.readexactly(length), 15)
+    except (asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError):
+        return None
+
+
+# The bot's menu as a Mini App (an experiment): the Menu button by the input
+# box opens /__sclaude/menu. The page has no cookie of its own: every call
+# carries initData, checked here, which also brings the language Telegram
+# reports. What the menu shows and does is keepawake's (webmenu.py), imported
+# on the first call so that the plain proxy never loads the bot.
+def webmenu():
+    root = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from keepawake import webmenu as module
+    # keepawake logs what a press did; the gate's own lines go to stderr too.
+    import logging
+    if not logging.getLogger("keepawake").handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        logging.getLogger("keepawake").addHandler(handler)
+        logging.getLogger("keepawake").setLevel(logging.INFO)
+    return module
+
+
+async def menu_api(body):
+    try:
+        call = json.loads(body.decode("utf-8", "replace"))
+        init = str(call.get("init") or "")
+        action, context = str(call.get("do") or ""), str(call.get("ctx") or "")
+        label = str(call.get("label") or "")[:200]
+    except (ValueError, AttributeError):
+        return respond("400 Bad Request", "")
+    if not tg_webapp.verify_init_data(init, GATE["token"], GATE["owner"]):
+        return respond("403 Forbidden", "")
+    try:
+        user = json.loads(dict(parse_qsl(init)).get("user") or "{}")
+    except ValueError:
+        user = {}
+    # A press runs commands — `keepawake status`, systemctl — for seconds:
+    # off the loop.
+    out = await asyncio.to_thread(webmenu().answer, GATE["token"], GATE["owner"],
+                                  user, action, context, int(time.time()), label)
+    return respond("200 OK", json.dumps(out), kind="application/json; charset=utf-8")
+
+
+MENU_STYLE = """
+html,body{margin:0;background:var(--tg-theme-bg-color,#fff);
+font:15px/1.4 system-ui,sans-serif;color:var(--tg-theme-text-color,#1c1917)}
+main{padding:12px 16px 24px;
+padding-top:calc(12px + var(--tg-safe-area-inset-top,0px) + var(--tg-content-safe-area-inset-top,0px))}
+#text,.note{white-space:pre-wrap;overflow-wrap:anywhere}
+a{color:var(--tg-theme-link-color,#2563eb)}
+.note{background:var(--tg-theme-secondary-bg-color,#f5f5f4);border-radius:12px;
+padding:12px;margin:12px 0}
+#rows{display:flex;flex-direction:column;gap:8px;margin-top:16px}
+.row{display:flex;gap:8px}
+.row button{flex:1;min-width:0}
+button{border:0;border-radius:10px;padding:10px 6px;font:inherit;
+background:var(--tg-theme-button-color,#2563eb);color:var(--tg-theme-button-text-color,#fff)}
+button.ok{background:#16a34a;color:#fff}
+button.danger{background:#dc2626;color:#fff}
+body.busy button{opacity:.5;pointer-events:none}
+#time{display:flex;gap:8px;margin-top:16px}
+#time[hidden]{display:none}
+#time input{flex:1;font:inherit;padding:8px;border-radius:10px;
+border:1px solid var(--tg-theme-hint-color,#a8a29e);
+background:var(--tg-theme-bg-color,#fff);color:inherit}
+#err{color:#dc2626}
+#help{margin-top:20px;color:var(--tg-theme-hint-color,#78716c);font-size:13px;
+white-space:pre-wrap}
+#help:empty{display:none}
+"""
+
+
+def menu_page(nonce):
+    script = """
+const tg = window.Telegram && window.Telegram.WebApp;
+const $ = (id) => document.getElementById(id);
+let busy = false, ctx = '';
+function button(b) {
+  const el = document.createElement('button');
+  el.textContent = b.text;
+  if (b.style === 'success') el.className = 'ok';
+  if (b.style === 'danger') el.className = 'danger';
+  if (b.callback_data) el.onclick = () => b.callback_data !== 'noop' && call(b.callback_data, b.text);
+  else if (b.url) el.onclick = () => tg.openLink(b.url);
+  // The phone preview is a Mini App of the same gate: go there in place.
+  else if (b.web_app) el.onclick = () => { location.href = b.web_app.url; };
+  return el;
+}
+// A screen is the chat's message, in Telegram's markup. Telegram keeps a few
+// tags and refuses the rest; a page would run whatever came, and a branch
+// name or a title from GitHub is in these screens. So only those tags are
+// kept, an <a> only with a web or tg: address, and no other attribute of
+// anything: no handler, no style.
+const KEPT = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'INS', 'S', 'STRIKE', 'DEL',
+  'CODE', 'PRE', 'A', 'BR', 'BLOCKQUOTE', 'SPAN']);
+function markup(html) {
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  (function clean(node) {
+    for (const el of [...node.children]) {
+      clean(el);
+      if (!KEPT.has(el.tagName)) { el.replaceWith(...el.childNodes); continue; }
+      const href = el.tagName === 'A' ? el.getAttribute('href') || '' : '';
+      for (const a of [...el.attributes]) el.removeAttribute(a.name);
+      if (/^(https?|tg):/i.test(href)) el.setAttribute('href', href);
+    }
+  })(t.content);
+  return t.content;
+}
+function render(v) {
+  document.documentElement.lang = v.lang;
+  $('notes').replaceChildren(...v.notes.map((n) => {
+    const d = document.createElement('div'); d.className = 'note'; d.append(markup(n)); return d; }));
+  if (v.text === null) return;
+  ctx = v.context;
+  $('text').replaceChildren(markup(v.text));
+  $('rows').replaceChildren(...v.rows.map((row) => {
+    const r = document.createElement('div'); r.className = 'row';
+    r.append(...row.map(button)); return r; }));
+  $('time').hidden = !v.time;
+  $('help').textContent = v.help || '';
+  if (tg.isVersionAtLeast('6.1')) v.main ? tg.BackButton.hide() : tg.BackButton.show();
+  window.scrollTo(0, 0);
+  if (v.close) setTimeout(() => tg.close(), 1500);
+}
+function call(action, label) {
+  if (busy) return;
+  busy = true;
+  document.body.classList.add('busy');
+  $('err').textContent = '';
+  fetch('/__sclaude/menu/api', {method: 'POST', cache: 'no-store',
+    body: JSON.stringify({init: tg.initData, do: action, ctx: ctx, label: label || ''})})
+    .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+    .then((v) => { render(v);
+      if (action && tg.HapticFeedback) tg.HapticFeedback.selectionChanged(); })
+    // 403 is almost always a page left open past the day its signature
+    // lasts: only the owner gets this far.
+    .catch((e) => { $('err').textContent = e === 403
+      ? 'This page is out of date: close it and open the menu again.'
+      : typeof e === 'number' ? 'The laptop refused (' + e + ').' : 'The laptop did not answer.'; })
+    .finally(() => { busy = false; document.body.classList.remove('busy'); });
+}
+// Links in a screen lead out of the Mini App.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href]');
+  if (a && tg) { e.preventDefault(); tg.openLink(a.href); }
+});
+if (!tg || !tg.initData) {
+  $('err').textContent = 'Open this from the bot: the Menu button by the input box.';
+} else {
+  tg.ready();
+  tg.expand();
+  if (tg.isVersionAtLeast('6.1')) tg.BackButton.onClick(() => call('menu_back'));
+  $('time').onsubmit = (e) => { e.preventDefault();
+    if ($('hhmm').value) call('until:' + $('hhmm').value, $('hhmm').value); };
+  // A card's button in a feature's topic opens the page on that feature.
+  const f = new URLSearchParams(location.search).get('f') || '';
+  const slash = f.indexOf('/');
+  call(slash > 0 ? 'topic:' + f.slice(0, slash) + ':' + f.slice(slash + 1) : '');
+}
+"""
+    return ("<!doctype html><html><head><meta charset=utf-8>"
+            "<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover'>"
+            "<title>Menu</title><style>%s</style></head><body><main>"
+            "<p id=err></p><div id=text>…</div>"
+            "<form id=time hidden><input id=hhmm type=time required><button>OK</button></form>"
+            "<div id=rows></div><div id=notes></div><p id=help></p>"
+            "</main>"
+            "<script src='https://telegram.org/js/telegram-web-app.js'></script>"
+            "<script nonce=%s>%s</script></body></html>" % (MENU_STYLE, nonce, script))
+
+
+def menu_csp(nonce):
+    """What the menu page may load and run: its own script (by nonce) and
+    Telegram's, its calls to the gate — and no handler written into markup,
+    should one get past markup()."""
+    return ("Content-Security-Policy: default-src 'none'; "
+            "script-src 'nonce-%s' https://telegram.org; style-src 'unsafe-inline'; "
+            "connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'"
+            % nonce)
 
 
 async def gate_own(method, target, headers, reader):
@@ -994,25 +1190,68 @@ async def gate_own(method, target, headers, reader):
         label = (parse_qs(url.query).get("f") or [""])[0]
         if label and not LABEL.match(label):
             return respond("404 Not Found", page("Not found", "<p>No such feature.</p>"))
-        return respond("200 OK", gate_bootstrap(label))
-    if url.path == "/__sclaude/tg/auth":
-        try:
-            length = int(headers.get("content-length") or 0)
-        except ValueError:
-            length = -1
-        if method != "POST" or not 0 < length <= AUTH_BODY_LIMIT:
+        # p: a path of the gate's own to show instead — code-server's.
+        path = (parse_qs(url.query).get("p") or [""])[0]
+        if path and not path.startswith(CODE_PREFIX):
+            return respond("404 Not Found", page("Not found", "<p>No such page.</p>"))
+        return respond("200 OK", gate_bootstrap(label, path))
+    if url.path == "/__sclaude/menu":
+        nonce = secrets.token_urlsafe(18)
+        return respond("200 OK", menu_page(nonce), (menu_csp(nonce),))
+    if url.path == "/__sclaude/menu/api":
+        body = await post_body(method, headers, reader)
+        if body is None:
             return respond("400 Bad Request", "")
-        try:
-            body = await asyncio.wait_for(reader.readexactly(length), 15)
-        except (asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError):
+        return await menu_api(body)
+    if url.path == "/__sclaude/tg/auth":
+        body = await post_body(method, headers, reader)
+        if body is None:
             return respond("400 Bad Request", "")
         if not tg_webapp.verify_init_data(body.decode("utf-8", "replace"),
                                           GATE["token"], GATE["owner"]):
             return respond("403 Forbidden", "")
         return respond("204 No Content", "", (
-            "Set-Cookie: %s=%s; Path=/; Max-Age=%d; Secure; HttpOnly; SameSite=Lax"
-            % (GATE_COOKIE, tg_webapp.sign_cookie(GATE["token"]), tg_webapp.COOKIE_TTL),))
+            "Set-Cookie: " + framed_cookie("%s=%s; Path=/; Max-Age=%d; HttpOnly" % (
+                GATE_COOKIE, tg_webapp.sign_cookie(GATE["token"]), tg_webapp.COOKIE_TTL)),))
     return None
+
+
+# Telegram Web shows a Mini App in a frame inside web.telegram.org, where a
+# browser keeps no SameSite=Lax cookie: the gate's own and the product's
+# behind it would both be dropped, and every request after the sign-in
+# refused. So every cookie on the gate's way is SameSite=None and
+# Partitioned: a browser keeps it for the frame, keyed to the site around it
+# (web.telegram.org), and does not offer it to any other. What SameSite=Lax
+# did against a forged request is done here instead, by cross_site.
+COOKIE_ATTRS = ("samesite", "secure", "partitioned")
+
+
+def framed_cookie(value):
+    """A Set-Cookie value that a Mini App inside Telegram Web keeps."""
+    parts = [p.strip() for p in value.split(";")]
+    kept = [parts[0]] + [p for p in parts[1:]
+                         if p and p.split("=", 1)[0].strip().lower() not in COOKIE_ATTRS]
+    return "; ".join(kept + ["Secure", "SameSite=None", "Partitioned"])
+
+
+def cross_site(method, headers):
+    """True for a request another site made the browser send: refused, as a
+    SameSite=Lax cookie would have kept it out. A plain navigation to a page
+    (a link followed, a redirect back from a sign-in) passes, as under Lax.
+
+    Sec-Fetch-Site says where the request came from in every current
+    browser; without it, a request that changes something says by Origin."""
+    site = headers.get("sec-fetch-site", "")
+    if site:
+        if site != "cross-site":
+            return False
+        return not (method in ("GET", "HEAD")
+                    and headers.get("sec-fetch-mode", "") == "navigate"
+                    and headers.get("sec-fetch-dest", "document") == "document")
+    origin = headers.get("origin", "")
+    if not origin or method in ("GET", "HEAD"):
+        return False
+    return urlsplit(origin).netloc != headers.get("host", "")
 
 
 def frameable(head):
@@ -1022,7 +1261,8 @@ def frameable(head):
     a product that guards itself against clickjacking — X-Frame-Options, a
     CSP frame-ancestors — would refuse it. Only on the gate's way: the
     product's own headers are unchanged everywhere else, and past the gate
-    is only the bot's owner. A Report-Only policy blocks nothing and stays."""
+    is only the bot's owner. A Report-Only policy blocks nothing and stays.
+    The product's cookies are made ones a frame keeps (framed_cookie)."""
     lines = head.decode("latin-1").split("\r\n")
     out = [lines[0]]
     for line in lines[1:]:
@@ -1030,6 +1270,8 @@ def frameable(head):
         key = name.strip().lower()
         if key == "x-frame-options":
             continue
+        if key == "set-cookie" and sep:
+            line = "%s: %s" % (name, framed_cookie(value.strip()))
         if key == "content-security-policy" and sep:
             kept = [d for d in value.split(";")
                     if d.strip() and not d.strip().lower().startswith("frame-ancestors")]
@@ -1062,20 +1304,27 @@ async def gate_handle(reader, writer):
                 asyncio.TimeoutError, ConnectionError):
             return
         method, target, headers = parse_head(head)
+        # Which path, not what it carried: a query may hold initData.
+        sys.stderr.write("gate: %s %s\n" % (method, urlsplit(target).path))
         own = await gate_own(method, target, headers, reader)
         if own is not None:
             writer.write(own)
             await writer.drain()
             return
-        if not tg_webapp.cookie_valid(gate_cookie(headers.get("cookie", "")), GATE["token"]):
+        if cross_site(method, headers) or not tg_webapp.cookie_valid(
+                gate_cookie(headers.get("cookie", "")), GATE["token"]):
             writer.write(respond("403 Forbidden", page(
                 "Closed", "<h1>Closed</h1><p>Open the feature from the bot: the 📱 "
                 "button next to it.</p>")))
             await writer.drain()
             return
+        host, port = "127.0.0.1", GATE_UPSTREAM
+        if target.startswith(CODE_PREFIX):
+            host, port = code_server()
+            head = without_prefix(head, CODE_PREFIX)
         try:
             up_reader, upstream = await asyncio.wait_for(
-                asyncio.open_connection("127.0.0.1", GATE_UPSTREAM), 5)
+                asyncio.open_connection(host, port), 5)
         except (OSError, asyncio.TimeoutError):
             writer.write(respond("502 Bad Gateway", page(
                 "Down", "<h1>sclaude-proxy is not answering</h1>")))
@@ -1094,6 +1343,37 @@ async def gate_handle(reader, writer):
                     w.close()
                 except (OSError, RuntimeError):
                     pass
+
+
+# code-server through the gate (an experiment): /__code/… is code-server's
+# /…, so a phone without Tailscale reaches it from the Mini App. code-server
+# keeps its own password behind the gate's check. Its pages use relative
+# addresses throughout, which is what lets it live under a prefix that only
+# the gate knows about.
+CODE_PREFIX = "/__code/"
+CODE_CONFIG = os.environ.get("SCLAUDE_GATE_CODE_CONFIG") or os.path.expanduser(
+    "~/.config/code-server/config.yaml")
+
+
+def code_server():
+    """(host, port) code-server listens on, from its config."""
+    try:
+        with open(CODE_CONFIG) as fh:
+            for line in fh:
+                if line.strip().startswith("bind-addr:"):
+                    host, _, port = line.split(":", 1)[1].strip().rpartition(":")
+                    return host, int(port)
+    except (OSError, ValueError):
+        pass
+    return "127.0.0.1", 8080
+
+
+def without_prefix(head, prefix):
+    """The request head with its target moved from under prefix to /."""
+    line, sep, rest = head.partition(b"\r\n")
+    method, target, version = line.split(b" ", 2)
+    target = b"/" + target[len(prefix):]
+    return b" ".join((method, target, version)) + sep + rest
 
 
 async def gate_main():

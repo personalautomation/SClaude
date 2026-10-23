@@ -11,6 +11,7 @@
 #
 # Run it with: python3 tests/proxy.py
 import json
+import re
 import os
 import shutil
 import socket
@@ -266,6 +267,11 @@ def check_peers(registry, stub, log):
     check("gate: a policy of frame-ancestors alone goes whole",
           mod.frameable(b"HTTP/1.1 200 OK\r\nContent-Security-Policy: frame-ancestors 'none'"),
           b"HTTP/1.1 200 OK")
+    got = mod.frameable(b"HTTP/1.1 303 See Other\r\n"
+                        b"Set-Cookie: sclaude_feature=a; Path=/; SameSite=Lax").decode()
+    check("gate: a product's cookie is one a frame in Telegram Web keeps",
+          got.split("\r\n")[1],
+          "Set-Cookie: sclaude_feature=a; Path=/; Secure; SameSite=None; Partitioned")
     for peer, want in (("127.0.0.1", True), ("::1", True), ("::ffff:127.0.0.1", True),
                        ("100.72.15.17", True), ("::ffff:100.101.2.3", True),
                        ("fd7a:115c:a1e0::1", True), ("192.168.1.20", False),
@@ -325,11 +331,19 @@ def check_gate(proxy_port, root):
                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     check("gate: no credentials, no gate", (proc.returncode, answers_on(port)), (1, False))
 
+    # code-server, as the gate finds it: here the proxy stands in for it.
+    code_config = os.path.join(root, "code-server.yaml")
+    with open(code_config, "w") as fh:
+        fh.write("bind-addr: 127.0.0.1:%d\nauth: password\n" % proxy_port)
+    # The menu page acts on keepawake's state: a file of the test's own.
     port = free_port()
     proc = subprocess.Popen([sys.executable, PROXY, "--gate"],
                             env=dict(os.environ, SCLAUDE_GATE_PORT=str(port),
                                      SCLAUDE_GATE_UPSTREAM=str(proxy_port),
                                      SCLAUDE_GATE_ENV=envfile, SCLAUDE_GATE_IDLE="2",
+                                     SCLAUDE_GATE_CODE_CONFIG=code_config,
+                                     KEEPAWAKE_STATE=os.path.join(root, "state.json"),
+                                     KEEPAWAKE_LOCK=os.path.join(root, ".lock"),
                                      SCLAUDE_PROXY_TICK="0.2"),
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
@@ -383,11 +397,36 @@ def check_gate(proxy_port, root):
                 cookie = line.split(":", 1)[1].strip().split(";")[0]
         check("gate: the cookie is secure and hidden from scripts",
               all(x in head for x in ("Secure", "HttpOnly")), True)
+        check("gate: and kept in Telegram Web's frame, for that frame only",
+              all(x in head for x in ("SameSite=None", "Partitioned")), True)
 
         status, head, _ = request(port, host, "/__sclaude/select?f=a", cookie=cookie)
         check("gate: the proxy picks the feature", status, "HTTP/1.1 303 See Other")
         status, _, body = request(port, host, "/", cookie=cookie + "; sclaude_feature=a")
         check("gate: the owner reaches the feature", body, "A %s" % host)
+
+        # A request another site made the browser send is refused even with
+        # the cookie, as SameSite=Lax would have kept it out; following a
+        # link from elsewhere is not.
+        def fetched(method, extra):
+            return raw_request(port, "%s / HTTP/1.1\r\nHost: %s\r\nCookie: %s; "
+                               "sclaude_feature=a\r\n%sContent-Length: 0\r\n\r\n"
+                               % (method, host, cookie, extra))
+        check("gate: a request from another site is refused",
+              fetched("POST", "Sec-Fetch-Site: cross-site\r\nSec-Fetch-Mode: no-cors\r\n")[0],
+              "HTTP/1.1 403 Forbidden")
+        check("gate: so is another site framing it",
+              fetched("GET", "Sec-Fetch-Site: cross-site\r\nSec-Fetch-Mode: navigate\r\n"
+                             "Sec-Fetch-Dest: iframe\r\n")[0], "HTTP/1.1 403 Forbidden")
+        check("gate: an old browser's post from another site is refused by its Origin",
+              fetched("POST", "Origin: https://elsewhere.example\r\n")[0],
+              "HTTP/1.1 403 Forbidden")
+        check("gate: a link followed from another site opens the page",
+              fetched("GET", "Sec-Fetch-Site: cross-site\r\nSec-Fetch-Mode: navigate\r\n"
+                             "Sec-Fetch-Dest: document\r\n")[2], "A %s" % host)
+        check("gate: the page's own requests pass",
+              fetched("GET", "Sec-Fetch-Site: same-origin\r\nSec-Fetch-Mode: cors\r\n")[2],
+              "A %s" % host)
 
         # Two requests on one connection: only the first is answered — the
         # second would otherwise go through on a check made for the first.
@@ -395,6 +434,49 @@ def check_gate(proxy_port, root):
                % (host, cookie))
         _, _, body = raw_request(port, req + req)
         check("gate: one request per connection", body.count("A %s" % host), 1)
+
+        # code-server under /__code/: behind the same cookie, its own paths
+        # with the prefix taken off.
+        status, _, _ = request(port, host, "/__code/")
+        check("gate: code-server is closed to a stranger", status, "HTTP/1.1 403 Forbidden")
+        status, _, body = request(port, host, "/__code/", cookie=cookie + "; sclaude_feature=a")
+        check("gate: the owner reaches code-server at its own /", body, "A %s" % host)
+        status, _, body = request(port, host, "/__sclaude/tg?p=%2F__code%2F")
+        check("gate: the bootstrap can open code-server",
+              ("200 OK" in status, '"/__code/"' in body), (True, True))
+        status, _, _ = request(port, host, "/__sclaude/tg?p=%2Fsomewhere")
+        check("gate: and no other path of its own", status, "HTTP/1.1 404 Not Found")
+
+        # The menu page: open, its calls checked one by one by initData.
+        status, head, body = raw_request(port, "GET /__sclaude/menu HTTP/1.1\r\nHost: %s\r\n\r\n"
+                                         % host)
+        check("gate: the menu page is open", ("200 OK" in status, "/__sclaude/menu/api" in body),
+              (True, True))
+        nonce = re.search(r"script-src 'nonce-([^']+)'", head)
+        check("gate: the menu page runs only its own script and Telegram's",
+              bool(nonce and "<script nonce=%s>" % nonce.group(1) in body), True)
+        check("gate: a screen's markup is filtered, not run",
+              ("markup(v.text)" in body, "innerHTML = v.text" in body), (True, False))
+
+        def menu(payload):
+            data = json.dumps(payload)
+            return raw_request(port, "POST /__sclaude/menu/api HTTP/1.1\r\nHost: %s\r\n"
+                               "Content-Length: %d\r\n\r\n%s" % (host, len(data.encode()), data))
+        check("gate: a menu call from somebody else is refused",
+              menu({"init": other, "do": ""})[0], "HTTP/1.1 403 Forbidden")
+        check("gate: a menu call with a stale sign-in is refused",
+              menu({"init": stale, "do": ""})[0], "HTTP/1.1 403 Forbidden")
+        check("gate: a cookie is not enough for a menu call",
+              raw_request(port, "POST /__sclaude/menu/api HTTP/1.1\r\nHost: %s\r\nCookie: %s\r\n"
+                          "Content-Length: 2\r\n\r\n{}" % (host, cookie))[0],
+              "HTTP/1.1 403 Forbidden")
+        check("gate: a menu call that is not JSON is refused",
+              raw_request(port, "POST /__sclaude/menu/api HTTP/1.1\r\nHost: %s\r\n"
+                          "Content-Length: 3\r\n\r\nabc" % host)[0], "HTTP/1.1 400 Bad Request")
+        status, head, body = menu({"init": good, "do": ""})
+        check("gate: the owner gets the menu", ("200 OK" in status, "application/json" in head),
+              (True, True))
+        check("gate: the menu is the bot's", json.loads(body).get("main"), True)
 
         check("gate: it ends itself when nobody looks",
               wait_for(lambda: proc.poll() is not None, 10), True)

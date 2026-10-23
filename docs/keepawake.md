@@ -190,7 +190,9 @@ name the feature in their data when it fits 64 bytes and leave it to the topic
 otherwise. The main chat keeps what is not about one feature: sleep, status,
 Chrome and the list of features, code-server, the repositories and their
 features — a press on one opens its topic — and Settings. Without Threaded Mode
-the card stands where the feature list was, with a way back to it.
+the card stands where the feature list was, with a way back to it. With phone
+access on all of this lives in the menu app (below), and the chat's menu and a
+topic's card are each one button to it.
 
 The main chat holds one menu at a time, and so does each topic (`screens`, by
 thread): a menu sent anew —
@@ -265,6 +267,66 @@ the bot — it checks the `pid` and removes it.
 
 Termius and code-server have not gone anywhere: a full-screen `claude` is real
 there, and for long stretches of work by hand that is still more convenient.
+
+## The menu as an app in Telegram
+
+**What the person starts is in the app; what the bot asks stays in the chat.**
+With phone access on, "☰ Menu" (`setChatMenuButton`, set for the chat as well
+as for the bot: the chat's own setting changes at once, the bot's only when a
+chat is reopened) opens a Mini App served by the gate. The chat keeps the
+bot's questions as buttons that become their answers, and a line, marked 📱,
+of everything started from the app — in the feature's topic when it was about
+a feature. What only showed something leaves nothing. Without phone access the
+app cannot open, so the chat's `/menu` keeps what must work without it: the
+hold and turning access on; the command list (`setMyCommands`) follows the same
+split.
+
+**The page has no screens of its own** (`keepawake/webmenu.py`). A press is
+handed to the chat's own `Handler.callback` as though it came from a menu
+message with the id 0, and `PageBot` catches what the handler does to that
+message: an edit becomes the page's next screen, a reply its note, a result
+(`Handler.result`) both the screen and the chat's 📱 line. One handler for both,
+so the app and the chat cannot disagree about what a button does. Where the two
+must differ — a time typed into the page's own field instead of a second message
+with a reply box, a docs section as a screen, a confirmation before access goes
+off — `press` takes the action before the handler does, and `ON_PAGE` tells the
+screens to leave out links that only work on the tailnet. Each screen has a line
+under it saying what it is for (`HELP`).
+
+**The gate** (`sclaude-proxy --gate`, on 127.0.0.1:3001 behind `tailscale
+funnel` on :8443) lets in only the bot's owner. Every call of the menu carries
+Telegram's signed `initData` and is checked by itself; a feature's page and
+code-server (`/__code/`, its own paths under a prefix only the gate knows) are
+reached with a cookie the gate signs once `initData` checked out. Telegram Web
+shows a Mini App in a frame inside web.telegram.org, where a browser keeps no
+`SameSite=Lax` cookie, so every cookie on the gate's way — its own and the
+product's — is made `SameSite=None; Partitioned`: kept for that frame and keyed
+to the site around it. What Lax did against a forged request the gate does
+itself: a request another site made the browser send (`Sec-Fetch-Site`, or
+`Origin` from an older browser) is refused, a plain link followed is not.
+
+**Phone access waits for the address.** A funnel just turned on is not reachable
+at once: while it was off its name left public DNS, and it comes back only after
+minutes (five, once). A phone that asks too early is told the name does not
+exist and keeps that answer five minutes more. So `gate_origin` counts the
+funnel only once the name is published — asked of the zone's own nameserver,
+which keeps no answer, with DNS over HTTPS when that fails — and until then
+nothing offers the app. The bot says it is waiting (`phone_wait`) and turns that
+message into "phone access is on" when it is ready; past fifteen minutes it
+offers the app anyway and logs why. The loop (`check_phone`) notices every
+change, made from the chat, the app (another process) or the terminal, and
+redraws what offers the app: the Menu button, the commands, the menu screens
+and the cards in the topics.
+
+**Off unless asked for.** Tailscale keeps a funnel across reboots, and a door to
+the internet nobody remembers opening is one to close: at start the bot turns
+phone access off if it was turned on before the machine started (`phone_on_at`
+against the kernel's boot time). A restart of the bot alone leaves it as it was.
+
+**A new feature has its topic from the start.** "✨ New feature" opens a topic
+at once, so the questions about the name already go there (`new_feature_topic`);
+when a worktree appears that is newer than the topic, the topic is that
+feature's and is renamed for it. One left unclaimed for twelve hours is deleted.
 
 ## Two Windows traps
 

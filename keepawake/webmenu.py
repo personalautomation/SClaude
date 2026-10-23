@@ -25,13 +25,27 @@ import threading
 import time
 
 from keepawake import telegramd
-from keepawake.i18n import current, t
+from keepawake.i18n import current, set_lang, t
 
 PAGE = 0
 
 # i18n keeps the language in a module global, and the gate answers calls from
 # threads; one call at a time keeps a screen in one language.
 _LOCK = threading.Lock()
+
+def pause(seconds):
+    """A wait inside a press, with the lock let go: another call — a Back,
+    a second page — is not held behind it. What a call sets for itself is
+    set again after: the language and ON_PAGE are module globals."""
+    lang = current()
+    _LOCK.release()
+    try:
+        time.sleep(seconds)
+    finally:
+        _LOCK.acquire()
+        set_lang(lang)
+        telegramd.ON_PAGE = True
+
 
 # Buttons the page leaves out.
 HIDDEN = ()
@@ -130,7 +144,9 @@ def features():
     found = []
     for repo in telegramd.known_repos():
         name = os.path.basename(repo)
-        for slug in telegramd.feature_records(repo):
+        # By sclaude's state, not the bot's record: a feature started at the
+        # terminal that has asked nothing yet has no record.
+        for slug in telegramd.feature_records(repo, "state.json"):
             if not telegramd.feature_dir(repo, slug) \
                     or telegramd.closing(telegramd.feature_wt(repo, slug)):
                 continue
@@ -202,7 +218,7 @@ def wait_question(channel, after, seconds=6):
         question = telegramd.pending_ask(channel)
         if question and (question.get("id") or "") != (after or ""):
             return question
-        time.sleep(0.5)
+        pause(0.5)
     return None
 
 
@@ -383,7 +399,7 @@ def press(bot, user, action, context, now, home=""):
         for _ in range(10 if verb != "stop" else 0):
             if telegramd.code_running():
                 break
-            time.sleep(0.5)
+            pause(0.5)
         telegramd.log.info("the menu page: code-server %s", verb)
         bot.screen = code_screen(home)
         bot.done = bot.screen[0]

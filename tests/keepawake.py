@@ -400,6 +400,16 @@ def bash_count(func, fake_procs="", snapshot=None, overrides=None):
     return out.stdout.strip()
 
 
+# Funnel's relays carry the menu app and the bot's own reachability checks;
+# active as they are, they are not someone working at the machine.
+_ts = json.dumps({"Peer": {
+    "a": {"HostName": "funnel-ingress-node", "Active": True, "Tags": ["tag:ingress"]},
+    "b": {"HostName": "phone", "Active": True},
+    "c": {"HostName": "tablet", "Active": False}}})
+check("tailnet traffic leaves funnel's relays out",
+      bash_count("count_tailscale",
+                 fake_procs="tailscale() { printf '%%s' %s; }" % shlex.quote(_ts)), "1")
+
 # An open session waiting for input is not work. That is exactly why the laptop
 # once did not sleep until morning: the claude process lived from the evening on,
 # the detector extended the deadline every minute, and no warning came — the
@@ -936,13 +946,18 @@ with sandbox() as box:
     check("we do not warn twice", len(bot.sent), 1)
 
     # A press on yesterday's message must not extend the hold today.
+    answers_before = len(bot.answers)
     handler.callback({"id": "c1", "data": "extend:1", "message": {"message_id": 5}})
     check("a stale callback gives an alert", bot.answers[-1],
           (telegramd.t("sleep.stale"), True))
+    # Telegram takes one answer per press: a silent one first would swallow it.
+    check("as the press's only answer", len(bot.answers) - answers_before, 1)
     check("a stale callback did not touch the deadline", read()["until_ts"], until)
 
+    answers_before = len(bot.answers)
     handler.callback({"id": "c2", "data": "extend:%d" % until,
                       "message": {"message_id": 6}})
+    check("a fresh press is answered once too", len(bot.answers) - answers_before, 1)
     after = read()
     check_true("a fresh callback extended it", after["until_ts"] > until)
     check("the decision is recorded", after["decision"], "extend")
@@ -1758,9 +1773,12 @@ if os.path.exists(cfg):
                     st["phone_wait"] = None
             # Phone access is off unless asked for since the machine started.
             saved_boot = tg_menu.boot_time
+            saved_which = tg_menu.shutil.which
             ran = []
             try:
                 tg_menu.boot_time = lambda: int(time.time()) - 60
+                # tailscale installed here whatever the machine running this.
+                tg_menu.shutil.which = lambda name: "/usr/bin/" + name
                 # Recorded, never run: the funnel here is the test's, not the machine's.
                 tg_menu.run = lambda cmd, timeout=25: (
                     ran.append(cmd), json.dumps(serve) if "serve status" in cmd else "")[1]
@@ -1784,9 +1802,34 @@ if os.path.exists(cfg):
                 tg_menu.phone_off_after_boot()
                 check("tailscale silent: no decision yet",
                       (tg_menu.FUNNEL_OFF in ran, tg_menu.BOOT_LOOKED[0]), (False, False))
+                tg_menu.run = lambda cmd, timeout=25: (
+                    ran.append(cmd), "failed to connect to local Tailscale daemon")[1]
+                tg_menu.phone_off_after_boot()
+                check("tailscale's error is no answer either",
+                      (tg_menu.FUNNEL_OFF in ran, tg_menu.BOOT_LOOKED[0]), (False, False))
+                # A warning beside the answer is still the answer.
+                tg_menu.run = lambda cmd, timeout=25: (
+                    ran.append(cmd), "Warning: client version differs\n" + json.dumps(serve)
+                    if "serve status" in cmd else "")[1]
+                tg_menu.phone_off_after_boot()
+                check("a warning beside tailscale's answer still decides",
+                      (tg_menu.FUNNEL_OFF in ran, tg_menu.BOOT_LOOKED[0]), (True, True))
+                # Silent for good, or not installed: given up, not asked every turn.
+                tg_menu.run = lambda cmd, timeout=25: (ran.append(cmd), "")[1]
+                tg_menu.BOOT_LOOKED[:] = [False, tg_menu.BOOT_TRIES]
+                del ran[:]
+                tg_menu.phone_off_after_boot()
+                check("silent past the tries: given up", (ran, tg_menu.BOOT_LOOKED[0]), ([], True))
+                tg_menu.BOOT_LOOKED[:] = [False, 0]
+                tg_menu.shutil.which = lambda name: None
+                tg_menu.phone_off_after_boot()
+                check("no tailscale: nothing to look at", (ran, tg_menu.BOOT_LOOKED[0]), ([], True))
+                tg_menu.shutil.which = lambda name: "/usr/bin/" + name
             finally:
                 tg_menu.BOOT_LOOKED[0] = True
                 tg_menu.boot_time = saved_boot
+                tg_menu.shutil.which = saved_which
+                tg_menu.BOOT_LOOKED[:] = [True, 0]
                 tg_menu.run = funnel_on
             # The funnel on :8443 but pointing elsewhere is not the gate.
             serve["Web"]["box.tail1.ts.net:8443"]["Handlers"]["/"]["Proxy"] = "http://127.0.0.1:9999"
@@ -4088,6 +4131,28 @@ for _ in range(50):
         break
     time.sleep(0.05)
 check("a later look takes its answer", telegramd.published("h.ts.net", look=True), True)
+# While a probe runs the last answer stands — after a restart, the previous
+# process's — and no second probe is started.
+telegramd.PUBLISHED.update(host="", ok=False, at=0)
+with telegramd.locked() as st:
+    st["published"] = {"host": "h3.ts.net", "ok": True}
+_started = []
+telegramd.name_published = lambda host: _started.append(host) or time.sleep(1) or True
+check("a restart reads the last answer while probing",
+      telegramd.published("h3.ts.net", look=True), True)
+telegramd.PUBLISHED.update(host="h3.ts.net", ok=False, at=0)
+check("and still while the probe runs", telegramd.published("h3.ts.net", look=True), True)
+time.sleep(0.2)
+check("one probe at a time", _started, ["h3.ts.net"])
+time.sleep(1.2)
+telegramd.PROBE.clear()
+telegramd.name_published = lambda host: True
+def _raises(host):
+    raise RuntimeError("a truncated answer")
+telegramd.name_published = _raises
+telegramd.probe_published("h2.ts.net")
+check("a probe that raises still answers", telegramd.PROBE.pop("h2.ts.net", "none"), False)
+telegramd.name_published = lambda host: True
 telegramd.PROBE_ASYNC = False
 telegramd.PUBLISHED.update(host="", ok=False, at=0)
 with telegramd.locked() as st:
@@ -4102,6 +4167,21 @@ check("sclaude-notify reads the bot's feature record",
       (True, True))
 check("and knows a lost topic by the bot's own words",
       [w for w in telegramd.TOPIC_GONE if 'b"%s"' % w not in _notify], [])
+
+# A feature started at the terminal that has asked nothing has no record of
+# the bot's, and is still found by its state.
+_root = tempfile.mkdtemp()
+_repo = os.path.join(_root, "app")
+os.makedirs(os.path.join(_repo, ".git", "worktrees", "app-quiet"))
+_wt = os.path.join(_root, "app-quiet")
+os.makedirs(os.path.join(_wt, ".sclaude", "local", "feature"))
+with open(os.path.join(_wt, ".git"), "w") as fh:
+    fh.write("gitdir: %s\n" % os.path.join(_repo, ".git", "worktrees", "app-quiet"))
+open(os.path.join(_wt, ".sclaude", "local", "feature", "state.json"), "w").close()
+check("a feature with no record of the bot's is not among the records",
+      telegramd.feature_records(_repo), [])
+check("but is found by its state", telegramd.feature_records(_repo, "state.json"), ["quiet"])
+shutil.rmtree(_root)
 
 # An answer is given only to the question its caller checked: the one read
 # again here can already be the next.

@@ -28,6 +28,7 @@ import logging
 import os
 import re
 import shlex
+import shutil
 import signal
 import stat
 import subprocess
@@ -306,8 +307,9 @@ class Bot(object):
                       reply_markup={"inline_keyboard": keyboard} if keyboard else None)
             return True
         except Exception as exc:
-            # The message already shows that text: it is as asked.
-            if "not modified" in str(exc):
+            # The message already shows that text: it is as asked. Telegram's
+            # own words are on the error (call), not in its str().
+            if "not modified" in (getattr(exc, "telegram", "") or str(exc)).lower():
                 return True
             log.warning("did not edit: %s", exc)
             return False
@@ -811,12 +813,23 @@ def wsl_ip():
     return ""
 
 
+def json_in(out):
+    """The JSON object in a command's output, None when there is none. run()
+    gives stderr with stdout, and a warning beside the answer — tailscale's
+    after an upgrade, before tailscaled restarts — is not a failed answer."""
+    start = (out or "").find("{")
+    if start < 0:
+        return None
+    try:
+        found, _end = json.JSONDecoder().raw_decode(out[start:])
+    except ValueError:
+        return None
+    return found if isinstance(found, dict) else None
+
+
 def serve_config():
     """`tailscale serve status`, parsed; {} when it does not answer."""
-    try:
-        return json.loads(run("tailscale serve status --json", timeout=10) or "{}")
-    except ValueError:
-        return {}
+    return json_in(run("tailscale serve status --json", timeout=10)) or {}
 
 
 def phone_origin(config=None):
@@ -976,6 +989,17 @@ PROBE = {}
 PROBE_ASYNC = True
 
 
+def probe_published(host):
+    """The loop's probe, in its thread. Whatever it raises is a "not yet":
+    an answer never left would hold the wait on "still probing" for good."""
+    try:
+        ok = name_published(host)
+    except Exception as exc:
+        log.warning("the probe of %s failed: %s", host, exc)
+        ok = False
+    PROBE[host] = ok
+
+
 def published(host, look=False):
     """Whether a phone can find the funnel's name: asked again every
     PUBLISH_RECHECK seconds until it can, then remembered while it lasts.
@@ -997,14 +1021,16 @@ def published(host, look=False):
     if look and PROBE_ASYNC:
         # Off the loop: the probes take up to some fifteen seconds, and
         # every press would wait on them. The answer is taken on a later turn.
-        probe = PROBE.get(host)
-        if probe is None:
+        # Meanwhile the last answer stands — the previous process's too, so
+        # a restart does not read as access turned off for a turn.
+        shared = read().get("published") or {}
+        meanwhile = shared.get("host") == host and bool(shared.get("ok"))
+        if host not in PROBE:
             PROBE[host] = None
-            threading.Thread(target=lambda: PROBE.__setitem__(host, name_published(host)),
-                             daemon=True).start()
-            return False
+            threading.Thread(target=probe_published, args=(host,), daemon=True).start()
+            return meanwhile
         if PROBE[host] is None:
-            return False          # still probing
+            return meanwhile          # still probing
         ok = PROBE.pop(host)
     else:
         ok = name_published(host)
@@ -2944,16 +2970,19 @@ class Handler(object):
         if data_raw.startswith("answer:"):
             return self.answer_button(cid, data_raw, message_id)
 
-        # The answer first thing, otherwise a spinner turns on the phone.
-        self.bot.answer(cid)
-        let_go(message_id)
-
         # The sleep buttons only, and by an explicit prefix. A check for "has a
         # colon" would intercept repo: and feat: as well — they appeared later,
         # and a press on a repository answered "the message is out of date"
-        # because the decision handler found no deadline stamp in it.
+        # because the decision handler found no deadline stamp in it. They
+        # answer the press themselves: a stale one says why in an alert, and
+        # a press takes one answer only.
         if data_raw.startswith(("extend:", "sleep:")):
+            let_go(message_id)
             return self.decision(data_raw, message_id, cid, now)
+
+        # The answer first thing, otherwise a spinner turns on the phone.
+        self.bot.answer(cid)
+        let_go(message_id)
 
         if data_raw == "menu_extend":
             self.bot.edit(message_id, keepawake_text(), awake_keyboard())
@@ -3356,6 +3385,7 @@ class Handler(object):
                 stale = True
             else:
                 stale = False
+                self.bot.answer(cid)
                 if action == "extend":
                     state.extend(st, now, manual=True)
                     state.touch(st, now)
@@ -3981,8 +4011,9 @@ def message_thread(msg):
     return (msg.get("message_thread_id") or 0) if msg.get("is_topic_message") else 0
 
 
-def feature_records(repo):
-    """[slug] of the repository's features that have a record of the bot's.
+def feature_records(repo, record=FEATURE_RECORD):
+    """[slug] of the repository's features that have a record of the bot's —
+    or, with record="state.json", every feature sclaude keeps a state for.
 
     By the name alone "app-admin-x" is as much feature "admin-x" of "app" as
     feature "x" of "app-admin"; the worktree's .git file, which names the
@@ -3992,7 +4023,7 @@ def feature_records(repo):
     own = os.path.join(os.path.realpath(repo), ".git", "worktrees") + os.sep
     found = []
     pattern = os.path.join(glob.escape(os.path.dirname(repo)), glob.escape(prefix) + "*",
-                           ".sclaude", "local", "feature", FEATURE_RECORD)
+                           ".sclaude", "local", "feature", record)
     for path in sorted(glob.glob(pattern)):
         tree = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(path))))
         try:
@@ -4214,8 +4245,8 @@ def card(name, slug, note="", in_topic=True, feats=None, config=None):
         # Read once: the page's Continue is named by the step.
         feats, _ = features_of_name(name)
     text = feature_card(name, slug, feats)
-    if not ON_PAGE:
-        # Whatever draws the chat's card — the loop, /menu, a press — says
+    if in_topic and not ON_PAGE:
+        # Whatever draws the topic's card — the loop, /menu, a press — says
         # which session state it shows, for check_card_states to compare.
         shown_state(name, slug)
     key = channel_key(name, slug)
@@ -4311,6 +4342,8 @@ def post_card(bot, name, slug):
     if not msg:
         return 0
     retire(bot, record.get("card") or 0)
+    # Read again: card() has just written the state it shows.
+    record = load_record(repo, slug)
     record["card"] = msg
     save_record(repo, slug, record)
     return msg
@@ -4417,6 +4450,7 @@ def check_card_states(bot, now=None):
 
 
 def redraw_changed_cards(bot):
+    serve = None              # tailscale's, read once, and only if a card is drawn
     for repo in known_repos():
         name = os.path.basename(repo)
         feats = None
@@ -4433,7 +4467,9 @@ def redraw_changed_cards(bot):
                 continue
             if feats is None:
                 feats, _ = features_of_name(name)
-            if not bot.edit(msg, *card(name, slug, feats=feats)):
+            if serve is None:
+                serve = serve_config()
+            if not bot.edit(msg, *card(name, slug, feats=feats, config=serve)):
                 # Not drawn: what the card shows is still the old state, and
                 # the next look tries again.
                 shown_state(name, slug, record.get("card_state") or "")
@@ -4481,8 +4517,10 @@ def boot_time():
 
 
 # Whether tailscale has answered since this process started: until it has,
-# a funnel kept from before the boot cannot be told from none.
-BOOT_LOOKED = [False]
+# a funnel kept from before the boot cannot be told from none. The second
+# item counts the tries.
+BOOT_LOOKED = [False, 0]
+BOOT_TRIES = 40
 
 
 def phone_off_after_boot():
@@ -4494,14 +4532,20 @@ def phone_off_after_boot():
     # funnel first seen later would pass for one asked for.
     if BOOT_LOOKED[0]:
         return
+    BOOT_LOOKED[1] += 1
+    # No tailscale, or one silent for some forty turns (a quarter of an
+    # hour): nothing to close, and two processes a turn for ever otherwise.
+    if not shutil.which("tailscale") or BOOT_LOOKED[1] > BOOT_TRIES:
+        BOOT_LOOKED[0] = True
+        log.info("phone access after boot: tailscale did not answer, not looked at")
+        return
     out = run("tailscale serve status --json", timeout=10)
-    if not out.strip():
+    # Answered means JSON: run() gives the error's text or its own words
+    # for one that failed — tailscaled not up yet — never an empty string.
+    config = json_in(out)
+    if config is None:
         return
     BOOT_LOOKED[0] = True
-    try:
-        config = json.loads(out)
-    except ValueError:
-        config = {}
     if not gate_origin(config, False):
         return
     if (read().get("phone_on_at") or 0) >= boot_time():

@@ -29,6 +29,9 @@ when there is somebody alive at the machine — recent input in a terminal or a
 code-server tab, or noticeable load. This does not lose the person: at the laptop
 itself Windows does not sleep because of the mouse and keyboard, while from a
 phone the hard holders hold — tailnet traffic, an SSH session, a code-server tab.
+Tailnet traffic is a peer Tailscale reports Active, funnel's ingress relays
+(`tag:ingress`) excepted: they carry the menu app and the bot's own checks, and
+counted they held the laptop for as long as the app was open anywhere.
 
 With nobody there, Windows sleeps by its own settings.
 

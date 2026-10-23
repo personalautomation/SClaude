@@ -301,7 +301,7 @@ session_watch_stop
     check("exit-advice-cut", last,
           "Done.\n\n- all closed;\n- sclaude goes on.\n\nReady. Then the preview.\n")
     check("closed-said-after-the-report",
-          "You do not need to type /exit" in RUN[RUN.index("session_report() {"):], True)
+          "No /exit needed" in RUN[RUN.index("session_report() {"):], True)
 
     # --- the ended session is recorded with its reason ------------------------
     state = os.path.join(wt, ".sclaude/local/feature", "state.json")

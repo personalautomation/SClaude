@@ -68,7 +68,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # --- step 1 prints the approved plan -------------------------------------
     out = report(wt, "plan", "# Plan\n\n- do it")
-    check("plan-headline", "The approved plan" in out, True)
+    check("plan-headline", "Approved plan" in out, True)
     check("plan-body-indented", "  # Plan\n" in out and "  - do it\n" in out, True)
 
     # --- a later session that left it alone prints nothing -------------------
@@ -78,13 +78,13 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(plan, "a") as fh:
         fh.write("- and this too\n")
     out = report(wt, "code")
-    check("changed-headline", "The plan was changed in this session" in out, True)
+    check("changed-headline", "Plan changed" in out, True)
     check("changed-body", "  - and this too\n" in out, True)
     check("changed-only-once", report(wt, "review"), "")
 
     # --- a replan prints the plan again, even unchanged ----------------------
     out = report(wt, "plan", "# Plan\n\n- do it")
-    check("replan-prints-again", "The approved plan" in out, True)
+    check("replan-prints-again", "Approved plan" in out, True)
 
     # --- a feature from before the record: silent, then tracked -------------
     os.remove(os.path.join(wt, ".sclaude/local/feature", "plan.printed"))
@@ -92,7 +92,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("no-record-started", os.path.exists(os.path.join(wt, ".sclaude/local/feature", "plan.printed")), True)
     with open(plan, "a") as fh:
         fh.write("- one more\n")
-    check("tracked-after-start", "The plan was changed" in report(wt, "code"), True)
+    check("tracked-after-start", "Plan changed" in report(wt, "code"), True)
 
 # --- wired into session_ended, on both ways out ------------------------------
 ended = re.search(r"^session_ended\(\) \{\n.*?^\}\n", RUN, re.S | re.M).group(0)

@@ -350,6 +350,11 @@ count_code() {
 # Counted by Active rather than Online: the phone is present in the network
 # around the clock (verified — Online=true with Active=false and a silent
 # handshake), and holding on presence would never let the laptop sleep.
+#
+# Funnel's relays are not a person: with phone access on they appear as peers
+# tagged tag:ingress, and turn Active whenever Telegram opens the menu app or
+# the bot checks the address is reachable. Counted, they held the laptop hard
+# for as long as the app was open anywhere.
 count_tailscale() {
   have tailscale || { printf '0'; return; }
   tailscale status --json 2>/dev/null | python3 -c "
@@ -358,7 +363,8 @@ try:
     d = json.load(sys.stdin)
 except Exception:
     print(0); raise SystemExit
-print(sum(1 for p in (d.get('Peer') or {}).values() if p.get('Active')))
+print(sum(1 for p in (d.get('Peer') or {}).values()
+          if p.get('Active') and 'tag:ingress' not in (p.get('Tags') or [])))
 " 2>/dev/null || printf '0'
 }
 

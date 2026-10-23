@@ -375,7 +375,7 @@ finally:
 
 # A topic's card follows its session: drawn again when the session changes,
 # left alone while it does not.
-names = ("agents", "known_repos", "feature_records", "feature_dir", "load_record", "save_record",
+names = ("agents", "serve_config", "known_repos", "feature_records", "feature_dir", "load_record", "save_record",
          "feature_session", "session_state", "features_of_name", "card")
 saved = {n: getattr(telegramd, n) for n in names}
 records = {"alpha": {"card": 55}}
@@ -384,6 +384,8 @@ edits = []
 try:
     answered_agents = {"ok": True}
     telegramd.agents = lambda: telegramd._AGENTS.update(ok=answered_agents["ok"]) or []
+    serve_reads = []
+    telegramd.serve_config = lambda: serve_reads.append(1) or {}
     telegramd.known_repos = lambda: ["/nowhere/shop"]
     telegramd.feature_records = lambda repo: ["alpha"]
     telegramd.feature_dir = lambda repo, slug: "/nowhere/shop-alpha/.sclaude/local/feature"
@@ -410,6 +412,7 @@ try:
     telegramd._CARD_LOOKED[0] = 0.0
     telegramd.check_card_states(EditBot(), now=10 ** 9 + 61)
     check("a session that changed draws its card again", edits, [(55, "card waiting")])
+    check("tailscale read once for the pass", serve_reads, [1])
     telegramd.check_card_states(EditBot(), now=10 ** 9 + 122)
     check("once", len(edits), 1)
     check("the state shown is recorded", records["alpha"].get("card_state"), "waiting")
@@ -417,6 +420,21 @@ finally:
     for n, f in saved.items():
         setattr(telegramd, n, f)
     telegramd._CARD_LOOKED[0] = 0.0
+
+# A wait inside a press lets other calls in, and keeps its own language and
+# ON_PAGE when it resumes.
+import threading  # noqa: E402
+got_in = []
+with webmenu._LOCK:
+    telegramd.ON_PAGE = True
+    other = threading.Thread(target=lambda: webmenu._LOCK.acquire() and (
+        got_in.append(1), setattr(telegramd, "ON_PAGE", False), webmenu._LOCK.release()))
+    other.start()
+    webmenu.pause(0.3)
+    other.join(2)
+    check("another call ran during the wait", got_in, [1])
+    check("and the waiting call is still on the page", telegramd.ON_PAGE, True)
+telegramd.ON_PAGE = False
 
 check("the screens are drawn for the page only while it asks", telegramd.ON_PAGE, False)
 

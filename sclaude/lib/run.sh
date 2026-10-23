@@ -838,7 +838,7 @@ session_ended() {
   # nobody is at the session's end to answer. See done_marker.
   SESSION_AUTO_CLOSED=""
   session_closed "$(done_marker "$wt")" "$wt" "$session" \
-    "The session reported its work done, and sclaude closed it." \
+    "Session done — sclaude closed it." \
     && SESSION_AUTO_CLOSED=1
   # Left by the person in a tab of its own: the tab closed with its last
   # message, which is often the one that says what is left — once a review
@@ -1691,7 +1691,7 @@ PYEOF
   session_watch_stop
   instruments_unchanged "$before_instruments" "friction review" || true
   session_closed "$done_file" "$where" "$session" \
-    "The friction review reported its work done, and sclaude closed it." || true
+    "Friction review done — sclaude closed it." || true
 
   local changed=""
   # What the review changed is the product's, committed on the feature's branch
@@ -2932,11 +2932,11 @@ session_report() {
   text="$(python3 "$LIB/session_end.py" last "$(transcript_dir "$1")/$2.jsonl" 2>/dev/null || true)"
   [[ -n "$text" ]] || return 0
   echo ""
-  say "${BOLD}The session's last message — the Claude session is already closed, do not type /exit:${OFF}"
+  say "${BOLD}Its last message:${OFF}"
   echo ""
   printf '%s\n' "$text" | sed 's/^/  /'
   echo ""
-  say "${BOLD}You do not need to type /exit: sclaude has already left the Claude session, and carries on from here.${OFF}"
+  say "${BOLD}No /exit needed — sclaude carries on.${OFF}"
 }
 
 # The plan, printed in the orchestrator's terminal when it is new to the person
@@ -2962,7 +2962,7 @@ plan_report() {
   local headline
   if [[ "$step" == "plan" ]]; then
     capture_plan "$wt" || return 0
-    headline="The approved plan — .sclaude/local/feature/plan.md, what step 2 starts from:"
+    headline="Approved plan (.sclaude/local/feature/plan.md):"
   else
     [[ -s "$plan" ]] || return 0
     if [[ ! -e "$printed" ]]; then
@@ -2970,7 +2970,7 @@ plan_report() {
       return 0
     fi
     cmp -s "$plan" "$printed" && return 0
-    headline="The plan was changed in this session — .sclaude/local/feature/plan.md now reads:"
+    headline="Plan changed (.sclaude/local/feature/plan.md):"
   fi
   echo ""
   say "${BOLD}$headline${OFF}"

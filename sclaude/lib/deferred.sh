@@ -439,7 +439,7 @@ PY
   session_watch_stop
   instruments_unchanged "$before_instruments" "deferred review" || true
   session_closed "$done_file" "$wt" "$session" \
-    "The deferred review reported its work done, and sclaude closed it." || true
+    "Deferred review done — sclaude closed it." || true
 
   # What the review committed goes to the product as a pull request, unless
   # the session opened one itself.

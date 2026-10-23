@@ -65,6 +65,10 @@ check("sidechain skipped",
 check("expired, dollars", piece(transcript(entry(4000, written=500))), "off ~$0.80")
 check("expired, percent", piece(transcript(entry(4000, written=500)), rate=5.0), "off ~4%")
 check("no transcript", sl.cache_piece({}, None), None)
+# A transcript with no breakdown of its cache writes: the 5-minute TTL, at once.
+_old = entry(120, written=500, ttl="5m")
+del _old["message"]["usage"]["cache_creation"]
+check("no breakdown: 5 minutes", piece(transcript(_old)), "3m")
 # The write far back, past the first tail read: the tail grows to it.
 check("1h write past the first tail",
       piece(transcript(entry(700, written=500),
@@ -83,6 +87,13 @@ tick("b", 7.0, 10)                    # seen first: its earlier spend is not cou
 check("learnt", round(tick("b", 8.8, 16), 6), 3.0)  # $0.2 + $1.8 moved 6%
 # A new window starts over but keeps the last rate until it learns a new one.
 check("new window keeps rate", round(tick("a", 4.0, 1, window=2_000_018_000), 6), 3.0)
+# A session resumed under its id counts from zero again: the lower cost is the
+# new baseline, and what it spends from there counts.
+tick("c", 3.0, 1, window=2_000_018_000)
+tick("c", 0.1, 1, window=2_000_018_000)
+tick("c", 1.1, 1, window=2_000_018_000)
+check("resumed session's spend counts from its new baseline",
+      round(json.load(open(sl.SPEND_FILE))["spend"], 6), 1.8)  # a: $0.8 + c: $1.0
 
 if FAILS:
     print("\n".join(FAILS))

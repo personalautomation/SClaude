@@ -1331,8 +1331,12 @@ async def gate_handle(reader, writer):
                 asyncio.TimeoutError, ConnectionError):
             return
         method, target, headers = parse_head(head)
-        # Which path, not what it carried: a query may hold initData.
-        sys.stderr.write("gate: %s %s\n" % (method, urlsplit(target).path))
+        path = urlsplit(target).path
+        # Which path, not what it carried: a query may hold initData. The
+        # gate's own paths only: a feature's page and code-server load
+        # hundreds of files, which would bury what matters in the journal.
+        if path.startswith("/__sclaude/"):
+            sys.stderr.write("gate: %s %s\n" % (method, path))
         own = await gate_own(method, target, headers, reader)
         if own is not None:
             writer.write(own)
@@ -1340,6 +1344,7 @@ async def gate_handle(reader, writer):
             return
         if cross_site(method, headers) or not tg_webapp.cookie_valid(
                 gate_cookie(headers.get("cookie", "")), GATE["token"]):
+            sys.stderr.write("gate: refused %s %s\n" % (method, path))
             writer.write(respond("403 Forbidden", page(
                 "Closed", "<h1>Closed</h1><p>Open the feature from the bot: the 📱 "
                 "button next to it.</p>")))

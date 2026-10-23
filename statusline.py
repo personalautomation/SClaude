@@ -172,6 +172,10 @@ def scan_requests(lines):
             if when is None:
                 continue
             found = (when, usage)
+        if "cache_creation" not in usage:
+            # A transcript that does not say how a write was kept: no TTL to
+            # find further back either, and reading on would only cost.
+            return found + (TTL_5M,)
         written = usage.get("cache_creation") or {}
         if written.get("ephemeral_1h_input_tokens"):
             return found + (TTL_1H,)
@@ -251,9 +255,11 @@ def remember_spend(d):
     moved = pct - s.get("start_pct", pct)
     if s["spend"] >= RATE_MIN_SPEND and moved >= RATE_MIN_PCT:
         rate = s["rate"] = moved / s["spend"]
-    # Written only when the spend or the window moved: every session draws
+    # Written only when the cost or the window moved: every session draws
     # its line on every turn, and they share the file.
-    if delta <= 0 and known and not fresh_window and not stale:
+    # A cost that fell — the session resumed under its id, counting from
+    # zero again — is written too: it is the new baseline.
+    if delta == 0 and known and not fresh_window and not stale:
         return rate
     tmp = "%s.%d" % (SPEND_FILE, os.getpid())
     try:

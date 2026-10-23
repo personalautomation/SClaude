@@ -361,13 +361,22 @@ BRIEF_ENV = "SCLAUDE_REPORT_BRIEF"
 BRIEF_ROWS = ("runs", "found", "fixed", "no fix", "open", "on fixes", "repeats")
 
 
-def brief(pr, newest, verdict_line):
-    """The status update: newest is (session label, {measure: n}) or None."""
-    if not newest:
-        return "Review — PR #%s: no review threads yet.\n%s\n" % (pr, verdict_line)
-    label, values = newest
-    return "Review — PR #%s, session %s\n%s\n%s\n" % (
-        pr, label, " · ".join("%s %d" % (row, values[row]) for row in BRIEF_ROWS),
+def newest(columns):
+    """The last session that ran: one just opened has no run yet, and its
+    zeros would say nothing."""
+    ran = [c for c in columns if c[1]["runs"]]
+    return ran[-1] if ran else None
+
+
+def brief(pr, session, verdict_line):
+    """The status update: session is (label, {measure: n}) or None."""
+    if not session:
+        return "Review — PR %s: no review run yet.\n%s\n" % (pr, verdict_line)
+    label, values = session
+    # No "#": Telegram makes a hashtag of #195. The findings from before the
+    # first session have the label "before" in the table.
+    return "Review — PR %s, %s\n%s\n%s\n" % (
+        pr, "before the sessions" if label == "before" else "session " + label, " · ".join("%s %d" % (row, values[row]) for row in BRIEF_ROWS),
         verdict_line)
 
 
@@ -504,7 +513,7 @@ def main():
     if path:
         try:
             with open(path, "w") as fh:
-                fh.write(brief(pr, columns[-1] if columns else None, said))
+                fh.write(brief(pr, newest(columns), said))
         except OSError:
             pass
     return 0

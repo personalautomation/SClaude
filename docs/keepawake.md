@@ -168,7 +168,7 @@ feature channel's only while it has no worktree.
 
 **Notes: what the topic is told without being asked.** After each review round
 sclaude also says where the review stands: `review_report` in `run.sh` has
-`review_report.py` write the newest session's numbers to the file
+`review_report.py` write the numbers of the last session that ran a review to the file
 `SCLAUDE_REPORT_BRIEF` names, and `ask_notice` (`sclaude/lib/io.sh`) lays that
 text in the feature channel's `notes/`, skipping a text the same as the last one
 — the report is printed at more than one point of a round. The bot sends every

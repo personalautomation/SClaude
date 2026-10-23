@@ -2710,7 +2710,7 @@ review_report() {
   root="$(scratch_root "$wt" 2>/dev/null || true)"
   [[ -n "$root" ]] && log="$root/.sclaude/local/review-context.log"
   echo ""
-  # The newest session's numbers go to the feature's topic as well, a message
+  # The last session's numbers go to the feature's topic as well, a message
   # per round (ask_notice).
   local brief; brief="$(mktemp)"
   SCLAUDE_REPORT_BRIEF="$brief" python3 "$LIB/review_report.py" "$wt" "$pr" "$repo" \

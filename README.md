@@ -685,7 +685,7 @@ not ask over one another. The topic starts with the feature's card — its step,
 issue and pull request, ▶️ continue the step, ⚙️ actions, its dev server (open on
 the laptop or the phone, start, stop) and 💻 code-server on its worktree — and
 "Menu" in the topic brings a fresh card. After each review round the topic also
-gets where the review stands: the newest session's runs, findings, fixed,
+gets where the review stands: the last review session's runs, findings, fixed,
 closed without a fix, still open, on earlier fixes and raised again, with the
 report's verdict — a message of its own each round, so the topic keeps the
 history. Typing an answer inside a topic answers

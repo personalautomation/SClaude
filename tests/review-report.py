@@ -170,11 +170,17 @@ with tempfile.TemporaryDirectory() as wt:
         brief = fh.read()
     # The phone's copy: where review stands, the newest session only.
     lines = brief.splitlines()
-    check("brief-title", lines[0], "Review — PR #7, session 2")
+    check("brief-title", lines[0], "Review — PR 7, session 2")
+    check("brief-before", review_report.brief(7, ("before", dict.fromkeys(
+        review_report.BRIEF_ROWS, 1)), "").splitlines()[0], "Review — PR 7, before the sessions")
     row2 = [l.split() for l in text.splitlines() if l.split()[:1] == ["2"]][0][-7:]
     check("brief-is-the-newest-row", lines[1],
           " · ".join("%s %s" % (m, n) for m, n in zip(review_report.BRIEF_ROWS, row2)))
     check_true = lambda name, ok: check(name, bool(ok), True)
+    zeros = dict.fromkeys(review_report.BRIEF_ROWS, 0)
+    check("brief-skips-a-session-not-run-yet",
+          review_report.newest([("1", dict(zeros, runs=2)), ("2", zeros)])[0], "1")
+    check("brief-nothing-run", review_report.newest([("1", zeros)]), None)
     check_true("brief-verdict", "Converging slowly." in brief)
     check("per-run", "Findings per review run, oldest first: 4 3 3 (one more still running)" in text, True)
     check("closed-without-fix",

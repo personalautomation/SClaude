@@ -220,19 +220,37 @@ phase's line, and a warning printed while the next step is set up goes with
 the start it leads to. A step done that follows a friction review goes on its
 own: that review comes between the step's last session and its end.
 
+**The review's keys on the phone** (`review_keys.py`). The message that a
+local review pass started ("Local review started: PR #7, round 3") carries the
+two keys its terminal takes: ⏭ the last pass for new findings (`[s]`, which
+becomes ↩️ to take it back) and ⏹ stop now (`[x x]`, asked once more before it
+stops). The message that a fix session started carries the first alone: the
+round is the last, and after it the review only checks the fixes. A pass that
+only checks them has no buttons, as its terminal takes no keys. A press writes
+its word — `pass`, `back` or `now` — into the feature's channel
+(`review-said`, `SAID_FILE`), and sclaude takes it from there
+(`review_said_take` in `local_review.sh`): a pass's wait looks every second and
+acts as on the key, and `review_enough`, which everything else asks, takes it
+first; a stop with no pass running counts as the last pass. Which message has
+the buttons is kept in the channel's `notes/review-buttons.json`, with the pid
+of the sclaude that printed the line. The next phase line the topic gets — the
+pass or session ended, or anything else started — takes them off, so they do
+not pile up; a press on a message whose sclaude is gone is told the review has
+ended, and its buttons go too.
+
 Every session sclaude opens for a feature — a step, a friction review, a
 regression fix, the epilogue, the retrospective — tells the topic when it
 starts and when it ends, in one shape (`phase_line` in `steps.sh`, numbered
-over the six of the cycle): "Step 4/6 review: fix session 2 started", "Friction
-review finished: after step 4/6 review, fix session 3". A step's lines name its
+over the seven of the cycle): "Step 4/7 review: fix session 2 started", "Friction
+review finished: after step 4/7 review, fix session 3". A step's lines name its
 session, since the step goes on after one ends — a review takes several — and
-the step itself is told once, when it closes: "Step 4/6 done: review". The
+the step itself is told once, when it closes: "Step 4/7 done: review". The
 review on this machine, which runs inside a step with no session of its own,
 is told the same way ("Local review started: PR #7, round 3", and at its end
 how many findings it leaves open), and so is a plan a session changed, by how
 much: "Plan changed · +3 −1 lines" — the plan itself is printed in the terminal.
 A step 4 session is a fix session: it fixes what the review found. Its line
-says what it is handed — "Step 4/6 review: fix session 1 resumed · findings:
+says what it is handed — "Step 4/7 review: fix session 1 resumed · findings:
 2 not fixed yet, 4 new · red: tests" — and the "Step 4 is not done" warning
 where the last round left the review: "findings: 3 fixed, 1 declined, 2 not
 fixed yet, 4 new, 1 on lines since changed · 1 left to you · red: tests"
@@ -243,13 +261,13 @@ is"; not fixed yet the ones it had seen and that are still open; new the ones
 posted since; left to you the threads the person kept. The fix session's own
 line keeps to its work: what is settled or the person's is left out. At its
 end, finished or ended, the line gives what the round left (`review_tally`,
-counted from the round's start, `steps.review.round_since`): "Step 4/6
+counted from the round's start, `steps.review.round_since`): "Step 4/7
 review: fix session 1 finished · 2 commits · findings: 1 declined, 5 for the
 review to check, 0 new". With the review on this machine its fixes are
 checked after it, so what it leaves of what it had is "for the review to
 check", not "still open", and "fixed" appears only when something confirmed
 a fix within the round. A round the review closed while the session goes on
-is told the same way: "Step 4/6 review: fix session 1, round 3 finished ·
+is told the same way: "Step 4/7 review: fix session 1, round 3 finished ·
 3 commits · findings: 5 fixed, 0 new". A regression sends one line when it
 starts and one when it ends ("Regression failed: local, on e2e: <the failed
 specs> · 11/12, 14m 03s"), with a sound only when it is red. A preview deploy says when it starts and
@@ -411,8 +429,10 @@ look that found the name unreachable.
 
 **The page stands on a feature.** Opened from a topic (`?f=`), the app's
 Sclaude, Chrome and Code-server are that feature's (`home_feature`); opened by
-the Menu button, which knows no topic, it stands on the feature sclaude worked
-on last (`guess_home`). The feature's actions are sclaude's own question
+the Menu button, which is one for the whole chat and tells the page nothing of
+the topic it was pressed in, it stands on nothing and asks which feature first
+(`home_pick`): a guess — the feature sclaude worked on last — showed one
+feature's card from another's topic. The feature's actions are sclaude's own question
 (`sclaude actions`): the page shows it with its buttons and answers it through
 the channel (`answer_page`), naming the question it answers so an answer cannot
 land on the next one; options are grouped by where they lead (`ACT_*`). A

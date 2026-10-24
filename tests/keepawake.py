@@ -886,7 +886,7 @@ class FakeBot(object):
         self.edits.append((mid, text))
         return not self.offline
 
-    def unbutton(self, mid):
+    def unbutton(self, mid, kb=None):
         self.unbuttoned.append(mid)
 
     def delete(self, mid):
@@ -955,6 +955,14 @@ with sandbox() as box:
     # Telegram takes one answer per press: a silent one first would swallow it.
     check("as the press's only answer", len(bot.answers) - answers_before, 1)
     check("a stale callback did not touch the deadline", read()["until_ts"], until)
+
+    # A review key on a message that no longer has them (review_keys.py): one
+    # answer saying the review is over, and the buttons go.
+    answers_before = len(bot.answers)
+    handler.callback({"id": "rv", "data": "rv:pass", "message": {"message_id": 4242}})
+    check("an old review key is answered once, as over",
+          bot.answers[answers_before:], [(telegramd.t("rv.gone"), False)])
+    check("and loses its buttons", bot.unbuttoned[-1], 4242)
 
     answers_before = len(bot.answers)
     handler.callback({"id": "c2", "data": "extend:%d" % until,

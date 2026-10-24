@@ -201,12 +201,19 @@ check("Chrome: the laptop, closing it, then here, a row each; the dev server is 
 telegramd.port_open = lambda port: False
 check("a feature that is not there leaves the menu as it is",
       webmenu.home_feature("shop/gone"), None)
-# Opened by the Menu button, which knows no topic: the feature sclaude
-# worked on last, and a way to another.
+# Opened by the Menu button, which knows no topic: no guess — the latest
+# feature was another topic's — but the question which one.
 webmenu.features = lambda: [("shop/alpha", "shop", "alpha", 2), ("shop/beta", "shop", "beta", 1)]
 view = press("")
-check("the Menu button's page stands on the latest feature", view["home"], "shop/alpha")
-check("and says so", "📍 alpha" in view["text"], True)
+check("the Menu button's page stands on no feature", view["home"] or "", "")
+check("and asks which", view["text"], t("menu.pickhome"))
+check("listing them", [b["callback_data"] for row in view["rows"] for b in row][:2],
+      ["home:shop/alpha", "home:shop/beta"])
+view = press("home:shop/alpha")
+check("the one chosen is the one", (view["home"], "📍 alpha" in view["text"]), ("shop/alpha", True))
+webmenu.features = lambda: []
+check("with no feature at all, the menu itself", press("")["main"], True)
+webmenu.features = lambda: [("shop/alpha", "shop", "alpha", 2), ("shop/beta", "shop", "beta", 1)]
 view = press("home_pick")
 check("another feature is one press away",
       [b["callback_data"] for row in view["rows"] for b in row][:3],
@@ -267,12 +274,12 @@ try:
     ACTIONS = {"id": "q2", "prompt": "Which one? [1-5] ", "form": "pick:5",
                "options": ["Finish up", "Return to development (return)", "Sync with main (sync)",
                            "Drop the feature (drop)", "Go back"],
-               "context": "  1)   Finish up                        4/6 done — preview\n"
+               "context": "  1)   Finish up                        4/7 done — preview\n"
                           "  2)   Return to development (return)   back to step 2, with notes\n"
                           "  3)   Sync with main (sync)            up to date\n"
                           "  4)   Drop the feature (drop)          clear its traces\n  5)   Go back"}
     saved_feats = telegramd.features_of_name
-    telegramd.features_of_name = lambda name: ([("alpha", "4/6 done, waiting for merge", "")], "")
+    telegramd.features_of_name = lambda name: ([("alpha", "4/7 done, waiting for merge", "")], "")
     try:
         telegramd.pending_ask = lambda channel: ACTIONS
         view = press("fc:acts:shop/alpha")
@@ -320,8 +327,8 @@ check_true("the chat's own screen never shows it",
 saved_feats = telegramd.features_of_name
 try:
     telegramd.ON_PAGE = True
-    for step, first in (("2/6 coding", t("page.continuestep", step="2/6 coding")),
-                        ("4/6 done, waiting for merge", t("page.finish"))):
+    for step, first in (("2/7 coding", t("page.continuestep", step="2/7 coding")),
+                        ("4/7 done, waiting for merge", t("page.finish"))):
         telegramd.features_of_name = lambda name, step=step: ([("alpha", step, "")], "")
         _text, rows = REAL_CARD("shop", "alpha", in_topic=False)
         check("Continue says what it does: %s" % step, rows[0][0]["text"], first)
@@ -349,7 +356,7 @@ try:
     # Claude Code says "waiting" of a session asking the person something:
     # open, and waiting for them — not "no session is open".
     saved_feats_of, saved_repo = telegramd.features_of_name, telegramd.repo_path
-    telegramd.features_of_name = lambda name: ([("alpha", "1/6 planning", "/nowhere/shop-alpha")], "")
+    telegramd.features_of_name = lambda name: ([("alpha", "1/7 planning", "/nowhere/shop-alpha")], "")
     telegramd.repo_path = lambda name: "/nowhere/shop"
     try:
         for status, want in (("waiting", "feat.blocked"), ("compacting", "feat.idle")):

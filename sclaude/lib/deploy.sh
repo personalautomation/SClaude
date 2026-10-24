@@ -690,16 +690,26 @@ qa_retest() {
   say "${BOLD}Issue #$issue is in '$QA_DONE', but the code on preview has changed since QA looked.${OFF}"
   info "  Preview is at ${now:0:8}${sent:+, QA was sent ${sent:0:8}} — it goes back to '$QA_TO' to be checked again."
   issue_move_status "$issue" "$QA_DONE" "$QA_TO"
-  if [[ "$draft" != true ]]; then
-    if gh pr ready "$pr" --repo "$repo" --undo >/dev/null 2>&1; then
-      info "PR #$pr is a draft again until QA accepts its issues."
-    else
-      warn "  could not make PR #$pr a draft — do it by hand (Convert to draft)"
-    fi
-  fi
-  state_set "$state" handoff "" 2>/dev/null || true
+  pr_unhandoff "$wt" "$pr" "$repo" "PR #$pr is a draft again until QA accepts its issues." "$draft"
   qa_sent "$wt"
   return 0
+}
+
+# A hand-off for the merge (pr_qa_handoff) taken back: the pull request a
+# draft again, unless it is one already (<draft> "true"), and the recorded
+# hand-off forgotten, so that the next yes hands it over again. qa_retest and
+# the sync with main (sync_withdraw) take it back.
+#
+#   pr_unhandoff <wt> <pr> <repo> <what is said> [draft]
+pr_unhandoff() {
+  if [[ "${5:-}" != true ]]; then
+    if gh pr ready "$2" --repo "$3" --undo >/dev/null 2>&1; then
+      info "$4"
+    else
+      warn "  could not make PR #$2 a draft — do it by hand (Convert to draft)"
+    fi
+  fi
+  state_set "$1/.sclaude/local/feature/state.json" handoff "" 2>/dev/null || true
 }
 
 # Records which preview commit QA has been sent to look at — see qa_retest.
@@ -1302,17 +1312,20 @@ qa_wait() {
 #
 # Returns 0 once merged, 1 with no branch to ask about, 2 when the pull request
 # was closed without a merge — it can never be merged then, and waiting on it
-# would last for ever.
+# would last for ever — and 3 when the branch stopped merging with main while
+# it waited (merge_conflicts, asked every SYNC_POLL seconds with the worktree
+# given): nobody can merge it then, and the sync with main is the caller's.
 #
 # `merge` in the project's config (project_flow_mode) adds a way out: with
 # `both`, `m` pressed here puts the merge question again; with `auto`, the
 # merge is made the first time GitHub calls the pull request ready — once, so
 # a refusal is not repeated every poll. <offer-mode> is merge_offer's.
 #
-#   merge_wait <slug> <issue> <pr> <branch> [offer-mode]
+#   merge_wait <slug> <issue> <pr> <branch> [offer-mode] [worktree]
 merge_wait() {
-  local slug="$1" issue="$2" pr="$3" branch="$4" offer_mode="${5:-}"
+  local slug="$1" issue="$2" pr="$3" branch="$4" offer_mode="${5:-}" wt="${6:-}"
   local waited=0 logged=0 start=$SECONDS mode auto_tried=0 keys="" offered
+  local looked=0 conflict_rc
 
   [[ -n "$branch" ]] || return 1
   mode="$(project_flow_mode merge)"
@@ -1341,6 +1354,21 @@ merge_wait() {
     fi
     poll_pause "$MERGE_POLL"
     waited=$((SECONDS - start))
+    # Asked of an open pull request only: one merged during the pause has its
+    # branch deleted on GitHub, and the stale ref left here may well conflict
+    # with the main that the merge moved.
+    if [[ -n "$wt" && $((waited - looked)) -ge "$SYNC_POLL" ]] \
+       && [[ "$(branch_pr_state "$branch")" == OPEN ]]; then
+      looked="$waited"
+      conflict_rc=0
+      merge_conflicts "$wt" >/dev/null || conflict_rc=$?
+      if [[ "$conflict_rc" -eq 1 ]]; then
+        [[ -t 1 ]] && printf '\r\033[2K'
+        echo ""
+        warn "Main has moved, and PR #$pr no longer merges with it."
+        return 3
+      fi
+    fi
     # Auto stops trying once the merge was put and answered (2): a refusal
     # repeated every poll is noise. Not offered (1) — the column read empty,
     # GitHub still computing — is tried again on the next poll.
@@ -1412,12 +1440,30 @@ remind_prod() {
   echo ""
   if [[ "${merged:-}" == "MERGED" ]]; then
     echo "${BOLD}Feature $slug: PR #$pr is merged.${OFF}"
+    # A sync left open is over with the merge: it was for a merge that has
+    # happened (on GitHub, past it), and the issue's summary stops naming it.
+    sync_close_open "$wt/.sclaude/local/feature/state.json"
   elif [[ "$no_deploy" -eq 1 ]]; then
     echo "${BOLD}Feature $slug: PR #$pr is open.${OFF}"
     echo "${DIM}Next: the merge, which is yours to do — nothing here deploys.${OFF}"
   else
     echo "${BOLD}Feature $slug: PR #$pr is open.${OFF}"
     echo "${DIM}Next: the preview, then QA, then the merge — the merge is yours to do.${OFF}"
+  fi
+
+  # Whether the branch merges with main, before anything is shown to QA: the
+  # preview and QA would otherwise look at code that is not what merges, and
+  # the merge wait below would wait for a merge nobody can make. On a conflict
+  # the sync with main (sync.sh) merges main in and pushes, and the run goes
+  # on with that: the preview below sees a changed tree and deploys it.
+  # Not for a pull request closed without a merge: it never merges, however
+  # well its branch does.
+  if [[ "${merged:-}" != "MERGED" && "${merged:-}" != "CLOSED" && "$pr" =~ ^[0-9]+$ ]]; then
+    # sync_gate: a pull request an earlier run handed over goes back to a
+    # draft before the new code reaches it.
+    local synced=0
+    sync_gate "$wt" "$slug" "$pr" || synced=$?
+    [[ "$synced" -eq 1 ]] && return 0
   fi
 
   # The order is not arbitrary: preview deploys the worktree's contents, so it
@@ -1609,6 +1655,20 @@ remind_prod() {
       run_step "$wt" "$slug" review
       return 0
     fi
+    # Main moves while QA works, and what merged cleanly before the preview
+    # may not now. Asked before the hand-off below: one made and taken back
+    # a moment later flips the board, the pull request and its summary for
+    # nothing. A sync here changes the code QA passed, so the run starts over
+    # on it: the preview, its regression, and QA again (qa_retest).
+    if [[ "${merged:-}" != "MERGED" ]]; then
+      local resynced=0
+      sync_gate "$wt" "$slug" "$pr" || resynced=$?
+      [[ "$resynced" -eq 1 ]] && return 0
+      if [[ "$resynced" -eq 3 ]]; then
+        remind_prod "$wt" "$slug"
+        return $?
+      fi
+    fi
     # QA said yes — to this issue. The pull request is handed over only when
     # every issue it closes is in Done, and until then it stays a draft, which
     # is what holds the merge offer below back (see pr_qa_handoff).
@@ -1635,8 +1695,17 @@ remind_prod() {
   # GitHub, and this notices it rather than ending the run with an errand.
   if [[ "${merged:-}" != "MERGED" ]] && [[ "$preview_live" -eq 1 || "$no_deploy" -eq 1 ]]; then
     local wait_rc=0
-    merge_wait "$slug" "$issue" "$pr" "$branch" "$offer_mode" || wait_rc=$?
+    merge_wait "$slug" "$issue" "$pr" "$branch" "$offer_mode" "$wt" || wait_rc=$?
     [[ "$wait_rc" -eq 0 ]] && merged="MERGED"
+    # Main moved under the wait and the branch no longer merges: the sync,
+    # and the run again on what it pushes.
+    if [[ "$wait_rc" -eq 3 ]]; then
+      # The pull request goes back to a draft now: it was handed over, and
+      # the sync in the run below pushes code nobody has checked.
+      sync_withdraw "$wt" "$pr"
+      remind_prod "$wt" "$slug"
+      return $?
+    fi
     # Closed without a merge: there is nothing left to wait for, and the
     # reminder below would tell the person to merge a pull request that no
     # longer can be.

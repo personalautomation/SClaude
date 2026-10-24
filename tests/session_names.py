@@ -7,7 +7,7 @@
 #     `1-plan(2)`: the round always comes last, and the first has none;
 #   * a friction review carries the number of the session it reviews;
 #   * a fixing session goes under the step it fixes in;
-#   * the epilogue is 5, the retrospective 6;
+#   * the sync with main is 5, the epilogue 6, the retrospective 7;
 #   * the name carries the emoji of its kind before the slug
 #     (named_with_icon), a friction review of a fixing session counted as
 #     friction.
@@ -62,8 +62,10 @@ check("friction-fix", label("friction", "fix-preview-1"), "4-fix-preview-frictio
 check("friction-fix-again", label("friction", "fix-prod-3"), "4-fix-prod-friction(3)")
 check("fix-local", label("fix", "fix-local-2"), "2-fix-local(2)")
 check("fix-first", label("fix", "fix-preview-1"), "4-fix-preview")
-check("epilogue", label("epilogue"), "5-epilogue")
-check("retro", label("retro"), "6-retro")
+check("sync", label("sync", "1"), "5-sync")
+check("sync-again", label("sync", "2"), "5-sync(2)")
+check("epilogue", label("epilogue"), "6-epilogue")
+check("retro", label("retro"), "7-retro")
 
 
 def icon(title):
@@ -75,7 +77,8 @@ def icon(title):
 for title, want in (("1-plan/x", "📝"), ("2-code(2)/x", "💻"), ("3-pr/x", "📤"),
                     ("4-review/x", "🛠"), ("4-review(2)/x", "🛠"), ("4-friction(2)/x", "🧱"),
                     ("4-fix-preview(2)/x", "🔧"), ("4-fix-preview-friction/x", "🧱"),
-                    ("5-epilogue/x", "🏁"), ("6-retro/x", "🔁"),
+                    ("5-sync/x", "🔀"), ("5-sync(2)/x", "🔀"),
+                    ("6-epilogue/x", "🏁"), ("7-retro/x", "🔁"),
                     ("friction/deferred", "🧱"), ("demo/code", "")):
     check("icon " + title, icon(title), want)
 
@@ -96,7 +99,7 @@ for name, want in (("4-review(2)/x", "4-review(2) 🛠/x"), ("1-plan/x", "1-plan
     check("icon kept " + name, icon(named(name)), icon(name))
 
 # The line that tells a session started or ended: one shape for every kind,
-# numbered over the six of the cycle as the menu numbers it.
+# numbered over the seven of the cycle as the menu numbers it.
 def phase(*args):
     script = 'source "%s/steps.sh"; source "%s/regression.sh"; phase_line "$@"' % (LIB, LIB)
     return subprocess.run(["bash", "-c", script, "bash"] + list(args),
@@ -104,19 +107,21 @@ def phase(*args):
 
 
 for args, want in (
-        (("started", "step", "plan", "1"), "📝 Step 1/6 planning: session 1 started"),
-        (("finished", "step", "review", "2"), "🛠 Step 4/6 review: fix session 2 finished"),
-        (("done", "step", "review"), "✅ Step 4/6 done: review"),
-        (("finished", "step", "review", "1", "3"), "🛠 Step 4/6 review: fix session 1, round 3 finished"),
-        (("finished", "friction", "review-3"), "🧱 Friction review finished: after step 4/6 review, fix session 3"),
-        (("ended", "friction", "code"), "🧱 Friction review ended: after step 2/6 development"),
+        (("started", "step", "plan", "1"), "📝 Step 1/7 planning: session 1 started"),
+        (("finished", "step", "review", "2"), "🛠 Step 4/7 review: fix session 2 finished"),
+        (("done", "step", "review"), "✅ Step 4/7 done: review"),
+        (("finished", "step", "review", "1", "3"), "🛠 Step 4/7 review: fix session 1, round 3 finished"),
+        (("finished", "friction", "review-3"), "🧱 Friction review finished: after step 4/7 review, fix session 3"),
+        (("ended", "friction", "code"), "🧱 Friction review ended: after step 2/7 development"),
         (("started", "friction", "fix-preview-1"), "🧱 Friction review started: after the preview regression fix 1"),
         (("started", "fix", "local", "e2e"), "🔧 Regression fix started: local, on e2e"),
         (("finished", "fix", "preview"), "🔧 Regression fix finished: preview"),
         (("started", "local-review", "7", "3"), "🔍 Local review started: PR #7, round 3"),
         (("finished", "local-review", "7", "4", "verify"), "🔍 Local review finished: PR #7, round 4, fixes only"),
-        (("finished", "epilogue"), "🏁 Step 5/6 finished: epilogue"),
-        (("started", "retro"), "🔁 Step 6/6 started: retrospective"),
+        (("started", "sync", "2"), "🔀 Step 5/7 started: sync with main, session 2"),
+        (("finished", "sync"), "🔀 Step 5/7 finished: sync with main"),
+        (("finished", "epilogue"), "🏁 Step 6/7 finished: epilogue"),
+        (("started", "retro"), "🔁 Step 7/7 started: retrospective"),
         (("finished", "deferred"), "🧱 Deferred friction review finished")):
     check("phase " + " ".join(args), phase(*args), want)
 
@@ -126,10 +131,18 @@ sys.path.insert(0, os.path.join(LIB, "..", ".."))
 from keepawake import notices  # noqa: E402
 icons = subprocess.run(["bash", "-c", 'source "%s/steps.sh"; for a in "step plan" "step code" '
                         '"step pr" "step review" "step other" "step review done" friction deferred '
-                        'fix local-review regression deploy epilogue retro; do '
+                        'fix local-review regression deploy sync epilogue retro; do '
                         'set -- $a; phase_icon "$1" "${2:-}" "${3:-}"; echo; done' % LIB],
                        capture_output=True, text=True, timeout=30).stdout.split()
 check("the bot knows every phase icon", sorted(set(icons)), sorted(notices.PHASE_ICONS))
+
+# The menu names the cycle's steps by their number (webmenu's act.steps):
+# one name for each, in both languages.
+from keepawake import i18n  # noqa: E402
+total = subprocess.run(["bash", "-c", 'source "%s/steps.sh"; cycle_total' % LIB],
+                       capture_output=True, text=True, timeout=30).stdout.strip()
+for half in i18n.STRINGS["act.steps"]:
+    check("act.steps names every step", str(len(half.split(" · "))), total)
 
 # The banner a session opens with in the terminal names it as the topic does.
 def title(*args):
@@ -139,13 +152,14 @@ def title(*args):
 
 
 for args, want in (
-        (("step", "code"), "Step 2/6 development"),
-        (("friction", "review-3"), "Friction review after step 4/6 review, fix session 3"),
+        (("step", "code"), "Step 2/7 development"),
+        (("friction", "review-3"), "Friction review after step 4/7 review, fix session 3"),
         (("friction", "fix-local-2"), "Friction review after the local regression fix 2"),
         (("fix", "local", "e2e"), "Regression fix: local, on e2e"),
         (("regression", "preview"), "Regression: preview"),
-        (("epilogue",), "Step 5/6 epilogue"),
-        (("retro",), "Step 6/6 retrospective"),
+        (("sync",), "Step 5/7 sync with main"),
+        (("epilogue",), "Step 6/7 epilogue"),
+        (("retro",), "Step 7/7 retrospective"),
         (("deferred",), "Deferred friction review"),
         # A key past the steps, as `sclaude friction` may pass, is said as it is.
         (("friction", "done"), "Friction review of done")):

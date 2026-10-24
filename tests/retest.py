@@ -41,7 +41,7 @@ def check(name, got, want):
 
 deploy = open(DEPLOY, encoding="utf-8").read()
 FUNC = ""
-for name in ("qa_retest", "qa_sent"):
+for name in ("qa_retest", "qa_sent", "pr_unhandoff"):
     match = re.search(r'^%s\(\) \{\n.*?^\}\n' % name, deploy, re.M | re.S)
     if not match:
         print("FAIL %s not found in deploy.sh" % name)

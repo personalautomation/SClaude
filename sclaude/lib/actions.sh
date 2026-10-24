@@ -115,7 +115,19 @@ feature_actions() {
   elif [[ "$behind" == "0" ]]; then
     labels+=("Sync with main (sync)"$'\t'"up to date with origin/main")
   else
-    labels+=("Sync with main (sync)"$'\t'"$behind commit(s) behind origin/main")
+    # And whether the merge would stop on conflicts: then it is a session's
+    # work (sync_with_main), which the person should know before choosing it.
+    local conflicts="" crc=0
+    [[ -n "$wt" ]] && { conflicts="$(merge_conflicts "$wt" nofetch)" || crc=$?; }
+    if [[ "$crc" -eq 1 ]]; then
+      # Only the deferred logs: sclaude's own merge, no session to pay for.
+      local -a cfiles; mapfile -t cfiles <<< "$conflicts"
+      local who="a session merges them"
+      sync_deferred_only "$wt" "${cfiles[@]}" && who="sclaude merges them itself"
+      labels+=("Sync with main (sync)"$'\t'"$behind commit(s) behind origin/main, ${#cfiles[@]} file(s) conflict — $who")
+    else
+      labels+=("Sync with main (sync)"$'\t'"$behind commit(s) behind origin/main")
+    fi
   fi
   verbs+=(sync)
 

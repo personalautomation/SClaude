@@ -407,8 +407,8 @@ STRINGS = {
     "page.refresh":      ("🔄 Обновить карточку", "🔄 Refresh the card"),
     # The feature's actions on the menu page, grouped by where each leads.
     "act.title":         ("⚙️ <b>Действия с фичей</b> %(slug)s", "⚙️ <b>Feature actions</b> %(slug)s"),
-    "act.steps":         ("план · код · PR · ревью · после merge · ретро",
-                          "plan · code · PR · review · after the merge · retro"),
+    "act.steps":         ("план · код · PR · ревью · с main · после merge · ретро",
+                          "plan · code · PR · review · with main · after the merge · retro"),
     "act.now":           ("Сейчас: <b>%(step)s</b>", "Now: <b>%(step)s</b>"),
     "act.back":          ("⏪ Назад, к шагу %(n)s", "⏪ Back to step %(n)s"),
     "act.reopen":        ("⏪ Заново открыть шаг %(n)s", "⏪ Reopen step %(n)s"),
@@ -432,6 +432,27 @@ STRINGS = {
     # of its own.
     "feat.actions":      ("⚙️ Действия", "⚙️ Actions"),
     "feat.new":          ("✨ Новая фича", "✨ New feature"),
+    # The review's keys on the topic's message that a pass or a fix session
+    # started (review_keys.py): the terminal's [s] and [x x].
+    "rv.last.pass":      ("⏭ Последний проход за новыми замечаниями",
+                          "⏭ Last pass for new findings"),
+    "rv.last.round":     ("⏭ Последний раунд: дальше только проверка фиксов",
+                          "⏭ Last round: then only check the fixes"),
+    "rv.back":           ("↩️ Отменить: искать дальше", "↩️ Take it back: keep searching"),
+    "rv.stop":           ("⏹ Остановить сейчас", "⏹ Stop now"),
+    "rv.stop.yes":       ("⏹ Да, остановить и отбросить этот проход",
+                          "⏹ Yes, stop and drop this pass"),
+    "rv.stop.no":        ("▶️ Пусть идёт", "▶️ Carry on"),
+    "rv.pass.ok":        ("Этот проход — последний, кто ищет новое",
+                          "This pass is the last to look for new findings"),
+    "rv.round.ok":       ("После этой сессии ревью только проверит фиксы",
+                          "After this session the review only checks the fixes"),
+    "rv.back.ok":        ("Отменено: ревью ищет дальше", "Taken back: the review keeps searching"),
+    "rv.now":            ("Проход останавливается; открытое уйдёт в сессию ревью",
+                          "Stopping the pass; what is open goes to the review session"),
+    "rv.gone":           ("Это ревью уже закончилось", "That review has ended"),
+    "rv.failed":         ("Не получилось передать sclaude — попробуйте ещё раз",
+                          "Could not pass it to sclaude — try again"),
     # The project's .sclaude/config.json, as `sclaude config` shows it. The
     # explanations themselves are sclaude's, from config.example.json.
     "cfg.button":        ("🧩 Конфиг проекта", "🧩 Project config"),

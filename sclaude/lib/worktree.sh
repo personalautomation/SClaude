@@ -893,17 +893,36 @@ sync_branch() {
     return 0
   fi
 
+  # Whether the merge would stop on conflicts, asked first (merge_conflicts):
+  # then it is the sync with main's (sync.sh), which resolves them — the
+  # person cannot, from a phone, and a step must not open on a half-merged
+  # tree.
+  local conflicts crc=0
+  conflicts="$(merge_conflicts "$wt" nofetch)" || crc=$?
+
   warn ""
   warn "  $branch is $behind commit(s) behind origin/main and has commits of its own."
   warn "  Starting the step on a stale branch is how a migration collides with one"
   warn "  that is already in main."
   echo ""
-  ask "${BOLD}Merge origin/main into $branch? [y/n] ${OFF}" answer yn
+  if [[ "$crc" -eq 1 ]]; then
+    if sync_ask "$wt" "$branch" "$conflicts"; then answer=y; else answer=n; fi
+  else
+    ask "${BOLD}Merge origin/main into $branch? [y/n] ${OFF}" answer yn
+  fi
   if ! is_yes "$answer"; then
     [[ -n "$tip" ]] && state_set "$state" sync.declined "$tip"
     info "  Left as it is — the step opens on the branch as it stands."
     info "  Not asked again until main moves; merge any time with: sclaude sync ${slug:-<feature>}"
     return 0
+  fi
+
+  if [[ "$crc" -eq 1 ]]; then
+    local synced=0
+    sync_gate "$wt" "$slug" "$(state_get "$state" pr 2>/dev/null || true)" nofetch || synced=$?
+    [[ "$synced" -ne 1 ]] && return 0
+    warn "  The step has not been started."
+    return 1
   fi
 
   # `--no-edit`: the person has just answered yes, and a merge message editor

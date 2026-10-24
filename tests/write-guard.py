@@ -336,6 +336,34 @@ try:
             check("review-guard-flags-the-merge-%s" % team,
                   "--disallowed-tools" in guard and "Bash(gh pr merge:*)" in guard[guard.index("--disallowed-tools") + 1],
                   True)
+    # A retrospective of a maintainer of the orchestrator (run_retro passes
+    # `instruments`) may change its checkout, all but what restrains it: the
+    # hooks, the policy and the checkout's git hooks. And it may not push there.
+    # Without the word the whole checkout stays read-only.
+    # This checkout stands for the orchestrator: the hook only judges the
+    # writes, and policy.py has to be where LIB says.
+    orchestrator = os.path.realpath(ROOT)
+    for maintainer in (["ann@x.test"], ["lead@x.test"]):
+        setup(maintainer)
+        for kind in ("instruments", ""):
+            name = "%s-%s" % (kind or "friction", maintainer[0])
+            guard = sh('INSTRUMENTS=%s; HOOKS="$INSTRUMENTS/sclaude/hooks"; review_guard_settings "%s" %s'
+                       % (orchestrator, repo, kind), repo).splitlines()
+            hooks = json.loads(guard[1])["hooks"]["PreToolUse"]
+            write = shlex.split(hooks[0]["hooks"][0]["command"])
+            bans = hooks[1]["hooks"][0]["command"]
+            check("retro-guard-is-write-guard-%s" % name, write[1].endswith("write-guard.py"), True)
+            check("retro-no-own-push-%s" % name, "--no-own-push" in bans, bool(kind))
+            check("retro-keeps-the-bans-%s" % name, "forbidden-commands.py" in bans, True)
+            for path, writable in ((os.path.join(orchestrator, "sclaude/lib/run.sh"), bool(kind)),
+                                   (os.path.join(orchestrator, "README.md"), bool(kind)),
+                                   (os.path.join(orchestrator, "sclaude/hooks/write-guard.py"), False),
+                                   (os.path.join(orchestrator, "sclaude/policy/core.json"), False),
+                                   (os.path.join(orchestrator, "sclaude/lib/policy.py"), False),
+                                   (os.path.join(orchestrator, "githooks/commit-msg"), False)):
+                check("retro-writes-%s-%s" % (os.path.relpath(path, orchestrator), name),
+                      hook("Write", args=write[2:], cwd=repo, file_path=path),
+                      "allow" if writable else "deny")
     setup(["lead@x.test"])
 
     # A step's settings carry it next to forbidden-commands.py.

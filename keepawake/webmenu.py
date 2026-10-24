@@ -193,14 +193,6 @@ def features():
     return sorted(found, key=lambda f: -f[3])
 
 
-def guess_home():
-    """The feature a page opened without one stands on: the one sclaude
-    worked on last. The Menu button is the bot's, the same in every topic,
-    and tells the page nothing of where it was pressed."""
-    found = features()
-    return found[0][0] if found else ""
-
-
 def home_feature(home):
     """(name, slug) of the feature the page was opened on — from its topic —
     or None. Sclaude, Chrome and Code-server then stand on it: in a
@@ -329,7 +321,7 @@ def actions_screen(key, question):
             rows += [[b] for _n, b in groups[group]]
     if cancel:
         rows.append([dict(cancel, text=t("act.cancel"))])
-    # The six steps in a line, the feature's own marked: "4/6 done, …" is
+    # The seven steps in a line, the feature's own marked: "4/7 done, …" is
     # step 4.
     at = re.match(r"(\d)/\d", step or "")
     names = list(names)
@@ -793,9 +785,13 @@ def answer(token, chat_id, user, action, context, now, label="", home=""):
     with held():
         telegramd.remember_lang(user)
         bot = PageBot(token, chat_id)
-        if not home and not action:
-            # Opened by the Menu button, which does not know the topic.
-            bot.home = home = guess_home()
+        if not home and not action and features():
+            # Opened by the Menu button, which is one for the whole chat:
+            # Telegram tells the page nothing of the topic it was pressed in,
+            # and the feature sclaude worked on last was often not the one
+            # whose topic it was. So it asks, and stands on nothing until
+            # told; a topic's card opens the page on its feature (`?f=`).
+            action = "home_pick"
         pressed_on = context
         telegramd.ON_PAGE = True
         try:

@@ -41,7 +41,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from keepawake import docs, notices, state
+from keepawake import docs, notices, review_keys, state
 import statusline
 from keepawake.i18n import DEFAULT, STRINGS, current, set_lang, ssh_holders, t
 from keepawake.state import (HOLD_SECONDS, local_label, locked, needs_warning,
@@ -364,11 +364,12 @@ class Bot(object):
             reason = getattr(exc, "telegram", "")
             return any(w in reason for w in TOPIC_GONE)
 
-    def unbutton(self, message_id):
-        # The message's text stays, its buttons go.
+    def unbutton(self, message_id, keyboard=None):
+        # The message's text stays, its buttons go — or become keyboard.
         try:
             self.call("editMessageReplyMarkup", chat_id=self.chat_id,
-                      message_id=message_id)
+                      message_id=message_id,
+                      reply_markup={"inline_keyboard": keyboard} if keyboard else None)
         except Exception as exc:
             log.warning("the buttons stayed: %s", exc)
 
@@ -1445,8 +1446,8 @@ def features_of(repo):
             # button leading nowhere.
             break
         # We split on two spaces — that is how align_columns separates the
-        # columns. One will not do: a step's name is sometimes two words ("3/6
-        # pull request"), and splitting on spaces returned "3/6 pull" as the step
+        # columns. One will not do: a step's name is sometimes two words ("3/7
+        # pull request"), and splitting on spaces returned "3/7 pull" as the step
         # and "request" as the path to the worktree. That is exactly how it
         # looked in the card.
         parts = [c for c in re.split(r" {2,}", line.strip()) if c]
@@ -1535,6 +1536,11 @@ def ask_channels(repo):
         if not slug.startswith(".") and os.path.isdir(path):
             found.append((slug, path))
     return found
+
+
+def feature_channels():
+    """Every feature's channel directory, of every known repository."""
+    return [channel for repo in known_repos() for slug, channel in ask_channels(repo) if slug]
 
 
 def channel_key(name, slug):
@@ -2821,6 +2827,19 @@ COMMANDS["start"] = COMMANDS["menu"]
 OFFLINE_COMMANDS = ("menu", "phone", "status", "awake", "extend", "sleep")
 
 
+class _Unbuttons(object):
+    # The keyboard edits a press makes, held until the press is answered.
+    def __init__(self):
+        self.edits = []
+
+    def unbutton(self, message_id, keyboard=None):
+        self.edits.append((message_id, keyboard))
+
+    def flush(self, bot):
+        for message_id, keyboard in self.edits:
+            bot.unbutton(message_id, keyboard)
+
+
 class Handler(object):
     def __init__(self, bot):
         self.bot = bot
@@ -3149,6 +3168,18 @@ class Handler(object):
         if data_raw.startswith(("extend:", "sleep:")):
             let_go(message_id)
             return self.decision(data_raw, message_id, cid, now)
+
+        # The review's keys on a topic's message (review_keys.py): the toast
+        # says what the press did, or that the review it was for has ended.
+        # The answer goes before the message's buttons are redrawn, as every
+        # answer here does: an edit on a slow network outlasts the seconds
+        # Telegram gives the press, and the toast is then never shown.
+        if data_raw.startswith("rv:"):
+            later = _Unbuttons()
+            toast = review_keys.press(later, feature_channels(), message_id, data_raw)
+            self.bot.answer(cid, toast or None)
+            later.flush(self.bot)
+            return
 
         # The answer first thing, otherwise a spinner turns on the phone.
         self.bot.answer(cid)
@@ -5095,7 +5126,8 @@ def main():
                           at_terminal=lambda pid: at_terminal({"pid": pid}),
                           shown=channel_context,
                           lost=lambda name, slug: topic_lost(bot)
-                          and feature_topic(bot, name, slug, renew=True))
+                          and feature_topic(bot, name, slug, renew=True),
+                          keys=review_keys)
         except Exception as exc:
             log.exception("sending sclaude's notes: %s", exc)
 

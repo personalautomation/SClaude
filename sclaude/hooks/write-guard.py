@@ -8,12 +8,16 @@
 #                   product's .sclaude/config.json (product_maintainer in
 #                   developer.sh); their rules go to .sclaude/people/<name>/,
 #                   and a maintainer can lift one into team/.
-#   --readonly DIR  nothing under DIR. sclaude passes its own checkout for the
-#                   friction review, the retrospective and the monthly deferred
+#   --readonly DIR  nothing under DIR, which may also be a file; given more
+#                   than once, under none of them. sclaude passes its own
+#                   checkout for the friction review and the monthly deferred
 #                   review: they read the orchestrator to understand a
 #                   restriction, and what they decide goes into the product.
 #                   A change to sclaude's out-of-the-box behaviour is a
 #                   deliberate pull request, never a session's side effect.
+#                   The retrospective of a maintainer of the orchestrator gets
+#                   only what restrains it — the hooks, the policy, the git
+#                   hooks — and may change the rest (review_guard_settings).
 #
 # Reading is never refused. Like every hook here it guards against an
 # accident, not against a session set on getting round it: a script written
@@ -41,7 +45,7 @@ from _shell import (GIT_VALUED, KEYWORDS, QUOTED, closing_at, inner_command, str
                     substitutions, tokenize, ungroup)
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
-READONLY_REASON = ("{dir} is sclaude's own checkout, and a session does not change "
+READONLY_REASON = ("{dir} is sclaude's own, and this session does not change "
                    "it: what this review decides goes into the product's .sclaude/ "
                    "or its code. A change to sclaude itself is proposed deliberately "
                    "(sclaude propose), so leave it as a deferred entry of class "
@@ -427,7 +431,7 @@ def refuses(payload, team, readonly, depth=0):
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         path = str(data.get("file_path") or data.get("notebook_path") or "")
         if readonly and path and inside(path):
-            return READONLY_REASON.format(dir=readonly[0])
+            return READONLY_REASON.format(dir=", ".join(readonly))
         if is_team(path):
             return REASON
         return None
@@ -462,7 +466,7 @@ def refuses(payload, team, readonly, depth=0):
         if targets is None:
             # Unparsable: refused only where it names a guarded place at all.
             if (readonly and any(d in command for d in readonly)) or (team and TEAM.search(command)):
-                return READONLY_REASON.format(dir=readonly[0]) if readonly else REASON
+                return READONLY_REASON.format(dir=", ".join(readonly)) if readonly else REASON
             return None
         if readonly:
             # A target with a variable in it: what the line set, then the
@@ -477,17 +481,17 @@ def refuses(payload, team, readonly, depth=0):
                                    lambda m: assigned.get(m.group(1), m.group(0)), word)
                     known = os.path.expandvars(known)
                     if "$" in known or "`" in known:
-                        return READONLY_REASON.format(dir=readonly[0])
+                        return READONLY_REASON.format(dir=", ".join(readonly))
                     targets[i] = (known, base)
             for word, base in targets:
                 # An unknown directory: an absolute path still tells, a relative
                 # one is taken as the checkout's.
                 if base is None and not os.path.isabs(os.path.expanduser(word)):
-                    return READONLY_REASON.format(dir=readonly[0])
+                    return READONLY_REASON.format(dir=", ".join(readonly))
                 if inside(word, base):
-                    return READONLY_REASON.format(dir=readonly[0])
+                    return READONLY_REASON.format(dir=", ".join(readonly))
             if git_writes_in(command, cwd, inside):
-                return READONLY_REASON.format(dir=readonly[0])
+                return READONLY_REASON.format(dir=", ".join(readonly))
         # The path as it resolves, from the directory the call runs in:
         # `cd .sclaude/team && echo x > policy.json` names no team path in a
         # word. Where the directory cannot be told, the word alone.

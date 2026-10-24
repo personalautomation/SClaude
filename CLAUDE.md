@@ -104,6 +104,15 @@ breaks the other silently — grep before you edit:
   also reads `phase_words`' verbs: a line saying `started` or `resumed` opens
   a step's message and the `✅` of a step's `done` closes it, so a step's lines
   are not mixed with the next one's; `tests/notices.py` runs it on those lines.
+- The cycle's numbering — the four `STEPS`, then the sync with main, the
+  epilogue and the retrospective (`cycle_number` in `sclaude/lib/steps.sh`) —
+  is named step by step by `act.steps` in `keepawake/i18n.py`, which the menu
+  indexes by a feature's step number, and counted again by `TOTAL` in the
+  issue's summary (`sclaude/lib/github.sh`); `tests/session_names.py` checks
+  that both halves of `act.steps` name as many steps as `cycle_total` counts.
+
+  <!-- Added by Claude on 2026-10-24 with step 5, the sync with main: the
+  steps after it moved up by one, and a list one short marks the wrong one. -->
 
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/run.sh`, which decides by it
@@ -141,6 +150,18 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-10-15 with the `review` key, so that a change to
   one side does not silently turn the review's words into a person's. -->
 
+- `review-said` in a feature's channel — the review's keys pressed in its
+  topic — is written by `SAID_FILE` in `keepawake/review_keys.py` and taken by
+  `review_said_take` (`REVIEW_SAID_FILE`) in `sclaude/lib/local_review.sh`;
+  the buttons go on the lines `phase_words` in `steps.sh` prints for a local
+  review pass and a fix session starting, which `PASS_START` and
+  `SESSION_START` there match. `tests/notices.py` runs both sides on
+  `phase_line`'s own output, `tests/local-review.py` a stop from the phone.
+
+  <!-- Added by Claude on 2026-10-24 with the review's keys in Telegram: a
+  word or a start line changed on one side alone would leave the buttons
+  doing nothing, or missing. -->
+
 - `sclaude new`'s options (`--issue`, `--blocked-ok`, `--create-issue`,
   `--no-issue`; `new_from_args` in `bin/sclaude`) and `sclaude config set` are
   what the bot's menu runs (`new_start` in `keepawake/webmenu.py`, `config_set`
@@ -157,11 +178,20 @@ This repository is public (personalautomation/SClaude). The projects sclaude
 drives are not. sclaude's review sessions — friction reviews, the monthly
 deferred review, retrospectives — work from those projects' material and
 change the product, never this checkout (`sclaude/hooks/write-guard.py
---readonly`). Whoever commits here by hand still works from what they saw in
-a product, so nothing committed here names a project's details: no project names, no pull-request,
+--readonly`). The one exception is the retrospective of a maintainer
+(`MAINTAINERS`): it may commit here, but not to the hooks, the policy or
+`githooks/`, and a hook refuses its push, so the person reads its commits
+before they go public (`review_guard_settings` in `sclaude/lib/steps.sh`).
+Whoever commits here, by hand or from a retrospective, still works from what
+they saw in a product, so nothing committed here names a project's details: no project names, no pull-request,
 issue or feature numbers, no file paths, tables, services or infrastructure
 of a product. Describe a problem in the orchestrator's own terms. What belongs
 to a project's story goes to that project.
+
+<!-- Provenance: the retrospective's exception was added by Claude at the
+owner's request on 2026-10-24: its fixes to sclaude went to the product's
+deferred file, and waited there for a review that could not make them either.
+The push stays the person's for the reason in this section. -->
 
 Data about projects that sclaude collects stays with the project: the
 deferred friction and the session rules in the product's `.sclaude/`
@@ -175,7 +205,8 @@ in its `.sclaude/local/`, which git and every Vercel upload are kept out of
 to `main`. Everybody else proposes a change on `dev/<name>` (the name comes
 from `developer_name` in `sclaude/lib/developer.sh`), which reaches `main`
 through a pull request. The review sessions do not commit here: they change
-the product. A step session whose plan reaches into this checkout may commit
+the product, except a maintainer's retrospective, which may commit here but
+not push. A step session whose plan reaches into this checkout may commit
 here and push to `main` (`OWN_CHECKOUT` in `sclaude/hooks/forbidden-commands.py`).
 
 <!-- Provenance: changed by Claude at the owner's explicit decision on
@@ -206,14 +237,17 @@ not need it:
 ```bash
 for f in $(git diff --name-only HEAD; git diff --name-only --cached); do
   grep -l "$(basename "${f%.*}")" tests/*.py
-done | sort -u | while read -r t; do python3 "$t" >/dev/null || echo "FAIL $t"; done
+done | sort -u | while read -r t; do python3 "$t" >/dev/null </dev/null || echo "FAIL $t"; done
 ```
+
+Each test runs with its stdin closed: some read it, and in the loop above
+that would swallow the rest of the list — the run then ends early, green.
 
 Run them all before a push, which is what reaches every machine (auto-sync
 from `main`):
 
 ```bash
-for t in tests/*.py; do python3 "$t" >/dev/null || echo "FAIL $t"; done
+for t in tests/*.py; do python3 "$t" >/dev/null </dev/null || echo "FAIL $t"; done
 ```
 
 ## The README before a push

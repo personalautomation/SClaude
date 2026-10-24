@@ -59,8 +59,9 @@ lost in an overgrown conversation. SDD's five names fall across them unevenly:
 | **2. code** | implement, verify | Claude builds it, checks it in a browser, and the product's tests must pass |
 | **3. pr** | — | the pull request, and the manuals updated to match |
 | **4. review** | verify | an automatic review of the pull request; Claude fixes what it finds; a preview deployment and its tests; then QA, the merge and production |
-| **5. epilogue** | — | after production: the outcome written into the issue and its parents, so an epic shows where it stands |
-| **6. retro** | — | before the feature is cleaned up: what you may have missed, how you could work better, what sclaude could do better |
+| **5. sync** | — | only when the reviewed branch does not merge with main: Claude merges main in, resolves the conflicts and pushes, and the preview and QA see the result |
+| **6. epilogue** | — | after production: the outcome written into the issue and its parents, so an epic shows where it stands |
+| **7. retro** | — | before the feature is cleaned up: what you may have missed, how you could work better, what sclaude could do better |
 
 When tests fail, a separate session fixes them. After every session a short
 **friction review** looks at what sclaude's safety rules refused, and loosens a
@@ -345,6 +346,14 @@ review of deferred findings — never change this repository: they change the
 product. A review that thinks one of sclaude's defaults is wrong for everybody
 works around it in the product and leaves a note for the maintainers.
 
+A maintainer's retrospective is the exception: what it finds wrong with
+sclaude it can fix here when you ask, and commit to `main`. It cannot touch
+sclaude's hooks or policy, and it cannot push — you read its commits (the
+retrospective's end lists them) and push yourself, since this repository is
+public and the retrospective has read your project. When sclaude's code changed
+during the retrospective, `sclaude done` stops before the clean-up; run it
+again.
+
 **Who keeps a product's rules.** `maintainers` in the product's
 `.sclaude/config.json` lists who curates the shared rules in `.sclaude/team/`.
 Anybody else's sessions write to `.sclaude/people/<name>/` instead. Both reach
@@ -455,6 +464,15 @@ the criteria on the preview and ticks them in the issue.
 
 You can also send a finished feature back yourself with `sclaude return`.
 
+**A branch that does not merge with main is synced first.** Before the
+preview, again after QA's yes, and every two minutes while it
+waits for the merge, sclaude asks git whether the branch still merges with
+main — no session and no tokens for that. When it does not, step 5 merges
+main in, resolves the conflicts, checks the result and pushes; the preview,
+its tests and QA then run again on that code. A conflict only in the deferred
+logs sclaude merges itself, with both sides' rows. A pull request already
+handed over for the merge goes back to a draft when a sync changes its code.
+
 The merge is yours (unless the product set it otherwise). After it sclaude
 offers production, runs the tests there, and rolls back if they fail.
 
@@ -472,8 +490,9 @@ Each step's model and permissions:
 | 2. code | opus / medium | `auto` | Implementation, checking in Chrome, commits |
 | 3. pr | sonnet / medium | `auto` | The manuals and the pull request — calls the `pr` skill |
 | 4. review | opus / medium | `auto` | Fixing review findings, the preview deploy |
-| 5. epilogue | sonnet / medium | `auto` | The outcome as one comment per issue, on the feature's issue and every parent; changes nothing in the repository |
-| 6. retro | opus / medium | `auto` | What you missed, how to work better, what sclaude could do better. What it fixes goes on the feature's branch and sends the feature back to step 3 |
+| 5. sync | opus / medium | `auto` | Only on a conflict with main: the merge of main into the branch, its conflicts resolved, checked and pushed |
+| 6. epilogue | sonnet / medium | `auto` | The outcome as one comment per issue, on the feature's issue and every parent; changes nothing in the repository |
+| 7. retro | opus / medium | `auto` | What you missed, how to work better, what sclaude could do better. What it fixes goes on the feature's branch and sends the feature back to step 3 |
 
 ### Environments and databases
 
@@ -578,7 +597,9 @@ screen, with an address bar of its own, and code-server opens on the worktree
 the same way. The phone needs nothing but Telegram; Telegram Web on a computer
 works too.
 
-Opened from a feature's topic, the app stands on that feature: 📋 Sclaude is its
+Telegram does not tell the app which topic "☰ Menu" was pressed in, so that
+button first asks which feature, or the whole machine. "📲 Open in the app" on
+a feature's card opens the app on that feature: 📋 Sclaude is its
 card, 🌐 Chrome and 💻 Code-server open it and its worktree (code-server's screen
 shows its password), and "📍 Choose a feature" moves to another or to the whole
 machine. The card in the app has a button to a row: ▶️ continue the step, named
@@ -729,7 +750,10 @@ report's verdict — a message of its own each round, so the topic keeps the
 history. And it follows what sclaude is doing there — each session that
 starts and ends, and each step once it is done; a review fix session with
 what it is handed and what it leaves (findings not fixed yet, new, fixed,
-declined, commits), and the review on this machine as it runs; regressions
+declined, commits), and the review on this machine as it runs — its start
+carries the keys its terminal takes, ⏭ the last pass for new findings and ⏹
+stop now, and a fix session's start the first of them, so a review can be
+ended from the phone; the buttons go once that pass or session ends; regressions
 (a red one names the specs that failed, by their titles), deploys and QA's
 moves on the board — in short messages, one step's lines apart from the next one's, silent unless something went wrong while you are
 away from the laptop. Typing an answer inside a topic answers
@@ -833,7 +857,7 @@ journalctl --user -u keepawake-telegram.service -f   # the bot's log
 ## statusline.py
 
 Claude Code's status line. On the left, the sclaude session (`1-plan`,
-`4-review(2)`, `4-fix-preview`, `5-epilogue`, …) and the path; in the middle the
+`4-review(2)`, `4-fix-preview`, `5-sync`, `6-epilogue`, …) and the path; in the middle the
 branch, the feature's pull request, the session's name and the worktree; on the
 right the model, the effort, how full the context is, the prompt cache, and the
 usage limits. On a narrow terminal the least important fields drop out first.

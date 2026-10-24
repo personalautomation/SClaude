@@ -127,7 +127,7 @@ INSTRUMENTS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 # half an orchestrator is worse than none.
 for _module in io ui steps state project environment developer branches worktree featuredb lock pane run \
                github plan deploy regression rollback watch picker abandon actions doctor deferred \
-               terminal retro scratch no_change local_review config; do
+               terminal retro scratch no_change local_review config sync; do
   # shellcheck source=/dev/null
   source "$LIB/$_module.sh" || {
     echo "sclaude: cannot load $LIB/$_module.sh" >&2
@@ -1136,6 +1136,16 @@ cmd_done() {
   # and skipping the retrospective there skipped the one look back it had.
   run_retro "$wt" "$slug" "$pr" "$issue"
 
+  # sclaude's own code changed while the retrospective ran — it may change it,
+  # and other sessions do. This process carries on in the old bash while every
+  # Python helper it calls is read anew from disk, so the clean-up goes on in
+  # a run of its own. The retrospective is not held again there (run_retro).
+  if [[ -n "${RETRO_INSTRUMENTS_CHANGED:-}" ]]; then
+    echo ""
+    say "${BOLD}sclaude's own code changed under this run; the clean-up goes on in a fresh one: $SELF done $slug${OFF}"
+    return 1
+  fi
+
   # A retrospective that committed the feature's own work on a branch with no
   # change has given it a change: the feature goes to its pull-request step,
   # the way a merged one goes back there (retro_reopen).
@@ -1319,11 +1329,14 @@ cmd_done() {
 # has already been published.
 cmd_sync() {
   require_repo
-  local slug="${1:-}" wt branch behind ahead answer
+  local slug="${1:-}" wt branch behind ahead answer pr
   local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF sync <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
   branch="$(state_get "$wt/.sclaude/local/feature/state.json" branch)" || die "the state carries no branch"
+  # sync_gate takes back a hand-off for the merge when the sync pushes code
+  # nobody has checked, from here as from the run.
+  pr="$(state_get "$wt/.sclaude/local/feature/state.json" pr 2>/dev/null || true)"
 
   echo ""
   info "Fetching origin…"
@@ -1334,6 +1347,36 @@ cmd_sync() {
 
   echo ""
   say "${BOLD}$slug${OFF} — $ahead commit(s) of its own, $behind behind origin/main."
+
+  # A sync broken off — a session the person left, perhaps mid-merge — goes
+  # back to that session, which sync_with_main tells them this command does:
+  # the uncommitted work refused below would be its own half-done merge.
+  #
+  # Its conflict may have gone meanwhile — resolved by hand or on GitHub, or
+  # main moved — and then sync_with_main closes it and says nothing more: the
+  # sync goes on below as an ordinary one. A merge still under way here is
+  # never that: sync_with_main has the session finish it.
+  #
+  # A merge under way that no sync left — the person's own, by hand — is
+  # theirs: a session takes it over only on a yes, as any paid one starts.
+  local under_way=""
+  merge_under_way "$wt" && under_way=1
+  if [[ -n "$under_way" ]] && ! sync_broken_off "$wt/.sclaude/local/feature/state.json"; then
+    echo ""
+    warn "  A merge is under way in $wt."
+    ask "${BOLD}Have a session finish it — resolve, check, push? [y/n] ${OFF}" answer yn
+    is_yes "$answer" || {
+      info "  Left as it is. Finish it: git -C $wt commit, or back out: git -C $wt merge --abort"
+      return 0
+    }
+  fi
+  if [[ -n "$under_way" ]] || sync_broken_off "$wt/.sclaude/local/feature/state.json"; then
+    local resumed=0
+    sync_gate "$wt" "$slug" "$pr" nofetch || resumed=$?
+    [[ "$resumed" -eq 3 ]] && echo "${GREEN}Merged — $branch now carries everything from main.${OFF}"
+    [[ "$resumed" -eq 0 ]] || return 0
+    behind="$(git -C "$REPO" rev-list --count "$branch..origin/main" 2>/dev/null)" || behind="?"
+  fi
 
   if [[ "$behind" == "0" ]]; then
     info "  Nothing to do: the branch already has everything from main."
@@ -1360,6 +1403,30 @@ cmd_sync() {
     warn ""
     warn "  Uncommitted work in the worktree — commit or stash it first:"
     printf '%s\n' "$dirty"
+    return 0
+  fi
+
+  # A branch updated on GitHub is merged from there: the check below is about
+  # origin's tip, and the merge must start from the same commit.
+  sync_catch_up "$wt"
+  if sync_diverged "$wt"; then
+    warn ""
+    warn "  $branch here and on origin have both moved — bring them together first:"
+    warn "    git -C $wt pull --no-rebase"
+    return 0
+  fi
+
+  # A merge that would stop on conflicts is not left half-done for the person
+  # to untangle — from a phone they cannot: the sync with main (sync.sh)
+  # resolves them, by itself for the deferred logs and in a session otherwise.
+  local conflicts crc=0
+  conflicts="$(merge_conflicts "$wt" nofetch)" || crc=$?
+  if [[ "$crc" -eq 1 ]]; then
+    echo ""
+    sync_ask "$wt" "$branch" "$conflicts" || { info "Left as it is."; return 0; }
+    local synced=0
+    sync_gate "$wt" "$slug" "$pr" nofetch || synced=$?
+    [[ "$synced" -eq 3 ]] && echo "${GREEN}Merged — $branch now carries everything from main.${OFF}"
     return 0
   fi
 

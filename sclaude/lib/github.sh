@@ -652,47 +652,48 @@ for stage in STAGE_ORDER:
             friction_cell(key),
         ))
 
-# The epilogues: the sessions that rewrite the status section in the issue and
-# its parents. They run several times in a feature's life — after the preview,
-# after production — and each conversation is a row, like every other claude
-# session the orchestrator starts.
-epilogue_runs = [r for r in ((s.get("epilogue") or {}).get("runs") or [])
-                 if isinstance(r, dict)]
-for number, run in enumerate(epilogue_runs, start=1):
-    sid = run.get("session") or ""
-    rows.append("| status update%s | %s | %s | %s | %s | — |" % (
-        " (%d)" % number if len(epilogue_runs) > 1 else "",
-        "done" if run.get("done") else "interrupted",
-        "`%s`" % sid[:8] if sid else "—",
-        when(run.get("started")),
-        when(run.get("finished")),
-    ))
+# The sessions after the steps, a row for each conversation like every other
+# session the orchestrator starts, numbered when a kind ran more than once.
+def run_rows(node, name):
+    runs = [r for r in ((s.get(node) or {}).get("runs") or []) if isinstance(r, dict)]
+    for number, run in enumerate(runs, start=1):
+        sid = run.get("session") or ""
+        rows.append("| %s%s | %s | %s | %s | %s | — |" % (
+            name,
+            " (%d)" % number if len(runs) > 1 else "",
+            "done" if run.get("done") else "interrupted",
+            "`%s`" % sid[:8] if sid else "—",
+            when(run.get("started")),
+            when(run.get("finished")),
+        ))
+    return runs
 
-# The retrospective before the clean-up (retro.sh): one more conversation, the
-# last one, and a row like the rest.
-retro_runs = [r for r in ((s.get("retro") or {}).get("runs") or [])
-              if isinstance(r, dict)]
-for number, run in enumerate(retro_runs, start=1):
-    sid = run.get("session") or ""
-    rows.append("| retrospective%s | %s | %s | %s | %s | — |" % (
-        " (%d)" % number if len(retro_runs) > 1 else "",
-        "done" if run.get("done") else "interrupted",
-        "`%s`" % sid[:8] if sid else "—",
-        when(run.get("started")),
-        when(run.get("finished")),
-    ))
 
-# The cycle counts six steps, as the menu does (step_label in steps.sh): the
-# four of ORDER, then the epilogue and the retrospective. Past step 4 the
-# state says `done`, and what follows is read from the runs above. Unlike the
-# menu this asks GitHub nothing, so a merge it cannot see leaves the feature
-# at "4/6 done" until the retrospective.
-TOTAL = len(ORDER) + 2
+# The syncs with main (sync.sh): one each time the reviewed branch stopped
+# merging with main. The epilogues, which rewrite the status section in the
+# issue and its parents: several in a feature's life — after the preview,
+# after production. And the retrospective before the clean-up (retro.sh),
+# the last one.
+sync_runs = run_rows("sync", "sync with main")
+epilogue_runs = run_rows("epilogue", "status update")
+retro_runs = run_rows("retro", "retrospective")
+
+# The cycle counts seven steps, as the menu does (step_label and
+# cycle_number in steps.sh): the four of ORDER, then the sync with main, the
+# epilogue and the retrospective. Past step 4 the state says `done`, and what
+# follows is read from the runs above. Unlike the menu this asks GitHub
+# nothing, so a merge it cannot see leaves the feature at "4/7 done" until
+# the retrospective.
+TOTAL = len(ORDER) + 3
 if current == "done":
     if s.get("no_change") or s.get("cleaned") or (retro_runs and retro_runs[-1].get("done")):
         head = "all done"
     elif retro_runs:
         head = "step %d/%d retro" % (TOTAL, TOTAL)
+    # A sync left open does not outlive the merge: remind_prod closes it
+    # there, before the epilogue that writes this.
+    elif sync_runs and not sync_runs[-1].get("done"):
+        head = "step %d/%d sync" % (len(ORDER) + 1, TOTAL)
     else:
         head = "step %d/%d done" % (len(ORDER), TOTAL)
 else:

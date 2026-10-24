@@ -225,7 +225,8 @@ team_guard_entry() {
 # For the sessions that review the work rather than do it: the friction
 # review, the retrospective, the monthly deferred review. They read sclaude's
 # checkout and change the product, never sclaude itself (write-guard.py
-# --readonly), and the team's rules stay the maintainers'.
+# --readonly), and the team's rules stay the maintainers'. The retrospective
+# of a maintainer of the orchestrator is the exception, below.
 #
 # And they run in the product's tree now, so the step bans hold for them as
 # for any step: the merge, a deploy, a push to the product's main, a migration onto a
@@ -233,17 +234,33 @@ team_guard_entry() {
 # in the tree they did, with no hook to refuse them. The same hook, under a
 # step no policy names (friction), and the policy's flags.
 #
+# With `instruments`, sclaude's checkout is the session's to change, all but
+# what restrains the session itself: the hooks, the policy presets and the
+# policy's reader, which every running session reads on its next call, and the
+# git hooks of the checkout. Its push is refused (forbidden-commands.py
+# --no-own-push): the checkout is public, the session works from a private
+# project, and the person pushes after reading the commits. run_retro passes
+# it for a maintainer of the orchestrator, and nobody else does.
+#
 # Returns 1 when the policy cannot be read, as a step does: the caller does
 # not start the session.
 #
-#   review_guard_settings [tree]
+#   review_guard_settings [tree] [instruments]
 review_guard_settings() {
-  local tree="${1:-${REPO:-.}}" bans_json
-  local -a args=(--readonly "$INSTRUMENTS") deny=() allow=()
+  local tree="${1:-${REPO:-.}}" bans_json hook_args
+  local -a args=() deny=() allow=()
+  hook_args="$(policy_hook_args "$tree")"
+  if [[ "${2:-}" == "instruments" ]]; then
+    args+=(--readonly "$HOOKS" --readonly "$INSTRUMENTS/sclaude/policy"
+           --readonly "$LIB/policy.py" --readonly "$INSTRUMENTS/githooks")
+    hook_args+=" --no-own-push"
+  else
+    args+=(--readonly "$INSTRUMENTS")
+  fi
   product_maintainer "$tree" || args+=(--team)
   policy_rules deny allow friction "$tree" || return 1
   bans_json="$(python3 -c 'import json, shlex, sys; print(json.dumps({"type": "command", "timeout": 10, "command": "python3 %s --step friction %s" % (shlex.quote(sys.argv[1]), sys.argv[2])}))' \
-    "$HOOKS/forbidden-commands.py" "$(policy_hook_args "$tree")")"
+    "$HOOKS/forbidden-commands.py" "$hook_args")"
   printf '%s\n' --settings \
     "{\"hooks\": {\"PreToolUse\": [$(guard_entry "${args[@]}"), {\"matcher\": \"Bash\", \"hooks\": [$bans_json]}]}}"
   (( ${#deny[@]} )) && printf '%s\n' --disallowed-tools "${deny[*]}"
@@ -490,26 +507,43 @@ PYSTATUS
 
 step_title() { step_field "$1" 4; }
 
-# Where a feature is in its cycle, for the menu and `sclaude status`: "2/6
-# development". The cycle shown has six steps, the four of STEPS and the two
-# sessions after them, the epilogue and the retrospective (session_label
-# numbers them 5 and 6 as well). Only the four are steps of the state: the
-# epilogue runs after the merge, and the retrospective inside `sclaude done`,
-# so a feature past step 4 is `done` in its state, and which of the rest it is
-# on is read from what they leave.
+# Where the sessions after the steps stand in the cycle the menu shows: the
+# sync with main (sync.sh), the epilogue and the retrospective, numbered on
+# from the four of STEPS — 5, 6 and 7 of seven.
+#
+#   cycle_number sync|epilogue|retro
+#   cycle_total
+cycle_number() {
+  case "$1" in
+    sync) echo $((${#STEPS[@]} + 1)) ;;
+    epilogue) echo $((${#STEPS[@]} + 2)) ;;
+    retro) echo $((${#STEPS[@]} + 3)) ;;
+  esac
+}
+
+cycle_total() { cycle_number retro; }
+
+# Where a feature is in its cycle, for the menu and `sclaude status`: "2/7
+# development". The cycle shown has seven steps, the four of STEPS and the
+# three sessions after them (cycle_number), which session_label numbers the
+# same way. Only the four are steps of the state: the sync runs only when the
+# branch would not merge, the epilogue after the merge, and the retrospective
+# inside `sclaude done`, so a feature past step 4 is `done` in its state, and
+# which of the rest it is on is read from what they leave.
 #
 #   step_label <step> [worktree]
 #
 # A `done` feature, with its worktree:
-#   4/6 done, waiting for merge   the pull request is open
-#   4/6 done, local regression running   the suite after the step is running
-#   5/6 epilogue                  merged, and an epilogue was broken off
-#   6/6 retro                     merged; the clean-up with its retro is next
+#   4/7 done, waiting for merge   the pull request is open
+#   4/7 done, local regression running   the suite after the step is running
+#   5/7 sync                      open, and a sync with main was broken off
+#   6/7 epilogue                  merged, and an epilogue was broken off
+#   7/7 retro                     merged; the clean-up with its retro is next
 #   all done                      the retro has run, or the feature changed
 #                                 nothing and has no pull request
-# Without the worktree, or when GitHub does not answer, it is "4/6 done".
+# Without the worktree, or when GitHub does not answer, it is "4/7 done".
 step_label() {
-  local total=$((${#STEPS[@]} + 2))
+  local total; total="$(cycle_total)"
   if [[ "$1" != "done" ]]; then
     echo "$(($(step_index "$1") + 1))/$total $(step_title "$1")"
     return
@@ -529,9 +563,12 @@ step_label() {
   local running
   case "$merged" in
     OPEN)
-      # Only here: it is a python start, for every feature the menu lists.
-      running="$(regression_running "$state")"
-      if [[ -n "$running" ]]; then
+      # Only here, and once: it is a python start, for every feature the
+      # menu lists.
+      running="$(open_pr_phase "$state")"
+      if [[ "$running" == sync ]]; then
+        echo "$(cycle_number sync)/$total sync"
+      elif [[ -n "$running" ]]; then
         echo "${#STEPS[@]}/$total done, $running regression running"
       else
         echo "${#STEPS[@]}/$total done, waiting for merge"
@@ -549,21 +586,28 @@ step_label() {
   if [[ -n "$slug" && -f "$estate" ]] \
      && [[ -n "$(state_get "$estate" session 2>/dev/null || true)" ]] \
      && [[ "$(state_get "$estate" done 2>/dev/null || echo false)" != "true" ]]; then
-    echo "$((${#STEPS[@]} + 1))/$total epilogue"
+    echo "$(cycle_number epilogue)/$total epilogue"
   else
     echo "$total/$total retro"
   fi
 }
 
-# The stage whose regression is running now, or nothing: a step closes
-# before the regression after it, and "waiting for merge" would be untrue for
-# the ten minutes the suite runs. A run killed midway leaves "running" behind,
-# so one started more than three hours ago no longer counts.
-regression_running() {
+# What a feature with its pull request open is at, past "waiting for merge":
+# `sync` for a sync with main broken off (sync_broken_off), or the stage whose
+# regression is running now — a step closes before the regression after it,
+# and "waiting for merge" would be untrue for the ten minutes the suite runs.
+# A run killed midway leaves "running" behind, so one started more than three
+# hours ago no longer counts. Nothing for neither.
+open_pr_phase() {
   python3 - "$1" <<'PY' 2>/dev/null
 import datetime, json, sys
 with open(sys.argv[1]) as fh:
-    stages = json.load(fh).get("regression") or {}
+    data = json.load(fh)
+runs = [r for r in ((data.get("sync") or {}).get("runs") or []) if isinstance(r, dict)]
+if runs and not runs[-1].get("done"):
+    print("sync")
+    raise SystemExit(0)
+stages = data.get("regression") or {}
 now = datetime.datetime.now(datetime.timezone.utc)
 for stage, run in stages.items():
     if not isinstance(run, dict) or run.get("status") != "running":
@@ -576,6 +620,27 @@ for stage, run in stages.items():
         print(stage)
         break
 PY
+}
+
+# The feature's syncs with main (session_runs sync), on one line: how many,
+# whether the last is open — begun and not closed: the person left it, or it
+# ended with the branch still apart from main — and that one's session.
+#
+#   sync_runs_info <state>   → "<count>\t<open|closed>\t<session>"
+sync_runs_info() {
+  python3 - "$1" <<'PY' 2>/dev/null || printf '0\tclosed\t\n'
+import json, sys
+with open(sys.argv[1]) as fh:
+    runs = ((json.load(fh).get("sync") or {}).get("runs")) or []
+runs = [r for r in runs if isinstance(r, dict)]
+last = runs[-1] if runs else {}
+print("%d\t%s\t%s" % (len(runs), "open" if runs and not last.get("done") else "closed",
+                       last.get("session") or ""))
+PY
+}
+
+sync_broken_off() {
+  [[ "$(sync_runs_info "$1" | cut -f2)" == open ]]
 }
 
 # Whether the feature's retrospective has run to its end: its last session
@@ -641,6 +706,7 @@ step_rewind_to() {
   done
   # The person's "enough" was about the round it was said in (review_enough).
   state_set "$state" steps.review.enough null 2>/dev/null || true
+  declare -F review_said_drop >/dev/null && review_said_drop
 
   state_set "$state" step "$target"
 }
@@ -778,8 +844,8 @@ PY
 
 # Where a session stands in the feature, for its name (`claude -n`): the
 # number of the step it belongs to and which conversation of that step it is.
-# The steps are 1 to 4 in STEPS order, the epilogue and the retrospective
-# follow them (session_label).
+# The steps are 1 to 4 in STEPS order, the sync with main, the epilogue and
+# the retrospective follow them (session_label).
 #
 #   session_number <friction key>   ->   "<number> <round>"
 #
@@ -812,13 +878,15 @@ with_round() {
 
 # The name a feature's session goes by: `<number>-<kind>(<round>)/<slug>`,
 # e.g. `1-plan/12-login`, `4-review(2)/12-login`, `4-friction(2)/12-login`
-# for the friction review of that review round, `5-epilogue/…`, `6-retro/…`.
+# for the friction review of that review round, `5-sync(2)/…` for a second
+# sync with main, `6-epilogue/…`, `7-retro/…`.
 # One shape for every kind, so the round is always last: the status line
 # shows the part before the slash as it is.
 #
 #   session_label step <state> <step> <session>
 #   session_label friction <key>
 #   session_label fix <key>
+#   session_label sync <session number>
 #   session_label epilogue|retro
 #
 # Called after the step's run is opened (step_run), so the session counts.
@@ -834,22 +902,25 @@ session_label() {
     fix)
       read -r number round <<< "$(session_number "$2")"
       with_round "$number" "$round" ;;
-    epilogue) echo "$((${#STEPS[@]} + 1))-epilogue" ;;
-    retro) echo "$((${#STEPS[@]} + 2))-retro" ;;
+    sync) with_round "$(cycle_number sync)-sync" "${2:-1}" ;;
+    epilogue) echo "$(cycle_number epilogue)-epilogue" ;;
+    retro) echo "$(cycle_number retro)-retro" ;;
   esac
 }
 
 # The line that tells a session started or finished: in the feature's topic
 # (ask_feed) for every session, and as the headline sclaude prints when it
 # closes one (session_closed). One shape for every kind, numbered as the
-# menu numbers the cycle — six, the epilogue and the retrospective last:
+# menu numbers the cycle — seven, the sync with main, the epilogue and the
+# retrospective last:
 #
-#   Step 4/6 review: fix session 2 started  a session of a step, which goes on
-#   Step 4/6 review: fix session 2 ended    left by a person, not closed on its report
-#   Step 4/6 done: review                   the step itself, closed
-#   Friction review finished: after step 2/6 development, session 3
+#   Step 4/7 review: fix session 2 started  a session of a step, which goes on
+#   Step 4/7 review: fix session 2 ended    left by a person, not closed on its report
+#   Step 4/7 done: review                   the step itself, closed
+#   Friction review finished: after step 2/7 development, session 3
 #   Regression fix started: local, on e2e
-#   Step 6/6 finished: retrospective
+#   Step 5/7 started: sync with main, session 2
+#   Step 7/7 finished: retrospective
 #
 #   phase_line <verb> step <step> [<session number> [<round>]]
 #   phase_line <verb> friction <key>          the key run_friction takes
@@ -857,6 +928,7 @@ session_label() {
 #   phase_line <verb> local-review <pr> <round> [verify]
 #   phase_line <verb> regression <stage>
 #   phase_line <verb> deploy <target>
+#   phase_line <verb> sync [<session number>]
 #   phase_line <verb> epilogue|retro|deferred
 phase_line() {
   printf '%s %s\n' "$(phase_icon "$2" "${3:-}" "$1")" "$(phase_words "$@")"
@@ -880,13 +952,14 @@ phase_icon() {
     local-review) printf '🔍' ;;
     regression) printf '🧪' ;;
     deploy) printf '🚀' ;;
+    sync) printf '🔀' ;;
     epilogue) printf '🏁' ;;
     retro) printf '🔁' ;;
   esac
 }
 
 phase_words() {
-  local verb="$1" kind="$2" total=$((${#STEPS[@]} + 2))
+  local verb="$1" kind="$2" total; total="$(cycle_total)"
   case "$kind" in
     step)
       if [[ -n "${4:-}" ]]; then
@@ -899,16 +972,18 @@ phase_words() {
     local-review) echo "Local review $verb: PR #$3, round $4${5:+, fixes only}" ;;
     regression) echo "Regression $verb: $3" ;;
     deploy) echo "Deploy $verb: $3" ;;
-    epilogue) echo "Step $((total - 1))/$total $verb: epilogue" ;;
+    sync) echo "Step $(cycle_number sync)/$total $verb: sync with main${3:+, session $3}" ;;
+    epilogue) echo "Step $(cycle_number epilogue)/$total $verb: epilogue" ;;
     retro) echo "Step $total/$total $verb: retrospective" ;;
     deferred) echo "Deferred friction review $verb" ;;
   esac
 }
 
 # What a friction review is about, from the key run_friction takes:
-# "after step 4/6 review, fix session 3", "after the preview regression fix 1".
+# "after step 4/7 review, fix session 3", "after the preview regression fix 1".
 friction_of() {
-  local total=$((${#STEPS[@]} + 2)) step="$1" n=""
+  local total step="$1" n=""
+  total="$(cycle_total)"
   if [[ "$1" =~ ^fix-([a-z]+)-([0-9]+)$ ]]; then
     echo "after the ${BASH_REMATCH[1]} regression fix ${BASH_REMATCH[2]}"
     return
@@ -925,19 +1000,20 @@ friction_of() {
 # The same names without a verb, for the banner a session opens with in the
 # terminal: what the topic calls it, the terminal calls it too.
 #
-#   Step 2/6 development
-#   Friction review after step 4/6 review, fix session 3
+#   Step 2/7 development
+#   Friction review after step 4/7 review, fix session 3
 #   Regression fix: local, on e2e
 #
-#   phase_title step|friction|fix|regression|epilogue|retro|deferred <args>  as phase_line
+#   phase_title step|friction|fix|regression|sync|epilogue|retro|deferred <args>  as phase_line
 phase_title() {
-  local total=$((${#STEPS[@]} + 2))
+  local total; total="$(cycle_total)"
   case "$1" in
     step) echo "Step $(($(step_index "$2") + 1))/$total $(step_title "$2")" ;;
     friction) echo "Friction review $(friction_of "$2")" ;;
     fix) echo "Regression fix: $2${3:+, on $3}" ;;
     regression) echo "Regression: $2" ;;
-    epilogue) echo "Step $((total - 1))/$total epilogue" ;;
+    sync) echo "Step $(cycle_number sync)/$total sync with main" ;;
+    epilogue) echo "Step $(cycle_number epilogue)/$total epilogue" ;;
     retro) echo "Step $total/$total retrospective" ;;
     deferred) echo "Deferred friction review" ;;
   esac
@@ -1026,6 +1102,7 @@ step_close_merged() {
     fi
   done
   state_set "$state" steps.review.enough null 2>/dev/null || true
+  declare -F review_said_drop >/dev/null && review_said_drop
   state_set "$state" step "done"
   state_set "$state" reopened null 2>/dev/null || true
   state_set "$state" reopened_pr null 2>/dev/null || true

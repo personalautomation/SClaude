@@ -54,11 +54,12 @@ with open(os.path.join(PRODUCT, ".sclaude", "config.json"), "w") as _fh:
 
 
 def run(hook, command, step=None, tool="Bash", tool_input=None, env=None,
-        cwd=None, root=None):
+        cwd=None, root=None, extra=()):
     """The hook's verdict in one word."""
     argv = [sys.executable, os.path.join(HOOKS, hook)]
     if step:
         argv += ["--step", step]
+    argv += list(extra)
     if hook == "forbidden-commands.py":
         argv += ["--root", root or PRODUCT]
     payload = {"tool_name": tool,
@@ -663,6 +664,16 @@ def main():
                       root=root, env=full)
             if got != want:
                 failures.append(("own", command, want, got))
+        # A retrospective commits to the checkout and never pushes it, to any
+        # branch: the checkout is public, the retrospective's material is not.
+        for command, want in (("git -C " + own + " push origin main", DENY),
+                              ("cd " + own + " && git push origin dev/x", DENY),
+                              ("git -C " + own + " commit -m x", ALLOW),
+                              ("git -C " + product_tree + " push origin feat/x", ALLOW)):
+            got = run("forbidden-commands.py", command, step="friction", cwd=product_tree,
+                      env={"CLAUDE_PROJECT_DIR": product_tree}, extra=["--no-own-push"])
+            if got != want:
+                failures.append(("retro-own", command, want, got))
     finally:
         shutil.rmtree(product_tree, ignore_errors=True)
 

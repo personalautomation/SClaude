@@ -309,17 +309,19 @@ local_review_run() {
 # takes that back. `x` stops the pass now — what it had found is not posted,
 # since a finding exists only in the answer the pass ends with — and so wants
 # pressing twice. Either way what is open goes to the review session. Nothing
-# here goes to Telegram: it is for whoever sits at this terminal, and a
-# question every round would be noise on the phone. Without a terminal it is
-# a plain wait. Everything goes to stderr: local_review answers on stdout.
+# here asks Telegram: a question every round would be noise on the phone —
+# the topic's message that the pass started carries the same two as buttons
+# instead (review_said_take), and a press is taken here as a key is. Without
+# a terminal it is a wait for those. Everything goes to stderr: local_review answers on stdout.
 # A check of the fixes (verify) takes no keys: the search is over already.
 # Returns 1 when the person stopped the pass.
 local_review_wait() {
-  local wt="$1" pid="$2" pass="$3" began="$4" verify="${5:-}" round="${6:-1}" armed=0 armed_at=0 said hint t tty="" which
+  local wt="$1" pid="$2" pass="$3" began="$4" verify="${5:-}" round="${6:-1}" armed=0 armed_at=0 said hint t tty="" which said_file
   # The round counts heads reviewed; a pass is another read of this head,
   # after one that found the cap, so the first pass goes unsaid.
   which="round $round"; [[ "$pass" -gt 1 ]] && which+=", pass $pass"
   said="$(review_enough "$wt")"
+  said_file="$(review_said_file)" || said_file=""
   # No echo while it waits: a key pressed between two reads would otherwise
   # land on the status line. No cursor either: blinking after the last key in
   # the hint, it read as that option being picked, or as a field to type in.
@@ -348,6 +350,15 @@ local_review_wait() {
         "$DIM" "$OFF" "$which" $((t / 60)) $((t % 60)) "$hint" >&2
     fi
     poll_pause 1
+    # A press in the topic: as the keys, with no second press to wait for —
+    # the phone asked for it already.
+    if [[ -z "$verify" && -n "$said_file" && -f "$said_file" ]]; then
+      case "$(review_said_take "$wt" wait)" in
+        now)  POLL_KEY=x; armed=1 ;;
+        pass) POLL_KEY=""; said=pass ;;
+        back) POLL_KEY=""; said="" ;;
+      esac
+    fi
     [[ -n "$POLL_KEY" && -z "$verify" ]] || continue
     case "$POLL_KEY" in
       x|X)
@@ -384,6 +395,7 @@ local_review_wait() {
 #
 review_enough() {
   local said
+  review_said_take "$1" >/dev/null
   said="$(state_get "$1/.sclaude/local/feature/state.json" steps.review.enough 2>/dev/null || true)"
   [[ "$said" == pass || "$said" == now ]] && echo "$said"
   return 0
@@ -391,6 +403,54 @@ review_enough() {
 
 review_enough_set() {
   state_set "$1/.sclaude/local/feature/state.json" steps.review.enough "${2:-null}" 2>/dev/null || true
+}
+
+# The same word said from the phone: the buttons the bot puts on the topic's
+# message that a review pass or a fix session started (keepawake/review_keys.py)
+# write it into the feature's channel, and it is taken from there here.
+#
+#   pass  the last pass, or round, for new findings — the terminal's [s];
+#   back  taken back — [s] again;
+#   now   stop the running pass — [x x]. Taken outside a pass's wait (a press
+#         that came as the pass ended) it is a pass: there is nothing to stop.
+#
+#   review_said_take <wt> [wait]   → the word taken, "" for none
+#
+# With `wait`, the caller is a pass's wait and does the stopping: the word is
+# kept as it was said.
+REVIEW_SAID_FILE=review-said
+
+review_said_file() {
+  # As ask_channel: a plain slug, and not a feature whose clean-up has ended.
+  [[ -n "${ASK_DIR:-}" && "${ASK_SLUG:-}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ \
+     && "$ASK_SLUG" != "${ASK_ENDED:-}" ]] || return 1
+  echo "$ASK_DIR/ask/$ASK_SLUG/$REVIEW_SAID_FILE"
+}
+
+# A press nobody took goes with the "enough" it would have set: wherever that
+# is cleared — step 4 closed, the cycle sent back — a word left in the file
+# would be taken by the next review, about a round it was not said in.
+review_said_drop() {
+  local file
+  file="$(review_said_file)" && rm -f "$file"
+  return 0
+}
+
+review_said_take() {
+  local file word
+  file="$(review_said_file)" && [[ -f "$file" ]] || return 0
+  # Renamed before it is read: a press that lands meanwhile writes a file
+  # of its own, taken next time, rather than one removed unread.
+  mv -f "$file" "$file.$$" 2>/dev/null || return 0
+  word="$(head -c 16 "$file.$$" 2>/dev/null)"
+  rm -f "$file.$$"
+  case "$word" in
+    pass) review_enough_set "$1" pass ;;
+    now)  if [[ "${2:-}" == wait ]]; then review_enough_set "$1" now; else review_enough_set "$1" pass; word=pass; fi ;;
+    back) review_enough_set "$1" "" ;;
+    *)    return 0 ;;
+  esac
+  echo "$word"
 }
 
 # How many review threads are open on the pull request, read from it: no

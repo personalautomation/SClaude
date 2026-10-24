@@ -146,6 +146,7 @@ pane_icon() {
     [0-9]*-code[/\(\ ]*)    phase_icon step code ;;
     [0-9]*-pr[/\(\ ]*)      phase_icon step pr ;;
     [0-9]*-review[/\(\ ]*)  phase_icon step review ;;
+    [0-9]*-sync[/\(\ ]*)    phase_icon sync ;;
     [0-9]*-epilogue[/\(\ ]*) phase_icon epilogue ;;
     [0-9]*-retro[/\(\ ]*)   phase_icon retro ;;
   esac

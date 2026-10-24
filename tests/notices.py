@@ -191,8 +191,8 @@ notices.take_feed(channel)
 # A line that opens with its kind's icon (phase_line) leads with it; the
 # laptop's goes on the rest, a box-drawing rule included.
 check("own-icon-leads",
-      notices.feed_message([("say", "1", "🛠 Step 4/6 review: fix session 1 resumed")])[0],
-      "🛠 Step 4/6 review: fix session 1 resumed")
+      notices.feed_message([("say", "1", "🛠 Step 4/7 review: fix session 1 resumed")])[0],
+      "🛠 Step 4/7 review: fix session 1 resumed")
 check("own-icon-loud", notices.feed_message([("alarm", "1", "🚀 Deploy failed: preview")])[0],
       "⚠️ 🚀 Deploy failed: preview")
 check("rule-is-no-icon", notices.feed_message([("say", "1", "── 12/12 green")])[0],
@@ -200,26 +200,26 @@ check("rule-is-no-icon", notices.feed_message([("say", "1", "── 12/12 green"
 # One step's lines are not mixed with the next one's: a step done ends the
 # message, and a start begins a new one once the message holds another
 # phase's line; a warning printed while the next step is set up goes with it.
-_batch = [("say", "1", "📝 Step 1/6 planning: session 1 finished"), ("say", "1", "Plan approved"),
-          ("say", "1", "✅ Step 1/6 done: planning"), ("warn", "1", "database: migrations did not apply"),
-          ("say", "1", "💻 Step 2/6 development: session 1 started")]
+_batch = [("say", "1", "📝 Step 1/7 planning: session 1 finished"), ("say", "1", "Plan approved"),
+          ("say", "1", "✅ Step 1/7 done: planning"), ("warn", "1", "database: migrations did not apply"),
+          ("say", "1", "💻 Step 2/7 development: session 1 started")]
 check("one-step-a-message",
       [notices.feed_message(g)[0] for g in notices.feed_groups(_batch)],
-      ["📝 Step 1/6 planning: session 1 finished\nPlan approved\n✅ Step 1/6 done: planning",
-       "🖥 ⚠️ database: migrations did not apply\n💻 Step 2/6 development: session 1 started"])
+      ["📝 Step 1/7 planning: session 1 finished\nPlan approved\n✅ Step 1/7 done: planning",
+       "🖥 ⚠️ database: migrations did not apply\n💻 Step 2/7 development: session 1 started"])
 # The step's ✅ comes after its session's friction review, and is not its end.
 check("done-after-friction-goes-alone",
       [notices.feed_message(g)[0] for g in notices.feed_groups([
-          ("say", "1", "💻 Step 2/6 development: session 1 finished"),
-          ("say", "1", "🧱 Friction review started: after step 2/6 development, session 1 · 2 entries"),
-          ("say", "1", "🧱 Friction review finished: after step 2/6 development, session 1"),
-          ("say", "1", "✅ Step 2/6 done: development")])],
-      ["💻 Step 2/6 development: session 1 finished",
-       "🧱 Friction review started: after step 2/6 development, session 1 · 2 entries\n"
-       "🧱 Friction review finished: after step 2/6 development, session 1",
-       "✅ Step 2/6 done: development"])
+          ("say", "1", "💻 Step 2/7 development: session 1 finished"),
+          ("say", "1", "🧱 Friction review started: after step 2/7 development, session 1 · 2 entries"),
+          ("say", "1", "🧱 Friction review finished: after step 2/7 development, session 1"),
+          ("say", "1", "✅ Step 2/7 done: development")])],
+      ["💻 Step 2/7 development: session 1 finished",
+       "🧱 Friction review started: after step 2/7 development, session 1 · 2 entries\n"
+       "🧱 Friction review finished: after step 2/7 development, session 1",
+       "✅ Step 2/7 done: development"])
 check("a-start-alone-is-not-cut",
-      len(notices.feed_groups([("warn", "1", "x"), ("say", "1", "💻 Step 2/6 development: session 1 started")])), 1)
+      len(notices.feed_groups([("warn", "1", "x"), ("say", "1", "💻 Step 2/7 development: session 1 started")])), 1)
 
 long_text, _ = notices.feed_message([("say", "1", "&" * 1000)] * 13)
 check("a long feed fits a message", len(long_text) <= notices.NOTE_MAX, True)
@@ -238,6 +238,144 @@ feed("info", "removed the worktree")
 check("an ended feature's channel gets no feed",
       os.path.exists(os.path.join(notes, notices.FEED_FILE)), False)
 os.remove(os.path.join(channel, "ended"))
+
+# --- the review's keys: buttons on the message a pass or fix session started ---------
+from keepawake import review_keys  # noqa: E402
+
+
+def phase(*args):
+    """A phase line as sclaude prints it (phase_line in steps.sh)."""
+    script = 'source "%s/steps.sh"; source "%s/regression.sh"; phase_line "$@"' % (LIB, LIB)
+    return subprocess.run(["bash", "-c", script, "_"] + list(args), capture_output=True,
+                          text=True, timeout=20).stdout.strip()
+
+
+class KeyBot(FakeBot):
+    def __init__(self):
+        FakeBot.__init__(self)
+        self.kb, self.marks = [], []
+
+    def send(self, text, keyboard=None, quiet=False, thread=None):
+        self.kb.append(keyboard)
+        return FakeBot.send(self, text, keyboard, quiet, thread)
+
+    def unbutton(self, message_id, keyboard=None):
+        self.marks.append((message_id, keyboard and [b["callback_data"] for row in keyboard for b in row]))
+
+
+def data_of(keyboard):
+    return keyboard and [b["callback_data"] for row in keyboard for b in row]
+
+
+me = str(os.getpid())
+for line in (phase("started", "local-review", "7", "2"), phase("finished", "local-review", "7", "2"),
+             phase("started", "local-review", "7", "3", "verify"),
+             phase("started", "step", "review", "2"), phase("resumed", "step", "review", "2", "3"),
+             phase("started", "step", "code", "1")):
+    check("a phase line: %s" % line, bool(notices.OWN_ICON.match(line)), True)
+check("a searching pass takes the keys",
+      review_keys.kind_of([("say", me, phase("started", "local-review", "7", "2"))]), ("pass", me))
+check("a check of the fixes takes none",
+      review_keys.kind_of([("say", me, phase("started", "local-review", "7", "3", "verify"))]), ("", ""))
+check("a fix session takes the last-round key",
+      review_keys.kind_of([("say", me, phase("started", "step", "review", "2"))]), ("session", me))
+check("a resumed one too",
+      review_keys.kind_of([("say", me, phase("resumed", "step", "review", "2", "3"))])[0], "session")
+check("another step takes none", review_keys.kind_of([("say", me, phase("started", "step", "code", "1"))])[0], "")
+check("started and finished in one message: nothing left to press",
+      review_keys.kind_of([("say", me, phase("started", "local-review", "7", "2")),
+                           ("say", me, phase("finished", "local-review", "7", "2") + " · 0 open")])[0], "")
+
+kbot = KeyBot()
+feed("say", phase("started", "local-review", "7", "2"))
+notices.check(kbot, [("shop", "feat-a", channel)], topic, log, keys=review_keys)
+check("the start goes with the pass's keys", data_of(kbot.kb[-1]), ["rv:pass", "rv:stop"])
+first = review_keys.load(channel)
+check("and is remembered as the message that has them", first.get("message_id"), 100 + len(kbot.sent))
+
+feed("warn", "  ✗ something printed during the pass")
+notices.check(kbot, [("shop", "feat-a", channel)], topic, log, keys=review_keys)
+check("a line that is no phase leaves them", (kbot.marks, review_keys.load(channel) == first), ([], True))
+
+alive = lambda pid: True  # noqa: E731
+press = lambda data: review_keys.press(kbot, [channel], first["message_id"], data, alive)  # noqa: E731
+check("an unknown message is told it is over",
+      (review_keys.press(kbot, [channel], 9999, "rv:pass", alive), kbot.marks[-1]), (telegramd.t("rv.gone"), (9999, None)))
+toast = press("rv:pass")
+said_path = os.path.join(channel, review_keys.SAID_FILE)
+check("[s] from the phone: the word for sclaude", open(said_path).read(), "pass")
+check("its button becomes the one taking it back", kbot.marks[-1], (first["message_id"], ["rv:back", "rv:stop"]))
+check("and the toast says so", toast, telegramd.t("rv.pass.ok"))
+press("rv:stop")
+check("stop asks once more first", kbot.marks[-1], (first["message_id"], ["rv:now", "rv:carry"]))
+check("and says nothing to sclaude yet", open(said_path).read(), "pass")
+press("rv:carry")
+check("carry on: back as it was", kbot.marks[-1], (first["message_id"], ["rv:back", "rv:stop"]))
+
+# sclaude takes the word as review_enough does, outside a pass's wait.
+wt = os.path.join(box, "wt")
+os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"))
+with open(os.path.join(wt, ".sclaude", "local", "feature", "state.json"), "w") as fh:
+    fh.write("{}\n")
+
+
+def take(*extra):
+    script = ('source "%s/io.sh"; source "%s/state.sh"; source "%s/local_review.sh"\n'
+              'LIB="%s"; ASK_DIR="%s"; ASK_SLUG=feat-a\nreview_said_take "$@"; echo "|$(review_enough "$1")"'
+              % (LIB, LIB, LIB, LIB, os.path.join(box, "sclaude")))
+    return subprocess.run(["bash", "-c", script, "_", wt] + list(extra), capture_output=True,
+                          text=True, timeout=20).stdout.strip()
+
+
+check("sclaude takes the phone's [s]", take(), "pass\n|pass")
+check("once", (take(), os.path.exists(said_path)), ("|pass", False))
+press("rv:back")
+check("taken back from the phone", take(), "back\n|")
+review_keys.say(channel, "now")
+check("a stop with no pass running is the last pass", take(), "pass\n|pass")
+review_keys.say(channel, "now")
+check("in a pass's wait it is kept a stop", take("wait"), "now\n|now")
+review_keys.say(channel, "junk")
+check("a word it does not know is dropped", (take(), os.path.exists(said_path)), ("|now", False))
+
+
+# A press nobody took goes when step 4 closes, with the enough it would set:
+# the next review must not start on a word said about this one.
+def drop(ended=""):
+    script = ('source "%s/io.sh"; source "%s/state.sh"; source "%s/local_review.sh"\n'
+              'ASK_DIR="%s"; ASK_SLUG=feat-a; ASK_ENDED="%s"\nreview_said_drop'
+              % (LIB, LIB, LIB, os.path.join(box, "sclaude"), ended))
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=20).returncode
+
+
+review_keys.say(channel, "pass")
+check("a clean-up that ended leaves the channel alone", (drop("feat-a"), os.path.exists(said_path)), (0, True))
+check("the press goes with step 4", (drop(), os.path.exists(said_path)), (0, False))
+
+press("rv:now")
+check("a stop takes the buttons off", (kbot.marks[-1], review_keys.load(channel)), ((first["message_id"], None), {}))
+
+feed("say", phase("started", "step", "review", "2"))
+notices.check(kbot, [("shop", "feat-a", channel)], topic, log, keys=review_keys)
+check("a fix session's start has the last-round key", data_of(kbot.kb[-1]), ["rv:pass"])
+session = review_keys.load(channel)
+check("whose press says so", review_keys.press(kbot, [channel], session["message_id"], "rv:pass", alive),
+      telegramd.t("rv.round.ok"))
+check("a session has no stop", review_keys.press(kbot, [channel], session["message_id"], "rv:now", alive), "")
+os.remove(said_path)
+marks = len(kbot.marks)
+feed("say", phase("finished", "step", "review", "2"))
+notices.check(kbot, [("shop", "feat-a", channel)], topic, log, keys=review_keys)
+check("its end takes the buttons off", kbot.marks[marks:], [(session["message_id"], None)])
+check("and the end itself has none", (kbot.kb[-1], review_keys.load(channel)), (None, {}))
+
+feed("say", phase("started", "local-review", "7", "3"))
+notices.check(kbot, [("shop", "feat-a", channel)], topic, log, keys=review_keys)
+gone = review_keys.load(channel)
+check("sclaude gone: the press says so and the buttons go",
+      (review_keys.press(kbot, [channel], gone["message_id"], "rv:pass", lambda pid: False),
+       kbot.marks[-1], os.path.exists(said_path)),
+      (telegramd.t("rv.gone"), (gone["message_id"], None), False))
 
 # A feature's channel is removed whole when it ends, its notes with it.
 notice("Review — PR #7, session 4")

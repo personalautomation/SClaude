@@ -73,7 +73,7 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # kind, and the message then opens with that icon rather than the laptop's.
 # These and no others — a "✓ passed" or a "⚠ careful" of sclaude's own is
 # still the laptop's.
-PHASE_ICONS = ("📝", "💻", "📤", "🛠", "▶️", "✅", "🧱", "🔧", "🔍", "🧪", "🚀", "🏁", "🔁")
+PHASE_ICONS = ("📝", "💻", "📤", "🛠", "▶️", "✅", "🧱", "🔧", "🔍", "🧪", "🚀", "🔀", "🏁", "🔁")
 OWN_ICON = re.compile("^(?:%s) " % "|".join(re.escape(i) for i in PHASE_ICONS))
 # The first five are the steps' own sessions, whose step's ✅ belongs with them.
 STEP_ICONS = PHASE_ICONS[:5]
@@ -122,7 +122,7 @@ def put_back(channel, lines):
 
 
 # A step's lines and the next one's are not one message: a line closing a
-# step ("✅ Step 1/6 done") ends the message, and one opening a session or a
+# step ("✅ Step 1/7 done") ends the message, and one opening a session or a
 # run ("... started", "... resumed") begins a new one once the message holds
 # another's phase line already. What stands between — a warning printed while
 # the next step is set up — goes with the start it leads to.
@@ -190,14 +190,17 @@ def feed_message(lines, shown=""):
     return head + "\n".join(body), any(level in FEED_LOUD for level, _ in kept)
 
 
-def check(bot, channels, topic, log, now=None, at_terminal=None, shown=None, lost=None):
+def check(bot, channels, topic, log, now=None, at_terminal=None, shown=None, lost=None,
+          keys=None):
     """Send every waiting note. channels: [(name, slug, directory)] of the
     features; topic(name, slug): the feature's topic, 0 for the main chat
     (no topics there), None for none yet — the notes then wait.
     at_terminal(pid): whether the person sits at the terminal that printed —
     then nothing sounds; shown(channel): the text an open question carries;
     lost(name, slug): called when a send failed — a topic deleted by hand is
-    made again there, and what waits goes to the new one."""
+    made again there, and what waits goes to the new one. keys: the review's
+    buttons (review_keys.py) — a message that a review pass or fix session
+    started carries them, and the next phase line takes them off."""
     now = time.time() if now is None else now
     for name, slug, channel in channels:
         # Only to the feature's topic. The feed mirrors the terminal, and in
@@ -217,7 +220,15 @@ def check(bot, channels, topic, log, now=None, at_terminal=None, shown=None, los
             pids = {line[1] for line in group}
             if loud and at_terminal and any(at_terminal(pid) for pid in pids):
                 loud = False
-            if not bot.send(text, quiet=not loud, thread=thread):
+            # A phase line means what had the buttons is over, whatever this
+            # message is about.
+            if keys and keys.has_phase(group):
+                keys.drop(bot, channel)
+            sent = bot.send(text, keyboard=keys.buttons_for(group) if keys else None,
+                            quiet=not loud, thread=thread)
+            if sent and keys:
+                keys.sent(channel, group, sent)
+            if not sent:
                 # The network: back to the file, this group and the rest,
                 # for the next turn.
                 put_back(channel, [line for g in groups[i:] for line in g])

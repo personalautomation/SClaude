@@ -45,7 +45,7 @@ the product, and the pull before `vercel --prod` carries it across with
 `--autostash`.
 
 Every section is optional and **nothing is defaulted**. A repository with no
-config still gets the cycle — six steps, a worktree, an issue, a pull request —
+config still gets the cycle — seven steps, a worktree, an issue, a pull request —
 and loses only what the config would have described: there is no regression to
 gate on, no manuals in front of step 1, no production to ship to, and each of
 those says so where it would have acted. A default would be one product's answer
@@ -566,6 +566,75 @@ Prod is `vercel --prod` from the main repository, and if the branch added
 migrations, then a `db:promote` first with the whole procedure from the project's
 README. Whether a promote is needed the script determines itself — by whether the
 branch touches `supabase/migrations`.
+
+## Step 5: the sync with main
+
+A reviewed branch whose pull request conflicted with main used to go on to the
+preview, to QA and to the merge as if nothing were wrong, and then wait: the
+merge offer said "it conflicts with main — resolve them and push", and the
+merge wait asked GitHub every half minute, for hours, about a merge nobody
+could make. The conflict is known long before that, and for nothing:
+`git merge-tree --write-tree` merges in memory and names the files, with no
+session and no GitHub call (`merge_conflicts` in `sclaude/lib/sync.sh`).
+
+So `remind_prod` asks it at three points:
+
+- **before the preview** — QA should look at the code that will merge, not at
+  the branch alone;
+- **after QA's yes, before the pull request is handed over** — main moves
+  while QA works, and a hand-off taken back a moment later would flip the
+  board, the pull request and its summary for nothing;
+- **while the merge is waited for**, every `SYNC_POLL` seconds (two minutes),
+  since the wait is a fetch — of an open pull request only: a merged one has
+  its branch deleted on GitHub, and the stale ref left here could conflict
+  with the main its merge moved.
+
+The branch asked about is origin's tip, which is what the pull request
+merges, and also the tree's own commits when origin lacks them: whoever
+merges main here merges those too. A merge under way in the tree — a sync
+broken off mid-way, or one by hand — is never clean, whatever origin's tip
+says: its files may hold conflict markers, and the preview would deploy them.
+Its unmerged files are the conflict, and the session finishes it.
+
+A conflict opens the sync session, `5-sync/<slug>` (`5-sync(2)` for a second
+one): the review step's model and rules, the prompt `sclaude/prompts/sync.md`.
+It merges `origin/main` into the branch — a merge, never a rebase: the branch is
+under review, and a force push is refused anyway — resolves each conflict
+keeping both sides' intent, checks the result as the project's `CLAUDE.md`
+says, and pushes. sclaude then checks for itself that no merge is under way,
+the tree is clean, the branch merges cleanly with main and is pushed. Only then
+does the run go on: from before the preview it simply continues, and the
+changed tree is deployed; from after QA, or from the wait, it starts over, so
+the preview, its regression and QA (`qa_retest`) see the new code. A session
+that ends otherwise stops the run, and the feature shows `5/7 sync` in the menu
+until `sclaude <feature>` finishes it; its conversation is resumed then.
+
+A pull request already handed over for the merge goes back to a draft
+whenever origin's branch moved during a sync (`sync_gate`), even one that
+stopped short after its push: origin then has code no preview and no QA has
+seen. The hand-off is taken back the same way `qa_retest` takes it back
+(`pr_unhandoff` in `deploy.sh`), from the run, from the menu's sync and from a
+step's start.
+
+One kind of conflict needs no session. The deferred logs
+(`.sclaude/*/deferred/*.tsv`) are rows that both sides append to — a feature's
+friction reviews on its branch, `deferred_to_main` on main — and their merge
+is the rows of both. When they are the only files in conflict, sclaude merges
+main in itself, with main's rows first and then the rows the branch added
+since the two parted (against the merge base) that main does not hold as many
+times, and pushes (`sync_deferred`). Against the base, not the branch's whole
+copy: rows the branch took from main at an earlier merge and main has since
+removed — the monthly review removes what it decided — would otherwise come
+back. The question that offers such a merge says so, rather than offering a
+session.
+
+The menu's own "Sync with main" (`cmd_sync`), there at every step, uses the
+same check: its line says how many files would conflict, and a yes to a merge
+that would conflict goes to the sync rather than leaving the tree half-merged
+for the person to untangle — from a phone they could not. The same goes for
+the merge with main a step offers at its start (`sync_branch`). Before step 3 the
+branch may not be on origin yet; the session then leaves it local, and the
+prompt says nothing of a pull request or of QA.
 
 ## Production rollback
 

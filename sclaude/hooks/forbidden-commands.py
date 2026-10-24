@@ -763,6 +763,10 @@ OWN_CHECKOUT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__f
                                              "..", ".."))
 
 
+OWN_PUSH_REASON = ("sclaude's checkout is public and this session works from a private "
+                   "project: commit there, and the person pushes after reading the commits")
+
+
 def toplevel(where):
     """The top of the work tree a directory is in, or None."""
     try:
@@ -868,6 +872,12 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
     # repository it is as harmless as the same push with the remote named.
     if scratch_push(command, parts, where, remote[0] if remote else "origin", redirected):
         return None
+    # A retrospective may commit to sclaude's own checkout, never push it
+    # (--no-own-push): it works from a private project's material, and the
+    # checkout is public and reaches every machine from main. The person reads
+    # the commits and pushes them. Any branch: every one of them is public.
+    if NO_OWN_PUSH and where and toplevel(where) == OWN_CHECKOUT:
+        return OWN_PUSH_REASON
     # The same for sclaude's own checkout, which goes to main without a PR.
     if own_push(where, remote[0] if remote else "origin", redirected):
         return None
@@ -1147,6 +1157,7 @@ def flag(argv, name):
 
 argv = sys.argv[1:]
 step = flag(argv, "--step")
+NO_OWN_PUSH = "--no-own-push" in argv
 # The product and the person whose policy this session works under. steps.sh
 # passes both; without a root the hook works out the repository it runs in.
 root = flag(argv, "--root")

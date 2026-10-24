@@ -324,20 +324,20 @@ session_watch_stop
 
     # A step's session, not the step: the step goes on after it.
     check("closed-by-sclaude", closed(True, "", "", "step", "code", "2"),
-          ["FEED 💻 Step 2/6 development: session 2 finished",
-           "💻 Step 2/6 development: session 2 finished — sclaude closed it.", "REPORT", "rc=0"])
+          ["FEED 💻 Step 2/7 development: session 2 finished",
+           "💻 Step 2/7 development: session 2 finished — sclaude closed it.", "REPORT", "rc=0"])
     check("left-by-a-person", closed(False, "", "", "step", "code", "1"),
-          ["FEED 💻 Step 2/6 development: session 1 ended", "rc=1"])
+          ["FEED 💻 Step 2/7 development: session 1 ended", "rc=1"])
     # A fix session's tally goes with it however it ended; the note only
     # when sclaude closed it.
     check("tally-when-left", closed(False, "nothing to act on", "2 commits · findings: 0 new",
                                     "step", "review", "1"),
-          ["FEED 🛠 Step 4/6 review: fix session 1 ended · 2 commits · findings: 0 new", "rc=1"])
+          ["FEED 🛠 Step 4/7 review: fix session 1 ended · 2 commits · findings: 0 new", "rc=1"])
     check("tally-when-closed", closed(True, "", "2 commits", "step", "review", "1")[0],
-          "FEED 🛠 Step 4/6 review: fix session 1 finished · 2 commits")
+          "FEED 🛠 Step 4/7 review: fix session 1 finished · 2 commits")
     check("closed-with-its-note", closed(True, "nothing to act on", "", "retro")[:2],
-          ["FEED 🔁 Step 6/6 finished: retrospective · nothing to act on",
-           "🔁 Step 6/6 finished: retrospective · nothing to act on — sclaude closed it."])
+          ["FEED 🔁 Step 7/7 finished: retrospective · nothing to act on",
+           "🔁 Step 7/7 finished: retrospective · nothing to act on — sclaude closed it."])
     # Every kind of session tells the topic it started, by the same line.
     for path, kind in (("run.sh", "started step"), ("run.sh", "resumed step"),
                        ("run.sh", "done step"), ("run.sh", "started friction"),

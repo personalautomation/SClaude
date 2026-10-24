@@ -1316,7 +1316,10 @@ after_step() {
   state_set "$state" "steps.$step.finished" "$(date -Iseconds)"
   # The person's "enough" was about this round of step 4: a review the
   # feature is sent back to starts without it.
-  [[ "$step" == "review" ]] && state_set "$state" steps.review.enough null
+  if [[ "$step" == "review" ]]; then
+    state_set "$state" steps.review.enough null
+    review_said_drop
+  fi
   # The step closed for real, so it is no longer a reopened one. The mark
   # describes a pass rather than the feature: left behind, it would keep a
   # merged PR from ever closing this step again.

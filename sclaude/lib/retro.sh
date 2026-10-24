@@ -33,6 +33,7 @@
 
 run_retro() {
   local wt="$1" slug="$2" pr="${3:-}" issue="${4:-}"
+  RETRO_INSTRUMENTS_CHANGED=""
   [[ "${SCLAUDE_RETRO:-on}" != "off" ]] || return 0
   # A conversation needs somebody at the terminal; the epilogue run from a
   # timer or a phone has nobody to hold it open for.
@@ -75,8 +76,11 @@ PY
 
   # The pull request's number, or nothing: a feature with no change of its own
   # (no_change.sh) has none, and render_prompt fills an empty <pr> with a dash.
-  local pr_number="$pr" no_change=""
+  local pr_number="$pr" no_change="" writable="" readonly=1
   [[ "$pr_number" == "null" ]] && pr_number=""
+  # sclaude's checkout is the conversation's to change too, for a maintainer
+  # of the orchestrator: decided here once, and handed to the guard below.
+  developer_is_maintainer && { writable=1; readonly=""; }
   [[ "$(state_get "$fstate" no_change 2>/dev/null || true)" == "true" ]] && no_change=1
 
   prompt="$(SCLAUDE_V_TERMINAL="${terminal:-}" \
@@ -87,6 +91,8 @@ PY
     SCLAUDE_V_WORKTREE="$wt" \
     SCLAUDE_V_BRANCH="$(state_get "$fstate" branch 2>/dev/null || true)" \
     SCLAUDE_V_INSTRUMENTS="$INSTRUMENTS" \
+    SCLAUDE_V_INSTRUMENTS_WRITABLE="$writable" \
+    SCLAUDE_V_INSTRUMENTS_READONLY="$readonly" \
     SCLAUDE_V_DONE_MARKER="$done_file" \
     render_prompt retro "$slug" "$pr" "$issue" "$wt")" || return 0
 
@@ -104,7 +110,7 @@ PY
   # The rules first: a session refused here leaves no watcher and no open run.
   local -a guard=()
   local guard_out
-  guard_out="$(review_guard_settings "$wt")" \
+  guard_out="$(review_guard_settings "$wt" ${writable:+instruments})" \
     || { warn "  The retrospective was not started: sclaude could not read its rules (see above)."; return 1; }
   mapfile -t guard <<< "$guard_out"
   # Past every reason not to start: the topic hears of a start that happens.
@@ -123,7 +129,17 @@ PY
       --add-dir "$HOME/.claude/projects" \
       -n "$(session_label retro)/$slug" "$prompt" )
   session_watch_stop
-  instruments_unchanged "$before_instruments" "retrospective" || true
+  # Kept for cmd_done, which stops short of the clean-up on code that changed
+  # under it.
+  RETRO_INSTRUMENTS_CHANGED=""
+  if [[ "$(instruments_state)" != "$before_instruments" ]]; then
+    RETRO_INSTRUMENTS_CHANGED=1
+    if [[ -n "$writable" ]]; then
+      retro_instruments_said "$before_instruments"
+    else
+      instruments_unchanged "$before_instruments" "retrospective" || true
+    fi
+  fi
   session_closed "$done_file" "$wt" "$session" "nothing to act on" "" retro \
     || retro_report "$wt" "$session"
 
@@ -150,8 +166,29 @@ PY
     state_set "$fstate" retro.project_to "$project_after"
   fi
 
-  # sclaude's checkout is read-only to the conversation (review_guard_settings):
-  # what it changes is the product's, and the branch above carries it.
+  # What it changed in the product is the product's, and the branch above
+  # carries it; what it changed in sclaude is said above.
+  return 0
+}
+
+# Says how sclaude's checkout changed while a retrospective allowed to change
+# it ran: the commits made in that time, and what is left uncommitted. Not
+# "the retrospective's": other sessions edit the checkout at the same time,
+# and nothing here can tell whose a change is. The session may not push
+# (review_guard_settings), so the commits wait for the person to read them.
+#
+#   retro_instruments_said <state before>
+retro_instruments_said() {
+  local before="${1%% *}" made=""
+  info "   sclaude's own checkout ($INSTRUMENTS) changed while the retrospective ran."
+  [[ -n "$before" ]] \
+    && made="$(git -C "$INSTRUMENTS" log --format='     %h %s' "$before..HEAD" 2>/dev/null || true)"
+  if [[ -n "$made" ]]; then
+    info "   Committed in that time, and not pushed by the retrospective — read them, then push:"
+    printf '%s\n' "$made"
+  fi
+  [[ -n "$(git -C "$INSTRUMENTS" status --porcelain 2>/dev/null)" ]] \
+    && warn "   Uncommitted there now: git -C $INSTRUMENTS status"
   return 0
 }
 

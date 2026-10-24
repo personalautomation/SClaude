@@ -109,6 +109,26 @@ deferred_only_revs() {
   return 0
 }
 
+# Two copies of one log as one: main's rows as they are, then each row of the
+# branch's copy that main does not hold as many times. A row may come back on
+# purpose (the monthly review counts the repeats), so it is counted, not
+# looked up. Used by deferred_to_main and by the sync with main (sync.sh).
+# The first file is told apart by its name, not by NR == FNR: an empty one
+# would make every row of the second count as its own.
+#
+#   deferred_union <main's copy> <the branch's copy>   → the rows, on stdout
+deferred_union() {
+  awk 'FILENAME == ARGV[1] { seen[$0]++; print; next } seen[$0] > 0 { seen[$0]--; next } { print }' "$1" "$2"
+}
+
+# The rows of <after> beyond what <before> holds, counted the same way: what
+# one side added to a log since an older copy of it.
+#
+#   deferred_minus <before> <after>   → the rows, on stdout
+deferred_minus() {
+  awk 'FILENAME == ARGV[1] { seen[$0]++; next } seen[$0] > 0 { seen[$0]--; next } { print }' "$1" "$2"
+}
+
 # Takes the deferred entries the commits <from>..HEAD of a feature's tree put
 # on its branch, and sends them straight to origin's main.
 #
@@ -171,11 +191,7 @@ deferred_to_main() {
       mkdir -p "$(dirname "$tmp/tree/$f")"
       [[ -f "$tmp/tree/$f" ]] || : > "$tmp/tree/$f"
       git -C "$wt" show "$head:$f" > "$tmp/branch-copy"
-      # main's rows as they are, then each row of the branch's copy that main
-      # does not hold as many times: a row may come back on purpose (the
-      # monthly review counts the repeats), so it is counted, not looked up.
-      awk 'NR == FNR { seen[$0]++; print; next } seen[$0] > 0 { seen[$0]--; next } { print }' \
-        "$tmp/tree/$f" "$tmp/branch-copy" > "$tmp/merged" && cat "$tmp/merged" > "$tmp/tree/$f"
+      deferred_union "$tmp/tree/$f" "$tmp/branch-copy" > "$tmp/merged" && cat "$tmp/merged" > "$tmp/tree/$f"
       git -C "$tmp/tree" add -- "$f"
     done <<< "$files"
     if git -C "$tmp/tree" diff --cached --quiet; then

@@ -642,6 +642,53 @@ try:
         check("stop-now-kept", json.load(fh)["steps"]["review"]["enough"], "now")
     prompts()
 
+    # The same stop pressed in the feature's topic, with no terminal at all:
+    # the bot's word (review_keys.say) in the channel ends the pass at once.
+    sys.path.insert(0, ROOT)
+    from keepawake import review_keys
+    write(state, "{}\n")
+    write(os.path.join(repo, "a.txt"), "stop from the phone\n")
+    git("commit", "-qam", "stop from the phone", cwd=repo)
+    git("push", "-q", cwd=repo)
+    write(os.path.join(tmp, "during"), "sleep 30\n")
+    with open(journal) as fh:
+        before = fh.read()
+    ask_dir = os.path.join(tmp, "ask-dir")
+    phone = os.path.join(ask_dir, "ask", "feat")
+    body = "set -uo pipefail\n"
+    body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""; SELF=sclaude\n'
+    for name in ("io", "ui", "state", "steps", "project", "picker", "local_review"):
+        body += 'source "%s/%s.sh"\n' % (LIB, name)
+    body += 'LIB="%s"\nwarn() { echo "$*" >&2; }\ninfo() { echo "$*"; }\n' % LIB
+    body += 'ASK_DIR=%s; ASK_SLUG=feat\n' % ask_dir
+    body += 'REPO=%s; n="$(local_review %s 7)"; echo "COUNT=$n"\n' % (repo, repo)
+    began = time.time()
+    proc = subprocess.Popen(["bash", "-c", body], cwd=repo, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=dict(os.environ, PATH=stubs + os.pathsep + os.environ["PATH"],
+                                     GH_WORLD=world), start_new_session=True)
+    feed_file = os.path.join(phone, "notes", "feed.tsv")
+    while time.time() - began < 20:
+        if os.path.exists(feed_file) and "Local review started" in open(feed_file).read():
+            break
+        time.sleep(0.2)
+    lines = [line.split("\t", 3) for line in open(feed_file).read().splitlines()]
+    check("phone-buttons-on-start", review_keys.kind_of([(lv, pid, text) for _, lv, pid, text in lines]),
+          ("pass", lines[-1][2]))
+    time.sleep(1)
+    review_keys.say(phone, "now")
+    out, err = proc.communicate(timeout=20)
+    os.remove(os.path.join(tmp, "during"))
+    check_true("phone-stop-quick", time.time() - began < 15)
+    check_true("phone-stop-count", "COUNT=" in out)
+    check_true("phone-stop-said", "Stopped pass 1 as you said" in err)
+    check("phone-stop-taken", os.path.exists(os.path.join(phone, review_keys.SAID_FILE)), False)
+    with open(journal) as fh:
+        check("phone-stop-not-recorded", fh.read(), before)
+    with open(state) as fh:
+        check("phone-stop-kept", json.load(fh)["steps"]["review"]["enough"], "now")
+    prompts()
+
     # A round is a head: two passes over one head count once, and the head
     # being reviewed is the next round whether or not a pass of it is in.
     rounds = os.path.join(tmp, "rounds.jsonl")

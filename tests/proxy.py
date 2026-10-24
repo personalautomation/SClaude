@@ -480,7 +480,13 @@ def check_gate(proxy_port, root):
         status, head, body = menu({"init": good, "do": ""})
         check("gate: the owner gets the menu", ("200 OK" in status, "application/json" in head),
               (True, True))
-        check("gate: the menu is the bot's", json.loads(body).get("main"), True)
+        # The bot's first screen: its menu, or — with features on this
+        # machine — which one to stand on (webmenu.answer).
+        first = json.loads(body)
+        check("gate: the menu is the bot's",
+              bool(first.get("text") and first.get("rows")
+                   and (first.get("main") or any("home:" in (b.get("callback_data") or "")
+                                                 for row in first["rows"] for b in row))), True)
 
         check("gate: it ends itself when nobody looks",
               wait_for(lambda: proc.poll() is not None, 10), True)

@@ -870,8 +870,8 @@ phase_line() {
 phase_icon() {
   case "$1" in
     step)
-      if [[ "$3" == done ]]; then printf '✅'; return; fi
-      case "$2" in
+      if [[ "${3:-}" == done ]]; then printf '✅'; return; fi
+      case "${2:-}" in
         plan) printf '📝' ;; code) printf '💻' ;; pr) printf '📤' ;; review) printf '🛠' ;;
         *) printf '▶️' ;;
       esac ;;

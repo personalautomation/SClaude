@@ -468,6 +468,7 @@ run_step() {
   # A new feature reaches its first step without naming itself to
   # feature_worktree.
   declare -F term_attach >/dev/null && term_attach "$wt"
+  declare -F tab_title >/dev/null && tab_title "$slug"
 
   # A merged PR closes everything left of the cycle: the work is in main, the
   # review took place, and there is nothing left to check a preview on. There is

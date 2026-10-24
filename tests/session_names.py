@@ -67,7 +67,7 @@ check("retro", label("retro"), "6-retro")
 
 
 def icon(title):
-    p = subprocess.run(["bash", "-c", 'source "%s/steps.sh"; source "%s/pane.sh"; pane_icon "$1"' % (LIB, LIB), "bash", title],
+    p = subprocess.run(["bash", "-uc", 'source "%s/steps.sh"; source "%s/pane.sh"; pane_icon "$1"' % (LIB, LIB), "bash", title],
                        capture_output=True, text=True, timeout=30)
     return p.stdout
 
@@ -82,7 +82,7 @@ for title, want in (("1-plan/x", "📝"), ("2-code(2)/x", "💻"), ("3-pr/x", "�
 
 
 def named(name):
-    p = subprocess.run(["bash", "-c", 'source "%s/steps.sh"; source "%s/pane.sh"; named_with_icon "$1"' % (LIB, LIB), "bash", name],
+    p = subprocess.run(["bash", "-uc", 'source "%s/steps.sh"; source "%s/pane.sh"; named_with_icon "$1"' % (LIB, LIB), "bash", name],
                        capture_output=True, text=True, timeout=30)
     return p.stdout
 

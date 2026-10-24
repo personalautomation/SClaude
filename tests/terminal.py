@@ -279,6 +279,38 @@ try:
 finally:
     shutil.rmtree(proj, ignore_errors=True)
 
+# --- the tab's title ----------------------------------------------------------
+#
+# The tab is named as the feature's topic is, `<slug> · <repo>`, and only where
+# there is a terminal: in $( ) under the bot nothing is written.
+
+
+def in_pty(script):
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.chdir(ROOT)
+        os.execvp("bash", ["bash", "-c", script])
+    out = b""
+    while True:
+        try:
+            ready, _, _ = select.select([fd], [], [], 10)
+            if not ready:
+                break
+            chunk = os.read(fd, 4096)
+        except OSError:
+            break
+        if not chunk:
+            break
+        out += chunk
+    os.waitpid(pid, 0)
+    return out
+
+
+TITLE = 'source "%s/terminal.sh"; REPO=/home/x/social; tab_title 12-login' % LIB
+check("tab-title-in-a-terminal", "\x1b]0;12-login · social\x07".encode() in in_pty(TITLE), True)
+quiet = subprocess.run(["bash", "-c", TITLE], capture_output=True, stdin=subprocess.DEVNULL, cwd=ROOT)
+check("tab-title-without-a-terminal", quiet.stdout + quiet.stderr, b"")
+
 for name, want, got in failures:
     print("FAIL %s: want %r, got %r" % (name, want, got))
 if failures:

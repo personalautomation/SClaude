@@ -206,6 +206,12 @@ by which GitHub closes the issue on the merge. No network, no `gh`, no open
 issues — there simply will be no list, and the old question about a name
 remains.
 
+The list and the suggestion are `sclaude/lib/issue_list.py`'s, which the bot's
+Mini App uses too: it offers the same choice on a phone and starts
+`sclaude new` with the answers as options — `--issue <n>` with the branch name,
+`--blocked-ok` once the blockers were shown, `--create-issue` or `--no-issue`
+for a name — so `cmd_new` asks none of it again (`new_from_args`).
+
 ## Acceptance criteria
 
 **Step 1 agrees the acceptance criteria, and the rest of the cycle is measured

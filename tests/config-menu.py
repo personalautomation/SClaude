@@ -141,6 +141,28 @@ try:
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.split()
     check("flow-default-is-the-screen-default", out,
           [menu("default", "qa")[1].strip(), menu("default", "merge")[1].strip()])
+
+    # `sclaude config set`, which the bot's menu calls: the same write as the
+    # screen's, and review's Actions follow it.
+    write(config, {"review": "github"})
+    script = ('LIB=%s; source "$LIB/config.sh"; REPO=%s; GREEN=; OFF=\n'
+              'say() { echo "S:$*"; }; info() { :; }; warn() { echo "W:$*"; }\n'
+              'require_repo() { :; }; die() { echo "D:$*"; exit 1; }\n'
+              'review_actions_sync() { echo "SYNC:$2"; }\n'
+              'cmd_config "$@"') % (LIB, repo)
+    out = subprocess.run(["bash", "-c", script, "bash", "set", "review", "local"],
+                         capture_output=True, text=True)
+    check("set-writes", json.load(open(config)).get("review"), "local")
+    check_true("set-syncs-actions", "SYNC:local" in out.stdout)
+    check("set-exit", out.returncode, 0)
+    out = subprocess.run(["bash", "-c", script, "bash", "set", "review", "maybe"],
+                         capture_output=True, text=True)
+    check("set-refuses-a-stranger", (out.returncode, json.load(open(config)).get("review")),
+          (1, "local"))
+    check_true("set-refusal-does-not-sync", "SYNC" not in out.stdout)
+    out = subprocess.run(["bash", "-c", script, "bash", "set", "review"],
+                         capture_output=True, text=True)
+    check_true("set-needs-both", out.returncode != 0 and "D:usage" in out.stdout)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

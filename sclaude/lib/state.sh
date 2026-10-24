@@ -498,13 +498,15 @@ list_features() {
       done
 }
 
-# Also where a recorded run (terminal.sh) is tied to the feature it works on:
-# every command that names a feature comes through here.
+# Also where a recorded run (terminal.sh) is tied to the feature it works on,
+# and its tab named for it: every command that names a feature comes through
+# here.
 feature_worktree() {
   local wt
   wt="$(list_features | awk -F'\t' -v want="$1" '$1 == want { print $2; found = 1 } END { exit !found }')" \
     || return 1
   declare -F term_attach >/dev/null && term_attach "$wt"
+  declare -F tab_title >/dev/null && tab_title "$1"
   printf '%s\n' "$wt"
 }
 

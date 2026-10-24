@@ -27,6 +27,14 @@ cmd_config() {
   file="$(config_file)"
   example="$INSTRUMENTS/sclaude/config.example.json"
 
+  # `sclaude config set <key> <value>`: the same as choosing it on the screen,
+  # for the bot's menu, which shows the screen itself.
+  if [[ "${1:-}" == "set" ]]; then
+    [[ $# -eq 3 ]] || die "usage: $SELF config set <key> <value>"
+    config_set "$file" "$2" "$3"
+    return
+  fi
+
   while :; do
     local -a keys=() items=()
     local row
@@ -100,14 +108,23 @@ config_section() {
   [[ "$rc" -eq 0 ]] || return 0
   [[ "${values[$choice]}" == "$now" ]] && return 0
 
-  if python3 "$LIB/config_menu.py" set "$file" "$key" "${values[$choice]}"; then
-    say "${GREEN}✓ $key: ${values[$choice]}${OFF} — in $file"
+  config_set "$file" "$key" "${values[$choice]}" || true
+  config_pause
+}
+
+# Write one value with fixed choices, and do what it implies.
+#
+#   config_set <file> <key> <value>
+config_set() {
+  local file="$1" key="$2" value="$3"
+  if python3 "$LIB/config_menu.py" set "$file" "$key" "$value"; then
+    say "${GREEN}✓ $key: $value${OFF} — in $file"
     info "  Commit it in the project: the file is the project's."
-    [[ "$key" == "review" ]] && review_actions_sync "$REPO" "${values[$choice]}"
+    if [[ "$key" == "review" ]]; then review_actions_sync "$REPO" "$value"; fi
   else
     warn "  Not changed."
+    return 1
   fi
-  config_pause
 }
 
 # Wait for Enter before the list is drawn over what was just printed.

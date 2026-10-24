@@ -1430,6 +1430,25 @@ with sandbox() as box:
         check("no actions button in the list",
               [b for row in telegramd.features_keyboard("myapp") for b in row
                if b["callback_data"].startswith("acts:")], [])
+        # The project's config is one press from its features, as it is the
+        # last row of sclaude's menu at the terminal.
+        check_true("the config is offered with the features",
+                   any(b["callback_data"] == "cfg:myapp"
+                       for row in telegramd.features_keyboard("myapp") for b in row))
+        long_name = "r" * 60
+        check("a config button too long for Telegram does nothing",
+              telegramd.cfg_data("cfgset", long_name, "review", "github"), "noop")
+        with state.locked() as st:
+            st["sclaude_repo"] = "/nonexistent/" + long_name
+        saved_choice = telegramd.repo_choice
+        telegramd.repo_choice = lambda: "/nonexistent/" + long_name
+        check("a long remembered repository is left out of a screen's button",
+              telegramd.cfg_data("cfg", long_name, "review"), "cfg::review")
+        check("but never out of a value set, which an old message would aim elsewhere",
+              telegramd.cfg_data("cfgset", long_name, "review", "github"), "noop")
+        telegramd.repo_choice = saved_choice
+        with state.locked() as st:
+            st["sclaude_repo"] = ""
     finally:
         telegramd.known_repos = saved_known
         telegramd.run = saved_run
@@ -1498,7 +1517,8 @@ with sandbox() as box:
                   "chrome_start", "code_start", "idle_keep", "noop",
                   "devopen:no-such-feature", "devstop:no-such-feature",
                   "devstart:no-such-feature", "devphone:no-such-feature", "gate_stop",
-                  "chrome_stop", "phone_toggle"]
+                  "chrome_stop", "phone_toggle", "cfg:myapp", "cfg:myapp:review",
+                  "cfgset:myapp:review:bogus"]
         from keepawake import docs as _docs
         routed += ["doc:" + k for k in _docs.SECTIONS]
         for data in routed:

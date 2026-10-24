@@ -439,6 +439,25 @@ the internet nobody remembers opening is one to close: at start the bot turns
 phone access off if it was turned on before the machine started (`phone_on_at`
 against the kernel's boot time). A restart of the bot alone leaves it as it was.
 
+**A new feature on the page is the terminal's picker.** Without a terminal
+`sclaude new` asks only for a name, so the chat's "✨ New feature" starts it
+at once. The page draws what `pick_start` draws instead — the open issues from
+`issue_list.py`, one's own first, the blockers before the labels — then the
+issue with its blockers and the branch name it suggests in a field, or a name
+with a tick for its issue, and starts `sclaude new --issue <n> --blocked-ok
+<branch>` or `--create-issue`/`--no-issue <name>`: the answers go with the
+command and the chat is asked nothing again. A name that sclaude would die on
+(no Latin letter, a branch or directory that exists) is refused on the page.
+The list is reused for two minutes, so the issue's screen and the start do not
+wait for GitHub again.
+
+**The project's config.** 🧩 on a repository's screen is `sclaude config`: the
+sections of `.sclaude/config.json` with their summary and the explanation from
+`config.example.json` (both through `config_menu.py`, as the terminal reads
+them). The ones with choices are set through `sclaude config set`, so that what
+a choice implies — `review_actions_sync` — happens as at the terminal; the rest
+are shown. It is in the chat's handler, so the chat and the page have it alike.
+
 **A new feature has its topic from the start.** "✨ New feature" opens a topic
 at once, so the questions about the name already go there (`new_feature_topic`);
 when a worktree appears that is newer than the topic, the topic is that

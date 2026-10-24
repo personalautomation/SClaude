@@ -432,6 +432,115 @@ STRINGS = {
     # of its own.
     "feat.actions":      ("⚙️ Действия", "⚙️ Actions"),
     "feat.new":          ("✨ Новая фича", "✨ New feature"),
+    # The project's .sclaude/config.json, as `sclaude config` shows it. The
+    # explanations themselves are sclaude's, from config.example.json.
+    "cfg.button":        ("🧩 Конфиг проекта", "🧩 Project config"),
+    "cfg.title":         ("🧩 <b>%(repo)s</b> — <code>.sclaude/config.json</code>\n"
+                          "⚙️ — выбирается здесь; остальное правится в файле.",
+                          "🧩 <b>%(repo)s</b> — <code>.sclaude/config.json</code>\n"
+                          "⚙️ — set here; the rest is edited in the file."),
+    "cfg.nofile":        ("\n\nФайла ещё нет: <code>sclaude new</code> предложит его написать — "
+                          "из того, что найдёт в репозитории.",
+                          "\n\nThere is no file yet: <code>sclaude new</code> offers to write one "
+                          "from what it finds in the repository."),
+    "cfg.setting":       ("⏳ Меняю…", "⏳ Setting it…"),
+    "cfg.toolong":       ("<i>Имя репозитория не помещается в кнопку Telegram — выберите "
+                          "значение в терминале: <code>sclaude config</code>.</i>",
+                          "<i>The repository name does not fit in a Telegram button — set "
+                          "it at the terminal: <code>sclaude config</code>.</i>"),
+    "cfg.writefirst":    ("<i>Выбирается здесь, когда у проекта есть конфиг: файл из одной "
+                          "секции <code>sclaude new</code> принял бы за готовый и не предложил бы "
+                          "написать остальное.</i>",
+                          "<i>Set here once the project has a config: a file of one section "
+                          "would pass with <code>sclaude new</code> for a finished one, and it would "
+                          "never offer to write the rest.</i>"),
+    "cfg.setpartly":     ("⚠️ %(section)s: <b>%(value)s</b> записан, но sclaude не закончил "
+                          "то, что за этим следует (Actions для review) — журнал бота "
+                          "скажет, что осталось.",
+                          "⚠️ %(section)s: <b>%(value)s</b> is written, but sclaude did not "
+                          "finish what follows it (Actions, for review) — the bot's log "
+                          "says what is left."),
+    "cfg.broken":        ("\n\n⚠️ Файл не читается как JSON — здесь ничего не изменится, "
+                          "пока его не поправят.",
+                          "\n\n⚠️ The file does not read as JSON — nothing changes here "
+                          "until it is fixed."),
+    "cfg.torepo":        ("‹ К репозиторию", "‹ The repository"),
+    "cfg.tolist":        ("‹ Все секции", "‹ All sections"),
+    "cfg.unknown":       ("Эту секцию sclaude не читает.", "sclaude does not read this section."),
+    "cfg.now":           ("Сейчас:", "Now:"),
+    "cfg.notset":        ("<i>Не задано.</i>", "<i>Not set.</i>"),
+    "cfg.commit":        ("<i>Файл — проекта: изменение остаётся в рабочем дереве основного "
+                          "checkout, закоммитьте его там.</i>",
+                          "<i>The file is the project's: a change stays in the main "
+                          "checkout's working tree — commit it there.</i>"),
+    "cfg.infile":        ("<i>Правится в файле — в терминале <code>sclaude config</code> открывает его "
+                          "последней строкой.</i>",
+                          "<i>Edited in the file — at the terminal the last row of "
+                          "<code>sclaude config</code> opens it.</i>"),
+    "cfg.set":           ("✅ %(section)s: <b>%(value)s</b> — в конфиге проекта.",
+                          "✅ %(section)s: <b>%(value)s</b> — in the project's config."),
+    "cfg.same":          ("%(section)s уже <b>%(value)s</b>.", "%(section)s is <b>%(value)s</b> already."),
+    "cfg.notchanged":    ("⚠️ %(section)s не изменён — подробности в журнале бота.",
+                          "⚠️ %(section)s not changed — the bot's log says why."),
+    # A new feature on the menu page: the terminal's picker, with buttons.
+    "nf.title":          ("✨ <b>Новая фича</b> в %(repo)s\nИз открытой issue или по имени.",
+                          "✨ <b>A new feature</b> in %(repo)s\nFrom an open issue or by a name."),
+    "nf.noissues":       ("\n\nОткрытых issues GitHub не назвал — или gh недоступен.",
+                          "\n\nGitHub named no open issues — or gh is not reachable."),
+    "nf.noanswer":       ("\n\n⚠️ GitHub не ответил — список issues недоступен. «Обновить» "
+                          "спросит ещё раз; по имени можно начать и так.",
+                          "\n\n⚠️ GitHub did not answer — the issues are not to hand. "
+                          "Refresh asks again; a name starts without them."),
+    "nf.noconfig":       ("<i>У проекта нет .sclaude/config.json: после старта sclaude "
+                          "спросит в чате, записать ли его.</i>",
+                          "<i>The project has no .sclaude/config.json: after the start "
+                          "sclaude asks in the chat whether to write it.</i>"),
+    "nf.more":           ("\n\nЕщё %(n)d не поместились — их можно начать из терминала.",
+                          "\n\n%(n)d more did not fit — start them from the terminal."),
+    "nf.byname":         ("✏️ Ввести имя", "✏️ Type a name"),
+    "nf.bynamehint":     ("issue можно создать по нему", "an issue can be made from it"),
+    "nf.mine":           ("Назначены мне", "Assigned to me"),
+    "nf.other":          ("Остальные открытые", "Other open issues"),
+    "nf.blockedby":      ("⛔ ждёт %(by)s", "⛔ blocked by %(by)s"),
+    "nf.gone":           ("Issue #%(n)s больше не открыта.", "Issue #%(n)s is no longer open."),
+    "nf.issue":          ("✨ <b>#%(n)d</b> %(title)s", "✨ <b>#%(n)d</b> %(title)s"),
+    "nf.blocked":        ("⛔ Её ждут открытые issues:", "⛔ It is blocked by open issues:"),
+    "nf.blockednote":    ("<i>План опирается на то, чего ещё нет. Начать можно и так — "
+                          "иногда фича как раз их и заканчивает.</i>",
+                          "<i>Its plan leans on work that has not landed. It can start "
+                          "anyway — sometimes the feature is what finishes them.</i>"),
+    "nf.branchnote":     ("Имя ветки — по номеру и заголовку; поправьте, если нужно. Ветка "
+                          "будет <code>feat/&lt;имя&gt;</code>.",
+                          "The branch name comes from the number and the title; correct it "
+                          "if need be. The branch is <code>feat/&lt;name&gt;</code>."),
+    "nf.branch":         ("имя ветки", "branch name"),
+    "nf.start":          ("▶️ Начать", "▶️ Start"),
+    "nf.startanyway":    ("▶️ Всё равно начать", "▶️ Start anyway"),
+    "nf.tolist":         ("‹ К списку issues", "‹ The issues"),
+    "nf.named":          ("✏️ <b>Новая фича</b> в %(repo)s по имени. Из имени — ветка "
+                          "<code>feat/&lt;имя&gt;</code> и, если отмечено, заголовок issue.",
+                          "✏️ <b>A new feature</b> in %(repo)s by a name. The name makes "
+                          "the branch <code>feat/&lt;name&gt;</code> and, when ticked, the "
+                          "issue's title."),
+    "nf.name":           ("имя фичи", "feature name"),
+    "nf.createissue":    ("Создать issue на GitHub", "Create a GitHub issue"),
+    "nf.createyes":      ("с этим заголовком, назначенную вам",
+                          "with this title, assigned to you"),
+    "nf.createno":       ("фича начнётся без issue — шагу 1 нечего прочесть",
+                          "the feature starts without one — step 1 has nothing to read"),
+    "nf.badname":        ("В имени нужна хотя бы одна латинская буква или цифра.",
+                          "A name needs at least one Latin letter or digit."),
+    "nf.exists":         ("Ветка или каталог <b>%(slug)s</b> уже есть — продолжите ту фичу "
+                          "или выберите другое имя.",
+                          "A branch or directory <b>%(slug)s</b> exists already — continue "
+                          "that feature or choose another name."),
+    "nf.startedtopic":   ("✨ <b>%(slug)s</b> в <b>%(repo)s</b> начата — вопросы придут в "
+                          "её топик.",
+                          "✨ <b>%(slug)s</b> in <b>%(repo)s</b> has started — its questions "
+                          "come to its topic."),
+    "nf.started":        ("✨ <b>%(slug)s</b> в <b>%(repo)s</b> начата — вопросы придут сюда.",
+                          "✨ <b>%(slug)s</b> in <b>%(repo)s</b> has started — its questions "
+                          "come here."),
     # The state of a step's session. "Waiting" is blocked: claude has asked for
     # permission or put a question, and without an answer the step will not
     # move. It matters to a person to tell it from "working": the first needs
@@ -647,12 +756,13 @@ STRINGS = {
                           "feature's page is on its card in Sclaude."),
     "help.sclaude":      ("Фичи в работе в этом репозитории и шаг каждой. Фича открывает "
                           "свою карточку; ✨ запускает новую — её вопросы придут в её "
-                          "собственный топик в чате. Выбранный здесь репозиторий открывает "
-                          "и code-server.",
+                          "собственный топик в чате; 🧩 — конфиг проекта. Выбранный здесь "
+                          "репозиторий открывает и code-server.",
                           "The features in progress in this repository, each with its "
                           "step. A feature opens its card; ✨ starts a new one — its "
-                          "questions come to a topic of its own in the chat. The "
-                          "repository chosen here is also the one code-server opens."),
+                          "questions come to a topic of its own in the chat; 🧩 is the "
+                          "project's config. The repository chosen here is also the one "
+                          "code-server opens."),
     "help.repos":        ("Какой репозиторий показывает Sclaude и открывает code-server. "
                           "Если code-server запущен, выбор другого перезапустит его на нём.",
                           "Which repository Sclaude shows and code-server opens. Choosing "
@@ -685,6 +795,26 @@ STRINGS = {
                           "Which language the bot and this app speak. Russian or English "
                           "fixes the choice; Follow Telegram takes your Telegram app's "
                           "language."),
+    "help.newfeat":      ("Как в терминале: свои issues сверху, у каждой — метки и то, "
+                          "что её блокирует. Или имя, из которого будет и ветка, и issue.",
+                          "As at the terminal: your own issues first, each with its labels "
+                          "and what blocks it. Or a name, which makes the branch and the "
+                          "issue."),
+    "help.nfissue":      ("▶️ запускает sclaude на этой issue с этим именем ветки: дальше — "
+                          "шаг 1, план, и его вопросы в топике фичи.",
+                          "▶️ starts sclaude on this issue with this branch name: then step "
+                          "1, the plan, with its questions in the feature's topic."),
+    "help.nfname":       ("▶️ запускает sclaude с этим именем; галочка решает за него, "
+                          "создавать ли issue — в чате он об этом не спросит.",
+                          "▶️ starts sclaude with this name; the tick answers whether to "
+                          "create an issue — it will not ask in the chat."),
+    "help.config":       ("Конфиг проекта, как `sclaude config` в терминале: секция, что в "
+                          "ней сейчас и зачем она. ⚙️ review, qa и merge выбираются здесь; "
+                          "остальное — структуры, их правят в файле.",
+                          "The project's config, as `sclaude config` shows it at the "
+                          "terminal: each section, what it holds and what it is for. ⚙️ "
+                          "review, qa and merge are set here; the rest are structures "
+                          "edited in the file."),
     "help.docs":         ("Как устроен keepawake, по разделам.",
                           "How keepawake works, section by section."),
     "option.back":       ("назад", "go back"),

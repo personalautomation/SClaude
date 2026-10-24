@@ -390,12 +390,12 @@ on, and launches `claude` with the right model, permissions and prompt for it.
 
 ```bash
 sclaude                 # the menu: features in progress, chosen with arrow keys
-sclaude new [name]      # start a feature at step 1
+sclaude new [name]      # start a feature at step 1 (--issue <n>, --create-issue, --no-issue)
 sclaude <name>          # continue a feature from its current step
 sclaude status          # every feature and its step
 sclaude actions [name]  # everything you can do with one feature, in one list
 sclaude doctor          # what this machine lacks, and how to fix it
-sclaude config          # the product's settings, each one explained
+sclaude config          # the product's settings, each one explained; set <key> <value>
 sclaude dev [name]      # start a feature's dev server; --stop to stop it
 sclaude sync <name>     # merge the latest main into a feature's branch
 sclaude news <name>     # what has happened on the pull request
@@ -408,6 +408,9 @@ sclaude done <name>     # clean up after the merge: worktree and branches
 sclaude drop <name>     # abandon a feature and remove its traces, here and on GitHub
 sclaude propose         # send your commits to sclaude as a pull request
 ```
+
+The tab sclaude runs in is named for the feature it is on, as its Telegram
+topic is: `<slug> · <repo>`.
 
 `sclaude --help` has the rest. In the menu, tick "show actions after choosing" to
 get every action for a feature in one list instead of remembering commands.
@@ -684,7 +687,11 @@ keepawake release         # let go now
 ("☰ Menu" by the input box): 💤 Keepawake — extend, until a time, release, and
 why the machine is or is not sleeping; 📋 Sclaude — the repositories, their
 features with what each step is doing (🟢 running, 🟡 waiting for you, ⚪ idle,
-⚫ not started) and a new feature; 💻 Code-server; 🌐 Chrome and the list of every
+⚫ not started), a new feature — from an open issue, yours first and marked
+when something blocks it, with the branch name to correct, or from a name with
+a tick for creating its issue, as `sclaude new` offers at the terminal — and 🧩
+the project's config, every section explained, with `review`, `qa` and `merge`
+set by a button; 💻 Code-server; 🌐 Chrome and the list of every
 feature; ⚙️ Settings — language, docs, restarting the bot, phone access. Each
 screen says under it what it is for. What you start there leaves a 📱 line in
 the chat — in the feature's topic when it is about a feature — and what only

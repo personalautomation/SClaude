@@ -141,6 +141,16 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-10-15 with the `review` key, so that a change to
   one side does not silently turn the review's words into a person's. -->
 
+- `sclaude new`'s options (`--issue`, `--blocked-ok`, `--create-issue`,
+  `--no-issue`; `new_from_args` in `bin/sclaude`) and `sclaude config set` are
+  what the bot's menu runs (`new_start` in `keepawake/webmenu.py`, `config_set`
+  in `keepawake/telegramd.py`); `tests/new-feature.py` and
+  `tests/config-menu.py` check sclaude's side, `tests/webmenu.py` the bot's.
+
+  <!-- Added by Claude on 2026-10-24 with the new-feature picker and the config
+  in the Mini App: an option renamed on one side would start a feature that
+  asks again, or dies, with nobody at the terminal. -->
+
 ## Public repository, private projects
 
 This repository is public (personalautomation/SClaude). The projects sclaude

@@ -116,6 +116,24 @@ term_attach() {
   echo "$SCLAUDE_TERM" >> "$list" 2>/dev/null || true
 }
 
+# The tab sclaude runs in, named for the feature it is on as the feature's
+# Telegram topic is (topic_name in telegramd.py): `<slug> · <repo>`. Several
+# sclaude tabs side by side are told apart by it, as the topics are; the
+# session tabs (pane.sh) carry their session's name. An OSC 0, which Windows
+# Terminal and every other takes as the title; the shell's prompt sets its own
+# again once sclaude is gone.
+#
+#   tab_title <slug>
+#
+# Only where stderr is a terminal: under the bot (setsid) and in $( ) of a test
+# there is no tab to name. To stderr rather than /dev/tty: it is the terminal
+# then, inside $( ) too, and a process with no controlling terminal has no
+# /dev/tty to open.
+tab_title() {
+  [[ -n "${1:-}" && -t 2 ]] || return 0
+  printf '\033]0;%s · %s\007' "$1" "$(basename "${REPO:-$PWD}")" >&2
+}
+
 # The marks around a Claude session running in place, in a recorded run.
 #
 #   term_skip begin <claude args…>

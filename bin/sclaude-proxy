@@ -1076,9 +1076,10 @@ background:var(--tg-theme-button-color,#2563eb);color:var(--tg-theme-button-text
 button.ok{background:#16a34a;color:#fff}
 button.danger{background:#dc2626;color:#fff}
 body.busy button{opacity:.5;pointer-events:none}
-#time{display:flex;gap:8px;margin-top:16px}
-#time[hidden]{display:none}
-#time input{flex:1;font:inherit;padding:8px;border-radius:10px;
+#time,#field{display:flex;gap:8px;margin-top:16px}
+#field{flex-direction:column}
+#time[hidden],#field[hidden]{display:none}
+#time input,#field input{flex:1;min-width:0;font:inherit;padding:8px;border-radius:10px;
 border:1px solid var(--tg-theme-hint-color,#a8a29e);
 background:var(--tg-theme-bg-color,#fff);color:inherit}
 #err{color:#dc2626}
@@ -1092,7 +1093,7 @@ def menu_page(nonce):
     script = """
 const tg = window.Telegram && window.Telegram.WebApp;
 const $ = (id) => document.getElementById(id);
-let busy = false, ctx = '';
+let busy = false, ctx = '', fieldAction = '';
 // The feature the page was opened on, from its topic: Sclaude, Chrome and
 // Code-server stand on it.
 // Opened by the Menu button it has none, and the first answer names the one
@@ -1148,6 +1149,17 @@ function render(v) {
     const r = document.createElement('div'); r.className = 'row';
     r.append(...row.map(button)); return r; }));
   $('time').hidden = !v.time;
+  // A text field: a branch's name, a feature's. Redrawn under the same name
+  // with nothing in it (a box ticked beside it), it keeps what was typed.
+  const f = v.input, box = $('field');
+  box.hidden = !f;
+  if (f) {
+    if (!(box.dataset.name === f.name && !f.value)) $('fieldv').value = f.value || '';
+    $('fieldv').placeholder = f.placeholder || '';
+    $('fieldok').textContent = f.button || 'OK';
+    box.dataset.name = f.name || '';
+    fieldAction = f.action;
+  } else box.dataset.name = '';
   $('help').textContent = v.help || '';
   if (tg.isVersionAtLeast('6.1')) v.main ? tg.BackButton.hide() : tg.BackButton.show();
   window.scrollTo(0, 0);
@@ -1183,6 +1195,9 @@ if (!tg || !tg.initData) {
   if (tg.isVersionAtLeast('6.1')) tg.BackButton.onClick(() => call('menu_back'));
   $('time').onsubmit = (e) => { e.preventDefault();
     if ($('hhmm').value) call('until:' + $('hhmm').value, $('hhmm').value); };
+  $('field').onsubmit = (e) => { e.preventDefault();
+    const text = $('fieldv').value.trim();
+    if (text && fieldAction) call(fieldAction + text, text); };
   // A card's button in a feature's topic opens the page on that feature.
   const slash = home.indexOf('/');
   call(slash > 0 ? 'topic:' + home.slice(0, slash) + ':' + home.slice(slash + 1) : '');
@@ -1193,6 +1208,8 @@ if (!tg || !tg.initData) {
             "<title>Menu</title><style>%s</style></head><body><main>"
             "<p id=err></p><div id=text>…</div>"
             "<form id=time hidden><input id=hhmm type=time required><button>OK</button></form>"
+            "<form id=field hidden><input id=fieldv autocomplete=off autocapitalize=off "
+            "spellcheck=false><button id=fieldok>OK</button></form>"
             "<div id=rows></div><div id=notes></div><p id=help></p>"
             "</main>"
             "<script src='https://telegram.org/js/telegram-web-app.js'></script>"

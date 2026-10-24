@@ -18,9 +18,11 @@
 #
 # The language is the bot's: a choice pinned in Settings, otherwise the
 # client's language_code from initData, remembered as a message would be.
+import contextlib
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 
@@ -33,18 +35,42 @@ PAGE = 0
 # threads; one call at a time keeps a screen in one language.
 _LOCK = threading.Lock()
 
-def pause(seconds):
-    """A wait inside a press, with the lock let go: another call — a Back,
-    a second page — is not held behind it. What a call sets for itself is
-    set again after: the language and ON_PAGE are module globals."""
+# Whether this thread holds _LOCK: only the call that holds it lets it go.
+_HOLDER = threading.local()
+
+
+@contextlib.contextmanager
+def held():
+    with _LOCK:
+        _HOLDER.on = True
+        try:
+            yield
+        finally:
+            _HOLDER.on = False
+
+
+def unlocked(fn, *args, **kwargs):
+    """fn run inside a press with the lock let go: another call — a Back,
+    a second page — is not held behind a wait or a slow command. What a call
+    sets for itself is set again after: the language and ON_PAGE are module
+    globals. fn itself must not draw: another call may switch the language
+    meanwhile."""
+    if not getattr(_HOLDER, "on", False):
+        return fn(*args, **kwargs)
     lang = current()
+    _HOLDER.on = False
     _LOCK.release()
     try:
-        time.sleep(seconds)
+        return fn(*args, **kwargs)
     finally:
         _LOCK.acquire()
+        _HOLDER.on = True
         set_lang(lang)
         telegramd.ON_PAGE = True
+
+
+def pause(seconds):
+    unlocked(time.sleep, seconds)
 
 
 # Buttons the page leaves out.
@@ -68,6 +94,9 @@ class PageBot(telegramd.Bot):
         self.home = None
         # A press that started nothing after all.
         self.untraced = False
+        # A text field under the screen: what it holds, and the action its
+        # OK sends with the text appended.
+        self.input = None
 
     def edit(self, message_id, text, keyboard=None):
         if message_id != PAGE:
@@ -110,7 +139,10 @@ HELP = (("menu_extend", "help.keepawake"), ("awake_until", "help.until"),
         ("repo:", "help.sclaude"), ("svc_repos", "help.repos"),
         ("topic:", "help.card"), ("feat:", "help.card"), ("fc:", "help.card"),
         ("menu_services", "help.settings"), ("svc_lang", "help.lang"),
-        ("lang:", "help.lang"), ("svc_docs", "help.docs"))
+        ("lang:", "help.lang"), ("svc_docs", "help.docs"),
+        ("newfeat:", "help.newfeat"), ("nfl:", "help.newfeat"), ("nfi:", "help.nfissue"),
+        ("nfn:", "help.nfname"), ("nfgo:", "help.newfeat"),
+        ("cfg:", "help.config"), ("cfgset:", "help.config"))
 
 
 def help_for(action, done):
@@ -132,6 +164,8 @@ def rows_for_page(rows, main):
     # A screen's own "Back" may lead one level up rather than to the menu;
     # either way it is the way back, and a second one would only confuse.
     if not main and not any(b.get("callback_data") == "menu_back"
+                            # One level up, in the config and a new feature.
+                            or b.get("text") in (t("cfg.tolist"), t("nf.tolist"))
                             or b.get("text") in (t("menu.back"), t("page.tocard"))
                             for row in out for b in row):
         out.append([{"text": t("menu.back"), "callback_data": "menu_back"}])
@@ -351,6 +385,188 @@ def answer_page(key, qid, reply):
             [[{"text": t("page.tocard"), "callback_data": "topic:%s:%s" % (name, slug)}]])
 
 
+# --- a new feature ------------------------------------------------------------
+#
+# The terminal starts a feature with a picture (pick_start in picker.sh): the
+# open issues, one's own first, each with its labels and what blocks it, or a
+# name typed instead; then the branch name the issue suggests, editable, and
+# for a name whether it gets an issue. The chat has none of that: with no
+# terminal sclaude asks only for a name. The page draws the same choice, from
+# the same code (issue_list.py), and starts sclaude with the answers given
+# (`sclaude new --issue …`), so nothing of it is asked again in the chat.
+#
+#   newfeat:<repo>                       the list; nfl:<repo> fetches it anew
+#   nfi:<repo>:<issue>                   one issue: its blockers, the branch
+#   nfn:<repo>:<1|0>                     a name, with an issue made for it or not
+#   nfgo:<repo>:<issue>:<1|0|->:<text>   start; the text is the field's
+
+# How long the list fetched from GitHub is reused: the issue's screen and the
+# start read it again within seconds.
+ISSUES_TTL = 120
+# Buttons on the list; the rest are counted.
+ISSUES_SHOWN = 30
+_ISSUES = {}
+
+
+def issue_list():
+    return telegramd.sclaude_module("issue_list")
+
+
+def open_issues(name, fresh=False):
+    """(the repository's open issues in the picker's order, whether they were
+    fetched just now); None for the issues when GitHub cannot say."""
+    at, rows = _ISSUES.get(name, (0, None))
+    if fresh or rows is None or time.time() - at > ISSUES_TTL:
+        repo = telegramd.repo_path(name)
+        slug = telegramd.gh_slug(repo) if repo else ""
+        rows = unlocked(issue_list().fetch, slug) if slug else None
+        if rows is None:
+            # GitHub did not answer: nothing is kept, and the next press asks
+            # again rather than calling every issue closed for two minutes.
+            _ISSUES.pop(name, None)
+            return None, True
+        _ISSUES[name] = (time.time(), rows)
+        return rows, True
+    return rows, False
+
+
+def new_list(name, fresh=False):
+    """The first screen: a name, or one of the open issues."""
+    if not telegramd.repo_path(name):
+        return t("repo.norepos"), telegramd.repos_keyboard()
+    issues, _ = open_issues(name, fresh)
+    text = t("nf.title", repo=telegramd.escape(name))
+    if issues is None:
+        text += t("nf.noanswer")
+    elif not issues:
+        text += t("nf.noissues")
+    issues = issues or []
+    rows = [[{"text": t("nf.byname"), "hint": t("nf.bynamehint"),
+              "callback_data": "nfn:%s:1" % name}]]
+    section = None
+    for it in issues[:ISSUES_SHOWN]:
+        want = "nf.mine" if it["mine"] else "nf.other"
+        if want != section:
+            section = want
+            rows.append([{"text": t(want), "style": "caption"}])
+        # The blockers go before the labels: they are the one fact here that
+        # changes whether to pick the issue at all.
+        hint = " · ".join(x for x in (
+            t("nf.blockedby", by=it["blocked"]) if it["blocked"] else "",
+            it["labels"].replace(",", ", ")) if x)
+        b = {"text": "#%d %s" % (it["number"], it["title"]),
+             "callback_data": "nfi:%s:%d" % (name, it["number"])}
+        if hint:
+            b["hint"] = hint
+        rows.append([b])
+    if len(issues) > ISSUES_SHOWN:
+        text += t("nf.more", n=len(issues) - ISSUES_SHOWN)
+    rows.append([{"text": t("repo.refresh"), "callback_data": "nfl:" + name},
+                 {"text": t("cfg.torepo"), "callback_data": "repo:" + name}])
+    rows.append([{"text": t("menu.back"), "callback_data": "menu_back"}])
+    return text, rows
+
+
+def noconfig_note(name):
+    """A repository with no .sclaude/config.json: the one question sclaude
+    still asks after a start from here — whether to write it — named before
+    the start, since it comes in the chat."""
+    repo = telegramd.repo_path(name)
+    return ("\n\n" + t("nf.noconfig")
+            if repo and not os.path.exists(telegramd.config_path(repo)) else "")
+
+
+def new_issue(bot, name, number, error="", typed=""):
+    """One issue: what blocks it, and the branch name it suggests, in a field
+    to correct before the start."""
+    issues, fetched = open_issues(name)
+    it = next((i for i in issues or [] if str(i["number"]) == number), None)
+    if not it and not fetched:
+        # Opened in the last two minutes, perhaps: the list kept is older.
+        issues = open_issues(name, fresh=True)[0]
+        it = next((i for i in issues or [] if str(i["number"]) == number), None)
+    if issues is None:
+        # GitHub did not answer: that says nothing about the issue.
+        bot.screen = (t("nf.noanswer").strip(), [
+            [{"text": t("repo.refresh"), "callback_data": "nfi:%s:%s" % (name, number)}],
+            [{"text": t("nf.tolist"), "callback_data": "newfeat:" + name}]])
+        return
+    if not it:
+        text, rows = new_list(name)
+        bot.screen = (t("nf.gone", n=telegramd.escape(number)) + "\n\n" + text, rows)
+        return
+    esc = telegramd.escape
+    text = t("nf.issue", n=it["number"], title=esc(it["title"]))
+    if it["labels"]:
+        text += "\n<i>%s</i>" % esc(it["labels"].replace(",", ", "))
+    if it["blockers"]:
+        text += "\n\n" + t("nf.blocked") + "".join(
+            "\n  #%s  %s" % (n, esc(title)) for n, title in it["blockers"])
+        text += "\n" + t("nf.blockednote")
+    text += "\n\n" + t("nf.branchnote") + noconfig_note(name)
+    if error:
+        text = "⚠️ " + error + "\n\n" + text
+    bot.screen = (text, [[{"text": t("nf.tolist"), "callback_data": "newfeat:" + name}]])
+    bot.input = {"name": "nf-branch:%s:%s" % (name, number),
+                 "value": typed or issue_list().suggest(it["number"], it["title"]),
+                 "placeholder": t("nf.branch"),
+                 "button": t("nf.startanyway") if it["blockers"] else t("nf.start"),
+                 "action": "nfgo:%s:%d:-:" % (name, it["number"])}
+
+
+def new_named(bot, name, create, error="", typed=""):
+    """A feature by name, and whether GitHub gets an issue for it — the
+    question sclaude asks at the terminal, answered here."""
+    text = t("nf.named", repo=telegramd.escape(name)) + noconfig_note(name)
+    if error:
+        text = "⚠️ " + error + "\n\n" + text
+    bot.screen = (text, [
+        [{"text": ("☑ " if create else "☐ ") + t("nf.createissue"),
+          "hint": t("nf.createyes" if create else "nf.createno"),
+          "callback_data": "nfn:%s:%d" % (name, 0 if create else 1)}],
+        [{"text": t("nf.tolist"), "callback_data": "newfeat:" + name}]])
+    # The same name for both states: the page keeps what was typed when the
+    # box is ticked.
+    bot.input = {"name": "nf-name:" + name, "value": typed, "placeholder": t("nf.name"),
+                 "button": t("nf.start"),
+                 "action": "nfgo:%s::%d:" % (name, 1 if create else 0)}
+
+
+def new_start(bot, rest):
+    """Start the feature with what the screens chose; a screen saying what
+    is wrong instead, when sclaude would only die on it."""
+    name, issue, create, typed = (rest.split(":", 3) + ["", "", "", ""])[:4]
+    typed = " ".join(typed.split())
+    repo = telegramd.repo_path(name)
+    if not repo:
+        bot.screen = (t("repo.norepos"), telegramd.repos_keyboard())
+        return
+    again = ((lambda error: new_issue(bot, name, issue, error, typed)) if issue
+             else (lambda error: new_named(bot, name, create != "0", error, typed)))
+    slug = issue_list().slugify(typed)
+    if not slug:
+        again(t("nf.badname"))
+        return
+    # What cmd_new refuses, said here: it dies with no one to read it.
+    exists = subprocess.run(["git", "-C", repo, "show-ref", "--verify", "--quiet",
+                             "refs/heads/feat/" + slug]).returncode == 0
+    if exists or os.path.exists(telegramd.feature_wt(repo, slug)):
+        again(t("nf.exists", slug=telegramd.escape(slug)))
+        return
+    if issue:
+        # The blockers were on the screen the start was pressed on.
+        args = ["new", "--issue", issue, "--blocked-ok", "--", typed]
+    else:
+        args = ["new", "--create-issue" if create != "0" else "--no-issue", "--", typed]
+    thread = telegramd.new_feature_topic(bot, name)
+    telegramd.start_sclaude(repo, args)
+    telegramd.log.info("the menu page started %s in %s", " ".join(args), name)
+    done = t("nf.startedtopic" if thread else "nf.started",
+             slug=telegramd.escape(slug), repo=telegramd.escape(name))
+    bot.screen = (done, [])
+    bot.done = done
+
+
 def code_screen(home):
     """code-server's screen, opening on the page's feature when it has one."""
     feature = home_feature(home)
@@ -458,6 +674,28 @@ def press(bot, user, action, context, now, home=""):
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         bot.screen = (t("svc.restarting"), [])
         return ""
+    if action.startswith(("newfeat:", "nfl:")):
+        # The chat starts sclaude at once and it asks for a name; the page
+        # offers the issues first, as the terminal does.
+        bot.screen = new_list(action.split(":", 1)[1], fresh=action.startswith("nfl:"))
+        return ""
+    if action.startswith("nfi:"):
+        _, name, number = action.split(":", 2)
+        new_issue(bot, name, number)
+        return ""
+    if action.startswith("nfn:"):
+        _, name, create = action.split(":", 2)
+        new_named(bot, name, create != "0")
+        return ""
+    if action.startswith("nfgo:"):
+        new_start(bot, action[5:])
+        return ""
+    if action.startswith("cfgset:"):
+        # What the chat redraws, and the line the chat keeps of it.
+        text, rows, bot.done = telegramd.config_press(
+            action, lambda cmd, timeout=25: unlocked(telegramd.run, cmd, timeout))
+        bot.screen = (text, rows)
+        return ""
     if action.startswith("doc:"):
         # The chat sends a section as a message of its own; the page shows it
         # as a screen, with the way back to the list.
@@ -536,8 +774,8 @@ def trace(token, chat_id, action, label, done, context, now):
         text = (done if len(done) <= TRACE_MAX and not action.startswith(TRACE_LABEL)
                 else telegramd.escape(label))
         # A new feature's line goes where its questions will.
-        if action.startswith("newfeat:"):
-            thread = telegramd.new_topic_of(action.split(":", 1)[1])
+        if action.startswith("nfgo:"):
+            thread = telegramd.new_topic_of(action.split(":", 2)[1])
     if not text:
         return
     bot = telegramd.Bot(token, chat_id)
@@ -552,7 +790,7 @@ def trace(token, chat_id, action, label, done, context, now):
 
 def answer(token, chat_id, user, action, context, now, label="", home=""):
     """The page's one call: the screen after the press, as JSON-ready data."""
-    with _LOCK:
+    with held():
         telegramd.remember_lang(user)
         bot = PageBot(token, chat_id)
         if not home and not action:
@@ -581,6 +819,7 @@ def answer(token, chat_id, user, action, context, now, label="", home=""):
             "text": text,
             "rows": rows_for_page(rows, main) if text is not None else None,
             "time": action == "awake_until" or text == t("awake.badtimepage"),
+            "input": bot.input,
             "notes": bot.notes,
             "context": context,
             "close": bot.close,

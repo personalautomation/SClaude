@@ -191,30 +191,18 @@ say() { ask_note "$*"; ask_feed say "$*"; echo "$*"; }
 # --- commands ----------------------------------------------------------------
 
 slugify() {
-  echo "$1" \
+  # printf rather than echo: echo takes a name that is -n or -e for its own
+  # option and prints nothing.
+  printf '%s\n' "$1" \
     | tr '[:upper:]' '[:lower:]' \
     | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-\+//' -e 's/-\+$//'
 }
 
 # A suggested branch name from an issue: the number and the title's first words,
-# all together no longer than 40 characters. We trim on word boundaries — a word
-# cut off in the middle reads worse than one word fewer. A title that is entirely
-# non-Latin disappears after slugify; the number alone is then left.
+# all together no longer than 40 characters. issue_list.py makes it, as it does
+# for the bot's Mini App, which offers the same name.
 suggest_slug() {
-  local number="$1" title="$2" slug="" word n=0
-  for word in $(slugify "$title" | tr '-' ' '); do
-    [[ $n -ge 4 ]] && break
-    [[ $(( ${#number} + 1 + ${#slug} + 1 + ${#word} )) -gt 40 ]] && break
-    slug="${slug:+$slug-}$word"
-    n=$((n + 1))
-  done
-  # A trailing preposition or article adds nothing: "change-an-account-how" reads
-  # worse than "change-an-account".
-  while [[ "$slug" == *-* ]] \
-     && [[ "$slug" =~ -(a|an|the|to|of|for|on|in|by|with|and|how|our|this)$ ]]; do
-    slug="${slug%-*}"
-  done
-  [[ -n "$slug" ]] && echo "$number-$slug" || echo "issue-$number"
+  python3 "$LIB/issue_list.py" suggest "$1" "$2"
 }
 
 # The cycle's start: a choice between a name thought up and an open issue.
@@ -224,6 +212,44 @@ start_feature() {
     manual) cmd_new ;;
     issue*) cmd_new "" "$(cut -f2 <<< "$choice")" "$(cut -f3 <<< "$choice")" ;;
   esac
+}
+
+# `sclaude new [options] [name]`: with no name, the picker. The options answer
+# ahead what cmd_new would ask, for a start made where its questions have no
+# one to ask — the bot's Mini App, which has already shown the person the issue,
+# its blockers and the branch name:
+#
+#   --issue <n>       start from issue n; the name is then the branch's
+#   --create-issue    a feature by name gets an issue, unasked
+#   --no-issue        it gets none, unasked
+#   --blocked-ok      start despite open blockers: they were shown
+#   --                the name follows, even one that starts with a dash
+new_from_args() {
+  local name="" issue=""
+  NEW_CREATE_ISSUE="" NEW_BLOCKED_OK=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --issue)        [[ "${2:-}" =~ ^[0-9]+$ ]] || die "--issue takes a number"
+                      issue="$2"; shift ;;
+      --create-issue) NEW_CREATE_ISSUE=yes ;;
+      --no-issue)     NEW_CREATE_ISSUE=no ;;
+      --blocked-ok)   NEW_BLOCKED_OK=1 ;;
+      # The rest is the name, whatever it starts with.
+      --)             shift; name="${*:-}"; break ;;
+      -*)             die "sclaude new: unknown option $1" ;;
+      # Words not quoted together are still one name: `sclaude new dark mode`.
+      *)              name="${name:+$name }$1" ;;
+    esac
+    shift
+  done
+  if [[ -n "$issue" && -z "$name" ]]; then
+    # The name is suggested from the issue's title, as the picker suggests it.
+    cmd_new "" "$issue" "$(gh issue view "$issue" -R "$(gh_repo)" --json title -q .title 2>/dev/null)"
+  elif [[ -n "$name" ]]; then
+    cmd_new "$name" "$issue"
+  else
+    start_feature
+  fi
 }
 
 cmd_new() {
@@ -246,7 +272,7 @@ cmd_new() {
 
   # Before the branch name is asked: a feature that is not going to start
   # should not cost the person a name first.
-  if [[ -n "$issue" ]] && ! issue_blockers_gate "$issue"; then
+  if [[ -n "$issue" && -z "${NEW_BLOCKED_OK:-}" ]] && ! issue_blockers_gate "$issue"; then
     info "Cancelled."
     return 0
   fi
@@ -286,7 +312,11 @@ cmd_new() {
   # before the worktree, so that a refusal leaves nothing on disk.
   if [[ -z "$issue" ]]; then
     echo ""
-    issue="$(issue_offer "$name")" || issue=""
+    case "${NEW_CREATE_ISSUE:-}" in
+      yes) issue="$(issue_create "$name")" || issue="" ;;
+      no)  issue="" ;;
+      *)   issue="$(issue_offer "$name")" || issue="" ;;
+    esac
     [[ -n "$issue" ]] && info "  issue #$issue created for this feature"
   fi
 
@@ -1598,7 +1628,11 @@ main() {
   # and all the worktrees. It is also the only one: a question is found even
   # before the feature is created, and the bot looks exactly here without knowing
   # about its tree.
-  case "${1:-}" in
+  # `config set` is the bot's, from a press: a report, like `status`. The
+  # screen `config` alone is a conversation.
+  local kind="${1:-}"
+  [[ "$kind" == config && "${2:-}" == set ]] && kind="config set"
+  case "$kind" in
     # _handoff is the timer's: no update of the orchestrator from inside a
     # five-minute sweep, and nobody to ask anything.
     #
@@ -1608,7 +1642,7 @@ main() {
     # answer nobody gives. Killed by its caller's timeout, it lived on as an
     # orphan polling the channel once a second, and held off every update of
     # instruments as "another sclaude" for as long as it lived.
-    status|ls|dev|news|checks|doctor|_handoff|-h|--help|help|-*) unset ASK_DIR ;;
+    status|ls|dev|news|checks|doctor|"config set"|_handoff|-h|--help|help|-*) unset ASK_DIR ;;
     *)
       # The same line decides what is recorded (terminal.sh): a conversation
       # is worth reading back, a report is not. First, so the record holds
@@ -1637,10 +1671,10 @@ main() {
   case "${1:-}" in
     # Once a month the deferred friction is offered first: see deferred.sh.
     "")            deferred_offer; cmd_menu ;;
-    new)           shift; [[ -n "${1:-}" ]] && cmd_new "$1" || start_feature ;;
+    new)           shift; new_from_args "$@" ;;
     status|ls)     cmd_status ;;
     doctor)        doctor_run ;;
-    config)        cmd_config ;;
+    config)        shift; cmd_config "$@" ;;
     dev)           shift; cmd_dev "$@" ;;
     # The list of actions on a feature. In the terminal people arrive here from
     # the menu, by the checkbox; from a phone there is no checkbox — there is

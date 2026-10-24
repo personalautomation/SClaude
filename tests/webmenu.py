@@ -57,6 +57,7 @@ telegramd.run = lambda cmd, timeout=25: ""
 telegramd.status_text = lambda: "<b>status</b>"
 telegramd.gate_origin = lambda *a: ""
 SPAWNED = []
+REAL_POPEN = webmenu.subprocess.Popen
 webmenu.subprocess.Popen = lambda args, **kw: SPAWNED.append(args)
 USER = {"id": 1, "language_code": "en"}
 
@@ -425,7 +426,7 @@ finally:
 # ON_PAGE when it resumes.
 import threading  # noqa: E402
 got_in = []
-with webmenu._LOCK:
+with webmenu.held():
     telegramd.ON_PAGE = True
     other = threading.Thread(target=lambda: webmenu._LOCK.acquire() and (
         got_in.append(1), setattr(telegramd, "ON_PAGE", False), webmenu._LOCK.release()))
@@ -436,7 +437,168 @@ with webmenu._LOCK:
     check("and the waiting call is still on the page", telegramd.ON_PAGE, True)
 telegramd.ON_PAGE = False
 
+# Only the call that holds the lock lets it go: another thread's unlocked()
+# runs its function with the lock still held.
+seen = []
+with webmenu.held():
+    stranger = threading.Thread(target=lambda: webmenu.unlocked(
+        lambda: seen.append(webmenu._LOCK.locked())))
+    stranger.start()
+    stranger.join(2)
+check("a thread that does not hold the lock does not release it", seen, [True])
+
 check("the screens are drawn for the page only while it asks", telegramd.ON_PAGE, False)
+
+# --- a new feature: the terminal's picker, on the page -------------------------
+import subprocess  # noqa: E402
+# git is run for real here: the branch a start would collide with.
+subprocess.Popen = REAL_POPEN
+shop = os.path.join(box, "shop")
+os.makedirs(shop)
+subprocess.run(["git", "init", "-q", shop], check=True)
+subprocess.run(["git", "-C", shop, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q",
+                "--allow-empty", "-m", "x"], check=True)
+subprocess.run(["git", "-C", shop, "branch", "feat/42-taken"], check=True)
+ISSUES = [
+    {"mine": True, "number": 61, "title": "Alpha <b>bold</b>", "labels": "Dev,ui",
+     "blocked": "#37", "blockers": [(37, "the base")]},
+    {"mine": False, "number": 59, "title": "Gamma", "labels": "", "blocked": "", "blockers": []},
+]
+fetched = []
+lister = webmenu.issue_list()
+saved_nf = dict(repo_path=telegramd.repo_path, gh_slug=telegramd.gh_slug,
+                start_sclaude=telegramd.start_sclaude, new_feature_topic=telegramd.new_feature_topic,
+                new_topic_of=telegramd.new_topic_of,
+                run=telegramd.run, fetch=lister.fetch)
+started = []
+telegramd.repo_path = lambda name: shop if name == "shop" else ""
+telegramd.gh_slug = lambda repo: "o/shop"
+telegramd.start_sclaude = lambda repo, args: started.append((repo, args))
+telegramd.new_feature_topic = lambda bot, name: 77
+telegramd.new_topic_of = lambda name: 77
+lister.fetch = lambda slug: fetched.append(slug) or [dict(i) for i in ISSUES]
+webmenu._ISSUES.clear()
+try:
+    out = press("newfeat:shop")
+    flat = [b for row in out["rows"] for b in row]
+    check("the list is GitHub's", fetched, ["o/shop"])
+    check("a name first, then mine, then the rest",
+          [b["text"] for b in flat][:5],
+          [t("nf.byname"), t("nf.mine"), "#61 Alpha <b>bold</b>", t("nf.other"), "#59 Gamma"])
+    check("the blockers before the labels", flat[2].get("hint"),
+          t("nf.blockedby", by="#37") + " · Dev, ui")
+    check("no field on the list", out["input"], None)
+    check("showing the list leaves nothing in the chat", sent(), [])
+    press("nfi:shop:61")
+    check("the issue screen reuses the list", fetched, ["o/shop"])
+    out = press("nfi:shop:61")
+    check_true("the blockers are named", "#37  the base" in out["text"])
+    check_true("the title is escaped", "&lt;b&gt;bold" in out["text"])
+    check("the branch is suggested", out["input"]["value"], "61-alpha-b-bold-b")
+    check("a blocked one starts anyway", out["input"]["button"], t("nf.startanyway"))
+    out = press(out["input"]["action"] + "61-alpha")
+    check("started from the issue, the blockers seen",
+          started, [(shop, ["new", "--issue", "61", "--blocked-ok", "--", "61-alpha"])])
+    check("the page says so", out["text"],
+          t("nf.startedtopic", slug="61-alpha", repo="shop"))
+    check("and the chat keeps it in the new topic", sent(), [("📱 " + out["text"], 77)])
+    del started[:]
+    out = press("nfn:shop:1")
+    check("a name gets an issue by default", out["input"]["action"], "nfgo:shop::1:")
+    out = press("nfn:shop:0")
+    check("the box unticked", out["input"]["action"], "nfgo:shop::0:")
+    check("under the same name, so the text stays", out["input"]["name"], "nf-name:shop")
+    out = press("nfgo:shop::1:Кириллица")
+    check("a name with no Latin letter is refused", started, [])
+    check_true("and says why", t("nf.badname") in out["text"])
+    check("keeping what was typed", out["input"]["value"], "Кириллица")
+    out = press("nfgo:shop:59:-:42-taken")
+    check("an existing branch is refused before sclaude", started, [])
+    check_true("by name", "42-taken" in out["text"] and out["input"] is not None)
+    press("nfgo:shop::0:Dark  mode")
+    check("a name, without an issue", started, [(shop, ["new", "--no-issue", "--", "Dark mode"])])
+    del started[:]
+    press("nfgo:shop::1:Dark mode")
+    check("a name, with an issue", started, [(shop, ["new", "--create-issue", "--", "Dark mode"])])
+    del started[:]
+    press("nfgo:shop::0:-dash")
+    check("a name with a dash first is still a name", started,
+          [(shop, ["new", "--no-issue", "--", "-dash"])])
+
+    # GitHub not answering is not "no issues" for two minutes.
+    webmenu._ISSUES.clear()
+    lister.fetch = lambda slug: None
+    check("a failed fetch shows none", webmenu.open_issues("shop"), (None, True))
+    out = press("nfi:shop:61")
+    check("and an issue is not called closed for it", out["text"], t("nf.noanswer").strip())
+    out = press("newfeat:shop")
+    check_true("the list says GitHub did not answer", t("nf.noanswer") in out["text"])
+    lister.fetch = lambda slug: fetched.append(slug) or [dict(i) for i in ISSUES]
+    check("and is not kept", [i["number"] for i in webmenu.open_issues("shop")[0]], [61, 59])
+    del fetched[:]
+    webmenu._ISSUES.clear()
+    press("nfi:shop:99")
+    check("an issue missing from a list fetched for this press is not fetched again",
+          fetched, ["o/shop"])
+
+    # --- the project's config ------------------------------------------------
+    # With no file a choice would write one of one key, which `sclaude new`
+    # would take for the project's whole config.
+    out = press("cfg:shop:qa")
+    check("no file, no choice", [b["callback_data"] for row in out["rows"] for b in row],
+          ["cfg:shop"])
+    check_true("and why", t("cfg.writefirst") in out["text"])
+    out = press("nfn:shop:1")
+    check_true("a start without a config names the question still to come",
+               t("nf.noconfig") in out["text"])
+    os.makedirs(os.path.join(shop, ".sclaude"))
+    with open(os.path.join(shop, ".sclaude", "config.json"), "w") as fh:
+        json.dump({"review": "local", "commands": {"lint": "npm run lint"}}, fh)
+    out = press("cfg:shop")
+    labels = [b["text"] for row in out["rows"] for b in row]
+    check("the sections with choices first", labels[:3],
+          ["⚙️ review · local", "⚙️ qa · github (not set)", "⚙️ merge · both (not set)"])
+    check_true("every section of the example", any(x.startswith("commands · lint") for x in labels))
+    out = press("cfg:shop:review")
+    check("the one in force is marked", [b["text"] for row in out["rows"] for b in row][:3],
+          ["github", "✓ local", "off"])
+    check_true("the explanation is sclaude's", "where the pull request" in out["text"])
+    ran = []
+    telegramd.run = lambda cmd, timeout=25: ran.append(cmd) or "✓ review: github\nrc=0"
+    out = press("cfgset:shop:review:github")
+    check("set through sclaude, so what it implies is done",
+          ran, ["cd %s && sclaude config set review github 2>&1; echo \"rc=$?\"" % shop])
+    check("the chat keeps the line", sent(), [("📱 " + t("cfg.set", section="review", value="github"), None)])
+    del ran[:]
+    out = press("cfgset:shop:review:local")
+    check("the value in force is not set again", ran, [])
+    check("nor traced", sent(), [])
+    # Written, and the Actions after it cut short: set, and said so.
+    def partly(cmd, timeout=25):
+        with open(os.path.join(shop, ".sclaude", "config.json")) as fh:
+            data = json.load(fh)
+        data["qa"] = "auto"
+        with open(os.path.join(shop, ".sclaude", "config.json"), "w") as fh:
+            json.dump(data, fh)
+        return "the command timed out"
+    telegramd.run = partly
+    out = press("cfgset:shop:qa:auto")
+    check_true("a value written is not called unchanged",
+               t("cfg.setpartly", section="qa", value="auto") in out["text"])
+    telegramd.run = lambda cmd, timeout=25: ran.append(cmd) or "rc=0"
+    out = press("cfgset:shop:commands:x")
+    check("a structure is not set from here", ran, [])
+    out = press("cfg:shop:commands")
+    check_true("a structure is shown", "npm run lint" in out["text"])
+    check("with only the way back", [b["callback_data"] for row in out["rows"] for b in row],
+          ["cfg:shop"])
+finally:
+    for n, f in saved_nf.items():
+        if n == "fetch":
+            lister.fetch = f
+        else:
+            setattr(telegramd, n, f)
+    subprocess.Popen = lambda args, **kw: SPAWNED.append(args)
 
 if failures:
     print("webmenu: FAILED: %d" % len(failures))

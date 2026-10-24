@@ -22,48 +22,13 @@ gh_repo() {
 #
 #   <mine?>\t<number>\t<title>\t<labels, comma-separated>\t<open blockers>
 #
-# "Mine?" is 1 when the issue is assigned to whoever gh is authenticated as. We
-# ask gh for the login rather than writing it as a constant: it has already
-# changed once in this project.
-#
-# The open blockers are "#68 #70", or empty: an issue that cannot start yet is
-# marked in the list rather than discovered after its worktree exists (see
-# blockers.py).
+# issue_list.py makes them: the bot's Mini App offers the same list.
 fetch_issues() {
-  local me json
   command -v gh >/dev/null 2>&1 || return 1
-  me="$(gh api user --jq .login 2>/dev/null)" || me=""
   # -R rather than the current directory: the issues live in the feature's
   # repository, while sclaude is launched both from the main worktree and from a
   # feature's worktree.
-  json="$(gh issue list -R "$(gh_repo)" --state open --limit 50 \
-            --json number,title,labels,assignees,blockedBy 2>/dev/null)" || return 1
-  # The data goes to python as an environment variable rather than through
-  # stdin: its stdin is already taken by the program itself (`python3 -`).
-  ISSUES_JSON="$json" python3 - "$me" "$(dirname "${BASH_SOURCE[0]}")" <<'PYFETCH'
-import json, os, sys
-me = sys.argv[1]
-sys.path.insert(0, sys.argv[2])
-from blockers import open_blockers
-try:
-    issues = json.loads(os.environ['ISSUES_JSON'])
-except ValueError:
-    sys.exit(1)
-rows = []
-for it in issues:
-    mine = any(a.get('login') == me for a in it.get('assignees') or [])
-    labels = ','.join(l['name'] for l in it.get('labels') or [])
-    title = ' '.join((it.get('title') or '').split())
-    # One's own issues on top, and within a block the freshest first.
-    blocked = ' '.join('#%s' % n for n, _ in open_blockers(it))
-    rows.append((0 if mine else 1, -it['number'],
-                 '%d\t%d\t%s\t%s\t%s'
-                 % (1 if mine else 0, it['number'], title, labels, blocked)))
-if not rows:
-    sys.exit(1)
-for _, _, row in sorted(rows):
-    print(row)
-PYFETCH
+  python3 "$(dirname "${BASH_SOURCE[0]}")/issue_list.py" rows "$(gh_repo)"
 }
 
 # One key. An arrow arrives as ESC [ A — we gather the tail and return a

@@ -631,9 +631,11 @@ purpose stays repeated. The question that offers such a merge says so,
 rather than offering a session.
 
 The sync is offered the same way at a step's start and from the menu
-(`sync_offer`), and `sync_gate` fetches before it notes where origin's branch
-stands, so that a fetch which only caught up with a push made elsewhere does
-not count as the sync moving it.
+(`sync_offer`). `sync_gate` holds origin's branch against the head the
+hand-off was made on (`handoff` in the state): commits it lacks — the sync's,
+or ones that came by other hands, a push from another machine, GitHub's
+"Update branch" — are unchecked code, and the hand-off goes back for them,
+said in those words. A ref here that only lags behind that head is not.
 
 The menu's own "Sync with main" (`cmd_sync`), there at every step, uses the
 same check: its line says how many files would conflict, and a yes to a merge

@@ -112,7 +112,8 @@ deferred_only_revs() {
 # Two copies of one log as one: main's rows as they are, then each row of the
 # branch's copy that main does not hold as many times. A row may come back on
 # purpose (the monthly review counts the repeats), so it is counted, not
-# looked up. Used by deferred_to_main and by the sync with main (sync.sh).
+# looked up. Used by deferred_to_main; the sync with main (sync_deferred)
+# subtracts only main's additions instead, with deferred_minus.
 # The first file is told apart by its name, not by NR == FNR: an empty one
 # would make every row of the second count as its own.
 #

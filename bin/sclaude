@@ -1139,7 +1139,8 @@ cmd_done() {
   # sclaude's own code changed while the retrospective ran — it may change it,
   # and other sessions do. This process carries on in the old bash while every
   # Python helper it calls is read anew from disk, so the clean-up goes on in
-  # a run of its own. The retrospective is not held again there (run_retro).
+  # a run of its own. With nothing run in between, that run asks before it
+  # goes back into the retrospective (run_retro).
   if [[ -n "${RETRO_INSTRUMENTS_CHANGED:-}" ]]; then
     echo ""
     say "${BOLD}sclaude's own code changed under this run; the clean-up goes on in a fresh one: $SELF done $slug${OFF}"
@@ -1373,6 +1374,9 @@ cmd_sync() {
   if [[ -n "$under_way" ]] || sync_broken_off "$wt/.sclaude/local/feature/state.json"; then
     local resumed=0
     sync_gate "$wt" "$slug" "$pr" nofetch || resumed=$?
+    # 5, a hand-off taken back over commits from elsewhere (said there), is
+    # no merge: the sync below still runs.
+    [[ "$resumed" -eq 5 ]] && resumed=0
     [[ "$resumed" -eq 3 ]] && echo "${GREEN}Merged — $branch now carries everything from main.${OFF}"
     [[ "$resumed" -eq 0 ]] || return 0
     behind="$(git -C "$REPO" rev-list --count "$branch..origin/main" 2>/dev/null)" || behind="?"

@@ -1664,7 +1664,7 @@ remind_prod() {
       local resynced=0
       sync_gate "$wt" "$slug" "$pr" || resynced=$?
       [[ "$resynced" -eq 1 ]] && return 0
-      if [[ "$resynced" -eq 3 ]]; then
+      if [[ "$resynced" -eq 3 || "$resynced" -eq 5 ]]; then
         remind_prod "$wt" "$slug"
         return $?
       fi

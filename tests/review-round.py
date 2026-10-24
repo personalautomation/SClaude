@@ -349,6 +349,7 @@ session_watch_stop
         # to it says "resumed".
         check("start-told " + kind, 'ask_feed say "$(phase_line %s' % kind in src
               or kind == "started friction" and 'echo resumed || echo started)" friction' in src
+              or kind == "started retro" and 'echo resumed || echo started)" retro' in src
               or kind == "started epilogue" and 'ask_feed say "$(phase_line "$verb" epilogue)' in src
               and "&& verb=resumed" in src, True)
     # And every close goes through session_closed, with no headline of its own.

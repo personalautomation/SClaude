@@ -81,7 +81,7 @@ code exists is what shift-left asks for.
 | pr | a pull request that exists on GitHub |
 | review | the tests passing on the preview; the pull request stays open for QA. No session at all when the automatic review found nothing |
 | epilogue | the session actually ran; one that never started is offered again from the menu |
-| retro | its session finished; one that was cut off is offered again |
+| retro | its session finished. A later `sclaude done` goes back into the same conversation, told what ran since — a rollback, another round — and asked to check its report against it; with nothing run since, it asks first |
 
 Ctrl-C, a usage limit or a closed laptop closes nothing: sclaude remembers where
 each feature is, and the conversation resumes. An interrupted run is never

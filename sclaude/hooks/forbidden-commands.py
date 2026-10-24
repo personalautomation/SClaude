@@ -767,6 +767,11 @@ OWN_PUSH_REASON = ("sclaude's checkout is public and this session works from a p
                    "project: commit there, and the person pushes after reading the commits")
 
 
+UNKNOWN_PUSH_DIR = ("where this push runs cannot be told, and it may be sclaude's own "
+                    "checkout, which this session may not push: run it with a plain "
+                    "path (git -C <dir> push)")
+
+
 def toplevel(where):
     """The top of the work tree a directory is in, or None."""
     try:
@@ -879,7 +884,9 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
     # A directory that cannot be told may be the checkout, and is refused: the
     # session's own pushes have nothing to wait for, the product's step 3
     # pushes its branch later.
-    if NO_OWN_PUSH and (where is None or toplevel(where) == OWN_CHECKOUT):
+    if NO_OWN_PUSH and where is None:
+        return UNKNOWN_PUSH_DIR
+    if NO_OWN_PUSH and toplevel(where) == OWN_CHECKOUT:
         return OWN_PUSH_REASON
     # The same for sclaude's own checkout, which goes to main without a PR.
     if own_push(where, remote[0] if remote else "origin", redirected):

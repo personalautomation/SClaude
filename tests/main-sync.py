@@ -351,9 +351,10 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(os.path.join(wt, LOG)) as fh:
         check("removed: the decided row stays out", fh.read(), "row1\nrow-main\nrow-new\n")
     # A row the branch repeats on purpose stays repeated, and a row both sides
-    # added — deferred_to_main sent it to main — comes once.
+    # added — deferred_to_main sent it to main — comes once. Main's copy ends
+    # without a newline, and its last row still stays a row of its own.
     seed, wt = setup(tmp, "repeat")
-    commit(seed, LOG, "row1\nsent\nrow-main\n", "main's rows")
+    commit(seed, LOG, "row1\nsent\nrow-main", "main's rows")
     git(seed, "push", "-q", "origin", "HEAD:main")
     commit(wt, LOG, "row1\nsent\nrow1\n", "the branch repeats row1")
     git(wt, "push", "-q")
@@ -374,6 +375,14 @@ with tempfile.TemporaryDirectory() as tmp:
     git(seed, "push", "-q", "origin", "HEAD:main")
     commit(wt, "app.txt", "one\nfeature\nthree\n", "feature's change")
     git(wt, "push", "-q")
+    def handed_over(wt, rev):
+        path = os.path.join(wt, ".sclaude/local/feature/state.json")
+        data = json.load(open(path)) if os.path.exists(path) else {}
+        data["handoff"] = git(wt, "rev-parse", rev)
+        with open(path, "w") as fh:
+            json.dump(data, fh)
+
+    handed_over(wt, "HEAD")
     pushed_dirty = ("git merge -q origin/main >/dev/null 2>&1; printf 'one\\nboth\\nthree\\n' > app.txt; "
                     "git add app.txt; git commit -q --no-edit; git push -q origin feat/9-x; "
                     "echo stray >> app.txt")
@@ -382,10 +391,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("gate: stops", rc, 1)
     check("gate: the hand-off taken back", "WITHDRAWN 7" in out, True)
     git(wt, "checkout", "-q", "--", "app.txt")
+    handed_over(wt, "origin/feat/9-x")
     rc, out = run(wt, 'sync_withdraw() { echo "WITHDRAWN $2"; }\nsync_gate "$PWD" 9-x 7', **env)
     check("gate: clean, nothing taken back", (rc, "WITHDRAWN" in out), (0, False))
-    # origin's branch moved on another machine, and the fetch brings the ref
-    # up to date: nothing was synced, and nothing is taken back.
+    # origin's branch moved on another machine: nothing was synced, but its
+    # commits are unchecked code all the same, and the hand-off goes back.
     other = os.path.join(tmp, "gate-other")
     subprocess.run(["git", "clone", "-q", "-b", "feat/9-x", os.path.join(tmp, "gate-origin.git"), other],
                    check=True, capture_output=True)
@@ -393,8 +403,14 @@ with tempfile.TemporaryDirectory() as tmp:
     git(other, "config", "user.name", "t")
     commit(other, "elsewhere.txt", "x\n", "pushed from elsewhere")
     git(other, "push", "-q")
-    rc, out = run(wt, 'sync_withdraw() { echo "WITHDRAWN $2"; }\nsync_gate "$PWD" 9-x 7', **env)
-    check("gate: a fetch alone takes nothing back", (rc, "WITHDRAWN" in out), (0, False))
+    # Fetched before the gate looks, as the menu and a step's start do: the
+    # commits are measured against the head handed over, not the ref.
+    git(wt, "fetch", "-q", "origin")
+    rc, out = run(wt, 'sync_withdraw() { echo "WITHDRAWN $2 $3"; }\nsync_gate "$PWD" 9-x 7 nofetch', **env)
+    # And 5: the code QA passed has changed, and the run starts over on it as
+    # for a sync (3) rather than handing it over again at once, but nothing
+    # was merged, and nobody is told so.
+    check("gate: commits from elsewhere take it back too", (rc, "WITHDRAWN 7" in out), (5, True))
 
     # The merge wait: main moves into a conflict while it waits.
     seed, wt = setup(tmp, "wait")

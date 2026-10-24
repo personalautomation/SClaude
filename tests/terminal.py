@@ -215,32 +215,61 @@ term_render "%s"
     p = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
     check("render-nothing", p.returncode, 1)
 
-    # --- the retrospective runs once per feature ---
-    def retro(state):
+    # --- a second retrospective resumes the first ---
+    transcripts = os.path.join(tmp, "transcripts")
+    os.makedirs(transcripts)
+    # Its last answer at 11:00: what ran after that is news to it.
+    with open(os.path.join(transcripts, "a.jsonl"), "w") as fh:
+        fh.write(json.dumps({"type": "assistant", "timestamp": "2026-10-09T10:00:00Z"}) + "\n")
+
+    def retro(state, answer="n"):
         with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             fh.write(state)
         script = r'''
 PROMPTS="%s/../prompts"
 info() { echo "INFO $*"; }
 term_render() { echo "RENDERED" > /dev/tty; }
-render_prompt() { return 1; }
-new_session_id() { echo 0; }
-transcript_dir() { echo /t; }
+render_prompt() { echo "PROMPT $1 SINCE[$SCLAUDE_B_SINCE]" > /dev/tty; return 1; }
+new_session_id() { echo new-id; }
+source "%s/state.sh"
 source "%s/retro.sh"
+transcript_dir() { echo "%s"; }
+developer_is_maintainer() { return 1; }
+ask() { echo "ASK $1" > /dev/tty; printf -v "$2" '%%s' "${RETRO_ANSWER:-n}"; }
+is_yes() { [[ "$1" == y ]]; }
 run_retro "%s" demo 7 3
 echo "rc=$?"
-''' % (LIB, LIB, wt)
-        return in_pty(["bash", "-c", script], env)[0]
+''' % (LIB, LIB, LIB, transcripts, wt)
+        return in_pty(["bash", "-c", script], dict(env, RETRO_ANSWER=answer))[0]
 
-    text = retro('{"retro": {"runs": [{"session": "a", "done": true}]}}')
-    check("retro-once-skips", "RENDERED" in text, False)
-    check("retro-once-says-so", "already took place" in text, True)
-    check("retro-once-rc", "rc=0" in text, True)
-    # Dropped or cut off: no finished run, so it goes ahead (and reaches the
-    # render, the first thing past the check).
-    text = retro('{"retro": {"runs": [{"session": "a"}]}}')
-    check("retro-unfinished-runs", "RENDERED" in text, True)
-    check("retro-unfinished-not-skipped", "already took place" in text, False)
+    # Finished, its conversation on disk: the same one again, told what ran
+    # since its last turn — and nothing but the clean-up when nothing did.
+    text = retro('{"retro": {"runs": [{"session": "a", "started": "2026-10-09T10:00:00+01:00", '
+                 '"finished": "2026-10-09T11:00:00+01:00", "done": true}]}, '
+                 '"steps": {"review": {"runs": [{"session": "r", "started": "2026-10-09T12:00:00+01:00", '
+                 '"finished": "2026-10-09T12:30:00+01:00"}]}}, '
+                 '"epilogue": {"runs": [{"session": "e", "started": "2026-10-09T13:00:00+01:00"}]}}')
+    check("retro-again-not-skipped", "already took place" in text, False)
+    check("retro-again-resumes", "PROMPT retro-again" in text, True)
+    check("retro-again-names-the-step", "steps.review: a session started 2026-10-09T12:00:00" in text, True)
+    check("retro-again-not-the-epilogue", "epilogue" in text.split("SINCE[", 1)[-1], False)
+    # Nothing ran since: a pass would only repeat itself, so it is offered —
+    # a no holds none, a yes goes back in, told so.
+    done_run = ('{"retro": {"runs": [{"session": "a", "started": "2026-10-09T10:00:00+01:00", '
+                '"finished": "2026-10-09T11:00:00+01:00", "done": true}]}}')
+    text = retro(done_run)
+    check("retro-nothing-since-asks", ("Go back into it?" in text, "PROMPT" in text), (True, False))
+    text = retro(done_run, "y")
+    check("retro-nothing-since-yes", "PROMPT retro-again SINCE[Nothing but this clean-up" in text, True)
+    # A later run killed before its first reply does not hide the one before.
+    text = retro('{"retro": {"runs": [{"session": "a", "started": "2026-10-09T10:00:00+01:00", '
+                 '"finished": "2026-10-09T11:00:00+01:00", "done": true}, {"session": "b"}]}}', "y")
+    check("retro-resumes-the-one-that-answered", "PROMPT retro-again" in text, True)
+    # No conversation on disk (it never got going): a new one.
+    text = retro('{"retro": {"runs": [{"session": "gone"}]}}')
+    check("retro-unstarted-is-new", "PROMPT retro SINCE" in text, True)
+    text = retro('{}')
+    check("retro-first-is-new", "PROMPT retro SINCE" in text, True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

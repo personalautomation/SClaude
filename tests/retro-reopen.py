@@ -156,29 +156,15 @@ with open(os.path.join(LIB, "retro.sh")) as fh:
 check("run-retro-records-the-change",
       'state_set "$fstate" retro.project_to "$project_after"' in retro_src, True)
 
-# --- a retrospective per pass through the review -------------------------------------
-guard = re.search(r"python3 - \"\$fstate\" <<'PY' 2>/dev/null; then\n(.*?)\nPY\n", retro_src, re.S)
-check("guard-present", bool(guard), True)
-
-
-def ran_already(review_finished, retro_started):
-    tmp = tempfile.mkdtemp()
-    try:
-        path = os.path.join(tmp, "state.json")
-        with open(path, "w") as fh:
-            json.dump({"steps": {"review": {"finished": review_finished}},
-                       "retro": {"runs": [{"started": retro_started, "done": True}]}}, fh)
-        return subprocess.run(["python3", "-", path], input=guard.group(1),
-                              text=True, capture_output=True).returncode == 0
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-if guard:
-    check("skipped-after-a-no-to-the-clean-up",
-          ran_already("2026-10-09T15:59:30+01:00", "2026-10-09T19:49:38+01:00"), True)
-    check("run-again-after-the-second-review",
-          ran_already("2026-10-12T11:00:00+01:00", "2026-10-09T19:49:38+01:00"), False)
+# --- a second retrospective resumes the first ------------------------------------
+# Once a second pass was skipped as already paid for, and a person who had left
+# with Ctrl-C could not get back into it. It resumes now (tests/terminal.py runs
+# it); here, that the skip did not come back and the resume reaches claude.
+check("no-skip-as-paid-for", "already took place" in retro_src, False)
+check("resumes-the-conversation", 'which=(--resume "$session")' in retro_src
+      and 'claude_launch "${which[@]}"' in retro_src, True)
+check("second-pass-prompt", 'template=retro-again' in retro_src
+      and os.path.exists(os.path.join(ROOT, "sclaude", "prompts", "retro-again.md")), True)
 
 # --- the report reaches sclaude's terminal ----------------------------------------
 def entry(kind, text=None, human=False, tool=False):
@@ -210,12 +196,17 @@ try:
     check("last-is-the-conversation-end", last, "Committed on the branch.")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
-check("report-printed-when-left-open", '|| retro_report "$wt" "$session"' in retro_src, True)
+check("report-printed-when-left-open",
+      '&& retro_report "$wt" "$session" "$last"' in retro_src, True)
 
 # --- the prompt names the branch -------------------------------------------------
 with open(os.path.join(ROOT, "sclaude", "prompts", "retro.md")) as fh:
     prompt = fh.read()
-check("prompt-names-the-branch", "own branch, `<branch>`" in prompt, True)
+# In the rules both passes include, so a resumed one is given them too.
+with open(os.path.join(ROOT, "sclaude", "prompts", "_retro-rules.md")) as fh:
+    rules = fh.read()
+check("prompt-names-the-branch", "own branch, `<branch>`" in rules
+      and "<include:retro-rules>" in prompt, True)
 with open(os.path.join(LIB, "retro.sh")) as fh:
     check("branch-passed-to-prompt", 'SCLAUDE_V_BRANCH=' in fh.read(), True)
 

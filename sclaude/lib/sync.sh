@@ -217,7 +217,7 @@ sync_deferred() {
     deferred_minus "$tmp/base" "$tmp/branch" > "$tmp/added" \
       && deferred_minus "$tmp/base" "$tmp/main" > "$tmp/theirs" \
       && deferred_minus "$tmp/theirs" "$tmp/added" > "$tmp/own" \
-      && cat "$tmp/main" "$tmp/own" > "$wt/$f" && git -C "$wt" add -- "$f" \
+      && awk '{ print }' "$tmp/main" "$tmp/own" > "$wt/$f" && git -C "$wt" add -- "$f" \
       || { failed=1; break; }
   done
   rm -rf "$tmp"
@@ -260,13 +260,13 @@ sync_settled() {
 # merge it — here or on GitHub. qa_retest does the same once a fresh preview
 # is green; this does not wait for that, which may never come.
 #
-#   sync_withdraw <wt> <pr>
+#   sync_withdraw <wt> <pr> [what moved it]
 sync_withdraw() {
   local state="$1/.sclaude/local/feature/state.json" repo
   [[ "$2" =~ ^[0-9]+$ ]] || return 0
   [[ -n "$(state_get "$state" handoff 2>/dev/null | grep -v '^null$')" ]] || return 0
   repo="$(gh_repo)" || return 0
-  pr_unhandoff "$1" "$2" "$repo" "PR #$2 is a draft again until the preview and QA have seen the sync."
+  pr_unhandoff "$1" "$2" "$repo" "PR #$2 is a draft again until the preview and QA have seen ${3:-the sync}."
 }
 
 # The sync as remind_prod and the menu take it: sync_with_main, and a pull
@@ -275,27 +275,54 @@ sync_withdraw() {
 # stopped short (1, with a change left uncommitted, say): either way origin
 # has code nobody has checked.
 #
-# Fetched before origin's tip is taken, not by sync_with_main after it: a
-# fetch that only brought the ref up to date — a push from another machine,
-# GitHub's "Update branch" — moved it with nothing synced, and the hand-off
-# was taken back for no reason anybody was told.
+# Origin's tip is held against the head the hand-off was made on (`handoff`,
+# pr_qa_handoff): a branch that moved by other hands — a push from another
+# machine, GitHub's "Update branch" — carries code nobody has checked too,
+# and the hand-off goes back for it as for the sync, said in its own words.
+# Against that head rather than the tip before this call: whatever fetched
+# in between — the menu, a step's start, deferred_to_main — had moved the ref
+# already, and the commits went unseen. Such commits are 3, as a sync is: the
+# code QA passed has changed, and the run starts over on it. Returned as 0,
+# remind_prod handed the pull request over again at once, unchecked.
 #
-#   sync_gate <wt> <slug> <pr> [nofetch] [conflicts]   → sync_with_main's 0, 1 or 3
+# Only a tip with commits the hand-off lacks: a ref not fetched since lags
+# behind it, and is not new code. Without that head here to compare with,
+# a push the call's own session made before it stopped short (1) still
+# counts, by the tip moving during the call.
+#
+#   sync_gate <wt> <slug> <pr> [nofetch]
+#     → sync_with_main's 0, 1 or 3, or 5: taken back for commits from
+#       elsewhere with nothing merged — the run starts over as for 3, and
+#       nobody is told "merged"
 sync_gate() {
-  local rc=0 before fetch="${4:-}"
-  [[ -z "$fetch" ]] && sync_fetch "$1" && fetch=nofetch
+  local rc=0 handed tip before
   before="$(sync_origin_tip "$1")"
-  sync_with_main "$1" "$2" "$fetch" "${5:-}" || rc=$?
-  if [[ "$rc" -eq 3 || "$(sync_origin_tip "$1")" != "$before" ]]; then
+  sync_with_main "$1" "$2" "${4:-}" || rc=$?
+  if [[ "$rc" -eq 3 ]]; then
+    sync_withdraw "$1" "$3"
+    return "$rc"
+  fi
+  handed="$(state_get "$1/.sclaude/local/feature/state.json" handoff 2>/dev/null || true)"
+  tip="$(sync_origin_tip "$1")"
+  if [[ -n "$handed" && "$handed" != "null" ]] && git -C "$1" cat-file -e "$handed^{commit}" 2>/dev/null; then
+    if [[ -n "$tip" && "$tip" != "$handed" ]] \
+       && ! git -C "$1" merge-base --is-ancestor "$tip" "$handed" 2>/dev/null; then
+      if [[ "$rc" -eq 0 ]]; then
+        sync_withdraw "$1" "$3" "the commits that reached its branch on origin"
+        rc=5
+      else
+        sync_withdraw "$1" "$3"
+      fi
+    fi
+  elif [[ "$rc" -eq 1 && "$tip" != "$before" ]]; then
     sync_withdraw "$1" "$3"
   fi
   return "$rc"
 }
 
 # The merge with main a step's start or the menu offers, when it would stop
-# on conflicts: the question (sync_ask), and on a yes the sync (sync_gate),
-# handed the conflicts found here rather than asking git again. A merge that
-# would not stop is the caller's own, plain `git merge`.
+# on conflicts: the question (sync_ask), and on a yes the sync (sync_gate).
+# A merge that would not stop is the caller's own, plain `git merge`.
 #
 #   sync_offer <wt> <slug> <branch> <pr>
 #     → 2 no conflict (or cannot tell): the caller merges, or asks first;
@@ -305,7 +332,7 @@ sync_offer() {
   conflicts="$(merge_conflicts "$1" nofetch)" || crc=$?
   [[ "$crc" -eq 1 ]] || return 2
   sync_ask "$1" "$3" "$conflicts" || return 4
-  sync_gate "$1" "$2" "$4" nofetch "$conflicts"
+  sync_gate "$1" "$2" "$4" nofetch
 }
 
 # The question before a merge that would stop on conflicts, with the files,
@@ -326,8 +353,7 @@ sync_ask() {
 
 # The check, and the sync when it is needed.
 #
-#   sync_with_main <wt> <slug> [nofetch] [conflicts]
-#                                → 0 merges cleanly as it is,
+#   sync_with_main <wt> <slug> [nofetch]   → 0 merges cleanly as it is,
 #                                  1 still does not (the run stops),
 #                                  3 synced: the branch moved, and what
 #                                    followed the old head runs again
@@ -339,13 +365,7 @@ sync_with_main() {
   local conflicts rc=0 pr issue branch session n prompt settings unfinished="" what
   local -a files extra
 
-  # Conflicts the caller has just found (sync_offer) stand: with nothing
-  # fetched since, git would say the same again.
-  if [[ -n "${4:-}" && "${3:-}" == nofetch ]]; then
-    conflicts="$4"; rc=1
-  else
-    conflicts="$(merge_conflicts "$wt" "${3:-}")" || rc=$?
-  fi
+  conflicts="$(merge_conflicts "$wt" "${3:-}")" || rc=$?
   # Behind origin's tip (updated on GitHub, its conflict editor perhaps): the
   # tree catches up, and the answer above, which is about that tip, stands —
   # what runs next works on this tree.

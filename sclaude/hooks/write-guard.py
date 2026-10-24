@@ -45,11 +45,14 @@ from _shell import (GIT_VALUED, KEYWORDS, QUOTED, closing_at, inner_command, str
                     substitutions, tokenize, ungroup)
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
-READONLY_REASON = ("{dir} is sclaude's own, and this session does not change "
-                   "it: what this review decides goes into the product's .sclaude/ "
-                   "or its code. A change to sclaude itself is proposed deliberately "
-                   "(sclaude propose), so leave it as a deferred entry of class "
-                   "sclaude-default.")
+# Said of every path the session may not write, which is the whole checkout
+# for most reviews and only what restrains the session for a maintainer's
+# retrospective: either way, what it would change there goes the same road.
+READONLY_REASON = ("this session may not change {dir} (sclaude's, read-only to it): "
+                   "what this review decides goes into the product's .sclaude/ "
+                   "or its code. A change there to sclaude itself is proposed "
+                   "deliberately (sclaude propose), so leave it as a deferred entry "
+                   "of class sclaude-default.")
 REASON = ("the product's shared sclaude rules (.sclaude/team/) are written by its "
           "maintainers — `maintainers` in .sclaude/config.json. Put the rule in your own "
           ".sclaude/people/<name>/ instead; a maintainer can lift it into team/.")

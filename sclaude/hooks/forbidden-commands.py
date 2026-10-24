@@ -876,7 +876,10 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
     # (--no-own-push): it works from a private project's material, and the
     # checkout is public and reaches every machine from main. The person reads
     # the commits and pushes them. Any branch: every one of them is public.
-    if NO_OWN_PUSH and where and toplevel(where) == OWN_CHECKOUT:
+    # A directory that cannot be told may be the checkout, and is refused: the
+    # session's own pushes have nothing to wait for, the product's step 3
+    # pushes its branch later.
+    if NO_OWN_PUSH and (where is None or toplevel(where) == OWN_CHECKOUT):
         return OWN_PUSH_REASON
     # The same for sclaude's own checkout, which goes to main without a PR.
     if own_push(where, remote[0] if remote else "origin", redirected):

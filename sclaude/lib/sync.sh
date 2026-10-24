@@ -63,6 +63,16 @@ sync_close_open() {
   session_runs "$1" sync close
 }
 
+# Fetches origin's main and, when origin has it, the tree's branch: what
+# merge_conflicts asks about. 1 when main could not be fetched.
+sync_fetch() {
+  local branch
+  git -C "$1" fetch -q origin main 2>/dev/null || return 1
+  branch="$(sync_branch_name "$1")" \
+    && { git -C "$1" fetch -q origin "$branch" 2>/dev/null || true; }
+  return 0
+}
+
 # What merging origin/main into the branch would leave in conflict, without
 # merging anything: the paths, one a line.
 #
@@ -83,8 +93,7 @@ merge_conflicts() {
   local wt="$1" tip=HEAD branch rc=0
   branch="$(sync_branch_name "$wt")" || branch=""
   if [[ "${2:-}" != nofetch ]]; then
-    git -C "$wt" fetch -q origin main 2>/dev/null || return 2
-    [[ -n "$branch" ]] && { git -C "$wt" fetch -q origin "$branch" 2>/dev/null || true; }
+    sync_fetch "$wt" || return 2
   fi
   [[ -n "$branch" ]] && git -C "$wt" rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null \
     && tip="refs/remotes/origin/$branch"
@@ -171,10 +180,13 @@ sync_catch_up() {
 
 # Merges origin/main into the branch when only the deferred logs conflict:
 # main's rows of each, then the rows the branch added since the two parted
-# (deferred_minus of the merge base) that main does not hold as many times
-# (deferred_union). Not the branch's whole copy: rows it took from main at an
-# earlier merge and main has since removed — the monthly review removes what
-# it decided — would come back. Committed, and pushed when origin has the branch —
+# (deferred_minus of the merge base) less the rows main added since then —
+# deferred_to_main sends a branch's rows to main, and they would come twice.
+# Not the branch's whole copy: rows it took from main at an earlier merge and
+# main has since removed — the monthly review removes what it decided — would
+# come back. Nor less all of main's copy: a row the branch repeats on purpose
+# (the monthly review counts the repeats) would cancel against the one both
+# sides had. Committed, and pushed when origin has the branch —
 # one not pushed yet stays local, as a session leaves it. Past hooks, as
 # deferred_to_main's push is: the logs are all it resolves, and the rest is
 # main's, which passed its own. On any trouble before the commit the merge is
@@ -203,7 +215,9 @@ sync_deferred() {
     # rows are its own.
     git -C "$wt" show ":1:$f" > "$tmp/base" 2>/dev/null || : > "$tmp/base"
     deferred_minus "$tmp/base" "$tmp/branch" > "$tmp/added" \
-      && deferred_union "$tmp/main" "$tmp/added" > "$wt/$f" && git -C "$wt" add -- "$f" \
+      && deferred_minus "$tmp/base" "$tmp/main" > "$tmp/theirs" \
+      && deferred_minus "$tmp/theirs" "$tmp/added" > "$tmp/own" \
+      && cat "$tmp/main" "$tmp/own" > "$wt/$f" && git -C "$wt" add -- "$f" \
       || { failed=1; break; }
   done
   rm -rf "$tmp"
@@ -261,15 +275,37 @@ sync_withdraw() {
 # stopped short (1, with a change left uncommitted, say): either way origin
 # has code nobody has checked.
 #
-#   sync_gate <wt> <slug> <pr> [nofetch]   → sync_with_main's 0, 1 or 3
+# Fetched before origin's tip is taken, not by sync_with_main after it: a
+# fetch that only brought the ref up to date — a push from another machine,
+# GitHub's "Update branch" — moved it with nothing synced, and the hand-off
+# was taken back for no reason anybody was told.
+#
+#   sync_gate <wt> <slug> <pr> [nofetch] [conflicts]   → sync_with_main's 0, 1 or 3
 sync_gate() {
-  local rc=0 before
+  local rc=0 before fetch="${4:-}"
+  [[ -z "$fetch" ]] && sync_fetch "$1" && fetch=nofetch
   before="$(sync_origin_tip "$1")"
-  sync_with_main "$1" "$2" "${4:-}" || rc=$?
+  sync_with_main "$1" "$2" "$fetch" "${5:-}" || rc=$?
   if [[ "$rc" -eq 3 || "$(sync_origin_tip "$1")" != "$before" ]]; then
     sync_withdraw "$1" "$3"
   fi
   return "$rc"
+}
+
+# The merge with main a step's start or the menu offers, when it would stop
+# on conflicts: the question (sync_ask), and on a yes the sync (sync_gate),
+# handed the conflicts found here rather than asking git again. A merge that
+# would not stop is the caller's own, plain `git merge`.
+#
+#   sync_offer <wt> <slug> <branch> <pr>
+#     → 2 no conflict (or cannot tell): the caller merges, or asks first;
+#       4 a no to the question; otherwise sync_gate's 0, 1 or 3
+sync_offer() {
+  local conflicts crc=0
+  conflicts="$(merge_conflicts "$1" nofetch)" || crc=$?
+  [[ "$crc" -eq 1 ]] || return 2
+  sync_ask "$1" "$3" "$conflicts" || return 4
+  sync_gate "$1" "$2" "$4" nofetch "$conflicts"
 }
 
 # The question before a merge that would stop on conflicts, with the files,
@@ -290,7 +326,8 @@ sync_ask() {
 
 # The check, and the sync when it is needed.
 #
-#   sync_with_main <wt> <slug> [nofetch]   → 0 merges cleanly as it is,
+#   sync_with_main <wt> <slug> [nofetch] [conflicts]
+#                                → 0 merges cleanly as it is,
 #                                  1 still does not (the run stops),
 #                                  3 synced: the branch moved, and what
 #                                    followed the old head runs again
@@ -299,10 +336,16 @@ sync_ask() {
 # run, and GitHub says the same thing later in its own words (merge_offer).
 sync_with_main() {
   local wt="$1" slug="$2" state="$1/.sclaude/local/feature/state.json"
-  local conflicts rc=0 pr issue branch session n prompt settings
+  local conflicts rc=0 pr issue branch session n prompt settings unfinished="" what
   local -a files extra
 
-  conflicts="$(merge_conflicts "$wt" "${3:-}")" || rc=$?
+  # Conflicts the caller has just found (sync_offer) stand: with nothing
+  # fetched since, git would say the same again.
+  if [[ -n "${4:-}" && "${3:-}" == nofetch ]]; then
+    conflicts="$4"; rc=1
+  else
+    conflicts="$(merge_conflicts "$wt" "${3:-}")" || rc=$?
+  fi
   # Behind origin's tip (updated on GitHub, its conflict editor perhaps): the
   # tree catches up, and the answer above, which is about that tip, stands —
   # what runs next works on this tree.
@@ -310,10 +353,11 @@ sync_with_main() {
   # A merge under way here — a sync broken off mid-way, or one by hand — is
   # no clean branch whatever origin's tip says: its files may hold conflict
   # markers, and the preview would deploy them. What is left unmerged is the
-  # conflict; with nothing left, the session checks and commits it.
+  # conflict; with nothing left, the session checks and commits it — said in
+  # words of its own, not as a file in conflict.
   if merge_under_way "$wt"; then
     conflicts="$(git -C "$wt" diff --name-only --diff-filter=U 2>/dev/null)"
-    [[ -n "$conflicts" ]] || conflicts="(none left unmerged: the merge under way is to be checked and committed)"
+    [[ -n "$conflicts" ]] || unfinished=1
     rc=1
   elif [[ "$rc" -eq 1 ]]; then
     # Apart both ways — commits here origin lacks, and there that this tree
@@ -339,7 +383,10 @@ sync_with_main() {
     [[ "$rc" -eq 0 ]] && sync_close_open "$state"
     return 0
   fi
-  mapfile -t files <<< "$conflicts"
+  files=()
+  [[ -n "$conflicts" ]] && mapfile -t files <<< "$conflicts"
+  what="${#files[@]} file(s) conflict"
+  [[ -n "$unfinished" ]] && what="a merge of main is under way here, resolved and not committed"
   pr="$(state_get "$state" pr 2>/dev/null || true)"
   echo ""
   # Reviewed, with its pull request open: what remind_prod calls this for.
@@ -347,13 +394,13 @@ sync_with_main() {
   local reviewed=""
   [[ "$(state_get "$state" step 2>/dev/null || true)" == "done" && "$pr" =~ ^[0-9]+$ ]] && reviewed=1
   if [[ "$pr" =~ ^[0-9]+$ ]]; then
-    warn "PR #$pr does not merge with main: ${#files[@]} file(s) conflict."
+    warn "PR #$pr does not merge with main: $what."
   else
-    warn "The branch does not merge with main: ${#files[@]} file(s) conflict."
+    warn "The branch does not merge with main: $what."
   fi
-  printf '%s\n' "${files[@]}" | sed 's/^/    /'
+  (( ${#files[@]} )) && printf '%s\n' "${files[@]}" | sed 's/^/    /'
 
-  if sync_deferred_only "$wt" "${files[@]}"; then
+  if [[ -z "$unfinished" ]] && sync_deferred_only "$wt" "${files[@]}"; then
     local drc=0
     sync_deferred "$wt" "${files[@]}" || drc=$?
     if [[ "$drc" -eq 0 ]]; then
@@ -396,18 +443,23 @@ sync_with_main() {
   echo "${BOLD}${BLUE}── $slug · $(phase_title sync): merge main into $branch ──${OFF}"
   info "   $(step_model review) / $(step_effort review) / $(step_mode review) · $wt"
   echo ""
-  ask_feed say "$(phase_line "$([[ -n "$resume" ]] && echo resumed || echo started)" sync "$n") · ${#files[@]} file(s) conflict"
+  ask_feed say "$(phase_line "$([[ -n "$resume" ]] && echo resumed || echo started)" sync "$n") · $what"
 
   rm -f "$(done_marker "$wt")"
   session_watch_start "$wt" "$session"
   if [[ -n "$resume" ]]; then
-    prompt="The branch still does not merge with \`origin/main\`. These files conflict now:"$'\n\n'"$(printf '    %s\n' "${files[@]}")"$'\n\n'"Carry on with the sync as agreed above."
+    if [[ -n "$unfinished" ]]; then
+      prompt="The merge with \`origin/main\` is still under way here: nothing is left unmerged, but it is not committed. Check it and carry on with the sync as agreed above."
+    else
+      prompt="The branch still does not merge with \`origin/main\`. These files conflict now:"$'\n\n'"$(printf '    %s\n' "${files[@]}")"$'\n\n'"Carry on with the sync as agreed above."
+    fi
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --resume "$session" \
         --model "$(step_model review)" --effort "$(step_effort review)" \
         --permission-mode "$(step_mode review)" "${extra[@]}" \
         -n "$(session_label sync "$n")/$slug" "$prompt" )
   else
-    prompt="$(SCLAUDE_V_BRANCH="$branch" SCLAUDE_V_CONFLICTS="$conflicts" SCLAUDE_V_REVIEWED="$reviewed" \
+    prompt="$(SCLAUDE_V_BRANCH="$branch" SCLAUDE_V_CONFLICTS="$conflicts" SCLAUDE_V_UNFINISHED="$unfinished" \
+      SCLAUDE_V_REVIEWED="$reviewed" \
       SCLAUDE_V_UNREVIEWED="$([[ -z "$reviewed" ]] && echo 1)" \
       render_prompt sync "$slug" "$pr" "$issue" "$wt")" || { session_watch_stop; return 1; }
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --session-id "$session" \

@@ -314,6 +314,16 @@ with tempfile.TemporaryDirectory() as tmp:
     check("under way: not clean", rc, 1)
     check("under way: a session took it", os.path.exists(launched), True)
     check("under way: names the unmerged file", "    app.txt" in out, True)
+    # Resolved and not committed: nothing unmerged, said as such rather than
+    # as a file in conflict.
+    write(os.path.join(wt, "app.txt"), "one\nboth\nthree\n")
+    git(wt, "add", "app.txt")
+    os.remove(launched)
+    rc, out = run(wt, 'sync_with_main "$PWD" 9-x', **env)
+    check("resolved, uncommitted: not clean", rc, 1)
+    check("resolved, uncommitted: a session took it", os.path.exists(launched), True)
+    check("resolved, uncommitted: said in words", ("under way here" in out, "file(s) conflict" in out),
+          (True, False))
 
     # Commits here that origin lacks conflict, origin's tip does not: they
     # are merged too by whoever merges here, so the conflict is named.
@@ -340,6 +350,18 @@ with tempfile.TemporaryDirectory() as tmp:
     check("removed: synced", run(wt, 'sync_with_main "$PWD" 9-x >/dev/null', **env)[0], 3)
     with open(os.path.join(wt, LOG)) as fh:
         check("removed: the decided row stays out", fh.read(), "row1\nrow-main\nrow-new\n")
+    # A row the branch repeats on purpose stays repeated, and a row both sides
+    # added — deferred_to_main sent it to main — comes once.
+    seed, wt = setup(tmp, "repeat")
+    commit(seed, LOG, "row1\nsent\nrow-main\n", "main's rows")
+    git(seed, "push", "-q", "origin", "HEAD:main")
+    commit(wt, LOG, "row1\nsent\nrow1\n", "the branch repeats row1")
+    git(wt, "push", "-q")
+    check("repeat: a conflict in the log", run(wt, 'merge_conflicts "$PWD"', **env), (1, LOG + "\n"))
+    check("repeat: synced", run(wt, 'sync_with_main "$PWD" 9-x >/dev/null', **env)[0], 3)
+    with open(os.path.join(wt, LOG)) as fh:
+        check("repeat: the repeat stays, the sent row comes once", fh.read(),
+              "row1\nsent\nrow-main\nrow1\n")
     check("minus: an empty older copy takes nothing away",
           run(wt, 'printf "a\\nb\\n" > "$TMPDIR_T/b"; : > "$TMPDIR_T/a"; '
                   'deferred_minus "$TMPDIR_T/a" "$TMPDIR_T/b"', TMPDIR_T=tmp, **env), (0, "a\nb\n"))
@@ -362,6 +384,17 @@ with tempfile.TemporaryDirectory() as tmp:
     git(wt, "checkout", "-q", "--", "app.txt")
     rc, out = run(wt, 'sync_withdraw() { echo "WITHDRAWN $2"; }\nsync_gate "$PWD" 9-x 7', **env)
     check("gate: clean, nothing taken back", (rc, "WITHDRAWN" in out), (0, False))
+    # origin's branch moved on another machine, and the fetch brings the ref
+    # up to date: nothing was synced, and nothing is taken back.
+    other = os.path.join(tmp, "gate-other")
+    subprocess.run(["git", "clone", "-q", "-b", "feat/9-x", os.path.join(tmp, "gate-origin.git"), other],
+                   check=True, capture_output=True)
+    git(other, "config", "user.email", "t@example.com")
+    git(other, "config", "user.name", "t")
+    commit(other, "elsewhere.txt", "x\n", "pushed from elsewhere")
+    git(other, "push", "-q")
+    rc, out = run(wt, 'sync_withdraw() { echo "WITHDRAWN $2"; }\nsync_gate "$PWD" 9-x 7', **env)
+    check("gate: a fetch alone takes nothing back", (rc, "WITHDRAWN" in out), (0, False))
 
     # The merge wait: main moves into a conflict while it waits.
     seed, wt = setup(tmp, "wait")

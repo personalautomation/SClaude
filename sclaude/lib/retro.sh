@@ -129,12 +129,10 @@ PY
       --add-dir "$HOME/.claude/projects" \
       -n "$(session_label retro)/$slug" "$prompt" )
   session_watch_stop
-  # Kept for cmd_done, which stops short of the clean-up on code that changed
-  # under it.
-  RETRO_INSTRUMENTS_CHANGED=""
+  local instruments_moved=""
   if [[ "$(instruments_state)" != "$before_instruments" ]]; then
-    RETRO_INSTRUMENTS_CHANGED=1
     if [[ -n "$writable" ]]; then
+      instruments_moved=1
       retro_instruments_said "$before_instruments"
     else
       instruments_unchanged "$before_instruments" "retrospective" || true
@@ -146,6 +144,11 @@ PY
   if [[ -f "$fstate" ]]; then
     if session_started "$wt" "$session"; then
       session_runs "$fstate" retro finish "$session"
+      # For cmd_done, which then stops short of the clean-up: the checkout
+      # this retrospective could change has changed under the running bash.
+      # Only for a run recorded as done, which the next `sclaude done` does
+      # not hold again; a read-only one only warns, as it always did.
+      RETRO_INSTRUMENTS_CHANGED="$instruments_moved"
     else
       session_runs "$fstate" retro drop "$session"
     fi

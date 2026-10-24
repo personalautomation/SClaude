@@ -1419,18 +1419,16 @@ cmd_sync() {
   # A merge that would stop on conflicts is not left half-done for the person
   # to untangle — from a phone they cannot: the sync with main (sync.sh)
   # resolves them, by itself for the deferred logs and in a session otherwise.
-  local conflicts crc=0
-  conflicts="$(merge_conflicts "$wt" nofetch)" || crc=$?
-  if [[ "$crc" -eq 1 ]]; then
-    echo ""
-    sync_ask "$wt" "$branch" "$conflicts" || { info "Left as it is."; return 0; }
-    local synced=0
-    sync_gate "$wt" "$slug" "$pr" nofetch || synced=$?
-    [[ "$synced" -eq 3 ]] && echo "${GREEN}Merged — $branch now carries everything from main.${OFF}"
-    return 0
-  fi
-
+  local synced=0
   echo ""
+  sync_offer "$wt" "$slug" "$branch" "$pr" || synced=$?
+  case "$synced" in
+    2) ;;
+    4) info "Left as it is."; return 0 ;;
+    3) echo "${GREEN}Merged — $branch now carries everything from main.${OFF}"; return 0 ;;
+    *) return 0 ;;
+  esac
+
   ask "${BOLD}Merge origin/main into $branch? [y/n] ${OFF}" answer yn
   is_yes "$answer" || { info "Left as it is."; return 0; }
 

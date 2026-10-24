@@ -351,12 +351,14 @@ local_review_wait() {
     fi
     poll_pause 1
     # A press in the topic: as the keys, with no second press to wait for —
-    # the phone asked for it already.
+    # the phone asked for it already. A key pressed here in the same second
+    # is still taken after it — the first x of a stop, say. Not an `s`: it
+    # turns the last pass over, and would undo the word the phone just gave.
     if [[ -z "$verify" && -n "$said_file" && -f "$said_file" ]]; then
       case "$(review_said_take "$wt" wait)" in
         now)  POLL_KEY=x; armed=1 ;;
-        pass) POLL_KEY=""; said=pass ;;
-        back) POLL_KEY=""; said="" ;;
+        pass) said=pass; [[ "$POLL_KEY" == [sS] ]] && POLL_KEY="" ;;
+        back) said=""; [[ "$POLL_KEY" == [sS] ]] && POLL_KEY="" ;;
       esac
     fi
     [[ -n "$POLL_KEY" && -z "$verify" ]] || continue

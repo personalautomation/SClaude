@@ -669,6 +669,8 @@ def main():
         for command, want in (("git -C " + own + " push origin main", DENY),
                               ("cd " + own + " && git push origin dev/x", DENY),
                               ("git -C " + own + " commit -m x", ALLOW),
+                              ('cd "$X" && git push', DENY),
+                              ('cd "$X" && git push origin feat/x', DENY),
                               ("git -C " + product_tree + " push origin feat/x", ALLOW)):
             got = run("forbidden-commands.py", command, step="friction", cwd=product_tree,
                       env={"CLAUDE_PROJECT_DIR": product_tree}, extra=["--no-own-push"])

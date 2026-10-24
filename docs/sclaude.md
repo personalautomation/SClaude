@@ -621,12 +621,19 @@ One kind of conflict needs no session. The deferred logs
 friction reviews on its branch, `deferred_to_main` on main — and their merge
 is the rows of both. When they are the only files in conflict, sclaude merges
 main in itself, with main's rows first and then the rows the branch added
-since the two parted (against the merge base) that main does not hold as many
-times, and pushes (`sync_deferred`). Against the base, not the branch's whole
+since the two parted (against the merge base), less those main added since
+then, and pushes (`sync_deferred`). Against the base, not the branch's whole
 copy: rows the branch took from main at an earlier merge and main has since
 removed — the monthly review removes what it decided — would otherwise come
-back. The question that offers such a merge says so, rather than offering a
-session.
+back. Less main's additions, not all of main's copy: `deferred_to_main` sends
+a branch's rows to main, and they come once, but a row the branch repeats on
+purpose stays repeated. The question that offers such a merge says so,
+rather than offering a session.
+
+The sync is offered the same way at a step's start and from the menu
+(`sync_offer`), and `sync_gate` fetches before it notes where origin's branch
+stands, so that a fetch which only caught up with a push made elsewhere does
+not count as the sync moving it.
 
 The menu's own "Sync with main" (`cmd_sync`), there at every step, uses the
 same check: its line says how many files would conflict, and a yes to a merge

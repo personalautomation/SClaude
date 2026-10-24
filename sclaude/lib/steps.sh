@@ -839,6 +839,126 @@ session_label() {
   esac
 }
 
+# The line that tells a session started or finished: in the feature's topic
+# (ask_feed) for every session, and as the headline sclaude prints when it
+# closes one (session_closed). One shape for every kind, numbered as the
+# menu numbers the cycle — six, the epilogue and the retrospective last:
+#
+#   Step 4/6 review: fix session 2 started  a session of a step, which goes on
+#   Step 4/6 review: fix session 2 ended    left by a person, not closed on its report
+#   Step 4/6 done: review                   the step itself, closed
+#   Friction review finished: after step 2/6 development, session 3
+#   Regression fix started: local, on e2e
+#   Step 6/6 finished: retrospective
+#
+#   phase_line <verb> step <step> [<session number> [<round>]]
+#   phase_line <verb> friction <key>          the key run_friction takes
+#   phase_line <verb> fix <stage> [<part>]
+#   phase_line <verb> local-review <pr> <round> [verify]
+#   phase_line <verb> regression <stage>
+#   phase_line <verb> deploy <target>
+#   phase_line <verb> epilogue|retro|deferred
+phase_line() {
+  printf '%s %s\n' "$(phase_icon "$2" "${3:-}" "$1")" "$(phase_words "$@")"
+}
+
+# The icon a line opens with in the topic, by what it is about — the one its
+# tab carries where it has one (pane_icon): a fix session's tools, a
+# regression's test tube. A step closed is a tick.
+#
+#   phase_icon <kind> <step or stage> <verb>
+phase_icon() {
+  case "$1" in
+    step)
+      if [[ "$3" == done ]]; then printf '✅'; return; fi
+      case "$2" in
+        plan) printf '📝' ;; code) printf '💻' ;; pr) printf '📤' ;; review) printf '🛠' ;;
+        *) printf '▶️' ;;
+      esac ;;
+    friction|deferred) printf '🧱' ;;
+    fix) printf '🔧' ;;
+    local-review) printf '🔍' ;;
+    regression) printf '🧪' ;;
+    deploy) printf '🚀' ;;
+    epilogue) printf '🏁' ;;
+    retro) printf '🔁' ;;
+  esac
+}
+
+phase_words() {
+  local verb="$1" kind="$2" total=$((${#STEPS[@]} + 2))
+  case "$kind" in
+    step)
+      if [[ -n "${4:-}" ]]; then
+        echo "Step $(($(step_index "$3") + 1))/$total $(step_title "$3"): $(step_session_word "$3") $4${5:+, round $5} $verb"
+      else
+        echo "Step $(($(step_index "$3") + 1))/$total $verb: $(step_title "$3")"
+      fi ;;
+    friction) echo "Friction review $verb: $(friction_of "$3")" ;;
+    fix) echo "Regression fix $verb: $3${4:+, on $4}" ;;
+    local-review) echo "Local review $verb: PR #$3, round $4${5:+, fixes only}" ;;
+    regression) echo "Regression $verb: $3" ;;
+    deploy) echo "Deploy $verb: $3" ;;
+    epilogue) echo "Step $((total - 1))/$total $verb: epilogue" ;;
+    retro) echo "Step $total/$total $verb: retrospective" ;;
+    deferred) echo "Deferred friction review $verb" ;;
+  esac
+}
+
+# What a friction review is about, from the key run_friction takes:
+# "after step 4/6 review, fix session 3", "after the preview regression fix 1".
+friction_of() {
+  local total=$((${#STEPS[@]} + 2)) step="$1" n=""
+  if [[ "$1" =~ ^fix-([a-z]+)-([0-9]+)$ ]]; then
+    echo "after the ${BASH_REMATCH[1]} regression fix ${BASH_REMATCH[2]}"
+    return
+  fi
+  [[ "$1" =~ ^([a-z]+)-([0-9]+)$ ]] && { step="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"; }
+  # A key that names no step (`sclaude friction` past the steps): said as it is.
+  if [[ "$(step_index "$step")" -lt 0 ]]; then
+    echo "of $1"
+    return
+  fi
+  echo "after step $(($(step_index "$step") + 1))/$total $(step_title "$step")${n:+, $(step_session_word "$step") $n}"
+}
+
+# The same names without a verb, for the banner a session opens with in the
+# terminal: what the topic calls it, the terminal calls it too.
+#
+#   Step 2/6 development
+#   Friction review after step 4/6 review, fix session 3
+#   Regression fix: local, on e2e
+#
+#   phase_title step|friction|fix|regression|epilogue|retro|deferred <args>  as phase_line
+phase_title() {
+  local total=$((${#STEPS[@]} + 2))
+  case "$1" in
+    step) echo "Step $(($(step_index "$2") + 1))/$total $(step_title "$2")" ;;
+    friction) echo "Friction review $(friction_of "$2")" ;;
+    fix) echo "Regression fix: $2${3:+, on $3}" ;;
+    regression) echo "Regression: $2" ;;
+    epilogue) echo "Step $((total - 1))/$total epilogue" ;;
+    retro) echo "Step $total/$total retrospective" ;;
+    deferred) echo "Deferred friction review" ;;
+  esac
+}
+
+# What a step's session is called: the review's fixes what the review found,
+# and is a fix session; any other step's is a session.
+step_session_word() {
+  if [[ "$1" == "review" ]]; then echo "fix session"; else echo "session"; fi
+}
+
+# Which conversation of its step a session is, 1 for the first; empty for a
+# step with no runs.
+#
+#   step_session_number <state> <step> <session>
+step_session_number() {
+  local key; key="$(step_run_key "$1" "$2" "$3")"
+  [[ "$key" =~ -([0-9]+)$ ]] && echo "${BASH_REMATCH[1]}"
+  return 0
+}
+
 # The key of the latest step session of the feature, by start: what a review
 # asked for by hand (`sclaude friction`) is about. The current step is the
 # wrong answer once a step has closed — its successor has no session yet —

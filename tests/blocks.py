@@ -59,7 +59,7 @@ def check_true(name, got):
         failures.append((name, "true", got))
 
 
-def run_bash(script, cwd, modules=("ui", "state", "project", "worktree", "deploy", "scratch"),
+def run_bash(script, cwd, modules=("io", "ui", "state", "steps", "project", "worktree", "deploy", "scratch"),
              stdin="", env=None):
     """The real functions in a real shell, with the network shadowed out."""
     body = "set -uo pipefail\n"
@@ -155,9 +155,32 @@ try:
                      'echo three >> %s' % marks])
     check("block-stops-at-the-first-error",
           open(marks).read().split(), ["one"])
-    check("block-error-returns-nonzero", rc != 0, True)
+    # 2, apart from a refusal's 1: a deploy that failed is told to the topic.
+    check("block-error-returns-two", rc, 2)
+    check("block-error-said-in-the-terminal-alone", "command not found" in out, False)
     check_true("block-error-says-the-rest-did-not-run",
                "The rest of this block did not run" in out)
+
+    # A preview deploy tells the topic when it starts and how it ended, once:
+    # the address it got, or that it failed after every try, loud.
+    def shipped(succeed):
+        ask_dir = tempfile.mkdtemp()
+        wtree = tempfile.mkdtemp()
+        os.makedirs(os.path.join(wtree, ".sclaude", "local", "feature"))
+        stub = ('preview_deploy() { %s; }\ndeploy_remember() { :; }\nalarm() { echo "$*" >&2; }\n'
+                'PREVIEW_TRIES=2; PREVIEW_RETRY_PAUSE=0\n'
+                % ('echo https://p.example > "$SCLAUDE_VERCEL_URL_FILE"' if succeed else 'return 2'))
+        run_bash(stub + 'preview_ship "%s"' % wtree, tmp,
+                 env=dict(os.environ, SCLAUDE_ASK_TTY="0", ASK_DIR=ask_dir, ASK_SLUG="demo"))
+        feed = os.path.join(ask_dir, "ask", "demo", "notes", "feed.tsv")
+        with open(feed) as fh:
+            return [l.split("\t")[1] + " " + l.split("\t")[3].rstrip("\n") for l in fh]
+
+    check("preview-told", shipped(True),
+          ["say 🚀 Deploy started: preview", "say 🚀 Deploy finished: preview · https://p.example"])
+    check("preview-failure-told-loud-once", shipped(False),
+          ["say 🚀 Deploy started: preview",
+           "alarm 🚀 Deploy failed: preview · 2 tries, the log is in the terminal"])
 
     # `cd` from the first line survives into the second. The whole block runs in
     # one subshell for this reason, and the prod block leans on it: `cd $REPO`,
@@ -221,13 +244,41 @@ try:
         fh.write("x\n")
     out, _, _ = run_bash(stop, tmp)
     check("stop-ignores-scratch", out.strip(), "rc=1")
+    # Nor is sclaude's config, edited by hand in this tree: the settings
+    # every feature reads, carried across the pull by --autostash.
+    config_path = os.path.join(REPO, ".sclaude", "config.json")
+    kept = open(config_path).read() if os.path.exists(config_path) else None
+    with open(config_path, "w") as fh:
+        fh.write((kept or "{}") + "\n")
+    out, _, _ = run_bash(stop, tmp)
+    check("stop-ignores-the-config", out.strip(), "rc=1")
+    # Unless what the pull brings changes it too: the autostash would not
+    # apply, and the edit would be left in a stash nobody is told of.
+    other_config = os.path.join(other, ".sclaude", "config.json")
+    os.makedirs(os.path.dirname(other_config), exist_ok=True)
+    with open(other_config, "w") as fh:
+        fh.write('{"review": "github"}\n')
+    git("add", "-f", ".sclaude/config.json", cwd=other)
+    git("commit", "-q", "-m", "their config", cwd=other)
+    git("push", "-q", "origin", "HEAD:main", cwd=other)
+    out, _, _ = run_bash(stop, tmp)
+    check_true("stop-when-the-pull-changes-the-config-too",
+               "rc=0" in out and "so the pull does not bury it" in out)
+    git("reset", "-q", "--hard", "HEAD~1", cwd=other)
+    git("push", "-q", "-f", "origin", "HEAD:main", cwd=other)
+    git("fetch", "-q", "origin", cwd=REPO)
+    if kept is None:
+        os.remove(config_path)
+    else:
+        with open(config_path, "w") as fh:
+            fh.write(kept)
 
     # The pulls in the production blocks never merge: with pull.rebase=false
     # set somewhere a plain pull would make a merge commit and ship it.
     deploy_src = open(os.path.join(LIB, "deploy.sh")).read()
     check("prod-pulls-are-ff-only",
           re.findall(r'"git pull[^"]*"', deploy_src),
-          ['"git pull --ff-only"', '"git pull --ff-only"'])
+          ['"git pull --ff-only --autostash"', '"git pull --ff-only --autostash"'])
     # In remind_prod the stop comes after the rollback notes and before the
     # riders, whose fetch empties the range the notes read; it returns before
     # any production block; and main_unpushed fetches nothing.
@@ -456,7 +507,7 @@ try:
                '"$rc" -eq 2' in confirm_body)
     check_true("confirmation-does-not-page-on-could-not-run",
                '"$rc" -eq 2' in confirm_body
-               and confirm_body.index('"$rc" -eq 2') < confirm_body.index("sclaude-notify"))
+               and confirm_body.index('"$rc" -eq 2') < confirm_body.index("notify_feature"))
 
     # The poll is what decides, as the function's own comment always claimed.
     # Throwing it away meant a rollback that landed after `--timeout` expired

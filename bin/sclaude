@@ -1117,6 +1117,8 @@ cmd_done() {
     state_set "$state" no_change null
     step_rewind_to "$wt" pr pr review
     state_set "$state" steps.pr.session null 2>/dev/null || true
+    # The watch on QA's earlier answer is spent, as in retro_reopen.
+    watch_stop "$slug"
     issue_hold_open "$issue"
     issue_sync "$wt"
     echo ""
@@ -1139,7 +1141,7 @@ cmd_done() {
   local again=""
   [[ "$no_change" == "true" ]] || again="$(retro_changed_code "$wt" "$branch")"
   if [[ -n "$again" ]]; then
-    retro_reopen "$wt" "$pr" || die "could not reopen '$slug': see $wt/.sclaude/local/feature/state.json"
+    retro_reopen "$wt" "$pr" "$slug" || die "could not reopen '$slug': see $wt/.sclaude/local/feature/state.json"
     echo ""
     say "${BOLD}The retrospective committed $again change(s) PR #$pr does not carry — '$slug' goes back to step '$(step_title pr)' for them.${OFF}"
     info "  The clean-up waits until their pull request is merged too: $SELF done $slug"
@@ -1412,8 +1414,14 @@ cmd_preview() {
   # cycle later skips as unchanged, so a deploy without them would stay without
   # them.
   preview_apply_migrations "$wt" || true
+  # The topic hears of it as of the cycle's (preview_ship): the deploy's own
+  # lines stay in the terminal.
+  ask_feed say "$(phase_line started deploy preview)"
   if preview_deploy "$wt"; then
     deploy_remember "$wt" preview
+    ask_feed say "$(phase_line finished deploy preview)"
+  else
+    ask_feed alarm "$(phase_line failed deploy preview) · the log is in the terminal"
   fi
 }
 

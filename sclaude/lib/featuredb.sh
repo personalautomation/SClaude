@@ -323,7 +323,7 @@ ensure_db() {
   fi
 
   status="$(cd "$wt" && $cli status --workdir "$dir" -o env 2>/dev/null)"
-  if ! python3 "$LIB/feature_db.py" envfile "$(project_config "$wt")" "$dir" \
+  if ! python3 "$LIB/feature_db.py" envfile "$(project_config_with database.local "$wt")" "$dir" \
          <<<"$status" > "$envf.tmp"; then
     rm -f "$envf" "$envf.tmp"
     warn "  database: the stack did not report every value the project maps — sharing the main local database"

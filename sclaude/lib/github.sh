@@ -426,6 +426,10 @@ def friction_cell(key):
     earlier = []
     for run in runs:
         sid = (run.get("session") or "")[:8]
+        # A put-off had no session (friction_defer_proposals): no id to show.
+        if (run.get("session") or "").startswith("deferred-"):
+            earlier.append("put off")
+            continue
         if run.get("stalled"):
             word = "stalled"
         elif run.get("done"):
@@ -465,6 +469,9 @@ def latest_friction_cell(key):
         # left there sends the next review into the closed conversation instead
         # of a new one.
         was = node.get("was")
+        if node.get("verdict") == "deferred":
+            # Put off by sclaude with no session (friction_defer_proposals).
+            return "put off"
         if node.get("unread"):
             # Closed by hand through `sclaude reset`. The entries stayed in
             # .reviewed with nobody reading them.
@@ -2070,7 +2077,7 @@ run_status() {
   [[ -n "$prompt" ]] || return 0
 
   echo ""
-  echo "${BOLD}${BLUE}── $slug · current status in issue #$issue and its parents ──${OFF}"
+  echo "${BOLD}${BLUE}── $slug · $(phase_title epilogue): the status into issue #$issue and its parents ──${OFF}"
   info "   sonnet / medium / auto · $REPO"
   info "   chain: $(tr '\n' ' ' <<< "$numbers")${labels:+ · labels: $labels}"
   echo ""
@@ -2095,6 +2102,11 @@ run_status() {
   settings="$(status_settings)" \
     || { warn "  The status session was not started: sclaude could not read its rules (see above)."; return 1; }
   local -a extra; mapfile -t extra <<< "$settings"
+  # Past every reason not to start: the topic hears of a start that happens.
+  local verb=started
+  [[ -n "$estate" && -n "${session:-}" && "$session" == "$(state_get "$estate" session 2>/dev/null || true)" ]] \
+    && verb=resumed
+  ask_feed say "$(phase_line "$verb" epilogue) · writes the status into issue #$issue"
 
   # Every claude conversation belongs in the issue's table, the epilogue's
   # included. Recorded in the feature's state while there is one; the id is
@@ -2138,8 +2150,7 @@ run_status() {
   session_watch_stop
   # It said its comments are written, and the watcher closed it: the report is
   # printed here, since claude's screen went with it.
-  session_closed "$done_file" "$REPO" "$session" \
-    "The epilogue reported its comments written, and sclaude closed it." || true
+  session_closed "$done_file" "$REPO" "$session" "" "" epilogue || true
   # Whether it took place, by the transcript rather than the clock — the
   # witness run_step and run_friction use (session_started, state.sh). The
   # clock timed the wrapper, and the row and the epilogue's own state must not

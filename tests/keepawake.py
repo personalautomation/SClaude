@@ -3956,7 +3956,7 @@ check("nine unlabelled ones do not fit",
 
 # The numbered list above labelled buttons is the same list a second time. We
 # remove precisely that, leaving the lines that explain the question.
-_ctx = "71-email · issue #71\n  1)  Continue  step 2/4\n  2)  Drop  clears all"
+_ctx = "71-email · issue #71\n  1)  Continue  step 2/6 development\n  2)  Drop  clears all"
 _named = _tg.ask_text("myapp", {"form": "pick:2", "prompt": "Which one?",
                                  "context": _ctx, "options": ["Continue", "Drop"]})
 check_true("the list above labelled buttons is removed", "1)  Continue" not in _named)
@@ -4169,6 +4169,8 @@ check("sclaude-notify reads the bot's feature record",
       (True, True))
 check("and knows a lost topic by the bot's own words",
       [w for w in telegramd.TOPIC_GONE if 'b"%s"' % w not in _notify], [])
+import urllib.parse
+
 # And records what it sends to a topic where the bot deletes it from: run
 # against a fake Telegram, the id it was given lands in the bot's record.
 _tg_dir = tempfile.mkdtemp(prefix="keepawake-test-notify-")
@@ -4176,14 +4178,15 @@ _srv_code = (
     "import http.server, json, sys\n"
     "class H(http.server.BaseHTTPRequestHandler):\n"
     "    def do_POST(self):\n"
-    "        self.rfile.read(int(self.headers['Content-Length']))\n"
+    "        sys.stderr.write(self.rfile.read(int(self.headers['Content-Length'])).decode() + '\\n')\n"
     "        body = json.dumps({'ok': True, 'result': {'message_id': 4321}}).encode()\n"
     "        self.send_response(200); self.end_headers(); self.wfile.write(body)\n"
     "    def log_message(self, *a): pass\n"
     "s = http.server.HTTPServer(('127.0.0.1', 0), H)\n"
     "print(s.server_address[1], flush=True)\n"
     "s.handle_request()\n")
-_srv = subprocess.Popen([sys.executable, "-c", _srv_code], stdout=subprocess.PIPE, text=True)
+_srv = subprocess.Popen([sys.executable, "-c", _srv_code], stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, text=True)
 try:
     _port = _srv.stdout.readline().strip()
     _home = os.path.join(_tg_dir, "home")
@@ -4204,13 +4207,46 @@ try:
     os.symlink(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "keepawake"),
                os.path.join(_tg_dir, "keepawake"))
     _env = dict(os.environ, HOME=_home, KEEPAWAKE_TOPICS=os.path.join(_tg_dir, "topics"))
-    subprocess.run(["bash", os.path.join(_bin, "sclaude-notify"), "--in", _wt, "hello"],
+    subprocess.run(["bash", os.path.join(_bin, "sclaude-notify"), "--in", _wt, "--as", "demo", "hello"],
                    env=_env, timeout=30)
     os.environ["KEEPAWAKE_TOPICS"], _saved_topics = _env["KEEPAWAKE_TOPICS"], os.environ["KEEPAWAKE_TOPICS"]
     try:
         _ledger = telegramd.topic_ledger(77)
         check("sclaude-notify records its message where the bot reads",
               open(_ledger).read() if os.path.exists(_ledger) else None, "4321\n")
+        # In the topic the text stands alone: the topic is the feature.
+        _srv.wait(timeout=10)
+        _sent = urllib.parse.parse_qs(_srv.stderr.read().strip().splitlines()[-1])
+        check("sclaude-notify names no feature in its topic", _sent.get("text"), ["<b>hello</b>"])
+
+        # A topic gone: the main chat gets the message itself — under the
+        # feature's name when one is given — not Telegram's refusal.
+        _gone_code = _srv_code.replace(
+            "        body = json.dumps({'ok': True, 'result': {'message_id': 4321}}).encode()\n"
+            "        self.send_response(200); self.end_headers(); self.wfile.write(body)\n",
+            "        if getattr(H, 'n', 0) == 0:\n"
+            "            H.n = 1\n"
+            "            self.send_response(400); self.end_headers()\n"
+            "            self.wfile.write(b'{\"ok\":false,\"description\":\"Bad Request: message thread not found\"}')\n"
+            "            return\n"
+            "        body = json.dumps({'ok': True, 'result': {'message_id': 4321}}).encode()\n"
+            "        self.send_response(200); self.end_headers(); self.wfile.write(body)\n"
+        ).replace("s.handle_request()\n", "s.handle_request()\ns.handle_request()\n")
+        for _args, _want in ((["--as", "demo"], ["<b>demo: hello</b>"]), ([], ["<b>hello</b>"])):
+            _gsrv = subprocess.Popen([sys.executable, "-c", _gone_code], stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE, text=True)
+            try:
+                _gport = _gsrv.stdout.readline().strip()
+                with open(os.path.join(_bin, "sclaude-notify"), "w") as fh:
+                    fh.write(_notify.replace("https://api.telegram.org/bot%s/sendMessage",
+                                             "http://127.0.0.1:%s/bot%%s/sendMessage" % _gport))
+                subprocess.run(["bash", os.path.join(_bin, "sclaude-notify"), "--in", _wt] + _args
+                               + ["hello"], env=_env, timeout=30)
+                _gsrv.wait(timeout=10)
+                _last = urllib.parse.parse_qs(_gsrv.stderr.read().strip().splitlines()[-1])
+                check("topic gone, main chat gets the message %s" % _args, _last.get("text"), _want)
+            finally:
+                _gsrv.kill()
     finally:
         os.environ["KEEPAWAKE_TOPICS"] = _saved_topics
 finally:

@@ -218,10 +218,11 @@ no_change_finish() {
   # closed with neither.
   local issue; issue="$(state_get "$state" issue 2>/dev/null || true)"
   [[ "$issue" == "null" ]] && issue=""
+  # Closed before the epilogue reads it, as a merged feature's is (remind_prod).
+  issue_close_done "$issue" unchanged
   run_status "$slug" "$issue" "" "" 0 0 "$wt" || true
   [[ -n "$issue" ]] && { issue_end_date "$(gh_repo)" "$issue" || true; }
 
-  issue_close_done "$issue" unchanged
   issue_sync "$wt"
   echo ""
   echo "${GREEN}Feature '$slug' is complete without a change to the code.${OFF}"

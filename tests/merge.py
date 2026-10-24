@@ -98,6 +98,15 @@ if ready_src:
     check("draft-is-not-ready", readiness(pr(isDraft=True)), "draft")
     check("no-rights-is-not-ready",
           readiness(pr(viewerCanUpdate=False)), "norights")
+    # One GraphQL call, rights and all: gh pr view takes viewerCanUpdate no
+    # more, and asking for it there failed the call — every answer
+    # `unknown`, an auto merge never made.
+    view = deploy[deploy.index("merge_readiness() {"):]
+    view = view[:view.index("PYREADY")]
+    view = "\n".join(l for l in view.splitlines() if not l.lstrip().startswith("#"))
+    check("readiness-in-one-graphql-call",
+          ("gh pr view" in view, view.count("gh api graphql"), "viewerCanUpdate}}}" in view),
+          (False, 1, True))
 
     # A pull request that is not open is not a thing to report on: the caller
     # has already established the branch is unmerged, so this is a race, and

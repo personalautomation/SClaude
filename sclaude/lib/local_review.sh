@@ -135,6 +135,20 @@ review_actions_sync() {
 # half of them and was interrupted finds the other half open on GitHub.
 # Everything it says goes to stderr: stdout is the count.
 local_review() {
+  # What it told the topic it started, for the end when it leaves early:
+  # GitHub not answering, an answer it could not record. A pass the person
+  # stopped with [x x] still ends as finished, with what is open; Ctrl-C is
+  # told by the pass's own trap.
+  local -a LOCAL_REVIEW_TOLD=()
+  local rc=0
+  local_review_run "$@" || rc=$?
+  trap - INT TERM HUP
+  [[ "$rc" -eq 0 || ${#LOCAL_REVIEW_TOLD[@]} -eq 0 ]] \
+    || ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · it did not finish, see the terminal"
+  return "$rc"
+}
+
+local_review_run() {
   local wt="$1" pr="$2" head last base scope out count answer repo
   local journal; journal="$(local_review_file "$wt" -rounds.jsonl)"
   head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)" || return 1
@@ -183,6 +197,16 @@ local_review() {
   local earlier began new more cap pass=1 round
   round="$(python3 "$LIB/local_review.py" round "$journal" "$head" 2>/dev/null || echo 1)"
   answer="$(local_review_file "$wt" -answer.md)"
+  # The lines above are indented, and the topic leaves those out: it hears
+  # of the review by these two, here and at the end.
+  ask_feed say "$(phase_line started local-review "${pr:-?}" "$round" $verify)"
+  # An array: a "?" for a missing PR, split from a string, globbed.
+  LOCAL_REVIEW_TOLD=("${pr:-?}" "$round" $verify)
+  # Ctrl-C between passes too — while a pass's answer is recorded, or the
+  # report printed — ends what the topic heard start: exit leaves the subshell
+  # local_review runs in before its wrapper could say it.
+  local between='ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · stopped"; exit 130'
+  trap "$between" INT TERM HUP
   while :; do
     if ! earlier="$(python3 "$LIB/local_review.py" prompt "$wt" "$pr" "$repo" "$journal" 2>>"$(local_review_file "$wt" .log)")"; then
       warn "  GitHub did not say which findings are open: the local review did not run pass $pass." >&2
@@ -218,10 +242,11 @@ local_review() {
                "Bash(git push:*)" "Bash(git commit:*)" \
              >"$answer.part" 2>"$(local_review_file "$wt" .log)" </dev/null ) &
     local pid=$!
-    trap 'kill -TERM "$pid" 2>/dev/null; stty echo < /dev/tty 2>/dev/null; printf '"'"'\033[?25h'"'"' >&2; exit 130' INT TERM HUP
+    # The end told here too, the pass stopped first.
+    trap 'kill -TERM "$pid" 2>/dev/null; stty echo < /dev/tty 2>/dev/null; printf '"'"'\033[?25h'"'"' >&2; ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · stopped"; exit 130' INT TERM HUP
     local stopped=0
     local_review_wait "$wt" "$pid" "$pass" "$began" "$verify" "$round" || stopped=1
-    trap - INT TERM HUP
+    trap "$between" INT TERM HUP
     if [[ "$stopped" -eq 1 ]]; then
       rm -f "$answer.part"
       warn "  Stopped pass $pass as you said; what earlier passes and rounds posted stays open on PR #$pr" >&2
@@ -259,6 +284,11 @@ local_review() {
       break
     fi
     pass=$((pass + 1))
+    # Where the review stands with that pass posted, before the next one
+    # reads on: to stderr, stdout being the count, and not to the topic,
+    # which hears of the review once it ends.
+    declare -F review_report >/dev/null \
+      && REVIEW_REPORT_QUIET=1 review_report "$wt" "${ASK_SLUG:-}" >&2
     info "  That pass found the cap ($LOCAL_REVIEW_CAP): reading ${base:0:7}..${head:0:7} again for the rest, pass $pass." >&2
   done
   if [[ "$count" -eq 0 ]]; then
@@ -266,6 +296,7 @@ local_review() {
   else
     info "  The local review leaves $count thread(s) open on PR #$pr." >&2
   fi
+  ask_feed say "$(phase_line finished local-review "${pr:-?}" "$round" $verify) · $count open"
   echo "$count"
 }
 

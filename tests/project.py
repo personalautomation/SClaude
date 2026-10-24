@@ -111,13 +111,27 @@ try:
     out, _, rc = run_bash('REPO=%s; project_db_url_var' % proj, tmp)
     check("unknown-section-is-empty", out.strip(), "")
 
-    # A worktree's own copy wins: a feature in flight may be changing it.
+    # The main checkout's config is every feature's: a key set there by hand
+    # reaches each of them. A worktree's copy answers only a key the main
+    # checkout lacks — a feature in flight adding it.
     wt = os.path.join(tmp, "proj-feature")
     os.makedirs(wt)
     with open(_cfg(os.path.join(wt, ".sclaude/config.json")), "w") as fh:
-        json.dump({"commands": {"typecheck": "from-the-worktree"}}, fh)
+        json.dump({"commands": {"typecheck": "from-the-worktree", "fresh": "only-here"}}, fh)
     out, _, _ = run_bash('REPO=%s; project_command typecheck %s' % (proj, wt), tmp)
-    check("worktree-config-wins", out.strip(), "from-the-worktree")
+    check("main-config-wins", out.strip(), "pnpm typecheck")
+    out, _, _ = run_bash('REPO=%s; project_get commands.fresh %s' % (proj, wt), tmp)
+    check("worktree-adds-a-key-main-lacks", out.strip(), "only-here")
+    # A whole section read at once comes from where it is: main's when it has
+    # one, the worktree's when only that one does.
+    out, _, _ = run_bash('REPO=%s; project_config_with commands %s' % (proj, wt), tmp)
+    check("section-from-main", out.strip(), os.path.join(proj, ".sclaude/config.json"))
+    out, _, _ = run_bash('REPO=%s; project_config_with database.local %s' % (proj, wt), tmp)
+    check("section-main-lacks-from-nowhere", out.strip(), os.path.join(proj, ".sclaude/config.json"))
+    with open(os.path.join(wt, ".sclaude/config.json"), "w") as fh:
+        json.dump({"commands": {"fresh": "only-here"}, "database": {"local": {"env": {}}}}, fh)
+    out, _, _ = run_bash('REPO=%s; project_config_with database.local %s' % (proj, wt), tmp)
+    check("section-main-lacks-from-the-worktree", out.strip(), os.path.join(wt, ".sclaude/config.json"))
 
     # --- no config at all ----------------------------------------------------
     #

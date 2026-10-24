@@ -11,6 +11,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -176,6 +177,14 @@ with tempfile.TemporaryDirectory() as wt:
     row2 = [l.split() for l in text.splitlines() if l.split()[:1] == ["2"]][0][-7:]
     check("brief-is-the-newest-row", lines[1],
           " · ".join("%s %s" % (m, n) for m, n in zip(review_report.BRIEF_ROWS, row2)))
+    # A session of several rounds gets a row for each under it: what each
+    # review run found, and the time to the next. One row for a session of
+    # many rounds only ever grew.
+    subrows = {l.split()[0]: l.split() for l in text.splitlines()
+               if re.match(r"^  \d+\.\d+ ", l)}
+    check("a-row-per-round", sorted(subrows), ["1.1", "1.2", "2.1", "2.2"])
+    check("each-round-its-findings", [subrows[k][-6] for k in ("1.1", "1.2", "2.1", "2.2")],
+          ["4", "3", "3", "0"])
     check_true = lambda name, ok: check(name, bool(ok), True)
     # Threads that could not be read give no status: its zeros would tell
     # the phone a review with open findings is clean.

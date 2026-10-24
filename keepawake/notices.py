@@ -68,6 +68,15 @@ FEED_LOUD = ("warn", "alarm")
 # How long lines that could not be sent are put back before they are let go.
 FEED_KEEP = 3600
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+# The icons sclaude's phase_line opens every session's start and end with
+# (phase_icon in sclaude/lib/steps.sh): a line that opens with one names its
+# kind, and the message then opens with that icon rather than the laptop's.
+# These and no others — a "✓ passed" or a "⚠ careful" of sclaude's own is
+# still the laptop's.
+PHASE_ICONS = ("📝", "💻", "📤", "🛠", "▶️", "✅", "🧱", "🔧", "🔍", "🧪", "🚀", "🏁", "🔁")
+OWN_ICON = re.compile("^(?:%s) " % "|".join(re.escape(i) for i in PHASE_ICONS))
+# The first five are the steps' own sessions, whose step's ✅ belongs with them.
+STEP_ICONS = PHASE_ICONS[:5]
 
 
 def take_feed(channel, now=None):
@@ -112,6 +121,38 @@ def put_back(channel, lines):
         pass
 
 
+# A step's lines and the next one's are not one message: a line closing a
+# step ("✅ Step 1/6 done") ends the message, and one opening a session or a
+# run ("... started", "... resumed") begins a new one once the message holds
+# another's phase line already. What stands between — a warning printed while
+# the next step is set up — goes with the start it leads to.
+OPENS = re.compile(r"\b(started|resumed)\b")
+CLOSES = "✅ "
+
+
+def feed_groups(lines):
+    """The gathered lines cut where one step's account ends and another's
+    begins, oldest first: [[line, ...], ...]."""
+    groups, current, lead = [], [], None
+    for line in lines:
+        text = ANSI.sub("", line[2] or "").strip()
+        own = OWN_ICON.match(text)
+        # A step's ✅ comes after the friction review of its last session:
+        # it is not that review's end, and goes on its own.
+        if lead and (own and OPENS.search(text)
+                     or text.startswith(CLOSES) and lead not in STEP_ICONS):
+            groups.append(current)
+            current, lead = [], None
+        current.append(line)
+        lead = lead or (own and own.group(0).strip())
+        if text.startswith(CLOSES):
+            groups.append(current)
+            current, lead = [], None
+    if current:
+        groups.append(current)
+    return groups
+
+
 def feed_message(lines, shown=""):
     """The message for the gathered lines, and whether it should sound: (text,
     loud), or ("", False) when nothing is worth a message."""
@@ -143,7 +184,10 @@ def feed_message(lines, shown=""):
         room -= len(line) + 1
     if len(kept) > len(body):
         body.append("<i>… %d more</i>" % (len(kept) - len(body)))
-    return "🖥 " + "\n".join(body), any(level in FEED_LOUD for level, _ in kept)
+    # A message that opens with a phase line is about that phase — the batch
+    # is cut so (feed_groups) — and leads with its icon, not the laptop's.
+    head = "" if OWN_ICON.match(kept[0][1]) else "🖥 "
+    return head + "\n".join(body), any(level in FEED_LOUD for level, _ in kept)
 
 
 def check(bot, channels, topic, log, now=None, at_terminal=None, shown=None, lost=None):
@@ -164,17 +208,23 @@ def check(bot, channels, topic, log, now=None, at_terminal=None, shown=None, los
         if os.path.exists(os.path.join(channel, NOTES_DIR, FEED_FILE)):
             thread = topic(name, slug)
         lines = take_feed(channel, now) if thread is not None else []
-        text, loud = feed_message(lines, shown(channel) if shown else "") if lines else ("", False)
-        if text and thread:
-            pids = {line[1] for line in lines}
+        context = shown(channel) if shown and lines else ""
+        groups = feed_groups(lines) if lines else []
+        for i, group in enumerate(groups):
+            text, loud = feed_message(group, context)
+            if not (text and thread):
+                continue
+            pids = {line[1] for line in group}
             if loud and at_terminal and any(at_terminal(pid) for pid in pids):
                 loud = False
             if not bot.send(text, quiet=not loud, thread=thread):
-                # The network: back to the file, for the next turn.
-                put_back(channel, lines)
+                # The network: back to the file, this group and the rest,
+                # for the next turn.
+                put_back(channel, [line for g in groups[i:] for line in g])
                 log.warning("the feed of %s/%s waits: not sent", name, slug)
                 if lost:
                     lost(name, slug)
+                break
         notes = pending(channel)
         if not notes:
             continue

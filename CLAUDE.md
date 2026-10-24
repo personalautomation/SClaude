@@ -96,6 +96,15 @@ breaks the other silently — grep before you edit:
   bot and imports the function, and read by `clear_topic_messages`, which
   deletes them with the topic; `tests/keepawake.py` runs both writers.
 
+- The icons `phase_icon` in `sclaude/lib/steps.sh` opens every session's
+  start and end line with (and `pane_icon` gives its tab) are listed again in
+  `PHASE_ICONS` in `keepawake/notices.py`, which leads the topic's message with
+  such an icon in place of the laptop's 🖥; one missing there gets 🖥 before
+  it. `tests/session_names.py` checks the two lists agree. `feed_groups` there
+  also reads `phase_words`' verbs: a line saying `started` or `resumed` opens
+  a step's message and the `✅` of a step's `done` closes it, so a step's lines
+  are not mixed with the next one's; `tests/notices.py` runs it on those lines.
+
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/run.sh`, which decides by it
   whether a review round stays in the same session; `tests/review-round.py`

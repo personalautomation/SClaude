@@ -1408,6 +1408,40 @@ if specs_fn:
 check_true("red-line-names-the-specs",
            "failed on $failed${failed_specs:+: $failed_specs}" in regression)
 
+# The topic's account of a run: one line at its start and one at its end, in
+# the shape every session takes; a sound only when red, and no log tail.
+notify_fns = "\n".join(re.search(r"^%s\(\) \{.*?^\}" % n, regression, re.S | re.M).group(0)
+                       for n in ("regression_duration", "regression_notify_start", "regression_notify_done"))
+
+
+def notified(call):
+    script = ('source "%s/steps.sh"\n'
+              'notify_feature() { local slug="$1"; shift; printf "%%s|%%s\\n" "$slug" "$*"; }\n'
+              % os.path.join(ROOT, "sclaude", "lib")) + notify_fns + "\n" + call
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                          timeout=30).stdout.strip()
+
+
+check("notify-start", notified('regression_notify_start demo local "" 12 720'),
+      "demo|--quiet 🧪 Regression started: local · 12 parts, expected 12m 00s")
+check("notify-start-deployed", notified('regression_notify_start demo preview https://p.example 1'),
+      "demo|--quiet 🧪 Regression started: preview (https://p.example) · 1 part")
+check("notify-green", notified('regression_notify_done demo local "" 12 12 820'),
+      "demo|--quiet 🧪 Regression finished: local, green · 12/12, 13m 40s")
+check("notify-red", notified('regression_notify_done demo local e2e 11 12 843 "Login › signs in (login.spec.ts:14)"'),
+      "demo|🧪 Regression failed: local, on e2e: Login › signs in (login.spec.ts:14) · 11/12, 14m 03s")
+_tail_log = tempfile.NamedTemporaryFile("w", suffix=".log", delete=False)
+_tail_log.write("=== typecheck ===\n\nsrc/a.ts(3,1): error TS2304\nFound 1 error.\n")
+_tail_log.close()
+check("notify-red-without-specs-brings-the-tail",
+      notified('regression_notify_done demo local typecheck 0 3 9 "" "" %s' % _tail_log.name),
+      "demo|🧪 Regression failed: local, on typecheck · 0/3, 9s\n=== typecheck ===\n"
+      "src/a.ts(3,1): error TS2304\nFound 1 error.")
+os.unlink(_tail_log.name)
+check("notify-broken", notified('regression_notify_done demo preview e2e 0 1 60 "" https://p.example'),
+      "demo|🧪 Regression could not run: preview · every spec failed and https://p.example is not serving"
+      " — the environment, not the code")
+
 # Once, local, e2e — and a retried part's time is not the suite's.
 check_true("retry-only-local-e2e-once",
            '"$stage" == "local" && "$part" == "e2e" && -z "$retried"' in regression)

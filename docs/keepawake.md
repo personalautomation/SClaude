@@ -165,6 +165,10 @@ in a private chat a deleted topic leaves them standing in the chat's "All" view.
 So every message sent into a topic or typed there is recorded, one id a line,
 in `~/.local/state/keepawake/topics/<thread>` (`topic_ledger` in `state.py`):
 by the bot (`remember_in_topic`) and by `sclaude-notify`, which sends past it.
+What sclaude sends that way about a feature — regressions, QA's moves on the
+board, a quota or usage limit — goes to the feature's topic, and its text does
+not name the feature: the topic is the feature. Only when it falls back to the
+main chat, with no topic to go to, does `--as` put the name before it.
 `delete_topic` sends them to `deleteMessages` first, having taken the record
 aside by a rename, so an id `sclaude-notify` appends meanwhile starts a new one
 and is deleted on the next turn rather than lost. Telegram lets a bot delete
@@ -204,6 +208,61 @@ it — the same test of the terminal's last keystroke that keeps questions silen
 at the laptop. The feed goes only to the topic: with none yet the file waits,
 lines a failed send took go back to it for an hour (`FEED_KEEP`), and a long
 batch is cut by whole lines, never through an HTML entity.
+
+Each of these lines opens with its kind's icon, the one its tab carries
+where it has one (`phase_icon` in `steps.sh`): 🛠 a review fix session, 🔍
+the local review, 🧪 a regression, 🔧 its fix, 🚀 a deploy, 🧱 a friction
+review, ✅ a step done. A message that opens with such a line leads with its
+icon rather than the laptop's 🖥 (`OWN_ICON` in `notices.py`). And one step's
+lines are not mixed with the next one's (`feed_groups`): a step done ends the
+message, a start or resume begins a new one once the message holds another
+phase's line, and a warning printed while the next step is set up goes with
+the start it leads to. A step done that follows a friction review goes on its
+own: that review comes between the step's last session and its end.
+
+Every session sclaude opens for a feature — a step, a friction review, a
+regression fix, the epilogue, the retrospective — tells the topic when it
+starts and when it ends, in one shape (`phase_line` in `steps.sh`, numbered
+over the six of the cycle): "Step 4/6 review: fix session 2 started", "Friction
+review finished: after step 4/6 review, fix session 3". A step's lines name its
+session, since the step goes on after one ends — a review takes several — and
+the step itself is told once, when it closes: "Step 4/6 done: review". The
+review on this machine, which runs inside a step with no session of its own,
+is told the same way ("Local review started: PR #7, round 3", and at its end
+how many findings it leaves open), and so is a plan a session changed, by how
+much: "Plan changed · +3 −1 lines" — the plan itself is printed in the terminal.
+A step 4 session is a fix session: it fixes what the review found. Its line
+says what it is handed — "Step 4/6 review: fix session 1 resumed · findings:
+2 not fixed yet, 4 new · red: tests" — and the "Step 4 is not done" warning
+where the last round left the review: "findings: 3 fixed, 1 declined, 2 not
+fixed yet, 4 new, 1 on lines since changed · 1 left to you · red: tests"
+(`brief` in `pr_context.py`). Both count from the fix session's last look at
+the pull request, its transcript's last entry: fixed and declined are the
+threads closed since, by the review confirming a fix or by a "Left as it
+is"; not fixed yet the ones it had seen and that are still open; new the ones
+posted since; left to you the threads the person kept. The fix session's own
+line keeps to its work: what is settled or the person's is left out. At its
+end, finished or ended, the line gives what the round left (`review_tally`,
+counted from the round's start, `steps.review.round_since`): "Step 4/6
+review: fix session 1 finished · 2 commits · findings: 1 declined, 5 for the
+review to check, 0 new". With the review on this machine its fixes are
+checked after it, so what it leaves of what it had is "for the review to
+check", not "still open", and "fixed" appears only when something confirmed
+a fix within the round. A round the review closed while the session goes on
+is told the same way: "Step 4/6 review: fix session 1, round 3 finished ·
+3 commits · findings: 5 fixed, 0 new". A regression sends one line when it
+starts and one when it ends ("Regression failed: local, on e2e: <the failed
+specs> · 11/12, 14m 03s"), with a sound only when it is red. A preview deploy says when it starts and
+how it ended ("Deploy finished: preview · <its address>", or failed after
+every try, with a sound); production, which begins with a question, says only
+how it ended. The commands a deploy runs stay in the terminal, and with the
+question they are what it rests on.
+"Finished" is a session
+sclaude closed on its report; "ended" one a person left, which says nothing
+of the work being done (`session_closed` in `run.sh`). A detail rides on the
+same line only where the reader needs it: how many friction entries a review
+has, the regression part a fix is for, that a fix goes back to the session of
+the last one, a retrospective that found nothing to act on.
 
 **The menu, split by where it is.** In a feature's topic there is nothing to
 choose: the topic is the feature, so the menu there is the feature's card —

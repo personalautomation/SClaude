@@ -181,7 +181,7 @@ try:
     def run_bash(script, env_extra=None):
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""; SELF=sclaude\n'
-        for name in ("io", "ui", "state", "project", "picker", "local_review"):
+        for name in ("io", "ui", "state", "steps", "project", "picker", "local_review"):
             body += 'source "%s/%s.sh"\n' % (LIB, name)
         body += 'LIB="%s"\nwarn() { echo "$*" >&2; }\ninfo() { echo "$*"; }\n' % LIB
         body += script
@@ -245,9 +245,24 @@ try:
     # --- the review -----------------------------------------------------------
     mode("local")
 
+    # What the feature's topic is told, through the channel ask_feed writes.
+    ask_dir = os.path.join(tmp, "ask")
+    feed = os.path.join(ask_dir, "ask", "demo", "notes", "feed.tsv")
+
     def review(answer):
         write(os.path.join(tmp, "answer"), answer)
-        return run_bash('REPO=%s; local_review %s 7' % (repo, repo))
+        return run_bash('REPO=%s; local_review %s 7' % (repo, repo),
+                        {"ASK_DIR": ask_dir, "ASK_SLUG": "demo"})
+
+    def told():
+        try:
+            with open(feed) as fh:
+                return [line.split("\t")[3].rstrip("\n") for line in fh]
+        except OSError:
+            return []
+        finally:
+            if os.path.exists(feed):
+                os.unlink(feed)
 
     def prompts():
         try:
@@ -265,6 +280,10 @@ try:
     out, err, rc = review("### a.txt:1 — b is wrong\nWith a, b comes out.\n\n"
                           "### a.txt:1 — another\nAnd so on.\n\nFINDINGS: 2\n")
     check("first-count", (out.strip(), rc), ("2", 0))
+    # The status line and the indented lines stay in the terminal; the topic
+    # hears that the review started and how it ended.
+    check("first-told", told(), ["🔍 Local review started: PR #7, round 1",
+                                 "🔍 Local review finished: PR #7, round 1 · 2 open"])
     first = prompts()
     check_true("first-reads-whole-pr", "the whole pull request" in first
                and "git diff %s..%s" % (base, head) in first)
@@ -571,7 +590,7 @@ try:
     posted_before = len(threads())
     body = "set -uo pipefail\n"
     body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""; SELF=sclaude\n'
-    for name in ("io", "ui", "state", "project", "picker", "local_review"):
+    for name in ("io", "ui", "state", "steps", "project", "picker", "local_review"):
         body += 'source "%s/%s.sh"\n' % (LIB, name)
     body += 'LIB="%s"\nwarn() { echo "$*" >&2; }\ninfo() { echo "$*"; }\n' % LIB
     body += 'REPO=%s; n="$(local_review %s 7)"; echo "COUNT=$n"\n' % (repo, repo)

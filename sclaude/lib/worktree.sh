@@ -795,9 +795,13 @@ check_next_types() {
 # What is uncommitted in a worktree — less the internal files the script created
 # itself. Those are temporary and go away with the worktree; showing them in a
 # question that says "you are about to lose this work" means asking about what
-# nobody minds losing.
+# nobody minds losing. More exact paths to leave out may follow the tree.
+#
+#   worktree_dirt <wt> [<path>...]
 worktree_dirt() {
   local wt="$1" line path p keep
+  shift
+  local -a skip=("${SCRATCH_PATHS[@]}" "$@")
   # We parse line by line rather than with a regex: the path in
   # `status --short` starts at the third character, and an exact comparison is
   # more reliable than a pattern that has to be escaped for every dot in a
@@ -807,7 +811,7 @@ worktree_dirt() {
     path="${line:3}"
     path="${path%/}"
     keep=1
-    for p in "${SCRATCH_PATHS[@]}"; do
+    for p in "${skip[@]}"; do
       [[ "$path" == "$p" || "$path" == "$p/"* ]] && { keep=0; break; }
     done
     [[ "$keep" -eq 1 ]] && printf '%s\n' "$line"

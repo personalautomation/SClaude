@@ -328,7 +328,7 @@ def git_branch(cwd, session_id):
 
 
 # A session sclaude started: `claude -n <number>-<kind>(<round>)/<slug>`, e.g.
-# `1-plan 📝/12-login` or `4-review(2) 🔍/12-login` (session_label in
+# `1-plan 📝/12-login` or `4-review(2) 🛠/12-login` (session_label in
 # sclaude/lib/steps.sh, the emoji from named_with_icon in sclaude/lib/pane.sh,
 # for the tab title). The label says which job this session has; the emoji
 # and the slug are left out, the slug being the worktree's, which the folder

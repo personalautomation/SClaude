@@ -189,24 +189,96 @@ prompt_additions() {
 # condition of the work.
 review_news() {
   local wt="$1" step="$2"
-  local state="$wt/.sclaude/local/feature/state.json" session transcript pr since
+  local state="$wt/.sclaude/local/feature/state.json" pr since
 
   [[ "$step" == "review" ]] || return 0
   pr="$(state_get "$state" pr || true)"
   [[ -n "$pr" && "$pr" != "null" ]] || return 0
 
-  session="$(state_get "$state" "steps.$step.session" || true)"
-  [[ -n "$session" ]] || return 0
-  transcript="$(transcript_dir "$wt")/$session.jsonl"
-  [[ -f "$transcript" ]] || return 0
-
-  # The last entry's time is the file's mtime: the transcript is appended to on
-  # every message, so that is precisely "when the step last worked". There is no
-  # reason to read the whole jsonl for it.
-  since="$(date -Iseconds -r "$transcript" 2>/dev/null)" || return 0
+  since="$(review_last_look "$wt")"
   [[ -n "$since" ]] || return 0
 
   python3 "$LIB/pr_context.py" "$wt" "$pr" "$(gh_repo)" "$since" 2>/dev/null || true
+}
+
+# What a fix session is handed, counted, for its line in the topic:
+# "findings: 2 not fixed yet, 4 new · red: tests" (brief in pr_context.py),
+# split at the session's last look for a resumed one. Nothing for another
+# step, or when GitHub cannot say.
+#
+#   review_brief <wt> <step> [resumed]
+review_brief() {
+  local wt="$1" step="$2" pr
+  [[ "$step" == "review" ]] || return 0
+  pr="$(state_get "$wt/.sclaude/local/feature/state.json" pr 2>/dev/null || true)"
+  [[ -n "$pr" && "$pr" != "null" ]] || return 0
+  python3 "$LIB/pr_context.py" --handed "$wt" "$pr" "$(gh_repo)" \
+    ${3:+"$(review_last_look "$wt")"} 2>/dev/null || true
+}
+
+# When the review step's session last looked at the pull request: its
+# transcript's last entry, the mark review_news counts new comments from.
+# The entry's time is the file's mtime: the transcript is appended to on every
+# message, so that is precisely "when the step last worked", with no reason to
+# read the whole jsonl for it. Not the round's start (round_since): a session
+# carries on past its last look. Empty with no session or transcript.
+#
+#   review_last_look <wt>
+review_last_look() {
+  local session transcript
+  session="$(state_get "$1/.sclaude/local/feature/state.json" steps.review.session 2>/dev/null || true)"
+  [[ -n "$session" && "$session" != "null" ]] || return 0
+  transcript="$(transcript_dir "$1")/$session.jsonl"
+  [[ -f "$transcript" ]] && date -Iseconds -r "$transcript" 2>/dev/null
+  return 0
+}
+
+# Where a fix session's round begins: now, and the head it starts from. From
+# its launch rather than its last look: what the review on this machine
+# confirmed between two rounds is the earlier round's, said at its end.
+# Only once the last round ended (review_round_ends): a session a person left
+# and came back to is the same round, and its tally counts all of it.
+#
+#   review_round_begins <wt>
+review_round_begins() {
+  local state="$1/.sclaude/local/feature/state.json"
+  [[ "$(state_get "$state" steps.review.round_open 2>/dev/null || true)" == "true" ]] && return 0
+  state_set "$state" steps.review.round_since "$(date -Iseconds)"
+  state_set "$state" steps.review.round_head "$(git -C "$1" rev-parse HEAD 2>/dev/null || echo null)"
+  state_set "$state" steps.review.round_open true
+}
+
+# A round is over: sclaude closed the session on its report, or the review
+# closed the round. The next launch begins a new one.
+review_round_ends() {
+  state_set "$1/.sclaude/local/feature/state.json" steps.review.round_open null 2>/dev/null || true
+}
+
+# What a fix session leaves at its end, for its line in the topic: the
+# commits it made in its round and how the findings stand (brief --done):
+# "2 commits · findings: 1 declined, 5 for the review to check, 0 new".
+# The round is from its launch (review_round_begins). Nothing for another
+# step, or when there is no round to count.
+#
+#   review_tally <wt> <step>
+review_tally() {
+  local wt="$1" state="$1/.sclaude/local/feature/state.json" pr since head commits standing
+  [[ "$2" == "review" ]] || return 0
+  pr="$(state_get "$state" pr 2>/dev/null || true)"
+  since="$(state_get "$state" steps.review.round_since 2>/dev/null || true)"
+  [[ -n "$pr" && "$pr" != "null" && -n "$since" && "$since" != "null" ]] || return 0
+  # From the head it started on, not by date: a rebase or a merge of main
+  # dates every commit anew. A head no longer in the history (rebased away)
+  # counts nothing rather than everything.
+  head="$(state_get "$state" steps.review.round_head 2>/dev/null || true)"
+  if [[ -n "$head" && "$head" != "null" ]] && git -C "$wt" merge-base --is-ancestor "$head" HEAD 2>/dev/null; then
+    commits="$(git -C "$wt" rev-list --count --first-parent --no-merges "$head..HEAD" 2>/dev/null || echo 0)"
+  else
+    commits=0
+  fi
+  standing="$(python3 "$LIB/pr_context.py" --done "$wt" "$pr" "$(gh_repo)" "$since" 2>/dev/null || true)"
+  printf '%s %s%s\n' "$commits" "$([[ "$commits" == 1 ]] && echo commit || echo commits)" \
+    "${standing:+ · $standing}"
 }
 
 # May step 4 close without a session, if the review turns out clean?
@@ -310,8 +382,8 @@ review_quota_rerun() {
     info "  sclaude runs it again at $(date -d "@$due" +%H:%M), once the limit has reset; no session is needed for it."
     info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug"
   } >&2
-  "${INSTRUMENTS:-}/bin/sclaude-notify" --in "$wt" --quiet \
-    "$slug: the automatic review of PR #$pr ran out of Claude quota; sclaude reruns it at $(date -d "@$due" +%H:%M)." \
+  notify_feature "$slug" --wt "$wt" --quiet \
+    "The automatic review of PR #$pr ran out of Claude quota; sclaude reruns it at $(date -d "@$due" +%H:%M)." \
     >/dev/null 2>&1 || true
   while now="$(date +%s)"; (( now < due )); do
     left=$(( due - now ))
@@ -478,9 +550,10 @@ run_step() {
   fi
 
   echo ""
-  echo "${BOLD}${BLUE}── $slug · step $(($(step_index "$step") + 1))/${#STEPS[@]}: $(step_title "$step") ──${OFF}"
-  # The topic gets the fact alone; the banner is drawn for a terminal.
-  ask_feed say "Step $(($(step_index "$step") + 1))/${#STEPS[@]} started: $(step_title "$step")"
+  echo "${BOLD}${BLUE}── $slug · $(phase_title step "$step") ──${OFF}"
+  # The topic hears of the step's session once it is opened, below, and of the
+  # step itself when it closes: entering it here is often a return to one that
+  # goes on. The indented lines under the banner stay here (notices.py).
   # Where to look at it, before anything else: with a server per feature,
   # localhost:3000 is the list of features, and the feature's own address is
   # the one thing a person needs from this header.
@@ -678,6 +751,10 @@ run_step() {
     [[ -n "$told" ]] && opening="$(printf '%s%s' "$told" "${news:+$'\n\n'$news}")"
     RUN_STEP_LAUNCHED=1
     step_run "$wt" "$step" open "$session"
+    local brief; brief="$(review_brief "$wt" "$step" resumed)"
+    # Where this round begins, for the account the session's end gives.
+    [[ "$step" == "review" ]] && review_round_begins "$wt"
+    ask_feed say "$(phase_line resumed step "$step" "$(step_session_number "$state" "$step" "$session")")${brief:+ · $brief}${qa:+ · returned by QA}"
     [[ "$step" == "review" ]] && run_comments "$wt" "$session" "$pr"
     [[ "$local_round" -eq 1 ]] && run_local_round "$wt" "$session"
     # The issue hears of it too, as on the fresh path below. A review session
@@ -728,6 +805,15 @@ run_step() {
     # Told something by sclaude — a session that could not be resumed is
     # opened afresh, and what was meant for it still reaches it.
     [[ -n "$told" ]] && prompt="$(printf '%s\n\n%s\n' "$prompt" "$told")"
+    # After the QA notes are read: whether QA sent it back goes on the line.
+    local brief returned=""
+    brief="$(review_brief "$wt" "$step")"
+    [[ "$step" == "review" ]] && { review_round_ends "$wt"; review_round_begins "$wt"; }
+    if [[ -n "$qa_fresh" ]] || [[ "$step" == "review" \
+          && "$(state_get "$state" reopened_by 2>/dev/null || true)" == "returned" ]]; then
+      returned=" · returned by QA"
+    fi
+    ask_feed say "$(phase_line started step "$step" "$(step_session_number "$state" "$step" "$session")")${brief:+ · $brief}$returned"
     RUN_STEP_LAUNCHED=1
     issue_sync "$wt"
     session_watch_start "$wt" "$session" "" "" "$step"
@@ -770,6 +856,9 @@ session_ended() {
   # timed the wrapper and let a stillborn session through whenever the launch
   # itself took longer than the threshold.
   if ! session_started "$wt" "$session"; then
+    # The topic heard it started: it hears this end, numbered while the run
+    # is still there to number it.
+    ask_feed say "$(phase_line ended step "$step" "$(step_session_number "$state" "$step" "$session")") · claude exited at once, see the terminal"
     step_run "$wt" "$step" drop "$session"
     warn ""
     warn "  claude exited immediately — the step never started."
@@ -791,6 +880,11 @@ session_ended() {
     local rounds; rounds="$(state_get "$state" "steps.$step.rounds" 2>/dev/null || true)"
     [[ "$rounds" =~ ^[0-9]+$ ]] || rounds=0
     rounds=$((rounds + 1))
+    # The topic hears of the round as of a fix session's end, with what it
+    # left; the terminal keeps its own words for it below.
+    local tally; tally="$(review_tally "$wt" "$step")"
+    review_round_ends "$wt"
+    ask_feed say "$(phase_line finished step "$step" "$(step_session_number "$state" "$step" "$session")" "$rounds")${tally:+ · $tally}"
     local held pct
     held="$(review_context "$wt" "$session")"
     pct="$(awk '{print $3}' <<<"$held")"
@@ -800,7 +894,7 @@ session_ended() {
       run_rounds "$wt" "$session" "$((rounds + 1))"
       review_context_log "$wt" "$slug" "$session" "carried on" "$held" "$rounds"
       echo ""
-      say "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
+      say_here "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
       [[ -n "$round_note" ]] && info "  $round_note"
       info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%): the same session takes the new findings."
       review_yours_report "$wt" "$pr" || true
@@ -818,7 +912,7 @@ session_ended() {
     watch_seen "$slug"
     issue_sync "$wt"
     echo ""
-    say "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
+    say_here "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
     [[ -n "$round_note" ]] && info "  $round_note"
     if [[ "$pct" =~ ^[0-9]+$ ]]; then
       info "  Its context is at ${pct}% (${REVIEW_CONTEXT_MAX_PCT}% or more): the new findings go to a fresh session."
@@ -839,9 +933,10 @@ session_ended() {
   # act on what they find without asking — the person did not type /exit, so
   # nobody is at the session's end to answer. See done_marker.
   SESSION_AUTO_CLOSED=""
-  session_closed "$(done_marker "$wt")" "$wt" "$session" \
-    "Step $(($(step_index "$step") + 1))/${#STEPS[@]} finished: $(step_title "$step")" \
+  session_closed "$(done_marker "$wt")" "$wt" "$session" "" "$(review_tally "$wt" "$step")" \
+    step "$step" "$(step_session_number "$state" "$step" "$session")" \
     && SESSION_AUTO_CLOSED=1
+  [[ "$step" == "review" && -n "$SESSION_AUTO_CLOSED" ]] && review_round_ends "$wt"
   # Left by the person in a tab of its own: the tab closed with its last
   # message, which is often the one that says what is left — once a review
   # session's account of what it resolved and what it waits for went with it.
@@ -1212,6 +1307,7 @@ after_step() {
   esac
 
   step_run "$wt" "$step" close
+  ask_feed say "$(phase_line done step "$step")"
   # The automatic returns are counted per closing of a step: a step that
   # closed has used none of them on its next run.
   state_set "$state" "steps.$step.auto_returns" null 2>/dev/null || true
@@ -1348,6 +1444,8 @@ run_friction() {
   local wt="$1" slug="$2" key="$3" reread="${4:-}"
   local log="$wt/.sclaude/local/feature/friction.log"
   local reviewed="$log.reviewed"
+  # This review's own entries (see `reading` below), by its key.
+  local batch="$wt/.sclaude/local/feature/friction-$key.log"
   local state="$wt/.sclaude/local/feature/state.json"
   # The key names what is reviewed: `review-3` is the third session of the
   # review step (step_run_key), `fix-preview-1` a fixing session, and a bare
@@ -1432,6 +1530,15 @@ run_friction() {
   # put off here, into the product's deferred file on the feature's branch, and
   # the log moves into .reviewed as a reviewed one does.
   local deferred_from; deferred_from="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
+  # The person's "write them in now" outlives an interrupted review: a pending
+  # one is not asked again, and a fresh session in its place would put the
+  # rules off against the answer.
+  FRICTION_APPLY_NOW=""
+  if [[ -n "$pending" ]]; then
+    [[ "$(state_get "$state" "friction.$key.apply_now" 2>/dev/null || true)" == "true" ]] && FRICTION_APPLY_NOW=1
+  else
+    state_set "$state" "friction.$key.apply_now" null 2>/dev/null || true
+  fi
   if [[ -z "$reread" && -z "$pending" ]] \
      && friction_defer_proposals "$wt" "$slug" "$key" "$step"; then
     { cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log"; } || true
@@ -1487,7 +1594,13 @@ run_friction() {
   # .reviewed, and a repeat would double the entries — precisely the trouble
   # described a paragraph above about the round trip through cmd_friction.
   [[ -n "$reread" || -n "$pending" ]] \
-    || { cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log" || true; }
+    || { cp "$log" "$batch" 2>/dev/null; cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log" || true; }
+  # What this review reads: its own entries, kept apart as they were moved —
+  # .reviewed holds every review's, and the review after step 2 read step 1's
+  # again and deferred the same refusal twice. A re-read (`sclaude friction`)
+  # is of everything; an unclosed review from before the batches, of .reviewed.
+  local reading="$reviewed"
+  [[ -z "$reread" && -s "$batch" ]] && reading="$batch"
 
   local transcript prompt count
   transcript="$(python3 - "$wt" "$wt/.sclaude/local/feature/state.json" <<'PYEOF'
@@ -1564,19 +1677,25 @@ PYEOF
     | sed -e "s|<feature>|$slug|g" -e "s|<step>|$label|g" \
       -e "s|<deferred>|$(deferred_file "$wt" "$slug")|g" \
       -e "s|<rules>|$(product_rules_dir "$wt")|g" -e "s|<instruments>|$INSTRUMENTS|g" \
-      -e "s|<log>|$reviewed|g" -e "s|<transcript>|$transcript|g" \
+      -e "s|<log>|$reading|g" -e "s|<transcript>|$transcript|g" \
       -e "s|<done-marker>|$done_file|g" -e "s|<worktree>|$wt|g" \
       -e "s|<branch>|$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "the feature's branch")|g")"
 
+  # The person asked for the proposals in CLAUDE.md now (friction_defer_proposals):
+  # the body puts every proposal off, and is told otherwise for this review.
+  if [[ -n "${FRICTION_APPLY_NOW:-}" ]]; then
+    prompt+=$'\n\n'"**I asked for this log's proposals in the project's CLAUDE.md now, not put off.** Write each \`proposal\` entry's rule into CLAUDE.md in this review, as any other change you make here, and leave it out of the deferred file: a decision of this cycle rests on it, and a month without it is a month of sessions that do not know it."
+  fi
+
   # The entries begin with a date; "^2" also caught any line of prose starting
   # with a two — on a live log of three entries it gave one.
-  count="$(grep -cE '^20[0-9]{2}-' "$reviewed" 2>/dev/null || echo 0)"
+  # grep -c prints its 0 and fails with it: `|| echo 0` made it two lines.
+  count="$(grep -cE '^20[0-9]{2}-' "$reading" 2>/dev/null)" || count="${count:-0}"
 
   echo ""
-  echo "${BOLD}${BLUE}── $slug · friction review after $([[ "$step" == fix-* ]] \
-    && printf "the %s fix" "$label" || printf "step '%s'%s" "$label" "${number:+, session $number}") ──${OFF}"
+  echo "${BOLD}${BLUE}── $slug · $(phase_title friction "$key") ──${OFF}"
   info "   opus / medium / plan · $wt"
-  info "   $count entries · $(basename "$reviewed")"
+  info "   $count entries · $(basename "$reading")"
   echo ""
 
   # A review is as much a session as a step, and it is interrupted the same way:
@@ -1654,6 +1773,9 @@ PYEOF
   guard_out="$(review_guard_settings "$wt")" \
     || { warn "  The friction review was not started: sclaude could not read its rules (see above)."; return 1; }
   mapfile -t guard <<< "$guard_out"
+  # Here, past every reason not to start: the topic hears of a start that
+  # happens. How much there is to review is the one detail it gets.
+  ask_feed say "$(phase_line "$([[ -n "$session" ]] && echo resumed || echo started)" friction "$key") · $count $([[ "$count" == 1 ]] && echo entry || echo entries)"
   local before_instruments; before_instruments="$(instruments_state)"
   if [[ -n "$session" ]]; then
     # Returning to an interrupted review. The log does not need moving — it is
@@ -1666,7 +1788,7 @@ PYEOF
         "${guard[@]}" \
         --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$INSTRUMENTS" \
         -n "$(session_label friction "$key")/$slug" \
-        "Back in the friction review for feature '$slug'. Pick up where the conversation left off; re-read $reviewed if you need to." )
+        "Back in the friction review for feature '$slug'. Pick up where the conversation left off; re-read $reading if you need to." )
   else
     session="$(new_session_id)"
     # Keyed by what the review is about. `friction.after` used to carry that,
@@ -1680,7 +1802,7 @@ PYEOF
     # its run keeps. Left on the node, latest_friction_cell reads them first
     # and gives this new review the old one's answer.
     local flag
-    for flag in empty fixed unread; do
+    for flag in empty fixed unread verdict verdict_note; do
       state_set "$state" "friction.$key.$flag" null 2>/dev/null || true
     done
     session_runs "$state" "friction.$key" open "$session"
@@ -1692,8 +1814,7 @@ PYEOF
   fi
   session_watch_stop
   instruments_unchanged "$before_instruments" "friction review" || true
-  session_closed "$done_file" "$where" "$session" \
-    "Friction review done — sclaude closed it." || true
+  session_closed "$done_file" "$where" "$session" "" "" friction "$key" || true
 
   local changed=""
   # What the review changed is the product's, committed on the feature's branch
@@ -1842,19 +1963,38 @@ friction_propose_project() {
 # session: the rows go into the product's deferred file in the worktree
 # (deferred.sh) and are committed on the feature's branch, and the state
 # records the review the way a session's deferral does. Returns 1 to leave the
-# log to a session: anything but proposals in it, or a deferred file that could
-# not be written or committed.
+# log to a session: anything but proposals in it, a deferred file that could
+# not be written or committed — or the person wanting them in CLAUDE.md now.
+#
+# Asked first: a rule the review's own decision rests on — a guard a fix put
+# in, which the next session must not take out — put off for a month is a
+# month of sessions that do not know it. "Now" leaves FRICTION_APPLY_NOW set,
+# and the friction review that takes the log is told to write them in.
+#
+# Each put-off is a review of the key's own, in its runs: a fix session's key
+# stands for all its rounds, and the state kept only the last one's.
 #
 #   friction_defer_proposals <wt> <slug> <key> <step>
 friction_defer_proposals() {
   local wt="$1" slug="$2" key="$3" step="$4"
   local log="$wt/.sclaude/local/feature/friction.log" state="$wt/.sclaude/local/feature/state.json"
-  local rows n now
+  local rows n now answer text
   [[ -s "$log" ]] || return 1
   rows="$(python3 "$LIB/friction_proposals.py" "$log" "$(basename "$REPO")" \
             "$slug" "$step" 2>/dev/null)" || return 1
   [[ -n "$rows" ]] || return 1
   n="$(grep -c . <<< "$rows")"
+  echo ""
+  say "${BOLD}The friction log after '$key' holds only proposed CLAUDE.md rules:${OFF}"
+  while IFS=$'\t' read -r _ _ _ _ _ text; do say "  - $text"; done <<< "$rows"
+  # Only a "no" writes them in now. An ask that got no answer — the feature
+  # ended elsewhere, no terminal — puts them off, as before the question.
+  if ask "${BOLD}Put them off to the monthly review? (n writes them into CLAUDE.md now) [y/n] ${OFF}" answer yn \
+     && ! is_yes "$answer"; then
+    FRICTION_APPLY_NOW=1
+    state_set "$state" "friction.$key.apply_now" true 2>/dev/null || true
+    return 1
+  fi
   local file; file="$(deferred_file "$wt" "$slug")"
   # How the file was before the rows, so a failed commit can put it back: from
   # HEAD when it is tracked, cut to its old size when it was there untracked,
@@ -1866,8 +2006,16 @@ friction_defer_proposals() {
   deferred_ensure "$wt" "$slug" || return 1
   git -C "$wt" diff --quiet HEAD -- "$file" 2>/dev/null || return 1
   printf '%s\n' "$rows" >> "$file" 2>/dev/null || return 1
+  now="$(date -Iseconds)"
+  # Its own id however close the last one was.
+  local run_id; run_id="deferred-$(date +%s%N)"
+  session_runs "$state" "friction.$key" open "$run_id"
+  local nth
+  nth="$(python3 -c 'import json,sys; print(len(((json.load(open(sys.argv[1])).get("friction") or {}).get(sys.argv[2]) or {}).get("runs") or []))' \
+           "$state" "$key" 2>/dev/null || echo 1)"
+  [[ "$nth" =~ ^[1-9][0-9]*$ ]] || nth=1
   if ! { git -C "$wt" add -- "$file" 2>/dev/null \
-         && git -C "$wt" commit -q -m "chore(sclaude): put off $n CLAUDE.md proposal(s) from $key" \
+         && git -C "$wt" commit -q -m "chore(sclaude): put off $n CLAUDE.md proposal(s) from $key, review $nth" \
               -m "The friction log after '$key' held nothing but proposals, so sclaude put them off to the monthly review itself, with no session." \
               -- "$file" >/dev/null 2>&1; }; then
     git -C "$wt" reset -q -- "$file" 2>/dev/null || true
@@ -1879,9 +2027,15 @@ friction_defer_proposals() {
     else
       rm -f "$file"
     fi
+    session_runs "$state" "friction.$key" drop "$run_id"
     return 1
   fi
-  now="$(date -Iseconds)"
+  session_runs "$state" "friction.$key" finish "$run_id"
+  # An earlier review's answer belongs to its run, as for a session (run_friction).
+  local flag
+  for flag in empty fixed unread was; do
+    state_set "$state" "friction.$key.$flag" null 2>/dev/null || true
+  done
   state_set "$state" "friction.$key.started" "$now"
   state_set "$state" "friction.$key.finished" "$now"
   state_set "$state" "friction.$key.done" true
@@ -2385,6 +2539,13 @@ review_close_gate() {
 
   warn ""
   warn "  Step 4 is not done — ${word#open: }."
+  # And where the last round left it, counted from the fix session's last
+  # look: what the review confirmed fixed, what the session had seen and did
+  # not fix, what the review found since (brief in pr_context.py).
+  local standing
+  standing="$(python3 "$LIB/pr_context.py" --brief "$wt" "$pr" "$repo" \
+                "$(review_last_look "$wt")" 2>/dev/null || true)"
+  [[ -n "$standing" ]] && warn "    $standing"
   if [[ -n "${SESSION_AUTO_CLOSED:-}" ]]; then
     review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"
     return 1
@@ -2472,8 +2633,8 @@ review_yours_wait() {
   # person sent the gate round again, asking GitHub the same thing for ever.
   review_yours_report "$wt" "$pr" "$repo" \
     || warn "  Threads you decided to leave are still open on PR #$pr — resolve them there."
-  "${INSTRUMENTS:-}/bin/sclaude-notify" --in "$wt" \
-    "$slug: PR #$pr waits for you — resolve on GitHub the review threads you decided to leave as they are." \
+  notify_feature "$slug" --wt "$wt" \
+    "PR #$pr waits for you — resolve on GitHub the review threads you decided to leave as they are." \
     >/dev/null 2>&1 || true
   while :; do
     ask "${BOLD}Resolved them? [y/n] ${OFF}" answer yn
@@ -2713,12 +2874,13 @@ review_report() {
   [[ -n "$root" ]] && log="$root/.sclaude/local/review-context.log"
   echo ""
   # The last session's numbers go to the feature's topic as well, a message
-  # per round (ask_notice).
+  # per round (ask_notice) — not for the report between two passes of one
+  # local review (REVIEW_REPORT_QUIET), which would send one each pass.
   local brief; brief="$(mktemp)"
   SCLAUDE_REPORT_BRIEF="$brief" python3 "$LIB/review_report.py" "$wt" "$pr" "$repo" \
     "$(state_get "$state" branch 2>/dev/null || true)" "$slug" "$log" 2>/dev/null || true
   local ASK_SLUG="$slug"
-  ask_notice "$(cat "$brief" 2>/dev/null)"
+  [[ -n "${REVIEW_REPORT_QUIET:-}" ]] || ask_notice "$(cat "$brief" 2>/dev/null)"
   rm -f "$brief"
 }
 
@@ -2848,7 +3010,7 @@ session_watch_start() {
               due=$(( $(date +%s) + ${LIMIT_RETRY:-1800} ))
             fi
             [[ -x "${INSTRUMENTS:-}/bin/sclaude-notify" ]] \
-              && "$INSTRUMENTS/bin/sclaude-notify" ${wt:+--in "$wt"} "$label: Claude hit its ${htype//_/-} limit. sclaude resumes the session by itself at $(date -d "@$due" +%H:%M)." \
+              && "$INSTRUMENTS/bin/sclaude-notify" --in "${wt:-$cwd}" --as "${label% (*}" "Claude hit its ${htype//_/-} limit${kind:+ in the $kind session}. sclaude resumes the session by itself at $(date -d "@$due" +%H:%M)." \
                    >/dev/null 2>&1 || true
           fi
           if (( $(date +%s) >= due )); then
@@ -2905,20 +3067,33 @@ session_watch_stop() {
   return 0
 }
 
-# Whether the watcher closed a session, and if it did, its report: printed,
-# with the marker removed so the next session starts clean.
+# A session has ended, and the feature's topic is told so by its phase_line
+# however it ended: "finished" when the watcher closed it on its report,
+# "ended" when a person left it, which says nothing of the work being done.
+# When the watcher closed it, its report too, printed in this terminal under
+# the same line, with the marker removed so the next session starts clean. The
+# note is what only a close by sclaude says — the retrospective's "nothing to
+# act on" — and goes with it; the tally is what the session leaves however it
+# ended — a fix session's commits and findings (review_tally).
 #
-#   session_closed <marker> <cwd> <session> <headline>
+#   session_closed <marker> <cwd> <session> <note> <tally> <phase_line kind and args>
 #
 # Returns 0 when the session was closed by sclaude, 1 when a person left it.
 session_closed() {
-  [[ -s "$1" ]] || return 1
-  rm -f "$1"
+  local marker="$1" cwd="$2" session="$3" note="$4" tally="$5" line
+  shift 5
+  if [[ ! -s "$marker" ]]; then
+    ask_feed say "$(phase_line ended "$@")${tally:+ · $tally}"
+    return 1
+  fi
+  rm -f "$marker"
+  line="$(phase_line finished "$@")${tally:+ · $tally}${note:+ · $note}"
+  ask_feed say "$line"
   # The terminal may have been left mid-redraw by the signal.
   stty sane 2>/dev/null || true
   echo ""
-  say "${BOLD}$4${OFF}"
-  session_report "$2" "$3"
+  say_here "${BOLD}$line — sclaude closed it.${OFF}"
+  session_report "$cwd" "$session"
   return 0
 }
 
@@ -2965,10 +3140,11 @@ session_report() {
 # from.
 plan_report() {
   local wt="$1" step="$2" plan="$1/.sclaude/local/feature/plan.md" printed="$1/.sclaude/local/feature/plan.printed"
-  local headline
+  local headline told
   if [[ "$step" == "plan" ]]; then
     capture_plan "$wt" || return 0
     headline="Approved plan (.sclaude/local/feature/plan.md):"
+    told="Plan approved"
   else
     [[ -s "$plan" ]] || return 0
     if [[ ! -e "$printed" ]]; then
@@ -2977,9 +3153,16 @@ plan_report() {
     fi
     cmp -s "$plan" "$printed" && return 0
     headline="Plan changed (.sclaude/local/feature/plan.md):"
+    # The plan is printed for this terminal alone; the topic gets how much
+    # of it changed, a path being nothing to a phone.
+    local added removed
+    read -r added removed < <(diff "$printed" "$plan" 2>/dev/null \
+      | awk '/^>/ { a++ } /^</ { r++ } END { print a + 0, r + 0 }')
+    told="Plan changed · +$added −$removed lines"
   fi
+  ask_feed say "$told"
   echo ""
-  say "${BOLD}$headline${OFF}"
+  say_here "${BOLD}$headline${OFF}"
   echo ""
   sed 's/^/  /' "$plan"
   echo ""

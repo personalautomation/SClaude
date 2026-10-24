@@ -305,9 +305,58 @@ session_watch_stop
     report = RUN[RUN.index("session_report() {"):]
     report = report[:report.index("\n}\n")]
     check("report-stays-in-the-terminal", "say " in report, False)
-    # The topic reads which step ended and which began, nothing more.
-    check("step-start-fed", 'ask_feed say "Step $(($(step_index "$step") + 1))/${#STEPS[@]} started' in RUN, True)
-    check("step-end-named", '"Step $(($(step_index "$step") + 1))/${#STEPS[@]} finished' in RUN, True)
+    # The topic reads which session ended, and how: "finished" when sclaude
+    # closed it on its report, "ended" when a person left it — the work may
+    # not be done. The terminal gets the same line, said to be sclaude's close.
+    closer = ('source "%s/steps.sh"\nsource "%s/regression.sh"\n'
+              'ask_feed() { printf "FEED %%s\\n" "$2"; }\nask_note() { :; }\n'
+              'session_report() { echo REPORT; }\nsay_here() { echo "$*"; }\nBOLD=; OFF=\n' % (LIB, LIB)
+              + functions(RUN, ["session_closed"]))
+
+    def closed(marked, *args):
+        marker = os.path.join(tmp, "closed.done")
+        with open(marker, "w") as fh:
+            fh.write("done" if marked else "")
+        p = subprocess.run(["bash", "-c", closer + '\nsession_closed "$@"; echo "rc=$?"',
+                            "_", marker, wt, session] + list(args),
+                           capture_output=True, text=True, timeout=30)
+        return [l for l in p.stdout.splitlines() if l.strip()]
+
+    # A step's session, not the step: the step goes on after it.
+    check("closed-by-sclaude", closed(True, "", "", "step", "code", "2"),
+          ["FEED 💻 Step 2/6 development: session 2 finished",
+           "💻 Step 2/6 development: session 2 finished — sclaude closed it.", "REPORT", "rc=0"])
+    check("left-by-a-person", closed(False, "", "", "step", "code", "1"),
+          ["FEED 💻 Step 2/6 development: session 1 ended", "rc=1"])
+    # A fix session's tally goes with it however it ended; the note only
+    # when sclaude closed it.
+    check("tally-when-left", closed(False, "nothing to act on", "2 commits · findings: 0 new",
+                                    "step", "review", "1"),
+          ["FEED 🛠 Step 4/6 review: fix session 1 ended · 2 commits · findings: 0 new", "rc=1"])
+    check("tally-when-closed", closed(True, "", "2 commits", "step", "review", "1")[0],
+          "FEED 🛠 Step 4/6 review: fix session 1 finished · 2 commits")
+    check("closed-with-its-note", closed(True, "nothing to act on", "", "retro")[:2],
+          ["FEED 🔁 Step 6/6 finished: retrospective · nothing to act on",
+           "🔁 Step 6/6 finished: retrospective · nothing to act on — sclaude closed it."])
+    # Every kind of session tells the topic it started, by the same line.
+    for path, kind in (("run.sh", "started step"), ("run.sh", "resumed step"),
+                       ("run.sh", "done step"), ("run.sh", "started friction"),
+                       ("regression.sh", "started fix"), ("github.sh", "started epilogue"),
+                       ("retro.sh", "started retro"), ("deferred.sh", "started deferred")):
+        with open(os.path.join(LIB, path)) as fh:
+            src = fh.read()
+        # The friction review's and the epilogue's verb is chosen: a return
+        # to it says "resumed".
+        check("start-told " + kind, 'ask_feed say "$(phase_line %s' % kind in src
+              or kind == "started friction" and 'echo resumed || echo started)" friction' in src
+              or kind == "started epilogue" and 'ask_feed say "$(phase_line "$verb" epilogue)' in src
+              and "&& verb=resumed" in src, True)
+    # And every close goes through session_closed, with no headline of its own.
+    for path in ("run.sh", "regression.sh", "github.sh", "retro.sh", "deferred.sh"):
+        with open(os.path.join(LIB, path)) as fh:
+            calls = re.findall(r'session_closed "[^\n]*(?:\\\n[^\n]*)?', fh.read())
+        check("closes-by-phase " + path,
+              [c for c in calls if "sclaude closed it" in c or "done —" in c], [])
 
     # --- the ended session is recorded with its reason ------------------------
     state = os.path.join(wt, ".sclaude/local/feature", "state.json")
@@ -552,8 +601,102 @@ session_watch_stop
                                               {"created": ""}], [])
     check("open-since-split", pc.open_since(tmp, "143", "o/r", "2026-10-02T12:00:00+01:00"), (2, 1))
     pc.open_threads = real_open_threads
+
+    # --- where the review stands, counted for the topic ------------------------
+    def thread(resolved, created, last=None, last_body="Resolved automatically: fixed in abc.",
+               outdated=False, url=""):
+        comments = [{"createdAt": created, "url": url, "body": "**x**", "author": {"__typename": "Bot"}}]
+        if last:
+            comments.append({"createdAt": last, "body": last_body, "author": {"__typename": "User"}})
+        return {"isResolved": resolved, "isOutdated": outdated, "comments": {"nodes": comments}}
+
+    S = "2026-10-02T12:00:00Z"
+    real_threads, real_view = pc.review_threads, pc.pr_view
+    pc.review_threads = lambda cwd, pr, repo: [
+        thread(True, "2026-10-02T10:00:00Z", last="2026-10-02T13:00:00Z"),        # fixed in it
+        thread(True, "2026-10-02T10:00:00Z", last="2026-10-02T13:00:00Z",
+               last_body="Left as it is: by design"),                             # declined in it
+        thread(True, "2026-10-01T10:00:00Z", last="2026-10-01T11:00:00Z"),        # settled before
+        thread(False, "2026-10-02T10:00:00Z", outdated=True),                     # not fixed yet
+        thread(False, "2026-10-02T14:00:00Z"),                                    # new
+        thread(False, "2026-10-02T09:00:00Z", url="https://x/pull/1#discussion_r9"),  # kept
+    ]
+    pc.pr_view = lambda cwd, pr, fields: {"statusCheckRollup": [
+        {"name": "tests", "conclusion": "FAILURE", "status": "COMPLETED"}]}
+    os.makedirs(os.path.dirname(os.path.join(tmp, pc.YOURS_FILE)), exist_ok=True)
+    with open(os.path.join(tmp, pc.YOURS_FILE), "w") as fh:
+        fh.write("https://x/pull/1#discussion_r9\tkeep it\n")
+    check("brief-since", pc.brief(tmp, "143", "o/r", S),
+          "findings: 1 fixed, 1 declined, 1 not fixed yet, 1 new, 1 on lines since changed"
+          " · 1 left to you · red: tests")
+    # The person resolving a thread they kept is not the session fixing it.
+    saved = pc.review_threads
+    pc.review_threads = lambda cwd, pr, repo: [
+        thread(True, "2026-10-02T09:00:00Z", last="2026-10-02T13:00:00Z",
+               url="https://x/pull/1#discussion_r9")]
+    check("brief-theirs-resolved-not-fixed", pc.brief(tmp, "143", "o/r", S),
+          "findings: 0 fixed, 0 not fixed yet, 0 new · red: tests")
+    pc.review_threads = saved
+    # What a fix session is handed: its work alone, nothing settled or the person's.
+    check("brief-handed", pc.brief(tmp, "143", "o/r", S, handed=True),
+          "findings: 1 not fixed yet, 1 new · red: tests")
+    # A fix session's own account at its end: in the round, what was closed,
+    # what it leaves of what it had, what the review posted meanwhile.
+    pc._MODES[tmp] = "local"
+    check("brief-done-local", pc.brief(tmp, "143", "o/r", S, done=True),
+          "findings: 1 fixed, 1 declined, 1 for the review to check, 1 new · 1 left to you · red: tests")
+    pc._MODES[tmp] = "github"
+    # The review in Actions has read the session's last push: what it left is open.
+    real_read = pc.review_read_head
+    pc.review_read_head = lambda cwd, view: True
+    check("brief-done-github", pc.brief(tmp, "143", "o/r", S, done=True),
+          "findings: 1 fixed, 1 declined, 1 still open, 1 new · 1 left to you · red: tests")
+    # Nothing confirmed yet in Actions: the review has not read the last push.
+    # Not yet: its fixes are for the review to check, a fixed one or not.
+    pc.review_read_head = lambda cwd, view: False
+    check("brief-done-github-unread", pc.brief(tmp, "143", "o/r", S, done=True),
+          "findings: 1 fixed, 1 declined, 1 for the review to check, 1 new · 1 left to you · red: tests")
+    pc.review_read_head = real_read
+    check("read-head-needs-the-review",
+          (pc.review_read_head(tmp, None),
+           pc.review_read_head(tmp, {"headRefOid": "x", "statusCheckRollup": []})), (False, False))
+    pc._MODES.pop(tmp)
+    check("brief-fresh", pc.brief(tmp, "143", "o/r"),
+          "findings: 2 open, 1 on lines since changed · 1 left to you · red: tests")
+    pc.review_threads = lambda cwd, pr, repo: None
+    check("brief-unreadable", pc.brief(tmp, "143", "o/r", S), "")
+    pc.review_threads, pc.pr_view = real_threads, real_view
+    os.unlink(os.path.join(tmp, pc.YOURS_FILE))
     gate = RUN[RUN.index("review_close_gate() {"):]
     gate = gate[:gate.index("\n}\n")]
+    # A round closed inside a fix session is told as its end is, with the tally.
+    rnd = RUN[RUN.index('if [[ "$step" == "review" && -s "$(round_marker "$wt")" ]]; then'):]
+    rnd = rnd[:rnd.index("\n  fi\n")]
+    check("round-told-as-an-end",
+          'ask_feed say "$(phase_line finished step "$step"' in rnd and '"$rounds")${tally:+ · $tally}"' in rnd
+          and 'say "${BOLD}Review round closed' not in rnd, True)
+    # A round goes on across a person's leave and return; it begins anew only
+    # after it ended — closed by sclaude on its report, or by the review.
+    rstate = os.path.join(wt, ".sclaude/local/feature", "state.json")
+    with open(rstate, "w") as fh:
+        json.dump({"steps": {"review": {}}}, fh)
+    rounds_sh = ('source "%s/state.sh"\n' % LIB) + functions(RUN, ["review_round_begins", "review_round_ends"])
+
+    def round_since(script):
+        subprocess.run(["bash", "-c", rounds_sh + "\n" + script], timeout=30)
+        with open(rstate) as fh:
+            return json.load(fh)["steps"]["review"].get("round_since")
+    first = round_since('review_round_begins "%s"' % wt)
+    time.sleep(1.1)
+    check("round-kept-across-a-return", round_since('review_round_begins "%s"' % wt), first)
+    check("round-begins-after-its-end",
+          round_since('review_round_ends "%s"; sleep 1; review_round_begins "%s"' % (wt, wt)) != first, True)
+    check("not-done-says-where-it-stands",
+          'warn "    $standing"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
+          and '"$(review_last_look "$wt")"' in gate, True)
+    check("resumed-review-says-what-it-is-handed",
+          '${brief:+ · $brief}' in RUN[RUN.index("review_brief() {"):]
+          and 'brief="$(review_brief "$wt" "$step" resumed)"' in RUN, True)
     check("auto-closed-gate-asks-nobody",
           gate.index('review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"')
           < gate.index("Back to a review session for it?"), True)

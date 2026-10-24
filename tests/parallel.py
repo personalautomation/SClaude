@@ -163,6 +163,7 @@ check("no-word-for-an-old-limit", os.path.exists(limit_file), False)
 
 # --- claude_launch opens it again ----------------------------------------------
 script = """
+source "%s/steps.sh"
 source "%s/pane.sh"
 export TMPDIR="%s"
 info() { :; }
@@ -176,7 +177,7 @@ claude() {
 }
 claude_launch --session-id %s --model opus -n "demo/review" "the opening prompt"
 echo "rc=$?"
-""" % (LIB, tmp, tmp, session, session)
+""" % (LIB, LIB, tmp, tmp, session, session)
 out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30).stdout
 calls = open(os.path.join(tmp, "calls")).read().splitlines()
 check("relaunched-once", len(calls), 2)

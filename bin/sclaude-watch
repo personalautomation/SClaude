@@ -43,10 +43,15 @@ norm() {
 # SCLAUDE_WATCH_QUIET is set by sclaude when it asks for one look from inside a
 # session (watch_look_now): the person is at that terminal already, and a
 # Telegram message about what they are looking at is noise.
+#
+# To the feature's topic, through the worktree watch_start recorded; the main
+# chat, under the feature's name, for a watch armed before it was recorded.
+# The text does not name the feature: in the topic it is the feature.
 notify() {
   [[ -z "${SCLAUDE_WATCH_QUIET:-}" ]] || return 0
   [[ -x "$NOTIFY" ]] || return 0
-  "$NOTIFY" "$@" 2>/dev/null || true
+  local wt; wt="$(field "${WATCH_FILE:-}" worktree || true)"
+  "$NOTIFY" ${wt:+--in "$wt"} --as "$(field "${WATCH_FILE:-}" feature || true)" "$@" 2>/dev/null || true
 }
 
 # One value out of a watch file. Silent and empty on anything unexpected: a
@@ -245,6 +250,8 @@ handoff() {
 # One feature. Looks, compares with what was recorded, and tells if it changed.
 look() {
   local file="$1" slug issue repo pr was now notes qa_file
+  # The watch being looked at, for notify.
+  WATCH_FILE="$file"
 
   slug="$(field "$file" feature)" || return 0
   issue="$(field "$file" issue)" || return 0
@@ -292,9 +299,9 @@ and its conversation has the summary for the merge."
     # hand-off that failed in part went through, or failed for the first time.
     # Still waiting is not news — it was said when the issue reached Done.
     case "$handed" in
-      handed)  notify "$slug: QA accepted every issue of PR #$pr — it is ready to merge.
+      handed)  notify "QA accepted every issue of PR #$pr — it is ready to merge.
 $ready" ;;
-      partial) notify "$slug: the hand-off of PR #$pr is incomplete; it is tried again on every look.
+      partial) notify "The hand-off of PR #$pr is incomplete; it is tried again on every look.
 $said" ;;
     esac
     return 0
@@ -312,10 +319,10 @@ $said" ;;
     "$(norm "$QA_DONE")")
       set_field "$file" verdict done
       if [[ "$handed" == handed ]]; then
-        notify "$slug: issue #$issue is in $QA_DONE
+        notify "Issue #$issue is in $QA_DONE
 QA accepted it. $ready"
       else
-        notify "$slug: issue #$issue is in $QA_DONE
+        notify "Issue #$issue is in $QA_DONE
 QA accepted it — the merge${pr:+ of PR #$pr} is next.${said:+
 $said}
 Continue with: sclaude $slug"
@@ -343,7 +350,7 @@ Continue with: sclaude $slug"
         printf '%s\n' "$notes" > "$qa_file"
       fi
       set_field "$file" verdict returned
-      notify "$slug: issue #$issue went back to $now — returned to development.
+      notify "Issue #$issue went back to $now — returned to development.
 What was said since${pr:+ (issue and PR #$pr)} is kept for the review step.
 Pick it up with: sclaude $slug${notes:+
 
@@ -355,7 +362,7 @@ $(head -c 600 <<< "$notes")}"
       # asked to set the status properly. We keep watching: the next move is
       # what counts, and it is their board to fix.
       set_field "$file" verdict other
-      notify "$slug: issue #$issue moved to '$now' — unexpected while waiting for QA.
+      notify "Issue #$issue moved to '$now' — unexpected while waiting for QA.
 Please set the ticket status: ${QA_DONE:-Done} if it is accepted, ${QA_BACK:-In progress}${QA_BACKLOG:+ or $QA_BACKLOG} if it needs work."
       ;;
   esac

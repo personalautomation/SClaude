@@ -303,6 +303,11 @@ ran, told, w = sweep("Done", dict(BASE, status="Done", handoff="done"))
 check("timer-handed-once", (ran, told), ("", ""))
 ran, told, w = sweep("Done", dict(BASE, status="Done"))
 check("timer-retries-while-done", "ready to merge" in told, True)
+# To the feature's topic, through the worktree its watch recorded, the name
+# given for the main chat alone and kept out of the text.
+check("timer-to-the-topic", told.startswith("--as demo QA accepted"), True)
+ran, told, w = sweep("Done", dict(BASE, status="Done", worktree="/wt/demo"))
+check("timer-in-the-worktree", told.startswith("--in /wt/demo --as demo QA accepted"), True)
 ran, told, w = sweep("Done", dict(BASE, status="In QA"), rc=1, says="any words at all")
 check("timer-says-why-waiting", "any words at all" in told, True)
 check("timer-waiting-not-recorded", w.get("handoff"), None)

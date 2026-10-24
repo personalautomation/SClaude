@@ -49,7 +49,8 @@ def run_bash(script, cwd, bin_dir):
         body += 'source "%s/%s.sh"\n' % (LIB, name)
     body += ('info() { :; }; warn() { :; }\n'
              'issue_sync() { echo SYNC; }\n'
-             'issue_hold_open() { echo "HOLD $1"; }\n')
+             'issue_hold_open() { echo "HOLD $1"; }\n'
+             'watch_stop() { echo "UNWATCH $1"; }\n')
     body += script
     env = dict(os.environ, PATH=bin_dir + os.pathsep + os.environ["PATH"])
     out = subprocess.run(["bash", "-c", body], cwd=cwd, capture_output=True,
@@ -101,7 +102,7 @@ try:
     check("nothing-without-a-merged-pr", out.strip(), "")
 
     # --- retro_reopen ---------------------------------------------------------
-    out, err, rc = run_bash('retro_reopen "%s" 160' % wt, wt, bin_dir)
+    out, err, rc = run_bash('retro_reopen "%s" 160 demo' % wt, wt, bin_dir)
     check("reopen-succeeds", rc, 0)
     with open(path) as fh:
         st = json.load(fh)
@@ -115,6 +116,9 @@ try:
     check("merged-pr-remembered", st.get("reopened_pr"), 160)
     check("preview-verdict-cleared", st["regression"]["preview"].get("status"), None)
     check("issue-held-open", "HOLD 145" in out, True)
+    # The board moves the reopened issue on its own; the watch on the merged
+    # pull request would have read that as QA handing the feature back.
+    check("qa-watch-stopped", "UNWATCH demo" in out, True)
     check("issue-synced", "SYNC" in out, True)
 
     # --- step 3 is told ---------------------------------------------------------
@@ -143,7 +147,8 @@ new_at = body.find('retro_changed_code "$wt" "$branch"')
 clean_at = body.find("Remove all of it?")
 check("done-asks-after-the-retrospective", 0 <= retro_at < new_at < clean_at, True)
 check("done-resumes-the-feature",
-      'retro_reopen "$wt" "$pr"' in body and 'cmd_resume "$slug"' in body, True)
+      'retro_reopen "$wt" "$pr" "$slug"' in body and 'cmd_resume "$slug"' in body, True)
+check("no-change-reopen-stops-the-watch", 'watch_stop "$slug"\n    issue_hold_open "$issue"' in body, True)
 
 # --- the retrospective records that it changed the code ------------------------------
 with open(os.path.join(LIB, "retro.sh")) as fh:

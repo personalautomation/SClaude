@@ -430,6 +430,26 @@ def main():
                 s["start"].astimezone().strftime("%m-%d %H:%M") if s and s["start"] else "",
                 hours(s["seconds"]) if s and s["seconds"] else "",
                 "$%.2f" % sum(s["costs"]) if s and s["costs"] else "") + values))
+            # A session that went several rounds, a row each under it: what
+            # each review run found and what became of it. One row for all of
+            # them only grew. The cost is the launch's when the session was
+            # launched once a round — resumed for each, as a fix session is.
+            # Its time runs from its review run to the next one, the last
+            # to the session's end.
+            if s is not None and len(gs) > 1:
+                costs = s["costs"] if len(s["costs"]) == len(gs) else []
+                end = (s["start"] + datetime.timedelta(seconds=s["seconds"])
+                       if s["start"] and s["seconds"] else None)
+                for j, g in enumerate(gs, start=1):
+                    rt = g["threads"]
+                    until = gs[j]["at"] if j < len(gs) else end
+                    took = (until - g["at"]).total_seconds() if g["at"] and until and until > g["at"] else 0
+                    print("  %-7s %-11s %6s %6s %4d %5d %5d %6d %4d %8d %7d" % (
+                        "%s.%d" % (label, j),
+                        g["at"].astimezone().strftime("  %H:%M") if g["at"] else "",
+                        hours(took) if took else "", "$%.2f" % costs[j - 1] if costs else "",
+                        1, len(rt), count(rt, "fixed"), count(rt, "no fix"), count(rt, "open"),
+                        sum(1 for t in rt if t["near_fix"]), sum(1 for t in rt if t["repeat"])))
         seconds = sum(s["seconds"] or 0 for s in people)
         costs = [c for s in people for c in s["costs"]]
         values = (len(groups), total, fixed, nofix, opened, near_all, len(repeats))

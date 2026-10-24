@@ -33,6 +33,17 @@ corrects, in prose rather than as JSON: what is being agreed to is "these
 commands will run against production one day", and a wall of braces is not a
 thing anybody reads before saying yes.
 
+Every feature reads the main checkout's copy, key by key (`project_config`,
+`project_get`), not the one its worktree's branch carries: a key set by hand
+in the main checkout — `merge: auto`, committed or not — reaches each feature
+at once. A worktree's copy answers only a key the main checkout has none of,
+a feature adding it; the readers that take a whole section (the feature's
+database, the board) take it from there too when the main checkout has none
+of it (`project_config_with`). A change to that file left uncommitted in the main tree
+does not stop production (`prod_main_unready`): it is sclaude's settings, not
+the product, and the pull before `vercel --prod` carries it across with
+`--autostash`.
+
 Every section is optional and **nothing is defaulted**. A repository with no
 config still gets the cycle — six steps, a worktree, an issue, a pull request —
 and loses only what the config would have described: there is no regression to
@@ -660,7 +671,8 @@ session looking at a red production has a reason to ask whether one is in flight
 **Returning a feature to development is a transition, not a message.** Once the
 preview regression is green the issue goes to `In QA` and a systemd timer takes
 over: `sclaude-watch` polls the column every few minutes and changes nothing
-itself — it looks and it tells. When the column leaves `In QA`, it collects what
+itself — it looks and it tells, in the feature's topic (the watch keeps the
+worktree for `sclaude-notify --in`). When the column leaves `In QA`, it collects what
 was written since the watch began — on the issue, on the pull request, and on
 the pull request's lines — and saves it **verbatim** beside the watch file.
 Verbatim rather than summarised, because the session is answering a person, and
@@ -977,6 +989,17 @@ removed the worktree and its `state.json`. So it keeps its own record outside
 every repository, in `~/.claude/sclaude/epilogue/<feature>.json`, and the
 session runs from the main repository. In its construction this is closest to
 the friction review — a session outside `STEPS`, with a prompt of its own.
+
+**A friction review reads its own entries.** Before it starts, the fresh log is
+appended to `friction.log.reviewed` and kept apart as
+`friction-<key>.log`, which is what the review is handed: `.reviewed` holds
+every review's entries, and a review handed all of it read the earlier steps'
+again and put the same refusal off twice. `sclaude friction`, a re-read, still
+reads everything. A log of nothing but proposed `CLAUDE.md` rules needs no
+session: sclaude puts them off to the monthly review itself — after asking,
+since a rule a decision of the same cycle rests on should not wait a month; a
+"no" hands the log to a review told to write them in now. Each such put-off is
+a review of the key's own, numbered in its commit and kept in the key's runs.
 
 ## sclaude's own files in a product
 

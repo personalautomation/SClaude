@@ -97,6 +97,15 @@ ask_note() {
   ASK_CONTEXT+="$1"$'\n'
 }
 
+# say, warn and alarm (bin/sclaude) for this terminal alone: kept for the next
+# question as they are, and not said to the feature's topic (ask_feed). For a
+# line the topic hears in a shape of its own — a session's start and end,
+# a regression's or a deploy's (phase_line) — so that it does not hear it
+# twice.
+say_here()   { ask_note "$*"; echo "$*"; }
+warn_here()  { ask_note "$*"; echo "${YELLOW:-}$*${OFF:-}" >&2; }
+alarm_here() { ask_note "$*"; echo "${RED:-}$*${OFF:-}" >&2; }
+
 # The context lives until the next question and is cleared with it: the lines
 # that explained the previous question have nothing to do with the next one.
 ask_forget() {
@@ -456,12 +465,21 @@ ask_feed() {
 # The worktree from list_features rather than feature_worktree, which also
 # attaches the terminal.
 #
-#   notify_feature <slug> [--quiet] <text>      or the text on stdin
+#   notify_feature <slug> [--wt <worktree>] [--quiet] <text>   or the text on stdin
+#
+# The text does not name the feature: the topic is the feature, and in the
+# main chat sclaude-notify puts the name before it (--as). A caller that has
+# the worktree passes it, and it is not looked for again.
 notify_feature() {
   local slug="$1" wt=""
   shift
-  wt="$(list_features 2>/dev/null | awk -F'\t' -v want="$slug" '$1 == want { print $2; exit }')"
-  "${INSTRUMENTS:-}/bin/sclaude-notify" ${wt:+--in "$wt"} "$@"
+  if [[ "${1:-}" == --wt ]]; then
+    wt="${2:-}"
+    shift 2
+  else
+    wt="$(list_features 2>/dev/null | awk -F'\t' -v want="$slug" '$1 == want { print $2; exit }')"
+  fi
+  "${INSTRUMENTS:-}/bin/sclaude-notify" ${wt:+--in "$wt"} --as "$slug" "$@"
 }
 
 # The id of the question standing in the channel right now. Empty when there is

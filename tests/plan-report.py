@@ -44,6 +44,9 @@ if not found:
 PRELUDE = """
 BOLD=""; OFF=""
 say() { printf '%s\\n' "$*"; }
+ask_note() { :; }
+say_here() { printf '%s\\n' "$*"; }
+ask_feed() { printf '%s\\n' "$2" >> "$FEED"; }
 capture_plan() {
   [[ -n "${APPROVED:-}" ]] || return 1
   printf '%s\\n' "$APPROVED" > "$1/.sclaude/local/feature/plan.md"
@@ -51,8 +54,22 @@ capture_plan() {
 """
 
 
+FEED = os.path.join(tempfile.mkdtemp(), "feed")
+
+
+def fed():
+    # What the topic was told since the last call.
+    try:
+        with open(FEED) as fh:
+            said = fh.read()
+    except OSError:
+        said = ""
+    open(FEED, "w").close()
+    return said
+
+
 def report(wt, step, approved=""):
-    env = dict(os.environ, APPROVED=approved)
+    env = dict(os.environ, APPROVED=approved, FEED=FEED)
     body = PRELUDE + found.group(0) + 'plan_report "%s" "%s"\n' % (wt, step)
     return subprocess.run(["bash", "-c", body], capture_output=True, text=True,
                           env=env, timeout=30).stdout
@@ -70,6 +87,8 @@ with tempfile.TemporaryDirectory() as tmp:
     out = report(wt, "plan", "# Plan\n\n- do it")
     check("plan-headline", "Approved plan" in out, True)
     check("plan-body-indented", "  # Plan\n" in out and "  - do it\n" in out, True)
+    # The topic gets the fact, not a path to a file it cannot open.
+    check("plan-approved-told", fed(), "Plan approved\n")
 
     # --- a later session that left it alone prints nothing -------------------
     check("code-unchanged-silent", report(wt, "code"), "")
@@ -80,6 +99,7 @@ with tempfile.TemporaryDirectory() as tmp:
     out = report(wt, "code")
     check("changed-headline", "Plan changed" in out, True)
     check("changed-body", "  - and this too\n" in out, True)
+    check("changed-told-by-size", fed(), "Plan changed · +1 −0 lines\n")
     check("changed-only-once", report(wt, "review"), "")
 
     # --- a replan prints the plan again, even unchanged ----------------------

@@ -188,6 +188,39 @@ check("a failed send asks for the topic again", lost_calls, [("shop", "feat-a")]
 notices.take_feed(channel)
 
 # Cut to fit a message, never through an entity: Telegram refuses the markup.
+# A line that opens with its kind's icon (phase_line) leads with it; the
+# laptop's goes on the rest, a box-drawing rule included.
+check("own-icon-leads",
+      notices.feed_message([("say", "1", "🛠 Step 4/6 review: fix session 1 resumed")])[0],
+      "🛠 Step 4/6 review: fix session 1 resumed")
+check("own-icon-loud", notices.feed_message([("alarm", "1", "🚀 Deploy failed: preview")])[0],
+      "⚠️ 🚀 Deploy failed: preview")
+check("rule-is-no-icon", notices.feed_message([("say", "1", "── 12/12 green")])[0],
+      "🖥 ── 12/12 green")
+# One step's lines are not mixed with the next one's: a step done ends the
+# message, and a start begins a new one once the message holds another
+# phase's line; a warning printed while the next step is set up goes with it.
+_batch = [("say", "1", "📝 Step 1/6 planning: session 1 finished"), ("say", "1", "Plan approved"),
+          ("say", "1", "✅ Step 1/6 done: planning"), ("warn", "1", "database: migrations did not apply"),
+          ("say", "1", "💻 Step 2/6 development: session 1 started")]
+check("one-step-a-message",
+      [notices.feed_message(g)[0] for g in notices.feed_groups(_batch)],
+      ["📝 Step 1/6 planning: session 1 finished\nPlan approved\n✅ Step 1/6 done: planning",
+       "🖥 ⚠️ database: migrations did not apply\n💻 Step 2/6 development: session 1 started"])
+# The step's ✅ comes after its session's friction review, and is not its end.
+check("done-after-friction-goes-alone",
+      [notices.feed_message(g)[0] for g in notices.feed_groups([
+          ("say", "1", "💻 Step 2/6 development: session 1 finished"),
+          ("say", "1", "🧱 Friction review started: after step 2/6 development, session 1 · 2 entries"),
+          ("say", "1", "🧱 Friction review finished: after step 2/6 development, session 1"),
+          ("say", "1", "✅ Step 2/6 done: development")])],
+      ["💻 Step 2/6 development: session 1 finished",
+       "🧱 Friction review started: after step 2/6 development, session 1 · 2 entries\n"
+       "🧱 Friction review finished: after step 2/6 development, session 1",
+       "✅ Step 2/6 done: development"])
+check("a-start-alone-is-not-cut",
+      len(notices.feed_groups([("warn", "1", "x"), ("say", "1", "💻 Step 2/6 development: session 1 started")])), 1)
+
 long_text, _ = notices.feed_message([("say", "1", "&" * 1000)] * 13)
 check("a long feed fits a message", len(long_text) <= notices.NOTE_MAX, True)
 check("cut between entities, the rest counted",

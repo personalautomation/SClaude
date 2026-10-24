@@ -195,11 +195,17 @@ regression_manual_parts() {
   git -C "$wt" merge-base --is-ancestor "$was" "$now" 2>/dev/null || return 1
   changed="$(git -C "$wt" diff --name-only --no-renames "$was" "$now" 2>/dev/null)" || return 1
   [[ -n "$changed" ]] || return 1
-  file="$(project_config "$wt")" || return 1
+  # Through project_get, key by key as the parts below are read: a feature
+  # adding `manuals` has them before the main checkout does.
+  file="$(project_get manuals "$wt")" || return 1
   python3 - "$file" "$changed" <<'PY' 2>/dev/null || return 1
 import json, sys
-with open(sys.argv[1]) as fh:
-    manuals = json.load(fh).get("manuals") or []
+manuals = []
+for line in sys.argv[1].splitlines():
+    try:
+        manuals.append(json.loads(line))
+    except ValueError:
+        pass
 paths = {m.get("path") for m in manuals if isinstance(m, dict)}
 changed = [line for line in sys.argv[2].splitlines() if line]
 sys.exit(0 if paths and all(c in paths for c in changed) else 1)
@@ -726,7 +732,7 @@ regression_run_body() {
   # The dev server was restarted by regression_run, before the queue.
   local total_expected; total_expected="$(regression_expected_total "$wt" "$stage" "$only" || true)"
   echo ""
-  echo "${BOLD}${BLUE}── regression: $stage${total_expected:+ (expected $(regression_duration "$total_expected"))} ──${OFF}"
+  echo "${BOLD}${BLUE}── $(phase_title regression "$stage")${total_expected:+ (expected $(regression_duration "$total_expected"))} ──${OFF}"
   [[ -n "$base" ]] && info "   $base"
 
   local one
@@ -750,7 +756,7 @@ regression_run_body() {
   # written again. It is cleared where it is answered — by the gate, once the
   # human says the cause has been dealt with.
 
-  regression_notify_start "$slug" "$stage" "$base"
+  regression_notify_start "$slug" "$stage" "$base" "$(wc -w <<< "$parts")" "$total_expected"
 
   started="$(date +%s)"
   for part in $parts; do
@@ -905,10 +911,11 @@ regression_run_body() {
     state_set "$state" "regression.$stage.failed_at" "$failed"
     state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
     echo ""
-    warn "  Every spec failed and $base is not serving."
-    warn "  That is the environment, not the code — no fixing session will help."
+    # Said to the phone by regression_notify_done, in a line of its own.
+    warn_here "  Every spec failed and $base is not serving."
+    warn_here "  That is the environment, not the code — no fixing session will help."
     info "     log: .sclaude/local/feature/regression.log"
-    regression_notify_done "$slug" "$stage" "$failed" "$passed" "$count" "$elapsed" "$log"
+    regression_notify_done "$slug" "$stage" "$failed" "$passed" "$count" "$elapsed" "" "$base"
     return 2
   fi
 
@@ -917,9 +924,11 @@ regression_run_body() {
     state_set "$state" "regression.$stage.status" failed
     state_set "$state" "regression.$stage.failed_at" "$failed"
     state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
-    warn "  ── $passed/$count, $(regression_duration "$elapsed") · failed on $failed${failed_specs:+: $failed_specs}"
+    # The terminal's line; the topic hears it from regression_notify_done,
+    # once, with a sound — through the feed too it came twice.
+    warn_here "  ── $passed/$count, $(regression_duration "$elapsed") · failed on $failed${failed_specs:+: $failed_specs}"
     info "     log: .sclaude/local/feature/regression.log"
-    regression_notify_done "$slug" "$stage" "$failed" "$passed" "$count" "$elapsed" "$log"
+    regression_notify_done "$slug" "$stage" "$failed" "$passed" "$count" "$elapsed" "$failed_specs" "" "$log"
     return 1
   fi
 
@@ -928,41 +937,47 @@ regression_run_body() {
   state_set "$state" "regression.$stage.tree" "${tree:-null}"
   state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
   echo "  ${GREEN}── $passed/$count, $(regression_duration "$elapsed") — green.${OFF}"
-  regression_notify_done "$slug" "$stage" "" "$passed" "$count" "$elapsed" "$log"
+  regression_notify_done "$slug" "$stage" "" "$passed" "$count" "$elapsed"
   return 0
 }
 
-# The two messages a run sends. Silent by construction when there are no
+# The two messages a run sends, one line each in the shape every session's
+# start and end take (phase_line): the start quiet, the end quiet when green
+# and with a sound when red. Silent by construction when there are no
 # credentials — sclaude-notify exits zero without them — so nothing here has to
-# ask whether Telegram is set up.
+# ask whether Telegram is set up. They are the topic's one account of the run:
+# the terminal's own lines about it stay there.
+#
+#   regression_notify_start <slug> <stage> <base> <parts> [<expected seconds>]
+#   regression_notify_done <slug> <stage> <failed part> <passed> <count> <seconds> [<specs> [<base> [<log>]]]
+#
+# The failed part empty is green; a base given is a stage that could not run,
+# its address not serving. A red part that names no specs — a typecheck, a
+# build — brings the last lines of its log instead, the one thing that says
+# whether it needs looking at now.
 regression_notify_start() {
-  local slug="$1" stage="$2" base="$3"
-  notify_feature "$slug" --quiet "$slug: regression started on $stage${base:+ ($base)}" 2>/dev/null || true
+  local slug="$1" stage="$2" base="$3" parts="$4" expected="${5:-}"
+  notify_feature "$slug" --quiet \
+    "$(phase_line started regression "$stage")${base:+ ($base)} · $parts $([[ "$parts" == 1 ]] && echo part || echo parts)${expected:+, expected $(regression_duration "$expected")}" \
+    2>/dev/null || true
 }
 
 regression_notify_done() {
-  local slug="$1" stage="$2" failed="$3" passed="$4" count="$5" elapsed="$6" log="$7"
-  local head tail=""
-
-  if [[ -n "$failed" ]]; then
-    head="$slug: regression FAILED on $stage"
-    # The last lines of the failing part, not the whole log: a phone shows a
-    # few lines, and the question the message has to answer is whether this
-    # needs looking at now.
-    tail="$(tail -20 "$log" 2>/dev/null)"
+  local slug="$1" stage="$2" failed="$3" passed="$4" count="$5" elapsed="$6" specs="${7:-}" base="${8:-}" log="${9:-}"
+  local took; took="$passed/$count, $(regression_duration "$elapsed")"
+  if [[ -n "$base" ]]; then
+    notify_feature "$slug" \
+      "$(phase_line "could not run" regression "$stage") · every spec failed and $base is not serving — the environment, not the code" \
+      2>/dev/null || true
+  elif [[ -n "$failed" ]]; then
+    local tail=""
+    [[ -z "$specs" && -n "$log" ]] && tail="$(grep -v '^[[:space:]]*$' "$log" 2>/dev/null | tail -5)"
+    notify_feature "$slug" "$(phase_line failed regression "$stage"), on $failed${specs:+: $specs} · $took${tail:+
+$tail}" 2>/dev/null || true
   else
-    head="$slug: regression green on $stage"
+    notify_feature "$slug" --quiet "$(phase_line finished regression "$stage"), green · $took" \
+      2>/dev/null || true
   fi
-
-  {
-    printf '%s\n' "$head"
-    printf '%s/%s parts, %s\n' "$passed" "$count" "$(regression_duration "$elapsed")"
-    [[ -n "$tail" ]] && printf '\n%s\n' "$tail"
-  } | if [[ -n "$failed" ]]; then
-        notify_feature "$slug" 2>/dev/null || true
-      else
-        notify_feature "$slug" --quiet 2>/dev/null || true
-      fi
 }
 
 # The gate: run the stage, and if it is red, fix it and run it again.
@@ -1183,7 +1198,7 @@ regression_gate() {
       failed_part="$(state_get "$state" "regression.$stage.failed_at" 2>/dev/null || true)"
       [[ -n "$failed_part" && "$failed_part" != "null" ]] || failed_part="a part"
       info "  Failed on: $failed_part. The log is .sclaude/local/feature/regression.log"
-      notify_feature "$slug" "$slug: regression still red on $stage
+      notify_feature "$slug" "Regression still red on $stage
 $attempts fixing session(s) did not help — it needs you.
 Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
 
@@ -1284,7 +1299,7 @@ Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
       echo ""
       info "  Nothing was changed, and the attempt was not counted."
       info "  The note is .sclaude/local/feature/regression.blocked; carry on with: $SELF $slug"
-      notify_feature "$slug" "$slug: $stage regression blocked from outside
+      notify_feature "$slug" "${stage^} regression blocked from outside
 The fixing session found the cause outside the branch and changed nothing.
 Note: .sclaude/local/feature/regression.blocked" 2>/dev/null || true
       return 1
@@ -1567,10 +1582,12 @@ regression_fix() {
     resume=1
     echo ""
     info "  Still red on $failed — back to the session that fixed it."
+    ask_feed say "$(phase_line resumed fix "$stage" "$failed") · still red after its fix"
   else
     session="$(new_session_id)"
     echo ""
     info "  Opening a session in step '$(step_title "$step")' to fix it."
+    ask_feed say "$(phase_line started fix "$stage" "$([[ "$failed" != "null" ]] && echo "$failed")")"
   fi
   state_set "$state" "regression.$stage.fix_session" "$session"
   state_set "$state" "regression.$stage.fix_for" "${failed:-null}"
@@ -1636,8 +1653,8 @@ regression_fix() {
   # The session said its fix is in and the watcher closed it; the gate's next
   # run is the judge. Its report is printed here, since claude's screen went
   # with it. See done_marker.
-  session_closed "$(done_marker "$wt")" "$wt" "$session" \
-    "The fixing session reported its fix in, and sclaude closed it." || true
+  session_closed "$(done_marker "$wt")" "$wt" "$session" "" "" \
+    fix "$stage" "$([[ "$failed" != "null" ]] && echo "$failed")" || true
 
   # A session that exited at the door leaves no assistant record, and the row
   # should say so rather than carry an id nobody can resume. The wall clock is

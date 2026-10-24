@@ -509,8 +509,9 @@ finish = re.search(r'^no_change_finish\(\) \{.*?^\}', no_change_sh, re.M | re.S)
 check_true("no-change-finish-writes-the-status",
            'run_status "$slug" "$issue" "" "" 0 0 "$wt"' in finish)
 check_true("no-change-finish-sets-the-end-date", "issue_end_date" in finish)
-check_true("no-change-status-before-close",
-           finish.find("run_status") < finish.find("issue_close_done"))
+# Closed first, so the epilogue reads the issue as it ends (see below).
+check_true("no-change-close-before-status",
+           finish.find("issue_close_done") < finish.find("run_status"))
 
 
 # --- a red production keeps its label and gains a mark -----------------------
@@ -644,6 +645,21 @@ check_true("preview-live-set-when-the-deploy-is-skipped",
                      r'(?:.|\n)*?preview_live=1\n\s*elif',
                      deploy_sh) is not None)
 
+
+# The issue closes before the epilogue reads it: issue_hold_open kept it open
+# until the cycle's end, and an epilogue that ran first saw every shipped
+# feature open — status.md's "closed, deployed-prod: write nothing" never
+# came up. At the cycle's end and for a change nothing deploys; a feature
+# that changed nothing is checked above.
+for _name, _src, _close, _status in (
+        ("shipped", deploy_sh, 'issue_close_done "$issue" shipped',
+         'run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_done" "$wt"\n'),
+        ("nodeploy", deploy_sh, 'issue_close_done "$issue" nodeploy',
+         'run_status "$slug" "$issue" "$pr" "${merged:-}" 0 0 "$wt"\n    if ! cmd_done'),
+):
+    check_true("issue-closed-before-the-epilogue-" + _name,
+               _close in _src and _status in _src
+               and _src.index(_close) < _src.index(_status))
 
 if failures:
     for name, want, got in failures:

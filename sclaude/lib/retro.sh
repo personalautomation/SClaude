@@ -91,7 +91,7 @@ PY
     render_prompt retro "$slug" "$pr" "$issue" "$wt")" || return 0
 
   echo ""
-  echo "${BOLD}${BLUE}── $slug · a retrospective before the clean-up ──${OFF}"
+  echo "${BOLD}${BLUE}── $slug · $(phase_title retro), before the clean-up ──${OFF}"
   info "   opus / medium / auto · $wt"
   if [[ -n "$terminal" ]]; then
     info "   the terminal, as it was: $terminal"
@@ -107,6 +107,8 @@ PY
   guard_out="$(review_guard_settings "$wt")" \
     || { warn "  The retrospective was not started: sclaude could not read its rules (see above)."; return 1; }
   mapfile -t guard <<< "$guard_out"
+  # Past every reason not to start: the topic hears of a start that happens.
+  ask_feed say "$(phase_line started retro)"
 
   [[ -f "$fstate" ]] && session_runs "$fstate" retro open "$session"
   local project_before project_after
@@ -122,8 +124,7 @@ PY
       -n "$(session_label retro)/$slug" "$prompt" )
   session_watch_stop
   instruments_unchanged "$before_instruments" "retrospective" || true
-  session_closed "$done_file" "$wt" "$session" \
-    "The retrospective found nothing to act on, and sclaude closed it." \
+  session_closed "$done_file" "$wt" "$session" "nothing to act on" "" retro \
     || retro_report "$wt" "$session"
 
   if [[ -f "$fstate" ]]; then
@@ -185,7 +186,7 @@ retro_changed_code() {
 # own did: step 3 opens their pull request, step 4 takes the automatic review's
 # findings, and the preview, QA and the merge follow as after any review.
 #
-#   retro_reopen <wt> <merged pr>
+#   retro_reopen <wt> <merged pr> <slug>
 #
 # The marks are the ones a production rollback writes (regression.sh). The
 # branch's merged pull request still answers for it: `reopened` keeps run_step
@@ -193,7 +194,7 @@ retro_changed_code() {
 # taking its number for the new one. The preview verdict goes too: it was given
 # on code without these commits.
 retro_reopen() {
-  local wt="$1" old="$2" state="$1/.sclaude/local/feature/state.json"
+  local wt="$1" old="$2" slug="$3" state="$1/.sclaude/local/feature/state.json"
   [[ -f "$state" ]] || return 1
   step_rewind_to "$wt" pr pr review
   state_set "$state" reopened pr 2>/dev/null || true
@@ -208,6 +209,13 @@ retro_reopen() {
   # their rows in the issue.
   state_set "$state" steps.pr.session null 2>/dev/null || true
   state_set "$state" steps.review.session null 2>/dev/null || true
+  # QA said yes to the merged pull request, and the watch on that answer is
+  # spent: the new one is put to QA again, and watch_start arms a fresh watch
+  # then. Left armed, it read the board moving the issue back to In progress —
+  # on its reopening, or on the new pull request linking it — as QA handing the
+  # feature back, and the cycle would have gone round the review once more with
+  # sclaude's own status comments for QA's notes.
+  watch_stop "$slug"
   issue_hold_open "$(state_get "$state" issue 2>/dev/null || true)"
   issue_sync "$wt"
   return 0

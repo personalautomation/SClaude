@@ -97,15 +97,18 @@ try:
     state = os.path.join(wt, ".sclaude/local/feature", "state.json")
     log = os.path.join(wt, ".sclaude/local/feature", "friction.log")
 
-    def defer():
-        with open(state, "w") as fh:
-            fh.write("{}")
-        script = ('for m in state developer deferred; do source "%s/$m.sh"; done\n'
-                  'LIB="%s"; REPO="%s/myapp"\ninfo() { :; }\n%s\n'
+    def defer(answer="y", fresh_state=True, ask=None, start="{}"):
+        if fresh_state:
+            with open(state, "w") as fh:
+                fh.write(start)
+        ask = ask or 'ask() { printf -v "$2" %%s "%s"; }' % answer
+        script = ('for m in state ui developer deferred; do source "%s/$m.sh"; done\n'
+                  'LIB="%s"; REPO="%s/myapp"\ninfo() { :; }\nsay() { :; }\n'
+                  '%s\n%s\n'
                   'export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t '
                   'GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t\n'
-                  'friction_defer_proposals "%s" 45-x review-21 review; echo "rc=$?"'
-                  % (LIB, LIB, tmp, DEFER, wt))
+                  'friction_defer_proposals "%s" 45-x review-21 review; echo "rc=$? now=${FRICTION_APPLY_NOW:-}"'
+                  % (LIB, LIB, tmp, ask, DEFER, wt))
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
         return out.stdout.strip().splitlines()[-1] if out.stdout.strip() else out.stderr
 
@@ -119,7 +122,8 @@ try:
 
     with open(log, "w") as fh:
         fh.writelines(both)
-    check("defer-done", defer(), "rc=0")
+    # An earlier review's answer left on the node would be read as this one's.
+    check("defer-done", defer(start='{"friction": {"review-21": {"empty": true, "was": "abcd1234"}}}').split()[0], "rc=0")
     check("defer-committed-on-the-branch", commits(), 2)
     check("defer-file-in-the-product", os.path.exists(deferred), True)
     with open(deferred) as fh:
@@ -133,22 +137,49 @@ try:
         node = (json.load(fh).get("friction") or {}).get("review-21") or {}
     check("defer-state-verdict", node.get("verdict"), "deferred")
     check("defer-state-done", node.get("done"), True)
+    check("defer-clears-an-earlier-answer", (node.get("empty"), node.get("was")), (None, None))
 
-    check("defer-appends", defer(), "rc=0")
+    # Each put-off of the key is a review of its own: the key stands for every
+    # round of a fix session, and its state kept only the last one.
+    check("defer-appends", defer(fresh_state=False).split()[0], "rc=0")
     check("defer-appended-rows", rows(), 4)
     check("defer-appended-commit", commits(), 3)
+    subjects = subprocess.run(["git", "-C", wt, "log", "-2", "--format=%s"],
+                              capture_output=True, text=True).stdout.split("\n")[:2]
+    check("defer-each-review-its-number", [x.rsplit(", ", 1)[-1] for x in subjects],
+          ["review 2", "review 1"])
+    with open(state) as fh:
+        runs = ((json.load(fh).get("friction") or {}).get("review-21") or {}).get("runs") or []
+    check("defer-each-review-a-run", [bool(r.get("done")) for r in runs], [True, True])
+
+    # Asked first: "n" puts nothing off and leaves the log to a review that
+    # writes the rules into CLAUDE.md now.
+    with open(log, "w") as fh:
+        fh.writelines(both)
+    check("defer-declined-left-to-session", defer(answer="n"), "rc=1 now=1")
+    check("defer-declined-writes-nothing", (rows(), commits()), (4, 3))
+    # Kept for a review that is interrupted and opened again as a new session.
+    with open(state) as fh:
+        check("defer-declined-remembered",
+              ((json.load(fh).get("friction") or {}).get("review-21") or {}).get("apply_now"), True)
+    # No answer at all is not a "no": they are put off, as before the question.
+    out = defer(ask="ask() { return 1; }")
+    check("defer-unanswered-puts-off", out.split(), ["rc=0", "now="])
+    check("defer-unanswered-rows", rows(), 6)
+    with open(log, "w") as fh:
+        fh.writelines(both)
 
     with open(log, "a") as fh:
         fh.write("2026-10-09T05:00:00+01:00\treview\thook\tgit push origin main\n")
-    check("defer-mixed-left-to-session", defer(), "rc=1")
-    check("defer-mixed-writes-nothing", (rows(), commits()), (4, 3))
+    check("defer-mixed-left-to-session", defer().split()[0], "rc=1")
+    check("defer-mixed-writes-nothing", (rows(), commits()), (6, 4))
 
     # Somebody editing the file by hand: left to a session rather than mixed in.
     with open(log, "w") as fh:
         fh.writelines(both)
     with open(deferred, "a") as fh:
         fh.write("somebody editing\n")
-    check("defer-dirty-file-left-to-session", defer(), "rc=1")
+    check("defer-dirty-file-left-to-session", defer().split()[0], "rc=1")
     subprocess.run(["git", "-C", wt, "checkout", "-q", "--", deferred], check=True)
 
     # The product's hooks refuse the commit. The file goes back to how it was,
@@ -160,7 +191,7 @@ try:
         fh.write("#!/bin/sh\nexit 1\n")
     os.chmod(refuse, 0o755)
     before = open(deferred).read()
-    check("refused-tracked-left-to-session", defer(), "rc=1")
+    check("refused-tracked-left-to-session", defer().split()[0], "rc=1")
     check("refused-tracked-restored", open(deferred).read(), before)
     # A feature with no file of its own yet: the file made for the rows goes.
     fresh = os.path.join(wt, ".sclaude", "team", "deferred", "146-y.tsv")
@@ -189,6 +220,26 @@ check("no-friction-queue", "lock_take" in rf, False)
 check("review-does-not-create-the-file", "deferred_ensure" in rf, False)
 check("asked-before-log-moves", asked < rf.index('cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log" || true'), True)
 check("asked-before-session", asked < rf.index("session_holder"), True)
+# A review reads its own entries, kept apart as they were moved: .reviewed
+# holds every review's, and the review after step 2 read step 1's again.
+check("review-reads-its-own-batch",
+      ('cp "$log" "$batch"' in rf, '-e "s|<log>|$reading|g"' in rf,
+       'reading="$batch"' in rf, "<log>|$reviewed|" in rf), (True, True, True, False))
+# Told to write the proposals in now when the person said so.
+check("now-survives-an-interruption",
+      'state_get "$state" "friction.$key.apply_now"' in rf
+      and "re-read $reading if you need to" in rf, True)
+check("now-told-to-the-review",
+      rf.index('FRICTION_APPLY_NOW=""') < asked and "I asked for this log's proposals" in rf, True)
+
+# A put-off has no session: the issue's column shows no id for it.
+with open(os.path.join(LIB, "github.sh")) as fh:
+    check("put-off-shown-without-an-id",
+          '.startswith("deferred-"):\n            earlier.append("put off")' in fh.read(), True)
+with open(os.path.join(LIB, "github.sh")) as fh:
+    check("latest-put-off-says-so",
+          'if node.get("verdict") == "deferred":\n            # Put off by sclaude with no session (friction_defer_proposals).\n            return "put off"' in fh.read(), True)
+check("new-session-clears-the-verdict", "for flag in empty fixed unread verdict verdict_note; do" in rf, True)
 
 # --- every variable run_friction reads, it sets -----------------------------
 #

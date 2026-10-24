@@ -66,6 +66,9 @@ with open(os.environ["PANE_TEST_OUT"], "w") as fh:
                "tty": bool(os.environ.get("PANE_TEST_TTY"))}, fh)
 PY
 [[ -n "${PANE_TEST_SLEEP:-}" ]] && sleep "$PANE_TEST_SLEEP"
+[[ -n "${PANE_TEST_STDERR:-}" ]] && echo "$PANE_TEST_STDERR" >&2
+# A child left running with claude's stderr, as an MCP server may be.
+[[ -n "${PANE_TEST_CHILD:-}" ]] && { sleep 30 & }
 exit "${PANE_TEST_RC:-0}"
 ''')
 
@@ -94,12 +97,13 @@ exit 0
 warn() { echo "WARN $*" >&2; }
 info() { echo "INFO $*"; }
 [[ -n "${PANE_TEST_PRELOAD:-}" ]] && source "$PANE_TEST_PRELOAD"
+source "%s/steps.sh"
 source "%s/pane.sh"
 cd "%s"
 ( claude_launch --session-id 0000 -n "demo/code" "$PANE_TEST_PROMPT" )
 echo "rc=$?"
 ( pane_marked 0000 ) && echo "in-pane=[1]" || echo "in-pane=[]"
-''' % (LIB, wt)
+''' % (LIB, LIB, wt)
         env = dict(os.environ,
                    PATH=bin_dir + os.pathsep + os.environ["PATH"],
                    PANE_TEST_OUT=out, PANE_TEST_PANES=panes,
@@ -170,6 +174,26 @@ echo "rc=$?"
     # The tab closed with the session's last message: session_ended prints it.
     check("pane-marked", "in-pane=[1]" in text, True)
     check("pane-cleaned-up", [n for n in os.listdir(tmp) if n.startswith("sclaude-pane.")], [])
+
+    # --- in a feature's tree: what claude said and how it left, kept there ---
+    feature = os.path.join(wt, ".sclaude", "local", "feature")
+    os.makedirs(feature, exist_ok=True)
+    text = run({"PANE_TEST_RC": "7", "PANE_TEST_STDERR": "Error: session in use"})
+    check("logged-status", "rc=7" in text, True)
+    deadline = time.time() + 5
+    tab_log = os.path.join(feature, "claude-tab.log")
+    while not os.path.exists(tab_log) and time.time() < deadline:
+        time.sleep(0.1)
+    logged = open(tab_log).read().splitlines() if os.path.exists(tab_log) else []
+    check("tab-log-shape", (len(logged), logged[0].endswith(" demo/code started") if logged else None,
+                            logged[1:2], logged[-1].endswith(" exit 7") if logged else None),
+          (3, True, ["Error: session in use"], True))
+    # A child holding claude's stderr does not hold the launch: the tee is
+    # waited for a moment, not until the child is gone.
+    began = time.time()
+    text = run({"PANE_TEST_RC": "0", "PANE_TEST_CHILD": "1"})
+    check("child-does-not-hold-the-launch", ("rc=0" in text, time.time() - began < 15), (True, True))
+    shutil.rmtree(os.path.join(wt, ".sclaude"))
 
     # --- a recorded run: the tab is not recorded, a session in place is
     # marked off ---

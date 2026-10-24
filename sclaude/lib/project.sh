@@ -28,17 +28,36 @@
 # of times per command, and a cache would be one more thing to invalidate when
 # the wizard writes it mid-run.
 
-# The config's path for a given tree. A worktree has its own copy of the
-# repository's files, so either answers — and the worktree is preferred because
-# a feature in flight may be changing it.
+# The config's path: the main checkout's, one for every feature. A worktree
+# has its own copy, the one its branch carries, and was preferred once — so a
+# key set in the main checkout (`merge: auto`, uncommitted or merged after the
+# feature began) reached one feature and not the next. The worktree's answers
+# only with no main checkout's at all; project_get also takes from it a key
+# the main checkout does not have yet, a feature in flight adding it.
 project_config() {
   local wt="${1:-}"
-  if [[ -n "$wt" && -f "$wt/.sclaude/config.json" ]]; then
-    echo "$wt/.sclaude/config.json"
+  if [[ -n "${REPO:-}" && -f "$REPO/.sclaude/config.json" ]]; then
+    echo "$REPO/.sclaude/config.json"
     return 0
   fi
-  [[ -n "${REPO:-}" && -f "$REPO/.sclaude/config.json" ]] || return 1
-  echo "$REPO/.sclaude/config.json"
+  [[ -n "$wt" && -f "$wt/.sclaude/config.json" ]] || return 1
+  echo "$wt/.sclaude/config.json"
+}
+
+# The config file a whole section is read from, for the readers that take it
+# whole rather than through project_get: the main checkout's, or the
+# worktree's when only that one has the section yet — a feature adding it.
+#
+#   project_config_with <key> [wt]
+project_config_with() {
+  local key="$1" wt="${2:-}" file
+  file="$(project_config "$wt")" || return 1
+  if ! project_value "$file" "$key" >/dev/null \
+     && [[ -n "$wt" && -f "$wt/.sclaude/config.json" ]] \
+     && project_value "$wt/.sclaude/config.json" "$key" >/dev/null; then
+    file="$wt/.sclaude/config.json"
+  fi
+  echo "$file"
 }
 
 # A value from the config by dotted path, or nothing.
@@ -49,7 +68,15 @@ project_config() {
 project_get() {
   local path="$1" wt="${2:-}" file
   file="$(project_config "$wt")" || return 1
-  python3 - "$file" "$path" <<'PY' 2>/dev/null
+  # Key by key: one the main checkout lacks is taken from the worktree's copy.
+  project_value "$file" "$path" && return 0
+  [[ -n "$wt" && -f "$wt/.sclaude/config.json" && "$wt/.sclaude/config.json" != "$file" ]] \
+    && project_value "$wt/.sclaude/config.json" "$path"
+}
+
+# One value by dotted path out of one config file; 1 when it is not there.
+project_value() {
+  python3 - "$1" "$2" <<'PY' 2>/dev/null
 import json, sys
 
 try:
@@ -127,7 +154,7 @@ project_migrations_dir() {
 # merges main. The tree's copy answers only where the main checkout has none.
 project_review_mode() {
   local mode
-  mode="$(project_get review 2>/dev/null || project_get review "${1:-}" 2>/dev/null || true)"
+  mode="$(project_get review "${1:-}" 2>/dev/null || true)"
   case "$mode" in
     local|off) echo "$mode" ;;
     *) echo github ;;
@@ -145,7 +172,7 @@ project_review_mode() {
 #   project_flow_mode <qa|merge> [wt]
 project_flow_mode() {
   local key="$1" mode
-  mode="$(project_get "$key" 2>/dev/null || project_get "$key" "${2:-}" 2>/dev/null || true)"
+  mode="$(project_get "$key" "${2:-}" 2>/dev/null || true)"
   case "$mode" in
     github|both|auto) echo "$mode" ;;
     *) [[ "$key" == merge ]] && echo both || echo github ;;
@@ -196,7 +223,7 @@ board_load() {
   local key value file
   PROGRESS_FROM="" PROGRESS_TO="" QA_FROM="" QA_TO="" QA_DONE=""
   PROGRESS_DATE_FIELD="" PROGRESS_END_FIELD="" ISSUE_LABEL="" ISSUE_TYPE=""
-  file="$(project_config "${1:-}")" || return 0
+  file="$(project_config_with board "${1:-}")" || return 0
   while IFS=$'\t' read -r key value; do
     case "$key" in
       columns.backlog)  PROGRESS_FROM="$value" ;;

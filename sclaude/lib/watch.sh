@@ -86,6 +86,9 @@ watch_start() {
   # Where the project lives, so the timer can run `sclaude _handoff` in it
   # once QA has accepted the work (bin/sclaude-watch, handoff).
   [[ -n "${REPO:-}" ]] && state_set "$file" root "$REPO"
+  # And the feature's worktree, whose topic the timer's messages go to
+  # (sclaude-notify --in) rather than to the main chat.
+  [[ -n "$wt" ]] && state_set "$file" worktree "$wt"
   # A watch re-armed after a return waits for a new acceptance, and the
   # hand-off of the head before it says nothing about this one. Cleared here as
   # well as on the timer's own sight of a move: `sclaude return` records the

@@ -288,15 +288,7 @@ def render_new(cwd, pr, repo, since):
     # new comment: the work is not finished. But unlike comments their state
     # does not accumulate, so we show the current one, without comparing against
     # the mark.
-    rows = checks_table(view.get("statusCheckRollup") or [])
-    red = [r for r in rows if r[1] not in ("SUCCESS", "PASS", "COMPLETED",
-                                           "NEUTRAL", "SKIPPED", "")]
-    # The findings check stays red after the person resolves by hand the
-    # threads they kept: it is not run again for that. close_state already
-    # lets step 4 close on such a red; told to a session as news, it woke the
-    # review of a pull request only to comment `/review` and turn it green.
-    if any(r[0] == FINDINGS_CHECK for r in red) and findings_red_explained(cwd, pr, repo, view):
-        red = [r for r in red if r[0] != FINDINGS_CHECK]
+    red = red_rows(cwd, pr, repo, view)
 
     if not fresh and not red:
         return ""
@@ -327,6 +319,112 @@ def render_new(cwd, pr, repo, since):
         out.append("")
 
     return "\n".join(out).rstrip("\n")
+
+
+def red_rows(cwd, pr, repo, view, nodes=None):
+    """The checks of `view` that are red and mean work, as checks_table rows;
+    `nodes` the review threads when the caller has read them already."""
+    rows = checks_table(view.get("statusCheckRollup") or [])
+    red = [r for r in rows if r[1] not in ("SUCCESS", "PASS", "COMPLETED",
+                                           "NEUTRAL", "SKIPPED", "")]
+    # The findings check stays red after the person resolves by hand the
+    # threads they kept: it is not run again for that. close_state already
+    # lets step 4 close on such a red; told to a session as news, it woke the
+    # review of a pull request only to comment `/review` and turn it green.
+    if any(r[0] == FINDINGS_CHECK for r in red) and findings_red_explained(cwd, pr, repo, view, nodes):
+        red = [r for r in red if r[0] != FINDINGS_CHECK]
+    return red
+
+
+def brief(cwd, pr, repo, since="", handed=False, done=False):
+    """Where the review stands, counted, for a line in the feature's topic —
+    "" when GitHub cannot say.
+
+    With `since`, when the fix session last looked at the pull request (the
+    last entry of its transcript), the last round: what was settled since —
+    findings closed as fixed (the review confirmed the fix and resolved them)
+    and closed as declined — and what is open, the findings the session had
+    seen and not fixed apart from the ones posted since. Without, the open
+    findings. Then how many open ones sit on lines changed since they were
+    posted (fixed, most likely, and to be checked), the threads the person
+    kept, which wait for their hand rather than a session's, and the red
+    checks.
+
+      findings: 3 fixed, 1 declined, 2 not fixed yet, 4 new · red: tests
+
+    `handed` keeps to what the session is given to work on — the open
+    findings, theirs and new, and the red checks: what is settled, what is
+    the person's and how likely a finding is fixed are not its work.
+
+      findings: 2 not fixed yet, 4 new · red: tests
+
+    `done` is the fix session's own account at its end, `since` being when
+    its round began: what was closed in the round, what it leaves open of
+    what it had — for the review to check when the review runs here, on the
+    fixes the session pushed, and still open when it ran in the round — and
+    what the review posted meanwhile.
+
+      findings: 1 declined, 5 for the review to check, 0 new · 1 left to you
+    """
+    nodes = review_threads(cwd, pr, repo)
+    if nodes is None:
+        return ""
+    start = parse_ts(since) if since else None
+    mine = yours(cwd)
+    fixed = declined = older = newer = outdated = kept = 0
+    for t in nodes:
+        comments = (t.get("comments") or {}).get("nodes") or []
+        first = comments[0] if comments else {}
+        # The person's, resolved by their own hand or not: no session's work.
+        if first.get("url") in mine:
+            if not t.get("isResolved"):
+                kept += 1
+            continue
+        if t.get("isResolved"):
+            # Settled in this session: its last word came after the start.
+            last = comments[-1] if comments else {}
+            when = parse_ts(last.get("createdAt"))
+            if start and when and when >= start:
+                # The replies, as review_report and the local review read
+                # them: the finding itself is no decision.
+                if decline_of(comments[1:]) is not None:
+                    declined += 1
+                else:
+                    fixed += 1
+            continue
+        when = parse_ts(first.get("createdAt"))
+        if start and when and when >= start:
+            newer += 1
+        else:
+            older += 1
+        if t.get("isOutdated"):
+            outdated += 1
+    view = pr_view(cwd, pr, "statusCheckRollup,comments,headRefOid")
+    if start and done:
+        # What it leaves is open only once a review has read its last push.
+        # A local review runs after the session; the one in Actions may not
+        # have finished on it — a session that stopped waiting for the checks
+        # had its fixes told as "still open", as though they were not made.
+        unread = review_mode(cwd) == "local" or not review_read_head(cwd, view)
+        found = ([] if unread and not fixed else ["%d fixed" % fixed]) \
+            + (["%d declined" % declined] if declined else []) \
+            + ["%d %s" % (older, "for the review to check" if unread else "still open"),
+               "%d new" % newer]
+    elif start:
+        found = ([] if handed else ["%d fixed" % fixed]
+                 + (["%d declined" % declined] if declined else [])) \
+            + ["%d not fixed yet" % older, "%d new" % newer]
+    else:
+        found = ["%d open" % older]
+    if outdated and not handed and not done:
+        found.append("%d on lines since changed" % outdated)
+    parts = ["findings: " + ", ".join(found)]
+    if kept and not handed:
+        parts.append("%d left to you" % kept)
+    red = red_rows(cwd, pr, repo, view, nodes) if view else []
+    if red:
+        parts.append("red: " + ", ".join(r[0] for r in red))
+    return " · ".join(parts)
 
 
 # The pull request's review threads that are still open, each as its first
@@ -435,8 +533,10 @@ def review_threads(cwd, pr, repo):
         after = info.get("endCursor")
 
 
-def open_threads(cwd, pr, repo):
-    nodes = review_threads(cwd, pr, repo)
+def open_threads(cwd, pr, repo, nodes=None):
+    # `nodes`: review_threads already read by the caller, not asked again.
+    if nodes is None:
+        nodes = review_threads(cwd, pr, repo)
     if nodes is None:
         return None, []
     threads, resolved = [], []
@@ -758,6 +858,23 @@ def names_review(name):
     name = (name or "").lower()
     return (name != FINDINGS_CHECK.lower()
             and re.search(r"(^|[^a-z])review([^a-z]|$)", name) is not None)
+
+
+def review_read_head(cwd, view):
+    """Whether the review in Actions has finished on the pull request's head,
+    and that head is the checkout's: what it left open, it has read."""
+    if not view:
+        return False
+    try:
+        local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd,
+                               capture_output=True, text=True,
+                               timeout=30).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if not local or view.get("headRefOid") != local:
+        return False
+    return any(is_claude_review(c.get("name") or "", c.get("workflowName") or "")
+               and not running(c) for c in view.get("statusCheckRollup") or [])
 
 
 def is_claude_review(name, workflow=""):
@@ -1292,14 +1409,14 @@ def finished(cwd, repo, head, rollup, expect_findings, view):
     return bool(run) and (run.get("status") or "") == "completed"
 
 
-def findings_red_explained(cwd, pr, repo, view):
+def findings_red_explained(cwd, pr, repo, view, nodes=None):
     """Whether the red findings check on the pull request in `view` has nothing
     in it for a session — findings_explained, given the threads still open
     other than the ones the person kept. False on anything unreadable."""
     head = (view or {}).get("headRefOid") or ""
     if not head or not repo:
         return False
-    threads, _ = open_threads(cwd, pr, repo)
+    threads, _ = open_threads(cwd, pr, repo, nodes)
     if threads is None:
         return False
     rest = split_yours(cwd, threads)[1]
@@ -1410,6 +1527,19 @@ def main():
         if got is not None:
             sys.stdout.write("%d %d\n" % got)
         return 0
+    # `--brief <cwd> <pr> <repo> [since]`: one line, see brief; `--handed`
+    # the same, kept to what a fix session is given; `--done` its account at
+    # its end.
+    if len(sys.argv) >= 5 and sys.argv[1] in ("--brief", "--handed", "--done"):
+        try:
+            sys.stdout.write(brief(sys.argv[2], sys.argv[3], sys.argv[4],
+                                   sys.argv[5] if len(sys.argv) > 5 else "",
+                                   handed=sys.argv[1] == "--handed",
+                                   done=sys.argv[1] == "--done") + "\n")
+        except Exception:
+            pass
+        return 0
+
     # `--open-since <cwd> <pr> <repo> <since>`: "<older> <newer>", or nothing
     # when it cannot be read. See open_since.
     if len(sys.argv) >= 6 and sys.argv[1] == "--open-since":

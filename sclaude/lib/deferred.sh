@@ -425,7 +425,9 @@ PY
   mapfile -t guard <<< "$guard_out"
 
   echo ""
-  echo "${BOLD}${BLUE}── the deferred friction · monthly review ──${OFF}"
+  echo "${BOLD}${BLUE}── $(phase_title deferred), monthly ──${OFF}"
+  # About no feature, so no topic hears of it today; said for the day one does.
+  ask_feed say "$(phase_line started deferred)"
   info "   opus / medium / plan · $wt ($branch)"
   echo ""
   # Where the branch stood before this session: one continued from earlier
@@ -438,8 +440,7 @@ PY
       --add-dir "$HOME/.claude/projects" -n "friction/deferred" "$prompt" )
   session_watch_stop
   instruments_unchanged "$before_instruments" "deferred review" || true
-  session_closed "$done_file" "$wt" "$session" \
-    "Deferred review done — sclaude closed it." || true
+  session_closed "$done_file" "$wt" "$session" "" "" deferred || true
 
   # What the review committed goes to the product as a pull request, unless
   # the session opened one itself.

@@ -152,7 +152,10 @@ asks first.
 
 ### The tool repairs itself, and says what a machine lacks
 
-The friction review fixes the rules that got in the way. `sclaude doctor` lists
+The friction review fixes the rules that got in the way. When a session's log
+holds only proposed CLAUDE.md rules, sclaude asks whether to put them off to the
+monthly review (`y`, no session) or write them in now (`n`, a review session
+does it). `sclaude doctor` lists
 what a machine is missing and the command that fixes each gap, so onboarding is a
 checklist. The retrospective at the end reads a recording of the whole run — what
 sclaude printed and what you typed — and says what could go better.
@@ -178,7 +181,8 @@ default: it waits for a yes or a no, and reads "Merge it **unchecked**?" when
 QA never saw the feature.
 
 A product may hand either decision back to sclaude, in `.sclaude/config.json`
-or from `sclaude config`. `qa` and `merge` each take `github` (a person does it
+or from `sclaude config`. The main checkout's copy is read for every feature,
+and a change to it left uncommitted there does not hold production up. `qa` and `merge` each take `github` (a person does it
 on GitHub; sclaude waits), `both` (the same, or a key in sclaude's wait — `a`
 accepts, `m` merges) and `auto` (sclaude does it). By default QA is `github` and
 the merge `both`. An acceptance given by sclaude says so in a comment on the
@@ -715,9 +719,12 @@ it is started, and the topic takes the feature's name once it has one. After eac
 gets where the review stands: the last review session's runs, findings, fixed,
 closed without a fix, still open, on earlier fixes and raised again, with the
 report's verdict — a message of its own each round, so the topic keeps the
-history. And it follows what sclaude is doing there — which step started
-and which finished, regressions (a red one names the specs that failed, by
-their titles), deploys — in short messages, silent unless something went wrong while you are
+history. And it follows what sclaude is doing there — each session that
+starts and ends, and each step once it is done; a review fix session with
+what it is handed and what it leaves (findings not fixed yet, new, fixed,
+declined, commits), and the review on this machine as it runs; regressions
+(a red one names the specs that failed, by their titles), deploys and QA's
+moves on the board — in short messages, one step's lines apart from the next one's, silent unless something went wrong while you are
 away from the laptop. Typing an answer inside a topic answers
 that feature; in the main chat, with several questions open there, answer one
 with Telegram's Reply on its message. The menu, the sleep warning and questions not about a feature stay

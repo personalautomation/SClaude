@@ -135,21 +135,24 @@ claude_here() {
 
 # The emoji of a session's kind, by what its name (session_label) says it is,
 # so the tabs tell the stages apart at a glance.
+#
+# The icons are phase_icon's (steps.sh), the ones the feature's topic opens
+# each line about the session with: one table for both.
 pane_icon() {
   case "$1" in
-    *friction*)             printf '🧱' ;;
-    *-fix-*)                printf '🔧' ;;
-    [0-9]*-plan[/\(\ ]*)    printf '📝' ;;
-    [0-9]*-code[/\(\ ]*)    printf '💻' ;;
-    [0-9]*-pr[/\(\ ]*)      printf '📤' ;;
-    [0-9]*-review[/\(\ ]*)  printf '🔍' ;;
-    [0-9]*-epilogue[/\(\ ]*) printf '🏁' ;;
-    [0-9]*-retro[/\(\ ]*)   printf '🔁' ;;
+    *friction*)             phase_icon friction ;;
+    *-fix-*)                phase_icon fix ;;
+    [0-9]*-plan[/\(\ ]*)    phase_icon step plan ;;
+    [0-9]*-code[/\(\ ]*)    phase_icon step code ;;
+    [0-9]*-pr[/\(\ ]*)      phase_icon step pr ;;
+    [0-9]*-review[/\(\ ]*)  phase_icon step review ;;
+    [0-9]*-epilogue[/\(\ ]*) phase_icon epilogue ;;
+    [0-9]*-retro[/\(\ ]*)   phase_icon retro ;;
   esac
 }
 
 # A session name with its kind's emoji between the label and the slug:
-# `4-review(2)/12-login` is `4-review(2) 🔍/12-login`. In the name rather than
+# `4-review(2)/12-login` is `4-review(2) 🛠/12-login`. In the name rather than
 # only in wt.exe's --title, because claude titles the tab with the session
 # name and the title given at the start does not survive; and before the
 # slash, because the tab cuts a long title at its end, where the slug is. A
@@ -176,6 +179,10 @@ pane_marked() {
   [[ -e "$file" ]] || return 1
   rm -f "$file"
 }
+
+# Where a claude run in a tab leaves its stderr and its exit, relative to the
+# feature's worktree. Appended to, run after run.
+PANE_LOG=".sclaude/local/feature/claude-tab.log"
 
 # One launch of claude, in a tab or in place. claude_launch around it adds the
 # return after a usage limit.
@@ -207,10 +214,34 @@ claude_launch_once() {
     # itself after giving up on it (below). Never both.
     printf 'mkdir %q 2>/dev/null || exit 0\n' "$dir/claimed"
     printf 'echo $$ > %q.tmp && mv %q.tmp %q\n' "$dir/pid" "$dir/pid" "$dir/pid"
-    printf 'claude'
-    printf ' %q' "$@"
-    printf '\n'
-    printf 'echo $? > %q\n' "$dir/status"
+    # What claude said on stderr and how it exited, kept in the feature's
+    # worktree (PANE_LOG): the tab closes with claude, and a session that left
+    # at once — as one did on its resume, its transcript untouched — left
+    # nothing to tell why. Through tee, so the tab still shows it. Only in a
+    # feature's tree, which its clean-up removes with the log.
+    local log=""
+    [[ -d "$PWD/.sclaude/local/feature" ]] && log="$PWD/$PANE_LOG"
+    if [[ -n "$log" ]]; then
+      printf 'echo "=== $(date -Iseconds)" %q >> %q\n' "$title started" "$log"
+      printf 'claude'
+      printf ' %q' "$@"
+      # The tee deaf to the signals the tab ends claude with (the trap below
+      # signals every child): it lives until claude closes its stderr, and
+      # claude winding down never writes into a pipe nobody reads.
+      printf ' 2> >(trap %q INT TERM HUP; exec tee -a %q >&2)\n' "" "$log"
+      # The tee runs on its own: waited for a moment, so what claude said is
+      # in the log before the line saying how it exited — and no longer,
+      # since a child claude left running (an MCP server, a dev server) may
+      # hold its stderr open, and the tee with it, for good.
+      printf 'rc=$?; for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 $! 2>/dev/null || break; sleep 0.2; done\n'
+      printf 'echo "=== $(date -Iseconds) exit $rc" >> %q\n' "$log"
+      printf 'echo $rc > %q\n' "$dir/status"
+    else
+      printf 'claude'
+      printf ' %q' "$@"
+      printf '\n'
+      printf 'echo $? > %q\n' "$dir/status"
+    fi
     echo 'exit 0'
   } > "$script"
 

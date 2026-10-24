@@ -98,7 +98,7 @@ def main():
     # A list of exactly the shape feature_actions draws: the separator stands
     # second from last, before "drop the feature".
     rows = [
-        "Continue\tstep 2/4",
+        "Continue\tstep 2/6 development",
         "Sync with main\tup to date",
         "Review friction\t3 entries",
         "\t",                       # the separator

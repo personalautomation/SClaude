@@ -49,6 +49,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("code-again", label("step", state, "code", "c2"), "2-code(2)")
     check("review-first", label("step", state, "review", "r1"), "4-review")
     check("review-second", label("step", state, "review", "r2"), "4-review(2)")
+    number = lambda *a: subprocess.run(
+        ["bash", "-c", 'source "%s/steps.sh"; step_session_number "$@"' % LIB, "bash"] + list(a),
+        capture_output=True, text=True, timeout=30).stdout.strip()
+    check("session-number-second", number(state, "code", "c2"), "2")
+    check("session-number-none", number(state, "pr", "x"), "")
 
 check("friction-plan", label("friction", "plan-1"), "1-friction")
 check("friction-review", label("friction", "review-2"), "4-friction(2)")
@@ -62,13 +67,13 @@ check("retro", label("retro"), "6-retro")
 
 
 def icon(title):
-    p = subprocess.run(["bash", "-c", 'source "%s/pane.sh"; pane_icon "$1"' % LIB, "bash", title],
+    p = subprocess.run(["bash", "-c", 'source "%s/steps.sh"; source "%s/pane.sh"; pane_icon "$1"' % (LIB, LIB), "bash", title],
                        capture_output=True, text=True, timeout=30)
     return p.stdout
 
 
 for title, want in (("1-plan/x", "📝"), ("2-code(2)/x", "💻"), ("3-pr/x", "📤"),
-                    ("4-review/x", "🔍"), ("4-review(2)/x", "🔍"), ("4-friction(2)/x", "🧱"),
+                    ("4-review/x", "🛠"), ("4-review(2)/x", "🛠"), ("4-friction(2)/x", "🧱"),
                     ("4-fix-preview(2)/x", "🔧"), ("4-fix-preview-friction/x", "🧱"),
                     ("5-epilogue/x", "🏁"), ("6-retro/x", "🔁"),
                     ("friction/deferred", "🧱"), ("demo/code", "")):
@@ -77,17 +82,73 @@ for title, want in (("1-plan/x", "📝"), ("2-code(2)/x", "💻"), ("3-pr/x", "�
 
 
 def named(name):
-    p = subprocess.run(["bash", "-c", 'source "%s/pane.sh"; named_with_icon "$1"' % LIB, "bash", name],
+    p = subprocess.run(["bash", "-c", 'source "%s/steps.sh"; source "%s/pane.sh"; named_with_icon "$1"' % (LIB, LIB), "bash", name],
                        capture_output=True, text=True, timeout=30)
     return p.stdout
 
 
 # The emoji goes into the name, before the slug: claude titles the tab with
 # the name, and cuts it at the end.
-for name, want in (("4-review(2)/x", "4-review(2) 🔍/x"), ("1-plan/x", "1-plan 📝/x"),
-                   ("4-review(2) 🔍/x", "4-review(2) 🔍/x"), ("demo/code", "demo/code"),
+for name, want in (("4-review(2)/x", "4-review(2) 🛠/x"), ("1-plan/x", "1-plan 📝/x"),
+                   ("4-review(2) 🛠/x", "4-review(2) 🛠/x"), ("demo/code", "demo/code"),
                    ("chat", "chat")):
     check("named " + name, named(name), want)
     check("icon kept " + name, icon(named(name)), icon(name))
+
+# The line that tells a session started or ended: one shape for every kind,
+# numbered over the six of the cycle as the menu numbers it.
+def phase(*args):
+    script = 'source "%s/steps.sh"; source "%s/regression.sh"; phase_line "$@"' % (LIB, LIB)
+    return subprocess.run(["bash", "-c", script, "bash"] + list(args),
+                          capture_output=True, text=True, timeout=30).stdout.strip()
+
+
+for args, want in (
+        (("started", "step", "plan", "1"), "📝 Step 1/6 planning: session 1 started"),
+        (("finished", "step", "review", "2"), "🛠 Step 4/6 review: fix session 2 finished"),
+        (("done", "step", "review"), "✅ Step 4/6 done: review"),
+        (("finished", "step", "review", "1", "3"), "🛠 Step 4/6 review: fix session 1, round 3 finished"),
+        (("finished", "friction", "review-3"), "🧱 Friction review finished: after step 4/6 review, fix session 3"),
+        (("ended", "friction", "code"), "🧱 Friction review ended: after step 2/6 development"),
+        (("started", "friction", "fix-preview-1"), "🧱 Friction review started: after the preview regression fix 1"),
+        (("started", "fix", "local", "e2e"), "🔧 Regression fix started: local, on e2e"),
+        (("finished", "fix", "preview"), "🔧 Regression fix finished: preview"),
+        (("started", "local-review", "7", "3"), "🔍 Local review started: PR #7, round 3"),
+        (("finished", "local-review", "7", "4", "verify"), "🔍 Local review finished: PR #7, round 4, fixes only"),
+        (("finished", "epilogue"), "🏁 Step 5/6 finished: epilogue"),
+        (("started", "retro"), "🔁 Step 6/6 started: retrospective"),
+        (("finished", "deferred"), "🧱 Deferred friction review finished")):
+    check("phase " + " ".join(args), phase(*args), want)
+
+# The bot leads a message with exactly these icons (OWN_ICON): every one
+# phase_icon gives, and no other.
+sys.path.insert(0, os.path.join(LIB, "..", ".."))
+from keepawake import notices  # noqa: E402
+icons = subprocess.run(["bash", "-c", 'source "%s/steps.sh"; for a in "step plan" "step code" '
+                        '"step pr" "step review" "step other" "step review done" friction deferred '
+                        'fix local-review regression deploy epilogue retro; do '
+                        'set -- $a; phase_icon "$1" "${2:-}" "${3:-}"; echo; done' % LIB],
+                       capture_output=True, text=True, timeout=30).stdout.split()
+check("the bot knows every phase icon", sorted(set(icons)), sorted(notices.PHASE_ICONS))
+
+# The banner a session opens with in the terminal names it as the topic does.
+def title(*args):
+    script = 'source "%s/steps.sh"; source "%s/regression.sh"; phase_title "$@"' % (LIB, LIB)
+    return subprocess.run(["bash", "-c", script, "bash"] + list(args),
+                          capture_output=True, text=True, timeout=30).stdout.strip()
+
+
+for args, want in (
+        (("step", "code"), "Step 2/6 development"),
+        (("friction", "review-3"), "Friction review after step 4/6 review, fix session 3"),
+        (("friction", "fix-local-2"), "Friction review after the local regression fix 2"),
+        (("fix", "local", "e2e"), "Regression fix: local, on e2e"),
+        (("regression", "preview"), "Regression: preview"),
+        (("epilogue",), "Step 5/6 epilogue"),
+        (("retro",), "Step 6/6 retrospective"),
+        (("deferred",), "Deferred friction review"),
+        # A key past the steps, as `sclaude friction` may pass, is said as it is.
+        (("friction", "done"), "Friction review of done")):
+    check("title " + " ".join(args), title(*args), want)
 
 sys.exit(1 if failed else 0)

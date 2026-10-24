@@ -345,15 +345,18 @@ run_block() {
   local title="$1" note="$2" prompt="$3"; shift 3
   local cmd answer
 
+  # Kept for the question (ask_note) rather than said to the feature's topic:
+  # a deploy tells the topic itself when it starts and ends (phase_line), and
+  # a question carries what it rests on to the phone anyway.
   echo ""
-  say "${BOLD}$title${OFF}"
-  [[ -n "$note" ]] && say "${DIM}$note${OFF}"
+  say_here "${BOLD}$title${OFF}"
+  [[ -n "$note" ]] && say_here "${DIM}$note${OFF}"
   echo ""
   # The list of commands is the very context without which "Publish?" is
   # meaningless: the human agrees to what they see, and on a phone they must see
   # the same thing.
   for cmd in "$@"; do
-    say "  $cmd"
+    say_here "  $cmd"
   done
 
   # We read the answer straight from the terminal rather than the script's
@@ -384,11 +387,13 @@ run_block() {
       fi
     done
   )
+  # 2, not the 1 of a "no": a caller tells the topic a deploy failed by it
+  # (phase_line), so these lines stay in the terminal.
   if [[ $? -ne 0 ]]; then
-    warn ""
-    warn "  ✗ $title — a command failed, stopping here."
-    warn "    The rest of this block did not run."
-    return 1
+    warn_here ""
+    warn_here "  ✗ $title — a command failed, stopping here."
+    warn_here "    The rest of this block did not run."
+    return 2
   fi
   # The outcome is printed afterwards: `vercel` ends its output with escape
   # sequences that erase the previous lines, and without this separator no trace
@@ -433,11 +438,23 @@ say_lines() {
 # the block's pull halfway through a yes. Neither is pushed, rebased, stashed
 # or dropped on the person's behalf: whether it belongs on origin is theirs to
 # say.
+#
+# sclaude's own config is no such change: it is the settings every feature
+# reads from this tree (project_config), edited here by hand — `merge: auto`
+# among them — and nothing the product runs. The block's pull carries it
+# across (--autostash) — unless what it pulls changes the file too: the stash
+# would not apply, git says so and goes on, and the person's settings sit in a
+# stash nobody mentions. Then it stops here, the one time a fetch is made.
 prod_main_unready() {
-  local repo="$1" commits dirt
+  local repo="$1" commits dirt config=".sclaude/config.json" incoming=""
   commits="$(main_unpushed "$repo")"
-  dirt="$(worktree_dirt "$repo")"
-  [[ -n "$commits$dirt" ]] || return 1
+  dirt="$(worktree_dirt "$repo" "$config")"
+  if [[ -n "$(git -C "$repo" status --porcelain -- "$config" 2>/dev/null)" ]] \
+     && GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$repo" fetch -q origin main 2>/dev/null \
+     && [[ -n "$(git -C "$repo" diff --name-only HEAD origin/main -- "$config" 2>/dev/null)" ]]; then
+    incoming=1
+  fi
+  [[ -n "$commits$dirt$incoming" ]] || return 1
   echo ""
   alarm "Production — main in $repo is not what origin holds:"
   if [[ -n "$commits" ]]; then
@@ -451,6 +468,10 @@ prod_main_unready() {
     info "  Changes not committed:"
     say_lines "$dirt"
     info "  Commit and push them, or put them away (git -C $repo stash)."
+  fi
+  if [[ -n "$incoming" ]]; then
+    info "  $config is edited here, and what the pull brings changes it too:"
+    info "  commit and push your edit, or put it away, so the pull does not bury it."
   fi
   return 0
 }
@@ -536,20 +557,27 @@ preview_ship() {
   local wt="$1" url_file try
   url_file="$wt/.sclaude/local/feature/preview.url"
   rm -f "$url_file"
+  ask_feed say "$(phase_line started deploy preview)"
   for ((try = 1; try <= PREVIEW_TRIES; try++)); do
     if SCLAUDE_VERCEL_URL_FILE="$url_file" preview_deploy "$wt"; then
       deploy_remember "$wt" preview
       if [[ -s "$url_file" ]]; then
         state_set "$wt/.sclaude/local/feature/state.json" regression.preview.url "$(< "$url_file")"
       fi
+      ask_feed say "$(phase_line finished deploy preview)$([[ -s "$url_file" ]] && printf ' · %s' "$(< "$url_file")")"
       rm -f "$url_file"
       return 0
     fi
     if [[ "$try" -lt "$PREVIEW_TRIES" ]]; then
-      warn "  The preview deploy failed — trying again in ${PREVIEW_RETRY_PAUSE}s ($((try + 1))/$PREVIEW_TRIES)."
+      # The terminal's alone: a retry that works is no news to a phone, and
+      # one that does not ends in the failed line below.
+      warn_here "  The preview deploy failed — trying again in ${PREVIEW_RETRY_PAUSE}s ($((try + 1))/$PREVIEW_TRIES)."
       sleep "$PREVIEW_RETRY_PAUSE"
     else
-      alarm "  The preview deploy failed $PREVIEW_TRIES times — this needs a person to read the log above."
+      # The topic's line is the phase's, with a sound; the terminal's names
+      # the log right above it.
+      alarm_here "  The preview deploy failed $PREVIEW_TRIES times — this needs a person to read the log above."
+      ask_feed alarm "$(phase_line failed deploy preview) · $PREVIEW_TRIES tries, the log is in the terminal"
     fi
   done
   rm -f "$url_file"
@@ -740,10 +768,16 @@ merge_readiness() {
   # else's repository, which is the case this is guarding against. A protected
   # branch that refuses the merge for a reason of its own shows up as `blocked`
   # in mergeStateStatus, which is checked below.
-  json="$(gh pr view "$pr" --repo "$repo" \
-            --json mergeable,mergeStateStatus,isDraft,viewerCanUpdate,state \
-            2>/dev/null)" || { echo unknown; return 0; }
-  [[ -n "$json" ]] || { echo unknown; return 0; }
+  #
+  # All of it from GraphQL, in one call per poll: `gh pr view --json` no
+  # longer takes viewerCanUpdate, and asking for it there failed the whole
+  # call — every answer was `unknown`, and a `merge: auto` pull request
+  # waited, clean, for ever.
+  json="$(gh api graphql \
+    -f query='query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){mergeable mergeStateStatus isDraft state viewerCanUpdate}}}' \
+    -f o="${repo%%/*}" -f n="${repo#*/}" -F p="$pr" \
+    --jq .data.repository.pullRequest 2>/dev/null)" || { echo unknown; return 0; }
+  [[ -n "$json" && "$json" != "null" ]] || { echo unknown; return 0; }
 
   MERGE_JSON="$json" python3 - <<'PYREADY'
 import json, os
@@ -1332,7 +1366,7 @@ merge_wait() {
 
 remind_prod() {
   local wt="$1" slug="$2" pr branch merged migrations=""
-  local issue preview_done=0 prod_done=0 qa_skipped=0
+  local issue preview_done=0 prod_done=0 prod_tried=0 qa_skipped=0
   # What `deployed-preview` is actually about, which is not preview_done.
   #
   # preview_done means "we shipped one in this run", and it is right for what it
@@ -1702,8 +1736,9 @@ remind_prod() {
     alarm "  It went in without a regression, a preview or QA; production is asked about below."
   fi
   if [[ "$no_deploy" -eq 1 ]]; then
-    run_status "$slug" "$issue" "$pr" "${merged:-}" 0 0 "$wt"
+    # Closed before the epilogue reads it, as at the cycle's end below.
     issue_close_done "$issue" nodeploy
+    run_status "$slug" "$issue" "$pr" "${merged:-}" 0 0 "$wt"
     if ! cmd_done "$slug"; then
       info "Later: $SELF done $slug"
     fi
@@ -1798,7 +1833,7 @@ remind_prod() {
     # loud rather than papering over with a guess: the block is assembled from
     # what is declared, and a missing promote leaves the migrations unshipped
     # where a guessed one would run something nobody named.
-    local -a prod_cmds=("cd $REPO" "git pull --ff-only")
+    local -a prod_cmds=("cd $REPO" "git pull --ff-only --autostash")
     local promote_cmd schema_path
     promote_cmd="$(project_get database.promote "$wt" || true)"
     schema_path="$(project_get database.schemaFile "$wt" || true)"
@@ -1831,6 +1866,8 @@ remind_prod() {
       "${prod_cmds[@]}"; then
       prod_done=1
       deploy_remember "$wt" prod
+    else
+      [[ $? -eq 2 ]] && prod_tried=1
     fi
     if [[ -n "$snapshot" ]]; then
       environment_restore "$REPO" "$snapshot" \
@@ -1843,11 +1880,22 @@ remind_prod() {
       "${prod_note:-The branch adds no migrations.}" \
       "$prod_ask" \
       "cd $REPO" \
-      "git pull --ff-only" \
+      "git pull --ff-only --autostash" \
       "vercel --prod"; then
       prod_done=1
       deploy_remember "$wt" prod
+    else
+      [[ $? -eq 2 ]] && prod_tried=1
     fi
+  fi
+
+  # Production starts with a question, which reaches the phone by itself:
+  # the topic hears only how it ended.
+  if [[ "$prod_done" -eq 1 ]]; then
+    local prod_url; prod_url="$(project_prod_url "$wt" 2>/dev/null || true)"
+    ask_feed say "$(phase_line finished deploy production)${prod_url:+ · $prod_url}"
+  elif [[ "$prod_tried" -eq 1 ]]; then
+    ask_feed alarm "$(phase_line failed deploy production) · the log is in the terminal"
   fi
 
   # The features that went out with this one are in production too, and their
@@ -1976,11 +2024,6 @@ remind_prod() {
     fi
   fi
 
-  # The outcome into the issue and its parents, before the clean-up: until this
-  # line it is not known whether the feature made it to prod, and "where it is
-  # now" is half of what the section exists for.
-  run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_done" "$wt"
-
   # The cycle is over here: every red or unrunnable production regression
   # returned above. So the issue closes — whether production carries the
   # feature or the human declined to ship it. A declined production used to
@@ -1988,11 +2031,21 @@ remind_prod() {
   # stayed open, merged and accepted, after its production question was
   # answered no. Shipping later is `vercel --prod` from the repository, which
   # needs no open issue.
+  #
+  # Before the epilogue, not after it: issue_hold_open kept the issue open
+  # until now, and an epilogue that read it open wrote "still open" of a
+  # feature about to close — and the closed, deployed-prod case status.md
+  # answers with no comment at all could never come up.
   if [[ "$prod_done" -eq 1 ]] || deploy_unchanged "$wt" prod; then
     issue_close_done "$issue" shipped
   else
     issue_close_done "$issue" declined
   fi
+
+  # The outcome into the issue and its parents, before the clean-up: until this
+  # line it is not known whether the feature made it to prod, and "where it is
+  # now" is half of what the section exists for.
+  run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_done" "$wt"
 
   # And only now the clean-up. It checks the merge against GitHub, shows what
   # exactly will disappear, and asks — once. There is deliberately no question

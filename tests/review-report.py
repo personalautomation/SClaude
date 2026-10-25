@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -137,6 +138,21 @@ with tempfile.TemporaryDirectory() as wt:
                          review_report.by_session(groups, review_report.sessions(wt))],
           [("1", 2), ("2", 2)])
     check("reversals-of-this-feature-only", review_report.logged_reversals(log, "x"), 2)
+
+    # A run left without an end in the middle — a session that never started —
+    # is not counted until now; only the last run can still be going.
+    gap = tempfile.mkdtemp()
+    os.makedirs(os.path.join(gap, ".sclaude/local/feature"))
+    with open(os.path.join(gap, ".sclaude/local/feature/state.json"), "w") as fh:
+        json.dump({"steps": {"review": {"runs": [
+            {"session": "a", "started": "2026-10-14T08:00:00+00:00", "finished": "2026-10-14T08:10:00+00:00"},
+            {"session": "b", "started": "2026-10-14T08:10:00+00:00"},
+            {"session": "c", "started": "2026-10-14T08:20:00+00:00"},
+        ]}}}, fh)
+    spans = [s["seconds"] for s in review_report.sessions(gap)]
+    check("an unended earlier run is not counted until now", spans[:2], [600.0, None])
+    check("the last run still is", spans[2] is not None and spans[2] > 0, True)
+    shutil.rmtree(gap, ignore_errors=True)
 
     # --- cost per launch, from what the status line left ----------------------
     context = "/tmp/claude-statusline-context-s2"

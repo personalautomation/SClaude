@@ -277,11 +277,14 @@ def sessions(cwd):
     runs = ((state.get("steps") or {}).get("review") or {}).get("runs") or []
     now = datetime.datetime.now(datetime.timezone.utc)
     out = []
-    for r in runs:
-        if not isinstance(r, dict):
-            continue
+    runs = [r for r in runs if isinstance(r, dict)]
+    for i, r in enumerate(runs):
         a = parse(r.get("started"))
-        b = parse(r.get("finished")) or (now if not r.get("done") and not r.get("outcome") else None)
+        # Only the last run can still be going: an earlier one without an end
+        # is one that never ended properly, and counted until now it grew by
+        # every hour the step ran after it.
+        going = i == len(runs) - 1 and not r.get("done") and not r.get("outcome")
+        b = parse(r.get("finished")) or (now if going else None)
         costs = [c for c in (r.get("costs") or []) if isinstance(c, (int, float))]
         out.append({"start": a, "rounds": r.get("rounds"), "costs": costs,
                     "seconds": (b - a).total_seconds() if a and b and b > a else None})

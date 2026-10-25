@@ -645,6 +645,10 @@ run_step() {
   # live_session (state.sh), and so is what it costs.
   if [[ -n "$session" ]] && ! live_session "$wt" "$session" >/dev/null; then
     info "   the session recorded for this step never started — beginning a new one"
+    # Its run goes too: left open, with no end, it was counted as running
+    # until now — one such run made a 16-minute session read as eight hours
+    # in the review's report.
+    session_runs "$state" "steps.$step" drop "$session"
     session=""
   fi
 

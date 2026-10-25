@@ -1974,10 +1974,14 @@ friction_propose_project() {
 # log to a session: anything but proposals in it, a deferred file that could
 # not be written or committed — or the person wanting them in CLAUDE.md now.
 #
-# Asked first: a rule the review's own decision rests on — a guard a fix put
-# in, which the next session must not take out — put off for a month is a
-# month of sessions that do not know it. "Now" leaves FRICTION_APPLY_NOW set,
-# and the friction review that takes the log is told to write them in.
+# Put off without a question by default. The question stopped the cycle
+# between a fix session and the review of its fixes until it was answered, and
+# on one feature it was asked fourteen times, answered "put off" every time,
+# and held the cycle for three hours once. SCLAUDE_FRICTION_ASK=on asks again:
+# a rule the review's own decision rests on — a guard a fix put in, which the
+# next session must not take out — put off for a month is a month of sessions
+# that do not know it. "Now" leaves FRICTION_APPLY_NOW set, and the friction
+# review that takes the log is told to write them in.
 #
 # Each put-off is a review of the key's own, in its runs: a fix session's key
 # stands for all its rounds, and the state kept only the last one's.
@@ -1997,7 +2001,9 @@ friction_defer_proposals() {
   while IFS=$'\t' read -r _ _ _ _ _ text; do say "  - $text"; done <<< "$rows"
   # Only a "no" writes them in now. An ask that got no answer — the feature
   # ended elsewhere, no terminal — puts them off, as before the question.
-  if ask "${BOLD}Put them off to the monthly review? (n writes them into CLAUDE.md now) [y/n] ${OFF}" answer yn \
+  if [[ "${SCLAUDE_FRICTION_ASK:-off}" != "on" ]]; then
+    info "  Put off to the monthly review (SCLAUDE_FRICTION_ASK=on asks first)."
+  elif ask "${BOLD}Put them off to the monthly review? (n writes them into CLAUDE.md now) [y/n] ${OFF}" answer yn \
      && ! is_yes "$answer"; then
     FRICTION_APPLY_NOW=1
     state_set "$state" "friction.$key.apply_now" true 2>/dev/null || true

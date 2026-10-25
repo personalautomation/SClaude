@@ -1099,9 +1099,12 @@ appended to `friction.log.reviewed` and kept apart as
 every review's entries, and a review handed all of it read the earlier steps'
 again and put the same refusal off twice. `sclaude friction`, a re-read, still
 reads everything. A log of nothing but proposed `CLAUDE.md` rules needs no
-session: sclaude puts them off to the monthly review itself — after asking,
-since a rule a decision of the same cycle rests on should not wait a month; a
-"no" hands the log to a review told to write them in now. Each such put-off is
+session: sclaude puts them off to the monthly review itself. It no longer
+asks by default: the question held the cycle between a fix session and the
+review of its fixes until it was answered, and the answer was nearly always
+"put off". `SCLAUDE_FRICTION_ASK=on` asks again, for a rule a decision of the
+same cycle rests on that should not wait a month; a "no" hands the log to a
+review told to write them in now. Each such put-off is
 a review of the key's own, numbered in its commit and kept in the key's runs.
 
 ## sclaude's own files in a product

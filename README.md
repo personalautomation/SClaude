@@ -154,9 +154,9 @@ asks first.
 ### The tool repairs itself, and says what a machine lacks
 
 The friction review fixes the rules that got in the way. When a session's log
-holds only proposed CLAUDE.md rules, sclaude asks whether to put them off to the
-monthly review (`y`, no session) or write them in now (`n`, a review session
-does it). `sclaude doctor` lists
+holds only proposed CLAUDE.md rules, sclaude puts them off to the monthly
+review itself, with no session and no question; `SCLAUDE_FRICTION_ASK=on`
+asks first, and `n` then has a review session write them in now. `sclaude doctor` lists
 what a machine is missing and the command that fixes each gap, so onboarding is a
 checklist. The retrospective at the end reads a recording of the whole run — what
 sclaude printed and what you typed — and says what could go better.
@@ -525,6 +525,7 @@ is stopped, database included (data kept), and starts again on the next visit.
 | `SCLAUDE_NO_RELOAD=1` | do not switch to newer sclaude code after a long session |
 | `SCLAUDE_TERM=off` | do not record the terminal (recordings are kept 60 days) |
 | `SCLAUDE_RETRO=off` | skip the retrospective |
+| `SCLAUDE_FRICTION_ASK=on` | ask before putting proposed CLAUDE.md rules off to the monthly review |
 | `SCLAUDE_DEV_IDLE` | how long an unused feature keeps running |
 | `SCLAUDE_DOCKER_START=off` | never start Docker |
 | `SCLAUDE_DOCKER_WAIT` | how long to wait for Docker to come up, in seconds (120) |

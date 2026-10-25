@@ -97,7 +97,7 @@ try:
     state = os.path.join(wt, ".sclaude/local/feature", "state.json")
     log = os.path.join(wt, ".sclaude/local/feature", "friction.log")
 
-    def defer(answer="y", fresh_state=True, ask=None, start="{}"):
+    def defer(answer="y", fresh_state=True, ask=None, start="{}", asking=True):
         if fresh_state:
             with open(state, "w") as fh:
                 fh.write(start)
@@ -109,7 +109,8 @@ try:
                   'GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t\n'
                   'friction_defer_proposals "%s" 45-x review-21 review; echo "rc=$? now=${FRICTION_APPLY_NOW:-}"'
                   % (LIB, LIB, tmp, ask, DEFER, wt))
-        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        env = dict(os.environ, SCLAUDE_FRICTION_ASK="on" if asking else "off")
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env)
         return out.stdout.strip().splitlines()[-1] if out.stdout.strip() else out.stderr
 
     def commits():
@@ -169,10 +170,18 @@ try:
     with open(log, "w") as fh:
         fh.writelines(both)
 
+    # Not asked by default: the question held the cycle until it was answered,
+    # and the answer was always the same.
+    out = defer(ask='ask() { echo ASKED; printf -v "$2" n; }', asking=False)
+    check("defer-not-asked-by-default", out.split(), ["rc=0", "now="])
+    check("defer-not-asked-rows", rows(), 8)
+    with open(log, "w") as fh:
+        fh.writelines(both)
+
     with open(log, "a") as fh:
         fh.write("2026-10-09T05:00:00+01:00\treview\thook\tgit push origin main\n")
     check("defer-mixed-left-to-session", defer().split()[0], "rc=1")
-    check("defer-mixed-writes-nothing", (rows(), commits()), (6, 4))
+    check("defer-mixed-writes-nothing", (rows(), commits()), (8, 5))
 
     # Somebody editing the file by hand: left to a session rather than mixed in.
     with open(log, "w") as fh:

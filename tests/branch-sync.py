@@ -14,7 +14,8 @@
 #   * the start merges, and asks nothing;
 #   * a state left with the old "no" mark is merged all the same;
 #   * a merge that would conflict goes to the sync with main, unasked, and
-#     leaves no half-merged tree; a sync that fails holds the step;
+#     leaves no half-merged tree; a sync that stops short opens the step,
+#     unless it left a merge under way;
 #   * a plain merge that stops on conflicts the check could not foresee is
 #     backed out, and the step opens;
 #   * the menu's sync (sync_offer with the branch named) still asks first,
@@ -74,7 +75,7 @@ try:
                   'REPO=%s\nsource %s/io.sh; source %s/ui.sh; source %s/state.sh; source %s/worktree.sh; source %s/deferred.sh; source %s/sync.sh\n'
                   'warn(){ echo "$*"; }; info(){ echo "$*"; }; unset ASK_DIR\n'
                   'ask() { echo "ASKED $1"; printf -v "$2" %%s "$ANSWER"; }\n'
-                  'sync_with_main() { echo "SYNC $2 $3"; return "${SYNC_RC:-3}"; }\n'
+                  'sync_with_main() { echo "SYNC $2 $3"; eval "${SYNC_DOES:-}"; return "${SYNC_RC:-3}"; }\n'
                   '%s'
                   % (repo, LIB, LIB, LIB, LIB, LIB, LIB, env.pop("PRELUDE", ""))
                   + (call or 'sync_branch %s') % repo + '\n')
@@ -115,8 +116,16 @@ try:
     check("conflict: nothing asked", "ASKED" in out, False)
     check("conflict: the sync takes it", "SYNC x nofetch" in out, True)
     check("conflict: no half-merged tree", git("rev-parse", "-q", "--verify", "MERGE_HEAD", cwd=repo), "")
-    out = start("", SYNC_RC="1")
-    check("conflict: a sync that fails holds the step", "has not been started" in out, True)
+    out = start("", call='sync_branch %s; echo "RC $?"', SYNC_RC="1")
+    check("conflict: a sync that stops short opens the step", "RC 0" in out, True)
+    check("conflict: ... and says how to merge", "sclaude sync x" in out, True)
+    out = start("", call='sync_branch %s; echo "RC $?"', SYNC_RC="1",
+                SYNC_DOES='git -C "$1" merge -q origin/main >/dev/null 2>&1')
+    check("conflict: a half-merged tree holds the step", "RC 1" in out and "has not been started" in out, True)
+    git("merge", "--abort", cwd=repo)
+    out = start("", call='sync_branch %s; echo "RC $?"', SYNC_RC="0")
+    check("conflict gone by the sync's look: the plain merge runs", "stopped on conflicts" in out, True)
+    check("conflict gone: backed out, the step opens", "RC 0" in out, True)
 
     # The menu names the branch: asked first, and a no is 4 with no sync.
     out = start("n", call='sync_offer %s x 7 feat/x; echo "RC $?"')

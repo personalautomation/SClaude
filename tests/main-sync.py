@@ -251,8 +251,13 @@ with tempfile.TemporaryDirectory() as tmp:
     git(seed, "push", "-q", "origin", "HEAD:main")
     commit(wt, "app.txt", "one\nfeature\nthree\n", "feature's change")
     git(wt, "push", "-q")
-    stub_gh = ('gh_repo() { echo o/r; }\n'
-               'gh() { [[ "$*" == "pr view 7 --repo o/r --json state --jq .state" ]] && echo "$GH_STATE"; }\n')
+    # An executable rather than a function: the call runs under `timeout`.
+    bindir = os.path.join(tmp, "reopened-bin")
+    os.makedirs(bindir)
+    write(os.path.join(bindir, "gh"), '#!/bin/bash\n'
+          '[[ "$*" == "pr view 7 --repo o/r --json state --jq .state" ]] && echo "$GH_STATE"\n')
+    os.chmod(os.path.join(bindir, "gh"), 0o755)
+    stub_gh = 'gh_repo() { echo o/r; }; PATH="%s:$PATH"\n' % bindir
     # No answer from GitHub (no network) keeps the number, as before.
     for gh_state, named in (("MERGED", False), ("CLOSED", False), ("OPEN", True), ("", True)):
         with open(os.path.join(wt, ".sclaude/local/feature/state.json"), "w") as fh:

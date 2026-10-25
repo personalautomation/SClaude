@@ -422,10 +422,11 @@ sync_with_main() {
   # opens the next one, and `reopened_pr` holds that number. Not named once
   # GitHub says it is merged or closed: "PR #N does not merge" about a merged
   # one reads as though the merge itself were in doubt. No answer (no
-  # network) keeps the number, as before.
+  # network, or none in ten seconds: it only picks the words) keeps the
+  # number, as before.
   local named="$pr" pr_state=""
   if [[ "$pr" =~ ^[0-9]+$ && "$(state_get "$state" reopened_pr 2>/dev/null || true)" == "$pr" ]]; then
-    pr_state="$(gh pr view "$pr" --repo "$(gh_repo 2>/dev/null)" --json state --jq .state 2>/dev/null || true)"
+    pr_state="$(timeout 10 gh pr view "$pr" --repo "$(gh_repo 2>/dev/null)" --json state --jq .state 2>/dev/null || true)"
     [[ "$pr_state" == MERGED || "$pr_state" == CLOSED ]] && named=""
   fi
   # Reviewed, with its pull request open: what remind_prod calls this for.

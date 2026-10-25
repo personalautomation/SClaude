@@ -1,4 +1,4 @@
-**The sync with main<if:reviewed>, step 5 of the cycle</if:reviewed>.** <if:reviewed>The feature "<feature>" is reviewed, and its pull request #<pr><if:issue> for issue #<issue></if:issue> is open on the branch `<branch>` — but it does not merge:</if:reviewed><if:unreviewed>The feature "<feature>"<if:issue> (issue #<issue>)</if:issue> is being built on the branch `<branch>`, and I asked to bring main into it — but it does not merge cleanly:</if:unreviewed> `origin/main` has moved since the branch left it<if:conflicts>, and merging the two leaves conflicts in
+**The sync with main<if:reviewed>, step 5 of the cycle</if:reviewed>.** <if:reviewed>The feature "<feature>" is reviewed, and its pull request #<pr><if:issue> for issue #<issue></if:issue> is open on the branch `<branch>` — but it does not merge:</if:reviewed><if:unreviewed>The feature "<feature>"<if:issue> (issue #<issue>)</if:issue> is being built on the branch `<branch>`, and main is to be brought into it — but it does not merge cleanly:</if:unreviewed> `origin/main` has moved since the branch left it<if:conflicts>, and merging the two leaves conflicts in
 
 ```
 <conflicts>

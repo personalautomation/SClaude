@@ -889,16 +889,28 @@ sync_branch() {
   # review have worked on a branch that is not what merges.
   warn ""
   warn "  $branch is $behind commit(s) behind origin/main and has commits of its own:"
-  warn "  main goes in first, so the step does not start on a stale branch."
+  warn "  merging main in before the step, so it does not start on a stale branch."
   # A merge that would stop on conflicts is the sync with main's (sync_offer),
   # which resolves them — the person cannot, from a phone, and a step must not
-  # open on a half-merged tree. Otherwise the plain merge below.
+  # open on a half-merged tree. Otherwise the plain merge below, and also after
+  # a sync that found nothing to resolve after all (0), or took a hand-off back
+  # with nothing merged (5).
   local synced=0
   sync_offer "$wt" "$slug" "$(state_get "$state" pr 2>/dev/null || true)" || synced=$?
-  if [[ "$synced" -ne 2 ]]; then
-    [[ "$synced" -ne 1 ]] && return 0
-    warn "  The step has not been started."
-    return 1
+  [[ "$synced" -eq 3 ]] && return 0
+  if [[ "$synced" -eq 1 ]]; then
+    # A half-merged tree holds the step: its files may carry conflict markers.
+    # Otherwise the sync stopped short (the session left, the branch had
+    # diverged) and the step opens as a "no" to the old question let it:
+    # nobody asked this time, and a step held by a merge nobody asked for
+    # could not be opened at all from a phone.
+    if merge_under_way "$wt"; then
+      warn "  A merge of main is under way in the tree; the step has not been started."
+      warn "  Finish it with: sclaude sync ${slug:-<feature>}   or back it out: git -C $wt merge --abort"
+      return 1
+    fi
+    warn "  Not merged — the step opens on the branch as it stands; merge it with: sclaude sync ${slug:-<feature>}"
+    return 0
   fi
 
   # `--no-edit`: nobody asked for a message, and a merge message editor
@@ -914,9 +926,17 @@ sync_branch() {
   # asked for this merge, so nobody is left a half-merged tree to untangle —
   # from a phone they could not: it is backed out, and the step opens on the
   # branch as it stood. The sync before the preview, or the menu, merges it.
-  git -C "$wt" merge --abort >/dev/null 2>&1 || true
+  # A merge that refused to start (an untracked file in the way, a hook) left
+  # nothing to back out: git has said why above.
   warn ""
-  warn "  The merge stopped on conflicts sclaude could not foresee, and was backed out."
+  if merge_under_way "$wt"; then
+    git -C "$wt" merge --abort >/dev/null 2>&1 \
+      || { warn "  The merge stopped on conflicts, and backing it out failed: git -C $wt merge --abort"
+           warn "  The step has not been started."; return 1; }
+    warn "  The merge stopped on conflicts sclaude could not foresee, and was backed out."
+  else
+    warn "  The merge did not run (git says why above)."
+  fi
   warn "  The step opens on the branch as it stands; merge it with: sclaude sync ${slug:-<feature>}"
   return 0
 }

@@ -660,7 +660,10 @@ The menu's own "Sync with main" (`cmd_sync`), there at every step, uses the
 same check: its line says how many files would conflict, and a yes to a merge
 that would conflict goes to the sync rather than leaving the tree half-merged
 for the person to untangle — from a phone they could not. The same goes for
-the merge with main a step offers at its start (`sync_branch`). Before step 3 the
+the merge with main a step makes at its start (`sync_branch`), which asks
+nothing: it once asked, a "no" was remembered for that state of main, and all
+it bought was the same merge later, before the preview, after step 3 and the
+review had worked on a branch that was not what merges. Before step 3 the
 branch may not be on origin yet; the session then leaves it local, and the
 prompt says nothing of a pull request or of QA.
 

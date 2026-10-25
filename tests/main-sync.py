@@ -14,7 +14,9 @@
 #     tip lacks are asked about with it;
 #   * sync_gate takes back a hand-off for the merge whenever origin's branch
 #     moved, even when the sync stopped short;
-#   * merge_wait stops waiting once main moves into a conflict (3).
+#   * merge_wait stops waiting once main moves into a conflict (3);
+#   * a pull request merged before the feature came back (reopened_pr) is
+#     not named: the branch is, unless GitHub says that number is open.
 #
 # Run it with: python3 tests/main-sync.py
 import json
@@ -241,6 +243,23 @@ with tempfile.TemporaryDirectory() as tmp:
     check("local: synced without a push", rc, 3)
     check("local: still not on origin", git(wt, "ls-remote", "--heads", "origin", "feat/9-x"), "")
     check("local: no PR to name", "The branch does not merge with main" in out, True)
+
+    # Sent back after its merge (retro_reopen): the state still carries the
+    # merged pull request until step 3 opens the next one. It is not named.
+    seed, wt = setup(tmp, "reopened")
+    commit(seed, "app.txt", "one\nmain\nthree\n", "main's change")
+    git(seed, "push", "-q", "origin", "HEAD:main")
+    commit(wt, "app.txt", "one\nfeature\nthree\n", "feature's change")
+    git(wt, "push", "-q")
+    stub_gh = 'gh_repo() { echo o/r; }; gh() { echo "$GH_STATE"; }\n'
+    for gh_state, named in (("MERGED", False), ("OPEN", True)):
+        with open(os.path.join(wt, ".sclaude/local/feature/state.json"), "w") as fh:
+            json.dump({"feature": "9-x", "branch": "feat/9-x", "pr": 7, "reopened_pr": 7,
+                       "issue": 9, "step": "pr"}, fh)
+        rc, out = run(wt, stub_gh + 'sync_with_main "$PWD" 9-x', **dict(env, GH_STATE=gh_state, NO_SESSION="1"))
+        check("reopened, %s: PR #7 named" % gh_state, "PR #7 does not merge with main" in out, named)
+        check("reopened, %s: the branch named" % gh_state,
+              "The branch does not merge with main" in out, not named)
 
     # The prompt, for a reviewed feature and for one still being built.
     def prompt(**values):

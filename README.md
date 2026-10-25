@@ -479,6 +479,10 @@ main in, resolves the conflicts, checks the result and pushes; the preview,
 its tests and QA then run again on that code. A conflict only in the deferred
 logs sclaude merges itself, with both sides' rows. A pull request already
 handed over for the merge goes back to a draft when a sync changes its code.
+Every step starts on a branch carrying the latest main, too: sclaude merges
+it in without asking, and a merge that would conflict goes to the same sync
+first. Only uncommitted work in the tree stops it; then it says so and leaves
+the merge to `sclaude sync <name>`.
 
 The merge is yours (unless the product set it otherwise). After it sclaude
 offers production, runs the tests there, and rolls back if they fail.

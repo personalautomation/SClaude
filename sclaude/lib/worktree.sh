@@ -834,15 +834,16 @@ worktree_dirt() {
 #
 # The decision is the same one `sclaude sync` makes, but its unambiguous half is
 # done silently: for a branch with no commits of its own a fast-forward changes
-# nothing except that it stops lying. A real merge comes with a question: it can
-# stall on conflicts, and untangling those under a session that is about to open
-# is not acceptable.
+# nothing except that it stops lying. A real merge is made without a question
+# too; one that would stall on conflicts goes to the sync with main, whose
+# session resolves them, since untangling them under a session that is about
+# to open is not acceptable.
 #
 # Before a local regression the branch has usually not been pushed yet, and
 # one that is behind main is put on top of it without a question
 # (sync_unpublished): nothing of anybody else's rests on its commits.
 sync_branch() {
-  local wt="$1" state branch slug behind dirty answer
+  local wt="$1" state branch slug behind dirty
   state="$wt/.sclaude/local/feature/state.json"
   branch="$(state_get "$state" branch 2>/dev/null)" || return 0
   [[ -n "$branch" && "$branch" != "null" ]] || return 0
@@ -882,49 +883,26 @@ sync_branch() {
   fi
 
   # The fast-forward did not apply, which means the branch has something of its
-  # own, and this is a real merge.
-  # Asked once for each state of main. A "no" is remembered against the
-  # commit origin/main stood at, and every later start of a step — a review
-  # round's fresh session, a resume, a rerun — says one line instead of asking
-  # again. Once the same question was asked at every round. When main
-  # moves, it is a new question.
-  local tip declined
-  tip="$(git -C "$REPO" rev-parse -q --verify origin/main 2>/dev/null || true)"
-  declined="$(state_get "$state" sync.declined 2>/dev/null || true)"
-  if [[ -n "$tip" && "$declined" == "$tip" ]]; then
-    info "  branch: $behind commit(s) behind origin/main — merging was declined for"
-    info "  this main; merge it with: sclaude sync ${slug:-<feature>}"
-    return 0
-  fi
-
+  # own, and this is a real merge — made without a question. One used to stand
+  # here, and its "no" bought nothing: the sync before the preview
+  # (remind_prod) merges main in all the same, only later, after step 3 and the
+  # review have worked on a branch that is not what merges.
   warn ""
-  warn "  $branch is $behind commit(s) behind origin/main and has commits of its own."
-  warn "  Starting the step on a stale branch is how a migration collides with one"
-  warn "  that is already in main."
-  echo ""
+  warn "  $branch is $behind commit(s) behind origin/main and has commits of its own:"
+  warn "  main goes in first, so the step does not start on a stale branch."
   # A merge that would stop on conflicts is the sync with main's (sync_offer),
   # which resolves them — the person cannot, from a phone, and a step must not
-  # open on a half-merged tree. Otherwise the plain question and merge below.
+  # open on a half-merged tree. Otherwise the plain merge below.
   local synced=0
-  sync_offer "$wt" "$slug" "$branch" "$(state_get "$state" pr 2>/dev/null || true)" || synced=$?
-  if [[ "$synced" -eq 2 ]]; then
-    ask "${BOLD}Merge origin/main into $branch? [y/n] ${OFF}" answer yn
-    is_yes "$answer" || synced=4
-  fi
-  if [[ "$synced" -eq 4 ]]; then
-    [[ -n "$tip" ]] && state_set "$state" sync.declined "$tip"
-    info "  Left as it is — the step opens on the branch as it stands."
-    info "  Not asked again until main moves; merge any time with: sclaude sync ${slug:-<feature>}"
-    return 0
-  fi
+  sync_offer "$wt" "$slug" "$(state_get "$state" pr 2>/dev/null || true)" || synced=$?
   if [[ "$synced" -ne 2 ]]; then
     [[ "$synced" -ne 1 ]] && return 0
     warn "  The step has not been started."
     return 1
   fi
 
-  # `--no-edit`: the person has just answered yes, and a merge message editor
-  # opening on top of that leaves the orchestrator waiting on a window that may
+  # `--no-edit`: nobody asked for a message, and a merge message editor
+  # opening on the way into a step leaves the orchestrator waiting on a window that may
   # be in another program entirely ("Waiting for your editor to close the
   # file..."), with nothing in the terminal to say what it is waiting for.
   if git -C "$wt" merge --no-edit origin/main; then

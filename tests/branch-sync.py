@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 #
-# "Merge origin/main into <branch>?" is asked once for each state of main.
+# A step's start merges main into a branch that is behind it, without asking.
 #
-# On one pull request every review round opened a fresh session through
-# run_step, and every one stopped on the same question the human had already
-# answered "n". A "no" is now remembered against origin/main's commit.
+# It used to ask, "Merge origin/main into <branch>?", and a "no" was
+# remembered against main's commit. The answer was nearly always yes, and a
+# no only put the merge off: the sync before the preview makes it all the
+# same, after step 3 and the review had worked on a branch that was not what
+# merges.
 #
 # Guarded here, on a scratch repository whose feature branch has a commit of
 # its own and is behind main:
 #
-#   * the first start asks; "n" leaves the branch as it is;
-#   * the next start does not ask, and says how to merge;
-#   * once main moves, it asks again;
-#   * "y" merges, as before.
+#   * the start merges, and asks nothing;
+#   * a state left with the old "no" mark is merged all the same;
+#   * a merge that would conflict goes to the sync with main, unasked, and
+#     leaves no half-merged tree; a sync that fails holds the step.
 #
 # Run it with: python3 tests/branch-sync.py
 import os
@@ -74,19 +76,20 @@ try:
                               env=dict(os.environ, ANSWER=answer, **env)).stdout
 
     main_moves()
-    out = start("n")
-    check("first-start-asks", "ASKED" in out, True)
-    check("n-leaves-it", git("log", "-1", "--format=%s", cwd=repo), "mine")
-    out = start("n")
-    check("second-start-does-not-ask", "ASKED" in out, False)
-    check("second-start-says-how", "sclaude sync x" in out, True)
+    out = start("")
+    check("start-does-not-ask", "ASKED" in out, False)
+    check("start-merges", git("log", "-1", "--format=%P", cwd=repo).count(" "), 1)
     main_moves()
-    out = start("y")
-    check("main-moved-asks-again", "ASKED" in out, True)
-    check("y-merges", git("log", "-1", "--format=%P", cwd=repo).count(" "), 1)
+    git("fetch", "-q", "origin", cwd=repo)
+    with open(os.path.join(repo, ".sclaude/local/feature", "state.json"), "w") as fh:
+        fh.write('{"branch": "feat/x", "feature": "x", "sync": {"declined": "%s"}}\n'
+                 % git("rev-parse", "origin/main", cwd=repo))
+    out = start("")
+    check("old-no-mark-merged-anyway",
+          subprocess.run(["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"], cwd=repo).returncode, 0)
 
     # A merge that would conflict is not left half-done for the person: the
-    # question says a session resolves it, and the sync with main does.
+    # sync with main resolves it, and nobody is asked first.
     git("push", "-q", "origin", "feat/x", cwd=repo)
     other = os.path.join(tmp, "other")
     with open(os.path.join(other, "f.txt"), "w") as fh:
@@ -102,11 +105,11 @@ try:
     git("add", "f.txt", cwd=repo)
     git("commit", "-q", "-m", "my f", cwd=repo)
     git("push", "-q", "origin", "feat/x", cwd=repo)
-    out = start("y")
-    check("conflict: the question names the session", "with a session resolving them" in out, True)
+    out = start("")
+    check("conflict: nothing asked", "ASKED" in out, False)
     check("conflict: the sync takes it", "SYNC x nofetch" in out, True)
     check("conflict: no half-merged tree", git("rev-parse", "-q", "--verify", "MERGE_HEAD", cwd=repo), "")
-    out = start("y", SYNC_RC="1")
+    out = start("", SYNC_RC="1")
     check("conflict: a sync that fails holds the step", "has not been started" in out, True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)

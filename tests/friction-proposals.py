@@ -97,7 +97,7 @@ try:
     state = os.path.join(wt, ".sclaude/local/feature", "state.json")
     log = os.path.join(wt, ".sclaude/local/feature", "friction.log")
 
-    def defer(answer="y", fresh_state=True, ask=None, start="{}", asking=True):
+    def defer(answer="y", fresh_state=True, ask=None, start="{}", asking=True, extra=None):
         if fresh_state:
             with open(state, "w") as fh:
                 fh.write(start)
@@ -109,7 +109,11 @@ try:
                   'GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t\n'
                   'friction_defer_proposals "%s" 45-x review-21 review; echo "rc=$? now=${FRICTION_APPLY_NOW:-}"'
                   % (LIB, LIB, tmp, ask, DEFER, wt))
-        env = dict(os.environ, SCLAUDE_FRICTION_ASK="on" if asking else "off")
+        # The classification has a test of its own (friction-classify.py), with
+        # a stub for the model; here it would call the real one.
+        env = dict(os.environ, SCLAUDE_FRICTION_ASK="on" if asking else "off",
+                   SCLAUDE_FRICTION_CLASSIFY="off")
+        env.update(extra or {})
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env)
         return out.stdout.strip().splitlines()[-1] if out.stdout.strip() else out.stderr
 
@@ -182,6 +186,28 @@ try:
         fh.write("2026-10-09T05:00:00+01:00\treview\thook\tgit push origin main\n")
     check("defer-mixed-left-to-session", defer().split()[0], "rc=1")
     check("defer-mixed-writes-nothing", (rows(), commits()), (8, 5))
+
+    # Matched against CLAUDE.md first: proposals it already states are not put
+    # off, nothing is committed, and the log is decided all the same.
+    with open(log, "w") as fh:
+        fh.writelines(both)
+    with open(os.path.join(wt, "CLAUDE.md"), "w") as fh:
+        fh.write("- Main moves only by merging a pull request, never by a push.\n")
+    stub_bin = os.path.join(tmp, "stub-bin")
+    os.makedirs(stub_bin, exist_ok=True)
+    with open(os.path.join(stub_bin, "claude"), "w") as fh:
+        fh.write("#!/bin/sh\necho '%s'\n" % json.dumps(
+            [{"n": i, "verdict": "covered", "quote": "Main moves only by merging a pull request"}
+             for i in (1, 2, 3)]))
+    os.chmod(os.path.join(stub_bin, "claude"), 0o755)
+    out = defer(asking=False, extra={"SCLAUDE_FRICTION_CLASSIFY": "on",
+                                     "PATH": stub_bin + ":" + os.environ["PATH"]})
+    check("defer-covered-decided", out.split()[0], "rc=0")
+    check("defer-covered-writes-nothing", (rows(), commits()), (8, 5))
+    with open(state) as fh:
+        check("defer-covered-review-done",
+              ((json.load(fh).get("friction") or {}).get("review-21") or {}).get("done"), True)
+    os.remove(os.path.join(wt, "CLAUDE.md"))
 
     # Somebody editing the file by hand: left to a session rather than mixed in.
     with open(log, "w") as fh:

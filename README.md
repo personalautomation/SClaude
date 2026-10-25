@@ -156,7 +156,9 @@ asks first.
 The friction review fixes the rules that got in the way. When a session's log
 holds only proposed CLAUDE.md rules, sclaude puts them off to the monthly
 review itself, with no session and no question; `SCLAUDE_FRICTION_ASK=on`
-asks first, and `n` then has a review session write them in now. `sclaude doctor` lists
+asks first, and `n` then has a review session write them in now. A small model
+first matches each to a class already put off, or to a rule CLAUDE.md already
+states, and sclaude says how many times its class has come back this month. `sclaude doctor` lists
 what a machine is missing and the command that fixes each gap, so onboarding is a
 checklist. The retrospective at the end reads a recording of the whole run — what
 sclaude printed and what you typed — and says what could go better.
@@ -526,6 +528,7 @@ is stopped, database included (data kept), and starts again on the next visit.
 | `SCLAUDE_TERM=off` | do not record the terminal (recordings are kept 60 days) |
 | `SCLAUDE_RETRO=off` | skip the retrospective |
 | `SCLAUDE_FRICTION_ASK=on` | ask before putting proposed CLAUDE.md rules off to the monthly review |
+| `SCLAUDE_FRICTION_CLASSIFY=off` | put proposed rules off as they come, without matching them to the classes already there and to CLAUDE.md |
 | `SCLAUDE_DEV_IDLE` | how long an unused feature keeps running |
 | `SCLAUDE_DOCKER_START=off` | never start Docker |
 | `SCLAUDE_DOCKER_WAIT` | how long to wait for Docker to come up, in seconds (120) |

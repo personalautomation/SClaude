@@ -1121,7 +1121,26 @@ asks by default: the question held the cycle between a fix session and the
 review of its fixes until it was answered, and the answer was nearly always
 "put off". `SCLAUDE_FRICTION_ASK=on` asks again, for a rule a decision of the
 same cycle rests on that should not wait a month; a "no" hands the log to a
-review told to write them in now. Each such put-off is
+review told to write them in now.
+
+**Before they are put off, they are matched** (`friction_classify.py`). Each
+step's session names its proposal's class itself, and on one feature four
+sessions proposed one rule under four classes, one of them a rule the
+project's `CLAUDE.md` already stated: the monthly review, which decides by
+how often a class comes back, would have read one rule seen four times as
+four rules seen once. So one call of a small model (`SCLAUDE_CLASSIFY_MODEL`,
+haiku) reads the proposals, the classes already put off and `CLAUDE.md`, and
+says of each: the same rule as a class already there (it takes that class),
+a rule `CLAUDE.md` states (not put off, the line quoted), or new. The answer
+is checked, not trusted — a class must exist, a quote must be `CLAUDE.md`'s
+word for word — and any failure leaves the rows as they came.
+
+Each class is counted as it goes in: "2nd time since the last monthly
+review, in 2 features". The count is worked out from the rows, one per
+occurrence, rather than kept in a field: each feature has a file of its own
+so that two branches never edit the same lines, and a counter two branches
+raised would conflict at every merge. `SCLAUDE_FRICTION_CLASSIFY=off` skips
+the matching. Each such put-off is
 a review of the key's own, numbered in its commit and kept in the key's runs.
 
 ## sclaude's own files in a product

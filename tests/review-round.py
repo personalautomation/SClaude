@@ -784,6 +784,36 @@ session_watch_stop
     check("github-red-to-session", "ASKED" in out, True)
     check("github-red-word-kept", left["steps"]["review"].get("enough"), "now")
 
+    # --- rounds that stopped converging are asked about, once ----------------
+    def stuck_ask(review, answer):
+        wt = tempfile.mkdtemp()
+        os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+        st = os.path.join(wt, ".sclaude/local/feature/state.json")
+        with open(st, "w") as fh:
+            json.dump({"steps": {"review": review}}, fh)
+        body = 'source "%s/state.sh"\nsource "%s/local_review.sh"\n' % (LIB, LIB)
+        body += functions(RUN, ["review_stuck_ask"])
+        body += ('\nLIB="%s"; BOLD=""; OFF=""\ninfo() { echo "$*"; }\n'
+                 'is_yes() { [[ "$1" == y ]]; }\n'
+                 'ask() { echo "ASKED"; printf -v "$2" %%s %s; }\n'
+                 'review_stuck_ask "%s"; review_stuck_ask "%s"\n') % (LIB, answer, wt, wt)
+        out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=30,
+                             stdin=subprocess.DEVNULL).stdout
+        with open(st) as fh:
+            got = json.load(fh)["steps"]["review"]
+        shutil.rmtree(wt, ignore_errors=True)
+        return out, got
+
+    out, got = stuck_ask({"stuck": "Not converging: findings per round hold level."}, "y")
+    check("stuck-asked-once", out.count("ASKED"), 1)
+    check("stuck-yes-ends-the-search", got.get("enough"), "pass")
+    out, got = stuck_ask({"stuck": "Not converging: findings per round hold level."}, "n")
+    check("stuck-no-carries-on", (out.count("ASKED"), got.get("enough")), (1, None))
+    out, got = stuck_ask({"stuck": ""}, "y")
+    check("converging-not-asked", out.count("ASKED"), 0)
+    out, got = stuck_ask({"stuck": "Not converging.", "enough": "now"}, "y")
+    check("ended-search-not-asked", out.count("ASKED"), 0)
+
     # --- step 4 closes only once the review is done with the head -------------
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
                           capture_output=True, text=True).stdout.strip()

@@ -2695,11 +2695,39 @@ review_reopen() {
   read -r older newer <<<"$split"
   if [[ "${older:-}" == "0" && "${newer:-0}" -gt 0 ]]; then
     info "  The review posted $newer new finding(s) — a fresh session takes them."
+    review_stuck_ask "$wt"
     state_set "$state" steps.review.session null
   else
     info "  Back to the session that was fixing them."
   fi
   run_step "$wt" "$slug" review
+}
+
+# Asks the person, once a feature, whether to end the search for new findings
+# when the review's report says the rounds stopped converging
+# (steps.review.stuck, written by review_report). Without it each round's new
+# findings went to a fresh session for as long as the person did not press
+# `s`: eighteen rounds on one feature, most of their findings in what users do
+# not see. A yes is the `s` key's word (review_enough): the findings open now
+# still go to the session, and its fixes are checked only if the person says
+# so. Not asked once the search is over already, nor a second time.
+#
+#   review_stuck_ask <wt>
+review_stuck_ask() {
+  local wt="$1" state="$1/.sclaude/local/feature/state.json" said answer
+  said="$(state_get "$state" steps.review.stuck 2>/dev/null || true)"
+  [[ -n "$said" && "$said" != "null" ]] || return 0
+  [[ -z "$(review_enough "$wt")" ]] || return 0
+  [[ "$(state_get "$state" steps.review.stuck_asked 2>/dev/null || true)" != "true" ]] || return 0
+  state_set "$state" steps.review.stuck_asked true 2>/dev/null || true
+  echo ""
+  info "  The review's report: $said"
+  if ask "${BOLD}End the search for new findings? The open ones still go to a session; its fixes are checked only if you say so. [y/n] ${OFF}" answer yn \
+     && is_yes "$answer"; then
+    review_enough_set "$wt" pass
+    info "  The search is over; this is the last session for new findings."
+  fi
+  return 0
 }
 
 # The git a step's session runs commits with: its hooks go through
@@ -2895,12 +2923,15 @@ review_report() {
   # The last session's numbers go to the feature's topic as well, a message
   # per round (ask_notice) — not for the report between two passes of one
   # local review (REVIEW_REPORT_QUIET), which would send one each pass.
-  local brief; brief="$(mktemp)"
-  SCLAUDE_REPORT_BRIEF="$brief" python3 "$LIB/review_report.py" "$wt" "$pr" "$repo" \
+  local brief stuck; brief="$(mktemp)"; stuck="$(mktemp)"
+  SCLAUDE_REPORT_BRIEF="$brief" SCLAUDE_REPORT_STUCK="$stuck" \
+    python3 "$LIB/review_report.py" "$wt" "$pr" "$repo" \
     "$(state_get "$state" branch 2>/dev/null || true)" "$slug" "$log" 2>/dev/null || true
+  # The verdict, when the rounds stopped converging: review_reopen asks by it.
+  state_set "$state" steps.review.stuck "$(cat "$stuck" 2>/dev/null)" 2>/dev/null || true
   local ASK_SLUG="$slug"
   [[ -n "${REVIEW_REPORT_QUIET:-}" ]] || ask_notice "$(cat "$brief" 2>/dev/null)"
-  rm -f "$brief"
+  rm -f "$brief" "$stuck"
 }
 
 cmd_review_report() {

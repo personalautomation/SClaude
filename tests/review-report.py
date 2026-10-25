@@ -154,6 +154,11 @@ with tempfile.TemporaryDirectory() as wt:
     check("the last run still is", spans[2] is not None and spans[2] > 0, True)
     shutil.rmtree(gap, ignore_errors=True)
 
+    # Stuck: not converging over enough rounds that one bad round is not it.
+    check("stuck-over-enough-rounds", review_report.stuck([5, 5, 5, 5], "Not converging: hold level."), True)
+    check("not-stuck-too-few", review_report.stuck([5, 5, 5], "Not converging: hold level."), False)
+    check("not-stuck-converging", review_report.stuck([9, 5, 3, 1], "Converging: half."), False)
+
     # --- cost per launch, from what the status line left ----------------------
     context = "/tmp/claude-statusline-context-s2"
     try:

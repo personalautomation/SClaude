@@ -823,6 +823,16 @@ review session sees the file and ends the `claude` process (found by
 lists only the review threads still open — the resolved ones are counted, not
 repeated — so the new round starts with the new findings and nothing else.
 
+**Rounds that stop converging are asked about once.** The report after each
+round ends on a verdict from the findings per round. When it says "Not
+converging" over four rounds or more (`stuck` in `review_report.py`), the next
+fresh session is preceded by one question (`review_stuck_ask`): end the search
+for new findings? A yes is the word the `s` key gives — the findings open now
+still go to that session, and its fixes are checked only if the person says
+so. Asked once a feature: on one pull request the verdict said "Not
+converging" eighteen rounds in a row, and each was followed by a fresh session
+until the person stopped it by hand.
+
 **Leaving step 4's session does not close it on its own.** After the session exits, the step closes only once the automatic review has finished with the pushed head and left nothing open: no check running or red (the findings check among them) and no unresolved review thread (`pr_context.py --close`). Otherwise sclaude waits for a running review, says what is open, and offers the session back; closing anyway is a second, explicit answer.
 
 **Every commit a step's session makes names it.** sclaude launches claude with `core.hooksPath` pointed at `sclaude/githooks` through `GIT_CONFIG_*` in that process's environment only; its `commit-msg` adds `Sclaude-Session: <id>` — the id the issue's table and `claude --resume` use — at the end of the trailer block, and every hook there then runs the project's own hook of the same name. A row in the issue finds its commits with `git log --grep=<id>`. Commits made by hand are untouched.

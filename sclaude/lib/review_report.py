@@ -541,7 +541,27 @@ def main():
                 fh.write(brief(pr, newest(columns), said))
         except OSError:
             pass
+    path = os.environ.get(STUCK_ENV, "")
+    if path and not threads_failed:
+        try:
+            with open(path, "w") as fh:
+                fh.write(said if stuck(per_round, said) else "")
+        except OSError:
+            pass
     return 0
+
+
+# Whether the rounds have stopped converging, for sclaude to ask the person
+# once whether to end the search (review_reopen in run.sh): the verdict says
+# so, over enough rounds that one bad round is not it. The report wrote
+# "Not converging" eighteen rounds in a row on one feature, and each was
+# followed by a fresh session, until the person stopped it by hand.
+STUCK_ENV = "SCLAUDE_REPORT_STUCK"
+STUCK_ROUNDS = 4
+
+
+def stuck(per_round, said):
+    return len(per_round) >= STUCK_ROUNDS and said.startswith("Not converging")
 
 
 def logged_reversals(log, slug):

@@ -653,13 +653,25 @@ check_true("preview-live-set-when-the-deploy-is-skipped",
 # that changed nothing is checked above.
 for _name, _src, _close, _status in (
         ("shipped", deploy_sh, 'issue_close_done "$issue" shipped',
-         'run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_done" "$wt"\n'),
+         'run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_live" "$wt"\n'),
         ("nodeploy", deploy_sh, 'issue_close_done "$issue" nodeploy',
          'run_status "$slug" "$issue" "$pr" "${merged:-}" 0 0 "$wt"\n    if ! cmd_done'),
 ):
     check_true("issue-closed-before-the-epilogue-" + _name,
                _close in _src and _status in _src
                and _src.index(_close) < _src.index(_status))
+
+# Production as it stands goes to the epilogue at the cycle's end, not what
+# this run shipped: after a declined clean-up the next pass finds production
+# unchanged, and with prod_done its fingerprint missed the first pass's and a
+# second epilogue rewrote the same status.
+check_true("prod-live-set-where-the-issue-closes-shipped",
+           re.search(r'deploy_unchanged "\$wt" prod; then\n\s*prod_live=1\n\s*issue_close_done',
+                     deploy_sh) is not None)
+# Nor is the issue reopened once the merge is in production.
+check_true("issue-not-held-open-after-the-cycle",
+           re.search(r'if \[\[ "\$\{merged:-\}" != "MERGED" \]\] \|\| ! deploy_unchanged "\$wt" prod; then\n'
+                     r'\s*issue_hold_open "\$issue"', deploy_sh) is not None)
 
 if failures:
     for name, want, got in failures:

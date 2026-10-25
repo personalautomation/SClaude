@@ -1743,7 +1743,12 @@ remind_prod() {
   fi
   # Whatever closed it by now — QA's Done through the board's auto-close, or
   # the merge — came before production. See issue_hold_open (github.sh).
-  issue_hold_open "$issue"
+  # Not once the merge is in production: that close was the cycle's own end,
+  # and a pass after a declined clean-up reopened the issue only to close it
+  # again a moment later.
+  if [[ "${merged:-}" != "MERGED" ]] || ! deploy_unchanged "$wt" prod; then
+    issue_hold_open "$issue"
+  fi
 
   # Neither the clean-up nor production has anything to do before the merge: the
   # worktree still holds the only copy of the work, while `vercel --prod` and
@@ -2105,7 +2110,9 @@ remind_prod() {
   # until now, and an epilogue that read it open wrote "still open" of a
   # feature about to close — and the closed, deployed-prod case status.md
   # answers with no comment at all could never come up.
+  local prod_live=0
   if [[ "$prod_done" -eq 1 ]] || deploy_unchanged "$wt" prod; then
+    prod_live=1
     issue_close_done "$issue" shipped
   else
     issue_close_done "$issue" declined
@@ -2114,7 +2121,13 @@ remind_prod() {
   # The outcome into the issue and its parents, before the clean-up: until this
   # line it is not known whether the feature made it to prod, and "where it is
   # now" is half of what the section exists for.
-  run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_done" "$wt"
+  #
+  # Production as it stands, not as this run shipped it — as preview_live is
+  # for the preview. Given prod_done, a pass after a declined clean-up, with
+  # production already there, described a different outcome from the pass
+  # that shipped it: the fingerprint missed, and a second epilogue rewrote the
+  # same status.
+  run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_live" "$wt"
 
   # The merge is in main now, its migrations too, and the main local database
   # is what the next feature's stack is filled from (db_main_up).

@@ -119,6 +119,73 @@ merge_conflicts_at() {
   esac
 }
 
+# Whether what a merge would put on main builds: the pull request's tip
+# merged with origin/main, checked with the project's `regression.manual`
+# parts in a throwaway worktree.
+#
+# GitHub calls a pull request clean when its merge has no textual conflict,
+# and nothing else looks: under `review: local` no Actions run, and the
+# branch's own regression ran before main moved. A rename on main that the
+# branch still calls passes all of that and leaves main unbuildable. Asked
+# only when main has commits the tip lacks — otherwise the tip is what merges,
+# and its own regression read it. A verdict is kept per tip and main, so the
+# merge wait's polls do not build the same pair again.
+#
+#   merge_build_check <wt>   → 0 builds, or nothing to check; 1 red, the
+#                              failing part on stdout; 2 cannot tell (no
+#                              network, no parts declared, the merge or the
+#                              worktree would not go)
+merge_build_check() {
+  local wt="$1" tip=HEAD branch main parts part cmd tmp log cache rc=0 failed=""
+  local c_tip c_main c_rc c_failed
+  [[ -n "$wt" ]] || return 2
+  sync_fetch "$wt" || return 2
+  branch="$(sync_branch_name "$wt")" \
+    && git -C "$wt" rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null \
+    && tip="refs/remotes/origin/$branch"
+  tip="$(git -C "$wt" rev-parse "$tip" 2>/dev/null)" || return 2
+  main="$(git -C "$wt" rev-parse origin/main 2>/dev/null)" || return 2
+  git -C "$wt" merge-base --is-ancestor "$main" "$tip" 2>/dev/null && return 0
+  parts="$(project_regression_parts manual "$wt")"
+  [[ -n "$parts" ]] || return 2
+
+  cache="$wt/.sclaude/local/feature/merge-check"
+  log="$cache.log"
+  mkdir -p "$(dirname "$cache")" 2>/dev/null || return 2
+  if [[ -f "$cache" ]] && read -r c_tip c_main c_rc c_failed < "$cache" \
+     && [[ "$c_tip" == "$tip" && "$c_main" == "$main" ]]; then
+    [[ "$c_rc" -eq 1 ]] && printf '%s\n' "$c_failed"
+    return "$c_rc"
+  fi
+
+  # Outside the feature's tree, where its own lint and typecheck would read
+  # it; one fixed path per feature, so a check cut short is cleared by the next.
+  tmp="${TMPDIR:-/tmp}/sclaude-merge-check-$(basename "$wt")"
+  git -C "$wt" worktree remove --force "$tmp" >/dev/null 2>&1 || true
+  rm -rf "$tmp"
+  info "  Building the PR's ${tip:0:7} merged with main ${main:0:7}: $parts." >&2
+  if ! git -C "$wt" worktree add -q --detach "$tmp" "$tip" >/dev/null 2>&1 \
+     || ! git -C "$tmp" -c user.name=sclaude -c user.email=sclaude@localhost \
+            merge -q --no-edit origin/main >/dev/null 2>&1; then
+    git -C "$wt" worktree remove --force "$tmp" >/dev/null 2>&1 || rm -rf "$tmp"
+    return 2
+  fi
+  link_env "$tmp" >/dev/null 2>&1
+  link_node_modules "$tmp" >/dev/null 2>&1
+  : > "$log"
+  for part in $parts; do
+    cmd="$(regression_command "$part" "" "$tmp")" || { rc=2; break; }
+    printf '\n=== %s ===\n$ %s\n\n' "$part" "$cmd" >> "$log"
+    if ! ( cd "$tmp" && eval "$cmd" ) >> "$log" 2>&1 < /dev/null; then
+      rc=1; failed="$part"; break
+    fi
+  done
+  git -C "$wt" worktree remove --force "$tmp" >/dev/null 2>&1 || rm -rf "$tmp"
+  [[ "$rc" -eq 2 ]] || printf '%s %s %s %s\n' "$tip" "$main" "$rc" "$failed" > "$cache"
+  [[ "$rc" -eq 1 ]] && printf '%s\n' "$failed"
+  return "$rc"
+}
+
 # Whether every path given is a file of the branch under the deferred folders
 # — as DEFERRED_PATHSPECS in deferred.sh names them, matched by git itself, so
 # the two cannot drift apart.

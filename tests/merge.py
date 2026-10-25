@@ -272,11 +272,20 @@ if offer:
                offer.find('"$ready" != "ready"') < offer.find('"$who" == auto'))
     # Auto answers only on QA's word: an empty column is asked about.
     check_true("auto-needs-qa-word",
-               '[[ "$who" == auto ]] && [[ "$qa_checked" -eq 1 || "$mode" == nodeploy ]]' in offer)
+               '[[ "$who" == auto && "$built" -eq 0 ]] && [[ "$qa_checked" -eq 1 || "$mode" == nodeploy ]]' in offer)
+    # And on the merge with the newer main having built: red is not offered,
+    # and before anything is asked or merged.
+    check_true("red-merge-build-is-not-offered",
+               re.search(r'merge_build_check "\$wt"\)" \|\| built=\$\?\n\s*if \[\[ "\$built" -eq 1 \]\]; then(?:.|\n)*?return 2',
+                         offer) is not None)
+    check_true("merge-build-before-the-question",
+               -1 < offer.find('merge_build_check') < offer.find('ask "${BOLD}$prompt'))
     check_true("a-declined-merge-is-an-answer",
                re.search(r'Merge: skipped[^\n]*\n\s*return 2', offer) is not None)
 
 mwait = body_of(deploy, "merge_wait") or ""
+check_true("merge-wait-offers-with-the-tree",
+           mwait.count('merge_offer "$slug" "$pr" "$issue" "$offer_mode" "$wt"') == 2)
 check_true("merge-wait-m-merges-from-here",
            '"$mode" == both && "$POLL_KEY" == [mM]' in mwait and "merge_offer" in mwait)
 check_true("merge-wait-auto-stops-on-an-answer",
@@ -343,7 +352,7 @@ if remind:
     # Which is only true if a successful offer updates the variable the rest of
     # the function branches on.
     check_true("a-merge-here-counts-as-merged",
-               re.search(r'merge_offer "\$slug" "\$pr" "\$issue"( "\$offer_mode")?; then\n\s*merged="MERGED"',
+               re.search(r'merge_offer "\$slug" "\$pr" "\$issue"( "\$offer_mode")?( "\$wt")?; then\n\s*merged="MERGED"',
                          remind) is not None)
     # Not asked at all when the branch is already in main.
     check_true("offer-skipped-when-already-merged",

@@ -938,9 +938,13 @@ PYMETHOD
 # `github` keeps the question out of sclaude altogether — the merge is clicked
 # there, and merge_wait waits for it; `auto` answers it without asking, on
 # the same conditions; `both` asks.
+#
+# Before either, what the merge would put on main is built (merge_build_check,
+# with the feature's tree <wt>): red is not offered at all, and when it cannot
+# be told, `auto` asks rather than merging.
 merge_offer() {
-  local slug="$1" pr="$2" issue="$3" mode="${4:-}"
-  local column ready obstacle method answer who
+  local slug="$1" pr="$2" issue="$3" mode="${4:-}" wt="${5:-}"
+  local column ready obstacle method answer who built=0 failed
 
   [[ -n "$pr" && "$pr" != "null" ]] || return 1
   command -v gh >/dev/null 2>&1 || return 1
@@ -1012,6 +1016,15 @@ merge_offer() {
   # sclaude's to ask when the merge is clicked on GitHub.
   [[ "$who" != github ]] || return 1
 
+  failed="$(merge_build_check "$wt")" || built=$?
+  if [[ "$built" -eq 1 ]]; then
+    echo ""
+    warn "PR #$pr merged with the newer main fails \`$failed\` — not merging it from here."
+    info "  The log: $wt/.sclaude/local/feature/merge-check.log"
+    info "  Merge main into the branch and fix it; then: $SELF $slug"
+    return 2
+  fi
+
   method="$(merge_method)"
 
   # The question, and what it rests on. Two headings and two wordings, because
@@ -1079,10 +1092,14 @@ merge_offer() {
   # the review is the whole check). Without it — no issue, no board, gh
   # silent about the column — the question is put to a person as before:
   # an empty answer about the board is not a pass.
-  if [[ "$who" == auto ]] && [[ "$qa_checked" -eq 1 || "$mode" == nodeploy ]]; then
+  if [[ "$who" == auto && "$built" -eq 0 ]] && [[ "$qa_checked" -eq 1 || "$mode" == nodeploy ]]; then
     say "${BOLD}Merging: \`merge\` is auto in .sclaude/config.json.${OFF}"
   else
-    [[ "$who" == auto ]] && info "  \`merge\` is auto, but nothing says QA passed it — so it is asked."
+    if [[ "$who" == auto && "$built" -ne 0 ]]; then
+      info "  \`merge\` is auto, but its merge with the newer main could not be built here — so it is asked."
+    elif [[ "$who" == auto ]]; then
+      info "  \`merge\` is auto, but nothing says QA passed it — so it is asked."
+    fi
     ask "${BOLD}$prompt [y/n] ${OFF}" answer yn
     if ! is_yes "$answer"; then
       info "→ Merge: skipped. It stays yours to do."
@@ -1412,14 +1429,14 @@ merge_wait() {
     if [[ "$mode" == both && "$POLL_KEY" == [mM] ]]; then
       [[ -t 1 ]] && printf '\r\033[2K'
       offered=0
-      merge_offer "$slug" "$pr" "$issue" "$offer_mode" || offered=$?
+      merge_offer "$slug" "$pr" "$issue" "$offer_mode" "$wt" || offered=$?
       [[ "$offered" -eq 0 ]] && return 0
       [[ "$offered" -eq 1 ]] \
         && info "  Nothing to merge from here yet: QA has not passed it, or GitHub has not called it ready."
     elif [[ "$mode" == auto && "$auto_tried" -eq 0 && "$(merge_readiness "$pr")" == ready ]]; then
       [[ -t 1 ]] && printf '\r\033[2K'
       offered=0
-      merge_offer "$slug" "$pr" "$issue" "$offer_mode" || offered=$?
+      merge_offer "$slug" "$pr" "$issue" "$offer_mode" "$wt" || offered=$?
       [[ "$offered" -eq 0 ]] && return 0
       [[ "$offered" -eq 2 ]] && auto_tried=1
     fi
@@ -1725,7 +1742,7 @@ remind_prod() {
     offer_mode=nodeploy
     if [[ "${merged:-}" != "MERGED" ]]; then pr_undraft "$pr"; fi
   fi
-  if [[ "${merged:-}" != "MERGED" ]] && merge_offer "$slug" "$pr" "$issue" "$offer_mode"; then
+  if [[ "${merged:-}" != "MERGED" ]] && merge_offer "$slug" "$pr" "$issue" "$offer_mode" "$wt"; then
     merged="MERGED"
   fi
   # Declined, or GitHub named something in the way: the merge is then done on

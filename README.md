@@ -508,6 +508,8 @@ environment is the product's local Supabase, each feature gets a Supabase stack
 of its own in Docker, filled from the main local database or the product's
 seed. It is removed with the feature. If Docker is not running sclaude starts
 it, and falls back to the shared local database, saying so, only when it cannot.
+The main local database is kept on main's migrations: sclaude applies what a
+merge brought at the end of the cycle and before each copy, and says so.
 
 **Every feature has its own address**, `http://<feature>.localhost:3000`,
 printed at the start of each step. A feature nobody has opened for half an hour

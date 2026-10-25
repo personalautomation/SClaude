@@ -118,7 +118,9 @@ case "$(tail -1 "$STUB_LOG")" in
     echo "API_URL=\"http://127.0.0.1:$base\""
     echo "SECRET_KEY=\"sb_secret_x\""
     exit 0 ;;
-  "migration up"*) exit 0 ;;
+  "migration up"*)
+    ls "$dir/supabase/migrations" 2>/dev/null | sed 's/^/  has /' >> "$STUB_LOG"
+    exit 0 ;;
   stop*) rm -f "$dir/.started"; exit 0 ;;
 esac
 """
@@ -526,6 +528,121 @@ docker() {
         shutil.rmtree(root, ignore_errors=True)
 
 
+def same_schema_cases():
+    """A copy loads into main's schema, emptied, and the feature's migrations
+    come after: reference rows with generated ids differ between two stacks,
+    and kept, main's rows pointed at the feature's absent ones."""
+    root = tempfile.mkdtemp(prefix="sclaude-schema-")
+    try:
+        os.makedirs(os.path.join(root, "repo"))
+        os.makedirs(os.path.join(root, "registry"))
+        cli = os.path.join(root, "stub-supabase")
+        with open(cli, "w") as fh:
+            fh.write(STUB_CLI)
+        os.chmod(cli, 0o755)
+        dlog = os.path.join(root, "docker.log")
+        docker = r"""
+docker() {
+  echo "$*" >> "$DOCKER_LOG"
+  case "$*" in
+    info*) return 0 ;;
+    inspect*) echo true ;;
+    *pg_dump*) echo "INSERT INTO public.t VALUES (1) ON CONFLICT DO NOTHING;" ;;
+    *schema_migrations*)
+      if [[ "$*" == *supabase_db_myapp\ * ]]; then printf '%s\n' $MAIN_HAS
+      else echo 0001; echo 0002; fi ;;
+    *string_agg*) echo "public.a, public.b" ;;
+    *"select id from auth.users"*) echo 11111111-1111-1111-1111-111111111111 ;;
+    *) cat >/dev/null ;;
+  esac
+}
+"""
+        for name, main_has in (("behind", "0001"), ("foreign", "0001 0009")):
+            wt = feature_tree(root, name)
+            for f in ("0001_a.sql", "0002_b.sql"):
+                open(os.path.join(wt, "supabase", "migrations", f), "w").close()
+            write_config(wt, cli, "true")
+            with open(os.path.join(wt, ".sclaude/config.json")) as fh:
+                cfg = json.load(fh)
+            cfg["database"]["local"]["copyFromMain"] = True
+            with open(os.path.join(wt, ".sclaude/config.json"), "w") as fh:
+                json.dump(cfg, fh)
+            os.symlink(wt, os.path.join(root, "registry", name))
+            for f in (dlog, os.path.join(root, "cli.log")):
+                if os.path.exists(f):
+                    os.remove(f)
+            bash(root, docker + 'ensure_db "%s"' % wt, {"DOCKER_LOG": dlog, "MAIN_HAS": main_has})
+            ran = [c for c in calls(root) if not c.startswith("has ")]
+            loaded = open(dlog).read()
+            if name == "behind":
+                reset = [c for c in ran if c.startswith("db reset")]
+                check("a feature ahead of main is set back to main's last migration",
+                      len(reset) == 1 and "--version 0001 --no-seed" in reset[0], True)
+                check("public's tables are emptied before main's rows go in",
+                      "-c TRUNCATE public.a, public.b; -f -" in loaded, True)
+                after = ran[ran.index(reset[0]) + 1:] if reset else []
+                check("the feature's migrations apply after the load",
+                      any(c.startswith("migration up") for c in after), True)
+                check("and the copy is recorded", state(wt).get("db", {}).get("copied"), True)
+            else:
+                check("a main database with a migration the tree lacks is not reset to",
+                      [c for c in ran if c.startswith("db reset")], [])
+                check("nor its rows loaded over an emptied schema", "TRUNCATE" in loaded, False)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def main_up_cases():
+    """The main local stack takes main's migrations — what is on main, not
+    what the main checkout has checked out."""
+    root = tempfile.mkdtemp(prefix="sclaude-mainup-")
+    try:
+        repo = os.path.join(root, "repo")
+        os.makedirs(os.path.join(repo, "supabase", "migrations"))
+        cli = os.path.join(root, "stub-supabase")
+        with open(cli, "w") as fh:
+            fh.write(STUB_CLI)
+        os.chmod(cli, 0o755)
+        with open(os.path.join(repo, "supabase", "config.toml"), "w") as fh:
+            fh.write(CONFIG)
+        for f in ("0001_a.sql", "0002_b.sql"):
+            open(os.path.join(repo, "supabase", "migrations", f), "w").close()
+        with open(_cfg(os.path.join(repo, ".sclaude/config.json")), "w") as fh:
+            json.dump({"database": {"local": {"environment": "localdb", "cli": cli}}}, fh)
+        git = lambda *a: subprocess.run(["git", "-C", repo, "-c", "user.email=t@t",
+                                         "-c", "user.name=t"] + list(a), capture_output=True)
+        git("init", "-q", "-b", "main")
+        git("add", "-A")
+        git("commit", "-qm", "base")
+        # The main tree on a branch with a migration main does not have.
+        git("checkout", "-qb", "other")
+        open(os.path.join(repo, "supabase", "migrations", "0003_c.sql"), "w").close()
+        git("add", "-A")
+        git("commit", "-qm", "other")
+        docker = r"""
+docker() {
+  case "$*" in
+    inspect*) echo "$RUNNING" ;;
+    *schema_migrations*) printf '%s\n' $MAIN_HAS ;;
+  esac
+}
+"""
+        out = bash(root, docker + "db_main_up", {"RUNNING": "true", "MAIN_HAS": "0001"})
+        ran = calls(root)
+        check("main's new migration is applied to the main stack",
+              any(c.startswith("migration up --workdir") for c in ran), True)
+        check("it is said, with the count", "applying main's 1 new migration(s)" in out, True)
+        check("the workdir holds main's migrations, not the checked-out branch's",
+              [c for c in ran if c.startswith("has ")], ["has 0001_a.sql", "has 0002_b.sql"])
+        os.remove(os.path.join(root, "cli.log"))
+        bash(root, docker + "db_main_up", {"RUNNING": "true", "MAIN_HAS": "0001 0002"})
+        check("a main stack up to date is left alone", calls(root), [])
+        bash(root, docker + "db_main_up", {"RUNNING": "false", "MAIN_HAS": "0001"})
+        check("a main stack that is not running is left alone", calls(root), [])
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def shared_cases():
     """The warning for schema work on a shared cloud project."""
     root = tempfile.mkdtemp(prefix="sclaude-shared-")
@@ -559,6 +676,8 @@ def main():
     env_cases()
     ensure_cases()
     copy_cases()
+    same_schema_cases()
+    main_up_cases()
     shared_cases()
     for name, want, got in failures:
         print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))

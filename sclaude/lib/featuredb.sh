@@ -357,6 +357,79 @@ ensure_db() {
 # The Postgres container of a stack, by its project_id.
 db_container() { echo "supabase_db_$1"; }
 
+# The main local stack's Postgres container, by the project_id in a tree's
+# tracked config (every tree carries the main one's), kept to the CLI's form
+# as db_project_id keeps a feature's.
+db_main_container() {
+  local own
+  own="$(sed -n 's/^project_id *= *"\([^"]*\)".*/\1/p' "$1/supabase/config.toml" 2>/dev/null | head -1)"
+  [[ -n "$own" ]] || return 1
+  own="$(sed -E 's/[^a-zA-Z0-9_.-]+/_/g' <<<"$own")"
+  db_container "${own:0:40}"
+}
+
+# The migration versions a stack has applied, one a line, in order.
+db_applied() {
+  docker exec "$1" psql -U supabase_admin -d postgres -Atc \
+    "select version from supabase_migrations.schema_migrations order by version" 2>/dev/null
+}
+
+# The versions of the migration files a listing names — the part of each
+# name before its first "_", as the Supabase CLI reads it.
+db_file_versions() {
+  sed -n 's#^\(.*/\)\{0,1\}\([0-9][0-9]*\)_[^/]*\.sql$#\2#p' | sort
+}
+
+# The main local stack, brought up to main's migrations: the files on
+# origin/main (main when there is no remote), whatever the main checkout has
+# checked out — another session may have it on a branch.
+#
+# Every feature's stack is filled from it (db_copy_main), and nothing applied
+# what a merge brought: features have stacks of their own, so the main one is
+# no longer where anybody writes migrations. It fell weeks behind, each copy
+# carried rows shaped for an old schema, and main's migrations that came after
+# then failed on them in the feature.
+#
+# Run at the end of a cycle, once the merge is in, and before every copy. Quiet
+# when nothing is pending. A stack that is not running is left so, and a
+# failure is a warning and no more: the main stack is the developer's, and
+# sclaude does not rebuild it.
+db_main_up() {
+  local repo="${REPO:-}" main ref pending tmp cli log
+  [[ -n "$repo" && -f "$repo/supabase/config.toml" ]] || return 0
+  [[ -n "$(project_get database.local.environment "$repo" 2>/dev/null || true)" ]] || return 0
+  main="$(db_main_container "$repo")" || return 0
+  [[ "$(docker inspect -f '{{.State.Running}}' "$main" 2>/dev/null)" == "true" ]] || return 0
+  ref=origin/main
+  git -C "$repo" rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1 || ref=main
+  git -C "$repo" rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1 || return 0
+  pending="$(comm -13 <(db_applied "$main" | sort) \
+    <(git -C "$repo" ls-tree --name-only "$ref" supabase/migrations/ 2>/dev/null | db_file_versions) \
+    | grep -c .)"
+  [[ "$pending" -gt 0 ]] || return 0
+
+  # A workdir of main's own: its config and its migrations, so a branch
+  # checked out in the main tree does not decide what the stack gets.
+  tmp="$(mktemp -d)" || return 0
+  mkdir -p "$tmp/supabase"
+  if ! git -C "$repo" show "$ref:supabase/config.toml" > "$tmp/supabase/config.toml" 2>/dev/null \
+     || ! git -C "$repo" archive "$ref" supabase/migrations | tar -x -C "$tmp" 2>/dev/null; then
+    rm -rf "$tmp"
+    warn "  database: could not read main's migrations — the main local database stays as it is"
+    return 0
+  fi
+  log="$repo/.sclaude/local/db-main.log"
+  mkdir -p "$(dirname "$log")"
+  cli="$(db_cli "$repo")"
+  info "  database: applying main's $pending new migration(s) to the main local database…"
+  if ! (cd "$repo" && $cli migration up --workdir "$tmp") >> "$log" 2>&1; then
+    warn "  database: they did not apply — see $log"
+    warn "  The main local database stays behind main; look before anything rebuilds it."
+  fi
+  rm -rf "$tmp"
+  return 0
+}
+
 # Fills a new stack with the main local database's data, when the project asks
 # for that (`copyFromMain`) and the main stack is running. Fails otherwise, and
 # the caller falls back to the project's setup.
@@ -368,13 +441,26 @@ db_container() { echo "supabase_db_$1"; }
 # people's avatars are already there and nothing new is uploaded for them. A
 # seed makes new people with new ids and uploads theirs afresh.
 #
-# Data only, over the schema the feature's own migrations built, as INSERT ...
-# ON CONFLICT DO NOTHING: rows a migration inserted itself (reference data) are
-# already there and stay as the feature's migrations have them. Triggers and
-# foreign keys are off for the load (session_replication_role), so the order of
-# tables does not matter. auth.schema_migrations is GoTrue's own and is left
-# out. A row that no longer fits — a column the feature made NOT NULL, say — is
-# an error in the log and is not copied; the rest is.
+# Data only, over the schema the main database has: the feature's stack is set
+# back to main's last migration first (db reset --version) when it has more,
+# public's tables are emptied, main's rows go in, and only then do the
+# feature's own migrations apply — over main's data, as they will over
+# production's. Emptied because a migration that inserts reference rows with
+# generated ids inserted them in both stacks under different ids: kept, the
+# feature's rows stood and main's were skipped as conflicts, while main's rows
+# pointing at them loaded with foreign keys off and pointed at nothing — until
+# a later migration put a foreign key back and failed on them.
+#
+# That needs every migration main has applied to be one of the tree's, and the
+# tree to have none main lacks below main's last: otherwise the schemas cannot
+# be made one, and the copy goes as INSERT ... ON CONFLICT DO NOTHING over the
+# feature's schema as it stands, the rows a migration inserted kept as the
+# feature has them.
+#
+# Triggers and foreign keys are off for the load (session_replication_role),
+# so the order of tables does not matter. auth.schema_migrations is GoTrue's
+# own and is left out. A row that no longer fits — a column the feature made
+# NOT NULL, say — is an error in the log and is not copied; the rest is.
 #
 # Columns are named in every INSERT (--column-inserts), not given by position:
 # the main database is often migrations behind, and a positional row from an
@@ -390,12 +476,9 @@ db_container() { echo "supabase_db_$1"; }
 # database's, from the ones this feature made.
 db_copy_main() {
   local wt="$1" log="$1/.sclaude/local/feature/db.log" state="$1/.sclaude/local/feature/state.json"
-  local own main feature errors
+  local main feature errors
   [[ "$(project_get database.local.copyFromMain "$wt" 2>/dev/null)" == "true" ]] || return 1
-  own="$(sed -n 's/^project_id *= *"\([^"]*\)".*/\1/p' "$wt/supabase/config.toml" | head -1)"
-  [[ -n "$own" ]] || return 1
-  own="$(sed -E 's/[^a-zA-Z0-9_.-]+/_/g' <<<"$own")"
-  main="$(db_container "${own:0:40}")"
+  main="$(db_main_container "$wt")" || return 1
   feature="$(db_container "$(db_project_id "$wt")")"
   # A Docker started a moment ago (docker_ensure) is still bringing the main
   # stack's containers back, and a copy refused now is refused for good: the
@@ -416,6 +499,26 @@ db_copy_main() {
     warn "  database: no container $feature for this feature's stack — filling from the seed instead"
     return 1
   fi
+  db_main_up
+
+  local theirs newest wipe=""
+  theirs="$(db_applied "$main")"
+  newest="$(tail -1 <<<"$theirs")"
+  if [[ -n "$newest" ]] && cmp -s <(sort <<<"$theirs") \
+       <(ls "$wt/supabase/migrations" 2>/dev/null | db_file_versions | awk -v n="$newest" '$0 + 0 <= n + 0'); then
+    if [[ "$(db_applied "$feature")" != "$theirs" ]]; then
+      info "  database: setting this feature's schema back to the main database's ($newest) for the copy…"
+      if ! (cd "$wt" && $(db_cli "$wt") db reset --version "$newest" --no-seed \
+              --workdir "$wt/.sclaude/local/feature/supabase") >> "$log" 2>&1; then
+        warn "  database: setting it back failed — see .sclaude/local/feature/db.log; filling from the seed instead"
+        warn "  This feature's database is its own; rebuild it with: npx supabase db reset"
+        return 1
+      fi
+    fi
+    wipe="$(docker exec "$feature" psql -U supabase_admin -d postgres -Atc \
+      "select string_agg(format('%I.%I', schemaname, tablename), ', ') from pg_tables where schemaname = 'public'" 2>>"$log")"
+  fi
+
   info "  database: copying the main local database into it…"
   # To a file first, and checked, rather than piped straight in: a dump that
   # fails half way — the main stack stopping mid-copy, a permission refused —
@@ -432,14 +535,23 @@ db_copy_main() {
     return 1
   fi
   local out rc
+  local -a empty=()
+  [[ -n "$wipe" ]] && empty=(-c "TRUNCATE $wipe;")
   out="$(docker exec -i "$feature" psql -U supabase_admin -d postgres -q \
-           -c "SET session_replication_role = replica;" -f - < "$dump" 2>&1 >/dev/null)"
+           -c "SET session_replication_role = replica;" \
+           "${empty[@]}" -f - < "$dump" 2>&1 >/dev/null)"
   rc=$?
   rm -f "$dump"
   printf '%s\n' "$out" >> "$log"
   if [[ "$rc" -ne 0 ]]; then
     warn "  database: loading the copy failed — see .sclaude/local/feature/db.log; filling from the seed instead"
     return 1
+  fi
+  # The feature's own migrations, now over main's rows.
+  if [[ -n "$wipe" ]] && ! (cd "$wt" && $(db_cli "$wt") migration up \
+         --workdir "$wt/.sclaude/local/feature/supabase") >> "$log" 2>&1; then
+    warn "  database: this feature's migrations did not apply over the copy — see .sclaude/local/feature/db.log."
+    warn "  This feature's database is its own; rebuild it with: npx supabase db reset"
   fi
   errors="$(grep -c 'ERROR:' <<<"$out")"
   docker exec "$feature" psql -U supabase_admin -d postgres -Atc "select id from auth.users" \
@@ -467,10 +579,9 @@ db_error_tables() {
 # stack has — the usual reason its rows do not fit. A feature's own new
 # migrations are counted too; on a fresh branch there are none.
 db_warn_main_behind() {
-  local main="$1" feature="$2" q mine theirs missing newest
-  q="select version from supabase_migrations.schema_migrations order by version"
-  theirs="$(docker exec "$main" psql -U supabase_admin -d postgres -Atc "$q" 2>/dev/null)" || return 0
-  mine="$(docker exec "$feature" psql -U supabase_admin -d postgres -Atc "$q" 2>/dev/null)" || return 0
+  local main="$1" feature="$2" mine theirs missing newest
+  theirs="$(db_applied "$main")" || return 0
+  mine="$(db_applied "$feature")" || return 0
   missing="$(comm -13 <(sort <<<"$theirs") <(sort <<<"$mine") | grep -c .)"
   [[ "$missing" -gt 0 ]] || return 0
   newest="$(tail -1 <<<"$theirs")"

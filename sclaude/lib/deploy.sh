@@ -2116,6 +2116,10 @@ remind_prod() {
   # now" is half of what the section exists for.
   run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_done" "$wt"
 
+  # The merge is in main now, its migrations too, and the main local database
+  # is what the next feature's stack is filled from (db_main_up).
+  db_main_up
+
   # And only now the clean-up. It checks the merge against GitHub, shows what
   # exactly will disappear, and asks — once. There is deliberately no question
   # of our own here: asking before it would mean asking twice about the same

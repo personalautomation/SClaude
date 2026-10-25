@@ -491,6 +491,25 @@ database's data when the project sets `copyFromMain` and the main stack is up �
 the same people with the same ids, so the objects they own in the bucket are
 already there — and with the project's seed otherwise.
 
+The copy goes into main's schema, not the feature's. A migration that inserts
+reference rows with generated ids gives them different ids in every stack, so
+main's rows that point at them, loaded over the feature's own, pointed at
+nothing — and a later migration that put a foreign key back failed on them.
+So the feature's stack is set back to the main database's last migration
+(`db reset --version`), public's tables are emptied, main's rows go in, and
+the feature's own migrations then apply over them, as they will over
+production's. Where the two cannot be made one schema — the main database has
+a migration the tree lacks — the copy goes over the feature's schema as
+before (`db_copy_main`).
+
+The main local database is the source, so it is kept on main's migrations:
+`db_main_up` applies the ones on `origin/main` that it lacks, from a workdir of
+main's own (whatever the main checkout has checked out), at the end of every
+cycle and before every copy. It is quiet when nothing is pending, leaves a
+stopped stack stopped, and only warns when the migrations do not apply — the
+main stack is the developer's, and sclaude does not rebuild it. Its log is
+`.sclaude/local/db-main.log` in the main checkout.
+
 The stack runs from `.sclaude/local/feature/supabase/`: a rewritten copy of the tree's
 `supabase/config.toml` — the tracked one is never touched, or the ports would
 ride into a commit — and symlinks for everything else, so the migrations the

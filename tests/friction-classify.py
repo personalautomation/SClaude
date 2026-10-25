@@ -193,8 +193,21 @@ def other_person(tmp):
           any(n.startswith("claude-md-a: 2nd time") for n in open(notes).read().splitlines()), True)
 
 
+def not_a_rule(tmp):
+    # "same" as the classes that are no rule is refused: the covered one (its
+    # quote is the check) and the one a proposal naming no class gets.
+    answer = json.dumps([{"n": 1, "verdict": "same", "class": "claude-md-already-stated"},
+                         {"n": 2, "verdict": "same", "class": "claude-md-proposal"}])
+    rows = [row("2026-10-24", "feat", "claude-md-x", "Proposal: x"),
+            row("2026-10-24", "feat", "claude-md-y", "Proposal: y")]
+    main_rows = [row("2026-10-20", "o", "claude-md-already-stated", "Already in CLAUDE.md: z"),
+                 row("2026-10-20", "o", "claude-md-proposal", "Proposal: w")]
+    rc, out, said = run(tmp, rows, answer, main_rows=main_rows)
+    check("same as a class that is no rule is refused", [r[4] for r in out], ["claude-md-x", "claude-md-y"])
+
+
 def main():
-    for fn in (same, covered, invented, broken, counted, no_material, batch, other_person):
+    for fn in (same, covered, invented, broken, counted, no_material, batch, other_person, not_a_rule):
         case(fn)
     for name, want, got in failures:
         print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))

@@ -1996,6 +1996,11 @@ friction_defer_proposals() {
             "$slug" "$step" 2>/dev/null)" || return 1
   [[ -n "$rows" ]] || return 1
   n="$(grep -c . <<< "$rows")"
+  local file; file="$(deferred_file "$wt" "$slug")"
+  # A file somebody is editing by hand goes to a session rather than being
+  # mixed into: asked first, before anything is said or a model is called
+  # for rows that would not be written.
+  git -C "$wt" diff --quiet HEAD -- "$file" 2>/dev/null || return 1
   echo ""
   say "${BOLD}The friction log after '$key' holds only proposed CLAUDE.md rules:${OFF}"
   while IFS=$'\t' read -r _ _ _ _ _ text; do say "  - $text"; done <<< "$rows"
@@ -2009,7 +2014,6 @@ friction_defer_proposals() {
     state_set "$state" "friction.$key.apply_now" true 2>/dev/null || true
     return 1
   fi
-  local file; file="$(deferred_file "$wt" "$slug")"
   # Matched first against the classes put off already and against CLAUDE.md
   # (friction_classify.py): the same rule in other words takes its class, so
   # it counts as one rule seen again; one CLAUDE.md states goes under a class
@@ -2721,7 +2725,7 @@ review_reopen() {
   read -r older newer <<<"$split"
   if [[ "${older:-}" == "0" && "${newer:-0}" -gt 0 ]]; then
     info "  The review posted $newer new finding(s) — a fresh session takes them."
-    review_stuck_ask "$wt"
+    review_stuck_say "$wt"
     state_set "$state" steps.review.session null
   else
     info "  Back to the session that was fixing them."
@@ -2729,34 +2733,28 @@ review_reopen() {
   run_step "$wt" "$slug" review
 }
 
-# Asks the person, once a feature, whether to end the search for new findings
-# when the review's report says the rounds stopped converging
-# (steps.review.stuck, written by review_report). Without it each round's new
-# findings went to a fresh session for as long as the person did not press
-# `s`: eighteen rounds on one feature, most of their findings in what users do
-# not see. A yes is the `s` key's word (review_enough): the findings open now
-# still go to the session, and its fixes are checked only if the person says
-# so. Not asked once the search is over already, nor a second time.
+# Says, once a feature and loudly, that the review's report finds the rounds
+# no longer converging (steps.review.stuck, written by review_report), and how
+# to end the search: each round's new findings went to a fresh session for as
+# long as the person did not press `s` — eighteen rounds on one feature, most
+# of their findings in what users do not see. Said, not asked: this runs when
+# the orchestrator closed the session, with nobody bound to be there, and a
+# question would hold the rounds until somebody answered. The keys that end
+# the search are already there: `s` while a review pass runs, ⏭ on the
+# topic's message of the pass and of the session (review_enough).
 #
-#   review_stuck_ask <wt>
-review_stuck_ask() {
-  local wt="$1" state="$1/.sclaude/local/feature/state.json" said answer
+#   review_stuck_say <wt>
+review_stuck_say() {
+  local wt="$1" state="$1/.sclaude/local/feature/state.json" said
   said="$(state_get "$state" steps.review.stuck 2>/dev/null || true)"
   [[ -n "$said" && "$said" != "null" ]] || return 0
   [[ -z "$(review_enough "$wt")" ]] || return 0
-  [[ "$(state_get "$state" steps.review.stuck_asked 2>/dev/null || true)" != "true" ]] || return 0
+  [[ "$(state_get "$state" steps.review.stuck_said 2>/dev/null || true)" != "true" ]] || return 0
+  state_set "$state" steps.review.stuck_said true 2>/dev/null || true
   echo ""
-  info "  The review's report: $said"
-  # It waits for the answer, here or in the feature's topic: the rounds it
-  # stops cost more than the wait. Only an answer uses the question up — one
-  # nobody could see (no terminal, no channel) is asked again next round.
-  if ask "${BOLD}End the search for new findings? The open ones still go to a session; its fixes are checked only if you say so. [y/n] ${OFF}" answer yn; then
-    state_set "$state" steps.review.stuck_asked true 2>/dev/null || true
-    if is_yes "$answer"; then
-      review_enough_set "$wt" pass
-      info "  The search is over; this is the last session for new findings."
-    fi
-  fi
+  warn "  The review's report: $said"
+  warn "  To make this the last session for new findings: [s] while a review pass runs,"
+  warn "  or ⏭ on the feature's topic. The open findings still go to a session."
   return 0
 }
 

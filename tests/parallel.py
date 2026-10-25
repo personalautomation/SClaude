@@ -27,6 +27,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -361,6 +362,19 @@ out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo,
 check("riders-own-squash-left-out", "(#903)" in out, False)
 check("riders-named-commits-left-out", "put off" in out, False)
 check("riders-still-name-the-hotfix", "fix: a hotfix straight on main" in out, True)
+# A "(#N)" gh cannot confirm as a pull request is a commit, its fields whole.
+open(os.path.join(repo, "issue-ref"), "w").write("i\n")
+g("add", "-A")
+g("commit", "-qm", "fix: typo in the footer (#77)")
+git_only = os.path.join(tmp, "git-only")
+os.makedirs(git_only, exist_ok=True)
+os.symlink(shutil.which("git"), os.path.join(git_only, "git"))
+out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo, prod, "main",
+                      "41-beta", "supabase/migrations", "903"],
+                     capture_output=True, text=True, env=dict(os.environ, PATH=git_only)).stdout
+check("riders-unconfirmed-squash-is-a-commit",
+      any(l.startswith("commit\t") and l.endswith("(#77)") for l in out.splitlines()), True)
+check("riders-no-empty-field", all("\t\t" not in l for l in out.splitlines()), True)
 
 # --- the deferred friction ----------------------------------------------------
 #

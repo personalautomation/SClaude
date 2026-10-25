@@ -49,6 +49,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from friction_proposals import DEFAULT_CLASS  # noqa: E402
+
 MODEL = os.environ.get("SCLAUDE_CLASSIFY_MODEL", "haiku")
 # The call stands between a fix session and the review of its fixes: a minute
 # at most, and then the rows go as they came.
@@ -187,7 +190,8 @@ def main():
     existing = deferred_rows(folders, own)
     classes = {}
     for f in existing:
-        classes[f[4]] = f[5]
+        if f[4] not in (COVERED, DEFAULT_CLASS):
+            classes[f[4]] = f[5]
     try:
         claude_md = open(claude_md_path, encoding="utf-8").read() if claude_md_path else ""
     except OSError:
@@ -203,7 +207,11 @@ def main():
             v = item.get("verdict")
             # An existing class, or one an earlier proposal of this batch has.
             earlier = {p[4] for p in proposals[:max(0, item["n"] - 1)]}
-            if v == "same" and (item.get("class") in classes or item.get("class") in earlier):
+            # Not the two classes that are no rule: the one rules CLAUDE.md
+            # states go under (its quote is the check, and "same" would skip
+            # it), and the one a proposal naming no class gets.
+            if v == "same" and item.get("class") not in (COVERED, DEFAULT_CLASS) \
+                    and (item.get("class") in classes or item.get("class") in earlier):
                 verdicts[item["n"]] = ("same", item["class"])
             elif v == "covered" and isinstance(item.get("quote"), str):
                 quote = squash(item["quote"])

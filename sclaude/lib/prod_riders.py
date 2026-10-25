@@ -27,9 +27,11 @@
 # ask it.
 #
 # A pull request squashed into one commit is a feature too, told by the
-# "(#<pr>)" GitHub ends its subject with: read as a commit, a feature's own
-# squashed merge was listed as pushed straight to main, above the question
-# that ships it, among nineteen commits of deferred entries.
+# "(#<pr>)" GitHub ends its subject with, when GitHub confirms that number is
+# a pull request (an issue number in a commit's subject reads the same): read
+# as a commit, a feature's own squashed merge was listed as pushed straight
+# to main, above the question that ships it, among nineteen commits of
+# deferred entries. The shipped one is known by its number (<own pr>).
 import json
 import re
 import subprocess
@@ -48,26 +50,30 @@ def git(repo, *args):
     return done.stdout
 
 
-def closing_issue(repo, pr, branch):
+def pr_info(repo, pr):
+    """The pull request's head branch and the issues it closes, in one call:
+    ("", "") when gh cannot say, and then a squashed subject's "(#N)" is not
+    taken for a pull request — an issue number reads the same."""
     try:
-        done = subprocess.run(["gh", "pr", "view", pr, "--json", "closingIssuesReferences"],
+        done = subprocess.run(["gh", "pr", "view", pr, "--json", "headRefName,closingIssuesReferences"],
                               cwd=repo, capture_output=True, text=True, timeout=60)
-        refs = json.loads(done.stdout).get("closingIssuesReferences") or []
-        if refs:
-            return ",".join(str(r.get("number")) for r in refs if r.get("number"))
+        data = json.loads(done.stdout) if done.returncode == 0 else {}
     except (OSError, ValueError, subprocess.SubprocessError):
-        pass
+        data = {}
+    refs = data.get("closingIssuesReferences") or []
+    issues = ",".join(str(r.get("number")) for r in refs if r.get("number"))
+    return data.get("headRefName") or "", issues
+
+
+def issue_of(issues, branch):
+    if issues:
+        return issues
     found = re.match(r"(?:[a-z]+/)?(\d+)-", branch)
     return found.group(1) if found else "-"
 
 
-def head_branch(repo, pr):
-    try:
-        done = subprocess.run(["gh", "pr", "view", pr, "--json", "headRefName"],
-                              cwd=repo, capture_output=True, text=True, timeout=60)
-        return json.loads(done.stdout).get("headRefName") or ""
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return ""
+def is_own(branch, own):
+    return bool(branch) and (branch.rstrip("/").split("/")[-1] == own or branch.endswith("/" + own))
 
 
 def riders(repo, prod, main, own, migrations_dir, own_pr="", skip=()):
@@ -79,24 +85,32 @@ def riders(repo, prod, main, own, migrations_dir, own_pr="", skip=()):
             continue
         merge = MERGE.match(subject)
         squash = None if merge else SQUASH.search(subject)
-        if merge or squash:
-            if merge:
-                pr, branch = merge.groups()
-            else:
-                pr = squash.group(1)
-                branch = "" if pr == own_pr else head_branch(repo, pr)
-            if pr == own_pr or (branch and (branch.rstrip("/").split("/")[-1] == own
-                                            or branch.endswith("/" + own))):
-                continue
+        if PROMOTE.match(subject):
+            continue
+        pr = branch = issues = ""
+        if merge:
+            pr, branch = merge.groups()
+        elif squash:
+            pr = squash.group(1)
+        if pr and pr == own_pr:
+            continue
+        if pr and not (merge and is_own(branch, own)):
+            head, issues = pr_info(repo, pr)
+            branch = branch or head
+        if (merge or (squash and branch)) and not is_own(branch, own):
             added = []
             if migrations_dir:
                 added = [p.rsplit("/", 1)[-1] for p in git(
                     repo, "diff", "--name-only", "--diff-filter=A", sha + "^1", sha,
                     "--", migrations_dir).split()]
-            out.append("feature\t%s\t%s\t%s\t%s" % (pr, closing_issue(repo, pr, branch),
-                                                     branch, ",".join(added) or "-"))
-        elif not PROMOTE.match(subject):
-            out.append("commit\t%s\t%s" % (sha[:8], subject))
+            # No field empty: the shell reads the line with IFS=tab, and an
+            # empty field there vanishes and moves the next ones left.
+            out.append("feature\t%s\t%s\t%s\t%s" % (pr, issue_of(issues, branch),
+                                                     branch or "-", ",".join(added) or "-"))
+        elif merge or (squash and is_own(branch, own)):
+            continue
+        else:
+            out.append("commit\t%s\t%s" % (sha[:8], subject or "-"))
     return out
 
 

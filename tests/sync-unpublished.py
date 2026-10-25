@@ -48,7 +48,7 @@ def commit(repo, name, text):
     git(repo, "commit", "-qm", "edit " + name)
 
 
-def world(tmp, branch_file, main_file, pushed=False):
+def world(tmp, branch_file, main_file, pushed=False, pr=None):
     origin = os.path.join(tmp, "origin.git")
     repo = os.path.join(tmp, "repo")
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", origin], check=True, env=ENV)
@@ -61,7 +61,7 @@ def world(tmp, branch_file, main_file, pushed=False):
     git(repo, "worktree", "add", "-q", "-b", "feat/x", wt, "main")
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     with open(os.path.join(wt, ".sclaude/local/feature/state.json"), "w") as fh:
-        json.dump({"branch": "feat/x", "feature": "x"}, fh)
+        json.dump(dict({"branch": "feat/x", "feature": "x"}, **({"pr": pr} if pr else {})), fh)
     exclude = git(repo, "rev-parse", "--git-path", "info/exclude")
     with open(os.path.join(repo, exclude) if not os.path.isabs(exclude) else exclude, "a") as fh:
         fh.write(".sclaude/local/\n")
@@ -91,11 +91,12 @@ def main():
         ("unpublished", "feature.txt", "schema.txt", False),
         ("pushed", "feature.txt", "schema.txt", True),
         ("conflict", "same.txt", "same.txt", False),
+        ("had a pr", "feature.txt", "schema.txt", False),
     )
     for name, bfile, mfile, pushed in cases:
         tmp = tempfile.mkdtemp(prefix="sclaude-unpub-")
         try:
-            repo, wt = world(tmp, bfile, mfile, pushed)
+            repo, wt = world(tmp, bfile, mfile, pushed, pr=57 if name == "had a pr" else None)
             before = git(wt, "rev-parse", "HEAD")
             out = run(repo, wt)
             on_main = subprocess.run(["git", "-C", wt, "merge-base", "--is-ancestor",
@@ -107,6 +108,9 @@ def main():
                       os.path.exists(os.path.join(wt, "feature.txt")), True)
             elif name == "pushed":
                 check("a pushed branch is not rewritten", git(wt, "rev-parse", "HEAD"), before)
+            elif name == "had a pr":
+                check("a branch with a pull request recorded is not rewritten",
+                      git(wt, "rev-parse", "HEAD"), before)
             else:
                 check("a conflicting rebase is backed out", git(wt, "rev-parse", "HEAD"), before)
                 check("and leaves no rebase under way",

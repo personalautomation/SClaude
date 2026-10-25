@@ -830,15 +830,15 @@ review session sees the file and ends the `claude` process (found by
 lists only the review threads still open — the resolved ones are counted, not
 repeated — so the new round starts with the new findings and nothing else.
 
-**Rounds that stop converging are asked about once.** The report after each
-round ends on a verdict from the findings per round. When it says "Not
-converging" over four rounds or more (`stuck` in `review_report.py`), the next
-fresh session is preceded by one question (`review_stuck_ask`): end the search
-for new findings? A yes is the word the `s` key gives — the findings open now
-still go to that session, and its fixes are checked only if the person says
-so. Asked once a feature: on one pull request the verdict said "Not
-converging" eighteen rounds in a row, and each was followed by a fresh session
-until the person stopped it by hand.
+**Rounds that stop converging are said, once.** The report after each round
+ends on a verdict from the findings per round. When it says "Not converging"
+over four rounds or more (`stuck` in `review_report.py`), the next fresh
+session is preceded by a warning that names the keys ending the search — `s`
+while a review pass runs, ⏭ on the feature's topic (`review_stuck_say`). Said,
+not asked: the session was closed by the orchestrator, nobody is bound to be
+there, and a question would hold the rounds until somebody answered. On one
+pull request the verdict said "Not converging" eighteen rounds in a row, each
+followed by a fresh session, until the person stopped it by hand.
 
 **Leaving step 4's session does not close it on its own.** After the session exits, the step closes only once the automatic review has finished with the pushed head and left nothing open: no check running or red (the findings check among them) and no unresolved review thread (`pr_context.py --close`). Otherwise sclaude waits for a running review, says what is open, and offers the session back; closing anyway is a second, explicit answer.
 

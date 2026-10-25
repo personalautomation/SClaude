@@ -960,8 +960,13 @@ sync_unpublished() {
   [[ "$(git -C "$wt" symbolic-ref -q --short HEAD 2>/dev/null)" == "$branch" ]] || return 0
   git -C "$REPO" fetch origin -q 2>/dev/null || true
   git -C "$wt" rev-parse -q --verify origin/main >/dev/null 2>&1 || return 0
-  # Pushed, or the remote cannot say: not ours to rewrite.
-  local remote
+  # Pushed, or the remote cannot say: not ours to rewrite. Nor once it was:
+  # a pull request recorded, or an upstream set — GitHub deletes a merged
+  # branch, and a rollback later finds it gone from origin.
+  local pr remote
+  pr="$(state_get "$state" pr 2>/dev/null || true)"
+  [[ -z "$pr" || "$pr" == "null" ]] || return 0
+  [[ -z "$(git -C "$wt" config --get "branch.$branch.remote" 2>/dev/null)" ]] || return 0
   remote="$(git -C "$wt" ls-remote --heads origin "$branch" 2>/dev/null)" || return 0
   [[ -z "$remote" ]] || return 0
   behind="$(deferred_rev_count "$REPO" "$branch..origin/main")" || return 0

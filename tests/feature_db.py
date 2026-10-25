@@ -639,6 +639,9 @@ docker() {
         check("a main stack up to date is left alone", calls(root), [])
         bash(root, docker + "db_main_up", {"RUNNING": "false", "MAIN_HAS": "0001"})
         check("a main stack that is not running is left alone", calls(root), [])
+        out = bash(root, docker + "db_main_up", {"RUNNING": "true", "MAIN_HAS": "0001 0007"})
+        check("a main stack with a migration main lacks is said, not tried",
+              (calls(root), "migrations main does not (0007)" in out), ([], True))
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

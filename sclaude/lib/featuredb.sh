@@ -405,10 +405,20 @@ db_main_up() {
   ref=origin/main
   git -C "$repo" rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1 || ref=main
   git -C "$repo" rev-parse -q --verify "$ref^{commit}" >/dev/null 2>&1 || return 0
-  pending="$(comm -13 <(db_applied "$main" | sort) \
-    <(git -C "$repo" ls-tree --name-only "$ref" supabase/migrations/ 2>/dev/null | db_file_versions) \
-    | grep -c .)"
+  local applied files foreign
+  applied="$(db_applied "$main" | sort)"
+  files="$(git -C "$repo" ls-tree --name-only "$ref" supabase/migrations/ 2>/dev/null | db_file_versions)"
+  pending="$(comm -13 <(printf '%s\n' "$applied") <(printf '%s\n' "$files") | grep -c .)"
   [[ "$pending" -gt 0 ]] || return 0
+  # Versions the stack has and main does not — a feature that ran on this
+  # database, a migration renamed before its merge: the CLI refuses every
+  # migration then, so it is said once, by name, rather than tried and failed.
+  foreign="$(comm -23 <(printf '%s\n' "$applied") <(printf '%s\n' "$files") | grep . | paste -sd' ')"
+  if [[ -n "$foreign" ]]; then
+    warn "  database: the main local database has migrations main does not ($foreign),"
+    warn "  so main's $pending new one(s) cannot be applied to it. Look at it in the main checkout."
+    return 0
+  fi
 
   # A workdir of main's own: its config and its migrations, so a branch
   # checked out in the main tree does not decide what the stack gets.
@@ -427,7 +437,10 @@ db_main_up() {
   # --include-all: features merge in another order than their migrations are
   # numbered, and one numbered below the last applied is main's all the same;
   # without it the CLI refused it, and the stack stayed behind for good.
-  if ! (cd "$repo" && $cli migration up --include-all --workdir "$tmp") >> "$log" 2>&1; then
+  # Under a lock: features end their cycles and fill new stacks in parallel,
+  # and two runs on the one database clashed on the same migrations.
+  if ! ( flock -w 300 9 || exit 1
+         cd "$repo" && $cli migration up --include-all --workdir "$tmp" ) 9>"$repo/.sclaude/local/db-main.lock" >> "$log" 2>&1; then
     warn "  database: they did not apply — see $log"
     warn "  The main local database stays behind main; look before anything rebuilds it."
   fi
@@ -534,7 +547,7 @@ db_copy_main() {
     return 1
   fi
 
-  local theirs newest wipe=""
+  local theirs newest wipe="" reset=""
   theirs="$(db_applied "$main")"
   newest="$(tail -1 <<<"$theirs")"
   if [[ -n "$newest" ]] && cmp -s <(sort <<<"$theirs") \
@@ -548,6 +561,7 @@ db_copy_main() {
         warn "  database: setting it back failed — see .sclaude/local/feature/db.log; filling from the seed instead"
         return 1
       fi
+      reset=1
     fi
     wipe="$(docker exec "$feature" psql -U supabase_admin -d postgres -Atc \
       "select string_agg(format('%I.%I', schemaname, tablename), ', ') from pg_tables where schemaname = 'public'" 2>>"$log")"
@@ -565,12 +579,13 @@ db_copy_main() {
   if [[ "$rc" -ne 0 ]]; then
     # Set back and emptied, the stack lacks the feature's own migrations: they
     # go back before the seed fills it.
-    [[ -n "$wipe" ]] && db_feature_up "$wt"
+    [[ -n "$wipe$reset" ]] && db_feature_up "$wt"
     warn "  database: loading the copy failed — see .sclaude/local/feature/db.log; filling from the seed instead"
     return 1
   fi
-  # The feature's own migrations, now over main's rows.
-  [[ -n "$wipe" ]] && db_feature_up "$wt"
+  # The feature's own migrations, now over main's rows — whenever the schema
+  # was set back, whether or not its tables could be listed for emptying.
+  [[ -n "$wipe$reset" ]] && db_feature_up "$wt"
   errors="$(grep -c 'ERROR:' <<<"$out")"
   docker exec "$feature" psql -U supabase_admin -d postgres -Atc "select id from auth.users" \
     > "$wt/.sclaude/local/feature/db-copied-users" 2>>"$log" || return 1

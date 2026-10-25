@@ -15,7 +15,8 @@
 #   * a state left with the old "no" mark is merged all the same;
 #   * a merge that would conflict goes to the sync with main, unasked, and
 #     leaves no half-merged tree; a sync that stops short opens the step,
-#     unless it left a merge under way;
+#     unless it left a merge under way, which holds the step before anything
+#     else is looked at;
 #   * a plain merge that stops on conflicts the check could not foresee is
 #     backed out, and the step opens;
 #   * the menu's sync (sync_offer with the branch named) still asks first,
@@ -118,10 +119,15 @@ try:
     check("conflict: no half-merged tree", git("rev-parse", "-q", "--verify", "MERGE_HEAD", cwd=repo), "")
     out = start("", call='sync_branch %s; echo "RC $?"', SYNC_RC="1")
     check("conflict: a sync that stops short opens the step", "RC 0" in out, True)
-    check("conflict: ... and says how to merge", "sclaude sync x" in out, True)
+    check("conflict: ... and says so", "Not merged" in out, True)
     out = start("", call='sync_branch %s; echo "RC $?"', SYNC_RC="1",
                 SYNC_DOES='git -C "$1" merge -q origin/main >/dev/null 2>&1')
     check("conflict: a half-merged tree holds the step", "RC 1" in out and "has not been started" in out, True)
+    # Left under way, its resolution staged: held at once, before the check on
+    # uncommitted work its staged files would pass for, and no sync opened.
+    out = start("", call='sync_branch %s; echo "RC $?"')
+    check("under way: held", "RC 1" in out and "has not been started" in out, True)
+    check("under way: no sync", "SYNC" in out, False)
     git("merge", "--abort", cwd=repo)
     out = start("", call='sync_branch %s; echo "RC $?"', SYNC_RC="0")
     check("conflict gone by the sync's look: the plain merge runs", "stopped on conflicts" in out, True)

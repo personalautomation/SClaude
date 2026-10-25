@@ -1426,15 +1426,17 @@ cmd_sync() {
   local synced=0
   echo ""
   sync_offer "$wt" "$slug" "$pr" "$branch" || synced=$?
+  # 0 and 5 are a yes already given that found nothing to resolve after all,
+  # or a hand-off taken back with nothing merged: the plain merge follows, not
+  # asked about twice.
   case "$synced" in
-    2) ;;
+    2) ask "${BOLD}Merge origin/main into $branch? [y/n] ${OFF}" answer yn
+       is_yes "$answer" || { info "Left as it is."; return 0; } ;;
+    0|5) ;;
     4) info "Left as it is."; return 0 ;;
     3) echo "${GREEN}Merged — $branch now carries everything from main.${OFF}"; return 0 ;;
     *) return 0 ;;
   esac
-
-  ask "${BOLD}Merge origin/main into $branch? [y/n] ${OFF}" answer yn
-  is_yes "$answer" || { info "Left as it is."; return 0; }
 
   # `--no-edit` for the reason sync_branch gives in worktree.sh.
   if git -C "$wt" merge --no-edit origin/main; then

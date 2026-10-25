@@ -863,6 +863,14 @@ sync_branch() {
   [[ "$behind" =~ ^[0-9]+$ ]] || return 0
   [[ "$behind" -eq 0 ]] && return 0
 
+  # A merge of main left under way (a sync broken off mid-way, one by hand)
+  # holds the step: its files may carry conflict markers. Before the check on
+  # uncommitted work, which its staged files would pass for.
+  if merge_under_way "$wt"; then
+    sync_branch_held "$wt" "$slug"
+    return 1
+  fi
+
   # Uncommitted work must not be merged into: merge would stop halfway. We check
   # before everything else — offering what is known to be impossible is
   # lying.
@@ -899,17 +907,20 @@ sync_branch() {
   sync_offer "$wt" "$slug" "$(state_get "$state" pr 2>/dev/null || true)" || synced=$?
   [[ "$synced" -eq 3 ]] && return 0
   if [[ "$synced" -eq 1 ]]; then
-    # A half-merged tree holds the step: its files may carry conflict markers.
-    # Otherwise the sync stopped short (the session left, the branch had
-    # diverged) and the step opens as a "no" to the old question let it:
-    # nobody asked this time, and a step held by a merge nobody asked for
-    # could not be opened at all from a phone.
+    # A half-merged tree holds the step, as above. Otherwise the sync stopped
+    # short — the session left, the branch had diverged, the push failed —
+    # and has said what comes next; the step opens as a "no" to the old
+    # question let it: nobody asked this time, and a step held by a merge
+    # nobody asked for could not be opened at all from a phone.
     if merge_under_way "$wt"; then
-      warn "  A merge of main is under way in the tree; the step has not been started."
-      warn "  Finish it with: sclaude sync ${slug:-<feature>}   or back it out: git -C $wt merge --abort"
+      sync_branch_held "$wt" "$slug"
       return 1
     fi
-    warn "  Not merged — the step opens on the branch as it stands; merge it with: sclaude sync ${slug:-<feature>}"
+    if git -C "$wt" merge-base --is-ancestor origin/main HEAD 2>/dev/null; then
+      warn "  main is merged in here; the step opens on it."
+    else
+      warn "  Not merged — the step opens on the branch as it stands."
+    fi
     return 0
   fi
 
@@ -922,23 +933,37 @@ sync_branch() {
     return 0
   fi
 
-  # Conflicts the check above could not foresee (it could not tell). Nobody
-  # asked for this merge, so nobody is left a half-merged tree to untangle —
-  # from a phone they could not: it is backed out, and the step opens on the
-  # branch as it stood. The sync before the preview, or the menu, merges it.
-  # A merge that refused to start (an untracked file in the way, a hook) left
-  # nothing to back out: git has said why above.
+  # The merge stopped: on conflicts the check above could not foresee (it
+  # could not tell), or at its commit — a hook of the product's refusing git's
+  # own message. Nobody asked for this merge, so nobody is left a half-merged
+  # tree to untangle — from a phone they could not: it is backed out, and the
+  # step opens on the branch as it stood. The sync before the preview, or the
+  # menu, merges it. A merge that refused to start (an untracked file in the
+  # way) left nothing to back out: git has said why above.
   warn ""
   if merge_under_way "$wt"; then
-    git -C "$wt" merge --abort >/dev/null 2>&1 \
-      || { warn "  The merge stopped on conflicts, and backing it out failed: git -C $wt merge --abort"
-           warn "  The step has not been started."; return 1; }
-    warn "  The merge stopped on conflicts sclaude could not foresee, and was backed out."
+    local unmerged; unmerged="$(git -C "$wt" diff --name-only --diff-filter=U 2>/dev/null)"
+    git -C "$wt" merge --abort >/dev/null 2>&1 || { sync_branch_held "$wt" "$slug"; return 1; }
+    if [[ -n "$unmerged" ]]; then
+      warn "  The merge stopped on conflicts sclaude could not foresee, and was backed out."
+    else
+      warn "  The merge could not be committed (git says why above), and was backed out."
+    fi
   else
     warn "  The merge did not run (git says why above)."
   fi
   warn "  The step opens on the branch as it stands; merge it with: sclaude sync ${slug:-<feature>}"
   return 0
+}
+
+# What a step's start says when a merge of main is under way in the tree, and
+# the step is held for it.
+#
+#   sync_branch_held <wt> <slug>
+sync_branch_held() {
+  warn ""
+  warn "  A merge of main is under way in the tree; the step has not been started."
+  warn "  Finish it with: sclaude sync ${2:-<feature>}   or back it out: git -C $1 merge --abort"
 }
 
 # A branch origin has never seen, behind main, put on top of main: rebased,

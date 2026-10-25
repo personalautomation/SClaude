@@ -267,21 +267,24 @@ review_guard_settings() {
   return 0
 }
 
-# sclaude's checkout as it stands: its HEAD and what is uncommitted, in one
-# line. Taken before and after a review session (instruments_unchanged).
+# sclaude's checkout as it stands, in one line: its HEAD, what is uncommitted,
+# and the repository's own config and hooks. Taken before and after a review
+# session (instruments_unchanged).
 #
 # Untracked files by their content, since their status line stays the same
-# however they change, and the repository's own config and hooks, which no
-# status shows. Ignored files are left out: running the hooks writes their
-# caches, and every review would be reported.
+# however they change; the config and hooks apart, which no status shows.
+# Ignored files are left out: running the hooks writes their caches, and every
+# review would be reported.
 instruments_state() {
   local git_dir
   git_dir="$(git -C "$INSTRUMENTS" rev-parse --absolute-git-dir 2>/dev/null)"
-  printf '%s %s\n' "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null)" \
+  printf '%s %s %s\n' "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null)" \
     "$( { git -C "$INSTRUMENTS" status --porcelain
           git -C "$INSTRUMENTS" diff HEAD
           git -C "$INSTRUMENTS" ls-files -o --exclude-standard -z \
             | (cd "$INSTRUMENTS" && xargs -0 -r sha1sum)
+        } 2>/dev/null | md5sum | cut -c1-12)" \
+    "$( {
           # The hooks by their content: a listing carries the mtime of .git
           # itself, which an index refresh during the review moves.
           [[ -n "$git_dir" ]] && cat "$git_dir/config" \
@@ -297,10 +300,30 @@ instruments_state() {
 # one of them. Nothing is reverted: what changed is for a person to look at.
 #
 #   instruments_unchanged <state before> <who>
+#
+# Commits alone are not that. Other sessions work in the checkout at the same
+# time, and the session watched here cannot commit (the guard refuses it): a
+# retrospective was told it had changed the checkout when two commits of
+# another session's had landed while it ran. So a HEAD that moved, over a tree
+# as clean as before and the same config and hooks, is said quietly, with the
+# commits named; whatever else changed is loud, the commits named with it.
 instruments_unchanged() {
-  [[ "$(instruments_state)" == "$1" ]] && return 0
+  local now; now="$(instruments_state)"
+  [[ "$now" == "$1" ]] && return 0
+  local -a was=($1) is=($now)
+  local made=""
+  [[ "${was[0]}" != "${is[0]}" && -n "${was[0]}" ]] \
+    && made="$(git -C "$INSTRUMENTS" log --format='     %h %s' "${was[0]}..HEAD" 2>/dev/null || true)"
+  if [[ -n "$made" && "${was[2]:-}" == "${is[2]:-}" \
+        && -z "$(git -C "$INSTRUMENTS" status --porcelain 2>/dev/null)" ]]; then
+    info "   Commits reached sclaude's checkout while the $2 ran — another session's; it cannot commit:"
+    printf '%s\n' "$made"
+    return 0
+  fi
   warn ""
   warn "  The $2 changed sclaude's own checkout ($INSTRUMENTS), which it may only read."
+  warn "  Another session working there at the same time would look the same."
+  [[ -n "$made" ]] && { warn "  Committed meanwhile:"; printf '%s\n' "$made" >&2; }
   warn "  Look before anything else runs from it: git -C $INSTRUMENTS status; git -C $INSTRUMENTS log -3"
   return 1
 }

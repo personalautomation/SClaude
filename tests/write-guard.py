@@ -393,6 +393,22 @@ try:
     changed = sh('INSTRUMENTS="%s"; s="$(instruments_state)"; echo 2 > "%s/a"; '
                  'instruments_unchanged "$s" review 2>&1 || echo changed' % (inst, inst), repo)
     check("instruments-changed-said", "changed sclaude's own checkout" in changed and "changed" in changed, True)
+    subprocess.run(["git", "-C", inst, "checkout", "-q", "a"], check=True)
+    # Another session's commit, over a tree as clean as before, is named and
+    # not blamed on the session watched: it cannot commit.
+    other = sh('info() { echo "INFO $*"; }; INSTRUMENTS="%s"; s="$(instruments_state)"; '
+               'echo 3 > "%s/a"; git -C "%s" -c user.name=t -c user.email=t@t commit -qam other; '
+               'instruments_unchanged "$s" review 2>&1 && echo quiet' % (inst, inst, inst), repo)
+    check("instruments-commits-alone-quiet",
+          "another session's" in other and "other" in other and other.endswith("quiet")
+          and "WARN" not in other, True)
+    both = sh('info() { :; }; INSTRUMENTS="%s"; s="$(instruments_state)"; '
+              'echo 4 > "%s/a"; git -C "%s" -c user.name=t -c user.email=t@t commit -qam more; '
+              'echo 5 > "%s/a"; instruments_unchanged "$s" review 2>&1 || echo changed'
+              % (inst, inst, inst, inst), repo)
+    check("instruments-commits-and-edits-loud",
+          "changed sclaude's own checkout" in both and "more" in both and both.endswith("changed"), True)
+    subprocess.run(["git", "-C", inst, "checkout", "-q", "a"], check=True)
     # Untracked content and the repository's config count too.
     with open(os.path.join(inst, "loose"), "w") as fh:
         fh.write("1\n")

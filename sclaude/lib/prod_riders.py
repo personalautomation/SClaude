@@ -62,24 +62,30 @@ def merged_prs(repo):
         found = {}
         try:
             done = subprocess.run(["gh", "pr", "list", "--state", "merged", "--limit", "300",
-                                   "--json", "number,headRefName,closingIssuesReferences"],
+                                   "--json", "number,headRefName,closingIssuesReferences,mergeCommit"],
                                   cwd=repo, capture_output=True, text=True, timeout=60)
             for pr in (json.loads(done.stdout) if done.returncode == 0 else []):
                 refs = pr.get("closingIssuesReferences") or []
                 found[str(pr.get("number"))] = (
                     pr.get("headRefName") or "",
-                    ",".join(str(r.get("number")) for r in refs if r.get("number")))
+                    ",".join(str(r.get("number")) for r in refs if r.get("number")),
+                    (pr.get("mergeCommit") or {}).get("oid") or "")
         except (OSError, ValueError, subprocess.SubprocessError):
             pass
         MERGED[repo] = found
     return MERGED[repo]
 
 
-def pr_info(repo, pr):
+def pr_info(repo, pr, sha=None):
     """The pull request's head branch and the issues it closes: ("", "") when
-    gh does not know it as a merged pull request, and then a squashed
-    subject's "(#N)" is not taken for one — an issue number reads the same."""
-    return merged_prs(repo).get(pr, ("", ""))
+    gh does not know it as a merged pull request — or, given the commit, when
+    that commit is not its merge — and then a squashed subject's "(#N)" is not
+    taken for one: an issue number, or a later commit citing the pull
+    request, reads the same."""
+    head, issues, merge = merged_prs(repo).get(pr, ("", "", ""))
+    if sha is not None and merge != sha:
+        return "", ""
+    return head, issues
 
 
 def issue_of(issues, branch):
@@ -109,11 +115,14 @@ def riders(repo, prod, main, own, migrations_dir, own_pr="", skip=()):
             pr, branch = merge.groups()
         elif squash:
             pr = squash.group(1)
-        if pr and pr == own_pr:
+        if merge and pr == own_pr:
             continue
         if pr and not (merge and is_own(branch, own)):
-            head, issues = pr_info(repo, pr)
+            # A squash is its pull request only as that pull request's merge.
+            head, issues = pr_info(repo, pr, None if merge else sha)
             branch = branch or head
+            if squash and head and pr == own_pr:
+                continue
         if (merge or (squash and branch)) and not is_own(branch, own):
             added = []
             if migrations_dir:

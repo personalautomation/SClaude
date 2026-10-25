@@ -250,6 +250,10 @@ def main():
         features[p[4]].add(p[2])
         kept.append(p)
     for p in kept:
+        # Not for the two classes that are no rule: their rows are unrelated
+        # rules, and a count over them would read as one rule coming back.
+        if p[4] in (COVERED, DEFAULT_CLASS):
+            continue
         n = counted[p[4]]
         line = "%s: %s time since the last monthly review" % (p[4], ordinal(n))
         if len(features[p[4]]) > 1:

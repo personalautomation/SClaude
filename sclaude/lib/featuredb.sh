@@ -550,19 +550,28 @@ db_copy_main() {
   # half-empty database as filled for good. A failed dump leaves the stack
   # empty and falls back to the seed. Taken before the feature's schema is set
   # back below, so that a failed dump leaves the stack as its migrations built it.
-  local dump="$wt/.sclaude/local/feature/db-copy.sql"
+  # Main's migrations and its rows read together, under the lock db_main_up
+  # applies migrations under: read apart, a parallel update could move the
+  # main database between them, and the feature's schema be set to a version
+  # its loaded rows were not dumped at.
+  local dump="$wt/.sclaude/local/feature/db-copy.sql" theirs newest wipe="" reset="" lock
+  lock="${REPO:-$wt}/.sclaude/local/db-main.lock"
+  mkdir -p "$(dirname "$lock")" 2>/dev/null
+  exec 8>"$lock"
+  flock -w 300 8 || true
+  theirs="$(db_applied "$main")"
+  newest="$(tail -1 <<<"$theirs")"
   if ! docker exec "$main" pg_dump -U supabase_admin -d postgres --data-only --column-inserts \
          --on-conflict-do-nothing --schema=auth --schema=public \
          --exclude-table=auth.schema_migrations > "$dump" 2>>"$log" \
      || ! grep -q '^INSERT INTO' "$dump"; then
+    exec 8>&-
     rm -f "$dump"
     warn "  database: copying the main database failed — see .sclaude/local/feature/db.log; filling from the seed instead"
     return 1
   fi
+  exec 8>&-
 
-  local theirs newest wipe="" reset=""
-  theirs="$(db_applied "$main")"
-  newest="$(tail -1 <<<"$theirs")"
   if [[ -n "$newest" ]] && cmp -s <(sort <<<"$theirs") \
        <(ls "$wt/supabase/migrations" 2>/dev/null | db_file_versions | awk -v n="$newest" '$0 + 0 <= n + 0'); then
     if [[ "$(db_applied "$feature")" != "$theirs" ]]; then
@@ -578,6 +587,15 @@ db_copy_main() {
     fi
     wipe="$(docker exec "$feature" psql -U supabase_admin -d postgres -Atc \
       "select string_agg(format('%I.%I', schemaname, tablename), ', ') from pg_tables where schemaname = 'public'" 2>>"$log")"
+    # Set back, the stack has main's reference rows under ids of its own
+    # again: without the list to empty them by, main's rows would point at
+    # nothing — the very fault this copy is shaped against.
+    if [[ -n "$reset" && -z "$wipe" ]]; then
+      rm -f "$dump"
+      db_feature_rebuild "$wt"
+      warn "  database: could not list this feature's tables to empty them — see .sclaude/local/feature/db.log; filling from the seed instead"
+      return 1
+    fi
   fi
 
   # Emptied on its own, stopping at an error: inside the load, a TRUNCATE

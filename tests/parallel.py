@@ -351,6 +351,15 @@ check("riders-skip-promote-commits", "promote" in out, False)
 open(os.path.join(repo, "squash-own"), "w").write("s\n")
 g("add", "-A")
 g("commit", "-qm", "feat(x): the feature being shipped (#903)")
+own_squash = g("rev-parse", "HEAD")
+# gh, as GitHub answers: the pull request merged as that very commit.
+gh_bin = os.path.join(tmp, "gh-bin")
+os.makedirs(gh_bin, exist_ok=True)
+with open(os.path.join(gh_bin, "gh"), "w") as fh:
+    fh.write("#!/bin/sh\necho '%s'\n" % json.dumps(
+        [{"number": 903, "headRefName": "feat/41-beta", "closingIssuesReferences": [],
+          "mergeCommit": {"oid": own_squash}}]))
+os.chmod(os.path.join(gh_bin, "gh"), 0o755)
 open(os.path.join(repo, "deferred.tsv"), "w").write("d\n")
 g("add", "-A")
 g("commit", "-qm", "chore(sclaude): put off 1 proposal")
@@ -358,7 +367,8 @@ skip_file = os.path.join(tmp, "riders-skip")
 open(skip_file, "w").write(g("rev-parse", "HEAD") + "\n")
 out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo, prod, "main",
                       "41-beta", "supabase/migrations", "903", skip_file],
-                     capture_output=True, text=True, env=dict(os.environ, PATH="/usr/bin:/bin")).stdout
+                     capture_output=True, text=True,
+                     env=dict(os.environ, PATH=gh_bin + ":/usr/bin:/bin")).stdout
 check("riders-own-squash-left-out", "(#903)" in out, False)
 check("riders-named-commits-left-out", "put off" in out, False)
 check("riders-still-name-the-hotfix", "fix: a hotfix straight on main" in out, True)
@@ -375,6 +385,17 @@ out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo,
 check("riders-unconfirmed-squash-is-a-commit",
       any(l.startswith("commit\t") and l.endswith("(#77)") for l in out.splitlines()), True)
 check("riders-no-empty-field", all("\t\t" not in l for l in out.splitlines()), True)
+# A commit pushed straight to main that cites the shipped pull request is no
+# merge of it: it rides along, and is said.
+open(os.path.join(repo, "follow-up"), "w").write("f\n")
+g("add", "-A")
+g("commit", "-qm", "fix: a follow-up to the feature (#903)")
+out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo, prod, "main",
+                      "41-beta", "supabase/migrations", "903"],
+                     capture_output=True, text=True,
+                     env=dict(os.environ, PATH=gh_bin + ":/usr/bin:/bin")).stdout
+check("riders-a-commit-citing-the-shipped-pr-is-said",
+      any(l.startswith("commit\t") and "follow-up" in l for l in out.splitlines()), True)
 
 # --- the deferred friction ----------------------------------------------------
 #

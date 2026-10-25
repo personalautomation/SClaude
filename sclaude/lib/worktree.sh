@@ -953,27 +953,28 @@ sync_branch() {
 #
 #   sync_unpublished <wt>
 sync_unpublished() {
-  local wt="$1" state branch behind
+  local wt="$1" state branch behind pr remote
   state="$wt/.sclaude/local/feature/state.json"
   branch="$(state_get "$state" branch 2>/dev/null)" || return 0
   [[ -n "$branch" && "$branch" != "null" ]] || return 0
   [[ "$(git -C "$wt" symbolic-ref -q --short HEAD 2>/dev/null)" == "$branch" ]] || return 0
+  # Pushed once, by what is known here first, before any network: a pull
+  # request recorded, or an upstream of the branch's own name — GitHub
+  # deletes a merged branch, and a rollback later finds it gone from origin.
+  # Only of its own name: a branch started from origin/main tracks main from
+  # birth (branch.autoSetupMerge), and that is no sign it was ever pushed.
+  pr="$(state_get "$state" pr 2>/dev/null || true)"
+  [[ -z "$pr" || "$pr" == "null" ]] || return 0
+  [[ "$(git -C "$wt" config --get "branch.$branch.merge" 2>/dev/null)" != "refs/heads/$branch" ]] || return 0
+  [[ -z "$(worktree_dirt "$wt")" ]] || return 0
   # Bounded, and never a prompt: it stands before the suite, which needs no
   # network of its own.
   GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$REPO" fetch origin -q 2>/dev/null || true
   git -C "$wt" rev-parse -q --verify origin/main >/dev/null 2>&1 || return 0
-  # Pushed, or the remote cannot say: not ours to rewrite. Nor once it was:
-  # a pull request recorded, or an upstream set — GitHub deletes a merged
-  # branch, and a rollback later finds it gone from origin.
-  local pr remote
-  pr="$(state_get "$state" pr 2>/dev/null || true)"
-  [[ -z "$pr" || "$pr" == "null" ]] || return 0
-  [[ -z "$(git -C "$wt" config --get "branch.$branch.remote" 2>/dev/null)" ]] || return 0
   remote="$(GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$wt" ls-remote --heads origin "$branch" 2>/dev/null)" || return 0
   [[ -z "$remote" ]] || return 0
   behind="$(deferred_rev_count "$REPO" "$branch..origin/main")" || return 0
   [[ "$behind" =~ ^[0-9]+$ && "$behind" -gt 0 ]] || return 0
-  [[ -z "$(worktree_dirt "$wt")" ]] || return 0
   if git -C "$wt" rebase -q origin/main >/dev/null 2>&1; then
     info "  branch: not pushed yet, so put on top of origin/main ($behind commit(s) behind it)"
   else

@@ -58,7 +58,9 @@ def world(tmp, branch_file, main_file, pushed=False, pr=None):
     commit(repo, "base", "1\n")
     git(repo, "push", "-q", "origin", "main")
     wt = os.path.join(tmp, "wt")
-    git(repo, "worktree", "add", "-q", "-b", "feat/x", wt, "main")
+    # As sclaude new makes it: from origin/main, so it tracks main from birth.
+    git(repo, "fetch", "-q", "origin")
+    git(repo, "worktree", "add", "-q", "-b", "feat/x", wt, "origin/main")
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     with open(os.path.join(wt, ".sclaude/local/feature/state.json"), "w") as fh:
         json.dump(dict({"branch": "feat/x", "feature": "x"}, **({"pr": pr} if pr else {})), fh)
@@ -67,7 +69,7 @@ def world(tmp, branch_file, main_file, pushed=False, pr=None):
         fh.write(".sclaude/local/\n")
     commit(wt, branch_file, "feature\n")
     if pushed:
-        git(wt, "push", "-q", "origin", "feat/x")
+        git(wt, "push", "-q", "-u", "origin", "feat/x")
     # Main moves on, by another hand.
     other = os.path.join(tmp, "other")
     subprocess.run(["git", "clone", "-q", origin, other], check=True, env=ENV,
@@ -102,6 +104,8 @@ def main():
             on_main = subprocess.run(["git", "-C", wt, "merge-base", "--is-ancestor",
                                       "origin/main", "HEAD"], env=ENV).returncode == 0
             if name == "unpublished":
+                check("the branch tracks main from birth, as sclaude's do",
+                      git(wt, "config", "--get", "branch.feat/x.merge"), "refs/heads/main")
                 check("an unpushed branch is put on top of main", on_main, True)
                 check("and it is said", "put on top of origin/main" in out, True)
                 check("its own commit is kept",

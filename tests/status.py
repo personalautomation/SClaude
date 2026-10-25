@@ -673,22 +673,42 @@ check_true("issue-not-held-open-after-the-cycle",
            re.search(r'if \[\[ "\$\{merged:-\}" != "MERGED" \]\] \|\| ! prod_carries_feature "\$wt"; then\n'
                      r'\s*issue_hold_open "\$issue"', deploy_sh) is not None)
 
-# prod_carries_feature, run: a recorded ship not rolled back carries the
-# feature, whatever main did since; none, or one rolled back, does not.
+# prod_carries_feature, run: a recorded ship not rolled back that holds the
+# merge of the feature's pull request carries the feature, whatever main did
+# since; none, one rolled back, or one before the pull request's merge (a
+# feature handed back and fixed in a second one) does not.
 _lib = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sclaude", "lib")
 _fn = re.search(r"^prod_carries_feature\(\) \{\n.*?^\}\n", deploy_sh, re.S | re.M).group(0)
 import tempfile as _tempfile
-for _name, _state, _want in (("shipped", {"deploy": {"prod": {"sha": "abc"}}}, "yes"),
-                             ("never shipped", {}, "no"),
-                             ("rolled back", {"deploy": {"prod": {"sha": "abc"}},
-                                              "rollback": {"prod": {"code": "done"}}}, "no")):
+_root = _tempfile.mkdtemp()
+_repo = os.path.join(_root, "repo")
+_genv = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+             GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_GLOBAL=os.devnull)
+subprocess.run(["git", "init", "-q", _repo], check=True, env=_genv)
+subprocess.run(["git", "-C", _repo, "commit", "-q", "--allow-empty", "-m", "first"], check=True, env=_genv)
+_first = subprocess.run(["git", "-C", _repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+subprocess.run(["git", "-C", _repo, "commit", "-q", "--allow-empty", "-m", "second"], check=True, env=_genv)
+_second = subprocess.run(["git", "-C", _repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+_bin = os.path.join(_root, "bin")
+os.makedirs(_bin)
+for _name, _state, _merge, _want in (
+        ("shipped", {"pr": 5, "deploy": {"prod": {"sha": _second}}}, _first, "yes"),
+        ("never shipped", {"pr": 5}, _first, "no"),
+        ("rolled back", {"pr": 5, "deploy": {"prod": {"sha": _second}},
+                         "rollback": {"prod": {"code": "done"}}}, _first, "no"),
+        ("an earlier pull request's ship", {"pr": 6, "deploy": {"prod": {"sha": _first}}}, _second, "no"),
+        ("gh cannot say", {"pr": 5, "deploy": {"prod": {"sha": _second}}}, "", "no")):
+    with open(os.path.join(_bin, "gh"), "w") as _fh:
+        _fh.write("#!/bin/sh\necho '%s'\n" % _merge)
+    os.chmod(os.path.join(_bin, "gh"), 0o755)
     _wt = _tempfile.mkdtemp()
     os.makedirs(os.path.join(_wt, ".sclaude/local/feature"))
     with open(os.path.join(_wt, ".sclaude/local/feature/state.json"), "w") as _fh:
         json.dump(_state, _fh)
-    _out = subprocess.run(["bash", "-c", 'source "%s/state.sh"\n%s\nprod_carries_feature "%s" && echo yes || echo no'
-                           % (_lib, _fn, _wt)], capture_output=True, text=True).stdout.strip()
-    check_true("prod-carries-feature-" + _name.replace(" ", "-"), _out == _want)
+    _out = subprocess.run(["bash", "-c", 'source "%s/state.sh"\nREPO="%s"\n%s\nprod_carries_feature "%s" && echo yes || echo no'
+                           % (_lib, _repo, _fn, _wt)], capture_output=True, text=True,
+                          env=dict(os.environ, PATH=_bin + ":" + os.environ["PATH"])).stdout.strip()
+    check_true("prod-carries-feature-" + _name.replace(" ", "-").replace("'", ""), _out == _want)
 
 if failures:
     for name, want, got in failures:

@@ -127,16 +127,24 @@ deploy_unchanged() {
 }
 
 # Whether production carries this feature: sclaude shipped it (a production
-# sha is recorded, by deploy_remember after the merge) and did not roll it
-# back. Every later ship is of a main that holds it too. Not deploy_unchanged:
-# that asks whether production is still the release this feature shipped, and
-# any commit on main since — another feature's merge, a hotfix — made it read
-# as not in production, the issue reopened and its status saying so.
+# sha is recorded, by deploy_remember after the merge), did not roll it back,
+# and that ship holds the merge of the feature's pull request now — a feature
+# handed back after one ship carries its fix in a second pull request, which
+# the earlier ship does not hold. Every later ship is of a main that holds it
+# too. Not deploy_unchanged: that asks whether production is still the release
+# this feature shipped, and any commit on main since — another feature's
+# merge, a hotfix — made it read as not in production, the issue reopened and
+# its status saying so. Unknown (gh cannot say) is "not carried".
 prod_carries_feature() {
-  local state="$1/.sclaude/local/feature/state.json" was
+  local state="$1/.sclaude/local/feature/state.json" was pr merge
   was="$(state_get "$state" deploy.prod.sha 2>/dev/null || true)"
   [[ -n "$was" && "$was" != "null" ]] || return 1
-  [[ "$(state_get "$state" rollback.prod.code 2>/dev/null || true)" != "done" ]]
+  [[ "$(state_get "$state" rollback.prod.code 2>/dev/null || true)" != "done" ]] || return 1
+  pr="$(state_get "$state" pr 2>/dev/null || true)"
+  [[ -n "$pr" && "$pr" != "null" ]] || return 1
+  merge="$(timeout 30 gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid // ""' 2>/dev/null)" || return 1
+  [[ -n "$merge" ]] || return 1
+  git -C "$REPO" merge-base --is-ancestor "$merge" "$was" 2>/dev/null
 }
 
 # Says out loud when production is not what main holds, and when main holds

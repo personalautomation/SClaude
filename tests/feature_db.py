@@ -629,8 +629,8 @@ docker() {
 """
         out = bash(root, docker + "db_main_up", {"RUNNING": "true", "MAIN_HAS": "0001"})
         ran = calls(root)
-        check("main's new migration is applied to the main stack",
-              any(c.startswith("migration up --workdir") for c in ran), True)
+        check("main's new migration is applied to the main stack, out of order too",
+              any(c.startswith("migration up --include-all --workdir") for c in ran), True)
         check("it is said, with the count", "applying main's 1 new migration(s)" in out, True)
         check("the workdir holds main's migrations, not the checked-out branch's",
               [c for c in ran if c.startswith("has ")], ["has 0001_a.sql", "has 0002_b.sql"])

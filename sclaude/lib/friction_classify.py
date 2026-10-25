@@ -15,15 +15,17 @@ So one call of a small model reads the proposals, the classes already put
 off (one example each) and CLAUDE.md, and says of each proposal:
 
     same     the rule of an existing class in other words: it takes that class
-    covered  a rule CLAUDE.md already states: it is not put off, and the note
-             quotes the line
+    covered  a rule CLAUDE.md already states: it is put off under one class,
+             COVERED, with the line quoted, for the monthly review to drop
+             or to read as a rule nobody follows
     new      neither: it keeps its own class
 
 The answer is checked, not trusted: a "same" must name a class that is there,
 and a "covered" must quote CLAUDE.md word for word; either one that does not
-counts as "new". Anything going wrong — no claude, a timeout, an answer that
-is not the JSON asked for — leaves every row as it came: this can only make
-the put-off better, never lose a row.
+counts as "new". No row is dropped: a quote can match a sentence that only
+looks like the rule, and a row left out would be one the monthly review never
+counts. Anything going wrong — no claude, a timeout, an answer that is not the
+JSON asked for — leaves every row as it came.
 
 Each row that is put off is also counted: how many entries of its class the
 deferred files hold since the last monthly review, this one included, and in
@@ -48,7 +50,10 @@ import sys
 import tempfile
 
 MODEL = os.environ.get("SCLAUDE_CLASSIFY_MODEL", "haiku")
-TIMEOUT = 180
+# The call stands between a fix session and the review of its fixes: a minute
+# at most, and then the rows go as they came.
+TIMEOUT = 60
+COVERED = "claude-md-already-stated"
 CLAUDE_MD_MAX = 60000
 QUOTE_MIN = 20
 
@@ -73,23 +78,26 @@ def last_reviewed(folder):
     return stamp if re.match(r"\d{4}-\d{2}-\d{2}$", stamp) else ""
 
 
+def tail(path):
+    """A deferred file by its rules folder: `team/deferred/x.tsv`."""
+    return "/".join(os.path.normpath(os.path.abspath(path)).split(os.sep)[-3:])
+
+
 def deferred_rows(folders, own):
     """Every row the deferred files hold since each folder's last review. The
     feature's own file is read from its tree as well as from main, and an
     identical row counted as often as the fuller copy has it: rows sent to
     main leave the branch, and rows not sent yet are on the branch alone."""
     out = []
-    own_real = os.path.realpath(own) if own else ""
-    own_name = os.path.basename(own) if own else ""
     own_rows = read_rows(own) if own else []
     seen_own = False
     for folder in folders:
         since = last_reviewed(folder)
         for path in sorted(glob.glob(os.path.join(folder, "*.tsv"))):
             rows = read_rows(path)
-            if own and (os.path.realpath(path) == own_real or os.path.basename(path) == own_name):
-                if seen_own:
-                    continue
+            # The same file is the same rules folder's: <folder>/deferred/<feature>.tsv.
+            # Another person's file of the same feature is theirs, and counts.
+            if own and not seen_own and tail(path) == tail(own):
                 seen_own = True
                 a, b = collections.Counter(rows), collections.Counter(own_rows)
                 rows = list((a | b).elements())
@@ -215,9 +223,13 @@ def main():
         if verdict and verdict[0] == "same" and verdict[1] not in classes:
             verdict = went.get(verdict[1], verdict)
         if verdict and verdict[0] == "covered":
-            notes.append("already in CLAUDE.md, not put off: %s — \"%s\"" % (
-                p[4], verdict[1][:160]))
+            notes.append("already in CLAUDE.md, put off as %s: %s — \"%s\"" % (
+                COVERED, p[4], verdict[1][:160]))
             went.setdefault(p[4], verdict)
+            p = p[:4] + [COVERED, "Already in CLAUDE.md (\"%s\"): %s" % (verdict[1][:200], p[5])]
+            counted[p[4]] += 1
+            features[p[4]].add(p[2])
+            kept.append(p)
             continue
         went.setdefault(p[4], verdict if verdict and verdict[0] == "same" else ("same", p[4]))
         if verdict and verdict[0] == "same" and verdict[1] != p[4]:

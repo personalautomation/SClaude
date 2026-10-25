@@ -113,7 +113,16 @@ deploy_unchanged() {
   fi
 
   now="$(deploy_head "$wt" "$stage")" || return 1
-  [[ -n "$now" && "$was" == "$now" ]] || return 1
+  [[ -n "$now" ]] || return 1
+  # Main moved on by deferred entries alone, which ship nothing: sclaude puts
+  # them on main itself after a ship, and production read as changed, the
+  # issue was reopened, and the status said the feature was not there.
+  if [[ "$stage" == "prod" && "$was" != "$now" ]] \
+     && git -C "$REPO" merge-base --is-ancestor "$was" "$now" 2>/dev/null \
+     && [[ "$(deferred_rev_count "$REPO" "$was..$now" 2>/dev/null)" == "0" ]]; then
+    return 0
+  fi
+  [[ "$was" == "$now" ]] || return 1
   [[ "$stage" != "preview" || -z "$(worktree_dirt "$wt")" ]]
 }
 

@@ -187,8 +187,8 @@ try:
     check("defer-mixed-left-to-session", defer().split()[0], "rc=1")
     check("defer-mixed-writes-nothing", (rows(), commits()), (8, 5))
 
-    # Matched against CLAUDE.md first: proposals it already states are not put
-    # off, nothing is committed, and the log is decided all the same.
+    # Matched against CLAUDE.md first: proposals it already states are put off
+    # under a class of their own, never dropped.
     with open(log, "w") as fh:
         fh.writelines(both)
     with open(os.path.join(wt, "CLAUDE.md"), "w") as fh:
@@ -203,10 +203,9 @@ try:
     out = defer(asking=False, extra={"SCLAUDE_FRICTION_CLASSIFY": "on",
                                      "PATH": stub_bin + ":" + os.environ["PATH"]})
     check("defer-covered-decided", out.split()[0], "rc=0")
-    check("defer-covered-writes-nothing", (rows(), commits()), (8, 5))
-    with open(state) as fh:
-        check("defer-covered-review-done",
-              ((json.load(fh).get("friction") or {}).get("review-21") or {}).get("done"), True)
+    check("defer-covered-kept", (rows(), commits()), (10, 6))
+    with open(deferred) as fh:
+        check("defer-covered-class", sum(1 for l in fh if "\tclaude-md-already-stated\t" in l), 2)
     os.remove(os.path.join(wt, "CLAUDE.md"))
 
     # Somebody editing the file by hand: left to a session rather than mixed in.

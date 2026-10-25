@@ -2012,10 +2012,10 @@ friction_defer_proposals() {
   local file; file="$(deferred_file "$wt" "$slug")"
   # Matched first against the classes put off already and against CLAUDE.md
   # (friction_classify.py): the same rule in other words takes its class, so
-  # it counts as one rule seen again; one CLAUDE.md states is not put off.
+  # it counts as one rule seen again; one CLAUDE.md states goes under a class
+  # of its own, for the monthly review to drop.
   # Each class is counted as it goes in. On any failure the rows stay as
   # they came. SCLAUDE_FRICTION_CLASSIFY=off skips it.
-  local proposed="$n"
   if [[ "${SCLAUDE_FRICTION_CLASSIFY:-on}" != "off" ]]; then
     local notes classified note
     local -a folders=()
@@ -2032,42 +2032,36 @@ friction_defer_proposals() {
   now="$(date -Iseconds)"
   # Its own id however close the last one was.
   local run_id; run_id="deferred-$(date +%s%N)"
-  if [[ "$n" -gt 0 ]]; then
-    # How the file was before the rows, so a failed commit can put it back: from
-    # HEAD when it is tracked, cut to its old size when it was there untracked,
-    # gone when it was made just now. `git checkout HEAD` alone failed on a file
-    # HEAD never had, the rows stayed, and the session that took over appended
-    # them a second time.
-    local existed=0 size=0
-    [[ -f "$file" ]] && { existed=1; size="$(stat -c %s "$file" 2>/dev/null || echo 0)"; }
-    deferred_ensure "$wt" "$slug" || return 1
-    git -C "$wt" diff --quiet HEAD -- "$file" 2>/dev/null || return 1
-    printf '%s\n' "$rows" >> "$file" 2>/dev/null || return 1
-    session_runs "$state" "friction.$key" open "$run_id"
-    local nth
-    nth="$(python3 -c 'import json,sys; print(len(((json.load(open(sys.argv[1])).get("friction") or {}).get(sys.argv[2]) or {}).get("runs") or []))' \
-             "$state" "$key" 2>/dev/null || echo 1)"
-    [[ "$nth" =~ ^[1-9][0-9]*$ ]] || nth=1
-    if ! { git -C "$wt" add -- "$file" 2>/dev/null \
-           && git -C "$wt" commit -q -m "chore(sclaude): put off $n CLAUDE.md proposal(s) from $key, review $nth" \
-                -m "The friction log after '$key' held nothing but proposals, so sclaude put them off to the monthly review itself, with no session." \
-                -- "$file" >/dev/null 2>&1; }; then
-      git -C "$wt" reset -q -- "$file" 2>/dev/null || true
-      local rel; rel="$(git -C "$wt" ls-files --full-name --error-unmatch -- "$file" 2>/dev/null)" || rel=""
-      if [[ -n "$rel" ]] && git -C "$wt" cat-file -e "HEAD:$rel" 2>/dev/null; then
-        git -C "$wt" checkout -q HEAD -- "$file" 2>/dev/null || true
-      elif (( existed )); then
-        truncate -s "$size" "$file" 2>/dev/null || true
-      else
-        rm -f "$file"
-      fi
-      session_runs "$state" "friction.$key" drop "$run_id"
-      return 1
+  # How the file was before the rows, so a failed commit can put it back: from
+  # HEAD when it is tracked, cut to its old size when it was there untracked,
+  # gone when it was made just now. `git checkout HEAD` alone failed on a file
+  # HEAD never had, the rows stayed, and the session that took over appended
+  # them a second time.
+  local existed=0 size=0
+  [[ -f "$file" ]] && { existed=1; size="$(stat -c %s "$file" 2>/dev/null || echo 0)"; }
+  deferred_ensure "$wt" "$slug" || return 1
+  git -C "$wt" diff --quiet HEAD -- "$file" 2>/dev/null || return 1
+  printf '%s\n' "$rows" >> "$file" 2>/dev/null || return 1
+  session_runs "$state" "friction.$key" open "$run_id"
+  local nth
+  nth="$(python3 -c 'import json,sys; print(len(((json.load(open(sys.argv[1])).get("friction") or {}).get(sys.argv[2]) or {}).get("runs") or []))' \
+           "$state" "$key" 2>/dev/null || echo 1)"
+  [[ "$nth" =~ ^[1-9][0-9]*$ ]] || nth=1
+  if ! { git -C "$wt" add -- "$file" 2>/dev/null \
+         && git -C "$wt" commit -q -m "chore(sclaude): put off $n CLAUDE.md proposal(s) from $key, review $nth" \
+              -m "The friction log after '$key' held nothing but proposals, so sclaude put them off to the monthly review itself, with no session." \
+              -- "$file" >/dev/null 2>&1; }; then
+    git -C "$wt" reset -q -- "$file" 2>/dev/null || true
+    local rel; rel="$(git -C "$wt" ls-files --full-name --error-unmatch -- "$file" 2>/dev/null)" || rel=""
+    if [[ -n "$rel" ]] && git -C "$wt" cat-file -e "HEAD:$rel" 2>/dev/null; then
+      git -C "$wt" checkout -q HEAD -- "$file" 2>/dev/null || true
+    elif (( existed )); then
+      truncate -s "$size" "$file" 2>/dev/null || true
+    else
+      rm -f "$file"
     fi
-  else
-    # Every one is a rule CLAUDE.md states already: nothing to write, and the
-    # log is decided all the same.
-    session_runs "$state" "friction.$key" open "$run_id"
+    session_runs "$state" "friction.$key" drop "$run_id"
+    return 1
   fi
   session_runs "$state" "friction.$key" finish "$run_id"
   # An earlier review's answer belongs to its run, as for a session (run_friction).
@@ -2080,13 +2074,9 @@ friction_defer_proposals() {
   state_set "$state" "friction.$key.done" true
   state_set "$state" "friction.$key.verdict" deferred
   state_set "$state" "friction.$key.verdict_note" \
-    "only CLAUDE.md proposals ($proposed), $n put off by sclaude without a session"
+    "only CLAUDE.md proposals ($n), put off by sclaude without a session"
   echo ""
-  if [[ "$n" -eq "$proposed" ]]; then
-    info "  friction after '$key': $n CLAUDE.md proposal(s), put off to the monthly review — no session needed"
-  else
-    info "  friction after '$key': $proposed CLAUDE.md proposal(s), $n put off to the monthly review, the rest in CLAUDE.md already"
-  fi
+  info "  friction after '$key': $n CLAUDE.md proposal(s), put off to the monthly review — no session needed"
   return 0
 }
 
@@ -2491,8 +2481,15 @@ review_close_gate() {
           info "    1) Check the fixes with a review pass — it resolves the threads they fixed and looks for nothing new"
           info "    2) Close step 4 now, with the $count thread(s) as they are"
           info "    3) Leave it open and come back later"
-          ask "${BOLD}Choose 1-3: ${OFF}" answer "pick:3" \
-            "Check the fixes" "Close step 4" "Leave it open"
+          # Asked again on anything but 1-3: a stray Enter left in the terminal
+          # read as "leave it open" and ended the step. No answer at all
+          # (nobody to ask) leaves it open, as before.
+          while :; do
+            ask "${BOLD}Choose 1-3: ${OFF}" answer "pick:3" \
+              "Check the fixes" "Close step 4" "Leave it open" || { answer=3; break; }
+            [[ "$answer" == [123] ]] && break
+            printf '%s\n' "  Answer 1, 2 or 3." >&2
+          done
           if [[ "$answer" != 1 ]]; then
             if [[ "$answer" != 2 ]]; then
               info "  Left open. Come back with: $SELF $slug"
@@ -2748,13 +2745,17 @@ review_stuck_ask() {
   [[ -n "$said" && "$said" != "null" ]] || return 0
   [[ -z "$(review_enough "$wt")" ]] || return 0
   [[ "$(state_get "$state" steps.review.stuck_asked 2>/dev/null || true)" != "true" ]] || return 0
-  state_set "$state" steps.review.stuck_asked true 2>/dev/null || true
   echo ""
   info "  The review's report: $said"
-  if ask "${BOLD}End the search for new findings? The open ones still go to a session; its fixes are checked only if you say so. [y/n] ${OFF}" answer yn \
-     && is_yes "$answer"; then
-    review_enough_set "$wt" pass
-    info "  The search is over; this is the last session for new findings."
+  # It waits for the answer, here or in the feature's topic: the rounds it
+  # stops cost more than the wait. Only an answer uses the question up — one
+  # nobody could see (no terminal, no channel) is asked again next round.
+  if ask "${BOLD}End the search for new findings? The open ones still go to a session; its fixes are checked only if you say so. [y/n] ${OFF}" answer yn; then
+    state_set "$state" steps.review.stuck_asked true 2>/dev/null || true
+    if is_yes "$answer"; then
+      review_enough_set "$wt" pass
+      info "  The search is over; this is the last session for new findings."
+    fi
   fi
   return 0
 }

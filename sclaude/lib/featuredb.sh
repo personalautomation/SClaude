@@ -314,10 +314,12 @@ ensure_db() {
   fi
 
   # Migrations the stack has not seen: the feature's own, written since the
-  # last start, and main's, merged in by sync_branch. One out of order — main
-  # brought one numbered below one already applied here — does not apply; the
-  # stack is this feature's alone, so rebuilding it is the answer.
-  if ! (cd "$wt" && $cli migration up --workdir "$dir") >> "$log" 2>&1; then
+  # last start, and main's, merged in by sync_branch or rebased under by
+  # sync_unpublished. One out of order — main brought one numbered below one
+  # already applied here — applies all the same (--include-all): refused, it
+  # left the suite running on a schema without main's change. One that still
+  # fails is the stack's alone, and rebuilding it is the answer.
+  if ! (cd "$wt" && $cli migration up --include-all --workdir "$dir") >> "$log" 2>&1; then
     warn "  database: pending migrations did not apply — see .sclaude/local/feature/db.log."
     warn "  This feature's database is its own; rebuild it with: npx supabase db reset"
   fi
@@ -422,12 +424,26 @@ db_main_up() {
   mkdir -p "$(dirname "$log")"
   cli="$(db_cli "$repo")"
   info "  database: applying main's $pending new migration(s) to the main local database…"
-  if ! (cd "$repo" && $cli migration up --workdir "$tmp") >> "$log" 2>&1; then
+  # --include-all: features merge in another order than their migrations are
+  # numbered, and one numbered below the last applied is main's all the same;
+  # without it the CLI refused it, and the stack stayed behind for good.
+  if ! (cd "$repo" && $cli migration up --include-all --workdir "$tmp") >> "$log" 2>&1; then
     warn "  database: they did not apply — see $log"
     warn "  The main local database stays behind main; look before anything rebuilds it."
   fi
   rm -rf "$tmp"
   return 0
+}
+
+# The feature's own migrations, applied to its stack again after the copy set
+# it back to main's schema; warned about when they do not apply.
+db_feature_up() {
+  local wt="$1"
+  (cd "$wt" && $(db_cli "$wt") migration up --include-all \
+     --workdir "$wt/.sclaude/local/feature/supabase") >> "$wt/.sclaude/local/feature/db.log" 2>&1 && return 0
+  warn "  database: this feature's migrations did not apply — see .sclaude/local/feature/db.log."
+  warn "  This feature's database is its own; rebuild it with: npx supabase db reset"
+  return 1
 }
 
 # Fills a new stack with the main local database's data, when the project asks
@@ -501,30 +517,13 @@ db_copy_main() {
   fi
   db_main_up
 
-  local theirs newest wipe=""
-  theirs="$(db_applied "$main")"
-  newest="$(tail -1 <<<"$theirs")"
-  if [[ -n "$newest" ]] && cmp -s <(sort <<<"$theirs") \
-       <(ls "$wt/supabase/migrations" 2>/dev/null | db_file_versions | awk -v n="$newest" '$0 + 0 <= n + 0'); then
-    if [[ "$(db_applied "$feature")" != "$theirs" ]]; then
-      info "  database: setting this feature's schema back to the main database's ($newest) for the copy…"
-      if ! (cd "$wt" && $(db_cli "$wt") db reset --version "$newest" --no-seed \
-              --workdir "$wt/.sclaude/local/feature/supabase") >> "$log" 2>&1; then
-        warn "  database: setting it back failed — see .sclaude/local/feature/db.log; filling from the seed instead"
-        warn "  This feature's database is its own; rebuild it with: npx supabase db reset"
-        return 1
-      fi
-    fi
-    wipe="$(docker exec "$feature" psql -U supabase_admin -d postgres -Atc \
-      "select string_agg(format('%I.%I', schemaname, tablename), ', ') from pg_tables where schemaname = 'public'" 2>>"$log")"
-  fi
-
   info "  database: copying the main local database into it…"
   # To a file first, and checked, rather than piped straight in: a dump that
   # fails half way — the main stack stopping mid-copy, a permission refused —
   # would otherwise load whatever it had produced, report no errors, and mark a
   # half-empty database as filled for good. A failed dump leaves the stack
-  # empty and falls back to the seed.
+  # empty and falls back to the seed. Taken before the feature's schema is set
+  # back below, so that a failed dump leaves the stack as its migrations built it.
   local dump="$wt/.sclaude/local/feature/db-copy.sql"
   if ! docker exec "$main" pg_dump -U supabase_admin -d postgres --data-only --column-inserts \
          --on-conflict-do-nothing --schema=auth --schema=public \
@@ -534,6 +533,26 @@ db_copy_main() {
     warn "  database: copying the main database failed — see .sclaude/local/feature/db.log; filling from the seed instead"
     return 1
   fi
+
+  local theirs newest wipe=""
+  theirs="$(db_applied "$main")"
+  newest="$(tail -1 <<<"$theirs")"
+  if [[ -n "$newest" ]] && cmp -s <(sort <<<"$theirs") \
+       <(ls "$wt/supabase/migrations" 2>/dev/null | db_file_versions | awk -v n="$newest" '$0 + 0 <= n + 0'); then
+    if [[ "$(db_applied "$feature")" != "$theirs" ]]; then
+      info "  database: setting this feature's schema back to the main database's ($newest) for the copy…"
+      if ! (cd "$wt" && $(db_cli "$wt") db reset --version "$newest" --no-seed \
+              --workdir "$wt/.sclaude/local/feature/supabase") >> "$log" 2>&1; then
+        rm -f "$dump"
+        db_feature_up "$wt"
+        warn "  database: setting it back failed — see .sclaude/local/feature/db.log; filling from the seed instead"
+        return 1
+      fi
+    fi
+    wipe="$(docker exec "$feature" psql -U supabase_admin -d postgres -Atc \
+      "select string_agg(format('%I.%I', schemaname, tablename), ', ') from pg_tables where schemaname = 'public'" 2>>"$log")"
+  fi
+
   local out rc
   local -a empty=()
   [[ -n "$wipe" ]] && empty=(-c "TRUNCATE $wipe;")
@@ -544,15 +563,14 @@ db_copy_main() {
   rm -f "$dump"
   printf '%s\n' "$out" >> "$log"
   if [[ "$rc" -ne 0 ]]; then
+    # Set back and emptied, the stack lacks the feature's own migrations: they
+    # go back before the seed fills it.
+    [[ -n "$wipe" ]] && db_feature_up "$wt"
     warn "  database: loading the copy failed — see .sclaude/local/feature/db.log; filling from the seed instead"
     return 1
   fi
   # The feature's own migrations, now over main's rows.
-  if [[ -n "$wipe" ]] && ! (cd "$wt" && $(db_cli "$wt") migration up \
-         --workdir "$wt/.sclaude/local/feature/supabase") >> "$log" 2>&1; then
-    warn "  database: this feature's migrations did not apply over the copy — see .sclaude/local/feature/db.log."
-    warn "  This feature's database is its own; rebuild it with: npx supabase db reset"
-  fi
+  [[ -n "$wipe" ]] && db_feature_up "$wt"
   errors="$(grep -c 'ERROR:' <<<"$out")"
   docker exec "$feature" psql -U supabase_admin -d postgres -Atc "select id from auth.users" \
     > "$wt/.sclaude/local/feature/db-copied-users" 2>>"$log" || return 1

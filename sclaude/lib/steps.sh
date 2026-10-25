@@ -276,9 +276,10 @@ review_guard_settings() {
 # Ignored files are left out: running the hooks writes their caches, and every
 # review would be reported.
 instruments_state() {
-  local git_dir
+  local git_dir clean=dirty
   git_dir="$(git -C "$INSTRUMENTS" rev-parse --absolute-git-dir 2>/dev/null)"
-  printf '%s %s %s\n' "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null)" \
+  [[ -z "$(git -C "$INSTRUMENTS" status --porcelain 2>/dev/null)" ]] && clean=clean
+  printf '%s %s %s %s\n' "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null)" \
     "$( { git -C "$INSTRUMENTS" status --porcelain
           git -C "$INSTRUMENTS" diff HEAD
           git -C "$INSTRUMENTS" ls-files -o --exclude-standard -z \
@@ -290,7 +291,21 @@ instruments_state() {
           [[ -n "$git_dir" ]] && cat "$git_dir/config" \
             && (cd "$git_dir/hooks" && find . \( -type f -o -type l \) -printf '%p %m %l\n' | sort \
                 && find . -type f -exec sha1sum {} + | sort)
-        } 2>/dev/null | md5sum | cut -c1-12)"
+        } 2>/dev/null | md5sum | cut -c1-12)" "$clean"
+}
+
+# Whether HEAD reached <now> from <was> by commits alone, as the reflog tells:
+# a pull, a checkout or a reset moves it too, and the session watched can run
+# those, while it cannot commit.
+#
+#   instruments_committed_only <was> <now>
+instruments_committed_only() {
+  local was="$1" sha how
+  while read -r sha how; do
+    [[ "$sha" == "$was" ]] && return 0
+    [[ "$how" == commit* ]] || return 1
+  done < <(git -C "$INSTRUMENTS" log -g --format='%H %gs' HEAD 2>/dev/null)
+  return 1
 }
 
 # Says so, loudly, when a review session changed sclaude's checkout after all.
@@ -304,9 +319,11 @@ instruments_state() {
 # Commits alone are not that. Other sessions work in the checkout at the same
 # time, and the session watched here cannot commit (the guard refuses it): a
 # retrospective was told it had changed the checkout when two commits of
-# another session's had landed while it ran. So a HEAD that moved, over a tree
-# as clean as before and the same config and hooks, is said quietly, with the
-# commits named; whatever else changed is loud, the commits named with it.
+# another session's had landed while it ran. So a HEAD that moved by commits
+# alone (the reflog says so; a pull, a checkout or a reset is not that), over a
+# tree clean before and after, with the same config and hooks, is said
+# quietly, with the commits named; whatever else changed is loud, the commits
+# named with it.
 instruments_unchanged() {
   local now; now="$(instruments_state)"
   [[ "$now" == "$1" ]] && return 0
@@ -315,7 +332,8 @@ instruments_unchanged() {
   [[ "${was[0]}" != "${is[0]}" && -n "${was[0]}" ]] \
     && made="$(git -C "$INSTRUMENTS" log --format='     %h %s' "${was[0]}..HEAD" 2>/dev/null || true)"
   if [[ -n "$made" && "${was[2]:-}" == "${is[2]:-}" \
-        && -z "$(git -C "$INSTRUMENTS" status --porcelain 2>/dev/null)" ]]; then
+        && "${was[3]:-}" == clean && "${is[3]:-}" == clean ]] \
+     && instruments_committed_only "${was[0]}" "${is[0]}"; then
     info "   Commits reached sclaude's checkout while the $2 ran — another session's; it cannot commit:"
     printf '%s\n' "$made"
     return 0

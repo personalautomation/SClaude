@@ -1131,9 +1131,12 @@ how often a class comes back, would have read one rule seen four times as
 four rules seen once. So one call of a small model (`SCLAUDE_CLASSIFY_MODEL`,
 haiku) reads the proposals, the classes already put off and `CLAUDE.md`, and
 says of each: the same rule as a class already there (it takes that class),
-a rule `CLAUDE.md` states (not put off, the line quoted), or new. The answer
-is checked, not trusted — a class must exist, a quote must be `CLAUDE.md`'s
-word for word — and any failure leaves the rows as they came.
+a rule `CLAUDE.md` states (put off under `claude-md-already-stated`, the line
+quoted, for the monthly review to drop), or new. The answer is checked, not
+trusted — a class must exist, a quote must be `CLAUDE.md`'s word for word —
+no row is dropped, and any failure leaves the rows as they came. The call is
+capped at a minute: it stands between a fix session and the review of its
+fixes.
 
 Each class is counted as it goes in: "2nd time since the last monthly
 review, in 2 features". The count is worked out from the rows, one per

@@ -406,6 +406,19 @@ try:
               'echo 4 > "%s/a"; git -C "%s" -c user.name=t -c user.email=t@t commit -qam more; '
               'echo 5 > "%s/a"; instruments_unchanged "$s" review 2>&1 || echo changed'
               % (inst, inst, inst, inst), repo)
+    # A move that is not a commit — a fast-forward the session ran — is loud.
+    subprocess.run(["git", "-C", inst, "checkout", "-q", "-b", "ahead"], check=True)
+    with open(os.path.join(inst, "a"), "w") as fh:
+        fh.write("9\n")
+    subprocess.run(["git", "-C", inst, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "ahead"],
+                   check=True)
+    main_branch = subprocess.run(["git", "-C", inst, "rev-parse", "--abbrev-ref", "@{-1}"],
+                                 capture_output=True, text=True).stdout.strip()
+    subprocess.run(["git", "-C", inst, "checkout", "-q", main_branch], check=True)
+    moved = sh('info() { echo "INFO $*"; }; INSTRUMENTS="%s"; s="$(instruments_state)"; '
+               'git -C "%s" merge -q --ff-only ahead; '
+               'instruments_unchanged "$s" review 2>&1 || echo changed' % (inst, inst), repo)
+    check("instruments-fast-forward-loud", moved.endswith("changed"), True)
     check("instruments-commits-and-edits-loud",
           "changed sclaude's own checkout" in both and "more" in both and both.endswith("changed"), True)
     subprocess.run(["git", "-C", inst, "checkout", "-q", "a"], check=True)

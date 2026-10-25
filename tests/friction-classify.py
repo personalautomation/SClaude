@@ -42,14 +42,14 @@ def row(date, feature, klass, text, step="review"):
 
 
 def run(tmp, rows, answer, own_rows=(), main_rows=(), reviewed=None, rc=0):
-    folder = os.path.join(tmp, "main", "deferred")
+    folder = os.path.join(tmp, "main", "team", "deferred")
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, "other.tsv"), "w") as fh:
         fh.write("".join(r + "\n" for r in main_rows))
     if reviewed:
         with open(os.path.join(folder, "last-reviewed"), "w") as fh:
             fh.write(reviewed + "\n")
-    own_dir = os.path.join(tmp, "tree", "deferred")
+    own_dir = os.path.join(tmp, "tree", "team", "deferred")
     os.makedirs(own_dir, exist_ok=True)
     own = os.path.join(own_dir, "feat.tsv")
     with open(own, "w") as fh:
@@ -100,8 +100,10 @@ def covered(tmp):
     answer = json.dumps([{"n": 1, "verdict": "covered",
                           "quote": "A condition is spelled out once, next to the code that checks it."}])
     rc, out, said = run(tmp, [row("2026-10-24", "feat", "claude-md-new", "Proposal: y")], answer)
-    check("covered: not put off", (rc, out), (0, []))
-    check("covered: the note quotes CLAUDE.md", any("already in CLAUDE.md" in n for n in said), True)
+    check("covered: put off under a class of its own, not dropped",
+          [r[4] for r in out], ["claude-md-already-stated"])
+    check("covered: the row quotes CLAUDE.md", out[0][5].startswith("Already in CLAUDE.md (") if out else False, True)
+    check("covered: the note says so", any("already in CLAUDE.md" in n for n in said), True)
 
 
 def invented(tmp):
@@ -126,8 +128,8 @@ def counted(tmp):
     # once; rows before the last monthly review are not counted.
     mine = row("2026-10-22", "feat", "claude-md-a", "Proposal: a, earlier")
     old = row("2026-09-01", "older", "claude-md-a", "Proposal: a, before the review")
-    os.makedirs(os.path.join(tmp, "main", "deferred"))
-    with open(os.path.join(tmp, "main", "deferred", "feat.tsv"), "w") as fh:
+    os.makedirs(os.path.join(tmp, "main", "team", "deferred"))
+    with open(os.path.join(tmp, "main", "team", "deferred", "feat.tsv"), "w") as fh:
         fh.write(mine + "\n")
     rc, out, said = run(tmp, [row("2026-10-24", "feat", "claude-md-a", "Proposal: a again")],
                         "[]", own_rows=[mine], main_rows=[old], reviewed="2026-10-01")
@@ -165,14 +167,34 @@ def batch(tmp):
             row("2026-10-24", "feat", "claude-md-c", "Proposal: in CLAUDE.md"),
             row("2026-10-24", "feat", "claude-md-d", "Proposal: in CLAUDE.md, said again")]
     rc, out, said = run(tmp, rows, answer)
-    check("batch: the second takes the first's class", [r[4] for r in out], ["claude-md-a", "claude-md-a"])
+    check("batch: the second takes the first's class, the covered ones theirs", [r[4] for r in out],
+          ["claude-md-a", "claude-md-a", "claude-md-already-stated", "claude-md-already-stated"])
     check("batch: counted together", any(n.startswith("claude-md-a: 2nd time") for n in said), True)
     check("batch: the same as a covered one goes too",
           sum(1 for n in said if n.startswith("already in CLAUDE.md")), 2)
 
 
+def other_person(tmp):
+    # Another person's file of the same feature is theirs, and counts too.
+    bob = os.path.join(tmp, "main", "people", "bob", "deferred")
+    os.makedirs(bob)
+    with open(os.path.join(bob, "feat.tsv"), "w") as fh:
+        fh.write(row("2026-10-23", "feat", "claude-md-a", "Proposal: a, by bob") + "\n")
+    folder = os.path.join(tmp, "main", "team", "deferred")
+    os.makedirs(folder)
+    own = os.path.join(tmp, "tree", "team", "deferred", "feat.tsv")
+    os.makedirs(os.path.dirname(own))
+    open(own, "w").close()
+    notes = os.path.join(tmp, "notes")
+    subprocess.run([sys.executable, SCRIPT, "--notes", notes, "--own", own, folder, bob],
+                   input=row("2026-10-24", "feat", "claude-md-a", "Proposal: a") + "\n",
+                   capture_output=True, text=True, env=dict(os.environ, PATH="/usr/bin:/bin"), timeout=60)
+    check("another person's file of the feature counts",
+          any(n.startswith("claude-md-a: 2nd time") for n in open(notes).read().splitlines()), True)
+
+
 def main():
-    for fn in (same, covered, invented, broken, counted, no_material, batch):
+    for fn in (same, covered, invented, broken, counted, no_material, batch, other_person):
         case(fn)
     for name, want, got in failures:
         print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))

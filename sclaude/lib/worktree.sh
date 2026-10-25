@@ -849,6 +849,15 @@ sync_branch() {
   [[ -n "$branch" && "$branch" != "null" ]] || return 0
   slug="$(state_get "$state" feature 2>/dev/null)" || slug=""
 
+  # A merge left under way (a sync broken off mid-way, one by hand) holds the
+  # step: its files may carry conflict markers. First of all: before the
+  # count of what main has, which a merge that took it all would put at none,
+  # and before the check on uncommitted work its staged files would pass for.
+  if merge_under_way "$wt"; then
+    sync_branch_held "$wt" "$slug"
+    return 1
+  fi
+
   # Silently: the network here is a convenience rather than an obligation. No
   # origin means we work with what we have, as cmd_sync does.
   git -C "$REPO" fetch origin -q 2>/dev/null || true
@@ -862,14 +871,6 @@ sync_branch() {
   # a warning at every start stops being read.
   [[ "$behind" =~ ^[0-9]+$ ]] || return 0
   [[ "$behind" -eq 0 ]] && return 0
-
-  # A merge of main left under way (a sync broken off mid-way, one by hand)
-  # holds the step: its files may carry conflict markers. Before the check on
-  # uncommitted work, which its staged files would pass for.
-  if merge_under_way "$wt"; then
-    sync_branch_held "$wt" "$slug"
-    return 1
-  fi
 
   # Uncommitted work must not be merged into: merge would stop halfway. We check
   # before everything else — offering what is known to be impossible is
@@ -962,7 +963,7 @@ sync_branch() {
 #   sync_branch_held <wt> <slug>
 sync_branch_held() {
   warn ""
-  warn "  A merge of main is under way in the tree; the step has not been started."
+  warn "  A merge is under way in the tree; the step has not been started."
   warn "  Finish it with: sclaude sync ${2:-<feature>}   or back it out: git -C $1 merge --abort"
 }
 

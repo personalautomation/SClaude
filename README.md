@@ -484,7 +484,8 @@ Every step starts on a branch carrying the latest main, too: sclaude merges
 it in without asking, and a merge that would conflict goes to the same sync
 first. With uncommitted work in the tree it merges nothing and says so; the
 merge is then `sclaude sync <name>`, which asks before a session resolves
-anything.
+anything. A merge left half-done in the tree holds the step until it is
+finished (`sclaude sync <name>`) or backed out (`git merge --abort`).
 
 The merge is yours (unless the product set it otherwise). After it sclaude
 offers production, runs the tests there, and rolls back if they fail.

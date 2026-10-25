@@ -2451,10 +2451,15 @@ review_close_gate() {
           count="$(local_review_count "$wt" "$pr")" || count="?"
           echo ""
           info "  You ended the search for new findings; $count thread(s) are open on PR #$pr."
-          ask "${BOLD}Check the fixes with a review pass? It resolves the threads they fixed and looks for nothing new. [y/n] ${OFF}" answer yn
-          if ! is_yes "$answer"; then
-            ask "${BOLD}Close step 4 now, with $count thread(s) left open as they are? [y/n] ${OFF}" answer yn
-            if ! is_yes "$answer"; then
+          # One choice of three, asked once: as two yes/no questions in a row
+          # it was answered twice, the second only after the first's "no".
+          info "    1) Check the fixes with a review pass — it resolves the threads they fixed and looks for nothing new"
+          info "    2) Close step 4 now, with the $count thread(s) as they are"
+          info "    3) Leave it open and come back later"
+          ask "${BOLD}Choose 1-3: ${OFF}" answer "pick:3" \
+            "Check the fixes" "Close step 4" "Leave it open"
+          if [[ "$answer" != 1 ]]; then
+            if [[ "$answer" != 2 ]]; then
               info "  Left open. Come back with: $SELF $slug"
               return 1
             fi

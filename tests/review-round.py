@@ -753,16 +753,17 @@ session_watch_stop
     # the person's word: asked first, reviewed on a yes, and what is still
     # open then goes to a session again.
     for said in ("now", "pass"):
-        out, left = enough_gate(said, "open: 3 review thread(s) open", 2, answers=("y",))
-        check("asked-before-check-%s" % said, "ASKED: Check the fixes" in out, True)
+        out, left = enough_gate(said, "open: 3 review thread(s) open", 2, answers=("1",))
+        check("asked-before-check-%s" % said, "Check the fixes" in out and "ASKED: Choose 1-3" in out, True)
         check("checked-on-yes-%s" % said, "REVIEWED" in out, True)
         check("open-goes-to-session-%s" % said, "back to a review session" in out.lower()
               and "RC=1" in out, True)
-    # No check, no close: left open, nothing reviewed.
-    out, left = enough_gate("now", "open: 3 review thread(s) open", 2, answers=("n", "n"))
+    # No check, no close: left open, nothing reviewed — one question, not two.
+    out, left = enough_gate("now", "open: 3 review thread(s) open", 2, answers=("3",))
+    check("one-question", out.count("ASKED"), 1)
     check("no-check-no-review", "REVIEWED" not in out and "RC=1" in out, True)
     # No check, but close: step 4 closes with the threads as they are.
-    out, left = enough_gate("now", "open: 3 review thread(s) open", 2, answers=("n", "y"))
+    out, left = enough_gate("now", "open: 3 review thread(s) open", 2, answers=("2",))
     check("no-check-closes", "REVIEWED" not in out and "RC=0" in out, True)
     check("no-check-left-open", left["steps"]["review"].get("left_open"), 3)
     # A head reviewed already is not asked about.
@@ -771,7 +772,7 @@ session_watch_stop
     # Without the word: reviewed at once, as before.
     out, left = enough_gate("", "open: 3 review thread(s) open", 2)
     check("unsaid-reviewed", "REVIEWED" in out and "Check the fixes" not in out, True)
-    out, left = enough_gate("pass", "ok", 0, answers=("y",))
+    out, left = enough_gate("pass", "ok", 0, answers=("1",))
     check("nothing-open-closes", "RC=0" in out, True)
     # In Actions: only threads posted after the session began are left open.
     out, left = enough_gate("pass", "open: 2 review thread(s) open", 0, mode="github", split="0 2")

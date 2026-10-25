@@ -445,7 +445,9 @@ was given stays readable.
 **Step 2, code.** A fresh session builds it, with the approved plan as its
 brief. Each commit names the criterion it serves in a `Requirement:` footer.
 Claude checks its work in Chrome at the feature's address. The step closes when
-you say it is done **and** the product's local tests pass.
+you say it is done **and** the product's local tests pass. A branch not
+pushed yet is put on top of main before those tests, without a question, when
+it rebases cleanly.
 
 **Step 3, pr.** The pull request, opened as a draft by the `pr` skill, with the
 criteria copied in as an unticked checklist for QA, and the manuals updated in
@@ -453,7 +455,10 @@ the same pull request.
 
 **Step 4, review.** The project's automatic review reads the pull request, and
 a session fixes what it found, one round at a time. The step closes when the
-review has nothing left open, the preview is deployed and its tests pass.
+review has nothing left open, the preview is deployed and its tests pass. When the
+report says the rounds stopped converging, sclaude says so once and names the
+keys that end the search for new findings; once you end it, one question with
+three answers settles the rest: check the fixes, close the step, or leave it.
 
 **QA, merge, production.** The issue moves to `In QA`, and sclaude waits — you
 can close the terminal; a background timer keeps watching the board. QA checks

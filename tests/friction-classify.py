@@ -206,8 +206,24 @@ def not_a_rule(tmp):
     check("same as a class that is no rule is refused", [r[4] for r in out], ["claude-md-x", "claude-md-y"])
 
 
+def follows_class(tmp):
+    # A row with no verdict goes where an earlier one of its class went; and
+    # classes that are no CLAUDE.md rule are not offered or taken.
+    answer = json.dumps([{"n": 1, "verdict": "same", "class": "claude-md-b"},
+                         {"n": 3, "verdict": "same", "class": "sclaude-default"}])
+    rows = [row("2026-10-24", "feat", "claude-md-a", "Proposal: a"),
+            row("2026-10-24", "feat", "claude-md-a", "Proposal: a, again"),
+            row("2026-10-24", "feat", "claude-md-c", "Proposal: c")]
+    main_rows = [row("2026-10-20", "o", "claude-md-b", "Proposal: b"),
+                 row("2026-10-20", "o", "sclaude-default", "A default of sclaude's")]
+    rc, out, said = run(tmp, rows, answer, main_rows=main_rows)
+    check("a row with no verdict follows its class", [r[4] for r in out],
+          ["claude-md-b", "claude-md-b", "claude-md-c"])
+
+
 def main():
-    for fn in (same, covered, invented, broken, counted, no_material, batch, other_person, not_a_rule):
+    for fn in (same, covered, invented, broken, counted, no_material, batch, other_person, not_a_rule,
+               follows_class):
         case(fn)
     for name, want, got in failures:
         print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))

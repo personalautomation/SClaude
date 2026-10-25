@@ -121,7 +121,9 @@ def riders(repo, prod, main, own, migrations_dir, own_pr="", skip=()):
             # A squash is its pull request only as that pull request's merge.
             head, issues = pr_info(repo, pr, None if merge else sha)
             branch = branch or head
-            if squash and head and pr == own_pr:
+            # The shipped one: as its merge when gh can say; by its number
+            # alone when gh cannot, rather than list it as a commit of its own.
+            if squash and pr == own_pr and (head or not merged_prs(repo)):
                 continue
         if (merge or (squash and branch)) and not is_own(branch, own):
             added = []

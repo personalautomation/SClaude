@@ -394,6 +394,12 @@ out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo,
                       "41-beta", "supabase/migrations", "903"],
                      capture_output=True, text=True,
                      env=dict(os.environ, PATH=gh_bin + ":/usr/bin:/bin")).stdout
+# gh unable to say: the shipped one's squash is still left out by its number.
+out_no_gh = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo, prod, "main",
+                            "41-beta", "supabase/migrations", "903"],
+                           capture_output=True, text=True, env=dict(os.environ, PATH=git_only)).stdout
+check("riders-own-squash-left-out-without-gh",
+      any("the feature being shipped" in l for l in out_no_gh.splitlines()), False)
 check("riders-a-commit-citing-the-shipped-pr-is-said",
       any(l.startswith("commit\t") and "follow-up" in l for l in out.splitlines()), True)
 

@@ -666,12 +666,14 @@ for _name, _src, _close, _status in (
 # unchanged, and with prod_done its fingerprint missed the first pass's and a
 # second epilogue rewrote the same status.
 check_true("prod-live-set-where-the-issue-closes-shipped",
-           re.search(r'prod_carries_feature "\$wt"; then\n\s*prod_live=1\n\s*issue_close_done',
+           re.search(r'if \[\[ "\$prod_done" -eq 1 \|\| "\$carried" -eq 1 \]\]; then\n\s*prod_live=1\n\s*issue_close_done',
                      deploy_sh) is not None)
-# Nor is the issue reopened once the merge is in production.
+# Nor is the issue reopened once the merge is in production — asked of GitHub
+# once a pass, and the close reads the same answer.
 check_true("issue-not-held-open-after-the-cycle",
-           re.search(r'if \[\[ "\$\{merged:-\}" != "MERGED" \]\] \|\| ! prod_carries_feature "\$wt"; then\n'
-                     r'\s*issue_hold_open "\$issue"', deploy_sh) is not None)
+           re.search(r'\[\[ "\$\{merged:-\}" == "MERGED" \]\] && prod_carries_feature "\$wt" && carried=1\n'
+                     r'\s*if \[\[ "\$carried" -eq 0 \]\]; then\n\s*issue_hold_open "\$issue"', deploy_sh) is not None)
+check_true("prod-carries-feature-asked-once", deploy_sh.count('prod_carries_feature "$wt"') == 1)
 
 # prod_carries_feature, run: a recorded ship not rolled back that holds the
 # merge of the feature's pull request carries the feature, whatever main did

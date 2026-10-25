@@ -432,6 +432,16 @@ db_main_up() {
     warn "  database: could not read main's migrations — the main local database stays as it is"
     return 0
   fi
+  # Everything else of the tree's supabase/ beside them, as db_workdir gives a
+  # feature's stack: the config can name templates, a .env or seed files, and
+  # without them it does not load.
+  local entry
+  shopt -s nullglob dotglob
+  for entry in "$repo"/supabase/*; do
+    case "$(basename "$entry")" in config.toml|migrations|.temp|.branches) continue ;; esac
+    ln -sfn "$entry" "$tmp/supabase/$(basename "$entry")"
+  done
+  shopt -u nullglob dotglob
   log="$repo/.sclaude/local/db-main.log"
   mkdir -p "$(dirname "$log")"
   cli="$(db_cli "$repo")"
@@ -603,6 +613,15 @@ db_copy_main() {
   # line, and the feature's rows stood where main's were meant to go.
   if [[ -n "$wipe" ]] && ! docker exec "$feature" psql -U supabase_admin -d postgres -q -v ON_ERROR_STOP=1 \
          -c "SET session_replication_role = replica;" -c "TRUNCATE $wipe;" >>"$log" 2>&1; then
+    # Set back, its reference rows are under ids of its own: main's would
+    # load beside them and point at nothing. Not set back, the schema is
+    # main's already and the rows go in as before.
+    if [[ -n "$reset" ]]; then
+      rm -f "$dump"
+      db_feature_rebuild "$wt"
+      warn "  database: emptying this feature's tables failed — see .sclaude/local/feature/db.log; filling from the seed instead"
+      return 1
+    fi
     warn "  database: emptying this feature's tables failed — main's rows go in beside the feature's, as before"
   fi
   local out rc

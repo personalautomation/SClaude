@@ -190,7 +190,10 @@ def main():
     existing = deferred_rows(folders, own)
     classes = {}
     for f in existing:
-        if f[4] not in (COVERED, DEFAULT_CLASS):
+        # Rules only: the deferred files hold other classes too — sclaude's
+        # own defaults, restrictions put off — and a rule merged into one of
+        # those would be counted as something it is not.
+        if f[4].startswith("claude-md-") and f[4] not in (COVERED, DEFAULT_CLASS):
             classes[f[4]] = f[5]
     try:
         claude_md = open(claude_md_path, encoding="utf-8").read() if claude_md_path else ""
@@ -230,6 +233,10 @@ def main():
         verdict = verdicts.get(i)
         if verdict and verdict[0] == "same" and verdict[1] not in classes:
             verdict = went.get(verdict[1], verdict)
+        # One with no verdict of its own goes where an earlier one of its
+        # class went: the class it came with is the same rule's.
+        if not verdict and p[4] in went:
+            verdict = went[p[4]]
         if verdict and verdict[0] == "covered":
             notes.append("already in CLAUDE.md, put off as %s: %s — \"%s\"" % (
                 COVERED, p[4], verdict[1][:160]))

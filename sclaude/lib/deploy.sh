@@ -142,7 +142,7 @@ prod_carries_feature() {
   [[ "$(state_get "$state" rollback.prod.code 2>/dev/null || true)" != "done" ]] || return 1
   pr="$(state_get "$state" pr 2>/dev/null || true)"
   [[ -n "$pr" && "$pr" != "null" ]] || return 1
-  merge="$(timeout 30 gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid // ""' 2>/dev/null)" || return 1
+  merge="$(cd "$REPO" && timeout 30 gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid // ""' 2>/dev/null)" || return 1
   [[ -n "$merge" ]] || return 1
   git -C "$REPO" merge-base --is-ancestor "$merge" "$was" 2>/dev/null
 }
@@ -1783,7 +1783,11 @@ remind_prod() {
   # Not once the merge is in production: that close was the cycle's own end,
   # and a pass after a declined clean-up reopened the issue only to close it
   # again a moment later.
-  if [[ "${merged:-}" != "MERGED" ]] || ! prod_carries_feature "$wt"; then
+  # Asked once a pass, and kept: it asks GitHub, and the close at the end
+  # must not read a different answer than the hold here did.
+  local carried=0
+  [[ "${merged:-}" == "MERGED" ]] && prod_carries_feature "$wt" && carried=1
+  if [[ "$carried" -eq 0 ]]; then
     issue_hold_open "$issue"
   fi
 
@@ -2148,7 +2152,7 @@ remind_prod() {
   # feature about to close — and the closed, deployed-prod case status.md
   # answers with no comment at all could never come up.
   local prod_live=0
-  if [[ "$prod_done" -eq 1 ]] || prod_carries_feature "$wt"; then
+  if [[ "$prod_done" -eq 1 || "$carried" -eq 1 ]]; then
     prod_live=1
     issue_close_done "$issue" shipped
   else

@@ -210,7 +210,14 @@ prod_riders() {
   main="$(git -C "$REPO" rev-parse --verify --quiet origin/main 2>/dev/null)" || return 0
   git -C "$REPO" merge-base --is-ancestor "$sha" "$main" 2>/dev/null || return 0
   dir="$(project_migrations_dir "$wt" || true)"
-  python3 "$LIB/prod_riders.py" "$REPO" "$sha" "$main" "$slug" "$dir" 2>/dev/null || true
+  # Commits that only add deferred entries ship nothing, as prod_drift_report
+  # leaves them out; and the feature's own pull request, by its number, which
+  # a squashed merge gives in its subject alone.
+  local skip; skip="$(mktemp)"
+  deferred_only_revs "$REPO" "$sha..$main" > "$skip" 2>/dev/null || true
+  python3 "$LIB/prod_riders.py" "$REPO" "$sha" "$main" "$slug" "$dir" \
+    "$(state_get "$wt/.sclaude/local/feature/state.json" pr 2>/dev/null || true)" "$skip" 2>/dev/null || true
+  rm -f "$skip"
 }
 
 # The riders, said above the production question — in this shell, so the

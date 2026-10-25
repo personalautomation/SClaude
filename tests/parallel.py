@@ -345,6 +345,23 @@ check("riders-name-a-direct-commit",
       [l.split("\t")[2] for l in lines if l.startswith("commit")], ["fix: a hotfix straight on main"])
 check("riders-skip-promote-commits", "promote" in out, False)
 
+# Squashed merges are features too, the one shipped among them; and commits
+# the caller names (deferred entries alone) are left out.
+open(os.path.join(repo, "squash-own"), "w").write("s\n")
+g("add", "-A")
+g("commit", "-qm", "feat(x): the feature being shipped (#903)")
+open(os.path.join(repo, "deferred.tsv"), "w").write("d\n")
+g("add", "-A")
+g("commit", "-qm", "chore(sclaude): put off 1 proposal")
+skip_file = os.path.join(tmp, "riders-skip")
+open(skip_file, "w").write(g("rev-parse", "HEAD") + "\n")
+out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo, prod, "main",
+                      "41-beta", "supabase/migrations", "903", skip_file],
+                     capture_output=True, text=True, env=dict(os.environ, PATH="/usr/bin:/bin")).stdout
+check("riders-own-squash-left-out", "(#903)" in out, False)
+check("riders-named-commits-left-out", "put off" in out, False)
+check("riders-still-name-the-hotfix", "fix: a hotfix straight on main" in out, True)
+
 # --- the deferred friction ----------------------------------------------------
 #
 # The files are the product's, one per rules folder (deferred.sh): a

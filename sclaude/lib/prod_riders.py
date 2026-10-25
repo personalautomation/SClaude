@@ -9,7 +9,8 @@
 # beside its own, while the question above it said only "The branch
 # adds migrations". The ship was right; the person was not told what it was.
 #
-#   prod_riders.py <repo> <prod sha> <main ref> <own slug> [<migrations dir>]
+#   prod_riders.py <repo> <prod sha> <main ref> <own slug> [<migrations dir>
+#                  [<own pr> [<file of shas to leave out>]]]
 #
 # One line per thing riding along, tab-separated:
 #
@@ -20,14 +21,22 @@
 # serves, other than the one being shipped; its issue is the one the pull
 # request closes, or the number its sclaude branch starts with. A commit is one
 # pushed straight to main — a promote commit aside, which records migrations
-# already in production. Nothing at all when it cannot be worked out: this is a
-# note above a question, never a reason not to ask it.
+# already in production, and the ones the caller names in the file (commits
+# that only add deferred entries, which ship nothing). Nothing at all when it
+# cannot be worked out: this is a note above a question, never a reason not to
+# ask it.
+#
+# A pull request squashed into one commit is a feature too, told by the
+# "(#<pr>)" GitHub ends its subject with: read as a commit, a feature's own
+# squashed merge was listed as pushed straight to main, above the question
+# that ships it, among nineteen commits of deferred entries.
 import json
 import re
 import subprocess
 import sys
 
 MERGE = re.compile(r"^Merge pull request #(\d+) from [^/\s]+/(\S+)")
+SQUASH = re.compile(r"\(#(\d+)\)$")
 PROMOTE = re.compile(r"^chore\(db\): promote migrations\b")
 
 
@@ -52,15 +61,32 @@ def closing_issue(repo, pr, branch):
     return found.group(1) if found else "-"
 
 
-def riders(repo, prod, main, own, migrations_dir):
+def head_branch(repo, pr):
+    try:
+        done = subprocess.run(["gh", "pr", "view", pr, "--json", "headRefName"],
+                              cwd=repo, capture_output=True, text=True, timeout=60)
+        return json.loads(done.stdout).get("headRefName") or ""
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return ""
+
+
+def riders(repo, prod, main, own, migrations_dir, own_pr="", skip=()):
     out = []
     log = git(repo, "log", "--first-parent", "--format=%H%x09%s", "%s..%s" % (prod, main))
     for line in log.splitlines():
         sha, _, subject = line.partition("\t")
+        if sha in skip:
+            continue
         merge = MERGE.match(subject)
-        if merge:
-            pr, branch = merge.groups()
-            if branch.rstrip("/").split("/")[-1] == own or branch.endswith("/" + own):
+        squash = None if merge else SQUASH.search(subject)
+        if merge or squash:
+            if merge:
+                pr, branch = merge.groups()
+            else:
+                pr = squash.group(1)
+                branch = "" if pr == own_pr else head_branch(repo, pr)
+            if pr == own_pr or (branch and (branch.rstrip("/").split("/")[-1] == own
+                                            or branch.endswith("/" + own))):
                 continue
             added = []
             if migrations_dir:
@@ -79,8 +105,16 @@ def main():
         return 0
     repo, prod, main_ref, own = sys.argv[1:5]
     migrations_dir = sys.argv[5] if len(sys.argv) > 5 else ""
+    own_pr = sys.argv[6] if len(sys.argv) > 6 else ""
+    skip = set()
+    if len(sys.argv) > 7:
+        try:
+            with open(sys.argv[7]) as fh:
+                skip = {l.strip() for l in fh if l.strip()}
+        except OSError:
+            pass
     try:
-        lines = riders(repo, prod, main_ref, own, migrations_dir)
+        lines = riders(repo, prod, main_ref, own, migrations_dir, own_pr, skip)
     except Exception:
         return 0
     for line in reversed(lines):

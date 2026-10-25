@@ -7,6 +7,7 @@ they live here, symlinked into `~/.local/bin` and `~/.claude/skills`.
 |---|---|
 | [`sclaude`](#binsclaude) | runs a feature from issue to production with Claude doing the work and a person making the decisions |
 | [`skills/pr`](#skillspr) | a `/pr` skill: opens a pull request the way the team does it |
+| [`skills/sreview`](#skillssreview) | a `/sreview` skill: review and fix in iterations until the review finds nothing substantive |
 | [`sclaude-proxy`](#binsclaude-proxy) | one address per feature: `http://<feature>.localhost:3000` |
 | [`chrome-debug`](#binchrome-debug) | the Chrome that Claude drives to check its work |
 | [`wsl-update`](#binwsl-update) | the daily update of the tooling in WSL |
@@ -577,6 +578,22 @@ runs the project's checks and opens the pull request. The description has
 asked for, as observable behaviour, for QA to tick; then **How to verify** and
 any **Notes**. It also updates the product's manuals. It never merges or
 deploys.
+
+## skills/sreview
+
+`/sreview [N]` runs iterations of review and fixing on the current branch, in
+any repository, and asks whether to go on every N iterations (5 by default). It
+stops by itself once a review finds nothing substantive.
+
+Each review is a fresh subagent that has not seen the fixes, told what was
+already decided so it does not raise it again. Fixes go to subagents where they
+are more than a line or two. Questions are asked once per iteration, about a
+class of findings rather than one line, and each answer is kept as a policy in
+`<git common dir>/sreview/policies.md` — outside git, shared by every worktree —
+which settles similar findings in this run and later ones. In a project run by
+sclaude it takes the check commands, the review mode and the review rules from
+there, and with a pull request open keeps the findings as its threads. It
+commits once per iteration; pushing is left to the project's own rules.
 
 ## bin/sclaude-proxy
 

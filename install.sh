@@ -139,6 +139,8 @@ fi
 
 ln -sfn "$REPO/skills/pr" "$SKILLS/pr"
 echo "symlinked: $SKILLS/pr"
+ln -sfn "$REPO/skills/sreview" "$SKILLS/sreview"
+echo "symlinked: $SKILLS/sreview"
 
 # settings.json points at ~/.claude/statusline.py — the symlink is what makes
 # that setting work after the machine is reinstalled.

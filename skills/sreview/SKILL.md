@@ -34,31 +34,59 @@ the user in the language they write in.
    review must never touch. Write the answers as stances. Read them on every
    run; they decide trade-offs before any question is asked.
 5. **Mode** — see below. Say in one line which mode you are in and why.
+6. **Scope: this session's work only.** Parallel sessions may share the branch
+   or the checkout; two reviews of the same code, or two sessions fixing it,
+   race and undo each other. So the scope is what the session that invoked
+   `/sreview` produced:
+   - the commits on the branch carrying this session's `Claude-Session:`
+     trailer (its URL is in the commit attribution this session was given;
+     `git log --format='%H %(trailers:key=Claude-Session,valueonly)'`);
+   - the uncommitted changes to files this session edited, and only those.
+
+   Say the scope in a line (commits, files). If the session cannot tell its own
+   work apart — no trailer, nothing it remembers editing — ask the user for the
+   scope rather than taking the whole branch.
+
+## Other sessions' code
+
+A finding on code this session did not write is not fixed here. Find its owner:
+`git blame` the lines → the commit → its `Claude-Session:` trailer. If that
+session is active (`ListAgents`), send it the finding verbatim with
+`path:line` and the failure scenario (`SendMessage`) and leave it to it; say
+so in the report. If it is not active, or has no trailer, list the finding in
+the report under **Not ours**, with the commit, for the user. Fix it here only
+when your own fix cannot be made without it — and then say which and why.
+
+Committing: stage by path the files of this session's fixes, never
+`git add -A`; if the branch moved under you since the iteration began (another
+session committed), rebase nothing and stop to tell the user.
 
 ## Modes
 
-**sclaude project** — `.sclaude/config.json` exists. Take from it:
+**sclaude project** — `.sclaude/config.json` exists. sclaude's files are in the
+checkout this skill is installed from, wherever that is:
+`I="$(cd "$(readlink -f ~/.claude/skills/sreview)/../.." && pwd)"`. Take:
 - the check commands: `commands` (`typecheck`, `lint`, and whatever the
   project's `CLAUDE.md` asks for after the kind of change made);
 - `review`: `local` / `github` / `off`;
-- the rules of sclaude's review step, `~/instruments/sclaude/prompts/review.md`:
+- the rules of sclaude's review step, `$I/sclaude/prompts/review.md`:
   read its step 1 and follow it — the fix brief, "a fix that would undo an earlier
   one is not a fix", findings on the review workflow file or on deferred files,
   the `Left as it is, at the author's decision:` reply. Where it speaks of one
   session per round and markers for the orchestrator, this skill replaces that:
   you run the rounds yourself.
 - the reviewer's model and level: `LOCAL_REVIEW_MODEL` / `LOCAL_REVIEW_LEVEL` in
-  `~/instruments/sclaude/lib/local_review.sh` (today opus, medium).
+  `$I/sclaude/lib/local_review.sh` (today opus, medium).
 
 With a pull request open for the branch (`gh pr view --json number`) and
 `review` not `off`, this is **PR mode**: findings live as threads on the pull
 request, as sclaude keeps them.
 - `review: local` — the reviewer is your subagent (step 1). Before it runs, get
   what is already on the pull request:
-  `python3 ~/instruments/sclaude/lib/local_review.py prompt <cwd> <pr> <owner/repo> <journal>`
+  `python3 $I/sclaude/lib/local_review.py prompt <cwd> <pr> <owner/repo> <journal>`
   and add its output to the reviewer's scope verbatim. After it answers, save
   the answer and post it:
-  `python3 ~/instruments/sclaude/lib/local_review.py record <cwd> <pr> <owner/repo> <answer> <base> <head> <seconds> <journal>`
+  `python3 $I/sclaude/lib/local_review.py record <cwd> <pr> <owner/repo> <answer> <base> <head> <seconds> <journal>`
   — it posts new threads and resolves the ones the reviewer marked `RESOLVED`.
   The journal is `.sclaude/local/feature/local-review-rounds.jsonl` when that
   directory exists (so sclaude counts these rounds), else `$S/branches/<branch>.rounds.jsonl`.
@@ -86,10 +114,10 @@ Spawn a new subagent (Agent tool; the sclaude model when there is one) that has
 not seen your fixes. It invokes the `code-review` skill at the level above, and
 changes no file and posts nothing. Its scope, in plain words:
 
-- iteration 1: the whole branch, `git diff $(git merge-base origin/main HEAD)..HEAD`
-  (the default branch's remote ref, `main` when there is no remote);
-- later iterations: the commits since the last reviewed head, reading the rest of
-  the branch as context — your fixes are where new bugs come from;
+- iteration 1: this session's work (step 0.6) — its commits by SHA and its
+  uncommitted files; the rest of the branch only as context, not to report on;
+- later iterations: this session's commits since the last reviewed head —
+  your fixes are where new bugs come from;
 - **what was settled**, verbatim, so it does not raise it again: every policy in
   `policies.md` (stances included), and from the branch log every finding
   declined, with its reason, and every finding fixed. Tell it: a finding that
@@ -199,5 +227,6 @@ commit, policies added.
 
 When it stops: iterations run, and per iteration what was found, fixed and
 declined; the policies added this run, each in a line; commits;
-what is left open and why; in PR mode, threads the user has to resolve by hand,
+what is left open and why; findings handed to other sessions, and **Not ours**;
+in PR mode, threads the user has to resolve by hand,
 with links. Do not open a pull request, merge or deploy — those are other steps.

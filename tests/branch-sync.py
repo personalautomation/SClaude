@@ -14,7 +14,11 @@
 #   * the start merges, and asks nothing;
 #   * a state left with the old "no" mark is merged all the same;
 #   * a merge that would conflict goes to the sync with main, unasked, and
-#     leaves no half-merged tree; a sync that fails holds the step.
+#     leaves no half-merged tree; a sync that fails holds the step;
+#   * a plain merge that stops on conflicts the check could not foresee is
+#     backed out, and the step opens;
+#   * the menu's sync (sync_offer with the branch named) still asks first,
+#     and a no starts nothing.
 #
 # Run it with: python3 tests/branch-sync.py
 import os
@@ -65,13 +69,15 @@ try:
     with open(os.path.join(repo, ".sclaude/local/feature", "state.json"), "w") as fh:
         fh.write('{"branch": "feat/x", "feature": "x"}\n')
 
-    def start(answer, **env):
+    def start(answer, call=None, **env):
         script = ('BOLD=""; OFF=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""\n'
                   'REPO=%s\nsource %s/io.sh; source %s/ui.sh; source %s/state.sh; source %s/worktree.sh; source %s/deferred.sh; source %s/sync.sh\n'
                   'warn(){ echo "$*"; }; info(){ echo "$*"; }; unset ASK_DIR\n'
                   'ask() { echo "ASKED $1"; printf -v "$2" %%s "$ANSWER"; }\n'
                   'sync_with_main() { echo "SYNC $2 $3"; return "${SYNC_RC:-3}"; }\n'
-                  'sync_branch %s\n' % (repo, LIB, LIB, LIB, LIB, LIB, LIB, repo))
+                  '%s'
+                  % (repo, LIB, LIB, LIB, LIB, LIB, LIB, env.pop("PRELUDE", ""))
+                  + (call or 'sync_branch %s') % repo + '\n')
         return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                               env=dict(os.environ, ANSWER=answer, **env)).stdout
 
@@ -111,6 +117,22 @@ try:
     check("conflict: no half-merged tree", git("rev-parse", "-q", "--verify", "MERGE_HEAD", cwd=repo), "")
     out = start("", SYNC_RC="1")
     check("conflict: a sync that fails holds the step", "has not been started" in out, True)
+
+    # The menu names the branch: asked first, and a no is 4 with no sync.
+    out = start("n", call='sync_offer %s x 7 feat/x; echo "RC $?"')
+    check("menu: asked first", "with a session resolving them" in out, True)
+    check("menu: a no is 4", "RC 4" in out, True)
+    check("menu: a no starts nothing", "SYNC" in out, False)
+    out = start("y", call='sync_offer %s x 7 feat/x; echo "RC $?"')
+    check("menu: a yes syncs", "SYNC x nofetch" in out, True)
+
+    # The check could not tell, and the plain merge stops on conflicts: backed
+    # out, and the step opens on the branch as it stood.
+    out = start("", call='sync_branch %s; echo "RC $?"', PRELUDE="merge_conflicts() { return 2; }\n")
+    check("unforeseen: nothing asked", "ASKED" in out, False)
+    check("unforeseen: the step opens", "RC 0" in out, True)
+    check("unforeseen: backed out", git("rev-parse", "-q", "--verify", "MERGE_HEAD", cwd=repo), "")
+    check("unforeseen: says how to merge", "sclaude sync x" in out, True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

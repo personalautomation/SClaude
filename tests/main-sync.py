@@ -251,8 +251,10 @@ with tempfile.TemporaryDirectory() as tmp:
     git(seed, "push", "-q", "origin", "HEAD:main")
     commit(wt, "app.txt", "one\nfeature\nthree\n", "feature's change")
     git(wt, "push", "-q")
-    stub_gh = 'gh_repo() { echo o/r; }; gh() { echo "$GH_STATE"; }\n'
-    for gh_state, named in (("MERGED", False), ("OPEN", True)):
+    stub_gh = ('gh_repo() { echo o/r; }\n'
+               'gh() { [[ "$*" == "pr view 7 --repo o/r --json state --jq .state" ]] && echo "$GH_STATE"; }\n')
+    # No answer from GitHub (no network) keeps the number, as before.
+    for gh_state, named in (("MERGED", False), ("CLOSED", False), ("OPEN", True), ("", True)):
         with open(os.path.join(wt, ".sclaude/local/feature/state.json"), "w") as fh:
             json.dump({"feature": "9-x", "branch": "feat/9-x", "pr": 7, "reopened_pr": 7,
                        "issue": 9, "step": "pr"}, fh)

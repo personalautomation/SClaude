@@ -320,19 +320,43 @@ sync_gate() {
   return "$rc"
 }
 
-# The merge with main a step's start makes, when it would stop on conflicts:
-# the sync (sync_gate), which names the files and resolves them — sclaude
-# itself when only the deferred logs conflict, a session otherwise. A merge
-# that would not stop is the caller's own, plain `git merge`.
+# The merge with main a step's start or the menu makes, when it would stop on
+# conflicts: the sync (sync_gate), which names the files and resolves them —
+# sclaude itself when only the deferred logs conflict, a session otherwise. A
+# merge that would not stop is the caller's own, plain `git merge`.
 #
-#   sync_offer <wt> <slug> <pr>
-#     → 2 no conflict (or cannot tell): the caller merges;
-#       otherwise sync_gate's 0, 1, 3 or 5
+# A step's start asks nothing: a "no" there only put off the merge the sync
+# before the preview makes all the same. The menu's "Sync with main" names the
+# branch, and is asked first (sync_ask): a person who opened it to look has not
+# yet agreed to a paid session.
+#
+#   sync_offer <wt> <slug> <pr> [<branch> to ask about]
+#     → 2 no conflict (or cannot tell): the caller merges, or asks first;
+#       4 a no to the question; otherwise sync_gate's 0, 1, 3 or 5
 sync_offer() {
-  local crc=0
-  merge_conflicts "$1" nofetch >/dev/null || crc=$?
+  local conflicts crc=0
+  conflicts="$(merge_conflicts "$1" nofetch)" || crc=$?
   [[ "$crc" -eq 1 ]] || return 2
+  if [[ -n "${4:-}" ]]; then
+    sync_ask "$1" "$4" "$conflicts" || return 4
+  fi
   sync_gate "$1" "$2" "$3" nofetch
+}
+
+# The question before a merge that would stop on conflicts, with the files,
+# and what resolves them: sclaude itself when only the deferred logs conflict,
+# a paid session otherwise.
+#
+#   sync_ask <wt> <branch> <conflicts>   → 0 on a yes
+sync_ask() {
+  local wt="$1" branch="$2" answer how="a session resolving them"
+  local -a files
+  mapfile -t files <<< "$3"
+  sync_deferred_only "$wt" "${files[@]}" && how="sclaude merging the deferred logs itself"
+  info "  The merge would stop on conflicts in ${#files[@]} file(s):"
+  printf '%s\n' "${files[@]}" | sed 's/^/    /'
+  ask "${BOLD}Merge origin/main into $branch, with $how? [y/n] ${OFF}" answer yn
+  is_yes "$answer"
 }
 
 # The check, and the sync when it is needed.
@@ -393,20 +417,22 @@ sync_with_main() {
   [[ -n "$unfinished" ]] && what="a merge of main is under way here, resolved and not committed"
   pr="$(state_get "$state" pr 2>/dev/null || true)"
   echo ""
-  # Reviewed, with its pull request open: what remind_prod calls this for.
-  # From the menu (cmd_sync) it may be any step, before a pull request.
-  local reviewed=""
-  [[ "$(state_get "$state" step 2>/dev/null || true)" == "done" && "$pr" =~ ^[0-9]+$ ]] && reviewed=1
   # A feature sent back after its merge (retro_reopen, a production rollback,
   # QA's hand-back) still carries the merged pull request's number until step 3
-  # opens the next one, and `reopened_pr` holds that number. Named only while
-  # GitHub says it is open: "PR #N does not merge" about a merged one reads as
-  # though the merge itself were in doubt.
-  local named="$pr"
-  if [[ "$pr" =~ ^[0-9]+$ && "$(state_get "$state" reopened_pr 2>/dev/null || true)" == "$pr" ]] \
-     && [[ "$(gh pr view "$pr" --repo "$(gh_repo)" --json state --jq .state 2>/dev/null)" != "OPEN" ]]; then
-    named=""
+  # opens the next one, and `reopened_pr` holds that number. Not named once
+  # GitHub says it is merged or closed: "PR #N does not merge" about a merged
+  # one reads as though the merge itself were in doubt. No answer (no
+  # network) keeps the number, as before.
+  local named="$pr" pr_state=""
+  if [[ "$pr" =~ ^[0-9]+$ && "$(state_get "$state" reopened_pr 2>/dev/null || true)" == "$pr" ]]; then
+    pr_state="$(gh pr view "$pr" --repo "$(gh_repo 2>/dev/null)" --json state --jq .state 2>/dev/null || true)"
+    [[ "$pr_state" == MERGED || "$pr_state" == CLOSED ]] && named=""
   fi
+  # Reviewed, with its pull request open: what remind_prod calls this for.
+  # From the menu (cmd_sync) it may be any step, before a pull request. The
+  # prompt says that pull request is open, so a merged one is no review's.
+  local reviewed=""
+  [[ "$(state_get "$state" step 2>/dev/null || true)" == "done" && "$named" =~ ^[0-9]+$ ]] && reviewed=1
   if [[ "$named" =~ ^[0-9]+$ ]]; then
     warn "PR #$pr does not merge with main: $what."
   else

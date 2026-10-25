@@ -646,11 +646,11 @@ copy: rows the branch took from main at an earlier merge and main has since
 removed — the monthly review removes what it decided — would otherwise come
 back. Less main's additions, not all of main's copy: `deferred_to_main` sends
 a branch's rows to main, and they come once, but a row the branch repeats on
-purpose stays repeated. The question that offers such a merge says so,
+purpose stays repeated. The menu's question about such a merge says so,
 rather than offering a session.
 
-The sync is offered the same way at a step's start and from the menu
-(`sync_offer`). `sync_gate` holds origin's branch against the head the
+The sync runs the same way at a step's start and from the menu
+(`sync_offer`): the start asks nothing, the menu asks first (`sync_ask`). `sync_gate` holds origin's branch against the head the
 hand-off was made on (`handoff` in the state): commits it lacks — the sync's,
 or ones that came by other hands, a push from another machine, GitHub's
 "Update branch" — are unchecked code, and the hand-off goes back for them,
@@ -659,11 +659,13 @@ said in those words. A ref here that only lags behind that head is not.
 The menu's own "Sync with main" (`cmd_sync`), there at every step, uses the
 same check: its line says how many files would conflict, and a yes to a merge
 that would conflict goes to the sync rather than leaving the tree half-merged
-for the person to untangle — from a phone they could not. The same goes for
-the merge with main a step makes at its start (`sync_branch`), which asks
+for the person to untangle — from a phone they could not. The merge with main
+a step makes at its start (`sync_branch`) goes the same way, and asks
 nothing: it once asked, a "no" was remembered for that state of main, and all
 it bought was the same merge later, before the preview, after step 3 and the
-review had worked on a branch that was not what merges. Before step 3 the
+review had worked on a branch that was not what merges. A plain merge there
+that stops on conflicts the check could not foresee is backed out, and the
+step opens on the branch as it stood. Before step 3 the
 branch may not be on origin yet; the session then leaves it local, and the
 prompt says nothing of a pull request or of QA.
 

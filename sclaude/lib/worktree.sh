@@ -902,22 +902,23 @@ sync_branch() {
   fi
 
   # `--no-edit`: nobody asked for a message, and a merge message editor
-  # opening on the way into a step leaves the orchestrator waiting on a window that may
-  # be in another program entirely ("Waiting for your editor to close the
-  # file..."), with nothing in the terminal to say what it is waiting for.
+  # opening on the way into a step leaves the orchestrator waiting on a window
+  # that may be in another program entirely ("Waiting for your editor to close
+  # the file..."), with nothing in the terminal to say what it is waiting for.
   if git -C "$wt" merge --no-edit origin/main; then
     echo "  ${GREEN}merged — $branch now carries everything from main${OFF}"
     return 0
   fi
 
-  # Conflicts: the tree is half-merged, and a session must not be opened on it.
-  # The only case where this function stops a step.
+  # Conflicts the check above could not foresee (it could not tell). Nobody
+  # asked for this merge, so nobody is left a half-merged tree to untangle —
+  # from a phone they could not: it is backed out, and the step opens on the
+  # branch as it stood. The sync before the preview, or the menu, merges it.
+  git -C "$wt" merge --abort >/dev/null 2>&1 || true
   warn ""
-  warn "  The merge stopped on conflicts. They are yours to resolve:"
-  warn "    cd $wt && git status"
-  warn "  To back out entirely: git -C $wt merge --abort"
-  warn "  The step has not been started."
-  return 1
+  warn "  The merge stopped on conflicts sclaude could not foresee, and was backed out."
+  warn "  The step opens on the branch as it stands; merge it with: sclaude sync ${slug:-<feature>}"
+  return 0
 }
 
 # A branch origin has never seen, behind main, put on top of main: rebased,

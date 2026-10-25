@@ -1425,7 +1425,7 @@ cmd_sync() {
   # resolves them, by itself for the deferred logs and in a session otherwise.
   local synced=0
   echo ""
-  sync_offer "$wt" "$slug" "$branch" "$pr" || synced=$?
+  sync_offer "$wt" "$slug" "$pr" "$branch" || synced=$?
   case "$synced" in
     2) ;;
     4) info "Left as it is."; return 0 ;;

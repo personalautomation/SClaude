@@ -481,8 +481,9 @@ logs sclaude merges itself, with both sides' rows. A pull request already
 handed over for the merge goes back to a draft when a sync changes its code.
 Every step starts on a branch carrying the latest main, too: sclaude merges
 it in without asking, and a merge that would conflict goes to the same sync
-first. Only uncommitted work in the tree stops it; then it says so and leaves
-the merge to `sclaude sync <name>`.
+first. With uncommitted work in the tree it merges nothing and says so; the
+merge is then `sclaude sync <name>`, which asks before a session resolves
+anything.
 
 The merge is yours (unless the product set it otherwise). After it sclaude
 offers production, runs the tests there, and rolls back if they fail.

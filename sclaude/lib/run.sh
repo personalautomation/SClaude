@@ -2599,6 +2599,9 @@ review_close_gate() {
     review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"
     return 1
   fi
+  # Said here too, before the person chooses: the rounds stopping converging
+  # is what this answer is about.
+  review_stuck_say "$wt"
   ask "${BOLD}Back to a review session for it? [y/n] ${OFF}" answer yn
   if is_yes "$answer"; then
     run_step "$wt" "$slug" review
@@ -2955,8 +2958,15 @@ review_report() {
   SCLAUDE_REPORT_BRIEF="$brief" SCLAUDE_REPORT_STUCK="$stuck" \
     python3 "$LIB/review_report.py" "$wt" "$pr" "$repo" \
     "$(state_get "$state" branch 2>/dev/null || true)" "$slug" "$log" 2>/dev/null || true
-  # The verdict, when the rounds stopped converging: review_reopen asks by it.
-  state_set "$state" steps.review.stuck "$(cat "$stuck" 2>/dev/null)" 2>/dev/null || true
+  # The verdict, when the rounds stopped converging, for review_stuck_say;
+  # "-" when they did not, and nothing when the report could not tell, which
+  # keeps what was there.
+  local verdict; verdict="$(cat "$stuck" 2>/dev/null)"
+  if [[ "$verdict" == "-" ]]; then
+    state_set "$state" steps.review.stuck "" 2>/dev/null || true
+  elif [[ -n "$verdict" ]]; then
+    state_set "$state" steps.review.stuck "$verdict" 2>/dev/null || true
+  fi
   local ASK_SLUG="$slug"
   [[ -n "${REVIEW_REPORT_QUIET:-}" ]] || ask_notice "$(cat "$brief" 2>/dev/null)"
   rm -f "$brief" "$stuck"

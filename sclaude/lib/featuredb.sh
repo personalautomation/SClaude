@@ -377,7 +377,9 @@ db_applied() {
 }
 
 # The versions of the migration files a listing names — the part of each
-# name before its first "_", as the Supabase CLI reads it.
+# name before its first "_", as the Supabase CLI reads it. The folder is the
+# CLI's, supabase/migrations under its workdir, whatever else a product's
+# config names: it is the one `migration up` and `db reset` apply.
 db_file_versions() {
   sed -n 's#^\(.*/\)\{0,1\}\([0-9][0-9]*\)_[^/]*\.sql$#\2#p' | sort
 }
@@ -446,6 +448,17 @@ db_main_up() {
   fi
   rm -rf "$tmp"
   return 0
+}
+
+# The feature's stack built again from its own migrations, empty, for the seed
+# to fill: what a copy that went wrong leaves behind otherwise is a schema
+# that is neither main's nor the feature's.
+db_feature_rebuild() {
+  local wt="$1"
+  (cd "$wt" && $(db_cli "$wt") db reset --no-seed \
+     --workdir "$wt/.sclaude/local/feature/supabase") >> "$wt/.sclaude/local/feature/db.log" 2>&1 && return 0
+  warn "  database: rebuilding this feature's database failed — rebuild it with: npx supabase db reset"
+  return 1
 }
 
 # The feature's own migrations, applied to its stack again after the copy set
@@ -557,7 +570,7 @@ db_copy_main() {
       if ! (cd "$wt" && $(db_cli "$wt") db reset --version "$newest" --no-seed \
               --workdir "$wt/.sclaude/local/feature/supabase") >> "$log" 2>&1; then
         rm -f "$dump"
-        db_feature_up "$wt"
+        db_feature_rebuild "$wt"
         warn "  database: setting it back failed — see .sclaude/local/feature/db.log; filling from the seed instead"
         return 1
       fi
@@ -567,25 +580,33 @@ db_copy_main() {
       "select string_agg(format('%I.%I', schemaname, tablename), ', ') from pg_tables where schemaname = 'public'" 2>>"$log")"
   fi
 
+  # Emptied on its own, stopping at an error: inside the load, a TRUNCATE
+  # refused — a table outside public pointing into it — was one more error
+  # line, and the feature's rows stood where main's were meant to go.
+  if [[ -n "$wipe" ]] && ! docker exec "$feature" psql -U supabase_admin -d postgres -q -v ON_ERROR_STOP=1 \
+         -c "SET session_replication_role = replica;" -c "TRUNCATE $wipe;" >>"$log" 2>&1; then
+    warn "  database: emptying this feature's tables failed — main's rows go in beside the feature's, as before"
+  fi
   local out rc
-  local -a empty=()
-  [[ -n "$wipe" ]] && empty=(-c "TRUNCATE $wipe;")
   out="$(docker exec -i "$feature" psql -U supabase_admin -d postgres -q \
-           -c "SET session_replication_role = replica;" \
-           "${empty[@]}" -f - < "$dump" 2>&1 >/dev/null)"
+           -c "SET session_replication_role = replica;" -f - < "$dump" 2>&1 >/dev/null)"
   rc=$?
   rm -f "$dump"
   printf '%s\n' "$out" >> "$log"
+  # Set back to main's schema, the stack lacks the feature's own migrations
+  # until they apply over main's rows. A load that failed, or migrations that
+  # do not apply over them, leave it on a schema that is neither: it is built
+  # again from the feature's migrations, and the seed fills it.
   if [[ "$rc" -ne 0 ]]; then
-    # Set back and emptied, the stack lacks the feature's own migrations: they
-    # go back before the seed fills it.
-    [[ -n "$wipe$reset" ]] && db_feature_up "$wt"
+    [[ -n "$reset" ]] && db_feature_rebuild "$wt"
     warn "  database: loading the copy failed — see .sclaude/local/feature/db.log; filling from the seed instead"
     return 1
   fi
-  # The feature's own migrations, now over main's rows — whenever the schema
-  # was set back, whether or not its tables could be listed for emptying.
-  [[ -n "$wipe$reset" ]] && db_feature_up "$wt"
+  if [[ -n "$reset" ]] && ! db_feature_up "$wt"; then
+    db_feature_rebuild "$wt"
+    warn "  database: filling from the seed instead of the copy"
+    return 1
+  fi
   errors="$(grep -c 'ERROR:' <<<"$out")"
   docker exec "$feature" psql -U supabase_admin -d postgres -Atc "select id from auth.users" \
     > "$wt/.sclaude/local/feature/db-copied-users" 2>>"$log" || return 1

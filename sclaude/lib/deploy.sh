@@ -126,6 +126,19 @@ deploy_unchanged() {
   [[ "$stage" != "preview" || -z "$(worktree_dirt "$wt")" ]]
 }
 
+# Whether production carries this feature: sclaude shipped it (a production
+# sha is recorded, by deploy_remember after the merge) and did not roll it
+# back. Every later ship is of a main that holds it too. Not deploy_unchanged:
+# that asks whether production is still the release this feature shipped, and
+# any commit on main since — another feature's merge, a hotfix — made it read
+# as not in production, the issue reopened and its status saying so.
+prod_carries_feature() {
+  local state="$1/.sclaude/local/feature/state.json" was
+  was="$(state_get "$state" deploy.prod.sha 2>/dev/null || true)"
+  [[ -n "$was" && "$was" != "null" ]] || return 1
+  [[ "$(state_get "$state" rollback.prod.code 2>/dev/null || true)" != "done" ]]
+}
+
 # Says out loud when production is not what main holds, and when main holds
 # commits that never reached origin. Silent when all three agree.
 #
@@ -1762,7 +1775,7 @@ remind_prod() {
   # Not once the merge is in production: that close was the cycle's own end,
   # and a pass after a declined clean-up reopened the issue only to close it
   # again a moment later.
-  if [[ "${merged:-}" != "MERGED" ]] || ! deploy_unchanged "$wt" prod; then
+  if [[ "${merged:-}" != "MERGED" ]] || ! prod_carries_feature "$wt"; then
     issue_hold_open "$issue"
   fi
 
@@ -2127,7 +2140,7 @@ remind_prod() {
   # feature about to close — and the closed, deployed-prod case status.md
   # answers with no comment at all could never come up.
   local prod_live=0
-  if [[ "$prod_done" -eq 1 ]] || deploy_unchanged "$wt" prod; then
+  if [[ "$prod_done" -eq 1 ]] || prod_carries_feature "$wt"; then
     prod_live=1
     issue_close_done "$issue" shipped
   else

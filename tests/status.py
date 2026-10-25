@@ -666,12 +666,29 @@ for _name, _src, _close, _status in (
 # unchanged, and with prod_done its fingerprint missed the first pass's and a
 # second epilogue rewrote the same status.
 check_true("prod-live-set-where-the-issue-closes-shipped",
-           re.search(r'deploy_unchanged "\$wt" prod; then\n\s*prod_live=1\n\s*issue_close_done',
+           re.search(r'prod_carries_feature "\$wt"; then\n\s*prod_live=1\n\s*issue_close_done',
                      deploy_sh) is not None)
 # Nor is the issue reopened once the merge is in production.
 check_true("issue-not-held-open-after-the-cycle",
-           re.search(r'if \[\[ "\$\{merged:-\}" != "MERGED" \]\] \|\| ! deploy_unchanged "\$wt" prod; then\n'
+           re.search(r'if \[\[ "\$\{merged:-\}" != "MERGED" \]\] \|\| ! prod_carries_feature "\$wt"; then\n'
                      r'\s*issue_hold_open "\$issue"', deploy_sh) is not None)
+
+# prod_carries_feature, run: a recorded ship not rolled back carries the
+# feature, whatever main did since; none, or one rolled back, does not.
+_lib = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sclaude", "lib")
+_fn = re.search(r"^prod_carries_feature\(\) \{\n.*?^\}\n", deploy_sh, re.S | re.M).group(0)
+import tempfile as _tempfile
+for _name, _state, _want in (("shipped", {"deploy": {"prod": {"sha": "abc"}}}, "yes"),
+                             ("never shipped", {}, "no"),
+                             ("rolled back", {"deploy": {"prod": {"sha": "abc"}},
+                                              "rollback": {"prod": {"code": "done"}}}, "no")):
+    _wt = _tempfile.mkdtemp()
+    os.makedirs(os.path.join(_wt, ".sclaude/local/feature"))
+    with open(os.path.join(_wt, ".sclaude/local/feature/state.json"), "w") as _fh:
+        json.dump(_state, _fh)
+    _out = subprocess.run(["bash", "-c", 'source "%s/state.sh"\n%s\nprod_carries_feature "%s" && echo yes || echo no'
+                           % (_lib, _fn, _wt)], capture_output=True, text=True).stdout.strip()
+    check_true("prod-carries-feature-" + _name.replace(" ", "-"), _out == _want)
 
 if failures:
     for name, want, got in failures:

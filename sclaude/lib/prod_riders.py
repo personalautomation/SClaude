@@ -50,19 +50,36 @@ def git(repo, *args):
     return done.stdout
 
 
+MERGED = {}
+
+
+def merged_prs(repo):
+    """Merged pull requests by number: (head branch, issues they close). One
+    call for all of them, made once: a call per commit that cites a number,
+    one after another before the production question, could add up to
+    minutes. Empty when gh cannot say."""
+    if repo not in MERGED:
+        found = {}
+        try:
+            done = subprocess.run(["gh", "pr", "list", "--state", "merged", "--limit", "300",
+                                   "--json", "number,headRefName,closingIssuesReferences"],
+                                  cwd=repo, capture_output=True, text=True, timeout=60)
+            for pr in (json.loads(done.stdout) if done.returncode == 0 else []):
+                refs = pr.get("closingIssuesReferences") or []
+                found[str(pr.get("number"))] = (
+                    pr.get("headRefName") or "",
+                    ",".join(str(r.get("number")) for r in refs if r.get("number")))
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+        MERGED[repo] = found
+    return MERGED[repo]
+
+
 def pr_info(repo, pr):
-    """The pull request's head branch and the issues it closes, in one call:
-    ("", "") when gh cannot say, and then a squashed subject's "(#N)" is not
-    taken for a pull request — an issue number reads the same."""
-    try:
-        done = subprocess.run(["gh", "pr", "view", pr, "--json", "headRefName,closingIssuesReferences"],
-                              cwd=repo, capture_output=True, text=True, timeout=60)
-        data = json.loads(done.stdout) if done.returncode == 0 else {}
-    except (OSError, ValueError, subprocess.SubprocessError):
-        data = {}
-    refs = data.get("closingIssuesReferences") or []
-    issues = ",".join(str(r.get("number")) for r in refs if r.get("number"))
-    return data.get("headRefName") or "", issues
+    """The pull request's head branch and the issues it closes: ("", "") when
+    gh does not know it as a merged pull request, and then a squashed
+    subject's "(#N)" is not taken for one — an issue number reads the same."""
+    return merged_prs(repo).get(pr, ("", ""))
 
 
 def issue_of(issues, branch):

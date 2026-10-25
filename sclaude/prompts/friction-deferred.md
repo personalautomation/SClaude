@@ -12,7 +12,7 @@ Over the month the friction reviews put two kinds of things in these files rathe
 
 **What to do.**
 
-1. Read every file and group the entries by class. Where two classes are plainly the same problem under two names, say so and treat them as one.
+1. Read every file and group the entries by class. Where two classes are plainly the same problem under two names, say so and treat them as one. Class `claude-md-already-stated` holds proposals sclaude matched to a rule the product's `CLAUDE.md` already states, the line quoted and the class it was proposed as named in the text: group those by the rule quoted, not as one class — each is a rule sessions do not follow, or a match that was wrong.
 2. Give me a table, most frequent class first: the class, how many times, over which features and steps, the first and the last date, and one line on what it is.
 3. For each class, propose one of:
    - **lift** — a restriction that keeps getting in the way: an `allow` in `<rules>/policy.json`, or a fix to the product's code;

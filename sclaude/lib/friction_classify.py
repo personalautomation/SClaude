@@ -234,7 +234,10 @@ def main():
             notes.append("already in CLAUDE.md, put off as %s: %s — \"%s\"" % (
                 COVERED, p[4], verdict[1][:160]))
             went.setdefault(p[4], verdict)
-            p = p[:4] + [COVERED, "Already in CLAUDE.md (\"%s\"): %s" % (verdict[1][:200], p[5])]
+            # Its own class kept in the text: one class for every such rule
+            # would count unrelated rules together.
+            p = p[:4] + [COVERED, "Already in CLAUDE.md (\"%s\"), proposed as %s: %s" % (
+                verdict[1][:200], p[4], p[5])]
             counted[p[4]] += 1
             features[p[4]].add(p[2])
             kept.append(p)

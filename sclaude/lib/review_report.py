@@ -545,15 +545,18 @@ def main():
     if path and not threads_failed:
         try:
             with open(path, "w") as fh:
-                fh.write(said if stuck(per_round, said) else "")
+                # "-" for "not stuck", so that a file left empty — threads
+                # nobody could read, a report that stopped early — tells
+                # sclaude to keep the verdict it had, not to clear it.
+                fh.write(said if stuck(per_round, said) else "-")
         except OSError:
             pass
     return 0
 
 
-# Whether the rounds have stopped converging, for sclaude to ask the person
-# once whether to end the search (review_reopen in run.sh): the verdict says
-# so, over enough rounds that one bad round is not it. The report wrote
+# Whether the rounds have stopped converging, for sclaude to warn once and
+# name the keys that end the search (review_stuck_say in run.sh): the verdict
+# says so, over enough rounds that one bad round is not it. The report wrote
 # "Not converging" eighteen rounds in a row on one feature, and each was
 # followed by a fresh session, until the person stopped it by hand.
 STUCK_ENV = "SCLAUDE_REPORT_STUCK"

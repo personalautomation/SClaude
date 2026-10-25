@@ -578,8 +578,10 @@ docker() {
                 reset = [c for c in ran if c.startswith("db reset")]
                 check("a feature ahead of main is set back to main's last migration",
                       len(reset) == 1 and "--version 0001 --no-seed" in reset[0], True)
-                check("public's tables are emptied before main's rows go in",
-                      "-c TRUNCATE public.a, public.b; -f -" in loaded, True)
+                trunc = loaded.find("-c TRUNCATE public.a, public.b;")
+                check("public's tables are emptied, stopping at an error, before main's rows go in",
+                      trunc >= 0 and "ON_ERROR_STOP=1" in loaded[:trunc + 40]
+                      and trunc < loaded.find("-f -"), True)
                 after = ran[ran.index(reset[0]) + 1:] if reset else []
                 check("the feature's migrations apply after the load",
                       any(c.startswith("migration up") for c in after), True)

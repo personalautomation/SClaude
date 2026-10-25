@@ -731,7 +731,8 @@ session_watch_stop
         with open(os.path.join(fake, "pr_context.py"), "w") as fh:
             fh.write("import sys\nprint(%r if '--open-since' in sys.argv else %r)\n" % (split, word))
         body = 'source "%s/state.sh"\nsource "%s/local_review.sh"\n' % (LIB, LIB)
-        body += functions(RUN, ["review_close_gate", "review_enough_close", "review_session_since"])
+        body += functions(RUN, ["review_close_gate", "review_enough_close", "review_session_since",
+                                "review_stuck_say"])
         body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5\n'
                  'gh_repo() { echo o/r; }\nproject_review_mode() { echo %s; }\n'
                  'local_review() { echo REVIEWED >&2; [[ %s == failed ]] && return 1; echo %s; }\n'

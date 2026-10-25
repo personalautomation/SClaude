@@ -958,7 +958,9 @@ sync_unpublished() {
   branch="$(state_get "$state" branch 2>/dev/null)" || return 0
   [[ -n "$branch" && "$branch" != "null" ]] || return 0
   [[ "$(git -C "$wt" symbolic-ref -q --short HEAD 2>/dev/null)" == "$branch" ]] || return 0
-  git -C "$REPO" fetch origin -q 2>/dev/null || true
+  # Bounded, and never a prompt: it stands before the suite, which needs no
+  # network of its own.
+  GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$REPO" fetch origin -q 2>/dev/null || true
   git -C "$wt" rev-parse -q --verify origin/main >/dev/null 2>&1 || return 0
   # Pushed, or the remote cannot say: not ours to rewrite. Nor once it was:
   # a pull request recorded, or an upstream set — GitHub deletes a merged
@@ -967,7 +969,7 @@ sync_unpublished() {
   pr="$(state_get "$state" pr 2>/dev/null || true)"
   [[ -z "$pr" || "$pr" == "null" ]] || return 0
   [[ -z "$(git -C "$wt" config --get "branch.$branch.remote" 2>/dev/null)" ]] || return 0
-  remote="$(git -C "$wt" ls-remote --heads origin "$branch" 2>/dev/null)" || return 0
+  remote="$(GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$wt" ls-remote --heads origin "$branch" 2>/dev/null)" || return 0
   [[ -z "$remote" ]] || return 0
   behind="$(deferred_rev_count "$REPO" "$branch..origin/main")" || return 0
   [[ "$behind" =~ ^[0-9]+$ && "$behind" -gt 0 ]] || return 0

@@ -664,6 +664,13 @@ the merge with main a step offers at its start (`sync_branch`). Before step 3 th
 branch may not be on origin yet; the session then leaves it local, and the
 prompt says nothing of a pull request or of QA.
 
+A branch origin has never seen is put on top of main before every local
+regression, with no question (`sync_unpublished`): rebased when it rebases
+cleanly over a clean tree, left as it is otherwise. Main moving during step 2
+once made the suite fail on the branch's older copy of a file main had changed,
+and a fixing session was opened only to rebase. A pushed branch is not
+rewritten; its merge with main stays the question above.
+
 ## Production rollback
 
 **A red production regression rolls production back, before anything is fixed.**

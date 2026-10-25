@@ -837,6 +837,10 @@ worktree_dirt() {
 # nothing except that it stops lying. A real merge comes with a question: it can
 # stall on conflicts, and untangling those under a session that is about to open
 # is not acceptable.
+#
+# Before a local regression the branch has usually not been pushed yet, and
+# one that is behind main is put on top of it without a question
+# (sync_unpublished): nothing of anybody else's rests on its commits.
 sync_branch() {
   local wt="$1" state branch slug behind dirty answer
   state="$wt/.sclaude/local/feature/state.json"
@@ -936,6 +940,39 @@ sync_branch() {
   warn "  To back out entirely: git -C $wt merge --abort"
   warn "  The step has not been started."
   return 1
+}
+
+# A branch origin has never seen, behind main, put on top of main: rebased,
+# silently, when it rebases cleanly over a clean tree. Before a local
+# regression (regression_gate), which judges the branch against main's
+# product: main moved during step 2 once, the suite's schema check failed on
+# the branch's older copy of a file main had changed, and a fixing session was
+# opened only to do this rebase. A branch that was pushed is sync_branch's —
+# rewriting commits somebody may have is not done without a question — and a
+# rebase that would stop on a conflict is backed out and left to the suite.
+#
+#   sync_unpublished <wt>
+sync_unpublished() {
+  local wt="$1" state branch behind
+  state="$wt/.sclaude/local/feature/state.json"
+  branch="$(state_get "$state" branch 2>/dev/null)" || return 0
+  [[ -n "$branch" && "$branch" != "null" ]] || return 0
+  [[ "$(git -C "$wt" symbolic-ref -q --short HEAD 2>/dev/null)" == "$branch" ]] || return 0
+  git -C "$REPO" fetch origin -q 2>/dev/null || true
+  git -C "$wt" rev-parse -q --verify origin/main >/dev/null 2>&1 || return 0
+  # Pushed, or the remote cannot say: not ours to rewrite.
+  local remote
+  remote="$(git -C "$wt" ls-remote --heads origin "$branch" 2>/dev/null)" || return 0
+  [[ -z "$remote" ]] || return 0
+  behind="$(deferred_rev_count "$REPO" "$branch..origin/main")" || return 0
+  [[ "$behind" =~ ^[0-9]+$ && "$behind" -gt 0 ]] || return 0
+  [[ -z "$(worktree_dirt "$wt")" ]] || return 0
+  if git -C "$wt" rebase -q origin/main >/dev/null 2>&1; then
+    info "  branch: not pushed yet, so put on top of origin/main ($behind commit(s) behind it)"
+  else
+    git -C "$wt" rebase --abort >/dev/null 2>&1 || true
+  fi
+  return 0
 }
 
 # The Supabase CLI's link: whether it exists at all.

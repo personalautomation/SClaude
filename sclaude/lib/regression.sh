@@ -1049,6 +1049,9 @@ regression_gate() {
   # Only local: a deployed verdict is about a deployment, which remind_prod
   # compares on its own terms (deploy_unchanged).
   local only=""
+  # Judged against main as it is now, when the branch can be moved there
+  # without a question (sync_unpublished).
+  [[ "$stage" == "local" ]] && declare -F sync_unpublished >/dev/null && sync_unpublished "$wt"
   if [[ "$stage" == "local" && "$(regression_status "$wt" local)" == "passed" ]]; then
     local was now
     was="$(state_get "$state" regression.local.tree 2>/dev/null || true)"

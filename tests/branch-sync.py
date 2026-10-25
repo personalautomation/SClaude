@@ -19,6 +19,7 @@
 #     else is looked at;
 #   * a plain merge that stops on conflicts the check could not foresee is
 #     backed out, and the step opens;
+#   * a sync the person left unfinished is not opened again by a start;
 #   * the menu's sync (sync_offer with the branch named) still asks first,
 #     and a no starts nothing.
 #
@@ -73,12 +74,12 @@ try:
 
     def start(answer, call=None, **env):
         script = ('BOLD=""; OFF=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""\n'
-                  'REPO=%s\nsource %s/io.sh; source %s/ui.sh; source %s/state.sh; source %s/worktree.sh; source %s/deferred.sh; source %s/sync.sh\n'
+                  'REPO=%s\nsource %s/io.sh; source %s/ui.sh; source %s/state.sh; source %s/steps.sh; source %s/worktree.sh; source %s/deferred.sh; source %s/sync.sh\n'
                   'warn(){ echo "$*"; }; info(){ echo "$*"; }; unset ASK_DIR\n'
                   'ask() { echo "ASKED $1"; printf -v "$2" %%s "$ANSWER"; }\n'
                   'sync_with_main() { echo "SYNC $2 $3"; eval "${SYNC_DOES:-}"; return "${SYNC_RC:-3}"; }\n'
                   '%s'
-                  % (repo, LIB, LIB, LIB, LIB, LIB, LIB, env.pop("PRELUDE", ""))
+                  % (repo, LIB, LIB, LIB, LIB, LIB, LIB, LIB, env.pop("PRELUDE", ""))
                   + (call or 'sync_branch %s') % repo + '\n')
         return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                               env=dict(os.environ, ANSWER=answer, **env)).stdout
@@ -132,6 +133,16 @@ try:
     out = start("", call='sync_branch %s; echo "RC $?"', SYNC_RC="0")
     check("conflict gone by the sync's look: the plain merge runs", "stopped on conflicts" in out, True)
     check("conflict gone: backed out, the step opens", "RC 0" in out, True)
+
+    # A sync the person left unfinished is not opened again by a step's start.
+    state_file = os.path.join(repo, ".sclaude/local/feature", "state.json")
+    with open(state_file, "w") as fh:
+        fh.write('{"branch": "feat/x", "feature": "x", "sync": {"runs": [{"session": "s1"}]}}\n')
+    out = start("", call='sync_branch %s; echo "RC $?"')
+    check("left unfinished: no sync", "SYNC" in out, False)
+    check("left unfinished: the step opens", "RC 0" in out and "left unfinished" in out, True)
+    with open(state_file, "w") as fh:
+        fh.write('{"branch": "feat/x", "feature": "x"}\n')
 
     # The menu names the branch: asked first, and a no is 4 with no sync.
     out = start("n", call='sync_offer %s x 7 feat/x; echo "RC $?"')

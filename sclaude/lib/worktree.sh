@@ -904,15 +904,29 @@ sync_branch() {
   # open on a half-merged tree. Otherwise the plain merge below, and also after
   # a sync that found nothing to resolve after all (0), or took a hand-off back
   # with nothing merged (5).
+  #
+  # A sync the person left unfinished is not opened again here: unasked, it
+  # would come back at every start — each review round, a resume — while the
+  # conflict stands. The step opens on the branch as it is, and the sync goes
+  # on from the menu, or before the preview, where it has to.
+  local crc=0
+  if sync_broken_off "$state"; then
+    merge_conflicts "$wt" nofetch >/dev/null || crc=$?
+    if [[ "$crc" -eq 1 ]]; then
+      warn "  A sync with main was left unfinished — the step opens on the branch as it stands."
+      warn "  Carry it on with: sclaude sync ${slug:-<feature>}"
+      return 0
+    fi
+  fi
   local synced=0
   sync_offer "$wt" "$slug" "$(state_get "$state" pr 2>/dev/null || true)" || synced=$?
   [[ "$synced" -eq 3 ]] && return 0
   if [[ "$synced" -eq 1 ]]; then
     # A half-merged tree holds the step, as above. Otherwise the sync stopped
     # short — the session left, the branch had diverged, the push failed —
-    # and has said what comes next; the step opens as a "no" to the old
-    # question let it: nobody asked this time, and a step held by a merge
-    # nobody asked for could not be opened at all from a phone.
+    # and has said what comes next; the step opens on the branch as it is: a
+    # step held by a merge nobody asked for could not be opened at all from a
+    # phone.
     if merge_under_way "$wt"; then
       sync_branch_held "$wt" "$slug"
       return 1
@@ -922,6 +936,17 @@ sync_branch() {
     else
       warn "  Not merged — the step opens on the branch as it stands."
     fi
+    return 0
+  fi
+
+  # Merged from the branch's own tip: one updated on origin (another machine,
+  # GitHub's "Update branch") is caught up first, as cmd_sync does, and one
+  # moved both here and there is not merged into at all — the merge would
+  # make a third head, and its push would be refused.
+  sync_catch_up "$wt"
+  if sync_diverged "$wt"; then
+    warn "  $branch here and on origin have both moved — not merged; the step opens on it as it is."
+    warn "  Bring them together (git -C $wt pull --no-rebase), then: sclaude sync ${slug:-<feature>}"
     return 0
   fi
 

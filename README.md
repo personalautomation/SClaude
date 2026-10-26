@@ -198,9 +198,10 @@ issue.
 
 Before sclaude merges, or asks to, it builds what the merge would put on main
 when main has moved past the branch: the branch merged with the newer main, in
-a throwaway worktree, through the project's `regression.manual` parts. Red is
-not merged from sclaude at all, and when it cannot be built `auto` asks
-instead. GitHub calls a merge without conflicts clean, and nothing else would
+a throwaway worktree, through the `regression.manual` parts as that merge's
+own config names them. Red is not merged from sclaude at all: `auto` says it is
+held, and tries again once the branch or main moves. When it cannot be built
+`auto` asks instead. GitHub calls a merge without conflicts clean, and nothing else would
 notice a rename on main that the branch still calls.
 
 **No staging between preview and production.** Preview is the last stop.

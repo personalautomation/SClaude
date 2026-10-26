@@ -165,9 +165,46 @@ def threads(cwd, pr, repo):
     return out
 
 
-def review_runs(cwd, branch):
-    """The automatic review's runs on the branch, oldest first: [{start,
-    seconds, running}], or None when unreadable. A run shorter than
+# The feature's state, relative to its worktree.
+STATE = ".sclaude/local/feature/state.json"
+
+
+def pr_created(cwd, pr):
+    """When the pull request was opened, or None when unreadable. A feature
+    reopened after its merge (a retrospective's fixes, a rollback) goes on
+    under a new pull request, in the same state and journal: what the review
+    did before this one opened was the earlier one's."""
+    data = gh_json(["pr", "view", str(pr), "--json", "createdAt"], cwd=cwd)
+    at = parse(data.get("createdAt")) if isinstance(data, dict) else None
+    # Less a margin: the journal and the sessions are stamped by this
+    # machine's clock, which may lag GitHub's, and a pass begun seconds after
+    # the opening would be left out.
+    return at - CLOCK_SKEW if at else None
+
+
+CLOCK_SKEW = datetime.timedelta(minutes=2)
+
+
+def reopened(cwd):
+    """Whether the feature went on after a merged pull request: when the
+    opening of the new one is unknown, its rounds are mixed with the old."""
+    try:
+        with open(os.path.join(cwd, STATE)) as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    return state.get("reopened_pr") not in (None, "", "null")
+
+
+def after(at, since):
+    """Whether a run that started at <at> belongs to the pull request opened
+    at <since>; every run does when <since> is unknown."""
+    return since is None or (at is not None and at >= since)
+
+
+def review_runs(cwd, branch, since=None):
+    """The automatic review's runs on the branch since <since>, oldest first:
+    [{start, seconds, running}], or None when unreadable. A run shorter than
     SKIP_SECONDS reviewed nothing (pr_context.py) and is left out."""
     if not branch:
         return None
@@ -183,7 +220,7 @@ def review_runs(cwd, branch):
         if not is_claude_review(name, name):
             continue
         a, b = parse(r.get("createdAt")), parse(r.get("updatedAt"))
-        if not a:
+        if not a or not after(a, since):
             continue
         running = (r.get("status") or "completed") != "completed"
         seconds = (b - a).total_seconds() if b and b > a else 0.0
@@ -199,10 +236,11 @@ def review_runs(cwd, branch):
 LOCAL_JOURNAL = ".sclaude/local/feature/local-review-rounds.jsonl"
 
 
-def local_runs(cwd):
-    """The local review's runs, oldest first, shaped as review_runs gives the
-    workflow's; None when the feature has no journal. Read by the journal's
-    own reader (local_review.rows), so both agree on what a run is."""
+def local_runs(cwd, since=None):
+    """The local review's runs since <since>, oldest first, shaped as
+    review_runs gives the workflow's; None when the feature has no journal.
+    Read by the journal's own reader (local_review.rows), so both agree on
+    what a run is."""
     path = os.path.join(cwd, LOCAL_JOURNAL)
     if not os.path.exists(path):
         return None
@@ -211,6 +249,8 @@ def local_runs(cwd):
     # many findings it brings: one run, from the first pass's start.
     out, last = [], None
     for row in journal_rows(path):
+        if not after(parse(row.get("at")), since):
+            continue
         key = (row.get("base"), row.get("head"))
         if out and key == last:
             out[-1]["seconds"] += float(row.get("seconds") or 0)
@@ -267,10 +307,12 @@ def mark_repeats(found):
         t["repeat"] = t["cites_declined"] or any(near(e, t) for e in earlier)
 
 
-def sessions(cwd):
-    """The review sessions from the feature's state, oldest first."""
+def sessions(cwd, since=None):
+    """The review sessions from the feature's state, oldest first: those that
+    were still going when the pull request opened at <since> — the one that
+    opened it included."""
     try:
-        with open(os.path.join(cwd, ".sclaude/local/feature/state.json")) as fh:
+        with open(os.path.join(cwd, STATE)) as fh:
             state = json.load(fh)
     except (OSError, ValueError):
         return []
@@ -278,6 +320,11 @@ def sessions(cwd):
     now = datetime.datetime.now(datetime.timezone.utc)
     out = []
     runs = [r for r in runs if isinstance(r, dict)]
+    # Placed by its end; one without an end is going only when it is the
+    # last, and an earlier one, which never ended properly, by its start.
+    runs = [r for i, r in enumerate(runs)
+            if (r.get("finished") is None and i == len(runs) - 1)
+            or after(parse(r.get("finished") or r.get("started")), since)]
     for i, r in enumerate(runs):
         a = parse(r.get("started"))
         # Only the last run can still be going: an earlier one without an end
@@ -394,7 +441,8 @@ def main():
     # By the project's mode, as the summary for QA decides (pr_handoff.py),
     # not by whether a journal is left over from an earlier mode.
     local = review_mode(cwd) == "local"
-    bot = (local_runs(cwd) or []) if local else None
+    since = pr_created(cwd, pr)
+    bot = (local_runs(cwd, since) or []) if local else None
     found = threads(cwd, pr, repo)
     threads_failed = found is None
     print("Review report — PR #%s%s" % (pr, ", reviewed on this machine" if local else ""))
@@ -402,11 +450,11 @@ def main():
         print("  The review threads could not be read (gh, network or permissions).")
         found = []
     if not local:
-        bot = review_runs(cwd, branch)
+        bot = review_runs(cwd, branch, since)
     groups = rounds(found, bot)
     mark_near_fixes(found)
     mark_repeats(found)
-    people = sessions(cwd)
+    people = sessions(cwd, since)
 
     total = len(found)
     fixed, nofix, opened = count(found, "fixed"), count(found, "no fix"), count(found, "open")
@@ -542,7 +590,9 @@ def main():
         except OSError:
             pass
     path = os.environ.get(STUCK_ENV, "")
-    if path and not threads_failed:
+    # Nor when the rounds may be two pull requests': a verdict on them would
+    # be said about the new one.
+    if path and not threads_failed and not (since is None and reopened(cwd)):
         try:
             with open(path, "w") as fh:
                 # "-" for "not stuck", so that a file left empty — threads

@@ -135,22 +135,22 @@ merge_conflicts_at() {
 #                              failing part on stdout; 2 cannot tell (no
 #                              network, no parts declared, the merge or the
 #                              worktree would not go)
+# The verdict per pair, in the feature's folder. Named anew when what the
+# check reads changed (the merged tree's config, not the main checkout's): a
+# verdict cached by the old reader would answer for its pair unbuilt.
+MERGE_VERDICT=merge-verdict
+
 merge_build_check() {
-  local wt="$1" tip=HEAD branch main parts part cmd tmp log cache rc=0 failed=""
+  local wt="$1" tip main parts part cmd tmp log cache rc=0 failed=""
   local c_tip c_main c_rc c_failed
   [[ -n "$wt" ]] || return 2
   sync_fetch "$wt" || return 2
-  branch="$(sync_branch_name "$wt")" \
-    && git -C "$wt" rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null \
-    && tip="refs/remotes/origin/$branch"
-  tip="$(git -C "$wt" rev-parse "$tip" 2>/dev/null)" || return 2
-  main="$(git -C "$wt" rev-parse origin/main 2>/dev/null)" || return 2
+  read -r tip main < <(merge_check_pair "$wt")
+  [[ -n "$tip" && -n "$main" ]] || return 2
   git -C "$wt" merge-base --is-ancestor "$main" "$tip" 2>/dev/null && return 0
-  parts="$(project_regression_parts manual "$wt")"
-  [[ -n "$parts" ]] || return 2
 
-  cache="$wt/.sclaude/local/feature/merge-check"
-  log="$cache.log"
+  cache="$wt/.sclaude/local/feature/$MERGE_VERDICT"
+  log="$wt/.sclaude/local/feature/merge-check.log"
   mkdir -p "$(dirname "$cache")" 2>/dev/null || return 2
   if [[ -f "$cache" ]] && read -r c_tip c_main c_rc c_failed < "$cache" \
      && [[ "$c_tip" == "$tip" && "$c_main" == "$main" ]]; then
@@ -163,18 +163,29 @@ merge_build_check() {
   tmp="${TMPDIR:-/tmp}/sclaude-merge-check-$(basename "$wt")"
   git -C "$wt" worktree remove --force "$tmp" >/dev/null 2>&1 || true
   rm -rf "$tmp"
-  info "  Building the PR's ${tip:0:7} merged with main ${main:0:7}: $parts." >&2
   if ! git -C "$wt" worktree add -q --detach "$tmp" "$tip" >/dev/null 2>&1 \
      || ! git -C "$tmp" -c user.name=sclaude -c user.email=sclaude@localhost \
             merge -q --no-edit origin/main >/dev/null 2>&1; then
     git -C "$wt" worktree remove --force "$tmp" >/dev/null 2>&1 || rm -rf "$tmp"
     return 2
   fi
+  # The parts and their commands as the merge has them, not as the main
+  # checkout does (project_config): this tree is what main will be, and a
+  # pull request that changes how the project is checked — a part dropped,
+  # a command rewritten — is checked the way it will be after the merge.
+  # Read main first, a part the pull request had removed ran on a tree it
+  # no longer fitted, and its red held the merge back.
+  parts="$(REPO="$tmp" project_regression_parts manual "$tmp")"
+  if [[ -z "$parts" ]]; then
+    git -C "$wt" worktree remove --force "$tmp" >/dev/null 2>&1 || rm -rf "$tmp"
+    return 2
+  fi
+  info "  Building the PR's ${tip:0:7} merged with main ${main:0:7}: $parts." >&2
   link_env "$tmp" >/dev/null 2>&1
   link_node_modules "$tmp" >/dev/null 2>&1
   : > "$log"
   for part in $parts; do
-    cmd="$(regression_command "$part" "" "$tmp")" || { rc=2; break; }
+    cmd="$(REPO="$tmp" regression_command "$part" "" "$tmp")" || { rc=2; break; }
     printf '\n=== %s ===\n$ %s\n\n' "$part" "$cmd" >> "$log"
     if ! ( cd "$tmp" && eval "$cmd" ) >> "$log" 2>&1 < /dev/null; then
       rc=1; failed="$part"; break
@@ -184,6 +195,33 @@ merge_build_check() {
   [[ "$rc" -eq 2 ]] || printf '%s %s %s %s\n' "$tip" "$main" "$rc" "$failed" > "$cache"
   [[ "$rc" -eq 1 ]] && printf '%s\n' "$failed"
   return "$rc"
+}
+
+# The pair merge_build_check judges, as this tree last fetched it: the
+# branch's tip on origin (HEAD when it has none there) and origin/main.
+#
+#   merge_check_pair <wt>   → "<tip> <main>"
+merge_check_pair() {
+  local wt="$1" tip=HEAD branch
+  [[ -n "$wt" ]] || { echo; return 0; }
+  branch="$(sync_branch_name "$wt")" \
+    && git -C "$wt" rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null \
+    && tip="refs/remotes/origin/$branch"
+  printf '%s %s\n' "$(git -C "$wt" rev-parse "$tip" 2>/dev/null)" \
+    "$(git -C "$wt" rev-parse origin/main 2>/dev/null)"
+}
+
+# The part merge_build_check found red for the pair as it stands now, or
+# nothing: read from its verdict, nothing built.
+#
+#   merge_check_red <wt>
+merge_check_red() {
+  local wt="$1" c_tip c_main c_rc c_failed
+  [[ -n "$wt" ]] || return 0
+  read -r c_tip c_main c_rc c_failed < "$wt/.sclaude/local/feature/$MERGE_VERDICT" 2>/dev/null \
+    || return 0
+  [[ "$c_rc" == 1 && "$c_tip $c_main" == "$(merge_check_pair "$wt")" ]] && printf '%s\n' "$c_failed"
+  return 0
 }
 
 # Whether every path given is a file of the branch under the deferred folders

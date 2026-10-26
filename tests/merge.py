@@ -288,8 +288,17 @@ check_true("merge-wait-offers-with-the-tree",
            mwait.count('merge_offer "$slug" "$pr" "$issue" "$offer_mode" "$wt"') == 2)
 check_true("merge-wait-m-merges-from-here",
            '"$mode" == both && "$POLL_KEY" == [mM]' in mwait and "merge_offer" in mwait)
+# Stops on an answer; a red check holds it only until the branch or main
+# moves, a new merge to put.
 check_true("merge-wait-auto-stops-on-an-answer",
-           '[[ "$offered" -eq 2 ]] && auto_tried=1' in mwait)
+           "answered=1" in mwait and '"$answered" -eq 0' in mwait)
+check_true("merge-wait-red-held-until-the-pair-moves",
+           'held="$(merge_check_pair "$wt")"' in mwait
+           and '"$held" != "$(merge_check_pair "$wt")"' in mwait)
+# Held by a red check of the merge with main, it says so, not "merges it itself".
+check_true("merge-wait-auto-held-said",
+           0 <= mwait.find("is auto, but held") < mwait.find("is auto: sclaude merges it itself")
+           and "merge_check_red" in mwait)
 check_true("merge-wait-m-says-why-not", "Nothing to merge from here yet" in mwait)
 check_true("merge-wait-gets-the-offer-mode",
            'merge_wait "$slug" "$issue" "$pr" "$branch" "$offer_mode"' in deploy)

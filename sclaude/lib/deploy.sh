@@ -1434,13 +1434,13 @@ qa_wait() {
 #
 # `merge` in the project's config (project_flow_mode) adds a way out: with
 # `both`, `m` pressed here puts the merge question again; with `auto`, the
-# merge is made the first time GitHub calls the pull request ready — once, so
-# a refusal is not repeated every poll. <offer-mode> is merge_offer's.
+# merge is made the first time GitHub calls the pull request ready — once,
+# or again after a red check once the pair moves. <offer-mode> is merge_offer's.
 #
 #   merge_wait <slug> <issue> <pr> <branch> [offer-mode] [worktree]
 merge_wait() {
   local slug="$1" issue="$2" pr="$3" branch="$4" offer_mode="${5:-}" wt="${6:-}"
-  local waited=0 logged=0 start=$SECONDS mode auto_tried=0 keys="" offered
+  local waited=0 logged=0 start=$SECONDS mode held=none answered=0 keys="" offered red
   local looked=0 conflict_rc
 
   [[ -n "$branch" ]] || return 1
@@ -1449,7 +1449,17 @@ merge_wait() {
   echo ""
   info "Waiting for the merge of PR #$pr${issue:+ (issue #$issue)}; merge it on GitHub."
   [[ "$mode" == both ]] && info "  Or press m here to merge it from sclaude."
-  [[ "$mode" == auto ]] && info "  \`merge\` is auto: sclaude merges it itself once GitHub calls it ready."
+  # Held by the check of the merge with main (merge_build_check): the offer
+  # just before said so, and "merges it itself" right under it is not what
+  # happens. It is tried again once the branch or main moves.
+  red="$(merge_check_red "$wt")"
+  if [[ "$mode" == auto && -n "$red" ]]; then
+    held="$(merge_check_pair "$wt")"
+    info "  \`merge\` is auto, but held: the merge with main fails \`$red\`. sclaude tries"
+    info "  again once the branch or main moves; or merge it on GitHub."
+  elif [[ "$mode" == auto ]]; then
+    info "  \`merge\` is auto: sclaude merges it itself once GitHub calls it ready."
+  fi
   info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug"
   echo ""
   local pr_state
@@ -1485,9 +1495,12 @@ merge_wait() {
         return 3
       fi
     fi
-    # Auto stops trying once the merge was put and answered (2): a refusal
-    # repeated every poll is noise. Not offered (1) — the column read empty,
-    # GitHub still computing — is tried again on the next poll.
+    # Auto stops trying once the merge was put and answered (2): a person's
+    # "no", or GitHub refusing it, repeated every poll is noise. A red check
+    # of the merge with main holds it only until the branch or main moves —
+    # fetched by the conflict check above — when it is a new merge to put.
+    # Not offered (1) — the column read empty, GitHub still computing — is
+    # tried again on the next poll.
     if [[ "$mode" == both && "$POLL_KEY" == [mM] ]]; then
       [[ -t 1 ]] && printf '\r\033[2K'
       offered=0
@@ -1495,12 +1508,19 @@ merge_wait() {
       [[ "$offered" -eq 0 ]] && return 0
       [[ "$offered" -eq 1 ]] \
         && info "  Nothing to merge from here yet: QA has not passed it, or GitHub has not called it ready."
-    elif [[ "$mode" == auto && "$auto_tried" -eq 0 && "$(merge_readiness "$pr")" == ready ]]; then
+    elif [[ "$mode" == auto && "$answered" -eq 0 && "$held" != "$(merge_check_pair "$wt")" \
+            && "$(merge_readiness "$pr")" == ready ]]; then
       [[ -t 1 ]] && printf '\r\033[2K'
       offered=0
       merge_offer "$slug" "$pr" "$issue" "$offer_mode" "$wt" || offered=$?
       [[ "$offered" -eq 0 ]] && return 0
-      [[ "$offered" -eq 2 ]] && auto_tried=1
+      if [[ "$offered" -eq 2 ]]; then
+        if [[ -n "$(merge_check_red "$wt")" ]]; then
+          held="$(merge_check_pair "$wt")"
+        else
+          answered=1
+        fi
+      fi
     fi
   done
   [[ -t 1 ]] && printf '\r\033[2K'

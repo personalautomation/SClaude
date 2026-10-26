@@ -34,7 +34,8 @@
 # feature began) reached one feature and not the next. The worktree's answers
 # only with no main checkout's at all; project_get also takes from it a key
 # the main checkout does not have yet, a feature in flight adding it. One key
-# is read from the worktree alone: see regression_serve_command.
+# is read from the worktree alone: see regression_serve_command; and the
+# check before a merge reads the merged tree's (merge_build_check).
 project_config() {
   local wt="${1:-}"
   if [[ -n "${REPO:-}" && -f "$REPO/.sclaude/config.json" ]]; then

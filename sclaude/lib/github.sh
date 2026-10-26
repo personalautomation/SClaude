@@ -154,6 +154,28 @@ capture_pr() {
   issue_hold_open "$(state_get "$wt/.sclaude/local/feature/state.json" issue || true)"
 }
 
+# The pull request the branch has now, recorded once it is a new one. A
+# feature reopened after its merge by a rollback or QA's hand-back goes back
+# to step 4, whose session opens the new pull request, and nothing else asks
+# the branch again: the state went on naming the merged one, and with it the
+# review report and the step's close.
+#
+#   capture_reopened_pr <wt>
+capture_reopened_pr() {
+  local state="$1/.sclaude/local/feature/state.json" seen number branch
+  seen="$(state_get "$state" reopened_pr 2>/dev/null || true)"
+  [[ -n "$seen" && "$seen" != "null" && "$seen" == "$(state_get "$state" pr 2>/dev/null || true)" ]] \
+    || return 0
+  # By the feature's branch, not the one the tree is on: a session that left
+  # it on another branch would give the feature that branch's pull request.
+  branch="$(state_get "$state" branch 2>/dev/null || true)"
+  [[ -n "$branch" && "$branch" != "null" ]] || return 0
+  [[ "$(git -C "$1" branch --show-current 2>/dev/null)" == "$branch" ]] || return 0
+  number="$(cd "$1" && gh pr view "$branch" --json number --jq .number 2>/dev/null)" || return 0
+  [[ -n "$number" && "$number" != "$seen" ]] || return 0
+  capture_pr "$1"
+}
+
 # The issue stays open until the whole cycle is over, and sclaude closes it.
 #
 # Two things close it too early, and neither is a mistake on its own. A board

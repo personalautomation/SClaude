@@ -472,6 +472,7 @@ run_step() {
   model="$(step_model "$step")"
   effort="$(step_effort "$step")"
   mode="$(step_mode "$step")"
+  [[ "$step" == "review" ]] && capture_reopened_pr "$wt"
   pr="$(state_get "$state" pr || true)"
   local issue; issue="$(state_get "$state" issue || true)"
   # A new feature reaches its first step without naming itself to
@@ -1163,6 +1164,10 @@ after_step() {
       fi
       ;;
     review)
+      # A reopened feature's session opened its new pull request just now:
+      # everything below — the gate, the push, the close — is about that one.
+      capture_reopened_pr "$wt"
+      pr="$(state_get "$state" pr 2>/dev/null || true)"
       # Leaving the session is not the review being done. Once a third round's
       # session exited while the automatic review of its push was still
       # running, and that review then opened six new threads: closing here
@@ -2768,7 +2773,7 @@ review_reopen() {
   run_step "$wt" "$slug" review
 }
 
-# Says, once a feature and loudly, that the review's report finds the rounds
+# Says, once a pull request and loudly, that the review's report finds the rounds
 # no longer converging (steps.review.stuck, written by review_report), and how
 # to end the search: each round's new findings went to a fresh session for as
 # long as the person did not press `s` — eighteen rounds on one feature, most
@@ -2780,12 +2785,23 @@ review_reopen() {
 #
 #   review_stuck_say <wt>
 review_stuck_say() {
-  local wt="$1" state="$1/.sclaude/local/feature/state.json" said
+  local wt="$1" state="$1/.sclaude/local/feature/state.json" said pr
   said="$(state_get "$state" steps.review.stuck 2>/dev/null || true)"
   [[ -n "$said" && "$said" != "null" ]] || return 0
   [[ -z "$(review_enough "$wt")" ]] || return 0
-  [[ "$(state_get "$state" steps.review.stuck_said 2>/dev/null || true)" != "true" ]] || return 0
-  state_set "$state" steps.review.stuck_said true 2>/dev/null || true
+  # Once per pull request, by its number: a feature reopened after its merge
+  # goes on under a new one, whose rounds were said about nothing yet, and a
+  # verdict on the merged one's is no verdict on them (review_report).
+  # A state from before the keying: a verdict with no number is the current
+  # pull request's, and `true` said for it.
+  local verdict_pr said_for
+  pr="$(state_get "$state" pr 2>/dev/null || true)"
+  verdict_pr="$(state_get "$state" steps.review.stuck_pr 2>/dev/null || true)"
+  [[ -n "$verdict_pr" && "$verdict_pr" != "null" ]] || verdict_pr="$pr"
+  said_for="$(state_get "$state" steps.review.stuck_said 2>/dev/null || true)"
+  [[ "$said_for" == "true" ]] && said_for="$pr"
+  [[ "$verdict_pr" == "$pr" && "$said_for" != "$pr" ]] || return 0
+  state_set "$state" steps.review.stuck_said "$pr" 2>/dev/null || true
   echo ""
   warn "  The review's report: $said"
   warn "  To make this the last session for new findings: [s] while a review pass runs,"
@@ -2998,6 +3014,7 @@ review_report() {
     state_set "$state" steps.review.stuck "" 2>/dev/null || true
   elif [[ -n "$verdict" ]]; then
     state_set "$state" steps.review.stuck "$verdict" 2>/dev/null || true
+    state_set "$state" steps.review.stuck_pr "$pr" 2>/dev/null || true
   fi
   local ASK_SLUG="$slug"
   [[ -n "${REVIEW_REPORT_QUIET:-}" ]] || ask_notice "$(cat "$brief" 2>/dev/null)"

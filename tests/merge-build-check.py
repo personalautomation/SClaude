@@ -12,6 +12,9 @@
 #                       and a rename on main sails through.
 #   built every poll    the merge wait builds the same pair every half minute.
 #   a tree left behind  the throwaway worktree outlives the check.
+#   main's config       the parts are read from the main checkout's config,
+#                       not the merge's: a part the pull request dropped runs
+#                       on a tree it no longer fits.
 #
 # A bare repository plays origin; the clone plays the feature's tree. The
 # project's parts are stubs: `check` fails when a file named `broken` exists.
@@ -89,12 +92,12 @@ info() { :; }
 warn() { :; }
 link_env() { :; }
 link_node_modules() { :; }
-project_regression_parts() { echo "check"; }
-regression_command() { echo "echo run >> %s; test ! -e broken"; }
+project_regression_parts() { echo "$REPO" >> %s.config; echo "check"; }
+regression_command() { echo "$REPO" >> %s.config; echo "echo run >> %s; test ! -e broken"; }
 source "%s/sync.sh"
 merge_build_check "%s"
 echo "rc=$?"
-""" % (self.runs, LIB, self.wt)
+""" % (self.runs, self.runs, self.runs, LIB, self.wt)
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                              env=dict(ENV, TMPDIR=self.tmp)).stdout.strip()
         return out.splitlines()
@@ -122,6 +125,9 @@ with tempfile.TemporaryDirectory() as tmp:
           os.path.exists(os.path.join(tmp, "sclaude-merge-check-feature")), False)
     check("the-throwaway-tree-is-unregistered",
           "sclaude-merge-check" in git(w.wt, "worktree", "list"), False)
+    with open(w.runs + ".config") as fh:
+        check("the-config-is-the-merge-s",
+              set(fh.read().split()), {os.path.join(tmp, "sclaude-merge-check-feature")})
 
 with tempfile.TemporaryDirectory() as tmp:
     # The branch alone is green; only main's newer commit breaks it, so a
@@ -131,10 +137,23 @@ with tempfile.TemporaryDirectory() as tmp:
     check("main-breaking-the-merge-is-red", w.run(), ["check", "rc=1"])
     check("a-red-pair-is-remembered", w.run(), ["check", "rc=1"])
     check("a-red-pair-is-built-once", w.built(), 1)
+    # The verdict read back for the merge wait: red for this pair only.
+    def red():
+        return subprocess.run(["bash", "-c", 'source "%s/sync.sh"; merge_check_red "%s"'
+                               % (LIB, w.wt)], capture_output=True, text=True,
+                              env=ENV).stdout.strip()
+    check("the-red-part-is-read-back", red(), "check")
+    # A verdict the old reader cached, from the main checkout's config, is
+    # not this check's: under its old name it is not read.
+    feature = os.path.join(w.wt, ".sclaude", "local", "feature")
+    os.rename(os.path.join(feature, "merge-verdict"), os.path.join(feature, "merge-check"))
+    check("an-old-cache-is-not-read", red(), "")
+    os.rename(os.path.join(feature, "merge-check"), os.path.join(feature, "merge-verdict"))
     # main fixed: a new pair, built again.
     w.main_moves("broken", None)
     check("main-moving-again-builds-again", w.run(), ["rc=0"])
     check("main-moving-again-ran-the-parts", w.built(), 2)
+    check("a-moved-pair-is-not-red", red(), "")
 
 if failures:
     print("\n%d check(s) failed." % len(failures))

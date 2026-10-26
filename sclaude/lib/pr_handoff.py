@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import acceptance  # noqa: E402
 import issue_comments  # noqa: E402
 from pr_context import FINDINGS_CHECK, GREEN, gh, gh_json, pr_view, review_mode  # noqa: E402
-from review_report import local_runs  # noqa: E402
+from review_report import local_runs, pr_created  # noqa: E402
 
 
 def repo_of(cwd):
@@ -219,7 +219,7 @@ def summary(cwd, pr, state_path, done, numbers):
     # Reviewed on this machine: its findings are threads like the workflow's,
     # counted above, but its runs are in its journal, not on the commits.
     local = review_mode(cwd) == "local"
-    runs = (local_runs(cwd) or []) if local else None
+    runs = (local_runs(cwd, pr_created(cwd, pr)) or []) if local else None
     if local:
         rows.append(("Last review", "on this machine, %d run%s, the last at %s"
                      % (len(runs), "" if len(runs) == 1 else "s",

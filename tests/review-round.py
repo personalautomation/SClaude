@@ -791,12 +791,13 @@ session_watch_stop
     check("github-red-word-kept", left["steps"]["review"].get("enough"), "now")
 
     # --- rounds that stopped converging are said, once, and not asked --------
-    def stuck_say(review):
+    def stuck_say(review, pr=7):
         wt = tempfile.mkdtemp()
         os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
         st = os.path.join(wt, ".sclaude/local/feature/state.json")
+        review = dict({"stuck_pr": 7}, **review)
         with open(st, "w") as fh:
-            json.dump({"steps": {"review": review}}, fh)
+            json.dump({"pr": pr, "steps": {"review": review}}, fh)
         body = 'source "%s/state.sh"\nsource "%s/local_review.sh"\n' % (LIB, LIB)
         body += functions(RUN, ["review_stuck_say"])
         body += ('\nLIB="%s"\nwarn() { echo "WARN $*"; }\n'
@@ -813,6 +814,17 @@ session_watch_stop
     check("stuck-names-the-keys", "[s]" in out and "⏭" in out, True)
     check("converging-not-said", stuck_say({"stuck": ""}).strip(), "")
     check("ended-search-not-said", stuck_say({"stuck": "Not converging.", "enough": "now"}).strip(), "")
+    # Once per pull request: a feature reopened after its merge goes on under
+    # a new one, and the merged one's verdict and its warning are not its.
+    check("said-again-for-a-new-pr", stuck_say({"stuck": "Not converging.", "stuck_pr": 9,
+                                                "stuck_said": 7}, pr=9).count("The review's report"), 1)
+    check("old-pr-verdict-not-said", stuck_say({"stuck": "Not converging."}, pr=9).strip(), "")
+    # A state from before the keying: a verdict with no number is the current
+    # pull request's, and a `true` was said for it.
+    check("unkeyed-verdict-said", stuck_say({"stuck": "Not converging.", "stuck_pr": None})
+          .count("The review's report"), 1)
+    check("unkeyed-said-not-again", stuck_say({"stuck": "Not converging.", "stuck_pr": None,
+                                               "stuck_said": True}).strip(), "")
 
     # --- step 4 closes only once the review is done with the head -------------
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,

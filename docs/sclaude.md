@@ -983,6 +983,20 @@ there, and a question would hold the rounds until somebody answered. On one
 pull request the verdict said "Not converging" eighteen rounds in a row, each
 followed by a fresh session, until the person stopped it by hand.
 
+**A second pull request starts its own report.** A feature reopened after
+its merge — a retrospective's fixes, a rollback — goes on under a new pull
+request, in the same state and journal. The report counts only the review
+sessions still going when that pull request opened, and the review runs after
+it (`pr_created` in `review_report.py`, less two minutes for this machine's
+clock); when that time cannot be read, no verdict is written. The verdict and
+its warning are kept per pull request (`steps.review.stuck_pr`, `stuck_said`).
+A rollback or QA's hand-back reopens the feature at step 4, whose session
+opens the new pull request, so step 4 records it on its way in and before it
+closes (`capture_reopened_pr` in `github.sh`). Counted with the new
+one, the merged one's rounds, whose threads the report no longer reads, showed
+as rounds that found nothing, and the new pull request's first findings were
+taken for a review that stopped converging.
+
 **Leaving step 4's session does not close it on its own.** After the session exits, the step closes only once the automatic review has finished with the pushed head and left nothing open: no check running or red (the findings check among them) and no unresolved review thread (`pr_context.py --close`). Otherwise sclaude waits for a running review, says what is open, and offers the session back; closing anyway is a second, explicit answer.
 
 **Every commit a step's session makes names it.** sclaude launches claude with `core.hooksPath` pointed at `sclaude/githooks` through `GIT_CONFIG_*` in that process's environment only; its `commit-msg` adds `Sclaude-Session: <id>` — the id the issue's table and `claude --resume` use — at the end of the trailer block, and every hook there then runs the project's own hook of the same name. A row in the issue finds its commits with `git log --grep=<id>`. Commits made by hand are untouched.

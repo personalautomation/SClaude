@@ -7,15 +7,17 @@ The feature "<feature>" <if:pr-number>is merged</if:pr-number><if:no-change>has 
 - <if:pr-number>The pull request #<pr-number><if:issue> and the issue #<issue></if:issue></if:pr-number><if:no-change>The issue #<issue></if:no-change>, with `gh`, if you need what was said there.
 - The session transcripts, only when you need what happened inside a session or there is no recording of the terminal — they are large: `<transcripts>/<session id>.jsonl`, the ids are in `state.json`. The raw terminal recordings are listed in `<terminal-raw>`.
 
-**What to answer.** Three sections, in this order:
+**What to answer.** Three sections, in this order, and a fourth when you have something for it:
 
 1. **What I may have missed.** Warnings that scrolled past, a question I answered without the information under it, a review thread left unanswered, something a session promised and did not do, a follow-up mentioned and never filed, uncommitted work, anything that exists only in this worktree. The worktree is still here, so this is the section to act on now.
 2. **How I could work better.** Recommendations about how I drove this feature: where I waited, where I went round the same loop, where an earlier or a clearer answer would have saved a session.
 3. **What `sclaude` could do better.** What this feature ran into in the orchestrator itself: a message that misled, a step that stalled, a question asked at the wrong moment, work a session did that `sclaude` could have done. Its source is in `<instruments>`; name the file and the function when you can.
 
+4. **Settings that would make me faster** — optional. Which of `sclaude`'s settings would suit the way I worked on this feature: the project's choices in `<instruments>/sclaude/config.example.json` against `<config>`, a copy of the main checkout's `.sclaude/config.json` — shared by everybody on the project, so say so — and the personal `SCLAUDE_*` switches in the table in `<instruments>/README.md`. Each one with how it is set (`sclaude config set` takes only `review`, `qa`, `merge`; the rest is edited in that file, not in the copy), the moment in this feature it would have saved, and how sure you are, as a percentage. Leave the section out when nothing in this feature points at a setting; it does not keep the session open.
+
 Also say, in a line or two, what went well and is worth keeping.
 
-**The rule for all three: facts only.** Every point stands on something you read — quote the line from the terminal or name the file and field. If you cannot point at it, leave it out. An empty section is a fine answer; write "nothing" under it. Do not pad a section to make it look useful.
+**The rule for all of them: facts only.** Every point stands on something you read — quote the line from the terminal or name the file and field. If you cannot point at it, leave it out. An empty section among the first three is a fine answer; write "nothing" under it. Do not pad a section to make it look useful.
 
 Change nothing while you look: no edits, no commits, no comments, no messages. Afterwards, do only what I ask for in this conversation.
 
@@ -23,7 +25,7 @@ Change nothing while you look: no edits, no commits, no comments, no messages. A
 
 <block:workshop>
 
-**How this ends.** Give the three sections as your last message.
+**How this ends.** Give the sections as your last message.
 
 - **If sections 1 and 3 are both "nothing"**, `sclaude` closes this session itself. Write the marker first — `echo done > <done-marker>` — and then the report, with no tool call after it. About thirty seconds after your turn ends the session is closed and the report printed in the orchestrator's terminal; if I type anything in those thirty seconds, the closing is called off and the marker removed. Say in the report that the session closes by itself, and that `sclaude` then asks about the clean-up.
 - **Otherwise** leave the marker out: the session stays open so we can talk it through, and I close it with `/exit` when we are done. End the report by saying so, and that `sclaude` asks about the clean-up after that.

@@ -112,6 +112,10 @@ PY
 
   local terminal session done_file prompt
   terminal="$(term_render "$wt" 2>/dev/null || true)"
+  # The project's config as the main checkout holds it — `sclaude config`
+  # writes there and leaves it uncommitted — copied where the session reads.
+  local config="$wt/.sclaude/local/feature/main-config.json"
+  cp "$REPO/.sclaude/config.json" "$config" 2>/dev/null || echo '{}' > "$config"
   session="${last:-$(new_session_id)}"
   done_file="${TMPDIR:-/tmp}/sclaude-retro-$slug.done"
   rm -f "$done_file"
@@ -138,6 +142,7 @@ PY
     SCLAUDE_V_WORKTREE="$wt" \
     SCLAUDE_V_BRANCH="$(state_get "$fstate" branch 2>/dev/null || true)" \
     SCLAUDE_V_INSTRUMENTS="$INSTRUMENTS" \
+    SCLAUDE_V_CONFIG="$config" \
     SCLAUDE_V_DONE_MARKER="$done_file" \
     render_prompt "$template" "$slug" "$pr" "$issue" "$wt")" || return 0
 

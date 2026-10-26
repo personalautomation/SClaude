@@ -162,7 +162,11 @@ first matches each to a class already put off, or to a rule CLAUDE.md already
 states, and sclaude says how many times its class has come back this month. `sclaude doctor` lists
 what a machine is missing and the command that fixes each gap, so onboarding is a
 checklist. The retrospective at the end reads a recording of the whole run — what
-sclaude printed and what you typed — and says what could go better.
+sclaude printed and what you typed — and says what could go better and, when
+the run points at one, a setting that would suit how you work. The monthly review
+can add the same, and also finds lines in CLAUDE.md, other instructions and
+Claude Code's memory that the tool's changes made untrue, and proposes tools to
+install or remove — each only on evidence, with how sure it is.
 
 ### What is measured
 

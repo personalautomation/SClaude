@@ -442,9 +442,19 @@ cmd_deferred() {
   done < <(deferred_dirs "$wt")
 
   done_file="${TMPDIR:-/tmp}/sclaude-deferred.done"
+  # The config as the main checkout holds it, set and maybe not committed,
+  # copied into the tree's own scratch: the session cannot read the main
+  # checkout, and opening it there would open it for writing too. Hidden
+  # from git first, so that no `git add -A` of the session takes it along;
+  # `{}` when there is none, which reads as every setting at its default.
+  local config="$wt/.sclaude/local/main-config.json"
+  scratch_hide "$wt"
+  mkdir -p "${config%/*}"
+  cp "$root/.sclaude/config.json" "$config" 2>/dev/null || echo '{}' > "$config"
   prompt="$(D_FILES="${list%$'\n'}" D_STAMPS="${stamps%$'\n'}" D_WT="$wt" D_BRANCH="$branch" \
     D_RULES="$(product_rules_dir "$wt")" D_INSTRUMENTS="$INSTRUMENTS" \
     D_DONE="$done_file" D_TODAY="$(date +%F)" D_WORKSHOP="$(workshop_rules "$wt" free)" \
+    D_MEMORY="$(transcript_dir "$root")/memory" D_CONFIG="$config" \
     python3 - "$PROMPTS/friction-deferred.md" <<'PY'
 import os, sys
 text = open(sys.argv[1], encoding="utf-8").read()
@@ -452,7 +462,8 @@ for key, env in (("<files>", "D_FILES"), ("<stamps>", "D_STAMPS"),
                  ("<worktree>", "D_WT"), ("<branch>", "D_BRANCH"),
                  ("<rules>", "D_RULES"), ("<instruments>", "D_INSTRUMENTS"),
                  ("<done-marker>", "D_DONE"), ("<today>", "D_TODAY"),
-                 ("<workshop-rules>", "D_WORKSHOP")):
+                 ("<workshop-rules>", "D_WORKSHOP"), ("<memory>", "D_MEMORY"),
+                 ("<config>", "D_CONFIG")):
     text = text.replace(key, os.environ.get(env, ""))
 print(text)
 PY
@@ -507,7 +518,9 @@ PY
       warn "  the review committed to $branch in $wt, and the push failed — push it by hand"
     fi
   elif [[ -z "$dirty" ]]; then
-    info "  the review changed nothing"
+    # Not "changed nothing": a fix to Claude Code's memory is made outside
+    # the tree, and is in the session's report.
+    info "  the review committed nothing to the product"
   fi
   # Edits the session made and did not commit are its work too: "changed
   # nothing" over them was wrong, and the tree holding them is named, and kept.

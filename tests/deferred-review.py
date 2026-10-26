@@ -11,6 +11,7 @@
 #
 # Run it with: python3 tests/deferred-review.py
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -40,7 +41,7 @@ def review(repo, prompt_out, dirty=False):
     script = r'''
 set -uo pipefail
 BOLD=""; BLUE=""; OFF=""; DIM=""; GREEN=""; YELLOW=""; RED=""
-for m in state project developer deferred; do source "%(lib)s/$m.sh"; done
+for m in state project developer scratch deferred; do source "%(lib)s/$m.sh"; done
 LIB="%(lib)s"; PROMPTS="%(prompts)s"; INSTRUMENTS="%(root)s"
 info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; die() { echo "DIE $*"; exit 1; }
 new_session_id() { echo 00000000-0000-0000-0000-000000000000; }
@@ -74,6 +75,10 @@ try:
     os.makedirs(d)
     with open(os.path.join(d, "12-a.tsv"), "w") as fh:
         fh.write("2026-09-01\tmyapp\t12-a\treview\tclass-a\tOn main.\n")
+    # A config, so that its copy is made: in a clone that never hid
+    # .sclaude/local the copy read as the review's uncommitted edits.
+    with open(os.path.join(repo, ".sclaude", "config.json"), "w") as fh:
+        fh.write("{}\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "an entry on main")
     git(repo, "push", "-q", "origin", "HEAD:main")
@@ -89,14 +94,20 @@ try:
     check("review-ran", "DIE" in out, False)
     check("names-mains-file", "deferred/12-a.tsv" in prompt, True)
     check("not-the-working-copys", "deferred/13-b.tsv" in prompt, False)
+    # The memory is named by the same encoding Claude Code uses, of the main
+    # checkout: a rule spelled out in the prompt missed dots and underscores.
+    check("memory-filled", "<memory>" in prompt, False)
+    # The config as the main checkout holds it, set and not committed.
+    check("config-in-the-tree", "/.sclaude/local/main-config.json" in prompt, True)
+    check("memory-of-main", "/.claude/projects/%s/memory" % re.sub(r"[^a-zA-Z0-9]", "-", repo) in prompt, True)
     # A review that changed nothing says so and leaves no tree or branch.
-    check("nothing-says-so", "the review changed nothing" in out, True)
+    check("nothing-says-so", "the review committed nothing to the product" in out, True)
     check("nothing-no-tree", trees(tmp), [])
     check("nothing-no-branch", branches(repo), [])
 
     # Edits it did not commit are named, and the tree holding them stays.
     out = review(repo, out_file, dirty=True)
-    check("dirty-not-nothing", "the review changed nothing" in out, False)
+    check("dirty-not-nothing", "the review committed nothing to the product" in out, False)
     check("dirty-named", "did not commit" in out and trees(tmp)[0] in out if trees(tmp) else False, True)
     for w in trees(tmp):
         git(repo, "worktree", "remove", "--force", os.path.join(tmp, w))
@@ -122,7 +133,7 @@ try:
           subprocess.run(["git", "-C", repo, "merge-base", "--is-ancestor", earlier, branch]).returncode, 0)
     check("same-day-push-fits", "push failed" in out, False)
     # This session changed nothing, and the morning's commits are not its work.
-    check("same-day-nothing-new", "the review changed nothing" in out, True)
+    check("same-day-nothing-new", "the review committed nothing to the product" in out, True)
     check("same-day-branch-kept", branches(repo), [branch])
     for w in trees(tmp):
         git(repo, "worktree", "remove", "--force", os.path.join(tmp, w))
@@ -162,7 +173,7 @@ try:
     git(repo, "fetch", "-q", "origin")
     os.remove(os.path.join(stamp_dir, "last-reviewed"))
     offer = subprocess.run(["bash", "-c",
-                            'for m in state project developer deferred; do source "%s/$m.sh"; done; '
+                            'for m in state project developer scratch deferred; do source "%s/$m.sh"; done; '
                             'DEFERRED_DAYS=30; info() { echo "$*"; }; say() { echo "$*"; }; '
                             'ask() { echo ASKED; }; is_yes() { return 1; }; gh() { :; }; '
                             'cd "%s" && deferred_offer' % (LIB, repo)],
@@ -180,14 +191,14 @@ try:
         fh.write("# header\n2026-09-01\tmyapp\t12-a\treview\tclass-a\tOld.\n"
                  "2026-09-02\tother\t3-b\treview\tclass-b\tNot ours.\n")
     said = subprocess.run(["bash", "-c",
-                           'for m in state project developer deferred; do source "%s/$m.sh"; done; '
+                           'for m in state project developer scratch deferred; do source "%s/$m.sh"; done; '
                            'warn() { echo "$*"; }; deferred_legacy "%s"' % (LIB, repo)],
                           capture_output=True, text=True,
                           env=dict(os.environ, XDG_STATE_HOME=os.path.join(tmp, "state"))).stdout
     check("legacy-entries-named", "1 deferred entry for myapp" in said, True)
 
     # An open pull request of an earlier review is named rather than offered over.
-    pending = subprocess.run(["bash", "-c", 'for m in state project developer deferred; do source "%s/$m.sh"; done; '
+    pending = subprocess.run(["bash", "-c", 'for m in state project developer scratch deferred; do source "%s/$m.sh"; done; '
                               'gh() { echo https://pr/7; }; deferred_pending "%s"' % (LIB, repo)],
                              capture_output=True, text=True).stdout.strip()
     check("pending-named", pending, "https://pr/7")

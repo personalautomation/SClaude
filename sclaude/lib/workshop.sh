@@ -345,11 +345,16 @@ WORKSHOP_PHONE_MAX=1200
 # The tests the change touches, as CLAUDE.md picks them for a commit: every
 # test file that names a changed file; and bash -n on every shell file. In a
 # clean environment, since the session's (its git hooks, its question channel)
-# is no test's business.
+# is no test's business. Each test in a session of its own, with no terminal:
+# one that checks what happens without a terminal (the picker's) would
+# otherwise find the person's and wait there for a key. Its own session is
+# also out of the terminal's reach for Ctrl-C and a closed tab, so those are
+# caught here: the test's session gets the signal the terminal would have sent
+# it (on Ctrl-C a test still runs its teardown), and so does sclaude.
 #
 #   workshop_tests <workshop> <base>
 workshop_tests() {
-  local ws="$1" base="$2" f t log
+  local ws="$1" base="$2" f t log pid rc sig="" saved
   local -a files=() tests=() failed=()
   # A rename as the deletion and the addition it is: a test that names the old
   # file is the one a rename breaks.
@@ -366,10 +371,27 @@ workshop_tests() {
   info "  Checking it: ${#tests[@]} test file(s) the change touches."
   log="${TMPDIR:-/tmp}/sclaude-workshop-tests.log"
   : > "$log"
+  saved="$(trap -p INT TERM HUP)"
+  trap 'sig=INT' INT; trap 'sig=TERM' TERM; trap 'sig=HUP' HUP
   for t in "${tests[@]}"; do
-    ( cd "$ws" && env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LANG="${LANG:-C.UTF-8}" \
-        TMPDIR="${TMPDIR:-/tmp}" python3 "$t" </dev/null >>"$log" 2>&1 ) || failed+=("$t")
+    # In the background, so not a group leader: setsid then makes the session
+    # in place, and $! is its id.
+    ( cd "$ws" && exec setsid env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LANG="${LANG:-C.UTF-8}" \
+        TMPDIR="${TMPDIR:-/tmp}" python3 "$t" </dev/null >>"$log" 2>&1 ) &
+    pid=$!
+    wait "$pid"; rc=$?
+    if [[ -n "$sig" ]]; then
+      kill -s "$sig" -- "-$pid" 2>/dev/null
+      # A second signal cuts a stuck teardown short; nothing outlives sclaude.
+      wait "$pid" 2>/dev/null
+      kill -KILL -- "-$pid" 2>/dev/null
+      break
+    fi
+    (( rc == 0 )) || failed+=("$t")
   done
+  trap - INT TERM HUP
+  eval "$saved"
+  [[ -n "$sig" ]] && { kill -s "$sig" "$BASHPID"; return 1; }
   (( ${#failed[@]} == 0 )) && return 0
   warn "  Red: ${failed[*]} — not published; it stays in $ws. The output: $log"
   return 1
@@ -391,7 +413,9 @@ workshop_publish() {
   workshop_py put "$rec" stopped null
   echo ""
   info "${BOLD}sclaude's change from this tree's workshop${OFF}"
-  git -C "$ws" log --format='     %h %s' "$start..HEAD" 2>/dev/null
+  # Not what main has already: a try that stopped after its rebase leaves
+  # start below the main it rebased on, and those commits are nobody's change.
+  git -C "$ws" log --format='     %h %s' "$start..HEAD" --not origin/main 2>/dev/null
   # sclaude's own git, not the session's: its hooks and its trailer are for
   # what the session commits.
   local -a G=(env -u GIT_CONFIG_COUNT git -C "$ws")

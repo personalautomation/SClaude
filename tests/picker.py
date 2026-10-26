@@ -162,13 +162,14 @@ def main():
     #
     # Through bash explicitly: os.popen calls /bin/sh, and there is neither
     # source nor bash functions there — the check would silently turn into
-    # "command not found".
+    # "command not found". In a session of its own, so that /dev/tty is not
+    # the terminal of whoever runs the test.
     import subprocess
     out = subprocess.run(
         ["bash", "-c",
          'BOLD=""; DIM=""; GREEN=""; OFF=""; source "%s/picker.sh"; '
          'out="$(pick_list "T" "a\tb" < /dev/null)"; echo "[$out] rc=$?"' % LIB],
-        capture_output=True, text=True).stdout.strip()
+        capture_output=True, text=True, start_new_session=True).stdout.strip()
     check("no terminal gives code 2 and silence", out, "[] rc=2")
 
     for name, want, got in failures:

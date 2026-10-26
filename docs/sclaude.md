@@ -442,7 +442,9 @@ pull-request or issue references, and paths of the product's own files, in
 the added lines and the commit messages; a hit is the person's to wave
 through), squashes it into one commit (`squash-message`: the first commit
 that is not a review round leads, the rest are listed, the trailers merged),
-runs the tests the change touches in a clean environment, and pushes
+runs the tests the change touches in a clean environment, each in a session
+of its own with no terminal (Ctrl-C and a closed tab are passed on to it,
+`workshop_tests`), and pushes
 `HEAD:main`. Then the live checkout is fast-forwarded to it when nothing else
 runs from it (`workshop_live_update`), so the next session runs the fix; the
 next sclaude start does it otherwise, and a checkout holding commits of its

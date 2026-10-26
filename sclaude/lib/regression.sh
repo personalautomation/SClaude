@@ -571,9 +571,10 @@ regression_line() {
 # failed *entirely* — Playwright prints "Running N tests" and "N failed", and
 # those two numbers matching is what "everything" means; a genuine regression
 # nearly always leaves something passing. A suite stopped at its cap
-# (REGRESSION_E2E_MAX_FAILURES) prints "M did not run" for the rest, and then
-# "everything" is the failed and the not-run adding up to what was to run,
-# with nothing passed. And the address must answer with a
+# (REGRESSION_E2E_MAX_FAILURES) prints "M did not run" for the rest, and
+# "K interrupted" for the specs other workers were still running when it
+# stopped; then "everything" is the failed, the interrupted and the not-run
+# adding up to what was to run, with nothing passed. And the address must answer with a
 # server error or not answer at all, which is the part that says the fault is
 # the deployment's rather than the branch's.
 #
@@ -581,17 +582,18 @@ regression_line() {
 # that does not parse. Calling a real failure "the environment" would send a
 # red regression past the gate, which is worse than the session this saves.
 regression_environment_broken() {
-  local log="$1" base="$2" ran failed skipped passed code
+  local log="$1" base="$2" ran failed cut skipped passed code
 
   command -v curl >/dev/null 2>&1 || return 1
 
   ran="$(grep -oE 'Running ([0-9]+) tests' "$log" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
   failed="$(grep -oE '^ *([0-9]+) failed' "$log" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+  cut="$(grep -oE '^ *([0-9]+) interrupted' "$log" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
   skipped="$(grep -oE '^ *([0-9]+) did not run' "$log" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
   passed="$(grep -oE '^ *([0-9]+) passed' "$log" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
   [[ "$ran" =~ ^[0-9]+$ && "$failed" =~ ^[0-9]+$ ]] || return 1
   [[ "${passed:-0}" -eq 0 ]] || return 1
-  [[ "$ran" -gt 0 && "$ran" -eq $(( failed + ${skipped:-0} )) ]] || return 1
+  [[ "$ran" -gt 0 && "$ran" -eq $(( failed + ${cut:-0} + ${skipped:-0} )) ]] || return 1
 
   # 000 is curl's own "no answer at all" — a host that does not resolve or
   # refuses the connection is as broken as one returning 500.

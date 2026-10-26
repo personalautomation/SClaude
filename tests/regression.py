@@ -905,7 +905,7 @@ if broken:
     # something passing, and an address that serves says the fault is the
     # branch's.
     check_true("checks-the-whole-suite-failed",
-               '"$ran" -eq $(( failed + ${skipped:-0} ))' in body)
+               '"$ran" -eq $(( failed + ${cut:-0} + ${skipped:-0} ))' in body)
     check_true("checks-the-address-too", "http_code" in body)
     check_true("counts-a-dead-host-as-broken", '"$code" == "000"' in body)
 
@@ -930,6 +930,11 @@ if broken:
                environment_broken("Running 105 tests using 4 workers\n"
                                   "  Testing stopped early after 10 maximum allowed failures.\n"
                                   "  10 failed\n  95 did not run\n"))
+    # In several workers the specs still running when it stopped are their own line.
+    check_true("broken-when-other-workers-were-cut-short",
+               environment_broken("Running 120 tests using 4 workers\n"
+                                  "  Testing stopped early after 10 maximum allowed failures.\n"
+                                  "  10 failed\n  3 interrupted\n  107 did not run\n"))
     check("not-broken-when-something-passed",
           environment_broken("Running 105 tests using 4 workers\n  10 failed\n"
                              "  90 did not run\n  5 passed\n"), False)

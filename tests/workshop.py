@@ -134,12 +134,30 @@ export SCLAUDE_SESSION=%(session)s
     check("state-unready", sh('workshop_state "%s" s1' % tree).strip(), "unready")
     out = sh('workshop_after_session s1 --session-id s1 --model opus -n x "the prompt"', answer="n")
     check("after-unready-asks", "ASK" in out and "RELAUNCH" not in out, True)
+    check("after-unready-names-the-mark", "sreview's mark" in out, True)
     check("after-unready-pending", ws_py("get", record, "pending.session").stdout.strip(), "s1")
     check("state-pending-for-other", sh('workshop_state "%s" s2' % tree).strip(), "pending")
     # A "yes" resumes the same session, with its arguments and a new word.
     out = sh('workshop_after_session s1 --session-id s1 --model opus -n x "the prompt"', answer="y n")
     check("after-yes-resumes", "RELAUNCH --resume s1 --model opus -n x" in out, True)
+    check("after-yes-says-what-is-missing", "What is missing: sreview's mark" in out, True)
     check("after-yes-asks-again", out.count("ASK"), 2)
+
+    # Sent back from the next opening, the record stays until it is finished:
+    # a run cut off after the session would otherwise forget it.
+    out = sh('claude_launch() { echo "LAUNCH $*"; }; workshop_pending "%s"' % tree, answer="y")
+    check("pending-resumed", "LAUNCH --resume s1" in out and "Missing:" in out, True)
+    check("pending-kept-while-resumed", ws_py("get", record, "pending.session").stdout.strip(), "s1")
+    # A session whose directory is gone cannot be sent back: said, and dropped.
+    ws_py("pending", record, "s1", "/no/such/dir", "--session-id", "s1", "-n", "x", "p")
+    out = sh('claude_launch() { echo "LAUNCH $*"; }; workshop_pending "%s"' % tree, answer="n")
+    check("pending-gone-dir-said", "is gone" in out and "LAUNCH" not in out and "ASK" not in out, True)
+    check("pending-gone-dir-dropped", ws_py("get", record, "pending.session").returncode, 1)
+    # Unfinished with no session recorded is still said.
+    ws_py("put", record, "pending", "null")
+    out = sh('workshop_pending "%s"' % tree)
+    check("unfinished-without-record-said", "no session is" in out and "Missing:" in out, True)
+    ws_py("pending", record, "s1", "/some/cwd", "--session-id", "s1", "-n", "x", "p")
 
     # sreview's mark at the head makes it ready for a maintainer.
     common = git(ws, "rev-parse", "--path-format=absolute", "--git-common-dir")

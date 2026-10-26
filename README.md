@@ -364,6 +364,7 @@ in the feature's workshop instead, a copy of the checkout at
   mode, so the plan you approve is your yes), open it without a question;
 - the session commits there, reviews its change — `/sreview` if you are a
   maintainer, any review you like otherwise — and runs `sclaude core-ready`.
+  Answering "stop" to sreview's "go on?" counts as a finished review.
 
 When the session ends, sclaude publishes the change itself. It looks for your
 project's details in it — the project's name, issue or pull-request numbers,
@@ -372,7 +373,7 @@ runs the tests the change touches; then it pushes a maintainer's change to
 `main` as one commit, and sends anybody else's as one pull request per
 feature. A change left uncommitted or unreviewed is not published: sclaude
 offers you the session back to finish it, at once and when you next open the
-feature. A publication that stops — red tests, no network, a refused push —
+feature, and says what is missing. A publication that stops — red tests, no network, a refused push —
 is tried again, quietly, every time you open the feature; only your own "no"
 to the project's details holds it until a session rewords the change. A list
 of matches too long for a phone question is asked at the terminal only. A

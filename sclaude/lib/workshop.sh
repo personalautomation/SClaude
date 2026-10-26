@@ -34,8 +34,9 @@
 # The record of who may write and what is ready is .sclaude/local/
 # instruments.json beside it (workshop.py), which write-guard.py reads.
 
-# What a session sent back to its unfinished change is told.
-WORKSHOP_RESUME="You changed sclaude in this feature's workshop, and the change is not finished: it is uncommitted, or not reviewed, or not marked ready. sclaude reopened this session for it. Finish the change, commit it in the workshop, review it as your instructions say, and run \`sclaude core-ready\`; sclaude publishes it when you end the session. If the change should not go out at all, say so and leave it: nothing unfinished is published."
+# What a session sent back to its unfinished change is told; what exactly is
+# missing (workshop_missing) follows it.
+WORKSHOP_RESUME="You changed sclaude in this feature's workshop, and the change is not finished. sclaude reopened this session for it. Finish the change, commit it in the workshop, review it as your instructions say, and run \`sclaude core-ready\`; sclaude publishes it when you end the session. If the change should not go out at all, say so and leave it: nothing unfinished is published. What is missing:"
 
 workshop_dir() { printf '%s/.sclaude/local/instruments\n' "$1"; }
 workshop_record() { printf '%s/.sclaude/local/instruments.json\n' "$1"; }
@@ -137,6 +138,29 @@ cmd_core_ready() {
   echo "Ready: sclaude publishes it when this session ends."
 }
 
+# What keeps the tree's workshop from being ready, in a line, for the person
+# and for the session sent back to it: one of uncommitted work, sreview's
+# mark (a maintainer's), or core-ready not run.
+#
+#   workshop_missing <tree>
+workshop_missing() {
+  local ws head mark
+  ws="$(workshop_dir "$1")"
+  if [[ -n "$(git -C "$ws" status --porcelain 2>/dev/null)" ]]; then
+    echo "uncommitted changes in $ws: commit them there, or drop them."
+    return
+  fi
+  head="$(git -C "$ws" rev-parse HEAD 2>/dev/null)"
+  if developer_is_maintainer; then
+    mark="$(workshop_sreview_mark "$ws")"
+    if [[ "$(head -n1 "$mark" 2>/dev/null)" != "$head" ]]; then
+      echo "sreview's mark of a finished review at the head (${head:0:8}): /sreview has not finished on it — run it from $ws, or, if the person has decided the review has gone far enough, they answer \"stop\" to its question — then sclaude core-ready."
+      return
+    fi
+  fi
+  echo "sclaude core-ready has not been run on the head (${head:0:8})."
+}
+
 # Where the tree's workshop stands for <session>: none (nothing unpublished),
 # ready, blocked (ready, but held back at this head by the person, for the
 # product's details: only a new commit lifts it), unready (uncommitted, or not marked ready at
@@ -190,9 +214,10 @@ workshop_after_session() {
   while :; do
     state="$(workshop_state "$tree" "$session")"
     case "$state" in
-      none) return 0 ;;
-      ready) workshop_publish "$tree"; return 0 ;;
+      none) workshop_py put "$rec" pending null; return 0 ;;
+      ready) workshop_py put "$rec" pending null; workshop_publish "$tree"; return 0 ;;
       blocked)
+        workshop_py put "$rec" pending null
         info "  sclaude's change in $ws waits: $(workshop_py get "$rec" blocked.why)"
         return 0 ;;
       pending)
@@ -200,16 +225,15 @@ workshop_after_session() {
         return 0 ;;
     esac
     echo ""
-    warn "  This session changed sclaude in its workshop ($ws), and did not finish:"
-    [[ -n "$(git -C "$ws" status --porcelain 2>/dev/null)" ]] \
-      && warn "  uncommitted changes there." || warn "  not reviewed and marked ready (sclaude core-ready)."
+    local missing; missing="$(workshop_missing "$tree")"
+    warn "  This session changed sclaude in its workshop ($ws), and did not finish. Missing:"
+    warn "  $missing"
     ask "  Back into the session to finish it? [y/n] " answer yn
     if is_yes "$answer"; then
       claude_again_args "$@"
-      claude_launch_once "${CLAUDE_AGAIN[@]}" "$WORKSHOP_RESUME"
+      claude_launch_once "${CLAUDE_AGAIN[@]}" "$WORKSHOP_RESUME $missing"
       continue
     fi
-    workshop_py put "$rec" pending null
     workshop_py pending "$rec" "$session" "$PWD" "$@"
     info "  Left in the workshop and not published; sclaude offers the session back when the feature is next opened."
     return 0
@@ -231,25 +255,45 @@ workshop_pending() {
     blocked) info "  sclaude's change in $(workshop_dir "$tree") waits: $(workshop_py get "$rec" blocked.why)"
              return 0 ;;
   esac
-  session="$(workshop_py get "$rec" pending.session 2>/dev/null)" || return 0
   ws="$(workshop_dir "$tree")"
+  if ! session="$(workshop_py get "$rec" pending.session 2>/dev/null)"; then
+    # Unfinished with nobody recorded to send back — a run killed between the
+    # session and its question: said, so it is not forgotten.
+    [[ "$(workshop_state "$tree" "")" == unready ]] || return 0
+    echo ""
+    warn "  A change to sclaude in this tree's workshop ($ws) is unfinished, and no session is"
+    warn "  recorded to finish it. Missing: $(workshop_missing "$tree")"
+    warn "  The next session of this tree that opens the workshop can finish it."
+    return 0
+  fi
   echo ""
-  warn "  An earlier session left a change to sclaude unfinished in this tree's workshop ($ws)."
+  # A session that cannot be sent back — its launch not recorded, or where
+  # it ran gone — is said once and dropped, not offered on every opening.
+  local -a saved=()
+  mapfile -d '' -t saved < <(workshop_py pending-args "$rec")
+  if (( ${#saved[@]} <= 1 )) || [[ ! -d "${saved[0]}" ]]; then
+    warn "  An earlier session left a change to sclaude unfinished in $ws, and cannot be sent back"
+    warn "  (where it ran is gone, or its launch was not recorded): finish it by hand there, or"
+    warn "  a session of this tree that opens the workshop can. Missing: $(workshop_missing "$tree")"
+    workshop_py put "$rec" pending null
+    return 0
+  fi
+  local missing; missing="$(workshop_missing "$tree")"
+  warn "  An earlier session left a change to sclaude unfinished in this tree's workshop ($ws). Missing:"
+  warn "  $missing"
   ask "  Back into that session to finish it? [y/n] " answer yn
   if ! is_yes "$answer"; then
     info "  Left as it is: nothing of it is published until it is finished."
     return 0
   fi
-  local -a saved=()
-  mapfile -d '' -t saved < <(workshop_py pending-args "$rec")
-  (( ${#saved[@]} > 1 )) || { warn "  The session's launch was not recorded; finish it by hand in $ws."; return 0; }
-  workshop_py put "$rec" pending null
+  # The record stays until the session has finished it (workshop_after_session
+  # clears it then): a run cut off after the session would lose it otherwise.
   claude_again_args "${saved[@]:1}"
   ( cd "${saved[0]}" || exit 0
     [[ -f "$tree/.sclaude/local/feature/state.json" ]] && declare -F dev_env_load >/dev/null \
       && dev_env_load "$tree"
     declare -F session_git_env >/dev/null && session_git_env "$session"
-    claude_launch "${CLAUDE_AGAIN[@]}" "$WORKSHOP_RESUME" )
+    claude_launch "${CLAUDE_AGAIN[@]}" "$WORKSHOP_RESUME $missing" )
   return 0
 }
 

@@ -884,6 +884,11 @@ session_watch_stop
     pf = a.index('regression_push_fix "$wt"')
     check("regression-fix-pushed-after-gate",
           rg < pf < a.index('review_close_gate "$wt"', pf), True)
+    # And on the way into step 4's next session, before the local review,
+    # which reads only what the pull request carries.
+    r = RUN[RUN.index("\nrun_step() {"):]
+    check("regression-fix-pushed-before-local-review",
+          r.index('regression_push_fix "$wt"') < r.index('local_review "$wt" "$pr"'), True)
     push = functions(RUN, ["regression_push_fix"])
     origin = os.path.join(tmp, "push-origin.git")
     clone = os.path.join(tmp, "push-clone")

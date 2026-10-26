@@ -226,11 +226,13 @@ commit, policies added.
 ## Report
 
 **The mark of a finished run.** When the run stopped by itself (step 6: the
-last review found nothing substantive and everything it found is handled),
-write the head it finished on — the full SHA, `git rev-parse HEAD` — as the
-only line of `$S/branches/<branch>.reviewed`, making its folder if needed. A
-run stopped any other way writes nothing, and removes a mark left there from
-before. sclaude reads it before it publishes a change made in its workshop
+last review found nothing substantive and everything it found is handled), or
+the user answered "stop" to step 6's question — their decision that the
+review has gone far enough — write the head it finished on — the full SHA,
+`git rev-parse HEAD` — as the only line of `$S/branches/<branch>.reviewed`,
+making its folder if needed, and say in the branch log which of the two it
+was. A run cut off any other way (interrupted, a question left unanswered)
+writes nothing, and removes a mark left there from before. sclaude reads it before it publishes a change made in its workshop
 (`sclaude core-ready`): no mark at the head, nothing goes out.
 
 When it stops: iterations run, and per iteration what was found, fixed and

@@ -596,6 +596,11 @@ run_step() {
   # keep the session; none leave the step to the checks and the comments.
   local review_word="" review_mode="" local_count=""
   if [[ "$step" == "review" ]]; then
+    # What a regression's fixing session committed, which it is not told to
+    # push, goes to the pull request first: the review reads only what the
+    # pull request carries, and with four such commits behind it the review
+    # here did not run and the session was told so, for a person to push.
+    regression_push_fix "$wt" "${pr:-}" || true
     review_mode="$(project_review_mode "$wt")"
     review_label_sync "$wt" "$pr"
     # Once the person ended the search (review_enough), nothing is reviewed
@@ -1184,8 +1189,10 @@ after_step() {
         return 0
       fi
       # A red run above opens a fixing session, which commits its fix and is
-      # not told to push. review_close_gate has already asked whether the pull
-      # request carries every commit, so nothing asked again: once
+      # not told to push (a step's next session pushes it on the way in, in
+      # run_step, but the step may close right here). review_close_gate has
+      # already asked whether the pull request carries every commit, so
+      # nothing asked again: once
       # the fix went green here, the preview was deployed from this tree with
       # it, QA accepted that preview — and the pull request merged without it.
       # So it is pushed now, and the review reads it like any other push.

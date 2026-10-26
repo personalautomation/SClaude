@@ -467,10 +467,20 @@ workshop's change records in the shared config: the `fork` remote and the
 
 **Unfinished.** A change uncommitted, or not marked ready at its head, is not
 published. The session is offered back at once — the same conversation, with
-`WORKSHOP_RESUME` in place of its prompt (`claude_again_args`) — and a "no"
-records its launch in the record's `pending`, which `workshop_pending` offers
+`WORKSHOP_RESUME` in place of its prompt (`claude_again_args`), and the
+question and that prompt both name what is missing (`workshop_missing`):
+uncommitted work, sreview's mark at the head, or `core-ready` not run (a
+sreview the person stopped with "stop" marks the head too: a review they
+called enough is finished, and without the mark the session was sent back
+to review again and again). A "no" to that
+question records the session's launch in the record's `pending`, which `workshop_pending` offers
 again when the feature is next opened (and the monthly review on its next run
-that day: its tree is kept while its workshop holds anything unpublished). While one is pending, what later sessions make waits behind it.
+that day: its tree is kept while its workshop holds anything unpublished).
+The record stays while the session is sent back, and goes when its
+change is finished or held, or when the session cannot be sent back (where
+it ran is gone), which is said once: cleared before the launch, it was lost to a run
+cut off after the session. An unfinished workshop with no session recorded
+is still said on every opening, with what is missing. While one is pending, what later sessions make waits behind it.
 When the tree goes, `workshop_remove` takes the workshop with it: work never
 published is committed as it was left and kept on its branch in the checkout,
 and named.
@@ -938,6 +948,13 @@ fix's own preview regression goes green — doing it "helpfully" here would be
 fighting the board with the person who just moved it.
 
 ## Step 4: review rounds
+
+**A regression's fix reaches the pull request before the review.** A fixing
+session commits and is not told to push, and the review reads only what the
+pull request carries: its threads hang on the pull request's lines. So
+`run_step` pushes such commits (`regression_push_fix`) before the local
+review of step 4's next session, as the step's close already did; four of
+them once left the review saying it had not run, for a person to push.
 
 **Step 4 runs one review round per session.** On one pull request five rounds of
 fixes ran in one conversation, and every file each fix read stayed in its

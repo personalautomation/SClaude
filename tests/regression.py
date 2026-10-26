@@ -1013,7 +1013,7 @@ import subprocess
 import tempfile
 
 
-def command_for(part, base, cmd, dev_env=None, email=None):
+def command_for(part, base, cmd, dev_env=None, email=None, stage=""):
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(["git", "init", "-q", tmp], check=True)
         if email:
@@ -1024,8 +1024,8 @@ INSTRUMENTS=%s
 project_command() { printf '%%s' %s; }
 source %s/sclaude/lib/developer.sh
 source %s/sclaude/lib/regression.sh
-regression_command %s %s
-""" % (tmp, shlex.quote(cmd), ROOT, ROOT, part, shlex.quote(base))
+regression_command %s %s '' %s
+""" % (tmp, shlex.quote(cmd), ROOT, ROOT, part, shlex.quote(base), shlex.quote(stage))
         env = {k: v for k, v in os.environ.items()
                if not k.startswith("GIT_") and k != "SCLAUDE_DEV"}
         env.update(HOME=tmp, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
@@ -1046,6 +1046,19 @@ check("dev-from-email-every-part",
 check("dev-from-env-with-base",
       command_for("e2e", "https://x.test", "npm run test:e2e", dev_env="bob"),
       "export SCLAUDE_DEV=bob; export E2E_BASE_URL=https://x.test; npm run test:e2e")
+# The cap on failures goes to the e2e of the stages that run the suite, and to
+# nothing else: production's look is seconds long, and a lint has no specs.
+check("cap-on-local-e2e",
+      command_for("e2e", "", "npm run test:e2e", stage="local"),
+      "export E2E_MAX_FAILURES=10; npm run test:e2e")
+check("cap-on-preview-e2e",
+      command_for("e2e", "https://x.test", "npm run test:e2e", stage="preview"),
+      "export E2E_MAX_FAILURES=10; export E2E_BASE_URL=https://x.test; npm run test:e2e")
+check("no-cap-on-prod-e2e",
+      command_for("e2e", "https://x.test", "npm run test:e2e", stage="prod"),
+      "export E2E_BASE_URL=https://x.test; npm run test:e2e")
+check("no-cap-on-other-parts",
+      command_for("lint", "", "npm run lint", stage="local"), "npm run lint")
 # The reason for export over a prefix: the second half of a chain sees it too.
 chained = command_for("e2e", "", "true && echo \"seen=$SCLAUDE_DEV\"",
                       dev_env="carol")
@@ -1362,6 +1375,36 @@ if wedged:
                         + "  1 failed\n"), False)
     check("not-wedged-when-nothing-failed",
           server_wedged("=== e2e ===\n  61 passed (7.0m)\n"), False)
+
+# A suite that stopped at its cap of failures is run once more on a fresh
+# server, whatever the failures were: on 2026-10-26 a server answering 404 under
+# /pro failed 91 specs on missing headings, with no page.goto among them.
+early = re.search(r"^regression_stopped_early\(\) \{.*?^\}", regression, re.S | re.M)
+check_true("stopped-early-check-exists", early is not None)
+STOPPED = "  Testing stopped early after 10 maximum allowed failures.\n  10 failed\n  95 did not run\n"
+
+
+def stopped_early(log_text):
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "regression.log")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(log_text)
+        script = early.group(0) + '\nregression_stopped_early "$1"'
+        return subprocess.run(["bash", "-c", script, "_", path]).returncode == 0
+
+
+if early:
+    check_true("stopped-early-at-the-cap",
+               stopped_early("=== build ===\nok\n=== e2e ===\n" + EXPECT * 10 + STOPPED))
+    check("not-stopped-early-below-the-cap",
+          stopped_early("=== e2e ===\n" + EXPECT + "  1 failed\n  60 passed\n"), False)
+    check("not-stopped-early-on-an-earlier-attempt",
+          stopped_early("=== e2e ===\n" + STOPPED
+                        + "=== e2e (again, on a fresh dev server) ===\n" + EXPECT
+                        + "  1 failed\n"), False)
+check_true("retry-asks-both-signatures",
+           re.search(r'regression_server_wedged "\$log".*?regression_stopped_early "\$log"',
+                     regression, re.S) is not None)
 
 # The red line names the specs that failed, by their titles.
 specs_fn = re.search(r"^regression_failed_specs\(\) \{.*?^\}", regression, re.S | re.M)

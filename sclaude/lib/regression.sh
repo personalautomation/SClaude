@@ -55,6 +55,18 @@
 # spends sessions all night on a spec nobody is watching.
 REGRESSION_MAX_ATTEMPTS="2"
 
+# How many failed specs an e2e part may collect before it stops, handed to the
+# suite as E2E_MAX_FAILURES; a project's config opts in by reading it as its
+# runner's maxFailures (Playwright's), and one that does not runs whole.
+#
+# On 2026-10-26 a feature's local e2e ran 67 minutes instead of fifteen: its dev
+# server answered 404 for every page under /pro, and each of 91 specs waited
+# out its own timeout against it. The fixing session found the same specs green
+# on a fresh server with no change to the code. Ten failures say as much about
+# a broken server, or a broken branch, as ninety do; a fixing session reads the
+# first few either way and runs the rest itself.
+REGRESSION_E2E_MAX_FAILURES=10
+
 # The command behind a named part, from the project's own config.
 #
 # The parts are named rather than listed as commands for the reason above — a
@@ -84,6 +96,11 @@ regression_command() {
   [[ -n "$cmd" ]] || return 1
   if [[ "$part" == "e2e" && -n "$base" ]]; then
     cmd="export E2E_BASE_URL=$base; $cmd"
+  fi
+  # Not on production: its e2e is a read-only look of a few seconds, and a
+  # stop there would save nothing.
+  if [[ "$part" == "e2e" && ( "$stage" == "local" || "$stage" == "preview" ) ]]; then
+    cmd="export E2E_MAX_FAILURES=$REGRESSION_E2E_MAX_FAILURES; $cmd"
   fi
   dev="$(developer_name 2>/dev/null || true)"
   if [[ -n "$dev" ]]; then
@@ -603,6 +620,22 @@ regression_server_wedged() {
   [[ "$errors" -eq "$failed" && "$gotos" -eq "$failed" ]]
 }
 
+# Whether the last local e2e stopped at REGRESSION_E2E_MAX_FAILURES.
+#
+# That many failures is what a broken dev server looks like whatever the specs
+# assert: on 2026-10-26 it answered 404 for every page under /pro, and the
+# failures were missing headings, missing buttons and locator timeouts — no
+# page.goto among them, so regression_server_wedged did not see it. A branch
+# that breaks that many specs is possible too; it pays for one more capped run
+# on a fresh server, minutes, against an hour of a broken server waited out.
+#
+# Only the last `=== e2e` section counts, as in regression_server_wedged.
+regression_stopped_early() {
+  local log="$1"
+  awk '/^=== e2e/ { buf = "" } { buf = buf $0 "\n" } END { printf "%s", buf }' "$log" 2>/dev/null \
+    | grep -qE 'Testing stopped early after [0-9]+ maximum allowed failures'
+}
+
 # One run of one stage. Returns 0 when every part passed.
 #
 # The log is .sclaude/local/feature/regression.log, beside dev.log and friction.log, and it is
@@ -682,7 +715,7 @@ regression_run_body() {
   local state="$wt/.sclaude/local/feature/state.json"
   local log="$wt/.sclaude/local/feature/regression.log"
   local base parts part cmd failed="" failed_specs="" passed=0
-  local started part_started part_total rc retried from
+  local started part_started part_total rc retried why from
   # The tree under test, taken before the run rather than after it: a change
   # made while the suite ran was not tested, and must not be called green.
   local tree; tree="$(regression_tree "$wt")"
@@ -810,10 +843,11 @@ regression_run_body() {
     #
     # At most twice, for e2e on the local stage alone: once more on a fresh dev
     # server when every failure was a page that never finished loading — see
-    # regression_server_wedged. The second attempt runs the whole command again
+    # regression_server_wedged — or when the suite stopped at its cap of
+    # failures — see regression_stopped_early. The second attempt runs the whole command again
     # rather than only the failed specs: a project may declare it as a chain,
     # and a whole green suite is what the fixing session would have proved.
-    retried=""
+    retried="" why=""
     while :; do
       from=$(( $(wc -l < "$log") + 1 ))
       ( cd "$wt" && eval "$cmd" ) >> "$log" 2>&1 < /dev/null &
@@ -842,19 +876,26 @@ regression_run_body() {
       fi
       wait "$part_pid"
       rc=$?
+      why=""
       if [[ "$rc" -ne 0 && "$stage" == "local" && "$part" == "e2e" && -z "$retried" ]] \
-         && regression_server_wedged "$log" \
          && declare -F ensure_dev >/dev/null; then
+        if regression_server_wedged "$log"; then
+          why="every failure was a page that never loaded"
+        elif regression_stopped_early "$log"; then
+          why="it stopped at $REGRESSION_E2E_MAX_FAILURES failures"
+        fi
+      fi
+      if [[ -n "$why" ]]; then
         retried=1
         {
-          echo "--- e2e: every failure was a page that never loaded; restarting the dev server and running e2e again"
+          echo "--- e2e: $why; restarting the dev server and running e2e again"
           echo ""
           echo "=== e2e (again, on a fresh dev server) ==="
           echo "\$ $cmd"
           echo ""
         } >> "$log"
         regression_line "$stage" "$parts" "$part" started "" "$wt" \
-          "pages stopped loading — restarting the dev server, running again"
+          "$why — restarting the dev server, running again"
         declare -F stop_own_dev >/dev/null && stop_own_dev "$wt" >/dev/null 2>&1
         ensure_dev "$wt" >/dev/null 2>&1
         continue

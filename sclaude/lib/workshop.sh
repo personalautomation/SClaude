@@ -368,12 +368,17 @@ workshop_tests() {
       [[ " ${tests[*]} " == *" $t "* ]] || tests+=("$t")
     done < <(cd "$ws" && grep -l -- "$(basename "${f%.*}")" tests/*.py 2>/dev/null)
   done
-  info "  Checking it: ${#tests[@]} test file(s) the change touches."
+  local n=${#tests[@]} i=0 began=$SECONDS started
+  info "  Testing sclaude itself before it goes out: $n test file(s) the change touches."
   log="${TMPDIR:-/tmp}/sclaude-workshop-tests.log"
   : > "$log"
   saved="$(trap -p INT TERM HUP)"
   trap 'sig=INT' INT; trap 'sig=TERM' TERM; trap 'sig=HUP' HUP
   for t in "${tests[@]}"; do
+    # A line per test, on the terminal alone (the feed gets the outcome): a
+    # run of minutes with nothing on the screen reads as one that hangs.
+    i=$((i + 1)) started=$SECONDS
+    printf '%s    [%d/%d] %s …%s' "$DIM" "$i" "$n" "${t#tests/}" "$OFF"
     # In the background, so not a group leader: setsid then makes the session
     # in place, and $! is its id.
     ( cd "$ws" && exec setsid env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LANG="${LANG:-C.UTF-8}" \
@@ -381,18 +386,29 @@ workshop_tests() {
     pid=$!
     wait "$pid"; rc=$?
     if [[ -n "$sig" ]]; then
+      echo ""
       kill -s "$sig" -- "-$pid" 2>/dev/null
       # A second signal cuts a stuck teardown short; nothing outlives sclaude.
       wait "$pid" 2>/dev/null
       kill -KILL -- "-$pid" 2>/dev/null
       break
     fi
-    (( rc == 0 )) || failed+=("$t")
+    if (( rc == 0 )); then
+      printf ' %s✓ %ds%s\n' "$GREEN" "$((SECONDS - started))" "$OFF"
+    else
+      printf ' %s✗ %ds%s\n' "$RED" "$((SECONDS - started))" "$OFF"
+      failed+=("$t")
+    fi
   done
   trap - INT TERM HUP
   eval "$saved"
   [[ -n "$sig" ]] && { kill -s "$sig" "$BASHPID"; return 1; }
-  (( ${#failed[@]} == 0 )) && return 0
+  # Said only when all is green: `failed` holds the bash -n failures too, and
+  # "1 of 1 green" right above "Red: bash -n …" read as a pass.
+  if (( ${#failed[@]} == 0 )); then
+    (( n == 0 )) || info "  Tests: all $n green, $((SECONDS - began))s."
+    return 0
+  fi
   warn "  Red: ${failed[*]} — not published; it stays in $ws. The output: $log"
   return 1
 }

@@ -450,8 +450,8 @@ pull-request or issue references, and paths of the product's own files, in
 the added lines and the commit messages; a hit is the person's to wave
 through), squashes it into one commit (`squash-message`: the first commit
 that is not a review round leads, the rest are listed, the trailers merged),
-runs the tests the change touches in a clean environment, each in a session
-of its own with no terminal (Ctrl-C and a closed tab are passed on to it,
+runs the tests the change touches in a clean environment, a line on the
+terminal for each as it runs, each in a session of its own with no terminal (Ctrl-C and a closed tab are passed on to it,
 `workshop_tests`), and pushes
 `HEAD:main`. Then the live checkout is fast-forwarded to it when nothing else
 runs from it (`workshop_live_update`), so the next session runs the fix; the
@@ -469,7 +469,12 @@ product's details is the one stop that holds the change at its head
 marked ready, lifts it. A "yes" to the same question is kept for the lines it
 was shown, so a retry does not ask it again, and a line not shown then does.
 In `sclaude done` the retry comes before the retrospective; when it moves
-sclaude's code, the clean-up goes on in a fresh run, retrospective and all.
+sclaude's code, the clean-up goes on in a fresh run, retrospective and all,
+which sclaude starts itself (`done_fresh`); moved by the retrospective or
+after it, the fresh run does not ask about the retrospective again. A feature on `done` whose pass
+through production got to the clean-up for its pull request and the release
+production still carries (`prod_pass.ended`) goes straight to the clean-up
+when opened, without production and the epilogue again.
 The retrospective's own change, stopped on the way (no network, a refused
 push), gets one more try before the clean-up takes the workshop; one stopped
 by its head — red tests, a conflict — would only stop again, and is kept on

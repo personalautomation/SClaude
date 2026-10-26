@@ -450,17 +450,28 @@ cmd_resume() {
   # until then nothing of it is published. Before the end of the cycle too,
   # since the sessions after it use it; but not on the way into the clean-up,
   # which asks itself, ahead of the retrospective (cmd_done).
-  local no_change_done=""
-  [[ "$step" == "done" \
-     && "$(state_get "$wt/.sclaude/local/feature/state.json" no_change 2>/dev/null || true)" == "true" ]] \
-    && no_change_done=1
-  [[ -n "$no_change_done" ]] || workshop_pending "$wt"
+  #
+  # Only the clean-up is left for a feature with no change (no_change.sh),
+  # which has nothing to deploy, and for one whose last pass through
+  # remind_prod got to the clean-up for this pull request and this production
+  # (prod_pass.ended). Sent through it again — the clean-up stopped for
+  # sclaude's code — it read the retrospective's commits as a preview nobody
+  # tested, said QA was skipped, and ran the epilogue a second time for
+  # nothing, and came to the same clean-up.
+  local fstate="$wt/.sclaude/local/feature/state.json" cleanup_left="" ended
+  if [[ "$step" == "done" ]]; then
+    ended="$(state_get "$fstate" prod_pass.ended 2>/dev/null || true)"
+    if [[ "$(state_get "$fstate" no_change 2>/dev/null || true)" == "true" \
+          || "$ended" == "$(prod_pass_mark "$wt" nodeploy)" ]] \
+       || { [[ "$ended" == "$(prod_pass_mark "$wt")" ]] && prod_carries_feature "$wt"; }; then
+      cleanup_left=1
+    fi
+  fi
+  [[ -n "$cleanup_left" ]] || workshop_pending "$wt"
 
   if [[ "$step" == "done" ]]; then
     echo "Feature '$slug' has been through every step."
-    # Nothing to deploy for a feature with no change (no_change.sh): only the
-    # clean-up is left.
-    if [[ -n "$no_change_done" ]]; then
+    if [[ -n "$cleanup_left" ]]; then
       cmd_done "$slug" || true
     else
       remind_prod "$wt" "$slug"
@@ -472,7 +483,6 @@ cmd_resume() {
   # stands between steps at all: the fix is needed by the step that is about to
   # start. If the review was interrupted, the feature waits here rather than
   # travelling on.
-  local fstate="$wt/.sclaude/local/feature/state.json"
   local fkey; fkey="$(friction_pending "$fstate" || true)"
   if [[ -n "$fkey" ]]; then
     # The key names what the review was about, so there is nothing left to look
@@ -1128,10 +1138,30 @@ cmd_handoff() {
   pr_qa_handoff "$wt" "$pr" "$issue"
 }
 
+# The clean-up of a feature in a sclaude process of its own, for cmd_done
+# when sclaude's code changed under it: the running bash holds the old code
+# while every Python helper it calls is read anew from disk. It used to stop
+# there and print the command, and the person who typed a different one
+# instead went back through production and the epilogue for nothing. Given
+# `retro`, the retrospective already ran here: the fresh run does not ask
+# again whether to go back into it. Its start-up leaves the checkout alone
+# (SCLAUDE_SYNCED): this run has just seen it move.
+#
+#   done_fresh <slug> [retro]
+done_fresh() {
+  echo ""
+  say "${BOLD}sclaude's own code changed under this run; the clean-up goes on in a fresh one ($SELF done $1).${OFF}"
+  SCLAUDE_SYNCED=1 SCLAUDE_DONE_RETRO_RAN="${2:-}" "$INSTRUMENTS/bin/sclaude" _done "$1"
+}
+
 cmd_done() {
   require_repo
   local slug="${1:-}" wt branch merged pr answer
   local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
+  # From done_fresh, once: a step this run resumes and the clean-up of a
+  # later round hold their retrospective as usual.
+  local retro_ran_here="${SCLAUDE_DONE_RETRO_RAN:-}"
+  unset SCLAUDE_DONE_RETRO_RAN
   [[ -n "$slug" ]] || die "name the feature: $SELF done <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
   branch="$(state_get "$wt/.sclaude/local/feature/state.json" branch)" || die "the state carries no branch"
@@ -1159,23 +1189,26 @@ cmd_done() {
   # What it published moved sclaude's code: the retrospective, like the
   # clean-up below, runs in a fresh process, on the code it reads.
   if [[ "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)" != "$live_before" ]]; then
-    echo ""
-    say "${BOLD}sclaude's own code changed under this run; the clean-up goes on in a fresh one: $SELF done $slug${OFF}"
-    return 1
+    done_fresh "$slug" "${retro_ran_here:+retro}"
+    return
   fi
 
-  run_retro "$wt" "$slug" "$pr" "$issue"
+  [[ -n "$retro_ran_here" ]] || run_retro "$wt" "$slug" "$pr" "$issue"
+  # Said to a fresh run below, which then does not ask about it again: only a
+  # retrospective that ran to its end, here or in the run before.
+  local retro_flag=""
+  if [[ -n "$retro_ran_here" ]] || retro_ran "$wt/.sclaude/local/feature/state.json"; then
+    retro_flag=retro
+  fi
 
   # sclaude's own code changed while the retrospective ran — what it published
   # from the workshop was brought into the checkout (workshop_live_update).
   # This process carries on in the old bash while every Python helper it calls
-  # is read anew from disk, so the clean-up goes on in a run of its own. With
-  # nothing run in between, that run asks before it goes back into the
-  # retrospective (run_retro).
+  # is read anew from disk, so the clean-up goes on in a run of its own, told
+  # that the retrospective has just run.
   if [[ -n "${RETRO_INSTRUMENTS_CHANGED:-}" ]]; then
-    echo ""
-    say "${BOLD}sclaude's own code changed under this run; the clean-up goes on in a fresh one: $SELF done $slug${OFF}"
-    return 1
+    done_fresh "$slug" "$retro_flag"
+    return
   fi
 
   # The retrospective's own change, whose publication stopped on the way as
@@ -1189,9 +1222,8 @@ cmd_done() {
     live_before="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)"
     workshop_publish "$wt"
     if [[ "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)" != "$live_before" ]]; then
-      echo ""
-      say "${BOLD}sclaude's own code changed under this run; the clean-up goes on in a fresh one: $SELF done $slug${OFF}"
-      return 1
+      done_fresh "$slug" "$retro_flag"
+      return
     fi
   fi
 
@@ -1835,6 +1867,9 @@ main() {
     _session-ended) shift; cmd_session_ended "$@" ;;
     # Internal: the timer handing over a PR that QA accepted.
     _handoff)      shift; cmd_handoff "$(slugify "${1:-}")" ;;
+    # Internal: the clean-up in a fresh process (done_fresh), whose caller
+    # reads its exit code — a "no" to the clean-up says "Later: …" there.
+    _done)         shift; cmd_done "${1:-}" ;;
     # Without a name it prints whatever is waiting — hence slugify only when
     # there is an argument.
     epilogue)      shift; cmd_epilogue "${1:+$(slugify "$1")}" ;;

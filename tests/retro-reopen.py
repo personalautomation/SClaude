@@ -149,6 +149,42 @@ check("done-asks-after-the-retrospective", 0 <= retro_at < new_at < clean_at, Tr
 check("done-resumes-the-feature",
       'retro_reopen "$wt" "$pr" "$slug"' in body and 'cmd_resume "$slug"' in body, True)
 check("no-change-reopen-stops-the-watch", 'watch_stop "$slug"\n    issue_hold_open "$issue"' in body, True)
+# sclaude's code changed under the clean-up: it goes on in a fresh process by
+# itself, not by a command the person has to type (and may type wrong).
+check("done-goes-on-fresh", body.count('done_fresh "$slug"'), 3)
+# After the retrospective the fresh run does not ask about it again; before
+# it, it holds it.
+check("fresh-run-after-the-retro", body.count('done_fresh "$slug" "$retro_flag"'), 2)
+check("fresh-run-keeps-the-word", 'done_fresh "$slug" "${retro_ran_here:+retro}"' in body, True)
+check("fresh-run-skips-it-once", '[[ -n "$retro_ran_here" ]] || run_retro' in body
+      and "unset SCLAUDE_DONE_RETRO_RAN" in body, True)
+check("done-does-not-stop-for-the-code", "goes on in a fresh one: $SELF done" in body, False)
+m = re.search(r"^done_fresh\(\) \{\n.*?^\}\n", src, re.S | re.M)
+check("fresh-run-is-a-new-process", m is not None
+      and 'SCLAUDE_SYNCED=1 SCLAUDE_DONE_RETRO_RAN="${2:-}" "$INSTRUMENTS/bin/sclaude" _done "$1"' in m.group(0), True)
+# Its "no" to the clean-up reaches the caller: `_done` keeps the exit code.
+check("fresh-run-keeps-the-code", '_done)         shift; cmd_done "${1:-}" ;;' in src, True)
+# Opened again after remind_prod got to the clean-up for this pull request and
+# this production, a done feature goes to the clean-up, not through production
+# and the epilogue; a pass that stopped short of it leaves no mark.
+m = re.search(r"^cmd_resume\(\) \{\n.*?^\}\n", src, re.S | re.M)
+resume = m.group(0) if m else ""
+left_at = resume.find('[[ "$ended" == "$(prod_pass_mark "$wt")" ]] && prod_carries_feature "$wt"')
+done_at = resume.find('if [[ -n "$cleanup_left" ]]; then\n      cmd_done "$slug"')
+check("resume-done-goes-to-the-clean-up", 0 < left_at < done_at
+      and '"$ended" == "$(prod_pass_mark "$wt" nodeploy)"' in resume, True)
+with open(os.path.join(LIB, "deploy.sh")) as fh:
+    deploy_src = fh.read()
+m = re.search(r"^remind_prod\(\) \{\n.*?^\}\n", deploy_src, re.S | re.M)
+remind = m.group(0) if m else ""
+mark_at = remind.rfind("prod_pass.ended")
+last_done_at = remind.rfind('if ! cmd_done "$slug"; then')
+check("pass-marked-before-the-clean-up", 0 < mark_at < last_done_at
+      and '[[ "$prod_live" -eq 1 ]] && state_set' in remind
+      and remind.count("prod_pass.ended") == 2, True)
+# Marked once the epilogue ran, before anything else can stop the pass.
+check("pass-marked-after-the-epilogue",
+      remind.rfind("run_status ") < mark_at < remind.rfind("db_main_up"), True)
 
 # --- the retrospective records that it changed the code ------------------------------
 with open(os.path.join(LIB, "retro.sh")) as fh:
@@ -216,7 +252,7 @@ with open(os.path.join(LIB, "retro.sh")) as fh:
 # with no change (no_change.sh), and `done` skipped the retrospective because
 # there was no pull request to read.
 check("done-runs-retro-for-no-change",
-      re.search(r'\n\s*run_retro "\$wt" "\$slug" "\$pr" "\$issue"\n', body) is not None, True)
+      re.search(r'\n\s*(?:\[\[ -n "\$retro_ran_here" \]\] \|\| )?run_retro "\$wt" "\$slug" "\$pr" "\$issue"\n', body) is not None, True)
 check("done-retro-before-settle",
       0 <= body.find("run_retro ") < body.find('no_change_settle "$wt"'), True)
 check("done-reopens-no-change-with-own-work",

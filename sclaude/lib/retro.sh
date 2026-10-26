@@ -98,9 +98,8 @@ PY
       GIT_TERMINAL_PROMPT=0 timeout 20 git -C "$wt" fetch -q origin main 2>/dev/null || true
       since="$(retro_since "$wt" "$answered_at" \
         "$(state_get "$fstate" retro.head 2>/dev/null || true)")"
-      # Nothing has run since — a "no" to the clean-up brought `done` back,
-      # or cmd_done stopped for sclaude's code and asked for a fresh run — so
-      # a pass would only repeat itself, and is paid for. Offered, not held:
+      # Nothing has run since — a "no" to the clean-up brought `done` back —
+      # so a pass would only repeat itself, and is paid for. Offered, not held:
       # the person who wants back into the conversation says so.
       if [[ -z "$since" && -n "$answered_at" ]]; then
         local again

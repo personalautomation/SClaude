@@ -63,8 +63,9 @@ def git(where, *args):
 # commit messages, and the person decides on whatever it finds.
 
 # Numbers of pull requests and issues: the orchestrator's own text has no use
-# for one.
-NUMBERED = re.compile(r"(?<![\w&$/{])#\d{1,6}\b|\b(?:PR|pull request|issue)s? #?\d{1,6}\b"
+# for one. Not a digit that a redirection follows: `state_get "$state" pr
+# 2>/dev/null` reads `pr`, then stderr, and is no pull request.
+NUMBERED = re.compile(r"(?<![\w&$/{])#\d{1,6}\b|\b(?:PR|pull request|issue)s? #?\d{1,6}\b(?!>)"
                       r"|/(?:pull|issues)/\d+", re.I)
 def product_terms(tree):
     """The words and paths that name the product the tree belongs to."""

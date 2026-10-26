@@ -377,7 +377,8 @@ in the feature's workshop instead, a copy of the checkout at
 When the session ends, sclaude publishes the change itself. It looks for your
 project's details in it — the project's name, issue or pull-request numbers,
 paths of its files — and asks you before it sends anything that matches; it
-runs the tests the change touches; then it pushes a maintainer's change to
+runs the tests the change touches, a line on the screen for each as it
+runs; then it pushes a maintainer's change to
 `main` as one commit, and sends anybody else's as one pull request per
 feature. A change left uncommitted or unreviewed is not published: sclaude
 offers you the session back to finish it, at once and when you next open the
@@ -387,8 +388,8 @@ to the project's details holds it until a session rewords the change. A list
 of matches too long for a phone question is asked at the terminal only. A
 workshop goes with its feature; a change in it never published
 stays on its branch in this checkout, and the clean-up names it. When the
-retrospective's change reaches this checkout, `sclaude done` stops before the
-clean-up; run it again.
+retrospective's change reaches this checkout, `sclaude done` carries on with
+the clean-up in a fresh run of the new code by itself.
 
 **Who keeps a product's rules.** `maintainers` in the product's
 `.sclaude/config.json` lists who curates the shared rules in `.sclaude/team/`.

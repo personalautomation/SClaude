@@ -126,6 +126,17 @@ deploy_unchanged() {
   [[ "$stage" != "preview" || -z "$(worktree_dirt "$wt")" ]]
 }
 
+# What prod_pass.ended holds for a pass through remind_prod that reached the
+# clean-up: the pull request, and the production it left, or `nodeploy`.
+# Written by remind_prod and compared with by cmd_resume, from here alone.
+#
+#   prod_pass_mark <wt> [nodeploy]
+prod_pass_mark() {
+  local state="$1/.sclaude/local/feature/state.json"
+  printf '%s %s' "$(state_get "$state" pr 2>/dev/null || true)" \
+    "${2:-$(state_get "$state" deploy.prod.sha 2>/dev/null || true)}"
+}
+
 # Whether production carries this feature: sclaude shipped it (a production
 # sha is recorded, by deploy_remember after the merge), did not roll it back,
 # and that ship holds the merge of the feature's pull request now — a feature
@@ -1953,6 +1964,7 @@ remind_prod() {
     # Closed before the epilogue reads it, as at the cycle's end below.
     issue_close_done "$issue" nodeploy
     run_status "$slug" "$issue" "$pr" "${merged:-}" 0 0 "$wt"
+    state_set "$wt/.sclaude/local/feature/state.json" prod_pass.ended "$(prod_pass_mark "$wt" nodeploy)"
     if ! cmd_done "$slug"; then
       info "Later: $SELF done $slug"
     fi
@@ -2268,6 +2280,13 @@ remind_prod() {
   # that shipped it: the fingerprint missed, and a second epilogue rewrote the
   # same status.
   run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_live" "$wt"
+
+  # The pass got here for this pull request and this production, the epilogue
+  # run: opened again, the feature goes to the clean-up (cmd_resume). A new
+  # ship, a second pull request or a pass cut off before here leaves it
+  # standing apart.
+  [[ "$prod_live" -eq 1 ]] && state_set "$wt/.sclaude/local/feature/state.json" prod_pass.ended \
+    "$(prod_pass_mark "$wt")"
 
   # The merge is in main now, its migrations too, and the main local database
   # is what the next feature's stack is filled from (db_main_up).

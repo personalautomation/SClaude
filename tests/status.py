@@ -655,7 +655,7 @@ for _name, _src, _close, _status in (
         ("shipped", deploy_sh, 'issue_close_done "$issue" shipped',
          'run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_live" "$wt"\n'),
         ("nodeploy", deploy_sh, 'issue_close_done "$issue" nodeploy',
-         'run_status "$slug" "$issue" "$pr" "${merged:-}" 0 0 "$wt"\n    if ! cmd_done'),
+         'run_status "$slug" "$issue" "$pr" "${merged:-}" 0 0 "$wt"\n    state_set'),
 ):
     check_true("issue-closed-before-the-epilogue-" + _name,
                _close in _src and _status in _src

@@ -238,6 +238,7 @@ export SCLAUDE_SESSION=%(session)s
     git(ws, "reset", "-q", "--hard", "origin/main")
     with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
         fh.write("# a hook refused an ordinary read\n")
+        fh.write('pr="$(state_get "$state" pr 2>/dev/null || true)"\n')
     git(ws, "commit", "-qam", "fix(sclaude): read what a hook refused")
     check("no-leaks", ws_py("leaks", ws, "origin/main", tree).returncode, 0)
 
@@ -292,7 +293,7 @@ export SCLAUDE_SESSION=%(session)s
     check("red-stays-ready", sh('workshop_state "%s" ""' % tree).strip(), "ready")
     check("red-not-on-the-way", ws_py("get", record, "stopped").returncode, 1)
     out = sh('workshop_pending "%s"' % tree)
-    check("red-retried-on-entry", "Checking it" in out, True)
+    check("red-retried-on-entry", "Testing sclaude itself" in out, True)
     git(ws, "reset", "-q", "--hard", "origin/main")
     ws_py("put", record, "ready", "null")
     with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
@@ -303,6 +304,8 @@ export SCLAUDE_SESSION=%(session)s
     out = sh('git -C "%s" rm -q sclaude/lib/tool.sh && git -C "%s" commit -qm gone && '
              'workshop_tests "%s" HEAD~1' % (ws, ws, ws))
     check("deleted-file-picks-its-test", "1 test file(s)" in out, True)
+    # Each test is said as it runs, and the run ends on how it went.
+    check("tests-said-each", "[1/1] tool.py" in out and "all 1 green" in out, True)
     git(ws, "reset", "-q", "--hard", "HEAD~1")
 
     # A remote or a branch recorded in the shared config is not a change of the

@@ -64,7 +64,8 @@ lost in an overgrown conversation. SDD's five names fall across them unevenly:
 | **6. epilogue** | — | after production: the outcome written into the issue and its parents, so an epic shows where it stands |
 | **7. retro** | — | before the feature is cleaned up: what you may have missed, how you could work better, what sclaude could do better |
 
-When tests fail, a separate session fixes them. After every session a short
+When tests fail, a separate session fixes them. After every step's session and
+every fixing session a short
 **friction review** looks at what sclaude's safety rules refused, and loosens a
 rule that was in the way.
 
@@ -80,7 +81,9 @@ code exists is what shift-left asks for.
 | plan | a plan you approved, with criteria |
 | code | your yes **and** the product's tests passing |
 | pr | a pull request that exists on GitHub |
-| review | the tests passing on the preview; the pull request stays open for QA. No session at all when the automatic review found nothing |
+| review | the automatic review has nothing left open — no thread unresolved, no check running or red — **and** the product's local tests passing; the pull request stays open for QA. No session at all when the review found nothing. The preview and its tests come after the step: a red preview puts the feature back on it |
+| fix after a regression | the same tests run again and pass. Two sessions that do not get them green stop the cycle for you |
+| sync | sclaude's own check after the session: no merge left under way, nothing uncommitted, the branch merging cleanly with main, and pushed. Otherwise the session is offered again. Then the preview, its tests and QA run on what it pushed |
 | epilogue | the session actually ran; one that never started is offered again from the menu |
 | retro | its session finished. A later `sclaude done` goes back into the same conversation, told what ran since — a rollback, another round — and asked to check its report against it; with nothing run since, it asks first |
 
@@ -531,17 +534,23 @@ The issue gets `deployed-preview` / `deployed-prod` labels, and its end date is
 filled in. Then `sclaude done` runs the retrospective and asks before removing
 the worktree and branches.
 
-Each step's model and permissions:
+Every Claude session sclaude starts, its model and permissions, and where the
+issue's summary table shows it:
 
-| Step | Model | Permissions | What it does |
-| --- | --- | --- | --- |
-| 1. plan | opus / high | `plan` | Discussion; the only file it may write is the plan |
-| 2. code | opus / medium | `auto` | Implementation, checking in Chrome, commits |
-| 3. pr | sonnet / medium | `auto` | The manuals and the pull request — calls the `pr` skill |
-| 4. review | opus / medium | `auto` | Fixing review findings, the preview deploy |
-| 5. sync | opus / medium | `auto` | Only on a conflict with main: the merge of main into the branch, its conflicts resolved, checked and pushed |
-| 6. epilogue | sonnet / medium | `auto` | The outcome as one comment per issue, on the feature's issue and every parent; changes nothing in the repository |
-| 7. retro | opus / medium | `auto` | What you missed, how to work better, what sclaude could do better. What it fixes goes on the feature's branch and sends the feature back to step 3 |
+| Session | Model | Permissions | What it does | In the issue |
+| --- | --- | --- | --- | --- |
+| 1. plan | opus / high | `plan` | Discussion; the only file it may write is the plan | a row |
+| 2. code | opus / medium | `auto` | Implementation, checking in Chrome, commits | a row |
+| 3. pr | sonnet / medium | `auto` | The manuals and the pull request — calls the `pr` skill | a row |
+| 4. review | opus / medium | `auto` | Fixing review findings, one round at a time; a QA hand-back or a production rollback reopens it | a row per session, with its rounds |
+| fix after a regression | as step 2 for the local tests, as step 4 for the preview's and production's | `auto` | Makes red tests green; after a rollback it is told what failed on production | a row per session, with how it ended |
+| 5. sync | sonnet / medium | `auto` | Only on a conflict with main: the merge of main into the branch, its conflicts resolved, checked and pushed | a row per session |
+| 6. epilogue | sonnet / medium | `auto` | The outcome as one comment per issue, on the feature's issue and every parent; changes nothing in the repository | a row |
+| 7. retro | opus / medium | `auto` | What you missed, how to work better, what sclaude could do better. What it fixes goes on the feature's branch and sends the feature back to step 3 | a row |
+| friction review | opus / medium | `plan` | After each step and fix session: reads what the safety rules refused, and loosens a rule that was in the way | the Friction column of that row |
+| local review pass | opus, `claude -p` | read-only | With the project's review set to `local`: finds problems in the pull request before step 4's session | not in the table: the findings land on the pull request, the report in the feature's Telegram topic |
+| friction matching | haiku, `claude -p` | no tools | One call that matches proposed rules to the ones already put off | not in the table: it is not a session |
+| monthly friction review | opus / medium | `plan` | `sclaude deferred`: the rules put off across features | not on a feature's issue: it belongs to none |
 
 ### Environments and databases
 

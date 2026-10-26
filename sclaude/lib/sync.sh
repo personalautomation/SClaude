@@ -28,6 +28,13 @@
 SYNC_POLL="${SYNC_POLL:-120}"
 [[ "$SYNC_POLL" =~ ^[1-9][0-9]*$ ]] || SYNC_POLL=120
 
+# The sync session's model and effort. Its rules are the review step's
+# (step_settings review below), its model is not: merging main in and
+# resolving the conflicts keeps both sides' intent, a narrower job than a
+# review round's, and sonnet does it at a fraction of opus's cost.
+SYNC_MODEL="sonnet"
+SYNC_EFFORT="medium"
+
 # The branch the tree is on; 1, and nothing printed, when HEAD is detached.
 sync_branch_name() {
   local b
@@ -614,7 +621,7 @@ sync_with_main() {
 
   echo ""
   echo "${BOLD}${BLUE}── $slug · $(phase_title sync): merge main into $branch ──${OFF}"
-  info "   $(step_model review) / $(step_effort review) / $(step_mode review) · $wt"
+  info "   $SYNC_MODEL / $SYNC_EFFORT / $(step_mode review) · $wt"
   echo ""
   ask_feed say "$(phase_line "$([[ -n "$resume" ]] && echo resumed || echo started)" sync "$n") · $what"
 
@@ -627,7 +634,7 @@ sync_with_main() {
       prompt="The branch still does not merge with \`origin/main\`. These files conflict now:"$'\n\n'"$(printf '    %s\n' "${files[@]}")"$'\n\n'"Carry on with the sync as agreed above."
     fi
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --resume "$session" \
-        --model "$(step_model review)" --effort "$(step_effort review)" \
+        --model "$SYNC_MODEL" --effort "$SYNC_EFFORT" \
         --permission-mode "$(step_mode review)" "${extra[@]}" \
         -n "$(session_label sync "$n")/$slug" "$prompt" )
   else
@@ -636,7 +643,7 @@ sync_with_main() {
       SCLAUDE_V_UNREVIEWED="$([[ -z "$reviewed" ]] && echo 1)" \
       render_prompt sync "$slug" "$pr" "$issue" "$wt")" || { session_watch_stop; return 1; }
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --session-id "$session" \
-        --model "$(step_model review)" --effort "$(step_effort review)" \
+        --model "$SYNC_MODEL" --effort "$SYNC_EFFORT" \
         --permission-mode "$(step_mode review)" "${extra[@]}" \
         -n "$(session_label sync "$n")/$slug" "$prompt" )
   fi

@@ -369,14 +369,22 @@ the PR all that time, so a comment that arrived mid-work has already been dealt
 with — from the start it would look new, and the session would be handed its own
 context to work through.
 
-A step is closed by the human rather than by a process that has ended: after
-leaving `claude` the script asks whether the step is finished, and while the
-answer is "no" the next launch returns to the same step. There is one exception:
-**a merged PR closes steps 3 and 4 itself** — the work is in `main`, the review
-took place, there is nothing left to check a preview on, and there is nothing to
-ask about. So every prompt tells the session what it ends with: say that it is
-done and stop — without offering the next step, because agreeing to it inside the
-session is impossible anyway, as it begins when the session is left.
+A step is closed by a result sclaude checks after the session ends, not by the
+session saying it is done (`after_step` in `run.sh`). Step 1 closes on an
+approved plan whose text could be read back from the transcript; step 2 on the
+person's "yes, it works" **and** a green local regression; step 3 on a pull
+request that exists and carries every commit; step 4 on an automatic review
+with nothing left open **and** a green local regression. While the result is
+missing the step stays current. A session that ended by itself is sent back
+into the same conversation, told what is missing, up to `AUTO_RETURNS` (two)
+times; after that, or after a session the person left, the next launch returns
+to the same step. One more exception: **a merged PR closes steps 3 and 4
+itself** — the work is in `main`, the review took place, there is nothing left
+to check a preview on, and there is nothing to ask about. The next step starts
+at once, with no question. So every prompt tells the session what it ends with:
+say that it is done and stop — without offering the next step, because agreeing
+to it inside the session is impossible anyway, as it begins when the session is
+left.
 
 ## The workshop
 
@@ -683,29 +691,35 @@ local `origin/*` outlives branches that have long been gone and the check lies.
 
 ## Preview and production
 
-Once every step has been through, the script prints what is left, separating
-**preview** from **prod**. The commands come ready to copy — one per line, with
-full paths — while the explanations go on their own line above the block rather
-than inside a command.
+Once step 4 has closed, sclaude goes on by itself (`remind_prod` in
+`deploy.sh`), in the order "The end of the cycle" explains.
 
-Preview is deployed **from the main repository with a path to the worktree**:
+**The preview is not asked about.** It is what QA looks at, and nothing after it
+can happen without one, so sclaude deploys it (`preview_ship`), up to
+`PREVIEW_TRIES` (three) times on a failure, and runs the preview regression
+against it. A tree already deployed and green is not deployed again; `sclaude
+preview <name>` and the menu's "Deploy a preview" still do it on purpose.
+
+The preview is deployed **from the main repository with a path to the
+worktree**, the equivalent of:
 
 ```bash
 cd ~/myapp
 vercel ~/myapp-<feature> --project <name>
 ```
 
-That way rather than a `cd` into the worktree, for two reasons. The link to the
-Vercel project lives in the main repository's `.vercel/`, and the worktree has
-none — a `vercel` launched from there will create a **new project** instead of
-deploying to the existing one (verified; the spare project had to be deleted by
-hand). And a `cd` into a directory that is about to be offered for deletion is
-contradictory advice.
+The link to the Vercel project lives in the main repository's `.vercel/`, and
+the worktree has none — a `vercel` launched from there would create a **new
+project** instead of deploying to the existing one (verified; the spare project
+had to be deleted by hand).
 
-Prod is `vercel --prod` from the main repository, and if the branch added
-migrations, then a `db:promote` first with the whole procedure from the project's
-README. Whether a promote is needed the script determines itself — by whether the
-branch touches `supabase/migrations`.
+**Production is asked about** ("Ship to production?"), after the merge, and on a
+"yes" sclaude runs it itself: `vercel --prod` from the main repository, and if
+the branch added migrations, the project's promote command first — whether one
+is needed sclaude determines by whether the branch touches the migrations
+directory. The chain breaks off at the first error, so that a promote that did
+not go through does not drag a deploy along with it. The production regression
+follows, and a red one rolls production back (see "Production rollback").
 
 ## Step 5: the sync with main
 
@@ -737,7 +751,9 @@ says: its files may hold conflict markers, and the preview would deploy them.
 Its unmerged files are the conflict, and the session finishes it.
 
 A conflict opens the sync session, `5-sync/<slug>` (`5-sync(2)` for a second
-one): the review step's model and rules, the prompt `sclaude/prompts/sync.md`.
+one): the review step's rules, sonnet at medium effort (`SYNC_MODEL` in
+`sync.sh`, a narrower job than a review round's), the prompt
+`sclaude/prompts/sync.md`.
 It merges `origin/main` into the branch — a merge, never a rebase: the branch is
 under review, and a force push is refused anyway — resolves each conflict
 keeping both sides' intent, checks the result as the project's `CLAUDE.md`
@@ -961,17 +977,28 @@ pull request carries: its threads hang on the pull request's lines. So
 review of step 4's next session, as the step's close already did; four of
 them once left the review saying it had not run, for a person to push.
 
-**Step 4 runs one review round per session.** On one pull request five rounds of
-fixes ran in one conversation, and every file each fix read stayed in its
-context. The session now fixes through subagents and keeps only the
-coordination; and once the automatic review closes every thread it fixed and
-posts new ones, it writes `.sclaude/local/feature/review-round` and stops. A session cannot
-clear its own context, so the orchestrator does: a watcher started beside every
-review session sees the file and ends the `claude` process (found by
-`--session-id`/`--resume` and its id), the run is recorded in the issue as
-"fixes confirmed", and a fresh session opens. Its snapshot of the pull request
-lists only the review threads still open — the resolved ones are counted, not
-repeated — so the new round starts with the new findings and nothing else.
+**Who reviews is the project's choice** (`review` in `.sclaude/config.json`,
+`project_review_mode`): the review workflow on GitHub, a review on this
+machine (`local`: read-only `claude -p` passes, `local_review.sh`, before each
+of step 4's sessions, posting their findings on the pull request), or none
+(`off`). When the review left nothing — no finding, no comment, every check
+green — step 4 opens no session at all and closes at once, saying which of
+the three it was.
+
+**A session's context is bounded per round, not per session.** On one pull
+request five rounds of fixes ran in one conversation, and every file each fix
+read stayed in its context. The session now fixes through subagents and keeps
+only the coordination; and once the automatic review closes every thread it
+fixed and posts new ones, it writes `.sclaude/local/feature/review-round` and
+stops. A watcher started beside every review session sees the file and ends
+the `claude` process (found by `--session-id`/`--resume` and its id). Then
+sclaude reads how full the session's context is (`review_context`, from the
+status line's file): under `REVIEW_CONTEXT_MAX_PCT` (40%) the same
+conversation takes the new findings; at or above it the run is recorded in
+the issue as "fixes confirmed", its friction review runs, and a fresh session
+opens. Its snapshot of the pull request lists only the review threads still
+open — the resolved ones are counted, not repeated — so the new round starts
+with the new findings and nothing else.
 
 **Rounds that stop converging are said, once.** The report after each round
 ends on a verdict from the findings per round. When it says "Not converging"
@@ -1023,16 +1050,11 @@ this, by the regression's rewind after a red deployed stage, and by
 `sclaude replan`. They differ only in which steps they name: one, one, and all
 four.
 
-Each is offered as a question, and on a "yes" the script runs the commands it
-showed itself, one at a time, printing each before running it. What is shown and
-what is run are the same list: a divergence here would be worse than no hint at
-all. The chain breaks off at the first error, so that a promote that did not go
-through does not drag a deploy along with it.
-
 ## The end of the cycle
 
 The order is **preview → QA → merge → prod → the outcome into the issue →
-clean-up**, and none of it is arbitrary. The preview and its regression come
+retrospective → clean-up**, with the check against main (step 5) before the
+preview, after QA's yes and during the merge wait, and none of it is arbitrary. The preview and its regression come
 first because they are what make the branch worth merging at all; offering the
 merge before them would be offering to merge something nobody has checked. QA
 comes next and before the merge, because a verdict given after the merge can no
@@ -1043,8 +1065,9 @@ main.
 
 Step 4 used to close only on a merged pull request, and that ran this order
 backwards: the preview and "In QA" live after step 4, so the branch was merged
-first and QA looked at main afterwards. Step 4 now closes on a green regression
-with the pull request open, and sclaude waits in two stages, each saying which
+first and QA looked at main afterwards. Step 4 now closes on a green local
+regression with the pull request open — the preview and its regression come
+after it, and a red preview puts the cycle back on step 4 — and sclaude waits in two stages, each saying which
 event it is waiting for:
 
 - **Waiting for QA** (`qa_wait`, every `QA_POLL` seconds). QA checks the
@@ -1175,7 +1198,7 @@ comment is assembled:
 | `nothing` | The log was empty, so no session was launched. The ordinary case: most steps run into no ban worth reporting. |
 | `` `id` open `` | Interrupted, with a conversation to return to. It holds the cycle until `sclaude friction` or `sclaude reset` closes it. |
 | `` `id` stalled `` | `claude` exited at the door. The id names a transcript with nothing in it, so there is nothing to resume — clear it rather than return to it. |
-| `` `id` fixed `` | The review ran and committed to the orchestrator: `HEAD` moved while it was open. |
+| `` `id` fixed `` | The review ran and committed a rule change to the product, on the feature's branch: the tree's `HEAD` moved while it was open. |
 | `` `id` reviewed `` | The review ran and changed nothing — it read the entries and found every ban deliberate. |
 | `` `id` unread `` | Closed by hand through `sclaude reset`. The entries stayed in `.reviewed` with nobody reading them. |
 
@@ -1211,14 +1234,15 @@ there: a backgrounded step never reaches `after_step`, so it got no next step
 and no friction review.
 
 **Underneath stands a second table: what the friction reviews actually changed.**
-The column above says *that* a review fixed the orchestrator; it cannot say what
-the fix was, and a reader was left to open sclaude's checkout and work out which
-commits fell between two steps of a feature. So `run_friction` keeps the
-instruments `HEAD` from either side of a review that committed — it already
-compared the two to decide whether to push — and the summary turns that range
-into commit subjects with `git log`. The range is honest by construction:
-while a review is open, the only things running in that tree are the review's
-own session and read-only git calls.
+The column above says *that* a review changed something; it cannot say what,
+and a reader was left to work out which commits fell between two steps of a
+feature. So `run_friction` keeps the feature tree's `HEAD` from either side of
+a review that committed (`project_from`, `project_to`) — it already compares
+the two to decide whether to push — and the summary turns that range into
+commit subjects with `git log`. A review no longer commits to sclaude itself:
+what it would change there goes through the workshop (see "The workshop").
+A state from before that change may still carry an orchestrator range
+(`from`, `to`), which is read in sclaude's checkout.
 
 A row is one commit, and the step is named once per review, so a review with
 four commits reads as one piece of work rather than four unrelated ones.
@@ -1235,10 +1259,7 @@ every entry, found each ban correct and changed nothing leaves no commit at
 all, and so had no row here. The review therefore says it in words: the two
 prompts ask for a last line, `sclaude-verdict: <kind> — <clause>`, and
 `friction_verdict` reads it back out of the review's transcript once the
-session exits. It is read rather than written by the session on purpose — the
-review works in sclaude's checkout with the feature's tree outside its scope, and
-widening that scope so it could write one bookkeeping file would hand the one
-session that edits the orchestrator a writable path into the product.
+session exits.
 
 Only the kinds in the table are accepted, so a model quoting the instruction
 back cannot land a word in the issue as though it were a decision; the last
@@ -1259,7 +1280,8 @@ touch somebody else's body": this section was appended to it. It is gone; a
 takes what is still true from it into its comment.
 
 It is deliberately not one of the four steps the state tracks, although the
-menu numbers it 5. It runs before the clean-up, while the worktree is still
+menu numbers it 6 (`cycle_number` in `steps.sh`: the sync with main is 5, the
+retrospective 7). It runs before the clean-up, while the worktree is still
 there, but by then the feature is already `done`, and an epilogue that broke
 off may be finished later with `sclaude epilogue` — after `sclaude done` has
 removed the worktree and its `state.json`. So it keeps its own record outside
@@ -1418,8 +1440,7 @@ the history of the decision not to do this work. The issue is closed as "not
 planned" — in a milestone's report what was abandoned must not look like what was
 done.
 
-In the menu it is the third item, after "new feature", and it deletes nothing
-itself — it drops into a separate list where the feature is chosen once more,
-with a "none, go back" item last. Adjacent numbers, one of which continues the
-work while the other destroys it, are a mistake waiting for its chance; the
-submenu is the protection against a finger that missed.
+In the menu it is an item of the feature's action list ("Drop the feature",
+behind the checkbox in the terminal, behind ⚙️ in Telegram), not of the top
+list: adjacent items, one of which continues the work while the other destroys
+it, are a mistake waiting for its chance (see "The menu and the action list").

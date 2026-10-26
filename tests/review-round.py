@@ -35,6 +35,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,7 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
 
 failures = []
+stand_ins = []
 
 
 def check(name, got, want):
@@ -80,8 +82,55 @@ try:
     session = str(uuid.uuid4())
 
     def fake(args):
-        """A long-running process whose arguments look like claude's."""
-        return subprocess.Popen(["bash", "-c", 'exec -a "claude %s" sleep 60' % args])
+        """A long-running process whose arguments look like claude's; all of
+        them are ended with the test, whatever stops it."""
+        proc = subprocess.Popen(["bash", "-c", 'exec -a "claude %s" sleep 60' % args])
+        stand_ins.append(proc)
+        return proc
+
+    def run_watcher(script, stdout=None):
+        """Start a watcher script in a session of its own, so that it goes as a
+        group with its watcher's loop, which nothing else ends: by
+        end_watcher, on a timeout, an interrupt or any error alike."""
+        return subprocess.Popen(["bash", "-c", script], stdout=stdout, text=True,
+                                start_new_session=True)
+
+    def end_watcher(proc, clean):
+        """Wait for the script, when the case ran clean, then end its group
+        whatever happened: a loop session_watch_stop missed would outlive
+        the script and end the stand-ins of the cases after it."""
+        out = None
+        try:
+            if clean:
+                out = proc.communicate(timeout=30)[0]
+                # session_watch_stop ended the watcher with the script: its
+                # group empties (a loop's last `sleep` may take a moment).
+                # Checked before the kill below, which would hide a stop that
+                # missed it.
+                deadline = time.time() + 2
+                while True:
+                    try:
+                        os.killpg(proc.pid, 0)
+                    except ProcessLookupError:
+                        break
+                    if time.time() > deadline:
+                        failures.append(("watcher-stopped-with-its-script", True, False))
+                        break
+                    time.sleep(0.05)
+        except subprocess.TimeoutExpired:
+            pass
+        finally:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            if proc.returncode is None:
+                proc.communicate()
+        return out
+
+    def gone(proc):
+        """Whether a stand-in has been ended (poll reaps it)."""
+        return proc.poll() is not None
 
     home = os.path.join(tmp, "home")
     tdir = os.path.join(home, ".claude", "projects", re.sub(r"[^a-zA-Z0-9]", "-", wt))
@@ -109,32 +158,71 @@ try:
         return {"type": "system", "subtype": "local_command", "timestamp": stamp(),
                 "content": "<command-name>%s</command-name>" % name}
 
-    def watched(marker, after, wait=1.5):
-        """Start the watcher, write the marker, add `after` to the transcript."""
+    feature = os.path.join(wt, ".sclaude/local/feature")
+    done_file = os.path.join(feature, "session-done")
+
+    def watched(marker, after, until=None, args=None):
+        """Start the watcher, write the marker, add `after()` to the transcript,
+        and wait for `until` — a session ended, a marker removed — up to 15s.
+
+        Each step waits for the one before rather than for a fixed time: the
+        marker is written here once the watcher has started (it removes old
+        ones as it starts), and the transcript is built and written after it
+        (an entry older than the marker, or than the watcher's start, is not
+        read). Fixed windows were too short under the load of the whole suite,
+        and the checks failed at random. Without `until`, a short window: the
+        case has no signal to wait for.
+
+        marker: a path, or None; args: session_watch_start's, the feature's
+        by default."""
         open(transcript, "w").close()
+        started, stop = os.path.join(tmp, "watching"), os.path.join(tmp, "stop-watching")
+        for f in (started, stop):
+            if os.path.exists(f):
+                os.remove(f)
         script = WATCH + """
 export HOME="%s"
 SESSION_POLL=0.2 SESSION_GRACE=0
-session_watch_start "%s" "%s"
-sleep 0.4
-echo "x" > "%s"
-sleep %s
+session_watch_start %s
+: > "%s"
+for _ in $(seq 300); do [[ -e "%s" ]] && break; sleep 0.1; done
 session_watch_stop
-echo "watcher=[$SESSION_WATCHER]"
-""" % (home, wt, session, os.path.join(wt, ".sclaude/local/feature", marker), wait)
-        proc = subprocess.Popen(["bash", "-c", script], stdout=subprocess.PIPE, text=True)
-        time.sleep(0.8)
-        say(*after)
-        return proc.communicate(timeout=30)[0]
+""" % (home, args or '"%s" "%s"' % (wt, session), started, stop)
+        proc = run_watcher(script)
+        clean = False
+        try:
+            deadline = time.time() + 15
+            while not os.path.exists(started):
+                if time.time() > deadline:
+                    # A failure like any other, so the report still comes out.
+                    failures.append(("watcher-started", True, False))
+                    return
+                time.sleep(0.05)
+            if marker:
+                with open(marker, "w") as fh:
+                    fh.write("x\n")
+            say(*after())
+            if until:
+                deadline = time.time() + 15
+                while not until() and time.time() < deadline:
+                    time.sleep(0.1)
+            else:
+                time.sleep(1.5)
+            clean = True
+        finally:
+            open(stop, "w").close()
+            end_watcher(proc, clean)
 
     # --- a marker and an ended turn end that session's process, and only it ---
     for marker in ("review-round", "session-done"):
         target = fake("--session-id %s --model opus" % session)
         resumed_other = fake("--resume 99999999-0000-0000-0000-000000000000")
         mentions = fake("--name x-%s" % session)  # the id, but not as a session flag
-        watched(marker, [turn_end()])
-        time.sleep(0.3)
-        check("%s-ends-the-session" % marker, target.poll() is not None, True)
+        watched(os.path.join(feature, marker), lambda: [turn_end()], until=lambda: gone(target))
+        check("%s-ends-the-session" % marker, gone(target), True)
+        # The others were signalled, if at all, by the same pkill: a moment
+        # for them to go before they are taken for left alone.
+        time.sleep(0.5)
         check("%s-other-session-left-alone" % marker, resumed_other.poll(), None)
         check("%s-id-without-flag-left-alone" % marker, mentions.poll(), None)
         for p in (target, resumed_other, mentions):
@@ -142,29 +230,30 @@ echo "watcher=[$SESSION_WATCHER]"
 
     # --- the turn that wrote the marker is still running: nothing yet ---------
     target = fake("--resume %s" % session)
-    watched("session-done", [{"type": "assistant", "timestamp": stamp(),
-                              "message": {"stop_reason": "tool_use", "content": []}}])
+    watched(done_file, lambda: [{"type": "assistant", "timestamp": stamp(),
+                                 "message": {"stop_reason": "tool_use", "content": []}}])
     check("running-turn-not-closed", target.poll(), None)
     target.kill()
 
     # --- a person typed after the marker: called off, marker gone -------------
     target = fake("--resume %s" % session)
-    watched("session-done", [turn_end(), typed("wait, one more thing")])
+    # The watcher removes the marker once it reads a person in the transcript:
+    # waited for, so the checks below are of a watcher that has read it.
+    marker_gone = lambda: not os.path.exists(done_file)
+    watched(done_file, lambda: [turn_end(), typed("wait, one more thing")], until=marker_gone)
     check("typed-calls-it-off", target.poll(), None)
-    check("typed-removes-the-marker",
-          os.path.exists(os.path.join(wt, ".sclaude/local/feature", "session-done")), False)
+    check("typed-removes-the-marker", marker_gone(), True)
     target.kill()
 
     target = fake("--resume %s" % session)
-    watched("session-done", [turn_end(), command("/cost")])
+    watched(done_file, lambda: [turn_end(), command("/cost")], until=marker_gone)
     check("command-calls-it-off", target.poll(), None)
     target.kill()
 
     # --- /exit is what the watcher does anyway: it does not call it off -------
     target = fake("--resume %s" % session)
-    watched("session-done", [turn_end(), command("/exit")])
-    time.sleep(0.3)
-    check("exit-does-not-call-it-off", target.poll() is not None, True)
+    watched(done_file, lambda: [turn_end(), command("/exit")], until=lambda: gone(target))
+    check("exit-does-not-call-it-off", gone(target), True)
     target.kill()
 
     # --- no marker: the watcher is stopped and kills nothing ------------------
@@ -177,8 +266,8 @@ sleep 0.6
 session_watch_stop
 echo "watcher=[$SESSION_WATCHER]"
 """ % (home, wt, session)
-    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
-                         timeout=30).stdout
+    proc = run_watcher(script, stdout=subprocess.PIPE)
+    out = end_watcher(proc, True) or ""
     check("no-marker-no-kill", target.poll(), None)
     check("watcher-cleared", "watcher=[]" in out, True)
     # Writing the marker after the watcher is stopped changes nothing.
@@ -194,27 +283,16 @@ echo "watcher=[$SESSION_WATCHER]"
     for approval, closes in (("User has approved your plan.", True),
                              ("User rejected the plan.", False)):
         target = fake("--session-id %s" % session)
-        open(transcript, "w").close()
-        done_file = os.path.join(wt, ".sclaude/local/feature", "session-done")
-        script = WATCH + """
-export HOME="%s"
-SESSION_POLL=0.2 SESSION_GRACE=0
-session_watch_start "%s" "%s" "" "" plan
-sleep 1.8
-session_watch_stop
-""" % (home, wt, session)
-        proc = subprocess.Popen(["bash", "-c", script])
-        time.sleep(0.5)
-        say({"type": "assistant", "timestamp": stamp(),
-             "message": {"stop_reason": "tool_use",
-                         "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {}}]}},
-            {"type": "user", "timestamp": stamp(),
-             "message": {"content": [{"type": "tool_result", "content": approval}]}},
-            turn_end("The plan is approved."))
-        proc.wait(timeout=30)
-        time.sleep(0.3)
+        watched(None, lambda: [{"type": "assistant", "timestamp": stamp(),
+                        "message": {"stop_reason": "tool_use",
+                                    "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {}}]}},
+                       {"type": "user", "timestamp": stamp(),
+                        "message": {"content": [{"type": "tool_result", "content": approval}]}},
+                       turn_end("The plan is approved.")],
+                until=(lambda: gone(target)) if closes else None,
+                args='"%s" "%s" "" "" plan' % (wt, session))
         check("plan-%s" % ("approved-closes" if closes else "rejected-stays"),
-              target.poll() is not None, closes)
+              gone(target), closes)
         check("plan-%s-marks-it" % ("approved" if closes else "rejected"),
               os.path.exists(done_file), closes)
         target.kill()
@@ -223,21 +301,14 @@ session_watch_stop
 
     # --- an approval from before this launch does not count -------------------
     target = fake("--resume %s" % session)
-    open(transcript, "w").close()
-    say({"type": "assistant", "timestamp": stamp(-60),
+    watched(None, lambda: [
+        {"type": "assistant", "timestamp": stamp(-60),
          "message": {"stop_reason": "tool_use",
                      "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {}}]}},
         {"type": "user", "timestamp": stamp(-59),
          "message": {"content": [{"type": "tool_result", "content": "User has approved your plan."}]}},
-        dict(turn_end("Approved earlier."), timestamp=stamp(-58)))
-    script = WATCH + """
-export HOME="%s"
-SESSION_POLL=0.2 SESSION_GRACE=0
-session_watch_start "%s" "%s" "" "" plan
-sleep 1.2
-session_watch_stop
-""" % (home, wt, session)
-    subprocess.run(["bash", "-c", script], timeout=30)
+        dict(turn_end("Approved earlier."), timestamp=stamp(-58))],
+        args='"%s" "%s" "" "" plan' % (wt, session))
     check("stale-approval-ignored", target.poll(), None)
     target.kill()
 
@@ -259,23 +330,10 @@ session_watch_stop
 
     # --- the epilogue: no worktree, a marker and a cwd of its own -------------
     target = fake("--session-id %s" % session)
-    open(transcript, "w").close()
     own = os.path.join(tmp, "epilogue.done")
-    script = WATCH + """
-export HOME="%s"
-SESSION_POLL=0.2 SESSION_GRACE=0
-session_watch_start "" "%s" "%s" "%s"
-sleep 0.4
-echo done > "%s"
-sleep 1.5
-session_watch_stop
-""" % (home, session, own, wt, own)
-    proc = subprocess.Popen(["bash", "-c", script])
-    time.sleep(0.8)
-    say(turn_end())
-    proc.wait(timeout=30)
-    time.sleep(0.3)
-    check("epilogue-marker-ends-the-session", target.poll() is not None, True)
+    watched(own, lambda: [turn_end()], until=lambda: gone(target),
+            args='"" "%s" "%s" "%s"' % (session, own, wt))
+    check("epilogue-marker-ends-the-session", gone(target), True)
     target.kill()
     os.remove(own)
     with open(os.path.join(LIB, "github.sh")) as fh:
@@ -937,6 +995,8 @@ session_watch_stop
     check("session-ended-reads-pr-and-issue",
           'pr="$(state_get "$state" pr' in se and 'issue="$(state_get "$state" issue' in se, True)
 finally:
+    for p in stand_ins:
+        p.kill()
     shutil.rmtree(tmp, ignore_errors=True)
 
 if failures:

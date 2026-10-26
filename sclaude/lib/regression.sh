@@ -662,12 +662,24 @@ regression_stopped_early() {
 # take the build for itself.
 REGRESSION_SERVING_MARK=".sclaude/local/feature/serving-build"
 
+# How the build is served: `commands["e2e:server"]` from the tree's own config,
+# never the main checkout's. Every other key is read main first (project.sh),
+# but whether a build can stand in for the dev server is a fact about the
+# code on the branch — a build that does not identify its tree passes the
+# port and cwd checks below and then fails the suite in its setup. So a
+# branch begun before main learned to serve its build keeps the dev server.
+regression_serve_command() {
+  local wt="$1"
+  [[ -n "$wt" && -f "$wt/.sclaude/config.json" ]] || return 1
+  project_value "$wt/.sclaude/config.json" "commands.e2e:server"
+}
+
 # Brings the build up on the feature's port. 0 once it answers from this tree;
 # otherwise the dev server is put back and 1 returned, for the suite to run
 # against that as it always did.
 regression_serve_build() {
   local wt="$1" serve port url log waited=0
-  serve="$(project_command "e2e:server" "$wt")" && [[ -n "$serve" ]] || return 1
+  serve="$(regression_serve_command "$wt")" && [[ -n "$serve" ]] || return 1
   port="$(feature_port "$wt")" || return 1
   url="$(dev_address "$wt")"
   log="$wt/.sclaude/local/feature/e2e-server.log"
@@ -914,7 +926,7 @@ regression_run_body() {
     # would have proved.
     retried="" why="" served=""
     if [[ "$stage" == "local" && "$part" == "e2e" && " $parts " == *" build "* ]] \
-       && [[ -n "$(project_command "e2e:server" "$wt" 2>/dev/null)" ]]; then
+       && [[ -n "$(regression_serve_command "$wt" 2>/dev/null)" ]]; then
       if regression_serve_build "$wt"; then
         served=1
       else

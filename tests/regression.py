@@ -1439,7 +1439,44 @@ if early:
 # serve it, and the dev server comes back however the suite ended.
 check_true("serves-the-build-only-after-a-build",
            '" $parts " == *" build "*' in regression
-           and 'project_command "e2e:server" "$wt"' in regression)
+           and 'regression_serve_command "$wt"' in regression)
+# How the build is served comes from the tree's config alone: a key in the
+# main checkout's would reach a branch whose code cannot serve its build.
+serve_fn = re.search(r"^regression_serve_command\(\) \{.*?^\}", regression, re.S | re.M)
+check_true("serve-command-helper-exists", serve_fn is not None)
+
+
+def serve_command(main_cmds, tree_cmds):
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        repo, wt = os.path.join(tmp, "repo"), os.path.join(tmp, "wt")
+        for root, cmds in ((repo, main_cmds), (wt, tree_cmds)):
+            if cmds is not None:
+                with open(_cfg(os.path.join(root, ".sclaude", "config.json")), "w") as fh:
+                    json.dump({"commands": cmds}, fh)
+        os.makedirs(wt, exist_ok=True)
+        # `set -e` up to the call and a mark after it: an empty answer counts
+        # only from a script that ran, or a broken source would pass as "".
+        script = ('set -e\nREPO=%s\nsource %s/sclaude/lib/project.sh\n%s\nset +e\n'
+                  'regression_serve_command %s\necho ran\n') % (repo, ROOT, serve_fn.group(0), wt)
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        lines = out.stdout.strip().split("\n")
+        if out.stderr or lines[-1] != "ran":
+            return "did not run: " + out.stderr.strip()
+        return "\n".join(lines[:-1]).strip()
+
+
+if serve_fn:
+    check("serve-command-not-from-main",
+          serve_command({"e2e:server": "from-main"}, {"build": "b"}), "")
+    check("serve-command-from-the-tree",
+          serve_command({"e2e:server": "from-main"}, {"e2e:server": "from-tree"}), "from-tree")
+    check("serve-command-tree-without-main-key",
+          serve_command({"build": "b"}, {"e2e:server": "from-tree"}), "from-tree")
+    check("serve-command-no-tree-config",
+          serve_command({"e2e:server": "from-main"}, None), "")
+
 check_true("dev-server-back-after-e2e",
            '[[ -n "$served" ]] && regression_serve_dev "$wt"' in regression)
 check_true("mark-names-what-the-proxy-reads",

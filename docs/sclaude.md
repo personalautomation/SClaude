@@ -39,10 +39,13 @@ in the main checkout — `merge: auto`, committed or not — reaches each featur
 at once. A worktree's copy answers only a key the main checkout has none of,
 a feature adding it; the readers that take a whole section (the feature's
 database, the board) take it from there too when the main checkout has none
-of it (`project_config_with`). A change to that file left uncommitted in the main tree
-does not stop production (`prod_main_unready`): it is sclaude's settings, not
-the product, and the pull before `vercel --prod` carries it across with
-`--autostash`.
+of it (`project_config_with`). One key is the other way round:
+`commands["e2e:server"]`, how the local e2e serves the run's build, comes from
+the worktree's copy alone (`regression_serve_command`), because whether a
+build can stand in for the dev server depends on the branch's code. A change
+to that file left uncommitted in the main tree does not stop production
+(`prod_main_unready`): it is sclaude's settings, not the product, and the pull
+before `vercel --prod` carries it across with `--autostash`.
 
 Every section is optional and **nothing is defaulted**. A repository with no
 config still gets the cycle — seven steps, a worktree, an issue, a pull request —

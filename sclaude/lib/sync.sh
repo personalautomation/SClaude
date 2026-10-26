@@ -390,40 +390,67 @@ sync_gate() {
 # The merge with main a step's start or the menu makes, when it would stop on
 # conflicts: the sync (sync_gate), which names the files and resolves them —
 # sclaude itself when only the deferred logs conflict, a session otherwise. A
-# merge that would not stop is the caller's own, plain `git merge`.
+# merge that would not stop is the caller's, sync_plain_merge.
 #
-# A step's start asks nothing: a "no" there only put off the merge the sync
-# before the preview makes all the same. The menu's "Sync with main" names the
-# branch, and is asked first (sync_ask): a person who opened it to look has not
-# yet agreed to a paid session.
+# Neither asks, even when a session resolves the conflicts: the branch has to
+# merge with main before its preview and its merge whatever is answered, so a
+# "no" — at a step's start or from the menu — only put the same session off.
 #
-#   sync_offer <wt> <slug> <pr> [<branch> to ask about]
-#     → 2 no conflict (or cannot tell): the caller merges, or asks first;
-#       4 a no to the question; otherwise sync_gate's 0, 1, 3 or 5
+#   sync_offer <wt> <slug> <pr>
+#     → 2 no conflict (or cannot tell): the caller merges;
+#       otherwise sync_gate's 0, 1, 3 or 5
 sync_offer() {
-  local conflicts crc=0
-  conflicts="$(merge_conflicts "$1" nofetch)" || crc=$?
+  local crc=0
+  merge_conflicts "$1" nofetch >/dev/null || crc=$?
   [[ "$crc" -eq 1 ]] || return 2
-  if [[ -n "${4:-}" ]]; then
-    sync_ask "$1" "$4" "$conflicts" || return 4
-  fi
   sync_gate "$1" "$2" "$3" nofetch
 }
 
-# The question before a merge that would stop on conflicts, with the files,
-# and what resolves them: sclaude itself when only the deferred logs conflict,
-# a paid session otherwise.
+# The plain merge of main into the branch, for a step's start (sync_branch)
+# and the menu (cmd_sync), once sync_offer found nothing a session must
+# resolve. Merged from the branch's own tip: one updated on origin (another
+# machine, GitHub's "Update branch") is caught up first, and one moved both
+# here and there is not merged into — the merge would make a third head, and
+# its push would be refused.
 #
-#   sync_ask <wt> <branch> <conflicts>   → 0 on a yes
-sync_ask() {
-  local wt="$1" branch="$2" answer how="a session resolving them"
-  local -a files
-  mapfile -t files <<< "$3"
-  sync_deferred_only "$wt" "${files[@]}" && how="sclaude merging the deferred logs itself"
-  info "  The merge would stop on conflicts in ${#files[@]} file(s):"
-  printf '%s\n' "${files[@]}" | sed 's/^/    /'
-  ask "${BOLD}Merge origin/main into $branch, with $how? [y/n] ${OFF}" answer yn
-  is_yes "$answer"
+# A merge that stops — on conflicts the check could not foresee (it could not
+# tell), or at its commit, a hook of the product's refusing git's own message
+# — is backed out: nobody is left a half-merged tree to untangle, from a phone
+# they could not. A merge that refused to start (an untracked file in the way)
+# left nothing to back out: git has said why.
+#
+#   sync_plain_merge <wt> <branch> <slug>
+#     → 0 merged; 1 not merged, the tree as it stood, and said why;
+#       2 a merge left under way that could not be backed out
+sync_plain_merge() {
+  local wt="$1" branch="$2" slug="$3" unmerged
+  sync_catch_up "$wt"
+  if sync_diverged "$wt"; then
+    warn "  $branch here and on origin have both moved — not merged."
+    warn "  Bring them together (git -C $wt pull --no-rebase), then: $SELF sync ${slug:-<feature>}"
+    return 1
+  fi
+  # `--no-edit`: nobody asked for a message, and a merge message editor
+  # leaves the orchestrator waiting on a window that may be in another program
+  # entirely ("Waiting for your editor to close the file..."), with nothing in
+  # the terminal to say what it is waiting for.
+  if git -C "$wt" merge --no-edit origin/main; then
+    echo "  ${GREEN}merged — $branch now carries everything from main${OFF}"
+    return 0
+  fi
+  warn ""
+  if merge_under_way "$wt"; then
+    unmerged="$(git -C "$wt" diff --name-only --diff-filter=U 2>/dev/null)"
+    git -C "$wt" merge --abort >/dev/null 2>&1 || return 2
+    if [[ -n "$unmerged" ]]; then
+      warn "  The merge stopped on conflicts sclaude could not foresee, and was backed out."
+    else
+      warn "  The merge could not be committed (git says why above), and was backed out."
+    fi
+  else
+    warn "  The merge did not run (git says why above)."
+  fi
+  return 1
 }
 
 # The check, and the sync when it is needed.

@@ -624,7 +624,15 @@ says, and pushes. sclaude then checks for itself that no merge is under way,
 the tree is clean, the branch merges cleanly with main and is pushed. Only then
 does the run go on: from before the preview it simply continues, and the
 changed tree is deployed; from after QA, or from the wait, it starts over, so
-the preview, its regression and QA (`qa_retest`) see the new code. A session
+the preview, its regression and QA (`qa_retest`) see the new code. QA is not
+asked again when the branch's own product is what they passed
+(`qa_product_same`): each commit's change against the main it stands on, less
+the paths that are not the product (`NO_DEPLOY`: `.sclaude`, `docs`, `.github`,
+`.githooks`, `*.md`), compared as text — bytes, whitespace and binaries
+included, renames found, only line numbers and blob ids dropped. Main's edits
+to lines the branch does not touch leave the yes standing; a change of the
+function header above the branch's lines does not, nor anything that cannot be
+read: in doubt, QA looks again. A session
 that ends otherwise stops the run, and the feature shows `5/7 sync` in the menu
 until `sclaude <feature>` finishes it; its conversation is resumed then.
 
@@ -646,26 +654,28 @@ copy: rows the branch took from main at an earlier merge and main has since
 removed — the monthly review removes what it decided — would otherwise come
 back. Less main's additions, not all of main's copy: `deferred_to_main` sends
 a branch's rows to main, and they come once, but a row the branch repeats on
-purpose stays repeated. The menu's question about such a merge says so,
-rather than offering a session.
+purpose stays repeated. The menu's line about such a merge says so, rather
+than naming a session.
 
 The sync runs the same way at a step's start and from the menu
-(`sync_offer`): the start asks nothing, the menu asks first (`sync_ask`). `sync_gate` holds origin's branch against the head the
+(`sync_offer`), and neither asks, even when a session resolves the
+conflicts: the branch has to merge with main before its preview and its merge
+whatever is answered, so a "no" only put the same session off. `sync_gate` holds origin's branch against the head the
 hand-off was made on (`handoff` in the state): commits it lacks — the sync's,
 or ones that came by other hands, a push from another machine, GitHub's
 "Update branch" — are unchecked code, and the hand-off goes back for them,
 said in those words. A ref here that only lags behind that head is not.
 
 The menu's own "Sync with main" (`cmd_sync`), there at every step, uses the
-same check: its line says how many files would conflict, and a yes to a merge
-that would conflict goes to the sync rather than leaving the tree half-merged
-for the person to untangle — from a phone they could not. The merge with main
+same check: its line says how many files would conflict, and choosing it for a
+merge that would conflict goes to the sync rather than leaving the tree
+half-merged for the person to untangle — from a phone they could not. A plain
+merge from either that stops anyway is backed out (`sync_plain_merge`). The merge with main
 a step makes at its start (`sync_branch`) goes the same way, and asks
 nothing: it once asked, a "no" was remembered for that state of main, and all
 it bought was the same merge later, before the preview, after step 3 and the
-review had worked on a branch that was not what merges. A plain merge there
-that stops on conflicts the check could not foresee is backed out, and the
-step opens on the branch as it stood. Before step 3 the
+review had worked on a branch that was not what merges; a plain merge there
+that was backed out leaves the step to open on the branch as it stood. Before step 3 the
 branch may not be on origin yet; the session then leaves it local, and the
 prompt says nothing of a pull request or of QA.
 

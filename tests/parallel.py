@@ -32,6 +32,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
 
 def _cfg(path):
@@ -130,7 +131,10 @@ os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
 home = os.path.join(tmp, "home")
 tdir = os.path.join(home, ".claude", "projects", re.sub(r"[^a-zA-Z0-9]", "-", wt))
 os.makedirs(tdir)
-session = "0f1e2d3c-aaaa-bbbb-cccc-00000000beef"
+# A fresh id for each run, as in review-round.py: the watcher ends a session
+# by `pkill -f "--resume <id>"`, and a second copy of this test running at the
+# same time would end this one's stand-ins.
+session = str(uuid.uuid4())
 transcript = os.path.join(tdir, session + ".jsonl")
 limit_file = os.path.join(tmp, "sclaude-limit-" + session)
 

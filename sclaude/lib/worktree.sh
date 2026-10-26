@@ -939,44 +939,12 @@ sync_branch() {
     return 0
   fi
 
-  # Merged from the branch's own tip: one updated on origin (another machine,
-  # GitHub's "Update branch") is caught up first, as cmd_sync does, and one
-  # moved both here and there is not merged into at all — the merge would
-  # make a third head, and its push would be refused.
-  sync_catch_up "$wt"
-  if sync_diverged "$wt"; then
-    warn "  $branch here and on origin have both moved — not merged; the step opens on it as it is."
-    warn "  Bring them together (git -C $wt pull --no-rebase), then: sclaude sync ${slug:-<feature>}"
-    return 0
-  fi
-
-  # `--no-edit`: nobody asked for a message, and a merge message editor
-  # opening on the way into a step leaves the orchestrator waiting on a window
-  # that may be in another program entirely ("Waiting for your editor to close
-  # the file..."), with nothing in the terminal to say what it is waiting for.
-  if git -C "$wt" merge --no-edit origin/main; then
-    echo "  ${GREEN}merged — $branch now carries everything from main${OFF}"
-    return 0
-  fi
-
-  # The merge stopped: on conflicts the check above could not foresee (it
-  # could not tell), or at its commit — a hook of the product's refusing git's
-  # own message. Nobody asked for this merge, so nobody is left a half-merged
-  # tree to untangle — from a phone they could not: it is backed out, and the
-  # step opens on the branch as it stood. The sync before the preview, or the
-  # menu, merges it. A merge that refused to start (an untracked file in the
-  # way) left nothing to back out: git has said why above.
-  warn ""
-  if merge_under_way "$wt"; then
-    local unmerged; unmerged="$(git -C "$wt" diff --name-only --diff-filter=U 2>/dev/null)"
-    git -C "$wt" merge --abort >/dev/null 2>&1 || { sync_branch_held "$wt" "$slug"; return 1; }
-    if [[ -n "$unmerged" ]]; then
-      warn "  The merge stopped on conflicts sclaude could not foresee, and was backed out."
-    else
-      warn "  The merge could not be committed (git says why above), and was backed out."
-    fi
-  else
-    warn "  The merge did not run (git says why above)."
+  local merged=0
+  sync_plain_merge "$wt" "$branch" "$slug" || merged=$?
+  [[ "$merged" -eq 0 ]] && return 0
+  if [[ "$merged" -eq 2 ]]; then
+    sync_branch_held "$wt" "$slug"
+    return 1
   fi
   warn "  The step opens on the branch as it stands; merge it with: sclaude sync ${slug:-<feature>}"
   return 0

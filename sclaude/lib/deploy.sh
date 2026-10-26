@@ -723,6 +723,20 @@ qa_retest() {
   IFS=$'\t' read -r pr_state draft <<<"$view"
   [[ "$pr_state" == OPEN ]] || return 1
 
+  # QA answers for the product. A preview that changed only by what main
+  # brought in and by files that are not the product (NO_DEPLOY: sclaude's own
+  # .sclaude, docs, the workflows) carries the product QA passed: their yes
+  # stands, and is moved on to the new commit.
+  if [[ -n "$sent" && "$sent" != "null" ]] && qa_product_same "$wt" "$sent" "$now"; then
+    echo ""
+    info "Issue #$issue stays in '$QA_DONE': since QA looked (${sent:0:8} → ${now:0:8}), only main and"
+    info "  files that are not the product changed — this branch's product is what QA passed."
+    [[ "$(state_get "$state" qa.accepted 2>/dev/null || true)" == "$sent" ]] \
+      && state_set "$state" qa.accepted "$now" 2>/dev/null || true
+    state_set "$state" qa.sha "$now" 2>/dev/null || true
+    return 1
+  fi
+
   echo ""
   say "${BOLD}Issue #$issue is in '$QA_DONE', but the code on preview has changed since QA looked.${OFF}"
   info "  Preview is at ${now:0:8}${sent:+, QA was sent ${sent:0:8}} — it goes back to '$QA_TO' to be checked again."
@@ -730,6 +744,54 @@ qa_retest() {
   pr_unhandoff "$wt" "$pr" "$repo" "PR #$pr is a draft again until QA accepts its issues." "$draft"
   qa_sent "$wt"
   return 0
+}
+
+# Whether two commits of a branch carry the same product of its own: what each
+# changes against the main it stands on, less what is not the product
+# (NO_DEPLOY), compared as text (qa_own_diff). A merge of main moves the base
+# and leaves the branch's own change as it was; a conflict resolved in a
+# product file, a fix, or main changing the very lines the branch touches (the
+# context of its hunks) makes them differ, and QA looks again. Anything that
+# cannot be read says "differ".
+#
+#   qa_product_same <wt> <a> <b>
+qa_product_same() {
+  local wt="$1" a="$2" b="$3" c base pa pb
+  local -a spec
+  mapfile -t spec < <(no_deploy_pathspec 2>/dev/null)
+  (( ${#spec[@]} )) || return 1
+  for c in "$a" "$b"; do
+    git -C "$wt" cat-file -e "$c^{commit}" 2>/dev/null || return 1
+  done
+  base="$(git -C "$wt" merge-base "$a" origin/main 2>/dev/null)" || return 1
+  pa="$(qa_own_diff "$wt" "$base" "$a" "${spec[@]}")" || return 1
+  base="$(git -C "$wt" merge-base "$b" origin/main 2>/dev/null)" || return 1
+  pb="$(qa_own_diff "$wt" "$base" "$b" "${spec[@]}")" || return 1
+  [[ "$pa" == "$pb" ]]
+}
+
+# The hash of a commit's change against <base> on the paths given, less what
+# only says where it lies: the line numbers in `@@` (the function context after
+# them stays) and the `index` blob ids, which move with main's edits elsewhere
+# in a file. Not patch-id, which ignores whitespace — a line re-indented out of
+# a Python block is a change QA has not seen. Binary files by their content
+# (`--binary`), every file by its bytes rather than a textconv driver's view of
+# it, and renames found whatever the person's git config says, less their
+# `similarity index` line, which moves with main's edits to the file — with
+# renames off, a renamed file reads as all of it deleted and added, and any
+# such edit would ask QA again. Streamed rather than held in a variable, which
+# would drop NUL bytes. A diff that fails is a failure, not an empty change.
+#
+#   qa_own_diff <wt> <base> <commit> <pathspec>...
+qa_own_diff() {
+  local wt="$1" base="$2" c="$3" h
+  shift 3
+  h="$(set -o pipefail
+       git -C "$wt" diff --binary --no-textconv --no-ext-diff --find-renames --no-color \
+         "$base" "$c" -- "$@" 2>/dev/null \
+         | sed -e '/^index /d' -e '/^similarity index /d' -e '/^dissimilarity index /d' \
+               -e 's/^@@ -[0-9,]* +[0-9,]* @@/@@/' | sha1sum)" || return 1
+  echo "${h%% *}"
 }
 
 # A hand-off for the merge (pr_qa_handoff) taken back: the pull request a

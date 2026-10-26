@@ -1423,29 +1423,20 @@ cmd_sync() {
   # A merge that would stop on conflicts is not left half-done for the person
   # to untangle — from a phone they cannot: the sync with main (sync.sh)
   # resolves them, by itself for the deferred logs and in a session otherwise.
-  local synced=0
+  # Not asked, even when a session resolves the conflicts: the branch has to
+  # merge with main before its preview and its merge whatever is answered, so
+  # a "no" would only put the same session off (sync_offer).
+  local synced=0 merged=0
   echo ""
-  sync_offer "$wt" "$slug" "$pr" "$branch" || synced=$?
-  # 0 and 5 are a yes already given that found nothing to resolve after all,
-  # or a hand-off taken back with nothing merged: the plain merge follows, not
-  # asked about twice.
+  sync_offer "$wt" "$slug" "$pr" || synced=$?
   case "$synced" in
-    2) ask "${BOLD}Merge origin/main into $branch? [y/n] ${OFF}" answer yn
-       is_yes "$answer" || { info "Left as it is."; return 0; } ;;
-    0|5) ;;
-    4) info "Left as it is."; return 0 ;;
+    0|2|5) ;;
     3) echo "${GREEN}Merged — $branch now carries everything from main.${OFF}"; return 0 ;;
     *) return 0 ;;
   esac
-
-  # `--no-edit` for the reason sync_branch gives in worktree.sh.
-  if git -C "$wt" merge --no-edit origin/main; then
-    echo "${GREEN}Merged — $branch now carries everything from main.${OFF}"
-  else
-    warn ""
-    warn "  The merge stopped on conflicts. They are yours to resolve:"
-    warn "    cd $wt && git status"
-    warn "  To back out entirely: git -C $wt merge --abort"
+  sync_plain_merge "$wt" "$branch" "$slug" || merged=$?
+  if [[ "$merged" -eq 2 ]]; then
+    warn "  The merge stopped, and backing it out failed — finish it or: git -C $wt merge --abort"
   fi
 }
 

@@ -484,14 +484,17 @@ preview, again after QA's yes, and every two minutes while it
 waits for the merge, sclaude asks git whether the branch still merges with
 main — no session and no tokens for that. When it does not, step 5 merges
 main in, resolves the conflicts, checks the result and pushes; the preview,
-its tests and QA then run again on that code. A conflict only in the deferred
-logs sclaude merges itself, with both sides' rows. A pull request already
+its tests and QA then run again on that code — QA only when the branch's own
+product changed: what main brought in and files that are not the product
+(`.sclaude`, `docs`, `.github`, `.githooks`, `*.md`) leave QA's yes
+standing. A conflict only in the deferred logs sclaude merges itself, with
+both sides' rows. A pull request already
 handed over for the merge goes back to a draft when a sync changes its code.
 Every step starts on a branch carrying the latest main, too: sclaude merges
 it in without asking, and a merge that would conflict goes to the same sync
 first. With uncommitted work in the tree it merges nothing and says so; the
-merge is then `sclaude sync <name>`, which asks before a session resolves
-anything. A merge left half-done in the tree holds the step until it is
+merge is then `sclaude sync <name>`, which goes the same way — the menu's
+line says beforehand whether a session will be needed. A merge left half-done in the tree holds the step until it is
 finished (`sclaude sync <name>`) or backed out (`git merge --abort`).
 
 The merge is yours (unless the product set it otherwise). After it sclaude

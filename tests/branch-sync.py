@@ -20,8 +20,7 @@
 #   * a plain merge that stops on conflicts the check could not foresee is
 #     backed out, and the step opens;
 #   * a sync the person left unfinished is not opened again by a start;
-#   * the menu's sync (sync_offer with the branch named) still asks first,
-#     and a no starts nothing.
+#   * the menu's sync (sync_offer) asks nothing either.
 #
 # Run it with: python3 tests/branch-sync.py
 import os
@@ -144,13 +143,10 @@ try:
     with open(state_file, "w") as fh:
         fh.write('{"branch": "feat/x", "feature": "x"}\n')
 
-    # The menu names the branch: asked first, and a no is 4 with no sync.
-    out = start("n", call='sync_offer %s x 7 feat/x; echo "RC $?"')
-    check("menu: asked first", "with a session resolving them" in out, True)
-    check("menu: a no is 4", "RC 4" in out, True)
-    check("menu: a no starts nothing", "SYNC" in out, False)
-    out = start("y", call='sync_offer %s x 7 feat/x; echo "RC $?"')
-    check("menu: a yes syncs", "SYNC x nofetch" in out, True)
+    # The menu asks nothing either: the item chosen is the answer.
+    out = start("", call='sync_offer %s x 7; echo "RC $?"')
+    check("menu: nothing asked", "ASKED" in out, False)
+    check("menu: the sync takes it", "SYNC x nofetch" in out, True)
 
     # The check could not tell, and the plain merge stops on conflicts: backed
     # out, and the step opens on the branch as it stood.

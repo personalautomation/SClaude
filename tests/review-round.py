@@ -39,6 +39,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
@@ -72,7 +73,11 @@ tmp = tempfile.mkdtemp()
 try:
     wt = os.path.join(tmp, "wt")
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
-    session = "0f1e2d3c-aaaa-bbbb-cccc-000000000001"
+    # A fresh id for each run: the watcher ends a session by
+    # `pkill -f "--resume <id>"`, and with one id for every run, a second copy
+    # of this test running at the same time (another session's suite) killed
+    # this one's stand-ins, and checks that expect them alive failed at random.
+    session = str(uuid.uuid4())
 
     def fake(args):
         """A long-running process whose arguments look like claude's."""

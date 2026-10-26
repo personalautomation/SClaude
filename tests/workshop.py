@@ -288,6 +288,7 @@ export SCLAUDE_SESSION=%(session)s
     ws_py("ready", record, "s1", git(ws, "rev-parse", "HEAD"), "sreview")
     out = sh('workshop_publish "%s"' % tree)
     check("red-not-published", "Red:" in out and "Published" not in out, True)
+    check("red-test-named", "✗ tool.py" in out, True)
     check("red-squashed-head-ready", ws_py("get", record, "ready.head").stdout.strip(),
           git(ws, "rev-parse", "HEAD"))
     check("red-stays-ready", sh('workshop_state "%s" ""' % tree).strip(), "ready")
@@ -304,8 +305,9 @@ export SCLAUDE_SESSION=%(session)s
     out = sh('git -C "%s" rm -q sclaude/lib/tool.sh && git -C "%s" commit -qm gone && '
              'workshop_tests "%s" HEAD~1' % (ws, ws, ws))
     check("deleted-file-picks-its-test", "1 test file(s)" in out, True)
-    # Each test is said as it runs, and the run ends on how it went.
-    check("tests-said-each", "[1/1] tool.py" in out and "all 1 green" in out, True)
+    # With no terminal no progress line is drawn, and the run ends on how it
+    # went; a red test is named on a line of its own.
+    check("tests-said-each", "[1/1]" not in out and "all 1 green" in out, True)
     git(ws, "reset", "-q", "--hard", "HEAD~1")
 
     # A remote or a branch recorded in the shared config is not a change of the

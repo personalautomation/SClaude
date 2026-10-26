@@ -368,17 +368,25 @@ workshop_tests() {
       [[ " ${tests[*]} " == *" $t "* ]] || tests+=("$t")
     done < <(cd "$ws" && grep -l -- "$(basename "${f%.*}")" tests/*.py 2>/dev/null)
   done
-  local n=${#tests[@]} i=0 began=$SECONDS started
+  local n=${#tests[@]} i=0 began=$SECONDS started tty="" line
+  [[ -t 1 ]] && tty=1
   info "  Testing sclaude itself before it goes out: $n test file(s) the change touches."
   log="${TMPDIR:-/tmp}/sclaude-workshop-tests.log"
   : > "$log"
   saved="$(trap -p INT TERM HUP)"
   trap 'sig=INT' INT; trap 'sig=TERM' TERM; trap 'sig=HUP' HUP
   for t in "${tests[@]}"; do
-    # A line per test, on the terminal alone (the feed gets the outcome): a
-    # run of minutes with nothing on the screen reads as one that hangs.
+    # One line on the terminal, redrawn for each test (the feed gets the
+    # outcome): a run of minutes with nothing on the screen reads as one that
+    # hangs, and a line per test buried the question that came after it. A red
+    # test keeps a line of its own.
     i=$((i + 1)) started=$SECONDS
-    printf '%s    [%d/%d] %s …%s' "$DIM" "$i" "$n" "${t#tests/}" "$OFF"
+    # Cut to the terminal's width: a line that wraps is cleared only on its
+    # last row, and the rows above pile up.
+    if [[ -n "$tty" ]]; then
+      line="    [$i/$n] ${t#tests/} …"
+      printf '\r\033[K%s%s%s' "$DIM" "${line:0:$(( ${COLUMNS:-$(tput cols 2>/dev/null || echo 80)} - 1 ))}" "$OFF"
+    fi
     # In the background, so not a group leader: setsid then makes the session
     # in place, and $! is its id.
     ( cd "$ws" && exec setsid env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LANG="${LANG:-C.UTF-8}" \
@@ -386,20 +394,20 @@ workshop_tests() {
     pid=$!
     wait "$pid"; rc=$?
     if [[ -n "$sig" ]]; then
-      echo ""
+      [[ -n "$tty" ]] && printf '\r\033[K'
       kill -s "$sig" -- "-$pid" 2>/dev/null
       # A second signal cuts a stuck teardown short; nothing outlives sclaude.
       wait "$pid" 2>/dev/null
       kill -KILL -- "-$pid" 2>/dev/null
       break
     fi
-    if (( rc == 0 )); then
-      printf ' %s✓ %ds%s\n' "$GREEN" "$((SECONDS - started))" "$OFF"
-    else
-      printf ' %s✗ %ds%s\n' "$RED" "$((SECONDS - started))" "$OFF"
+    if (( rc != 0 )); then
+      [[ -n "$tty" ]] && printf '\r\033[K'
+      printf '%s    ✗ %s, %ds%s\n' "$RED" "${t#tests/}" "$((SECONDS - started))" "$OFF"
       failed+=("$t")
     fi
   done
+  [[ -n "$tty" && -z "$sig" ]] && printf '\r\033[K'
   trap - INT TERM HUP
   eval "$saved"
   [[ -n "$sig" ]] && { kill -s "$sig" "$BASHPID"; return 1; }

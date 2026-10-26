@@ -155,6 +155,16 @@ is rolled back: that release is not ours to remove. Migrations are undone only
 where their undo instructions can actually be run, and sclaude shows the SQL and
 asks first.
 
+While production carries a feature whose last production tests were red — the
+rollback failed, you declined it, another release sits on top, or the tests
+could not run — sclaude holds the feature: nothing is shipped, closed or
+cleaned up, and it says which way out fits. `sclaude regression <name> prod`
+runs the production tests again and, green, lifts the hold;
+`sclaude rollback <name>` puts the previous release back and sends the fix to
+the review step; `sclaude return <name>` sends the fix forward from the review
+where going back is not possible. The bot's action list offers the production
+tests again too.
+
 ### The tool repairs itself, and says what a machine lacks
 
 The friction review fixes the rules that got in the way. When a session's log
@@ -447,6 +457,7 @@ sclaude sync <name>     # merge the latest main into a feature's branch
 sclaude news <name>     # what has happened on the pull request
 sclaude preview <name>  # deploy the branch to a preview
 sclaude rollback <name> # put production back to the release before this feature
+sclaude regression <name> prod  # run the production tests again; green lifts a hold
 sclaude replan <name>   # take a feature back to step 1 and plan it again
 sclaude return <name> [reason]  # send a finished feature back to step 4
 sclaude reset <name>    # start the current step over, forgetting its conversation

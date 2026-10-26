@@ -671,9 +671,12 @@ check_true("prod-live-set-where-the-issue-closes-shipped",
 # Nor is the issue reopened once the merge is in production — asked of GitHub
 # once a pass, and the close reads the same answer.
 check_true("issue-not-held-open-after-the-cycle",
-           re.search(r'\[\[ "\$\{merged:-\}" == "MERGED" \]\] && prod_carries_feature "\$wt" && carried=1\n'
+           re.search(r'\[\[ -z "\$carried_asked" && "\$\{merged:-\}" == "MERGED" \]\] && prod_carries_feature "\$wt" && carried=1\n'
                      r'\s*if \[\[ "\$carried" -eq 0 \]\]; then\n\s*issue_hold_open "\$issue"', deploy_sh) is not None)
-check_true("prod-carries-feature-asked-once", deploy_sh.count('prod_carries_feature "$wt"') == 1)
+# Once a pass: at the top when production's regression is red (the hold), else
+# where the issue is held open; the second is skipped when the first asked.
+check_true("prod-carries-feature-asked-once", deploy_sh.count('prod_carries_feature "$wt"') == 2
+           and deploy_sh.count('carried_asked=1\n    prod_carries_feature "$wt" || carries=$?') == 1)
 
 # prod_carries_feature, run: a recorded ship not rolled back that holds the
 # merge of the feature's pull request carries the feature, whatever main did

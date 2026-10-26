@@ -1370,6 +1370,146 @@ check("rewind-prod-marks-who", after.get("reopened_by"), "prod")
 check("rewind-prod-clears-the-preview-verdict",
       after["regression"]["preview"].get("status"), None)
 
+# --- a production carrying the feature with a red last regression -------------
+#
+# It went by as "unchanged, skipping": the issue closed as shipped, the epilogue
+# said so, and the clean-up offered to remove the tree production was to be
+# mended from. Now the pass holds, says why, and names the way out that fits:
+# the suite again when it could not run, a rollback only as the person's own.
+def held(regression):
+    with tempfile.TemporaryDirectory() as wt:
+        os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+        with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
+            json.dump({"pr": 7, "regression": {"prod": regression}}, fh)
+        body = "set -uo pipefail\nSELF=sclaude\n"
+        for name in ("io", "ui", "steps", "state", "regression", "deploy"):
+            body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
+        body += ('alarm() { echo "ALARM $*"; }; info() { echo "$*"; }\n'
+                 'prod_red_hold "%s" demo\n' % wt)
+        return subprocess.run(["bash", "-c", body], capture_output=True, text=True,
+                              timeout=30).stdout
+
+
+out = held({"status": "failed"})
+check_true("hold-red-alarms", "ALARM Production carries this feature, and its last regression was red." in out)
+check_true("hold-red-offers-both", "sclaude regression demo prod" in out and "sclaude rollback demo" in out)
+out = held({"status": "failed", "unrunnable": True})
+check_true("hold-unrunnable-says-so", "could not run" in out)
+check_true("hold-unrunnable-no-rollback", "sclaude regression demo prod" in out and "rollback" not in out)
+out = held({"status": "failed", "intruded": "https://other.app"})
+check_true("hold-intruded-says-so", "another release on top" in out
+           and "Rolling back would take that release away too" in out)
+
+deploy_src = open(os.path.join(ROOT, "sclaude", "lib", "deploy.sh"), encoding="utf-8").read()
+remind_src = re.search(r"^remind_prod\(\) \{\n.*?^\}\n", deploy_src, re.S | re.M).group(0)
+hold_at = remind_src.find("prod_red_hold \"$wt\" \"$slug\"")
+check_true("hold-before-everything",
+           -1 < remind_src.find('merged="$(branch_pr_state "$branch")"') < hold_at
+           < remind_src.find("rollback_remember_previous")
+           < remind_src.find('issue_close_done "$issue" shipped')
+           and hold_at < remind_src.find("already merged — the preview and QA are skipped"))
+check_true("hold-wants-red-and-carried",
+           re.search(r'"\$\{merged:-\}" == "MERGED" && "\$\(regression_status "\$wt" prod\)" == failed \]\]; then\n'
+                     r'\s*carried_asked=1\n\s*prod_carries_feature "\$wt" \|\| carries=\$\?\n'
+                     r'\s*if \[\[ "\$carries" -eq 0 \]\]; then\n\s*carried=1\n\s*prod_red_hold', remind_src) is not None)
+# GitHub's silence on a red production holds the pass too, as it stops `return`.
+check_true("hold-on-unknown-too",
+           re.search(r'if \[\[ "\$carries" -eq 2 \]\]; then\n(?:\s*#.*\n)*\s*echo ""\n\s*alarm [^\n]*GitHub could not say[^\n]*\n'
+                     r'[^\n]*\n\s*return 0', remind_src) is not None)
+# The intrusion is about the run it came from, so every prod run starts without it.
+check_true("intruded-cleared-before-the-run",
+           'regression.prod.intruded null' in remind_src[:remind_src.find('regression_run "$wt" "$slug" prod')+60])
+
+# A run that could not start is told apart from a red, and a red or a green
+# clears it.
+check_true("unrunnable-recorded",
+           regression.count('"regression.$stage.unrunnable" true') == 1
+           and regression.count('"regression.$stage.unrunnable" null') == 2)
+
+# The ways out: production's suite by hand records its result and on green
+# lifts the hold; a rollback by hand puts the cycle back on the review.
+sclaude_src = open(os.path.join(ROOT, "bin", "sclaude"), encoding="utf-8").read()
+creg = re.search(r"^cmd_regression\(\) \{\n.*?^\}\n", sclaude_src, re.S | re.M).group(0)
+check_true("regression-by-hand-runs-prod", 'regression_run "$wt" "$slug" prod' in creg
+           and 'regression_clear_mark "$wt" prod' in creg and "rollback_prod" not in creg)
+check_true("regression-takes-the-stage",
+           'regression)    shift; cmd_regression "$(slugify "${1:-}")" "${2:-}" || true ;;' in sclaude_src)
+crb = re.search(r"^cmd_rollback\(\) \{\n.*?^\}\n", sclaude_src, re.S | re.M).group(0)
+check_true("rollback-by-hand-rewinds",
+           -1 < crb.find('rollback_prod "$wt" "$slug" || return 1') < crb.find('regression_rewind "$wt" "$slug" prod'))
+# ...from `done` only: a feature already in its fix's round keeps it.
+check_true("rollback-by-hand-rewinds-from-done-only",
+           re.search(r'elif \[\[ "\$step" == "done" \]\]; then\n\s*regression_rewind', crb) is not None
+           and '[[ "$step" == "done" && "$(regression_status "$wt" prod)" != failed ]]' in crb)
+check_true("green-repeat-clears-intruded",
+           re.search(r'if \[\[ "\$prod_rc" -eq 0 \]\]; then\n(?:\s*#.*\n)*\s*state_set [^\n]*regression\.prod\.intruded null',
+                     remind_src) is not None)
+# By hand, production's suite runs only of a production that carries the
+# feature, and keeps the mark of another release on top unless it is green.
+check_true("regression-by-hand-wants-it-carried",
+           -1 < creg.find('if ! prod_carries_feature "$wt"; then') < creg.find('regression_run "$wt" "$slug" prod'))
+check_true("regression-by-hand-keeps-intruded-on-red",
+           creg.find("regression.prod.intruded null") > creg.find('if [[ "$rc" -eq 0 ]]; then'))
+# A rollback that cannot happen leaves a way forward: the fix from the review.
+out = held({"status": "failed"})
+check_true("hold-red-offers-forward", "sclaude return demo" in out)
+out = held({"status": "failed", "intruded": "https://other.app"})
+check_true("hold-intruded-offers-forward", "sclaude return demo" in out)
+# A 2 for want of a suite or an address is not a red: a project with no
+# production suite is not held after every ship. Only a broken environment is
+# recorded (regression_run), and it is held as one that could not run.
+rc2 = re.search(r'elif \[\[ "\$prod_rc" -eq 2 \]\]; then\n(.*?)\n    else\n', remind_src, re.S)
+check_true("prod-2-not-recorded-as-red", rc2 is not None and "regression.prod.status" not in rc2.group(1))
+out = held({"status": "failed", "unrunnable": True})
+check_true("hold-unrunnable-offers-forward", "sclaude return demo" in out)
+# The way forward from a held production hands the review the failure, as
+# production's red does, rather than a QA hand-back with none.
+cret = re.search(r"^cmd_return\(\) \{\n.*?^\}\n", sclaude_src, re.S | re.M).group(0)
+check_true("return-from-a-held-production-rewinds-as-prod",
+           re.search(r'regression_status "\$wt" prod\)" == failed \]\]; then\n'
+                     r'\s*local carries=0\n\s*prod_carries_feature "\$wt" \|\| carries=\$\?\n'
+                     r'\s*if \[\[ "\$carries" -eq 0 \]\]; then\n'
+                     r'\s*state_set "\$state" regression\.prod\.reason "\$\{\*:-null\}"\n'
+                     r'\s*regression_rewind "\$wt" "\$slug" prod', cret) is not None
+           and cret.find("regression_rewind") < cret.find("return_to_development")
+           and cret.find('if [[ "$carries" -eq 2 ]]; then') < cret.find("return_to_development")
+           and "returned as a hand-back from QA" in cret)
+# GitHub's silence is told apart from "not carried" (2), and every other
+# caller still reads it as not carried.
+check_true("return-retry-keeps-the-reason", '$SELF return $slug${*:+ \\"$*\\"}' in cret)
+check_true("carries-unknown-is-2",
+           re.search(r"gh pr view \"\$pr\" --json mergeCommit[^\n]*\|\| return 2", deploy_src) is not None)
+# The reason reaches the fix session, and the next run of the stage drops it.
+check_true("fix-block-carries-the-reason",
+           '"regression.$stage.reason"' in regression and "### The reason given" in regression
+           and regression.find('"regression.$stage.status" running') < regression.find('"regression.$stage.reason" null'))
+# A release shipped now is judged by its own run: the red of the one before
+# is cleared before it, so a 2 from it does not hold the fix.
+check_true("prod-status-cleared-before-its-run",
+           re.search(r'regression\.prod\.status null[^\n]*\n[^\n]*regression\.prod\.unrunnable null[^\n]*\n'
+                     r'\s*regression_run "\$wt" "\$slug" prod', remind_src) is not None)
+# The bot can lift the hold too: the menu offers production's suite while held,
+# on `done` only, and says when it could not run rather than calling it red.
+check_true("menu-offers-prod-check", "verbs+=(regression-prod)" in actions_sh
+           and 'regression-prod) cmd_regression "$slug" prod || true ;;' in actions_sh
+           and '[[ "$step" == "done" && "$(regression_status "$wt" prod)" == "failed"' in actions_sh
+           and "could not run on production last time" in actions_sh)
+
+# A promote of what production has already commits nothing, and must not fail
+# the block before the ship; and a ship that failed is not a declined one.
+check_true("ship-question-says-production-is-red",
+           re.search(r'if \[\[ "\$\(regression_status "\$wt" prod\)" == failed \\\n'
+                     r'\s*&& [^\n]*rollback\.prod\.code[^\n]*!= "done" \]\]; then\n'
+                     r'\s*prod_red="Production.s last regression was red', remind_src) is not None
+           and remind_src.count('"$prod_red${prod_note:-') == 2)
+check_true("promote-commits-only-what-is-staged",
+           "git diff --cached --quiet || git commit -m 'chore(db): promote migrations for $slug'" in remind_src)
+tried = re.search(r'\n  if \[\[ "\$prod_tried" -eq 1 \]\]; then\n(.*?)\n  fi\n', remind_src, re.S)
+check_true("failed-ship-stops-before-the-close", tried is not None and "return 0" in tried.group(1)
+           and "run_status" not in tried.group(1)
+           and "db_main_up" in tried.group(1)
+           and remind_src.find(tried.group(0)) < remind_src.find('issue_close_done "$issue" declined'))
+
 # --- a dev server that wedged during the local e2e -----------------------------
 #
 # On 2026-10-09 a feature's server, restarted right before the run, stopped finishing
@@ -1583,7 +1723,7 @@ check_true("retried-time-not-remembered",
 # The production block stops at its first failure, so putting the main tree's
 # environment back cannot be one of its commands: a promote that failed halfway
 # left the tree on production.
-prod_block = deploy[deploy.index('"${prod_note:-The branch adds migrations'):]
+prod_block = deploy[deploy.index('"$prod_red${prod_note:-The branch adds migrations'):]
 check_true("prod-restore-after-the-block",
            re.search(r'^\s+fi\n\s+if \[\[ -n "\$snapshot" \]\]; then\n\s+environment_restore',
                      prod_block, re.M) is not None)

@@ -928,7 +928,31 @@ preview and its suite, then production — and to close the incident with a seco
 comment once production is green on the feature again.
 
 By hand the same thing is `sclaude rollback <name>`, and it stands in the action
-list once the feature has actually reached production. Sessions cannot do it:
+list once the feature has actually reached production. From `done`, with
+production's suite red, it puts the cycle back on the review too
+(`regression_rewind`), as the automatic one does: left on `done`, the next pass
+asked to ship the same main again, and a "no" led to the clean-up of the tree
+the fix was to be made in. With the suite green it sends nothing back and names
+`sclaude return`; in development it leaves the round as it is.
+
+**A production that carries the feature with its last regression not green holds
+the cycle** (`prod_red_hold`, at the top of `remind_prod`): a rollback that
+failed or was refused, a red with another release on top, a run that could not
+start (`regression.prod.unrunnable`), a red run by hand. It once went by as
+"unchanged, skipping" to the issue closed as shipped, the epilogue and the
+clean-up. The hold ships, closes and rolls back nothing — what serves production
+now, and whose it is, is not known to the pass — and names the way out that
+fits: `sclaude regression <name> prod`, which runs production's suite (only of
+a production that carries the feature) and on green clears the red and lifts
+the hold; the rollback, offered only where it is the person's to choose; or
+`sclaude return <name>`, the fix forward from the review where a rollback
+cannot happen, sent back as production's red sends it (`regression_rewind`), so
+the review is handed the failure. A red production GitHub cannot attribute
+(`prod_carries_feature` answers 2 when `gh` does not) stops the pass the same
+way, and `return` with it, until GitHub answers: neither ships past it nor
+takes it for a QA hand-back. Only a broken environment is recorded as one
+that could not run: a project with no production suite or address has nothing
+to hold on, and is not held. Sessions cannot do it:
 `VERCEL_READS` in the hook is an allowlist and `rollback` is not in it, so it was
 already refused — `rollback status` was added beside the other reads, because a
 session looking at a red production has a reason to ask whether one is in flight.

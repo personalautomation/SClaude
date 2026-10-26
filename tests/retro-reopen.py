@@ -169,10 +169,15 @@ check("fresh-run-keeps-the-code", '_done)         shift; cmd_done "${1:-}" ;;' i
 # and the epilogue; a pass that stopped short of it leaves no mark.
 m = re.search(r"^cmd_resume\(\) \{\n.*?^\}\n", src, re.S | re.M)
 resume = m.group(0) if m else ""
-left_at = resume.find('[[ "$ended" == "$(prod_pass_mark "$wt")" ]] && prod_carries_feature "$wt"')
+left_at = resume.find('[[ "$ended" == "$(prod_pass_mark "$wt")" ]]')
 done_at = resume.find('if [[ -n "$cleanup_left" ]]; then\n      cmd_done "$slug"')
 check("resume-done-goes-to-the-clean-up", 0 < left_at < done_at
       and '"$ended" == "$(prod_pass_mark "$wt" nodeploy)"' in resume, True)
+# A production gone red since is not taken to the clean-up: remind_prod holds it.
+check("resume-done-not-over-a-red-production",
+      re.search(r'\[\[ "\$ended" == "\$\(prod_pass_mark "\$wt"\)" \]\] \\\n'
+                r'\s*&& \[\[ "\$\(regression_status "\$wt" prod\)" != failed \]\] && prod_carries_feature "\$wt"; \}',
+                resume) is not None, True)
 with open(os.path.join(LIB, "deploy.sh")) as fh:
     deploy_src = fh.read()
 m = re.search(r"^remind_prod\(\) \{\n.*?^\}\n", deploy_src, re.S | re.M)

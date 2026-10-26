@@ -151,6 +151,53 @@ deploy_prod_same() {
     && [[ "$(deferred_rev_count "$REPO" "$was..$now" 2>/dev/null)" == "0" ]]
 }
 
+# A production that carries the feature with its last regression not green
+# — a rollback that failed or was refused, a red with another release on
+# top, a run that could not start, a red run by hand — holds the cycle where
+# it is. It went by as "unchanged, skipping" once: the issue closed as
+# shipped, the epilogue said so, and the clean-up offered to remove the tree
+# production was to be mended from. Nothing is shipped or rolled back from
+# here, since what serves production now, and whose it is, is not known to
+# this pass: the person checks again (`regression <slug> prod`, which lifts
+# the hold when green), rolls back (`rollback`, which puts the cycle back on
+# the review), or sends the fix forward from the review (`return`).
+#
+#   prod_red_hold <wt> <slug>
+prod_red_hold() {
+  local wt="$1" slug="$2" state="$1/.sclaude/local/feature/state.json" why
+  # alarm, not warn: the topic hears it with a sound, as the red it is.
+  echo ""
+  if [[ "$(state_get "$state" regression.prod.unrunnable 2>/dev/null || true)" == "true" ]]; then
+    why="its last regression could not run"
+    alarm "Production carries this feature, and $why."
+    info "  A suite that did not run says nothing about production. Run it again:"
+    info "    $SELF regression $slug prod"
+    info "  or, if what it found broken is the feature's, fix it from the review:"
+    info "    $SELF return $slug"
+  elif [[ -n "$(state_get "$state" regression.prod.intruded 2>/dev/null | grep -v '^null$')" ]]; then
+    why="its last regression was red with another release on top"
+    alarm "Production carries this feature, and $why."
+    info "  Rolling back would take that release away too. Once whoever deployed"
+    info "  it has had a look, run the suite again:"
+    info "    $SELF regression $slug prod"
+    info "  or, if the red is this feature's, roll it back:"
+    info "    $SELF rollback $slug"
+    info "  or fix it forward, from the review:"
+    info "    $SELF return $slug"
+  else
+    why="its last regression was red"
+    alarm "Production carries this feature, and $why."
+    info "  Mended by hand? Run the suite again:"
+    info "    $SELF regression $slug prod"
+    info "  Or roll it back, and the fix goes on from the review:"
+    info "    $SELF rollback $slug"
+    info "  Or, where it cannot go back (a migration, no release to go to), fix it"
+    info "  forward from the review:"
+    info "    $SELF return $slug"
+  fi
+  info "  Nothing is shipped, closed or cleaned up meanwhile. The worktree: $wt"
+}
+
 # What prod_pass.ended holds for a pass through remind_prod that reached the
 # clean-up: the pull request, and the production it left, or `nodeploy`.
 # Written by remind_prod and compared with by cmd_resume, from here alone.
@@ -170,7 +217,10 @@ prod_pass_mark() {
 # too. Not deploy_unchanged: that asks whether production is still the release
 # this feature shipped, and any commit on main since — another feature's
 # merge, a hotfix — made it read as not in production, the issue reopened and
-# its status saying so. Unknown (gh cannot say) is "not carried".
+# its status saying so. Unknown (gh cannot say) is 2: "not
+# carried" to every caller that tests it with && or !, and told apart where a
+# red production is at stake — remind_prod's hold and `sclaude return`, which
+# must not ship past it or take it for a QA hand-back on GitHub's silence.
 prod_carries_feature() {
   local state="$1/.sclaude/local/feature/state.json" was pr merge
   was="$(state_get "$state" deploy.prod.sha 2>/dev/null || true)"
@@ -178,8 +228,10 @@ prod_carries_feature() {
   [[ "$(state_get "$state" rollback.prod.code 2>/dev/null || true)" != "done" ]] || return 1
   pr="$(state_get "$state" pr 2>/dev/null || true)"
   [[ -n "$pr" && "$pr" != "null" ]] || return 1
-  merge="$(cd "$REPO" && timeout 30 gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid // ""' 2>/dev/null)" || return 1
+  merge="$(cd "$REPO" && timeout 30 gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid // ""' 2>/dev/null)" || return 2
   [[ -n "$merge" ]] || return 1
+  # A merge not fetched here cannot be in the release shipped from here (every
+  # ancestor of it is local): git's 128 for it is "not carried" too.
   git -C "$REPO" merge-base --is-ancestor "$merge" "$was" 2>/dev/null
 }
 
@@ -1591,6 +1643,29 @@ remind_prod() {
   issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue || true)"
   [[ "$issue" == "null" ]] && issue=""
   [[ -n "$branch" ]] && merged="$(branch_pr_state "$branch")"
+  # Production carries the feature and its last regression was not green: the
+  # pass stops here, before the preview, the question of shipping and the
+  # issue, the epilogue and the clean-up (prod_red_hold). GitHub is asked
+  # whether production carries it only then, and the answer kept for the
+  # issue below (carried_asked).
+  local carried=0 carried_asked="" carries=0
+  if [[ "${merged:-}" == "MERGED" && "$(regression_status "$wt" prod)" == failed ]]; then
+    carried_asked=1
+    prod_carries_feature "$wt" || carries=$?
+    if [[ "$carries" -eq 0 ]]; then
+      carried=1
+      prod_red_hold "$wt" "$slug"
+      return 0
+    fi
+    # Red, and not known whether production carries it: held as well, as
+    # `return` stops on the same silence, rather than shipped past or closed.
+    if [[ "$carries" -eq 2 ]]; then
+      echo ""
+      alarm "Production's last regression was red, and GitHub could not say whether it carries '$slug'."
+      info "  Nothing goes on until it can (gh auth status). Then: $SELF $slug"
+      return 0
+    fi
+  fi
   branch_has_migrations "$wt" && migrations=1
   # Or noted by an earlier run (rollback_remember_migrations): one stopped
   # before production and run again once main was brought level finds the
@@ -1919,9 +1994,10 @@ remind_prod() {
   # and a pass after a declined clean-up reopened the issue only to close it
   # again a moment later.
   # Asked once a pass, and kept: it asks GitHub, and the close at the end
-  # must not read a different answer than the hold here did.
-  local carried=0
-  [[ "${merged:-}" == "MERGED" ]] && prod_carries_feature "$wt" && carried=1
+  # must not read a different answer than the hold here did — nor than the
+  # one at the top, when that asked already. The merge may have come in this
+  # pass since; then it is asked here.
+  [[ -z "$carried_asked" && "${merged:-}" == "MERGED" ]] && prod_carries_feature "$wt" && carried=1
   if [[ "$carried" -eq 0 ]]; then
     issue_hold_open "$issue"
   fi
@@ -2020,6 +2096,17 @@ remind_prod() {
     prod_note=""
     prod_ask="Ship to production?"
   fi
+  # Production red with an earlier release of this feature (a fix sent forward
+  # by `return`): the question says so, so that a "no", which closes the
+  # issue, is not given without knowing it. Apart from prod_note, whose
+  # defaults below say what the block does with migrations. Not after a
+  # rollback: production serves the release before, checked green on its own
+  # stage, while the feature's status stays the red it was rolled back for.
+  local prod_red=""
+  if [[ "$(regression_status "$wt" prod)" == failed \
+        && "$(state_get "$wt/.sclaude/local/feature/state.json" rollback.prod.code 2>/dev/null || true)" != "done" ]]; then
+    prod_red="Production's last regression was red — this ships the fix. "
+  fi
 
   # As with preview: when main is what production already has (deploy_unchanged
   # says when) there is nothing here to decide. Said and
@@ -2095,7 +2182,10 @@ remind_prod() {
     if [[ -n "$promote_cmd" ]]; then
       prod_cmds+=("$promote_cmd")
       prod_cmds+=("git add $migrations_dir${schema_path:+ $schema_path}")
-      prod_cmds+=("git commit -m 'chore(db): promote migrations for $slug'")
+      # Only with something to commit: a promote of what production has
+      # already (an earlier run's record, a rider's) changes no file, and a
+      # bare `git commit` then failed the block before `vercel --prod`.
+      prod_cmds+=("git diff --cached --quiet || git commit -m 'chore(db): promote migrations for $slug'")
       prod_cmds+=("git push")
     else
       warn "  The branch adds migrations and the project names no promote command."
@@ -2116,7 +2206,7 @@ remind_prod() {
 
     if run_block \
       "Production" \
-      "${prod_note:-The branch adds migrations: promote first, then ship.}" \
+      "$prod_red${prod_note:-The branch adds migrations: promote first, then ship.}" \
       "$prod_ask" \
       "${prod_cmds[@]}"; then
       prod_done=1
@@ -2132,7 +2222,7 @@ remind_prod() {
     write_vercelignore "$REPO"
     if run_block \
       "Production" \
-      "${prod_note:-The branch adds no migrations.}" \
+      "$prod_red${prod_note:-The branch adds no migrations.}" \
       "$prod_ask" \
       "cd $REPO" \
       "git pull --ff-only --autostash" \
@@ -2151,6 +2241,22 @@ remind_prod() {
     ask_feed say "$(phase_line finished deploy production)${prod_url:+ · $prod_url}"
   elif [[ "$prod_tried" -eq 1 ]]; then
     ask_feed alarm "$(phase_line failed deploy production) · the log is in the terminal"
+  fi
+
+  # A ship that was tried and failed is not a "no": it went on to close the
+  # issue as declined, the epilogue saying so, and the clean-up. It stops
+  # here, the issue held open, for another try, and the main local database
+  # brought level with whatever the promote already put on main. No epilogue:
+  # its status has no word for a failed ship — "merged, not in production",
+  # which the issue says already, is true — and its session would push the
+  # failing command's output off the screen above the warning.
+  if [[ "$prod_tried" -eq 1 ]]; then
+    db_main_up
+    echo ""
+    warn "The ship to production failed — see above. Nothing is closed or cleaned up."
+    info "  Put it right and carry on: $SELF $slug"
+    info "  The worktree stays: $wt"
+    return 0
   fi
 
   # The features that went out with this one are in production too, and their
@@ -2182,6 +2288,11 @@ remind_prod() {
     # anything fixed. regression_rewind at the end puts the cycle back on the
     # review step, where the fixing session belongs — and by then it runs against
     # a production that works.
+    # This release's suite has not run yet: a red recorded of the one before
+    # (held, then fixed forward) must not hold this one if its run says 2.
+    state_set "$wt/.sclaude/local/feature/state.json" regression.prod.intruded null 2>/dev/null || true
+    state_set "$wt/.sclaude/local/feature/state.json" regression.prod.status null 2>/dev/null || true
+    state_set "$wt/.sclaude/local/feature/state.json" regression.prod.unrunnable null 2>/dev/null || true
     regression_run "$wt" "$slug" prod
     local prod_rc=$?
 
@@ -2224,6 +2335,9 @@ remind_prod() {
     fi
 
     if [[ "$prod_rc" -eq 0 ]]; then
+      # Green on the repeat after another release landed: that release is no
+      # longer a reason for anything.
+      state_set "$wt/.sclaude/local/feature/state.json" regression.prod.intruded null 2>/dev/null || true
       state_set "$wt/.sclaude/local/feature/state.json" regression.prod.attempts 0 2>/dev/null || true
       regression_clear_mark "$wt" prod
     elif [[ "$prod_rc" -eq 2 ]]; then

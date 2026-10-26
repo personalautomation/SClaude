@@ -53,7 +53,8 @@
 #   sclaude done <name>     clean up after the merge (the worktree and branches)
 #   sclaude drop <name>     abandon a feature: remove its traces here and on
 #                           GitHub
-#   sclaude regression <name> run the checks a step closes on
+#   sclaude regression <name> [prod]
+#                           run the checks a step closes on, or production's
 #   sclaude friction <name> review what got in a step's way and customise
 #                           sclaude for the product
 #   sclaude deferred        the monthly review of the friction put off
@@ -454,16 +455,18 @@ cmd_resume() {
   # Only the clean-up is left for a feature with no change (no_change.sh),
   # which has nothing to deploy, and for one whose last pass through
   # remind_prod got to the clean-up for this pull request and this production
-  # (prod_pass.ended). Sent through it again — the clean-up stopped for
-  # sclaude's code — it read the retrospective's commits as a preview nobody
-  # tested, said QA was skipped, and ran the epilogue a second time for
-  # nothing, and came to the same clean-up.
+  # (prod_pass.ended), unless production went red since (remind_prod then
+  # holds it). Sent through it again — the clean-up stopped for sclaude's
+  # code — it read the retrospective's commits as a preview nobody tested,
+  # said QA was skipped, and ran the epilogue a second time for nothing, and
+  # came to the same clean-up.
   local fstate="$wt/.sclaude/local/feature/state.json" cleanup_left="" ended
   if [[ "$step" == "done" ]]; then
     ended="$(state_get "$fstate" prod_pass.ended 2>/dev/null || true)"
     if [[ "$(state_get "$fstate" no_change 2>/dev/null || true)" == "true" \
           || "$ended" == "$(prod_pass_mark "$wt" nodeploy)" ]] \
-       || { [[ "$ended" == "$(prod_pass_mark "$wt")" ]] && prod_carries_feature "$wt"; }; then
+       || { [[ "$ended" == "$(prod_pass_mark "$wt")" ]] \
+            && [[ "$(regression_status "$wt" prod)" != failed ]] && prod_carries_feature "$wt"; }; then
       cleanup_left=1
     fi
   fi
@@ -862,6 +865,33 @@ cmd_return() {
     return 0
   fi
 
+  # Held on a red production (prod_red_hold names this way forward): the fix
+  # goes back as production's red sends it, so the review session is handed
+  # the failure (regression_fix_block), and the reason with it, rather than a
+  # QA hand-back with none. Asked as remind_prod asks it, so the command and
+  # the pass agree: a red left from an earlier release is not this one's, and
+  # GitHub's silence stops both.
+  if [[ "$(regression_status "$wt" prod)" == failed ]]; then
+    local carries=0
+    prod_carries_feature "$wt" || carries=$?
+    if [[ "$carries" -eq 0 ]]; then
+      state_set "$state" regression.prod.reason "${*:-null}"
+      regression_rewind "$wt" "$slug" prod
+      info "  Back on the review to fix production forward, in this same tree."
+      cmd_resume "$slug"
+      return
+    fi
+    # A hand-back from QA moves the card and cannot be taken back: not on a
+    # guess.
+    if [[ "$carries" -eq 2 ]]; then
+      warn "GitHub could not say whether production carries '$slug'; nothing was"
+      warn "returned. Try again once it can (gh auth status): $SELF return $slug${*:+ \"$*\"}"
+      return 1
+    fi
+    info "  Production's last regression was red, but production does not carry this"
+    info "  feature now: returned as a hand-back from QA."
+  fi
+
   return_to_development "$wt" "$slug" "$@" || die "could not return '$slug': see $state"
   cmd_resume "$slug"
 }
@@ -932,10 +962,45 @@ cmd_friction() {
 # those right after it makes them.
 cmd_regression() {
   require_repo
-  local slug="${1:-}" wt
+  local slug="${1:-}" stage="${2:-local}" wt
   local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
-  [[ -n "$slug" ]] || die "name the feature: $SELF regression <name>"
+  [[ -n "$slug" ]] || die "name the feature: $SELF regression <name> [prod]"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+
+  # Production's suite, by hand: the one way to tell a production held red
+  # (prod_red_hold) that it is green again. Only checked — on red nothing is
+  # rolled back, which is `rollback`'s to do and asks.
+  if [[ "$stage" == "prod" ]]; then
+    local state="$wt/.sclaude/local/feature/state.json" rc=0
+    # Only of a production that carries the feature: one rolled back, or not
+    # yet holding its fix, would answer green about another release, and
+    # take the feature's red off with it.
+    if ! prod_carries_feature "$wt"; then
+      warn "Production does not carry '$slug' as far as can be told (not shipped from"
+      warn "here, rolled back, its fix not shipped yet — or GitHub could not be asked):"
+      warn "its suite would say nothing about the feature."
+      return 1
+    fi
+    regression_run "$wt" "$slug" prod || rc=$?
+    echo ""
+    if [[ "$rc" -eq 0 ]]; then
+      # Another release on top no longer matters once production is green; on
+      # anything else it still does, and the hold goes on saying so.
+      state_set "$state" regression.prod.intruded null 2>/dev/null || true
+      state_set "$state" regression.prod.attempts 0 2>/dev/null || true
+      regression_clear_mark "$wt" prod
+      info "  Production is green. Carry on with: $SELF $slug"
+      return 0
+    fi
+    if [[ "$rc" -eq 2 ]]; then
+      info "  It could not run; nothing changed. Run it again once it can."
+    else
+      info "  Still red, and nothing was rolled back. To go back to the release"
+      info "  before this feature, with the fix from the review: $SELF rollback $slug"
+    fi
+    return 1
+  fi
+  [[ "$stage" == "local" ]] || die "usage: $SELF regression <name> [prod]"
 
   prepare_worktree "$wt"
   if regression_run "$wt" "$slug" local; then
@@ -1637,6 +1702,25 @@ cmd_rollback() {
   rollback_confirm "$wt" "$slug" || true
   rollback_incident "$wt" "$slug" \
     "$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null || true)"
+  # Production no longer carries the feature, so the fix goes on from the
+  # review, as after the automatic rollback. Left on `done`, the next pass
+  # asked to ship the same main again, and a "no" led to the clean-up of the
+  # tree the fix was to be made in. Only from `done`: a feature already back
+  # in development — its fix's pull request perhaps open — keeps its round,
+  # and a second rewind would take that pull request for the rolled back one.
+  # And only for a red: a rollback made with production green is the
+  # person's own reason, and the review would be handed a failure no suite
+  # found.
+  local step; step="$(state_get "$wt/.sclaude/local/feature/state.json" step 2>/dev/null || true)"
+  if [[ "$step" == "done" && "$(regression_status "$wt" prod)" != failed ]]; then
+    info "  Production's suite was not red, so the feature is not sent back. To fix"
+    info "  something from the review: $SELF return $slug"
+  elif [[ "$step" == "done" ]]; then
+    regression_rewind "$wt" "$slug" prod
+    info "  The fix goes on from the review step, in this same tree: $SELF $slug"
+  else
+    info "  The feature is in development ($(step_label "$step")); it goes on from there: $SELF $slug"
+  fi
 }
 
 # The server usually starts by itself before a step; this command is for the
@@ -1722,6 +1806,7 @@ ${BOLD}$SELF${OFF} — an orchestrator for the feature development cycle
   $SELF done <name>     remove the worktree and branches after the merge
   $SELF drop <name>     abandon a feature: clear its traces here and on GitHub
   $SELF regression <name> run the checks step 2 and step 4 close on
+  $SELF regression <name> prod   production's suite again; green lifts a hold
   $SELF friction <name> review what got in the step's way and fix the tooling
   $SELF deferred        the monthly review of the friction put off (offered by itself)
   $SELF review-stats    what review sessions cost in context, to set the threshold
@@ -1861,7 +1946,7 @@ main() {
     checks)        shift; cmd_checks "${1:-}" ;;
     # A red run is an answer, not a script failure: || true so the shell does
     # not report one where the summary has already said everything.
-    regression)    shift; cmd_regression "$(slugify "${1:-}")" || true ;;
+    regression)    shift; cmd_regression "$(slugify "${1:-}")" "${2:-}" || true ;;
     reset)         shift; cmd_reset "$(slugify "${1:-}")" ;;
     # Internal: the end of a step's session, handed over by code_reload.
     _session-ended) shift; cmd_session_ended "$@" ;;

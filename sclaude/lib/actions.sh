@@ -229,6 +229,19 @@ feature_actions() {
   esac
   labels+=("Run the regression (regression)"$'\t'"$rnote_r")
   verbs+=(regression)
+  # Production's suite again, while production holds the feature red: the
+  # one press that lifts the hold (prod_red_hold) without a terminal. Read
+  # from the state alone — a menu does not ask GitHub; the command does.
+  # On `done` only: back in development, its fix's pull request is the
+  # state's, and production does not carry that yet.
+  if [[ "$step" == "done" && "$(regression_status "$wt" prod)" == "failed" \
+        && -n "${dsha:-}" && "$dsha" != "null" && "${rbcode:-}" != "done" ]]; then
+    local pnote="red on production; green lifts the hold"
+    [[ "$(state_get "$state" regression.prod.unrunnable 2>/dev/null || true)" == "true" ]] \
+      && pnote="could not run on production last time; green lifts the hold"
+    labels+=("Check production again (regression-prod)"$'\t'"$pnote")
+    verbs+=(regression-prod)
+  fi
 
   # The clean-up only when there is something to clean up: before the merge it
   # will refuse by itself, and offering it means offering a refusal.
@@ -383,6 +396,7 @@ feature_actions() {
     dev)      cmd_dev "$slug" ;;
     friction) cmd_friction "$slug" ;;
     regression) cmd_regression "$slug" ;;
+    regression-prod) cmd_regression "$slug" prod || true ;;
     reset)    cmd_reset "$slug" ;;
     done)     cmd_done "$slug" || true ;;
     drop)     cmd_abandon "$slug" ;;

@@ -853,6 +853,9 @@ regression_run_body() {
 
   : > "$log"
   state_set "$state" "regression.$stage.status" running
+  # What the person said of the last red (`sclaude return` on a held
+  # production) was for the fix it led to, which is this run's to judge.
+  state_set "$state" "regression.$stage.reason" null
   state_set "$state" "regression.$stage.started" "$(date -Iseconds)"
   state_set "$state" "regression.$stage.failed_at" null
   # And the previous run's finishing time, or the state reads as a run that
@@ -1046,6 +1049,9 @@ regression_run_body() {
   if [[ -n "$failed" && "$stage" != "local" && -n "$base" ]] \
      && regression_environment_broken "$log" "$base"; then
     state_set "$state" "regression.$stage.status" failed
+    # Told apart from a red by prod_red_hold, which then asks for the run
+    # again rather than for a rollback.
+    state_set "$state" "regression.$stage.unrunnable" true
     state_set "$state" "regression.$stage.failed_at" "$failed"
     state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
     echo ""
@@ -1060,6 +1066,7 @@ regression_run_body() {
   echo ""
   if [[ -n "$failed" ]]; then
     state_set "$state" "regression.$stage.status" failed
+    state_set "$state" "regression.$stage.unrunnable" null
     state_set "$state" "regression.$stage.failed_at" "$failed"
     state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
     # The terminal's line; the topic hears it from regression_notify_done,
@@ -1071,6 +1078,7 @@ regression_run_body() {
   fi
 
   state_set "$state" "regression.$stage.status" passed
+  state_set "$state" "regression.$stage.unrunnable" null
   state_set "$state" "regression.$stage.failed_at" null
   state_set "$state" "regression.$stage.tree" "${tree:-null}"
   state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
@@ -1637,6 +1645,8 @@ regression_fix_block() {
     printf 'The full output is in `.sclaude/local/feature/regression.log`; its last lines:\n\n'
   fi
   printf '```\n%s\n```\n\n' "$(tail -30 "$kept" 2>/dev/null)"
+  local reason; reason="$(state_get "$state" "regression.$stage.reason" 2>/dev/null || true)"
+  [[ -n "$reason" && "$reason" != "null" ]] && printf '### The reason given\n\n%s\n\n' "$reason"
   # A merged pull request cannot be reopened, so the fix needs a new one — from
   # this same branch. sclaude follows the feature by the branch its state
   # names: the PR it records, whether that PR is merged, what the preview

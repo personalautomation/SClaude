@@ -570,7 +570,10 @@ regression_line() {
 # Two things have to hold, and neither alone is enough. The suite must have
 # failed *entirely* — Playwright prints "Running N tests" and "N failed", and
 # those two numbers matching is what "everything" means; a genuine regression
-# nearly always leaves something passing. And the address must answer with a
+# nearly always leaves something passing. A suite stopped at its cap
+# (REGRESSION_E2E_MAX_FAILURES) prints "M did not run" for the rest, and then
+# "everything" is the failed and the not-run adding up to what was to run,
+# with nothing passed. And the address must answer with a
 # server error or not answer at all, which is the part that says the fault is
 # the deployment's rather than the branch's.
 #
@@ -578,14 +581,17 @@ regression_line() {
 # that does not parse. Calling a real failure "the environment" would send a
 # red regression past the gate, which is worse than the session this saves.
 regression_environment_broken() {
-  local log="$1" base="$2" ran failed code
+  local log="$1" base="$2" ran failed skipped passed code
 
   command -v curl >/dev/null 2>&1 || return 1
 
   ran="$(grep -oE 'Running ([0-9]+) tests' "$log" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
   failed="$(grep -oE '^ *([0-9]+) failed' "$log" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+  skipped="$(grep -oE '^ *([0-9]+) did not run' "$log" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+  passed="$(grep -oE '^ *([0-9]+) passed' "$log" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
   [[ "$ran" =~ ^[0-9]+$ && "$failed" =~ ^[0-9]+$ ]] || return 1
-  [[ "$ran" -gt 0 && "$ran" -eq "$failed" ]] || return 1
+  [[ "${passed:-0}" -eq 0 ]] || return 1
+  [[ "$ran" -gt 0 && "$ran" -eq $(( failed + ${skipped:-0} )) ]] || return 1
 
   # 000 is curl's own "no answer at all" — a host that does not resolve or
   # refuses the connection is as broken as one returning 500.
@@ -844,16 +850,17 @@ regression_run_body() {
     # At most twice, for e2e on the local stage alone: once more on a fresh dev
     # server when every failure was a page that never finished loading — see
     # regression_server_wedged — or when the suite stopped at its cap of
-    # failures — see regression_stopped_early. The second attempt runs the whole command again
-    # rather than only the failed specs: a project may declare it as a chain,
-    # and a whole green suite is what the fixing session would have proved.
+    # failures — see regression_stopped_early. The second attempt runs the
+    # whole command again rather than only the failed specs: a project may
+    # declare it as a chain, and a whole green suite is what the fixing session
+    # would have proved.
     retried="" why=""
     while :; do
       from=$(( $(wc -l < "$log") + 1 ))
       ( cd "$wt" && eval "$cmd" ) >> "$log" 2>&1 < /dev/null &
       local part_pid=$!
       if [[ -t 1 ]]; then
-        local total done_n spin=0 frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+        local total done_n failed_n spin=0 frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
         while kill -0 "$part_pid" 2>/dev/null; do
           # `grep -c` prints 0 and exits 1 when nothing matches, so `|| echo 0`
           # appends a second zero and the variable becomes "0\n0". A newline in
@@ -868,8 +875,14 @@ regression_run_body() {
             | grep -cE '^[[:space:]]+[✓✘][[:space:]]+[0-9]+' | head -1)"
           [[ "$total" =~ ^[0-9]+$ ]] || total=""
           [[ "$done_n" =~ ^[0-9]+$ ]] || done_n=0
+          # And how many of those failed, so a run going wrong says so before
+          # it ends. A suite in several workers prints the same one line per
+          # finished spec, in the order they finish, so both counts hold.
+          failed_n="$(tail -n +"$from" "$log" 2>/dev/null \
+            | grep -cE '^[[:space:]]+✘[[:space:]]+[0-9]+' | head -1)"
+          [[ "$failed_n" =~ ^[1-9][0-9]*$ ]] || failed_n=""
           regression_line "$stage" "$parts" "$part" started "" "$wt" \
-            "${frames:spin:1} $(regression_duration $(( $(date +%s) - part_started )))${total:+ · $done_n/$total}"
+            "${frames:spin:1} $(regression_duration $(( $(date +%s) - part_started )))${total:+ · $done_n/$total}${failed_n:+ · $failed_n failed}"
           spin=$(( (spin + 1) % 10 ))
           sleep 1
         done

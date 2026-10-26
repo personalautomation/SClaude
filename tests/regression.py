@@ -904,9 +904,37 @@ if broken:
     # Both conditions, never one: a genuine regression nearly always leaves
     # something passing, and an address that serves says the fault is the
     # branch's.
-    check_true("checks-the-whole-suite-failed", '"$ran" -eq "$failed"' in body)
+    check_true("checks-the-whole-suite-failed",
+               '"$ran" -eq $(( failed + ${skipped:-0} ))' in body)
     check_true("checks-the-address-too", "http_code" in body)
     check_true("counts-a-dead-host-as-broken", '"$code" == "000"' in body)
+
+
+def environment_broken(log_text, code="500"):
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "regression.log")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(log_text)
+        script = ("curl() { printf %s; }\n" % code) + "regression_environment_broken" \
+            + "() {" + broken.group(1) + "\n}\nregression_environment_broken \"$1\" https://x.test"
+        return subprocess.run(["bash", "-c", script, "_", path]).returncode == 0
+
+
+if broken:
+    check_true("broken-when-everything-failed",
+               environment_broken("Running 20 tests using 1 worker\n  20 failed\n"))
+    # The cap stops a dead deployment's suite after ten; the rest did not run.
+    check_true("broken-when-the-cap-left-the-rest-unrun",
+               environment_broken("Running 105 tests using 4 workers\n"
+                                  "  Testing stopped early after 10 maximum allowed failures.\n"
+                                  "  10 failed\n  95 did not run\n"))
+    check("not-broken-when-something-passed",
+          environment_broken("Running 105 tests using 4 workers\n  10 failed\n"
+                             "  90 did not run\n  5 passed\n"), False)
+    check("not-broken-when-the-host-serves",
+          environment_broken("Running 20 tests using 1 worker\n  20 failed\n", code="200"), False)
 check_true("broken-environment-returns-2",
            re.search(r'regression_environment_broken "\$log" "\$base"; then(?:.|\n)*?return 2',
                      regression) is not None)
@@ -1402,6 +1430,10 @@ if early:
           stopped_early("=== e2e ===\n" + STOPPED
                         + "=== e2e (again, on a fresh dev server) ===\n" + EXPECT
                         + "  1 failed\n"), False)
+# The running line counts the failures as they come, beside the finished specs.
+check_true("progress-counts-failures",
+           "${failed_n:+ · $failed_n failed}" in regression
+           and "grep -cE '^[[:space:]]+✘[[:space:]]+[0-9]+'" in regression)
 check_true("retry-asks-both-signatures",
            re.search(r'regression_server_wedged "\$log".*?regression_stopped_early "\$log"',
                      regression, re.S) is not None)

@@ -88,7 +88,7 @@ deploy_remember() {
 # Two conditions, and both are needed. The commit must match, and for preview
 # the tree must also be clean: the same HEAD with uncommitted edits is not
 # "nothing changed", and vercel uploads the working tree rather than the commit.
-# Prod ships what was pushed, so main's HEAD alone answers for it.
+# Prod has its own conditions, in the code below.
 #
 # False on everything unknown — no record, no git, an unreadable HEAD. The
 # question is "do we know this is pointless", and not knowing is not a yes.
@@ -99,7 +99,7 @@ deploy_unchanged() {
 
   # A rolled-back production is never unchanged, whatever the commits say.
   #
-  # This compares what we shipped against main's HEAD, and after a rollback the
+  # This compares what we shipped against main, and after a rollback the
   # two still agree — main holds the commit, and production serves the release
   # before it. Without this the next pass would print "Production already at
   # abc1234 — unchanged, skipping" and never offer to ship the fix, which is the
@@ -114,16 +114,41 @@ deploy_unchanged() {
 
   now="$(deploy_head "$wt" "$stage")" || return 1
   [[ -n "$now" ]] || return 1
-  # Main moved on by deferred entries alone, which ship nothing: sclaude puts
-  # them on main itself after a ship, and production read as changed, the
-  # issue was reopened, and the status said the feature was not there.
-  if [[ "$stage" == "prod" && "$was" != "$now" ]] \
-     && git -C "$REPO" merge-base --is-ancestor "$was" "$now" 2>/dev/null \
-     && [[ "$(deferred_rev_count "$REPO" "$was..$now" 2>/dev/null)" == "0" ]]; then
-    return 0
+  if [[ "$stage" != "prod" ]]; then
+    [[ "$was" == "$now" ]] || return 1
+  else
+    # The main checkout's main, which `vercel --prod` uploads — a commit made
+    # there and not pushed is something new, and prod_main_unready says so.
+    deploy_prod_same "$was" "$now" || return 1
+    # And main on origin as it is now: the checkout's branch lags whenever
+    # the merge was made on GitHub — by sclaude's auto merge, or by hand — and
+    # read from there alone, a merged pull request looked shipped already,
+    # production was skipped with nobody asked, and the feature closed as
+    # declined. Asked with ls-remote, which moves no ref: a fetch here moved
+    # origin/main past the branch before rollback_remember_migrations read
+    # `origin/main...HEAD`, and a merge that brings a migration recorded none.
+    # A head not here yet is something new.
+    local remote
+    remote="$(GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$REPO" ls-remote origin refs/heads/main 2>/dev/null | cut -f1)"
+    if [[ -n "$remote" ]]; then
+      git -C "$REPO" cat-file -e "$remote^{commit}" 2>/dev/null || return 1
+      deploy_prod_same "$was" "$remote" || return 1
+    fi
   fi
-  [[ "$was" == "$now" ]] || return 1
   [[ "$stage" != "preview" || -z "$(worktree_dirt "$wt")" ]]
+}
+
+# Whether main at <now> is what production got at <was>: the same commit, or
+# one past it by deferred entries alone, which ship nothing — sclaude puts
+# them on main itself after a ship, and production read as changed, the issue
+# was reopened, and the status said the feature was not there.
+#
+#   deploy_prod_same <was> <now>
+deploy_prod_same() {
+  local was="$1" now="$2"
+  [[ "$was" == "$now" ]] && return 0
+  git -C "$REPO" merge-base --is-ancestor "$was" "$now" 2>/dev/null \
+    && [[ "$(deferred_rev_count "$REPO" "$was..$now" 2>/dev/null)" == "0" ]]
 }
 
 # What prod_pass.ended holds for a pass through remind_prod that reached the
@@ -1996,8 +2021,8 @@ remind_prod() {
     prod_ask="Ship to production?"
   fi
 
-  # As with preview: main's HEAD is what `vercel --prod` ships, so when it is
-  # the commit already in production there is nothing here to decide. Said and
+  # As with preview: when main is what production already has (deploy_unchanged
+  # says when) there is nothing here to decide. Said and
   # not asked — and unlike preview there is no second door, by design: shipping
   # an unchanged main to prod is not a thing anybody needs a shortcut for, and
   # `vercel --prod` from $REPO is the honest way to do it deliberately.
@@ -2021,8 +2046,12 @@ remind_prod() {
   # along, whose fetch of main empties the range rollback_remember_migrations
   # reads — so in this order. See prod_riders.py: on 2026-10-09 one feature
   # shipped another's migration without a word about it.
-  local riders="" rider_issues=""
-  if ! deploy_unchanged "$wt" prod; then
+  # Asked once: main on origin may move between two askings, and a second
+  # answer of "changed" would ship past what only the first one's branch
+  # records and checks.
+  local riders="" rider_issues="" prod_same=0
+  deploy_unchanged "$wt" prod && prod_same=1
+  if [[ "$prod_same" -eq 0 ]]; then
     rollback_remember_previous "$wt"
     [[ -n "$migrations" ]] && rollback_remember_migrations "$wt"
 
@@ -2045,7 +2074,7 @@ remind_prod() {
     fi
   fi
 
-  if deploy_unchanged "$wt" prod; then
+  if [[ "$prod_same" -eq 1 ]]; then
     echo ""
     info "Production already at $(deploy_head "$wt" prod | cut -c1-8) — unchanged, skipping."
   elif [[ -n "$migrations" ]]; then

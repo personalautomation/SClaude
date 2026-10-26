@@ -322,14 +322,16 @@ try:
     # "Do we know that deploying again would be pointless?" Everything unknown
     # answers no, and after a rollback the answer is no whatever the commits say.
 
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO,
+    # What production got is recorded as main's commit; deploy_unchanged
+    # says which mains are compared with it.
+    head = subprocess.run(["git", "rev-parse", "origin/main"], cwd=REPO,
                           capture_output=True, text=True).stdout.strip()
     state = os.path.join(WT, ".sclaude/local/feature", "state.json")
 
     def unchanged(stage):
         _, _, rc = run_bash(
             'REPO=%s; deploy_unchanged %s %s' % (REPO, WT, stage), tmp,
-            modules=("ui", "state", "worktree", "rollback", "deploy"))
+            modules=("ui", "state", "worktree", "rollback", "deferred", "deploy"))
         return rc == 0
 
     # Nothing recorded: not knowing is not a yes.
@@ -348,6 +350,65 @@ try:
     # would be "changed" for ever and the skip would never work again.
     run_bash('state_set %s rollback.prod.code null' % state, tmp)
     check("unchanged-again-once-the-mark-clears", unchanged("prod"), True)
+
+    # A merge made on GitHub moves origin's main and not the main checkout's
+    # branch: production is behind it, and fetched, that is what is seen.
+    other = os.path.join(tmp, "other")
+    subprocess.run(["git", "clone", "-q", "-b", "main", os.path.join(tmp, "origin.git"), other],
+                   capture_output=True, check=True)
+    with open(os.path.join(other, "merged.txt"), "w") as fh:
+        fh.write("m\n")
+    for args in (["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "merged"],
+                 ["push", "-q", "origin", "main"]):
+        subprocess.run(["git"] + args, cwd=other, capture_output=True, check=True)
+    before = subprocess.run(["git", "rev-parse", "origin/main"], cwd=REPO,
+                            capture_output=True, text=True).stdout.strip()
+    check("changed-once-origin-main-moved", unchanged("prod"), False)
+    # Asked without a fetch: a moved origin/main would empty the range the
+    # rollback reads the branch's migrations from.
+    check("origin-main-not-fetched", subprocess.run(
+        ["git", "rev-parse", "origin/main"], cwd=REPO, capture_output=True, text=True).stdout.strip(),
+        before)
+    # A head on origin already here — fetched to a ref of its own, so
+    # origin/main stays put — is compared: a real commit is something new,
+    # and one that adds deferred entries alone, as sclaude pushes them after
+    # a ship, is not.
+    def on_origin(path):
+        with open(os.path.join(other, path), "w") as fh:
+            fh.write(path + "\n")
+        for args in (["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", path],
+                     ["push", "-q", "origin", "main"]):
+            subprocess.run(["git"] + args, cwd=other, capture_output=True, check=True)
+        subprocess.run(["git", "fetch", "-q", "origin", "main:refs/test/remote"], cwd=REPO,
+                       capture_output=True, check=True)
+    subprocess.run(["git", "fetch", "-q", "origin", "main:refs/test/remote"], cwd=REPO,
+                   capture_output=True, check=True)
+    run_bash('state_set %s deploy.prod.sha %s' % (state, subprocess.run(
+        ["git", "rev-parse", "refs/test/remote"], cwd=REPO, capture_output=True, text=True).stdout.strip()), tmp)
+    subprocess.run(["git", "merge", "-q", "--ff-only", "refs/test/remote"], cwd=REPO,
+                   capture_output=True, check=True)
+    os.makedirs(os.path.join(other, ".sclaude", "team", "deferred"), exist_ok=True)
+    on_origin(".sclaude/team/deferred/x.tsv")
+    check("unchanged-past-deferred-entries-on-origin", unchanged("prod"), True)
+    on_origin("real.txt")
+    check("changed-by-a-real-commit-on-origin", unchanged("prod"), False)
+
+    # And a commit on the main checkout's main nobody pushed is something new
+    # too: `vercel --prod` would upload it.
+    subprocess.run(["git", "fetch", "-q", "origin"], cwd=REPO, capture_output=True, check=True)
+    shipped = subprocess.run(["git", "rev-parse", "origin/main"], cwd=REPO,
+                             capture_output=True, text=True).stdout.strip()
+    run_bash('state_set %s deploy.prod.sha %s' % (state, shipped), tmp)
+    subprocess.run(["git", "merge", "-q", "--ff-only", "origin/main"], cwd=REPO,
+                   capture_output=True, check=True)
+    check("unchanged-once-shipped", unchanged("prod"), True)
+    with open(os.path.join(REPO, "local.txt"), "w") as fh:
+        fh.write("l\n")
+    for args in (["add", "local.txt"], ["commit", "-qm", "local"]):
+        subprocess.run(["git"] + args, cwd=REPO, capture_output=True, check=True)
+    check("changed-with-an-unpushed-commit", unchanged("prod"), False)
+    subprocess.run(["git", "reset", "-q", "--hard", "origin/main"], cwd=REPO,
+                   capture_output=True, check=True)
 
     # Preview is unaffected by any of it — a different stage with a different
     # question.

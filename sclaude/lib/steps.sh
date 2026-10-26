@@ -218,15 +218,41 @@ guard_entry() {
 # "vercel"}]} there deployed on its next call. Rules are changed by the
 # reviews, which a person approves (review_guard_settings), never by the step
 # they would free.
+#
+# Nor is sclaude's live checkout, which every other session runs from: a step
+# changes sclaude in the tree's workshop, once the person has let it
+# (`sclaude core-open`, workshop.sh). Read leniently, as every session's
+# guard is: a step writes through variables all day, and only a write that
+# names the checkout is refused for a target it cannot tell.
+#
+#   team_guard_entry [tree]
 team_guard_entry() {
-  guard_entry --team
+  local -a args=()
+  mapfile -t args < <(sclaude_guard_args "${1:-}")
+  guard_entry --team "${args[@]}" --lenient
+}
+
+# The write guard's arguments for sclaude's checkout: read-only, but for what
+# sreview keeps in its git directory, and the tree's workshop, read-only until
+# the session opens it.
+#
+#   sclaude_guard_args [tree]
+sclaude_guard_args() {
+  local common
+  common="$(git -C "$INSTRUMENTS" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  printf '%s\n' --readonly "$INSTRUMENTS"
+  [[ -n "$common" ]] && printf '%s\n' --allow "$common/sreview"
+  [[ -n "${1:-}" ]] && printf '%s\n' --workshop "$(workshop_dir "$1")"
+  return 0
 }
 
 # For the sessions that review the work rather than do it: the friction
-# review, the retrospective, the monthly deferred review. They read sclaude's
-# checkout and change the product, never sclaude itself (write-guard.py
-# --readonly), and the team's rules stay the maintainers'. The retrospective
-# of a maintainer of the orchestrator is the exception, below.
+# review, the retrospective, the monthly deferred review. sclaude's live
+# checkout is read-only to them as to every session; they change sclaude in
+# the tree's workshop, which opens for them without a question
+# (forbidden-commands.py CORE_OPEN_FREE): the retrospective is where the
+# person expects such changes, and the other two start in plan mode, so the
+# plan the person approved is the yes. The team's rules stay the maintainers'.
 #
 # And they run in the product's tree now, so the step bans hold for them as
 # for any step: the merge, a deploy, a push to the product's main, a migration onto a
@@ -234,29 +260,18 @@ team_guard_entry() {
 # in the tree they did, with no hook to refuse them. The same hook, under a
 # step no policy names (friction), and the policy's flags.
 #
-# With `instruments`, sclaude's checkout is the session's to change, all but
-# what restrains the session itself: the hooks, the policy presets and the
-# policy's reader, which every running session reads on its next call, and the
-# git hooks of the checkout. Its push is refused (forbidden-commands.py
-# --no-own-push): the checkout is public, the session works from a private
-# project, and the person pushes after reading the commits. run_retro passes
-# it for a maintainer of the orchestrator, and nobody else does.
-#
 # Returns 1 when the policy cannot be read, as a step does: the caller does
 # not start the session.
 #
-#   review_guard_settings [tree] [instruments]
+#   review_guard_settings [tree]
 review_guard_settings() {
   local tree="${1:-${REPO:-.}}" bans_json hook_args
   local -a args=() deny=() allow=()
   hook_args="$(policy_hook_args "$tree")"
-  if [[ "${2:-}" == "instruments" ]]; then
-    args+=(--readonly "$HOOKS" --readonly "$INSTRUMENTS/sclaude/policy"
-           --readonly "$LIB/policy.py" --readonly "$INSTRUMENTS/githooks")
-    hook_args+=" --no-own-push"
-  else
-    args+=(--readonly "$INSTRUMENTS")
-  fi
+  mapfile -t args < <(sclaude_guard_args "$tree")
+  # Leniently, as a step's: they run tests in the workshop with loops and
+  # redirections now, and the strict reading refused those for naming nothing.
+  args+=(--lenient)
   product_maintainer "$tree" || args+=(--team)
   policy_rules deny allow friction "$tree" || return 1
   bans_json="$(python3 -c 'import json, shlex, sys; print(json.dumps({"type": "command", "timeout": 10, "command": "python3 %s --step friction %s" % (shlex.quote(sys.argv[1]), sys.argv[2])}))' \
@@ -286,9 +301,13 @@ instruments_state() {
             | (cd "$INSTRUMENTS" && xargs -0 -r sha1sum)
         } 2>/dev/null | md5sum | cut -c1-12)" \
     "$( {
+          # The config but what sending a workshop's change records in it,
+          # which a workshop shares: the fork remote, and the branches of
+          # workshops and of proposals.
           # The hooks by their content: a listing carries the mtime of .git
           # itself, which an index refresh during the review moves.
-          [[ -n "$git_dir" ]] && cat "$git_dir/config" \
+          [[ -n "$git_dir" ]] && git config --file "$git_dir/config" --list \
+               | grep -vE '^(remote\.fork\.|branch\.(dev|workshop)/)' \
             && (cd "$git_dir/hooks" && find . \( -type f -o -type l \) -printf '%p %m %l\n' | sort \
                 && find . -type f -exec sha1sum {} + | sort)
         } 2>/dev/null | md5sum | cut -c1-12)" "$clean"
@@ -303,7 +322,9 @@ instruments_committed_only() {
   local was="$1" sha how
   while read -r sha how; do
     [[ "$sha" == "$was" ]] && return 0
-    [[ "$how" == commit* ]] || return 1
+    # sclaude's own fast-forward to what a workshop published
+    # (workshop_live_update) is as harmless as a commit.
+    [[ "$how" == commit* || "$how" == "merge origin/main: Fast-forward" ]] || return 1
   done < <(git -C "$INSTRUMENTS" log -g --format='%H %gs' HEAD 2>/dev/null)
   return 1
 }
@@ -334,7 +355,7 @@ instruments_unchanged() {
   if [[ -n "$made" && "${was[2]:-}" == "${is[2]:-}" \
         && "${was[3]:-}" == clean && "${is[3]:-}" == clean ]] \
      && instruments_committed_only "${was[0]}" "${is[0]}"; then
-    info "   Commits reached sclaude's checkout while the $2 ran — another session's; it cannot commit:"
+    info "   sclaude's checkout moved on while the $2 ran — published changes, or another hand's commits:"
     printf '%s\n' "$made"
     return 0
   fi
@@ -533,7 +554,12 @@ status_settings() {
   # the product forbids a step to run. The hook is called with --step status,
   # a step no policy names, so only the shared rules and the push parsing apply.
   policy_rules deny allow status || return 1
-  printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$(policy_hook_args)" <<'PYSTATUS'
+  # sclaude's checkout is read-only to it as to every session; the feature's
+  # tree is gone, so there is no workshop, and a change to sclaude waits as a
+  # deferred entry.
+  local -a guard_args=()
+  mapfile -t guard_args < <(sclaude_guard_args)
+  printf '%s\n' --disallowed-tools "${deny[*]}" --settings "$(python3 - "$hook" "$(policy_hook_args)" "$(guard_entry "${guard_args[@]}" --lenient)" <<'PYSTATUS'
 import json, shlex, sys
 
 print(json.dumps({"hooks": {"PreToolUse": [{
@@ -541,7 +567,7 @@ print(json.dumps({"hooks": {"PreToolUse": [{
     "hooks": [{"type": "command",
                "command": "python3 %s --step status %s" % (shlex.quote(sys.argv[1]), sys.argv[2]),
                "timeout": 10}],
-}]}}))
+}, json.loads(sys.argv[3])]}}))
 PYSTATUS
 )"
 }

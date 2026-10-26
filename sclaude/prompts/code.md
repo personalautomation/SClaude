@@ -47,6 +47,8 @@ Don't touch the product's manuals: <manuals>. It's written in the next step, aft
 
 <include:friction>
 
+<block:workshop>
+
 **How this session ends.** You are step 2 of four; the `sclaude` orchestrator drives the steps from outside. The pull request is step 3 — a separate session with a different model and prompt, launched by the orchestrator once I say development is done.
 
 The orchestrator runs this step with restrictions: `gh pr create`, merge, deploy and anything leading to production simply won't run here. A rejection is the step's boundary, not a failure.

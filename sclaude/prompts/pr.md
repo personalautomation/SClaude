@@ -54,6 +54,8 @@ About the `.sclaude/local/feature/` directory: it's a working directory, it's in
 
 <include:friction>
 
+<block:workshop>
+
 **How this session ends.** You are step 3 of four; the `sclaude` orchestrator drives the steps from outside. Handling review comments is step 4 — a separate session with a different model, launched by the orchestrator once I say this step is done.
 
 The orchestrator runs this step with restrictions: merge, deploy and anything leading to production simply won't run here. A rejection is the step's boundary, not a failure; `git push` of the branch and `gh pr create` are allowed — that's your job.

@@ -1,0 +1,11 @@
+**sclaude itself.** sclaude's live checkout, `<instruments>`, is read-only to you: every other session runs from it. When what you run into is a bug or a gap in sclaude itself — its code, its prompts, its hooks — and the fix is clear, it is fixed rather than put off, in this tree's workshop: `<workshop>`, a worktree of sclaude's checkout that every session of this tree shares.
+
+1. Run `sclaude core-open` first. <if:core-ask>Claude Code asks me before it runs, so say in a line just before it what you want to change in sclaude and why. A "no" means leave sclaude alone: put the finding off as a deferred entry of class `sclaude-default` instead.
+</if:core-ask><if:core-free>It opens without a question.
+</if:core-free>2. Read `<workshop>/CLAUDE.md` and follow it: English only, the coupled strings, the tests to run, the README and the docs. Above all, that repository is public and this product is not. Nothing you write there — code, comments, tests, docs, commit messages — names this product or its details: no product name, no pull-request, issue or feature numbers, no file paths, tables, services or infrastructure of the product. Describe the problem in sclaude's own terms.
+3. Commit in the workshop (`git -C <workshop> …`), by its commit rules. Never push it, and never put a change to sclaude on this product's branch: the two are separate commits in separate repositories.
+4. Review the change: <if:core-maintainer>run `/sreview` from the workshop (`cd <workshop>` first) on your own commits there, until it stops by itself.
+</if:core-maintainer><if:core-other>in whatever way you have — `/code-review`, a careful second read — and say how in the next step.
+</if:core-other>5. Run <if:core-maintainer>`sclaude core-ready`</if:core-maintainer><if:core-other>`sclaude core-ready --review "<how you reviewed it>"`</if:core-other> once it is committed and reviewed. sclaude publishes it when this session ends — <if:core-maintainer>to sclaude's main</if:core-maintainer><if:core-other>as a pull request to sclaude</if:core-other> — after checking it for this product's details and running the tests it touches. A change left uncommitted or unreviewed is not published, and sclaude offers this session back to finish it.
+
+What is a rule for this product alone — a permission, a ban, a prompt addition — still goes into the product, not into sclaude.

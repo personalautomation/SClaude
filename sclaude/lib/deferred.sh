@@ -28,9 +28,10 @@
 #
 # A line, tab-separated: date, project, feature, step, class, what happened.
 # No field holds a tab, and step and class are single words. Class
-# `sclaude-default` marks something about sclaude itself — a preset wrong for
-# every product, or a bug in its code: the product works around it, and
-# changing sclaude is a deliberate pull request to it.
+# `sclaude-default` marks something about sclaude itself — a preset that may be
+# wrong for every product, or a fix a session was not let make: the product
+# works around it, and this review decides it, changing sclaude in its
+# workshop when it should change (workshop.sh).
 #
 # No timer starts the review: it is a conversation, and a conversation needs
 # a person at a terminal. sclaude offers it when it is opened in a product and
@@ -363,8 +364,9 @@ deferred_offer() {
 # The review itself: a session in plan mode, in a worktree of the product's
 # main on a branch of its own, since its result — the files trimmed, rules
 # written into the policy or the product's CLAUDE.md — is a change to the
-# product like any other and reaches main by a pull request. sclaude's
-# checkout is read-only to it.
+# product like any other and reaches main by a pull request. sclaude's live
+# checkout is read-only to it; what it changes in sclaude is made in the
+# review's workshop, and published by sclaude (workshop.sh).
 cmd_deferred() {
   local prompt session done_file root wt branch base
   [[ -f "$PROMPTS/friction-deferred.md" ]] || die "no prompt for the deferred review"
@@ -379,6 +381,26 @@ cmd_deferred() {
   wt="$root-deferred-$who-$(date +%F)"
   git -C "$root" fetch -q origin main 2>/dev/null || true
   base="$(git -C "$root" rev-parse -q --verify origin/main 2>/dev/null || git -C "$root" rev-parse HEAD)"
+
+  # Trees an earlier review kept for a change to sclaude it had not published
+  # (below): their session is offered back, or the change tried again, and a
+  # tree with nothing left for it goes. Today's tree stays for this review.
+  # By the date the name ends in: a prefix alone also took another person's
+  # whose name starts with this one's.
+  local kept kept_branch
+  for kept in "$root-deferred-$who-"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]; do
+    [[ -d "$kept" && -f "$(workshop_record "$kept")" ]] || continue
+    workshop_pending "$kept"
+    [[ "$kept" == "$wt" ]] && continue
+    if ! workshop_unpublished "$kept" && [[ -z "$(git -C "$kept" status --porcelain 2>/dev/null)" ]]; then
+      kept_branch="$(git -C "$kept" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+      workshop_remove "$kept"
+      git -C "$root" worktree remove "$kept" >/dev/null 2>&1 || true
+      # A branch with no work of its own goes too, as at a review's end.
+      [[ -n "$kept_branch" && "$(git -C "$root" rev-list --count "$base..$kept_branch" 2>/dev/null || echo 1)" -eq 0 ]] \
+        && git -C "$root" branch -q -D "$kept_branch" >/dev/null 2>&1
+    fi
+  done
   local made=""
   if [[ ! -d "$wt" ]]; then
     # A review run earlier the same day may have pushed this branch already:
@@ -422,14 +444,15 @@ cmd_deferred() {
   done_file="${TMPDIR:-/tmp}/sclaude-deferred.done"
   prompt="$(D_FILES="${list%$'\n'}" D_STAMPS="${stamps%$'\n'}" D_WT="$wt" D_BRANCH="$branch" \
     D_RULES="$(product_rules_dir "$wt")" D_INSTRUMENTS="$INSTRUMENTS" \
-    D_DONE="$done_file" D_TODAY="$(date +%F)" \
+    D_DONE="$done_file" D_TODAY="$(date +%F)" D_WORKSHOP="$(workshop_rules "$wt" free)" \
     python3 - "$PROMPTS/friction-deferred.md" <<'PY'
 import os, sys
 text = open(sys.argv[1], encoding="utf-8").read()
 for key, env in (("<files>", "D_FILES"), ("<stamps>", "D_STAMPS"),
                  ("<worktree>", "D_WT"), ("<branch>", "D_BRANCH"),
                  ("<rules>", "D_RULES"), ("<instruments>", "D_INSTRUMENTS"),
-                 ("<done-marker>", "D_DONE"), ("<today>", "D_TODAY")):
+                 ("<done-marker>", "D_DONE"), ("<today>", "D_TODAY"),
+                 ("<workshop-rules>", "D_WORKSHOP")):
     text = text.replace(key, os.environ.get(env, ""))
 print(text)
 PY
@@ -492,8 +515,15 @@ PY
     warn "  the review left changes it did not commit in $wt — commit them there, or remove the tree"
     return 0
   fi
+  # Nor does a change to sclaude left unpublished in its workshop: the tree
+  # stays, and the next review offers the session back, or publishes it.
+  if workshop_unpublished "$wt"; then
+    warn "  the review's change to sclaude is not published yet; $wt is kept for it"
+    return 0
+  fi
   # A clean worktree has nothing more to give: the branch keeps the work, and a
   # branch with none is not left behind for next month's review to trip on.
+  workshop_remove "$wt"
   git -C "$root" worktree remove "$wt" >/dev/null 2>&1 || true
   [[ "$kept" -gt 0 ]] || git -C "$root" branch -q -D "$branch" >/dev/null 2>&1 || true
 }

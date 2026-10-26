@@ -6,7 +6,7 @@ and the date each folder was last reviewed:
 
 <stamps>
 
-You are in `<worktree>`, a worktree of the product's main on its own branch, `<branch>`, made for this review. `<instruments>` is sclaude's own checkout: read it if you need to understand a restriction, and change nothing in it — a hook refuses writes there.
+You are in `<worktree>`, a worktree of the product's main on its own branch, `<branch>`, made for this review. `<instruments>` is sclaude's live checkout: read it if you need to understand a restriction, and never change it — a hook refuses writes there. A change to sclaude is made in this review's workshop, as the paragraph on sclaude below says.
 
 Over the month the friction reviews put two kinds of things in these files rather than decide them one at a time: friction that was neither a restriction to lift nor a ban working as intended, and the rules sessions proposed for the product's `CLAUDE.md`. Each line is one occurrence — date, project, feature, step, class, what happened. The point of collecting them is the count: one occurrence is an anecdote, the same class in five features is a pattern.
 
@@ -19,14 +19,16 @@ Over the month the friction reviews put two kinds of things in these files rathe
    - **ban for good** — it recurs, and it is my step every time: a `deny` in `<rules>/policy.json`, so its refusals stop reaching the log;
    - **write the rule** — a proposed `CLAUDE.md` line that keeps being needed: into the product's `CLAUDE.md`, by its own rules;
    - **relax the rule** — class `claude-md-relax-…`, a rule review sessions found too strict, redundant or out of date because it kept producing findings that fixed nothing real: loosen or remove that line of the product's `CLAUDE.md` (or the rule it names), by the product's own rules;
-   - **change sclaude's default** — class `sclaude-default`, or anything that is plainly wrong for every product: say what the preset should become. That is not done here: it is a deliberate pull request to sclaude, and the entry stays in the file until it is made;
+   - **change sclaude** — class `sclaude-default`, or anything that is plainly wrong for every product: say what sclaude's default or code should become, as an item of its own in the plan. Once I approve it, make it in the workshop (below), and remove the entries it settles; an entry whose change you do not make stays in the file;
    - **keep waiting** — too rare to decide; it stays in the file;
    - **drop** — no longer true (the code it was about has changed) or not worth a rule; it goes from the file.
 
    Base it on the count and on the cost each occurrence had, not on how convincing a single entry reads. If you are unsure, ask me.
 
+<workshop-rules>
+
 `<rules>` is where this person's rules go: `.sclaude/team/` for the product's maintainers, their own `.sclaude/people/<name>/` for everybody else — a hook keeps everybody else out of `team/`.
 
-Present it as a plan, and once I approve it, make the changes in `<worktree>`: the policy and the rules, and the entry files themselves — remove the entries of every class that was decided (lifted, banned, written or dropped), keep those that keep waiting or wait for a change to sclaude, delete a file left with no entries, and write `<today>` alone into each `last-reviewed` above, creating it if it is not there. Only this review writes those files: a feature's branch adds entries, never dates. Commit on `<branch>` by the product's commit rules. When this session ends, `sclaude` pushes the branch and opens its pull request into the product's main; don't push or open one yourself.
+Present it as a plan, and once I approve it, make the changes in `<worktree>`: the policy and the rules, and the entry files themselves — remove the entries of every class that was decided (lifted, banned, written or dropped), keep those that keep waiting or wait for a change to sclaude not made here, delete a file left with no entries, and write `<today>` alone into each `last-reviewed` above, creating it if it is not there. Only this review writes those files: a feature's branch adds entries, never dates. Commit on `<branch>` by the product's commit rules. When this session ends, `sclaude` pushes the branch and opens its pull request into the product's main; don't push or open one yourself.
 
-**How this ends.** When the changes are committed, write the marker — `echo done > <done-marker>` — and then the report as your last message, with no tool call after it: what was decided for each class, which commits were made, what waits for a change to sclaude's defaults, and what keeps waiting. About thirty seconds after your turn ends `sclaude` closes the session and prints the report; if I type anything in that time, the closing is called off. If something is left for me to answer, leave the marker out, and I close the session myself.
+**How this ends.** When the changes are committed, write the marker — `echo done > <done-marker>` — and then the report as your last message, with no tool call after it: what was decided for each class, which commits were made — in the product and in sclaude's workshop — what waits for a change to sclaude, and what keeps waiting. About thirty seconds after your turn ends `sclaude` closes the session and prints the report; if I type anything in that time, the closing is called off. If something is left for me to answer, leave the marker out, and I close the session myself.

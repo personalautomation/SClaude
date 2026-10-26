@@ -725,6 +725,9 @@ remove_worktree() {
 remove_worktree_tree() {
   local wt="$1" out
   stop_dev "$wt"
+  # sclaude's workshop inside it is a worktree of sclaude's checkout, which
+  # git there knows nothing of (workshop.sh).
+  declare -F workshop_remove >/dev/null && workshop_remove "$wt"
   out="$(git -C "$REPO" worktree remove --force "$wt" 2>&1)" && return 0
   if git -C "$REPO" worktree list --porcelain | grep -qxF "worktree $wt"; then
     printf '%s\n' "$out" >&2

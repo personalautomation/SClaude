@@ -118,11 +118,8 @@ PY
 
   # The pull request's number, or nothing: a feature with no change of its own
   # (no_change.sh) has none, and render_prompt fills an empty <pr> with a dash.
-  local pr_number="$pr" no_change="" writable="" readonly=1
+  local pr_number="$pr" no_change=""
   [[ "$pr_number" == "null" ]] && pr_number=""
-  # sclaude's checkout is the conversation's to change too, for a maintainer
-  # of the orchestrator: decided here once, and handed to the guard below.
-  developer_is_maintainer && { writable=1; readonly=""; }
   [[ "$(state_get "$fstate" no_change 2>/dev/null || true)" == "true" ]] && no_change=1
 
   # The same values for both prompts: the rules on sclaude's checkout may have
@@ -141,8 +138,6 @@ PY
     SCLAUDE_V_WORKTREE="$wt" \
     SCLAUDE_V_BRANCH="$(state_get "$fstate" branch 2>/dev/null || true)" \
     SCLAUDE_V_INSTRUMENTS="$INSTRUMENTS" \
-    SCLAUDE_V_INSTRUMENTS_WRITABLE="$writable" \
-    SCLAUDE_V_INSTRUMENTS_READONLY="$readonly" \
     SCLAUDE_V_DONE_MARKER="$done_file" \
     render_prompt "$template" "$slug" "$pr" "$issue" "$wt")" || return 0
 
@@ -162,7 +157,7 @@ PY
   # The rules first: a session refused here leaves no watcher and no open run.
   local -a guard=()
   local guard_out
-  guard_out="$(review_guard_settings "$wt" ${writable:+instruments})" \
+  guard_out="$(review_guard_settings "$wt")" \
     || { warn "  The retrospective was not started: sclaude could not read its rules (see above)."; return 1; }
   mapfile -t guard <<< "$guard_out"
   # Past every reason not to start: the topic hears of a start that happens.
@@ -183,15 +178,11 @@ PY
       --add-dir "$HOME/.claude/projects" \
       -n "$(session_label retro)/$slug" "$prompt" )
   session_watch_stop
+  # The live checkout moved on while it ran: what it published was brought in
+  # (workshop_live_update), or another hand updated it.
   local instruments_moved=""
-  if [[ "$(instruments_state)" != "$before_instruments" ]]; then
-    if [[ -n "$writable" ]]; then
-      instruments_moved=1
-      retro_instruments_said "$before_instruments"
-    else
-      instruments_unchanged "$before_instruments" "retrospective" || true
-    fi
-  fi
+  [[ "$(instruments_state | cut -d' ' -f1)" != "${before_instruments%% *}" ]] && instruments_moved=1
+  instruments_unchanged "$before_instruments" "retrospective" || true
   # A resumed conversation has the first pass's answers already: this pass
   # ran only if it added one. One that did not — refused at the door, left at
   # once — is neither reported nor counted, and its run keeps its last end.
@@ -205,12 +196,9 @@ PY
   if [[ -f "$fstate" ]]; then
     if [[ -n "$answered" ]]; then
       session_runs "$fstate" retro finish "$session"
-      # For cmd_done, which then stops short of the clean-up: the checkout
-      # this retrospective could change has changed under the running bash.
-      # Only for a run recorded as done, which the next `sclaude done` does
-      # not hold again. A read-only one warns and goes on, as before the
-      # exception: stopping there left a feature uncleaned whenever another
-      # session committed to the checkout during it.
+      # For cmd_done, which then stops short of the clean-up: sclaude's code
+      # changed under the running bash. Only for a run recorded as done,
+      # which the next `sclaude done` does not hold again.
       RETRO_INSTRUMENTS_CHANGED="$instruments_moved"
     elif [[ -z "$last" ]]; then
       session_runs "$fstate" retro drop "$session"
@@ -238,27 +226,6 @@ PY
 
   # What it changed in the product is the product's, and the branch above
   # carries it; what it changed in sclaude is said above.
-  return 0
-}
-
-# Says how sclaude's checkout changed while a retrospective allowed to change
-# it ran: the commits made in that time, and what is left uncommitted. Not
-# "the retrospective's": other sessions edit the checkout at the same time,
-# and nothing here can tell whose a change is. The session may not push
-# (review_guard_settings), so the commits wait for the person to read them.
-#
-#   retro_instruments_said <state before>
-retro_instruments_said() {
-  local before="${1%% *}" made=""
-  info "   sclaude's own checkout ($INSTRUMENTS) changed while the retrospective ran."
-  [[ -n "$before" ]] \
-    && made="$(git -C "$INSTRUMENTS" log --format='     %h %s' "$before..HEAD" 2>/dev/null || true)"
-  if [[ -n "$made" ]]; then
-    info "   Committed in that time, and not pushed by the retrospective — read them, then push:"
-    printf '%s\n' "$made"
-  fi
-  [[ -n "$(git -C "$INSTRUMENTS" status --porcelain 2>/dev/null)" ]] \
-    && warn "   Uncommitted there now: git -C $INSTRUMENTS status"
   return 0
 }
 

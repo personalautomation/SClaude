@@ -115,7 +115,9 @@ for command, cwd, want in (
         ("sed -Ei 's/a/b/' /home/u/sclaude/f", "/tmp", "deny"),
         # git that changes the checkout without a commit: its remote, its refs.
         ("git -C /home/u/sclaude remote set-url origin x", "/tmp", "deny"),
-        ("cd /home/u/sclaude && git fetch", "/tmp", "deny"),
+        ("cd /home/u/sclaude && git fetch origin main:main", "/tmp", "deny"),
+        # A plain fetch only reads origin into the remote-tracking refs.
+        ("cd /home/u/sclaude && git fetch", "/tmp", "allow"),
         # A relative `cd` from an unknown place is still unknown.
         ('cd "$X" && cd sub && echo x > f', "/home/u/myapp-1", "deny"),
         # Reading it, and writing the product, from inside it or not.
@@ -250,8 +252,9 @@ check("both team", hook("Bash", RO + ("--team",), "/home/u/sclaude",
 
 # --- who maintains, and where rules go -----------------------------------------
 def sh(script, cwd, env=None):
-    body = ('source "%s/developer.sh"; source "%s/steps.sh"; HOOKS=/hooks; LIB="%s"\n'
-            'warn() { echo "WARN $*" >&2; }\n%s' % (LIB, LIB, LIB, script))
+    body = ('source "%s/developer.sh"; source "%s/steps.sh"; source "%s/workshop.sh"; '
+            'HOOKS=/hooks; LIB="%s"\n'
+            'warn() { echo "WARN $*" >&2; }\n%s' % (LIB, LIB, LIB, LIB, script))
     full = dict(os.environ, **(env or {}))
     full.pop("SCLAUDE_DEV", None)
     if env:
@@ -336,34 +339,106 @@ try:
             check("review-guard-flags-the-merge-%s" % team,
                   "--disallowed-tools" in guard and "Bash(gh pr merge:*)" in guard[guard.index("--disallowed-tools") + 1],
                   True)
-    # A retrospective of a maintainer of the orchestrator (run_retro passes
-    # `instruments`) may change its checkout, all but what restrains it: the
-    # hooks, the policy and the checkout's git hooks. And it may not push there.
-    # Without the word the whole checkout stays read-only.
+    # sclaude's live checkout is read-only to every review session, a
+    # maintainer's retrospective included, and none of them is told it may
+    # push: a change to sclaude is made in the tree's workshop, writable once
+    # the session's id is in the workshop's record, and sreview's state in the
+    # checkout's git directory stays writable for its review. The record
+    # itself never is.
     # This checkout stands for the orchestrator: the hook only judges the
     # writes, and policy.py has to be where LIB says.
     orchestrator = os.path.realpath(ROOT)
+    common = subprocess.run(["git", "-C", orchestrator, "rev-parse", "--path-format=absolute",
+                             "--git-common-dir"], capture_output=True, text=True).stdout.strip()
+    workshop = os.path.join(repo, ".sclaude", "local", "instruments")
     for maintainer in (["ann@x.test"], ["lead@x.test"]):
         setup(maintainer)
-        for kind in ("instruments", ""):
-            name = "%s-%s" % (kind or "friction", maintainer[0])
-            guard = sh('INSTRUMENTS=%s; HOOKS="$INSTRUMENTS/sclaude/hooks"; review_guard_settings "%s" %s'
-                       % (orchestrator, repo, kind), repo).splitlines()
-            hooks = json.loads(guard[1])["hooks"]["PreToolUse"]
-            write = shlex.split(hooks[0]["hooks"][0]["command"])
-            bans = hooks[1]["hooks"][0]["command"]
-            check("retro-guard-is-write-guard-%s" % name, write[1].endswith("write-guard.py"), True)
-            check("retro-no-own-push-%s" % name, "--no-own-push" in bans, bool(kind))
-            check("retro-keeps-the-bans-%s" % name, "forbidden-commands.py" in bans, True)
-            for path, writable in ((os.path.join(orchestrator, "sclaude/lib/run.sh"), bool(kind)),
-                                   (os.path.join(orchestrator, "README.md"), bool(kind)),
-                                   (os.path.join(orchestrator, "sclaude/hooks/write-guard.py"), False),
-                                   (os.path.join(orchestrator, "sclaude/policy/core.json"), False),
-                                   (os.path.join(orchestrator, "sclaude/lib/policy.py"), False),
-                                   (os.path.join(orchestrator, "githooks/commit-msg"), False)):
-                check("retro-writes-%s-%s" % (os.path.relpath(path, orchestrator), name),
-                      hook("Write", args=write[2:], cwd=repo, file_path=path),
-                      "allow" if writable else "deny")
+        name = maintainer[0]
+        guard = sh('INSTRUMENTS=%s; HOOKS="$INSTRUMENTS/sclaude/hooks"; review_guard_settings "%s"'
+                   % (orchestrator, repo), repo).splitlines()
+        hooks = json.loads(guard[1])["hooks"]["PreToolUse"]
+        write = shlex.split(hooks[0]["hooks"][0]["command"])
+        bans = hooks[1]["hooks"][0]["command"]
+        check("review-guard-is-write-guard-%s" % name, write[1].endswith("write-guard.py"), True)
+        check("review-no-push-flag-%s" % name, "--no-own-push" in bans, False)
+        check("review-keeps-the-bans-%s" % name, "forbidden-commands.py" in bans, True)
+        check("review-names-the-workshop-%s" % name, workshop in write, True)
+        for path in (os.path.join(orchestrator, "sclaude/lib/run.sh"),
+                     os.path.join(orchestrator, "README.md"),
+                     os.path.join(orchestrator, "sclaude/hooks/write-guard.py")):
+            check("review-writes-%s-%s" % (os.path.relpath(path, orchestrator), name),
+                  hook("Write", args=write[2:], cwd=repo, file_path=path), "deny")
+        if common:
+            check("review-writes-sreview-%s" % name,
+                  hook("Write", args=write[2:], cwd=repo,
+                       file_path=os.path.join(common, "sreview", "policies.md")), "allow")
+    setup(["lead@x.test"])
+
+    # The workshop opens by its record, for the sessions named there only.
+    os.makedirs(workshop, exist_ok=True)
+    record = workshop + ".json"
+    args = ["--readonly", orchestrator, "--workshop", workshop]
+
+    def in_workshop(session, tool="Write", **data):
+        out = subprocess.run([sys.executable, HOOK] + args, input=json.dumps(
+            {"tool_name": tool, "tool_input": data, "cwd": repo, "session_id": session}),
+            capture_output=True, text=True)
+        return "deny" if '"deny"' in out.stdout else "allow"
+
+    target = os.path.join(workshop, "sclaude", "lib", "x.sh")
+    check("workshop-closed-without-record", in_workshop("s1", file_path=target), "deny")
+    with open(record, "w") as fh:
+        json.dump({"approved": ["s1"]}, fh)
+    check("workshop-open-for-approved", in_workshop("s1", file_path=target), "allow")
+    check("workshop-closed-for-another", in_workshop("s2", file_path=target), "deny")
+    check("workshop-record-never-written", in_workshop("s1", file_path=record), "deny")
+    check("workshop-git-commit-approved",
+          in_workshop("s1", "Bash", command="git -C %s commit -qm x" % workshop), "allow")
+    check("workshop-git-commit-other",
+          in_workshop("s2", "Bash", command="git -C %s commit -qm x" % workshop), "deny")
+    check("workshop-refusal-names-core-open",
+          "core-open" in subprocess.run([sys.executable, HOOK] + args, input=json.dumps(
+              {"tool_name": "Write", "tool_input": {"file_path": target}, "cwd": repo,
+               "session_id": "s2"}), capture_output=True, text=True).stdout, True)
+    # --lenient, a step's: a target it cannot tell passes unless the command
+    # names the checkout; a review's strict reading refuses it.
+    lenient = args + ["--lenient"]
+    for command, want_strict, want_lenient in (
+            ('for f in a b; do echo x > "$f"; done', "deny", "allow"),
+            ('echo x > "$OUT/f"', "deny", "allow"),
+            ('echo x > "$OUT/f" # %s' % orchestrator, "deny", "deny"),
+            ("cd $D && git commit -qm x", "deny", "allow"),
+            ("echo x > %s/README.md" % orchestrator, "deny", "deny")):
+        for flags, want in ((args, want_strict), (lenient, want_lenient)):
+            out = subprocess.run([sys.executable, HOOK] + flags, input=json.dumps(
+                {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": repo,
+                 "session_id": "s9"}), capture_output=True, text=True)
+            got = "deny" if '"deny"' in out.stdout else "allow"
+            check("lenient-%s-%s" % ("on" if flags is lenient else "off", command[:30]), got, want)
+    # A fetch reads origin into the remote-tracking refs: allowed in the
+    # read-only checkout. One into a branch of its own is not.
+    for command, want in (("git -C %s fetch -q origin main" % orchestrator, "allow"),
+                          ("cd %s && git fetch" % orchestrator, "allow"),
+                          ("git -C %s fetch origin main:main" % orchestrator, "deny"),
+                          ("git -C %s fetch origin main --refmap='refs/heads/*:refs/heads/*'"
+                           % orchestrator, "deny"),
+                          ("git -C %s fetch --set-upstream origin main" % orchestrator, "deny")):
+        out = subprocess.run([sys.executable, HOOK] + args, input=json.dumps(
+            {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": repo,
+             "session_id": "s9"}), capture_output=True, text=True)
+        check("fetch-%s" % command[-20:], "deny" if '"deny"' in out.stdout else "allow", want)
+    # A target that cannot be told is said as such, not as a write to sclaude.
+    out = subprocess.run([sys.executable, HOOK] + args, input=json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": 'echo x > "$OUT/f"'}, "cwd": repo,
+         "session_id": "s9"}), capture_output=True, text=True).stdout
+    check("unknown-target-said", "cannot be told" in out, True)
+    # Every review session gets the lenient reading too.
+    guard = sh('INSTRUMENTS=%s; HOOKS="$INSTRUMENTS/sclaude/hooks"; review_guard_settings "%s"'
+               % (orchestrator, repo), repo).splitlines()
+    check("review-guard-lenient",
+          "--lenient" in json.loads(guard[1])["hooks"]["PreToolUse"][0]["hooks"][0]["command"], True)
+    os.remove(record)
+
     setup(["lead@x.test"])
 
     # A step's settings carry it next to forbidden-commands.py.
@@ -400,7 +475,7 @@ try:
                'echo 3 > "%s/a"; git -C "%s" -c user.name=t -c user.email=t@t commit -qam other; '
                'instruments_unchanged "$s" review 2>&1 && echo quiet' % (inst, inst, inst), repo)
     check("instruments-commits-alone-quiet",
-          "another session's" in other and "other" in other and other.endswith("quiet")
+          "another hand's" in other and "other" in other and other.endswith("quiet")
           and "WARN" not in other, True)
     both = sh('info() { :; }; INSTRUMENTS="%s"; s="$(instruments_state)"; '
               'echo 4 > "%s/a"; git -C "%s" -c user.name=t -c user.email=t@t commit -qam more; '

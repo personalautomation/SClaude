@@ -58,6 +58,11 @@
 #                           sclaude for the product
 #   sclaude deferred        the monthly review of the friction put off
 #   sclaude propose         send a change to sclaude itself as a pull request
+#   sclaude core-open       run by a session: open the tree's workshop, where
+#                           it may change sclaude (workshop.sh)
+#   sclaude core-ready [--review "<how>"]
+#                           run by a session: its change there is reviewed,
+#                           and is published when the session ends
 #   sclaude review-stats    what this product's review sessions cost in context
 #   sclaude review-report <name>
 #                           whether the review is still worth it: rounds,
@@ -127,7 +132,7 @@ INSTRUMENTS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 # half an orchestrator is worse than none.
 for _module in io ui steps state project environment developer branches worktree featuredb lock pane run \
                github plan deploy regression rollback watch picker abandon actions doctor deferred \
-               terminal retro scratch no_change local_review config sync; do
+               terminal retro scratch no_change local_review config sync workshop; do
   # shellcheck source=/dev/null
   source "$LIB/$_module.sh" || {
     echo "sclaude: cannot load $LIB/$_module.sh" >&2
@@ -440,11 +445,22 @@ cmd_resume() {
       ;;
   esac
 
+  # A change to sclaude a session left unfinished in the feature's workshop is
+  # offered back first, and one whose publishing stopped short is tried again:
+  # until then nothing of it is published. Before the end of the cycle too,
+  # since the sessions after it use it; but not on the way into the clean-up,
+  # which asks itself, ahead of the retrospective (cmd_done).
+  local no_change_done=""
+  [[ "$step" == "done" \
+     && "$(state_get "$wt/.sclaude/local/feature/state.json" no_change 2>/dev/null || true)" == "true" ]] \
+    && no_change_done=1
+  [[ -n "$no_change_done" ]] || workshop_pending "$wt"
+
   if [[ "$step" == "done" ]]; then
     echo "Feature '$slug' has been through every step."
     # Nothing to deploy for a feature with no change (no_change.sh): only the
     # clean-up is left.
-    if [[ "$(state_get "$wt/.sclaude/local/feature/state.json" no_change 2>/dev/null || true)" == "true" ]]; then
+    if [[ -n "$no_change_done" ]]; then
       cmd_done "$slug" || true
     else
       remind_prod "$wt" "$slug"
@@ -1134,17 +1150,49 @@ cmd_done() {
   # A feature with no change of its own has one too: such a feature may have
   # done all of its work elsewhere — once, all of it in sclaude's own checkout —
   # and skipping the retrospective there skipped the one look back it had.
+  # What a session left in the feature's workshop gets its last chance before
+  # the clean-up takes the workshop — offered back, or tried again — and
+  # before the retrospective, which then runs with the fix. The retrospective's
+  # own unfinished change is asked about as it ends (workshop_after_session).
+  local live_before; live_before="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)"
+  workshop_pending "$wt"
+  # What it published moved sclaude's code: the retrospective, like the
+  # clean-up below, runs in a fresh process, on the code it reads.
+  if [[ "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)" != "$live_before" ]]; then
+    echo ""
+    say "${BOLD}sclaude's own code changed under this run; the clean-up goes on in a fresh one: $SELF done $slug${OFF}"
+    return 1
+  fi
+
   run_retro "$wt" "$slug" "$pr" "$issue"
 
-  # sclaude's own code changed while the retrospective ran — it may change it,
-  # and other sessions do. This process carries on in the old bash while every
-  # Python helper it calls is read anew from disk, so the clean-up goes on in
-  # a run of its own. With nothing run in between, that run asks before it
-  # goes back into the retrospective (run_retro).
+  # sclaude's own code changed while the retrospective ran — what it published
+  # from the workshop was brought into the checkout (workshop_live_update).
+  # This process carries on in the old bash while every Python helper it calls
+  # is read anew from disk, so the clean-up goes on in a run of its own. With
+  # nothing run in between, that run asks before it goes back into the
+  # retrospective (run_retro).
   if [[ -n "${RETRO_INSTRUMENTS_CHANGED:-}" ]]; then
     echo ""
     say "${BOLD}sclaude's own code changed under this run; the clean-up goes on in a fresh one: $SELF done $slug${OFF}"
     return 1
+  fi
+
+  # The retrospective's own change, whose publication stopped on the way as
+  # it ended — no network, a refused push — gets one more try: past here the
+  # workshop goes with the tree, and what it holds waits on a branch nobody
+  # tries again. Red tests or a conflict would only stop it again, minutes
+  # later. A try that moves sclaude's code sends the clean-up into a fresh
+  # run, as above.
+  if [[ "$(workshop_state "$wt" "")" == ready \
+        && "$(workshop_py get "$(workshop_record "$wt")" stopped 2>/dev/null)" == "on the way" ]]; then
+    live_before="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)"
+    workshop_publish "$wt"
+    if [[ "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)" != "$live_before" ]]; then
+      echo ""
+      say "${BOLD}sclaude's own code changed under this run; the clean-up goes on in a fresh one: $SELF done $slug${OFF}"
+      return 1
+    fi
   fi
 
   # A retrospective that committed the feature's own work on a branch with no
@@ -1704,7 +1752,9 @@ main() {
     # answer nobody gives. Killed by its caller's timeout, it lived on as an
     # orphan polling the channel once a second, and held off every update of
     # instruments as "another sclaude" for as long as it lived.
-    status|ls|dev|news|checks|doctor|"config set"|_handoff|-h|--help|help|-*) unset ASK_DIR ;;
+    # core-open and core-ready are run by a session, under the sclaude that
+    # started it: an update from here would move the checkout under both.
+    status|ls|dev|news|checks|doctor|"config set"|core-open|core-ready|_handoff|-h|--help|help|-*) unset ASK_DIR ;;
     *)
       # The same line decides what is recorded (terminal.sh): a conversation
       # is worth reading back, a report is not. First, so the record holds
@@ -1770,6 +1820,9 @@ main() {
     friction)      shift; cmd_friction "$(slugify "${1:-}")" ;;
     deferred)      cmd_deferred ;;
     propose)       cmd_propose ;;
+    # Run by a session, to change sclaude in its tree's workshop (workshop.sh).
+    core-open)     cmd_core_open ;;
+    core-ready)    shift; cmd_core_ready "$@" ;;
     review-stats)  cmd_review_stats ;;
     review-report) shift; cmd_review_report "$(slugify "${1:-}")" ;;
     # The verdict is the exit code (see wait_checks): no `|| true` here.

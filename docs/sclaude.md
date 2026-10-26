@@ -84,8 +84,9 @@ is handled by the new code. `SCLAUDE_NO_RELOAD=1` turns that off.
 update leaves everybody on `main`; a branch of one's own, `dev/<name>` (the
 name comes from `developer.sh`), is for proposing a change to sclaude, and a
 non-maintainer's commits there go out as a pull request (see "Who changes the
-orchestrator"). sclaude never pushes its own checkout otherwise: the review
-sessions do not commit to it, and a step session that commits there pushes on its own.
+orchestrator"). No session sclaude runs changes or pushes the checkout: what a
+session changes in sclaude it makes in its tree's workshop, and sclaude
+publishes it (see "The workshop" below).
 
 | File | What is in it |
 | --- | --- |
@@ -110,6 +111,7 @@ sessions do not commit to it, and a step session that commits there pushes on it
 | `sclaude/lib/actions.sh` | the list of actions on a single feature |
 | `sclaude/lib/terminal.sh` | recording sclaude's terminal — what it printed, what the person typed — for reading back |
 | `sclaude/lib/retro.sh` | the retrospective over a merged feature, right before `sclaude done` removes it |
+| `sclaude/lib/workshop.sh`, `workshop.py` | the tree's workshop, where a session changes sclaude, and the publishing of what it made there |
 | `sclaude/lib/*.py` | gathering an issue's context, chain and acceptance criteria, reading migrations' `-- down:` blocks, the cycle's record, and assembling prompts |
 | `sclaude/hooks/*.py` | the steps' bans and the friction log |
 | `sclaude/prompts/*.md` | the steps' prompts and the shared includes (`_*.md`) |
@@ -372,6 +374,110 @@ took place, there is nothing left to check a preview on, and there is nothing to
 ask about. So every prompt tells the session what it ends with: say that it is
 done and stop — without offering the next step, because agreeing to it inside the
 session is impossible anyway, as it begins when the session is left.
+
+## The workshop
+
+sclaude's live checkout is read-only to every session it runs —
+`sclaude_guard_args` in `steps.sh` hands `write-guard.py` `--readonly
+$INSTRUMENTS` for the steps, the reviews and the epilogue alike — and no
+session pushes it or a worktree of it (`OWN_CHECKOUT` in
+`forbidden-commands.py`). Every other session runs from that checkout, and a
+hook edited there changes all of them on their next call; the repository is
+public, and a session works from a private product. Steps used to commit and
+push its `main` themselves, and the review sessions could not touch it at all,
+so a clear bug in a hook waited a month in a deferred file.
+
+A session changes sclaude in its tree's workshop instead (`workshop.sh`): a
+worktree of the checkout at `<tree>/.sclaude/local/instruments`, made from
+`origin/main` by the first `sclaude core-open` and shared by every session of
+the tree — a feature's, or a monthly review's. Inside the product's tree,
+since the session may already write there without a prompt, and under
+`.sclaude/local`, which git, the product's tools and every upload leave
+alone. A maintainer's workshop is on a branch nobody sees (`workshop/<time>`),
+since what reaches `main` is one squashed commit; anybody else's is the branch
+its pull request comes from, `dev/<name>-<time>` — never named after the
+feature, since the repository is public.
+
+**Who may write there.** `.sclaude/local/instruments.json`, the record beside
+it (`workshop.py`), lists the sessions in `approved`. `write-guard.py
+--workshop DIR` treats the workshop as read-only for any other session, and
+the record as read-only for all. `sclaude core-open` adds the session that
+runs it, which it knows by `SCLAUDE_SESSION` (`claude_launch` exports it).
+`forbidden-commands.py` answers that call with "ask" in a step, so Claude Code
+puts the question to the person — the model cannot answer it, in auto mode
+too — every session anew; under `--step friction` (the retrospective, the
+friction review, the monthly review) it lets it through, since the
+retrospective is where the person expects changes and the other two start in
+plan mode. The prompts say which by `workshop_rules` (`prompts/_workshop.md`).
+
+Every session's write guard reads leniently (`--lenient`): a target it cannot
+tell — a loop's `"$f"`, a `$( … )`, a directory in a variable — is refused
+only when the command names the checkout or the workshop at all, and the
+refusal says that the target could not be told. Steps write through
+variables all day, and a review now runs the workshop's tests in loops; the
+strict reading refused those for naming nothing. A plain `git fetch` in the
+checkout is allowed — no refspec, and only the flags that read
+(`FETCH_READS`) — since it only reads origin into the remote-tracking refs. sreview's state in the
+checkout's git directory stays writable (`--allow`), since reviewing a
+workshop's change writes it.
+
+**Finished, and reviewed.** The session commits in the workshop, reviews its
+change and runs `sclaude core-ready`, which refuses uncommitted work and
+records the head as ready. For a maintainer of sclaude the review is sreview:
+`core-ready` wants sreview's mark of a finished run at that head
+(`$S/branches/<branch>.reviewed`, `workshop_sreview_mark`). For anybody else
+it is whatever review they choose, named with `--review`, and the
+maintainer's review of the pull request is the gate.
+
+**Publishing**, from `claude_launch` once the session exits
+(`workshop_after_session`): with the head ready, `workshop_publish` fetches
+`origin/main`; for a maintainer it rebases onto it (a conflict leaves the
+change where it is, said), checks it for the product's details
+(`workshop.py leaks`: the product's repository and folder names, the
+feature's slug and branch, the package's name, `#12`-like numbers and
+pull-request or issue references, and paths of the product's own files, in
+the added lines and the commit messages; a hit is the person's to wave
+through), squashes it into one commit (`squash-message`: the first commit
+that is not a review round leads, the rest are listed, the trailers merged),
+runs the tests the change touches in a clean environment, and pushes
+`HEAD:main`. Then the live checkout is fast-forwarded to it when nothing else
+runs from it (`workshop_live_update`), so the next session runs the fix; the
+next sclaude start does it otherwise, and a checkout holding commits of its
+own that origin lacks is told to bring them on top (`pull --rebase`). Anybody else's goes through the same
+check and tests, unsquashed, to its branch and its one pull request
+(`instruments_propose` from the workshop; a push that failed is not taken
+for sent). The rebase and the squash leave the head ready, so a publication
+stopped short — red tests, no gh or no login, no network, a refused push, a
+conflict with main — is tried again, silently, whenever the tree is opened
+(`workshop_pending`, also at the `done` step, before `sclaude done` clears the
+tree, and for a monthly review's kept trees). The person's own "no" to the
+product's details is the one stop that holds the change at its head
+(`workshop_block`): asking again would not help, and a session's new commit,
+marked ready, lifts it. A "yes" to the same question is kept for the lines it
+was shown, so a retry does not ask it again, and a line not shown then does.
+In `sclaude done` the retry comes before the retrospective; when it moves
+sclaude's code, the clean-up goes on in a fresh run, retrospective and all.
+The retrospective's own change, stopped on the way (no network, a refused
+push), gets one more try before the clean-up takes the workshop; one stopped
+by its head — red tests, a conflict — would only stop again, and is kept on
+its branch. The live checkout's state,
+which the reviews compare before and after, leaves out what sending a
+workshop's change records in the shared config: the `fork` remote and the
+`dev/` and `workshop/` branches.
+
+**Unfinished.** A change uncommitted, or not marked ready at its head, is not
+published. The session is offered back at once — the same conversation, with
+`WORKSHOP_RESUME` in place of its prompt (`claude_again_args`) — and a "no"
+records its launch in the record's `pending`, which `workshop_pending` offers
+again when the feature is next opened (and the monthly review on its next run
+that day: its tree is kept while its workshop holds anything unpublished). While one is pending, what later sessions make waits behind it.
+When the tree goes, `workshop_remove` takes the workshop with it: work never
+published is committed as it was left and kept on its branch in the checkout,
+and named.
+
+The reviews' own refusals no longer reach the step's friction log
+(`_friction.py` skips `--step friction`): a retrospective's refused push sat
+there until the next step's review read it as that step's friction.
 
 ## The worktree
 

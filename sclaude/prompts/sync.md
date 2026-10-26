@@ -15,6 +15,8 @@ When you are done, `git merge-tree --write-tree HEAD origin/main` must exit 0 an
 
 <include:questions>
 
+<block:workshop>
+
 <include:report>
 
 The report also names **each conflicted file and how you resolved it**, and anything main changed that the feature had to be adapted to.

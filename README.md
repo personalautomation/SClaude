@@ -351,18 +351,35 @@ go out as a pull request — pushed here if you may push, otherwise through a fo
 the pull request travels. Without `MAINTAINERS` everybody is a maintainer, which
 is what a copy used by one person wants.
 
-sclaude's own review sessions — friction reviews, retrospectives, the monthly
-review of deferred findings — never change this repository: they change the
-product. A review that thinks one of sclaude's defaults is wrong for everybody
-works around it in the product and leaves a note for the maintainers.
+**When a session finds a bug in sclaude.** No session sclaude runs changes
+this checkout, which every other session runs from, and none pushes it: the
+repository is public and the session has read your project. It fixes sclaude
+in the feature's workshop instead, a copy of the checkout at
+`.sclaude/local/instruments` that every session of the feature shares:
 
-A maintainer's retrospective is the exception: what it finds wrong with
-sclaude it can fix here when you ask, and commit to `main`. It cannot touch
-sclaude's hooks or policy, and it cannot push — you read its commits (the
-retrospective's end lists them) and push yourself, since this repository is
-public and the retrospective has read your project. When sclaude's code changed
-during the retrospective, `sclaude done` stops before the clean-up; run it
-again.
+- a step's session runs `sclaude core-open`, and Claude Code asks you first,
+  in its window, every session anew; a "no" leaves sclaude alone, and the
+  finding is put off for the monthly review;
+- the retrospective, and the friction and monthly reviews (which start in plan
+  mode, so the plan you approve is your yes), open it without a question;
+- the session commits there, reviews its change — `/sreview` if you are a
+  maintainer, any review you like otherwise — and runs `sclaude core-ready`.
+
+When the session ends, sclaude publishes the change itself. It looks for your
+project's details in it — the project's name, issue or pull-request numbers,
+paths of its files — and asks you before it sends anything that matches; it
+runs the tests the change touches; then it pushes a maintainer's change to
+`main` as one commit, and sends anybody else's as one pull request per
+feature. A change left uncommitted or unreviewed is not published: sclaude
+offers you the session back to finish it, at once and when you next open the
+feature. A publication that stops — red tests, no network, a refused push —
+is tried again, quietly, every time you open the feature; only your own "no"
+to the project's details holds it until a session rewords the change. A list
+of matches too long for a phone question is asked at the terminal only. A
+workshop goes with its feature; a change in it never published
+stays on its branch in this checkout, and the clean-up names it. When the
+retrospective's change reaches this checkout, `sclaude done` stops before the
+clean-up; run it again.
 
 **Who keeps a product's rules.** `maintainers` in the product's
 `.sclaude/config.json` lists who curates the shared rules in `.sclaude/team/`.
@@ -426,6 +443,8 @@ sclaude reset <name>    # start the current step over, forgetting its conversati
 sclaude done <name>     # clean up after the merge: worktree and branches
 sclaude drop <name>     # abandon a feature and remove its traces, here and on GitHub
 sclaude propose         # send your commits to sclaude as a pull request
+sclaude core-open       # run by a session: open the feature's workshop to change sclaude
+sclaude core-ready      # run by a session: its change there is reviewed; publish it at the end
 ```
 
 The tab sclaude runs in is named for the feature it is on, as its Telegram

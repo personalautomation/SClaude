@@ -37,6 +37,10 @@ SCRATCH = "/tmp/claude-{}".format(os.getuid())
 # product on Vercel and Supabase writes in .sclaude/team/policy.json, with the
 # product's own bans and the way it tells its environment.
 PRODUCT = tempfile.mkdtemp(prefix="sclaude-hooks-product-")
+# A repository on main, where the cases with no directory of their own run: not
+# the checkout the test runs from, whose own pushes are refused outright and
+# whose branch is a workshop's when sclaude tests a change before publishing it.
+subprocess.run(["git", "init", "-q", "-b", "main", PRODUCT], check=True)
 os.makedirs(os.path.join(PRODUCT, ".sclaude", "team"))
 with open(os.path.join(PRODUCT, ".sclaude", "team", "policy.json"), "w") as _fh:
     json.dump({
@@ -78,7 +82,7 @@ def run(hook, command, step=None, tool="Bash", tool_input=None, env=None,
     except ValueError:
         return ALLOW
     decision = (out.get("hookSpecificOutput") or {}).get("permissionDecision")
-    return DENY if decision == "deny" else ALLOW
+    return {"deny": DENY, "ask": "ask"}.get(decision, ALLOW)
 
 
 # (command, expectation). Every wrapper is checked both bare and with an
@@ -504,7 +508,8 @@ def main():
             failures.append(("plan", command, want, got))
 
     for command, want in FORBIDDEN:
-        got = run("forbidden-commands.py", command, step="review")
+        got = run("forbidden-commands.py", command, step="review", cwd=PRODUCT,
+                  env={"CLAUDE_PROJECT_DIR": PRODUCT})
         if got != want:
             failures.append(("review", command, want, got))
 
@@ -625,59 +630,55 @@ def main():
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
-    # sclaude's own checkout goes to main without a pull request: a push to
-    # main there passes, --force and --no-verify do not, and neither does a
-    # push from it to a URL, one redirected to another repository, or one
-    # where the product is the checkout itself.
+    # sclaude's own checkout is never pushed by a session, to any branch and in
+    # any spelling: the repository is public and the session works from a
+    # private product, so sclaude publishes a workshop's change itself.
+    # Committing is not pushing, and the product is still the product.
     own = os.path.realpath(os.path.join(HOOKS, "..", ".."))
     above, name = os.path.split(own)
     product_tree = tempfile.mkdtemp(prefix="hooks-product-")
     subprocess.run(["git", "init", "-q", "-b", "main", product_tree], check=True)
     try:
         own_cases = [
-            ("git -C " + own + " push origin main", None, None, ALLOW),
-            ("cd " + own + " && git push origin HEAD:main", None, None, ALLOW),
-            ("cd " + own + "/sclaude && git push -u origin main", None, None, ALLOW),
-            # `~` is the home directory, as bash has it; a quoted one is not.
-            ("git -C ~/" + name + " push origin main", None, {"HOME": above}, ALLOW),
-            ("cd ~/" + name + " && git push origin main", None, {"HOME": above}, ALLOW),
-            ("cd '~/" + name + "'; git push origin main", None, {"HOME": above}, DENY),
-            ("git -C " + own + " push --force origin main", None, None, DENY),
-            ("cd " + own + " && git push --no-verify origin main", None, None, DENY),
-            ("git -C " + own + " push origin +main", None, None, DENY),
-            ("git -C " + own + " push https://github.com/o/r.git main", None, None, DENY),
-            ("git -C " + own + " --git-dir=" + product_tree + "/.git push origin main",
-             None, None, DENY),
-            ("GIT_DIR=" + product_tree + "/.git git -C " + own + " push origin main",
-             None, None, DENY),
-            # A product that is the checkout itself keeps the ban.
-            ("git -C " + own + " push origin main", own, None, DENY),
+            ("git -C " + own + " push origin main", None, DENY),
+            ("cd " + own + " && git push origin HEAD:main", None, DENY),
+            ("cd " + own + "/sclaude && git push -u origin main", None, DENY),
+            ("cd " + own + " && git push origin dev/x", None, DENY),
+            # `~` is the home directory, as bash has it.
+            ("git -C ~/" + name + " push origin dev/x", {"HOME": above}, DENY),
+            ("cd ~/" + name + " && git push origin dev/x", {"HOME": above}, DENY),
+            ("git -C " + own + " push https://github.com/o/r.git dev/x", None, DENY),
+            ("GIT_DIR=" + own + "/.git git push origin dev/x", None, DENY),
+            ("cd \"$X\" && git -C " + own + " push origin dev/x", None, DENY),
+            ("git -C " + own + " commit -m x", None, ALLOW),
             # The product is still the product.
-            ("git push origin main", None, None, DENY),
-            ("git push", None, None, DENY),
-            ("git -C " + own + " status && git push origin main", None, None, DENY),
+            ("git push origin main", None, DENY),
+            ("git push origin feat/x", None, ALLOW),
+            ("cd \"$X\" && git push origin feat/x", None, ALLOW),
+            ("git -C " + product_tree + " push origin feat/x", None, ALLOW),
         ]
-        for command, root, env, want in own_cases:
-            full = dict(env or {})
-            full["CLAUDE_PROJECT_DIR"] = product_tree
-            got = run("forbidden-commands.py", command, step="code", cwd=product_tree,
-                      root=root, env=full)
-            if got != want:
-                failures.append(("own", command, want, got))
-        # A retrospective commits to the checkout and never pushes it, to any
-        # branch: the checkout is public, the retrospective's material is not.
-        for command, want in (("git -C " + own + " push origin main", DENY),
-                              ("cd " + own + " && git push origin dev/x", DENY),
-                              ("git -C " + own + " commit -m x", ALLOW),
-                              ('cd "$X" && git push', DENY),
-                              ('cd "$X" && git push origin feat/x', DENY),
-                              ("git -C " + product_tree + " push origin feat/x", ALLOW)):
-            got = run("forbidden-commands.py", command, step="friction", cwd=product_tree,
-                      env={"CLAUDE_PROJECT_DIR": product_tree}, extra=["--no-own-push"])
-            if got != want:
-                failures.append(("retro-own", command, want, got))
+        for step in ("code", "friction"):
+            for command, env, want in own_cases:
+                full = dict(env or {})
+                full["CLAUDE_PROJECT_DIR"] = product_tree
+                got = run("forbidden-commands.py", command, step=step, cwd=product_tree, env=full)
+                if got != want:
+                    failures.append(("own-" + step, command, want, got))
     finally:
         shutil.rmtree(product_tree, ignore_errors=True)
+
+    # `sclaude core-open` is asked of the person in a step, every session; the
+    # reviews (--step friction) open the workshop without a question.
+    for command, step, want in (("sclaude core-open", "code", "ask"),
+                                ("/x/bin/sclaude core-open", "review", "ask"),
+                                ("cd sub && sclaude core-open", "pr", "ask"),
+                                ("sclaude core-open", "friction", ALLOW),
+                                ("sclaude core-ready", "code", ALLOW),
+                                ("sclaude checks 5", "review", ALLOW)):
+        got = run("forbidden-commands.py", command, step=step, cwd=PRODUCT,
+                  env={"CLAUDE_PROJECT_DIR": PRODUCT})
+        if got != want:
+            failures.append(("core-open", command, want, got))
 
     for command, step, want in BY_STEP:
         got = run("forbidden-commands.py", command, step=step)

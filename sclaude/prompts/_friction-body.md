@@ -1,4 +1,4 @@
-You are reviewing friction for the product, not editing `sclaude`. `<instruments>` is sclaude's own checkout: read it to understand a restriction, and change nothing in it — a hook refuses writes there. sclaude ships presets that every product starts from; a product customises them, and this review is how. What you decide goes into the product, in this feature's worktree, `<worktree>`, open to you in this session.
+You are reviewing friction: what got in a session's way, and the fix for it. Most of it is the product's — sclaude ships presets that every product starts from; a product customises them, and this review is how — and goes into this feature's worktree, `<worktree>`, open to you in this session. A bug in sclaude itself is fixed in sclaude, in the workshop the paragraph on sclaude below describes. `<instruments>` is sclaude's live checkout: read it to understand a restriction, and never change it — a hook refuses writes there.
 
 **Where each change goes.** Ask of every change: would it be right for a product sclaude has never seen? If it names this product's commands, files, services or habits, it is the product's. Concretely:
 
@@ -6,17 +6,20 @@ You are reviewing friction for the product, not editing `sclaude`. `<instruments
 - **A ban working as intended that will trip every feature** — a `deny` entry in the same file, so its refusals stop reaching the log as friction. Merging, pushing to `main`, deploying are already sclaude's and need no entry.
 - **A rule the product's agents are missing, a project script that hangs, a hook or config of the project's own** — the project itself: read its `CLAUDE.md` first and follow its rules.
 - **Something one of sclaude's steps should be told here, and only for its sessions** — an addition to that step's prompt, `<rules>/prompts/<step>.md` (plan, code, pr, review). sclaude appends it after its own text; it adds to the step, it cannot replace what sclaude says.
-- **A preset that looks wrong for every product** — still fix it here, in the product, so this product stops tripping. Then put the finding off (below) with class `sclaude-default` and one line on what the preset should become: whether sclaude's defaults change is decided deliberately, outside a review, by a pull request to sclaude.
+- **A bug in sclaude's own code, prompts or hooks** — a hook that refuses an ordinary command because it misreads it, a message that sends a session the wrong way, a step that breaks on what any product would meet — is fixed in sclaude, in the workshop (below), with a test, as an item of its own in the plan: what changes in which of sclaude's files, and why. Don't put off a bug whose fix is clear: an entry waits a month, and every session meanwhile trips over it again.
+- **A preset that looks wrong for every product** — a default that is a choice rather than a bug — still fix it here, in the product, so this product stops tripping. Then put the finding off (below) with class `sclaude-default` and one line on what the preset should become: a default every product inherits is changed at the monthly review, with every product's entries in front of it.
 
 `<rules>` is `<worktree>/.sclaude/team` when the person running this maintains the product, and their own `.sclaude/people/<name>` otherwise — a hook keeps everybody else out of `team/`. Create the file if it is not there, with the shape `sclaude/policy/core.json` shows.
 
-Commit everything in the worktree, on the feature's branch, `<branch>`, by the project's commit rules — never on its `main`, and no new branch or pull request: it reaches `main` with this feature's pull request and goes through its review like any other change. Don't push; `sclaude` pushes the branch after this session. Keep it to what the friction calls for — the feature's own code is the steps' work, not yours. Say in the plan which file each change goes to, and in the report which commits you made.
+<workshop-rules>
+
+Commit everything else in the worktree, on the feature's branch, `<branch>`, by the project's commit rules — never on its `main`, and no new branch or pull request: it reaches `main` with this feature's pull request and goes through its review like any other change. Don't push; `sclaude` pushes the branch after this session. Keep it to what the friction calls for — the feature's own code is the steps' work, not yours. Say in the plan which file each change goes to, and in the report which commits you made.
 
 **What to read.**
 
 - The friction log — `<log>`. It holds two kinds of entries, and that's normal. Rejections are written by the orchestrator, one paragraph each: time, step, source, subject, reason. Requests are written by the session itself, free-form and often several paragraphs: nobody asked it to fit into fields, and the analysis is better for it. A rejection's source says who issued it, and that determines where to look for the cause:
 
-  - `hook` — one of our own bans fired, `forbidden-commands.py` or `no-code-in-planning.py`. The cause is in those files.
+  - `hook` — one of our own bans fired, `forbidden-commands.py` or `no-code-in-planning.py`. The cause is in those files: a ban working as intended, or a bug in them, which is fixed in the workshop.
   - `rule` — `--disallowed-tools` fired. The list is built from the policy (below), and `step_settings()` in `sclaude/lib/steps.sh` adds the orchestrator's own few.
   - `classifier` — the built-in `auto` mode classifier refused, not the orchestrator. No such ban exists in our files, so don't look there: see `claude auto-mode config`. It's tuned through the `autoMode.environment` line that `step_settings()` passes to the step — that's how steps 2–4 already know a feature worktree isn't a foreign repository but the same tree.
   - `model` — the session wrote it itself, and it's what no ban caught. Such an entry doesn't follow the fields: read it as prose.

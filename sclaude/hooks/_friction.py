@@ -63,6 +63,11 @@ def note(step, source, subject, reason):
     the hook down for its sake would mean trading a working ban for statistics
     that were not gathered.
     """
+    # A review session's own refusals (the retrospective and the reviews run
+    # under --step friction) are not a step's friction: written here, they sat
+    # in the log until the next step's review read them as that step's.
+    if step == "friction":
+        return
     try:
         path = log_path()
         if not path:

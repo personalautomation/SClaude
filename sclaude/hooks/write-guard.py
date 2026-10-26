@@ -10,14 +10,23 @@
 #                   and a maintainer can lift one into team/.
 #   --readonly DIR  nothing under DIR, which may also be a file; given more
 #                   than once, under none of them. sclaude passes its own
-#                   checkout for the friction review and the monthly deferred
-#                   review: they read the orchestrator to understand a
-#                   restriction, and what they decide goes into the product.
-#                   A change to sclaude's out-of-the-box behaviour is a
-#                   deliberate pull request, never a session's side effect.
-#                   The retrospective of a maintainer of the orchestrator gets
-#                   only what restrains it — the hooks, the policy, the git
-#                   hooks — and may change the rest (review_guard_settings).
+#                   live checkout for every session it runs: the others run
+#                   from it, and a hook changed there changes all of them on
+#                   their next call. A session changes sclaude in its tree's
+#                   workshop instead (workshop.sh).
+#   --allow DIR     the exception under a read-only DIR: sreview's state in
+#                   the checkout's git directory, which reviewing a workshop's
+#                   change writes.
+#   --workshop DIR  the tree's workshop, read-only too until the session has
+#                   opened it (`sclaude core-open`, which records the session
+#                   in DIR.json; the record itself is never the session's to
+#                   write).
+#   --lenient       what cannot be told — a target in a variable, a directory
+#                   that is not known — is refused only when the command names
+#                   a read-only place at all. sclaude passes it for every
+#                   session: they write into variables all day, and a review
+#                   session runs the workshop's tests in loops. Without it
+#                   anything unknown is refused.
 #
 # Reading is never refused. Like every hook here it guards against an
 # accident, not against a session set on getting round it: a script written
@@ -45,14 +54,20 @@ from _shell import (GIT_VALUED, KEYWORDS, QUOTED, closing_at, inner_command, str
                     substitutions, tokenize, ungroup)
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
-# Said of every path the session may not write, which is the whole checkout
-# for most reviews and only what restrains the session for a maintainer's
-# retrospective: either way, what it would change there goes the same road.
-READONLY_REASON = ("this session may not change {dir} (sclaude's, read-only to it): "
-                   "what this review decides goes into the product's .sclaude/ "
-                   "or its code. A change there to sclaude itself is proposed "
-                   "deliberately (sclaude propose), so leave it as a deferred entry "
-                   "of class sclaude-default.")
+# Said of every path the session may not write. With a workshop the way to
+# change sclaude is named; without one (the epilogue, whose tree is gone) the
+# change waits as a deferred entry.
+READONLY_REASON = ("this session may not change {dir}: sclaude's live checkout is read-only "
+                   "to every sclaude session, since the others run from it.")
+WORKSHOP_REASON = (" Change sclaude in this tree's workshop, {workshop}, instead: "
+                   "`sclaude core-open` opens it for this session.")
+NO_WORKSHOP_REASON = (" Leave the change as a deferred entry of class sclaude-default.")
+# Said where the place a command writes cannot be told, rather than the reason
+# above, which then named a place the command never meant: a loop's
+# `>…/$(basename $t).out` into the scratchpad was told it may not change sclaude.
+UNKNOWN_REASON = ("where this command writes cannot be told — a target in a variable or in "
+                  "$( … ), or a directory that is not known — and it may be a place this "
+                  "session may not change ({dir}). Write it with the path spelled out.")
 REASON = ("the product's shared sclaude rules (.sclaude/team/) are written by its "
           "maintainers — `maintainers` in .sclaude/config.json. Put the rule in your own "
           ".sclaude/people/<name>/ instead; a maintainer can lift it into team/.")
@@ -92,6 +107,10 @@ CONFIG_READS = ("--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list"
                 "--get-color", "--get-colorbool", "get", "list")
 
 
+# The flags of a fetch that only reads origin into the remote-tracking refs.
+FETCH_READS = ("-q", "--quiet", "-v", "--verbose", "--prune", "-p", "--all", "--tags",
+               "--no-tags", "--dry-run")
+
 # Flags that put branch and tag in list mode, some with a value of their own.
 # --sort, --format and --column are not among them: `git branch --sort=x new`
 # creates new.
@@ -107,6 +126,13 @@ def git_reads(sub, rest):
         return plain[:1] in (["list"], ["show"])
     if sub == "worktree":
         return plain[:1] == ["list"]
+    if sub == "fetch":
+        # What origin has, into the remote-tracking refs, which sclaude's own
+        # sync fetches all the time: nothing anybody runs changes with it. A
+        # refspec into a branch of the checkout's (`main:main`, or one given
+        # as --refmap's value) does, and --set-upstream writes its config: so
+        # only these flags, and no refspec.
+        return not any(":" in w for w in plain) and all(f in FETCH_READS for f in flags)
     if sub == "branch":
         if any(f in BRANCH_WRITES for f in flags):
             return False
@@ -368,11 +394,12 @@ def write_targets(command, cwd):
     return [(unmask(w), where) for w, where in out]
 
 
-def git_writes_in(command, cwd, inside):
+def git_writes_in(command, cwd, inside, unknown=lambda: True):
     """Does a git call change a repository in a directory `inside` accepts?
 
     The directory is followed through `cd` and `git -C`; one that cannot be
-    told (a variable) counts as inside, which is the safe side.
+    told (a variable) counts as inside, which is the safe side, unless
+    `unknown` says otherwise (--lenient).
     """
     found = calls(command, cwd)
     if found is None:
@@ -411,20 +438,43 @@ def git_writes_in(command, cwd, inside):
         writes = (sub in GIT_WRITES and not git_reads(sub, rest)) or (
             sub in GIT_WRITE_FORMS
             and next((w for w in rest if not w.startswith("-")), "") in GIT_WRITE_FORMS[sub])
-        if writes and any(p is None or inside(p) for p in places):
+        if writes and any(inside(p) if p is not None else unknown() for p in places):
             return True
     return False
 
 
-def refuses(payload, team, readonly, depth=0):
+def refuses(payload, team, readonly, depth=0, allow=(), lenient=False, why=None):
     """The reason to refuse this call, or None."""
     tool = payload.get("tool_name")
     data = payload.get("tool_input") or {}
     cwd = payload.get("cwd") or os.getcwd()
+    command = str(data.get("command", "")) if tool == "Bash" else ""
+
+    def under(full, dirs):
+        return any(full == d or full.startswith(d + os.sep) for d in dirs)
 
     def inside(path, base=None):
         full = os.path.realpath(os.path.join(base or cwd, os.path.expanduser(path)))
-        return any(full == d or full.startswith(d + os.sep) for d in readonly)
+        return under(full, readonly) and not under(full, allow)
+
+    reason = why or READONLY_REASON.format(dir=", ".join(readonly))
+    vague = UNKNOWN_REASON.format(dir=", ".join(readonly))
+
+    def named():
+        """Whether the command names a read-only place, as written or as `~`."""
+        home = os.path.expanduser("~")
+        for d in readonly:
+            forms = [d, d.replace(home, "~", 1), d.replace(home, "$HOME", 1)]
+            rel = os.path.relpath(d, cwd)
+            if not rel.startswith(".."):
+                forms.append(rel)
+            if any(f in command for f in forms):
+                return True
+        return False
+
+    def unknown():
+        """What cannot be told is refused, or with --lenient only near a guarded place."""
+        return not lenient or named()
 
     def is_team(path):
         # As resolved: `.sclaude/people/../team/policy.json` is the team's.
@@ -434,12 +484,11 @@ def refuses(payload, team, readonly, depth=0):
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         path = str(data.get("file_path") or data.get("notebook_path") or "")
         if readonly and path and inside(path):
-            return READONLY_REASON.format(dir=", ".join(readonly))
+            return reason
         if is_team(path):
             return REASON
         return None
     if tool == "Bash":
-        command = str(data.get("command", ""))
         # What a substitution, a shell's -c string or eval runs writes as
         # surely as the line itself: `bash -c "echo x > $RO/f"` passed.
         # A substitution runs where the line has got to by then, which is not
@@ -449,7 +498,7 @@ def refuses(payload, team, readonly, depth=0):
         found = calls(command, cwd, seen) or []
         visited = []
         for there in [cwd] + seen:
-            there = there if there is not None else (readonly[0] if readonly else cwd)
+            there = there if there is not None else (readonly[0] if readonly and unknown() else cwd)
             if there not in visited:
                 visited.append(there)
         nested = [(text, there) for text in (substitutions(command) or []) for there in visited]
@@ -457,19 +506,21 @@ def refuses(payload, team, readonly, depth=0):
             inner = inner_command([words[0].rsplit("/", 1)[-1]] + [unmask(w) for w in words[1:]])
             if inner is not None:
                 nested.append((inner, where if where is not None else
-                               (readonly[0] if readonly else cwd)))
+                               (readonly[0] if readonly and unknown() else cwd)))
         for text, where in nested:
             if depth >= 3:
                 return "a command nested this deep cannot be judged"
-            reason = refuses({"tool_name": "Bash", "tool_input": {"command": text},
-                              "cwd": where}, team, readonly, depth + 1)
-            if reason:
-                return reason
+            found_reason = refuses({"tool_name": "Bash", "tool_input": {"command": text},
+                                    "cwd": where}, team, readonly, depth + 1, allow, lenient, why)
+            if found_reason:
+                return found_reason
         targets = write_targets(command, cwd)
         if targets is None:
             # Unparsable: refused only where it names a guarded place at all.
-            if (readonly and any(d in command for d in readonly)) or (team and TEAM.search(command)):
-                return READONLY_REASON.format(dir=", ".join(readonly)) if readonly else REASON
+            if readonly and named():
+                return reason
+            if team and TEAM.search(command):
+                return REASON
             return None
         if readonly:
             # A target with a variable in it: what the line set, then the
@@ -484,17 +535,23 @@ def refuses(payload, team, readonly, depth=0):
                                    lambda m: assigned.get(m.group(1), m.group(0)), word)
                     known = os.path.expandvars(known)
                     if "$" in known or "`" in known:
-                        return READONLY_REASON.format(dir=", ".join(readonly))
+                        if unknown():
+                            return vague
+                        continue
                     targets[i] = (known, base)
             for word, base in targets:
+                if "$" in word or "`" in word:
+                    continue
                 # An unknown directory: an absolute path still tells, a relative
                 # one is taken as the checkout's.
                 if base is None and not os.path.isabs(os.path.expanduser(word)):
-                    return READONLY_REASON.format(dir=", ".join(readonly))
+                    if unknown():
+                        return vague
+                    continue
                 if inside(word, base):
-                    return READONLY_REASON.format(dir=", ".join(readonly))
-            if git_writes_in(command, cwd, inside):
-                return READONLY_REASON.format(dir=", ".join(readonly))
+                    return reason
+            if git_writes_in(command, cwd, inside, unknown):
+                return reason
         # The path as it resolves, from the directory the call runs in:
         # `cd .sclaude/team && echo x > policy.json` names no team path in a
         # word. Where the directory cannot be told, the word alone.
@@ -505,21 +562,48 @@ def refuses(payload, team, readonly, depth=0):
     return None
 
 
+def given(argv, name):
+    return [os.path.realpath(argv[i + 1]) for i, a in enumerate(argv)
+            if a == name and i + 1 < len(argv)]
+
+
+def approved(record, session):
+    """Whether the workshop's record lets this session write in it."""
+    try:
+        with open(record, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    return bool(session) and session in ((data or {}).get("approved") or [])
+
+
 def main():
     argv = sys.argv[1:]
     team = "--team" in argv
-    readonly = [os.path.realpath(argv[i + 1]) for i, a in enumerate(argv)
-                if a == "--readonly" and i + 1 < len(argv)]
+    lenient = "--lenient" in argv
+    readonly = given(argv, "--readonly")
+    allow = given(argv, "--allow")
+    workshop = (given(argv, "--workshop") or [""])[0]
     try:
         payload = json.load(sys.stdin)
     except ValueError:
         return 0
+    why = None
+    if readonly:
+        why = READONLY_REASON.format(dir=", ".join(readonly)) + (
+            WORKSHOP_REASON.format(workshop=workshop) if workshop else NO_WORKSHOP_REASON)
+    if workshop:
+        # The record says who may write in the workshop, and is never the
+        # session's to write; the workshop is read-only until it says so.
+        readonly.append(workshop + ".json")
+        if not approved(workshop + ".json", payload.get("session_id")):
+            readonly.append(workshop)
     data = payload.get("tool_input") or {}
     _failsafe.CONTEXT["subject"] = str(data.get("command") or data.get("file_path") or "")
     # A hook that raises exits non-zero, and Claude Code runs the call anyway.
     # Refused instead: an unreadable call near a guarded place is refused too.
     try:
-        reason = refuses(payload, team, readonly)
+        reason = refuses(payload, team, readonly, 0, allow, lenient, why)
     except Exception as exc:  # noqa: BLE001
         reason = "the write guard failed on this call (%s: %s), so it is refused" % (
             type(exc).__name__, exc)

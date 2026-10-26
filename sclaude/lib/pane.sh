@@ -82,32 +82,26 @@ claude_launch() {
     args+=("$arg")
   done
   set -- "${args[@]}"
+  # The session's id reaches its commands: `sclaude core-open` and
+  # `core-ready` name the session they are run by (workshop.sh).
+  [[ -n "$session" ]] && export SCLAUDE_SESSION="$session"
   claude_launch_once "$@"
   status=$?
   # Closed by the session watcher because the usage limit had reset, not
-  # ended: opened again where it stopped. The arguments are the first
-  # launch's up to and including `-n <name>`, which every caller passes
-  # right before its prompt; the prompt gives way to a word to carry on —
-  # the opening one was answered long ago. A `--session-id` becomes
-  # `--resume`, since the conversation now exists.
+  # ended: opened again where it stopped (claude_again_args).
   local limit_file="${TMPDIR:-/tmp}/sclaude-limit-$session"
   while [[ -n "$session" && -s "$limit_file" ]]; do
     rm -f "$limit_file"
-    local -a again=()
-    local arg named=""
-    for arg in "$@"; do
-      if [[ -n "$named" ]]; then again+=("$arg"); break; fi
-      case "$arg" in
-        --session-id) again+=(--resume) ;;
-        -n) again+=(-n); named=1 ;;
-        *) again+=("$arg") ;;
-      esac
-    done
+    claude_again_args "$@"
     echo ""
     info "   The usage limit has reset — resuming the session where it stopped."
-    claude_launch_once "${again[@]}" "$CLAUDE_LIMIT_RESUME"
+    claude_launch_once "${CLAUDE_AGAIN[@]}" "$CLAUDE_LIMIT_RESUME"
     status=$?
   done
+  # What it changed in sclaude, in the tree's workshop: published, or the
+  # session offered back to finish it.
+  [[ -n "$session" ]] && declare -F workshop_after_session >/dev/null \
+    && workshop_after_session "$session" "$@"
   # Whether the session's screen is gone with it: a tab closes when claude
   # exits, and its last message with it; in place it stays on the screen.
   # session_ended prints it again for a tab (session_report). Marked after
@@ -116,6 +110,26 @@ claude_launch() {
   # replaces the process between the exit and that point.
   [[ -n "$session" ]] && pane_mark "$session" "$SCLAUDE_IN_PANE"
   return "$status"
+}
+
+# The arguments that open a launched session again, into CLAUDE_AGAIN: the
+# first launch's up to and including `-n <name>`, which every caller passes
+# right before its prompt; the prompt gives way to the caller's word to carry
+# on, since the opening one was answered long ago. A `--session-id` becomes
+# `--resume`, since the conversation now exists.
+#
+#   claude_again_args <the launch's arguments…>
+claude_again_args() {
+  local arg named=""
+  CLAUDE_AGAIN=()
+  for arg in "$@"; do
+    if [[ -n "$named" ]]; then CLAUDE_AGAIN+=("$arg"); break; fi
+    case "$arg" in
+      --session-id) CLAUDE_AGAIN+=(--resume) ;;
+      -n) CLAUDE_AGAIN+=(-n); named=1 ;;
+      *) CLAUDE_AGAIN+=("$arg") ;;
+    esac
+  done
 }
 
 # What a session reopened after a usage limit is told.

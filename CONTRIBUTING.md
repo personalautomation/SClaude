@@ -48,10 +48,12 @@ proposes:
 Your name is the part of your git email before the `@`, or
 `git config --global sclaude.developer <name>`.
 
-sclaude's own review sessions never change this repository; when one finds a
-default that is wrong for everybody, it works around it in the product and
-leaves a note. Turning that note into a change here is what `sclaude propose`
-is for.
+sclaude's sessions never change your checkout of this repository: a session
+that finds a bug in sclaude fixes it in its feature's workshop, and sclaude
+sends that the same way — a pull request for you, after checking it for your
+product's details ([README, "When a session finds a bug in
+sclaude"](README.md#who-changes-the-orchestrator)). A change you make by hand
+is what `sclaude propose` is for.
 
 ## The rules of this repository
 

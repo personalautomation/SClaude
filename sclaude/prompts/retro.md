@@ -21,6 +21,8 @@ Change nothing while you look: no edits, no commits, no comments, no messages. A
 
 <include:retro-rules>
 
+<block:workshop>
+
 **How this ends.** Give the three sections as your last message.
 
 - **If sections 1 and 3 are both "nothing"**, `sclaude` closes this session itself. Write the marker first — `echo done > <done-marker>` — and then the report, with no tool call after it. About thirty seconds after your turn ends the session is closed and the report printed in the orchestrator's terminal; if I type anything in those thirty seconds, the closing is called off and the marker removed. Say in the report that the session closes by itself, and that `sclaude` then asks about the clean-up.

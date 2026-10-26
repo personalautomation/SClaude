@@ -7,7 +7,7 @@
 # breaks on ends up here — verified live, not from the documentation:
 #
 #   * "push is allowed, but not to main" — the product's main; sclaude's own
-#     checkout is the exception, see OWN_CHECKOUT. A rule with a `*` in the middle —
+#     checkout is never pushed, see OWN_CHECKOUT. A rule with a `*` in the middle —
 #     `Bash(git push * main)` — does not fire at all, and `git push` cannot be
 #     banned outright: step 2 pushes the branch, step 4 pushes review fixes. So
 #     the arguments have to be parsed, and that is a hook's work.
@@ -73,8 +73,7 @@ from _shell import (GIT_VALUED, SEPARATORS, call_form, closing_at, inner_command
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
 
-# The branch that must not be pushed to: it moves only by merging a PR. In
-# every repository but sclaude's own checkout (OWN_CHECKOUT).
+# The branch that must not be pushed to: it moves only by merging a PR.
 PROTECTED = "main"
 
 # The commands banned by prefix come from the session's policy: sclaude's
@@ -529,6 +528,31 @@ def shared_schema_asks(command):
     return None
 
 
+# `sclaude core-open` lets the session change sclaude, in its tree's workshop
+# (workshop.sh). A step's session asks the person first, every session anew:
+# Claude Code puts the question, and the model cannot answer it, in auto mode
+# too. The reviews run under --step friction — the retrospective, where the
+# person expects changes to sclaude, and the friction and deferred reviews,
+# which start in plan mode, so the plan the person approved is the yes — and
+# open it without a question.
+CORE_OPEN_ASK = ("this session asks to change sclaude itself: `sclaude core-open` opens the "
+                 "tree's workshop, a copy of sclaude's checkout, for this session to change "
+                 "and commit in. sclaude publishes the change once the session has reviewed "
+                 "it, after checking it for the product's details. Allow it only if you want "
+                 "sclaude changed from this session.")
+CORE_OPEN_FREE = ("friction",)
+
+
+def core_open_asks(command, step):
+    """The question to put before a step's session opens the workshop, or None."""
+    if step in CORE_OPEN_FREE:
+        return None
+    for words in segments(command) or []:
+        if words[:2] == ["sclaude", "core-open"]:
+            return CORE_OPEN_ASK
+    return None
+
+
 TAIL = _failsafe.TAIL
 
 
@@ -750,47 +774,50 @@ MAIN_REASON = ("main moves only by merging a pull request — that is "
 
 # sclaude's own checkout, which bin/sclaude knows as $INSTRUMENTS: the
 # repository this hook sits in, two levels up, found the way bin/sclaude finds
-# it. Its rule is the opposite of a product's: changes there go straight to
-# `main`, with no pull request. A code step once followed its plan into the
-# checkout, committed, and its push to main was refused twice; the person had
-# to finish by hand. So a push to `main` passes when the repository it runs in
-# is this checkout itself — the top of it, not a repository nested inside or a
-# worktree of it — and names one of its remotes rather than a path or URL.
-# --force and --no-verify are refused there as everywhere. A directory that
-# cannot be told, a repository named past the directory (--git-dir, GIT_DIR),
-# or a product that is this checkout get no exemption.
+# it. No session sclaude runs pushes it, from the checkout itself or from a
+# worktree of it — a tree's workshop (workshop.sh) is one. The repository is
+# public and the session works from a private product: sclaude publishes what
+# a session made in the workshop once it is reviewed, after checking it for
+# the product's details. Steps used to push its main themselves, unread.
 OWN_CHECKOUT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                              "..", ".."))
 
 
-OWN_PUSH_REASON = ("sclaude's checkout is public and this session works from a private "
-                   "project: commit there, and the person pushes after reading the commits")
+OWN_PUSH_REASON = ("this is sclaude's own repository, which is public, and this session works "
+                   "from a private product: commit in the workshop and run `sclaude core-ready` "
+                   "once the change is reviewed; sclaude publishes it when the session ends")
 
 
 UNKNOWN_PUSH_DIR = ("where this push runs cannot be told, and it may be sclaude's own "
-                    "checkout, which this session may not push: run it with a plain "
-                    "path (git -C <dir> push)")
+                    "checkout, which no session pushes: run it with a plain path "
+                    "(git -C <dir> push)")
 
 
-def toplevel(where):
-    """The top of the work tree a directory is in, or None."""
+def common_dir(where):
+    """The git directory a work tree's repository keeps, shared by its worktrees."""
     try:
-        done = subprocess.run(["git", "-C", where, "rev-parse", "--show-toplevel"],
-                              capture_output=True, text=True, timeout=5)
+        done = subprocess.run(["git", "-C", where, "rev-parse", "--path-format=absolute",
+                               "--git-common-dir"], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return None
     return os.path.realpath(done.stdout.strip()) if done.returncode == 0 else None
 
 
-def own_push(where, remote, redirected=False):
-    """Is this a push from sclaude's own checkout to one of its remotes?"""
-    if not where or not remote or redirected or "/" in remote or ":" in remote:
-        return False
-    for product in (root, project_dir()):
-        product = os.path.realpath(product) if product else ""
-        if product == OWN_CHECKOUT or product.startswith(OWN_CHECKOUT + os.sep):
-            return False
-    return toplevel(where) == OWN_CHECKOUT
+def own_repository(where):
+    """Is the repository at `where` sclaude's checkout or a worktree of it?
+
+    By the git directory they share, so that a copy of this hook in a workshop
+    (its tests run there before a change is published) knows the same one."""
+    mine = common_dir(OWN_CHECKOUT)
+    return mine is not None and common_dir(where) == mine
+
+
+def names_own(command):
+    """Whether a command names sclaude's checkout or a workshop of it."""
+    home = os.path.expanduser("~")
+    return any(form in command for form in (
+        OWN_CHECKOUT, OWN_CHECKOUT.replace(home, "~", 1), OWN_CHECKOUT.replace(home, "$HOME", 1),
+        ".sclaude/local/instruments"))
 
 
 def push_target(ref, known):
@@ -877,20 +904,13 @@ def push_refuses(words, command="", parts=(), where=None, raw=(),
     # repository it is as harmless as the same push with the remote named.
     if scratch_push(command, parts, where, remote[0] if remote else "origin", redirected):
         return None
-    # A retrospective may commit to sclaude's own checkout, never push it
-    # (--no-own-push): it works from a private project's material, and the
-    # checkout is public and reaches every machine from main. The person reads
-    # the commits and pushes them. Any branch: every one of them is public.
-    # A directory that cannot be told may be the checkout, and is refused: the
-    # session's own pushes have nothing to wait for, the product's step 3
-    # pushes its branch later.
-    if NO_OWN_PUSH and where is None:
-        return UNKNOWN_PUSH_DIR
-    if NO_OWN_PUSH and toplevel(where) == OWN_CHECKOUT:
+    # sclaude's own repository, on any branch: every one of them is public
+    # (OWN_CHECKOUT). A directory that cannot be told, or a repository named
+    # past it, is refused where the command names the checkout at all.
+    if (where is None or redirected) and names_own(command):
+        return UNKNOWN_PUSH_DIR if where is None else OWN_PUSH_REASON
+    if where is not None and own_repository(where):
         return OWN_PUSH_REASON
-    # The same for sclaude's own checkout, which goes to main without a PR.
-    if own_push(where, remote[0] if remote else "origin", redirected):
-        return None
     for ref in refs[1:] if len(refs) > 1 else []:
         # `HEAD` or `@` alone is the branch checked out, pushed under its own
         # name: `git push origin HEAD` on main is the push to main, and it went
@@ -1167,7 +1187,6 @@ def flag(argv, name):
 
 argv = sys.argv[1:]
 step = flag(argv, "--step")
-NO_OWN_PUSH = "--no-own-push" in argv
 # The product and the person whose policy this session works under. steps.sh
 # passes both; without a root the hook works out the repository it runs in.
 root = flag(argv, "--root")
@@ -1214,7 +1233,7 @@ if payload.get("tool_name") == "Bash":
             type(exc).__name__, exc)
     if reason:
         deny(reason, step, command)
-    question = shared_schema_asks(command)
+    question = core_open_asks(command, step) or shared_schema_asks(command)
     if question:
         # Asked of the person at the terminal rather than refused: not our
         # refusal, so not in the friction log either.

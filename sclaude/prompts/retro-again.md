@@ -8,4 +8,6 @@ Take everything you concluded above as a draft written before that, not as the a
 
 <include:retro-rules>
 
+<block:workshop>
+
 **How this ends** is as before: the three sections as your last message, the whole of each, not only what changed — the report is read on its own. If sections 1 and 3 are both "nothing", write the marker first — `echo done > <done-marker>` — and then the report, with no tool call after it, and `sclaude` closes this session itself. Otherwise leave the marker out, end the report by saying the session stays open, and I close it with `/exit` when we are done.

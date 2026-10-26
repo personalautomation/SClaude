@@ -162,6 +162,34 @@ breaks the other silently — grep before you edit:
   word or a start line changed on one side alone would leave the buttons
   doing nothing, or missing. -->
 
+- The workshop's record, `.sclaude/local/instruments.json` beside the
+  workshop (`workshop_record` in `sclaude/lib/workshop.sh`), lists in
+  `approved` the sessions that may write there; `sclaude/lib/workshop.py`
+  writes it and `approved` in `sclaude/hooks/write-guard.py` reads it, and
+  `--workshop DIR` names the record as `DIR.json`. `tests/write-guard.py` and
+  `tests/workshop.py` check each side.
+- `sclaude core-open` is asked of the person in a step and not in a review by
+  `core_open_asks` and `CORE_OPEN_FREE` (`--step friction`) in
+  `sclaude/hooks/forbidden-commands.py`; `sclaude/prompts/_workshop.md` tells
+  the session which, by `workshop_rules` in `workshop.sh`. `tests/hooks.py`
+  checks the hook.
+- sreview's mark of a finished run, `$S/branches/<branch>.reviewed` holding
+  the head it finished on, is written by `skills/sreview/SKILL.md` ("Report")
+  and read by `workshop_sreview_mark` in `workshop.sh` before `core-ready`
+  lets a maintainer's change go out; `tests/workshop.py` reads it.
+- `WORKSHOP_PHONE_MAX` in `workshop.sh` stays under `ASK_CONTEXT_MAX` in
+  `keepawake/telegramd.py`, which clips a question's context in the middle: a
+  leak question longer than that is asked at the terminal alone, so that a
+  "yes" from the phone never covers lines it did not show.
+- `<workshop-rules>` in `sclaude/prompts/_friction-body.md` and
+  `friction-deferred.md` is filled by `run_friction` in `sclaude/lib/run.sh`
+  and `cmd_deferred` in `sclaude/lib/deferred.sh`; `<block:workshop>` in the
+  step and retrospective prompts by `render_prompt` in `run.sh`.
+
+  <!-- Added by Claude on 2026-10-26 with the workshop: a name changed on one
+  side alone would leave a session unable to write where it was let, or a
+  maintainer's change published unreviewed. -->
+
 - `sclaude new`'s options (`--issue`, `--blocked-ok`, `--create-issue`,
   `--no-issue`; `new_from_args` in `bin/sclaude`) and `sclaude config set` are
   what the bot's menu runs (`new_start` in `keepawake/webmenu.py`, `config_set`
@@ -175,23 +203,33 @@ breaks the other silently — grep before you edit:
 ## Public repository, private projects
 
 This repository is public (personalautomation/SClaude). The projects sclaude
-drives are not. sclaude's review sessions — friction reviews, the monthly
-deferred review, retrospectives — work from those projects' material and
-change the product, never this checkout (`sclaude/hooks/write-guard.py
---readonly`). The one exception is the retrospective of a maintainer
-(`MAINTAINERS`): it may commit here, but not to the hooks, the policy or
-`githooks/`, and a hook refuses its push, so the person reads its commits
-before they go public (`review_guard_settings` in `sclaude/lib/steps.sh`).
-Whoever commits here, by hand or from a retrospective, still works from what
-they saw in a product, so nothing committed here names a project's details: no project names, no pull-request,
-issue or feature numbers, no file paths, tables, services or infrastructure
-of a product. Describe a problem in the orchestrator's own terms. What belongs
-to a project's story goes to that project.
+drives are not. So no session sclaude runs changes this checkout, and none
+pushes it: the live checkout is read-only to every one of them
+(`sclaude_guard_args` in `sclaude/lib/steps.sh`, `sclaude/hooks/write-guard.py
+--readonly`), and a push from it or from a worktree of it is refused
+(`OWN_CHECKOUT` in `sclaude/hooks/forbidden-commands.py`). A session that
+finds something to fix in sclaude fixes it in its tree's workshop, a worktree
+of this checkout at `.sclaude/local/instruments` (`sclaude/lib/workshop.sh`):
 
-<!-- Provenance: the retrospective's exception was added by Claude at the
-owner's request on 2026-10-24: its fixes to sclaude went to the product's
-deferred file, and waited there for a review that could not make them either.
-The push stays the person's for the reason in this section. -->
+- `sclaude core-open` lets it write there — asked of the person by Claude Code
+  in a step, every session anew; given without a question to the
+  retrospective and to the friction and deferred reviews, which start in plan
+  mode, so the approved plan is the yes;
+- it commits there and reviews its change — `/sreview` for a maintainer of
+  sclaude (`MAINTAINERS`), whatever review they choose for anybody else — and
+  runs `sclaude core-ready`;
+- when the session ends, sclaude publishes it: a check for the product's
+  details (`leaks` in `sclaude/lib/workshop.py`), which asks the person on a
+  hit, the tests the change touches, then `main` for a maintainer, squashed
+  into one commit, or one pull request per tree for anybody else. A change
+  left unfinished is not published, and its session is offered back.
+
+Whoever commits here, by hand or from a workshop, still works from what they
+saw in a product, so nothing committed here names a project's details: no
+project names, no pull-request, issue or feature numbers, no file paths,
+tables, services or infrastructure of a product. Describe a problem in the
+orchestrator's own terms. What belongs to a project's story goes to that
+project.
 
 Data about projects that sclaude collects stays with the project: the
 deferred friction and the session rules in the product's `.sclaude/`
@@ -204,15 +242,9 @@ in its `.sclaude/local/`, which git and every Vercel upload are kept out of
 `MAINTAINERS` lists the git addresses allowed to commit sclaude's core straight
 to `main`. Everybody else proposes a change on `dev/<name>` (the name comes
 from `developer_name` in `sclaude/lib/developer.sh`), which reaches `main`
-through a pull request. The review sessions do not commit here: they change
-the product, except a maintainer's retrospective, which may commit here but
-not push. A step session whose plan reaches into this checkout may commit
-here and push to `main` (`OWN_CHECKOUT` in `sclaude/hooks/forbidden-commands.py`).
-
-<!-- Provenance: changed by Claude at the owner's explicit decision on
-2026-10-13, after a code step's push to this checkout's main was refused
-twice and the person had to finish by hand. The old line said no session
-commits here. -->
+through a pull request. The same holds for what a session made in a workshop:
+sclaude sends a maintainer's to `main` and anybody else's as a pull request
+from the workshop's own `dev/<name>-<time>` branch.
 
 With `MAINTAINERS` absent everybody is a maintainer, which is what a copy used
 by one person wants.

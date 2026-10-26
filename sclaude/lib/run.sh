@@ -144,6 +144,15 @@ sys.stdout.write(feature_in_history(sys.argv[2]))' "$LIB" "$wt" 2>/dev/null || t
       ;;
   esac
 
+  # The paragraph on changing sclaude in the tree's workshop (workshop.sh):
+  # asked of the person in a step, free in the retrospective. The epilogue,
+  # whose tree is gone, and step 1, which writes nothing, have none.
+  local -x SCLAUDE_B_WORKSHOP=""
+  case "$step" in
+    code|pr|review|sync) SCLAUDE_B_WORKSHOP="$(workshop_rules "$wt" ask)" ;;
+    retro|retro-again) SCLAUDE_B_WORKSHOP="$(workshop_rules "$wt" free)" ;;
+  esac
+
   python3 "$LIB/render_prompt.py" "$file" "$PROMPTS" \
     || die "could not assemble the prompt for step $step"
   prompt_additions "$step" "${wt:-${REPO:-}}"
@@ -1434,7 +1443,8 @@ collect_denials() {
 # and what it cost. That is reading a transcript and reasoning, not a grep.
 #
 # The directory is the feature's worktree: what the review decides goes into the
-# product, on the feature's branch, and sclaude's checkout is read-only to it.
+# product, on the feature's branch, or into sclaude in the feature's workshop;
+# sclaude's live checkout is read-only to it.
 # That checkout is added with --add-dir, to read a restriction where it is
 # written, and so are the transcripts, which lie outside both: without it the
 # file tools will not go there.
@@ -1689,6 +1699,13 @@ PYEOF
       -e "s|<done-marker>|$done_file|g" -e "s|<worktree>|$wt|g" \
       -e "s|<branch>|$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "the feature's branch")|g")"
 
+  # The paragraph on changing sclaude in the feature's workshop (workshop.sh),
+  # free here: the plan I approve is the yes. Put in whole, past sed, since it
+  # runs to several lines.
+  prompt="$(WORKSHOP_RULES="$(workshop_rules "$wt" free)" python3 -c '
+import os, sys
+sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSHOP_RULES"]))' <<< "$prompt")"
+
   # The person asked for the proposals in CLAUDE.md now (friction_defer_proposals):
   # the body puts every proposal off, and is told otherwise for this review.
   if [[ -n "${FRICTION_APPLY_NOW:-}" ]]; then
@@ -1751,9 +1768,10 @@ PYEOF
     fi
   fi
 
-  # The review changes the product only: its policy, its deferred file, its
-  # code, on the feature's branch. sclaude's checkout is read-only to it
-  # (review_guard_settings), so there is no orchestrator range to record.
+  # The review changes the product on the feature's branch — its policy, its
+  # deferred file, its code — and sclaude only in the feature's workshop,
+  # which sclaude publishes itself (workshop.sh): there is no orchestrator
+  # range to record here.
   # Where the feature's branch stood when this review began, kept with it: a
   # resumed review starts on top of what its interrupted run committed, and
   # taking HEAD again here made that work invisible, never pushed or counted.
@@ -1775,7 +1793,7 @@ PYEOF
   # or new: a stalled transcript can exist, so a stall is often resumed.
   state_set "$state" "friction.$key.stalled" null 2>/dev/null || true
 
-  # The review changes the product, never sclaude (review_guard_settings).
+  # sclaude's live checkout is read-only to it (review_guard_settings).
   local -a guard=()
   local guard_out
   guard_out="$(review_guard_settings "$wt")" \
@@ -2116,30 +2134,36 @@ regression_push_fix() {
 # the way a pull request travels. The pull request is opened once and every
 # later push updates it; a closed or merged one makes way for a new one.
 # Returns 1 to leave the push to the plain path: no gh, an origin gh cannot
-# place on GitHub, or a fork that could not be made.
+# place on GitHub, or a fork that could not be made; 2 when the push itself
+# failed, which it has said how to finish.
 #
-#   instruments_propose <branch> <commits>
+#   [PROPOSE_DIR=<checkout>] [PROPOSE_INTRO=<text>] instruments_propose <branch> <commits>
+#
+# PROPOSE_DIR is where the branch is, $INSTRUMENTS by default; a workshop
+# (workshop.sh) is a worktree of it with the same remotes. PROPOSE_INTRO opens
+# the pull request's description.
 instruments_propose() {
-  local branch="$1" ahead="$2" slug remote=origin login head pr title body
+  local branch="$1" ahead="$2" dir="${PROPOSE_DIR:-$INSTRUMENTS}" slug remote=origin login head pr title body
+  local intro="${PROPOSE_INTRO:-Changes to sclaude from \`$branch\`, made by hand by this developer and proposed with \`sclaude propose\`. Later pushes to the branch update this pull request.}"
   command -v gh >/dev/null 2>&1 || return 1
-  slug="$(cd "$INSTRUMENTS" && GH_PROMPT_DISABLED=1 gh repo view \
+  slug="$(cd "$dir" && GH_PROMPT_DISABLED=1 gh repo view \
             --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || return 1
   [[ "$slug" == */* ]] || return 1
   if [[ "$(GH_PROMPT_DISABLED=1 gh api "repos/$slug" --jq .permissions.push 2>/dev/null)" != "true" ]]; then
-    if ! git -C "$INSTRUMENTS" remote get-url fork >/dev/null 2>&1; then
+    if ! git -C "$dir" remote get-url fork >/dev/null 2>&1; then
       info "  instruments: you cannot push to $slug; making your fork of it, once"
-      ( cd "$INSTRUMENTS" && GH_PROMPT_DISABLED=1 gh repo fork \
+      ( cd "$dir" && GH_PROMPT_DISABLED=1 gh repo fork \
           --remote --remote-name fork >/dev/null 2>&1 ) || return 1
-      git -C "$INSTRUMENTS" remote get-url fork >/dev/null 2>&1 || return 1
+      git -C "$dir" remote get-url fork >/dev/null 2>&1 || return 1
     fi
     remote=fork
   fi
 
   info "  instruments: pushing $ahead commit(s) to $remote/$branch"
-  if ! GIT_TERMINAL_PROMPT=0 git -C "$INSTRUMENTS" push -q -u "$remote" "$branch" >/dev/null 2>&1; then
+  if ! GIT_TERMINAL_PROMPT=0 git -C "$dir" push -q -u "$remote" "$branch" >/dev/null 2>&1; then
     warn "  instruments: push failed — the work is committed but not sent"
-    warn "  finish it by hand: git -C $INSTRUMENTS push $remote $branch"
-    return 0
+    warn "  finish it by hand: git -C $dir push $remote $branch"
+    return 2
   fi
 
   head="$branch"
@@ -2155,15 +2179,13 @@ instruments_propose() {
   fi
 
   # Named by its one commit, or by whose fixes they are.
-  if [[ "$(git -C "$INSTRUMENTS" rev-list --count origin/main..HEAD 2>/dev/null)" == 1 ]]; then
-    title="$(git -C "$INSTRUMENTS" log -1 --format=%s 2>/dev/null)"
+  if [[ "$(git -C "$dir" rev-list --count origin/main..HEAD 2>/dev/null)" == 1 ]]; then
+    title="$(git -C "$dir" log -1 --format=%s 2>/dev/null)"
   else
     title="sclaude: fixes from $(developer_name 2>/dev/null || echo "$branch")"
   fi
-  body="$(printf '%s\n\n%s\n\n%s\n' \
-    "Changes to sclaude from \`$branch\`, made by hand by this developer and proposed with \`sclaude propose\`; sclaude's sessions never commit to it." \
-    "$(git -C "$INSTRUMENTS" log origin/main..HEAD --format='- %s' 2>/dev/null)" \
-    "Later pushes to the branch update this pull request.")"
+  body="$(printf '%s\n\n%s\n' "$intro" \
+    "$(git -C "$dir" log origin/main..HEAD --format='- %s' 2>/dev/null)")"
   if pr="$(GH_PROMPT_DISABLED=1 gh pr create --repo "$slug" --base main \
              --head "$head" --title "$title" --body "$body" 2>/dev/null)"; then
     info "  instruments: pushed, and opened a pull request: $pr"
@@ -2216,7 +2238,10 @@ cmd_propose() {
     info "  $ahead commit(s) moved from main to $new; main is origin's again"
     branch="$new"
   fi
-  instruments_propose "$branch" "$ahead" && return 0
+  local sent=0
+  instruments_propose "$branch" "$ahead" || sent=$?
+  (( sent == 0 )) && return 0
+  (( sent == 2 )) && return 1
   warn "  could not send it as a pull request (gh missing, or origin is not on GitHub)."
   warn "  The commits are on $branch: push it and open the pull request by hand."
   return 1

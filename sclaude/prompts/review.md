@@ -96,6 +96,8 @@ The orchestrator captured the PR state as of the start of this step — checks a
 
 <include:friction>
 
+<block:workshop>
+
 **How this session ends.** You are step 4, the last one; the `sclaude` orchestrator drives the steps from outside. There are no further sessions: merge, migration promote and `vercel --prod` I do by hand, and the orchestrator reminds me of them when I exit.
 
 The preview deploy isn't yours: the orchestrator offers it when I exit. It can do what you can't from here — the project link lives in `.vercel/` of the main repo, not in this worktree, and `vercel` run here would create a new project instead of deploying to ours.

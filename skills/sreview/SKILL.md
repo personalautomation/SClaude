@@ -1,6 +1,6 @@
 ---
 name: sreview
-description: Run iterations of code review and fixing on the current branch until the review finds nothing substantive, stopping every N iterations (default 5) to ask whether to go on. Each review is a fresh subagent; questions to the user are asked per class of finding, and the answers are kept as policies that settle similar findings now and in later runs. Works in any repository; in a project run by sclaude it follows sclaude's review settings and rules. Runs only when the user invokes /sreview.
+description: Run iterations of code review and fixing on the current branch until the review finds nothing substantive, stopping every N iterations (default 5) to ask whether to go on. Each review is a fresh subagent; questions to the user are asked per class of finding, and the answers are kept as policies that settle similar findings now and in later runs. Works in any repository; in a project run by sclaude it follows sclaude's review settings and rules. Runs only when the user invokes /sreview, or when a sclaude session's instructions tell it to review the change it made in sclaude's workshop.
 argument-hint: "[iterations before asking, default 5]"
 ---
 
@@ -224,6 +224,14 @@ commit, policies added.
 - A question with no answer is not a yes: nothing it covers is declined.
 
 ## Report
+
+**The mark of a finished run.** When the run stopped by itself (step 6: the
+last review found nothing substantive and everything it found is handled),
+write the head it finished on — the full SHA, `git rev-parse HEAD` — as the
+only line of `$S/branches/<branch>.reviewed`, making its folder if needed. A
+run stopped any other way writes nothing, and removes a mark left there from
+before. sclaude reads it before it publishes a change made in its workshop
+(`sclaude core-ready`): no mark at the head, nothing goes out.
 
 When it stops: iterations run, and per iteration what was found, fixed and
 declined; the policies added this run, each in a line; commits;

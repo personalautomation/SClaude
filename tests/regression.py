@@ -1399,7 +1399,7 @@ if wedged:
           server_wedged("=== e2e ===\n" + GOTO + EXPECT + "  2 failed\n"), False)
     check("not-wedged-on-an-earlier-attempt",
           server_wedged("=== e2e ===\n" + GOTO + "  1 failed\n"
-                        "=== e2e (again, on a fresh dev server) ===\n" + EXPECT
+                        "=== e2e (again, on a fresh server) ===\n" + EXPECT
                         + "  1 failed\n"), False)
     check("not-wedged-when-nothing-failed",
           server_wedged("=== e2e ===\n  61 passed (7.0m)\n"), False)
@@ -1428,8 +1428,20 @@ if early:
           stopped_early("=== e2e ===\n" + EXPECT + "  1 failed\n  60 passed\n"), False)
     check("not-stopped-early-on-an-earlier-attempt",
           stopped_early("=== e2e ===\n" + STOPPED
-                        + "=== e2e (again, on a fresh dev server) ===\n" + EXPECT
+                        + "=== e2e (again, on a fresh server) ===\n" + EXPECT
                         + "  1 failed\n"), False)
+# The local e2e runs against the run's own build when the project says how to
+# serve it, and the dev server comes back however the suite ended.
+check_true("serves-the-build-only-after-a-build",
+           '" $parts " == *" build "*' in regression
+           and 'project_command "e2e:server" "$wt"' in regression)
+check_true("dev-server-back-after-e2e",
+           '[[ -n "$served" ]] && regression_serve_dev "$wt"' in regression)
+check_true("mark-names-what-the-proxy-reads",
+           'REGRESSION_SERVING_MARK=".sclaude/local/feature/serving-build"' in regression
+           and '"serving-build"' in open(os.path.join(ROOT, "bin", "sclaude-proxy"),
+                                         encoding="utf-8").read())
+
 # The running line counts the failures as they come, beside the finished specs.
 check_true("progress-counts-failures",
            "${failed_n:+ · $failed_n failed}" in regression

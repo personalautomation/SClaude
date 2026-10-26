@@ -102,6 +102,10 @@ START_LIMIT = 600
 # first build keeps the port shut a while longer. This is how long a finished
 # start is still "starting" rather than "failed".
 BUILD_GRACE = float(os.environ.get("SCLAUDE_PROXY_BUILD_GRACE") or 180)
+# How long the regression's mark that its build holds the port is believed:
+# two hours, well past a whole suite, so a run that died leaves the feature
+# without a lazy start for no longer than that.
+SERVING_LIMIT = 7200
 
 # Per feature label: the `sclaude dev` that is starting it and when, the one
 # stopping it, and when a connection for it was last opened. In memory only: a
@@ -479,6 +483,16 @@ def start_state(label, wt):
     a request through here in between to clear it. That is started again, once;
     a server that goes quiet twice in a row after a clean start is a failure."""
     now = time.time()
+    # The regression is swapping the dev server for its own build (sclaude's
+    # regression_serve_build): the port is closed for a moment on purpose, and
+    # a start here would take it from the build. A mark older than any suite
+    # is a run that died halfway, and the start goes ahead.
+    try:
+        mark = os.path.join(feature_dir(wt), "serving-build")
+        if now - os.path.getmtime(mark) < SERVING_LIMIT:
+            return "starting"
+    except OSError:
+        pass
     tries = 0
     entry = STARTING.get(label)
     if entry:

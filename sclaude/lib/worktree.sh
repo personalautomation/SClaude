@@ -445,6 +445,14 @@ ensure_dev() {
   # A tree being removed gets no server, and no database either — see stop_dev.
   [[ -e "$wt/.sclaude/local/feature/closing" ]] && return 0
 
+  # The regression's build on the port instead of the dev server, left there by
+  # a run that did not finish — see regression_serve_build. Found running from
+  # this tree, it would pass below for the dev server.
+  if [[ -n "${REGRESSION_SERVING_MARK:-}" && -e "$wt/$REGRESSION_SERVING_MARK" ]]; then
+    stop_own_dev "$wt" >/dev/null 2>&1
+    rm -f "$wt/$REGRESSION_SERVING_MARK"
+  fi
+
   # Before starting rather than after: the server reads the environment once at
   # start-up, and once up against prod it stays that way until a restart. The
   # check stands here rather than only in prepare_worktree, because a step may

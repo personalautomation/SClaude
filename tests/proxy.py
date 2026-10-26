@@ -666,6 +666,16 @@ def main():
         time.sleep(0.3)
         check("a closing feature is never started", calls_for(log, "closing"), [])
 
+        # The regression swapping its build in: the port is shut on purpose
+        # for a moment, and a start would take it from the build.
+        serving_wt = register(registry, root, "serving", free_port())
+        open(os.path.join(serving_wt, ".sclaude/local/feature", "serving-build"), "w").close()
+        status, _, body = request(port, "serving." + host)
+        check("a feature serving its build waits rather than starts", status,
+              "HTTP/1.1 503 Service Unavailable")
+        time.sleep(0.3)
+        check("a feature serving its build is never started", calls_for(log, "serving"), [])
+
         # A stopped feature is started by the first request for it, once.
         status, head, body = request(port, "c." + host)
         check("a stopped feature answers 503 while it starts", status,

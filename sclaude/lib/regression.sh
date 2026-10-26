@@ -642,6 +642,62 @@ regression_stopped_early() {
     | grep -qE 'Testing stopped early after [0-9]+ maximum allowed failures'
 }
 
+# The local e2e against the run's own build rather than the dev server.
+#
+# On 2026-10-26 a project's suite took 9.5 minutes in four workers against its
+# `next dev`, and 3.9 against `next start` on the build the run had made a
+# minute before: the dev server, compiling and watching, was the whole limit.
+# So a project may name, as `commands["e2e:server"]`, how its build is served.
+# For the length of the e2e that server takes the feature's port, so the
+# address, the cookies and anything allowed by origin stay what they were, and
+# the dev server comes back after. Only when `build` ran earlier in the same
+# run: a build left from some other day is not the code being judged.
+#
+# REGRESSION_SERVING_MARK says so to sclaude-proxy, which otherwise starts the
+# dev server itself on finding the port closed — in the second between the two
+# servers, that start would take the port from the build. ensure_dev clears
+# it, and stops a build it finds serving: a dev server asked for later must not
+# take the build for itself.
+REGRESSION_SERVING_MARK=".sclaude/local/feature/serving-build"
+
+# Brings the build up on the feature's port. 0 once it answers from this tree;
+# otherwise the dev server is put back and 1 returned, for the suite to run
+# against that as it always did.
+regression_serve_build() {
+  local wt="$1" serve port url log waited=0
+  serve="$(project_command "e2e:server" "$wt")" && [[ -n "$serve" ]] || return 1
+  port="$(feature_port "$wt")" || return 1
+  url="$(dev_address "$wt")"
+  log="$wt/.sclaude/local/feature/e2e-server.log"
+  touch "$wt/$REGRESSION_SERVING_MARK"
+  stop_own_dev "$wt" >/dev/null 2>&1
+  # Started the way ensure_dev starts the dev server, for the same reasons:
+  # a session of its own, every stream closed, the feature's database and
+  # address in its environment.
+  ( cd "$wt" && dev_env_load "$wt" && export PORT="$port" SCLAUDE_DEV_URL="$url" \
+      && setsid --fork bash -c "$serve" > "$log" 2>&1 < /dev/null & ) >/dev/null 2>&1
+  # A minute: `next start` is up in well under a second, and anything slower
+  # is a server that will not come.
+  while (( waited < 120 )); do
+    if curl -s -o /dev/null -m 2 "http://127.0.0.1:$port/" 2>/dev/null \
+       && [[ "$(dev_cwd "$(dev_pid "$port")")" == "$wt" ]]; then
+      return 0
+    fi
+    sleep 0.5
+    waited=$((waited + 1))
+  done
+  regression_serve_dev "$wt"
+  return 1
+}
+
+# Puts the dev server back where the build was.
+regression_serve_dev() {
+  local wt="$1"
+  stop_own_dev "$wt" >/dev/null 2>&1
+  rm -f "$wt/$REGRESSION_SERVING_MARK"
+  ensure_dev "$wt" >/dev/null 2>&1
+}
+
 # One run of one stage. Returns 0 when every part passed.
 #
 # The log is .sclaude/local/feature/regression.log, beside dev.log and friction.log, and it is
@@ -721,7 +777,7 @@ regression_run_body() {
   local state="$wt/.sclaude/local/feature/state.json"
   local log="$wt/.sclaude/local/feature/regression.log"
   local base parts part cmd failed="" failed_specs="" passed=0
-  local started part_started part_total rc retried why from
+  local started part_started part_total rc retried why served from
   # The tree under test, taken before the run rather than after it: a change
   # made while the suite ran was not tested, and must not be called green.
   local tree; tree="$(regression_tree "$wt")"
@@ -854,7 +910,15 @@ regression_run_body() {
     # whole command again rather than only the failed specs: a project may
     # declare it as a chain, and a whole green suite is what the fixing session
     # would have proved.
-    retried="" why=""
+    retried="" why="" served=""
+    if [[ "$stage" == "local" && "$part" == "e2e" && " $parts " == *" build "* ]] \
+       && [[ -n "$(project_command "e2e:server" "$wt" 2>/dev/null)" ]]; then
+      if regression_serve_build "$wt"; then
+        served=1
+      else
+        echo "--- e2e: the build did not come up under e2e:server (.sclaude/local/feature/e2e-server.log); running against the dev server" >> "$log"
+      fi
+    fi
     while :; do
       from=$(( $(wc -l < "$log") + 1 ))
       ( cd "$wt" && eval "$cmd" ) >> "$log" 2>&1 < /dev/null &
@@ -901,20 +965,26 @@ regression_run_body() {
       if [[ -n "$why" ]]; then
         retried=1
         {
-          echo "--- e2e: $why; restarting the dev server and running e2e again"
+          echo "--- e2e: $why; restarting the server and running e2e again"
           echo ""
-          echo "=== e2e (again, on a fresh dev server) ==="
+          echo "=== e2e (again, on a fresh server) ==="
           echo "\$ $cmd"
           echo ""
         } >> "$log"
         regression_line "$stage" "$parts" "$part" started "" "$wt" \
-          "$why — restarting the dev server, running again"
-        declare -F stop_own_dev >/dev/null && stop_own_dev "$wt" >/dev/null 2>&1
-        ensure_dev "$wt" >/dev/null 2>&1
+          "$why — restarting the server, running again"
+        if [[ -n "$served" ]] && regression_serve_build "$wt"; then
+          :
+        else
+          served=""
+          declare -F stop_own_dev >/dev/null && stop_own_dev "$wt" >/dev/null 2>&1
+          ensure_dev "$wt" >/dev/null 2>&1
+        fi
         continue
       fi
       break
     done
+    [[ -n "$served" ]] && regression_serve_dev "$wt"
     part_total=$(( $(date +%s) - part_started ))
     local load_after; load_after="$(regression_load)"
     echo "--- $part: $(regression_duration "$part_total"), load ${load_after:-?} on $(nproc 2>/dev/null || echo ?) CPUs" >> "$log"

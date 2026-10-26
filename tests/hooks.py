@@ -387,6 +387,45 @@ FORBIDDEN = [
     ("TOKEN=$(cat f) git push origin main", DENY),
     ("A=`cat f` gh pr merge 82", DENY),
     ("A=$(cat f) B=plain gh pr merge 82", DENY),
+    # A bracket in quotes inside a substitution is text: the `)` in the pattern
+    # closed the body early, and a read-only grep was refused as unparsable.
+    ("n=$(grep -n '^ [0-9]*) x' f | cut -d: -f1); sed -n \"$((n)),$((n+30))p\" f", ALLOW),
+    ("x=$(echo ')'; gh pr merge 5)", DENY),
+    ("x=$(echo \")\"; gh pr merge 5)", DENY),
+    ("x=$(echo \"$(gh pr merge 5)\")", DENY),
+    ("x=$(echo 'open", DENY),
+    # A heredoc's body is data whatever its delimiter: an apostrophe there is
+    # no quote, and the commit message written this way was refused.
+    ("echo \"$(cat <<EOF\nIt's done\nEOF\n)\"", ALLOW),
+    ("x=$(cat <<EOF\nIt's\nEOF\n); y=$(gh pr merge 5)", DENY),
+    ("x=$(cat <<-EOF\n\tIt's )\n\tEOF\n)$(gh pr merge 5)", DENY),
+    # An unquoted heredoc expands $( … ), and a quoted one does not.
+    ("x=$(cat <<EOF\nIt's $(gh pr merge 5)\nEOF\n)", DENY),
+    ("cat <<EOF\nIt's $(gh pr merge 5)\nEOF", DENY),
+    ("cat <<'EOF'\nIt's $(gh pr merge 5)\nEOF", ALLOW),
+    # A here-string, a padded delimiter, `EOF)` and a comment end nothing early.
+    ("x=$(tr a b <<<hi\n); y=$(gh pr merge 5)", DENY),
+    ("x=$(tr a b <<<hi)", ALLOW),
+    ("x=$(cat <<EOF\n  EOF\nIt's\nEOF\n); y=$(gh pr merge 5)", DENY),
+    ("x=$(cat <<EOF\nIt's\nEOF\n  )", ALLOW),
+    ("x=$(cat <<EOF\nhi\nEOF); y=$(gh pr merge 5)", DENY),
+    ("x=$(echo a # <<EOF\n); y=$(gh pr merge 5)", DENY),
+    # A `#` inside a word is no comment, and a delimiter is the whole word.
+    ("echo a\\ #$(gh pr merge 5)", DENY),
+    ("echo ${x/ #/}$(gh pr merge 5)", DENY),
+    ("echo ${x:- #}$(gh pr merge 5)", DENY),
+    ("cat <<END-MSG\nIt's\nEND-MSG", ALLOW),
+    # `${…}` has quotes of its own, and `<<=` is arithmetic.
+    ("echo \"${x:-\"} #$(gh pr merge 5)\"}\"", DENY),
+    ("echo \"${x:-'}'}\" #$(gh pr merge 5)", ALLOW),
+    ("(( a <<= 1 ))\necho ok", ALLOW),
+    ("cat <<=E\n# $(gh pr merge 5)\n=E", DENY),
+    ("echo ${x:-<(gh pr merge 5)}", DENY),
+    ("echo ${x:->(gh pr merge 5)}", DENY),
+    ("echo \"${x:-<(gh pr merge 5)}\"", ALLOW),
+    ("echo $${x ; echo ok", ALLOW),
+    ("cat <<E\"OF\"\nIt's $(gh pr merge 5)\nEOF", ALLOW),
+    ("x=$(cat <<END-MSG\nIt's\nEND-MSG\n); y=$(gh pr merge 5)", DENY),
     # Reading Vercel deploys nothing, and a fixing session needs it: the preview
     # regression fails on an environment this tree cannot see otherwise.
     ("vercel env ls preview", ALLOW),

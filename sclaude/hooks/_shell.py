@@ -213,13 +213,35 @@ def substitutions(command):
     """The commands inside $( … ), <( … ), >( … ) and backticks, or None.
 
     Each runs as a command of its own, and `x=$(gh pr merge 5)` merged with no
-    ban looking: the words around it are an assignment. Single quotes and the
-    body of a heredoc with a quoted delimiter expand nothing and are skipped.
-    One nested in another is found when its outer one is judged. None when a
-    bracket is left open: unknown is not permission.
+    ban looking: the words around it are an assignment. Single quotes, a
+    comment and the body of a heredoc with a quoted delimiter expand nothing
+    and are skipped. One nested in another is found when its outer one is
+    judged. None when a bracket is left open: unknown is not permission.
     """
-    text = strip_quoted_heredocs(command)
-    out, i, quote = [], 0, ""
+    found = scan(command, 0, False)
+    return None if found is None else found[1]
+
+
+def body_end(text, start):
+    """The index of the `)` that closes a substitution whose body starts at
+    `start`, or None when nothing does."""
+    found = scan(text, start, True)
+    return None if found is None else found[0]
+
+
+def scan(text, i, closing):
+    """Read `text` from `i` as the shell does: (where it ends, the bodies of the
+    substitutions met on the way), or None when something is left open.
+
+    With `closing`, it ends at the `)` that closes a substitution's body.
+    Counting every bracket closed `$(grep '^ [0-9]*) x' f)` at the one in the
+    pattern, left the body with an open quote, and a read-only grep was
+    refused as unparsable. So a bracket in quotes, in a comment or in a
+    heredoc's body is text; in double quotes only `$(` and backticks expand,
+    and in a heredoc's body too, when its delimiter is not quoted, while an
+    apostrophe there is no quote.
+    """
+    out, quote, depth, heredocs = [], "", 1, []
     while i < len(text):
         ch = text[i]
         if ch == "\\" and quote != "'":
@@ -241,19 +263,11 @@ def substitutions(command):
         # Process substitution is not one inside double quotes: there `->(`
         # is text, and only $( and backticks expand.
         if (ch == "$" or (ch in "<>" and not quote)) and text[i + 1:i + 2] == "(":
-            depth, j, inner = 1, i + 2, ""
-            while j < len(text) and depth:
-                if text[j] == "(":
-                    depth += 1
-                elif text[j] == ")":
-                    depth -= 1
-                if depth:
-                    inner += text[j]
-                j += 1
-            if depth:
+            j = body_end(text, i + 2)
+            if j is None:
                 return None
-            out.append(inner)
-            i = j
+            out.append(text[i + 2:j])
+            i = j + 1
             continue
         if ch == "`":
             j = text.find("`", i + 1)
@@ -262,30 +276,206 @@ def substitutions(command):
             out.append(text[i + 1:j])
             i = j + 1
             continue
+        if text.startswith("$$", i):
+            i += 2
+            continue
+        # `${…}` is one word with quotes of its own: `"${x:-"} #"}"` is all
+        # text, and its `#` opens no comment.
+        if text.startswith("${", i):
+            found = parameter(text, i + 2, quote == '"')
+            if found is None:
+                return None
+            out += found[1]
+            i = found[0] + 1
+            continue
+        if quote:
+            i += 1
+            continue
+        if text.startswith("<<<", i):
+            i += 3
+            continue
+        word = heredoc_word(text, i) if text.startswith("<<", i) else None
+        if word:
+            delimiter, quoted, end = word
+            heredocs.append((delimiter, quoted, text.startswith("<<-", i)))
+            i = end
+            continue
+        # A `#` opens a comment only where a word starts: not after an
+        # escaped blank, as in `a\ #`.
+        if ch == "#" and word_start(text, i):
+            end = text.find("\n", i)
+            i = len(text) if end == -1 else end
+            continue
+        if ch == "\n" and heredocs:
+            for delimiter, quoted, tabs in heredocs:
+                body = heredoc_body(text, i, delimiter, tabs, closing)
+                if body is None:
+                    return None
+                start, i = body
+                if not quoted:
+                    inner = expansions(text, start, i)
+                    if inner is None:
+                        return None
+                    out += inner
+            heredocs = []
+            continue
+        if closing and ch == "(":
+            depth += 1
+        elif closing and ch == ")":
+            depth -= 1
+            if not depth:
+                return i, out
         i += 1
+    return None if closing else (len(text), out)
+
+
+def parameter(text, i, in_double):
+    """(the index of the `}` that closes a `${` whose inside starts at `i`, the
+    substitutions in it), or None when nothing closes it.
+
+    Quotes inside it are its own, nested in any outside: a `}` in them closes
+    nothing, in `"${x:-'}'}"` too. A process substitution runs in it unless
+    it stands in double quotes.
+    """
+    out, quote = [], ""
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and quote != "'":
+            i += 2
+            continue
+        if quote == "'":
+            if ch == "'":
+                quote = ""
+        elif ch == "'" and not quote:
+            quote = "'"
+        elif ch == '"':
+            quote = "" if quote == '"' else '"'
+        elif text.startswith("$$", i) and not quote:
+            i += 1
+        elif text[i:i + 2] in ("$(", "<(", ">(") and (ch == "$" or not (quote or in_double)):
+            j = body_end(text, i + 2)
+            if j is None:
+                return None
+            out.append(text[i + 2:j])
+            i = j
+        elif ch == "`":
+            j = text.find("`", i + 1)
+            if j == -1:
+                return None
+            out.append(text[i + 1:j])
+            i = j
+        elif text.startswith("${", i):
+            found = parameter(text, i + 2, in_double or quote == '"')
+            if found is None:
+                return None
+            out += found[1]
+            i = found[0]
+        elif ch == "}" and not quote:
+            return i, out
+        i += 1
+    return None
+
+
+def word_start(text, i):
+    """Whether a word starts at `i`: the text's start, or after an unescaped
+    blank or operator."""
+    if i == 0:
+        return True
+    if text[i - 1] not in " \t\n;|&(":
+        return False
+    escapes = len(text[:i - 1]) - len(text[:i - 1].rstrip("\\"))
+    return escapes % 2 == 0
+
+
+ARITHMETIC_SHIFT = re.compile(r"=(?:[\s\d$]|$)")
+
+
+def heredoc_word(text, i):
+    """(delimiter, quoted, where the word ends) for a heredoc opened at `i`,
+    or None when `<<` there opens none.
+
+    The delimiter is the whole word with its quotes taken off, as bash reads
+    it: `<<END-MSG` ends at `END-MSG`, and `<<E"OF"` at a quoted `EOF`. A word
+    starting with a digit is taken for arithmetic (`$((1<<2))`), and so is
+    `=` before a blank, a digit or a `$` (`(( a <<= 1 ))`); `<<=E` is a heredoc.
+    """
+    j = i + 3 if text.startswith("<<-", i) else i + 2
+    while j < len(text) and text[j] in " \t":
+        j += 1
+    if j >= len(text) or text[j].isdigit() or ARITHMETIC_SHIFT.match(text, j):
+        return None
+    word, quoted, quote = "", False, ""
+    while j < len(text):
+        ch = text[j]
+        if quote:
+            if ch == quote:
+                quote = ""
+            else:
+                word += ch
+        elif ch in "'\"":
+            quote, quoted = ch, True
+        elif ch == "\\" and j + 1 < len(text):
+            word, quoted = word + text[j + 1], True
+            j += 1
+        elif ch in " \t\n;|&<>()":
+            break
+        else:
+            word += ch
+        j += 1
+    if quote or not word:
+        return None
+    return word, quoted, j
+
+
+def heredoc_body(text, i, delimiter, tabs, closing):
+    """(where the body starts, where its delimiter line ends) for a heredoc
+    whose body follows the newline at `i`, or None when the delimiter never
+    comes.
+
+    The delimiter line is the delimiter alone, as bash reads it (`<<-` takes
+    leading tabs off first): a body line `  EOF` is the body's. Inside a
+    substitution `EOF)` ends it too, and the `)` closes the substitution.
+    """
+    start = pos = i + 1
+    while pos <= len(text):
+        end = text.find("\n", pos)
+        line = text[pos:] if end == -1 else text[pos:end]
+        line = line.lstrip("\t") if tabs else line
+        if line == delimiter:
+            return start, len(text) if end == -1 else end
+        if closing and line.startswith(delimiter + ")"):
+            return start, (len(text) if end == -1 else end) - len(line) + len(delimiter)
+        if end == -1:
+            return None
+        pos = end + 1
+    return None
+
+
+def expansions(text, start, stop):
+    """The substitutions in a heredoc's body between `start` and `stop`: only
+    `$(` and backticks mean anything there, and a quote is text."""
+    out, k = [], start
+    while k < stop:
+        if text[k] == "\\":
+            k += 2
+            continue
+        if text.startswith("$(", k):
+            j = body_end(text, k + 2)
+            if j is None or j >= stop:
+                return None
+            out.append(text[k + 2:j])
+            k = j + 1
+            continue
+        if text[k] == "`":
+            j = text.find("`", k + 1, stop)
+            if j == -1:
+                return None
+            out.append(text[k + 1:j])
+            k = j + 1
+            continue
+        k += 1
     return out
 
-
-def strip_quoted_heredocs(command):
-    """The command without the bodies of heredocs whose delimiter is quoted."""
-    lines = command.split("\n")
-    out, i = [], 0
-    while i < len(lines):
-        line = lines[i]
-        out.append(line)
-        i += 1
-        for m in HEREDOC.finditer(line):
-            delimiter = m.group(1) or m.group(2) or m.group(3)
-            quoted = m.group(3) is None
-            start = i
-            while i < len(lines) and lines[i].strip() != delimiter:
-                i += 1
-            if not quoted:
-                out.extend(lines[start:i])
-            if i < len(lines):
-                out.append(lines[i])
-            i += 1
-    return "\n".join(out)
 
 # Wrappers whose first positional argument is not the command but a parameter
 # of their own: `timeout 5 …` and `nice -n 5 …` take a number. For timeout it is

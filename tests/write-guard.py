@@ -231,6 +231,20 @@ for command, cwd, want in (
         # A bracket in quotes closes no group.
         ('echo "a)" > notes.txt', "/home/u/myapp-1", "allow"),
         ("echo '(x' && echo y > notes.txt", "/home/u/myapp-1", "allow"),
+        # A heredoc's apostrophe inside a substitution leaves no body unjudged.
+        ("x=$(cat <<EOF\nIt's\nEOF\n); y=$(git commit -qm x)", "/home/u/sclaude", "deny"),
+        ("x=\"$(cat <<EOF\nIt's\nEOF\n)$(git commit -qm x)\"", "/home/u/sclaude", "deny"),
+        ("x=$(tr a b <<<hi\n); y=$(git commit -qm x)", "/home/u/sclaude", "deny"),
+        ("x=$(cat <<EOF\nhi\nEOF); y=$(git commit -qm x)", "/home/u/sclaude", "deny"),
+        ("x=$(echo a # <<EOF\n); y=$(git commit -qm x)", "/home/u/sclaude", "deny"),
+        ("echo a\\ #$(git commit -qm x)", "/home/u/sclaude", "deny"),
+        ("echo ${x/ #/}$(git commit -qm x)", "/home/u/sclaude", "deny"),
+        ("cat <<END-MSG\nhi\nEND-MSG\n$(git commit -qm x)", "/home/u/sclaude", "deny"),
+        ("cat <<E\\OF\nhi\nEOF\n$(git commit -qm x)", "/home/u/sclaude", "deny"),
+        ("x=$(echo 'open", "/home/u/sclaude", "deny"),
+        ("x=$(cat <<EOF\n  EOF\nIt's\nEOF\n); y=$(git commit -qm x)", "/home/u/sclaude", "deny"),
+        # A body left open that names no read-only place is not this guard's.
+        ("x=$(echo 'open", "/home/u/myapp-1", "allow"),
         # A `>` in quotes is text, not a redirection.
         ('cd /home/u/myapp-1 && git commit -m "a -> b"', "/home/u/sclaude", "allow"),
         ("git log --format='%h>%s'", "/home/u/sclaude", "allow"),

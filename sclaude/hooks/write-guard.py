@@ -501,7 +501,17 @@ def refuses(payload, team, readonly, depth=0, allow=(), lenient=False, why=None)
             there = there if there is not None else (readonly[0] if readonly and unknown() else cwd)
             if there not in visited:
                 visited.append(there)
-        nested = [(text, there) for text in (substitutions(command) or []) for there in visited]
+        subs = substitutions(command)
+        if subs is None:
+            # A body left open is unparsable, as below: dropping it judged
+            # nothing past it, and `$(cat <<EOF … It's … EOF); $(git commit)`
+            # committed in the read-only checkout. Run from inside it, the
+            # line need not name it.
+            if readonly and (named() or inside(cwd)):
+                return reason
+            if team and TEAM.search(command):
+                return REASON
+        nested = [(text, there) for text in (subs or []) for there in visited]
         for words, where in found:
             inner = inner_command([words[0].rsplit("/", 1)[-1]] + [unmask(w) for w in words[1:]])
             if inner is not None:

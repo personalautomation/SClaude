@@ -1237,8 +1237,13 @@ function shell(start) {
     if (v.startsWith(location.host)) v = v.slice(location.host.length);
     if (!v.startsWith('/')) v = '/' + v;
     frame.contentWindow.location.href = v; url.blur(); };
+  const back = () => frame.contentWindow.history.back();
   if (tg && tg.isVersionAtLeast('6.1')) {
-    tg.BackButton.show(); tg.BackButton.onClick(() => frame.contentWindow.history.back());
+    tg.BackButton.show(); tg.BackButton.onClick(back);
+  } else if (window.Telegram && window.Telegram.WebView) {
+    // A client this page takes for an old one may still show the back
+    // button of the page before: its press still comes, as an event.
+    window.Telegram.WebView.onEvent('back_button_pressed', back);
   }
   frame.src = start;
 }
@@ -1288,9 +1293,14 @@ if (!tg || !tg.initData) {
   fetch('/__sclaude/tg/ticket', {method: 'POST', body: tg.initData, credentials: 'same-origin'})
     .then((r) => r.ok ? r.text() : Promise.reject(r.status))
     .then((ticket) => {
+      // From what Telegram's script gathered, not from the address: a page
+      // reached from the menu has none there, and its script takes them from
+      // its own storage. Without them the features' side reads as an old
+      // client: no back button and no safe area, the bar under Telegram's.
       const keep = new URLSearchParams();
-      for (const [k, v] of new URLSearchParams(location.hash.slice(1)))
-        if (k.startsWith('tgWebApp') && k !== 'tgWebAppData') keep.set(k, v);
+      const params = (window.Telegram.WebView && window.Telegram.WebView.initParams) || {};
+      for (const k in params)
+        if (k.startsWith('tgWebApp') && k !== 'tgWebAppData' && params[k] != null) keep.set(k, params[k]);
       location.replace(location.protocol + '//' + location.hostname + ':' + %(app)d
         + '/__sclaude/enter?' + new URLSearchParams({t: ticket, f: label, p: path}) + '#' + keep);
     })

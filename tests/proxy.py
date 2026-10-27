@@ -386,6 +386,8 @@ def check_gate(proxy_port, root):
               all(x in body for x in ("/__sclaude/tg/ticket", "/__sclaude/enter?", "10000")), True)
         check("gate: and Telegram's signed data stays behind",
               "k !== 'tgWebAppData'" in body, True)
+        check("gate: its view settings go along, from Telegram's script, not the address",
+              "Telegram.WebView.initParams" in body, True)
         check("gate: the bot's side is framed by itself and Telegram Web alone",
               "frame-ancestors 'self' https://web.telegram.org" in head, True)
         status, _, body = request(port, host, "/__sclaude/tg")

@@ -1871,7 +1871,7 @@ main() {
     # instruments as "another sclaude" for as long as it lived.
     # core-open and core-ready are run by a session, under the sclaude that
     # started it: an update from here would move the checkout under both.
-    status|ls|dev|news|checks|doctor|"config set"|core-open|core-ready|_handoff|-h|--help|help|-*) unset ASK_DIR ;;
+    status|ls|dev|news|checks|doctor|"config set"|core-open|core-ready|_flow|_handoff|-h|--help|help|-*) unset ASK_DIR ;;
     *)
       # The same line decides what is recorded (terminal.sh): a conversation
       # is worth reading back, a report is not. First, so the record holds
@@ -1950,6 +1950,9 @@ main() {
     reset)         shift; cmd_reset "$(slugify "${1:-}")" ;;
     # Internal: the end of a step's session, handed over by code_reload.
     _session-ended) shift; cmd_session_ended "$@" ;;
+    # Internal: where a feature stands and its actions, as JSON for its
+    # process map (sclaude-proxy); a report, so no update and no channel.
+    _flow)         shift; cmd_flow "$(slugify "${1:-}")" ;;
     # Internal: the timer handing over a PR that QA accepted.
     _handoff)      shift; cmd_handoff "$(slugify "${1:-}")" ;;
     # Internal: the clean-up in a fresh process (done_fresh), whose caller

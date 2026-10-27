@@ -193,6 +193,77 @@ In the terminal a line with the issue's and the PR's numbers is printed above th
 same list: there is no card there, and half the list's items are about precisely
 those.
 
+## The process map
+
+**One model of the cycle draws every picture of it.** `sclaude/lib/process.py`
+holds the lanes, the nodes, the edges forward and back, and the commands with
+the node each leads to. From it come the printed map,
+`docs/presentations/bpmn_diagrams.html` (rebuilt by
+`docs/presentations/build.py`), and a feature's own map on the proxy,
+`/__sclaude/flow?f=<label>`; the proxy also serves the printed page itself,
+drawn from the model on each request, at `/__sclaude/bpmn` — main's line in
+its list of features. The proxy runs for days while sclaude's update pulls
+new code under it, so it reads `process.py` again whenever the file changed
+(`process_map`): the map it serves is the checkout's, with no restart. A drawing kept by hand beside the code would go
+stale the first time a step moved; `tests/process.py` instead fails when the
+model and the code part: a command dispatched in `bin/sclaude` and missing
+from `COMMANDS` or the other way round, an action verb in `actions.sh` with no
+command, a step number that is not `cycle_number`'s, a place `position` can
+answer that the page cannot light, a built page that is not what the model
+draws now.
+
+Besides the cycle at a glance, a feature's states and the whole process, two
+maps take apart what the whole one marks on its sessions: W, a session
+changing sclaude in its workshop and the publishing after it, and F, the
+friction review after it — each a block on the whole map leading in, and
+its own lanes for the rest.
+
+The maps are BPMN with vertical lanes and the flow running down, so the width
+is a page's and the length is what splits. An edge running down bends in the
+gap above its target; one that would cross a node in its way takes a channel
+on the left, and one running back up takes a channel on the right — no line
+crosses a node, and every way back is the same dashed red. Printed (A4
+landscape), the large map is cut into sheets between lanes, never through
+one, each sheet a window on the same drawing that overlaps its neighbours, so
+they glue. The page cuts the sheets again in the browser for the paper and
+scale chosen above the map (`PRINT_SCRIPT`), and sets `@page` to that paper:
+a browser's own Scale shrinks each sheet without making fewer, and its
+dialog hides Layout and Paper size once a page names its paper.
+
+**Every block, arrow and command can be pointed at** (`INTERACT_SCRIPT`,
+shared by both pages). Each carries a `data-key` — `n:<node>`, `e:<map>:<n>`,
+`c:<command>` — and the script lights what is hovered and what is selected
+as a union: a block with its arrows and their other ends and the commands
+open there (`WHEN` maps a command's "When" to the blocks), an arrow with its
+two ends, a command with the place it leads to; the rest fades. A click
+selects, Ctrl-click adds or takes away, Esc and a floating button clear. The
+note under the pointer is built from the model: a block's lane and kind, the
+session's model, effort and permission mode (`SPEC`, checked against
+`STEP_SPEC`, `SYNC_MODEL` and the launches — kept off the block itself), what
+it does at more length than fits on it (`DETAILS`), and which commands lead
+to it; an arrow's two ends and why it is taken.
+
+**Where a feature stands is the state's, not the map's.** `position` in
+`process.py` reads `state.json` — the step, an open fixing session, a running
+regression, a sync left open, QA's mark (`qa.sha`, `qa.accepted`), the
+hand-off, the production hold as `prod_red_hold` sees it, the retrospective's
+runs — plus GitHub's word on the pull request and the epilogue's own record,
+which `cmd_flow` (`sclaude _flow <name>`) passes it. `_flow` is a report: no
+update of sclaude, no question channel, one line of JSON on stdout with the
+node, the menu's words for the step, and the action list from
+`feature_action_items` — the same computation the terminal's list and the
+phone's use, so the map never offers what the menu would not. The proxy runs
+it in the feature's tree, one run at a time per feature — killed with
+everything it started when it takes over a minute — an answer kept fourteen
+seconds (`SCLAUDE_FLOW_FRESH`), and the page asks again every fifteen while
+it is in view, every minute while it is not. Asked that often, `_flow` does
+not fetch (`FLOW_NO_FETCH`: the menu's "behind" is as fresh as the last
+fetch) and asks GitHub only past step 4, where the pull request's state is
+the place. Opened from the Mini App (`map_button` in
+`keepawake/telegramd.py`, `start=1`), the map starts the feature's dev server
+as opening the feature would; a feature that never had one has no label yet,
+and its button runs `sclaude dev --no-browser` first.
+
 ## Starting from an issue
 
 **The cycle starts from a choice rather than from a name thought up on the

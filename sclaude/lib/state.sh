@@ -501,12 +501,18 @@ list_features() {
 # Also where a recorded run (terminal.sh) is tied to the feature it works on,
 # and its tab named for it: every command that names a feature comes through
 # here.
+#
+#   feature_worktree <slug> [quiet]
 feature_worktree() {
   local wt
   wt="$(list_features | awk -F'\t' -v want="$1" '$1 == want { print $2; found = 1 } END { exit !found }')" \
     || return 1
-  declare -F term_attach >/dev/null && term_attach "$wt"
-  declare -F tab_title >/dev/null && tab_title "$1"
+  # quiet: a report about the feature (cmd_flow), not work on it — the
+  # terminal's record and the tab's title are left as they are.
+  if [[ "${2:-}" != quiet ]]; then
+    declare -F term_attach >/dev/null && term_attach "$wt"
+    declare -F tab_title >/dev/null && tab_title "$1"
+  fi
   printf '%s\n' "$wt"
 }
 

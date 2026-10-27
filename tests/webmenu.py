@@ -278,24 +278,42 @@ try:
                           "  2)   Return to development (return)   back to step 2, with notes\n"
                           "  3)   Sync with main (sync)            up to date\n"
                           "  4)   Drop the feature (drop)          clear its traces\n  5)   Go back"}
-    saved_feats = telegramd.features_of_name
+    saved_feats, saved_dev, saved_origin = (telegramd.features_of_name, telegramd.feature_dev,
+                                            telegramd.gate_origin)
     telegramd.features_of_name = lambda name: ([("alpha", "4/7 done, waiting for merge", "")], "")
+    telegramd.feature_dev = lambda repo, slug: ("alpha", 3101, True)
+    telegramd.gate_origin = lambda *a: "https://box.tail1.ts.net:8443"
     try:
         telegramd.pending_ask = lambda channel: ACTIONS
         view = press("fc:acts:shop/alpha")
         check("the actions are not a numbered question on the page", "[1-5]" in view["text"], False)
         check("the current step is marked", "📍<b>review</b>" in view["text"], True)
-        flat = [(b.get("style") == "caption" and "§" + b["text"]) or b["callback_data"]
+        flat = [(b.get("style") == "caption" and "§" + b["text"])
+                or b.get("callback_data") or (b.get("web_app") and "map")
                 for row in view["rows"] for b in row]
-        check("grouped by where they lead: back, staying, forward, the end",
-              flat, ["§" + t("act.back", n="2 · code"), "pa:q2:2", "§" + t("act.stay"), "pa:q2:3",
-                     "§" + t("act.forward"), "pa:q2:1", "§" + t("act.end"), "pa:q2:4",
-                     "pa:q2:5", "topic:shop:alpha"])
+        expected = ["§" + t("act.back", n="2 · code"), "pa:q2:2", "§" + t("act.stay"), "pa:q2:3",
+                    "§" + t("act.forward"), "pa:q2:1", "§" + t("act.end"), "pa:q2:4",
+                    "pa:q2:5", "topic:shop:alpha"]
+        # The process map, through the gate, when the feature has a dev label.
+        maps = [b["web_app"]["url"] for row in view["rows"] for b in row if b.get("web_app")]
+        check("the map is offered", len(maps), 1)
+        if maps:
+            expected.insert(expected.index("pa:q2:5"), "map")
+            check("the map opens through the gate",
+                  "/__sclaude/tg?f=" in maps[0] and "p=%2F__sclaude%2Fflow%3Ff%3D" in maps[0], True)
+        check("grouped by where they lead: back, staying, forward, the end", flat, expected)
         check("each says what it does",
               [b.get("hint") for row in view["rows"] for b in row if b.get("callback_data") == "pa:q2:2"],
               ["back to step 2, with notes"])
+        # A feature with no dev server yet: the button starts one first.
+        telegramd.feature_dev = lambda repo, slug: None
+        view = press("fc:acts:shop/alpha")
+        check("with no dev server the map starts one",
+              [b.get("callback_data") for row in view["rows"] for b in row
+               if b.get("text") == t("act.map")], [telegramd.card_data("map", "shop/alpha")])
     finally:
         telegramd.features_of_name = saved_feats
+        telegramd.feature_dev, telegramd.gate_origin = saved_dev, saved_origin
     telegramd.pending_ask = lambda channel: None
     saved_busy = telegramd.feature_busy
     telegramd.feature_busy = lambda repo, slug: True

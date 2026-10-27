@@ -226,10 +226,13 @@ def connection_echo():
 
 def start_proxy(registry, stub, log, idle, tick, grace=180):
     port = free_port()
+    # A code-server service that does not exist: the list's own Code Server
+    # lines must not depend on whether this machine runs one.
     env = dict(os.environ, SCLAUDE_PROXY_PORT=str(port), SCLAUDE_PROXY_BIND="127.0.0.1",
                SCLAUDE_DEV_REGISTRY=registry, SCLAUDE_BIN=stub, STUB_LOG=log,
                SCLAUDE_DEV_IDLE=str(idle), SCLAUDE_PROXY_TICK=str(tick),
-               SCLAUDE_PROXY_BUILD_GRACE=str(grace))
+               SCLAUDE_PROXY_BUILD_GRACE=str(grace),
+               SCLAUDE_CODE_SERVICE="sclaude-test-no-such.service")
     proc = subprocess.Popen([sys.executable, PROXY], env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     wait_for(lambda: answers_on(port), 5)
@@ -590,7 +593,7 @@ def main():
             status, _, body = request(port, host)
             check("a running, enabled service is offered, by its own port",
                   "href='http://127.0.0.1:%d/'" % (svc_base + 3) in body
-                  and "svc — Studio" in body, True)
+                  and "svc — Supabase Studio" in body, True)
             check("a disabled service is never offered, even unprobed",
                   "svc — Inbucket" in body, False)
         finally:
@@ -606,7 +609,7 @@ def main():
             fh.write("[studio]\nenabled = true\nport = 999\n")
         status, _, body = request(port, host)
         check("a stopped feature's own services are not offered",
-              "svc2 — Studio" in body, False)
+              "svc2 — Supabase Studio" in body, False)
 
         # main has no database block of its own — its Studio is the shared
         # stack's, on the literal port its config names, not base + slot.
@@ -620,7 +623,7 @@ def main():
             status, _, body = request(port, host)
             check("main's own Studio is offered on its config's literal port",
                   "href='http://127.0.0.1:%d/'" % main_studio_port in body
-                  and "main — Studio" in body, True)
+                  and "main — Supabase Studio" in body, True)
         finally:
             main_studio.close()
 

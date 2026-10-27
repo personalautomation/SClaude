@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Build the two slide decks from src/ into self-contained HTML pages.
+"""Build the two slide decks from src/ into self-contained HTML pages, and
+the process map from sclaude/lib/process.py.
 
 Each deck is src/head.html + the deck's slides + src/tail.html. The decks
 link to each other: by default through their sibling file names, so the
@@ -11,10 +12,17 @@ links when the pages are published somewhere else.
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "src"
+sys.path.insert(0, str(HERE.parent.parent / "sclaude" / "lib"))
+import process  # noqa: E402
+
+# The process map: drawn from the model the code is checked against, so it is
+# rebuilt here rather than edited (tests/process.py fails on a stale copy).
+PROCESS = "bpmn_diagrams.html"
 
 DECKS = [
     # file, title, the mark at the foot of each slide, the link to the other deck
@@ -44,6 +52,8 @@ def main():
             page = page.replace(key, url)
         (args.out / name).write_text(page)
         print(args.out / name)
+    (args.out / PROCESS).write_text(process.doc())
+    print(args.out / PROCESS)
 
 
 if __name__ == "__main__":

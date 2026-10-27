@@ -407,6 +407,20 @@ dev_address() {
   feature_url "$wt"
 }
 
+# The feature's process map on the proxy (sclaude/lib/process.py): where it
+# stands in the cycle, lit, and what can be done with it now. Nothing when
+# the proxy is not up or the feature has no label yet: the map is the
+# proxy's page.
+#
+#   flow_address <worktree>
+flow_address() {
+  local label
+  [[ -z "$DEV_PORT_PINNED" ]] && proxy_up || return 1
+  label="$(state_get "$1/.sclaude/local/feature/state.json" dev.label 2>/dev/null)"
+  [[ -n "$label" && "$label" != "null" ]] || return 1
+  echo "http://localhost:$PROXY_PORT/__sclaude/flow?f=$label"
+}
+
 # Everything a process started in the feature must see besides its own
 # arguments: today, the feature's own database (featuredb.sh). A no-op where that
 # module is not loaded.

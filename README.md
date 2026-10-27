@@ -17,6 +17,10 @@ they live here, symlinked into `~/.local/bin` and `~/.claude/skills`.
 
 How the parts work inside, and why they were built that way, is in
 [`docs/sclaude.md`](docs/sclaude.md) and [`docs/keepawake.md`](docs/keepawake.md).
+sclaude's cycle drawn as BPMN — every lane, every way back, every command and
+where it leads, interactive and printable — is
+[`docs/presentations/bpmn_diagrams.html`](docs/presentations/bpmn_diagrams.html),
+one page that opens in a browser from a checkout.
 
 ## Presentations
 
@@ -33,6 +37,22 @@ the arrow keys; on a phone the slides stack into one column. GitHub shows the
 file's source, so open it from a checkout. The decks are built from
 `docs/presentations/src/` by `python3 docs/presentations/build.py`; edit the
 sources and rebuild rather than editing the built pages.
+
+Beside them, [`bpmn_diagrams.html`](docs/presentations/bpmn_diagrams.html)
+is the process map: the cycle at a glance, a feature's states, the whole
+process as BPMN with every lane and every way back, how a session changes
+sclaude itself (the blocks marked W), the friction review that follows the
+sessions marked F, and every command with the place it leads to. To print it, choose the paper and the scale on the
+page itself, above the whole process (A4 landscape at 100% is recommended;
+"Fit the width" puts the whole width on one sheet, the map going on down):
+the large map is cut between lanes into overlapping sheets that glue
+together, and the page tells how many; every printed page names its
+section in its header and its number at the foot. The page names its paper, so the
+print dialog shows no Layout or Paper size; its Scale would only shrink each
+sheet. The same build draws it
+from `sclaude/lib/process.py`, which `tests/process.py` checks against the
+code; a feature's own copy, with where it stands lit, is on the proxy (see
+[bin/sclaude-proxy](#binsclaude-proxy)).
 
 Everything written in this repository is in English; see `CLAUDE.md` for the
 rule and its three deliberate exceptions.
@@ -667,6 +687,29 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
 - `localhost:3000`, or the machine's Tailscale address — the list of features.
   From another device, choosing a feature makes the bare address serve it from
   then on.
+- Under each feature and main, a line for each web tool of its own: its
+  Supabase Studio and Inbucket while its database stack runs, Code Server
+  opened on its tree (started on the way when it is down; from this machine
+  — the phone has its own through the gate), and its process map.
+- `localhost:3000/__sclaude/flow?f=<feature>` — the feature's process map: the
+  whole cycle as BPMN, with where the feature stands lit and, beside it, the
+  actions open to it now, each with its command and the place on the map it
+  leads to. It follows the feature as it moves (every few seconds). The list of
+  features links it on a line of its own, "<feature> — Process map (BPMN)",
+  and under main the same line opens the whole cycle with no feature on it
+  (`/__sclaude/bpmn`). Every step's header prints it under "Open it at",
+  and in the Telegram Mini App it is "🗺 Process map" in a feature's actions and
+  on its card, which starts the feature's dev server too (and gives it one
+  first when it has never had one).
+
+On either map, pointing at a block, an arrow or a command lights it and what
+it touches — a block its arrows and their other ends, an arrow its two ends, a
+command the place it leads to, a block the commands open there — and fades the
+rest, with a note on what it is and does. A click keeps it lit, Ctrl-click adds
+more (the lit things add up), and Esc or the floating button clears. On the
+printed page the commands' names are also pinned beside the maps, so both are
+read together; unpin them from the list itself or from the heading of the
+commands' section.
 
 Different addresses rather than different ports keep features apart in one
 browser: cookies ignore the port, so on ports alone signing in to one feature

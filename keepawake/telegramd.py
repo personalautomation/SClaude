@@ -667,6 +667,22 @@ def phone_button(origin, label):
              "web_app": {"url": "%s/__sclaude/tg?f=%s" % (origin, label)}}] if origin else []
 
 
+def map_button(origin, key, dev):
+    """The feature's process map in the Mini App (sclaude/lib/process.py,
+    served by the proxy at /__sclaude/flow), through the gate; the map asks
+    the proxy to start the dev server it is reached by (start=1). A feature
+    that never had a dev server has no address yet: the button then starts
+    one first (the card's "map" press), and the card comes back with the
+    map's own button. None while phone access is off."""
+    if not origin:
+        return []
+    if not dev:
+        return [{"text": t("act.map"), "callback_data": card_data("map", key)}]
+    path = "/__sclaude/flow?f=%s&start=1" % dev[0]
+    return [{"text": t("act.map"), "web_app": {"url": "%s/__sclaude/tg?f=%s&p=%s" % (
+        origin, dev[0], urllib.parse.quote(path, safe=""))}}]
+
+
 def code_app_button(origin, folder=""):
     # code-server inside the Mini App, through the gate's /__code/ (an
     # experiment). Only while phone access is on and code-server is up: the
@@ -3489,6 +3505,19 @@ class Handler(object):
                 if (feature_dev(repo, slug) or (0, 0, False))[2]:
                     break
                 time.sleep(0.5)
+        elif action == "map":
+            # A feature with no dev server yet has no address for its map:
+            # `sclaude dev` gives it one and starts it. Left to run on its
+            # own — a first build takes minutes, and this handler answers
+            # every other press — while the card waits only for the address,
+            # which comes first, and comes back with the map's own button.
+            run("cd " + shlex.quote(feature_wt(repo, slug))
+                + " && setsid nohup sclaude dev --no-browser >/dev/null 2>&1 &", timeout=10)
+            for _ in range(20):
+                if feature_dev(repo, slug):
+                    break
+                time.sleep(0.5)
+            note = t("card.mapready") if feature_dev(repo, slug) else t("card.mapfailed")
         elif action == "code":
             run("systemctl --user start code-server.service")
             # The card redrawn at once would still call it stopped.
@@ -4567,10 +4596,13 @@ def card(name, slug, note="", in_topic=True, feats=None, config=None):
             if ON_PAGE:
                 # A row each: where to open it, and starting or stopping it.
                 rows += [[b] for b in row] + [[switch]]
+                rows += [map_button(origin, key, dev)] if origin else []
             else:
                 rows.append(row + [switch])
         else:
             text += t("card.nodev")
+            if ON_PAGE and origin:
+                rows.append(map_button(origin, key, None))
         # code-server opens the worktree itself with ?folder=, whichever
         # project it was started on.
         folder = "/?folder=" + urllib.parse.quote(feature_wt(repo, slug))

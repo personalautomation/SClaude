@@ -569,6 +569,7 @@ run_step() {
   # localhost:3000 is the list of features, and the feature's own address is
   # the one thing a person needs from this header.
   echo "   ${BOLD}Open it at $(dev_address "$wt")${OFF}"
+  local map; map="$(flow_address "$wt")" && info "   Where it stands: $map"
   info "   $model / $effort / $mode · $wt"
   # Before the server and before the session: merging main in under a running
   # server means changing the code under its feet, and a merge stalled on

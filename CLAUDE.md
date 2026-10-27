@@ -190,6 +190,21 @@ breaks the other silently — grep before you edit:
   side alone would leave a session unable to write where it was let, or a
   maintainer's change published unreviewed. -->
 
+- The process map, `sclaude/lib/process.py`, names every command
+  `bin/sclaude` dispatches (`COMMANDS`), every verb of the action list in
+  `sclaude/lib/actions.sh`, the steps as `STEPS` and `cycle_number` number
+  them, and reads `state.json`'s fields to say where a feature stands
+  (`position`, called by `cmd_flow`); `bin/sclaude-proxy` serves it at
+  `/__sclaude/flow`, the Mini App opens it through the gate (`FLOW_PREFIX`,
+  `map_button` in `keepawake/telegramd.py`), and
+  `docs/presentations/bpmn_diagrams.html` is built from it.
+  `tests/process.py` checks each side and fails on a stale built page: a
+  command, a step or a way back added to the code goes on the map in the
+  same change.
+
+  <!-- Added by Claude on 2026-10-26 with the process map: a map that
+  disagrees with the code is worse than none. -->
+
 - `sclaude new`'s options (`--issue`, `--blocked-ok`, `--create-issue`,
   `--no-issue`; `new_from_args` in `bin/sclaude`) and `sclaude config set` are
   what the bot's menu runs (`new_start` in `keepawake/webmenu.py`, `config_set`

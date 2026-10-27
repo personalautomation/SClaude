@@ -25,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 
 from keepawake import telegramd
 from keepawake.i18n import current, set_lang, t
@@ -266,6 +267,17 @@ def is_actions(question):
     return sum(1 for o in options if ACT_KEY.search(str(o))) >= 3
 
 
+def flow_button(name, slug):
+    """The feature's process map, through the gate (telegramd.map_button):
+    opened at once when the feature has a dev server, started first when it
+    has none."""
+    origin = telegramd.gate_origin()
+    if not origin:
+        return []
+    dev = telegramd.feature_dev(telegramd.repo_path(name), slug)
+    return telegramd.map_button(origin, telegramd.channel_key(name, slug), dev)
+
+
 def actions_screen(key, question):
     """The list of actions as a page screen: where the feature is, and the
     actions grouped by where each leads — back, staying, forward, after the
@@ -319,6 +331,10 @@ def actions_screen(key, question):
         if groups[group]:
             rows.append([{"text": t(caption), "style": "caption"}])
             rows += [[b] for _n, b in groups[group]]
+    # The feature's process map, where it stands lit, through the gate.
+    flow = flow_button(name, slug)
+    if flow:
+        rows.append(flow)
     if cancel:
         rows.append([dict(cancel, text=t("act.cancel"))])
     # The seven steps in a line, the feature's own marked: "4/7 done, …" is
@@ -742,7 +758,7 @@ def press(bot, user, action, context, now, home=""):
 
 
 # The card buttons that start something; the rest of a card's only redraw it.
-CARD_ACTS = ("go", "acts", "open", "start", "stop", "code")
+CARD_ACTS = ("go", "acts", "open", "start", "stop", "code", "map")
 # A result longer than this is a screen (Chrome's, code-server's), and the
 # chat keeps the button's name instead.
 TRACE_MAX = 300

@@ -68,24 +68,21 @@ friction_count() {
   grep -cE '^20[0-9]{2}-' "$log" 2>/dev/null || true
 }
 
-# Gathers the applicable actions and carries out the chosen one.
+# The items of a feature's action list, appended to the caller's arrays
+# `labels` (what the person sees, a tab before the hint) and `verbs` (what
+# is carried out), index for index. One computation for the terminal's list,
+# the phone's and the process map's (cmd_flow), so they cannot disagree
+# about what applies.
 #
-# The items are assembled in two linked parts: labels are what the human sees,
-# verbs what will be carried out. Their index is shared, so the order in one
-# place determines both the appearance and the meaning; they have no way of
-# diverging.
-feature_actions() {
-  require_repo
-  local slug="$1" wt state step pr issue branch behind fcount
-  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
-  wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+#   local -a labels=() verbs=(); feature_action_items <slug> [worktree]
+feature_action_items() {
+  local slug="$1" wt="${2:-}" state step pr issue branch behind fcount
+  [[ -n "$wt" ]] || wt="$(feature_worktree "$slug")" || return 1
   state="$wt/.sclaude/local/feature/state.json"
   step="$(state_get "$state" step || echo "?")"
   pr="$(state_get "$state" pr || true)";       [[ "$pr" == "null" ]] && pr=""
   issue="$(state_get "$state" issue || true)"; [[ "$issue" == "null" ]] && issue=""
   branch="$(state_get "$state" branch || true)"
-
-  local -a labels=() verbs=()
 
   # Continue comes first, so that Enter all the way through matches what the
   # same menu does with the checkbox cleared. A closed feature has nothing to
@@ -105,7 +102,10 @@ feature_actions() {
   # and by a button on a phone — and then there is nobody to refresh it. We pull
   # it ourselves, quietly and without dying: there may be no network, and being
   # left without an action list because of that is not acceptable.
-  git -C "$REPO" fetch origin --quiet 2>/dev/null || true
+  # Not for the process map (FLOW_NO_FETCH, cmd_flow): it asks every few
+  # seconds, and a fetch each time would race the sessions' own in the
+  # shared repository; its "behind" is as fresh as the last fetch anybody made.
+  [[ -n "${FLOW_NO_FETCH:-}" ]] || git -C "$REPO" fetch origin --quiet 2>/dev/null || true
 
   behind="$(branch_behind "$branch" || true)"
   if [[ -z "$behind" ]]; then
@@ -300,6 +300,68 @@ feature_actions() {
   verbs+=(drop)
   labels+=("Go back"$'\t'"")
   verbs+=(back)
+}
+
+# Where a feature stands and what can be done with it now, as one line of
+# JSON for its process map (`sclaude _flow <name>`, sclaude-proxy's
+# /__sclaude/flow/state): the node of sclaude/lib/process.py it stands on,
+# the menu's own words for its step, and the items of its action list. Asks
+# nothing and prints nothing else: the proxy reads stdout whole.
+#
+#   cmd_flow <slug>
+cmd_flow() {
+  require_repo >/dev/null
+  local slug="$1" wt state step branch pr_state="" where node title why
+  wt="$(feature_worktree "$slug" quiet)" || { printf '{"error": "no such feature"}\n'; return 1; }
+  state="$wt/.sclaude/local/feature/state.json"
+  step="$(state_get "$state" step 2>/dev/null || echo plan)"
+  branch="$(state_get "$state" branch 2>/dev/null || true)"
+  # GitHub is asked only past step 4, where the pull request's state is the
+  # place: before it the state says it all, and the map asks every few seconds.
+  [[ "$step" == "done" && -n "$branch" ]] && pr_state="$(branch_pr_state "$branch")"
+  # Asked once: step_label and the action list below ask it again.
+  local PR_STATE_KNOWN=1 PR_STATE="$pr_state"
+  IFS=$'\t' read -r node title why \
+    < <(python3 "$LIB/process.py" position "$state" "$pr_state" "$(epilogue_dir)/$slug.json")
+  where="$(step_label "$step" "$wt" 2>/dev/null)"
+  local -a labels=() verbs=()
+  FLOW_NO_FETCH=1 feature_action_items "$slug" "$wt" >/dev/null 2>&1 </dev/null || true
+  local i
+  for i in "${!labels[@]}"; do
+    # The list's separators and its way out are the menu's, not actions.
+    [[ "${verbs[$i]}" == nothing || "${verbs[$i]}" == back ]] && continue
+    printf '%s\t%s\n' "${verbs[$i]}" "${labels[$i]}"
+  done | python3 -c '
+import json, sys
+node, title, why, where, feature = sys.argv[1:6]
+actions = []
+for line in sys.stdin:
+    verb, _, rest = line.rstrip("\n").partition("\t")
+    label, _, hint = rest.partition("\t")
+    actions.append({"verb": verb, "label": label, "hint": hint})
+print(json.dumps({"feature": feature, "node": node, "title": title, "why": why,
+                  "where": where, "actions": actions}))
+' "$node" "$title" "$why" "$where" "$slug"
+}
+
+# Gathers the applicable actions and carries out the chosen one.
+#
+# The items are assembled in two linked parts: labels are what the human sees,
+# verbs what will be carried out. Their index is shared, so the order in one
+# place determines both the appearance and the meaning; they have no way of
+# diverging.
+feature_actions() {
+  require_repo
+  local slug="$1" wt state pr issue
+  local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+  state="$wt/.sclaude/local/feature/state.json"
+  # For the line above the list; the items read the state themselves.
+  pr="$(state_get "$state" pr || true)";       [[ "$pr" == "null" ]] && pr=""
+  issue="$(state_get "$state" issue || true)"; [[ "$issue" == "null" ]] && issue=""
+
+  local -a labels=() verbs=()
+  feature_action_items "$slug" "$wt"
 
   # The issue and the pull request as a line above the list. In the terminal
   # that is simply convenient: the list of actions on a feature has until now

@@ -60,11 +60,13 @@
 # build — for the tests.
 import asyncio
 import html
+import importlib
 import ipaddress
 import json
 import os
 import re
 import secrets
+import signal
 import socket
 import subprocess
 import sys
@@ -78,6 +80,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)),
                                 "..", "sclaude", "lib"))
 import feature_db  # noqa: E402 — PORT_SLOTS, the single source of truth
 import dev_login  # noqa: E402
+import process  # noqa: E402 — the process map, and a feature's place on it
 
 PORT = int(os.environ.get("SCLAUDE_PROXY_PORT") or 3000)
 BIND = os.environ.get("SCLAUDE_PROXY_BIND") or "0.0.0.0"
@@ -188,7 +191,7 @@ def features():
 # Kept to the two that are worth opening in a browser. The API port (Kong) is
 # an endpoint for curl/fetch, not a page, and Analytics needs Logflare
 # credentials nobody has here — both would just be dead links.
-SERVICE_NAMES = {"studio": "Studio", "local_smtp": "Inbucket", "inbucket": "Inbucket"}
+SERVICE_NAMES = {"studio": "Supabase Studio", "local_smtp": "Inbucket", "inbucket": "Inbucket"}
 SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*(#.*)?$")
 ENABLED_RE = re.compile(r"^\s*enabled\s*=\s*(true|false)\s*(#.*)?$")
 PORT_RE = re.compile(r"^\s*port\s*=\s*(\d+)\s*(#.*)?$")
@@ -341,7 +344,7 @@ def probe_features():
     return out
 
 
-def listing(host, probed, note=""):
+def listing(host, probed, note="", code_up=None):
     """The rendered page from `probed` (probe_features()'s result) — pure
     string building, no I/O, so it is safe to call straight from the event
     loop once the blocking work is done."""
@@ -360,8 +363,8 @@ def listing(host, probed, note=""):
         other = (" <a class=alt href='%s'>without signing in</a>" % html.escape(plain)
                  if login else "")
         rows.append(
-            "<tr><td><a href='%s'>%s</a>%s</td><td class='%s'>%s</td>"
-            "<td class=path>%s</td></tr>" % (
+            "<tr><td><a href='%s'>%s</a>%s</td>"
+            "<td class='%s'>%s</td><td class=path>%s</td></tr>" % (
                 html.escape(href), html.escape(label), other,
                 "up" if live else "down",
                 "running" if live else "not running",
@@ -371,6 +374,21 @@ def listing(host, probed, note=""):
                 "<tr><td class=sub><a href='http://127.0.0.1:%d/'>%s — %s</a></td>"
                 "<td class=up>running</td><td class=path></td></tr>" % (
                     sport, html.escape(label), html.escape(name)))
+        # code-server on this tree, from this machine (code_up is None from
+        # anywhere else: the phone has the gate's own, under /__code/).
+        if code_up is not None:
+            rows.append(
+                "<tr><td class=sub><a href='/__sclaude/code?f=%s'>%s — Code Server</a></td>"
+                "<td class='%s'>%s</td><td class=path></td></tr>" % (
+                    html.escape(label), html.escape(label),
+                    "up" if code_up else "down", "running" if code_up else "starts on opening"))
+        # The process map: main's is the whole cycle, a feature's has where
+        # it stands lit and the actions open to it now.
+        rows.append(
+            "<tr><td class=sub><a href='%s'>%s — %s</a></td><td></td><td class=path></td></tr>" % (
+                "/__sclaude/bpmn" if label == "main"
+                else "/__sclaude/flow?f=%s" % html.escape(label),
+                html.escape(label), MAP_NAME))
     table = ("<table>%s</table>" % "".join(rows)) if rows else \
         "<p>No feature has a dev server registered yet.</p>"
     hint = ("<p>Opening a feature that is not running starts it. One nobody has "
@@ -385,7 +403,9 @@ async def gather_listing(host, note=""):
     is one page load blocking every proxied connection, HMR sockets included,
     for as long as the slowest of N features' dev port and two services take
     to time out."""
-    return listing(host, await asyncio.to_thread(probe_features), note)
+    code_up = (await asyncio.to_thread(code_running)) if is_local(host) else None
+    # From elsewhere, or with no code-server service: no line at all.
+    return listing(host, await asyncio.to_thread(probe_features), note, code_up)
 
 
 # --- starting and stopping ---------------------------------------------------
@@ -755,11 +775,190 @@ async def own_page(target, host, headers=None):
         port = host.rsplit(":", 1)[1] if ":" in host and not host.endswith("]") else ""
         target = ("http://%s.localhost%s/" % (label, ":" + port if port else "")) if local else "/"
         return respond("303 See Other", "", ("Location: %s" % target,))
+    if url.path == "/__sclaude/flow":
+        label = (parse_qs(url.query).get("f") or [""])[0]
+        found = feature(label)
+        if not found:
+            return respond("404 Not Found",
+                           await gather_listing(host, "No such feature: %s" % label))
+        # From the Mini App (start=1): the map is opened to look at the
+        # feature, so its dev server comes up with it, as opening it would.
+        if (parse_qs(url.query).get("start") or [""])[0] == "1" and found[1] \
+                and not await asyncio.to_thread(answers, found[1]):
+            start_state(label, found[0])
+        return respond("200 OK", process_map().page(label))
+    if url.path == "/__sclaude/code":
+        # code-server on the tree, its service started first when it is down.
+        # From this machine only: the phone has the gate's own.
+        # Starting a service is not for another site's page to do: a link
+        # followed passes, an image or a fetch from elsewhere does not.
+        if cross_site("GET", headers or {}):
+            return respond("403 Forbidden", page("Refused", "<p>Open it from the list.</p>"))
+        label = (parse_qs(url.query).get("f") or [""])[0]
+        found = feature(label)
+        if not found or not is_local(host):
+            return respond("404 Not Found",
+                           await gather_listing(host, "No such feature: %s" % label))
+        # Started only when nothing answers yet: the socket, or a code-server
+        # run some other way, is already the way in.
+        if not await asyncio.to_thread(code_running) and not await asyncio.to_thread(answers, 8080):
+            try:
+                done = await asyncio.to_thread(
+                    subprocess.run, ["systemctl", "--user", "start", CODE_SERVICE],
+                    stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+                why = done.stderr.strip() if done.returncode else ""
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                why = str(exc) or "systemctl did not answer"
+            if why:
+                return respond("502 Bad Gateway", page("Not started", (
+                    "<h1>code-server did not start</h1><p>%s</p>" % html.escape(why))))
+        # Whatever the service says: active comes the moment it forks, the
+        # port only once it has bound — and with the socket, at once.
+        for _ in range(20):
+            if await asyncio.to_thread(answers, 8080):
+                break
+            await asyncio.sleep(0.5)
+        return respond("303 See Other", "", (
+            "Location: %s/?%s" % (CODE_LOCAL, urlencode({"folder": found[0]})),))
+    if url.path == "/__sclaude/bpmn":
+        # The whole cycle with no feature's place on it: the printed page,
+        # drawn from the model now rather than read from a build.
+        return respond("200 OK", process_map().doc())
+    if url.path == "/__sclaude/flow/state":
+        label = (parse_qs(url.query).get("f") or [""])[0]
+        found = feature(label)
+        if not found:
+            return respond("404 Not Found", json.dumps({"error": "no such feature"}),
+                           kind="application/json; charset=utf-8")
+        body = await flow_state(label, found[0])
+        return respond("200 OK", body, kind="application/json; charset=utf-8")
     if url.path == "/__sclaude/clear":
         return respond("303 See Other", "", (
             "Location: /__sclaude/",
             "Set-Cookie: %s=; Path=/; Max-Age=0; SameSite=Lax" % COOKIE))
     return respond("200 OK", await gather_listing(host))
+
+
+# --- a feature's process map -------------------------------------------------
+#
+# /__sclaude/flow?f=<label> is the process map (sclaude/lib/process.py) with
+# where the feature stands lit and the actions open to it now; the page asks
+# /__sclaude/flow/state every few seconds, which runs `sclaude _flow` in the
+# feature's tree. One run at a time per feature, and an answer kept a few
+# seconds: two tabs open on one feature do not double the gh calls.
+FLOW_PREFIX = "/__sclaude/flow?f="
+MAP_NAME = "Process map (BPMN)"
+# code-server for this machine's browser, at one address either way install.sh
+# sets it up: code-server-local.socket listening here and starting code-server
+# on contact (bind-addr elsewhere), or code-server itself on 127.0.0.1:8080
+# with the socket left off — and then nothing starts it on contact, so
+# /__sclaude/code starts the service first. Whether it runs is the
+# service's to say: the socket's port always answers.
+CODE_LOCAL = "http://127.0.0.1:8080"
+CODE_SERVICE = os.environ.get("SCLAUDE_CODE_SERVICE") or "code-server.service"
+
+
+def code_running():
+    """True while code-server's service runs, False while it does not, None
+    where there is no such service — no line for it then."""
+    try:
+        done = subprocess.run(["systemctl", "--user", "show", "-p", "LoadState,ActiveState", "--value",
+                               CODE_SERVICE], stdin=subprocess.DEVNULL, capture_output=True,
+                              text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    load, _, active = done.stdout.strip().partition("\n")
+    if done.returncode != 0 or load.strip() != "loaded":
+        return None
+    return active.strip() == "active"
+FLOW_FRESH = float(os.environ.get("SCLAUDE_FLOW_FRESH") or 14)
+FLOW_LIMIT = 60
+FLOW = {}
+
+
+_PROCESS_SEEN = [None]
+
+
+def process_map():
+    """sclaude/lib/process.py as it is on disk now. The proxy runs for days,
+    and sclaude's update pulls a new model under it: read again whenever the
+    file changed, so the map served is the one the checkout has."""
+    global process
+    try:
+        stamp = os.stat(process.__file__).st_mtime_ns
+    except OSError:
+        return process
+    if _PROCESS_SEEN[0] is not None and stamp != _PROCESS_SEEN[0]:
+        try:
+            process = importlib.reload(process)
+        except Exception as exc:  # a broken edit: keep serving the last good one
+            sys.stderr.write("process map not reloaded: %s\n" % exc)
+            return process
+    _PROCESS_SEEN[0] = stamp
+    return process
+
+
+def flow_slug(wt):
+    """The feature's own name, which `sclaude _flow` takes: the label is
+    the dev server's host name, which need not be the same."""
+    try:
+        with open(os.path.join(feature_dir(wt), "state.json")) as fh:
+            return json.load(fh).get("feature") or ""
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def flow_run(wt):
+    """`sclaude _flow` in the feature's tree, its JSON line or an error.
+
+    In a session of its own, ended whole on a timeout: killing sclaude alone
+    would leave a hung `git fetch` or `gh` holding its stdout, and the read
+    would wait on them for ever."""
+    slug = flow_slug(wt) or os.path.basename(wt)
+    answer = {}
+    try:
+        proc = subprocess.Popen([SCLAUDE, "_flow", slug], cwd=wt, env=run_env(),
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        proc = None
+    if proc:
+        try:
+            out, _ = proc.communicate(timeout=FLOW_LIMIT)
+            lines = out.decode("utf-8", "replace").strip().splitlines()
+            answer = json.loads(lines[-1]) if lines else {}
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            proc.communicate()
+        except (ValueError, IndexError):
+            answer = {}
+    if not answer:
+        answer = {"error": "sclaude _flow did not answer"}
+    return json.dumps(answer)
+
+
+def flow_state(label, wt):
+    """The feature's answer, at most FLOW_FRESH old, from one run at a time.
+
+    The run is kept apart from the requests that wait on it: a request that
+    goes away (a tab closed) leaves it running, and its result is stored
+    when it ends, whoever is still waiting."""
+    held = FLOW.setdefault(label, {"at": 0.0, "body": "{}", "task": None})
+    if time.time() - held["at"] < FLOW_FRESH:
+        return asyncio.sleep(0, held["body"])
+    if held["task"] is None:
+        task = asyncio.ensure_future(asyncio.to_thread(flow_run, wt))
+
+        def stored(done):
+            held["task"] = None
+            if not done.cancelled() and done.exception() is None:
+                held["at"], held["body"] = time.time(), done.result()
+        task.add_done_callback(stored)
+        held["task"] = task
+    return asyncio.shield(held["task"])
 
 
 # --- the connection ----------------------------------------------------------
@@ -1250,7 +1449,9 @@ async def gate_own(method, target, headers, reader):
             return respond("404 Not Found", page("Not found", "<p>No such feature.</p>"))
         # p: a path of the gate's own to show instead — code-server's.
         path = (parse_qs(url.query).get("p") or [""])[0]
-        if path and not (path.startswith(CODE_PREFIX) and GATE_PATH.match(path)):
+        # code-server, or a feature's process map (FLOW_PREFIX).
+        if path and not ((path.startswith(CODE_PREFIX) or path.startswith(FLOW_PREFIX))
+                         and GATE_PATH.match(path)):
             return respond("404 Not Found", page("Not found", "<p>No such page.</p>"))
         return respond("200 OK", gate_bootstrap(label, path))
     if url.path == "/__sclaude/menu":

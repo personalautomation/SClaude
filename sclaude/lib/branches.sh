@@ -16,7 +16,14 @@
 # A branch's PR state in one word: MERGED, CLOSED, OPEN, or empty when gh does
 # not answer or there never was a PR. It costs a network request, so we ask only
 # about branches that already look closed.
+#
+# PR_STATE_KNOWN set (cmd_flow, which has just asked): its answer, PR_STATE,
+# rather than the same question again from each caller below it.
 branch_pr_state() {
+  if [[ -n "${PR_STATE_KNOWN:-}" ]]; then
+    printf '%s\n' "${PR_STATE:-}"
+    return 0
+  fi
   gh pr list --head "$1" --state all --limit 1 --json state --jq '.[0].state' \
     2>/dev/null || true
 }

@@ -119,6 +119,7 @@ publishes it (see "The workshop" below).
 | `sclaude/hooks/*.py` | the steps' bans and the friction log |
 | `sclaude/prompts/*.md` | the steps' prompts and the shared includes (`_*.md`) |
 | `tests/*.py` | benches for the hooks, the prompts, the project's config, the acceptance criteria, the down blocks, the cycle's record, QA's hand-back, the choice of database, the functions whose failures are silent, choosing with arrow keys and the question channel |
+| `tests/run` | runs the benches side by side, longest first, each with a TMPDIR of its own; `--changed` for the ones a change touches |
 
 ## The menu and the action list
 

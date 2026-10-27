@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+#
+# Runs the benches in this directory side by side.
+#
+# One after another the suite takes about twelve minutes, and most of it is
+# spent waiting — on pseudo-terminals, polls and child processes — rather than
+# computing. Each bench builds its own temporary world and shares nothing with
+# the others, so they run in parallel, the longest first: the time each took
+# last is kept in the git directory, and a bench started late that is also the
+# longest would be the whole run's tail.
+#
+#   tests/run                 every bench
+#   tests/run --changed       the benches that name a file changed against HEAD
+#                             (staged or not) — the check before a commit
+#   tests/run hooks io        the benches named
+#   tests/run -j 4 ...        at most four at a time (default: the CPU count)
+#
+# Not named *.py, so that `tests/*.py` still means the benches and nothing else.
+import argparse
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+
+
+def git(*args):
+    return subprocess.run(["git", "-C", ROOT] + list(args), capture_output=True,
+                          text=True, check=False).stdout
+
+
+def times_file():
+    path = git("rev-parse", "--git-path", "sclaude-test-times.json").strip()
+    if not path:
+        return None
+    return path if os.path.isabs(path) else os.path.join(ROOT, path)
+
+
+def load_times():
+    try:
+        with open(times_file()) as fh:
+            return json.load(fh)
+    except (OSError, TypeError, ValueError):
+        return {}
+
+
+def save_times(times):
+    path = times_file()
+    if not path:
+        return
+    try:
+        with open(path + ".tmp", "w") as fh:
+            json.dump(times, fh, indent=0, sort_keys=True)
+        os.replace(path + ".tmp", path)
+    except OSError:
+        pass
+
+
+def all_benches():
+    return sorted(f[:-3] for f in os.listdir(HERE) if f.endswith(".py"))
+
+
+def changed_benches():
+    """The benches that name a changed file — a bench names what it guards."""
+    names = set(git("diff", "--name-only", "HEAD").split())
+    names |= set(git("diff", "--name-only", "--cached").split())
+    # A new file, not yet added, is a change too.
+    names |= set(git("ls-files", "--others", "--exclude-standard").split())
+    # This file: no bench guards it, and its name is in every one of them.
+    names.discard("tests/run")
+    words = {os.path.splitext(os.path.basename(n))[0] for n in names}
+    picked = set()
+    for bench in all_benches():
+        with open(os.path.join(HERE, bench + ".py"), errors="replace") as fh:
+            text = fh.read()
+        if bench in words or any(w and w in text for w in words):
+            picked.add(bench)
+    return sorted(picked)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="tests/run")
+    ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 4)
+    ap.add_argument("--changed", action="store_true")
+    ap.add_argument("benches", nargs="*")
+    args = ap.parse_args()
+
+    if args.benches:
+        benches = [os.path.basename(b).removesuffix(".py") for b in args.benches]
+        missing = [b for b in benches if not os.path.exists(os.path.join(HERE, b + ".py"))]
+        if missing:
+            sys.exit("no such bench: " + ", ".join(missing))
+    elif args.changed:
+        benches = changed_benches()
+        if not benches:
+            print("no bench names a changed file")
+            return 0
+    else:
+        benches = all_benches()
+
+    times = load_times()
+    # Unknown ones first: a new bench may well be a long one.
+    queue = sorted(benches, key=lambda b: -times.get(b, float("inf")))
+    lock = threading.Lock()
+    running = {}
+    interrupted = threading.Event()
+    failed = []
+    started = time.time()
+
+    def worker():
+        while True:
+            with lock:
+                if not queue:
+                    return
+                bench = queue.pop(0)
+                t0 = time.time()
+                # stdin closed: some benches read it. A session of its own, so
+                # the terminal's Ctrl-C reaches this runner alone, which passes
+                # it on to the bench's group and lets the bench run its own
+                # teardown. What a bench starts in a session of its own is the
+                # bench's to stop. Started under the lock, so that an interrupt
+                # either finds it in `running` or finds the queue empty.
+                #
+                # A TMPDIR of its own, removed when it ends: what a bench and its
+                # children leave in the temporary directory goes with it, rather
+                # than piling up in /tmp run after run.
+                tmp = tempfile.mkdtemp(prefix="sclaude-test-%s-" % bench)
+                proc = subprocess.Popen(
+                    [sys.executable, os.path.join(HERE, bench + ".py")], cwd=ROOT,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, start_new_session=True,
+                    env=dict(os.environ, TMPDIR=tmp))
+                running[bench] = proc
+            out = proc.communicate()[0].decode(errors="replace")
+            took = time.time() - t0
+            shutil.rmtree(tmp, ignore_errors=True)
+            with lock:
+                running.pop(bench, None)
+                # An interrupted bench neither failed nor took its usual time.
+                if interrupted.is_set():
+                    return
+                times[bench] = round(took, 1)
+                if proc.returncode != 0:
+                    failed.append(bench)
+                    lines = out.rstrip("\n").splitlines()
+                    print("FAIL %s (%.0fs, exit %d)" % (bench, took, proc.returncode))
+                    for line in lines[-40:]:
+                        print("  | " + line)
+                    sys.stdout.flush()
+
+    threads = [threading.Thread(target=worker, daemon=True)
+               for _ in range(max(1, min(args.jobs, len(benches))))]
+    try:
+        # Started inside the try: a worker launches its bench at once, and an
+        # interrupt between two starts must still reach the ones launched.
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    except KeyboardInterrupt:
+        # SIGINT rather than SIGTERM: Python exits on SIGTERM without running
+        # `finally`, and that is where the benches remove their temporary
+        # worlds and worktrees.
+        def signal_all(sig):
+            for proc in procs:
+                try:
+                    os.killpg(proc.pid, sig)
+                except OSError:
+                    pass
+
+        with lock:
+            interrupted.set()
+            queue.clear()
+            procs = list(running.values())
+        signal_all(signal.SIGINT)
+        print("\ninterrupted: waiting for the benches to clean up "
+              "(Ctrl-C again kills them)")
+        sys.stdout.flush()
+        try:
+            for t in threads:
+                if t.ident is not None:     # the interrupt may have come before its start
+                    t.join()
+        except KeyboardInterrupt:
+            signal_all(signal.SIGKILL)
+        return 130
+    finally:
+        save_times(times)
+
+    print("%d/%d passed in %.0fs" % (len(benches) - len(failed), len(benches),
+                                     time.time() - started))
+    if failed:
+        print("failed: " + " ".join(sorted(failed)))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

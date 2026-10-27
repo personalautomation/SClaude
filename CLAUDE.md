@@ -289,28 +289,28 @@ a message whose trailer block is broken.
 ## Tests
 
 `python3 tests/<name>.py` — each file is standalone and exits non-zero on
-failure.
+failure. `tests/run` runs several side by side, the longest first (the times
+of the last run are kept in the git directory), with stdin closed, and prints
+the output of the ones that fail.
 
 Before a commit, run the tests that touch what changed: every test file that
 names a changed file (a test sources or runs the modules it guards by name).
-The whole suite takes minutes, most of it `tests/resume.py`, and a commit does
-not need it:
+A commit does not need the whole suite:
 
 ```bash
-for f in $(git diff --name-only HEAD; git diff --name-only --cached); do
-  grep -l "$(basename "${f%.*}")" tests/*.py
-done | sort -u | while read -r t; do python3 "$t" >/dev/null </dev/null || echo "FAIL $t"; done
+tests/run --changed
 ```
-
-Each test runs with its stdin closed: some read it, and in the loop above
-that would swallow the rest of the list — the run then ends early, green.
 
 Run them all before a push, which is what reaches every machine (auto-sync
-from `main`):
+from `main`) — about two minutes in parallel, twelve one after another:
 
 ```bash
-for t in tests/*.py; do python3 "$t" >/dev/null </dev/null || echo "FAIL $t"; done
+tests/run
 ```
+
+The benches build their own temporary worlds and share nothing, which is what
+lets them run together; a new one keeps to that — no fixed port it listens on,
+no fixed path outside its own temporary directory.
 
 ## The README before a push
 

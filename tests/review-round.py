@@ -580,6 +580,11 @@ echo "watcher=[$SESSION_WATCHER]"
                                      {"used_percentage": 12.6, "context_window_size": 1000000},
                                      "cost": {"total_cost_usd": 3.25}}),
                    capture_output=True, text=True, timeout=30)
+    # Its cache of the branch, at a fixed path in /tmp that TMPDIR does not move.
+    try:
+        os.remove("/tmp/claude-statusline-branch-%s" % sid)
+    except OSError:
+        pass
     try:
         with open(shared) as fh:
             check("statusline-leaves-the-share", json.load(fh),

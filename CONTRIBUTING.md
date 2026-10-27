@@ -80,19 +80,16 @@ Each file in `tests/` is standalone and exits non-zero on failure:
 python3 tests/<name>.py
 ```
 
-Before a commit, the tests that name a changed file:
+Before a commit, the tests that name a changed file, side by side:
 
 ```bash
-for f in $(git diff --name-only HEAD; git diff --name-only --cached); do
-  grep -l "$(basename "${f%.*}")" tests/*.py
-done | sort -u | while read -r t; do python3 "$t" >/dev/null || echo "FAIL $t"; done
+tests/run --changed
 ```
 
-Before a pull request, all of them (a few minutes, most of it
-`tests/resume.py`):
+Before a pull request, all of them (about two minutes):
 
 ```bash
-for t in tests/*.py; do python3 "$t" >/dev/null || echo "FAIL $t"; done
+tests/run
 ```
 
 Shell files have no runner of their own: check them with `bash -n`.

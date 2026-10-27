@@ -29,10 +29,12 @@
 # of them happens before or after the session rather than inside it.
 #
 # Run it with: python3 tests/resume.py
+import concurrent.futures
 import json
 import os
 import pty
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -298,6 +300,9 @@ exec %s "$@"
             # fixture that answers blind, and the `n` meant for the next
             # question is spent on it.
             DEV_PORT="39517",
+            # The npm stub starts no server, so ensure_dev's wait for its port
+            # would cost every run three seconds for nothing.
+            DEV_START_WAIT="0",
             # The channel ask() reads alongside the terminal. Left pointing at a
             # real one, a question here would wait on the phone.
             ASK_DIR=os.path.join(self.root, "ask"),
@@ -306,11 +311,15 @@ exec %s "$@"
             SCLAUDE_NO_SYNC="1",
         )
 
-        primary, secondary = pty.openpty()
-        proc = subprocess.Popen(
-            [SCLAUDE, "demo"], cwd=self.repo, env=env,
-            stdin=secondary, stdout=secondary, stderr=secondary,
-            close_fds=True, start_new_session=True)
+        with live_lock:
+            if stopping.is_set():
+                raise RuntimeError("interrupted")
+            primary, secondary = pty.openpty()
+            proc = subprocess.Popen(
+                [SCLAUDE, "demo"], cwd=self.repo, env=env,
+                stdin=secondary, stdout=secondary, stderr=secondary,
+                close_fds=True, start_new_session=True)
+            live.add(proc)
         os.close(secondary)
 
         # Answers go in as the questions arrive; the reader drains in parallel so
@@ -347,6 +356,8 @@ exec %s "$@"
                     pass
         finally:
             os.close(primary)
+            with live_lock:
+                live.discard(proc)
         reader.join(timeout=5)
 
         with open(prompts) as fh:
@@ -370,8 +381,20 @@ DONE_STATE = {
 }
 
 
+# A review reopened while every step before it is done — f, g and h start there.
+reopened_review = dict(DONE_STATE["steps"], review={"done": False, "finished": None})
+
 tmp = tempfile.mkdtemp()
-try:
+
+# The `sclaude demo` runs under way. Each is in a session of its own, out of
+# reach of the Ctrl-C that stops this bench, so an interrupt kills them here
+# and starts no more; the cases then end, and the clean-up below runs.
+live = set()
+live_lock = threading.Lock()
+stopping = threading.Event()
+
+
+def case_a():
     # --- QA hands back a merged feature --------------------------------------
     #
     # The case the whole thing failed on. The watch is armed in remind_prod and
@@ -413,6 +436,8 @@ try:
     w.resume()
     check("returned-verdict-cleared-once-delivered", w.watch_field("verdict"), "")
 
+
+def case_a2():
     # --- the rewind must also survive after_step -----------------------------
     #
     # A second review found the first fix bought exactly one session: run_step
@@ -438,6 +463,8 @@ try:
     # step as it should.
     check("reopened-pr-recorded", w.state("reopened_pr"), "208")
 
+
+def case_b():
     # --- the same, unmerged --------------------------------------------------
     #
     # The path that always worked. It must keep working: the guard is about a
@@ -462,6 +489,8 @@ try:
     check("unmerged-step-stays-review", w.state("step"), "review")
     check("unmerged-review-reopened", w.state("steps.review.done"), "false")
 
+
+def case_c():
     # --- QA passes it --------------------------------------------------------
     #
     # Nothing is rewound, and the banner is acknowledged where it is shown:
@@ -481,6 +510,8 @@ try:
     out2 = w.resume()
     check("done-banner-not-repeated", "QA passed this one" in out2, False)
 
+
+def case_d():
     # --- a merged feature with no verdict ------------------------------------
     #
     # The shortcut itself, which must still work. A step nobody reopened closes
@@ -495,6 +526,8 @@ try:
     check("merged-shortcut-still-closes", w.state("step"), "done")
     check("merged-shortcut-marks-review", w.state("steps.review.done"), "true")
 
+
+def case_e():
     # --- a second resume after a hand-back -----------------------------------
     #
     # The rewind must not repeat. The verdict was cleared when the comments were
@@ -526,6 +559,8 @@ try:
     out = w.resume(stillborn=True)
     check("second-no-banner", "was returned to development" in out, False)
 
+
+def case_f():
     # --- a review reopened by a preview fix, then merged ----------------------
     #
     # A red preview, a fixing session, a green rerun: regression_rewind puts the
@@ -534,7 +569,6 @@ try:
     # the next run opened a review of the merged pull request that after_step
     # refused to close, waiting for a second pull request nobody needed. Feature
     # 138 was left exactly there.
-    reopened_review = dict(DONE_STATE["steps"], review={"done": False, "finished": None})
     w = World(os.path.join(tmp, "f"), merged=True)
     w.set_state(dict(DONE_STATE, step="review", steps=reopened_review, worktree=w.wt,
                      reopened="review", reopened_pr=208, reopened_by="preview"))
@@ -543,6 +577,8 @@ try:
     check("preview-reopen-no-review-session", w.prompts.strip(), "")
     check("preview-reopen-mark-cleared", w.state("reopened_by"), "")
 
+
+def case_g():
     # --- a review reopened by a production rollback --------------------------
     #
     # This one must hold until a new pull request arrives — and the session must
@@ -569,6 +605,8 @@ try:
     # The gate's own instructions are not: no gate reads a note this one writes.
     check("prod-review-no-gate-note", "regression.blocked" in w.prompts, False)
 
+
+def case_h():
     # --- a fix that left the branch ------------------------------------------
     #
     # sclaude follows the feature by the branch in its state. A fix on another
@@ -582,8 +620,32 @@ try:
     check("other-branch-review-stays-open", w.state("steps.review.done"), "false")
     check_true("other-branch-is-named", "The worktree is on fix/elsewhere" in out)
 
+
+CASES = [case_a, case_a2, case_b, case_c, case_d, case_e, case_f, case_g, case_h]
+
+try:
+    # Each case builds its own world under tmp — repository, HOME, stubs, ask
+    # channel — and shares nothing with the others, so they run side by side.
+    # Run one after another they took two minutes, nearly all of it waiting on
+    # processes, and this bench is the longest of the suite.
+    with concurrent.futures.ThreadPoolExecutor(len(CASES)) as pool:
+        try:
+            for job in [pool.submit(case) for case in CASES]:
+                job.result()
+        except BaseException:
+            # Not only an interrupt: a case that crashed fails the bench, and
+            # the pool would otherwise wait for every other case before the
+            # clean-up — with a Ctrl-C there left nobody to stop them.
+            with live_lock:
+                stopping.set()
+                for proc in live:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+            raise
 finally:
-    for sub in ("a", "b", "c", "d", "e", "f", "g", "h"):
+    for sub in os.listdir(tmp):
         repo = os.path.join(tmp, sub, "repo")
         wt = os.path.join(tmp, sub, "repo-demo")
         if os.path.isdir(repo):

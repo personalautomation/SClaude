@@ -10,6 +10,7 @@
 # checked here with a hammer: a thousand reads against two writing processes.
 #
 # Run it with: python3 tests/keepawake.py
+import atexit
 import calendar
 import datetime
 import glob
@@ -25,6 +26,14 @@ import threading
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+# Everything this file puts in the temporary directory — a sandbox per block,
+# fake homes, snapshots, and whatever its children make there through TMPDIR —
+# goes under one root, removed at exit, a failed run's or an interrupted one's
+# too. Each block made its own and few took it back: thousands piled up in /tmp.
+_TMP_ROOT = tempfile.mkdtemp(prefix="keepawake-test-")
+tempfile.tempdir = os.environ["TMPDIR"] = _TMP_ROOT
+atexit.register(shutil.rmtree, _TMP_ROOT, True)
 
 from keepawake import state
 from keepawake.state import (HARD_HOLDERS, HOLD_SECONDS, REFUSAL_HOLDS,
@@ -2741,8 +2750,9 @@ with sandbox() as box:
         tg_settle.known_repos = old_repos
 
     # The warning before sleep, once its deadline moved without a press on it.
+    # The window is stamped from the checks' own now_w: a clock read of its
+    # own, a second later on a loaded machine, made every button stale.
     def warned(**kw):
-        now_w = int(time.time())
         with state.locked() as st:
             st.update(dict(until_ts=now_w + 600, warned_for_ts=now_w + 600,
                            warn_message_id=31, decision="", updated_ts=now_w))
@@ -3113,7 +3123,11 @@ with sandbox() as box:
         # The dev server buttons act on this feature's server.
         acted = []
         saved_dev, saved_act = tg_topic.feature_dev, tg_topic.dev_act
-        tg_topic.feature_dev = lambda r, sl: ("e-label", 3001, False)
+        # Stopped when pressed, up on the next look: the handler waits for the
+        # server to come up before redrawing, and one that never does costs
+        # its whole ten-second wait.
+        looks = []
+        tg_topic.feature_dev = lambda r, sl: (looks.append(1), ("e-label", 3001, len(looks) > 1))[1]
         tg_topic.dev_act = lambda action, label, wt: acted.append((action, label))
         try:
             h5.callback({"id": "c", "data": "fc:start:shop/e", "message": {"message_id": 621}})

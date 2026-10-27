@@ -555,9 +555,11 @@ ensure_dev() {
   # of seconds, and the session would not start for all that time. The server
   # will catch up — by the time the browser matters, it has long been ready. We
   # wait only a couple of seconds to catch a start-up crash, which is visible at
-  # once.
-  local waited=0
-  while [[ "$waited" -lt 6 ]]; do
+  # once. DEV_START_WAIT, in whole seconds, is for a bench whose npm starts
+  # nothing: there the whole wait is spent on a port that never opens.
+  local waited=0 ticks=6
+  [[ "${DEV_START_WAIT:-}" =~ ^[0-9]+$ ]] && ticks=$(( 10#$DEV_START_WAIT * 2 ))
+  while [[ "$waited" -lt "$ticks" ]]; do
     sleep 0.5
     waited=$((waited + 1))
     [[ -n "$(dev_pid "$port")" ]] && { info "  dev server: up on $(dev_address "$wt")"; return 0; }

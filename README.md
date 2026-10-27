@@ -895,7 +895,8 @@ when something blocks it, with the branch name to correct, or from a name with
 a tick for creating its issue, as `sclaude new` offers at the terminal — and 🧩
 the project's config, every section explained, with `review`, `qa` and `merge`
 set by a button; 💻 Code-server; 🌐 Chrome and the list of every
-feature; ⚙️ Settings — language, docs, restarting the bot, phone access. Each
+feature; ⚙️ Settings — language, docs, restarting the bot (the screen waits
+and says when it is back), phone access. Each
 screen says under it what it is for. What you start there leaves a 📱 line in
 the chat — in the feature's topic when it is about a feature — and what only
 shows something leaves nothing. sclaude's questions stay in the chat as buttons,

@@ -264,6 +264,11 @@ STRINGS = {
                           "🔁 Restarting…\nI will report once I am back."),
     "svc.restarted":     ("✅ Демон перезапущен и снова на связи.",
                           "✅ Daemon restarted and back online."),
+    # The menu page waited a minute and the bot did not come back.
+    "svc.notback":       ("⚠️ Демон не вернулся за минуту.\n"
+                          "На ноутбуке: <code>journalctl --user -u %(unit)s</code>",
+                          "⚠️ The daemon is not back after a minute.\n"
+                          "On the laptop: <code>journalctl --user -u %(unit)s</code>"),
 
     # code-server
     "code.title":        ("<b>code-server</b>\n%(state)s\n%(folder)s\n\n"

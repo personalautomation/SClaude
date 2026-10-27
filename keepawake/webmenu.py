@@ -81,6 +81,9 @@ HIDDEN = ()
 # restarts the process it runs in, and here that is the gate.
 BOT_UNIT = os.environ.get("KEEPAWAKE_UNIT") or "keepawake-telegram.service"
 
+# How long the page waits for the restarted bot before it says it is not back.
+RESTART_WAIT = 60
+
 
 class PageBot(telegramd.Bot):
     def __init__(self, token, chat_id):
@@ -98,6 +101,9 @@ class PageBot(telegramd.Bot):
         # A text field under the screen: what it holds, and the action its
         # OK sends with the text appended.
         self.input = None
+        # An action the page sends by itself a moment later, to see whether
+        # what it waits for has happened.
+        self.follow = None
 
     def edit(self, message_id, text, keyboard=None):
         if message_id != PAGE:
@@ -681,6 +687,19 @@ def press(bot, user, action, context, now, home=""):
                          start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         bot.screen = (t("svc.restarting"), [])
+        # The chat's line changes when the bot is back; the page asks until
+        # then, since nothing tells it.
+        bot.follow = "restart_wait:%d" % now
+        return ""
+    if action.startswith("restart_wait:"):
+        # The new process takes the mark off once it is up (report_restart).
+        if not telegramd.read().get("restart_page"):
+            bot.screen = (t("svc.restarted"), telegramd.services_keyboard())
+        elif now - int(action.split(":", 1)[1] or 0) > RESTART_WAIT:
+            bot.screen = (t("svc.notback", unit=BOT_UNIT), telegramd.services_keyboard())
+        else:
+            bot.screen = (t("svc.restarting"), [])
+            bot.follow = action
         return ""
     if action.startswith(("newfeat:", "nfl:")):
         # The chat starts sclaude at once and it asks for a name; the page
@@ -837,4 +856,5 @@ def answer(token, chat_id, user, action, context, now, label="", home=""):
             "close": bot.close,
             "help": help_for(action, bot.done) if text is not None else "",
             "home": bot.home,
+            "follow": bot.follow,
         }

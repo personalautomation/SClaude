@@ -168,6 +168,32 @@ check_true("the restart restarts the bot's unit", webmenu.BOT_UNIT in SPAWNED[-1
 check("its line in the chat is reported on by the new process",
       read().get("restart_notify"), MESSAGE[0])
 check("as a line, with no Settings menu under it", read().get("restart_page"), True)
+check_true("the page asks again by itself", view["follow"].startswith("restart_wait:"))
+wait = view["follow"]
+view = press(wait)
+check("until the bot is back it still waits", (view["text"], view["follow"]),
+      (t("svc.restarting"), wait))
+check("and the chat hears nothing of the waiting", sent(), [])
+# The new process: its line in the chat changes, and the mark goes with it.
+telegramd.report_restart(telegramd.Bot("t:k", 12345))
+check("the bot back takes the mark off", read().get("restart_page"), False)
+view = press(wait)
+check("then the page says so, and stops asking", (view["text"], view["follow"]),
+      (t("svc.restarted"), None))
+check_true("with Settings under it",
+           any(b.get("callback_data") == "svc_restart" for row in view["rows"] for b in row))
+with telegramd.locked() as st:
+    st["restart_page"] = True
+view = press("restart_wait:%d" % (time.time() - webmenu.RESTART_WAIT - 5))
+check("a bot not back in time is said to be so",
+      (view["text"], view["follow"]), (t("svc.notback", unit=webmenu.BOT_UNIT), None))
+with telegramd.locked() as st:
+    st["restart_page"] = False
+# A restart whose line never reached the chat still ends the page's wait.
+with telegramd.locked() as st:
+    st["restart_page"], st["restart_notify"] = True, 0
+check("without a line to change", telegramd.report_restart(telegramd.Bot("t:k", 12345)), False)
+check("the mark still goes", read().get("restart_page"), False)
 
 # The label as the button carries it, from i18n: the Russian half stays there.
 RU_LABEL = STRINGS["lang.ru"][0]

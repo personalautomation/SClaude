@@ -1329,19 +1329,23 @@ def report_restart(bot):
     # whether to write to the chat for the keyboard's sake as well.
     data = read()
     mid = data.get("restart_notify") or 0
-    if not mid:
-        return False
     old = data.get("restart_from_pid") or 0
     if old == os.getpid():
         return False    # the same process: the restart has not happened yet
+    if data.get("restart_page"):
+        # Asked for from the menu page, which waits for this mark to go
+        # (restart_wait in webmenu.py) — whether or not its line in the chat
+        # was sent.
+        with locked() as st:
+            st["restart_page"] = False
+    if not mid:
+        return False
     with locked() as st:
         st["restart_notify"] = 0
         st["restart_from_pid"] = 0
     if data.get("restart_page"):
-        # Asked for from the menu page: the line in the chat is its trace,
-        # and a Settings menu under it would be a second menu to keep true.
-        with locked() as st:
-            st["restart_page"] = False
+        # The line in the chat is the page's trace, and a Settings menu under
+        # it would be a second menu to keep true.
         bot.edit(mid, "📱 " + t("svc.restarted"))
     else:
         bot.edit(mid, t("svc.restarted"), services_keyboard())

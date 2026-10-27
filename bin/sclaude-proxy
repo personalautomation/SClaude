@@ -1331,6 +1331,15 @@ def menu_page(nonce):
 const tg = window.Telegram && window.Telegram.WebApp;
 const $ = (id) => document.getElementById(id);
 let busy = false, ctx = '', fieldAction = '';
+// A screen that waits for something (the bot restarting) names an action the
+// page sends by itself a moment later, quietly; any press cancels it, and an
+// answer to a press made since is not drawn. A quiet call that hangs is
+// given up after a few seconds; one that fails is tried again, up to MISSES
+// in a row, and then the page stops, its last error shown, and offers to
+// check again. Counted, not timed: a page back from the background has a
+// stale clock.
+let follow = 0, seq = 0, misses = 0;
+const MISSES = 20;
 // The feature the page was opened on, from its topic: Sclaude, Chrome and
 // Code-server stand on it.
 // Opened by the Menu button it has none, and the first answer names the one
@@ -1402,22 +1411,37 @@ function render(v) {
   window.scrollTo(0, 0);
   if (v.close) setTimeout(() => tg.close(), 1500);
 }
-function call(action, label) {
+function call(action, label, quiet) {
+  clearTimeout(follow);
   if (busy) return;
-  busy = true;
-  document.body.classList.add('busy');
-  $('err').textContent = '';
+  const mine = ++seq;
+  if (!quiet) {
+    busy = true;
+    document.body.classList.add('busy');
+    $('err').textContent = '';
+  }
   fetch('/__sclaude/menu/api', {method: 'POST', cache: 'no-store',
+    signal: quiet && AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined,
     body: JSON.stringify({init: tg.initData, do: action, ctx: ctx, label: label || '', home: home})})
     .then((r) => r.ok ? r.json() : Promise.reject(r.status))
-    .then((v) => { if (typeof v.home === 'string') home = v.home; render(v);
-      if (action && tg.HapticFeedback) tg.HapticFeedback.selectionChanged(); })
+    .then((v) => { if (mine !== seq) return;
+      if (quiet) $('err').textContent = '';
+      if (typeof v.home === 'string') home = v.home; render(v);
+      misses = 0;
+      if (v.follow) follow = setTimeout(() => call(v.follow, '', true), 1500);
+      // A press, or the end of a wait: the phone says so.
+      if (tg.HapticFeedback && (quiet ? !v.follow : action)) tg.HapticFeedback.selectionChanged(); })
     // 403 is almost always a page left open past the day its signature
     // lasts: only the owner gets this far.
-    .catch((e) => { $('err').textContent = e === 403
+    .catch((e) => { if (mine !== seq) return; $('err').textContent = e === 403
       ? 'This page is out of date: close it and open the menu again.'
-      : typeof e === 'number' ? 'The laptop refused (' + e + ').' : 'The laptop did not answer.'; })
-    .finally(() => { busy = false; document.body.classList.remove('busy'); });
+      : typeof e === 'number' ? 'The laptop refused (' + e + ').' : 'The laptop did not answer.';
+      if (!quiet || e === 403) return;
+      if (++misses < MISSES) { follow = setTimeout(() => call(action, '', true), 3000); return; }
+      const r = document.createElement('div'); r.className = 'row';
+      r.append(button({text: '🔁 Check again', callback_data: action}));
+      $('rows').prepend(r); })
+    .finally(() => { if (!quiet) { busy = false; document.body.classList.remove('busy'); } });
 }
 // Links in a screen lead out of the Mini App.
 document.addEventListener('click', (e) => {

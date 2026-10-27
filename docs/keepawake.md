@@ -396,6 +396,17 @@ off — `press` takes the action before the handler does, and `ON_PAGE` tells th
 screens to leave out links that only work on the tailnet. Each screen has a line
 under it saying what it is for (`HELP`).
 
+**A screen that waits asks again by itself.** The bot's restart from the page
+restarts another process than the gate that draws the page, and nothing tells
+the page when it is done. So its answer names a `follow` action,
+`restart_wait:<time pressed>`, which the page sends quietly every 1.5 s: the new
+process takes `restart_page` off at start (`report_restart`), and the page then
+shows "back online" with Settings under it; a minute without it (`RESTART_WAIT`)
+says the bot is not back. A quiet call that hangs is given up after 8 s and one
+that fails is tried again, up to twenty in a row — counted, since a page back
+from the background has a stale clock — after which the page keeps the last
+error and offers to check again. Any press cancels the wait.
+
 **The gate** (`sclaude-proxy --gate`, on 127.0.0.1:3001 behind `tailscale
 funnel` on :8443) lets in only the bot's owner. Every call of the menu carries
 Telegram's signed `initData` and is checked by itself; a feature's page and

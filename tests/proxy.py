@@ -382,12 +382,15 @@ def check_gate(proxy_port, root):
         check("gate: it loads Telegram's script",
               "telegram.org/js/telegram-web-app.js" in body, True)
         check("gate: it asks for full screen", "requestFullscreen" in body, True)
-        check("gate: it sends a feature to the features' side with a ticket",
-              all(x in body for x in ("/__sclaude/tg/ticket", "/__sclaude/enter?", "10000")), True)
-        check("gate: and Telegram's signed data stays behind",
-              "k !== 'tgWebAppData'" in body, True)
-        check("gate: its view settings go along, from Telegram's script, not the address",
-              "Telegram.WebView.initParams" in body, True)
+        check("gate: it frames a feature from the features' side, with a ticket",
+              all(x in body for x in ("/__sclaude/tg/ticket", "shell(app + '/__sclaude/enter?'",
+                                      "':' + 10000")), True)
+        check("gate: and stays the page itself, where Telegram's events come",
+              "location.replace" in body, False)
+        check("gate: the features' frame cannot send the Mini App elsewhere",
+              "frame.sandbox = 'allow-scripts" in body and "allow-top-navigation" not in body, True)
+        check("gate: the bar is told where the frame is by that frame alone",
+              "e.source === frame.contentWindow && e.origin === remote" in body, True)
         check("gate: the bot's side is framed by itself and Telegram Web alone",
               "frame-ancestors 'self' https://web.telegram.org" in head, True)
         status, _, body = request(port, host, "/__sclaude/tg")
@@ -458,6 +461,12 @@ def check_gate(proxy_port, root):
               all(x in body for x in ("id=url", "<iframe id=frame", "--tg-content-safe-area-inset-top",
                                       "/__sclaude/login?f=")), True)
         check("gate: and asks Telegram for nothing signed", "initData" in body, False)
+        check("gate: nor loads Telegram's script, which in a frame would talk to the bot's page",
+              "telegram-web-app.js" in body, False)
+        check("gate: it answers the bot's page alone, and tells only that page where it is",
+              all(x in body for x in ("e.source !== parent || e.origin !== bot",
+                                      "parent.postMessage({sclaude: 'where', at: w}, bot)",
+                                      "':' + 8443")), True)
         status, _, body = request(aport, ahost, "/__sclaude/shell?p=%2F__sclaude%2Fflow%3Ff%3Da",
                                   cookie=app)
         check("gate: or over a feature's map", '"/__sclaude/flow?f=a"' in body, True)

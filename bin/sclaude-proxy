@@ -1125,9 +1125,11 @@ async def handle(reader, writer):
 # one origin's scripts away from another's, and a feature's page runs
 # whatever the product loads, so it must not stand where initData is, or the
 # menu that starts sessions on this machine. The entry checks initData on the
-# bot's side and sends the page on to the features' side with a ticket
-# (tg_webapp.sign_ticket), which buys a cookie of that side's own. Only the
-# view's settings go along, never the signed data.
+# bot's side and frames the features' side with a ticket
+# (tg_webapp.sign_ticket), which buys a cookie of that side's own. The page
+# itself stays on the bot's side: Telegram sends its events (the back
+# button, the safe area) only to the origin the Mini App opened on. The two
+# talk by postMessage, each answering only the other's origin.
 #
 # Cookies are not kept apart by port, so each side's cookie is sent to both:
 # each side reads only its own, the bot's side refuses what the features' side
@@ -1140,6 +1142,8 @@ GATE_APP_PORT = int(os.environ.get("SCLAUDE_GATE_APP_PORT") or 3002)
 # The port the funnel publishes the features' side on, on the same name: the
 # entry page builds the address from its own host and this.
 GATE_APP_PUBLIC = int(os.environ.get("SCLAUDE_GATE_APP_PUBLIC") or 10000)
+# And the bot's, which the features' side answers to from inside its frame.
+GATE_BOT_PUBLIC = int(os.environ.get("SCLAUDE_GATE_BOT_PUBLIC") or 8443)
 GATE_UPSTREAM = int(os.environ.get("SCLAUDE_GATE_UPSTREAM") or PORT)
 GATE_ENV = os.environ.get("SCLAUDE_GATE_ENV") or os.path.expanduser(
     "~/.config/keepawake/env")
@@ -1199,6 +1203,7 @@ background:var(--tg-theme-secondary-bg-color,#f5f5f4);border-bottom:1px solid rg
 #url{flex:1;min-width:0;border:0;border-radius:8px;padding:6px 8px;font:inherit;
 background:var(--tg-theme-bg-color,#fff);color:inherit}
 #frame{flex:1;border:0;width:100%}
+#bar[hidden]{display:none}
 #msg{padding:24px 16px}
 """
 
@@ -1215,37 +1220,61 @@ GATE_PATH = re.compile(r"^[A-Za-z0-9/_.~%?=&+-]*$")
 
 
 # The address bar over the frame, on either side: the page runs it once it
-# may show the frame.
+# may show the frame. remote, an origin, is a frame of the features' side
+# inside the bot's page: the bar cannot look into it, so it learns where the
+# frame is from what that side's page says (gate_shell), and asks it to
+# reload or go; back is the page's own history, which holds the frame's.
 SHELL_SCRIPT = """
-function shell(start) {
+// DIAG (temporary): what this page knows of Telegram, to the gate's journal.
+function report(what) { try {
+  const params = (window.Telegram && window.Telegram.WebView && window.Telegram.WebView.initParams) || {};
+  navigator.sendBeacon('/__sclaude/diag', JSON.stringify({what: what, page: location.pathname,
+    version: tg && tg.version, platform: tg && tg.platform, full: tg && tg.isFullscreen,
+    keys: Object.keys(params).filter((k) => k !== 'tgWebAppData'), signed: !!params.tgWebAppData,
+    hash: location.hash.length, history: history.length, frame: -1}));
+} catch (e) {} }
+function shell(start, remote) {
   msg.remove();
   document.getElementById('shell').hidden = false;
   const frame = document.getElementById('frame');
   const url = document.getElementById('url');
-  // about:blank and error pages are not an address worth showing.
-  const where = () => { try { const l = frame.contentWindow.location;
-    return l.protocol.startsWith('http') ? l.pathname + l.search + l.hash : null; }
-    catch (e) { return null; } };
+  const host = remote ? new URL(remote).host : location.host;
   let shown = '';
-  setInterval(() => { const w = where();
-    if (w && w !== shown && document.activeElement !== url) { shown = w; url.value = location.host + w; } }, 400);
-  document.getElementById('back').onclick = () => frame.contentWindow.history.back();
-  document.getElementById('reload').onclick = () => frame.contentWindow.location.reload();
-  document.getElementById('out').onclick = () => { location.href = where() || '/'; };
+  const show = (w) => { if (w && w !== shown && document.activeElement !== url) {
+    shown = w; url.value = host + w; } };
+  // about:blank and error pages are not an address worth showing.
+  const where = () => { if (remote) return shown || null;
+    try { const l = frame.contentWindow.location;
+      return l.protocol.startsWith('http') ? l.pathname + l.search + l.hash : null; }
+    catch (e) { return null; } };
+  const tell = (m) => frame.contentWindow.postMessage(m, remote);
+  if (remote) {
+    // Only where the frame is, from that frame, and only shown as text.
+    window.addEventListener('message', (e) => {
+      if (e.source === frame.contentWindow && e.origin === remote && e.data
+          && e.data.sclaude === 'where' && typeof e.data.at === 'string') show(e.data.at); });
+  } else setInterval(() => show(where()), 400);
+  const back = () => { report('back'); remote ? history.back() : frame.contentWindow.history.back(); };
+  document.getElementById('back').onclick = back;
+  document.getElementById('reload').onclick = () => remote ? tell({sclaude: 'reload'})
+    : frame.contentWindow.location.reload();
+  document.getElementById('out').onclick = () => { location.href = (remote || '') + (where() || '/'); };
   url.onkeydown = (e) => { if (e.key !== 'Enter') return;
     let v = url.value.trim().replace(/^https?:\\/\\//, '');
-    if (v.startsWith(location.host)) v = v.slice(location.host.length);
+    if (v.startsWith(host)) v = v.slice(host.length);
     if (!v.startsWith('/')) v = '/' + v;
-    frame.contentWindow.location.href = v; url.blur(); };
-  const back = () => frame.contentWindow.history.back();
+    remote ? tell({sclaude: 'go', to: v}) : (frame.contentWindow.location.href = v); url.blur(); };
   if (tg && tg.isVersionAtLeast('6.1')) {
     tg.BackButton.show(); tg.BackButton.onClick(back);
-  } else if (window.Telegram && window.Telegram.WebView) {
-    // A client this page takes for an old one may still show the back
-    // button of the page before: its press still comes, as an event.
-    window.Telegram.WebView.onEvent('back_button_pressed', back);
   }
+  // A feature's page may not take this page's place: a frame of another
+  // origin can still send the whole Mini App elsewhere, to a page dressed
+  // as the bot's. Everything else a product does in a frame stays allowed;
+  // leaving the frame is the bar's ⤢, from this page.
+  if (remote) frame.sandbox = 'allow-scripts allow-same-origin allow-forms allow-modals '
+    + 'allow-popups allow-popups-to-escape-sandbox allow-downloads';
   frame.src = start;
+  report('shell');
 }
 function view() {
   tg.ready();
@@ -1256,7 +1285,7 @@ function view() {
 """ % {"full": "true" if GATE_FULLSCREEN else "false"}
 
 
-def shell_page(title, script):
+def shell_page(title, script, telegram=True):
     """The address bar and its frame, hidden until script shows them."""
     return ("<!doctype html><html><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover'>"
@@ -1268,17 +1297,20 @@ def shell_page(title, script):
             "<input id=url inputmode=url autocapitalize=off autocorrect=off spellcheck=false>"
             "<button id=out aria-label='Open without the bar'>⤢</button>"
             "</div><iframe id=frame></iframe></div>"
-            "<script src='https://telegram.org/js/telegram-web-app.js'></script>"
-            "<script>const tg = window.Telegram && window.Telegram.WebApp;\n"
+            "%s<script>const tg = window.Telegram && window.Telegram.WebApp;\n"
             "const msg = document.getElementById('msg');%s%s</script></body></html>"
-            % (html.escape(title), SHELL_STYLE, html.escape(title), SHELL_SCRIPT, script))
+            % (html.escape(title), SHELL_STYLE, html.escape(title),
+               "<script src='https://telegram.org/js/telegram-web-app.js'></script>"
+               if telegram else "", SHELL_SCRIPT, script))
 
 
 def gate_bootstrap(label, path=""):
-    """The page the bot's button opens, on the bot's side: set the view up and
-    prove who is looking. code-server is shown here, in the address bar's
-    frame; a feature or its map is on the features' side, where the page goes
-    with a ticket and with Telegram's view settings — not its signed data."""
+    """The page the bot's button opens, on the bot's side: set the view up,
+    prove who is looking, and show the address bar. code-server is in its
+    frame from this side; a feature or its map from the features' side, which
+    the frame enters with a ticket. The page itself stays here: a Telegram
+    client sends its events (the back button, the safe area) to the origin
+    the Mini App opened on, and a page that went to another got none."""
     script = """
 const label = %(label)s, path = %(path)s;
 if (!tg || !tg.initData) {
@@ -1293,16 +1325,9 @@ if (!tg || !tg.initData) {
   fetch('/__sclaude/tg/ticket', {method: 'POST', body: tg.initData, credentials: 'same-origin'})
     .then((r) => r.ok ? r.text() : Promise.reject(r.status))
     .then((ticket) => {
-      // From what Telegram's script gathered, not from the address: a page
-      // reached from the menu has none there, and its script takes them from
-      // its own storage. Without them the features' side reads as an old
-      // client: no back button and no safe area, the bar under Telegram's.
-      const keep = new URLSearchParams();
-      const params = (window.Telegram.WebView && window.Telegram.WebView.initParams) || {};
-      for (const k in params)
-        if (k.startsWith('tgWebApp') && k !== 'tgWebAppData' && params[k] != null) keep.set(k, params[k]);
-      location.replace(location.protocol + '//' + location.hostname + ':' + %(app)d
-        + '/__sclaude/enter?' + new URLSearchParams({t: ticket, f: label, p: path}) + '#' + keep);
+      report('entry');
+      const app = location.protocol + '//' + location.hostname + ':' + %(app)d;
+      shell(app + '/__sclaude/enter?' + new URLSearchParams({t: ticket, f: label, p: path}), app);
     })
     .catch((e) => { msg.textContent = typeof e === 'number'
       ? 'The bot did not recognise you (' + e + ').' : 'The laptop did not answer.'; });
@@ -1312,15 +1337,33 @@ if (!tg || !tg.initData) {
 
 
 def gate_shell(label, path=""):
-    """The features' side of the same page: the address bar over a feature,
-    for a browser that has this side's cookie. Telegram's script is here for
-    the view (full screen, the back button), and has no initData to give."""
+    """The features' side of the same page, for a browser with this side's
+    cookie. In the bot's page it is only the feature's frame, with no bar of
+    its own: it says where the feature is, and reloads or goes when that page
+    asks — that page and no other. Loaded on its own, it draws its own bar.
+    Never Telegram's script: in a frame it would talk to the bot's page."""
     script = """
 const start = %(path)s || (%(label)s ? '/__sclaude/login?f=' + encodeURIComponent(%(label)s) : '/__sclaude/');
-if (tg) view();
-shell(start);
-""" % {"label": js_string(label), "path": js_string(path)}
-    return shell_page(label or "Features", script)
+if (window.parent !== window) {
+  const bot = location.protocol + '//' + location.hostname + ':' + %(bot)d;
+  msg.remove();
+  document.getElementById('shell').hidden = false;
+  document.getElementById('bar').hidden = true;
+  const frame = document.getElementById('frame');
+  let shown = '';
+  setInterval(() => { try { const l = frame.contentWindow.location;
+    const w = l.pathname + l.search + l.hash;
+    if (l.protocol.startsWith('http') && w !== shown) {
+      shown = w; parent.postMessage({sclaude: 'where', at: w}, bot); } } catch (e) {} }, 400);
+  window.addEventListener('message', (e) => {
+    if (e.source !== parent || e.origin !== bot || !e.data) return;
+    if (e.data.sclaude === 'reload') frame.contentWindow.location.reload();
+    if (e.data.sclaude === 'go' && typeof e.data.to === 'string' && e.data.to.startsWith('/'))
+      frame.contentWindow.location.href = e.data.to; });
+  frame.src = start;
+} else shell(start);
+""" % {"label": js_string(label), "path": js_string(path), "bot": GATE_BOT_PUBLIC}
+    return shell_page(label or "Features", script, telegram=False)
 
 
 async def post_body(method, headers, reader):
@@ -1811,6 +1854,19 @@ async def gate_handle(reader, writer, side="bot"):
         # hundreds of files, which would bury what matters in the journal.
         if path.startswith("/__sclaude/"):
             sys.stderr.write("gate %s: %s %s\n" % (side, method, path))
+        if path == "/__sclaude/diag":
+            # DIAG (temporary): the page's report, a few known fields only.
+            body = await post_body(method, headers, reader)
+            try:
+                seen = json.loads((body or b"{}").decode("utf-8", "replace"))
+                keep = {k: seen.get(k) for k in ("what", "page", "version", "platform", "full",
+                                                  "keys", "signed", "hash", "history", "frame")}
+                sys.stderr.write("gate %s: diag %s\n" % (side, json.dumps(keep)[:600]))
+            except (ValueError, AttributeError):
+                pass
+            writer.write(respond("204 No Content", ""))
+            await writer.drain()
+            return
         if side == "bot":
             if from_app_side(headers):
                 sys.stderr.write("gate bot: refused from the features' side %s %s\n"

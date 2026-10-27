@@ -417,11 +417,18 @@ around it and send the menu's calls, which start sessions on this machine. So
 carries it and is checked by itself, and must come from the menu's own origin;
 code-server (`/__code/`, its own paths under a prefix only the gate knows) is
 reached with the bot's side's cookie, signed once `initData` checked out. A
-feature opens through the entry, which checks `initData` and sends the page on
-to `/__sclaude/enter` on the features' side with a ticket — a minute long,
-good once — and with Telegram's view settings from the address (`tgWebApp*`)
-but never its signed data. The ticket buys that side's own cookie, under
-another key, and the page is the same address bar over the feature. Cookies
+feature opens through the entry, which checks `initData` and frames
+`/__sclaude/enter` on the features' side with a ticket — a minute long, good
+once — that buys that side's own cookie, under another key. The page itself
+stays on the bot's side: an Android Telegram client sends its events (the back
+button, the safe area) only to the origin the Mini App opened on, and a page
+that had gone to the other port got none — the back button did nothing and the
+bar sat under Telegram's own. The bar cannot look into a frame of another
+origin, so the features' page in it (`gate_shell`, with no bar and no
+Telegram script of its own) says where the feature is by `postMessage`, and
+reloads or goes when the bot's page asks; each answers only the other's
+origin, and the bar shows what it is told as text. Back is the page's own
+history, which holds the frame's. Cookies
 are not kept apart by port, so each side reads only its own cookie, the bot's
 side refuses whatever the features' side makes the browser send
 (`Sec-Fetch-Site: same-site`, or `Origin`/`Referer` naming the other port),

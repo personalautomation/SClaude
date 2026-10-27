@@ -449,6 +449,54 @@ echo "watcher=[$SESSION_WATCHER]"
     check("issue-shows-the-reason",
           'run_status = run.get("outcome") or ("done" if run.get("done") else "interrupted")' in gh_src,
           True)
+    # A session that closed on its marker is not "interrupted" in the issue.
+    check("marker-close-records-finished",
+          'step_run "$wt" "$step" end "$session" "${SESSION_AUTO_CLOSED:+finished}"' in RUN,
+          True)
+    body = 'source "%s/state.sh"\nsource "%s/steps.sh"\n' % (LIB, LIB)
+    body += 'step_run "%s" review open S4\n' % wt
+    body += 'step_run "%s" review end S4 ""\n' % wt
+    subprocess.run(["bash", "-c", body], timeout=30)
+    with open(state) as fh:
+        runs = json.load(fh)["steps"]["review"]["runs"]
+    check("exit-without-marker-has-no-reason", runs[-1].get("outcome"), None)
+    # Closed on its marker, resumed, then left by the person: interrupted again.
+    body = 'source "%s/state.sh"\nsource "%s/steps.sh"\n' % (LIB, LIB)
+    body += 'step_run "%s" review open S5\n' % wt
+    body += 'step_run "%s" review end S5 finished\n' % wt
+    body += 'step_run "%s" review open S5\n' % wt
+    subprocess.run(["bash", "-c", body], timeout=30)
+    with open(state) as fh:
+        runs = json.load(fh)["steps"]["review"]["runs"]
+    check("resumed-is-going-again", runs[-1].get("outcome"), None)
+    body = 'source "%s/state.sh"\nsource "%s/steps.sh"\n' % (LIB, LIB)
+    body += 'step_run "%s" review end S5 ""\n' % wt
+    subprocess.run(["bash", "-c", body], timeout=30)
+    with open(state) as fh:
+        runs = json.load(fh)["steps"]["review"]["runs"]
+    check("resumed-then-left-loses-finished", runs[-1].get("outcome"), None)
+    # Closed, rewound, resumed: the run is going again. Not without a rewind.
+    body = 'source "%s/state.sh"\nsource "%s/steps.sh"\n' % (LIB, LIB)
+    body += 'step_run "%s" review open S6\n' % wt
+    body += 'step_run "%s" review end S6 finished\n' % wt
+    body += 'step_run "%s" review close\n' % wt
+    body += 'state_set "%s" steps.review.done true\n' % state
+    body += 'step_run "%s" review open S6\n' % wt
+    subprocess.run(["bash", "-c", body], timeout=30)
+    with open(state) as fh:
+        runs = json.load(fh)["steps"]["review"]["runs"]
+    check("resumed-unrewound-stays-done", runs[-1].get("done"), True)
+    body = 'source "%s/state.sh"\nsource "%s/steps.sh"\n' % (LIB, LIB)
+    body += 'step_rewind_to "%s" review review\n' % wt
+    body += 'step_run "%s" review open S6\n' % wt
+    subprocess.run(["bash", "-c", body], timeout=30)
+    with open(state) as fh:
+        runs = json.load(fh)["steps"]["review"]["runs"]
+    check("resumed-after-rewind-is-going", runs[-1].get("done"), None)
+    sys.path.insert(0, LIB)
+    import issue_context
+    lines = "\n".join(issue_context.request_lines(5, []))
+    check("new-request-names-its-marker", issue_context.REQUEST in lines, True)
 
     # --- run_step rotates on the marker ----------------------------------------
     rot = RUN[RUN.index('if [[ "$step" == "review" && -s "$(round_marker "$wt")" ]]; then'):]

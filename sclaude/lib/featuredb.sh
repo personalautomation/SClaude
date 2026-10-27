@@ -324,14 +324,17 @@ ensure_db() {
     warn "  This feature's database is its own; rebuild it with: npx supabase db reset"
   fi
 
+  # The temporary file is this process's own: a lazy start of the dev server
+  # can run this beside the regression's, and with one shared name the first
+  # mv took the file from under the second ("mv: cannot stat …db.env.tmp").
   status="$(cd "$wt" && $cli status --workdir "$dir" -o env 2>/dev/null)"
   if ! python3 "$LIB/feature_db.py" envfile "$(project_config_with database.local "$wt")" "$dir" \
-         <<<"$status" > "$envf.tmp"; then
-    rm -f "$envf" "$envf.tmp"
+         <<<"$status" > "$envf.tmp.$$"; then
+    rm -f "$envf" "$envf.tmp.$$"
     warn "  database: the stack did not report every value the project maps — sharing the main local database"
     return 0
   fi
-  mv "$envf.tmp" "$envf"
+  mv "$envf.tmp.$$" "$envf"
 
   # Filled once: a new stack has the schema and nothing else, and a feature
   # that cannot sign anybody in cannot be looked at.

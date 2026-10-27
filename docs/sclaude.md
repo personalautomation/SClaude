@@ -324,6 +324,13 @@ criteria answer — did this feature do what it was supposed to — is asked aft
 that. The plan carries a copy, at its head, so that a step with no network still
 has the list; the issue is where a correction lands.
 
+What the person decides after planning reaches the issue from the step it was
+decided in: step 2 and step 4 both add it to the `User request` comment
+(`### Added during development`, `### Added during review`) and note it in the
+plan. A criterion that has to change is the person's to edit in the issue; the
+session proposes the wording and never writes it. Once a review decision changed
+a criterion and only the code knew: the automatic QA ticked the old wording.
+
 Each criterion is identified `AC1`, `AC2`, and the identifier is what the rest
 of the cycle points at:
 

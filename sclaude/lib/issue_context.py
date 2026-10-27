@@ -418,10 +418,13 @@ def request_lines(number, comments):
         out.append("It exists — rewrite it in place, never add a second one: "
                    "`%s`." % issue_comments.edit_command(cid))
     else:
+        # The marker is how the next session finds it: without it every
+        # later one is told there is none and posts another.
         out.append("There is no \"User request\" comment yet. Create it with "
-                   "`%s`; the command prints its URL, and the number after "
+                   "`%s`, starting with the marker `%s` on its own line; the "
+                   "command prints its URL, and the number after "
                    "`#issuecomment-` is the id you rewrite it by: `%s`."
-                   % (issue_comments.create_command(number),
+                   % (issue_comments.create_command(number), REQUEST,
                       issue_comments.edit_command("<id>")))
     out.append("")
     return out

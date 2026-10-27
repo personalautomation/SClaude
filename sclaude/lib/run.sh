@@ -133,6 +133,10 @@ sys.stdout.write(feature_in_history(sys.argv[2]))' "$LIB" "$wt" 2>/dev/null || t
          && [[ "$(state_get "$wt/.sclaude/local/feature/state.json" reopened_by 2>/dev/null || true)" == "prod" ]]; then
         SCLAUDE_B_REGRESSION="$(regression_fix_block "$wt" prod 2>/dev/null || true)"
       fi
+      # The same comment as step 2's: a thread can end in a change of scope,
+      # and without it the issue went on describing the scope before it.
+      [[ -n "$issue" ]] && SCLAUDE_B_USER_REQUEST="$(
+        python3 "$LIB/issue_context.py" --request "$issue" "$wt" 2>/dev/null || true)"
       ;;
     status)
       # The directory for gh is the main repository rather than the feature's
@@ -973,7 +977,10 @@ session_ended() {
     review_context_log "$wt" "$slug" "$session" "$([[ -n "$SESSION_AUTO_CLOSED" ]] && echo done || echo exit)" \
       "$(review_context "$wt" "$session")" "$closed_rounds"
   fi
-  step_run "$wt" "$step" end "$session"
+  # A session that wrote its marker ended its own work, and its row in the
+  # issue says so: without a reason an earlier row reads "interrupted", as it
+  # did for every review session the review on this machine sent back to.
+  step_run "$wt" "$step" end "$session" "${SESSION_AUTO_CLOSED:+finished}"
 
   # The friction review follows every session, not every step.
   #

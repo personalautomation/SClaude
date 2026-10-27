@@ -161,18 +161,30 @@ mine = [r for r in runs if r.get("session") == session] if session else []
 if op == "open":
     if not mine:
         runs.append({"session": session, "started": now})
-    # Resumed after a stall: the conversation is going now, whatever it did
-    # at the door the first time.
+    # Resumed after a stall or a close on its marker: the conversation is
+    # going now, whatever it did at the door or how it ended the first time.
     for r in mine:
         r.pop("stalled", None)
+        r.pop("outcome", None)
+        # A step rewound (step_rewind_to writes its done as false) and its
+        # session resumed: the run that closed it is open again. Only there:
+        # a retrospective resumed without an answer keeps its last end, and
+        # its node has no done of its own.
+        if node.get("done") is False:
+            r.pop("done", None)
 if op in ("end", "finish"):
     for r in mine:
         r["finished"] = now
         # A session ended by the orchestrator rather than by a person says why
         # — the review step's rotation: "fixes confirmed". Shown in the issue
         # in place of "interrupted", which is what an earlier row would read.
-        if op == "end" and outcome:
-            r["outcome"] = outcome
+        # An end without one clears an earlier reason: a session closed on
+        # its marker and resumed, then left by the person, was interrupted.
+        if op == "end":
+            if outcome:
+                r["outcome"] = outcome
+            else:
+                r.pop("outcome", None)
 if op == "drop":
     runs = [r for r in runs if not (r.get("session") == session and not r.get("finished"))]
 if op == "stall":

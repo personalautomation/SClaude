@@ -569,4 +569,26 @@ metrics_append() {
   if [[ -n "$dev" && -n "$url" && -n "$repo" && -z "${SCLAUDE_NO_SYNC:-}" ]]; then
     ( python3 "$LIB/metrics.py" publish "$dev" "$url" "$repo" >/dev/null 2>&1 & )
   fi
+  # A finished feature is when the DORA numbers move: rebuilt now, not at the
+  # next stale start.
+  dora_refresh "$repo" force
+}
+
+# The product's DORA page (dora.py), rebuilt in the background: `sclaude`
+# asks on every conversational start, and dora.py does nothing while the page
+# is younger than SCLAUDE_DORA_EVERY. `force` rebuilds whatever its age.
+#
+# Only where there is something to read it from — a Vercel link or a GitHub
+# remote. A bench's repository has neither, and a process left running after
+# the bench removed its tree is noise in every test that counts them.
+# setsid, so neither the terminal closing nor a step's process group ending
+# takes a minute of network calls down halfway.
+dora_refresh() {
+  local repo="$1" force="${2:-}"
+  [[ -n "$repo" && -d "$repo/.git" && -z "${SCLAUDE_NO_SYNC:-}" ]] || return 0
+  [[ -f "$repo/.vercel/project.json" ]] \
+    || git -C "$repo" remote get-url origin 2>/dev/null | grep -q 'github\.com' \
+    || return 0
+  ( cd / && exec setsid python3 "$LIB/dora.py" refresh "$repo" ${force:+--force} \
+      </dev/null >/dev/null 2>&1 & )
 }

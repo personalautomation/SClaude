@@ -205,6 +205,21 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-10-26 with the process map: a map that
   disagrees with the code is worse than none. -->
 
+- The DORA page, `.sclaude/local/dora/index.html` in the product's main
+  checkout, is written by `DIR`/`PAGE` in `sclaude/lib/dora.py` and served by
+  `DORA_PAGE` in `bin/sclaude-proxy`; `tests/dora.py` and `tests/proxy.py`
+  check each side. dora.py finds rollbacks by the heading and the marker
+  `rollback_incident` in `sclaude/lib/rollback.sh` writes (`ROLLBACK_HEADING`
+  in dora.py, `ROLLBACK` in `issue_comments.py`); reword that comment and failures stop being counted. The page
+  also reads the names `session_label` in `sclaude/lib/steps.sh` gives a
+  session (`step_of` in `sclaude/lib/claude_usage.py`; `tests/session_names.py`
+  feeds it every kind) and the columns of `review-context.log` that
+  `review_context_log` in `run.sh` writes (`review_log` in
+  `sclaude/lib/dev_quality.py`; `tests/metrics-page.py`).
+
+  <!-- Added by Claude on 2026-10-27 with the DORA page: a path or a heading
+  changed on one side alone leaves the page missing or every failure unseen. -->
+
 - `sclaude new`'s options (`--issue`, `--blocked-ok`, `--create-issue`,
   `--no-issue`; `new_from_args` in `bin/sclaude`) and `sclaude config set` are
   what the bot's menu runs (`new_start` in `keepawake/webmenu.py`, `config_set`

@@ -1891,6 +1891,8 @@ main() {
       local _repo; _repo="$(main_repo 2>/dev/null)" || _repo=""
       if [[ -n "$_repo" && -d "$_repo/.git" ]]; then
         export ASK_DIR="$_repo/.git/sclaude"
+        # The product's DORA page, when it is older than a few hours.
+        dora_refresh "$_repo"
       else
         unset ASK_DIR
       fi

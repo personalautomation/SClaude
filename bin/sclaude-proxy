@@ -389,6 +389,10 @@ def listing(host, probed, note="", code_up=None):
                 "/__sclaude/bpmn" if label == "main"
                 else "/__sclaude/flow?f=%s" % html.escape(label),
                 html.escape(label), MAP_NAME))
+        if label == "main":
+            rows.append(
+                "<tr><td class=sub><a href='/__sclaude/dora'>main — %s</a></td><td></td>"
+                "<td class=path></td></tr>" % DORA_NAME)
     table = ("<table>%s</table>" % "".join(rows)) if rows else \
         "<p>No feature has a dev server registered yet.</p>"
     hint = ("<p>Opening a feature that is not running starts it. One nobody has "
@@ -824,6 +828,8 @@ async def own_page(target, host, headers=None):
         # The whole cycle with no feature's place on it: the printed page,
         # drawn from the model now rather than read from a build.
         return respond("200 OK", process_map().doc())
+    if url.path == "/__sclaude/dora":
+        return respond("200 OK", await asyncio.to_thread(dora_page))
     if url.path == "/__sclaude/flow/state":
         label = (parse_qs(url.query).get("f") or [""])[0]
         found = feature(label)
@@ -839,6 +845,19 @@ async def own_page(target, host, headers=None):
     return respond("200 OK", await gather_listing(host))
 
 
+def dora_page():
+    """The DORA page main's checkout holds, or a page saying when it will."""
+    found = feature("main")
+    try:
+        with open(os.path.join(found[0], DORA_PAGE), encoding="utf-8") as fh:
+            return fh.read()
+    except (OSError, TypeError):
+        return page(DORA_NAME, (
+            "<h1>%s</h1><p>Not built yet. sclaude builds it in the background "
+            "each time it starts in this product, and again when a feature is "
+            "finished; it takes a minute.</p>" % DORA_NAME))
+
+
 # --- a feature's process map -------------------------------------------------
 #
 # /__sclaude/flow?f=<label> is the process map (sclaude/lib/process.py) with
@@ -848,6 +867,11 @@ async def own_page(target, host, headers=None):
 # seconds: two tabs open on one feature do not double the gh calls.
 FLOW_PREFIX = "/__sclaude/flow?f="
 MAP_NAME = "Process map (BPMN)"
+# The product's DORA metrics, under main: a page sclaude rebuilds in the
+# background (sclaude/lib/dora.py) inside the main checkout, served from there
+# as it stands. Only main's — the numbers are the product's, not a feature's.
+DORA_PAGE = ".sclaude/local/dora/index.html"
+DORA_NAME = "DORA metrics"
 # code-server for this machine's browser, at one address either way install.sh
 # sets it up: code-server-local.socket listening here and starting code-server
 # on contact (bind-addr elsewhere), or code-server itself on 127.0.0.1:8080

@@ -129,7 +129,16 @@
     "            same, or sclaude asks, and `m` pressed in its wait merges from",
     "            here; the default) or \"auto\" (sclaude merges as soon as QA",
     "            passed and GitHub allows it, and carries on). Never before",
-    "            QA: with `qa` on github, auto still waits for the board."
+    "            QA: with `qa` on github, auto still waits for the board.",
+    "metricsTeam — who the metrics page compares: \"real\", the people whose",
+    "            work is in the records, with no team part when there is one;",
+    "            \"demo\", three generated teammates beside the real developer,",
+    "            drawn from the real figures by fixed profiles (two who write",
+    "            far more code, one who only fixes bugs) and kept per browser —",
+    "            for showing the page with a team. Generated data: never",
+    "            present it as anybody's real work. Set it in",
+    "            .sclaude/local/config.json instead to turn the demo on for",
+    "            one machine only: that file is outside git, and wins."
   ],
 
   "qa": "github",
@@ -201,6 +210,8 @@
   },
 
   "metrics": "git@github.com:your-team/sclaude-metrics.git",
+
+  "metricsTeam": "real",
 
   "doctor": [
     {

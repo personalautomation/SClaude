@@ -98,6 +98,25 @@ for name, want in (("4-review(2)/x", "4-review(2) 🛠/x"), ("1-plan/x", "1-plan
     check("named " + name, named(name), want)
     check("icon kept " + name, icon(named(name)), icon(name))
 
+# The metrics page reads the step back out of the name (claude_usage.step_of):
+# every name session_label gives, as Claude Code stores it with its icon,
+# must come back as the step it was given for.
+sys.path.insert(0, LIB)
+import claude_usage  # noqa: E402
+
+for args, want in ((("friction", "review-2"), "friction"), (("friction", "fix-prod-3"), "friction"),
+                   (("fix", "fix-local-2"), "fix"), (("fix", "fix-preview-1"), "fix"),
+                   (("sync", "2"), "sync"), (("epilogue",), "epilogue"), (("retro",), "retro")):
+    title = named(label(*args) + "/7-feature")
+    check("step of " + title, claude_usage.step_of(title), want)
+for step in ("plan", "code", "pr", "review"):
+    with tempfile.TemporaryDirectory() as tmp:
+        state = os.path.join(tmp, "state.json")
+        with open(state, "w") as fh:
+            json.dump({"steps": {step: {"runs": [{"session": "a"}, {"session": "b"}]}}}, fh)
+        title = named(label("step", state, step, "b") + "/7-feature")
+        check("step of " + title, claude_usage.step_of(title), step)
+
 # The line that tells a session started or ended: one shape for every kind,
 # numbered over the seven of the cycle as the menu numbers it.
 def phase(*args):

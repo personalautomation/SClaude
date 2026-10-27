@@ -44,6 +44,12 @@ CHOICES = {
     ],
 }
 
+CHOICES["metricsTeam"] = [
+    ("real", "the metrics page compares the people whose work is in the records"),
+    ("demo", "three generated teammates beside them, drawn from the real figures, "
+             "to show the page with a team"),
+]
+
 # An absent key that means something other than its first choice: the merge
 # sclaude offered before `merge` existed.
 DEFAULTS = {"merge": "both"}

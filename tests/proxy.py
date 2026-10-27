@@ -627,6 +627,22 @@ def main():
         finally:
             main_studio.close()
 
+        # The product's DORA page goes under main, and only main: the numbers
+        # are the product's. Before dora.py has built it, the route says so;
+        # after, it serves the file as it stands (sclaude/lib/dora.py writes
+        # it at the same path).
+        check("the DORA page is offered under main",
+              "<a href='/__sclaude/dora'>main — DORA metrics</a>" in body, True)
+        check("the DORA page is offered once", body.count("/__sclaude/dora"), 1)
+        status, _, body = request(port, host, "/__sclaude/dora")
+        check("an unbuilt DORA page says so", "Not built yet" in body, True)
+        dora_dir = os.path.join(root, "wt-main", ".sclaude", "local", "dora")
+        os.makedirs(dora_dir, exist_ok=True)
+        with open(os.path.join(dora_dir, "index.html"), "w") as fh:
+            fh.write("<!doctype html><title>DORA metrics</title>built-page")
+        status, _, body = request(port, host, "/__sclaude/dora")
+        check("the built DORA page is served", "built-page" in body, True)
+
         status, _, body = request(port, "100.64.0.1:%d" % port)
         check("a remote list links through the cookie",
               "href='/__sclaude/select?f=a'" in body, True)

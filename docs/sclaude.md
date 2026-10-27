@@ -1513,6 +1513,156 @@ a zero would average in as. The whole call is best-effort down to the `|| true`:
 a record that cannot be written is one measurement lost, and losing it must not
 stand in the way of cleaning up a merged feature.
 
+## The metrics page
+
+The page shows the four DORA metrics first, then delivery, development
+quality, Claude's work and token efficiency. Every figure is drawn from what
+already exists rather than from anything recorded for it. DORA's
+(`sclaude/lib/dora.py`):
+
+- **deploys** are Vercel's READY production deployments, with their commit —
+  the one list of what actually reached production, a rollback's redeploys
+  included;
+- **changes** are the commits each deploy put on production for the first
+  time: the deploy's commit against every earlier deploy's, not only the
+  previous one's, so a deploy after a rollback does not ship the rolled-back
+  commits a second time. A squashed pull request's clock starts at its first
+  commit (GitHub), a commit made on main at its own author date;
+- **failures** are production rollbacks: the incident comment
+  `rollback_incident` writes on the feature's issue, found by its heading and
+  confirmed by its marker, and a rollback in a cycle record where no comment
+  lies within the hour. The record alone undercounts — a fresh ship clears the
+  rollback from the state — which is why the comment comes first. Restore time
+  runs from the deploy that was serving to the rollback;
+- **where the time went** is the cycle records of this product: by `repo`, or,
+  for a record from before it was written, by a pull request of ours opened
+  from the feature's branch.
+
+The rest:
+
+- **Claude's sessions** (`sclaude/lib/claude_usage.py`) are Claude Code's
+  transcripts of the product's main checkout and of every worktree,
+  `<repo>-<feature>`, which names the feature. Dollars, tokens by kind and
+  model, lines edited and time in the model come from the `cost-state` record
+  Claude Code keeps — its own account, not a price list; it is cumulative, so
+  each run's last one counts. The step comes from the name sclaude gave the
+  session (`session_label`, with its icon); tool calls, refusals,
+  compactions and API errors from the lines themselves. A subagent's
+  transcript has no account of its own, its cost being in its session's. Each
+  transcript's summary is kept beside the page with the size and mtime it was
+  read at, so a refresh reads only what grew.
+- **development quality** (`sclaude/lib/dev_quality.py`): a regression stage
+  is green first time when it passed with no fixing session; review rounds and
+  the threads they were handed are `review-context.log`'s rows; acceptance
+  criteria are the ticks in the issue's `<!-- sclaude:ac -->` block, kept per
+  issue once read; reverts, lines, tests (by path) and migrations from main's
+  history; a commit is Claude's when a session signed it (`Sclaude-Session:`,
+  `Claude-Session:` or a Claude co-author).
+- **delivery**: pull requests per feature by their branch, sizes and review
+  threads from GitHub, builds and their time from Vercel's every environment.
+- **past the four keys** (`sclaude/lib/metrics_extra.py`), from the same data:
+  rework is a deploy that only shipped fixes to what was out — a feature's
+  later pull request, a fix branch, a fix committed to main — while a `fix:`
+  commit inside a new feature's own pull request is that feature's work; a
+  pull request merged with a merge commit owns every commit of its branch, so
+  they all start at its first commit. A pull request's way takes its first
+  answer from a review, a thread or a comment, a bot's included, and its
+  maturity from its commits' sizes, asked of GitHub ten at a time and only
+  once: a commit's size is what makes GitHub's API slow. Issues come with
+  their type, parent and reopenings; autonomy is tool calls over what a person
+  put in — what they typed, less the prompt sclaude opens its own sessions
+  with, plus the questions Claude asked and the actions they turned down.
+- **the review per feature** (`gh_review_rounds` in `dora.py`) reuses
+  `review_report.py`, the report printed at the close of every round: a round
+  is a run of the automatic review on the feature's branch — not a session,
+  which can carry several — and a thread's fate is fixed, closed without a fix
+  (the author's decline) or still open, over every pull request the feature
+  took. A finished feature's figures are kept once read, until a pull request
+  of it is added.
+
+- **requirements** (`requirements` in `dev_quality.py`): development begins
+  when the plan is approved, which is when the acceptance criteria are posted;
+  the description, the User request comment and the criteria as they stood
+  then are laid against how they ended — GitHub keeps every version of an
+  edited body whole — with QA's ticks read as no change. A fifth of the text
+  rewritten, a criterion added or dropped, or two requirements under the
+  request's "Added during development" (which the code step writes) is a
+  significant change. A feature started unclear when its plan sessions asked
+  at least as many clarifying questions — each question of an AskUserQuestion
+  call, from the transcripts — as it has acceptance criteria: relative to
+  size, because the questions grow with the feature.
+
+- **the person and Claude** (`human_ai` in `metrics_extra.py`): every time a
+  person stepped in — a message typed after Claude's turn, an answer to its
+  question — is in the transcript with the time they took, from Claude's last
+  line, capped at half an hour (longer, they were away), and the tool calls
+  Claude made since the time before. Claude's own time is its cost record's
+  time in the model and in tools. The opening prompt sclaude gives a session is
+  not the person's.
+- **health at a glance**: each figure is scored 0–100 by its own bands
+  (`Band.score` in `metrics_guide.py`: 100 at the good mark, 50 at the watch
+  mark, 0 one more step beyond), a direction is the mean of its figures, the
+  index the mean of the directions, and the imbalance the best direction less
+  the worst. Spend has no band of its own, so the cost direction reads the cache
+  hit rate and the last week's spend per standard feature against the weeks
+  before.
+
+- **the team** (`team_section` in `dora.py`, its script `TEAM_JS`) is drawn
+  only for `metricsTeam: demo` in the product's config. The real developer's
+  figures are the product's; three generated teammates are drawn from them in
+  the browser by `PROFILES` — a multiplier, or a value of its own, per figure
+  and person — and the draw is kept in the browser's storage
+  (`sclaude-team-factors-v1`), so the page does not change on every load.
+  Clearing that key draws them again. `metricsTeam` in the product's
+  `.sclaude/local/config.json` — outside git — wins over the committed one,
+  so one machine can show the demo while the team's page stays real.
+  Each person also gets a card of their strong sides with Claude and what to
+  work on: the adoption and effectiveness figures scored by their bands, the
+  best three and the weakest three, each weak one with a habit to try
+  (`TEAM_TIPS`).
+  Each figure of the team part has its note too (`TEAM_GUIDE` in
+  `metrics_guide.py`), its "How" written for real teammates: every developer's
+  sclaude publishing its cycle records and transcript summaries to the team's
+  metrics repository, one file per person; commits by git author, pull
+  requests by GitHub author. It is generated data, for showing the
+  page with a team; nothing real is attributed to them.
+
+Features differ in size, so the figures per feature can be read per standard
+feature instead (`complexity` in `metrics_extra.py`; the switch at the top of
+the page, kept per browser). A feature's size is the acceptance criteria the
+plan wrote into its issue — the scope as asked, before any code, which the
+implementation cannot inflate; a feature with none is sized by the lines its
+pull requests changed, at the median rate of lines per criterion. The unit is
+the median finished feature, so a normalised figure keeps its usual units.
+The weekly charts are weighted the same way: what a week shipped or had in
+work is summed in standard features, and its spend is divided by what it
+shipped. Both versions are drawn into the page and the switch shows one.
+
+Each figure carries a note, shown on hover over its tile or on a tap — why
+it matters, what to aim for, how it is counted — and a colour, from `sclaude/lib/metrics_guide.py`. The bands are
+the published ones where a source exists (DORA's levels, the usual pull
+request and flow benchmarks) and a stated judgement where none does; a figure
+whose good direction depends on the team, such as spend or session counts, is
+explained and left uncoloured.
+
+The page is the product's and lives in it, at
+`.sclaude/local/dora/index.html` beside what Vercel, GitHub and the
+transcripts last answered.
+The answers are merged run by run, so history outlives Vercel's retention and a
+run with no network draws the last known picture — the page names the source it
+could not reach. Not the committed part of `.sclaude/`: a file that changes by
+itself every few hours would dirty the main checkout, where "uncommitted
+changes" must mean somebody's work.
+
+`dora_refresh` (`state.sh`) starts it in the background on every
+conversational `sclaude`, under `setsid`; it does nothing while the page is
+younger than `SCLAUDE_DORA_EVERY` seconds (six hours), and two sclaudes
+starting together build it once — the second finds the lock taken.
+`metrics_append` forces it: a finished feature is when the numbers move. Only
+a product with a Vercel link or a GitHub remote is asked, and never under
+`SCLAUDE_NO_SYNC`, so a bench's repository leaves nothing running.
+`sclaude-proxy` serves the file as it stands at `/__sclaude/dora`, under main.
+
 ## Abandoning a feature
 
 **Work that was decided against is cleared away by `sclaude drop`.** `done` is

@@ -205,7 +205,45 @@ install or remove — each only on evidence, with how sure it is.
 
 One record per finished feature: time per step, test attempts, what failed, how
 far it shipped, who ran it. Enough for the four DORA metrics from real cycles
-rather than guesses.
+rather than guesses — and sclaude draws them, with the rest of what it counts,
+on a page under `main` at `http://localhost:3000/` ("main — DORA metrics"):
+the four DORA keys with rework and hotfix rates and lead time by stage; a pull
+request's way — coding, pickup, review, merge and deploy time, maturity;
+features shipped, cycle time, time to market, flow efficiency; software
+quality — escaped defects, reopened issues, work by commit type, regression
+green first time, review threads, acceptance criteria; code health and
+project hygiene; and Claude's own work — sessions, autonomy (tool calls per
+human input), what of Claude Code is used, when the work happens, the share
+of commits it wrote, and what a feature, a deploy or a pull request cost,
+week by week. The review is counted per feature, over all its pull requests:
+rounds (runs of the review, not sessions), threads, and the share closed
+without a fix or still open. The requirements are read from each issue's
+history: how many features had theirs change significantly after the plan was
+approved, and how many started unclear — as many clarifying questions in
+planning as the feature has acceptance criteria. How much a person had to
+work for what Claude did is counted from every time they stepped in: Claude's
+run between interventions, the sessions nobody stepped into, the person's
+minutes per hour of Claude, week by week. One radar puts it together — eight
+directions (speed, stability, quality, requirements, flow, autonomy, cost,
+discipline), each its figures scored by their own bands — with a health index
+and the imbalance between the best and the worst direction. A table of
+contents on the left, which folds away, leads through the parts. With
+`metricsTeam` set to `demo` (`sclaude config`, or `.sclaude/local/config.json`
+for one machine only), a team part lays developers
+side by side — output, speed, quality, AI adoption and effectiveness (Claude's
+share of their commits, subagents, skills, plan mode, the prompt cache, how
+often they step in or turn Claude down), cost, who holds what and who works on
+what, and for each person their strong sides with Claude and what to work on,
+with a habit to try — with three generated teammates drawn from the real figures, to
+show the page with a team. Each figure is coloured good, watch or poor where
+a standard band exists, and shows on hover (a tap on a phone) why it matters, what to aim for
+and how it is counted. A switch at the top compares features of different
+size: the figures marked ◆ — cycle time, time to market, review rounds and
+threads, questions and spend per feature, and the weekly charts of what was
+shipped, in work and spent — are divided by each feature's size, in standard
+features (its acceptance criteria; the median finished feature is one). A
+closing list names what such scorecards ask for and the page cannot measure,
+and why.
 
 ### Two deliberate choices
 
@@ -630,6 +668,7 @@ is stopped, database included (data kept), and starts again on the next visit.
 | `.sclaude/team/`, `.sclaude/people/<name>/` | rules, prompt additions, deferred findings | the product | yes | no harm if it is |
 | `.sclaude/local/feature/` | one feature's working state: the plan, logs, its database settings | the feature's worktree | never | never |
 | `.sclaude/local/terminal/` | terminal recordings the retrospective reads | the product's main checkout | never | never |
+| `.sclaude/local/dora/` | the product's DORA page and what it was built from | the product's main checkout | never | never |
 | `.vercelignore` | keeps `.env*` and sclaude's files out of a deploy | each tree sclaude deploys | no, unless the product tracks its own | — |
 | `~/.claude/sclaude/` | your cycle records, remembered choices, running dev servers | your home | never | — |
 | `~/.config/sclaude/` | this machine's settings | your home | never | — |
@@ -697,7 +736,17 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   leads to. It follows the feature as it moves (every few seconds). The list of
   features links it on a line of its own, "<feature> — Process map (BPMN)",
   and under main the same line opens the whole cycle with no feature on it
-  (`/__sclaude/bpmn`). Every step's header prints it under "Open it at",
+  (`/__sclaude/bpmn`).
+- `localhost:3000/__sclaude/dora` — the product's metrics, linked under main
+  as "main — DORA metrics": DORA, delivery, development quality, Claude's work
+  and token efficiency. Production deploys and builds come from Vercel, each
+  change's first commit from git and GitHub, failures from the rollback
+  comments sclaude writes on an issue, sessions, tokens and dollars from
+  Claude Code's transcripts (its own cost record), and the rest from the cycle
+  records, the review log and the issues' acceptance criteria. It is rebuilt in the background whenever `sclaude` starts in
+  the product and the page is over six hours old (`SCLAUDE_DORA_EVERY`, in
+  seconds), and at once when a feature is finished; an open tab reloads
+  itself hourly. Every step's header prints it under "Open it at",
   and in the Telegram Mini App it is "🗺 Process map" in a feature's actions and
   on its card, which starts the feature's dev server too (and gives it one
   first when it has never had one).

@@ -141,7 +141,9 @@ def main():
         check("the address comes from the file", dev_login.email(), "dev@example.com")
 
         for value, want in (("/a?b=1", "/a?b=1"), ("//evil.com", "/"), ("http://x", "/"),
-                            ("/\\evil", "/"), (None, "/")):
+                            ("/\\evil", "/"), (None, "/"),
+                            ("/\r\nSet-Cookie: a=1", "/"), ("/\t/evil.com", "/"),
+                            ("/a\x7f", "/")):
             check("safe_next(%r)" % value, dev_login.safe_next(value), want)
 
         # No devLogin: nothing offered, and asked anyway, a reason.
@@ -268,6 +270,14 @@ def check_proxy(root, wt, dport, login_file):
         status, headers, _ = request(port, "f1." + host, "/__sclaude/login?next=/x",
                                      cookie="a=1; sb-127-auth-token.0=xyz")
         check("a browser already signed in is only sent on", headers.get("location"), "/x")
+
+        # next= goes into the Location header: CR LF in it must not start
+        # headers of a link's choosing.
+        status, headers, _ = request(
+            port, "f1." + host, "/__sclaude/login?next=/%0d%0aSet-Cookie:%20planted=1",
+            cookie="sb-127-auth-token=xyz")
+        check("a CR LF in next= plants no header",
+              (headers.get("location"), "planted" in headers.get("set-cookie", "")), ("/", False))
 
         status, headers, _ = request(port, "100.64.0.1:%d" % port, "/__sclaude/login?f=f1",
                                      cookie="sb-127-auth-token=old")

@@ -167,9 +167,14 @@ def token(url, secret, address, timeout=10):
 
 
 def safe_next(value):
-    """A path on the same site to land on, or "/"."""
+    """A path on the same site to land on, or "/".
+
+    No control character either: it goes into a Location header as it is,
+    where CR LF would start headers of the caller's choosing, and a browser
+    drops a tab or a newline from an address, so "/<tab>/evil.com" lands
+    on evil.com."""
     if isinstance(value, str) and value.startswith("/") and not value.startswith("//") \
-            and "\\" not in value:
+            and "\\" not in value and not any(ord(c) < 0x20 or c == "\x7f" for c in value):
         return value
     return "/"
 

@@ -691,7 +691,9 @@ def respond(status, body, extra=(), kind="text/html; charset=utf-8"):
             # Every page of ours closes its connection: see the note at the top
             # on why the next request must be routed afresh.
             "Connection: close"]
-    head.extend(extra)
+    # A header carrying CR or LF would end itself and start others: dropped,
+    # whatever let it get this far.
+    head.extend(h for h in extra if "\r" not in h and "\n" not in h)
     return ("\r\n".join(head) + "\r\n\r\n").encode("latin-1") + data
 
 

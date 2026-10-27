@@ -1104,12 +1104,13 @@ async def handle(reader, writer):
 # --- the gate: the phone's entry from the internet ---------------------------
 #
 # `sclaude-proxy --gate` is what `tailscale funnel` publishes for the phone's
-# Telegram Mini App (sclaude-gate.socket on 127.0.0.1:3001; the funnel stays on,
-# because Tailscale takes a minute and a half to carry a freshly enabled one). It routes nothing itself: a request it lets
-# in goes on to the proxy on :3000 as it came, so starting, routing and idling
-# stay in one process. Its own job is who: a page opened from the bot proves
-# itself with Telegram's signed initData once (tg_webapp.py) and then carries
-# the gate's cookie; anything without it gets a 403.
+# Telegram Mini App (sclaude-gate.socket on 127.0.0.1:3001 and :3002; the
+# funnel stays on, because Tailscale takes a minute and a half to carry a
+# freshly enabled one). It routes nothing itself: a request it lets in goes on
+# to the proxy on :3000, or to code-server, as it came, so starting, routing
+# and idling stay in one process. Its own job is who: a page opened from the
+# bot proves itself with Telegram's signed initData once (tg_webapp.py) and
+# then carries the gate's cookie; anything without it gets a 403.
 #
 # One request per connection, always: funnel keeps its connections to this
 # port and would carry the next request — anybody's — down one that was
@@ -1117,14 +1118,35 @@ async def handle(reader, writer):
 #
 # It ends itself after SCLAUDE_GATE_IDLE seconds with no connection open and
 # none new, and the socket starts it again on the next one.
+#
+# Two sides, on two origins, from one process: the bot's (127.0.0.1:3001,
+# funnel :8443) — the menu page, code-server, and the entry the bot's buttons
+# open — and the features' (127.0.0.1:3002, funnel :10000). A browser keeps
+# one origin's scripts away from another's, and a feature's page runs
+# whatever the product loads, so it must not stand where initData is, or the
+# menu that starts sessions on this machine. The entry checks initData on the
+# bot's side and sends the page on to the features' side with a ticket
+# (tg_webapp.sign_ticket), which buys a cookie of that side's own. Only the
+# view's settings go along, never the signed data.
+#
+# Cookies are not kept apart by port, so each side's cookie is sent to both:
+# each side reads only its own, the bot's side refuses what the features' side
+# makes the browser send (Sec-Fetch-Site same-site), and neither cookie is
+# passed on to what stands behind the gate, or taken from what it answers.
 import tg_webapp  # noqa: E402
 
 GATE_PORT = int(os.environ.get("SCLAUDE_GATE_PORT") or 3001)
+GATE_APP_PORT = int(os.environ.get("SCLAUDE_GATE_APP_PORT") or 3002)
+# The port the funnel publishes the features' side on, on the same name: the
+# entry page builds the address from its own host and this.
+GATE_APP_PUBLIC = int(os.environ.get("SCLAUDE_GATE_APP_PUBLIC") or 10000)
 GATE_UPSTREAM = int(os.environ.get("SCLAUDE_GATE_UPSTREAM") or PORT)
 GATE_ENV = os.environ.get("SCLAUDE_GATE_ENV") or os.path.expanduser(
     "~/.config/keepawake/env")
 GATE_IDLE = float(os.environ.get("SCLAUDE_GATE_IDLE") or 1800)
 GATE_COOKIE = "sclaude_tg"
+GATE_APP_COOKIE = "sclaude_tg_app"
+GATE_COOKIES = (GATE_COOKIE, GATE_APP_COOKIE)
 # The Mini App goes full screen, as close to an app of its own as Telegram
 # allows. Telegram then floats its close and menu buttons over the top of the
 # page; False keeps its header and only expands the sheet to full height.
@@ -1132,14 +1154,29 @@ GATE_FULLSCREEN = True
 AUTH_BODY_LIMIT = 8192
 
 GATE = {"token": "", "owner": 0, "open": 0, "last": 0.0}
+# Tickets already used, by their value, until they would have run out anyway.
+USED_TICKETS = {}
 
 
-def gate_cookie(header):
+def gate_cookie(header, name=GATE_COOKIE):
     for part in header.split(";"):
-        name, _, value = part.strip().partition("=")
-        if name == GATE_COOKIE:
+        key, _, value = part.strip().partition("=")
+        if key == name:
             return value.strip()
     return ""
+
+
+def take_ticket(value):
+    """True the first time a good ticket is shown, never again."""
+    now = time.time()
+    for used, until in list(USED_TICKETS.items()):
+        if until <= now:
+            del USED_TICKETS[used]
+    expiry = tg_webapp.ticket_valid(value, GATE["token"])
+    if not expiry or value in USED_TICKETS:
+        return False
+    USED_TICKETS[value] = expiry
+    return True
 
 
 # The Mini App's own frame. Telegram shows no address bar in a Mini App and has
@@ -1177,14 +1214,10 @@ def js_string(value):
 GATE_PATH = re.compile(r"^[A-Za-z0-9/_.~%?=&+-]*$")
 
 
-def gate_bootstrap(label, path=""):
-    """The page the bot's button opens: set the view up, sign in, show the
-    feature inside the address bar's frame."""
-    script = """
-const tg = window.Telegram && window.Telegram.WebApp;
-const msg = document.getElementById('msg');
-const start = %(path)s || (%(label)s ? '/__sclaude/login?f=' + encodeURIComponent(%(label)s) : '/__sclaude/');
-function shell() {
+# The address bar over the frame, on either side: the page runs it once it
+# may show the frame.
+SHELL_SCRIPT = """
+function shell(start) {
   msg.remove();
   document.getElementById('shell').hidden = false;
   const frame = document.getElementById('frame');
@@ -1209,19 +1242,17 @@ function shell() {
   }
   frame.src = start;
 }
-if (!tg || !tg.initData) {
-  msg.textContent = 'Open this from the bot: the phone button next to the feature.';
-} else {
+function view() {
   tg.ready();
   tg.expand();
-  if (%(full)s && tg.isVersionAtLeast('8.0')) { try { tg.requestFullscreen(); } catch (e) {} }
+  if (%(full)s && tg.isVersionAtLeast('8.0') && !tg.isFullscreen) { try { tg.requestFullscreen(); } catch (e) {} }
   if (tg.isVersionAtLeast('7.7')) tg.disableVerticalSwipes();
-  fetch('/__sclaude/tg/auth', {method: 'POST', body: tg.initData, credentials: 'same-origin'})
-    .then((r) => r.ok ? shell() : (msg.textContent = 'The bot did not recognise you (' + r.status + ').'))
-    .catch(() => { msg.textContent = 'The laptop did not answer.'; });
 }
-""" % {"full": "true" if GATE_FULLSCREEN else "false", "label": js_string(label),
-       "path": js_string(path)}
+""" % {"full": "true" if GATE_FULLSCREEN else "false"}
+
+
+def shell_page(title, script):
+    """The address bar and its frame, hidden until script shows them."""
     return ("<!doctype html><html><head><meta charset=utf-8>"
             "<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover'>"
             "<title>%s</title><style>%s</style></head><body>"
@@ -1233,9 +1264,53 @@ if (!tg || !tg.initData) {
             "<button id=out aria-label='Open without the bar'>⤢</button>"
             "</div><iframe id=frame></iframe></div>"
             "<script src='https://telegram.org/js/telegram-web-app.js'></script>"
-            "<script>%s</script></body></html>"
-            % (html.escape(label or ("code-server" if path else "Features")), SHELL_STYLE,
-               html.escape(label or ("code-server" if path else "the features")), script))
+            "<script>const tg = window.Telegram && window.Telegram.WebApp;\n"
+            "const msg = document.getElementById('msg');%s%s</script></body></html>"
+            % (html.escape(title), SHELL_STYLE, html.escape(title), SHELL_SCRIPT, script))
+
+
+def gate_bootstrap(label, path=""):
+    """The page the bot's button opens, on the bot's side: set the view up and
+    prove who is looking. code-server is shown here, in the address bar's
+    frame; a feature or its map is on the features' side, where the page goes
+    with a ticket and with Telegram's view settings — not its signed data."""
+    script = """
+const label = %(label)s, path = %(path)s;
+if (!tg || !tg.initData) {
+  msg.textContent = 'Open this from the bot: the phone button next to the feature.';
+} else if (path.startsWith('/__code/')) {
+  view();
+  fetch('/__sclaude/tg/auth', {method: 'POST', body: tg.initData, credentials: 'same-origin'})
+    .then((r) => r.ok ? shell(path) : (msg.textContent = 'The bot did not recognise you (' + r.status + ').'))
+    .catch(() => { msg.textContent = 'The laptop did not answer.'; });
+} else {
+  view();
+  fetch('/__sclaude/tg/ticket', {method: 'POST', body: tg.initData, credentials: 'same-origin'})
+    .then((r) => r.ok ? r.text() : Promise.reject(r.status))
+    .then((ticket) => {
+      const keep = new URLSearchParams();
+      for (const [k, v] of new URLSearchParams(location.hash.slice(1)))
+        if (k.startsWith('tgWebApp') && k !== 'tgWebAppData') keep.set(k, v);
+      location.replace(location.protocol + '//' + location.hostname + ':' + %(app)d
+        + '/__sclaude/enter?' + new URLSearchParams({t: ticket, f: label, p: path}) + '#' + keep);
+    })
+    .catch((e) => { msg.textContent = typeof e === 'number'
+      ? 'The bot did not recognise you (' + e + ').' : 'The laptop did not answer.'; });
+}
+""" % {"label": js_string(label), "path": js_string(path), "app": GATE_APP_PUBLIC}
+    return shell_page(label or ("code-server" if path else "Features"), script)
+
+
+def gate_shell(label, path=""):
+    """The features' side of the same page: the address bar over a feature,
+    for a browser that has this side's cookie. Telegram's script is here for
+    the view (full screen, the back button), and has no initData to give."""
+    script = """
+const start = %(path)s || (%(label)s ? '/__sclaude/login?f=' + encodeURIComponent(%(label)s) : '/__sclaude/');
+if (tg) view();
+shell(start);
+""" % {"label": js_string(label), "path": js_string(path)}
+    return shell_page(label or "Features", script)
 
 
 async def post_body(method, headers, reader):
@@ -1482,46 +1557,121 @@ if (!tg || !tg.initData) {
 def menu_csp(nonce):
     """What the menu page may load and run: its own script (by nonce) and
     Telegram's, its calls to the gate — and no handler written into markup,
-    should one get past markup()."""
+    should one get past markup(). Framed only where BOT_ANCESTORS allows."""
     return ("Content-Security-Policy: default-src 'none'; "
             "script-src 'nonce-%s' https://telegram.org; style-src 'unsafe-inline'; "
-            "connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'"
-            % nonce)
+            "connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; "
+            "frame-ancestors 'self' https://web.telegram.org" % nonce)
 
 
-async def gate_own(method, target, headers, reader):
-    """A response for the gate's open routes, or None for any other path."""
+def gate_target(query):
+    """(label, path) a bootstrap is asked to show, or None when either is
+    not one of ours: p is code-server's (on the bot's side) or a feature's
+    process map (FLOW_PREFIX, on the features')."""
+    label = (query.get("f") or [""])[0]
+    if label and not LABEL.match(label):
+        return None
+    path = (query.get("p") or [""])[0]
+    if path and not ((path.startswith(CODE_PREFIX) or path.startswith(FLOW_PREFIX))
+                     and GATE_PATH.match(path)):
+        return None
+    return label, path
+
+
+def same_origin(headers):
+    """True unless the request says it came from another origin: what the
+    menu's calls and the sign-ins must be."""
+    site = headers.get("sec-fetch-site", "")
+    if site:
+        return site in ("same-origin", "none")
+    origin = headers.get("origin", "")
+    return not origin or urlsplit(origin).netloc == headers.get("host", "")
+
+
+def from_app_side(headers):
+    """True for a request the features' side made the browser send to the
+    bot's: same name, another port. Sec-Fetch-Site says same-site; an old
+    browser is told by Origin or Referer, when it sends either."""
+    if headers.get("sec-fetch-site", "") == "same-site":
+        return True
+    host = headers.get("host", "")
+    for name in ("origin", "referer"):
+        there = urlsplit(headers.get(name, "")).netloc
+        if there and there != host and there.rsplit(":", 1)[0] == host.rsplit(":", 1)[0]:
+            return True
+    return False
+
+
+# Who may frame the bot's side: itself (code-server in the address bar), and
+# Telegram Web, which shows a Mini App in a frame — not the features' side.
+BOT_ANCESTORS = "Content-Security-Policy: frame-ancestors 'self' https://web.telegram.org"
+
+
+async def bot_own(method, target, headers, reader):
+    """A response for the bot's side's own routes, or None for any other path."""
     url = urlsplit(target)
     if url.path == "/__sclaude/tg":
         # No feature is the list of them all, the bot's first row.
-        label = (parse_qs(url.query).get("f") or [""])[0]
-        if label and not LABEL.match(label):
-            return respond("404 Not Found", page("Not found", "<p>No such feature.</p>"))
-        # p: a path of the gate's own to show instead — code-server's.
-        path = (parse_qs(url.query).get("p") or [""])[0]
-        # code-server, or a feature's process map (FLOW_PREFIX).
-        if path and not ((path.startswith(CODE_PREFIX) or path.startswith(FLOW_PREFIX))
-                         and GATE_PATH.match(path)):
+        shown = gate_target(parse_qs(url.query))
+        if shown is None:
             return respond("404 Not Found", page("Not found", "<p>No such page.</p>"))
-        return respond("200 OK", gate_bootstrap(label, path))
+        return respond("200 OK", gate_bootstrap(*shown), (BOT_ANCESTORS,))
     if url.path == "/__sclaude/menu":
         nonce = secrets.token_urlsafe(18)
         return respond("200 OK", menu_page(nonce), (menu_csp(nonce),))
-    if url.path == "/__sclaude/menu/api":
+    if url.path in ("/__sclaude/menu/api", "/__sclaude/tg/auth", "/__sclaude/tg/ticket"):
         body = await post_body(method, headers, reader)
         if body is None:
             return respond("400 Bad Request", "")
-        return await menu_api(body)
-    if url.path == "/__sclaude/tg/auth":
-        body = await post_body(method, headers, reader)
-        if body is None:
-            return respond("400 Bad Request", "")
+        if not same_origin(headers):
+            return respond("403 Forbidden", "")
+        if url.path == "/__sclaude/menu/api":
+            return await menu_api(body)
         if not tg_webapp.verify_init_data(body.decode("utf-8", "replace"),
                                           GATE["token"], GATE["owner"]):
             return respond("403 Forbidden", "")
+        if url.path == "/__sclaude/tg/ticket":
+            return respond("200 OK", tg_webapp.sign_ticket(GATE["token"]),
+                           kind="text/plain; charset=utf-8")
         return respond("204 No Content", "", (
             "Set-Cookie: " + framed_cookie("%s=%s; Path=/; Max-Age=%d; HttpOnly" % (
                 GATE_COOKIE, tg_webapp.sign_cookie(GATE["token"]), tg_webapp.COOKIE_TTL)),))
+    return None
+
+
+async def app_own(method, target, headers):
+    """A response for the features' side's own routes, or None for any other
+    path. The bot's pages and code-server are not here at all."""
+    url = urlsplit(target)
+    if url.path == "/__sclaude/enter":
+        # From the bot's side, with a ticket: this side's cookie, then the
+        # page itself, so that the ticket leaves the address.
+        query = parse_qs(url.query)
+        shown = gate_target(query)
+        if shown is None or shown[1].startswith(CODE_PREFIX):
+            return respond("404 Not Found", page("Not found", "<p>No such page.</p>"))
+        if not take_ticket((query.get("t") or [""])[0]):
+            return respond("403 Forbidden", page("Closed", (
+                "<h1>Closed</h1><p>This link was used already, or is too old: open "
+                "the feature from the bot again.</p>")))
+        return respond("303 See Other", "", (
+            "Location: /__sclaude/shell?" + urlencode({"f": shown[0], "p": shown[1]}),
+            "Set-Cookie: " + framed_cookie("%s=%s; Path=/; Max-Age=%d; HttpOnly" % (
+                GATE_APP_COOKIE, tg_webapp.sign_cookie(GATE["token"], purpose="app"),
+                tg_webapp.COOKIE_TTL))))
+    if url.path == "/__sclaude/shell":
+        if cross_site(method, headers) or not tg_webapp.cookie_valid(
+                gate_cookie(headers.get("cookie", ""), GATE_APP_COOKIE), GATE["token"],
+                purpose="app"):
+            return closed()
+        shown = gate_target(parse_qs(url.query))
+        if shown is None or shown[1].startswith(CODE_PREFIX):
+            return respond("404 Not Found", page("Not found", "<p>No such page.</p>"))
+        return respond("200 OK", gate_shell(*shown))
+    if url.path in ("/__sclaude/tg", "/__sclaude/menu") or url.path.startswith(
+            ("/__sclaude/tg/", "/__sclaude/menu/", CODE_PREFIX)) or url.path == CODE_PREFIX[:-1]:
+        return respond("404 Not Found", page("Not found", (
+            "<p>Not on this side: the bot's pages open from the bot.</p>")))
     return None
 
 
@@ -1563,7 +1713,7 @@ def cross_site(method, headers):
     return urlsplit(origin).netloc != headers.get("host", "")
 
 
-def frameable(head):
+def frameable(head, ancestors=None):
     """A response head with the bans on framing taken out.
 
     The Mini App shows a feature inside its own frame (the address bar), and
@@ -1571,7 +1721,9 @@ def frameable(head):
     CSP frame-ancestors — would refuse it. Only on the gate's way: the
     product's own headers are unchanged everywhere else, and past the gate
     is only the bot's owner. A Report-Only policy blocks nothing and stays.
-    The product's cookies are made ones a frame keeps (framed_cookie)."""
+    The product's cookies are made ones a frame keeps (framed_cookie); one
+    named as the gate's own is dropped, so that nothing behind the gate can
+    replace it. ancestors, a header line, says who may frame it instead."""
     lines = head.decode("latin-1").split("\r\n")
     out = [lines[0]]
     for line in lines[1:]:
@@ -1580,6 +1732,8 @@ def frameable(head):
         if key == "x-frame-options":
             continue
         if key == "set-cookie" and sep:
+            if value.strip().partition("=")[0].strip() in GATE_COOKIES:
+                continue
             line = "%s: %s" % (name, framed_cookie(value.strip()))
         if key == "content-security-policy" and sep:
             kept = [d for d in value.split(";")
@@ -1588,21 +1742,49 @@ def frameable(head):
                 continue
             line = "%s:%s" % (name, ";".join(kept))
         out.append(line)
+    if ancestors:
+        out.append(ancestors)
     return "\r\n".join(out).encode("latin-1")
 
 
-async def gate_relay(up_reader, writer):
+def without_gate_cookies(head):
+    """A request head with the gate's own cookies taken out of its Cookie
+    header: what stands behind the gate has no use for them, and a page that
+    echoed them back would hand a script what HttpOnly keeps from it."""
+    lines = head.decode("latin-1").split("\r\n")
+    out = [lines[0]]
+    for line in lines[1:]:
+        name, sep, value = line.partition(":")
+        if sep and name.strip().lower() == "cookie":
+            kept = [part for part in value.split(";") if part.strip()
+                    and part.strip().partition("=")[0].strip() not in GATE_COOKIES]
+            if not kept:
+                continue
+            line = "%s:%s" % (name, ";".join(kept))
+        out.append(line)
+    return "\r\n".join(out).encode("latin-1")
+
+
+async def gate_relay(up_reader, writer, ancestors=None):
     """The upstream's answer, its head made frameable, then the rest as is."""
     try:
         head = await up_reader.readuntil(b"\r\n\r\n")
     except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError):
         return
-    writer.write(frameable(head[:-4]) + b"\r\n\r\n")
+    writer.write(frameable(head[:-4], ancestors) + b"\r\n\r\n")
     await writer.drain()
     await pipe(up_reader, writer)
 
 
-async def gate_handle(reader, writer):
+def closed():
+    return respond("403 Forbidden", page(
+        "Closed", "<h1>Closed</h1><p>Open the feature from the bot: the 📱 "
+        "button next to it.</p>"))
+
+
+async def gate_handle(reader, writer, side="bot"):
+    """One request on one side: "bot" (its own pages and code-server) or
+    "app" (the features, through the proxy)."""
     upstream = None
     GATE["open"] += 1
     GATE["last"] = time.time()
@@ -1614,40 +1796,56 @@ async def gate_handle(reader, writer):
             return
         method, target, headers = parse_head(head)
         path = urlsplit(target).path
-        # Which path, not what it carried: a query may hold initData. The
+        # Which path, not what it carried: a query may hold a ticket. The
         # gate's own paths only: a feature's page and code-server load
         # hundreds of files, which would bury what matters in the journal.
         if path.startswith("/__sclaude/"):
-            sys.stderr.write("gate: %s %s\n" % (method, path))
-        own = await gate_own(method, target, headers, reader)
+            sys.stderr.write("gate %s: %s %s\n" % (side, method, path))
+        if side == "bot":
+            if from_app_side(headers):
+                sys.stderr.write("gate bot: refused from the features' side %s %s\n"
+                                 % (method, path))
+                writer.write(respond("403 Forbidden", ""))
+                await writer.drain()
+                return
+            own = await bot_own(method, target, headers, reader)
+            if own is None and not target.startswith(CODE_PREFIX):
+                own = respond("404 Not Found", page("Not found", (
+                    "<p>Features open from the bot, on their own side.</p>")))
+        else:
+            own = await app_own(method, target, headers)
         if own is not None:
             writer.write(own)
             await writer.drain()
             return
+        cookie = gate_cookie(headers.get("cookie", ""),
+                             GATE_COOKIE if side == "bot" else GATE_APP_COOKIE)
         if cross_site(method, headers) or not tg_webapp.cookie_valid(
-                gate_cookie(headers.get("cookie", "")), GATE["token"]):
-            sys.stderr.write("gate: refused %s %s\n" % (method, path))
-            writer.write(respond("403 Forbidden", page(
-                "Closed", "<h1>Closed</h1><p>Open the feature from the bot: the 📱 "
-                "button next to it.</p>")))
+                cookie, GATE["token"], purpose="cookie" if side == "bot" else "app"):
+            sys.stderr.write("gate %s: refused %s %s\n" % (side, method, path))
+            writer.write(closed())
             await writer.drain()
             return
-        host, port = "127.0.0.1", GATE_UPSTREAM
-        if target.startswith(CODE_PREFIX):
+        head = without_gate_cookies(head)
+        if side == "bot":
             host, port = code_server()
             head = without_prefix(head, CODE_PREFIX)
+        else:
+            host, port = "127.0.0.1", GATE_UPSTREAM
         try:
             up_reader, upstream = await asyncio.wait_for(
                 asyncio.open_connection(host, port), 5)
         except (OSError, asyncio.TimeoutError):
             writer.write(respond("502 Bad Gateway", page(
-                "Down", "<h1>sclaude-proxy is not answering</h1>")))
+                "Down", "<h1>%s is not answering</h1>" % (
+                    "code-server" if side == "bot" else "sclaude-proxy"))))
             await writer.drain()
             return
         if headers.get("upgrade", "").lower() != "websocket":
             head = close_after(head)
         upstream.write(head)
-        await asyncio.gather(pipe(reader, upstream), gate_relay(up_reader, writer))
+        await asyncio.gather(pipe(reader, upstream), gate_relay(
+            up_reader, writer, BOT_ANCESTORS if side == "bot" else None))
     finally:
         GATE["open"] -= 1
         GATE["last"] = time.time()
@@ -1659,8 +1857,9 @@ async def gate_handle(reader, writer):
                     pass
 
 
-# code-server through the gate (an experiment): /__code/… is code-server's
-# /…, so a phone without Tailscale reaches it from the Mini App. code-server
+# code-server through the gate (an experiment): /__code/… on the bot's side is
+# code-server's /…, so a phone without Tailscale reaches it from the Mini App.
+# A shell on this machine, so never on the features' side. code-server
 # keeps its own password behind the gate's check. Its pages use relative
 # addresses throughout, which is what lets it live under a prefix that only
 # the gate knows about.
@@ -1690,6 +1889,27 @@ def without_prefix(head, prefix):
     return b" ".join((method, target, version)) + sep + rest
 
 
+def gate_sockets():
+    """The bot's side's socket and the features' side's: systemd's when
+    sclaude-gate.socket started the gate (fd 3 and 4, in the order of its
+    ListenStream lines), else bound here. A socket unit from before the
+    features' side hands over one: the second is then bound here."""
+    handed = 0
+    if os.environ.get("LISTEN_PID") == str(os.getpid()):
+        handed = min(int(os.environ.get("LISTEN_FDS") or 0), 2)
+    socks = [socket.socket(fileno=3 + i) for i in range(handed)]
+    for port in (GATE_PORT, GATE_APP_PORT)[handed:]:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Loopback only: funnel connects from this machine, and nothing else may.
+        sock.bind(("127.0.0.1", port))
+        sock.listen(128)
+        socks.append(sock)
+    for sock in socks:
+        sock.setblocking(False)
+    return socks
+
+
 async def gate_main():
     env = tg_webapp.read_env(GATE_ENV)
     token = env.get("KEEPAWAKE_BOT_TOKEN", "")
@@ -1699,21 +1919,14 @@ async def gate_main():
                          "KEEPAWAKE_CHAT_ID in %s\n" % GATE_ENV)
         sys.exit(1)
     GATE.update(token=token, owner=int(owner), last=time.time())
-    if os.environ.get("LISTEN_PID") == str(os.getpid()) \
-            and int(os.environ.get("LISTEN_FDS") or 0) >= 1:
-        # sclaude-gate.socket holds the port; exiting when idle gives it back
-        # to systemd, which starts the gate again on the next connection.
-        sock = socket.socket(fileno=3)
-    else:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # Loopback only: funnel connects from this machine, and nothing else may.
-        sock.bind(("127.0.0.1", GATE_PORT))
-        sock.listen(128)
-    sock.setblocking(False)
-    server = await asyncio.start_server(gate_handle, sock=sock, limit=HEAD_LIMIT)
+    # sclaude-gate.socket holds the ports; exiting when idle gives them back
+    # to systemd, which starts the gate again on the next connection.
+    bot_sock, app_sock = gate_sockets()
+    bot = await asyncio.start_server(gate_handle, sock=bot_sock, limit=HEAD_LIMIT)
+    app = await asyncio.start_server(lambda r, w: gate_handle(r, w, "app"),
+                                     sock=app_sock, limit=HEAD_LIMIT)
     tick = min(TICK, max(GATE_IDLE / 4, 0.1))
-    async with server:
+    async with bot, app:
         while GATE["open"] or time.time() - GATE["last"] < GATE_IDLE:
             await asyncio.sleep(tick)
     sys.stderr.write("sclaude-proxy --gate: nobody looked for %ds; closing\n" % GATE_IDLE)

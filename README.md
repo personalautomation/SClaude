@@ -793,10 +793,15 @@ left — going on with the session past them pays to write the whole conversatio
 into the cache again. Continue and the actions start nothing beside a step at
 work or a question waiting for you.
 
-It works through `tailscale funnel`, which publishes
-`https://<node>.<tailnet>.ts.net:8443`. A gate in front lets in only your
-Telegram account (the one in `KEEPAWAKE_CHAT_ID`), checked by Telegram's own
-signature, and sends everyone else away with `403`.
+It works through `tailscale funnel`, which publishes two addresses on the same
+name: `https://<node>.<tailnet>.ts.net:8443` for the bot's own pages (the menu
+and code-server) and `:10000` for the features. A gate in front lets in only
+your Telegram account (the one in `KEEPAWAKE_CHAT_ID`), checked by Telegram's
+own signature, and sends everyone else away with `403`. The features are kept
+on an address of their own so that a script on a feature's page — a product's
+bug, or a third-party script it loads — cannot press the menu's buttons for
+you. Phone access turned on before this needs `./install.sh` once more, or
+turning off and on again in the app's Settings.
 
 Phone access is off until you turn it on, and off again after the machine
 restarts. Turning it on takes a few minutes — sometimes five — before Tailscale
@@ -814,7 +819,8 @@ sudo tailscale set --operator=$USER    # lets the bot run `tailscale funnel`
 Funnel also has to be allowed for the machine in your Tailscale policy; if it is
 not, the bot shows Tailscale's answer with the link that turns it on. A product
 that signs people in through a provider with a list of allowed redirect
-addresses (Supabase Auth, OAuth apps) needs the funnel address in that list.
+addresses (Supabase Auth, OAuth apps) needs the features' funnel address
+(`:10000`) in that list.
 
 ## bin/chrome-debug
 

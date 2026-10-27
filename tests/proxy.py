@@ -58,7 +58,8 @@ def wait_for(predicate, seconds=10):
 
 
 def upstream(name):
-    """A dev server that says who it is, and echoes after an upgrade."""
+    """A dev server that says who it is, and echoes after an upgrade. /cookies
+    answers with the cookies it was sent; /plant tries to set the gate's."""
     server = socket.socket()
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", 0))
@@ -73,10 +74,12 @@ def upstream(name):
                     return
                 head += chunk
             text = head.decode("latin-1").lower()
-            host = ""
-            for line in text.split("\r\n"):
-                if line.startswith("host:"):
+            host, cookies = "", "-"
+            for line in head.decode("latin-1").split("\r\n"):
+                if line.lower().startswith("host:"):
                     host = line[5:].strip()
+                if line.lower().startswith("cookie:"):
+                    cookies = line[7:].strip()
             if "upgrade: websocket" in text:
                 conn.sendall(b"HTTP/1.1 101 Switching Protocols\r\n"
                              b"Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
@@ -86,8 +89,13 @@ def upstream(name):
                         return
                     conn.sendall(data)
             body = ("%s %s" % (name, host)).encode()
-            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n"
-                         b"Connection: close\r\n\r\n%s" % (len(body), body))
+            planted = b""
+            if text.startswith("get /cookies "):
+                body = cookies.encode()
+            if text.startswith("get /plant "):
+                planted = b"Set-Cookie: sclaude_tg_app=planted; Path=/\r\nSet-Cookie: theirs=1\r\n"
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n%s"
+                         b"Connection: close\r\n\r\n%s" % (len(body), planted, body))
 
     def loop():
         while True:
@@ -317,8 +325,9 @@ def raw_request(port, text):
 
 def check_gate(proxy_port, root):
     """`sclaude-proxy --gate`: the phone's entry from the internet lets in only
-    the bot's owner, by Telegram's signed initData, and passes them on to the
-    proxy one request per connection."""
+    the bot's owner, by Telegram's signed initData, and passes them on one
+    request per connection — the bot's pages and code-server on one side, the
+    features on another, which never sees initData."""
     sys.path.insert(0, os.path.join(os.path.dirname(PROXY), "..", "sclaude", "lib"))
     import tg_webapp
     token, owner = "123:TEST-TOKEN", 4242
@@ -327,9 +336,10 @@ def check_gate(proxy_port, root):
         fh.write("KEEPAWAKE_BOT_TOKEN=%s\nKEEPAWAKE_CHAT_ID=%d\n" % (token, owner))
 
     # No credentials: the gate does not open at all.
-    port = free_port()
+    port, aport = free_port(), free_port()
     proc = subprocess.run([sys.executable, PROXY, "--gate"], timeout=10,
                           env=dict(os.environ, SCLAUDE_GATE_PORT=str(port),
+                                   SCLAUDE_GATE_APP_PORT=str(aport),
                                    SCLAUDE_GATE_ENV=os.path.join(root, "nothing.env")),
                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     check("gate: no credentials, no gate", (proc.returncode, answers_on(port)), (1, False))
@@ -339,9 +349,11 @@ def check_gate(proxy_port, root):
     with open(code_config, "w") as fh:
         fh.write("bind-addr: 127.0.0.1:%d\nauth: password\n" % proxy_port)
     # The menu page acts on keepawake's state: a file of the test's own.
-    port = free_port()
+    port, aport = free_port(), free_port()
     proc = subprocess.Popen([sys.executable, PROXY, "--gate"],
                             env=dict(os.environ, SCLAUDE_GATE_PORT=str(port),
+                                     SCLAUDE_GATE_APP_PORT=str(aport),
+                                     SCLAUDE_GATE_APP_PUBLIC="10000",
                                      SCLAUDE_GATE_UPSTREAM=str(proxy_port),
                                      SCLAUDE_GATE_ENV=envfile, SCLAUDE_GATE_IDLE="2",
                                      SCLAUDE_GATE_CODE_CONFIG=code_config,
@@ -350,34 +362,41 @@ def check_gate(proxy_port, root):
                                      SCLAUDE_PROXY_TICK="0.2"),
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
-        wait_for(lambda: answers_on(port), 5)
-        host = "box.tail1.ts.net:8443"
+        wait_for(lambda: answers_on(port) and answers_on(aport), 5)
+        host, ahost = "box.tail1.ts.net:8443", "box.tail1.ts.net:10000"
 
-        status, _, body = request(port, host, "/")
+        # The features' side: closed to whoever has not come from the bot.
+        status, _, body = request(aport, ahost, "/")
         check("gate: a stranger is refused", status, "HTTP/1.1 403 Forbidden")
         check("gate: a stranger sees no feature", ">a<" in body, False)
-        status, _, _ = request(port, host, "/__sclaude/")
+        status, _, _ = request(aport, ahost, "/__sclaude/")
         check("gate: the list is closed too", status, "HTTP/1.1 403 Forbidden")
-        status, _, _ = request(port, host, "/", cookie="sclaude_tg=99999999999.forged")
+        status, _, _ = request(aport, ahost, "/", cookie="sclaude_tg_app=99999999999.forged")
         check("gate: a forged cookie is refused", status, "HTTP/1.1 403 Forbidden")
+        # The bot's side has no feature behind it at all.
+        status, _, _ = request(port, host, "/")
+        check("gate: no feature on the bot's side", status, "HTTP/1.1 404 Not Found")
 
-        status, _, body = request(port, host, "/__sclaude/tg?f=a")
+        status, head, body = request(port, host, "/__sclaude/tg?f=a")
         check("gate: the bootstrap page is open", status, "HTTP/1.1 200 OK")
         check("gate: it loads Telegram's script",
               "telegram.org/js/telegram-web-app.js" in body, True)
         check("gate: it asks for full screen", "requestFullscreen" in body, True)
-        check("gate: it draws an address bar over the feature's frame",
-              all(x in body for x in ("id=url", "<iframe id=frame", "--tg-content-safe-area-inset-top")),
-              True)
+        check("gate: it sends a feature to the features' side with a ticket",
+              all(x in body for x in ("/__sclaude/tg/ticket", "/__sclaude/enter?", "10000")), True)
+        check("gate: and Telegram's signed data stays behind",
+              "k !== 'tgWebAppData'" in body, True)
+        check("gate: the bot's side is framed by itself and Telegram Web alone",
+              "frame-ancestors 'self' https://web.telegram.org" in head, True)
         status, _, body = request(port, host, "/__sclaude/tg")
-        check("gate: no feature is the list", ("200 OK" in status, "'/__sclaude/'" in body),
-              (True, True))
+        check("gate: no feature is the list", "200 OK" in status, True)
         status, _, _ = request(port, host, "/__sclaude/tg?f=../x")
         check("gate: a bad label is not echoed", status, "HTTP/1.1 404 Not Found")
 
-        def auth(data):
-            return raw_request(port, "POST /__sclaude/tg/auth HTTP/1.1\r\nHost: %s\r\n"
-                               "Content-Length: %d\r\n\r\n%s" % (host, len(data), data))
+        def post(path, data, extra="", to=port, at=host):
+            return raw_request(to, "POST %s HTTP/1.1\r\nHost: %s\r\n%s"
+                               "Content-Length: %d\r\n\r\n%s"
+                               % (path, at, extra, len(data.encode()), data))
 
         now = int(time.time())
         good = tg_webapp.sign_init_data(
@@ -390,9 +409,13 @@ def check_gate(proxy_port, root):
             {"auth_date": str(now), "user": json.dumps({"id": owner})}, "999:OTHER")
         for name, data in (("somebody else", other), ("a stale sign-in", stale),
                            ("another bot", foreign), ("tampered data", good.replace("4242", "4243"))):
-            check("gate: %s is refused" % name, auth(data)[0], "HTTP/1.1 403 Forbidden")
+            check("gate: %s is refused" % name, post("/__sclaude/tg/auth", data)[0],
+                  "HTTP/1.1 403 Forbidden")
+            check("gate: %s gets no ticket" % name, post("/__sclaude/tg/ticket", data)[0],
+                  "HTTP/1.1 403 Forbidden")
 
-        status, head, _ = auth(good)
+        # The bot's side: its cookie, for code-server.
+        status, head, _ = post("/__sclaude/tg/auth", good)
         check("gate: the owner signs in", status, "HTTP/1.1 204 No Content")
         cookie = ""
         for line in head.split("\r\n"):
@@ -403,18 +426,64 @@ def check_gate(proxy_port, root):
         check("gate: and kept in Telegram Web's frame, for that frame only",
               all(x in head for x in ("SameSite=None", "Partitioned")), True)
 
-        status, head, _ = request(port, host, "/__sclaude/select?f=a", cookie=cookie)
+        # The features' side: a ticket from the bot's, good once.
+        status, _, ticket = post("/__sclaude/tg/ticket", good)
+        check("gate: the owner gets a ticket", (status, ticket.count(".")),
+              ("HTTP/1.1 200 OK", 1))
+        status, _, _ = request(aport, ahost, "/__sclaude/enter?f=a&t=1-x.forged")
+        check("gate: a forged ticket is refused", status, "HTTP/1.1 403 Forbidden")
+        status, head, _ = request(aport, ahost, "/__sclaude/enter?f=a&p=&t=" + ticket)
+        check("gate: a ticket lets the owner into the features' side, off the address",
+              (status, "Location: /__sclaude/shell?f=a&p=" in head),
+              ("HTTP/1.1 303 See Other", True))
+        app = ""
+        for line in head.split("\r\n"):
+            if line.lower().startswith("set-cookie: sclaude_tg_app="):
+                app = line.split(":", 1)[1].strip().split(";")[0]
+        check("gate: with a cookie of that side's own, as guarded",
+              bool(app) and all(x in head for x in ("Secure", "HttpOnly", "Partitioned")), True)
+        status, _, _ = request(aport, ahost, "/__sclaude/enter?f=a&t=" + ticket)
+        check("gate: a ticket is good once", status, "HTTP/1.1 403 Forbidden")
+        _, _, ticket2 = post("/__sclaude/tg/ticket", good)
+        status, _, _ = request(aport, ahost, "/__sclaude/enter?p=%2F__code%2F&t=" + ticket2)
+        check("gate: a ticket opens no code-server", status, "HTTP/1.1 404 Not Found")
+
+        status, _, body = request(aport, ahost, "/__sclaude/shell?f=a")
+        check("gate: the features' page is closed without the cookie", status,
+              "HTTP/1.1 403 Forbidden")
+        status, _, body = request(aport, ahost, "/__sclaude/shell?f=a", cookie=app)
+        check("gate: it draws an address bar over the feature's frame",
+              all(x in body for x in ("id=url", "<iframe id=frame", "--tg-content-safe-area-inset-top",
+                                      "/__sclaude/login?f=")), True)
+        check("gate: and asks Telegram for nothing signed", "initData" in body, False)
+        status, _, body = request(aport, ahost, "/__sclaude/shell?p=%2F__sclaude%2Fflow%3Ff%3Da",
+                                  cookie=app)
+        check("gate: or over a feature's map", '"/__sclaude/flow?f=a"' in body, True)
+
+        # Each side's cookie is that side's alone.
+        status, _, _ = request(aport, ahost, "/", cookie=cookie + "; sclaude_feature=a")
+        check("gate: the bot's cookie does not open a feature", status, "HTTP/1.1 403 Forbidden")
+        status, _, _ = request(port, host, "/__code/", cookie=app)
+        check("gate: the features' cookie does not open code-server", status,
+              "HTTP/1.1 403 Forbidden")
+
+        status, head, _ = request(aport, ahost, "/__sclaude/select?f=a", cookie=app)
         check("gate: the proxy picks the feature", status, "HTTP/1.1 303 See Other")
-        status, _, body = request(port, host, "/", cookie=cookie + "; sclaude_feature=a")
-        check("gate: the owner reaches the feature", body, "A %s" % host)
+        both = "%s; %s; sclaude_feature=a" % (cookie, app)
+        status, _, body = request(aport, ahost, "/", cookie=both)
+        check("gate: the owner reaches the feature", body, "A %s" % ahost)
+        _, _, body = request(aport, ahost, "/cookies", cookie=both)
+        check("gate: the gate's cookies are not passed on", body, "sclaude_feature=a")
+        _, head, _ = request(aport, ahost, "/plant", cookie=both)
+        check("gate: nor set from behind it, a feature's own kept",
+              ("sclaude_tg_app=planted" in head, "theirs=1" in head), (False, True))
 
         # A request another site made the browser send is refused even with
         # the cookie, as SameSite=Lax would have kept it out; following a
         # link from elsewhere is not.
         def fetched(method, extra):
-            return raw_request(port, "%s / HTTP/1.1\r\nHost: %s\r\nCookie: %s; "
-                               "sclaude_feature=a\r\n%sContent-Length: 0\r\n\r\n"
-                               % (method, host, cookie, extra))
+            return raw_request(aport, "%s / HTTP/1.1\r\nHost: %s\r\nCookie: %s\r\n"
+                               "%sContent-Length: 0\r\n\r\n" % (method, ahost, both, extra))
         check("gate: a request from another site is refused",
               fetched("POST", "Sec-Fetch-Site: cross-site\r\nSec-Fetch-Mode: no-cors\r\n")[0],
               "HTTP/1.1 403 Forbidden")
@@ -426,24 +495,25 @@ def check_gate(proxy_port, root):
               "HTTP/1.1 403 Forbidden")
         check("gate: a link followed from another site opens the page",
               fetched("GET", "Sec-Fetch-Site: cross-site\r\nSec-Fetch-Mode: navigate\r\n"
-                             "Sec-Fetch-Dest: document\r\n")[2], "A %s" % host)
+                             "Sec-Fetch-Dest: document\r\n")[2], "A %s" % ahost)
         check("gate: the page's own requests pass",
               fetched("GET", "Sec-Fetch-Site: same-origin\r\nSec-Fetch-Mode: cors\r\n")[2],
-              "A %s" % host)
+              "A %s" % ahost)
 
         # Two requests on one connection: only the first is answered — the
         # second would otherwise go through on a check made for the first.
-        req = ("GET / HTTP/1.1\r\nHost: %s\r\nCookie: %s; sclaude_feature=a\r\n\r\n"
-               % (host, cookie))
-        _, _, body = raw_request(port, req + req)
-        check("gate: one request per connection", body.count("A %s" % host), 1)
+        req = "GET / HTTP/1.1\r\nHost: %s\r\nCookie: %s\r\n\r\n" % (ahost, both)
+        _, _, body = raw_request(aport, req + req)
+        check("gate: one request per connection", body.count("A %s" % ahost), 1)
 
-        # code-server under /__code/: behind the same cookie, its own paths
-        # with the prefix taken off.
+        # code-server under /__code/, on the bot's side only: behind that
+        # side's cookie, its own paths with the prefix taken off.
         status, _, _ = request(port, host, "/__code/")
         check("gate: code-server is closed to a stranger", status, "HTTP/1.1 403 Forbidden")
         status, _, body = request(port, host, "/__code/", cookie=cookie + "; sclaude_feature=a")
         check("gate: the owner reaches code-server at its own /", body, "A %s" % host)
+        status, _, _ = request(aport, ahost, "/__code/", cookie=both)
+        check("gate: code-server is not on the features' side", status, "HTTP/1.1 404 Not Found")
         status, _, body = request(port, host, "/__sclaude/tg?p=%2F__code%2F")
         check("gate: the bootstrap can open code-server",
               ("200 OK" in status, '"/__code/"' in body), (True, True))
@@ -454,6 +524,26 @@ def check_gate(proxy_port, root):
         check("gate: a code-server path that could close the script is refused",
               (status, "<script>x" in body), ("HTTP/1.1 404 Not Found", False))
 
+        # What a feature's page makes the browser send to the bot's side —
+        # same name, another port — is refused, whatever it carries.
+        for name, extra in (("by Sec-Fetch-Site", "Sec-Fetch-Site: same-site\r\n"),
+                            ("by Origin", "Origin: https://%s\r\n" % ahost),
+                            ("by Referer", "Referer: https://%s/x\r\n" % ahost)):
+            check("gate: code-server refuses the features' side %s" % name,
+                  raw_request(port, "GET /__code/ HTTP/1.1\r\nHost: %s\r\nCookie: %s\r\n%s\r\n"
+                              % (host, cookie, extra))[0], "HTTP/1.1 403 Forbidden")
+            check("gate: so does the menu %s" % name,
+                  post("/__sclaude/menu/api", json.dumps({"init": good, "do": ""}), extra)[0],
+                  "HTTP/1.1 403 Forbidden")
+        check("gate: and the menu's calls from another site",
+              post("/__sclaude/menu/api", json.dumps({"init": good, "do": ""}),
+                   "Sec-Fetch-Site: cross-site\r\n")[0], "HTTP/1.1 403 Forbidden")
+        status, _, _ = request(aport, ahost, "/__sclaude/menu")
+        check("gate: the menu is not on the features' side", status, "HTTP/1.1 404 Not Found")
+        status, _, _ = post("/__sclaude/menu/api", json.dumps({"init": good, "do": ""}),
+                            to=aport, at=ahost)
+        check("gate: nor its calls", status, "HTTP/1.1 404 Not Found")
+
         # The menu page: open, its calls checked one by one by initData.
         status, head, body = raw_request(port, "GET /__sclaude/menu HTTP/1.1\r\nHost: %s\r\n\r\n"
                                          % host)
@@ -462,13 +552,14 @@ def check_gate(proxy_port, root):
         nonce = re.search(r"script-src 'nonce-([^']+)'", head)
         check("gate: the menu page runs only its own script and Telegram's",
               bool(nonce and "<script nonce=%s>" % nonce.group(1) in body), True)
+        check("gate: the menu page is framed by itself and Telegram Web alone",
+              "frame-ancestors 'self' https://web.telegram.org" in head, True)
         check("gate: a screen's markup is filtered, not run",
               ("markup(v.text)" in body, "innerHTML = v.text" in body), (True, False))
 
         def menu(payload):
-            data = json.dumps(payload)
-            return raw_request(port, "POST /__sclaude/menu/api HTTP/1.1\r\nHost: %s\r\n"
-                               "Content-Length: %d\r\n\r\n%s" % (host, len(data.encode()), data))
+            return post("/__sclaude/menu/api", json.dumps(payload),
+                        "Sec-Fetch-Site: same-origin\r\n")
         check("gate: a menu call from somebody else is refused",
               menu({"init": other, "do": ""})[0], "HTTP/1.1 403 Forbidden")
         check("gate: a menu call with a stale sign-in is refused",
@@ -478,8 +569,7 @@ def check_gate(proxy_port, root):
                           "Content-Length: 2\r\n\r\n{}" % (host, cookie))[0],
               "HTTP/1.1 403 Forbidden")
         check("gate: a menu call that is not JSON is refused",
-              raw_request(port, "POST /__sclaude/menu/api HTTP/1.1\r\nHost: %s\r\n"
-                          "Content-Length: 3\r\n\r\nabc" % host)[0], "HTTP/1.1 400 Bad Request")
+              post("/__sclaude/menu/api", "abc")[0], "HTTP/1.1 400 Bad Request")
         status, head, body = menu({"init": good, "do": ""})
         check("gate: the owner gets the menu", ("200 OK" in status, "application/json" in head),
               (True, True))

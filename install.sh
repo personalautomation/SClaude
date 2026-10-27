@@ -225,10 +225,25 @@ if [[ $SYSTEMD -eq 1 ]]; then
   # service goes first: a gate from before the socket bound :3001 itself, and
   # stopped is only stopped — the socket brings it back on demand.
   systemctl --user stop sclaude-gate.service 2>/dev/null || true
-  if systemctl --user enable --now sclaude-gate.socket 2>/dev/null; then
-    echo "enabled: sclaude-gate.socket (127.0.0.1:3001, the phone's entry behind tailscale funnel)"
+  # Restarted, not only started: a socket already listening keeps the ports
+  # it was started with, and the features' side (:3002) came later.
+  if systemctl --user enable sclaude-gate.socket 2>/dev/null \
+      && systemctl --user restart sclaude-gate.socket 2>/dev/null; then
+    echo "enabled: sclaude-gate.socket (127.0.0.1:3001 and :3002, the phone's entry behind tailscale funnel)"
   else
-    echo "note: sclaude-gate.socket did not start — something holds 127.0.0.1:3001" >&2
+    echo "note: sclaude-gate.socket did not start — something holds 127.0.0.1:3001 or :3002" >&2
+  fi
+  # Phone access from before the features had a side of their own: the
+  # funnel for that side, so that it stays on (the bot counts it on only
+  # with both). Only where the bot's side is already published.
+  if command -v tailscale >/dev/null \
+      && tailscale serve status 2>/dev/null | grep -q ':8443 (Funnel on)' \
+      && ! tailscale serve status 2>/dev/null | grep -q ':10000 (Funnel on)'; then
+    if tailscale funnel --bg --https=10000 http://127.0.0.1:3002 >/dev/null 2>&1; then
+      echo "phone access: the features' side published on :10000"
+    else
+      echo "note: phone access needs turning on again in the bot's Settings" >&2
+    fi
   fi
 
   if [[ $EXTRAS -eq 1 ]]; then

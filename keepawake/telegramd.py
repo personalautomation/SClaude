@@ -887,11 +887,22 @@ def phone_origin(config=None):
 # public DNS while it is off, and comes back only after a while (five minutes
 # once) — and a phone that pressed the button met "connection closed" every time. What
 # stands at the door instead is the gate, which lets in only the bot's owner.
+#
+# Two funnels, one per side of the gate: :8443 for the bot's own pages (the
+# menu, code-server, the entry every button opens) and :10000 for the
+# features, on an origin of their own so that a feature's page cannot reach
+# the menu (bin/sclaude-proxy). Phone access is on when both are.
 GATE_PORT = 3001
 GATE_LOCAL = "http://127.0.0.1:%d" % GATE_PORT
 GATE_FUNNEL_PORT = 8443
-FUNNEL_ON = "tailscale funnel --bg --https=%d %s" % (GATE_FUNNEL_PORT, GATE_LOCAL)
-FUNNEL_OFF = "tailscale funnel --https=%d off" % GATE_FUNNEL_PORT
+GATE_APP_PORT = 3002
+GATE_APP_FUNNEL_PORT = 10000
+FUNNEL_ON = "tailscale funnel --bg --https=%d %s && tailscale funnel --bg --https=%d %s" % (
+    GATE_FUNNEL_PORT, GATE_LOCAL, GATE_APP_FUNNEL_PORT, "http://127.0.0.1:%d" % GATE_APP_PORT)
+# The features' side first, and each on its own: one never set up says so
+# and the other still goes.
+FUNNEL_OFF = "tailscale funnel --https=%d off; tailscale funnel --https=%d off" % (
+    GATE_APP_FUNNEL_PORT, GATE_FUNNEL_PORT)
 
 
 def phone_on():
@@ -993,7 +1004,7 @@ def name_published(host, port=None):
     funnel off for a few minutes keeps its name, and the relay takes a minute
     or more to carry it again."""
     import socket
-    port = port or GATE_FUNNEL_PORT
+    ports = [port] if port else [GATE_FUNNEL_PORT, GATE_APP_FUNNEL_PORT]
     zone = ".".join(host.split(".")[-2:])
     try:
         server = socket.gethostbyname(doh(zone, "NS")[0].rstrip("."))
@@ -1007,7 +1018,9 @@ def name_published(host, port=None):
             addresses = [a for a in doh(host, "A") if a.count(".") == 3]
         except (OSError, ValueError):
             addresses = []
-    return any(funnel_answers(host, port, a) for a in addresses[:2])
+    # Both sides: a phone that reaches the bot's and not the features' opens
+    # every feature on a dead page.
+    return all(any(funnel_answers(host, p, a) for a in addresses[:2]) for p in ports)
 
 
 # The loop's probe, run in a thread: {host: None while running, else the
@@ -1078,23 +1091,33 @@ def published(host, look=False):
     return ok
 
 
+def funnelled(config, host, port, local):
+    """Whether the funnel on host:port carries the gate's side on local."""
+    hostport = "%s:%d" % (host, port)
+    if not (config.get("AllowFunnel") or {}).get(hostport):
+        return False
+    web = (config.get("Web") or {}).get(hostport) or {}
+    proxy = str((((web.get("Handlers") or {}).get("/")) or {}).get("Proxy", ""))
+    return proxy.rstrip("/").endswith(":%d" % local)
+
+
 def gate_origin(config=None, ready=True, look=False):
-    """https://<node>.<tailnet>.ts.net:8443 while the funnel carries the gate,
-    "" while it does not — read from Tailscale, never remembered. With
-    ready, also "" until a phone can find the name (published); without,
-    the funnel's set-up alone counts, as for turning it off."""
+    """https://<node>.<tailnet>.ts.net:8443 — the bot's side, where every
+    button points — while the funnels carry the gate, "" while they do not:
+    read from Tailscale, never remembered. With ready, both sides' funnels,
+    and "" until a phone can find the name (published); without, the bot's
+    side set up alone counts, as for turning it off."""
     if config is None:
         config = serve_config()
-    for hostport, allowed in (config.get("AllowFunnel") or {}).items():
+    for hostport in (config.get("AllowFunnel") or {}):
         host, _, port = hostport.rpartition(":")
-        if not allowed or port != str(GATE_FUNNEL_PORT):
+        if port != str(GATE_FUNNEL_PORT) or not funnelled(config, host, GATE_FUNNEL_PORT,
+                                                           GATE_PORT):
             continue
-        web = (config.get("Web") or {}).get(hostport) or {}
-        proxy = str((((web.get("Handlers") or {}).get("/")) or {}).get("Proxy", ""))
-        if proxy.rstrip("/").endswith(":3001"):
-            if ready and not published(host, look):
-                return ""
-            return "https://%s:%s" % (host, port)
+        if ready and not (funnelled(config, host, GATE_APP_FUNNEL_PORT, GATE_APP_PORT)
+                          and published(host, look)):
+            return ""
+        return "https://%s:%s" % (host, port)
     PUBLISHED.update(host="", ok=False)
     # The funnel is off: the loop's last answer goes too, or a funnel set up
     # again by hand would read as published before it is.

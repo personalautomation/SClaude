@@ -407,11 +407,29 @@ that fails is tried again, up to twenty in a row — counted, since a page back
 from the background has a stale clock — after which the page keeps the last
 error and offers to check again. Any press cancels the wait.
 
-**The gate** (`sclaude-proxy --gate`, on 127.0.0.1:3001 behind `tailscale
-funnel` on :8443) lets in only the bot's owner. Every call of the menu carries
-Telegram's signed `initData` and is checked by itself; a feature's page and
-code-server (`/__code/`, its own paths under a prefix only the gate knows) are
-reached with a cookie the gate signs once `initData` checked out. Telegram Web
+**The gate** (`sclaude-proxy --gate`) lets in only the bot's owner, and has two
+sides on two origins: the bot's (127.0.0.1:3001 behind `tailscale funnel` on
+:8443) — the menu page, code-server and the entry every button opens — and the
+features' (127.0.0.1:3002 behind :10000). A feature's page runs whatever the
+product loads; on the bot's origin it could read `initData` from the page
+around it and send the menu's calls, which start sessions on this machine. So
+`initData` is only ever handed to the bot's side. Every call of the menu
+carries it and is checked by itself, and must come from the menu's own origin;
+code-server (`/__code/`, its own paths under a prefix only the gate knows) is
+reached with the bot's side's cookie, signed once `initData` checked out. A
+feature opens through the entry, which checks `initData` and sends the page on
+to `/__sclaude/enter` on the features' side with a ticket — a minute long,
+good once — and with Telegram's view settings from the address (`tgWebApp*`)
+but never its signed data. The ticket buys that side's own cookie, under
+another key, and the page is the same address bar over the feature. Cookies
+are not kept apart by port, so each side reads only its own cookie, the bot's
+side refuses whatever the features' side makes the browser send
+(`Sec-Fetch-Site: same-site`, or `Origin`/`Referer` naming the other port),
+lets only itself and Telegram Web frame it (`frame-ancestors`), and neither
+cookie is passed on to a product or code-server, or taken from what they
+answer. `install.sh` restarts the socket for the second port, and adds the
+:10000 funnel where :8443 was already published; the bot counts phone access
+as on only with both. Telegram Web
 shows a Mini App in a frame inside web.telegram.org, where a browser keeps no
 `SameSite=Lax` cookie, so every cookie on the gate's way — its own and the
 product's — is made `SameSite=None; Partitioned`: kept for that frame and keyed

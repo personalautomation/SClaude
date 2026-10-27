@@ -1,11 +1,14 @@
 [Unit]
-Description=The phone's entry to features through Telegram (behind tailscale funnel :8443)
+Description=The phone's entry to features through Telegram (behind tailscale funnel :8443 and :10000)
 Documentation=file:@REPO@/README.md
 
 [Socket]
 # Loopback only: `tailscale funnel` connects from this machine, and nothing
 # else may. Who is let in past it is the gate's decision (bin/sclaude-proxy).
 ListenStream=127.0.0.1:3001
+# The features' side (funnel :10000), on an origin of its own: see the gate
+# in bin/sclaude-proxy. The order is the gate's: fd 3, then fd 4.
+ListenStream=127.0.0.1:3002
 Accept=no
 
 [Install]

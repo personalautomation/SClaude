@@ -1717,10 +1717,14 @@ if os.path.exists(cfg):
 
         saved_run = tg_menu.run
         try:
-            serve = {"TCP": {"8443": {"HTTPS": True}},
+            # Both sides of the gate: the bot's on :8443, the features' on :10000.
+            serve = {"TCP": {"8443": {"HTTPS": True}, "10000": {"HTTPS": True}},
                      "Web": {"box.tail1.ts.net:8443": {"Handlers": {"/": {
-                         "Proxy": "http://127.0.0.1:3001"}}}},
-                     "AllowFunnel": {"box.tail1.ts.net:8443": True}}
+                                 "Proxy": "http://127.0.0.1:3001"}}},
+                             "box.tail1.ts.net:10000": {"Handlers": {"/": {
+                                 "Proxy": "http://127.0.0.1:3002"}}}},
+                     "AllowFunnel": {"box.tail1.ts.net:8443": True,
+                                     "box.tail1.ts.net:10000": True}}
 
             def funnel_on(cmd, timeout=25):
                 if "serve status" in cmd:
@@ -1874,6 +1878,15 @@ if os.path.exists(cfg):
             serve["Web"]["box.tail1.ts.net:8443"]["Handlers"]["/"]["Proxy"] = "http://127.0.0.1:9999"
             check("a funnel to something else is not phone access", tg_menu.gate_origin(), "")
             serve["Web"]["box.tail1.ts.net:8443"]["Handlers"]["/"]["Proxy"] = "http://127.0.0.1:3001"
+            # The bot's side alone, as set up before the features had their
+            # own: not on — every feature would open on a dead page — but
+            # enough to be turned off.
+            del serve["AllowFunnel"]["box.tail1.ts.net:10000"]
+            tg_menu.PUBLISHED.update(host="box.tail1.ts.net", ok=True)
+            check("the bot's side alone is not phone access", tg_menu.gate_origin(), "")
+            check("but is there to turn off", tg_menu.gate_origin(None, False),
+                  "https://box.tail1.ts.net:8443")
+            tg_menu.PUBLISHED.update(host="", ok=False)
             serve["AllowFunnel"] = {}
             check("served on the tailnet only is not phone access", tg_menu.gate_origin(), "")
         finally:

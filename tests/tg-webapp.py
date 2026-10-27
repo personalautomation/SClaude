@@ -74,6 +74,28 @@ check("a signed initData is no cookie",
       tg_webapp.cookie_valid("%s.%s" % (expiry, good.rsplit("hash=", 1)[1]), TOKEN, now=NOW),
       False)
 
+# The features' side has a cookie of its own: neither side's passes for the other's.
+app = tg_webapp.sign_cookie(TOKEN, ttl=3600, now=NOW, purpose="app")
+check("a fresh cookie of the features' side",
+      tg_webapp.cookie_valid(app, TOKEN, now=NOW + 10, purpose="app"), True)
+check("the features' cookie is not the bot's", tg_webapp.cookie_valid(app, TOKEN, now=NOW), False)
+check("nor the bot's the features'",
+      tg_webapp.cookie_valid(cookie, TOKEN, now=NOW, purpose="app"), False)
+
+ticket = tg_webapp.sign_ticket(TOKEN, now=NOW)
+check("a fresh ticket", tg_webapp.ticket_valid(ticket, TOKEN, now=NOW + 5),
+      NOW + tg_webapp.TICKET_TTL)
+check("every ticket differs", ticket == tg_webapp.sign_ticket(TOKEN, now=NOW), False)
+check("a ticket out of time",
+      tg_webapp.ticket_valid(ticket, TOKEN, now=NOW + tg_webapp.TICKET_TTL + 1), 0)
+check("a ticket of another token", tg_webapp.ticket_valid(ticket, "9:other", now=NOW), 0)
+body, _, tmac = ticket.partition(".")
+check("a ticket with its time pushed out",
+      tg_webapp.ticket_valid("%d%s.%s" % (int(body.split("-")[0]) + 999, body[10:], tmac),
+                             TOKEN, now=NOW), 0)
+check("a cookie is no ticket", tg_webapp.ticket_valid(cookie, TOKEN, now=NOW), 0)
+check("a ticket is no cookie", tg_webapp.cookie_valid(ticket, TOKEN, now=NOW), False)
+
 with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as fh:
     fh.write("# comment\nKEEPAWAKE_BOT_TOKEN='%s'\n\nKEEPAWAKE_CHAT_ID=%d\n" % (TOKEN, OWNER))
 try:

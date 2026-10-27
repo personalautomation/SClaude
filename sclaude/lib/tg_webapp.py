@@ -13,9 +13,17 @@
 #
 # The token never leaves this machine and is the only secret: replacing it in
 # BotFather revokes every cookie at once.
+#
+# Two sides, two origins (bin/sclaude-proxy): the bot's own pages and
+# code-server on one, the features on another, so that a feature's page can
+# neither read initData nor press the menu. initData is only ever handed to
+# the bot's side, which gives the features' side a ticket for it: short-lived,
+# good once, and good for nothing on the bot's side. Each side's cookie has a
+# key of its own, so neither passes for the other.
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from urllib.parse import parse_qsl, urlencode
 
@@ -24,6 +32,9 @@ from urllib.parse import parse_qsl, urlencode
 INIT_MAX_AGE = 86400
 # How long the gate's cookie lets a browser in.
 COOKIE_TTL = 12 * 3600
+# How long a ticket from the bot's side to the features' side lasts: the
+# page goes there at once.
+TICKET_TTL = 60
 
 
 def _webapp_secret(token):
@@ -31,9 +42,14 @@ def _webapp_secret(token):
     return hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
 
 
-def _cookie_secret(token):
-    # A key of its own, so that a cookie can never pass for initData or back.
-    return hmac.new(b"sclaude-gate-cookie", token.encode(), hashlib.sha256).digest()
+# The key of each thing the gate signs: a cookie can never pass for initData
+# or back, nor one side's cookie for the other's, nor a ticket for either.
+PURPOSES = {"cookie": b"sclaude-gate-cookie", "app": b"sclaude-gate-app-cookie",
+            "ticket": b"sclaude-gate-ticket"}
+
+
+def _cookie_secret(token, purpose="cookie"):
+    return hmac.new(PURPOSES[purpose], token.encode(), hashlib.sha256).digest()
 
 
 def sign_init_data(fields, token):
@@ -65,21 +81,46 @@ def verify_init_data(raw, token, owner_id, max_age=INIT_MAX_AGE, now=None):
     return uid == int(owner_id)
 
 
-def sign_cookie(token, ttl=COOKIE_TTL, now=None):
-    """`<expiry>.<hmac>` — the value of the gate's cookie."""
+def sign_cookie(token, ttl=COOKIE_TTL, now=None, purpose="cookie"):
+    """`<expiry>.<hmac>` — the value of the gate's cookie (purpose "cookie"
+    on the bot's side, "app" on the features')."""
     expiry = int((time.time() if now is None else now) + ttl)
-    mac = hmac.new(_cookie_secret(token), str(expiry).encode(), hashlib.sha256).hexdigest()
+    mac = hmac.new(_cookie_secret(token, purpose), str(expiry).encode(),
+                   hashlib.sha256).hexdigest()
     return "%d.%s" % (expiry, mac)
 
 
-def cookie_valid(value, token, now=None):
+def cookie_valid(value, token, now=None, purpose="cookie"):
     expiry, _, mac = (value or "").partition(".")
     if not expiry.isdigit() or not mac or not token:
         return False
-    want = hmac.new(_cookie_secret(token), expiry.encode(), hashlib.sha256).hexdigest()
+    want = hmac.new(_cookie_secret(token, purpose), expiry.encode(),
+                    hashlib.sha256).hexdigest()
     if not hmac.compare_digest(want, mac):
         return False
     return int(expiry) > (time.time() if now is None else now)
+
+
+def sign_ticket(token, now=None):
+    """`<expiry>-<nonce>.<hmac>`: the bot's side lets the features' side in.
+    The nonce makes every ticket different, so that one used is told apart."""
+    expiry = int((time.time() if now is None else now) + TICKET_TTL)
+    body = "%d-%s" % (expiry, secrets.token_hex(8))
+    mac = hmac.new(_cookie_secret(token, "ticket"), body.encode(), hashlib.sha256).hexdigest()
+    return "%s.%s" % (body, mac)
+
+
+def ticket_valid(value, token, now=None):
+    """The ticket's expiry when it is the gate's and not yet out, else 0.
+    Using it once is the gate's to remember."""
+    body, _, mac = (value or "").partition(".")
+    expiry, _, nonce = body.partition("-")
+    if not expiry.isdigit() or not nonce or not mac or not token:
+        return 0
+    want = hmac.new(_cookie_secret(token, "ticket"), body.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(want, mac):
+        return 0
+    return int(expiry) if int(expiry) > (time.time() if now is None else now) else 0
 
 
 def read_env(path):

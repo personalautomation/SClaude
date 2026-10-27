@@ -928,7 +928,10 @@ def phone_on():
 #
 # The name is asked of the zone's own nameserver, which keeps no answer: a
 # resolver asked too early would itself remember "no such name" for minutes.
-# DNS over HTTPS stands in when that fails.
+# DNS over HTTPS stands in when that fails, and the system's resolver when
+# that fails too: some networks block every DNS-over-HTTPS service by name,
+# and the probe then never found the name and the app waited the full
+# PUBLISH_WAIT_MAX after every restart.
 PUBLISHED = {"host": "", "at": 0.0, "ok": False, "since": 0.0}
 # How often a name not yet published is asked again.
 PUBLISH_RECHECK = 10
@@ -980,6 +983,35 @@ def dns_addresses(server, name):
     return found
 
 
+# Addresses of the tailnet itself: a resolver with MagicDNS answers the
+# node's name with one of these, which reach the node directly and say
+# nothing about the funnel's relays.
+TAILNET_NETS = ("100.64.0.0/10", "fd7a:115c:a1e0::/48")
+
+
+def system_addresses(host):
+    """The public addresses the system's resolver has for host, IPv4 first:
+    the last resort of name_published. A "no such name" it keeps for a while
+    only delays the answer here; the phone asks a resolver of its own."""
+    import ipaddress
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except (OSError, UnicodeError):
+        return []
+    nets = [ipaddress.ip_network(n) for n in TAILNET_NETS]
+    found = []
+    for family, _, _, _, sockaddr in sorted(infos, key=lambda i: i[0] != socket.AF_INET):
+        try:
+            ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        if ip.is_global and not any(ip.version == n.version and ip in n for n in nets) \
+                and str(ip) not in found:
+            found.append(str(ip))
+    return found
+
+
 def funnel_answers(host, port, address):
     """True when the funnel at address carries a request to the gate: TLS
     under the funnel's name, and an HTTP answer back. A relay that has not
@@ -1018,6 +1050,8 @@ def name_published(host, port=None):
             addresses = [a for a in doh(host, "A") if a.count(".") == 3]
         except (OSError, ValueError):
             addresses = []
+    if not addresses:
+        addresses = system_addresses(host)
     # Both sides: a phone that reaches the bot's and not the features' opens
     # every feature on a dead page.
     return all(any(funnel_answers(host, p, a) for a in addresses[:2]) for p in ports)

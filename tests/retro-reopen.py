@@ -240,6 +240,151 @@ finally:
 check("report-printed-when-left-open",
       '&& retro_report "$wt" "$session" "$last"' in retro_src, True)
 
+# --- plan mode, and closing on its own word ------------------------------------
+# The retrospective runs in plan mode, so nothing changes — sclaude's workshop
+# included, which opens for it without a question — before the person approved
+# a plan. Plan mode forbids it the done marker; with nothing to act on it ends
+# its report on RETRO_NOTHING_SAID, and the watcher closes it on that.
+check("retro-in-plan-mode", "--permission-mode plan" in retro_src
+      and "--permission-mode auto" not in retro_src, True)
+said = re.search(r'^RETRO_NOTHING_SAID="([^"]+)"', retro_src, re.M)
+check("closing-line-declared", said is not None, True)
+check("closing-line-to-the-watcher",
+      'retro "$RETRO_NOTHING_SAID"' in retro_src
+      and 'SCLAUDE_V_NOTHING_SAID="$RETRO_NOTHING_SAID"' in retro_src, True)
+for name in ("retro.md", "retro-again.md"):
+    with open(os.path.join(ROOT, "sclaude", "prompts", name)) as fh:
+        text = fh.read()
+    check("%s-names-the-line" % name, "`<nothing-said>`" in text, True)
+    check("%s-no-marker" % name, "<done-marker>" in text, False)
+with open(os.path.join(LIB, "run.sh")) as fh:
+    run_src = fh.read()
+check("watcher-reads-the-line",
+      'watch-said "$transcript" "$started" "$said"' in run_src, True)
+
+
+def timed(kind, text, at, end=True, human=False):
+    e = entry(kind, text, human=human)
+    e["timestamp"] = "2026-10-27T10:00:%02dZ" % at
+    if kind == "assistant":
+        e["message"]["stop_reason"] = "end_turn" if end else "tool_use"
+    return e
+
+
+def watch_said(es, after=0, line="Nothing to act on: sclaude closes this session."):
+    path = os.path.join(tmp, "s.jsonl")
+    with open(path, "w") as fh:
+        for e in es:
+            fh.write(json.dumps(e) + "\n")
+    return subprocess.run(["python3", os.path.join(LIB, "session_end.py"), "watch-said",
+                           path, str(after), line],
+                          capture_output=True, text=True).stdout.strip()
+
+
+LINE = said.group(1) if said else ""
+REPORT = "## 1. nothing\n\n## 3. nothing\n\n**%s**\n" % LINE
+tmp = tempfile.mkdtemp()
+try:
+    check("said-ends-it", watch_said([timed("user", "go", 1, human=True),
+                                      timed("assistant", REPORT, 2)], line=LINE), "ended")
+    check("said-mid-turn-waits", watch_said([timed("assistant", REPORT, 2, end=False)],
+                                            line=LINE), "working")
+    check("a-person-after-it-keeps-it",
+          watch_said([timed("assistant", REPORT, 2), timed("user", "wait", 3, human=True)],
+                     line=LINE), "human")
+    check("the-answer-to-them-keeps-it",
+          watch_said([timed("assistant", REPORT, 2), timed("user", "wait", 3, human=True),
+                      timed("assistant", "Sure.", 4)], line=LINE), "none")
+    check("not-the-last-line-does-not-count",
+          watch_said([timed("assistant", "%s\n\nBut section 1 has a point." % LINE, 2)],
+                     line=LINE), "none")
+    check("an-earlier-pass-does-not-count",
+          watch_said([timed("assistant", REPORT, 2)], after=9999999999, line=LINE), "none")
+    check("no-line-no-close", watch_said([timed("assistant", "## 1. a warning", 2)],
+                                         line=LINE), "none")
+    # Said, then taken back: a command run after it, a correction after it.
+    run = timed("assistant", None, 3, end=False)
+    run["message"]["content"] = [{"type": "tool_use", "name": "Bash", "input": {"command": "git status"}}]
+    check("a-command-after-it-takes-it-back",
+          watch_said([timed("assistant", REPORT, 2, end=False), run,
+                      timed("user", "M a.txt", 4),
+                      timed("assistant", "Correction: section 1 has uncommitted work.", 5)],
+                     line=LINE), "none")
+    check("a-near-copy-counts",
+          watch_said([timed("assistant", "## 3. nothing\n\n- %s" % LINE.rstrip("."), 2)],
+                     line=LINE), "ended")
+    # Put into a plan, as plan mode bids: its dialog waiting is the turn's end,
+    # and an answer to it goes on with the turn.
+    plan = timed("assistant", None, 2, end=False)
+    plan["message"]["content"] = [{"type": "tool_use", "name": "ExitPlanMode",
+                                   "input": {"plan": REPORT}}]
+    check("a-plan-ending-on-it-counts", watch_said([plan], line=LINE), "ended")
+    check("an-answered-plan-goes-on",
+          watch_said([plan, timed("user", "User rejected", 3)], line=LINE), "working")
+    path = os.path.join(tmp, "p.jsonl")
+    with open(path, "w") as fh:
+        fh.write(json.dumps(plan) + "\n")
+    shown = subprocess.run(["python3", os.path.join(LIB, "session_end.py"), "last", path],
+                           capture_output=True, text=True).stdout
+    check("a-waiting-plan-is-the-report", LINE in shown, True)
+    # The report in the person's language: a line after it in Cyrillic is a
+    # line, and a correction in it takes the closing back.
+    check("a-cyrillic-line-after-it-counts",
+          watch_said([timed("assistant", REPORT + "\nСессия остаётся открытой.", 2)],
+                     line=LINE), "none")
+    check("a-cyrillic-correction-takes-it-back",
+          watch_said([timed("assistant", REPORT, 2, end=False),
+                      timed("assistant", "Хотя нет — первый пункт стоит обсудить.", 3)],
+                     line=LINE), "none")
+    # A plan that names a file rather than carrying its text.
+    plan_file = os.path.join(tmp, "plan.md")
+    with open(plan_file, "w") as fh:
+        fh.write(REPORT)
+    by_file = timed("assistant", None, 2, end=False)
+    by_file["message"]["content"] = [{"type": "tool_use", "name": "ExitPlanMode",
+                                      "input": {"planFilePath": plan_file}}]
+    check("a-plan-by-file-counts", watch_said([by_file], line=LINE), "ended")
+
+    def said_by(kind, es):
+        path = os.path.join(tmp, "f.jsonl")
+        with open(path, "w") as fh:
+            for e in es:
+                fh.write(json.dumps(e) + "\n")
+        return subprocess.run(["python3", os.path.join(LIB, "session_end.py"), kind, path],
+                              capture_output=True, text=True).stdout.strip()
+
+    # Said as a message and as a plan: printed once.
+    shown = said_by("last", [timed("assistant", REPORT, 1, end=False), plan])
+    check("a-report-in-both-printed-once", shown.count(LINE), 1)
+    # The report given as a plan, the plan turned down with a word: the plan
+    # is the report, not the answer after it.
+    shown = said_by("first", [timed("user", "go", 0, human=True), plan,
+                              timed("user", "rejected: talk first", 3),
+                              timed("assistant", "Sure, what first?", 4)])
+    check("a-plan-is-the-first-report", LINE in shown and "Sure" not in shown, True)
+    # A plan is the whole report (the prompts say so): printed alone.
+    short = timed("assistant", None, 2, end=False)
+    short["message"]["content"] = [{"type": "tool_use", "name": "ExitPlanMode",
+                                    "input": {"plan": "No changes.\n\n" + LINE}}]
+    for kind in ("last", "first"):
+        shown = said_by(kind, [timed("user", "go", 0, human=True),
+                               timed("assistant", "Reading the state.", 1, end=False), short])
+        check("%s-prints-the-plan-alone" % kind,
+              "No changes." in shown and "Reading" not in shown, True)
+    for name in ("retro.md", "retro-again.md"):
+        with open(os.path.join(ROOT, "sclaude", "prompts", name)) as fh:
+            check("%s-plan-carries-every-section" % name, "every section in full" in fh.read(), True)
+    # Odd inputs are silent, as the rest of the module; a plan that is not a
+    # text falls back to the file the call names.
+    e = timed("assistant", None, 2, end=False)
+    e["message"]["content"] = [{"type": "tool_use", "name": "ExitPlanMode",
+                                "input": {"plan": ["a"], "planFilePath": plan_file}}]
+    check("a-plan-not-text-reads-the-file", watch_said([e], line=LINE), "ended")
+    e["message"]["content"][0]["input"] = {"planFilePath": 123}
+    check("a-path-not-text-is-silent", watch_said([e], line=LINE), "none")
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
 # --- the prompt names the branch -------------------------------------------------
 with open(os.path.join(ROOT, "sclaude", "prompts", "retro.md")) as fh:
     prompt = fh.read()
@@ -268,7 +413,7 @@ import render_prompt
 values = {"feature": "f", "pr": "\u2014", "pr-number": "", "no-change": "1",
           "issue": "9", "branch": "feat/f", "worktree": "/w", "instruments": "/i",
           "terminal": "", "terminal-raw": "/r", "transcripts": "/t",
-          "done-marker": "/d"}
+          "nothing-said": "Nothing to act on."}
 no_pr = render_prompt.render(prompt, os.path.join(ROOT, "sclaude", "prompts"), values, {})
 check("no-change-prompt-names-no-pr", "#\u2014" not in no_pr and "pull request #" not in no_pr, True)
 check("no-change-prompt-names-the-issue", "The issue #9" in no_pr, True)

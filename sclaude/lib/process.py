@@ -161,7 +161,7 @@ SPEC = {
     "fix_prod": ("opus", "medium", "auto"),       # step 4's
     "sync": ("sonnet", "medium", "auto"),
     "epilogue": ("sonnet", "medium", "auto"),
-    "retro": ("opus", "medium", "auto"),
+    "retro": ("opus", "medium", "plan"),
     "local_pass": ("opus", "default", "read-only, claude -p"),
     "f_review": ("opus", "medium", "plan"),
     "f_monthly": ("opus", "medium", "plan"),

@@ -495,9 +495,8 @@ runs it, which it knows by `SCLAUDE_SESSION` (`claude_launch` exports it).
 `forbidden-commands.py` answers that call with "ask" in a step, so Claude Code
 puts the question to the person — the model cannot answer it, in auto mode
 too — every session anew; under `--step friction` (the retrospective, the
-friction review, the monthly review) it lets it through, since the
-retrospective is where the person expects changes and the other two start in
-plan mode. The prompts say which by `workshop_rules` (`prompts/_workshop.md`).
+friction review, the monthly review) it lets it through, since all three
+start in plan mode and the plan the person approved is the yes. The prompts say which by `workshop_rules` (`prompts/_workshop.md`).
 
 Every session's write guard reads leniently (`--lenient`): a target it cannot
 tell — a loop's `"$f"`, a `$( … )`, a directory in a variable — is refused

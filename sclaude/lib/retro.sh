@@ -15,10 +15,17 @@
 #   2. how the person could work better, by what actually happened;
 #   3. what sclaude could do better, by what this feature ran into.
 #
-# With nothing in 1 and nothing in 3 the session closes itself (the done
-# marker, as the friction review's), and its report is printed here. With
-# anything to act on it stays open, and the person talks it through there:
-# the worktree is still in place for whatever they decide to finish in it.
+# It runs in plan mode, as the friction reviews do: it reads and reports, and
+# changes nothing — the product, sclaude's workshop (core-open is given to it
+# without a question) — before the person has approved a plan for it. In auto
+# mode that yes was the prompt's word alone.
+#
+# With nothing in 1 and nothing in 3 the session closes itself, with nothing to
+# approve: plan mode forbids it the done marker, so it ends its report on
+# RETRO_NOTHING_SAID instead, which the watcher reads as one (session_end.py
+# watch-said), and its report is printed here. With anything to act on it
+# stays open, and the person talks it through there: the worktree is still in
+# place for whatever they decide to finish in it.
 #
 # A later clean-up goes back into the same conversation (retro-again.md),
 # told what ran since its last turn, to look at its report again.
@@ -37,6 +44,10 @@
 # How many of the branch's commits the second pass is listed; the rest it is
 # told the number of, and reads with git.
 RETRO_SINCE_COMMITS=40
+
+# The line the session ends its report on when it has nothing to act on, which
+# closes it; the prompts are given it as <nothing-said>.
+RETRO_NOTHING_SAID="Nothing to act on: sclaude closes this session."
 
 # What the second pass is told when nothing ran since the first.
 RETRO_NOTHING_SINCE="Nothing but this clean-up: no step, review or sync ran, and no commit reached the branch. So this is me coming back to the conversation: carry on with it, and check your report against what is on disk now."
@@ -142,12 +153,12 @@ PY
     SCLAUDE_V_BRANCH="$(state_get "$fstate" branch 2>/dev/null || true)" \
     SCLAUDE_V_INSTRUMENTS="$INSTRUMENTS" \
     SCLAUDE_V_CONFIG="$config" \
-    SCLAUDE_V_DONE_MARKER="$done_file" \
+    SCLAUDE_V_NOTHING_SAID="$RETRO_NOTHING_SAID" \
     render_prompt "$template" "$slug" "$pr" "$issue" "$wt")" || return 0
 
   echo ""
   echo "${BOLD}${BLUE}── $slug · $(phase_title retro), before the clean-up ──${OFF}"
-  info "   opus / medium / auto · $wt"
+  info "   opus / medium / plan · $wt"
   [[ -n "$last" ]] \
     && info "   the same conversation again, told what happened since its last turn"
   if [[ -n "$terminal" ]]; then
@@ -171,13 +182,13 @@ PY
   local project_before project_after
   project_before="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
 
-  session_watch_start "" "$session" "$done_file" "$wt" retro
+  session_watch_start "" "$session" "$done_file" "$wt" retro "$RETRO_NOTHING_SAID"
   local before_instruments; before_instruments="$(instruments_state)"
   local -a which=(--session-id "$session")
   [[ -n "$last" ]] && which=(--resume "$session")
   ( cd "$wt" && claude_launch "${which[@]}" --model opus --effort medium \
       "${guard[@]}" \
-      --permission-mode auto --add-dir "$INSTRUMENTS" --add-dir "$TERM_DIR" \
+      --permission-mode plan --add-dir "$INSTRUMENTS" --add-dir "$TERM_DIR" \
       --add-dir "$(cd "$wt" && term_dir)" \
       --add-dir "$HOME/.claude/projects" \
       -n "$(session_label retro)/$slug" "$prompt" )

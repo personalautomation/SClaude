@@ -436,8 +436,8 @@ in the feature's workshop instead, a copy of the checkout at
 - a step's session runs `sclaude core-open`, and Claude Code asks you first,
   in its window, every session anew; a "no" leaves sclaude alone, and the
   finding is put off for the monthly review;
-- the retrospective, and the friction and monthly reviews (which start in plan
-  mode, so the plan you approve is your yes), open it without a question;
+- the retrospective and the friction and monthly reviews start in plan mode,
+  so the plan you approve is your yes: they open it without a question;
 - the session commits there, reviews its change — `/sreview` if you are a
   maintainer, any review you like otherwise — and runs `sclaude core-ready`.
   Answering "stop" to sreview's "go on?" counts as a finished review.
@@ -616,7 +616,7 @@ issue's summary table shows it:
 | fix after a regression | as step 2 for the local tests, as step 4 for the preview's and production's | `auto` | Makes red tests green; after a rollback it is told what failed on production | a row per session, with how it ended |
 | 5. sync | sonnet / medium | `auto` | Only on a conflict with main: the merge of main into the branch, its conflicts resolved, checked and pushed | a row per session |
 | 6. epilogue | sonnet / medium | `auto` | The outcome as one comment per issue, on the feature's issue and every parent; changes nothing in the repository | a row |
-| 7. retro | opus / medium | `auto` | What you missed, how to work better, what sclaude could do better. What it fixes goes on the feature's branch and sends the feature back to step 3 | a row |
+| 7. retro | opus / medium | `plan` | What you missed, how to work better, what sclaude could do better. What it fixes goes on the feature's branch and sends the feature back to step 3 | a row |
 | friction review | opus / medium | `plan` | After each step and fix session: reads what the safety rules refused, and loosens a rule that was in the way | the Friction column of that row |
 | local review pass | opus, `claude -p` | read-only | With the project's review set to `local`: finds problems in the pull request before step 4's session | not in the table: the findings land on the pull request, the report in the feature's Telegram topic |
 | friction matching | haiku, `claude -p` | no tools | One call that matches proposed rules to the ones already put off | not in the table: it is not a session |

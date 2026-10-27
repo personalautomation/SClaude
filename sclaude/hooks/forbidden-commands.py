@@ -531,10 +531,9 @@ def shared_schema_asks(command):
 # `sclaude core-open` lets the session change sclaude, in its tree's workshop
 # (workshop.sh). A step's session asks the person first, every session anew:
 # Claude Code puts the question, and the model cannot answer it, in auto mode
-# too. The reviews run under --step friction — the retrospective, where the
-# person expects changes to sclaude, and the friction and deferred reviews,
-# which start in plan mode, so the plan the person approved is the yes — and
-# open it without a question.
+# too. The reviews run under --step friction — the retrospective and the
+# friction and deferred reviews, which all start in plan mode, so the plan the
+# person approved is the yes — and open it without a question.
 CORE_OPEN_ASK = ("this session asks to change sclaude itself: `sclaude core-open` opens the "
                  "tree's workshop, a copy of sclaude's checkout, for this session to change "
                  "and commit in. sclaude publishes the change once the session has reviewed "

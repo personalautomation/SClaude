@@ -250,9 +250,8 @@ sclaude_guard_args() {
 # review, the retrospective, the monthly deferred review. sclaude's live
 # checkout is read-only to them as to every session; they change sclaude in
 # the tree's workshop, which opens for them without a question
-# (forbidden-commands.py CORE_OPEN_FREE): the retrospective is where the
-# person expects such changes, and the other two start in plan mode, so the
-# plan the person approved is the yes. The team's rules stay the maintainers'.
+# (forbidden-commands.py CORE_OPEN_FREE): all three start in plan mode, so
+# the plan the person approved is the yes. The team's rules stay the maintainers'.
 #
 # And they run in the product's tree now, so the step bans hold for them as
 # for any step: the merge, a deploy, a push to the product's main, a migration onto a

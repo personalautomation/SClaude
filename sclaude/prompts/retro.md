@@ -19,7 +19,7 @@ Also say, in a line or two, what went well and is worth keeping.
 
 **The rule for all of them: facts only.** Every point stands on something you read — quote the line from the terminal or name the file and field. If you cannot point at it, leave it out. An empty section among the first three is a fine answer; write "nothing" under it. Do not pad a section to make it look useful.
 
-Change nothing while you look: no edits, no commits, no comments, no messages. Afterwards, do only what I ask for in this conversation.
+This session is in plan mode. Change nothing while you look: no edits, no commits, no comments, no messages. Afterwards, do only what I ask for in this conversation, and each time as a plan first: what changes, in which file or where, and why. Once I approve it, make it; the plan I approve is my yes, also for opening `sclaude`'s workshop.
 
 <include:retro-rules>
 
@@ -27,5 +27,5 @@ Change nothing while you look: no edits, no commits, no comments, no messages. A
 
 **How this ends.** Give the sections as your last message.
 
-- **If sections 1 and 3 are both "nothing"**, `sclaude` closes this session itself. Write the marker first — `echo done > <done-marker>` — and then the report, with no tool call after it. About thirty seconds after your turn ends the session is closed and the report printed in the orchestrator's terminal; if I type anything in those thirty seconds, the closing is called off and the marker removed. Say in the report that the session closes by itself, and that `sclaude` then asks about the clean-up.
-- **Otherwise** leave the marker out: the session stays open so we can talk it through, and I close it with `/exit` when we are done. End the report by saying so, and that `sclaude` asks about the clean-up after that.
+- **If sections 1 and 3 are both "nothing"**, `sclaude` closes this session itself, with nothing for me to approve. Say in the report that `sclaude` then asks about the clean-up, and end it on this line, alone, as its very last line: `<nothing-said>`. That line is the signal; no tool call after it. End this turn on that message rather than on a plan or a question, though plan mode asks for one: there is nothing to plan. Should you give the report itself as a plan all the same, that plan carries every section in full, not a summary: it is what `sclaude` prints as your report. The plans for changes I ask for later are only the changes. About thirty seconds after your turn ends the session is closed and the report printed in the orchestrator's terminal; if I type anything in those thirty seconds, the closing is called off.
+- **Otherwise** give them as a message, not as a plan, and without that line: the session stays open so we can talk it through, and I close it with `/exit` when we are done. End the report by saying so, and that `sclaude` asks about the clean-up after that.

@@ -3085,7 +3085,7 @@ done_marker() {
 
 # The watcher beside a session that may end itself.
 #
-#   session_watch_start <wt> <session> [<marker> <cwd> <kind>]
+#   session_watch_start <wt> <session> [<marker> <cwd> <kind> <said>]
 #
 # The session writes a marker — round_marker or done_marker — and gives its
 # report as its last message. The watcher waits for that turn to end, then
@@ -3107,9 +3107,14 @@ done_marker() {
 # moment counted from instead (session_end.py approved). A person who types
 # after the approval keeps the session: it then waits for /exit.
 #
+# The retrospective, in plan mode too, writes none either: <said> is the line
+# it ends its report on when it has nothing to act on, and that message is the
+# moment counted from (session_end.py watch-said). The watcher writes the
+# marker itself, for session_closed.
+#
 # SESSION_POLL and SESSION_GRACE are seconds, overridable for the tests.
 session_watch_start() {
-  local wt="$1" session="$2" done="${3:-}" cwd="${4:-$1}" kind="${5:-}"
+  local wt="$1" session="$2" done="${3:-}" cwd="${4:-$1}" kind="${5:-}" said="${6:-}"
   local round="" transcript
   SESSION_WATCHER=""
   [[ -n "$session" ]] || return 0
@@ -3172,7 +3177,7 @@ session_watch_start() {
       fi
       if [[ -n "$marker" ]]; then
         since="$(stat -c %Y "$marker" 2>/dev/null || echo 0)"
-      elif [[ "$kind" != "plan" ]]; then
+      elif [[ "$kind" != "plan" && -z "$said" ]]; then
         ended=""; continue
       fi
       # The transcript is read again only when it has grown: a planning
@@ -3182,6 +3187,8 @@ session_watch_start() {
         seen="$size:$since"
         if [[ -n "$marker" ]]; then
           verdict="$(python3 "$LIB/session_end.py" watch "$transcript" "$since" 2>/dev/null)"
+        elif [[ -n "$said" ]]; then
+          verdict="$(python3 "$LIB/session_end.py" watch-said "$transcript" "$started" "$said" 2>/dev/null)"
         else
           verdict="$(python3 "$LIB/session_end.py" watch-plan "$transcript" "$started" 2>/dev/null)"
         fi
@@ -3192,7 +3199,7 @@ session_watch_start() {
           [[ -n "$ended" ]] || ended="$(date +%s)"
           if (( $(date +%s) - ended >= ${SESSION_GRACE:-30} )); then
             # What session_ended looks for to know it was not a person's /exit.
-            [[ -n "$marker" ]] || echo "plan approved" > "$done"
+            [[ -n "$marker" ]] || echo "${said:-plan approved}" > "$done"
             pkill -TERM -f -- "(--session-id|--resume) $session" 2>/dev/null || true
             exit 0
           fi ;;

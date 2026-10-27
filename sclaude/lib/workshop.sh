@@ -20,8 +20,9 @@
 #
 #   * `sclaude core-open` lets the session write there. In a step it is asked
 #     of the person, by Claude Code itself (forbidden-commands.py answers
-#     "ask"), for every session; a retrospective and the reviews that start in
-#     plan mode, whose plan the person approved, get it without a question;
+#     "ask"), for every session; the retrospective and the reviews, which
+#     start in plan mode, so the person approved their plan, get it without
+#     a question;
 #   * the session commits there, reviews its change — sreview for a
 #     maintainer of sclaude (MAINTAINERS), a review of its choosing for
 #     anybody else — and says so with `sclaude core-ready`;

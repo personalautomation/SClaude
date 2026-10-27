@@ -19,6 +19,8 @@
 #
 #   session_end.py watch <transcript> <since>   → human | ended | working
 #   session_end.py watch-plan <transcript> <after> → none | human | ended | working
+#   session_end.py watch-said <transcript> <after> <line>
+#                                               → none | human | ended | working
 #   session_end.py approved <transcript>        → when the plan was approved
 #   session_end.py last <transcript>            → the last message's text
 #   session_end.py first <transcript>           → the text that ended the first
@@ -30,8 +32,12 @@
 # trouble — an unreadable transcript is "working" and an empty message.
 import datetime
 import json
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from presented_plan import plan_text  # noqa: E402
 
 COMMAND = re.compile(r"<command-name>\s*(/[^<\s]+)")
 
@@ -120,6 +126,77 @@ def watch_plan(path, after):
         elif state != "human" and entry.get("type") == "assistant":
             reason = (entry.get("message") or {}).get("stop_reason")
             state = "ended" if reason == "end_turn" else "working"
+    return state
+
+
+def words(text):
+    """A line as the watcher compares it with the one it waits for: its words,
+    in lower case — a list marker, a heading, emphasis or the last stop around
+    it do not make it another line. In any script: a line in the person's
+    language after it is a line too."""
+    return " ".join(re.findall(r"[^\W_]+", text.lower()))
+
+
+def plan_of(block):
+    """The plan an ExitPlanMode call puts up, or None for any other block:
+    its text, or the file it names (presented_plan.plan_text). Empty when
+    neither is a text to be had."""
+    if not isinstance(block, dict) or block.get("type") != "tool_use" \
+            or block.get("name") != "ExitPlanMode":
+        return None
+    given = block.get("input")
+    if isinstance(given, dict) and not isinstance(given.get("plan"), str):
+        given = {k: v for k, v in given.items() if k != "plan"}
+    try:
+        plan = plan_text(given)
+    except (TypeError, ValueError):
+        return ""
+    return plan.strip() if isinstance(plan, str) else ""
+
+
+def watch_said(path, after, line):
+    """`watch`, counted from the last message at or after `after` that ends
+    on `line`, a line of its own.
+
+    The retrospective runs in plan mode, which forbids it to write a marker
+    before a plan is approved, and with nothing to act on it has no plan to
+    put up: it ends its report on the line it was given instead (retro.sh),
+    and the watcher reads that as its marker. A message that names the line
+    among others does not count, nor one before `after`, a pass resumed
+    earlier; and anything the session says or runs after it — a correction, a
+    command — takes it back. Plan mode bids every turn end on a plan, so a
+    plan that ends on the line counts too, and its dialog, waiting on the
+    person, is the turn's end. "none" while no such message stands.
+    """
+    want = words(line)
+    since, state = None, "none"
+    for entry in entries(path):
+        moment = when(entry)
+        waiting = False
+        if entry.get("type") == "assistant" and moment is not None and moment >= after:
+            for block in (entry.get("message") or {}).get("content") or []:
+                if not isinstance(block, dict) or block.get("type") not in ("text", "tool_use"):
+                    continue
+                plan = block.get("type") == "tool_use"
+                text = (plan_of(block) or "") if plan else block.get("text") or ""
+                lines = [l for l in map(words, str(text).split("\n")) if l]
+                if want and lines and lines[-1] == want:
+                    since, state, waiting = moment, "working", plan
+                elif plan or lines:
+                    since, state = None, "none"
+        if since is None or moment is None or moment < since:
+            continue
+        if typed_by_a_person(entry):
+            state = "human"
+        elif state == "human":
+            continue
+        elif entry.get("type") == "assistant":
+            reason = (entry.get("message") or {}).get("stop_reason")
+            state = "ended" if waiting or reason == "end_turn" else "working"
+        elif entry.get("type") == "user":
+            # A result handed back — the plan's dialog answered — goes on
+            # with the turn.
+            state = "working"
     return state
 
 
@@ -227,7 +304,9 @@ def last(path):
 
     A turn interleaves text with tool calls; what the person reads at the end
     is the text after the last tool result or prompt, which is where the
-    prompts ask for the report.
+    prompts ask for the report. A plan still waiting on its dialog is the
+    report — the retrospective may be closed there (watch_said), and its
+    prompts say a plan carries every section — in place of the text before it.
     """
     texts = []
     for entry in entries(path):
@@ -236,7 +315,10 @@ def last(path):
             texts = []
         elif kind == "assistant":
             for block in (entry.get("message") or {}).get("content") or []:
-                if isinstance(block, dict) and block.get("type") == "text" \
+                plan = plan_of(block)
+                if plan:
+                    texts = [plan]
+                elif isinstance(block, dict) and block.get("type") == "text" \
                         and (block.get("text") or "").strip():
                     texts.append(block["text"].strip())
     return without_exit("\n\n".join(texts))
@@ -248,7 +330,9 @@ def first(path):
     The retrospective gives its report there and then talks it through with the
     person, so by the time they leave, the last message is about whatever they
     discussed last and the report is further up. The turn ends where somebody
-    types the first prompt after the session has said anything.
+    types the first prompt after the session has said anything, or at its
+    first plan, which waits on the person too and is then the report — what
+    follows the dialog's answer is the conversation.
     """
     texts, spoke = [], False
     for entry in entries(path):
@@ -259,6 +343,9 @@ def first(path):
             texts = []
         elif kind == "assistant":
             for block in (entry.get("message") or {}).get("content") or []:
+                plan = plan_of(block)
+                if plan:
+                    return without_exit(plan)
                 if isinstance(block, dict) and block.get("type") == "text" \
                         and (block.get("text") or "").strip():
                     texts.append(block["text"].strip())
@@ -310,6 +397,12 @@ def main():
         except ValueError:
             after = 0.0
         sys.stdout.write(watch_plan(args[1], after) + "\n")
+    elif len(args) == 4 and args[0] == "watch-said":
+        try:
+            after = float(args[2])
+        except ValueError:
+            after = 0.0
+        sys.stdout.write(watch_said(args[1], after, args[3]) + "\n")
     elif len(args) == 2 and args[0] == "approved":
         moment = approved(args[1])
         if moment is not None:

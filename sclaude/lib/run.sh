@@ -796,6 +796,13 @@ run_step() {
     # What sclaude itself has to tell it goes first.
     local opening="$news"
     [[ -n "$told" ]] && opening="$(printf '%s%s' "$told" "${news:+$'\n\n'$news}")"
+    # No marker_gone for step 1, which writes no marker: the plan's approval
+    # closes it. A review on this machine writes no review-round (review.md).
+    if [[ -n "$opening" && "$step" != "plan" ]]; then
+      local gone=(.sclaude/local/feature/session-done)
+      [[ "$step" == "review" && "$review_mode" != "local" ]] && gone+=(.sclaude/local/feature/review-round)
+      opening="$(printf '%s\n\n%s' "$opening" "$(marker_gone "${gone[@]}")")"
+    fi
     RUN_STEP_LAUNCHED=1
     state_set "$state" "steps.$step.gate" null
     step_run "$wt" "$step" open "$session"
@@ -3152,6 +3159,28 @@ review_carry_on() {
 # ask, since nobody typed /exit (see auto_return).
 done_marker() {
   echo "$1/.sclaude/local/feature/session-done"
+}
+
+# What a conversation opened again with a message is told of its marker.
+#
+# None stands by then: session_closed takes it off as the session closes, and
+# session_watch_start as the next one opens, so that an old marker cannot
+# close a session that has not done its work yet. The session does not know
+# that. It remembers writing one, and a development session sent back with
+# "it does not work yet" found nothing to change, said its marker "already
+# stood", and stayed open until somebody typed /exit. A fixing session's
+# regression.blocked was the same case (regression_fix).
+#
+# Whoever ended the session last: the sentence is true either way, and keeps
+# the reasons the instructions give to leave a marker out. Telling only the
+# ones sclaude closed meant knowing that across processes, and every way of
+# keeping it — a variable, the run's outcome — lost it somewhere.
+#
+#   marker_gone <marker>...   — paths as the session's prompt names them
+marker_gone() {
+  local names="" m
+  for m in "$@"; do names+="${names:+ or }\`$m\`"; done
+  printf '**No marker closes this session now** (%s): sclaude takes it off whenever it closes or reopens this conversation, so one written before no longer stands. When this work is done, write it as your instructions say, also when it turned out to need no change; leave it out only where they tell you to.' "$names"
 }
 
 # The watcher beside a session that may end itself.

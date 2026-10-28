@@ -1823,8 +1823,8 @@ regression_fix() {
     # One wording for a session that ended on a fix and one that ended on a
     # note: which it was is not kept once an orchestrator fix overwrites the
     # status, and the session knows anyway.
-    prompt="$(printf '**The %s regression ran again and failed on the same part.** If you ended last time on a note, it was taken off: write `.sclaude/local/feature/regression.blocked` again if the cause is still outside this tree, or this session ends as a fix that did not hold.\n\n%s\n' \
-      "$stage" "$SCLAUDE_B_REGRESSION")"
+    prompt="$(printf '**The %s regression ran again and failed on the same part.** If you ended last time on a note, it was taken off: write `.sclaude/local/feature/regression.blocked` again if the cause is still outside this tree, or this session ends as a fix that did not hold.\n\n%s\n\n%s\n' \
+      "$stage" "$(marker_gone .sclaude/local/feature/session-done)" "$SCLAUDE_B_REGRESSION")"
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --resume "$session" \
         --model "$model" --effort "$effort" \
         --permission-mode "$mode" "${extra[@]}" -n "$name" "$prompt" )

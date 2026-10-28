@@ -679,8 +679,56 @@ def case_j():
           "review-session" in w.sessions, False)
 
 
+def case_k():
+    # --- "it does not work yet" goes back to the session ---------------------
+    #
+    # sclaude closed the session on its marker and took the marker off, and
+    # the session remembered writing it: sent back with what was wrong, it
+    # found nothing to change, said its marker "already stood", and stayed
+    # open until somebody typed /exit. The message that reopens it says the
+    # marker is gone.
+    w = World(os.path.join(tmp, "k"), merged=False)
+    steps = dict(DONE_STATE["steps"],
+                 code={"done": False, "session": "code-session"},
+                 pr={"done": False}, review={"done": False})
+    w.set_state(dict(DONE_STATE, step="code", steps=steps, pr=None,
+                     regression={}, worktree=w.wt))
+    tdir = os.path.join(w.home, ".claude", "projects", encoded(w.wt))
+    os.makedirs(tdir, exist_ok=True)
+    with open(os.path.join(tdir, "code-session.jsonl"), "w") as fh:
+        fh.write('{"type":"assistant","message":{"content":[]}}\n')
+    w.resume(answers="n\nthe form does not load\nn\n\n", timeout=60)
+    check_true("not-working-reaches-the-session", "the form does not load" in w.prompts)
+    check("not-working-resumes-the-same-session", w.sessions.count("code-session") >= 2, True)
+    check_true("not-working-told-the-marker-is-gone",
+               "No marker closes this session now" in w.prompts)
+
+
+def case_l():
+    # --- the same across processes: QA returns the feature --------------------
+    #
+    # The review session was closed in a run long finished; the return opens
+    # it again from a new `sclaude <feature>` with QA's notes, and the note
+    # goes with them. A review run on this machine is not told of review-round,
+    # which it never writes; this one is GitHub's.
+    w = World(os.path.join(tmp, "l"), merged=False)
+    w.set_state(dict(DONE_STATE, worktree=w.wt))
+    w.watch({"feature": "demo", "verdict": "returned", "status": "In progress"},
+            notes="the avatar does not load on iOS\n")
+    tdir = os.path.join(w.home, ".claude", "projects", encoded(w.wt))
+    os.makedirs(tdir, exist_ok=True)
+    with open(os.path.join(tdir, "old-session.jsonl"), "w") as fh:
+        fh.write('{"type":"assistant","message":{"content":[]}}\n')
+    w.resume(stillborn=True)
+    check_true("qa-return-resumes-the-review-session", "old-session" in w.sessions)
+    check_true("qa-return-notes-reach-it", "avatar does not load" in w.prompts)
+    check_true("qa-return-told-the-marker-is-gone",
+               "No marker closes this session now** (`.sclaude/local/feature/session-done` or "
+               "`.sclaude/local/feature/review-round`)" in w.prompts)
+
+
 CASES = [case_a, case_a2, case_b, case_c, case_d, case_e, case_f, case_g, case_h,
-         case_i, case_j]
+         case_i, case_j, case_k, case_l]
 
 try:
     # Each case builds its own world under tmp — repository, HOME, stubs, ask

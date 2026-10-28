@@ -149,6 +149,17 @@ is nothing to press blindly there. The numbered list above labelled buttons is
 removed in doing so — it would repeat them — while the lines that explain the
 question stay.
 
+A question answered in words — "What is not working?" — waits on the channel
+and the terminal at once, by turns of `ASK_POLL`, and a read with a time limit
+has no line editing: readline drops what was typed when its time runs out.
+So the wait takes only the first key, and the line is then read with readline,
+that key already in it and no limit: the arrows move the cursor, and the
+answer from the phone is no longer taken once somebody has begun to type at
+the laptop. An arrow pressed before any text is dropped whole. The feature's
+end is still watched while the line is typed, by a subshell beside readline:
+a key pressed by someone who then left does not hold the process once the
+feature is ended from the bot.
+
 **The checkbox does not carry over into the chat: an inline keyboard has neither
 a space bar nor a state that would survive a press.** What it does have is the
 row's width, and the two purposes lay themselves out along it side by side with
@@ -758,7 +769,11 @@ project has none. With Docker down sclaude starts it — Docker Desktop from WSL
 or `docker.service` where sudo needs no password — and waits up to
 `SCLAUDE_DOCKER_WAIT` seconds (120); `SCLAUDE_DOCKER_DESKTOP` names the
 launcher when it is somewhere unusual. A start that fails is not retried for
-ten minutes. Only when Docker stays down does the feature fall back to the
+ten minutes. A stack whose start exits with an error — as it does when started
+again while its containers are still coming up — is given up to
+`SCLAUDE_DB_WAIT` seconds (120) to answer `status` before it counts as down:
+the shared database it would fall back to lacks the feature's own migrations.
+Only when Docker or the stack stays down does the feature fall back to the
 shared local database, and it says so. `SCLAUDE_DOCKER_START=off` starts
 nothing.
 

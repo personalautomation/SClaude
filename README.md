@@ -660,6 +660,7 @@ is stopped, database included (data kept), and starts again on the next visit.
 | `SCLAUDE_DOCKER_START=off` | never start Docker |
 | `SCLAUDE_DOCKER_WAIT` | how long to wait for Docker to come up, in seconds (120) |
 | `SCLAUDE_DOCKER_DESKTOP` | where Docker Desktop is, when it is somewhere unusual |
+| `SCLAUDE_DB_WAIT` | how long a feature's own database may take to answer after its start reported a failure, in seconds (120) |
 
 ### What sclaude writes, and where
 

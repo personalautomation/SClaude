@@ -111,7 +111,14 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 case "$(tail -1 "$STUB_LOG")" in
-  start*) touch "$dir/.started"; exit 0 ;;
+  start*)
+    # STUB_START=late: the containers come up, but the CLI exits non-zero, as
+    # it does when started again while they are still starting.
+    # STUB_START=dead: nothing comes up.
+    [[ "${STUB_START:-}" == dead ]] && exit 1
+    touch "$dir/.started"
+    [[ "${STUB_START:-}" == late ]] && exit 1
+    exit 0 ;;
   status*)
     [[ -f "$dir/.started" ]] || exit 1
     base=$(sed -n 's/^port = \(5[0-9]*1\)$/\1/p' "$dir/supabase/config.toml" | head -1)
@@ -188,7 +195,10 @@ source "$LIB/featuredb.sh"
                  "STUB_LOG": os.path.join(root, "cli.log"),
                  # Not the machine's real proxy: nothing listens here, so the
                  # answers do not depend on whether it happens to be running.
-                 "SCLAUDE_PROXY_PORT": "1"})
+                 "SCLAUDE_PROXY_PORT": "1",
+                 # A stub stack answers at once or never: nothing here is worth
+                 # the real wait for one that is still coming up.
+                 "SCLAUDE_DB_WAIT": "0"})
     full.update(env or {})
     done = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                           env=full, timeout=60)
@@ -676,10 +686,57 @@ def shared_cases():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def failed_start_cases():
+    """A start that exits non-zero, with the stack up a moment later or never."""
+    root = tempfile.mkdtemp(prefix="sclaude-featuredb-")
+    try:
+        os.makedirs(os.path.join(root, "repo"))
+        os.makedirs(os.path.join(root, "registry"))
+        cli = os.path.join(root, "stub-supabase")
+        with open(cli, "w") as fh:
+            fh.write(STUB_CLI)
+        os.chmod(cli, 0o755)
+
+        late = feature_tree(root, "late")
+        write_config(late, cli, "true")
+        os.symlink(late, os.path.join(root, "registry", "late"))
+        running = "docker() { [[ \"$1\" == inspect ]] && echo true; return 0; }\n"
+        out = bash(root, running + 'ensure_db "%s"' % late,
+                   {"STUB_START": "late", "SCLAUDE_DB_WAIT": "4"})
+        envf = os.path.join(late, ".sclaude/local/feature", "db.env")
+        check("a stack up after a failed start is the feature's own", os.path.isfile(envf), True)
+        check("no fall-back to the shared database is announced",
+              "sharing the main local database" in out, False)
+        check("waiting for it is said", "came up after all" in out, True)
+
+        dead = feature_tree(root, "dead")
+        write_config(dead, cli, "true")
+        os.symlink(dead, os.path.join(root, "registry", "dead"))
+        out = bash(root, running + 'ensure_db "%s"' % dead,
+                   {"STUB_START": "dead", "SCLAUDE_DB_WAIT": "2"})
+        check("a stack that never comes up falls back, and says so",
+              "supabase start failed" in out and "sharing the main local database" in out, True)
+
+        # No container running: the start failed for real, and nothing waits.
+        gone = feature_tree(root, "gone")
+        write_config(gone, cli, "true")
+        os.symlink(gone, os.path.join(root, "registry", "gone"))
+        import time as _time
+        began = _time.time()
+        out = bash(root, 'ensure_db "%s"' % gone, {"STUB_START": "late", "SCLAUDE_DB_WAIT": "30"})
+        check("with no container running the fall-back is at once",
+              _time.time() - began < 10 and "sharing the main local database" in out, True)
+        check("...and leaves no environment file",
+              os.path.exists(os.path.join(dead, ".sclaude/local/feature", "db.env")), False)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     config_cases()
     env_cases()
     ensure_cases()
+    failed_start_cases()
     copy_cases()
     same_schema_cases()
     main_up_cases()

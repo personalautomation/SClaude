@@ -853,9 +853,12 @@ PY
 #
 #   run_cost <wt> <session>
 run_cost() {
-  local wt="$1" session="$2"
-  [[ -n "$session" && -s "/tmp/claude-statusline-context-$session" ]] || return 0
-  python3 - "$wt/.sclaude/local/feature/state.json" "$session" "/tmp/claude-statusline-context-$session" <<'PY' 2>/dev/null || true
+  local wt="$1" session="$2" file
+  [[ -n "$session" ]] || return 0
+  # Named by the id Claude Code has now (session_latest in state.sh).
+  file="/tmp/claude-statusline-context-$(session_latest "$wt" "$session")"
+  [[ -s "$file" ]] || return 0
+  python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$file" <<'PY' 2>/dev/null || true
 import json, sys
 path, session, context = sys.argv[1:4]
 with open(context) as fh:

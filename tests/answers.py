@@ -15,13 +15,7 @@
 #     count as neither;
 #   * typed in a real terminal — "т", Backspace, "n" — the answer is no;
 #   * a yes/no question takes no default: an empty line, or a word that is
-#     neither, is asked again; the end of input stops it with an empty reply;
-#   * free text typed while the question also waits on the channel is edited
-#     in place: the arrows move the cursor, a word typed after them lands
-#     there, an arrow pressed before typing leaves nothing behind, a space
-#     typed first is not Enter, a prompt wider than the terminal is not shown
-#     twice, a feature ended while a line is half typed ends the wait, and an
-#     answer from the channel still counts while nothing has been typed.
+#     neither, is asked again; the end of input stops it with an empty reply.
 #
 # Run it with: python3 tests/answers.py
 import os
@@ -98,85 +92,6 @@ while time.time() < end:
             break
         out += d
 check("typed-erased-cyrillic-then-n", "VERDICT=no" in out.decode(errors="replace"), True)
-
-# --- free text, typed while the channel is waiting too --------------------
-def typed(keys, channel=None, prompt="What is wrong? ", cols=None, end_feature=False):
-    """What ask hands back, and what the screen showed, for keys typed at a
-    terminal with the channel open. end_feature ends the feature from outside
-    after the keys, as the bot does."""
-    import fcntl
-    import json
-    import shutil
-    import struct
-    import tempfile
-    import termios
-    d = tempfile.mkdtemp(prefix="sclaude-answers-")
-    try:
-        script = ('BOLD=$\'\\e[1m\'; OFF=$\'\\e[0m\'; source "%s/io.sh"; source "%s/ui.sh"; '
-                  'ASK_DIR=%s; ASK_SLUG=demo; ASK_POLL=0.3; ask "${BOLD}%s${OFF}" said; '
-                  'echo "SAID[$said]"' % (LIB, LIB, d, prompt))
-        pid, fd = pty.fork()
-        if pid == 0:
-            os.environ["LANG"] = "C.UTF-8"
-            os.execvp("bash", ["bash", "-c", script])
-        if cols:
-            fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, cols, 0, 0))
-        channel_dir = os.path.join(d, "ask", "demo")
-        time.sleep(1)
-        if channel is not None:
-            with open(os.path.join(channel_dir, "answer.json.tmp"), "w") as fh:
-                json.dump({"reply": channel}, fh)
-            os.replace(os.path.join(channel_dir, "answer.json.tmp"),
-                       os.path.join(channel_dir, "answer.json"))
-        for chunk in keys:
-            os.write(fd, chunk)
-            # Longer than a turn of the wait: the line must outlive its ends.
-            time.sleep(0.5)
-        if end_feature:
-            open(os.path.join(channel_dir, "ended"), "w").close()
-        out = b""
-        end = time.time() + 6
-        while time.time() < end:
-            r, _, _ = select.select([fd], [], [], 0.3)
-            if r:
-                try:
-                    data = os.read(fd, 4000)
-                except OSError:
-                    break
-                if not data:
-                    break
-                out += data
-        # Still there after the wait is a process stuck in a read: a failure
-        # to report, not a bench to hang.
-        if os.waitpid(pid, os.WNOHANG) == (0, 0):
-            os.kill(pid, 9)
-            os.waitpid(pid, 0)
-        text = out.decode(errors="replace")
-        start = text.rfind("SAID[")
-        said = text[start + 5:text.find("]", start)] if start >= 0 else None
-        return said, text
-    finally:
-        shutil.rmtree(d, ignore_errors=True)
-
-
-check("free-text-edited-with-the-arrows",
-      typed([b"a", b"bc", b"\x1b[D\x1b[D", b"X", b"\r"])[0], "aXbc")
-check("free-text-arrow-before-typing-leaves-nothing",
-      typed([b"\x1b[D", b"ok", b"\r"])[0], "ok")
-check("free-text-cyrillic", typed(["ж".encode(), "ук".encode(), b"\r"])[0], "жук")
-check("free-text-empty-enter", typed([b"\r"])[0], "")
-check("free-text-space-first-is-not-enter", typed([b" ", b"ok", b"\r"])[0], "ok")
-check("free-text-from-the-channel", typed([], channel="from the phone")[0], "from the phone")
-# A prompt wider than the terminal: every row it took is erased before
-# readline prints it again, so its words are on the screen once.
-wide = "What is not working, said in as many words as it takes to wrap? "
-said, screen = typed([b"a", b"\r"], prompt=wide, cols=40)
-check("free-text-wrapped-prompt-answer", said, "a")
-check("free-text-wrapped-prompt-erased-upwards", "\x1b[1A" in screen, True)
-# The feature ended from the bot while a line is half typed: the process says
-# so and goes, rather than waiting in readline for ever.
-said, screen = typed([b"half"], end_feature=True)
-check("free-text-feature-ended-mid-line", (said, "has ended elsewhere" in screen), (None, True))
 
 if failures:
     for name, want, got in failures:

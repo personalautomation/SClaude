@@ -45,40 +45,6 @@ ask() {
   done
 }
 
-# A prompt as readline is handed it: the colour codes in it marked as taking
-# no room (\001 … \002). Unmarked, readline counts them as characters, and the
-# cursor it moves with the arrows lands that many columns off.
-rl_prompt() {
-  printf '%s' "$1" | sed $'s/\x1b\\[[0-9;]*m/\x01&\x02/g'
-}
-
-# Erases a prompt line already printed, on every row it wrapped onto, and
-# leaves the cursor at its start: \r and erase-line alone clear the last row
-# only, and a prompt longer than the terminal is wide would show its first
-# part twice once readline prints it again.
-rl_unprint() {
-  local plain cols rows=0
-  plain="$(printf '%s' "$1" | sed $'s/\x1b\\[[0-9;]*m//g')"
-  cols="$(stty size < /dev/tty 2>/dev/null)"; cols="${cols##* }"
-  if [[ "$cols" =~ ^[0-9]+$ ]] && (( cols > 0 && ${#plain} > 0 )); then
-    rows=$(( (${#plain} - 1) / cols ))
-  fi
-  printf '\r' >&2
-  (( rows > 0 )) && printf '\033[%dA' "$rows" >&2
-  printf '\033[J' >&2
-}
-
-# The feature this question belongs to is gone: the question goes, and so does
-# this process — a caller handed an empty reply would only ask again. Called
-# from ask_once and from the watch it keeps beside a line being typed, which is
-# a subshell: $$ is the orchestrator either way.
-ask_ended_quit() {
-  printf '\n%s\n' "The feature $ASK_SLUG has ended elsewhere: nothing left to answer here." >&2
-  ask_retract
-  ask_forget
-  kill -TERM "$$" 2>/dev/null
-}
-
 # A number typed for a pick:N list, in base 10: callers compare it with plain
 # arithmetic, to which "08" is a bad octal number rather than option 8. Every
 # path of ask_once hands its reply through here, with a channel or without.
@@ -119,7 +85,7 @@ ask_once() {
   if [[ -z "${ASK_DIR:-}" ]]; then
     ask_forget
     if ( exec < /dev/tty ) 2>/dev/null; then
-      read -erp "$(rl_prompt "$__prompt")" __reply < /dev/tty || __rc=$?
+      read -rp "$__prompt" __reply < /dev/tty || __rc=$?
     else
       read -rp "$__prompt" __reply || __rc=$?
     fi
@@ -137,7 +103,7 @@ ask_once() {
 
   if [[ -z "$__published" ]]; then
     if ( exec < /dev/tty ) 2>/dev/null; then
-      read -erp "$(rl_prompt "$__prompt")" __reply < /dev/tty || __rc=$?
+      read -rp "$__prompt" __reply < /dev/tty || __rc=$?
     else
       read -rp "$__prompt" __reply || __rc=$?
     fi
@@ -175,7 +141,7 @@ ask_once() {
   # bash reports the open error before the redirection takes effect. Around a
   # subshell the suppression covers that too. The same device stands in
   # pick_start.
-  local __in="" __from="" __key=""
+  local __in="" __from=""
   if ( exec < /dev/tty ) 2>/dev/null; then __in=/dev/tty; fi
   # So that Backspace erases a whole Cyrillic letter rather than its last
   # byte (see clean_reply).
@@ -184,55 +150,15 @@ ask_once() {
   local __ended; __ended="$(ask_ended_mark)"
   while :; do
     if [[ -n "$__ended" && -f "$__ended" ]]; then
-      ask_ended_quit
+      # The feature is gone: the question goes, and so does this process — a
+      # caller handed an empty reply would only ask again.
+      printf '\n%s\n' "The feature $ASK_SLUG has ended elsewhere: nothing left to answer here." >&2
+      ask_retract
+      ask_forget
+      kill -TERM "$$" 2>/dev/null
       exit 143
     fi
-    if [[ -n "$__in" && -z "$__form" ]]; then
-      # Free text is read with line editing, which read -t cannot give: a
-      # readline read that times out drops what was typed so far, and the
-      # wait times out every ASK_POLL. So the wait takes only the first key,
-      # one character with no echo; once the human has begun to type, the
-      # rest is theirs, and readline reads the line with that key already in
-      # it and no time limit. Before, the arrows did not move the cursor: a
-      # word inserted with them landed at the end, and their escape codes on
-      # the screen.
-      __rc=0
-      # IFS emptied: read would otherwise strip a space or a tab and hand
-      # back "", the same as Enter — an empty answer for a line just begun.
-      IFS= read -rsn1 -t "$ASK_POLL" __key < "$__in" || __rc=$?
-      if [[ "$__rc" -eq 0 ]]; then
-        case "$__key" in
-          "")    printf "\n" >&2; __reply=""; __from=tty; break ;;
-          $'\e') # An arrow or another key with no text: dropped whole.
-                 while IFS= read -rsn1 -t 0.05 __key < "$__in"; do :; done
-                 continue ;;
-          $'\x7f'|$'\b') continue ;;
-        esac
-        # The prompt laid out again, by readline, which has to know where its
-        # line starts to redraw it: its last line, erased first on every row
-        # it wrapped onto.
-        rl_unprint "${__prompt##*$'\n'}"
-        # The line has no time limit now, so the feature's end is watched
-        # beside it: someone who pressed a key and left would otherwise hold
-        # this process in readline after the feature was ended from the bot.
-        local __watch=""
-        if [[ -n "$__ended" ]]; then
-          ( while sleep "$ASK_POLL"; do
-              [[ -f "$__ended" ]] || continue
-              stty sane < "$__in" 2>/dev/null
-              ask_ended_quit
-              exit 0
-            done ) &
-          __watch=$!
-        fi
-        read -erp "$(rl_prompt "${__prompt##*$'\n'}")" -i "$__key" __reply < "$__in" || __rc=$?
-        if [[ -n "$__watch" ]]; then
-          kill "$__watch" 2>/dev/null
-          wait "$__watch" 2>/dev/null
-        fi
-        __from=tty; break
-      fi
-    elif [[ -n "$__in" ]]; then
+    if [[ -n "$__in" ]]; then
       # read holds the pause itself: -t returns control after exactly ASK_POLL
       # if the human has typed nothing.
       read -rt "$ASK_POLL" __reply < "$__in" && { __from=tty; break; } || __rc=$?

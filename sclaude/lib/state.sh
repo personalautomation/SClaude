@@ -218,6 +218,28 @@ transcript_dir() {
   echo "$HOME/.claude/projects/$encoded"
 }
 
+# The transcript a session's conversation lives in now, and its id.
+#
+# Claude Code may carry a conversation on under a new id while the process
+# runs, in a new transcript that holds all of it (`chain` in session_end.py).
+# sclaude keeps the id it launched with — in state.json, in the process's
+# arguments, in SCLAUDE_SESSION — and finds the live transcript from it here.
+# A missing transcript is printed as it would be named, as before.
+#
+#   session_transcript <dir> <session>   → the path
+#   session_latest <dir> <session>       → the id that path is named by
+SESSION_END_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/session_end.py"
+session_transcript() {
+  local first="$(transcript_dir "$1")/$2.jsonl"
+  python3 "$SESSION_END_PY" chain "$first" 2>/dev/null | tail -n 1 | grep . || echo "$first"
+}
+
+session_latest() {
+  local path; path="$(session_transcript "$1" "$2")"
+  path="${path##*/}"
+  echo "${path%.jsonl}"
+}
+
 # Whether a recorded session id is live: prints it if the conversation took
 # place, and nothing if it did not.
 #
@@ -265,7 +287,7 @@ live_session() {
 session_started() {
   local wt="$1" session="$2"
   local file
-  file="$(transcript_dir "$wt")/$session.jsonl"
+  file="$(session_transcript "$wt" "$session")"
   [[ -f "$file" ]] || return 1
   python3 - "$file" <<'PY'
 import json, sys
@@ -347,7 +369,7 @@ PY
 friction_verdict() {
   local wt="$1" session="$2" file
   [[ -n "$session" && "$session" != "null" ]] || return 1
-  file="$(transcript_dir "$wt")/$session.jsonl"
+  file="$(session_transcript "$wt" "$session")"
   [[ -f "$file" ]] || return 1
   python3 - "$file" <<'PY' 2>/dev/null
 import json, re, sys

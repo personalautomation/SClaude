@@ -78,7 +78,7 @@ run_retro() {
     local candidate count at answered_at="" fallback=""
     local -a unanswered=()
     while IFS=$'\t' read -r candidate fallback; do
-      IFS=$'\t' read -r count at < <(retro_answers "$(transcript_dir "$wt")/$candidate.jsonl")
+      IFS=$'\t' read -r count at < <(retro_answers "$(session_transcript "$wt" "$candidate")")
       if (( ${count:-0} > 0 )); then
         last="$candidate" answers_before="$count" answered_at="${at:-$fallback}"
         break
@@ -202,7 +202,7 @@ PY
   # ran only if it added one. One that did not — refused at the door, left at
   # once — is neither reported nor counted, and its run keeps its last end.
   local answered="" answers_after
-  answers_after="$(retro_answers "$(transcript_dir "$wt")/$session.jsonl" | cut -f1)"
+  answers_after="$(retro_answers "$(session_transcript "$wt" "$session")" | cut -f1)"
   (( ${answers_after:-0} > answers_before )) && answered=1
   # The close always, for its line in the topic: the start was said.
   session_closed "$done_file" "$wt" "$session" "nothing to act on" "" retro \
@@ -434,7 +434,7 @@ EOF
 #   retro_report <wt> <session> [resumed]
 retro_report() {
   local transcript report last
-  transcript="$(transcript_dir "$1")/$2.jsonl"
+  transcript="$(session_transcript "$1" "$2")"
   last="$(python3 "$LIB/session_end.py" last "$transcript" 2>/dev/null || true)"
   if [[ -n "${3:-}" ]]; then
     [[ -n "$last" ]] || return 0

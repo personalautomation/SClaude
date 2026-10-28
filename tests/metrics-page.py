@@ -197,6 +197,31 @@ def usage_checks(root):
              for s in claude_usage.sessions(repo, cache, root=projects)}
     check("a grown transcript is read again", again[("7-thing", "s1", False)]["cost"], 4.0)
 
+    # Carried on under a new id: the new transcript holds the whole
+    # conversation and the same cost account, grown; the old one is left out
+    # and its subagents go to the new one.
+    thing = os.path.join(projects, base + "-7-thing")
+    write(os.path.join(thing, "s6.jsonl"), [
+        {"type": "custom-title", "customTitle": "4-review 🛠/7-thing"},
+        assistant("g"), cost_state(7, 2.0, 20),
+        {"type": "continued-in", "continuedInSessionId": "s7"}])
+    write(os.path.join(thing, "s7.jsonl"), [
+        {"type": "custom-title", "customTitle": "4-review 🛠/7-thing"},
+        assistant("g"), assistant("h"), cost_state(7, 5.0, 50)])
+    write(os.path.join(thing, "s6", "subagents", "agent-y.jsonl"), [assistant("i")])
+    # One whose new transcript is not there: kept.
+    write(os.path.join(thing, "s8.jsonl"), [
+        assistant("j"), cost_state(8, 1.0, 10),
+        {"type": "continued-in", "continuedInSessionId": "s9"}])
+    found = claude_usage.sessions(repo, cache, root=projects)
+    mains = {s["session"]: s for s in found if not s["sub"]}
+    check("a continued transcript is left out", "s6" in mains, False)
+    check("its continuation counts the cost once", mains["s7"]["cost"], 5.0)
+    check("a continuation that is not there keeps the old one", mains["s8"]["cost"], 1.0)
+    check("a continued session's subagent goes to the new id",
+          [s["session"] for s in found if s["sub"] and s["tokens"]["output"] == 2
+           and s["session"] in ("s6", "s7")], ["s7"])
+
 
 def quality_checks(root):
     records = [

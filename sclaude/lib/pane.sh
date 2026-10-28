@@ -82,6 +82,8 @@ claude_launch() {
     args+=("$arg")
   done
   set -- "${args[@]}"
+  resume_latest "$@"
+  set -- "${CLAUDE_LATEST[@]}"
   # The session's id reaches its commands: `sclaude core-open` and
   # `core-ready` name the session they are run by (workshop.sh).
   [[ -n "$session" ]] && export SCLAUDE_SESSION="$session"
@@ -93,6 +95,8 @@ claude_launch() {
   while [[ -n "$session" && -s "$limit_file" ]]; do
     rm -f "$limit_file"
     claude_again_args "$@"
+    resume_latest "${CLAUDE_AGAIN[@]}"
+    CLAUDE_AGAIN=("${CLAUDE_LATEST[@]}")
     echo ""
     info "   The usage limit has reset — resuming the session where it stopped."
     claude_launch_once "${CLAUDE_AGAIN[@]}" "$CLAUDE_LIMIT_RESUME"
@@ -110,6 +114,27 @@ claude_launch() {
   # replaces the process between the exit and that point.
   [[ -n "$session" ]] && pane_mark "$session" "$SCLAUDE_IN_PANE"
   return "$status"
+}
+
+# The launch's arguments into CLAUDE_LATEST, with a `--resume` taken to where
+# the conversation went on: Claude Code may give a running conversation a new
+# id, and hides the old one as superseded (session_latest in state.sh).
+# Everything else of sclaude's keeps the id it launched with — SCLAUDE_SESSION,
+# state.json, the usage-limit file — and the watcher finds the process by any
+# id of the chain.
+#
+#   resume_latest <the launch's arguments…>
+resume_latest() {
+  local arg resume=""
+  CLAUDE_LATEST=()
+  for arg in "$@"; do
+    if [[ -n "$resume" ]] && declare -F session_latest >/dev/null; then
+      arg="$(session_latest "$PWD" "$arg")"
+    fi
+    resume=""
+    [[ "$arg" == "--resume" ]] && resume=1
+    CLAUDE_LATEST+=("$arg")
+  done
 }
 
 # The arguments that open a launched session again, into CLAUDE_AGAIN: the

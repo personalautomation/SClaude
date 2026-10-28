@@ -20,6 +20,7 @@
 import json
 import os
 import pty
+import re
 import select
 import shutil
 import signal
@@ -251,6 +252,23 @@ echo "rc=$?"
     text = run({"PANE_TEST_SLEEP": "30"}, interrupt_after=3)
     check("ctrl-c-ends-the-session", time.time() - t0 < 15, True)
     check("ctrl-c-sclaude-goes-on", "rc=" in text, True)
+
+    # --- a --resume goes to where the conversation went on --------------------
+    # Claude Code may carry a conversation on under a new id and hide the old
+    # one as superseded; the launch resumes the new one, and only a --resume.
+    home = os.path.join(tmp, "home")
+    tdir = os.path.join(home, ".claude", "projects", re.sub(r"[^a-zA-Z0-9]", "-", wt))
+    os.makedirs(tdir, exist_ok=True)
+    with open(os.path.join(tdir, "old.jsonl"), "w") as fh:
+        fh.write(json.dumps({"type": "continued-in", "continuedInSessionId": "new"}) + "\n")
+    open(os.path.join(tdir, "new.jsonl"), "w").close()
+    script = ('source "%s/state.sh"; source "%s/pane.sh"; cd "%s"; HOME="%s"\n'
+              'resume_latest --resume old -n old "--resume"; echo "${CLAUDE_LATEST[*]}"\n'
+              'resume_latest --session-id old -n x; echo "${CLAUDE_LATEST[*]}"\n'
+              'resume_latest --resume other; echo "${CLAUDE_LATEST[*]}"\n') % (LIB, LIB, wt, home)
+    got = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.splitlines()
+    check("resume-goes-to-the-continuation", got,
+          ["--resume new -n old --resume", "--session-id old -n x", "--resume other"])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

@@ -312,6 +312,82 @@ echo "watcher=[$SESSION_WATCHER]"
     check("stale-approval-ignored", target.poll(), None)
     target.kill()
 
+    # --- the conversation went on under a new id ------------------------------
+    #
+    # Claude Code may carry a running conversation on in a new transcript,
+    # ending the old one on a `continued-in` entry; the process keeps the id
+    # it was launched with. A review session did, wrote its marker and its
+    # report into the new transcript, and the watcher, reading the old one,
+    # left it open.
+    nxt = str(uuid.uuid4())
+    moved = os.path.join(tdir, nxt + ".jsonl")
+
+    def carried_on(*entries):
+        """The old transcript ends on its continuation; `entries` go into the
+        new one."""
+        with open(moved, "w") as fh:
+            for e in entries:
+                fh.write(json.dumps(e) + "\n")
+        return [{"type": "continued-in", "sessionId": session, "continuedInSessionId": nxt}]
+
+    target = fake("--session-id %s --model opus" % session)
+    watched(done_file, lambda: carried_on(turn_end()), until=lambda: gone(target))
+    check("continued-session-closed", gone(target), True)
+    target.kill()
+
+    # Opened again by claude_launch on the id it went on under, while sclaude
+    # watches by the one it launched with.
+    target = fake("--resume %s" % nxt)
+    watched(done_file, lambda: carried_on(turn_end()), until=lambda: gone(target))
+    check("continued-session-resumed-by-new-id-closed", gone(target), True)
+    target.kill()
+
+    target = fake("--resume %s" % nxt)
+    watched(done_file, lambda: carried_on(turn_end(), typed("one more thing")),
+            until=lambda: not os.path.exists(done_file))
+    check("continued-session-typed-calls-it-off", target.poll(), None)
+    target.kill()
+    os.remove(moved)
+
+    # chain: the transcripts in order, the live one last; a missing one or a
+    # loop ends it.
+    def chained(path):
+        return subprocess.run([sys.executable, END, "chain", path], capture_output=True,
+                              text=True).stdout.split()
+    a, b, c = (os.path.join(tdir, "chain-%s.jsonl" % n) for n in "abc")
+    for path, to in ((a, "chain-b"), (b, "chain-a")):
+        with open(path, "w") as fh:
+            fh.write(json.dumps({"type": "continued-in", "continuedInSessionId": to}) + "\n")
+    check("chain-loop-stops", chained(a), [a, b])
+    with open(b, "w") as fh:
+        fh.write(json.dumps({"type": "continued-in", "continuedInSessionId": "chain-c"}) + "\n")
+    check("chain-missing-stops", chained(a), [a, b])
+    open(c, "w").close()
+    check("chain-follows", chained(a), [a, b, c])
+    with open(c, "w") as fh:
+        fh.write(json.dumps({"type": "continued-in", "continuedInSessionId": "../x"}) + "\n")
+    check("chain-odd-id-ignored", chained(a), [a, b, c])
+    script = 'source "%s/state.sh"; HOME="%s"; session_latest "%s" chain-a; session_transcript "%s" none' % (
+        LIB, home, wt, wt)
+    check("session-latest", subprocess.run(["bash", "-c", script], capture_output=True,
+                                           text=True).stdout.split(),
+          ["chain-c", os.path.join(tdir, "none.jsonl")])
+    # session_holder: the conversation is open under the id it went on under,
+    # which is the one `claude agents` reports.
+    fake_bin = os.path.join(tmp, "fake-bin")
+    os.makedirs(fake_bin, exist_ok=True)
+    with open(os.path.join(fake_bin, "claude"), "w") as fh:
+        fh.write('#!/bin/sh\necho \'[{"sessionId": "chain-c", "pid": 42}]\'\n')
+    os.chmod(os.path.join(fake_bin, "claude"), 0o755)
+    holder = 'source "%s/state.sh"\nLIB="%s"\n%s\nHOME="%s"; PATH="%s:$PATH"\n' % (
+        LIB, LIB, functions(RUN, ["session_holder"]), home, fake_bin)
+    for sid, want in (("chain-a", "pid 42"), ("chain-c", "pid 42"), ("other", "")):
+        check("holder-%s" % sid, subprocess.run(
+            ["bash", "-c", holder + 'session_holder %s "%s"' % (sid, wt)],
+            capture_output=True, text=True).stdout.strip(), want)
+    for path in (a, b, c):
+        os.remove(path)
+
     # --- unpushed: commits on no remote, and only for an open pull request ----
     repo = os.path.join(tmp, "repo")
     os.makedirs(repo)

@@ -852,7 +852,7 @@ check_true("fix-rows-numbered-by-position",
 check_true("transcript-finds-fixing-sessions", 'saved.get("regression")' in run_sh)
 check_true("transcript-matches-by-prefix", 'short + "*.jsonl"' in run_sh)
 check_true("transcript-labels-the-stage", '"fix after regression" if stage == "local"' in run_sh
-           and 'out.append("%s — %s" % (name, found[0]))' in run_sh)
+           and 'out.append("%s — %s" % (name, chain(found[0])[-1]))' in run_sh)
 
 # --- what a run shows while it is running ------------------------------------
 #

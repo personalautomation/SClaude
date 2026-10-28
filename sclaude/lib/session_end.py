@@ -27,6 +27,9 @@
 #                                                 turn, before anybody answered
 #   session_end.py limit <transcript> [<after>] → the usage limit it stopped on
 #   session_end.py context <transcript>         → tokens held now and at the start
+#   session_end.py chain <transcript>           → the transcripts the conversation
+#                                                 went on in, one per line, its
+#                                                 own first and the live one last
 #
 # `since` is seconds since the epoch: the marker's mtime. Silent on any
 # trouble — an unreadable transcript is "working" and an empty message.
@@ -40,6 +43,47 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from presented_plan import plan_text  # noqa: E402
 
 COMMAND = re.compile(r"<command-name>\s*(/[^<\s]+)")
+SESSION_ID = re.compile(r"^[A-Za-z0-9-]{1,128}$")
+
+
+# Claude Code may carry a conversation on under a new session id while the
+# same process runs: it copies the conversation whole into a new transcript
+# beside the old one, ends the old one on a `continued-in` entry naming the new
+# id, and writes there from then on. The process keeps the id it was launched
+# with in its arguments, and `/resume` hides the old one as superseded. One
+# review session went on so, wrote its marker into the new transcript, and the
+# watcher, still reading the old one, saw a turn that never ended and left it
+# open.
+#
+# So every reader of a session's transcript reads the last one in this chain:
+# it holds the whole conversation, and reading the others as well would count
+# it twice. The chain stops at a transcript that is missing, and at a loop.
+def chain(path):
+    out = [path]
+    while True:
+        nxt = None
+        try:
+            with open(path, "rb") as fh:
+                for line in fh:
+                    if b'"continued-in"' not in line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except ValueError:
+                        continue
+                    sid = entry.get("continuedInSessionId") \
+                        if isinstance(entry, dict) and entry.get("type") == "continued-in" else None
+                    if isinstance(sid, str) and SESSION_ID.match(sid):
+                        nxt = sid
+        except OSError:
+            break
+        if not nxt:
+            break
+        path = os.path.join(os.path.dirname(path), nxt + ".jsonl")
+        if path in out or not os.path.isfile(path):
+            break
+        out.append(path)
+    return out
 
 
 def entries(path):
@@ -419,6 +463,8 @@ def main():
         held = context(args[1])
         if held:
             sys.stdout.write("%d %d\n" % held)
+    elif len(args) == 2 and args[0] == "chain":
+        sys.stdout.write("\n".join(chain(args[1])) + "\n")
     elif len(args) == 2 and args[0] in ("last", "first"):
         text = (last if args[0] == "last" else first)(args[1])
         if text:

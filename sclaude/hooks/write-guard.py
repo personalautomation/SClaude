@@ -578,13 +578,20 @@ def given(argv, name):
 
 
 def approved(record, session):
-    """Whether the workshop's record lets this session write in it."""
+    """Whether the workshop's record lets this session write in it.
+
+    The record holds the id sclaude launched the session with, which
+    `sclaude core-open` took from SCLAUDE_SESSION. Claude Code may carry a
+    running conversation on under a new id, and that is the one the hook is
+    given; the process keeps its environment, which the hook inherits and the
+    session cannot change. Either id names the session."""
     try:
         with open(record, encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, ValueError):
         return False
-    return bool(session) and session in ((data or {}).get("approved") or [])
+    ids = (data or {}).get("approved") or []
+    return any(sid and sid in ids for sid in (session, os.environ.get("SCLAUDE_SESSION")))
 
 
 def main():

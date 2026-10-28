@@ -51,7 +51,7 @@ STEP_WORDS = {"plan", "code", "pr", "review", "fix", "friction", "epilogue", "re
 TIMESTAMP = re.compile(rb'"timestamp":"([^"]+)"')
 
 # Bumped when a summary gains a field: every transcript is read again once.
-VERSION = 4
+VERSION = 5
 
 # A person who takes longer than this to answer was away rather than working:
 # their time counts up to here and no further.
@@ -114,7 +114,7 @@ def read(path):
     """One transcript's summary, or None when it cannot be read."""
     usage, tools, seen_tools = {}, {}, set()
     runs, denials = {}, {}
-    title, first, last = None, None, None
+    title, first, last, continued = None, None, None, None
     compactions = errors = prompts = questions = 0
     # The person's turns: [[when, seconds they took, Claude's calls since]].
     human, pending_asks, since_last, last_claude = [], {}, 0, None
@@ -163,6 +163,14 @@ def read(path):
                     continue
                 if entry.get("type") == "cost-state":
                     runs[str(entry.get("startTime"))] = entry
+                continue
+            if b'"continued-in"' in line:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if entry.get("type") == "continued-in":
+                    continued = entry.get("continuedInSessionId") or continued
                 continue
             if b'"custom-title"' in line:
                 try:
@@ -239,7 +247,7 @@ def read(path):
             "compactions": compactions, "api_errors": errors, "prompts": prompts,
             "questions": questions, "human": human,
             "lines_added": lines_added, "lines_removed": lines_removed,
-            "api_ms": api_ms, "tool_ms": tool_ms}
+            "api_ms": api_ms, "tool_ms": tool_ms, "continued_in": continued}
 
 
 def sessions(repo, cache_path, root=None):
@@ -266,6 +274,12 @@ def sessions(repo, cache_path, root=None):
         feature = rest.split("-sclaude-local-instruments", 1)[0].rstrip("-") or "main"
         files = glob.glob(os.path.join(glob.escape(d), "*.jsonl")) + \
             glob.glob(os.path.join(glob.escape(d), "*", "subagents", "*.jsonl"))
+        # Claude Code may carry a conversation on under a new id, in a new
+        # transcript that holds all of it, its cost account included (`chain`
+        # in session_end.py). The old one is then left out, and its subagents
+        # go to the session it became; the old one counted beside it was the
+        # same conversation twice.
+        mains, became = [], {}
         for path in files:
             rel = os.path.relpath(path, root)
             try:
@@ -288,6 +302,17 @@ def sessions(repo, cache_path, root=None):
             item.update(project=name, feature=feature, session=parent, sub=sub,
                         workshop=workshop,
                         step="workshop" if workshop else step_of(summary.get("title")))
+            mains.append(item)
+            nxt = summary.get("continued_in")
+            if not sub and nxt and os.path.exists(os.path.join(d, nxt + ".jsonl")):
+                became[parent] = nxt
+        for item in mains:
+            if not item["sub"] and item["session"] in became:
+                continue
+            seen = set()
+            while item["session"] in became and item["session"] not in seen:
+                seen.add(item["session"])
+                item["session"] = became[item["session"]]
             out.append(item)
     try:
         tmp = cache_path + ".tmp"

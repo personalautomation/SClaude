@@ -393,10 +393,14 @@ try:
     record = workshop + ".json"
     args = ["--readonly", orchestrator, "--workshop", workshop]
 
-    def in_workshop(session, tool="Write", **data):
+    def in_workshop(session, tool="Write", launched=None, **data):
+        """launched: the SCLAUDE_SESSION claude was started with, if any."""
+        env = {k: v for k, v in os.environ.items() if k != "SCLAUDE_SESSION"}
+        if launched:
+            env["SCLAUDE_SESSION"] = launched
         out = subprocess.run([sys.executable, HOOK] + args, input=json.dumps(
             {"tool_name": tool, "tool_input": data, "cwd": repo, "session_id": session}),
-            capture_output=True, text=True)
+            capture_output=True, text=True, env=env)
         return "deny" if '"deny"' in out.stdout else "allow"
 
     target = os.path.join(workshop, "sclaude", "lib", "x.sh")
@@ -405,6 +409,13 @@ try:
         json.dump({"approved": ["s1"]}, fh)
     check("workshop-open-for-approved", in_workshop("s1", file_path=target), "allow")
     check("workshop-closed-for-another", in_workshop("s2", file_path=target), "deny")
+    # Claude Code carried the approved conversation on under a new id: the
+    # hook is given that one, and the process still has the id it was
+    # launched with.
+    check("workshop-open-for-continued",
+          in_workshop("s1-next", launched="s1", file_path=target), "allow")
+    check("workshop-closed-for-another-launch",
+          in_workshop("s1-next", launched="s3", file_path=target), "deny")
     check("workshop-record-never-written", in_workshop("s1", file_path=record), "deny")
     check("workshop-git-commit-approved",
           in_workshop("s1", "Bash", command="git -C %s commit -qm x" % workshop), "allow")

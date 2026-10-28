@@ -39,6 +39,7 @@ import sys
 wt, session = sys.argv[1], sys.argv[2]
 sys.path.insert(0, sys.argv[3])
 from presented_plan import plan_text
+from session_end import chain
 
 # The project's directory in ~/.claude/projects — the path with everything but
 # letters and digits replaced by a hyphen. Verified against every directory on
@@ -47,6 +48,8 @@ encoded = "".join(c if c.isalnum() else "-" for c in wt)
 transcript = os.path.expanduser(
     os.path.join("~/.claude/projects", encoded, session + ".jsonl")
 )
+# Where the conversation went on, should Claude Code have given it a new id.
+transcript = chain(transcript)[-1]
 
 try:
     with open(transcript) as fh:

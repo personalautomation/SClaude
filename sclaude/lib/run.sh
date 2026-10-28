@@ -241,7 +241,7 @@ review_last_look() {
   local session transcript
   session="$(state_get "$1/.sclaude/local/feature/state.json" steps.review.session 2>/dev/null || true)"
   [[ -n "$session" && "$session" != "null" ]] || return 0
-  transcript="$(transcript_dir "$1")/$session.jsonl"
+  transcript="$(session_transcript "$1" "$session")"
   [[ -f "$transcript" ]] && date -Iseconds -r "$transcript" 2>/dev/null
   return 0
 }
@@ -435,12 +435,20 @@ review_quota_rerun() {
 # no terminal — verified under the daemon. Silent on any trouble: no claude, no
 # answer, broken JSON — we consider the session free and go on as before. A false
 # "busy" is worse than a missed one: it stops the work entirely.
+#
+# Any id of the conversation counts: Claude Code may have carried it on under a
+# new one, which is what it reports, and claude_launch would resume that one
+# (session_transcript in state.sh).
+#
+#   session_holder <session> <dir its transcripts are kept for>
 session_holder() {
-  local session="$1"
+  local session="$1" ids
   [[ -n "$session" ]] || return 0
-  timeout 15 claude agents --json 2>/dev/null | SCLAUDE_SESSION="$session" python3 -c '
+  ids="$(python3 "$LIB/session_end.py" chain "$(transcript_dir "$2")/$session.jsonl" 2>/dev/null \
+    | sed 's#.*/##; s#\.jsonl$##')"
+  timeout 15 claude agents --json 2>/dev/null | SCLAUDE_SESSION="${ids:-$session}" python3 -c '
 import json, os, sys
-want = os.environ["SCLAUDE_SESSION"]
+want = os.environ["SCLAUDE_SESSION"].split()
 try:
     agents = json.load(sys.stdin)
 except (ValueError, OSError):
@@ -448,7 +456,7 @@ except (ValueError, OSError):
 if not isinstance(agents, list):
     sys.exit(0)
 for a in agents:
-    if not isinstance(a, dict) or a.get("sessionId") != want:
+    if not isinstance(a, dict) or a.get("sessionId") not in want:
         continue
     # We name what this session can be found by: for a background one the short
     # id for `claude attach`, for an interactive one the pid of the window it is
@@ -701,7 +709,7 @@ run_step() {
   # and name the culprit.
   local holder
   if [[ -n "$session" ]]; then
-    holder="$(session_holder "$session")"
+    holder="$(session_holder "$session" "$wt")"
     if [[ -n "$holder" ]]; then
       warn ""
       warn "  This step's session is already open elsewhere ($holder)."
@@ -1517,7 +1525,7 @@ collect_denials() {
 
   [[ -n "$session" ]] || return 0
 
-  transcript="$(transcript_dir "$wt")/$session.jsonl"
+  transcript="$(session_transcript "$wt" "$session")"
   [[ -f "$transcript" ]] || return 0
 
   # CLAUDE_PROJECT_DIR is the same thing the hook finds the log by: the feature
@@ -1719,9 +1727,11 @@ run_friction() {
   [[ -z "$reread" && -s "$batch" ]] && reading="$batch"
 
   local transcript prompt count
-  transcript="$(python3 - "$wt" "$wt/.sclaude/local/feature/state.json" <<'PYEOF'
+  transcript="$(python3 - "$wt" "$wt/.sclaude/local/feature/state.json" "$LIB" <<'PYEOF'
 import json, os, sys
 wt, state = sys.argv[1], sys.argv[2]
+sys.path.insert(0, sys.argv[3])
+from session_end import chain
 # The same method as in capture_plan: the sessions directory is the worktree's
 # path with everything but letters and digits replaced by a hyphen.
 encoded = "".join(c if c.isalnum() else "-" for c in wt)
@@ -1744,7 +1754,8 @@ for name, node in steps.items():
     for number, sid in enumerate(sids, start=1):
         if not sid:
             continue
-        path = os.path.join(base, sid + ".jsonl")
+        # The transcript the conversation went on in, which holds all of it.
+        path = chain(os.path.join(base, sid + ".jsonl"))[-1]
         if os.path.exists(path):
             out.append("%s%s — %s" % (name, " (%d)" % number if len(sids) > 1 else "", path))
 
@@ -1762,7 +1773,7 @@ for stage, node in (saved.get("regression") or {}).items():
         if found:
             # Named as its row in the issue (fix_name in github.sh).
             name = "fix after regression" if stage == "local" else "fix after %s regression" % stage
-            out.append("%s — %s" % (name, found[0]))
+            out.append("%s — %s" % (name, chain(found[0])[-1]))
 
 print("; ".join(out) if out else base)
 PYEOF
@@ -1856,7 +1867,7 @@ sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSH
   # open" — and they will look for the culprit themselves. So we check here and
   # name it.
   if [[ -n "$session" ]]; then
-    local fholder; fholder="$(session_holder "$session")"
+    local fholder; fholder="$(session_holder "$session" "$where")"
     if [[ -n "$fholder" ]]; then
       warn ""
       warn "  This friction review is already open elsewhere ($fholder)."
@@ -3003,8 +3014,10 @@ round_marker() {
 # (CONTEXT_FILE in statusline.py), since only Claude Code knows the window. A
 # share it did not leave is "-": the round then rotates as it always did.
 review_context() {
-  local wt="$1" session="$2" tokens pct="" size="" file="/tmp/claude-statusline-context-$2"
-  tokens="$(python3 "$LIB/session_end.py" context "$(transcript_dir "$wt")/$session.jsonl" 2>/dev/null || true)"
+  local wt="$1" session="$2" tokens pct="" size="" file
+  # The status line names its file by the id Claude Code has now.
+  file="/tmp/claude-statusline-context-$(session_latest "$wt" "$session")"
+  tokens="$(python3 "$LIB/session_end.py" context "$(session_transcript "$wt" "$session")" 2>/dev/null || true)"
   [[ -n "$tokens" ]] || tokens="- -"
   if [[ -s "$file" ]]; then
     read -r pct size < <(python3 - "$file" <<'PY' 2>/dev/null || true
@@ -3240,9 +3253,25 @@ session_watch_start() {
   (
     marker="" since="" ended="" size="" seen="" verdict=""
     lseen="" hit="" told="" acted="" due=0
+    # The process is found by any id the conversation has had: Claude Code
+    # may carry it on under a new one while it runs, and the transcript with
+    # it (session_transcript in state.sh); the process keeps the one it was
+    # launched with, which claude_launch may have taken from further along.
+    ids="$session"
     while sleep "${SESSION_POLL:-5}"; do
       size="$(stat -c %s "$transcript" 2>/dev/null || echo 0)"
       if [[ "$size" != "$lseen" ]]; then
+        # Only a transcript that grew can have gone on in another one.
+        chain="$(python3 "$LIB/session_end.py" chain "$transcript" 2>/dev/null)"
+        if [[ -n "$chain" && "${chain##*$'\n'}" != "$transcript" ]]; then
+          transcript="${chain##*$'\n'}"
+          while read -r t; do
+            t="${t##*/}"; t="${t%.jsonl}"
+            [[ "|$ids|" == *"|$t|"* ]] || ids+="|$t"
+          done <<<"$chain"
+          size="$(stat -c %s "$transcript" 2>/dev/null || echo 0)"
+          seen=""
+        fi
         lseen="$size"
         hit="$(python3 "$LIB/session_end.py" limit "$transcript" "$started" 2>/dev/null)"
       fi
@@ -3266,7 +3295,7 @@ session_watch_start() {
           if (( $(date +%s) >= due )); then
             acted="$huuid"
             echo "$huuid" > "$limit_file"
-            pkill -TERM -f -- "(--session-id|--resume) $session" 2>/dev/null || true
+            pkill -TERM -f -- "(--session-id|--resume) ($ids)( |$)" 2>/dev/null || true
           fi
         fi
         continue
@@ -3300,7 +3329,7 @@ session_watch_start() {
           if (( $(date +%s) - ended >= ${SESSION_GRACE:-30} )); then
             # What session_ended looks for to know it was not a person's /exit.
             [[ -n "$marker" ]] || echo "${said:-plan approved}" > "$done"
-            pkill -TERM -f -- "(--session-id|--resume) $session" 2>/dev/null || true
+            pkill -TERM -f -- "(--session-id|--resume) ($ids)( |$)" 2>/dev/null || true
             exit 0
           fi ;;
         *) ended="" ;;
@@ -3362,7 +3391,7 @@ session_closed() {
 #   session_report <wt> <session>
 session_report() {
   local text
-  text="$(python3 "$LIB/session_end.py" last "$(transcript_dir "$1")/$2.jsonl" 2>/dev/null || true)"
+  text="$(python3 "$LIB/session_end.py" last "$(session_transcript "$1" "$2")" 2>/dev/null || true)"
   [[ -n "$text" ]] || return 0
   echo ""
   echo "${BOLD}Its last message:${OFF}"

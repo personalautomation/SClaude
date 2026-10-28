@@ -28,6 +28,9 @@
 #
 #   SCLAUDE_PANE=off   always in place.
 #   SCLAUDE_PANE_WAIT  seconds to wait for the tab to start (default 20).
+#   SCLAUDE_PANE_FOCUS=follow  let the new tab take the focus, as Windows
+#                      Terminal does by itself; by default it goes back to the
+#                      tab that had it (pane_focus_keep).
 
 pane_available() {
   [[ "${SCLAUDE_PANE:-on}" != "off" ]] || return 1
@@ -39,6 +42,43 @@ pane_available() {
     [[ "${TERM_PROGRAM:-}" != "vscode" ]] || return 1
   fi
   command -v wt.exe >/dev/null 2>&1
+}
+
+# The focus kept where it was while a tab opens: pane-focus.ps1, started before
+# wt.exe and left running until the new tab is there. Returns once the script
+# has seen which tab is selected; without powershell.exe, at once.
+#
+# The script takes whichever tab appears next for its own, so one launch at a
+# time: two features resumed together after a usage limit would otherwise each
+# note the other's new tab as the one to go back to. The lock is held by the
+# script for as long as it runs. A script not ready within ten seconds — still
+# waiting for the lock, or slow to start — is given up on, and this tab takes
+# the focus. Killing it reaches only its WSL side, so the script is also told
+# how long it has left once it holds the lock, and counts that from its own
+# start by the Windows clock (the two clocks part after a sleep): past it, its
+# snapshot may already hold this new tab, and it leaves without acting on some
+# later one. Three seconds short of ours, for the start of powershell.exe that
+# neither side counts.
+PANE_FOCUS_PS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pane-focus.ps1"
+pane_focus_keep() {
+  [[ "${SCLAUDE_PANE_FOCUS:-stay}" != "follow" ]] || return 0
+  command -v powershell.exe >/dev/null 2>&1 || return 0
+  local fd line keeper lock="${TMPDIR:-/tmp}/sclaude-pane-focus.lock"
+  local started=${EPOCHREALTIME/[.,]/}
+  # Encoded rather than named by its path: a script on the WSL share is one
+  # the execution policy may refuse to run. stdin from /dev/null: a Windows
+  # program given the terminal reads from it through WSL, and would take keys
+  # meant for sclaude or claude.
+  exec {fd}< <(exec 9>>"$lock"; flock -w 10 9 || exit 0
+               left=$(( 7000 - (${EPOCHREALTIME/[.,]/} - started) / 1000 ))
+               (( left > 0 )) || exit 0
+               encoded="$({ echo "\$budget = $left"; cat "$PANE_FOCUS_PS"; } \
+                          | iconv -f UTF-8 -t UTF-16LE | base64 -w0)" || exit 0
+               cd /mnt/c 2>/dev/null
+               exec powershell.exe -NoProfile -NonInteractive -EncodedCommand "$encoded" </dev/null 2>/dev/null)
+  keeper=$!
+  read -r -t 10 -u "$fd" line || kill "$keeper" 2>/dev/null
+  exec {fd}<&-
 }
 
 # claude, in a new tab where there can be one, in place otherwise.
@@ -287,6 +327,7 @@ claude_launch_once() {
 
   # From a Windows directory: wt.exe and wsl.exe complain about a cwd inside
   # the distribution, which they see as a UNC path.
+  pane_focus_keep
   if ! ( cd /mnt/c 2>/dev/null; wt.exe -w 0 new-tab --title "$title" \
            wsl.exe -d "$WSL_DISTRO_NAME" -- bash "$script" ) >/dev/null 2>&1; then
     rm -rf "$dir"

@@ -652,6 +652,7 @@ is stopped, database included (data kept), and starts again on the next visit.
 | `SCLAUDE_DEV` | your name, instead of `sclaude.developer` or the one from your git email |
 | `SCLAUDE_NO_SYNC=1` | do not pull the latest sclaude before a command |
 | `SCLAUDE_NO_RELOAD=1` | do not switch to newer sclaude code after a long session |
+| `SCLAUDE_PANE_FOCUS=follow` | let a session's new tab take the focus; by default it stays on the tab you were in |
 | `SCLAUDE_TERM=off` | do not record the terminal (recordings are kept 60 days) |
 | `SCLAUDE_RETRO=off` | skip the retrospective |
 | `SCLAUDE_FRICTION_ASK=on` | ask before putting proposed CLAUDE.md rules off to the monthly review |

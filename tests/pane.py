@@ -13,6 +13,11 @@
 #   * a pane that never starts is given up on and claude runs in place, and a
 #     pane starting after that does not run it a second time;
 #   * Ctrl-C in sclaude ends the claude in the pane and sclaude carries on.
+#   * the focus keeper (pane-focus.ps1) is started, and heard from, before
+#     wt.exe opens the tab, and not at all with SCLAUDE_PANE_FOCUS=follow;
+#     the script itself, which needs a Windows desktop, is not run here. It
+#     does not get the terminal as its stdin, is told the time it has left, and one
+#     never ready is stopped.
 #   * in a recorded run (terminal.sh) a tab is not recorded, and a session in
 #     place is marked off for the playback to cut, with nothing else changed.
 #
@@ -88,10 +93,29 @@ esac
 exit 0
 ''')
 
+    # The focus keeper: notes that it ran and whether the tab was open by then,
+    # and says it is ready, as pane-focus.ps1 does. Always stood in for, so
+    # that no run here reaches the real desktop.
+    focus = os.path.join(tmp, "focus")
+    write("powershell.exe", r'''
+[[ -s "$PANE_TEST_PANES" ]] && echo after >> "$PANE_TEST_FOCUS" || echo before >> "$PANE_TEST_FOCUS"
+[[ -t 0 ]] && echo stdin-tty >> "$PANE_TEST_FOCUS"
+# The script opens with the time it has left, a little under seven seconds.
+while [[ $# -gt 0 && "$1" != "-EncodedCommand" ]]; do shift; done
+first="$(base64 -d <<< "$2" | iconv -f UTF-16LE -t UTF-8 | head -1)"
+left=${first#\$budget = }
+[[ "$left" =~ ^[0-9]+$ ]] && (( left > 4000 && left <= 7000 )) || echo "bad-budget:$first" >> "$PANE_TEST_FOCUS"
+if [[ -n "${PANE_TEST_FOCUS_SILENT:-}" ]]; then
+  echo $$ > "$PANE_TEST_FOCUS.pid"
+  sleep 30
+fi
+echo ready
+''')
+
     PROMPT = "Fix it; then say \"done\" — it's $HOME `x`\nsecond line"
 
     def run(extra_env=None, tty=True, interrupt_after=None):
-        for f in (out, panes):
+        for f in (out, panes, focus):
             if os.path.exists(f):
                 os.remove(f)
         script = r'''
@@ -107,7 +131,7 @@ echo "rc=$?"
 ''' % (LIB, LIB, wt)
         env = dict(os.environ,
                    PATH=bin_dir + os.pathsep + os.environ["PATH"],
-                   PANE_TEST_OUT=out, PANE_TEST_PANES=panes,
+                   PANE_TEST_OUT=out, PANE_TEST_PANES=panes, PANE_TEST_FOCUS=focus,
                    PANE_TEST_PROMPT=PROMPT, PANE_TEST_FOO="a b;c",
                    WT_SESSION="test", WSL_DISTRO_NAME="Test",
                    WSL_INTEROP="/run/WSL/1_interop", TMPDIR=tmp)
@@ -174,7 +198,22 @@ echo "rc=$?"
     check("pane-says-where", "in a new tab" in text, True)
     # The tab closed with the session's last message: session_ended prints it.
     check("pane-marked", "in-pane=[1]" in text, True)
+    check("focus-kept-before-the-tab", open(focus).read().split() if os.path.exists(focus) else None, ["before"])
     check("pane-cleaned-up", [n for n in os.listdir(tmp) if n.startswith("sclaude-pane.")], [])
+
+    # --- a keeper never ready is stopped, not left to act on a later tab ---
+    began = time.time()
+    text = run({"PANE_TEST_FOCUS_SILENT": "1"})
+    check("silent-keeper-tab-opened", (pane_count(), "rc=0" in text), (1, True))
+    check("silent-keeper-gave-up", 9 < time.time() - began < 25, True)
+    keeper_pid = int(open(focus + ".pid").read()) if os.path.exists(focus + ".pid") else None
+    time.sleep(0.5)
+    check("silent-keeper-stopped", keeper_pid is not None and not os.path.exists("/proc/%d" % keeper_pid), True)
+
+    # --- SCLAUDE_PANE_FOCUS=follow: the new tab keeps the focus ---
+    text = run({"SCLAUDE_PANE_FOCUS": "follow"})
+    check("follow-tab-opened", pane_count(), 1)
+    check("follow-no-keeper", os.path.exists(focus), False)
 
     # --- in a feature's tree: what claude said and how it left, kept there ---
     feature = os.path.join(wt, ".sclaude", "local", "feature")

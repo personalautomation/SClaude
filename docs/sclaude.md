@@ -1319,7 +1319,7 @@ does have an outcome, and the orchestrator knows it exactly:
 |---|---|
 | `green` | The re-run passed after this session. It is the one that fixed the stage. |
 | `red` | The session finished and the stage failed again. The attempt was counted. |
-| `blocked` | The cause was outside the branch. Nothing was changed and the attempt was given back — deliberately not `red`, or the row numbers would disagree with `attempts`. |
+| `blocked` | The cause was outside the branch. Nothing was changed and the attempt was given back — deliberately not `red`, or the row numbers would disagree with `attempts`. The gate runs the stage once more by itself, and a green run then keeps `blocked` here: the session did not fix it. |
 | `stalled` | `claude` exited at the door, leaving no assistant record. Nothing ran, so the stage was not left red by it. |
 | `open` | Interrupted, with a conversation to return to. |
 | `—` | No record: the feature predates the field. Nothing is guessed backwards from how the stage ended. |

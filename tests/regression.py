@@ -324,6 +324,85 @@ if gate is not None:
     check_true("gate-refunds-the-blocked-attempt",
                re.search(r'-eq 3.*\n(?:.*\n)*?.*attempts" "\$attempts"',
                          blocked_body) is not None)
+    # A blocked ending runs the stage once more by itself (a flake goes green),
+    # and only once: a cause that really is outside would loop for ever.
+    blocked_branch = blocked_body[blocked_body.find('"$frc" -eq 3'):]
+    blocked_branch = blocked_branch[:blocked_branch.find('\n    fi\n')]
+    check_true("gate-reruns-a-blocked-stage-once",
+               re.search(r'blocked_reruns" -lt 1 \]\]; then\n(?:.*\n)*?\s*continue\n',
+                         blocked_branch) is not None)
+    check_true("gate-blocked-rerun-is-not-asked", "ask " not in blocked_branch)
+    check_true("gate-blocked-rerun-counter-is-per-gate",
+               "blocked_reruns=0" in blocked_body)
+    # The note survives the rerun, so an interrupted one still leaves the next
+    # start its question; the phone hears "blocked" only when the gate stops.
+    rerun_side = blocked_branch[:blocked_branch.find("continue")]
+    check_true("gate-blocked-rerun-keeps-the-note", "rm -f" not in rerun_side)
+    check_true("gate-blocked-notifies-only-on-stopping",
+               "notify_feature" not in rerun_side
+               and "notify_feature" in blocked_branch)
+    # A green run after a blocked session is not that session's fix.
+    green_side = blocked_body[blocked_body.find('if [[ "$rc" -eq 0 ]]'):]
+    green_side = green_side[:green_side.find("return 0")]
+    check_true("green-keeps-a-blocked-row", '!= "blocked"' in green_side)
+    check_true("green-drops-the-blocked-note", "regression.blocked" in green_side)
+    # A person who declines a third fixing session takes the step back: the
+    # gate says so, and after_step drops the mark that would rerun the suite.
+    # An explicit no only: no answer at all settles nothing.
+    check_true("limit-no-hands-the-step-back",
+               re.search(r'is_no "\$again" && REGRESSION_TAKEN_OVER=1\n\s*return 1',
+                         blocked_body) is not None)
+    # The note goes only once a fixing session is really opening, and a resumed
+    # session is told it was taken off, not only that a fix failed: it may have
+    # ended on a note.
+    fix_fn = re.search(r'\nregression_fix\(\) \{\n(.*?)\n\}\n', regression, re.S)
+    fix_body = fix_fn.group(1) if fix_fn else ""
+    check_true("fix-drops-the-note-at-the-launch",
+               re.search(r'rm -f "\$wt/\.sclaude/local/feature/regression\.blocked"\n\s*session_watch_start',
+                         fix_body) is not None)
+    check_true("gate-does-not-drop-the-note-before-the-fix",
+               re.search(r'regression\.blocked"\n\s*regression_fix', blocked_body) is None)
+    check_true("resumed-session-is-told-of-the-note",
+               re.search(r'if \[\[ -n "\$resume" \]\]; then\n(?:\s*#.*\n)*\s*prompt="[^\n]*it was taken off',
+                         fix_body) is not None)
+    check_true("resumed-feed-does-not-claim-a-fix",
+               "still red after its fix" not in fix_body)
+    run_src = open(os.path.join(ROOT, "sclaude", "lib", "run.sh"), encoding="utf-8").read()
+    # The short-circuit keeps the mark, so a check left on the way comes back
+    # to it, and a run_step from inside after_step's checks (step 4's open
+    # threads) opens the session rather than coming round to it again.
+    shortcut = run_src[run_src.find('-z "${RUN_STEP_IN_GATE:-}"'):]
+    shortcut = shortcut[:shortcut.find("return 0")]
+    check_true("gate-short-circuit-found", "after_step" in shortcut)
+    check_true("gate-short-circuit-keeps-the-mark", "gate\" null" not in shortcut)
+    after_fn = re.search(r'\nafter_step\(\) \{\n(.*?)\n\}\n', run_src, re.S)
+    after_body = after_fn.group(1) if after_fn else ""
+    check_true("after-step-guards-its-own-checks",
+               "local RUN_STEP_IN_GATE=1" in after_body.split("case ", 1)[0])
+    # Not a green run, a refused push or the look at the threads: the next
+    # start comes back to those checks. Only the two stops that need step 4's
+    # session (another branch, the reopened pull request still merged) drop it.
+    check("gate-mark-cleared-only-where-said",
+          after_body.count('"steps.$step.gate" null'), 6)
+    check("review-gate-mark-off-at-the-session-stops",
+          len(re.findall(r'info "  Come back with: \$SELF \$slug"\n(?:\s*#.*\n)*\s*state_set "\$state" "steps\.\$step\.gate" null\n\s*return 0',
+                         after_body)), 2)
+    # A refused push goes to the session, told why (P-7): back to it after a
+    # session that closed itself, straight away on the way back.
+    refused = after_body[after_body.find('if [[ "$fix_pushed" -eq 2 ]]; then'):]
+    refused = refused[:refused.find("\n      fi\n")]
+    check_true("refused-push-drops-the-mark", '"steps.$step.gate" null' in refused)
+    check_true("refused-push-returns-to-the-session",
+               'auto_return "$wt" "$slug" "$step" "$unpushed"' in refused
+               and 'run_step "$wt" "$slug" "$step" "$unpushed"' in refused)
+    # Both steps that close on the local regression mark it.
+    check("both-gates-are-marked",
+          run_src.count('state_set "$state" "steps.$step.gate" true\n        if ! regression_gate "$wt" "$slug" local'), 2)
+    check_true("after-step-drops-the-gate-mark-on-taken-over",
+               re.search(r'REGRESSION_TAKEN_OVER:-\}" \]\] && state_set "\$state" "steps\.\$step\.gate" null',
+                         open(os.path.join(ROOT, "sclaude", "lib", "run.sh"),
+                              encoding="utf-8").read())
+               is not None)
 # The note is addressed to the human, so the run must not destroy it on its way
 # to re-deriving it. An earlier version cleared it at the head of regression_run
 # and so spent four minutes of suite plus a fixing session reproducing a

@@ -1160,6 +1160,7 @@ cmd_reset() {
   state_set "$state" "steps.$step.session" null
   state_set "$state" "steps.$step.started" null
   state_set "$state" "steps.$step.bg" null
+  state_set "$state" "steps.$step.gate" null
 
   # And the regression's exhausted attempts. Without this a stage that used up
   # both fixing sessions stays wedged: every later entry runs the whole suite

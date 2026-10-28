@@ -146,6 +146,8 @@ for arg in "$@"; do
   prev="$arg"
 done
 printf '%s\n' "$prompt" >> "$prompts"
+# And which conversation it was, so a case can tell a resume from a new one.
+printf '%s\n' "$session" >> "$prompts.sessions"
 # The transcript session_started looks for, unless the test asked for a session
 # that never got going. Writing it makes the orchestrator carry on into
 # after_step, which closes the step and runs the whole epilogue — useful for
@@ -362,6 +364,11 @@ exec %s "$@"
 
         with open(prompts) as fh:
             self.prompts = fh.read()
+        try:
+            with open(prompts + ".sessions") as fh:
+                self.sessions = fh.read().split()
+        except OSError:
+            self.sessions = []
         return b"".join(chunks).decode(errors="replace")
 
 
@@ -621,7 +628,59 @@ def case_h():
     check_true("other-branch-is-named", "The worktree is on fix/elsewhere" in out)
 
 
-CASES = [case_a, case_a2, case_b, case_c, case_d, case_e, case_f, case_g, case_h]
+def case_i():
+    # --- a confirmed step 2 waiting on its regression ------------------------
+    #
+    # The session finished, the person confirmed it, and the regression was not
+    # green — so the step stayed current. The next `sclaude <feature>` resumed
+    # the finished session: the watcher cleared its marker on the way in,
+    # nothing wrote it again, and the old report stood there until somebody
+    # typed /exit. The mark after_step leaves sends it back to the gate.
+    w = World(os.path.join(tmp, "i"), merged=False)
+    steps = dict(DONE_STATE["steps"],
+                 code={"done": False, "session": "code-session", "gate": True},
+                 pr={"done": False}, review={"done": False})
+    w.set_state(dict(DONE_STATE, step="code", steps=steps, pr=None,
+                     regression={}, worktree=w.wt))
+    # A transcript, so that the session is one run_step would resume.
+    tdir = os.path.join(w.home, ".claude", "projects", encoded(w.wt))
+    os.makedirs(tdir, exist_ok=True)
+    with open(os.path.join(tdir, "code-session.jsonl"), "w") as fh:
+        fh.write('{"type":"assistant","message":{"content":[]}}\n')
+    out = w.resume(timeout=60)
+    check_true("gate-mark-goes-to-the-gate",
+               "waits only for the regression" in out)
+    check("gate-mark-does-not-resume-the-session",
+          "code-session" in w.sessions, False)
+    check("gate-mark-does-not-ask-again",
+          "Do you confirm that everything works" in out, False)
+
+
+def case_j():
+    # --- the same for step 4 --------------------------------------------------
+    #
+    # The review closes on the same local regression, and a red one left the
+    # same finished session to be resumed. Its closing check (the pull
+    # request's threads) runs again on the way, and may send the step back to
+    # a session: the mark is taken off first, so that one opens.
+    w = World(os.path.join(tmp, "j"), merged=False)
+    steps = dict(DONE_STATE["steps"],
+                 review={"done": False, "session": "review-session", "gate": True})
+    w.set_state(dict(DONE_STATE, step="review", steps=steps, regression={},
+                     worktree=w.wt))
+    tdir = os.path.join(w.home, ".claude", "projects", encoded(w.wt))
+    os.makedirs(tdir, exist_ok=True)
+    with open(os.path.join(tdir, "review-session.jsonl"), "w") as fh:
+        fh.write('{"type":"assistant","message":{"content":[]}}\n')
+    out = w.resume(timeout=60)
+    check_true("review-gate-mark-goes-to-the-gate",
+               "waits only for the regression" in out)
+    check("review-gate-mark-does-not-resume-the-session",
+          "review-session" in w.sessions, False)
+
+
+CASES = [case_a, case_a2, case_b, case_c, case_d, case_e, case_f, case_g, case_h,
+         case_i, case_j]
 
 try:
     # Each case builds its own world under tmp — repository, HOME, stubs, ask

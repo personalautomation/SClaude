@@ -528,7 +528,8 @@ echo "watcher=[$SESSION_WATCHER]"
     check("no-global-opening", "SESSION_OPENING" in RUN, False)
     after = RUN[RUN.index("after_step() {"):]
     after = after[:after.index("\n}\n")]
-    check("plan-returns", after.count('auto_return "$wt" "$slug" "$step"'), 3)
+    # plan unread, pr missing, pr unpushed, and review's refused push of a fix.
+    check("plan-returns", after.count('auto_return "$wt" "$slug" "$step"'), 4)
     check("pr-checks-the-push", 'pr_context.py" --unpushed "$wt" "$number"' in after, True)
     check("code-no-goes-back",
           'run_step "$wt" "$slug" "$step" "**The person checked the work and it does not work yet:** $wrong"' in after, True)

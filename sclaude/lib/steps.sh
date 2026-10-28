@@ -766,6 +766,8 @@ step_rewind_to() {
   local state="$wt/.sclaude/local/feature/state.json" s
 
   for s in "$@"; do
+    # A step sent back has work for its session again, not only a gate left.
+    state_set "$state" "steps.$s.gate" null 2>/dev/null || true
     [[ "$(state_get "$state" "steps.$s.done" 2>/dev/null || echo false)" == "true" ]] || continue
     state_set "$state" "steps.$s.done" false
     state_set "$state" "steps.$s.finished" null

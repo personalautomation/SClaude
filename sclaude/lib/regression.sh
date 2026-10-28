@@ -1185,6 +1185,7 @@ regression_gate() {
   local wt="$1" slug="$2" stage="$3"
   local state="$wt/.sclaude/local/feature/state.json"
   local attempts
+  REGRESSION_TAKEN_OVER=""
 
   # A local verdict is about a tree, and it stays true exactly as long as the
   # tree does. After a review that left no comments nothing in the tree has
@@ -1265,7 +1266,7 @@ regression_gate() {
     fi
   fi
 
-  local rc fixed_here=0
+  local rc fixed_here=0 blocked_reruns=0
   if [[ -n "$only" ]]; then
     echo ""
     info "  Only the manuals changed since the last green run — running $only."
@@ -1300,8 +1301,15 @@ regression_gate() {
       # `fix_status_set` rewrites the last word, which is that session; a stage
       # that went green with no fixing session at all has an empty string and
       # gets nothing.
-      [[ -n "$(state_get "$state" "regression.$stage.fix_status" 2>/dev/null || true)" ]] \
+      #
+      # Except a session that ended `blocked`: it changed nothing, so the green
+      # run after it (the rerun of a flake, or a cause dealt with outside) is
+      # not its doing, and its row keeps saying what it found.
+      local last_fix
+      last_fix="$(state_get "$state" "regression.$stage.fix_status" 2>/dev/null || true)"
+      [[ -n "$last_fix" && "${last_fix##* }" != "blocked" ]] \
         && fix_status_set "$state" "$stage" green
+      rm -f "$wt/.sclaude/local/feature/regression.blocked"
       state_set "$state" "regression.$stage.attempts" 0
       regression_clear_mark "$wt" "$stage"
       state_set "$state" "regression.$stage.orchestrator_fixes" 0
@@ -1375,6 +1383,10 @@ Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
         info "  Opening another session on $stage."
       else
         info "  Carry on when you are ready with: $SELF $slug"
+        # The person takes it from here, so the step's own session is where
+        # the next start goes, not this gate again (after_step reads it). An
+        # explicit no only: no answer (the terminal gone) settles nothing.
+        is_no "$again" && REGRESSION_TAKEN_OVER=1
         return 1
       fi
     fi
@@ -1428,11 +1440,10 @@ Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
     fi
 
     # 3 means the session found the cause outside this worktree and wrote it
-    # down instead of editing code to make a red run go green. Another session
-    # would reach the same conclusion, and a re-run would confirm the same
-    # failure, so we do neither: the attempt is given back and the note is put
-    # in front of the human, who is the only one who can change a deployment's
-    # environment.
+    # down instead of editing code to make a red run go green. The attempt is
+    # given back, the stage is run once more (below), and if the next session
+    # says the same, the note is put in front of the human, who is the only one
+    # who can change a deployment's environment.
     if [[ "$frc" -eq 3 ]]; then
       # Neither "fixed" nor "failed to fix": the third outcome, and the attempt
       # is given back. It stays distinct from `red` because the attempt is not
@@ -1447,6 +1458,23 @@ Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
       done < "$wt/.sclaude/local/feature/regression.blocked"
       echo ""
       info "  Nothing was changed, and the attempt was not counted."
+
+      # Run again once, without asking. Returning dropped the person at the
+      # shell only for the next start to put the same note in front of them —
+      # and the commonest note, a test that flaked on a loaded machine, needs
+      # nothing but the run made again. Once, because a cause that really is
+      # outside (a deployment's environment) would otherwise go round for ever:
+      # red, a session, the same note, red again.
+      #
+      # The note stays through the run: an interrupted one leaves it for the
+      # next start's question. A green run drops it, the next fixing session
+      # writes its own.
+      if [[ "$blocked_reruns" -lt 1 ]]; then
+        blocked_reruns=$((blocked_reruns + 1))
+        info "  Running $stage again, once: a flaky failure goes green on its own."
+        continue
+      fi
+      info "  Blocked again after a second run, so it is not noise."
       info "  The note is .sclaude/local/feature/regression.blocked; carry on with: $SELF $slug"
       notify_feature "$slug" "${stage^} regression blocked from outside
 The fixing session found the cause outside the branch and changed nothing.
@@ -1732,8 +1760,9 @@ regression_fix() {
      && live_session "$wt" "$session" >/dev/null; then
     resume=1
     echo ""
-    info "  Still red on $failed — back to the session that fixed it."
-    ask_feed say "$(phase_line resumed fix "$stage" "$failed") · still red after its fix"
+    # Not "after its fix": the session may have ended on a note instead.
+    info "  Still red on $failed — back to the same session."
+    ask_feed say "$(phase_line resumed fix "$stage" "$failed") · still red on the same part"
   else
     session="$(new_session_id)"
     echo ""
@@ -1785,9 +1814,16 @@ regression_fix() {
   fi
   fix_word_set "$state" "$stage" fix_started "$(date -Iseconds)" append
   fix_word_set "$state" "$stage" fix_finished - append
+  # A note left by a session before is not this one's finding, and is taken
+  # off only now that a session is opening: one that never starts (its rules
+  # unreadable, its prompt missing) leaves it for the next start's question.
+  rm -f "$wt/.sclaude/local/feature/regression.blocked"
   session_watch_start "$wt" "$session"
   if [[ -n "$resume" ]]; then
-    prompt="$(printf '**Your fix did not make the %s regression green.** It ran again and failed on the same part.\n\n%s\n' \
+    # One wording for a session that ended on a fix and one that ended on a
+    # note: which it was is not kept once an orchestrator fix overwrites the
+    # status, and the session knows anyway.
+    prompt="$(printf '**The %s regression ran again and failed on the same part.** If you ended last time on a note, it was taken off: write `.sclaude/local/feature/regression.blocked` again if the cause is still outside this tree, or this session ends as a fix that did not hold.\n\n%s\n' \
       "$stage" "$SCLAUDE_B_REGRESSION")"
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --resume "$session" \
         --model "$model" --effort "$effort" \

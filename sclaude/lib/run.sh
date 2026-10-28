@@ -575,6 +575,28 @@ run_step() {
   echo "   ${BOLD}Open it at $(dev_address "$wt")${OFF}"
   local map; map="$(flow_address "$wt")" && info "   Where it stands: $map"
   info "   $model / $effort / $mode · $wt"
+  # A step whose session is finished, and which waits only on the local
+  # regression (after_step marks it), goes back to its closing check.
+  # Resuming the session instead put the person in front of its old report:
+  # the watcher clears the marker on the way in, nothing in the session writes
+  # it again, and the conversation stood open until somebody typed /exit.
+  # Anything sclaude has to tell the session (<told>) opens it as before.
+  #
+  # The mark stays, so that a check left on the way (Ctrl-C in step 4's wait
+  # for the review, "left open") comes back here next time; a check that
+  # sends the step back to its session (step 4's open threads) calls run_step
+  # from inside after_step, whose RUN_STEP_IN_GATE makes that one open it.
+  # Step 4's fixes from the regression are pushed first, as on the way into a
+  # session, so the review reads them; nobody was at a session's end to
+  # answer for it.
+  if [[ -z "$told" && -z "${RUN_STEP_IN_GATE:-}" \
+        && "$(state_get "$state" "steps.$step.gate" 2>/dev/null || true)" == "true" ]]; then
+    info "   The session is finished; the step waits only for the regression."
+    [[ "$step" == "review" ]] && { regression_push_fix "$wt" "${pr:-}" || true; }
+    SESSION_AUTO_CLOSED=""
+    after_step "$wt" "$slug" "$step" gate
+    return 0
+  fi
   # Before the server and before the session: merging main in under a running
   # server means changing the code under its feet, and a merge stalled on
   # conflicts leaves a tree on which a session must not be opened at all. A
@@ -775,6 +797,7 @@ run_step() {
     local opening="$news"
     [[ -n "$told" ]] && opening="$(printf '%s%s' "$told" "${news:+$'\n\n'$news}")"
     RUN_STEP_LAUNCHED=1
+    state_set "$state" "steps.$step.gate" null
     step_run "$wt" "$step" open "$session"
     local brief; brief="$(review_brief "$wt" "$step" resumed)"
     # Where this round begins, for the account the session's end gives.
@@ -840,6 +863,7 @@ run_step() {
     fi
     ask_feed say "$(phase_line started step "$step" "$(step_session_number "$state" "$step" "$session")")${brief:+ · $brief}$returned"
     RUN_STEP_LAUNCHED=1
+    state_set "$state" "steps.$step.gate" null
     issue_sync "$wt"
     session_watch_start "$wt" "$session" "" "" "$step"
     ( cd "$wt" && dev_env_load "$wt" && session_git_env "$session" && claude_launch --session-id "$session" \
@@ -1118,8 +1142,15 @@ extend_acceptance() {
 # a review of a PR that does not exist. Changing one's mind after an automatic
 # close is possible: `sclaude replan <feature>` returns the feature to step 1.
 after_step() {
-  local wt="$1" slug="$2" step="$3"
+  # <gate_only>: "gate" when run_step comes straight back to the closing
+  # check of a step whose session is already finished (`steps.<step>.gate`).
+  local wt="$1" slug="$2" step="$3" gate_only="${4:-}"
   local state="$wt/.sclaude/local/feature/state.json" next answer
+  # A run_step called from the checks below (step 4's open threads) is sent
+  # to the session, and must open it rather than take run_step's way back to
+  # these checks on `steps.<step>.gate`.
+  # Local, so it ends with this call however it returns.
+  local RUN_STEP_IN_GATE=1
 
   echo ""
   case "$step" in
@@ -1197,9 +1228,14 @@ after_step() {
       # for QA, and the suite would test main's product.
       if no_deploy_feature "$wt"; then
         no_deploy_say "No local regression before the merge."
-      elif ! regression_gate "$wt" "$slug" local; then
-        info "  The review waits for a green regression: $SELF $slug"
-        return 0
+      else
+        # Marked as step 2's is, and for the same hang (run_step).
+        state_set "$state" "steps.$step.gate" true
+        if ! regression_gate "$wt" "$slug" local; then
+          [[ -n "${REGRESSION_TAKEN_OVER:-}" ]] && state_set "$state" "steps.$step.gate" null
+          info "  The review waits for a green regression: $SELF $slug"
+          return 0
+        fi
       fi
       # A red run above opens a fixing session, which commits its fix and is
       # not told to push (a step's next session pushes it on the way in, in
@@ -1211,7 +1247,22 @@ after_step() {
       # So it is pushed now, and the review reads it like any other push.
       local fix_pushed=0
       regression_push_fix "$wt" "${pr:-}" || fix_pushed=$?
+      # A refused push goes to the session, told why: a passing blip it just
+      # pushes again, a pre-push hook or a branch moved on GitHub it fixes,
+      # and a worktree left on main or detached it puts back on the branch.
+      # Back to it by itself after a session that closed itself (at most
+      # AUTO_RETURNS), straight away on run_step's way back; after a /exit
+      # the next start opens it, the mark gone.
       if [[ "$fix_pushed" -eq 2 ]]; then
+        state_set "$state" "steps.$step.gate" null
+        # Empty, not an error, on a detached HEAD.
+        local here; here="$(git -C "$wt" branch --show-current 2>/dev/null || true)"
+        local unpushed="**The regression's fix could not be pushed to PR #${pr:-?}.** sclaude's push was refused, or the worktree is not on the feature's branch (${here:-a detached HEAD} now). Get the commits onto the pull request — push them, fix what refused the push (a pre-push hook, a branch that moved on GitHub), or bring them onto the feature's branch — then finish as the prompt says."
+        auto_return "$wt" "$slug" "$step" "$unpushed" && return 0
+        if [[ "$gate_only" == "gate" ]]; then
+          run_step "$wt" "$slug" "$step" "$unpushed"
+          return 0
+        fi
         info "  The review waits for the fix to reach PR #${pr:-?}: $SELF $slug"
         return 0
       fi
@@ -1255,6 +1306,8 @@ after_step() {
         info "  switch back, merge $on_branch into it (or cherry-pick the fix), push,"
         info "  and open the pull request from $branch."
         info "  Come back with: $SELF $slug"
+        # Its session's work, not these checks' again (run_step's way back).
+        state_set "$state" "steps.$step.gate" null
         return 0
       fi
 
@@ -1273,6 +1326,8 @@ after_step() {
         info "  A merged pull request cannot be reopened, so the fix needs one of"
         info "  its own; the review stays open until the branch carries it."
         info "  Come back with: $SELF $slug"
+        # The session opens the new pull request: it is where the next start goes.
+        state_set "$state" "steps.$step.gate" null
         return 0
       fi
 
@@ -1294,8 +1349,12 @@ after_step() {
       # Criteria the session agreed with the human mid-step are in the plan
       # only; QA ticks in the issue. Before the question, on every exit: the
       # list should not wait for the human to call the step done.
+      # Back at the gate (run_step, `steps.code.gate`) the person has said yes
+      # already, about the same session's work: nothing to ask again.
+      [[ "$gate_only" == "gate" ]] && answer=y || {
       extend_acceptance "$wt"
       ask "${BOLD}Please check everything yourself after AI. Do you confirm that everything works as it should? [y/n] ${OFF}" answer yn
+      }
       if ! is_yes "$answer"; then
         # Back to the same session, which knows what it built: a person is in
         # the loop, so there is no limit on how often. What they say is wrong
@@ -1333,9 +1392,20 @@ after_step() {
       fi
       if no_deploy_feature "$wt"; then
         no_deploy_say "No local regression: the pull request and its review come next."
-      elif ! regression_gate "$wt" "$slug" local; then
-        info "  The step waits for a green regression: $SELF $slug"
-        return 0
+      else
+        # The session is finished and the person has confirmed it: from here
+        # the step waits on the regression alone. Marked before the run, so
+        # that a red one, or a Ctrl-C in it, brings the next `sclaude
+        # <feature>` back here rather than into the finished session (see
+        # run_step).
+        state_set "$state" "steps.$step.gate" true
+        if ! regression_gate "$wt" "$slug" local; then
+          # Out of fixing sessions, and the person said they would take it on:
+          # the next start opens the step's session for them, not the suite.
+          [[ -n "${REGRESSION_TAKEN_OVER:-}" ]] && state_set "$state" "steps.$step.gate" null
+          info "  The step waits for a green regression: $SELF $slug"
+          return 0
+        fi
       fi
       ;;
   esac
@@ -1345,6 +1415,7 @@ after_step() {
   # The automatic returns are counted per closing of a step: a step that
   # closed has used none of them on its next run.
   state_set "$state" "steps.$step.auto_returns" null 2>/dev/null || true
+  state_set "$state" "steps.$step.gate" null 2>/dev/null || true
   state_set "$state" "steps.$step.done" true
   state_set "$state" "steps.$step.finished" "$(date -Iseconds)"
   # The person's "enough" was about this round of step 4: a review the

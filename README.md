@@ -102,14 +102,15 @@ code exists is what shift-left asks for.
 | code | your yes **and** the product's tests passing |
 | pr | a pull request that exists on GitHub |
 | review | the automatic review has nothing left open — no thread unresolved, no check running or red — **and** the product's local tests passing; the pull request stays open for QA. No session at all when the review found nothing. The preview and its tests come after the step: a red preview puts the feature back on it |
-| fix after a regression | the same tests run again and pass. Two sessions that do not get them green stop the cycle for you |
+| fix after a regression | the same tests run again and pass. Two sessions that do not get them green stop the cycle for you. A session that finds the cause outside the branch changes nothing and leaves a note; the tests then run once more by themselves (a flaky test goes green), and a second such note stops the cycle with it for you |
 | sync | sclaude's own check after the session: no merge left under way, nothing uncommitted, the branch merging cleanly with main, and pushed. Otherwise the session is offered again. Then the preview, its tests and QA run on what it pushed |
 | epilogue | the session actually ran; one that never started is offered again from the menu |
 | retro | its session finished. A later `sclaude done` goes back into the same conversation, told what ran since — a rollback, another round — and asked to check its report against it; with nothing run since, it asks first |
 
 Ctrl-C, a usage limit or a closed laptop closes nothing: sclaude remembers where
 each feature is, and the conversation resumes. An interrupted run is never
-mistaken for a finished one.
+mistaken for a finished one. A step whose session has finished and which waits
+only on its tests goes back to the tests, not into the finished conversation.
 
 ### Contain — the blast radius of a mistake
 

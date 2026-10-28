@@ -1643,6 +1643,7 @@ run_friction() {
   else
     [[ -s "$log" ]] || {
       state_set "$state" "friction.$key.empty" true
+      history_add "$state" "friction.$key" empty
       return 0
     }
   fi
@@ -1666,6 +1667,7 @@ run_friction() {
   if [[ -z "$reread" && -z "$pending" ]] \
      && friction_defer_proposals "$wt" "$slug" "$key" "$step"; then
     { cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log"; } || true
+    history_add "$state" "friction.$key" deferred
     # Entries alone skip the pull request (deferred_to_main).
     deferred_to_main "$wt" "$deferred_from" || friction_push_project "$wt" "$deferred_from"
     return 0
@@ -2029,6 +2031,7 @@ sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSH
   verdict="$(friction_verdict "$where" "$session" || true)"
   if [[ -n "$verdict" ]]; then
     state_set "$state" "friction.$key.verdict" "${verdict%%$'\t'*}"
+    history_add "$state" "friction.$key" verdict verdict="${verdict%%$'\t'*}"
     local note="${verdict#*$'\t'}"
     [[ -n "$note" && "$note" != "$verdict" ]] \
       && state_set "$state" "friction.$key.verdict_note" "$note"

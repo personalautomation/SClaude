@@ -213,6 +213,35 @@ command, a step number that is not `cycle_number`'s, a place `position` can
 answer that the page cannot light, a built page that is not what the model
 draws now.
 
+**A feature's way through it is kept and played back.** Every thing that
+begins or ends — a session's sitting (`session_runs`), a regression, a fix, a
+deploy, QA's verdict, the hand-off, the merge, a rollback, a friction review
+and how a workshop change was published (`history_add`) — is a line of JSON
+in `.sclaude/local/feature/history.jsonl`, in the tree and out of git, gone
+with the tree at the clean-up. state.json keeps where each stands now and a
+conversation's first start and last end; the history keeps every time a
+place was entered. `history` in `process.py` turns it into the places in
+order: the ones named, those between filled in along the map's shortest way
+when it is short (a long way round would be a guess),
+the time between two places given to the first check or person on that way
+(what it waited on), a conversation resumed with nothing between counted as
+one stay of several sittings, and the friction reviews and workshop passes as
+ways of their own. `sclaude _flow` sends it with the position, and the page
+plays it.
+
+What each place took goes with it (`metrics`), shown under the blocks by
+checkboxes and never in the History: the person's input — the times they
+stepped in during a conversation (claude_usage's `human`: a message after
+Claude's turn, an answer to its question), answers to sclaude's questions
+(`ask_log` writes `ask answered`) and commands run on the feature at a
+terminal (`history_command`, once per process) — counted on the place the
+feature stood on then; and each conversation's cost from Claude Code's own
+account, followed into the conversations it was carried on in, on the place
+it ran. A workshop's work happens in the conversation that opened it and
+counts there. The transcripts are read through a cache beside
+the history (`transcripts.json`), so a poll reads only what grew, and a
+conversation still going at most once a minute.
+
 Besides the cycle at a glance, a feature's states and the whole process, two
 maps take apart what the whole one marks on its sessions: W, a session
 changing sclaude in its workshop and the publishing after it, and F, the

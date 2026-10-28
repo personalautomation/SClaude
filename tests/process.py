@@ -264,6 +264,241 @@ check("the map's button starts sclaude dev without holding the bot",
       "setsid nohup sclaude dev --no-browser >/dev/null 2>&1 &" in read("keepawake", "telegramd.py"))
 check("the step's header names the map", "flow_address" in read("sclaude", "lib", "run.sh"))
 
+# --- how a feature went ------------------------------------------------------
+
+# The writers: session_runs and history_add, beside the state, in the tree.
+with tempfile.TemporaryDirectory() as tmp:
+    feat = os.path.join(tmp, ".sclaude", "local", "feature")
+    os.makedirs(feat)
+    st = os.path.join(feat, "state.json")
+    with open(st, "w") as fh:
+        json.dump({"step": "plan"}, fh)
+    subprocess.run(["bash", "-c", 'source "%s/state.sh"; f="$1"; '
+                    'session_runs "$f" steps.plan open s1; session_runs "$f" steps.plan end s1; '
+                    'session_runs "$f" steps.plan open s1; session_runs "$f" steps.plan finish s1 finished; '
+                    'history_add "$f" regression.local failed note=\'say "x"\'; '
+                    'history_add "$f/../nowhere/state.json" qa in' % LIB, "_", st],
+                   capture_output=True, text=True, timeout=30)
+    rows = process.read_history(st)
+    check("history is written beside the state, in the tree's .sclaude/local",
+          process.HISTORY_FILE == "history.jsonl" and len(rows) == 5, str(rows))
+    check("every sitting of a conversation is kept",
+          [(r["what"], r["op"]) for r in rows[:4]] == [("steps.plan", "open"), ("steps.plan", "end"),
+                                                         ("steps.plan", "open"), ("steps.plan", "finish")])
+    check("history_add quotes its values", rows[-1].get("note") == 'say "x"', str(rows[-1]))
+    check("no history where there is no feature", not os.path.exists(os.path.join(tmp, ".sclaude", "local", "nowhere")))
+
+
+def at(hhmm, day=27):
+    return "2026-10-%02dT%s:00+00:00" % (day, hhmm)
+
+
+rows = [
+    {"at": at("10:00"), "what": "steps.plan", "op": "open", "session": "p1"},
+    {"at": at("10:10"), "what": "steps.plan", "op": "end", "session": "p1"},
+    {"at": at("10:11"), "what": "steps.plan", "op": "open", "session": "p2"},
+    {"at": at("10:20"), "what": "steps.plan", "op": "finish", "session": "p2"},
+    {"at": at("10:21"), "what": "steps.code", "op": "open", "session": "c1"},
+    {"at": at("11:00"), "what": "steps.code", "op": "end", "session": "c1"},
+    {"at": at("11:30"), "what": "steps.code", "op": "open", "session": "c1"},
+    {"at": at("12:00"), "what": "steps.code", "op": "end", "session": "c1"},
+    {"at": at("13:00"), "what": "friction.code-1", "op": "open", "session": "f1"},
+    {"at": at("13:10"), "what": "friction.code-1", "op": "finish", "session": "f1", "outcome": "fixed"},
+    {"at": at("13:10"), "what": "friction.code-1", "op": "verdict", "verdict": "lifted"},
+    {"at": at("13:11"), "what": "workshop", "op": "ready", "session": "f1"},
+    {"at": at("13:12"), "what": "workshop", "op": "main"},
+    {"at": at("14:00"), "what": "regression.local", "op": "start"},
+    {"at": at("14:05"), "what": "regression.local", "op": "passed"},
+    {"at": at("13:59"), "what": "friction.pr-1", "op": "empty"},
+]
+got = process.history({}, rows, "pr")
+seq = [v.get("n") or tuple(v["pass"]) for v in got["visits"]]
+check("history: a place entered again is entered again",
+      seq[:9] == ["new", "prepare", "main_in", "plan", "approve", "plan_check", "plan", "approve", "plan_check"], str(seq))
+code = [v for v in got["visits"] if v.get("n") == "code"]
+check("history: a conversation resumed is one stay, its sittings summed",
+      len(code) == 1 and code[0].get("k") == 2 and code[0].get("s") == 69 * 60, str(code))
+check("history: the places between are filled in along the map",
+      seq[seq.index("code"):seq.index("reg_local") + 1] == ["code", ("friction", 0), ("workshop", 0), "works", "reg_local"], str(seq))
+works = [v for v in got["visits"] if v.get("n") == "works"][0]
+check("history: the time between goes to who it waited on", works.get("wait") and works.get("s") == 120 * 60, str(works))
+check("history: it ends where the feature stands", got["visits"][-1] == {"n": "pr", "here": True}, str(got["visits"][-1]))
+fr = got["passes"]["friction"]
+check("history: an empty friction log is no pass", len(fr) == 1 and "code-1" in fr[0]["label"], str(fr))
+check("history: a review that fixed sclaude in the workshop goes by its bug",
+      [s["n"] for s in fr[0]["steps"]][-4:] == ["f_bug", "f_verdict", "f_push", "f_next"], str(fr[0]["steps"]))
+ws = got["passes"]["workshop"]
+check("history: a publication without its session is the last pass's",
+      len(ws) == 1 and ws[0]["steps"][-1]["n"] == "w_main", str(ws))
+nodes = process.all_nodes()
+check("history: every place it plays is on a map",
+      all(s["n"] in nodes for p in fr + ws for s in p["steps"])
+      and all(v["n"] in process.NODES for v in got["visits"] if "n" in v))
+check("history: every detailed place a feature stands on is on the overview and the states",
+      all(process.projection()[n][0] in process.OVERVIEW_NODES and process.projection()[n][1] in process.STATE_NODES
+          for n in process.POSITIONS))
+check("history: nothing recorded plays where it stands", process.history({}, [], "plan")["visits"] == [{"n": "plan", "here": True}])
+def seq_of(rows, here=None):
+    return [v.get("n") or tuple(v["pass"]) for v in process.history({}, rows, here)["visits"]]
+
+
+got = seq_of([{"at": at("09:00"), "what": "steps.plan", "op": "open", "session": "a"},
+              {"at": at("12:00"), "what": "steps.plan", "op": "drop", "session": "a"},
+              {"at": at("12:00"), "what": "steps.plan", "op": "open", "session": "b"},
+              {"at": at("12:30"), "what": "steps.plan", "op": "end", "session": "b"}])
+check("history: a conversation that never took place is no stay", got.count("plan") == 1, str(got))
+local = process.history({}, [{"at": at("09:00"), "what": "review.local", "op": "start"},
+                             {"at": at("09:05"), "what": "fix.local", "op": "start"},
+                             {"at": at("09:10"), "what": "fix.local", "op": "end"},
+                             {"at": at("10:00"), "what": "review.local", "op": "start"},
+                             {"at": at("10:04"), "what": "review.local", "op": "end"}])["visits"]
+passes = [v for v in local if v.get("n") == "local_pass"]
+check("history: a start after an interrupted run is a stay of its own",
+      len(passes) == 2 and passes[1]["s"] == 240, str(local))
+got = seq_of([{"at": at("09:00"), "what": "qa", "op": "in"},
+              {"at": at("10:00"), "what": "qa", "op": "accepted"},
+              {"at": at("10:01"), "what": "merge", "op": "wait"},
+              {"at": at("11:00"), "what": "qa", "op": "accepted"},
+              {"at": at("11:01"), "what": "merge", "op": "wait"},
+              {"at": at("12:00"), "what": "merge", "op": "merged"}])
+check("history: QA Done seen again is not another verdict",
+      got.count("qa_verdict") == 1 and got.count("merge_wait") == 1, str(got))
+got = process.history({}, [{"at": at("09:00"), "what": "workshop", "op": "none", "session": "s"}])
+check("history: a workshop left untouched is no pass", not got["passes"]["workshop"], str(got))
+got = seq_of([{"at": at("09:00"), "what": "steps.review", "op": "open", "session": "a"},
+              {"at": at("09:30"), "what": "steps.review", "op": "end", "session": "a"},
+              {"at": at("09:31"), "what": "review.local", "op": "start"},
+              {"at": at("09:35"), "what": "review.local", "op": "end"}])
+check("history: no long way round is made up between two places",
+      got[-2:] == ["review", "local_pass"] and "merged" not in got, str(got))
+review = [v for v in process.history({}, [
+    {"at": at("09:00"), "what": "steps.review", "op": "open", "session": "r"},
+    {"at": at("10:00"), "what": "steps.review", "op": "open", "session": "r"},
+    {"at": at("10:30"), "what": "steps.review", "op": "end", "session": "r"}])["visits"] if v.get("n") == "review"]
+check("history: a review carried on into its next round keeps the round",
+      len(review) == 1 and review[0]["s"] == 90 * 60, str(review))
+retro = [v for v in process.history({}, [
+    {"at": at("09:00"), "what": "retro", "op": "open", "session": "t"},
+    {"at": at("09:40"), "what": "retro", "op": "drop", "session": "t"}])["visits"] if v.get("n") == "retro"]
+check("history: a retrospective nobody answered still took its time",
+      len(retro) == 1 and retro[0]["s"] == 40 * 60, str(retro))
+got = seq_of([{"at": at("09:00"), "what": "sync", "op": "open", "session": "a"},
+              {"at": at("12:00"), "what": "sync", "op": "open", "session": "b"},
+              {"at": at("12:30"), "what": "sync", "op": "end", "session": "b"}])
+check("history: a conversation opened in place of a dead one is one stay",
+      got.count("sync") == 1 and "merge_check" not in got, str(got))
+got = seq_of([{"at": at("09:00"), "what": "steps.code", "op": "open", "session": "a"},
+              {"at": at("10:00"), "what": "steps.review", "op": "open", "session": "r"},
+              {"at": at("11:00"), "what": "steps.review", "op": "end", "session": "r"},
+              {"at": at("12:00"), "what": "steps.code", "op": "open", "session": "b"},
+              {"at": at("12:30"), "what": "steps.code", "op": "end", "session": "b"}])
+check("history: a stay left open while the feature went elsewhere ends there",
+      got.count("code") == 2 and got.index("review") < len(got) - 1 - got[::-1].index("code"), str(got))
+sync = [v for v in process.history({}, [
+    {"at": at("09:00"), "what": "sync", "op": "open", "session": "a"},
+    {"at": at("09:50"), "what": "sync", "op": "open", "session": "b"},
+    {"at": at("09:51"), "what": "sync", "op": "drop", "session": "b"}])["visits"] if v.get("n") == "sync"]
+check("history: a drop takes back only its own conversation",
+      len(sync) == 1 and sync[0]["s"] == 50 * 60, str(sync))
+summaries = {"c1": {"human": [[at("09:30"), 60, 3], [at("13:00"), 30, 1]], "cost": 2.5},
+             "f1": {"human": [[at("11:05"), 10, 0]], "cost": 0.5}}
+mrows = [{"at": at("09:00"), "what": "steps.code", "op": "open", "session": "c1"},
+         {"at": at("10:00"), "what": "steps.code", "op": "end", "session": "c1"},
+         {"at": at("11:00"), "what": "friction.code-1", "op": "open", "session": "f1"},
+         {"at": at("11:10"), "what": "friction.code-1", "op": "finish", "session": "f1", "outcome": "reviewed"},
+         {"at": at("11:20"), "what": "regression.local", "op": "start"},
+         {"at": at("11:25"), "what": "ask", "op": "answered", "from": "tty"},
+         {"at": at("11:30"), "what": "regression.local", "op": "passed"},
+         {"at": at("12:00"), "what": "command", "op": "return", "run": "1.1"}]
+m = process.history({}, mrows, "review", summaries.get)["metrics"]
+check("metrics: each time the person stepped in counts where the feature stood",
+      m["input"]["detail"] == {"code": 2, "reg_local": 2} and m["input"]["friction"] == {"f_review": 1}
+      and m["input"]["detail"].get("review") is None, str(m))
+check("metrics: a session costs where it ran",
+      m["cost"] == {"detail": {"code": 2.5}, "friction": {"f_review": 0.5}}, str(m))
+check("metrics: none without transcripts but the history's own",
+      process.history({}, mrows, "review")["metrics"]["cost"] == {})
+st = [v for v in process.history({}, [
+    {"at": at("10:00"), "what": "regression.local", "op": "start"},
+    {"at": at("15:00"), "what": "command", "op": "x", "run": "2.2"},
+    {"at": at("15:00"), "what": "regression.local", "op": "start"},
+    {"at": at("15:05"), "what": "regression.local", "op": "passed"}])["visits"] if v.get("n") == "reg_local"]
+check("history: an input says nothing of when a run left off", st and st[0].get("s", 0) < 3600, str(st))
+with tempfile.TemporaryDirectory() as tmp:
+    import claude_usage
+    tree = os.path.join(tmp, "tree")
+    feat = os.path.join(tree, ".sclaude", "local", "feature")
+    os.makedirs(feat)
+    folder = os.path.join(tmp, "projects", claude_usage.project_name(tree))
+    os.makedirs(folder)
+    for sid, nxt in (("a", "b"), ("b", None)):
+        with open(os.path.join(folder, sid + ".jsonl"), "w") as fh:
+            fh.write(json.dumps({"type": "cost-state", "startTime": 1, "totalCostUSD": 1.5}) + "\n")
+            if nxt:
+                fh.write(json.dumps({"type": "continued-in", "continuedInSessionId": nxt}) + "\n")
+    root, claude_usage.ROOT = claude_usage.ROOT, os.path.join(tmp, "projects")
+    try:
+        reader = process.transcripts_of(os.path.join(feat, "state.json"))
+        got = reader("a")
+        reader.done()
+    finally:
+        claude_usage.ROOT = root
+    check("metrics: a conversation carried on under a new id is its last transcript, once",
+          got and got["cost"] == 1.5 and got["id"].endswith("b.jsonl"), str(got))
+    check("metrics: the transcripts are cached beside the history",
+          os.path.exists(os.path.join(feat, process.TRANSCRIPT_CACHE)))
+    with open(os.path.join(folder, "c.jsonl"), "w") as fh:
+        fh.write(json.dumps({"type": "cost-state", "startTime": 1, "totalCostUSD": 1.0}) + "\n")
+        fh.write(json.dumps({"type": "continued-in", "continuedInSessionId": "d"}) + "\n")
+    claude_usage.ROOT = os.path.join(tmp, "projects")
+    try:
+        reader = process.transcripts_of(os.path.join(feat, "state.json"))
+        before = reader("c")
+        reader.done()
+        with open(os.path.join(folder, "d.jsonl"), "w") as fh:
+            fh.write(json.dumps({"type": "cost-state", "startTime": 1, "totalCostUSD": 4.0}) + "\n")
+        reader = process.transcripts_of(os.path.join(feat, "state.json"))
+        after = reader("c")
+    finally:
+        claude_usage.ROOT = root
+    check("metrics: a continuation not on disk yet is followed once it is",
+          before["cost"] == 1.0 and after["cost"] == 4.0, "%s %s" % (before, after))
+same = {"a": {"human": [], "cost": 2.0, "id": "/t/b.jsonl"}, "b": {"human": [], "cost": 2.0, "id": "/t/b.jsonl"}}
+m = process.history({}, [{"at": at("09:00"), "what": "steps.code", "op": "open", "session": "a"},
+                         {"at": at("10:00"), "what": "steps.code", "op": "open", "session": "b"},
+                         {"at": at("11:00"), "what": "steps.code", "op": "end", "session": "b"}],
+                    None, same.get)["metrics"]
+check("metrics: two ids of one conversation count it once", m["cost"] == {"detail": {"code": 2.0}}, str(m))
+st = [v for v in process.history({}, [
+    {"at": at("10:00"), "what": "regression.local", "op": "start", "run": "1.1"},
+    {"at": at("10:20"), "what": "ask", "op": "answered", "run": "1.1"},
+    {"at": at("15:00"), "what": "ask", "op": "answered", "run": "2.2"},
+    {"at": at("15:01"), "what": "regression.local", "op": "start", "run": "2.2"},
+    {"at": at("15:05"), "what": "regression.local", "op": "passed", "run": "2.2"}])["visits"] if v.get("n") == "reg_local"]
+check("history: a run cut off ends at its own last line, not the next run's",
+      st and st[0].get("s") == 24 * 60 and st[0].get("k") == 2, str(st))
+check("the page offers the metrics by checkboxes, each with the whole feature's total",
+      'class="metrics"' in page and 'value="input"' in page and 'value="cost"' in page
+      and page.count('class="mt-total"') == 2)
+check("an answer to sclaude and a command go into the history",
+      "history_add \"$ASK_TREE/.sclaude/local/feature/state.json\" ask answered" in read("sclaude", "lib", "io.sh")
+      and "history_command \"$wt\"" in read("sclaude", "lib", "state.sh")
+      and 'SCLAUDE_COMMAND="${1:-menu}"' in sclaude
+      and 'export SCLAUDE_RUN="${SCLAUDE_RUN:-' in sclaude and "SCLAUDE_REEXEC" not in sclaude)
+check("the player pauses the arrow too", "animation-play-state:paused" in process.PLAY_STYLE)
+check("the player pauses the time, not only the steps",
+      "if (!paused) left -=" in process.PLAY_SCRIPT and "if (!paused) gone +=" in process.PLAY_SCRIPT)
+for m in ("detail", "overview", "states", "workshop", "friction"):
+    check("page plays the %s map" % m, 'data-play="%s"' % m in page)
+check("page chooses the friction and the workshop passes",
+      'data-pass="friction"' in page and 'data-pass="workshop"' in page)
+check("cmd_flow sends the history", "process.history(json.load(fh), process.read_history(state)" in read("sclaude", "lib", "actions.sh")
+      and '"history": history' in read("sclaude", "lib", "actions.sh"))
+check("the state's writers name the same file",
+      '"history.jsonl"' in read("sclaude", "lib", "state.sh") and "history.jsonl" in read("sclaude", "lib", "state.sh"))
+check("the map is not centred across on open (it hid the first lanes)",
+      "inline: 'nearest'" in process.LIVE_SCRIPT and "inline: 'center'" not in process.LIVE_SCRIPT)
+
 # --- the proxy's runs of `sclaude _flow` -------------------------------------
 #
 # A run past its limit is ended with everything it started: a hung git or gh

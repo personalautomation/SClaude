@@ -699,6 +699,7 @@ rollback_prod() {
 
   state_set "$state" rollback.prod.code done 2>/dev/null || true
   state_set "$state" rollback.prod.at "$(date -Iseconds)" 2>/dev/null || true
+  history_add "$state" rollback.prod done
   [[ -n "$sha" ]] && state_set "$state" rollback.prod.to_sha "$sha" 2>/dev/null || true
   echo "${GREEN}✓ Production is back at ${sha:0:8}${sha:+ — }$url${OFF}"
 

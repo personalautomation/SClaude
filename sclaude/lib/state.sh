@@ -142,7 +142,8 @@ new_session_id() {
 # review's idle clock read them.
 session_runs() {
   local file="$1" node="$2" op="$3" session="${4:-}" outcome="${5:-}"
-  python3 - "$file" "$node" "$op" "$session" "$(date -Iseconds)" "$outcome" <<'PYRUN' 2>/dev/null || true
+  SCLAUDE_RUN="${SCLAUDE_RUN:-}" \
+    python3 - "$file" "$node" "$op" "$session" "$(date -Iseconds)" "$outcome" <<'PYRUN' 2>/dev/null || true
 import json, sys
 path, dotted, op, session, now, outcome = sys.argv[1:7]
 with open(path) as fh:
@@ -202,7 +203,63 @@ node["runs"] = runs
 with open(path, "w") as fh:
     json.dump(data, fh, indent=2, ensure_ascii=False)
     fh.write("\n")
+# The same moment in the feature's history (history_add): runs keep one
+# entry per conversation, and a conversation entered three times leaves its
+# first start and its last end there — the history keeps every sitting.
+import os
+if os.path.basename(path) == "state.json":
+    row = {"at": now, "what": dotted, "op": op}
+    if session:
+        row["session"] = session
+    if outcome:
+        row["outcome"] = outcome
+    if os.environ.get("SCLAUDE_RUN"):
+        row["run"] = os.environ["SCLAUDE_RUN"]
+    with open(os.path.join(os.path.dirname(path), "history.jsonl"), "a") as fh:
+        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 PYRUN
+}
+
+# A command a person ran on the feature at the terminal, once per process,
+# in its history: one more time they stepped in. The feature is looked up
+# from subshells too, so the process is told by its run id in the file (its
+# pid and start, SCLAUDE_RUN, which every line carries: a pid alone comes
+# round again) rather than by a variable.
+history_command() {
+  local state="$1/.sclaude/local/feature/state.json"
+  [[ -t 0 && -n "${SCLAUDE_COMMAND:-}" && -n "${SCLAUDE_RUN:-}" ]] || return 0
+  grep -qs "\"what\": \"command\".*\"run\": \"${SCLAUDE_RUN//./\\.}\"" "${state%/*}/history.jsonl" \
+    && return 0
+  history_add "$state" command "$SCLAUDE_COMMAND"
+}
+
+# The feature's history: one line of JSON per thing that began or ended, in
+# the order it happened, beside its state — `.sclaude/local/feature/history.jsonl`.
+# state.json keeps where each thing stands now, and loses the earlier times a
+# stage was entered; this keeps them all. The process map plays a feature's
+# way through the cycle from it (`history` in sclaude/lib/process.py, which
+# names the file again as HISTORY_FILE). session_runs writes the sessions'
+# lines itself; everything else calls this.
+#
+#   history_add <state> <what> <op> [<key>=<value>…]
+#
+# <what> is a dotted name — regression.preview, fix.local, deploy.prod, qa,
+# workshop — and <op> what happened to it: start, passed, failed, in, …
+history_add() {
+  local state="$1" what="$2" op="$3" extra="" kv value
+  shift 3
+  [[ -n "$state" && -d "${state%/*}" ]] || return 0
+  # Which sclaude process wrote it (SCLAUDE_RUN, bin/sclaude): a run cut off
+  # ends where its own last line is.
+  [[ -n "${SCLAUDE_RUN:-}" ]] && set -- "$@" run="$SCLAUDE_RUN"
+  for kv in "$@"; do
+    value="${kv#*=}"
+    value="${value//\\/\\\\}"; value="${value//\"/\\\"}"; value="${value//$'\n'/ }"
+    extra+=", \"${kv%%=*}\": \"$value\""
+  done
+  printf '{"at": "%s", "what": "%s", "op": "%s"%s}\n' "$(date -Iseconds)" "$what" "$op" "$extra" \
+    >> "${state%/*}/history.jsonl" 2>/dev/null
+  return 0
 }
 
 # The sessions directory in ~/.claude/projects: the worktree's path with
@@ -544,6 +601,7 @@ feature_worktree() {
   # quiet: a report about the feature (cmd_flow), not work on it — the
   # terminal's record and the tab's title are left as they are.
   if [[ "${2:-}" != quiet ]]; then
+    history_command "$wt"
     declare -F term_attach >/dev/null && term_attach "$wt"
     declare -F tab_title >/dev/null && tab_title "$1"
   fi

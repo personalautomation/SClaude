@@ -277,6 +277,22 @@ ask_log() {
   printf '%s pid=%s from=%s tty=%s reply=%q prompt=%q\n' \
     "$(date -Iseconds)" "$$" "${2:-none}" "${4:-closed}" "$3" "$q" \
     >> "$dir/answers.log" 2>/dev/null || true
+  # And in the feature's history, as one more time the person had to step in
+  # (process.py counts them on its map) — from the terminal or the phone; a
+  # reply piped in is a script's. The tree is looked up once per feature in
+  # this process: the person waits on this line.
+  if [[ -n "${ASK_SLUG:-}" && "$ASK_SLUG" != "${ASK_ENDED:-}" && "${2:-}" != stdin ]] \
+     && declare -F history_add >/dev/null; then
+    # Only a tree found is kept: one not there yet (sclaude new) is looked
+    # for again on the next answer.
+    local tree
+    if [[ "${ASK_TREE_OF:-}" != "$ASK_SLUG" ]] \
+       && tree="$(feature_worktree "$ASK_SLUG" quiet 2>/dev/null)"; then
+      ASK_TREE="$tree" ASK_TREE_OF="$ASK_SLUG"
+    fi
+    [[ "${ASK_TREE_OF:-}" == "$ASK_SLUG" ]] \
+      && history_add "$ASK_TREE/.sclaude/local/feature/state.json" ask answered from="${2:-none}"
+  fi
 }
 
 # Where to see that the feature this process asks about was ended by another: its

@@ -1628,6 +1628,7 @@ pr_qa_handoff_now() {
     return 4
   fi
   state_set "$state" handoff "$head" 2>/dev/null || true
+  history_add "$state" handoff done
   return 0
 }
 

@@ -214,9 +214,10 @@ workshop_after_session() {
   ws="$(workshop_dir "$tree")"
   while :; do
     state="$(workshop_state "$tree" "$session")"
+    workshop_history "$tree" "$state" "$session"
     case "$state" in
       none) workshop_py put "$rec" pending null; return 0 ;;
-      ready) workshop_py put "$rec" pending null; workshop_publish "$tree"; return 0 ;;
+      ready) workshop_py put "$rec" pending null; WORKSHOP_SESSION="$session" workshop_publish "$tree"; return 0 ;;
       blocked)
         workshop_py put "$rec" pending null
         info "  sclaude's change in $ws waits: $(workshop_py get "$rec" blocked.why)"
@@ -236,6 +237,7 @@ workshop_after_session() {
       continue
     fi
     workshop_py pending "$rec" "$session" "$PWD" "$@"
+    workshop_history "$tree" left "$session"
     info "  Left in the workshop and not published; sclaude offers the session back when the feature is next opened."
     return 0
   done
@@ -422,6 +424,18 @@ workshop_tests() {
   return 1
 }
 
+# How a session's change in the workshop came out, in the feature's history
+# (history_add): its state when the session ended (none, ready, blocked,
+# pending, left) and how the publication went (main, pr, held, red,
+# stopped). The session is the one that ended, or WORKSHOP_SESSION for a
+# publication: the process map plays the pass after that session.
+#
+#   workshop_history <tree> <op> [<session>]
+workshop_history() {
+  history_add "$1/.sclaude/local/feature/state.json" workshop "$2" \
+    session="${3:-${WORKSHOP_SESSION:-}}"
+}
+
 # Publishes what the tree's workshop holds, ready and reviewed: for a
 # maintainer to main, rebased on origin's and squashed into one commit; for
 # anybody else to the workshop's own branch and its one pull request.
@@ -447,6 +461,7 @@ workshop_publish() {
   if ! GIT_TERMINAL_PROMPT=0 timeout 30 "${G[@]}" fetch -q origin main 2>/dev/null; then
     warn "  Could not reach sclaude's repository: not published; it stays in $ws, and is tried again when the tree is next opened."
     workshop_py put "$rec" stopped '"on the way"'
+    workshop_history "$tree" stopped
     return 0
   fi
   if developer_is_maintainer; then
@@ -454,6 +469,7 @@ workshop_publish() {
       "${G[@]}" rebase --abort >/dev/null 2>&1
       warn "  It conflicts with sclaude's main: not published; it stays in $ws, and is tried again when"
       warn "  the tree is next opened. A session of this tree can rebase it there and mark it ready again."
+      workshop_history "$tree" stopped
       return 0
     fi
     base=origin/main
@@ -474,15 +490,18 @@ workshop_publish() {
   workshop_leaks "$ws" "$base" "$tree" || leaked=$?
   if (( leaked == 1 )); then
     workshop_block "$tree" "held back for the product's details; a session of this tree rewords it"
+    workshop_history "$tree" held
     return 0
   fi
   (( leaked == 0 )) || return 0
-  workshop_tests "$ws" "$base" || { info "  It is tried again when the tree is next opened."; return 0; }
+  workshop_tests "$ws" "$base" || { info "  It is tried again when the tree is next opened."
+                                    workshop_history "$tree" red; return 0; }
   if developer_is_maintainer; then
     if ! GIT_TERMINAL_PROMPT=0 "${G[@]}" push -q origin HEAD:main >/dev/null 2>&1; then
       warn "  The push to main was refused (main moved meanwhile?): it stays in $ws,"
       warn "  and is tried again when the tree is next opened."
       workshop_py put "$rec" stopped '"on the way"'
+      workshop_history "$tree" stopped
       return 0
     fi
     info "  ${GREEN}Published to sclaude's main${OFF}: $("${G[@]}" log -1 --format='%h %s')"
@@ -495,11 +514,13 @@ workshop_publish() {
       instruments_propose "$branch" "$("${G[@]}" rev-list --count origin/main..HEAD)" \
       || { warn "  Not sent (no gh, no login, or the push failed): it stays in $ws, and is tried again when the tree is next opened."
            workshop_py put "$rec" stopped '"on the way"'
+           workshop_history "$tree" stopped
            return 0; }
   fi
   workshop_py put "$rec" start "\"$("${G[@]}" rev-parse HEAD)\""
   workshop_py put "$rec" ready null
   workshop_py put "$rec" blocked null
+  workshop_history "$tree" "$(developer_is_maintainer && echo main || echo pr)"
   developer_is_maintainer && workshop_live_update
   return 0
 }

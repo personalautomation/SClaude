@@ -305,7 +305,8 @@ feature_action_items() {
 # Where a feature stands and what can be done with it now, as one line of
 # JSON for its process map (`sclaude _flow <name>`, sclaude-proxy's
 # /__sclaude/flow/state): the node of sclaude/lib/process.py it stands on,
-# the menu's own words for its step, and the items of its action list. Asks
+# the menu's own words for its step, the items of its action list, and
+# how it went (`history`, from its history file) for the map to play. Asks
 # nothing and prints nothing else: the proxy reads stdout whole.
 #
 #   cmd_flow <slug>
@@ -333,15 +334,28 @@ cmd_flow() {
     printf '%s\t%s\n' "${verbs[$i]}" "${labels[$i]}"
   done | python3 -c '
 import json, sys
-node, title, why, where, feature = sys.argv[1:6]
+node, title, why, where, feature, lib, state = sys.argv[1:8]
 actions = []
 for line in sys.stdin:
     verb, _, rest = line.rstrip("\n").partition("\t")
     label, _, hint = rest.partition("\t")
     actions.append({"verb": verb, "label": label, "hint": hint})
+# How it went, for the map to play: its history file, ending where it is.
+# Read here rather than handed over: the history of a long feature outgrows what
+# one argument may carry.
+sys.path.insert(0, lib)
+try:
+    import process
+    read = process.transcripts_of(state)
+    with open(state) as fh:
+        history = process.history(json.load(fh), process.read_history(state),
+                                  node if node in process.NODES else None, read)
+    read.done()
+except Exception:
+    history = None
 print(json.dumps({"feature": feature, "node": node, "title": title, "why": why,
-                  "where": where, "actions": actions}))
-' "$node" "$title" "$why" "$where" "$slug"
+                  "where": where, "actions": actions, "history": history}))
+' "$node" "$title" "$why" "$where" "$slug" "$LIB" "$state"
 }
 
 # Gathers the applicable actions and carries out the chosen one.

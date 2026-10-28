@@ -23,6 +23,7 @@ splits across pages.
 
     process.py doc <out.html>
     process.py position <state.json> [pr-state] [epilogue.json]
+    process.py history <state.json> [node]   the feature's way, for its page to play
     process.py page <label>              a feature's page shell, for a check
 """
 
@@ -31,6 +32,7 @@ import html
 import json
 import os
 import sys
+import time
 
 # --- the model ---------------------------------------------------------------
 
@@ -646,6 +648,598 @@ def position(state, pr_state="", epilogue=None):
     return "preview", "past step 4; GitHub did not say where the pull request is"
 
 
+# --- how a feature went ------------------------------------------------------
+#
+# The feature's history, history_add's and session_runs' lines (state.sh) in
+# the file beside its state, played back on the map: each place it stood on,
+# how long, and the way it went on. The file lives in the worktree's
+# .sclaude/local, which git never carries and the clean-up removes with the
+# tree; a feature begun before it has no history to play.
+#
+# What it gives the page: `visits`, the detailed map's places in order —
+# those the history names, with the places between them filled in along the
+# map's shortest way, and the time between two places given to the first
+# check or person on the way — and `passes`, the friction reviews and the
+# workshop's publications, each a way through its own map. A visit
+# {"pass": [map, i]} is where the feature went off to one of those.
+
+HISTORY_FILE = "history.jsonl"
+# What the transcripts said of each conversation, kept beside the history.
+TRANSCRIPT_CACHE = "transcripts.json"
+TRANSCRIPT_FRESH = 60
+
+# A step closed: the check it closes on.
+STEP_CLOSE = {"plan": "plan_check", "pr": "pr_check", "review": "review_close"}
+STAGE_NODE = {"local": "reg_local", "preview": "preview", "prod": "prod"}
+# Who the gap before the next place is spent on: a check, a person, a wait.
+WAITS_ON = ("user", "gate", "wait", "hold")
+# The most places filled in between two the history names.
+FILL_MAX = 5
+
+
+def _when(text):
+    try:
+        at = datetime.datetime.fromisoformat(str(text or ""))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=datetime.timezone.utc)
+
+
+def _row(at, what, op, **extra):
+    row = {"at": at, "what": what, "op": op}
+    row.update({k: v for k, v in extra.items() if v})
+    return row
+
+
+def history_rows(lines):
+    """The file's rows in the order they happened; one written in the same
+    second as another stays after it."""
+    rows = [r for r in lines if isinstance(r, dict) and _when(r.get("at")) and r.get("what")]
+    return [r for _i, r in sorted(enumerate(rows), key=lambda p: (_when(p[1]["at"]), p[0]))]
+
+
+def _graph(edges):
+    out = {}
+    for a, b, _label, _kind in edges:
+        out.setdefault(a, []).append(b)
+    return out
+
+
+def _way(graph, a, b):
+    """The shortest way along the map from a to b, both ends included; from
+    a place back to itself, the shortest way round. [a, b] when none."""
+    queue, seen = [[a, x] for x in graph.get(a, [])], {a} if a != b else set()
+    while queue:
+        way = queue.pop(0)
+        if way[-1] == b:
+            return way
+        if way[-1] in seen:
+            continue
+        seen.add(way[-1])
+        queue += [way + [x] for x in graph.get(way[-1], []) if x not in seen or x == b]
+    return [a, b]
+
+
+def _seconds(a, b):
+    ta, tb = _when(a), _when(b)
+    return max(0, int((tb - ta).total_seconds())) if ta and tb else None
+
+
+class _Places:
+    """The detailed map's places, as the rows enter and leave them."""
+
+    def __init__(self):
+        self.list, self.open = [], {}
+        # Where a stay left open by an interrupted run (a Ctrl-C writes no
+        # end) is taken to have ended: the last line of the sclaude run that
+        # opened it, or of any run where the lines name none.
+        self.last, self.last_of, self.run = None, {}, None
+
+    def enter(self, node, at, key=None, session=None):
+        key = key or node
+        place = self.open.get(key)
+        if place:
+            # A conversation opened with no end before it and nothing else
+            # between: the review carrying on into its next round in the
+            # same one, or one opened in place of a conversation that died
+            # (the sync's). One stay, the new conversation a sitting of its
+            # own, so that its drop takes back only what it added.
+            if session and place.get("session") and self.list[-1] is place:
+                place["sittings"][-1][1] = at
+                place["sittings"].append([at, None])
+                place.setdefault("before", []).append(place["session"])
+                place["session"] = session
+                return
+            # Left open while the feature went elsewhere: it ended where
+            # the next place began.
+            after = self.list[self.list.index(place) + 1:]
+            self.leave(key, next((p["from"] for p in after if p.get("from")),
+                                 self.last_of.get(place.get("run")) or self.last or at))
+        self.list.append({"n": node, "from": at, "to": None, "session": session, "sittings": [],
+                          "run": self.run})
+        self.open[key] = self.list[-1]
+        self.list[-1]["sittings"].append([at, None])
+
+    def leave(self, key, at):
+        place = self.open.pop(key, None)
+        if place:
+            place["to"] = at
+            place["sittings"][-1][1] = at
+
+    def drop(self, key):
+        """A conversation that never took place: no stay at all."""
+        place = self.open.pop(key, None)
+        if place:
+            place["sittings"].pop()
+            if not place["sittings"]:
+                self.list.remove(place)
+            else:
+                place["session"] = place["before"].pop()
+                place["to"] = place["sittings"][-1][1]
+
+    def point(self, node, at):
+        self.list.append({"n": node, "from": at, "to": at, "session": None, "sittings": []})
+
+    def detour(self, kind, index, at):
+        self.list.append({"pass": [kind, index], "from": at, "to": at})
+
+
+def _friction_way(rows, workshop_sessions):
+    """A friction review's way through its map, from its rows."""
+    ops = [r["op"] for r in rows]
+    if "deferred" in ops:
+        return [{"n": n} for n in ("f_trip", "f_log", "f_empty", "f_rules", "f_classify", "f_defer")]
+    way = [{"n": n} for n in ("f_trip", "f_log", "f_empty", "f_rules")]
+    sitting, outcome, verdict, session = None, "", "", ""
+    for r in rows:
+        if r["op"] == "open":
+            if way[-1]["n"] == "f_review":
+                way[-1]["k"] = way[-1].get("k", 1) + 1
+            else:
+                way.append({"n": "f_review", "s": 0, "from": r["at"]})
+            sitting, session = r["at"], r.get("session") or session
+        elif r["op"] in ("end", "stall", "finish") and sitting:
+            way[-1]["s"] += _seconds(sitting, r["at"]) or 0
+            way[-1]["to"] = r["at"]
+            sitting = None
+            if r["op"] == "stall":
+                way.append({"n": "f_hold"})
+        if r["op"] in ("finish", "end") and r.get("outcome"):
+            outcome = r["outcome"]
+        if r["op"] == "verdict":
+            verdict = r.get("verdict", "")
+    if not (outcome or verdict):
+        return way
+    if session in workshop_sessions:
+        decided = "f_bug"
+    elif verdict in ("lifted", "mixed") or outcome == "fixed":
+        decided = "f_lift"
+    else:
+        decided = "f_deliberate"
+    way += [{"n": "f_plan"}, {"n": "f_decide"}, {"n": decided}, {"n": "f_verdict"}]
+    if outcome == "fixed":
+        way.append({"n": "f_push"})
+    way.append({"n": "f_next"})
+    return way
+
+
+WORKSHOP_START = ("w_find", "w_ask", "w_open", "w_change", "w_ready", "w_exit", "w_ready_gate")
+WORKSHOP_OUT = {
+    "blocked": ("w_leaks", "w_leak_ask"), "held": ("w_leaks", "w_leak_ask"),
+    "left": ("w_back",), "red": ("w_leaks", "w_tests"),
+    "stopped": ("w_leaks", "w_tests", "w_who"),
+    "main": ("w_leaks", "w_tests", "w_who", "w_main"), "pr": ("w_leaks", "w_tests", "w_who", "w_pr"),
+}
+
+
+def _workshop_way(rows):
+    """A session's change to sclaude, from the session's end to how its
+    publication went."""
+    way = list(WORKSHOP_START)
+    for r in rows:
+        if way[-1] == "w_back" and r["op"] != "left":
+            way += ["w_change", "w_ready", "w_exit", "w_ready_gate"]
+        for n in WORKSHOP_OUT.get(r["op"], ()):
+            if n != way[-1]:
+                way.append(n)
+    return [{"n": n} for n in way]
+
+
+def _session_names(state):
+    """What each conversation was: "2 · code", "friction code-1", "retro"."""
+    names = {}
+    for step, node in (state.get("steps") or {}).items():
+        for run in _runs(node):
+            names[run.get("session")] = NODES.get(step, ("", "", "", step))[3]
+    for key, node in (state.get("friction") or {}).items():
+        for run in _runs(node):
+            names[run.get("session")] = "friction review " + key
+    for what in ("sync", "retro", "epilogue"):
+        for run in _runs(state.get(what) if isinstance(state.get(what), dict) else None):
+            names[run.get("session")] = NODES[what][3]
+    names.pop(None, None)
+    return names
+
+
+def _short(at):
+    when = _when(at)
+    return when.strftime("%d %b %H:%M") if when else ""
+
+
+def history(state, lines, here=None, transcripts=None):
+    """The feature's way through the maps, for the page to play, and what
+    each place took (`metrics`) when the sessions' transcripts are given:
+    a function from a session id to claude_usage.read's summary, or None."""
+    rows = history_rows(lines)
+    places = _Places()
+    friction, workshop = {}, {}
+    merged = qa_open = False
+    first = rows[0]["at"] if rows else None
+    if first:
+        places.point("new", first)
+    for r in rows:
+        what, op, at = r["what"], r["op"], r["at"]
+        head, _, rest = what.partition(".")
+        places.run = r.get("run")
+        if head == "steps" and rest in NODES:
+            if op == "open":
+                places.enter(rest, at, "steps." + rest, r.get("session"))
+            elif op == "drop":
+                places.drop("steps." + rest)
+            elif op in ("end", "stall", "finish"):
+                places.leave("steps." + rest, at)
+            if op in ("close", "finish") and rest in STEP_CLOSE:
+                places.point(STEP_CLOSE[rest], at)
+        elif what in ("sync", "retro", "epilogue"):
+            if op == "open":
+                places.enter(what, at, what, r.get("session"))
+            elif op == "drop" and what != "retro":
+                places.drop(what)
+            elif op in ("end", "stall", "finish", "drop"):
+                # A retrospective nobody answered is dropped (retro.sh), but
+                # its conversation took place.
+                places.leave(what, at)
+        elif head == "friction" and rest:
+            if rest not in friction:
+                friction[rest] = []
+                if op != "empty":
+                    places.detour("friction", rest, at)
+            friction[rest].append(r)
+        elif head == "regression" and rest in STAGE_NODE:
+            if op == "start":
+                places.enter(STAGE_NODE[rest], at, what)
+            else:
+                places.leave(what, at)
+        elif head == "fix" and rest in STAGE_NODE:
+            node = "fix_" + rest
+            if op == "start":
+                places.enter(node, at, what, r.get("session"))
+            else:
+                places.leave(what, at)
+        elif what == "deploy.preview":
+            if op == "start":
+                places.enter("preview", at, what)
+            else:
+                places.leave(what, at)
+        elif what == "deploy.prod" and op == "done":
+            places.point("prod", at)
+        elif what == "review.local":
+            if op == "start":
+                places.enter("local_pass", at, what)
+            else:
+                places.leave(what, at)
+        elif what == "qa":
+            # Done is seen again on every look before the merge: a verdict is
+            # one only after QA was sent to look.
+            if op == "in":
+                places.point("in_qa", at)
+                places.enter("qa_check", at, "qa")
+                qa_open = True
+            elif qa_open or op == "back":
+                places.leave("qa", at)
+                places.point("qa_verdict", at)
+                qa_open = False
+        elif what == "handoff":
+            places.point("handoff", at)
+        elif what == "merge":
+            if op == "wait":
+                places.enter("merge_wait", at, "merge")
+            elif not merged:
+                merged = True
+                places.leave("merge", at)
+                places.point("merged", at)
+        elif what == "rollback.prod":
+            places.point("rollback", at)
+        elif what == "workshop" and op == "none" and r.get("session") not in workshop:
+            pass  # let write there, and changed nothing: no pass
+        elif what == "workshop":
+            session = r.get("session") or (list(workshop)[-1] if workshop else "")
+            if session not in workshop:
+                workshop[session] = []
+                places.detour("workshop", session, at)
+            workshop[session].append(r)
+        # A command is the next process's: it says nothing of when the run
+        # before it left off.
+        if what != "command":
+            places.last = at
+        if r.get("run"):
+            places.last_of[r["run"]] = at
+
+    # Merged into one: the same place entered again with nothing between, by
+    # the same conversation — a session resumed, a deploy and its regression.
+    visits = []
+    for p in places.list:
+        last = visits[-1] if visits else None
+        if last and "n" in p and last.get("n") == p["n"] and p["n"] != "new" and (
+                not p.get("session") or not last.get("session") or p["session"] == last["session"]):
+            last["sittings"] += p["sittings"]
+            last["to"] = p["to"] or last["to"]
+            continue
+        visits.append(p)
+    if here and (not visits or visits[-1].get("n") != here):
+        visits.append({"n": here, "from": None, "to": None, "sittings": [], "here": True})
+    elif visits and here:
+        visits[-1]["here"] = True
+
+    # The places between, along the map; the time between two places to the
+    # first check or person on the way, who is what it waited on.
+    graph = _graph(EDGES)
+    out, prev = [], None
+    for v in visits:
+        if "pass" in v:
+            out.append({"pass": v["pass"]})
+            continue
+        if prev is not None:
+            way = _way(graph, prev["n"], v["n"])[1:-1]
+            # A long way round is a guess, not a fill: a local review pass
+            # after a round has no arrow of its own, and the shortest way
+            # there runs through the merge and the retrospective.
+            if len(way) > FILL_MAX:
+                way = []
+            gap = _seconds(prev.get("to"), v.get("from") or (v["sittings"][0][0] if v["sittings"] else None))
+            waited = next((n for n in way if NODES[n][2] in WAITS_ON), None)
+            for n in way:
+                step = {"n": n}
+                if n == waited and gap and gap >= 60:
+                    step.update({"s": gap, "from": prev.get("to"), "to": v.get("from"), "wait": True})
+                out.append(step)
+        step = {"n": v["n"]}
+        secs = [_seconds(a, b) for a, b in v["sittings"] if b]
+        if secs:
+            step["s"] = sum(secs)
+        if len(v["sittings"]) > 1:
+            step["k"] = len(v["sittings"])
+        if v.get("from"):
+            step["from"] = v["from"]
+        if v.get("to"):
+            step["to"] = v["to"]
+        if v.get("here"):
+            step["here"] = True
+        out.append(step)
+        prev = v
+
+    names = _session_names(state)
+    workshop_sessions = set(workshop)
+    passes = {"friction": [], "workshop": []}
+    index = {}
+    for key, rs in friction.items():
+        if [r["op"] for r in rs] == ["empty"]:
+            continue
+        verdict = next((r.get("verdict") for r in rs if r["op"] == "verdict"), "")
+        if any(r["op"] == "deferred" for r in rs):
+            verdict = "put off, no session"
+        index[("friction", key)] = len(passes["friction"])
+        passes["friction"].append({
+            "label": "%s · %s%s" % (_short(rs[0]["at"]), key, (" · " + verdict) if verdict else ""),
+            "steps": _friction_way(rs, workshop_sessions)})
+    for session, rs in workshop.items():
+        ends = [r["op"] for r in rs if r["op"] in WORKSHOP_OUT or r["op"] in ("none", "ready")]
+        index[("workshop", session)] = len(passes["workshop"])
+        passes["workshop"].append({
+            "label": "%s · after %s%s" % (_short(rs[0]["at"]), names.get(session, "a session"),
+                                       (" · " + ends[-1]) if ends else ""),
+            "steps": _workshop_way(rs)})
+    steps = []
+    for s in out:
+        if "pass" in s:
+            i = index.get(tuple(s["pass"]))
+            if i is not None:
+                steps.append({"pass": [s["pass"][0], i]})
+        else:
+            steps.append(s)
+    return {"visits": steps, "passes": passes,
+            "metrics": metrics(rows, steps, passes, transcripts),
+            "now": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+
+
+# --- what each place took ----------------------------------------------------
+#
+# Shown on the maps by the checkboxes above them, never in the History:
+#
+#   input   each time the person stepped in — a message typed to Claude after
+#           its turn or an answer to its question (claude_usage's `human`), an
+#           answer to sclaude's own question (`ask answered`, io.sh) and a
+#           command run on the feature at the terminal (`command`, state.sh) —
+#           counted on the place the feature stood on at that moment;
+#   cost    the dollars Claude Code's own account gives each conversation,
+#           on the place the conversation ran.
+#
+# Both as {map: {node: total}}, the friction review's over every review. A
+# workshop's work is done in the conversation of the step or the review that
+# opened it, and counts there.
+
+def _session_place(rows):
+    """Where each conversation ran, from the rows that opened it."""
+    out = {}
+    for r in rows:
+        if r["op"] not in ("open", "start") or not r.get("session"):
+            continue
+        head, _, rest = r["what"].partition(".")
+        if head == "steps" and rest in NODES:
+            out[r["session"]] = ("detail", rest)
+        elif head == "fix" and rest in STAGE_NODE:
+            out[r["session"]] = ("detail", "fix_" + rest)
+        elif r["what"] in ("sync", "retro", "epilogue"):
+            out[r["session"]] = ("detail", r["what"])
+        elif head == "friction":
+            out[r["session"]] = ("friction", "f_review")
+    return out
+
+
+def metrics(rows, steps, passes, transcripts):
+    stays = [("detail", s) for s in steps if "n" in s]
+    stays += [(m, s) for m, ps in passes.items() for p in ps for s in p["steps"]]
+    timed = [(m, s["n"], _when(s["from"]), _when(s.get("to")) or _when(s["from"]))
+             for m, s in stays if s.get("from")]
+
+    def place(at, inside_only=False):
+        when = _when(at)
+        if not when:
+            return None
+        inside = [t for t in timed if t[2] <= when <= t[3]]
+        if inside:
+            return min(inside, key=lambda t: t[3] - t[2])[:2]
+        if inside_only:
+            return None
+        before = [t for t in timed if t[0] == "detail" and t[2] <= when]
+        return max(before, key=lambda t: t[2])[:2] if before else None
+
+    out = {"input": {}, "cost": {}}
+
+    def add(kind, where, n):
+        if where and n:
+            box = out[kind].setdefault(where[0], {})
+            box[where[1]] = round(box.get(where[1], 0) + n, 4)
+
+    for r in rows:
+        if (r["what"], r["op"]) == ("ask", "answered") or r["what"] == "command":
+            add("input", place(r["at"]), 1)
+    counted = set()
+    for session, where in _session_place(rows).items():
+        summary = transcripts(session) if transcripts else None
+        # Two ids of one conversation carried on: its last transcript once.
+        if not summary or summary.get("id", session) in counted:
+            continue
+        counted.add(summary.get("id", session))
+        for when, _seconds_taken, _calls in summary.get("human") or []:
+            # Within its conversation: where the feature stood then, or
+            # where the conversation ran when no stay holds the moment.
+            add("input", place(when, True) or where, 1)
+        add("cost", where, summary.get("cost") or 0)
+    return out
+
+
+def transcripts_of(state_path):
+    """The sessions' summaries, read from Claude Code's transcripts of the
+    feature's tree and kept beside its state by size and time, so a poll
+    reads only the conversations that grew."""
+    import claude_usage
+    from session_end import SESSION_ID, next_link
+    feature = os.path.dirname(state_path)
+    tree = os.path.dirname(os.path.dirname(os.path.dirname(feature)))
+    folder = os.path.join(claude_usage.ROOT, claude_usage.project_name(tree))
+    cache_path = os.path.join(feature, TRANSCRIPT_CACHE)
+    try:
+        with open(cache_path) as fh:
+            cache = json.load(fh)
+    except (OSError, ValueError):
+        cache = {}
+    changed = []
+
+    def one(path):
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        stamp = [st.st_size, st.st_mtime_ns]
+        held = cache.get(path)
+        # A conversation still going grows between two polls: read again
+        # at most once a minute, not its whole transcript every poll.
+        if held and len(held) == 3 and (held[0] == stamp or time.time() - held[2] < TRANSCRIPT_FRESH):
+            return held[1]
+        whole = claude_usage.read(path)
+        if whole is None:
+            return None  # not read: tried again next time, not kept as empty
+        summary = {"human": whole.get("human") or [], "cost": whole.get("cost")}
+        cache[path] = [stamp, summary, time.time()]
+        changed.append(path)
+        return summary
+
+    def after(path):
+        """The transcript a conversation was carried on in, or None: one
+        link of session_end.chain (next_link), kept as `one` keeps its
+        summaries. A successor named but not on disk yet is looked for again
+        next time."""
+        st = os.stat(path)
+        stamp, key = [st.st_size, st.st_mtime_ns], "next:" + path
+        held = cache.get(key)
+        if held and len(held) == 3 and (held[0] == stamp or time.time() - held[2] < TRANSCRIPT_FRESH):
+            nxt = held[1]
+        else:
+            try:
+                sid = next_link(path)
+            except OSError:
+                raise  # read again next time, not kept as "no link"
+            nxt = os.path.join(folder, sid + ".jsonl") if sid else None
+            cache[key] = [stamp, nxt, time.time()]
+            changed.append(key)
+        # The link is kept even before its transcript is there: a stat on
+        # every poll, not a read of the whole file.
+        return nxt if nxt and os.path.isfile(nxt) else None
+
+    def read(session):
+        """A conversation as its last transcript holds it whole: Claude Code
+        carries one on under a new id by copying it, the rule
+        session_end.chain reads it by."""
+        if not SESSION_ID.match(session or ""):
+            return None
+        last = os.path.join(folder, session + ".jsonl")
+        seen = set()
+        while last not in seen:
+            seen.add(last)
+            # A link not read leaves the conversation unknown this time: an
+            # earlier transcript taken for the last would count it twice.
+            try:
+                nxt = after(last)
+            except OSError:
+                return None
+            if not nxt:
+                break
+            last = nxt
+        summary = one(last)
+        return dict(summary, id=last) if summary else None
+
+    def done():
+        if changed:
+            # Transcripts gone (a tree cleaned up by hand) leave no keys.
+            for key in [k for k in cache if not os.path.exists(k.replace("next:", "", 1))]:
+                del cache[key]
+            tmp = "%s.%d.tmp" % (cache_path, os.getpid())
+            try:
+                with open(tmp, "w") as fh:
+                    json.dump(cache, fh)
+                os.replace(tmp, cache_path)
+            except OSError:
+                pass
+    read.done = done
+    return read
+
+
+def read_history(state_path):
+    """The rows of the history file beside a state."""
+    lines = []
+    try:
+        with open(os.path.join(os.path.dirname(state_path), HISTORY_FILE)) as fh:
+            for line in fh:
+                try:
+                    lines.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return lines
+
+
 # --- drawing -----------------------------------------------------------------
 
 LANE_W = 246
@@ -1046,7 +1640,22 @@ def client_model():
     sheets = {"w": detail.width, "h": detail.height,
               "cuts": sorted(set([detail.lane_x[lane] for lane, _ in detail.lanes] + [detail.width]))}
     return {"nodes": nodes, "edges": edges, "cmds": cmds, "sheets": sheets, "alias": alias,
-            "base": dict(ALIAS)}
+            "base": dict(ALIAS), "proj": projection()}
+
+
+def projection():
+    """Each detailed place as the overview and the states draw it: the
+    places a feature stands on (POSITIONS), and the blocks that borrow a
+    detail (ALIAS). A place neither has is not on those maps."""
+    out = {}
+    for nid in NODES:
+        small = [s for s, big in ALIAS.items() if big == nid]
+        o, s = POSITIONS.get(nid, ("", ""))
+        o = o or next((x for x in small if x.startswith("o_")), "")
+        s = s or next((x for x in small if x.startswith("s_")), "")
+        if o or s:
+            out[nid] = [o, s]
+    return out
 
 
 def tiles(diagram, page_w=1010, page_h=640, overlap=36):
@@ -1442,7 +2051,9 @@ function render(v) {
   }
   if (here && here !== last) {
     const n = document.querySelector('svg.map-detail [data-node="' + here + '"]');
-    if (n && last === '') n.scrollIntoView({block: 'center', inline: 'center'});
+    // Down to it only: centred across as well, the card scrolled the map's
+    // first lanes off its left edge with no way to tell they were there.
+    if (n && last === '') n.scrollIntoView({block: 'center', inline: 'nearest'});
     last = here;
   }
   const ul = document.getElementById('acts');
@@ -1471,6 +2082,7 @@ function render(v) {
     ul.append(li);
   });
   window.processMap.paint();
+  player.update(v.history);
   document.getElementById('err').textContent = v.error || '';
 }
 function poll() {
@@ -1482,6 +2094,424 @@ function poll() {
 }
 poll();
 """
+
+# How the feature went, played on its maps (`history` above). ▶ by a map's
+# heading plays the whole way on that map: a place lights with a clock
+# counting the time it stood there, then the arrow it left by; a friction
+# review or a workshop pass jumps to its own map and back. By the friction
+# review's and the workshop's headings ▶ plays the pass chosen beside it.
+# A place entered again keeps its count: "×2 · 3 h 10 min".
+PLAY_SCRIPT = r"""
+const player = (() => {
+  let data = null, token = 0, paused = false, speed = 1;
+  const bar = document.getElementById('player');
+  const say = (t) => { bar.querySelector('.pl-text').textContent = t; };
+  function dur(s) {
+    if (s == null) return '';
+    if (s < 60) return Math.round(s) + ' s';
+    const m = Math.round(s / 60);
+    if (m < 60) return m + ' min';
+    const h = Math.floor(m / 60), d = Math.floor(h / 24);
+    if (d) return d + ' d ' + (h % 24) + ' h';
+    return h + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
+  }
+  function when(t) {
+    if (!t) return '';
+    const d = new Date(t);
+    return d.toLocaleDateString(undefined, {day: 'numeric', month: 'short'}) + ' '
+      + d.toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit'});
+  }
+  // A wait that stands still while paused and follows a change of speed.
+  function sleep(ms, mine) {
+    return new Promise((done) => {
+      let left = ms, last = performance.now();
+      const tick = () => {
+        if (mine !== token) return done(false);
+        const now = performance.now();
+        if (!paused) left -= (now - last) * speed;
+        last = now;
+        if (left <= 0) return done(true);
+        setTimeout(tick, 40);
+      };
+      setTimeout(tick, 40);
+    });
+  }
+  function clear() {
+    document.querySelectorAll('.pl-clock,.pl-tag').forEach((g) => g.remove());
+    document.querySelectorAll('.pl-now,.pl-seen,.pl-go,.pl-went').forEach((el) => {
+      el.classList.remove('pl-now', 'pl-seen', 'pl-go', 'pl-went');
+      delete el.__pl;
+    });
+    document.body.classList.remove('playing');
+  }
+  function stop() {
+    token++; paused = false; clear(); bar.hidden = true; playing = null;
+    bar.querySelector('.pl-pause').textContent = '⏸';
+    document.body.classList.remove('pl-paused');
+    document.querySelectorAll('#hist li.on').forEach((li) => li.classList.remove('on'));
+    document.querySelectorAll('.play').forEach((b) => { b.textContent = '▶'; b.classList.remove('on'); });
+  }
+  // The detailed map's places as the overview or the states draw them; one
+  // place standing for several in a row is entered once, their times summed.
+  function onMap(steps, map) {
+    const col = map === 'overview' ? 0 : 1, out = [];
+    steps.forEach((s) => {
+      if (s.pass) { out.push(s); return; }
+      const n = (M.proj[s.n] || [])[col];
+      if (!n) return;
+      const last = out[out.length - 1];
+      if (last && !last.pass && last.n === n) {
+        if (s.s != null) last.s = (last.s || 0) + s.s;
+        last.to = s.to || last.to; last.here = last.here || s.here;
+        return;
+      }
+      out.push(Object.assign({}, s, {n: n}));
+    });
+    return out;
+  }
+  function edgeKey(map, a, b) {
+    return Object.keys(M.edges).find((k) => k.startsWith(map + ':') && M.edges[k].f === a && M.edges[k].t === b);
+  }
+  function svgEl(map, sel) {
+    const svg = document.querySelector('svg.map-' + map);
+    return svg ? svg.querySelector(sel) : null;
+  }
+  function clock(g, s, ms, mine) {
+    const box = g.querySelector('.shape').getBBox(), ns = 'http://www.w3.org/2000/svg';
+    const c = document.createElementNS(ns, 'g');
+    c.setAttribute('class', 'pl-clock');
+    c.setAttribute('transform', 'translate(' + (box.x + 2) + ' ' + (box.y + 2) + ')');
+    c.innerHTML = '<circle r="12"/><line class="pl-hand" x1="0" y1="0" x2="0" y2="-8"/>'
+      + '<line x1="0" y1="0" x2="5" y2="0"/><text x="17" y="4"></text>';
+    g.append(c);
+    const text = c.querySelector('text'), hand = c.querySelector('.pl-hand');
+    let gone = 0, last = performance.now();
+    (function frame(t) {
+      if (mine !== token || !c.isConnected) return;
+      if (!paused) gone += (t - last) * speed;
+      last = t;
+      const f = Math.min(1, gone / ms);
+      hand.setAttribute('transform', 'rotate(' + (f * 720) + ')');
+      text.textContent = s != null ? dur(s * f) : '';
+      if (f < 1) requestAnimationFrame(frame);
+    })(last);
+    return c;
+  }
+  function tag(g, n, s) {
+    const seen = g.__pl || (g.__pl = {k: 0, s: 0});
+    seen.k++; seen.s += s || 0;
+    g.querySelectorAll('.pl-tag').forEach((t) => t.remove());
+    if (!seen.s && seen.k < 2) return;
+    const box = g.querySelector('.shape').getBBox(), ns = 'http://www.w3.org/2000/svg';
+    const t = document.createElementNS(ns, 'text');
+    t.setAttribute('class', 'pl-tag');
+    t.setAttribute('x', box.x + 4); t.setAttribute('y', box.y + box.height + 12);
+    t.textContent = [seen.k > 1 ? '×' + seen.k : '', seen.s ? dur(seen.s) : ''].filter(Boolean).join(' · ');
+    g.append(t);
+  }
+  const TITLE = {friction: 'the friction review', workshop: 'how a session changes sclaude'};
+  // What is being played, kept for the history list: a click there plays
+  // from that place on.
+  let playing = null;
+  function arrow(prev, s) {
+    if (!prev || prev.map !== s.map) return null;
+    const k = edgeKey(s.map, prev.n, s.n);
+    return k ? M.edges[k] : null;
+  }
+  // The places already passed, lit at once: a jump in the list lands with
+  // what came before it as the play would have left it.
+  function mark(steps, upto) {
+    for (let i = 0; i < upto; i++) {
+      const s = steps[i], g = svgEl(s.map, '[data-node="' + s.n + '"]');
+      if (!g) continue;
+      const k = i && steps[i - 1].map === s.map ? edgeKey(s.map, steps[i - 1].n, s.n) : null;
+      const e = k && svgEl(s.map, '[data-key="e:' + k + '"]');
+      if (e) e.classList.add('pl-went');
+      g.classList.add('pl-seen');
+      tag(g, s.n, s.s);
+    }
+  }
+  async function run(steps, label, start) {
+    stop();
+    start = start || 0;
+    const mine = ++token;
+    playing = {steps: steps, label: label};
+    document.body.classList.add('playing');
+    bar.hidden = false;
+    showTab('history');
+    list(steps, label);
+    mark(steps, start);
+    let prev = start ? steps[start - 1] : null;
+    for (let i = start; i < steps.length; i++) {
+      const s = steps[i];
+      pick(i);
+      if (s.map !== (prev && prev.map) && prev) {
+        say(label + ' · ' + (s.map === 'friction' || s.map === 'workshop'
+          ? '↪ off to ' + TITLE[s.map] + (s.pass ? ': ' + s.pass : '') : '↩ back to the cycle'));
+        if (!await sleep(1100, mine)) return;
+      }
+      const g = svgEl(s.map, '[data-node="' + s.n + '"]');
+      if (!g) { prev = s; continue; }
+      g.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'smooth'});
+      if (prev && prev.map === s.map) {
+        const k = edgeKey(s.map, prev.n, s.n);
+        const e = k && svgEl(s.map, '[data-key="e:' + k + '"]');
+        if (e) {
+          e.classList.add('pl-go');
+          if (!await sleep(650, mine)) return;
+          e.classList.remove('pl-go'); e.classList.add('pl-went');
+        }
+      }
+      const n = M.nodes[s.n] || {};
+      const ms = s.s != null ? Math.min(4200, 900 + 700 * Math.log10(1 + s.s / 60)) : 420;
+      say(label + ' · ' + (i + 1) + '/' + steps.length + ' — ' + (n.t || s.n)
+        + (s.s != null ? ' · ' + (s.wait ? 'waited ' : '') + dur(s.s) : '')
+        + (s.k > 1 ? ' in ' + s.k + ' sittings' : '')
+        + (s.from ? ' · ' + when(s.from) + (s.to && s.to !== s.from ? ' – ' + when(s.to) : '') : '')
+        + (s.here ? ' · it is here now' : ''));
+      g.classList.add('pl-now');
+      const c = clock(g, s.s, ms, mine);
+      if (!await sleep(ms, mine)) return;
+      c.remove();
+      g.classList.remove('pl-now'); g.classList.add('pl-seen');
+      tag(g, s.n, s.s);
+      prev = s;
+    }
+    say(label + ' · played' + (steps.length ? '' : ': nothing recorded yet'));
+    pick(-1);
+    document.querySelectorAll('.play.on').forEach((b) => { b.textContent = '▶'; b.classList.remove('on'); });
+  }
+  // The history beside the map: every place with when, how long and the
+  // arrow it came by; the one playing is lit and kept in view.
+  function list(steps, label) {
+    const ul = document.getElementById('hist');
+    ul.textContent = '';
+    document.getElementById('hist-what').textContent = label;
+    if (!steps.length) {
+      const li = document.createElement('li');
+      li.className = 'muted';
+      li.textContent = 'Nothing recorded yet: the history starts with the sessions run since sclaude kept one.';
+      ul.append(li);
+      return;
+    }
+    steps.forEach((s, i) => {
+      const prev = steps[i - 1], li = document.createElement('li'), n = M.nodes[s.n] || {};
+      li.dataset.i = i;
+      if (prev && prev.map !== s.map) {
+        const off = document.createElement('div');
+        off.className = 'h-off';
+        off.textContent = s.map === 'friction' || s.map === 'workshop'
+          ? '↪ ' + TITLE[s.map] + (s.pass ? ': ' + s.pass : '') : '↩ back to the cycle';
+        li.append(off);
+      }
+      const e = arrow(prev, s);
+      if (e && e.l) {
+        const via = document.createElement('div');
+        via.className = 'h-via' + (e.k === 'back' ? ' back' : '');
+        via.textContent = '→ ' + e.l;
+        li.append(via);
+      }
+      const head = document.createElement('div');
+      head.className = 'h-t';
+      head.textContent = n.t || s.n;
+      li.append(head);
+      const bits = [];
+      if (s.from) bits.push(when(s.from) + (s.to && s.to !== s.from ? ' – ' + when(s.to) : ''));
+      if (s.s != null) bits.push((s.wait ? 'waited ' : '') + dur(s.s));
+      if (s.k > 1) bits.push(s.k + ' sittings');
+      if (s.here) bits.push('here now');
+      if (bits.length) {
+        const m = document.createElement('div');
+        m.className = 'h-m';
+        m.textContent = bits.join(' · ');
+        li.append(m);
+      } else li.classList.add('h-pass');
+      li.addEventListener('click', () => {
+        const b = document.querySelector('.play.on');
+        run(steps, label, i);
+        if (b) { b.textContent = '■'; b.classList.add('on'); }
+      });
+      ul.append(li);
+    });
+  }
+  function pick(i) {
+    const panel = document.querySelector('.panel');
+    document.querySelectorAll('#hist li.on').forEach((li) => li.classList.remove('on'));
+    const li = document.querySelector('#hist li[data-i="' + i + '"]');
+    if (!li) return;
+    li.classList.add('on');
+    panel.scrollTo({top: li.offsetTop - panel.clientHeight / 2 + li.offsetHeight / 2, behavior: 'smooth'});
+  }
+  function expand(map) {
+    const h = data || {visits: [], passes: {}};
+    if (map === 'friction' || map === 'workshop') {
+      const sel = document.querySelector('select.pass[data-pass="' + map + '"]');
+      const p = (h.passes[map] || [])[+(sel && sel.value)];
+      return p ? p.steps.map((s) => Object.assign({map: map}, s)) : [];
+    }
+    const out = [];
+    (map === 'detail' ? h.visits : onMap(h.visits, map)).forEach((s) => {
+      if (!s.pass) { out.push(Object.assign({map: map}, s)); return; }
+      const p = (h.passes[s.pass[0]] || [])[s.pass[1]];
+      if (p) p.steps.forEach((x) => out.push(Object.assign({map: s.pass[0], pass: p.label}, x)));
+    });
+    return out;
+  }
+  document.querySelectorAll('.play').forEach((b) => b.addEventListener('click', () => {
+    if (b.classList.contains('on')) { stop(); return; }
+    run(expand(b.dataset.play), b.dataset.label);
+    b.textContent = '■'; b.classList.add('on');
+  }));
+  bar.querySelector('.pl-pause').addEventListener('click', (ev) => {
+    paused = !paused; ev.target.textContent = paused ? '▶' : '⏸';
+    document.body.classList.toggle('pl-paused', paused);
+  });
+  bar.querySelector('.pl-speed').addEventListener('change', (ev) => { speed = +ev.target.value; });
+  bar.querySelector('.pl-stop').addEventListener('click', stop);
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !bar.hidden) stop(); });
+  function update(h) {
+    if (!h) return;
+    data = h;
+    ['friction', 'workshop'].forEach((map) => {
+      const sel = document.querySelector('select.pass[data-pass="' + map + '"]');
+      if (!sel) return;
+      const list = h.passes[map] || [], was = sel.value;
+      const sig = JSON.stringify(list.map((p) => p.label));
+      if (sel.dataset.sig === sig) return;
+      sel.dataset.sig = sig;
+      sel.textContent = '';
+      list.forEach((p, i) => { const o = document.createElement('option'); o.value = i; o.textContent = p.label; sel.append(o); });
+      if (!list.length) { const o = document.createElement('option'); o.textContent = 'no pass yet'; sel.append(o); }
+      sel.disabled = !list.length;
+      if (was && +was < list.length) sel.value = was;
+      else if (list.length) sel.value = list.length - 1;
+      document.querySelector('.play[data-play="' + map + '"]').disabled = !list.length;
+    });
+    document.querySelectorAll('.play').forEach((b) => {
+      if (b.dataset.play !== 'friction' && b.dataset.play !== 'workshop') b.disabled = false;
+    });
+    if (bar.hidden) list(expand('detail'), 'The whole process');
+  }
+  // The panel's two faces: what can be done now, and how it went.
+  function showTab(name) {
+    document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+    document.querySelectorAll('.tab').forEach((t) => { t.hidden = t.id !== 'tab-' + name; });
+  }
+  document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+  // What each place took, under its block, by the checkboxes above the maps.
+  const SHOW = {input: (n) => '✋ ' + n, cost: (n) => '$' + (n < 10 ? n.toFixed(2) : Math.round(n))};
+  function totals(kind, map) {
+    const m = ((data || {}).metrics || {})[kind] || {};
+    if (map !== 'overview' && map !== 'states') return m[map] || {};
+    const col = map === 'overview' ? 0 : 1, out = {};
+    Object.entries(m.detail || {}).forEach(([n, v]) => {
+      const to = (M.proj[n] || [])[col];
+      if (to) out[to] = (out[to] || 0) + v;
+    });
+    return out;
+  }
+  function drawMetrics() {
+    // The whole feature beside each checkbox: every map the metrics name,
+    // which share no place (the overview and the states, drawn from the
+    // detailed map here, are not among them).
+    document.querySelectorAll('.mt-total').forEach((b) => {
+      const m = ((data || {}).metrics || {})[b.dataset.kind] || {};
+      const sum = Object.keys(m).reduce((t, map) =>
+        t + Object.values(m[map] || {}).reduce((a, v) => a + v, 0), 0);
+      b.textContent = '· ' + (b.dataset.kind === 'cost' ? '$' + sum.toFixed(2) : sum);
+    });
+    document.querySelectorAll('.mt').forEach((t) => t.remove());
+    const on = [...document.querySelectorAll('.metrics input:checked')].map((c) => c.value);
+    ['detail', 'overview', 'states', 'workshop', 'friction'].forEach((map) => {
+      const per = {};
+      on.forEach((kind) => Object.entries(totals(kind, map)).forEach(([n, v]) => {
+        if (v) (per[n] = per[n] || []).push(SHOW[kind](v));
+      }));
+      Object.entries(per).forEach(([n, words]) => {
+        const g = svgEl(map, '[data-node="' + n + '"]');
+        if (!g) return;
+        const box = g.querySelector('.shape').getBBox();
+        const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        t.setAttribute('class', 'mt');
+        t.setAttribute('x', box.x + box.width - 2); t.setAttribute('y', box.y + box.height + 13);
+        t.setAttribute('text-anchor', 'end');
+        t.textContent = words.join('  ');
+        g.append(t);
+      });
+    });
+    try { localStorage.setItem('process-metrics', JSON.stringify(on)); } catch (e) {}
+  }
+  try {
+    const kept = JSON.parse(localStorage.getItem('process-metrics') || '[]');
+    document.querySelectorAll('.metrics input').forEach((c) => { c.checked = kept.includes(c.value); });
+  } catch (e) {}
+  document.querySelectorAll('.metrics input').forEach((c) => c.addEventListener('change', drawMetrics));
+  return {update: (h) => { update(h); if (h) drawMetrics(); }, stop: stop};
+})();
+"""
+
+PLAY_STYLE = """
+.play{font:600 13px var(--body);width:30px;height:26px;margin-left:10px;border-radius:7px;border:1px solid var(--line);
+background:var(--surface);color:var(--auto);cursor:pointer;vertical-align:middle}
+.play:hover:not(:disabled){border-color:var(--auto)}.play.on{background:var(--auto);color:var(--surface)}
+.play:disabled{opacity:.4;cursor:default}
+select.pass{font:13px var(--body);margin-left:8px;padding:3px 6px;border-radius:7px;border:1px solid var(--line);
+background:var(--surface);color:var(--ink);vertical-align:middle;max-width:min(380px,60vw)}
+#player{position:fixed;left:16px;bottom:16px;z-index:25;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 32px);
+padding:8px 10px;border-radius:12px;background:var(--surface);border:1px solid var(--line);
+box-shadow:0 6px 20px rgba(0,0,0,.18);font-size:13.5px}
+#player[hidden]{display:none}
+#player button,#player select{font:inherit;padding:3px 8px;border-radius:7px;border:1px solid var(--line);
+background:var(--surface);color:var(--ink);cursor:pointer}
+.pl-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.playing svg.map .node:not(.pl-now):not(.pl-seen){opacity:.4}
+body.playing svg.map .edge:not(.pl-go):not(.pl-went){opacity:.3}
+.node.pl-now .shape{stroke:var(--auto);stroke-width:5;filter:drop-shadow(0 0 10px var(--auto))}
+.node.pl-seen .shape{stroke-width:2.8}
+.edge.pl-go path.line{stroke:var(--auto);stroke-width:4;stroke-dasharray:10 6;animation:pl-flow .5s linear infinite}
+.edge.pl-went path.line{stroke:var(--auto);stroke-width:2.4}
+@keyframes pl-flow{to{stroke-dashoffset:-16}}
+body.pl-paused .edge.pl-go path.line{animation-play-state:paused}
+.pl-clock circle{fill:var(--surface);stroke:var(--auto);stroke-width:2}
+.pl-clock line{stroke:var(--ink);stroke-width:2;stroke-linecap:round}
+.pl-clock text,.pl-tag{font:700 12px var(--body);fill:var(--auto);paint-order:stroke;stroke:var(--paper);
+stroke-width:4px;stroke-linejoin:round}
+.pl-tag{font-size:11px}
+.metrics{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:10px 0 0;font-size:13.5px}
+.metrics label{display:flex;align-items:center;gap:5px;cursor:pointer}
+.mt{font:700 11.5px var(--body);fill:var(--violet);paint-order:stroke;stroke:var(--paper);stroke-width:4px;
+stroke-linejoin:round;pointer-events:none}
+.panel{position:sticky}
+.tabs{display:flex;gap:4px;margin:-4px 0 10px;padding:3px;border-radius:10px;background:var(--lane-b)}
+.tabs button{flex:1;font:600 13px var(--body);padding:6px 8px;border:0;border-radius:8px;background:none;
+color:var(--muted);cursor:pointer}
+.tabs button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+#hist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+#hist li{padding:5px 8px;border-radius:8px;cursor:pointer;border-left:3px solid transparent}
+#hist li:hover{background:var(--lane-b)}
+#hist li.on{background:var(--auto-soft);border-left-color:var(--auto)}
+#hist li.h-pass .h-t{font-weight:500;color:var(--muted)}
+.h-t{font-weight:600;font-size:14px}.h-m{color:var(--muted);font-size:12.5px}
+.h-via{color:var(--muted);font-size:12px}.h-via.back{color:var(--human)}
+.h-off{font:600 12px var(--body);color:var(--cloud);margin:6px 0 2px}
+"""
+
+
+def play_head(map_name, label, passes=False):
+    """▶ beside a map's heading; for a map of passes, the choice of one."""
+    out = '<button type="button" class="play" data-play="%s" data-label="%s" title="Play how the feature went" disabled>▶</button>' \
+        % (map_name, esc(label))
+    if passes:
+        out += '<select class="pass" data-pass="%s" aria-label="Which pass" disabled><option>no pass yet</option></select>' \
+            % map_name
+    return out
+
+
+PLAYER_BAR = """<div id="player" hidden><button type="button" class="pl-pause" title="Pause">⏸</button>
+<select class="pl-speed" aria-label="Speed"><option value="1">×1</option><option value="2">×2</option>
+<option value="4">×4</option></select><span class="pl-text"></span>
+<button type="button" class="pl-stop" title="Stop (Esc)">✕</button></div>"""
+
 
 LIVE_STYLE = """
 .live{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
@@ -1501,6 +2531,7 @@ padding:14px;max-height:calc(100vh - 24px);overflow:auto}
 .mini svg.map{min-width:0}
 .detail-card{max-height:calc(100vh - 120px);overflow:auto}
 .detail-card svg.map{width:auto;max-width:none}
+h2.first-map{margin-top:0}
 @media (max-width:900px){.live{grid-template-columns:1fr}.panel{position:static;max-height:none}}
 """
 
@@ -1523,27 +2554,44 @@ def page(label):
 <p class="muted"><a href="/__sclaude/">features</a> · <a href="/__sclaude/select?f=%s">open the feature</a></p>
 <h1>%s</h1>
 %s
+<div class="metrics"><span class="muted">Show on the maps:</span>
+<label title="Each time you stepped in: a message to Claude after its turn, an answer to its question or to sclaude's, a command run on the feature"><input type="checkbox" value="input"> ✋ your input <b class="mt-total" data-kind="input"></b></label>
+<label title="What Claude Code's own account says each conversation cost"><input type="checkbox" value="cost"> $ Claude's cost <b class="mt-total" data-kind="cost"></b></label></div>
 <div class="live" style="margin-top:14px">
 <div>
+<h2 class="first-map">The whole process%s</h2>
 <div class="card detail-card">%s</div>
-<h2>The cycle at a glance</h2><div class="card mini">%s</div>
-<h2>States</h2><div class="card mini">%s</div>
-<h2>How a session changes sclaude</h2><div class="card mini">%s</div>
-<h2>The friction review</h2><div class="card mini">%s</div>
+<h2>The cycle at a glance%s</h2><div class="card mini">%s</div>
+<h2>States%s</h2><div class="card mini">%s</div>
+<h2>How a session changes sclaude%s</h2><div class="card mini">%s</div>
+<h2>The friction review%s</h2><div class="card mini">%s</div>
 <h2>Every command</h2>%s
 </div>
 <aside class="panel">
+<div class="tabs" role="tablist"><button type="button" data-tab="actions" class="on">Actions</button><button type="button" data-tab="history">History</button></div>
+<div class="tab" id="tab-actions">
 <div class="muted" id="stamp">…</div>
 <h3>Where it stands</h3><div id="where">…</div><div class="muted" id="why"></div>
 <h3>What you can do now</h3><ul id="acts"></ul>
 <p id="err"></p>
+</div>
+<div class="tab" id="tab-history" hidden>
+<p class="muted">Played: <b id="hist-what">The whole process</b>. Click a place to play from it.</p>
+<ul id="hist"></ul>
+</div>
 </aside>
 </div>
 <button id="clear" type="button" hidden>Clear the selection</button>
-</main><script>%s%s</script></body></html>
-""" % (esc(label), STYLE, LIVE_STYLE, esc(label), esc(label), LEGEND, detail.svg(), overview.svg(),
-       states.svg(), Diagram(*node_sets()[3]).svg(), Diagram(*node_sets()[4]).svg(), commands_table(),
-       INTERACT_SCRIPT % {"model": json.dumps(client_model())}, script)
+%s
+</main><script>%s%s%s</script></body></html>
+""" % (esc(label), STYLE, LIVE_STYLE + PLAY_STYLE, esc(label), esc(label), LEGEND,
+       play_head("detail", "The whole process"), detail.svg(),
+       play_head("overview", "The cycle at a glance"), overview.svg(),
+       play_head("states", "States"), states.svg(),
+       play_head("workshop", "How a session changes sclaude", passes=True), Diagram(*node_sets()[3]).svg(),
+       play_head("friction", "The friction review", passes=True), Diagram(*node_sets()[4]).svg(),
+       commands_table(), PLAYER_BAR,
+       INTERACT_SCRIPT % {"model": json.dumps(client_model())}, PLAY_SCRIPT, script)
 
 
 # --- the command line --------------------------------------------------------
@@ -1569,6 +2617,17 @@ def main(argv):
                 epilogue = None
         node, why = position(state, argv[2] if len(argv) >= 3 else "", epilogue)
         print("%s\t%s\t%s" % (node, NODES[node][3], why))
+        return 0
+    if len(argv) >= 2 and argv[0] == "history":
+        try:
+            with open(argv[1]) as fh:
+                state = json.load(fh)
+        except (OSError, ValueError):
+            state = {}
+        here = argv[2] if len(argv) >= 3 and argv[2] in NODES else None
+        read = transcripts_of(argv[1])
+        print(json.dumps(history(state, read_history(argv[1]), here, read), ensure_ascii=False))
+        read.done()
         return 0
     if len(argv) >= 2 and argv[0] == "page":
         sys.stdout.write(page(argv[1]))

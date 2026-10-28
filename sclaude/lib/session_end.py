@@ -58,23 +58,32 @@ SESSION_ID = re.compile(r"^[A-Za-z0-9-]{1,128}$")
 # So every reader of a session's transcript reads the last one in this chain:
 # it holds the whole conversation, and reading the others as well would count
 # it twice. The chain stops at a transcript that is missing, and at a loop.
+def next_link(path):
+    """The session id one transcript says its conversation went on under:
+    the last well-formed one, or None. One link of `chain`, for a reader that
+    keeps the links it has read (process.py). A file that cannot be read
+    raises OSError: "no link" is an answer, a failed read is not."""
+    nxt = None
+    with open(path, "rb") as fh:
+        for line in fh:
+            if b'"continued-in"' not in line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            sid = entry.get("continuedInSessionId") \
+                if isinstance(entry, dict) and entry.get("type") == "continued-in" else None
+            if isinstance(sid, str) and SESSION_ID.match(sid):
+                nxt = sid
+    return nxt
+
+
 def chain(path):
     out = [path]
     while True:
-        nxt = None
         try:
-            with open(path, "rb") as fh:
-                for line in fh:
-                    if b'"continued-in"' not in line:
-                        continue
-                    try:
-                        entry = json.loads(line)
-                    except ValueError:
-                        continue
-                    sid = entry.get("continuedInSessionId") \
-                        if isinstance(entry, dict) and entry.get("type") == "continued-in" else None
-                    if isinstance(sid, str) and SESSION_ID.match(sid):
-                        nxt = sid
+            nxt = next_link(path)
         except OSError:
             break
         if not nxt:

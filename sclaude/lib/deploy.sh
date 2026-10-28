@@ -683,12 +683,14 @@ preview_ship() {
   url_file="$wt/.sclaude/local/feature/preview.url"
   rm -f "$url_file"
   ask_feed say "$(phase_line started deploy preview)"
+  history_add "$wt/.sclaude/local/feature/state.json" deploy.preview start
   for ((try = 1; try <= PREVIEW_TRIES; try++)); do
     if SCLAUDE_VERCEL_URL_FILE="$url_file" preview_deploy "$wt"; then
       deploy_remember "$wt" preview
       if [[ -s "$url_file" ]]; then
         state_set "$wt/.sclaude/local/feature/state.json" regression.preview.url "$(< "$url_file")"
       fi
+      history_add "$wt/.sclaude/local/feature/state.json" deploy.preview done
       ask_feed say "$(phase_line finished deploy preview)$([[ -s "$url_file" ]] && printf ' · %s' "$(< "$url_file")")"
       rm -f "$url_file"
       return 0
@@ -702,6 +704,7 @@ preview_ship() {
       # The topic's line is the phase's, with a sound; the terminal's names
       # the log right above it.
       alarm_here "  The preview deploy failed $PREVIEW_TRIES times — this needs a person to read the log above."
+      history_add "$wt/.sclaude/local/feature/state.json" deploy.preview failed
       ask_feed alarm "$(phase_line failed deploy preview) · $PREVIEW_TRIES tries, the log is in the terminal"
     fi
   done
@@ -905,6 +908,7 @@ qa_sent() {
   now="$(state_get "$state" deploy.preview.sha 2>/dev/null || true)"
   [[ -n "$now" && "$now" != "null" ]] || return 0
   state_set "$state" qa.sha "$now" 2>/dev/null || true
+  history_add "$state" qa in
 }
 
 # Records that QA accepted the preview commit they were sent (`qa.sha`), for
@@ -916,6 +920,7 @@ qa_accepted() {
   sent="$(state_get "$state" qa.sha 2>/dev/null || true)"
   [[ -n "$sent" && "$sent" != "null" ]] || return 0
   state_set "$state" qa.accepted "$sent" 2>/dev/null || true
+  history_add "$state" qa accepted
 }
 
 # --- the merge, when QA has passed and nothing is in the way -----------------
@@ -1266,6 +1271,7 @@ merge_offer() {
 
   echo ""
   echo "${GREEN}✓ PR #$pr merged.${OFF}"
+  [[ -n "$wt" ]] && history_add "$wt/.sclaude/local/feature/state.json" merge merged
   return 0
 }
 
@@ -1430,6 +1436,7 @@ qa_wait() {
         return 0
       elif qa_back_column "$now" && ! qa_back_column "$prev"; then
         [[ -t 1 && "$announced" -eq 1 ]] && printf '\r\033[2K'
+        history_add "$wt/.sclaude/local/feature/state.json" qa back
         return 2
       elif ! column_is "$now" "$QA_TO" && ! column_is "$now" "$said"; then
         [[ -t 1 && "$announced" -eq 1 ]] && printf '\r\033[2K'
@@ -1550,6 +1557,7 @@ merge_wait() {
   fi
   info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug"
   echo ""
+  [[ -n "$wt" ]] && history_add "$wt/.sclaude/local/feature/state.json" merge wait
   local pr_state
   while pr_state="$(branch_pr_state "$branch")"; [[ "$pr_state" != "MERGED" ]]; do
     if [[ "$pr_state" == "CLOSED" ]]; then
@@ -1613,6 +1621,7 @@ merge_wait() {
   done
   [[ -t 1 ]] && printf '\r\033[2K'
   echo "${GREEN}✓ PR #$pr merged.${OFF}"
+  [[ -n "$wt" ]] && history_add "$wt/.sclaude/local/feature/state.json" merge merged
   return 0
 }
 
@@ -1687,6 +1696,9 @@ remind_prod() {
   echo ""
   if [[ "${merged:-}" == "MERGED" ]]; then
     echo "${BOLD}Feature $slug: PR #$pr is merged.${OFF}"
+    # Seen here also when it was merged with nobody waiting: the history
+    # keeps the first time only (process.py).
+    history_add "$wt/.sclaude/local/feature/state.json" merge merged
     # A sync left open is over with the merge: it was for a merge that has
     # happened (on GitHub, past it), and the issue's summary stops naming it.
     sync_close_open "$wt/.sclaude/local/feature/state.json"
@@ -2237,9 +2249,11 @@ remind_prod() {
   # Production starts with a question, which reaches the phone by itself:
   # the topic hears only how it ended.
   if [[ "$prod_done" -eq 1 ]]; then
+    history_add "$wt/.sclaude/local/feature/state.json" deploy.prod done
     local prod_url; prod_url="$(project_prod_url "$wt" 2>/dev/null || true)"
     ask_feed say "$(phase_line finished deploy production)${prod_url:+ · $prod_url}"
   elif [[ "$prod_tried" -eq 1 ]]; then
+    history_add "$wt/.sclaude/local/feature/state.json" deploy.prod failed
     ask_feed alarm "$(phase_line failed deploy production) · the log is in the terminal"
   fi
 

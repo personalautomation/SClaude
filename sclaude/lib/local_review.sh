@@ -200,6 +200,7 @@ local_review_run() {
   # The lines above are indented, and the topic leaves those out: it hears
   # of the review by these two, here and at the end.
   ask_feed say "$(phase_line started local-review "${pr:-?}" "$round" $verify)"
+  history_add "$wt/.sclaude/local/feature/state.json" review.local start
   # An array: a "?" for a missing PR, split from a string, globbed.
   LOCAL_REVIEW_TOLD=("${pr:-?}" "$round" $verify)
   # Ctrl-C between passes too — while a pass's answer is recorded, or the
@@ -297,6 +298,7 @@ local_review_run() {
     info "  The local review leaves $count thread(s) open on PR #$pr." >&2
   fi
   ask_feed say "$(phase_line finished local-review "${pr:-?}" "$round" $verify) · $count open"
+  history_add "$wt/.sclaude/local/feature/state.json" review.local end open="$count"
   echo "$count"
 }
 

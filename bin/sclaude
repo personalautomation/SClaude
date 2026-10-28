@@ -1858,6 +1858,13 @@ main() {
   # about its tree.
   # `config set` is the bot's, from a press: a report, like `status`. The
   # screen `config` alone is a conversation.
+  # What the person ran, for the history of the feature it touches
+  # (history_command): `sclaude <name>` alone is a resume. The run is this
+  # process and everything sclaude starts below it — its re-execs after an
+  # update, `_done`, `_session-ended` — which inherit it: none of those is
+  # a command the person typed.
+  SCLAUDE_COMMAND="${1:-menu}"
+  export SCLAUDE_RUN="${SCLAUDE_RUN:-$$.${EPOCHSECONDS:-0}}"
   local kind="${1:-}"
   [[ "$kind" == config && "${2:-}" == set ]] && kind="config set"
   case "$kind" in

@@ -857,6 +857,7 @@ regression_run_body() {
   # production) was for the fix it led to, which is this run's to judge.
   state_set "$state" "regression.$stage.reason" null
   state_set "$state" "regression.$stage.started" "$(date -Iseconds)"
+  history_add "$state" "regression.$stage" start
   state_set "$state" "regression.$stage.failed_at" null
   # And the previous run's finishing time, or the state reads as a run that
   # ended before it began: started 13:56, finished 09:21.
@@ -885,6 +886,7 @@ regression_run_body() {
       state_set "$state" "regression.$stage.status" failed
       state_set "$state" "regression.$stage.failed_at" "$part"
       state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
+      history_add "$state" "regression.$stage" failed
       return 1
     fi
     part_started="$(date +%s)"
@@ -1054,6 +1056,7 @@ regression_run_body() {
     state_set "$state" "regression.$stage.unrunnable" true
     state_set "$state" "regression.$stage.failed_at" "$failed"
     state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
+    history_add "$state" "regression.$stage" unrunnable
     echo ""
     # Said to the phone by regression_notify_done, in a line of its own.
     warn_here "  Every spec failed and $base is not serving."
@@ -1069,6 +1072,7 @@ regression_run_body() {
     state_set "$state" "regression.$stage.unrunnable" null
     state_set "$state" "regression.$stage.failed_at" "$failed"
     state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
+    history_add "$state" "regression.$stage" failed
     # The terminal's line; the topic hears it from regression_notify_done,
     # once, with a sound — through the feed too it came twice.
     warn_here "  ── $passed/$count, $(regression_duration "$elapsed") · failed on $failed${failed_specs:+: $failed_specs}"
@@ -1082,6 +1086,7 @@ regression_run_body() {
   state_set "$state" "regression.$stage.failed_at" null
   state_set "$state" "regression.$stage.tree" "${tree:-null}"
   state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
+  history_add "$state" "regression.$stage" passed
   echo "  ${GREEN}── $passed/$count, $(regression_duration "$elapsed") — green.${OFF}"
   regression_notify_done "$slug" "$stage" "" "$passed" "$count" "$elapsed"
   return 0
@@ -1817,6 +1822,7 @@ regression_fix() {
   # A note left by a session before is not this one's finding, and is taken
   # off only now that a session is opening: one that never starts (its rules
   # unreadable, its prompt missing) leaves it for the next start's question.
+  history_add "$state" "fix.$stage" start session="$session"
   rm -f "$wt/.sclaude/local/feature/regression.blocked"
   session_watch_start "$wt" "$session"
   if [[ -n "$resume" ]]; then
@@ -1836,6 +1842,7 @@ regression_fix() {
   fi
   session_watch_stop
   fix_word_set "$state" "$stage" fix_finished "$(date -Iseconds)"
+  history_add "$state" "fix.$stage" end session="$session"
 
   # The session said its fix is in and the watcher closed it; the gate's next
   # run is the judge. Its report is printed here, since claude's screen went

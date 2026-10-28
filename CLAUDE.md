@@ -205,6 +205,18 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-10-26 with the process map: a map that
   disagrees with the code is worse than none. -->
 
+- A feature's history, `.sclaude/local/feature/history.jsonl` beside its
+  state, is written by `session_runs` and `history_add` in
+  `sclaude/lib/state.sh` and read by `HISTORY_FILE`/`history` in
+  `sclaude/lib/process.py`, which knows the `what` and `op` words the
+  writers use (`regression.<stage>`, `fix.<stage>`, `qa in`, `workshop
+  main`, `ask answered` from `ask_log` in `io.sh`, `command` from
+  `history_command`…); a word changed on one side alone drops that place
+  from the played history, or an input from its count, without an error.
+  `tests/process.py` runs both sides.
+
+  <!-- Added by Claude on 2026-10-28 with the played history of a feature. -->
+
 - The DORA page, `.sclaude/local/dora/index.html` in the product's main
   checkout, is written by `DIR`/`PAGE` in `sclaude/lib/dora.py` and served by
   `DORA_PAGE` in `bin/sclaude-proxy`; `tests/dora.py` and `tests/proxy.py`

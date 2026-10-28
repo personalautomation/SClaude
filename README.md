@@ -737,7 +737,18 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   leads to. It follows the feature as it moves (every few seconds). The list of
   features links it on a line of its own, "<feature> — Process map (BPMN)",
   and under main the same line opens the whole cycle with no feature on it
-  (`/__sclaude/bpmn`).
+  (`/__sclaude/bpmn`). The panel beside it switches between **Actions** and
+  **History**: every place the feature stood on, when and for how long, and
+  the arrow it left by. ▶ by a map's heading plays how the feature went on
+  that map — a clock on each place counting its time, then the arrow it took,
+  a friction review or a change to sclaude jumping to its own map and back;
+  by those two maps' headings a list chooses which pass to play. While it
+  plays the History follows it, and a click on a line plays from there. The
+  history starts with sessions run since sclaude keeps it. Checkboxes above
+  the maps put under each block what it took: ✋ your input — each message to
+  Claude after its turn, each answer to its question or to sclaude's, each
+  command run on the feature at the terminal — and Claude's cost in dollars,
+  each checkbox showing the whole feature's total beside it.
 - `localhost:3000/__sclaude/dora` — the product's metrics, linked under main
   as "main — DORA metrics": DORA, delivery, development quality, Claude's work
   and token efficiency. Production deploys and builds come from Vercel, each

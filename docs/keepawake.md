@@ -424,7 +424,11 @@ at once: while it was off its name left public DNS, and it comes back only after
 minutes (five, once). A phone that asks too early is told the name does not
 exist and keeps that answer five minutes more. So `gate_origin` counts the
 funnel only once the name is published — asked of the zone's own nameserver,
-which keeps no answer, with DNS over HTTPS when that fails — and until then
+which keeps no answer, with DNS over HTTPS when that fails, and the system's
+resolver only when DNS over HTTPS cannot be reached at all (some networks
+block every such service by name; asked otherwise, the network's resolver
+would keep "no such name" for a phone on the same Wi-Fi; a tailnet address it
+gives is left out, as it reaches the node and not the relay) — and until then
 nothing offers the app. The bot says it is waiting (`phone_wait`) and turns that
 message into "phone access is on" when it is ready; past fifteen minutes it
 offers the app anyway and logs why. The loop (`check_phone`) notices every

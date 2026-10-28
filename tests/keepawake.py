@@ -930,7 +930,8 @@ with sandbox() as box:
     os.environ["KEEPAWAKE_CHAT_ID"] = "12345"
     from keepawake import telegramd
     # Public DNS is never asked: a funnel's name counts as published unless
-    # a check says otherwise.
+    # a check says otherwise. The real one is kept for the check of it.
+    REAL_NAME_PUBLISHED = telegramd.name_published
     telegramd.name_published = lambda host: True
     # The probe answers at once here; the loop runs it in a thread.
     telegramd.PROBE_ASYNC = False
@@ -1876,6 +1877,54 @@ if os.path.exists(cfg):
             serve["Web"]["box.tail1.ts.net:8443"]["Handlers"]["/"]["Proxy"] = "http://127.0.0.1:3001"
             serve["AllowFunnel"] = {}
             check("served on the tailnet only is not phone access", tg_menu.gate_origin(), "")
+
+            # Every DNS-over-HTTPS service blocked by name: the system's
+            # resolver finds the relays, a tailnet address (MagicDNS) aside,
+            # and the gate must answer through them.
+            import socket as _socket
+            saved = (tg_menu.doh, _socket.getaddrinfo, tg_menu.funnel_answers)
+            tcp = (_socket.SOCK_STREAM, _socket.IPPROTO_TCP, "")
+            try:
+                def blocked(name, rtype):
+                    raise OSError("refused")
+                tg_menu.doh = blocked
+                _socket.getaddrinfo = lambda host, port, **kw: [
+                    (_socket.AF_INET6, *tcp, ("2a00:dd80:3e::b3a", 0, 0, 0)),
+                    (_socket.AF_INET, *tcp, ("100.101.102.103", 0)),
+                    (_socket.AF_INET, *tcp, ("176.58.90.145", 0)),
+                    (_socket.AF_INET, *tcp, ("176.58.90.145", 0))]
+                check("the system's resolver: public relays, IPv4 first, the tailnet's left out",
+                      tg_menu.system_addresses("box.tail1.ts.net"),
+                      ["176.58.90.145", "2a00:dd80:3e::b3a"])
+                probed = []
+                tg_menu.funnel_answers = lambda host, port, address: (
+                    probed.append((port, address)), False)[1]
+                check("DNS over HTTPS blocked: the relays are still probed, on the gate's port",
+                      (REAL_NAME_PUBLISHED("box.tail1.ts.net"), sorted({p for p, _ in probed}),
+                       "100.101.102.103" in [a for _, a in probed]),
+                      (False, [tg_menu.GATE_FUNNEL_PORT], False))
+                tg_menu.funnel_answers = lambda host, port, address: True
+                check("and with the gate answering it is published",
+                      REAL_NAME_PUBLISHED("box.tail1.ts.net"), True)
+                # DNS over HTTPS reachable and saying "no such name": the
+                # network's resolver is not asked, so it keeps no such answer
+                # for a phone on the same Wi-Fi.
+                asked = []
+                tg_menu.doh = lambda name, rtype: []
+                _socket.getaddrinfo = lambda *a, **kw: asked.append(a) or []
+                check("DNS over HTTPS answering empty: the system's resolver is left alone",
+                      (REAL_NAME_PUBLISHED("box.tail1.ts.net"), asked), (False, []))
+                def busy(name, rtype):
+                    raise tg_menu.urllib.error.HTTPError("https://dns.google", 503, "busy", {}, None)
+                tg_menu.doh = busy
+                check("nor when it answers with an HTTP error: it was reached",
+                      (REAL_NAME_PUBLISHED("box.tail1.ts.net"), asked), (False, []))
+                def no_name(*a, **kw):
+                    raise _socket.gaierror("no such name")
+                _socket.getaddrinfo = no_name
+                check("no name anywhere: nothing to probe", tg_menu.system_addresses("x.ts.net"), [])
+            finally:
+                tg_menu.doh, _socket.getaddrinfo, tg_menu.funnel_answers = saved
         finally:
             tg_menu.run = saved_run
     finally:

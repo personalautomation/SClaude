@@ -917,7 +917,12 @@ def phone_on():
 #
 # The name is asked of the zone's own nameserver, which keeps no answer: a
 # resolver asked too early would itself remember "no such name" for minutes.
-# DNS over HTTPS stands in when that fails.
+# DNS over HTTPS stands in when that fails, and the system's resolver only
+# when DNS over HTTPS cannot be reached at all: some networks block every
+# such service by name, and the probe then never found the name and the app
+# waited the full PUBLISH_WAIT_MAX after every restart. Not when it answers
+# "no such name": the system's resolver is the network's, a phone on the same
+# Wi-Fi asks it too, and it would keep that answer for minutes.
 PUBLISHED = {"host": "", "at": 0.0, "ok": False, "since": 0.0}
 # How often a name not yet published is asked again.
 PUBLISH_RECHECK = 10
@@ -969,6 +974,29 @@ def dns_addresses(server, name):
     return found
 
 
+def system_addresses(host):
+    """The public addresses the system's resolver has for host, IPv4 first:
+    the last resort of name_published. Public only: a resolver with MagicDNS
+    answers the node's name with a tailnet address (100.64.0.0/10,
+    fd7a:115c:a1e0::/48), which reaches the node directly and says nothing
+    about the funnel's relays, and is_global is false for both ranges."""
+    import ipaddress
+    import socket
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except (OSError, UnicodeError):
+        return []
+    found = []
+    for family, _, _, _, sockaddr in sorted(infos, key=lambda i: i[0] != socket.AF_INET):
+        try:
+            ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        if ip.is_global and str(ip) not in found:
+            found.append(str(ip))
+    return found
+
+
 def funnel_answers(host, port, address):
     """True when the funnel at address carries a request to the gate: TLS
     under the funnel's name, and an HTTP answer back. A relay that has not
@@ -1005,7 +1033,14 @@ def name_published(host, port=None):
         # an empty answer, which raise nothing: a public resolver then.
         try:
             addresses = [a for a in doh(host, "A") if a.count(".") == 3]
-        except (OSError, ValueError):
+        except urllib.error.HTTPError:
+            # Reached, and it said no (a 429, a 503): as good as "no such name".
+            addresses = []
+        except OSError:
+            # DNS over HTTPS out of reach — refused, or no answer in time, as
+            # where its servers are dropped: the system's resolver then.
+            addresses = system_addresses(host)
+        except ValueError:
             addresses = []
     return any(funnel_answers(host, port, a) for a in addresses[:2])
 

@@ -706,11 +706,12 @@ def main():
     finally:
         shutil.rmtree(product_tree, ignore_errors=True)
 
-    # `sclaude core-open` is asked of the person in a step, every session; the
-    # reviews (--step friction) open the workshop without a question.
-    for command, step, want in (("sclaude core-open", "code", "ask"),
-                                ("/x/bin/sclaude core-open", "review", "ask"),
-                                ("cd sub && sclaude core-open", "pr", "ask"),
+    # `sclaude core-open` is refused a step's session, its friction review
+    # changing sclaude; the reviews (--step friction) open the workshop.
+    for command, step, want in (("sclaude core-open", "code", DENY),
+                                ("/x/bin/sclaude core-open", "review", DENY),
+                                ("cd sub && sclaude core-open", "pr", DENY),
+                                ("sclaude core-open", "sync", DENY),
                                 ("sclaude core-open", "friction", ALLOW),
                                 ("sclaude core-ready", "code", ALLOW),
                                 ("sclaude checks 5", "review", ALLOW)):
@@ -718,6 +719,16 @@ def main():
                   env={"CLAUDE_PROJECT_DIR": PRODUCT})
         if got != want:
             failures.append(("core-open", command, want, got))
+    # Its refusal sends the step on with its work, not to the person.
+    done = subprocess.run([sys.executable, os.path.join(HOOKS, "forbidden-commands.py"),
+                           "--step", "code", "--root", PRODUCT],
+                          input=json.dumps({"tool_name": "Bash",
+                                            "tool_input": {"command": "sclaude core-open"}}),
+                          text=True, capture_output=True, timeout=20,
+                          env=dict(os.environ, CLAUDE_PROJECT_DIR=PRODUCT))
+    reason = json.loads(done.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+    if not reason.endswith("carry on with the step's own work.") or "stop" in reason:
+        failures.append(("core-open-goes-on", reason))
 
     for command, step, want in BY_STEP:
         got = run("forbidden-commands.py", command, step=step)
@@ -1003,6 +1014,7 @@ def main():
     for marker in const("collect-denials.py", "OWN_MARKERS"):
         if not any(marker in tail for tail in (
                 const("_failsafe.py", "TAIL"),
+                const("forbidden-commands.py", "CORE_OPEN_TAIL"),
                 const("no-code-in-planning.py", "REASON"),
                 const("plan-on-disk.py", "TAIL"),
                 const("write-guard.py", "REASON"),

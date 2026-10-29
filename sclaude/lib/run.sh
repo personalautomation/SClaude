@@ -149,12 +149,12 @@ sys.stdout.write(feature_in_history(sys.argv[2]))' "$LIB" "$wt" 2>/dev/null || t
   esac
 
   # The paragraph on changing sclaude in the tree's workshop (workshop.sh):
-  # asked of the person in a step, free in the retrospective. The epilogue,
-  # whose tree is gone, and step 1, which writes nothing, have none.
+  # the retrospective's alone among the steps' prompts. A step's session logs
+  # what got in its way (friction.log), and its friction review changes
+  # sclaude; `sclaude core-open` is refused it (forbidden-commands.py).
   local -x SCLAUDE_B_WORKSHOP=""
   case "$step" in
-    code|pr|review|sync) SCLAUDE_B_WORKSHOP="$(workshop_rules "$wt" ask)" ;;
-    retro|retro-again) SCLAUDE_B_WORKSHOP="$(workshop_rules "$wt" free)" ;;
+    retro|retro-again) SCLAUDE_B_WORKSHOP="$(workshop_rules "$wt")" ;;
   esac
 
   python3 "$LIB/render_prompt.py" "$file" "$PROMPTS" \
@@ -926,7 +926,25 @@ session_ended() {
     step_run "$wt" "$step" drop "$session"
     warn ""
     warn "  claude exited immediately — the step never started."
-    warn "  See what it printed above; the step stays where it was."
+    # Run in a tab, it printed there, and the tab went with it: what is
+    # "above" here is sclaude's own output. The tab's log kept the rest.
+    local tab_end=""
+    pane_marked "$session" && tab_end="$(pane_last_exit "$wt")"
+    if [[ -n "$tab_end" ]]; then
+      local code="${tab_end%%$'\n'*}" line
+      case "$code" in
+        130|143) warn "  Its tab ended it (exit $code): Ctrl-C there, or the tab was closed." ;;
+        0)       warn "  It exited on its own (exit 0) before the session began." ;;
+        *)       warn "  It exited with code $code." ;;
+      esac
+      if [[ "$tab_end" == *$'\n'* ]]; then
+        info "  What it wrote:"
+        while IFS= read -r line; do info "    $line"; done <<<"${tab_end#*$'\n'}"
+      fi
+      info "  The tab's log: $PANE_LOG. The step stays where it was."
+    else
+      warn "  See what it printed above; the step stays where it was."
+    fi
     return 0
   fi
   # The review round is over: the automatic review closed every finding this
@@ -1113,22 +1131,82 @@ sync_acceptance() {
 #
 # Only new identifiers are written; a criterion worded differently in the plan
 # is reported, as sync_acceptance reports it. Quiet when nothing changed: this
-# runs after every code session.
+# runs after every code session, and as the review closes, with `reworded`.
+#
+#   extend_acceptance <wt> [reworded]
 extend_acceptance() {
-  local wt="$1" ac_issue out word line
+  local wt="$1" asked="${2:-}" ac_issue out word line details
   ac_issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue || true)"
   [[ -n "$ac_issue" && "$ac_issue" != "null" && -f "$wt/.sclaude/local/feature/plan.md" ]] || return 0
   out="$(python3 "$LIB/acceptance.py" --extend "$ac_issue" "$wt/.sclaude/local/feature/plan.md" "$wt" 2>/dev/null || true)"
   word="${out%%$'\n'*}"
+  details="$(tail -n +2 <<<"$out")"
+  # `reworded`: the caller asks about those itself (reword_acceptance), and
+  # "edit them in GitHub" here would contradict its question.
+  [[ "$asked" == reworded ]] && details="$(grep -v ' reads differently$' <<<"$details" || true)"
   case "$word" in
     written|extended)
                 info "  Acceptance criteria on issue #$ac_issue updated from the plan:"
-                while IFS= read -r line; do info "    $line"; done < <(tail -n +2 <<<"$out") ;;
+                while IFS= read -r line; do [[ -n "$line" ]] && info "    $line"; done <<<"$details" ;;
     unchanged|nothing) ;;
-    differs)    warn "  The plan's acceptance criteria differ from issue #$ac_issue — only new ones are added:"
-                while IFS= read -r line; do info "    $line"; done < <(tail -n +2 <<<"$out")
+    differs)    [[ -n "$details" ]] || return 0
+                warn "  The plan's acceptance criteria differ from issue #$ac_issue — only new ones are added:"
+                while IFS= read -r line; do info "    $line"; done <<<"$details"
                 info "  The issue is where corrections land. If the plan is right, edit the criteria in GitHub." ;;
     *)          warn "  Could not add the new acceptance criteria to issue #$ac_issue ($word) — they are in .sclaude/local/feature/plan.md only." ;;
+  esac
+}
+
+# The criteria the review reworded in the plan, offered to the issue before QA.
+#
+# The review changes what a feature does at the person's word, and its session
+# rewords the criterion in the plan (prompts/review.md). The issue keeps the old
+# text — extend_acceptance writes only new criteria — and QA, or the automatic
+# acceptance, then ticked a behaviour nobody built any more. Asked rather than
+# written: a criterion the person reworded in GitHub reads differently from the
+# plan too, and there the issue is right. A "no" is remembered for that same
+# difference, so the question does not come back with every round.
+#
+#   reword_acceptance <wt>
+reword_acceptance() {
+  local wt="$1" state="$1/.sclaude/local/feature/state.json" plan="$1/.sclaude/local/feature/plan.md"
+  local ac_issue out word details mark kept answer cid have want
+  ac_issue="$(state_get "$state" issue 2>/dev/null || true)"
+  [[ -n "$ac_issue" && "$ac_issue" != "null" && -f "$plan" ]] || return 0
+  out="$(python3 "$LIB/acceptance.py" --reworded "$ac_issue" "$plan" "$wt" 2>/dev/null || true)"
+  word="${out%%$'\n'*}"
+  [[ "$word" == differs || "$word" == body ]] || return 0
+  details="$(tail -n +2 <<<"$out")"
+  mark="$(printf '%s' "$details" | sha1sum | cut -c1-16)"
+  kept="$(state_get "$state" acceptance.kept 2>/dev/null || true)"
+  [[ "$kept" == "$mark" ]] && return 0
+  echo ""
+  warn "  The plan words these acceptance criteria otherwise than issue #$ac_issue:"
+  while IFS=$'\t' read -r cid have want; do
+    info "    $cid in the issue: $have"
+    info "    $cid in the plan:  $want"
+  done <<<"$details"
+  info "  QA ticks the issue's wording — a criterion changed in the review and left there is ticked as it was."
+  if [[ "$word" == body ]]; then
+    warn "  Issue #$ac_issue keeps its criteria in the description, which sclaude never writes: edit them there before QA."
+    return 0
+  fi
+  ask "${BOLD}  Write the plan's wording into issue #$ac_issue? [y/n] ${OFF}" answer yn
+  # Only a no is kept: no answer at all (no terminal, no channel) settles
+  # nothing, and the question comes again at the next close.
+  if is_no "$answer"; then
+    state_set "$state" acceptance.kept "$mark" 2>/dev/null || true
+    info "  Left as the issue says."
+    return 0
+  fi
+  if ! is_yes "$answer"; then
+    warn "  No answer: issue #$ac_issue keeps its wording, and this is asked again as the review next closes."
+    return 0
+  fi
+  out="$(python3 "$LIB/acceptance.py" --reword "$ac_issue" "$plan" "$wt" 2>/dev/null || true)"
+  case "${out%%$'\n'*}" in
+    reworded) info "  Issue #$ac_issue now reads as the plan, those boxes empty again." ;;
+    *)        warn "  Could not write issue #$ac_issue — edit those criteria in GitHub before QA." ;;
   esac
 }
 
@@ -1334,7 +1412,11 @@ after_step() {
             && "$pr_state" == "MERGED" ]]; then
         echo ""
         case "$(state_get "$state" reopened_by 2>/dev/null || true)" in
-          prod) warn "  This is still the pull request production was rolled back from (#$seen_pr)." ;;
+          prod) if [[ "$(state_get "$state" regression.prod.deploy_failed 2>/dev/null || true)" =~ ^(null)?$ ]]; then
+                  warn "  This is still the pull request production was rolled back from (#$seen_pr)."
+                else
+                  warn "  This is still the pull request whose ship to production failed (#$seen_pr)."
+                fi ;;
           returned|qa) warn "  This is still the pull request the feature was returned on (#$seen_pr)." ;;
           *)    warn "  This is still the merged pull request the review was reopened on (#$seen_pr)." ;;
         esac
@@ -1346,6 +1428,11 @@ after_step() {
         return 0
       fi
 
+      # Before QA reads the criteria: a merged pull request has had its QA.
+      if [[ "$pr_state" != "MERGED" ]]; then
+        extend_acceptance "$wt" reworded
+        reword_acceptance "$wt"
+      fi
       if [[ "$pr_state" == "MERGED" ]]; then
         info "  PR #${pr:-?} is merged — the review is done."
       elif no_deploy_feature "$wt"; then
@@ -1532,8 +1619,12 @@ collect_denials() {
   # worktree's root. The silence on an error is deliberate, as in note() itself:
   # statistics that were not gathered are no reason to bring a feature's cycle
   # down.
+  # A sync runs under the review step's rules (sync_session's step_settings),
+  # so a ban those set on purpose is known as one.
+  local rules=""
+  [[ "$step" == sync ]] && rules=review
   CLAUDE_PROJECT_DIR="$wt" SCLAUDE_POLICY_PERSON="$(developer_name 2>/dev/null)" \
-    python3 "$HOOKS/collect-denials.py" \
+    SCLAUDE_POLICY_STEP="$rules" python3 "$HOOKS/collect-denials.py" \
     "$step" "$transcript" 2>/dev/null || true
 }
 
@@ -1689,6 +1780,11 @@ run_friction() {
     local rest="${step#fix-}"
     label="${rest%-*}"
     head_prompt="$PROMPTS/friction-fix.md"
+  elif [[ "$step" == sync ]]; then
+    # The sync with main, numbered as a step of the cycle but no step of
+    # STEP_SPEC: step_title has no name for it.
+    label="sync"
+    head_prompt="$PROMPTS/friction.md"
   else
     label="$(step_title "$step")"
     head_prompt="$PROMPTS/friction.md"
@@ -1777,6 +1873,15 @@ for stage, node in (saved.get("regression") or {}).items():
             name = "fix after regression" if stage == "local" else "fix after %s regression" % stage
             out.append("%s — %s" % (name, chain(found[0])[-1]))
 
+# The syncs with main, which are not steps either and have their own friction
+# reviews (sync-N): named as their rows in the issue (run_rows in github.sh).
+syncs = [r for r in ((saved.get("sync") or {}).get("runs") or []) if isinstance(r, dict)]
+for number, run in enumerate(syncs, start=1):
+    if run.get("session"):
+        path = chain(os.path.join(base, run["session"] + ".jsonl"))[-1]
+        if os.path.exists(path):
+            out.append("sync with main%s — %s" % (" (%d)" % number if len(syncs) > 1 else "", path))
+
 print("; ".join(out) if out else base)
 PYEOF
 )"
@@ -1813,7 +1918,7 @@ PYEOF
   # The paragraph on changing sclaude in the feature's workshop (workshop.sh),
   # free here: the plan I approve is the yes. Put in whole, past sed, since it
   # runs to several lines.
-  prompt="$(WORKSHOP_RULES="$(workshop_rules "$wt" free)" python3 -c '
+  prompt="$(WORKSHOP_RULES="$(workshop_rules "$wt")" python3 -c '
 import os, sys
 sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSHOP_RULES"]))' <<< "$prompt")"
 
@@ -2874,7 +2979,8 @@ review_reopen() {
 }
 
 # Says, once a pull request and loudly, that the review's report finds the rounds
-# no longer converging (steps.review.stuck, written by review_report), and how
+# no longer converging, or fed by their own fixes (steps.review.stuck, written
+# by review_report), and how
 # to end the search: each round's new findings went to a fresh session for as
 # long as the person did not press `s` — eighteen rounds on one feature, most
 # of their findings in what users do not see. Said, not asked: this runs when

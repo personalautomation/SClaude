@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
 from acceptance import (AC_CLOSE, AC_OPEN, NOTE, PLACEHOLDER, merge_section,
                         parse, plan_content, plan_section, plan_verdict,
                         render, section, status, sync, unticked, extend,
-                        tick_all)
+                        tick_all, reword)
 import issue_comments  # noqa: E402
 
 failures = []
@@ -514,6 +514,43 @@ check("extend-issue-only-quiet", extend("71", PLAN), ("unchanged", []))
 
 stub(None)
 check("extend-unreadable", extend("71", GROWN)[0], "unreadable")
+
+
+# --- reword: a criterion the review changed, written at the person's yes ------
+#
+# Only criteria both sides have and word differently; their box empties, the
+# rest of the comment stays.
+
+edited = []
+acceptance.issue_comments.edit = \
+    lambda cid, text, cwd=None: edited.append((cid, text)) or True
+REWORDED = PLAN.replace("A draft 404s for anyone but its author.",
+                        "A draft 404s for anyone but its author and the admins.")
+before = comment("- [x] AC1. A guest sees only published events.\n"
+                 "  QA: checked on staging.\n"
+                 "- [x] AC2. A draft 404s for anyone but its author.\n"
+                 "- [ ] AC7. Added in GitHub.")
+stub(issue(human, (6, before)))
+check("reword-lists", reword("71", REWORDED),
+      ("differs", ["AC2\tA draft 404s for anyone but its author.\t"
+                   "A draft 404s for anyone but its author and the admins."]))
+check("reword-lists-writes-nothing", edited, [])
+word, details = reword("71", REWORDED, write=True)
+check("reword-word", word, "reworded")
+after = parse(edited[-1][1])
+check("reword-new-text", after[1][1], "A draft 404s for anyone but its author and the admins.")
+check("reword-box-emptied", after[1][2], False)
+check("reword-other-tick-kept", after[0][2], True)
+check_true("reword-note-kept", "QA: checked on staging." in edited[-1][1])
+check_true("reword-github-only-kept", "AC7. Added in GitHub." in edited[-1][1])
+stub(issue(human, (6, before)))
+check("reword-same-unchanged", reword("71", PLAN.replace(
+    "- [ ] AC2. A draft 404s for anyone but its author.\n", "")), ("unchanged", []))
+stub(issue(body("- [ ] AC2. A draft 404s for anyone but its author.")))
+check("reword-never-writes-a-body", reword("71", REWORDED, write=True)[0], "body")
+check("reword-lists-a-body-as-body", reword("71", REWORDED)[0], "body")
+stub(None)
+check("reword-unreadable", reword("71", REWORDED)[0], "unreadable")
 
 
 # --- the comment id ------------------------------------------------------------

@@ -11,6 +11,9 @@
 # a later plan that disagrees with it is reported rather than written over.
 # The one exception is growth: a criterion step 2 agreed with the human mid-way
 # is appended after the session (--extend), and nothing already there changes.
+# A criterion the review reworded in the plan is the other: it is shown to the
+# human as the review closes, and written over the issue's only at their yes
+# (--reword).
 # From there they are the one statement of what this feature has to do that
 # outlives the worktree: the plan is rewritten whenever development deviates,
 # the commits describe what was built rather than what was asked for, and
@@ -477,6 +480,63 @@ def extend(number, plan_text, cwd=None):
     return "extended", ["%s added" % c for c, _ in added] + differ
 
 
+def reword(number, plan_text, cwd=None, write=False):
+    """The criteria the plan words otherwise than the issue. (word, details).
+
+    The review changes what a feature does at the person's word, and the
+    criterion that described the old behaviour is reworded in the plan, under
+    the same identifier. extend() reports such a criterion and leaves it — the
+    issue is where corrections land — so QA, or the automatic acceptance,
+    ticked the wording nobody built any more. This lists them for the person,
+    and with `write` puts the plan's wording into our comment, at the person's
+    yes.
+
+    Only criteria both sides have and word differently are touched. Their box
+    is emptied: a tick was given to the old text. Every other line, the ticks
+    and any note QA left stay as they were, the promise sync() and extend()
+    keep. One a person reworded in GitHub reads differently too, which is why
+    nothing is written without that yes.
+
+    "differs"     — details are "<id>\\t<issue's text>\\t<plan's text>" lines;
+    "reworded"    — with `write`, those criteria now read as the plan does;
+    "unchanged"   — nothing both sides have reads differently;
+    "body"        — the same details, for criteria that live in the
+                    description, which is never written: listing or not;
+    and "unreadable", "torn", "refused" as for tick_all().
+    """
+    issue = fetch(number, cwd)
+    if issue is None:
+        return "unreadable", []
+    own, text = source(issue)
+    planned = dict(plan_criteria(plan_section(plan_text) or ""))
+    changed = [(cid, have, planned[cid]) for cid, have, _ in parse(text)
+               if cid in planned and planned[cid] != have]
+    if not changed:
+        return "unchanged", []
+    details = ["%s\t%s\t%s" % row for row in changed]
+    # Before the listing's word: a yes to writing a description is a yes to
+    # nothing, so the person is not asked for one.
+    if own is None:
+        return "body", details
+    if not write:
+        return "differs", details
+    new_text = dict((cid, body) for cid, _, body in changed)
+    lines = []
+    for line in section(text).split("\n"):
+        found = CRITERION.match(line)
+        if found and found.group("id") in new_text:
+            cid = found.group("id")
+            line = "- [ ] %s. %s" % (cid, new_text[cid])
+        lines.append(line)
+    new = merge_section(text, lines)
+    if new is None:
+        return "torn", details
+    cid = issue_comments.comment_id(own)
+    if cid is None or not issue_comments.edit(cid, new, cwd):
+        return "refused", details
+    return "reworded", details
+
+
 def status(number, cwd=None):
     """The criteria as QA left them in the issue, one line each, or ""."""
     return "\n".join("%s %s. %s" % ("✓" if done else "☐", cid, text)
@@ -541,7 +601,7 @@ def main():
     argv = sys.argv[1:]
     mode = None
     if argv and argv[0] in ("--sync", "--extend", "--status", "--unticked",
-                            "--verdict", "--tick"):
+                            "--verdict", "--tick", "--reworded", "--reword"):
         mode, argv = argv[0], argv[1:]
     try:
         if mode == "--verdict":
@@ -562,6 +622,14 @@ def main():
             sys.stdout.write("\n".join([word] + details) + "\n")
             return 0 if word in ("written", "extended", "unchanged",
                                  "nothing") else 1
+        if mode in ("--reworded", "--reword"):
+            # --reworded lists, --reword writes; the word first either way.
+            with open(argv[1]) as fh:
+                plan_text = fh.read()
+            cwd = argv[2] if len(argv) > 2 else None
+            word, details = reword(number, plan_text, cwd, write=mode == "--reword")
+            sys.stdout.write("\n".join([word] + details) + "\n")
+            return 0 if word in ("differs", "reworded", "unchanged", "body") else 1
         cwd = argv[1] if len(argv) > 1 else None
         if mode == "--tick":
             word = tick_all(number, cwd)
@@ -574,7 +642,8 @@ def main():
         else:
             sys.stdout.write(render(number, cwd))
     except Exception:
-        return 1 if mode in ("--sync", "--extend", "--verdict", "--tick") else 0
+        return 1 if mode in ("--sync", "--extend", "--verdict", "--tick",
+                             "--reworded", "--reword") else 0
     return 0
 
 

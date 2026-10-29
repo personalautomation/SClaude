@@ -16,9 +16,21 @@ numbers against cycle_number, every place `position` can answer against the
 nodes. A change to the cycle that is not made here fails there.
 
 Layout: BPMN with vertical lanes, the flow running down. Each node sits in a
-lane and a row; an edge running down bends in the gap above its target, and
-one running back up goes round by a channel on the right, so no line crosses
-a node. Vertical lanes keep the width to a page's, and the length is what
+lane and a row; an edge running down turns in the gap under its block, one
+running back up goes round by a channel on the right and one with a node in
+its way by one on the left — on the right, inside the ways back, between
+lanes right of the middle — so no line crosses a node. The ways round by a
+channel into one block share it, a trunk: one carries it in, the others
+join it with a small arrow, a chevron on the trunk past each. The arrows follow
+three rules: out — on each side of a block the
+way reaching farthest leaves from that side's corner along its row, the
+others from below, each turning on its own level right under the block,
+the farthest first, labelled there; in — several ways into a block enter
+its top apart, in the order they come from, the ways back nested; the
+channels — nested by how far they go, each turning above its target's row
+by how near its channel is (Diagram.corners, levels, entries). Each gap
+between rows is as tall as what runs in it, and where nothing turns in it
+the lower row rises into the upper one's height (Diagram._rows). Vertical lanes keep the width to a page's, and the length is what
 splits across pages.
 
     process.py doc <out.html>
@@ -27,6 +39,7 @@ splits across pages.
     process.py page <label>              a feature's page shell, for a check
 """
 
+import contextlib
 import datetime
 import html
 import json
@@ -43,13 +56,13 @@ LANES = [
     ("sclaude", "sclaude"),
     ("session", "Claude session"),
     ("github", "GitHub"),
-    ("watch", "Timer & bot"),
 ]
 
 # A node: id -> (lane, row, kind, title, text, flags).
 # kind: start, end, task, session, gate, wait, hold, user.
 # flags: "F" a friction review follows the session; "W" it may change sclaude
-# in its tree's workshop.
+# in its tree's workshop itself — its prompt carries <block:workshop>: the
+# retrospective; a step's findings reach sclaude through its friction review.
 NODES = {
     # start
     "new": ("person", 0, "start", "sclaude new",
@@ -58,11 +71,9 @@ NODES = {
                 "worktree from origin/main, branch feat/<slug>, its own dev server and database", ""),
     "board_start": ("github", 1, "task", "Issue taken",
                     "Backlog → In progress, Start date", ""),
-    "main_in": ("sclaude", 2, "task", "Main merged in",
-                "before every step, without asking; a conflict goes to the sync (5)", ""),
     # step 1
     "plan": ("session", 3, "session", "1 · plan",
-             "the issue, its parents and the manuals; scope first, then a plan with acceptance criteria", "FW"),
+             "the issue, its parents and the manuals; scope first, then a plan with acceptance criteria", "FS"),
     "approve": ("person", 4, "user", "Correct and approve",
                 "the scope, then the plan with its criteria", ""),
     "plan_check": ("sclaude", 5, "gate", "Plan read back?",
@@ -71,83 +82,66 @@ NODES = {
            "a comment of their own, AC1, AC2, …", ""),
     # step 2
     "code": ("session", 6, "session", "2 · code",
-             "builds it, checks it in Chrome, commits with Requirement: ACn", "FW"),
+             "builds it, checks it in Chrome, commits with Requirement: ACn", "FRS"),
     "works": ("person", 7, "gate", "Does it work?",
               "your yes; a no goes back with what is wrong", ""),
-    "reg_local": ("sclaude", 8, "gate", "Local regression green?",
-                  "the project's suite against the feature's server", ""),
-    "fix_local": ("session", 8, "session", "Fix after regression",
-                  "makes the red tests green — two sessions at most, then it stops for you", "F"),
     # step 3
     "pr": ("session", 9, "session", "3 · pr",
-           "manuals updated, a draft PR by the pr skill, the criteria as QA's checklist", "FW"),
+           "manuals updated, a draft PR by the pr skill, the criteria as QA's checklist", "FS"),
     "pr_check": ("sclaude", 10, "gate", "PR there, all pushed?",
                  "a pull request on GitHub carrying every commit", ""),
     "draft_pr": ("github", 10, "task", "Draft PR",
-                 "the review workflow reads it (review: github)", ""),
+                 "assigned to its author, in the issue's milestone", ""),
+    "ci_review": ("github", 11, "task", "Review on CI",
+                  "the project's review workflow reads each push; sclaude waits for its check", ""),
     # step 4
     "local_pass": ("session", 11, "task", "Local review passes",
-                   "review: local — read-only passes; findings posted on the PR", ""),
+                   "review: local — read-only passes; findings posted on the PR", "S"),
     "review_found": ("sclaude", 12, "gate", "Anything to answer?",
                      "findings, comments, red checks; none — no session at all", ""),
     "review": ("session", 13, "session", "4 · review",
-               "fixes the findings through subagents, pushes, one round, stops", "FW"),
+               "fixes the findings through subagents, pushes, one round, stops", "FRS"),
     "round": ("sclaude", 14, "gate", "Round closed: context under 40%?",
               "yes — the same session takes the new findings; no — a fresh one", ""),
     "review_close": ("sclaude", 15, "gate", "Nothing open, local regression green?",
-                     "no thread, no red or running check; then step 4 is done", ""),
+                     "no thread, no red or running check; then step 4 is done", "R"),
     # end of the cycle
-    "hold": ("sclaude", 16, "gate", "Production red and carrying it?",
-             "a red last run, a failed or refused rollback — the cycle holds", ""),
-    "hold_ways": ("person", 16, "hold", "Held",
-                  "regression <name> prod · rollback · return", ""),
-    "merge_check": ("sclaude", 17, "gate", "Merges with main?",
-                    "git merge-tree, no session; before the preview, after QA, while waiting", ""),
-    "sync": ("session", 17, "session", "5 · sync",
-             "merges origin/main in, resolves the conflicts, checks, pushes", "W"),
-    "preview": ("sclaude", 18, "task", "Preview",
-                "deployed (three tries), the preview regression run against it", ""),
-    "preview_ok": ("sclaude", 19, "gate", "Preview green?",
-                   "red — the fix goes on from step 4", ""),
-    "fix_preview": ("session", 19, "session", "Fix after preview",
-                    "makes the preview's tests green, from step 4", "F"),
-    "in_qa": ("github", 20, "task", "Issue → In QA",
-              "the preview is what QA looks at", ""),
-    "watch": ("watch", 20, "wait", "QA watched",
-              "sclaude-watch polls the column, tells the feature's topic", ""),
-    "qa_check": ("qa", 21, "user", "QA checks the criteria",
+    "preview": ("sclaude", 17, "task", "Preview",
+                "deployed (three tries), the preview regression run against it", "RS"),
+    # The QA watch is folded in: a timer of its own lane, it only watched.
+    "in_qa": ("github", 19, "task", "Issue → In QA",
+              "the preview is what QA looks at; a timer watches the column", ""),
+    "qa_check": ("qa", 20, "user", "QA checks the criteria",
                  "on the preview, ticking them in the issue", ""),
-    "qa_verdict": ("qa", 22, "gate", "Done, or back?",
+    "qa_verdict": ("qa", 21, "gate", "Done, or back?",
                    "Done — on to the merge; In progress — a hand-back", ""),
-    "handoff": ("sclaude", 23, "task", "PR handed over",
-                "ready for review, Backlog, a summary for whoever merges", ""),
-    "merge": ("person", 24, "gate", "Merge?",
+    "handoff": ("sclaude", 22, "task", "PR handed over",
+                "ready for review, Backlog, a summary for whoever merges", "S"),
+    "merge": ("person", 23, "gate", "Merge?",
               "offered, or done by sclaude when the project says merge: auto", ""),
-    "merge_wait": ("sclaude", 24, "wait", "Waiting for the merge",
-                   "polls every 30 s; main checked every 2 min", ""),
-    "merged": ("github", 25, "task", "Merged",
-               "Closes #N closes the issue; Target date; PR → Done", ""),
-    "ship": ("person", 26, "gate", "Ship to production?",
+    "merge_wait": ("sclaude", 23, "wait", "Waiting for the merge",
+                   "polls every 30 s; main checked every 2 min", "S"),
+    "merged": ("github", 24, "task", "Merged",
+               "Target date; PR → Done; the issue held open to the end", ""),
+    "ship": ("person", 25, "gate", "Ship to production?",
              "asked after the merge", ""),
-    "prod": ("sclaude", 27, "task", "Production",
-             "the promote of migrations, vercel --prod, the production regression", ""),
-    "prod_ok": ("sclaude", 28, "gate", "Production green?",
-                "red — rolled back before anything is fixed", ""),
-    "rollback": ("sclaude", 29, "task", "Rollback",
-                 "the previous deployment, the down blocks, a check, the incident on the issue", ""),
-    "fix_prod": ("session", 29, "session", "Fix after production",
-                 "told what failed and that production runs the old release", "F"),
-    "epilogue": ("session", 30, "session", "6 · epilogue",
+    "prod": ("sclaude", 26, "task", "Production",
+             "the promote of migrations, vercel --prod, the production regression", "R"),
+    # The same status session where the run stops at a red preview, drawn
+    # beside it rather than reached across the map.
+    "epi_preview": ("session", 17, "session", "6 · epilogue", "the status: preview red, or green after red", ""),
+    "epilogue": ("session", 29, "session", "6 · epilogue",
                  "Current status on the issue and every parent; deployed-* labels", ""),
-    "done_cmd": ("person", 31, "user", "sclaude done",
-                 "offered at the end; the clean-up after the merge", ""),
-    "retro": ("session", 32, "session", "7 · retro",
+    "done_cmd": ("sclaude", 30, "task", "sclaude done",
+                 "called by the run after the epilogue; by hand later", ""),
+    "retro": ("session", 31, "session", "7 · retro",
               "what was missed, what could work better, what sclaude could do better", "W"),
-    "retro_fix": ("sclaude", 33, "gate", "The retro changed the code?",
+    "retro_fix": ("sclaude", 32, "gate", "The retro changed the code?",
                   "yes — its commits go out from step 3", ""),
-    "cleanup": ("sclaude", 34, "task", "Clean-up",
-                "the cycle's record; asks, then removes the worktree, branches and database", ""),
-    "end": ("sclaude", 35, "end", "Done", "", ""),
+    "cleanup": ("person", 33, "gate", "Clean up?",
+                "remove the worktree, branches, database; the record stays", ""),
+    "end": ("sclaude", 34, "end", "Done", "", ""),
+    "kept": ("person", 34, "end", "Kept", "later: sclaude done <name>", ""),
 }
 
 # How each session runs: model · effort · permission mode. Shown in the note
@@ -171,7 +165,7 @@ SPEC = {
 }
 
 # What each block does, at more length than fits on it: the note under the
-# pointer. The overview's and the states' blocks borrow these (ALIAS).
+# pointer. The overview's blocks borrow these (ALIAS).
 DETAILS = {
     "new": "Lists the repository's open issues, yours first, and suggests a branch name from the chosen one; or takes a name typed by hand. From the phone the Mini App asks the same and starts it with the answers.",
     "prepare": "Branches feat/<slug> from a fresh origin/main into a worktree of its own, links the environment and hard-links node_modules, claims a port and a <feature>.localhost address, and on a local database starts a Supabase stack for this feature alone.",
@@ -187,46 +181,46 @@ DETAILS = {
     "fix_local": "A separate session gets the failing log and fixes the cause, then the suite runs again. Two sessions that do not make it green stop the cycle and tell you: a third guess at the same failure rarely helps.",
     "pr": "Updates the manuals the change touches and opens a draft pull request through the pr skill, with the criteria copied in as QA's unticked checklist and Closes #N for the issue.",
     "pr_check": "sclaude looks for the pull request on GitHub and for commits it does not carry. Missing either: the session is sent back to finish, at most twice.",
-    "draft_pr": "The draft is assigned to its author and put in the issue's milestone. The project's review workflow reads it, unless the review runs on this machine or is off.",
+    "draft_pr": "The draft is assigned to its author and put in the issue's milestone. Who reviews it is the project's review setting.",
+    "ci_review": "With review set to github, the project's review workflow in Actions reviews the pull request on every push and posts its findings as threads. sclaude waits for its check before step 4 opens a session, and each round's next findings come from its run on the round's push.",
     "local_pass": "With review set to local, read-only claude -p passes review the pull request here and post their findings as threads signed by this machine. A key in the terminal or in the topic ends the search.",
     "review_found": "Findings, unresolved threads, comments and red checks are gathered before any session. Nothing to answer: step 4 closes with no session at all.",
     "review": "The session fixes the findings through subagents, keeping only the coordination, pushes, and stops once the automatic review has confirmed the fixes and posted the next round.",
     "round": "A watcher ends the session when the round closes. Under 40% context the same conversation takes the new findings; above it a fresh one does, after the round's friction review. Rounds that stop converging are said once.",
     "review_close": "Leaving step 4 closes it only when nothing is open — no unresolved thread, no running or red check — and the local regression is green again. Otherwise sclaude waits, says what is open, and offers the session back.",
-    "hold": "Production carries this feature and its last run there was red, could not run, or has another release on top. The cycle ships, closes and cleans up nothing until a person chooses a way out.",
-    "hold_ways": "sclaude regression <name> prod runs production's suite again (green lifts the hold); sclaude rollback puts the previous release back and sends the fix to step 4; sclaude return fixes forward from step 4.",
+    "hold_ways": "Production carries this feature and its regression there was not green, with nothing rolled back: the rollback failed or was refused, another release landed on top and the repeated run was red too, or the suite could not run in a broken environment (a project with no production suite or address is not held). A red run made by hand lands here as well. Every later pass of sclaude <name> checks this first and stops on it, so nothing is shipped, closed or cleaned up. The ways out: sclaude regression <name> prod runs production's suite again, and green goes on to the epilogue; sclaude rollback puts the previous release back and sends the fix to step 4; sclaude return fixes forward from step 4.",
     "merge_check": "git merge-tree tells in memory whether the branch merges cleanly with main — no session, no GitHub call. Asked before the preview, after QA's yes, and every two minutes while waiting for the merge.",
     "sync": "Merges origin/main into the branch (never a rebase), resolves each conflict keeping both sides' intent, checks the result as the project's CLAUDE.md says and pushes. sclaude then checks it settled; a pull request handed over goes back to a draft.",
-    "preview": "Deploys the worktree to a preview from the main repository (up to three tries), applies the branch's migrations there, and runs the preview regression against the deployment. An unchanged tree already green is not deployed again.",
+    "preview": "Deploys the worktree to a preview from the main repository (up to three tries), applies the branch's migrations there, and runs the preview regression against the deployment. An unchanged tree already green is not deployed again. A deploy that fails three times goes to the fixing session as a red run does — the command that failed named — and deploys again; after two such sessions it is yours.",
     "preview_ok": "Green: the issue goes to In QA. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there.",
     "fix_preview": "A fixing session in step 4, where the pull request is open and pushes reach the branch, with the failing run's log. The fix goes the whole way round again.",
-    "in_qa": "The issue moves to In QA only after the preview's tests passed, so the column says something true. The QA watch starts.",
-    "watch": "A systemd timer looks at the issue's column every few minutes and tells the feature's topic; it hands the pull request over when QA says Done, even with nobody at the terminal. It changes nothing else.",
+    "in_qa": "The issue moves to In QA only after the preview's tests passed, so the column says something true. The QA watch starts: a systemd timer looks at the issue's column every few minutes and tells the feature's topic; it hands the pull request over when QA says Done, even with nobody at the terminal. It changes nothing else.",
     "qa_check": "QA opens the preview, checks each acceptance criterion and ticks it in the issue's comment. Nothing ticks a box but a person, unless the project's qa setting says so.",
     "qa_verdict": "Done goes on to the merge. In progress or Backlog is a hand-back: everything said since on the issue and the pull request is collected word for word and opens step 4 with it.",
     "handoff": "The draft is marked ready, moved to Backlog, its assignees cleared, and a summary for whoever merges is posted: the preview, QA's verdict, the criteria, the review's findings, the checks.",
-    "merge": "The merge is yours unless the project's config says merge: auto. sclaude offers it once QA passed and GitHub says the way is clear; declined, it waits.",
+    "merge": "The merge is yours unless the project's config says merge: auto. sclaude offers it once QA passed, GitHub says the way is clear and the pull request, merged with the newer main, builds and passes its checks; declined, or that check red, it waits.",
     "merge_wait": "Polls GitHub every 30 seconds for the merge and checks every two minutes whether main moved into a conflict. Ctrl-C leaves the wait and loses nothing.",
-    "merged": "GitHub closes the issue by Closes #N; sclaude fills Target date with today so the roadmap's bar ends when the work did, and moves the pull request to Done.",
-    "ship": "Asked once the merge is in. The deployment production runs now is recorded first, for a rollback. A no goes on to the epilogue with production postponed.",
-    "prod": "The project's promote of migrations if the branch has any, then vercel --prod from the main repository, then the production regression against production.",
-    "prod_ok": "Green: deployed-prod is labelled and the cycle goes on. Red: production is rolled back before anything is fixed.",
+    "merged": "sclaude fills Target date with today so the roadmap's bar ends when the work did, and moves the pull request to Done. GitHub closes the issue by Closes #N, and sclaude reopens it: it closes it itself when the cycle ends — shipped once production is green, declined after a no to production.",
+    "ship": "Asked once the merge is in. The deployment production runs now is recorded first, for a rollback. A no closes the issue as declined and goes on to the epilogue; shipping later is vercel --prod from the repository.",
+    "prod": "The project's promote of migrations if the branch has any, then vercel --prod from the main repository, then the production regression against production. A ship that fails reopens step 4 at once, its session told which command failed; production's suite runs first when the promote began, since the old code may stand on the new migrations.",
+    "prod_ok": "Green: deployed-prod is labelled, the issue closes and the cycle goes on. Red: production is rolled back before anything is fixed. A red that is not rolled back holds the cycle: when the rollback fails or is refused, when another release landed on top during the run and the repeated run is red too, and when the suite could not run in a broken environment.",
     "rollback": "vercel rollback to the recorded deployment, the migrations' down blocks only when every one is runnable, a check that the old release serves, and an incident comment on the issue.",
     "fix_prod": "Opens in step 4 with the failing run's log, told that production runs the previous release and that the local suite is the check that matters. The fix goes round again: local, merge, preview, production.",
     "epilogue": "A short session writes a Current status comment on the issue and on every parent up the chain, and Current behaviour where the product now differs from a description. Labels deployed-preview and deployed-prod are set by how each stage ended.",
-    "done_cmd": "Offered at the end of the cycle; also from the menu. It checks the merge with GitHub, runs the retrospective, then asks before removing anything.",
+    "done_cmd": "Called by the run itself once production is settled, with no question of its own; by hand from the menu or the terminal later, after a no to the clean-up. It checks the merge with GitHub, runs the retrospective, then asks once before removing anything.",
     "retro": "Reads the plan, the friction logs and the terminal's record of the cycle: what you may have missed, how the work could go better, what sclaude could do better. It may fix sclaude in its workshop.",
     "retro_fix": "Commits the retrospective made on the feature's branch go out the way the feature's own did: back to step 3 for their pull request and the review.",
-    "cleanup": "Appends the cycle's record to ~/.claude/sclaude/cycles.jsonl, then asks before removing the worktree, the branches and the feature's database.",
+    "cleanup": "Shows what would go and asks once: Remove all of it? Yes appends the cycle's record to ~/.claude/sclaude/cycles.jsonl and removes the worktree, the branches and the feature's database; no keeps all of it.",
+    "kept": "A no to the clean-up keeps everything: the worktree, the branches, the database. sclaude done <name> asks again.",
     "end": "The feature is done: merged, shipped or postponed, its outcome written into the issues. sclaude drop ends it here too, from any step: the worktree, the branches, the pull request and the issue (closed as not planned), each asked about.",
     "f_trip": "During any step or fixing session, a hook refuses a command, a rule of --disallowed-tools fires, Claude Code's auto-mode classifier refuses, or the session itself notes what got in its way, or proposes a rule for the project's CLAUDE.md.",
     "f_log": "The hooks append each refusal to .sclaude/local/feature/friction.log as it happens: the time, the step, the source, the subject, the reason. The classifier's refusals leave no event, so they are gathered from the transcript once the session ends.",
-    "f_empty": "Asked after every step's session, every review round that goes to a fresh session and every fixing session. An empty log needs no session: the issue's Friction column says nothing for it — the ordinary case.",
+    "f_empty": "Asked after every step's session, every review round that goes to a fresh session, every sync with main and every fixing session. An empty log needs no session: the issue's Friction column says nothing for it — the ordinary case.",
     "f_none": "Nothing got in the session's way that a rule refused: the cycle goes straight on.",
     "f_rules": "A log of nothing but proposed CLAUDE.md rules needs no session: they are put off to the monthly review, where how often a class comes back decides it. With SCLAUDE_FRICTION_ASK=on you are asked first, and now hands them to a review told to write them in.",
     "f_classify": "One call of a small model reads the proposals, the classes already put off and CLAUDE.md, and says of each: the same as a class already there, a rule CLAUDE.md already states, or new. Checked, not trusted; a failure leaves the rows as they came.",
     "f_review": "A session in plan mode, in the feature's tree, reads this session's entries and its transcript and decides each one. It may change the product's rules on the feature's branch, and sclaude itself in the workshop. It ends with a verdict line.",
-    "f_hold": "A review interrupted, or one that never started, stays open and holds the cycle: the next step waits until sclaude friction finishes it or sclaude reset closes it.",
+    "f_hold": "A review interrupted, or one that never started, stays open: after a step's session, a review round or a sync the run waits until sclaude friction finishes it or sclaude reset closes it; after a fixing session the stage goes on, and the next review waits for it.",
     "f_plan": "The review starts in plan mode, so nothing changes before you approve its plan: which file each change goes to, and why.",
     "f_decide": "A restriction that blocked ordinary work and protects nothing is lifted; one working as intended is explained; one a single feature is not enough evidence for is put off; a bug in sclaude's own code is fixed in sclaude.",
     "f_lift": "An allow or deny entry in the product's policy.json (the team's, or the person's own), a rule in the project's CLAUDE.md, or an addition to a step's prompt — committed on the feature's branch, to reach main with its pull request.",
@@ -237,13 +231,15 @@ DETAILS = {
     "f_push": "The review's commits are pushed to the feature's branch and go through its pull request's review. A feature already merged gets a pull request of their own.",
     "f_next": "The cycle goes on: the next step, the next review round, or the next fixing session.",
     "f_monthly": "sclaude deferred, offered once a month: every feature's put-off rows together. A class that keeps coming back is decided — a rule lifted, a preset changed, a CLAUDE.md line written — and its rows removed.",
-    "w_find": "Any session sclaude runs may find something to fix in sclaude itself: a step, a fixing session, the retrospective, a friction review, the monthly review. sclaude's live checkout is read-only to all of them.",
-    "w_ask": "In a step Claude Code asks you, every session anew: the model cannot answer it, in auto mode too. The retrospective and the friction and monthly reviews start in plan mode, so their approved plan is the yes.",
+    "w_find": "The retrospective, a friction review or the monthly review finds something to fix in sclaude itself. A step's session does not change sclaude: it logs what got in its way, and its friction review brings it here. sclaude's live checkout is read-only to all of them.",
+    "w_ask": "The retrospective and the friction and monthly reviews start in plan mode: the plan you approve, with the change to sclaude in it, is the yes, and sclaude core-open opens without a question.",
     "w_open": "Makes the tree's workshop, a worktree of sclaude from origin/main at .sclaude/local/instruments, shared by every session of the tree, and lets this session write there.",
     "w_change": "The session commits in the workshop and reviews its change: /sreview for a maintainer of sclaude, whatever review they choose for anybody else.",
     "w_ready": "Refuses uncommitted work and records the head as ready; for a maintainer it wants sreview's mark of a finished run at that head.",
     "w_exit": "Publishing starts from claude_launch once the session exits, whatever step it was in.",
     "w_ready_gate": "A change uncommitted, unreviewed at its head or never marked ready is not published.",
+    "w_pending": "The change waits in the workshop: it is offered again whenever the tree is opened, and later sessions' changes wait behind it.",
+    "w_held": "A no to the product's details keeps the change unpublished at the head it was shown; it goes on once a new commit is marked ready.",
     "w_back": "The same conversation is offered back, told what is missing. A no records it as pending: it is offered again when the feature is next opened, and later sessions' changes wait behind it.",
     "w_leaks": "sclaude is public and the product is not: the added lines and the commit messages are searched for the product's repository and folder names, the feature's slug and branch, issue and pull-request numbers, and paths of the product's own files.",
     "w_leak_ask": "A hit is shown to you, in the terminal and in the topic when it is short. A yes is kept for the lines it was shown; a no holds the change at its head until a new commit is marked ready.",
@@ -252,14 +248,13 @@ DETAILS = {
     "w_main": "Rebased onto origin/main, squashed into one commit, pushed to main; the live checkout is fast-forwarded when nothing runs from it, so the next session runs the fix.",
     "w_pr": "Pushed unsquashed to the workshop's own dev/<name>-<time> branch, never named after the feature, as one pull request per tree; the maintainer's review of it is the gate.",
 }
+# The epilogue's copies beside the stops are its session.
+DETAILS["epi_preview"] = DETAILS["epilogue"]
 ALIAS = {
     "o_new": "new", "o_plan": "plan", "o_approve": "approve", "o_code": "code", "o_works": "works",
-    "o_reg": "reg_local", "o_pr": "pr", "o_review": "review", "o_ghreview": "draft_pr",
-    "o_sync": "sync", "o_preview": "preview", "o_qa": "qa_check", "o_merge": "merge", "o_prod": "prod",
-    "o_epilogue": "epilogue", "o_retro": "retro", "o_end": "cleanup",
-    "s_plan": "plan", "s_code": "code", "s_pr": "pr", "s_review": "review", "s_sync": "sync",
-    "s_preview": "preview", "s_qa": "qa_check", "s_merge": "merge_wait", "s_hold": "hold_ways",
-    "s_epilogue": "epilogue", "s_retro": "retro", "s_done": "end",
+    "o_pr": "pr", "o_review": "review", "o_ghreview": "draft_pr",
+    "o_preview": "preview", "o_qa": "qa_check", "o_merge": "merge", "o_prod": "prod",
+    "o_epilogue": "epilogue", "o_epi_preview": "epi_preview", "o_retro": "retro", "o_end": "cleanup",
 }
 
 # An edge: (from, to, label, kind). kind: "" the flow, "back" a return, "msg"
@@ -267,24 +262,24 @@ ALIAS = {
 EDGES = [
     ("new", "prepare", "", ""),
     ("prepare", "board_start", "", "msg"),
-    ("prepare", "main_in", "", ""),
-    ("main_in", "plan", "", ""),
+    ("prepare", "plan", "", ""),
     ("plan", "approve", "", ""),
+    # Your corrections go back into the plan's session, until you approve.
+    ("approve", "plan", "corrections", "back"),
     ("approve", "plan_check", "approved", ""),
     ("plan_check", "plan", "not found — sent back (≤2)", "back"),
     ("plan_check", "ac", "", "msg"),
     ("plan_check", "code", "yes", ""),
     ("code", "works", "", ""),
     ("works", "code", "no — what is wrong", "back"),
-    ("works", "reg_local", "yes", ""),
-    ("reg_local", "fix_local", "red", ""),
-    ("fix_local", "reg_local", "again", "back"),
-    ("reg_local", "pr", "green", ""),
+    ("works", "pr", "yes", ""),
     ("pr", "pr_check", "", ""),
     ("pr_check", "pr", "no — sent back (≤2)", "back"),
     ("pr_check", "draft_pr", "", "msg"),
-    ("draft_pr", "local_pass", "review: local", ""),
+    ("draft_pr", "ci_review", "", ""),
+    ("draft_pr", "local_pass", "", ""),
     ("draft_pr", "review_found", "", ""),
+    ("ci_review", "review_found", "", ""),
     ("local_pass", "review_found", "", ""),
     ("review_found", "review", "yes", ""),
     ("review_found", "review_close", "nothing — step closes", ""),
@@ -292,17 +287,9 @@ EDGES = [
     ("round", "review", "next round", "back"),
     ("round", "review_close", "session left", ""),
     ("review_close", "review", "no", "back"),
-    ("review_close", "hold", "yes", ""),
-    ("hold", "hold_ways", "yes", ""),
-    ("hold", "merge_check", "no", ""),
-    ("merge_check", "sync", "conflict", ""),
-    ("sync", "merge_check", "settled", "back"),
-    ("merge_check", "preview", "clean", ""),
-    ("preview", "preview_ok", "", ""),
-    ("preview_ok", "fix_preview", "red", ""),
-    ("fix_preview", "review", "step 4 reopened", "back"),
-    ("preview_ok", "in_qa", "green", "msg"),
-    ("in_qa", "watch", "", "msg"),
+    ("review_close", "preview", "yes", ""),
+    ("preview", "in_qa", "green", "msg"),
+    ("preview", "review", "red, or the deploy failed: fixed from step 4", "back"),
     ("in_qa", "qa_check", "", ""),
     ("qa_check", "qa_verdict", "", ""),
     ("qa_verdict", "review", "hand-back: their words open step 4", "back"),
@@ -311,21 +298,28 @@ EDGES = [
     ("merge", "merged", "yes", ""),
     ("merge", "merge_wait", "not now", ""),
     ("merge_wait", "merged", "merged on GitHub", ""),
-    ("merge_wait", "sync", "main moved into a conflict", "back"),
+    # The branch moved — a sync after a conflict with main, or commits from
+    # elsewhere — and the run starts over on the new code (remind_prod).
+    ("handoff", "preview", "the branch moved", "back"),
+    ("merge_wait", "preview", "the branch moved", "back"),
     ("merged", "ship", "", ""),
+    # Where the run stops at a red preview and has the issue's status written
+    # (run_status in remind_prod), and where it goes green after a red status
+    # and has it written again: the epilogue's session, drawn beside it.
+    ("preview", "epi_preview", "red; green after red", "msg"),
     ("ship", "prod", "yes", ""),
+    # One way each into the epilogue: the status is written there for the
+    # production block's stops too — main not ready (asked after the yes),
+    # production red (whose fix goes back to step 4 by its own way).
     ("ship", "epilogue", "no", ""),
-    ("prod", "prod_ok", "", ""),
-    ("prod_ok", "rollback", "red", ""),
-    ("rollback", "fix_prod", "", ""),
-    ("fix_prod", "review", "step 4 reopened", "back"),
-    ("prod_ok", "epilogue", "green", ""),
+    ("prod", "epilogue", "green, red, or main not ready", ""),
+    ("prod", "review", "red: rolled back, or held; the ship failed", "back"),
     ("epilogue", "done_cmd", "", ""),
     ("done_cmd", "retro", "", ""),
     ("retro", "retro_fix", "", ""),
     ("retro_fix", "pr", "yes — step 3 again", "back"),
     ("retro_fix", "cleanup", "no", ""),
-    ("cleanup", "end", "", ""),
+    ("cleanup", "end", "yes", ""), ("cleanup", "kept", "no", ""),
 ]
 
 # The overview: the cycle at a glance.
@@ -337,32 +331,47 @@ OVERVIEW_NODES = {
     "o_approve": ("person", 1, "user", "Approve", "the plan and its criteria", ""),
     "o_code": ("session", 2, "session", "2 · code", "build, check, commit", "F"),
     "o_works": ("person", 2, "gate", "Works?", "your yes", ""),
-    "o_reg": ("sclaude", 3, "gate", "Tests green?", "a fix session if not", ""),
     "o_pr": ("session", 4, "session", "3 · pr", "manuals, draft PR", "F"),
     "o_review": ("session", 5, "session", "4 · review", "round after round", "F"),
     "o_ghreview": ("github", 5, "task", "Automatic review", "findings on the PR", ""),
-    "o_sync": ("session", 6, "session", "5 · sync", "only on a conflict with main", ""),
-    "o_preview": ("sclaude", 6, "task", "Preview", "deployed and tested", ""),
-    "o_qa": ("person", 7, "gate", "QA", "Done or back", ""),
-    "o_merge": ("person", 8, "user", "Merge", "yours, or auto", ""),
-    "o_prod": ("sclaude", 9, "gate", "Production", "shipped and tested", ""),
+    # The sync with main is no block of its own: it runs ahead of most of
+    # them, and S on each says so (SYNC_NODES has its map). QA's and the
+    # merge's are their own: the sync there is sclaude's, after QA's yes and
+    # during the wait, not the person's.
+    "o_preview": ("sclaude", 6, "gate", "Preview", "deployed and tested", ""),
+    "o_qa": ("person", 7, "gate", "QA", "Done or back", "S"),
+    "o_merge": ("person", 8, "user", "Merge", "yours, or auto", "S"),
+    "o_prod": ("sclaude", 9, "gate", "Production", "shipped on your yes, tested; red, not rolled back: held here", ""),
+    "o_epi_preview": ("session", 6, "session", "6 · epilogue", "the status: red, or green after red", ""),
     "o_epilogue": ("session", 10, "session", "6 · epilogue", "status up the issue chain", ""),
     "o_retro": ("session", 11, "session", "7 · retro", "lessons, sclaude's fixes", ""),
     "o_end": ("sclaude", 12, "end", "Clean-up", "", ""),
 }
 OVERVIEW_EDGES = [
     ("o_new", "o_plan", "", ""), ("o_plan", "o_approve", "", ""),
-    ("o_approve", "o_code", "", ""), ("o_code", "o_works", "", ""),
-    ("o_works", "o_reg", "yes", ""), ("o_works", "o_code", "no", "back"),
-    ("o_reg", "o_pr", "green", ""), ("o_pr", "o_ghreview", "", "msg"),
-    ("o_ghreview", "o_review", "", "msg"),
-    ("o_review", "o_preview", "nothing open", ""),
-    ("o_preview", "o_sync", "conflict", ""), ("o_sync", "o_preview", "", "back"),
+    # Your corrections go back to the plan's session, until you approve.
+    ("o_approve", "o_plan", "corrections", "back"),
+    ("o_approve", "o_code", "approved", ""), ("o_code", "o_works", "", ""),
+    ("o_works", "o_pr", "yes", ""), ("o_works", "o_code", "no", "back"),
+    ("o_pr", "o_ghreview", "", "msg"),
+    ("o_ghreview", "o_review", "findings", "msg"),
+    # A round: the session pushes its fixes, the review reads the push and
+    # brings the next findings — until sclaude finds nothing open.
+    ("o_review", "o_ghreview", "push", "msg"),
+    ("o_review", "o_preview", "nothing open, tests green", ""),
     ("o_preview", "o_qa", "green", ""),
-    ("o_preview", "o_review", "red", "back"),
+    ("o_preview", "o_review", "red, or the deploy failed", "back"),
+    ("o_preview", "o_epi_preview", "red; green after red", "msg"),
     ("o_qa", "o_review", "back", "back"), ("o_qa", "o_merge", "Done", ""),
-    ("o_merge", "o_prod", "", ""), ("o_prod", "o_review", "red: rollback", "back"),
-    ("o_prod", "o_epilogue", "green", ""), ("o_epilogue", "o_retro", "", ""),
+    # A sync after QA's yes or during the merge's wait changes the code QA
+    # passed: the preview, its regression and QA again.
+    ("o_qa", "o_preview", "the branch moved", "back"),
+    ("o_merge", "o_preview", "the branch moved", "back"),
+    ("o_merge", "o_prod", "", ""),
+    # Held, production stays where it is, waiting on the person: no way out.
+    ("o_prod", "o_review", "red, rolled back; or the ship failed", "back"),
+    # The ship is asked here (ship): a no goes on as a green run does.
+    ("o_prod", "o_epilogue", "green, red, or not shipped", ""), ("o_epilogue", "o_retro", "", ""),
     ("o_retro", "o_pr", "it fixed code", "back"), ("o_retro", "o_end", "", ""),
 ]
 
@@ -372,16 +381,18 @@ OVERVIEW_EDGES = [
 WORKSHOP_LANES = [("person", "You"), ("sclaude", "sclaude"), ("session", "Claude session"),
                   ("github", "GitHub")]
 WORKSHOP_NODES = {
-    "w_find": ("session", 0, "start", "A fix for sclaude", "found by any session", ""),
-    "w_ask": ("person", 1, "gate", "Let it write sclaude?", "asked in a step; a review's approved plan is the yes", ""),
+    "w_find": ("session", 0, "start", "A fix for sclaude", "found by the retro or a review", ""),
+    "w_ask": ("person", 1, "user", "The plan you approve", "the retro's or a review's, the change in it", ""),
     "w_open": ("session", 2, "session", "sclaude core-open", "opens the tree's workshop for this session", ""),
     "w_change": ("session", 3, "session", "Commit and review", "in the workshop; sreview for a maintainer", ""),
     "w_ready": ("session", 4, "session", "sclaude core-ready", "the head marked ready to publish", ""),
     "w_exit": ("session", 5, "session", "The session ends", "publishing begins", ""),
     "w_ready_gate": ("sclaude", 6, "gate", "Finished at its head?", "committed, reviewed, marked ready", ""),
     "w_back": ("person", 6, "gate", "Back to the session?", "told what is missing; no keeps it pending", ""),
+    "w_pending": ("session", 7, "end", "Pending", "offered again when the tree is next opened", ""),
     "w_leaks": ("sclaude", 7, "gate", "The product's details in it?", "names, numbers, paths of the product", ""),
     "w_leak_ask": ("person", 7, "gate", "Publish anyway?", "a no holds the change at its head", ""),
+    "w_held": ("person", 8, "end", "Held at its head", "until a new commit is marked ready", ""),
     "w_tests": ("sclaude", 8, "task", "The tests it touches", "a clean environment, no terminal; red — tried again later", ""),
     "w_who": ("sclaude", 9, "gate", "A maintainer?", "MAINTAINERS", ""),
     "w_main": ("github", 9, "task", "Pushed to main", "one squashed commit; the live checkout updated", ""),
@@ -389,16 +400,18 @@ WORKSHOP_NODES = {
 }
 WORKSHOP_EDGES = [
     ("w_find", "w_ask", "", ""),
-    ("w_ask", "w_open", "yes", ""),
+    ("w_ask", "w_open", "approved", ""),
     ("w_open", "w_change", "", ""),
     ("w_change", "w_ready", "", ""),
     ("w_ready", "w_exit", "", ""),
     ("w_exit", "w_ready_gate", "", ""),
     ("w_ready_gate", "w_back", "no", ""),
     ("w_back", "w_change", "yes — same conversation", "back"),
+    ("w_back", "w_pending", "no", ""),
     ("w_ready_gate", "w_leaks", "yes", ""),
     ("w_leaks", "w_leak_ask", "a hit", ""),
     ("w_leak_ask", "w_tests", "yes", ""),
+    ("w_leak_ask", "w_held", "no", ""),
     ("w_leaks", "w_tests", "none", ""),
     ("w_tests", "w_who", "green", ""),
     ("w_who", "w_main", "yes", "msg"),
@@ -413,22 +426,22 @@ FRICTION_LANES = [("session", "Step session"), ("sclaude", "sclaude"), ("review"
 FRICTION_NODES = {
     "f_trip": ("session", 0, "start", "A refusal", "a hook, a rule, the classifier — or the session's own note", ""),
     "f_log": ("sclaude", 1, "task", "Friction log", "each refusal a paragraph; the classifier's gathered after the session", ""),
-    "f_empty": ("sclaude", 2, "gate", "Anything logged?", "after every step, round and fix session", ""),
+    "f_empty": ("sclaude", 2, "gate", "Anything logged?", "after every step, round, sync and fix session", ""),
     "f_none": ("session", 2, "end", "No review", "the ordinary case", ""),
     "f_rules": ("sclaude", 3, "gate", "Only proposed rules?", "rules for the project's CLAUDE.md, nothing else", ""),
     "f_classify": ("monthly", 3, "task", "Matched, no session", "a small model names each one's class", ""),
-    "f_review": ("review", 4, "session", "Friction review", "reads the log and the transcript, plans a change for each entry", ""),
+    "f_review": ("review", 4, "session", "Friction review", "reads the log and the transcript, plans a change for each entry", "W"),
     "f_hold": ("sclaude", 4, "hold", "Held", "an open review holds the next step", ""),
     "f_plan": ("person", 5, "user", "Approve its plan", "which file each change goes to", ""),
     "f_decide": ("review", 6, "gate", "Each entry: which kind?", "in the way, as intended, unsure, or a bug", ""),
-    "f_bug": ("sclaude", 7, "task", "A bug in sclaude", "fixed in the workshop", "W"),
+    "f_bug": ("review", 8, "task", "A bug in sclaude", "the review fixes it in the workshop", ""),
     "f_deliberate": ("review", 7, "task", "Left as it is", "explained; a recurring one gets a deny entry", ""),
     "f_lift": ("branch", 7, "task", "The product's rules", "policy allow or deny, CLAUDE.md, a step's prompt", ""),
     "f_defer": ("monthly", 7, "task", "A deferred row", "in the feature's own file, sent to main", ""),
     "f_verdict": ("sclaude", 8, "task", "Verdict recorded", "lifted, deliberate or mixed — in the issue", ""),
     "f_push": ("sclaude", 9, "task", "Pushed", "with the feature's PR; after the merge, a PR of its own", ""),
     "f_next": ("session", 10, "end", "The next session", "the next step, round or fix", ""),
-    "f_monthly": ("monthly", 10, "session", "Monthly review", "sclaude deferred: every feature's rows, by class", ""),
+    "f_monthly": ("monthly", 10, "session", "Monthly review", "sclaude deferred: every feature's rows, by class", "W"),
 }
 FRICTION_EDGES = [
     ("f_trip", "f_log", "", "msg"),
@@ -437,7 +450,7 @@ FRICTION_EDGES = [
     ("f_empty", "f_rules", "entries", ""),
     ("f_rules", "f_classify", "yes", "msg"),
     ("f_rules", "f_review", "no", ""),
-    ("f_review", "f_hold", "interrupted", ""),
+    ("f_review", "f_hold", "cut off", ""),
     ("f_hold", "f_review", "friction", "back"),
     ("f_review", "f_plan", "", ""),
     ("f_plan", "f_decide", "approved", ""),
@@ -454,57 +467,366 @@ FRICTION_EDGES = [
     ("f_defer", "f_monthly", "once a month", ""),
 ]
 
-# The feature's states, as the menu names them ("2/7 code").
-STATE_LANES = [("dev", "In development"), ("wait", "Waiting on others"),
-               ("after", "After the merge")]
-STATE_NODES = {
-    "s_plan": ("dev", 0, "task", "1/7 plan", "", ""),
-    "s_code": ("dev", 1, "task", "2/7 code", "", ""),
-    "s_pr": ("dev", 2, "task", "3/7 pr", "", ""),
-    "s_review": ("dev", 3, "task", "4/7 review", "", ""),
-    "s_sync": ("wait", 3, "task", "5/7 sync", "a sync broken off", ""),
-    "s_preview": ("wait", 4, "task", "4/7 done", "preview, its regression", ""),
-    "s_qa": ("wait", 5, "wait", "In QA", "QA has the issue", ""),
-    "s_merge": ("wait", 6, "wait", "Waiting for merge", "the PR handed over", ""),
-    "s_hold": ("after", 6, "hold", "Held", "production red", ""),
-    "s_epilogue": ("after", 7, "task", "6/7 epilogue", "", ""),
-    "s_retro": ("after", 8, "task", "7/7 retro", "clean-up next", ""),
-    "s_done": ("after", 9, "end", "all done", "", ""),
+# A stage's regression, out of the detailed map: there an R marks where one
+# runs. The local suite closes steps 2 and 4, the preview's comes before QA,
+# production's after the ship (regression.sh, deploy.sh).
+REGRESSION_LANES = [("person", "You"), ("sclaude", "sclaude"), ("session", "Claude session")]
+REGRESSION_NODES = {
+    "r_local": ("sclaude", 0, "start", "Local suite", "after step 2's yes, and as step 4 closes", ""),
+    "reg_local": ('sclaude', 1, 'gate', 'Local regression green?',
+        "the project's suite against the feature's server", ''),
+    "fix_local": ('session', 1, 'session', 'Fix after regression',
+        'makes the red tests green — two sessions at most, then it stops for you', 'F'),
+    "r_stop": ("person", 2, "hold", "Stopped for you", "two fixing sessions and still red", ""),
+    "r_preview": ("sclaude", 3, "start", "Preview suite", "against the preview, before QA", ""),
+    "preview_ok": ('sclaude', 4, 'gate', 'Preview green?',
+        'red — the fix goes on from step 4', ''),
+    "fix_preview": ('session', 4, 'session', 'Fix after preview',
+        "makes the preview's tests green, from step 4", 'F'),
+    "r_prod": ("sclaude", 5, "start", "Production suite", "against production, after the ship", ""),
+    "prod_ok": ('sclaude', 6, 'gate', 'Production green?',
+        'red — rolled back before anything is fixed, or held', ''),
+    "rollback": ('sclaude', 7, 'task', 'Rollback',
+        'the previous deployment, the down blocks, a check, the incident on the issue', ''),
+    "hold_ways": ('person', 7, 'hold', 'Held',
+        'production red and not rolled back: regression <name> prod · rollback · return', ''),
+    "fix_prod": ('session', 8, 'session', 'Fix after production',
+        'told what failed and that production runs the old release', 'F'),
+    "r_step4": ("session", 9, "end", "Step 4 reopened", "the fix goes the whole way round", ""),
+    "r_on": ("sclaude", 9, "end", "The cycle goes on", "", ""),
 }
-STATE_EDGES = [
-    ("s_plan", "s_code", "", ""), ("s_code", "s_pr", "", ""),
-    ("s_pr", "s_review", "", ""), ("s_review", "s_preview", "", ""),
-    ("s_preview", "s_sync", "conflict", "back"), ("s_sync", "s_preview", "", ""),
-    ("s_preview", "s_qa", "green", ""), ("s_preview", "s_review", "red", "back"),
-    ("s_qa", "s_merge", "Done", ""), ("s_qa", "s_review", "hand-back", "back"),
-    ("s_merge", "s_epilogue", "merged", ""), ("s_merge", "s_hold", "prod red", ""),
-    ("s_hold", "s_review", "rollback / return", "back"),
-    ("s_epilogue", "s_retro", "", ""), ("s_retro", "s_pr", "retro fixed code", "back"),
-    ("s_retro", "s_done", "", ""),
+REGRESSION_EDGES = [
+    ("r_local", "reg_local", "", ""),
+    ("reg_local", "fix_local", "red", ""),
+    ("fix_local", "reg_local", "again", "back"),
+    ("reg_local", "r_stop", "red after two", ""),
+    ("r_stop", "reg_local", "sclaude regression", "back"),
+    ("reg_local", "r_on", "green", ""),
+    ("r_preview", "preview_ok", "", ""),
+    ("preview_ok", "fix_preview", "red", ""),
+    ("fix_preview", "r_step4", "", ""),
+    ("preview_ok", "r_on", "green", ""),
+    ("r_prod", "prod_ok", "", ""),
+    ("prod_ok", "rollback", "red", ""),
+    ("prod_ok", "hold_ways", "red, not rolled back", ""),
+    ("rollback", "hold_ways", "failed", ""),
+    ("hold_ways", "rollback", "rollback", ""),
+    ("rollback", "fix_prod", "", ""),
+    ("fix_prod", "r_step4", "", ""),
+    ("hold_ways", "r_on", "regression prod: green", ""),
+    ("hold_ways", "r_step4", "return", ""),
+    ("prod_ok", "r_on", "green", ""),
+]
+
+# Main and the branch, out of the detailed map: there an S marks where main
+# is checked (worktree.sh before each step, deploy.sh before the preview and
+# during the merge wait, sync.sh).
+SYNC_LANES = [("sclaude", "sclaude"), ("session", "Claude session")]
+SYNC_NODES = {
+    "y_when": ("sclaude", 0, "start", "Main checked",
+               "before each step and the preview, after QA, every 2 min while the merge waits", ""),
+    "merge_check": ('sclaude', 1, 'gate', 'Merges with main?',
+        'git merge-tree, no session; before the preview, after QA, while waiting', ''),
+    "main_in": ('sclaude', 2, 'task', 'Main merged in',
+        "at a step's start, without asking; elsewhere a clean check changes nothing", ''),
+    "y_stop": ("session", 3, "end", "The run stops",
+               "not settled: sclaude <feature> takes it up", ""),
+    "sync": ('session', 2, 'session', '5 · sync',
+        'merges origin/main in, resolves the conflicts, checks, pushes', 'F'),
+    "y_on": ("sclaude", 3, "end", "The cycle goes on", "", ""),
+}
+SYNC_EDGES = [
+    ("y_when", "merge_check", "", ""),
+    ("merge_check", "main_in", "clean", ""),
+    ("merge_check", "sync", "conflict", ""),
+    ("sync", "merge_check", "settled", "back"),
+    ("sync", "y_stop", "not settled", ""),
+    ("main_in", "y_on", "", ""),
 ]
 
 # Where a feature can stand (what `position` answers): the detailed node, and
-# the overview's and the states' nodes lit with it.
+# the overview's block lit with it.
 POSITIONS = {
-    "plan": ("o_plan", "s_plan"),
-    "code": ("o_code", "s_code"),
-    "reg_local": ("o_reg", "s_code"),
-    "fix_local": ("o_reg", "s_code"),
-    "pr": ("o_pr", "s_pr"),
-    "review": ("o_review", "s_review"),
-    "fix_preview": ("o_review", "s_review"),
-    "fix_prod": ("o_review", "s_review"),
-    "sync": ("o_sync", "s_sync"),
-    "preview": ("o_preview", "s_preview"),
-    "qa_check": ("o_qa", "s_qa"),
-    "merge_wait": ("o_merge", "s_merge"),
-    "hold_ways": ("o_prod", "s_hold"),
-    "prod": ("o_prod", "s_merge"),
-    "epilogue": ("o_epilogue", "s_epilogue"),
-    "done_cmd": ("o_retro", "s_retro"),
-    "cleanup": ("o_end", "s_retro"),
-    "end": ("o_end", "s_done"),
+    "plan": "o_plan",
+    "code": "o_code",
+    "reg_local": "o_code",
+    "fix_local": "o_code",
+    "pr": "o_pr",
+    "review": "o_review",
+    "fix_preview": "o_review",
+    "fix_prod": "o_review",
+    "handoff": "o_qa",
+    "preview": "o_preview",
+    "qa_check": "o_qa",
+    "merge_wait": "o_merge",
+    "hold_ways": "o_prod",
+    "prod": "o_prod",
+    "ship": "o_prod",
+    "local_pass": "o_review",
+    "epilogue": "o_epilogue",
+    "done_cmd": "o_retro",
+    "retro": "o_retro",
+    "cleanup": "o_end",
+    "end": "o_end",
 }
+
+# --- the map a project's config draws ---------------------------------------
+#
+# A project's map shows its own cycle, not every one sclaude can run: the
+# review on CI or on this machine, QA on a board or none, a merge by a
+# person or by sclaude. The model above holds them all; for_config takes out
+# what a config does not run (NEEDS), carries the flow past a block taken
+# out (PASS), and puts in the words a setting changes (VARIANTS). A block or
+# an arrow not in NEEDS is on every project's map.
+
+# A block, or an arrow by (from, to), and the setting it needs: (name,
+# values). An arrow named here is not carried past a block taken out — it
+# is one way of a choice, and the choice drops it.
+NEEDS = {
+    "ci_review": ("review", {"github"}),
+    "local_pass": ("review", {"local"}),
+    ("draft_pr", "ci_review"): ("review", {"github"}),
+    ("draft_pr", "local_pass"): ("review", {"local"}),
+    ("draft_pr", "review_found"): ("review", {"off"}),
+    "r_local": ("regression.local", {True}),
+    "r_stop": ("regression.local", {True}),
+    "r_preview": ("regression.preview", {True}),
+    "r_prod": ("regression.prod", {True}),
+    # A badge by (block, letter): R only where that stage has a suite.
+    ("code", "R"): ("regression.local", {True}),
+    ("review", "R"): ("regression.local", {True}),
+    ("review_close", "R"): ("regression.local", {True}),
+    ("preview", "R"): ("regression.preview", {True}),
+    ("prod", "R"): ("regression.prod", {True}),
+    "reg_local": ("regression.local", {True}),
+    "fix_local": ("regression.local", {True}),
+    "preview_ok": ("regression.preview", {True}),
+    "fix_preview": ("regression.preview", {True}),
+    "prod_ok": ("regression.prod", {True}),
+    "rollback": ("regression.prod", {True}),
+    "fix_prod": ("regression.prod", {True}),
+    "hold_ways": ("regression.prod", {True}),
+    "in_qa": ("board.qa", {True}),
+    "qa_check": ("board.done", {True}),
+    "qa_verdict": ("board.done", {True}),
+    "merge": ("merge", {"both", "auto"}),
+    "o_ghreview": ("review", {"github", "local"}),
+    "o_qa": ("board.done", {True}),
+}
+
+# Where the flow goes on when a block is taken out: an arrow into it is
+# carried to this one, and on down the chain while that one is out too.
+PASS = {
+    "ci_review": "review_found", "local_pass": "review_found",
+    "reg_local": "pr", "preview_ok": "in_qa", "in_qa": "qa_check",
+    "qa_check": "qa_verdict", "qa_verdict": "handoff", "prod_ok": "epilogue",
+    "merge": "merge_wait",
+    "o_ghreview": "o_review", "o_qa": "o_merge",
+}
+
+# The words, and for a few the lane, a setting changes: block -> [(name,
+# values, {field: value})], the first that matches taken. Fields: lane,
+# kind, title, text, details.
+VARIANTS = {
+    "merge": [("merge", {"auto"}, {
+        "lane": "sclaude", "title": "Merged by sclaude",
+        "text": "merge: auto — once QA passed and GitHub says the way is clear",
+        "details": "With merge set to auto, sclaude merges the pull request itself once QA passed and GitHub says the way is clear; a red check of the merge with main holds it until the branch or main moves."}),
+              ("merge", {"both"}, {"text": "offered here once QA passed, or merge it on GitHub"})],
+    "merge_wait": [("merge", {"github"}, {
+        "text": "merge it on GitHub; polled every 30 s, main checked every 2 min"})],
+    "qa_check": [("qa", {"auto"}, {
+        "lane": "sclaude", "title": "Accepted by sclaude",
+        "text": "qa: auto — moved to Done once the preview regression is green",
+        "details": "With qa set to auto, sclaude moves the issue to Done itself once the preview regression is green; a person can still hand it back from the board."}),
+                 ("qa", {"both"}, {
+        "text": "on the preview, ticking them in the issue — or a key in sclaude's wait"})],
+    "prepare": [("database.local", {False}, {
+        "text": "worktree from origin/main, branch feat/<slug>, its own dev server"})],
+    "prod": [("database.promote", {False}, {
+        "text": "vercel --prod, then the production regression"})],
+    "o_ghreview": [("review", {"local"}, {
+        "lane": "sclaude", "title": "Local review", "text": "passes on this machine"})],
+    "o_qa": [("qa", {"auto"}, {"lane": "sclaude", "title": "QA: auto", "text": "accepted when the preview is green"})],
+    "o_prod": [("regression.prod", {False}, {"kind": "task", "text": "shipped on your yes"})],
+    "o_preview": [("regression.preview", {False}, {"kind": "task", "text": "deployed"})],
+    "o_merge": [("merge", {"auto"}, {"lane": "sclaude", "text": "by sclaude: merge auto"}),
+                ("merge", {"github"}, {"text": "yours, on GitHub"})],
+}
+
+
+def setting(cfg, name):
+    """A setting the map depends on, read as sclaude reads it
+    (project_review_mode, project_flow_mode, project_regression_parts, the
+    board's columns in project.sh)."""
+    cfg = cfg or {}
+    if name == "review":
+        return cfg.get("review") if cfg.get("review") in ("local", "off") else "github"
+    if name in ("qa", "merge"):
+        mode = cfg.get(name)
+        return mode if mode in ("github", "both", "auto") else ("both" if name == "merge" else "github")
+    if name.startswith("regression."):
+        return bool((cfg.get("regression") or {}).get(name.split(".", 1)[1]))
+    if name in ("board.qa", "board.done"):
+        # done is what QA is waited for by (qa_wait); qa only where the issue
+        # is moved to before it (issue_qa_ready).
+        columns = (cfg.get("board") or {}).get("columns") or {}
+        return bool(columns.get("done") and (name == "board.done" or columns.get("qa")))
+    if name.startswith("database."):
+        return bool((cfg.get("database") or {}).get(name.split(".", 1)[1]))
+    return None
+
+
+def _needs(cfg, key):
+    need = NEEDS.get(key)
+    return not need or setting(cfg, need[0]) in need[1]
+
+
+def for_config(cfg, nodes, edges):
+    """One map as cfg runs it: the blocks it needs, the arrows carried past
+    the ones it does not, the words it changes; rows left empty closed up."""
+    kept = {}
+    for nid, node in nodes.items():
+        if not _needs(cfg, nid):
+            continue
+        lane, row, kind, title, text, flags = node
+        for name, values, fields in VARIANTS.get(nid, []):
+            if setting(cfg, name) in values:
+                lane, kind = fields.get("lane", lane), fields.get("kind", kind)
+                title, text = fields.get("title", title), fields.get("text", text)
+                break
+        flags = "".join(f for f in flags if _needs(cfg, (nid, f)))
+        kept[nid] = (lane, row, kind, title, text, flags)
+    out, seen = [], set()
+    for a, b, label, kind in edges:
+        if a not in kept or not _needs(cfg, (a, b)):
+            continue
+        if b not in kept:
+            if (a, b) in NEEDS:
+                continue
+            hops = 0
+            while b not in kept and b in PASS and hops < len(PASS):
+                b, hops = PASS[b], hops + 1
+            if b not in kept or b == a:
+                continue
+            kind = "" if kind == "msg" else kind
+        if (a, b) in seen:
+            continue
+        seen.add((a, b))
+        out.append((a, b, label, kind))
+    rows = {r: i for i, r in enumerate(sorted({n[1] for n in kept.values()}))}
+    kept = {nid: (n[0], rows[n[1]]) + n[2:] for nid, n in kept.items()}
+    return kept, out
+
+
+def _variant_details(cfg):
+    details = dict(DETAILS)
+    for nid, variants in VARIANTS.items():
+        for name, values, fields in variants:
+            if setting(cfg, name) in values:
+                if "details" in fields:
+                    details[nid] = fields["details"]
+                break
+    return details
+
+
+def config_of(tree):
+    """The project's config as sclaude reads it for a tree (project_config,
+    project_get): the main checkout's, with a key it lacks taken from the
+    tree's own copy. {} when neither can be read."""
+    main = tree
+    try:
+        with open(os.path.join(tree, ".git")) as fh:
+            line = fh.read().strip()
+        if line.startswith("gitdir:"):
+            gitdir = line.split(":", 1)[1].strip()
+            main = os.path.dirname(os.path.dirname(os.path.dirname(os.path.normpath(gitdir))))
+    except OSError:
+        pass
+    def read(where):
+        try:
+            with open(os.path.join(where, ".sclaude", "config.json")) as fh:
+                got = json.load(fh)
+            return got if isinstance(got, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def fill(first, second):
+        # Key by key down every path, as project_get falls back: the first's
+        # value, the second's where the first has none (null is none).
+        out = dict(second)
+        for key, value in first.items():
+            if value is None:
+                continue
+            if isinstance(value, dict) and isinstance(second.get(key), dict):
+                out[key] = fill(value, second[key])
+            else:
+                out[key] = value
+        return out
+    first, second = read(main), (read(tree) if main != tree else {})
+    cfg = fill(first, second)
+    # A section read whole (project_config_with): the board's, from the file
+    # that has it.
+    if "board" in first or "board" in second:
+        cfg["board"] = first.get("board") if first.get("board") is not None else second.get("board")
+    return cfg
+
+
+def on_map(nid):
+    """A place on the map drawn now: the block itself, or the one the flow
+    goes on to when this config draws none (PASS). "" when neither."""
+    drawn = all_nodes()
+    hops = 0
+    while nid and nid not in drawn and hops < len(PASS):
+        nid, hops = PASS.get(nid, ""), hops + 1
+    return nid if nid in drawn else ""
+
+
+EXAMPLE_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.example.json")
+
+
+def example_config():
+    try:
+        with open(EXAMPLE_CONFIG) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+@contextlib.contextmanager
+def configured(cfg):
+    """The maps as cfg draws them, for what is drawn, lit or played inside:
+    the model's tables stand in for the config's own meanwhile."""
+    global NODES, EDGES, OVERVIEW_NODES, OVERVIEW_EDGES
+    global DETAILS, POSITIONS, ALIAS, REGRESSION_NODES, REGRESSION_EDGES, SYNC_NODES, SYNC_EDGES
+    saved = (NODES, EDGES, OVERVIEW_NODES, OVERVIEW_EDGES,
+             DETAILS, POSITIONS, ALIAS, REGRESSION_NODES, REGRESSION_EDGES, SYNC_NODES, SYNC_EDGES)
+    try:
+        NODES, EDGES = for_config(cfg, NODES, EDGES)
+        REGRESSION_NODES, REGRESSION_EDGES = for_config(cfg, REGRESSION_NODES, REGRESSION_EDGES)
+        OVERVIEW_NODES, OVERVIEW_EDGES = for_config(cfg, OVERVIEW_NODES, OVERVIEW_EDGES)
+        DETAILS = _variant_details(cfg)
+
+        def on(nid, nodes):
+            hops = 0
+            while nid and nid not in nodes and hops < len(PASS):
+                nid, hops = PASS.get(nid, ""), hops + 1
+            return nid if nid in nodes else ""
+        POSITIONS = {k: on(o, OVERVIEW_NODES) for k, o in saved[5].items()}
+        ALIAS = {k: v for k, v in saved[6].items() if k in OVERVIEW_NODES}
+        # A block of the glance carries the letters of the step
+        # it stands for: what happens inside it shows outside too.
+        drawn = all_nodes()
+        for nid, n in list(OVERVIEW_NODES.items()):
+            big = drawn.get(ALIAS.get(nid, ""))
+            if big:
+                flags = "".join(f for f in "FWRS" if f in n[5] + big[5])
+                OVERVIEW_NODES[nid] = n[:5] + (flags,)
+        yield
+    finally:
+        (NODES, EDGES, OVERVIEW_NODES, OVERVIEW_EDGES,
+         DETAILS, POSITIONS, ALIAS, REGRESSION_NODES, REGRESSION_EDGES, SYNC_NODES, SYNC_EDGES) = saved
+
 
 # Commands: (command, verb in the action list or "", when it applies, what it
 # does, the node it leads to or "").
@@ -556,11 +878,16 @@ def all_nodes():
     return {nid: n for _name, _lanes, nodes, _edges in node_sets() for nid, n in nodes.items()}
 
 
+def node_sets_named():
+    return {name: nodes for name, _lanes, nodes, _edges in node_sets()}
+
+
 def node_sets():
     return [("detail", LANES, NODES, EDGES), ("overview", OVERVIEW_LANES, OVERVIEW_NODES, OVERVIEW_EDGES),
-            ("states", STATE_LANES, STATE_NODES, STATE_EDGES),
             ("workshop", WORKSHOP_LANES, WORKSHOP_NODES, WORKSHOP_EDGES),
-            ("friction", FRICTION_LANES, FRICTION_NODES, FRICTION_EDGES)]
+            ("friction", FRICTION_LANES, FRICTION_NODES, FRICTION_EDGES),
+            ("regression", REGRESSION_LANES, REGRESSION_NODES, REGRESSION_EDGES),
+            ("sync", SYNC_LANES, SYNC_NODES, SYNC_EDGES)]
 
 
 # --- where a feature stands --------------------------------------------------
@@ -574,25 +901,239 @@ def _fix_open(state, stage):
     return bool(words) and words[-1] == "open"
 
 
+def _when_iso(text):
+    try:
+        when = datetime.datetime.fromisoformat(text or "")
+    except (TypeError, ValueError):
+        return None
+    return when if when.tzinfo else None
+
+
+def _recent(when):
+    """A start believed: less than three hours ago. One left by a run that
+    was killed stays behind."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return bool(when) and (now - when).total_seconds() < 3 * 3600
+
+
+def _fresh(text):
+    return _recent(_when_iso(text))
+
+
 def _running(state, stage):
     run = (state.get("regression") or {}).get(stage) or {}
-    if run.get("status") != "running":
+    return run.get("status") == "running" and _fresh(run.get("started"))
+
+
+def _going(run):
+    """A session's run going now: not ended, or taken up again after its end
+    (session_runs' resumed), and begun or taken up less than three hours
+    ago. One left unfinished has an end, and is not going."""
+    if not run or run.get("done"):
         return False
-    try:
-        started = datetime.datetime.fromisoformat(run.get("started") or "")
-    except ValueError:
+    began = _when_iso(run.get("resumed")) or _when_iso(run.get("started"))
+    ended = _when_iso(run.get("finished"))
+    return _recent(began) and (not ended or began > ended)
+
+
+def _sync_in_step(state):
+    """A sync with main going during a step: the sync before the step's
+    session, or one asked for from the menu. One left unfinished is not where
+    the feature stands — the step opens on the branch as it is
+    (sync_broken_off)."""
+    sync = _runs(state.get("sync"))
+    return bool(sync) and _going(sync[-1])
+
+
+def _friction_open(state):
+    """A friction review open holds the next step (f_hold)."""
+    return any(runs and not runs[-1].get("done")
+               for runs in (_runs(v) for v in (state.get("friction") or {}).values() if isinstance(v, dict)))
+
+
+def _open(run):
+    """A run not ended, or taken up again after its end (session_runs'
+    resumed): open however long ago it began, as the retrospective is."""
+    if not run or run.get("done"):
         return False
-    now = datetime.datetime.now(datetime.timezone.utc)
-    return bool(started.tzinfo) and (now - started).total_seconds() < 3 * 3600
+    resumed, ended = _when_iso(run.get("resumed")), _when_iso(run.get("finished"))
+    return not ended or bool(resumed and resumed > ended)
+
+
+def _session_node(state, session):
+    """The block of the session's run, while it is open."""
+    places = [("steps.%s" % step, step) for step in ((state.get("steps") or {}))]
+    places += [("retro", "retro"), ("sync", "sync"), ("epilogue", "epilogue")]
+    for path, nid in places:
+        node = state
+        for part in path.split("."):
+            node = (node or {}).get(part) if isinstance(node, dict) else None
+        for run in _runs(node if isinstance(node, dict) else None):
+            if run.get("session") == session and _open(run):
+                return nid
+    return ""
+
+
+def busy(state, workshop=None):
+    """The F and W badges at work now, {block: [flags]}: a friction review
+    open behind the session it follows (its key is the step and a number,
+    review-3, fix-local-1), and a session the workshop's record lets write
+    sclaude (workshop, .sclaude/local/instruments.json) while its run is
+    open."""
+    out, drawn = {}, all_nodes()
+    for key, node in (state.get("friction") or {}).items():
+        runs = _runs(node) if isinstance(node, dict) else []
+        nid = key.rsplit("-", 1)[0].replace("-", "_")
+        if runs and not runs[-1].get("done") and "F" in drawn.get(nid, ("",) * 6)[5]:
+            out.setdefault(nid, []).append("F")
+    for session in (workshop or {}).get("approved") or []:
+        nid = _session_node(state, session)
+        if nid and "W" in drawn.get(nid, ("",) * 6)[5] and "W" not in out.get(nid, []):
+            out.setdefault(nid, []).append("W")
+    # R: a suite running, or a session fixing what it found, on the block the
+    # stage runs from; S: a sync with main going, on the step it runs ahead
+    # of, or on the preview once the steps are done.
+    step = state.get("step") or "plan"
+    at_step = step if step in NODES else "review"
+    for stage, block in (("local", at_step), ("preview", "preview"), ("prod", "prod")):
+        fixing = _fix_open(state, stage)
+        if _running(state, stage) or fixing:
+            nid = "review" if fixing and stage != "local" else block
+            if "R" in NODES.get(nid, ("",) * 6)[5] and "R" not in out.get(nid, []):
+                out.setdefault(nid, []).append("R")
+    sync = _runs(state.get("sync"))
+    if sync and _going(sync[-1]):
+        nid = _sync_block(state)
+        if "S" in NODES.get(nid, ("",) * 6)[5]:
+            out.setdefault(nid, []).append("S")
+    return out
+
+
+def _sync_block(state):
+    """The block a sync with main runs ahead of: the step's, or once the steps
+    are done the preview, the hand-over after QA's yes, the merge's wait."""
+    step = state.get("step") or "plan"
+    if step in NODES and step != "done":
+        return step
+    if state.get("handoff"):
+        return "merge_wait"
+    return "handoff" if (state.get("qa") or {}).get("accepted") else "preview"
+
+
+def stalled(state, pr_state=""):
+    """A sync with main broken off once the steps are done, its pull request
+    open, {block: {"S": text}}: the feature stands there until the person runs
+    it again (_past_steps). One broken off in a step is not: the step opens on
+    the branch as it is (_sync_in_step); nor once the pull request is merged
+    or closed, when there is nothing left to sync."""
+    sync = _runs(state.get("sync"))
+    if (state.get("step") != "done" or pr_state != "OPEN" or state.get("no_change")
+            or not sync or sync[-1].get("done") or _going(sync[-1])):
+        return {}
+    nid = _sync_block(state)
+    if "S" not in NODES.get(nid, ("",) * 6)[5]:
+        return {}
+    return {nid: {"S": "broken off — `sclaude sync %s` takes it up again" % (state.get("feature") or "<name>")}}
+
+
+# Why a letter stands on a block: (block, letter) -> a sentence, else the
+# letter's own words (FLAG_WORDS). The glance's blocks borrow
+# their step's (ALIAS).
+BADGE_WHY = {
+    ("plan", "S"): "S — main is merged into the branch before the plan's session opens; a conflict goes to the sync first.",
+    ("code", "S"): "S — main is merged in before step 2's session opens; a conflict goes to the sync first.",
+    ("pr", "S"): "S — main is merged in before step 3, so the pull request carries what will merge.",
+    ("review", "S"): "S — main is merged in before each review round.",
+    ("preview", "S"): "S — the branch must merge with main before its preview is deployed.",
+    ("merge_wait", "S"): "S — every 2 min the wait checks whether main moved into a conflict; one goes to the sync, the PR back to a draft, and the run to the preview again.",
+    ("handoff", "S"): "S — before the hand-over main is checked; a conflict goes to the sync, and the run to the preview and QA again, as do commits that reached the branch from elsewhere.",
+    # The glance's QA and merge, which carry their own S (OVERVIEW_NODES).
+    ("qa_check", "S"): "S — once QA accepted, main is checked before the hand-over; a conflict goes to the sync, and the run to the preview and QA again, as do commits that reached the branch from elsewhere.",
+    ("merge", "S"): "S — while the merge waits, main is checked every 2 min; a conflict goes to the sync, the PR back to a draft, and the run to the preview again.",
+    ("code", "R"): "R — after your yes the local suite runs against this feature's server; red opens a fixing session, two at most.",
+    ("review", "R"): "R — a red preview or production comes back here to be fixed.",
+    ("review_close", "R"): "R — the local suite runs again before step 4 closes; red opens a fixing session, two at most.",
+    ("local_pass", "S"): "S — main is merged in when step 4 starts or is taken up again, before the local review's pass; a conflict goes to the sync first.",
+    ("preview", "R"): "R — the preview suite runs against this deployment; green sends the issue to QA, red back to step 4.",
+    ("prod", "R"): "R — production's suite runs after the ship; red is rolled back first, then fixed from step 4 — or held.",
+    ("plan", "F"): "F — what the safety rules refused the plan's session is reviewed once it ends.",
+    ("code", "F"): "F — what the safety rules refused step 2's session is reviewed once it ends.",
+    ("pr", "F"): "F — what the safety rules refused step 3's session is reviewed once it ends.",
+    ("review", "F"): "F — what the safety rules refused a review round is reviewed when the round goes to a fresh session.",
+    ("retro", "W"): "W — the retrospective may fix what it found in sclaude, in the workshop; its approved plan is the yes.",
+    ("f_review", "W"): "W — a bug in sclaude the review finds it fixes in the workshop; its approved plan is the yes.",
+    ("f_monthly", "W"): "W — the monthly review makes a change to sclaude it decides on in the workshop; its approved plan is the yes.",
+    ("sync", "F"): "F — what got in the sync session's way is reviewed once it ends, as after a step's session.",
+}
+
+
+def badge_why(nid, flag):
+    base = ALIAS.get(nid, nid)
+    return BADGE_WHY.get((base, flag)) or "%s — %s" % (flag, FLAG_WORDS.get(flag, ""))
+
+
+def _hhmm(text):
+    when = _when_iso(text)
+    return when.astimezone().strftime("%H:%M") if when else ""
+
+
+def busy_notes(state, workshop=None):
+    """How the work behind each turning letter goes, {block: {letter: text}},
+    from what the state holds: since when, which attempt, what is open."""
+    out = {}
+    for nid, flags in busy(state, workshop).items():
+        for flag in flags:
+            text = ""
+            if flag == "R":
+                for stage in ("local", "preview", "prod"):
+                    run = (state.get("regression") or {}).get(stage) or {}
+                    if _running(state, stage):
+                        tries = str(run.get("attempts") or 0)
+                        # attempts: the fixing attempts the stage has used of
+                        # its two (regression.sh), given back after a yes to
+                        # another or a session that spent nothing.
+                        text = "now: the %s suite, running since %s%s" % (
+                            stage, _hhmm(run.get("started")),
+                            "" if tries == "0" else " (fixing attempts used: %s)" % tries)
+                    elif _fix_open(state, stage):
+                        text = "now: a session fixing the red %s suite" % stage
+            elif flag == "S":
+                sync = _runs(state.get("sync"))
+                text = "now: a sync with main, since %s" % _hhmm((sync[-1].get("resumed") or sync[-1].get("started"))) \
+                    if sync else ""
+            elif flag == "F":
+                open_ = [(k, _runs(v)[-1]) for k, v in (state.get("friction") or {}).items()
+                         if isinstance(v, dict) and _runs(v) and not _runs(v)[-1].get("done")
+                         and k.rsplit("-", 1)[0].replace("-", "_") == nid]
+                if open_:
+                    key, run = open_[-1]
+                    text = "now: friction review %s open since %s — it holds the next step" % (key, _hhmm(run.get("started")))
+            elif flag == "W":
+                ready = (workshop or {}).get("ready") or {}
+                text = "now: changing sclaude" + (
+                    "; ready at %s, published when the session ends" % str(ready.get("head", ""))[:7]
+                    if ready.get("head") else "; not marked ready yet")
+            if text:
+                out.setdefault(nid, {})[flag] = text
+    return out
 
 
 def prod_held(state):
     """As prod_red_hold's condition: production carries the feature and its
-    last run there was not green, and it was not rolled back."""
+    last run there was not green, and it was not rolled back. Carried is read
+    from the state, not from GitHub as prod_carries_feature does it: the
+    pull request production was shipped for is the feature's pull request now
+    — a fix sent forward in a new one is not in that release — and with no
+    pull request nothing is carried. A ship recorded before deploy.prod.pr was
+    kept counts as carried."""
     reg = (state.get("regression") or {}).get("prod") or {}
-    shipped = ((state.get("deploy") or {}).get("prod") or {}).get("sha")
+    prod = (state.get("deploy") or {}).get("prod") or {}
     rolled = ((state.get("rollback") or {}).get("prod") or {}).get("code") == "done"
-    return bool(shipped) and not rolled and (reg.get("status") == "failed" or reg.get("unrunnable") is True)
+    pr = state.get("pr")
+    carried = bool(prod.get("sha")) and bool(pr) and prod.get("pr") in (None, pr)
+    # failed alone, as regression_status reads it: a run that could not run
+    # is recorded failed too, and one cut off midway is not a hold.
+    return carried and not rolled and reg.get("status") == "failed"
 
 
 def position(state, pr_state="", epilogue=None):
@@ -603,17 +1144,32 @@ def position(state, pr_state="", epilogue=None):
     (~/.claude/sclaude/epilogue/<feature>.json), when there is one."""
     step = state.get("step") or "plan"
     if step != "done":
-        if step in ("code", "review") and _running(state, "local"):
-            return "reg_local", "the local regression is running"
-        if step == "code" and _fix_open(state, "local"):
+        node, why = _in_step(state, step)
+        if _friction_open(state):
+            why += "; an open friction review holds the next step"
+        return node, why
+    return _past_steps(state, pr_state, epilogue)
+
+
+def _in_step(state, step):
+    if _sync_in_step(state):
+        return "sync", "a sync with main is open, ahead of the step"
+    if step in ("code", "review") and _running(state, "local"):
+        return "reg_local", "the local regression is running"
+    if step == "code" and _fix_open(state, "local"):
+        return "fix_local", "a session is fixing the local regression"
+    if step == "review":
+        for stage in ("prod", "preview"):
+            if _fix_open(state, stage):
+                return "fix_" + stage, "a session is fixing the %s regression" % stage
+        if _fix_open(state, "local"):
             return "fix_local", "a session is fixing the local regression"
-        if step == "review":
-            for stage in ("prod", "preview"):
-                if _fix_open(state, stage):
-                    return "fix_" + stage, "a session is fixing the %s regression" % stage
-            if _fix_open(state, "local"):
-                return "fix_local", "a session is fixing the local regression"
-        return (step if step in NODES else "plan"), "step %s" % step
+        if _fresh(((state.get("review") or {}).get("local") or {}).get("running")):
+            return "local_pass", "the local review is reading the pull request"
+    return (step if step in NODES else "plan"), "step %s" % step
+
+
+def _past_steps(state, pr_state, epilogue):
     if state.get("no_change"):
         return "cleanup", "no change to the code: only the clean-up is left"
     if pr_state == "OPEN":
@@ -632,13 +1188,27 @@ def position(state, pr_state="", epilogue=None):
         # As remind_prod holds: only once the pull request is merged. A fix
         # going round on a pull request of its own is not held, though the
         # red run it answers stays recorded until the next ship.
-        if prod_held(state):
-            return "hold_ways", "production carries the feature, and its last run was not green"
+        # A run going on is said first: one started from the hold leaves its
+        # unrunnable mark until it ends.
         if _running(state, "prod"):
             return "prod", "the production regression is running"
+        # Not bounded in time: the answer may take a night (remind_prod).
+        if (state.get("prod_pass") or {}).get("shipping"):
+            return "ship", "asked whether to ship to production, or shipping"
+        if prod_held(state):
+            return "hold_ways", "production carries the feature, and its last run was not green"
         retro = _runs(state.get("retro"))
-        if retro and retro[-1].get("done"):
-            return "end", "the retrospective ran; only the clean-up may be left"
+        last = retro[-1] if retro else {}
+        # Resumed, a retrospective keeps the end it had (session_runs): it is
+        # open again while taken up after that end.
+        resumed, ended = _when_iso(last.get("resumed")), _when_iso(last.get("finished"))
+        again = bool(resumed and ended and resumed > ended)
+        # The tree is still here, so the clean-up was not done: not asked yet,
+        # or declined (kept) — sclaude done asks it again.
+        if retro and last.get("done") and not again:
+            return "cleanup", "the retrospective ran; the clean-up is left: sclaude done asks it"
+        if retro:
+            return "retro", "the retrospective is open: running, or broken off"
         epi = epilogue or {}
         if epi.get("session") and not epi.get("done"):
             return "epilogue", "the epilogue broke off"
@@ -696,6 +1266,19 @@ def history_rows(lines):
     second as another stays after it."""
     rows = [r for r in lines if isinstance(r, dict) and _when(r.get("at")) and r.get("what")]
     return [r for _i, r in sorted(enumerate(rows), key=lambda p: (_when(p[1]["at"]), p[0]))]
+
+
+# The epilogue's copy on the whole map, beside the preview: a status session
+# run_status marked as the preview's (`about`), red or written again green.
+# A step aside, from wherever the run or the menu wrote it before the merge,
+# and never a deviation: the way on goes from the place before it.
+COPIES = {"epi_preview"}
+
+# Steps whose session, opened again right after one of its own, took up one
+# that broke off: nothing ran between, and no way round is played. Each closes
+# on a check of its own (STEP_CLOSE), entered when it finished; the code's
+# "no" from you is not recorded, and the review's rounds do go round.
+REOPENED = ("plan", "pr")
 
 
 def _graph(edges):
@@ -823,10 +1406,79 @@ def _friction_way(rows, workshop_sessions):
     return way
 
 
+def _timed(node, a, b):
+    step = {"n": node, "from": a}
+    if b:
+        step.update({"to": b, "s": _seconds(a, b) or 0})
+    return step
+
+
+def _regression_way(stage, rows, cut=None):
+    """A stage's run through the regression map, each place with its time,
+    so what it took is counted there and not on the step it came from. A run
+    cut off ends at cut: the last line of the sclaude run that started it."""
+    gate = {"local": "reg_local", "preview": "preview_ok", "prod": "prod_ok"}[stage]
+    way, run, fix = [{"n": "r_" + stage}], None, None
+    for r in rows:
+        what, op, at = r["what"], r["op"], r["at"]
+        if what.startswith("regression."):
+            if op == "start":
+                run = at
+            else:
+                way.append(_timed(gate, run or at, at))
+                run = None
+                if op == "passed":
+                    way.append({"n": "r_on"})
+        elif what.startswith("fix."):
+            node = "fix_" + stage
+            if op == "start":
+                fix = at
+                way.append(dict(_timed(node, at, None), session=r.get("session")))
+            elif way and way[-1]["n"] == node:
+                way[-1].update(_timed(node, fix or at, at))
+                if stage == "local":
+                    way.append({"n": gate})
+        elif what == "rollback.prod":
+            way.append({"n": "rollback", "from": at, "to": at})
+    if run:
+        way.append(_timed(gate, run, cut if cut and _seconds(run, cut) else None))
+    return way
+
+
+def _sync_way(rows):
+    """A sync with main through its map: the check, the session's sittings,
+    and the merge in once it settled."""
+    way = [{"n": "y_when"}, {"n": "merge_check"}]
+    sitting = None
+    for r in rows:
+        if r["op"] == "open":
+            if way[-1]["n"] == "sync":
+                # One opened in place of a conversation that died: that one
+                # ended here, and this is a sitting of the same stay.
+                if sitting:
+                    way[-1]["s"] += _seconds(sitting, r["at"]) or 0
+                way[-1]["k"] = way[-1].get("k", 1) + 1
+            else:
+                way.append({"n": "sync", "from": r["at"], "s": 0})
+            sitting = r["at"]
+        elif r["op"] == "drop" and sitting:
+            # A conversation that never took place: no time, no sitting.
+            sitting = None
+            if way[-1].get("k", 1) > 1:
+                way[-1]["k"] -= 1
+        elif r["op"] in ("end", "finish", "stall") and sitting:
+            way[-1]["s"] += _seconds(sitting, r["at"]) or 0
+            way[-1]["to"] = r["at"]
+            sitting = None
+        if r["op"] in ("finish", "close"):
+            way += [{"n": "merge_check"}, {"n": "main_in"}, {"n": "y_on"}]
+    return way
+
+
 WORKSHOP_START = ("w_find", "w_ask", "w_open", "w_change", "w_ready", "w_exit", "w_ready_gate")
 WORKSHOP_OUT = {
-    "blocked": ("w_leaks", "w_leak_ask"), "held": ("w_leaks", "w_leak_ask"),
-    "left": ("w_back",), "red": ("w_leaks", "w_tests"),
+    "blocked": ("w_leaks", "w_leak_ask", "w_held"), "held": ("w_leaks", "w_leak_ask", "w_held"),
+    "left": ("w_back", "w_pending"), "red": ("w_leaks", "w_tests"),
     "stopped": ("w_leaks", "w_tests", "w_who"),
     "main": ("w_leaks", "w_tests", "w_who", "w_main"), "pr": ("w_leaks", "w_tests", "w_who", "w_pr"),
 }
@@ -837,7 +1489,7 @@ def _workshop_way(rows):
     publication went."""
     way = list(WORKSHOP_START)
     for r in rows:
-        if way[-1] == "w_back" and r["op"] != "left":
+        if way[-1] == "w_pending" and r["op"] != "left":
             way += ["w_change", "w_ready", "w_exit", "w_ready_gate"]
         for n in WORKSHOP_OUT.get(r["op"], ()):
             if n != way[-1]:
@@ -856,7 +1508,7 @@ def _session_names(state):
             names[run.get("session")] = "friction review " + key
     for what in ("sync", "retro", "epilogue"):
         for run in _runs(state.get(what) if isinstance(state.get(what), dict) else None):
-            names[run.get("session")] = NODES[what][3]
+            names[run.get("session")] = all_nodes()[what][3]
     names.pop(None, None)
     return names
 
@@ -872,7 +1524,8 @@ def history(state, lines, here=None, transcripts=None):
     a function from a session id to claude_usage.read's summary, or None."""
     rows = history_rows(lines)
     places = _Places()
-    friction, workshop = {}, {}
+    friction, workshop, regression, syncs = {}, {}, {}, {}
+    last_run = {}
     merged = qa_open = False
     first = rows[0]["at"] if rows else None
     if first:
@@ -890,9 +1543,23 @@ def history(state, lines, here=None, transcripts=None):
                 places.leave("steps." + rest, at)
             if op in ("close", "finish") and rest in STEP_CLOSE:
                 places.point(STEP_CLOSE[rest], at)
-        elif what in ("sync", "retro", "epilogue"):
+        elif what == "sync":
+            # A sync is a pass on its own map: where it ran, and what it took.
+            key = last_run.get("sync")
+            # A new pass once the last one settled or never took place; one
+            # left unfinished and taken up again goes on in its own.
+            if op == "open" and (key is None or any(x["op"] in ("finish", "close")
+                                                    for x in syncs[key])
+                                 or [x["op"] for x in syncs[key]][-1:] == ["drop"]):
+                key = last_run["sync"] = str(len(syncs))
+                syncs[key] = []
+                places.detour("sync", key, at)
+            if key is not None:
+                syncs[key].append(r)
+        elif what in ("retro", "epilogue"):
             if op == "open":
-                places.enter(what, at, what, r.get("session"))
+                places.enter("epi_preview" if r.get("about") == "preview" else what,
+                             at, what, r.get("session"))
             elif op == "drop" and what != "retro":
                 places.drop(what)
             elif op in ("end", "stall", "finish", "drop"):
@@ -905,17 +1572,17 @@ def history(state, lines, here=None, transcripts=None):
                 if op != "empty":
                     places.detour("friction", rest, at)
             friction[rest].append(r)
-        elif head == "regression" and rest in STAGE_NODE:
-            if op == "start":
-                places.enter(STAGE_NODE[rest], at, what)
-            else:
-                places.leave(what, at)
-        elif head == "fix" and rest in STAGE_NODE:
-            node = "fix_" + rest
-            if op == "start":
-                places.enter(node, at, what, r.get("session"))
-            else:
-                places.leave(what, at)
+        elif head in ("regression", "fix") and rest in STAGE_NODE \
+                or what == "rollback.prod":
+            # A stage's run is a pass on the regression map, its fixing
+            # sessions and a rollback with it.
+            stage = "prod" if what == "rollback.prod" else rest
+            key = last_run.get(stage)
+            if (head, op) == ("regression", "start") or key is None:
+                key = last_run[stage] = "%s-%d" % (stage, len(regression))
+                regression[key] = []
+                places.detour("regression", key, at)
+            regression[key].append(r)
         elif what == "deploy.preview":
             if op == "start":
                 places.enter("preview", at, what)
@@ -948,8 +1615,6 @@ def history(state, lines, here=None, transcripts=None):
                 merged = True
                 places.leave("merge", at)
                 places.point("merged", at)
-        elif what == "rollback.prod":
-            places.point("rollback", at)
         elif what == "workshop" and op == "none" and r.get("session") not in workshop:
             pass  # let write there, and changed nothing: no pass
         elif what == "workshop":
@@ -976,7 +1641,8 @@ def history(state, lines, here=None, transcripts=None):
             last["to"] = p["to"] or last["to"]
             continue
         visits.append(p)
-    if here and (not visits or visits[-1].get("n") != here):
+    aside = here and here not in NODES
+    if here and not aside and (not visits or visits[-1].get("n") != here):
         visits.append({"n": here, "from": None, "to": None, "sittings": [], "here": True})
     elif visits and here:
         visits[-1]["here"] = True
@@ -984,25 +1650,43 @@ def history(state, lines, here=None, transcripts=None):
     # The places between, along the map; the time between two places to the
     # first check or person on the way, who is what it waited on.
     graph = _graph(EDGES)
-    out, prev = [], None
+    out, prev, held, stray, after_copy = [], None, [], False, False
     for v in visits:
         if "pass" in v:
-            out.append({"pass": v["pass"]})
+            # A regression run or a sync stands between two places of the
+            # cycle (an R, an S on the way): it is played after the way that
+            # led to it, which waited until it began.
+            if (v["pass"][0] in ("regression", "sync") or held) and prev is not None:
+                held.append(v)
+            else:
+                out.append({"pass": v["pass"]})
             continue
-        if prev is not None:
-            way = _way(graph, prev["n"], v["n"])[1:-1]
+        copy = v["n"] in COPIES
+        stop = prev
+        if prev is not None and not copy:
+            # Back where it was before a status copy: no way round.
+            reopened = prev["n"] == v["n"] and (v["n"] in REOPENED or after_copy)
+            full = [] if reopened else _way(graph, prev["n"], v["n"])
+            way = full[1:-1]
+            # The map has no way at all from the one to the other: the
+            # feature went where the map does not go (deviations).
+            stray = full == [prev["n"], v["n"]] and v["n"] not in graph.get(prev["n"], [])
             # A long way round is a guess, not a fill: a local review pass
             # after a round has no arrow of its own, and the shortest way
             # there runs through the merge and the retrospective.
             if len(way) > FILL_MAX:
                 way = []
-            gap = _seconds(prev.get("to"), v.get("from") or (v["sittings"][0][0] if v["sittings"] else None))
+            until = held[0].get("from") if held else None
+            until = until or v.get("from") or (v["sittings"][0][0] if v["sittings"] else None)
+            gap = _seconds(prev.get("to"), until)
             waited = next((n for n in way if NODES[n][2] in WAITS_ON), None)
             for n in way:
                 step = {"n": n}
                 if n == waited and gap and gap >= 60:
-                    step.update({"s": gap, "from": prev.get("to"), "to": v.get("from"), "wait": True})
+                    step.update({"s": gap, "from": prev.get("to"), "to": until, "wait": True})
                 out.append(step)
+        out += [{"pass": h["pass"]} for h in held]
+        held = []
         step = {"n": v["n"]}
         secs = [_seconds(a, b) for a, b in v["sittings"] if b]
         if secs:
@@ -1015,13 +1699,33 @@ def history(state, lines, here=None, transcripts=None):
             step["to"] = v["to"]
         if v.get("here"):
             step["here"] = True
+        if prev is not None and stray:
+            step["off"] = "the map has no way from %s to %s" % (
+                NODES.get(prev["n"], ("",) * 4)[3] or prev["n"], NODES.get(v["n"], ("",) * 4)[3] or v["n"])
+        stray = False
         out.append(step)
-        prev = v
+        prev = dict(stop, to=v.get("to") or stop.get("to")) if copy else v
+        after_copy = copy
+    # The last passes, with no place after them yet.
+    out += [{"pass": h["pass"]} for h in held]
 
     names = _session_names(state)
     workshop_sessions = set(workshop)
-    passes = {"friction": [], "workshop": []}
+    passes = {"friction": [], "workshop": [], "regression": [], "sync": []}
     index = {}
+    for key, rs in regression.items():
+        index[("regression", key)] = len(passes["regression"])
+        ends = [x["op"] for x in rs if x["what"].startswith("regression.") and x["op"] != "start"]
+        passes["regression"].append({
+            "label": "%s · %s%s" % (_short(rs[0]["at"]), key.split("-")[0], (" · " + ends[-1]) if ends else ""),
+            "steps": _regression_way(key.split("-")[0], rs,
+                                     places.last_of.get(rs[0].get("run")) if rs[0].get("run") else None)})
+    for key, rs in syncs.items():
+        index[("sync", key)] = len(passes["sync"])
+        ends = [x["op"] for x in rs if x["op"] != "open"]
+        passes["sync"].append({
+            "label": "%s · sync%s" % (_short(rs[0]["at"]), (" · " + ends[-1]) if ends else ""),
+            "steps": _sync_way(rs)})
     for key, rs in friction.items():
         if [r["op"] for r in rs] == ["empty"]:
             continue
@@ -1039,6 +1743,14 @@ def history(state, lines, here=None, transcripts=None):
             "label": "%s · after %s%s" % (_short(rs[0]["at"]), names.get(session, "a session"),
                                        (" · " + ends[-1]) if ends else ""),
             "steps": _workshop_way(rs)})
+    if aside:
+        # On a map of its own (a run, a sync): the last pass there that
+        # reaches it stands there now.
+        for name, ps in passes.items():
+            if ps and here in node_sets_named().get(name, {}):
+                last = ps[-1]["steps"]
+                hit = [x for x in last if x.get("n") == here]
+                (hit[-1] if hit else last.append({"n": here}) or last[-1])["here"] = True
     steps = []
     for s in out:
         if "pass" in s:
@@ -1047,9 +1759,49 @@ def history(state, lines, here=None, transcripts=None):
                 steps.append({"pass": [s["pass"][0], i]})
         else:
             steps.append(s)
+    deviations(steps)
     return {"visits": steps, "passes": passes,
             "metrics": metrics(rows, steps, passes, transcripts),
             "now": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+
+
+# A map of its own is reached from a block marked with its letter: a pass
+# between two places neither of which carries it is the feature going where
+# the map does not say.
+PASS_LETTER = {"regression": "R", "sync": "S", "friction": "F", "workshop": "W"}
+
+
+def deviations(steps):
+    """Marks in place each pass the map does not lead to from where it ran
+    (`off`, a sentence): the places before and after it carry no letter of
+    its map. A jump with no way on the map is marked as it is played (history)."""
+    for i, s in enumerate(steps):
+        if "pass" not in s:
+            continue
+        letter = PASS_LETTER.get(s["pass"][0])
+        # Its block may stand a gate or two back: a run after your yes on
+        # step 2's work is played after "Does it work?" (history's fill).
+        before = []
+        for x in steps[:i][::-1]:
+            if "n" in x:
+                before.append(x["n"])
+                if len(before) == 3 or NODES.get(x["n"], ("",) * 3)[2] not in WAITS_ON:
+                    break
+        near = before + [x["n"] for x in steps[i + 1:] if "n" in x][:1]
+        # Or a pass beside it whose map has the letter: a fixing session's
+        # friction review (F on the regression map), a review's change to
+        # sclaude (W on the friction map).
+        beside = [x["pass"][0] for x in steps[max(0, i - 1):i + 2] if "pass" in x and x is not s]
+        if any(letter in n[5] for m in beside for n in node_sets_named().get(m, {}).values()):
+            continue
+        if letter and near and not any(letter in NODES.get(n, ("",) * 6)[5] for n in near):
+            ends = [near[0]] + near[len(before):] if before else near
+            names = " and ".join(NODES.get(n, ("",) * 4)[3] or n for n in ends)
+            if len(ends) == 1:
+                names = "here and " + names
+            s["off"] = "%s ran between %s, and no block there carries %s" % (
+                {"regression": "a regression", "sync": "a sync with main", "friction": "a friction review",
+                 "workshop": "a change to sclaude"}[s["pass"][0]], names, letter)
 
 
 # --- what each place took ----------------------------------------------------
@@ -1062,14 +1814,19 @@ def history(state, lines, here=None, transcripts=None):
 #           command run on the feature at the terminal (`command`, state.sh) —
 #           counted on the place the feature stood on at that moment;
 #   cost    the dollars Claude Code's own account gives each conversation,
-#           on the place the conversation ran.
+#           on the place the conversation ran;
+#   wait    the seconds a question waited for the person's answer, counted
+#           on the place the answer came in: Claude's, after its turn or its
+#           question (claude_usage's `human`, not capped), and sclaude's own
+#           (`ask answered waited=`, ask_once in ui.sh).
 #
 # Both as {map: {node: total}}, the friction review's over every review. A
 # workshop's work is done in the conversation of the step or the review that
 # opened it, and counts there.
 
-def _session_place(rows):
-    """Where each conversation ran, from the rows that opened it."""
+def _session_place(rows, opened=None):
+    """Where each conversation ran, from the rows that opened it; with
+    `opened`, a dict, when each was first opened too."""
     out = {}
     for r in rows:
         if r["op"] not in ("open", "start") or not r.get("session"):
@@ -1078,8 +1835,12 @@ def _session_place(rows):
         if head == "steps" and rest in NODES:
             out[r["session"]] = ("detail", rest)
         elif head == "fix" and rest in STAGE_NODE:
-            out[r["session"]] = ("detail", "fix_" + rest)
-        elif r["what"] in ("sync", "retro", "epilogue"):
+            out[r["session"]] = ("regression", "fix_" + rest)
+        elif r["what"] == "sync":
+            out[r["session"]] = ("sync", "sync")
+            if opened is not None:
+                opened.setdefault(r["session"], r["at"])
+        elif r["what"] in ("retro", "epilogue"):
             out[r["session"]] = ("detail", r["what"])
         elif head == "friction":
             out[r["session"]] = ("friction", "f_review")
@@ -1104,28 +1865,55 @@ def metrics(rows, steps, passes, transcripts):
         before = [t for t in timed if t[0] == "detail" and t[2] <= when]
         return max(before, key=lambda t: t[2])[:2] if before else None
 
-    out = {"input": {}, "cost": {}}
+    out = {"input": {}, "cost": {}, "wait": {}}
+    detail = [t for t in timed if t[0] == "detail"]
 
-    def add(kind, where, n):
+    def ahead(at):
+        """The detailed block a sync at this moment ran ahead of, one marked
+        S: the stay that holds it (the merge's wait), else the next one."""
+        when = _when(at)
+        marked = [t for t in detail if "S" in NODES.get(t[1], ("",) * 6)[5]]
+        if not when or not marked:
+            return None
+        inside = [t for t in marked if t[2] <= when <= t[3]]
+        later = [t for t in marked if t[2] > when]
+        pick = min(inside, key=lambda t: t[3] - t[2]) if inside else \
+            min(later, key=lambda t: t[2]) if later else max(marked, key=lambda t: t[2])
+        return pick[1]
+
+    def add(kind, where, n, at=None):
         if where and n:
             box = out[kind].setdefault(where[0], {})
             box[where[1]] = round(box.get(where[1], 0) + n, 4)
+            # The glance draws no sync: what one took counts under the block
+            # it ran ahead of ("ahead", the page's totals for the overview).
+            node = ahead(at) if where[0] == "sync" else None
+            if node:
+                box = out[kind].setdefault("ahead", {})
+                box[node] = round(box.get(node, 0) + n, 4)
 
     for r in rows:
         if (r["what"], r["op"]) == ("ask", "answered") or r["what"] == "command":
-            add("input", place(r["at"]), 1)
-    counted = set()
-    for session, where in _session_place(rows).items():
+            add("input", place(r["at"]), 1, r["at"])
+        if (r["what"], r["op"]) == ("ask", "answered") and str(r.get("waited", "")).isdigit():
+            add("wait", place(r["at"]), int(r["waited"]), r["at"])
+    counted, opened = set(), {}
+    for session, where in _session_place(rows, opened).items():
         summary = transcripts(session) if transcripts else None
         # Two ids of one conversation carried on: its last transcript once.
         if not summary or summary.get("id", session) in counted:
             continue
         counted.add(summary.get("id", session))
-        for when, _seconds_taken, _calls in summary.get("human") or []:
+        for turn in summary.get("human") or []:
             # Within its conversation: where the feature stood then, or
             # where the conversation ran when no stay holds the moment.
-            add("input", place(when, True) or where, 1)
-        add("cost", where, summary.get("cost") or 0)
+            at = place(turn[0], True) or where
+            add("input", at, 1, turn[0])
+            # How long Claude waited for the person, the whole of it: a
+            # night left unanswered is a night (a summary older than the
+            # field gives the capped time).
+            add("wait", at, turn[3] if len(turn) > 3 else turn[1], turn[0])
+        add("cost", where, summary.get("cost") or 0, opened.get(session))
     return out
 
 
@@ -1245,7 +2033,9 @@ def read_history(state_path):
 LANE_W = 246
 NODE_W = 198
 NODE_H = 78
-ROW_H = 112
+# The strip under a block the feature's page writes in: its metrics, the
+# player's count (drawMetrics, the player's tag).
+UNDER = 16
 TOP = 52
 CHANNEL = 10
 
@@ -1273,36 +2063,43 @@ class Diagram:
         self.rows = max(n[1] for n in nodes.values()) + 1
         self.lane_x = {lane: 0 for lane, _ in lanes}
         # Edges running down past a node in their way take a channel on the
-        # left, as edges running back take one on the right.
+        # left (or the right, below), as edges running back take one on the
+        # right — one for each block they go into (_route: the trunks).
         self.detours = [e for e in edges if not self.is_back(e) and self.blocked(e)]
-        self.left = CHANNEL * (len(self.detours) + 1) if self.detours else 0
+        # One between two lanes right of the middle goes round on the right,
+        # its runs the shorter, inside the ways back there.
+        order = {lane: i for i, (lane, _) in enumerate(lanes)}
+        self.east = [e for e in self.detours
+                     if min(order[nodes[e[0]][0]], order[nodes[e[1]][0]]) > (len(lanes) - 1) / 2]
+        west = {e[1] for e in self.detours if e not in self.east}
+        # A channel per block the detours go into (body: the trunks).
+        self.left = CHANNEL * (len(west) + 1) if west else 0
         self.lane_x = {lane: self.left + i * LANE_W for i, (lane, _) in enumerate(lanes)}
-        backs = [e for e in edges if self.is_back(e)]
+        # A channel per block the ways back go into (body: the trunks).
+        backs = {e[1] for e in edges if self.is_back(e)} | {("east", e[1]) for e in self.east}
         self.right = self.left + len(lanes) * LANE_W
         self.width = self.right + CHANNEL * (len(backs) + 1) + 8
-        self.height = TOP + self.rows * ROW_H + 16
+        # The ways routed first — across the map, and how far under or over a
+        # block each turns — then each gap as tall as what turns in it
+        # (_rows), and the turns put where the rows came out (_place).
+        self.top = [0] * self.rows
+        self._route()
+        self._rows()
+        self._place()
 
     def center(self, nid):
         lane, row = self.nodes[nid][0], self.nodes[nid][1]
-        return self.lane_x[lane] + LANE_W / 2, TOP + row * ROW_H + ROW_H / 2
+        return self.lane_x[lane] + LANE_W / 2, self.top[row] + NODE_H / 2
 
     def is_back(self, edge):
         return self.nodes[edge[1]][1] < self.nodes[edge[0]][1]
 
     def blocked(self, edge):
-        """Whether a node stands in the straight way down of an edge: in the
-        source's lane below it, or in the target's above it."""
-        (la, ra), (lb, rb) = self.nodes[edge[0]][:2], self.nodes[edge[1]][:2]
-        if rb - ra < 2:
-            return False
-        for nid, n in self.nodes.items():
-            if nid in edge[:2]:
-                continue
-            if n[0] == la and ra < n[1] < rb and la != lb:
-                return True
-            if n[0] == lb and (ra < n[1] < rb if la == lb else ra <= n[1] < rb):
-                return True
-        return False
+        """Whether a node stands in an edge's way down: a way leaves its block
+        right under it and goes down in the target's lane, so a node there
+        between the two rows is in its way."""
+        (_la, ra), (lb, rb) = self.nodes[edge[0]][:2], self.nodes[edge[1]][:2]
+        return any(n[0] == lb and ra < n[1] < rb for nid, n in self.nodes.items() if nid not in edge[:2])
 
     def shape(self, nid):
         lane, row, kind, title, text, flags = self.nodes[nid]
@@ -1340,58 +2137,331 @@ class Diagram:
                 last = i == room - 1 and len(lines) > room
                 out.append('<text class="s" x="%.1f" y="%.1f" text-anchor="middle">%s</text>'
                            % (cx, ty + i * 12 - 1, esc(line + (" …" if last else ""))))
-        badge = x + w - 4
-        for flag, word in (("F", "friction review after it"), ("W", "may change sclaude in its workshop")):
+        badge = x + w - 6
+        for flag in "FWRS":
             if flag in flags:
-                out.append('<g class="badge b-%s"><circle cx="%.1f" cy="%.1f" r="8"/>'
+                # The ring turns while the review or the workshop is at work
+                # (busy, lit by the feature's page).
+                # Why the letter is on this block, shown on hover; the page
+                # adds how the work is going while it is at work.
+                why = badge_why(nid, flag)
+                out.append('<g class="badge b-%s" data-why="%s"><title>%s</title>'
+                           '<circle class="ring" cx="%.1f" cy="%.1f" r="13"/>'
+                           '<circle class="dot" cx="%.1f" cy="%.1f" r="10"/>'
                            '<text x="%.1f" y="%.1f" text-anchor="middle">%s</text></g>'
-                           % (flag, badge, y + 2, badge, y + 5.5, flag))
-                badge -= 19
+                           % (flag, esc(why), esc(why), badge, y + 2, badge, y + 2, badge, y + 6.5, flag))
+                badge -= 26
         out.append("</g>")
         return "\n".join(out)
 
-    def edge(self, edge, index, back_index, detour_index=0, nth=0):
+    def edge(self, edge, index):
+        """An arrow by the three rules (corners, levels, entries): out of a
+        side's corner along its row, or from below turning on its level right
+        under its block; into its target's top at its own point, a way from
+        a channel turning above the target's row at its own height. A way
+        round by a channel into a block others go round into too ends at
+        their trunk, with a small arrow (_route: self.trunk)."""
         a, b, label, kind = edge
         ax, ay = self.center(a)
         bx, by = self.center(b)
-        ra, rb = self.nodes[a][1], self.nodes[b][1]
         half = NODE_H / 2
-        lane_shift = (index % 5) * 3
-        anchor = "start"
-        if self.is_back(edge) or edge in self.detours:
-            back = self.is_back(edge)
-            cx = (self.right + CHANNEL * (back_index + 1) if back
-                  else self.left - CHANNEL * (detour_index + 1))
-            y1 = ay + half + 10 + lane_shift
-            y2 = by - half - 12 - lane_shift
-            pts = [(ax, ay + half), (ax, y1), (cx, y1), (cx, y2), (bx, y2), (bx, by - half)]
-            # Several ways back from one node: their labels side by side.
-            lx, ly = ax + 7 + nth * 78, y1 + (-3 if back else 11)
-        elif ra == rb:
+        if self.nodes[a][1] == self.nodes[b][1]:
             side = 1 if bx > ax else -1
             dy = 9 if side > 0 else -9
             pts = [(ax + side * NODE_W / 2, ay + dy), (bx - side * NODE_W / 2, by + dy)]
             lx, ly, anchor = (ax + bx) / 2, (ay + dy - 4 if side < 0 else ay + dy + 13), "middle"
         else:
-            gap = by - half - 14 - lane_shift
-            if abs(ax - bx) < 1:
-                pts = [(ax, ay + half), (bx, by - half)]
-                lx, ly, anchor = ax - 6, ay + half + 12, "end"
+            ex, top = bx + self.entry.get(index, 0), by - half
+            corner = self.corner.get(index)
+            y = self.run_y(index)
+            if corner:
+                start = [(ax + corner * NODE_W / 2, ay)]
+                lx, ly, anchor = ax + corner * (NODE_W / 2 + 6), ay - 5, "start" if corner > 0 else "end"
             else:
-                pts = [(ax, ay + half), (ax, gap), (bx, gap), (bx, by - half)]
-                # By the arrow's end: several leaving one block would pile
-                # their labels up at its foot.
-                lx, ly, anchor = bx + 6, by - half - 4, "start"
+                start = [(ax, ay + half), (ax, y)]
+                lx, ly, anchor = (ax - 6, y - 3, "end") if self.goes_left(edge) else (ax + 6, y - 3, "start")
+                # A labelled way straight down has its label where this one's
+                # would be: this one's goes out past the block's edge.
+                if self.reach(edge) >= 1 and any(
+                        e[0] == a and e[2] and e is not edge and self.reach(e) < 1 for e in self.edges):
+                    lx += (-1 if anchor == "end" else 1) * NODE_W / 2
+            if index in self.channel_x:
+                cx, turn = self.channel_x[index], self.turn[index]
+                pts = start + [(cx, y), (cx, turn), (ex, turn), (ex, top)]
+            else:
+                pts = start + [(ex, y), (ex, top)]
         path = "M" + " L".join("%.1f %.1f" % p for p in pts)
         # A wide transparent twin under the line: something to point at.
         out = ['<g class="edge e-%s" data-key="e:%s:%d">' % (kind or "flow", self.name, index),
-               '<path class="hit" d="%s"/>' % path,
-               '<path class="line" d="%s" marker-end="url(#arrow-%s)"/>' % (path, self.name)]
+               '<path class="hit" d="%s"/>' % path]
+        if index in self.trunk:
+            # Its own run ends at the trunk; the rest of its way, the trunk's,
+            # shows only while it is lit.
+            k = len(start) + 1
+            out += ['<path class="line" d="M%s" marker-end="url(#join%s-%s)"/>'
+                    % (" L".join("%.1f %.1f" % p for p in pts[:k]),
+                       "-back" if self.is_back(edge) else "", self.name),
+                    '<path class="line ride" d="M%s" marker-end="url(#arrow-%s)"/>'
+                    % (" L".join("%.1f %.1f" % p for p in pts[k - 1:]), self.name)]
+        else:
+            out.append('<path class="line" d="%s" marker-end="url(#arrow-%s)"/>' % (path, self.name))
+            # On a trunk, a chevron past each way joining it: the way on is up
+            # a trunk back, down a detour's.
+            cx = self.channel_x.get(index)
+            up = -1 if self.is_back(edge) else 1
+            for y in sorted(self.run_y(i) for i, j in self.trunk.items() if j == index):
+                out.append('<path class="chev" d="M%.1f %.1f L%.1f %.1f L%.1f %.1f"/>'
+                           % (cx - 3.5, y + up * 5, cx, y + up * 9, cx + 3.5, y + up * 5))
         if label:
             out.append('<text class="el" x="%.1f" y="%.1f" text-anchor="%s">%s</text>'
                        % (lx, ly, anchor, esc(label)))
         out.append("</g>")
         return "\n".join(out)
+
+    def run_y(self, index):
+        """The height a way runs across at, and meets a trunk at: its row's
+        middle from a corner, its level under the block from below."""
+        if index in self.corner:
+            return self.center(self.edges[index][0])[1]
+        return self.level[index]
+
+    def goes_left(self, edge):
+        """A detour round the left, or a way to a lane on the left; a way back
+        goes right, as a detour round the right does."""
+        if edge in self.east:
+            return False
+        return edge in self.detours or (not self.is_back(edge)
+                                        and self.center(edge[1])[0] < self.center(edge[0])[0] - 1)
+
+    def reach(self, edge):
+        """How far across a way runs: a way to a channel, the farthest."""
+        if self.is_back(edge) or edge in self.detours:
+            return float("inf")
+        return abs(self.center(edge[1])[0] - self.center(edge[0])[0])
+
+    def corners(self):
+        """Rule 1, the corners: on each side of a block, the way reaching
+        farthest that side leaves from its corner and runs along the row —
+        when the row is clear that far and no arrow to a block of the same
+        row takes that side. {edge index: 1 right, -1 left}."""
+        out, ways = {}, {}
+        for i, e in enumerate(self.edges):
+            ways.setdefault(e[0], []).append((i, e))
+        for a, es in ways.items():
+            ax, row = self.center(a)[0], self.nodes[a][1]
+            for side in (1, -1):
+                best, taken = None, False
+                for i, e in es:
+                    bx = self.center(e[1])[0]
+                    if self.nodes[e[1]][1] == row:
+                        taken = taken or (bx - ax) * side > 0
+                        continue
+                    reach = self.reach(e)
+                    # A way straight down has no side to leave by.
+                    if (side < 0) != self.goes_left(e) or reach < 1:
+                        continue
+                    if any(n[1] == row and 0 < (self.center(nid)[0] - ax) * side <= reach
+                           for nid, n in self.nodes.items() if nid not in (a, e[1])):
+                        continue
+                    if best is None or reach > best[0]:
+                        best = (reach, i)
+                if best and not taken:
+                    out[best[1]] = side
+        return out
+
+    def levels(self):
+        """Rule 1, from below: the other ways turn right under their block,
+        per side — left, or right and straight down — each on its own level,
+        the farthest first, so none crosses another on its way. {index: how
+        far under its block}."""
+        out, sides = {}, {}
+        for i, e in enumerate(self.edges):
+            if i in self.corner or self.nodes[e[0]][1] == self.nodes[e[1]][1]:
+                continue
+            sides.setdefault((e[0], self.goes_left(e)), []).append((-self.reach(e), i))
+        for (a, _left), ways in sides.items():
+            # From 12 under it, so a label 3 above its line clears the block.
+            step = min(12, 20 / (len(ways) - 1)) if len(ways) > 1 else 0
+            for k, (_reach, i) in enumerate(sorted(ways)):
+                out[i] = 12 + k * step
+        # Ways from one row into one block would share their level and merge:
+        # the nearer source's turns higher, so a farther one's drop does not
+        # cross it.
+        into = {}
+        for i, e in enumerate(self.edges):
+            if i in out and i not in self.channel_x:
+                ax, bx = self.center(e[0])[0], self.center(e[1])[0]
+                into.setdefault((e[1], self.nodes[e[0]][1]), []).append((self.reach(e), min(ax, bx), max(ax, bx), i))
+        for ways in into.values():
+            ways.sort()
+            for k, (_reach, lo, hi, i) in enumerate(ways):
+                # Moved by the nearer ways whose run shares a stretch with it.
+                out[i] += 3 * sum(1 for _r, lo2, hi2, _i in ways[:k] if max(lo, lo2) < min(hi, hi2))
+        return out
+
+    def entries(self):
+        """Rules 2 and 3, the way in: several ways into one block enter its
+        top apart, left of its letters (BPMN asks no shared point), in the
+        order they come from — the left channel and the blocks by x, then
+        a detour round the right, then the way back, the farthest channel
+        innermost, so their runs nest. The ways round by one channel into a
+        block come in as one, by their trunk.
+        A way from a channel turns above its target's row by how near its
+        channel is, the nearest lowest. Returns ({index: x offset},
+        {index: how far over its target's top it turns})."""
+        entry, turn, into, rows = {}, {}, {}, {}
+        for i, e in enumerate(self.edges):
+            # A way into a trunk comes in where the trunk does.
+            if self.nodes[e[0]][1] == self.nodes[e[1]][1] or i in self.trunk:
+                continue
+            came = self.channel_x.get(i, self.center(e[0])[0])
+            back = self.is_back(e)
+            east = back or e in self.east
+            # From the right, a detour enters left of the ways back: it
+            # turns above them, so their runs stop short of its drop.
+            into.setdefault(e[1], []).append((2 if back else 1 if east else 0, -came if east else came, i))
+            if i in self.channel_x:
+                near = abs(self.channel_x[i] - (self.right if east else self.left))
+                # A way back comes up its channel, the nearest turning lowest;
+                # a detour comes down the left one, the farthest lowest. The
+                # ways back take the lowest heights, the detours those above.
+                rows.setdefault(self.nodes[e[1]][1], []).append((not back, near if back else -near, i))
+        for b, ways in into.items():
+            if len(ways) < 2:
+                continue
+            letters = len(self.nodes[b][5])
+            lo, hi = -NODE_W / 2 + 16, (NODE_W / 2 - 16 if not letters else NODE_W / 2 - 22 - 26 * letters)
+            step = min(22, (hi - lo) / (len(ways) - 1))
+            for k, (_back, _came, i) in enumerate(sorted(ways)):
+                entry[i] = (lo + hi) / 2 + (k - (len(ways) - 1) / 2) * step
+        for row, ways in rows.items():
+            # 12 px off the block, so the arrowhead has its drop, then 4
+            # apart; the gap is made tall enough for them and the levels
+            # under the row above (_rows).
+            for k, (_detour, _near, i) in enumerate(sorted(ways)):
+                turn[i] = 12 + k * 4
+        for i, j in self.trunk.items():
+            if j in entry:
+                entry[i] = entry[j]
+            turn[i] = turn[j]
+        return entry, turn
+
+    def _route(self):
+        """The ways' channels, corners, levels and turns, by the rows' tops."""
+        self.corner = self.corners()
+        # Rule 3, the channels: the ways back on the right nested — one going
+        # up fewer rows nearer, a longer one round it; of two as long, the
+        # one into the block further right nearer — the detours on their side
+        # nested too (nest).
+        #
+        # The ways round by a channel into one block share it, a trunk, one
+        # per side — back on the right, round the right, round the left: each
+        # runs along its row into it, and one carries it in, with the arrow
+        # (self.trunk: a way -> the one carrying it). Where a way meets its
+        # channel, down the map: its row, and in the row a corner's run (the
+        # row's middle) above a level (under it). A way back is carried by the
+        # one meeting it lowest, a detour by the one meeting it highest.
+        def meets(i):
+            return (self.nodes[self.edges[i][0]][1], 0 if i in self.corner else 1)
+
+        def side(e):
+            return "back" if self.is_back(e) else ("east" if e in self.east else "west") if e in self.detours else ""
+        carrier = {}
+        for i, e in enumerate(self.edges):
+            if side(e):
+                key, j = (side(e), e[1]), carrier.get((side(e), e[1]))
+                if j is None or (meets(i) > meets(j) if key[0] == "back" else meets(i) < meets(j)):
+                    carrier[key] = i
+        self.trunk = {i: carrier[(side(e), e[1])] for i, e in enumerate(self.edges)
+                      if side(e) and carrier[(side(e), e[1])] != i}
+
+        # Nested: a detour into a higher row nearer; into one row, the one
+        # reaching farther across nearer, turning higher (entries), so neither
+        # crosses the other. The detours round the right run nearest the
+        # lanes, the ways back past them.
+        def nest(i, way):
+            b = self.edges[i][1]
+            return (self.nodes[b][1], -way * self.center(b)[0], i)
+        east = sorted((c for (k, _b), c in carrier.items() if k == "east"), key=lambda i: nest(i, -1))
+        backs = sorted((c for (k, _b), c in carrier.items() if k == "back"), key=lambda i: (
+            self.nodes[self.edges[i][0]][1] - self.nodes[self.edges[i][1]][1],
+            -self.center(self.edges[i][1])[0], i))
+        west = sorted((c for (k, _b), c in carrier.items() if k == "west"), key=lambda i: nest(i, 1))
+        self.channel_x = {i: self.right + CHANNEL * (k + 1) for k, i in enumerate(east + backs)}
+        self.channel_x.update({i: self.left - CHANNEL * (k + 1) for k, i in enumerate(west)})
+        self.channel_x.update({i: self.channel_x[j] for i, j in self.trunk.items()})
+        self.level_off = self.levels()
+        self.entry, self.turn_off = self.entries()
+
+    def _place(self):
+        """The levels and the turns where the rows came out."""
+        self.level = {i: self.top[self.nodes[self.edges[i][0]][1]] + NODE_H + off
+                      for i, off in self.level_off.items()}
+        self.turn = {i: self.top[self.nodes[self.edges[i][1]][1]] - off for i, off in self.turn_off.items()}
+
+    def _rows(self):
+        """Each row's top, its gap above as tall as what runs in it: the
+        levels the ways under the row above turn on and the turns of the ways
+        into the row — 30 px where only a way straight down crosses it, room
+        for its label and its arrowhead.
+
+        Where no way turns under the upper row — they all leave from its
+        blocks' middles — the lower row rises: under what is drawn above it in
+        its own lanes, a drop for the arrowheads under the middles' runs, its
+        own runs and their labels clear of the blocks above, and the turns of
+        the ways coming into it by a channel under the middles' runs and
+        clear of the blocks they pass."""
+        lev, above = [0] * (self.rows + 1), [0] * (self.rows + 1)
+        sides = [False] * (self.rows + 1)
+        for i, e in enumerate(self.edges):
+            ra = self.nodes[e[0]][1]
+            if i in self.level_off:
+                lev[ra] = max(lev[ra], self.level_off[i])
+            if i in self.corner:
+                sides[ra] = True
+            if i in self.turn_off:
+                rb = self.nodes[e[1]][1]
+                above[rb] = max(above[rb], self.turn_off[i])
+        drawn = {}
+        for nid, (_lane, row, kind, _t, text, _f) in self.nodes.items():
+            drawn[nid] = NODE_H
+            if kind in ("start", "end"):
+                # The words under the circle (shape): its title, then the text.
+                lines = len(wrap(text, 30)[:2])
+                drawn[nid] = 2 * 13 + 16 + (14 + 13 * (lines - 1) if lines else 0) + 4
+        tops, y = [], TOP + max(above[0], 14) + 6
+        for r in range(self.rows):
+            tops.append(y)
+            step = NODE_H + max(30, lev[r] + max(above[r + 1], 14) + 6)
+            upper = {n[0]: drawn[nid] for nid, n in self.nodes.items() if n[1] == r}
+            if r + 1 < self.rows and upper and not lev[r]:
+                lower = [n[0] for n in self.nodes.values() if n[1] == r + 1]
+                # Under every block the page writes a line of its own (its
+                # metrics, the player's count, 13 px), and a block's letters
+                # stand 13 px over its top: in one lane, both fit between.
+                rise = [upper[lane] + UNDER + 14 for lane in lower if lane in upper]
+                if sides[r]:
+                    rise.append(NODE_H / 2 + 14)
+                # Its own middles' runs, their labels 15 px above them, clear
+                # of the blocks above and the line under them.
+                rise.append(max(upper.values()) + UNDER + 15 - NODE_H / 2)
+                # A way into the lower row from a channel turns over it: its
+                # run under the upper row's middles, and clear of the line
+                # under any block above that it passes.
+                for i, off in self.turn_off.items():
+                    e = self.edges[i]
+                    if self.nodes[e[1]][1] != r + 1 or i in self.trunk:
+                        continue
+                    ends = sorted((self.channel_x[i], self.center(e[1])[0] + self.entry.get(i, 0)))
+                    rise.append(NODE_H / 2 + 14 + off)
+                    rise += [drawn[nid] + UNDER + off for nid, n in self.nodes.items() if n[1] == r
+                             and ends[0] < self.center(nid)[0] + NODE_W / 2
+                             and ends[1] > self.center(nid)[0] - NODE_W / 2]
+                step = min(step, max(rise))
+            y += step
+        self.top = tops
+        last = [drawn[nid] for nid, n in self.nodes.items() if n[1] == self.rows - 1]
+        self.height = int(tops[-1] + max(last + [NODE_H]) + max(lev[self.rows - 1], 0) + 20)
 
     def body(self):
         parts = []
@@ -1405,18 +2475,8 @@ class Diagram:
             parts.append('<text class="lt" x="%.1f" y="30" text-anchor="middle">%s</text>'
                          % (x + LANE_W / 2, esc(title)))
         parts.append('<line class="lh" x1="0" y1="%d" x2="%d" y2="%d"/>' % (TOP - 8, self.width, TOP - 8))
-        back = detour = 0
-        outgoing = {}
         for i, e in enumerate(self.edges):
-            nth = 0
-            if self.is_back(e) or e in self.detours:
-                nth = outgoing.get(e[0], 0)
-                outgoing[e[0]] = nth + 1
-            parts.append(self.edge(e, i, back, detour, nth))
-            if self.is_back(e):
-                back += 1
-            elif e in self.detours:
-                detour += 1
+            parts.append(self.edge(e, i))
         for nid in self.nodes:
             parts.append(self.shape(nid))
         return "\n".join(parts)
@@ -1424,13 +2484,20 @@ class Diagram:
     def svg(self, symbol=False):
         defs = ('<defs><marker id="arrow-%s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" '
                 'markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ah"/>'
-                '</marker></defs>' % self.name)
+                '</marker>' % self.name
+                # Half as large, where a way joins a trunk.
+                + "".join('<marker id="join%s-%s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" '
+                          'markerHeight="6" markerUnits="userSpaceOnUse" orient="auto">'
+                          '<path d="M0 0 L10 5 L0 10 z" class="%s"/></marker>' % (kind, self.name, cls)
+                          for kind, cls in (("", "ah"), ("-back", "ahb")))
+                + '</defs>')
         if symbol:
             return ('<svg class="defs" width="0" height="0" aria-hidden="true">%s<symbol id="sym-%s" '
                     'viewBox="0 0 %d %d">%s</symbol></svg>' % (defs, self.name, self.width, self.height, self.body()))
-        # Never wider than drawn; narrower when the window is (the detailed
-        # map scales down to fit rather than run off the screen).
-        cap = ' style="max-width:%dpx"' % self.width if self.name == "detail" else ""
+        # Never wider than drawn, so every map is at one scale; narrower when
+        # the window is (it scales down to fit), and on a phone no narrower
+        # than 760 px — but a map narrower than that is not stretched to it.
+        cap = ' style="max-width:%dpx;min-width:%dpx"' % (self.width, min(760, self.width))
         return ('<svg class="map map-%s" viewBox="0 0 %d %d" width="%d" height="%d"%s '
                 'role="img" aria-label="%s">%s%s</svg>'
                 % (self.name, self.width, self.height, self.width, self.height, cap, esc(self.name),
@@ -1459,11 +2526,11 @@ h1{font-size:28px;margin:0 0 4px}h2{font-size:20px;margin:36px 0 8px}
 p.lead,.muted{color:var(--muted)}
 code{font-family:var(--mono);font-size:.92em}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px;overflow-x:auto}
-svg.map{display:block;width:100%;height:auto;min-width:760px}
+/* A map's card hugs its map: no empty field round a narrow one. */
+.card:has(> svg.map){width:fit-content;max-width:100%;margin-inline:auto}
+svg.map{display:block;width:100%;height:auto;min-width:760px;margin:0 auto}
 .lane{stroke:var(--line);stroke-width:1}
 .lane{fill:var(--lane-a)}.lane.alt{fill:var(--lane-b)}.l-gutter{fill:var(--surface);stroke:none}
-svg.map-overview,svg.map-states,svg.map-workshop,svg.map-friction{max-width:1100px;margin:0 auto}
-svg.map-detail{width:100%;height:auto;margin:0 auto}
 .lt{font:600 14px var(--body);fill:var(--muted);letter-spacing:.02em}
 .lh{stroke:var(--line)}
 .node .shape{stroke-width:1.6;fill:var(--surface);stroke:var(--muted)}
@@ -1478,12 +2545,22 @@ svg.map-detail{width:100%;height:auto;margin:0 auto}
 .k-hold .shape{fill:var(--human-soft);stroke:var(--human);stroke-width:2.4;stroke-dasharray:6 3}
 .k-start .shape{fill:var(--auto-soft);stroke:var(--auto);stroke-width:2}
 .k-end .shape{fill:var(--surface);stroke:var(--ink);stroke-width:4}
-.badge circle{stroke:none}.badge text{font:700 10px var(--body);fill:#fff}
-.b-F circle{fill:var(--signal)}.b-W circle{fill:var(--cloud)}
+.badge .dot{stroke:none}.badge text{font:700 12px var(--body);fill:#fff}
+.b-F .dot{fill:var(--signal)}.b-W .dot{fill:var(--cloud)}.b-R .dot{fill:var(--human)}.b-S .dot{fill:var(--auto)}
+.badge .ring{fill:none;stroke-width:0;opacity:0}
+.b-F .ring{stroke:var(--signal)}.b-W .ring{stroke:var(--cloud)}.b-R .ring{stroke:var(--human)}.b-S .ring{stroke:var(--auto)}
+.badge.busy .ring{opacity:1;stroke-width:3;stroke-dasharray:21 6.2;
+  animation:ring-turn 1.4s linear infinite,ring-beat 1.4s ease-in-out infinite}
+@keyframes ring-turn{to{stroke-dashoffset:-81.7}}
+@keyframes ring-beat{50%{stroke-width:5}}
+@media (prefers-reduced-motion:reduce){.badge.busy .ring{animation:none;stroke-width:4}}
+.badge.stalled .ring{opacity:1;stroke:var(--human);stroke-width:3}
 .edge path{fill:none;stroke:var(--muted);stroke-width:1.4}
 .e-back path{stroke:var(--human);stroke-dasharray:6 4}
 .e-msg path{stroke:var(--cloud);stroke-dasharray:2 3}
-.ah{fill:var(--muted)}
+.ah{fill:var(--muted)}.ahb{fill:var(--human)}
+.edge path.chev{fill:none;stroke:var(--muted);stroke-width:1.6;stroke-dasharray:none}
+.e-back path.chev{stroke:var(--human)}
 .el{font:10.5px var(--body);fill:var(--muted);paint-order:stroke;stroke:var(--paper);stroke-width:4px;
 stroke-linejoin:round}
 .e-back .el{fill:var(--human)}
@@ -1519,6 +2596,8 @@ body.dimming svg.map .node.here:not(.is-focus):not(.is-lit){opacity:.6}
 .node.is-lit .shape{stroke-width:2.8}
 .node.is-picked .shape{stroke-dasharray:none}
 .edge.is-focus path.line{stroke-width:3.4}
+.edge path.ride{opacity:0}
+.edge.is-focus path.ride,.edge.is-lit path.ride,.edge.pl-go path.ride,.edge.pl-went path.ride{opacity:1}
 .edge.is-focus .el{font-weight:700;fill:var(--ink)}
 .edge.e-back.is-focus .el{fill:var(--human)}
 tr.is-focus td{background:var(--signal-soft)}tr.is-lit td{background:var(--lane-b)}
@@ -1535,6 +2614,7 @@ background:var(--surface);color:var(--ink)}
 .printbar button{background:var(--ink);color:var(--paper);border-color:var(--ink);cursor:pointer}
 .printbar p{flex-basis:100%;margin:0;font-size:13px}
 .legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin:10px 0 0;padding:0;list-style:none;font-size:13px}
+.legend-maps{margin-top:6px}
 .legend li{display:flex;align-items:center;gap:6px}
 .sw{width:22px;height:14px;border-radius:4px;border:2px solid}
 table{border-collapse:collapse;width:100%;background:var(--surface);border-radius:12px;overflow:hidden}
@@ -1568,8 +2648,13 @@ LEGEND = """<ul class="legend">
 <li><span class="sw" style="background:var(--cloud-soft);border-color:var(--cloud);border-style:dashed"></span>waiting</li>
 <li><svg width="34" height="10"><path d="M0 5 H34" stroke="var(--human)" stroke-dasharray="6 4" stroke-width="2"/></svg>goes back</li>
 <li><svg width="34" height="10"><path d="M0 5 H34" stroke="var(--cloud)" stroke-dasharray="2 3" stroke-width="2"/></svg>a message to another lane</li>
-<li><span class="sw" style="background:var(--signal);border-color:var(--signal);border-radius:50%;width:14px"></span>F — a friction review follows</li>
-<li><span class="sw" style="background:var(--cloud);border-color:var(--cloud);border-radius:50%;width:14px"></span>W — may change sclaude in its workshop</li>
+</ul>
+<ul class="legend legend-maps">
+<li><span class="sw" style="background:var(--signal);border-color:var(--signal);border-radius:50%;width:14px"></span>F — a friction review follows (<a href="#map-friction">its own map</a>)</li>
+<li><span class="sw" style="background:var(--cloud);border-color:var(--cloud);border-radius:50%;width:14px"></span>W — may change sclaude in its workshop (<a href="#map-workshop">its own map</a>)</li>
+<li><span class="sw" style="background:var(--human);border-color:var(--human);border-radius:50%;width:14px"></span>R — a regression runs here (<a href="#map-regression">its own map</a>)</li>
+<li><span class="sw" style="background:var(--auto);border-color:var(--auto);border-radius:50%;width:14px"></span>S — main is checked here (<a href="#map-sync">its own map</a>)</li>
+<li>The issue's summary comment — sessions, rounds, reviews — is rewritten at every step, by sclaude itself</li>
 </ul>"""
 
 
@@ -1580,19 +2665,23 @@ def _rows(lo, hi):
     return [nid for nid, n in NODES.items() if lo <= n[1] <= hi]
 
 
+# A run and a sync come after step 1 and before the cycle ends; production's
+# part of the regression map only once it shipped.
+_SUB = list(REGRESSION_NODES) + list(SYNC_NODES)
+_PROD = ["r_prod", "prod_ok", "rollback", "hold_ways", "fix_prod"]
 WHEN = {
-    "always": _rows(0, 35),
-    "before the cycle ends": _rows(3, 15),
-    "a finished feature": _rows(16, 35),
-    "with a pull request": _rows(10, 35),
-    "after step 1": _rows(6, 35),
-    "once production carried it": _rows(27, 35) + ["hold_ways"],
-    "production red and carrying it": ["hold", "hold_ways"],
-    "with friction logged": [nid for nid, n in NODES.items() if "F" in n[5]],
-    "at step 4 or done": _rows(11, 35),
+    "always": _rows(0, 34) + _SUB,
+    "before the cycle ends": _rows(3, 15) + _SUB,
+    "a finished feature": _rows(16, 34) + _PROD,
+    "with a pull request": _rows(10, 34) + _SUB,
+    "after step 1": _rows(6, 34) + _SUB,
+    "once production carried it": _rows(26, 34) + _PROD,
+    "production red and carrying it": ["hold_ways"],
+    "with friction logged": [nid for nid, n in all_nodes().items() if "F" in n[5]],
+    "at step 4 or done": _rows(11, 34) + _SUB,
     "an epilogue broken off": ["epilogue"],
     "monthly, offered": [],
-    "in a session": [nid for nid, n in NODES.items() if n[2] == "session"],
+    "in a session": [nid for nid, n in all_nodes().items() if n[2] == "session"],
     "with review rounds": ["review", "round"],
     "a developer's branch": [],
 }
@@ -1609,7 +2698,9 @@ EDGE_WORDS = {
     "msg": "a message to another lane: one side tells the other", "cmd": "a command a person runs",
 }
 FLAG_WORDS = {"F": "a friction review follows the session",
-              "W": "the session may change sclaude in its workshop"}
+              "W": "the session may change sclaude in its workshop",
+              "R": "a regression runs here: its own map shows the run and its fixes",
+              "S": "main is checked here: its own map shows the merge in and the sync"}
 
 
 def client_model():
@@ -1629,7 +2720,7 @@ def client_model():
         for i, (a, b, label, kind) in enumerate(set_edges):
             edges["%s:%d" % (name, i)] = {"f": a, "t": b, "l": label, "k": kind,
                                           "w": EDGE_WORDS.get(kind, "")}
-    # The overview's and the states' blocks that stand for a detailed one:
+    # The overview's blocks that stand for a detailed one:
     # a place lit on one map is lit on every map that has it.
     alias = {}
     for small, big in ALIAS.items():
@@ -1644,17 +2735,14 @@ def client_model():
 
 
 def projection():
-    """Each detailed place as the overview and the states draw it: the
-    places a feature stands on (POSITIONS), and the blocks that borrow a
-    detail (ALIAS). A place neither has is not on those maps."""
+    """Each detailed place as the overview draws it: the places a feature
+    stands on (POSITIONS), and the blocks that borrow a detail (ALIAS). A
+    place neither has is not on it."""
     out = {}
-    for nid in NODES:
-        small = [s for s, big in ALIAS.items() if big == nid]
-        o, s = POSITIONS.get(nid, ("", ""))
-        o = o or next((x for x in small if x.startswith("o_")), "")
-        s = s or next((x for x in small if x.startswith("s_")), "")
-        if o or s:
-            out[nid] = [o, s]
+    for nid in all_nodes():
+        o = POSITIONS.get(nid) or next((s for s, big in ALIAS.items() if big == nid), "")
+        if o:
+            out[nid] = o
     return out
 
 
@@ -1722,15 +2810,17 @@ def commands_dock():
     items = "".join('<li data-key="c:%d"><code>%s</code></li>' % (i, esc(short_command(cmd)))
                     for i, cmd in shown)
     return ('<aside id="dock" class="screen-only" style="--n:%d" hidden><div class="dock-head"><b>Commands</b>'
-            '<button type="button" class="pin" title="Unpin: the full list stays in section 6" aria-label="Unpin">📌</button>'
-            '</div><ul>%s</ul></aside>' % (len(shown), items))
+            '<button type="button" class="pin" title="Unpin: the full list stays in section %d" aria-label="Unpin">📌</button>'
+            '</div><ul>%s</ul></aside>' % (len(shown), len(SECTIONS), items))
 
 
 def commands_table():
     rows = []
     for i, (cmd, _verb, when, what, target) in enumerate(COMMANDS):
-        lead = ", ".join("where the feature stands" if t == "@here" else esc(all_nodes()[t][3])
-                         for t in places(target))
+        # A place this project's map does not draw is left out.
+        shown = all_nodes()
+        lead = ", ".join("where the feature stands" if t == "@here" else esc(shown[t][3])
+                         for t in places(target) if t == "@here" or t in shown)
         rows.append('<tr data-key="c:%d"><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s</td></tr>'
                     % (i, esc(cmd), esc(when), esc(what), lead))
     return ('<table class="cmds"><thead><tr><th>Command</th><th>When</th><th>What it does</th>'
@@ -1931,7 +3021,7 @@ function choosePrint() {
   const scale = chosen === 'fit' ? 'fit' : +chosen;
   const n = cutSheets(paper, scale);
   document.getElementById('count').textContent = n + (n === 1 ? ' sheet' : ' sheets') + ' for the whole process, plus '
-    + 'a page each for the overview and the states, and the commands';
+    + 'a page for the overview, and the commands';
   try { localStorage.setItem('process-print', JSON.stringify([paper, scale])); } catch (e) {}
 }
 try { const saved = JSON.parse(localStorage.getItem('process-print') || 'null');
@@ -1961,9 +3051,10 @@ would only shrink each sheet without making fewer of them. Leave the dialog's ma
 
 # The printed page's sections, in order: each is a named page (`page: sN`)
 # whose running header names it, so a loose sheet says where it belongs.
-SECTIONS = ["1. The cycle at a glance", "2. A feature's states", "3. The whole process",
-            "4. How a session changes sclaude", "5. The friction review",
-            "6. Commands and where they lead"]
+SECTIONS = ["1. The cycle at a glance", "2. The whole process",
+            "3. How a session changes sclaude", "4. The friction review",
+            "5. A stage's regression", "6. Main and the branch",
+            "7. Commands and where they lead"]
 
 
 def running_heads():
@@ -1976,10 +3067,17 @@ def running_heads():
     return "\n".join(css)
 
 
-def doc():
+def doc(cfg=None):
+    """The printed page: the maps as cfg draws them — a project's own, or,
+    with none, the example config's (config.example.json), the cycle a
+    typical project runs."""
+    with configured(example_config() if cfg is None else cfg):
+        return _doc()
+
+
+def _doc():
     detail = Diagram(*node_sets()[0])
     overview = Diagram(*node_sets()[1])
-    states = Diagram(*node_sets()[2])
     return """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1998,26 +3096,33 @@ click to keep it lit, Ctrl-click to add more, Esc to clear.</p>
 <div class="card">%s</div>
 </section><section style="page:s2">
 <h2>%s</h2>
-<p class="muted">What the menu and the issue's summary say a feature is at.</p>
-<div class="card">%s</div>
-</section><section style="page:s3">
-<h2>%s</h2>
 <p class="muted">Every lane, every check and every way back.</p>
 %s
 <div class="card screen-only">%s</div>
 %s
 %s
-</section><section style="page:s4">
+</section><section style="page:s3" id="map-workshop">
 <h2>%s</h2>
 <p class="muted">Any session marked W may take this way: it changes sclaude in its tree's workshop, and sclaude
 publishes the change once the session ends.</p>
 <div class="card">%s</div>
-</section><section style="page:s5">
+</section><section style="page:s4" id="map-friction">
 <h2>%s</h2>
 <p class="muted">Every session marked F leads here once it ends: what the safety rules refused it is read by a
 session of its own, which lifts a rule, leaves it, puts it off a month, or fixes sclaude.</p>
 <div class="card">%s</div>
-</section><section style="page:s6">
+</section><section style="page:s5" id="map-regression">
+<h2>%s</h2>
+<p class="muted">Every block marked R runs a stage's suite here: the local one closes steps 2 and 4, the
+preview's comes before QA, production's after the ship. Red goes to a fixing session, at most two, or back to
+step 4; production is rolled back first.</p>
+<div class="card">%s</div>
+</section><section style="page:s6" id="map-sync">
+<h2>%s</h2>
+<p class="muted">Every block marked S checks main here: it is merged in without asking, and a conflict goes to
+the sync session.</p>
+<div class="card">%s</div>
+</section><section style="page:s7">
 <h2>%s <button type="button" class="pin pin-head screen-only">📌 Pin</button></h2>
 <p class="muted">A feature's action list shows only those that apply to it now. A command lights the place it
 leads to; a block lights the commands open there.</p>
@@ -2026,10 +3131,11 @@ leads to; a block lights the commands open there.</p>
 <button id="clear" class="screen-only" type="button" hidden>Clear the selection</button>
 %s
 </main><script>%s%s%s</script></body></html>
-""" % (STYLE, running_heads(), LEGEND, esc(SECTIONS[0]), overview.svg(), esc(SECTIONS[1]), states.svg(),
-       esc(SECTIONS[2]), PRINT_BAR, detail.svg(), detail.svg(symbol=True), tiles(detail),
-       esc(SECTIONS[3]), Diagram(*node_sets()[3]).svg(), esc(SECTIONS[4]), Diagram(*node_sets()[4]).svg(),
-       esc(SECTIONS[5]), commands_table(),
+""" % (STYLE, running_heads(), LEGEND, esc(SECTIONS[0]), overview.svg(),
+       esc(SECTIONS[1]), PRINT_BAR, detail.svg(), detail.svg(symbol=True), tiles(detail),
+       esc(SECTIONS[2]), Diagram(*node_sets()[2]).svg(), esc(SECTIONS[3]), Diagram(*node_sets()[3]).svg(),
+       esc(SECTIONS[4]), Diagram(*node_sets()[4]).svg(), esc(SECTIONS[5]), Diagram(*node_sets()[5]).svg(),
+       esc(SECTIONS[6]), commands_table(),
        commands_dock(), INTERACT_SCRIPT % {"model": json.dumps(client_model())}, PRINT_SCRIPT, DOCK_SCRIPT)
 
 
@@ -2045,12 +3151,46 @@ function render(v) {
   document.getElementById('stamp').textContent = 'updated ' + new Date().toLocaleTimeString();
   const here = v.node || '';
   document.querySelectorAll('.node.here').forEach((n) => n.classList.remove('here'));
+  // F and W at work now: their rings turn.
+  document.querySelectorAll('.badge.busy, .badge.stalled').forEach((b) => {
+    b.classList.remove('busy', 'stalled');
+    b.querySelector('title').textContent = b.dataset.why;
+  });
+  // The glance's blocks carry their step's letters (ALIAS):
+  // they turn with it.
+  Object.entries(v.busy || {}).forEach(([id, flags]) => flags.forEach((f) =>
+    [id].concat(M.alias[id] || []).forEach((at) =>
+    document.querySelectorAll('svg.map [data-node="' + at + '"] .b-' + f).forEach((b) => {
+      b.classList.add('busy');
+      // On hover, how it goes now, under why it is there.
+      const note = ((v.notes || {})[id] || {})[f];
+      b.querySelector('title').textContent = b.dataset.why + (note ? '\n' + note : '');
+    }))));
+  // A sync with main has no block on the glance: its S stands
+  // on the block it runs ahead of, which is lit for it, the S turning — or,
+  // broken off, standing still in the colour of a wait on the person.
+  const syncAt = [];
+  Object.entries(v.busy || {}).forEach(([id, flags]) => { if (flags.includes('S')) syncAt.push(id); });
+  Object.entries(v.stalled || {}).forEach(([id, notes]) => {
+    syncAt.push(id);
+    [id].concat(M.alias[id] || [], POS[id] || []).forEach((at) =>
+      document.querySelectorAll('svg.map [data-node="' + at + '"] .b-S').forEach((b) => {
+        b.classList.add('stalled');
+        b.querySelector('title').textContent = b.dataset.why + '\n' + notes.S;
+      }));
+  });
+  (v.busy ? syncAt : []).forEach((id) => (POS[id] || []).forEach((at) =>
+    document.querySelectorAll('svg.map [data-node="' + at + '"] .b-S').forEach((b) => {
+      if (!b.classList.contains('stalled')) b.classList.add('busy');
+    })));
   if (here) {
-    [here].concat(POS[here] || []).forEach((id) =>
+    [here].concat(POS[here] || (here === 'sync' ? syncAt.flatMap((id) => POS[id] || []) : [])).forEach((id) =>
       document.querySelectorAll('svg.map [data-node="' + id + '"]').forEach((n) => n.classList.add('here')));
   }
   if (here && here !== last) {
-    const n = document.querySelector('svg.map-detail [data-node="' + here + '"]');
+    // On the whole process, or on the map of its own a place has (R, S).
+    const n = document.querySelector('svg.map-detail [data-node="' + here + '"]')
+      || document.querySelector('svg.map [data-node="' + here + '"]');
     // Down to it only: centred across as well, the card scrolled the map's
     // first lanes off its left edge with no way to tell they were there.
     if (n && last === '') n.scrollIntoView({block: 'center', inline: 'nearest'});
@@ -2137,7 +3277,9 @@ const player = (() => {
     });
   }
   function clear() {
-    document.querySelectorAll('.pl-clock,.pl-tag').forEach((g) => g.remove());
+    document.querySelectorAll('.pl-clock,.pl-tag,.pl-ghost').forEach((g) => g.remove());
+    document.querySelectorAll('.pl-wrong').forEach((g) => g.classList.remove('pl-wrong'));
+    document.getElementById('pl-off').hidden = true;
     document.querySelectorAll('.pl-now,.pl-seen,.pl-go,.pl-went').forEach((el) => {
       el.classList.remove('pl-now', 'pl-seen', 'pl-go', 'pl-went');
       delete el.__pl;
@@ -2151,16 +3293,17 @@ const player = (() => {
     document.querySelectorAll('#hist li.on').forEach((li) => li.classList.remove('on'));
     document.querySelectorAll('.play').forEach((b) => { b.textContent = '▶'; b.classList.remove('on'); });
   }
-  // The detailed map's places as the overview or the states draw them; one
-  // place standing for several in a row is entered once, their times summed.
+  // The detailed map's places as the overview draws them; one place
+  // standing for several in a row is entered once, their times summed.
   function onMap(steps, map) {
-    const col = map === 'overview' ? 0 : 1, out = [];
+    const out = [];
     steps.forEach((s) => {
       if (s.pass) { out.push(s); return; }
-      const n = (M.proj[s.n] || [])[col];
+      const n = M.proj[s.n];
       if (!n) return;
       const last = out[out.length - 1];
       if (last && !last.pass && last.n === n) {
+        last.off = last.off || s.off;
         if (s.s != null) last.s = (last.s || 0) + s.s;
         last.to = s.to || last.to; last.here = last.here || s.here;
         return;
@@ -2209,7 +3352,10 @@ const player = (() => {
     t.textContent = [seen.k > 1 ? '×' + seen.k : '', seen.s ? dur(seen.s) : ''].filter(Boolean).join(' · ');
     g.append(t);
   }
-  const TITLE = {friction: 'the friction review', workshop: 'how a session changes sclaude'};
+  const TITLE = {friction: 'the friction review', workshop: 'how a session changes sclaude',
+                 regression: "a stage's regression", sync: 'main and the branch'};
+  // The maps a pass is played on, each a way of its own from the main one.
+  const PASSES = Object.keys(TITLE);
   // What is being played, kept for the history list: a click there plays
   // from that place on.
   let playing = null;
@@ -2246,11 +3392,12 @@ const player = (() => {
       const s = steps[i];
       pick(i);
       if (s.map !== (prev && prev.map) && prev) {
-        say(label + ' · ' + (s.map === 'friction' || s.map === 'workshop'
+        say(label + ' · ' + (PASSES.includes(s.map)
           ? '↪ off to ' + TITLE[s.map] + (s.pass ? ': ' + s.pass : '') : '↩ back to the cycle'));
         if (!await sleep(1100, mine)) return;
       }
       const g = svgEl(s.map, '[data-node="' + s.n + '"]');
+      if (s.off) deviate(prev, s, g);
       if (!g) { prev = s; continue; }
       g.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'smooth'});
       if (prev && prev.map === s.map) {
@@ -2281,6 +3428,36 @@ const player = (() => {
     pick(-1);
     document.querySelectorAll('.play.on').forEach((b) => { b.textContent = '▶'; b.classList.remove('on'); });
   }
+  // The feature went where the map does not go: the play pauses on it, the
+  // places are ringed and joined by a ghost of the way it took, and a note
+  // says what happened — where the map is wrong, or the code.
+  function deviate(prev, s, g) {
+    if (g) g.classList.add('pl-wrong');
+    const p = g && prev && prev.map === s.map && svgEl(s.map, '[data-node="' + prev.n + '"]');
+    if (p) {
+      p.classList.add('pl-wrong');
+      const a = p.querySelector('.shape').getBBox(), b = g.querySelector('.shape').getBBox();
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      line.setAttribute('class', 'pl-ghost');
+      line.setAttribute('d', 'M' + (a.x + a.width / 2) + ' ' + (a.y + a.height / 2)
+        + ' L' + (b.x + b.width / 2) + ' ' + (b.y + b.height / 2));
+      g.ownerSVGElement.append(line);
+    }
+    const box = document.getElementById('pl-off');
+    box.querySelector('.pl-off-what').textContent = s.off.charAt(0).toUpperCase() + s.off.slice(1) + '.';
+    box.querySelector('.pl-off-when').textContent = s.from ? when(s.from) : '';
+    box.hidden = false;
+    paused = true;
+    bar.querySelector('.pl-pause').textContent = '▶';
+    document.body.classList.add('pl-paused');
+  }
+  document.querySelector('#pl-off .pl-off-go').addEventListener('click', () => {
+    document.getElementById('pl-off').hidden = true;
+    paused = false;
+    bar.querySelector('.pl-pause').textContent = '⏸';
+    document.body.classList.remove('pl-paused');
+  });
+  document.querySelector('#pl-off .pl-off-stop').addEventListener('click', () => stop());
   // The history beside the map: every place with when, how long and the
   // arrow it came by; the one playing is lit and kept in view.
   function list(steps, label) {
@@ -2294,13 +3471,24 @@ const player = (() => {
       ul.append(li);
       return;
     }
+    const offs = steps.filter((s) => s.off).length;
+    if (offs) {
+      const li = document.createElement('li');
+      li.className = 'h-offs';
+      li.textContent = '⚠ ' + offs + (offs === 1 ? ' place' : ' places') + ' where the feature left the map';
+      ul.append(li);
+    }
     steps.forEach((s, i) => {
       const prev = steps[i - 1], li = document.createElement('li'), n = M.nodes[s.n] || {};
       li.dataset.i = i;
+      if (s.off) {
+        li.classList.add('h-wrong');
+        li.title = s.off;
+      }
       if (prev && prev.map !== s.map) {
         const off = document.createElement('div');
         off.className = 'h-off';
-        off.textContent = s.map === 'friction' || s.map === 'workshop'
+        off.textContent = PASSES.includes(s.map)
           ? '↪ ' + TITLE[s.map] + (s.pass ? ': ' + s.pass : '') : '↩ back to the cycle';
         li.append(off);
       }
@@ -2344,7 +3532,7 @@ const player = (() => {
   }
   function expand(map) {
     const h = data || {visits: [], passes: {}};
-    if (map === 'friction' || map === 'workshop') {
+    if (PASSES.includes(map)) {
       const sel = document.querySelector('select.pass[data-pass="' + map + '"]');
       const p = (h.passes[map] || [])[+(sel && sel.value)];
       return p ? p.steps.map((s) => Object.assign({map: map}, s)) : [];
@@ -2353,7 +3541,8 @@ const player = (() => {
     (map === 'detail' ? h.visits : onMap(h.visits, map)).forEach((s) => {
       if (!s.pass) { out.push(Object.assign({map: map}, s)); return; }
       const p = (h.passes[s.pass[0]] || [])[s.pass[1]];
-      if (p) p.steps.forEach((x) => out.push(Object.assign({map: s.pass[0], pass: p.label}, x)));
+      if (p) p.steps.forEach((x, j) => out.push(Object.assign({map: s.pass[0], pass: p.label},
+        x, j || !s.off ? {} : {off: s.off})));
     });
     return out;
   }
@@ -2372,7 +3561,7 @@ const player = (() => {
   function update(h) {
     if (!h) return;
     data = h;
-    ['friction', 'workshop'].forEach((map) => {
+    PASSES.forEach((map) => {
       const sel = document.querySelector('select.pass[data-pass="' + map + '"]');
       if (!sel) return;
       const list = h.passes[map] || [], was = sel.value;
@@ -2388,7 +3577,7 @@ const player = (() => {
       document.querySelector('.play[data-play="' + map + '"]').disabled = !list.length;
     });
     document.querySelectorAll('.play').forEach((b) => {
-      if (b.dataset.play !== 'friction' && b.dataset.play !== 'workshop') b.disabled = false;
+      if (!PASSES.includes(b.dataset.play)) b.disabled = false;
     });
     if (bar.hidden) list(expand('detail'), 'The whole process');
   }
@@ -2399,30 +3588,38 @@ const player = (() => {
   }
   document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
   // What each place took, under its block, by the checkboxes above the maps.
-  const SHOW = {input: (n) => '✋ ' + n, cost: (n) => '$' + (n < 10 ? n.toFixed(2) : Math.round(n))};
+  const took = (s) => s < 3600 ? Math.max(1, Math.round(s / 60)) + ' min'
+    : s < 86400 ? Math.floor(s / 3600) + ' h' + (Math.round(s % 3600 / 60) ? ' ' + Math.round(s % 3600 / 60) + ' min' : '')
+    : Math.floor(s / 86400) + ' d ' + Math.round(s % 86400 / 3600) + ' h';
+  const SHOW = {input: (n) => '✋ ' + n, cost: (n) => '$' + (n < 10 ? n.toFixed(2) : Math.round(n)),
+                wait: (n) => '⏳ ' + took(n)};
   function totals(kind, map) {
     const m = ((data || {}).metrics || {})[kind] || {};
-    if (map !== 'overview' && map !== 'states') return m[map] || {};
-    const col = map === 'overview' ? 0 : 1, out = {};
-    Object.entries(m.detail || {}).forEach(([n, v]) => {
-      const to = (M.proj[n] || [])[col];
+    if (map !== 'overview') return m[map] || {};
+    const out = {};
+    // The whole process and the regressions' map project onto it; a sync,
+    // which it does not draw, counts under the block it ran ahead of.
+    ['detail', 'regression', 'ahead'].forEach((from) => Object.entries(m[from] || {}).forEach(([n, v]) => {
+      const to = M.proj[n];
       if (to) out[to] = (out[to] || 0) + v;
-    });
+    }));
     return out;
   }
   function drawMetrics() {
     // The whole feature beside each checkbox: every map the metrics name,
-    // which share no place (the overview and the states, drawn from the
-    // detailed map here, are not among them).
+    // which share no place (the overview, drawn from the detailed map here,
+    // is not among them).
     document.querySelectorAll('.mt-total').forEach((b) => {
       const m = ((data || {}).metrics || {})[b.dataset.kind] || {};
-      const sum = Object.keys(m).reduce((t, map) =>
+      // "ahead" repeats the sync's under the glance's blocks: not twice.
+      const sum = Object.keys(m).filter((map) => map !== 'ahead').reduce((t, map) =>
         t + Object.values(m[map] || {}).reduce((a, v) => a + v, 0), 0);
-      b.textContent = '· ' + (b.dataset.kind === 'cost' ? '$' + sum.toFixed(2) : sum);
+      b.textContent = '· ' + (b.dataset.kind === 'cost' ? '$' + sum.toFixed(2)
+        : b.dataset.kind === 'wait' ? (sum ? took(sum) : '0') : sum);
     });
     document.querySelectorAll('.mt').forEach((t) => t.remove());
     const on = [...document.querySelectorAll('.metrics input:checked')].map((c) => c.value);
-    ['detail', 'overview', 'states', 'workshop', 'friction'].forEach((map) => {
+    ['detail', 'overview'].concat(PASSES).forEach((map) => {
       const per = {};
       on.forEach((kind) => Object.entries(totals(kind, map)).forEach(([n, v]) => {
         if (v) (per[n] = per[n] || []).push(SHOW[kind](v));
@@ -2437,6 +3634,12 @@ const player = (() => {
         t.setAttribute('text-anchor', 'end');
         t.textContent = words.join('  ');
         g.append(t);
+        // No wider than its block: a block in the next lane may stand
+        // beside this line (a row risen, _rows).
+        if (t.getComputedTextLength() > box.width - 4) {
+          t.setAttribute('textLength', box.width - 4);
+          t.setAttribute('lengthAdjust', 'spacingAndGlyphs');
+        }
       });
     });
     try { localStorage.setItem('process-metrics', JSON.stringify(on)); } catch (e) {}
@@ -2451,6 +3654,16 @@ const player = (() => {
 """
 
 PLAY_STYLE = """
+.pl-wrong .shape{stroke:var(--human)!important;stroke-width:3.5!important}
+.pl-ghost{fill:none;stroke:var(--human);stroke-width:2.5;stroke-dasharray:5 4;pointer-events:none}
+#pl-off{position:fixed;left:50%;top:18%;transform:translateX(-50%);z-index:30;max-width:min(460px,92vw);
+background:var(--surface);border:2px solid var(--human);border-radius:12px;padding:14px 16px;
+box-shadow:0 10px 30px rgba(0,0,0,.25)}
+#pl-off h3{margin:0 0 6px;color:var(--human)}#pl-off p{margin:6px 0}
+#pl-off button{font:600 13px var(--body);padding:5px 12px;border-radius:7px;border:1px solid var(--line);
+background:var(--surface);color:var(--ink);cursor:pointer}
+#hist li.h-wrong{border-left:3px solid var(--human)}#hist li.h-wrong .h-t::before{content:"⚠ "}
+#hist li.h-offs{color:var(--human);font-weight:600}
 .play{font:600 13px var(--body);width:30px;height:26px;margin-left:10px;border-radius:7px;border:1px solid var(--line);
 background:var(--surface);color:var(--auto);cursor:pointer;vertical-align:middle}
 .play:hover:not(:disabled){border-color:var(--auto)}.play.on{background:var(--auto);color:var(--surface)}
@@ -2510,7 +3723,11 @@ def play_head(map_name, label, passes=False):
 PLAYER_BAR = """<div id="player" hidden><button type="button" class="pl-pause" title="Pause">⏸</button>
 <select class="pl-speed" aria-label="Speed"><option value="1">×1</option><option value="2">×2</option>
 <option value="4">×4</option></select><span class="pl-text"></span>
-<button type="button" class="pl-stop" title="Stop (Esc)">✕</button></div>"""
+<button type="button" class="pl-stop" title="Stop (Esc)">✕</button></div>
+<div id="pl-off" role="dialog" aria-labelledby="pl-off-h" hidden><h3 id="pl-off-h">⚠ The feature left the map here</h3>
+<p class="pl-off-what"></p><p class="pl-off-when muted"></p>
+<p class="muted">The way it took is not drawn: the map, or the code, is wrong here.</p>
+<button type="button" class="pl-off-go">Play on</button> <button type="button" class="pl-off-stop">Stop</button></div>"""
 
 
 LIVE_STYLE = """
@@ -2536,15 +3753,20 @@ h2.first-map{margin-top:0}
 """
 
 
-def page(label):
-    """A feature's map: the same drawing, with its place lit and its actions,
-    kept current by polling /__sclaude/flow/state."""
+def page(label, cfg=None):
+    """A feature's map: the same drawing as its project's config draws it,
+    with its place lit and its actions, kept current by polling
+    /__sclaude/flow/state."""
+    with configured(example_config() if cfg is None else cfg):
+        return _page(label)
+
+
+def _page(label):
     detail = Diagram(*node_sets()[0])
     overview = Diagram(*node_sets()[1])
-    states = Diagram(*node_sets()[2])
     script = LIVE_SCRIPT % {
         "label": json.dumps(label),
-        "positions": json.dumps({k: list(v) for k, v in POSITIONS.items()}),
+        "positions": json.dumps({k: [v] if v else [] for k, v in POSITIONS.items()}),
     }
     return """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -2556,15 +3778,17 @@ def page(label):
 %s
 <div class="metrics"><span class="muted">Show on the maps:</span>
 <label title="Each time you stepped in: a message to Claude after its turn, an answer to its question or to sclaude's, a command run on the feature"><input type="checkbox" value="input"> ✋ your input <b class="mt-total" data-kind="input"></b></label>
-<label title="What Claude Code's own account says each conversation cost"><input type="checkbox" value="cost"> $ Claude's cost <b class="mt-total" data-kind="cost"></b></label></div>
+<label title="What Claude Code's own account says each conversation cost"><input type="checkbox" value="cost"> $ Claude's cost <b class="mt-total" data-kind="cost"></b></label>
+<label title="How long a question waited for your answer — Claude's, after its turn or its question, and sclaude's own — the whole of it, nights included"><input type="checkbox" value="wait"> ⏳ waiting for you <b class="mt-total" data-kind="wait"></b></label></div>
 <div class="live" style="margin-top:14px">
 <div>
 <h2 class="first-map">The whole process%s</h2>
 <div class="card detail-card">%s</div>
 <h2>The cycle at a glance%s</h2><div class="card mini">%s</div>
-<h2>States%s</h2><div class="card mini">%s</div>
-<h2>How a session changes sclaude%s</h2><div class="card mini">%s</div>
-<h2>The friction review%s</h2><div class="card mini">%s</div>
+<h2 id="map-workshop">How a session changes sclaude%s</h2><div class="card mini">%s</div>
+<h2 id="map-friction">The friction review%s</h2><div class="card mini">%s</div>
+<h2 id="map-regression">A stage's regression%s</h2><div class="card mini">%s</div>
+<h2 id="map-sync">Main and the branch%s</h2><div class="card mini">%s</div>
 <h2>Every command</h2>%s
 </div>
 <aside class="panel">
@@ -2587,9 +3811,10 @@ def page(label):
 """ % (esc(label), STYLE, LIVE_STYLE + PLAY_STYLE, esc(label), esc(label), LEGEND,
        play_head("detail", "The whole process"), detail.svg(),
        play_head("overview", "The cycle at a glance"), overview.svg(),
-       play_head("states", "States"), states.svg(),
-       play_head("workshop", "How a session changes sclaude", passes=True), Diagram(*node_sets()[3]).svg(),
-       play_head("friction", "The friction review", passes=True), Diagram(*node_sets()[4]).svg(),
+       play_head("workshop", "How a session changes sclaude", passes=True), Diagram(*node_sets()[2]).svg(),
+       play_head("friction", "The friction review", passes=True), Diagram(*node_sets()[3]).svg(),
+       play_head("regression", "A stage's regression", passes=True), Diagram(*node_sets()[4]).svg(),
+       play_head("sync", "Main and the branch", passes=True), Diagram(*node_sets()[5]).svg(),
        commands_table(), PLAYER_BAR,
        INTERACT_SCRIPT % {"model": json.dumps(client_model())}, PLAY_SCRIPT, script)
 
@@ -2616,7 +3841,7 @@ def main(argv):
             except (OSError, ValueError):
                 epilogue = None
         node, why = position(state, argv[2] if len(argv) >= 3 else "", epilogue)
-        print("%s\t%s\t%s" % (node, NODES[node][3], why))
+        print("%s\t%s\t%s" % (node, all_nodes()[node][3], why))
         return 0
     if len(argv) >= 2 and argv[0] == "history":
         try:

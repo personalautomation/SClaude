@@ -404,6 +404,14 @@ try:
         return "deny" if '"deny"' in out.stdout else "allow"
 
     target = os.path.join(workshop, "sclaude", "lib", "x.sh")
+    # A step may not open the workshop, so its refusal points at the friction
+    # log rather than at `sclaude core-open`, which would be refused it too.
+    for flags, name, friction in ((["--step"], "step", True), ([], "review", False)):
+        out = subprocess.run([sys.executable, HOOK] + args + flags, input=json.dumps(
+            {"tool_name": "Write", "tool_input": {"file_path": target}, "cwd": repo,
+             "session_id": "s0"}), capture_output=True, text=True).stdout
+        check("workshop-refusal-names-friction-log-%s" % name,
+              ("friction.log" in out, "core-open" in out), (friction, not friction))
     check("workshop-closed-without-record", in_workshop("s1", file_path=target), "deny")
     with open(record, "w") as fh:
         json.dump({"approved": ["s1"]}, fh)

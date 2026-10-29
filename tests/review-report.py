@@ -158,6 +158,15 @@ with tempfile.TemporaryDirectory() as wt:
     check("stuck-over-enough-rounds", review_report.stuck([5, 5, 5, 5], "Not converging: hold level."), True)
     check("not-stuck-too-few", review_report.stuck([5, 5, 5], "Not converging: hold level."), False)
     check("not-stuck-converging", review_report.stuck([9, 5, 3, 1], "Converging: half."), False)
+    said = "Converging: half. " + review_report.FEEDING
+    check("stuck-when-fixes-feed-it-two-rounds", review_report.stuck([8, 6, 5, 3, 2], said, 2), True)
+    check("not-stuck-feeding-one-round", review_report.stuck([6, 4, 2, 1], said, 1), False)
+    check("not-stuck-feeding-too-few-rounds", review_report.stuck([8, 6, 5], said, 3), False)
+    on, off = {"near_fix": True}, {"near_fix": False}
+    check("feeding-streak-counts-back", review_report.feeding_streak(
+        [{"threads": [on]}, {"threads": [off, off]}, {"threads": [on, off]}, {"threads": [on]}]), 2)
+    check("feeding-streak-empty-round-breaks", review_report.feeding_streak(
+        [{"threads": [on]}, {"threads": []}]), 0)
 
     # --- cost per launch, from what the status line left ----------------------
     context = "/tmp/claude-statusline-context-s2"

@@ -51,7 +51,7 @@ STEP_WORDS = {"plan", "code", "pr", "review", "fix", "friction", "epilogue", "re
 TIMESTAMP = re.compile(rb'"timestamp":"([^"]+)"')
 
 # Bumped when a summary gains a field: every transcript is read again once.
-VERSION = 5
+VERSION = 6
 
 # A person who takes longer than this to answer was away rather than working:
 # their time counts up to here and no further.
@@ -90,14 +90,16 @@ def fold(word):
     return "fix" if re.fullmatch(r"fix(-[a-z]+)?", word) else word
 
 
-def wait(start, end):
-    """Seconds from one ISO time to another, capped at AWAY; 0 when unknown."""
+def wait(start, end, cap=AWAY):
+    """Seconds from one ISO time to another, capped (AWAY, or none); 0 when
+    unknown."""
     try:
         a = datetime.fromisoformat(start.replace("Z", "+00:00"))
         b = datetime.fromisoformat(end.replace("Z", "+00:00"))
     except (AttributeError, ValueError):
         return 0
-    return max(0, min(AWAY, int((b - a).total_seconds())))
+    seconds = max(0, int((b - a).total_seconds()))
+    return min(cap, seconds) if cap else seconds
 
 
 def typed(entry):
@@ -116,7 +118,8 @@ def read(path):
     runs, denials = {}, {}
     title, first, last, continued = None, None, None, None
     compactions = errors = prompts = questions = 0
-    # The person's turns: [[when, seconds they took, Claude's calls since]].
+    # The person's turns: [[when, seconds they took (capped at AWAY),
+    # Claude's calls since, seconds Claude waited for them (not capped)]].
     human, pending_asks, since_last, last_claude = [], {}, 0, None
     try:
         fh = open(path, "rb")
@@ -190,7 +193,8 @@ def read(path):
                     # The session's opening prompt follows no turn of Claude's.
                     if last_claude:
                         human.append([entry.get("timestamp"),
-                                      wait(last_claude, entry.get("timestamp")), since_last])
+                                      wait(last_claude, entry.get("timestamp")), since_last,
+                                      wait(last_claude, entry.get("timestamp"), None)])
                         since_last = 0
             elif pending_asks and b'"tool_result"' in line and \
                     any(i and i.encode() in line for i in pending_asks):
@@ -203,7 +207,7 @@ def read(path):
                         if isinstance(block, dict) else None
                     if asked_at:
                         human.append([entry.get("timestamp"), wait(asked_at, entry.get("timestamp")),
-                                      since_last])
+                                      since_last, wait(asked_at, entry.get("timestamp"), None)])
                         since_last = 0
             if b'"toolDenialKind"' in line:
                 try:

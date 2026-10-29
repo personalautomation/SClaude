@@ -142,7 +142,7 @@ new_session_id() {
 # review's idle clock read them.
 session_runs() {
   local file="$1" node="$2" op="$3" session="${4:-}" outcome="${5:-}"
-  SCLAUDE_RUN="${SCLAUDE_RUN:-}" \
+  SCLAUDE_RUN="${SCLAUDE_RUN:-}" SCLAUDE_ABOUT="${SCLAUDE_ABOUT:-}" \
     python3 - "$file" "$node" "$op" "$session" "$(date -Iseconds)" "$outcome" <<'PYRUN' 2>/dev/null || true
 import json, sys
 path, dotted, op, session, now, outcome = sys.argv[1:7]
@@ -167,6 +167,10 @@ if op == "open":
     for r in mine:
         r.pop("stalled", None)
         r.pop("outcome", None)
+        # When it was taken up again: a run that keeps its end (below) is
+        # going once more while this is later than that end, and one whose
+        # sclaude was killed is going again from now.
+        r["resumed"] = now
         # A step rewound (step_rewind_to writes its done as false) and its
         # session resumed: the run that closed it is open again. Only there:
         # a retrospective resumed without an answer keeps its last end, and
@@ -215,6 +219,10 @@ if os.path.basename(path) == "state.json":
         row["outcome"] = outcome
     if os.environ.get("SCLAUDE_RUN"):
         row["run"] = os.environ["SCLAUDE_RUN"]
+    # What the session is about, where one node runs for more than one
+    # thing (the status: the preview's, or the cycle's end).
+    if os.environ.get("SCLAUDE_ABOUT"):
+        row["about"] = os.environ["SCLAUDE_ABOUT"]
     with open(os.path.join(os.path.dirname(path), "history.jsonl"), "a") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 PYRUN

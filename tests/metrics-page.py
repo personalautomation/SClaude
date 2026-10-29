@@ -168,6 +168,8 @@ def usage_checks(root):
     check("an answer to Claude's question is a turn, timed from the question",
           (found5["human"][0][1], found5["human"][0][2]), (120, 1))
     check("a wait past the cap counts as the cap", found5["human"][1][1], claude_usage.AWAY)
+    check("...and as the whole of it where the wait is asked for",
+          found5["human"][1][3] > claude_usage.AWAY and found5["human"][0][3] == 120, True)
     check("the opening prompt is no turn", len(found5["human"]), 2)
     check("first and last timestamps", (s1["start"], s1["end"]),
           ("2026-10-20T10:00:00Z", "2026-10-20T11:00:00Z"))

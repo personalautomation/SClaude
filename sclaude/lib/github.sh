@@ -676,17 +676,20 @@ for stage in STAGE_ORDER:
 
 # The sessions after the steps, a row for each conversation like every other
 # session the orchestrator starts, numbered when a kind ran more than once.
-def run_rows(node, name):
+# A sync's friction review is keyed by its run's number (sync-N, sync.sh); the
+# epilogue and the retrospective have none.
+def run_rows(node, name, friction=False):
     runs = [r for r in ((s.get(node) or {}).get("runs") or []) if isinstance(r, dict)]
     for number, run in enumerate(runs, start=1):
         sid = run.get("session") or ""
-        rows.append("| %s%s | %s | %s | %s | %s | — |" % (
+        rows.append("| %s%s | %s | %s | %s | %s | %s |" % (
             name,
             " (%d)" % number if len(runs) > 1 else "",
             "done" if run.get("done") else "interrupted",
             "`%s`" % sid[:8] if sid else "—",
             when(run.get("started")),
             when(run.get("finished")),
+            friction_cell("%s-%d" % (node, number)) if friction else "—",
         ))
     return runs
 
@@ -696,7 +699,7 @@ def run_rows(node, name):
 # issue and its parents: several in a feature's life — after the preview,
 # after production. And the retrospective before the clean-up (retro.sh),
 # the last one.
-sync_runs = run_rows("sync", "sync with main")
+sync_runs = run_rows("sync", "sync with main", friction=True)
 epilogue_runs = run_rows("epilogue", "status update")
 retro_runs = run_rows("retro", "retrospective")
 
@@ -1929,8 +1932,20 @@ status_fingerprint() {
 # The seventh argument is the feature's worktree, and it is optional: the
 # epilogue's own memory lives in that tree's state.json, so a caller without one
 # — cmd_epilogue, resuming a feature whose tree is already cleaned up — simply
-# keeps no record. That costs nothing there: a cleaned-up feature is reached
+# keeps no record (with the tree still there, it passes it). That costs nothing there: a cleaned-up feature is reached
 # only by naming it, never by the menu offering it.
+# The issue chain says the preview is red, from a stop before (run_status
+# records it): green now, the status is written again rather than left wrong
+# for the whole of QA and the merge — on every green pass until a session has
+# written it.
+#
+#   status_green_again <slug> <issue> <pr> <merged> <wt>
+status_green_again() {
+  [[ "$(state_get "$5/.sclaude/local/feature/state.json" status.preview_red 2>/dev/null || true)" == true ]] \
+    || return 0
+  run_status "$1" "$2" "$3" "$4" 1 0 "$5"
+}
+
 run_status() {
   local slug="$1" issue="$2" pr="$3" merged="$4" preview="$5" prod="$6" wt="${7:-}"
   # The eighth is the red preview, and it is deliberately not folded into
@@ -1957,16 +1972,23 @@ run_status() {
   # produce the same paragraphs — so when the fingerprint matches what was
   # written last time, we say so and stop. The labels below are not reapplied
   # either: they were applied in that same run, from these same values.
+  # Red words still standing over a green preview are not "this", whatever the
+  # fingerprint says.
   if [[ -n "$wt" ]]; then
     fingerprint="$(status_fingerprint "$wt" "$pr" "$merged" "$preview" "$prod" || true)"
     if [[ -n "$fingerprint" ]] \
-       && [[ "$fingerprint" == "$(state_get "$wt/.sclaude/local/feature/state.json" status.fingerprint 2>/dev/null || true)" ]]; then
+       && [[ "$fingerprint" == "$(state_get "$wt/.sclaude/local/feature/state.json" status.fingerprint 2>/dev/null || true)" ]] \
+       && [[ "$preview_red" == 1 || "$(state_get "$wt/.sclaude/local/feature/state.json" status.preview_red 2>/dev/null || true)" != true ]]; then
       echo ""
       info "The status in issue #$issue already describes this — nothing changed, skipping."
       info "  To write it again anyway: $SELF epilogue $slug"
       return 0
     fi
   fi
+
+  # The labels alone (STATUS_LABELS_ONLY, the merge's wait): no walk of the
+  # chain when none is earned.
+  [[ -n "${STATUS_LABELS_ONLY:-}" && "$preview$prod$preview_red$prod_red" != *1* ]] && return 0
 
   # issue_chain.py computes the chain — the same walk that will go into the
   # prompt. There is deliberately no copy of our own on gh+jq here: two walks
@@ -2022,6 +2044,9 @@ run_status() {
          "Deployed to production, but the regression against it is red"
     apply_deploy_labels "$repo" "$marks" "$numbers"
   fi
+  # The labels alone, no session: where the words need no rewriting
+  # (remind_prod's merge wait).
+  [[ -n "${STATUS_LABELS_ONLY:-}" ]] && return 0
 
   # What the session is told when no `deployed-*` label was earned. Said rather
   # than left blank: "none" alone would have it guess why, and a deploy that
@@ -2120,6 +2145,10 @@ run_status() {
     if [[ -n "$session" ]] && ! live_session "$REPO" "$session" >/dev/null; then
       session=""
     fi
+    # An interrupted one about another preview (red, now green) is not
+    # taken up: its words are the old ones.
+    [[ -n "$session" && "$(state_get "$estate" preview 2>/dev/null || true)$(state_get "$estate" preview_red 2>/dev/null || true)" \
+        != "$preview$preview_red" ]] && session=""
   fi
 
   local settings
@@ -2138,7 +2167,11 @@ run_status() {
   local fstate=""
   [[ -n "$wt" && -f "$wt/.sclaude/local/feature/state.json" ]] && fstate="$wt/.sclaude/local/feature/state.json"
   [[ -n "${session:-}" ]] || session="$(new_session_id)"
-  [[ -n "$fstate" ]] && session_runs "$fstate" epilogue open "$session"
+  # Before the merge a status is the preview's (red, or written again green):
+  # the history says so, and the map plays it beside the preview.
+  local about=""
+  [[ -n "$pr" && "$pr" != null && "$merged" != MERGED ]] && about=preview
+  [[ -n "$fstate" ]] && SCLAUDE_ABOUT="$about" session_runs "$fstate" epilogue open "$session"
 
   session_watch_start "" "$session" "$done_file" "$REPO"
   if [[ -n "$estate" && "$session" == "$(state_get "$estate" session 2>/dev/null || true)" ]]; then
@@ -2161,6 +2194,7 @@ run_status() {
       state_set "$estate" merged "${merged:-}"
       state_set "$estate" preview "$preview"
       state_set "$estate" prod "$prod"
+      state_set "$estate" preview_red "$preview_red"
       ( cd "$REPO" && claude_launch --session-id "$session" --model sonnet --effort medium \
           --permission-mode auto "${extra[@]}" -n "$(session_label epilogue)/$slug" "$prompt" )
     else
@@ -2174,7 +2208,8 @@ run_status() {
   session_watch_stop
   # It said its comments are written, and the watcher closed it: the report is
   # printed here, since claude's screen went with it.
-  session_closed "$done_file" "$REPO" "$session" "" "" epilogue || true
+  local written=0
+  session_closed "$done_file" "$REPO" "$session" "" "" epilogue && written=1
   # Whether it took place, by the transcript rather than the clock — the
   # witness run_step and run_friction use (session_started, state.sh). The
   # clock timed the wrapper, and the row and the epilogue's own state must not
@@ -2193,22 +2228,28 @@ run_status() {
     issue_sync "$wt"
   fi
 
+  # A red run arms the rewrite whether or not its words got written: a session
+  # left pending about the red preview is replaced by the green one, rather
+  # than finished later with the red words.
+  [[ -n "$wt" && "$preview_red" == 1 ]] \
+    && state_set "$wt/.sclaude/local/feature/state.json" status.preview_red true 2>/dev/null
+
+  # There used to be a command here that the human had to remember and type
+  # themselves. Now there is nothing to type: the menu itself offers to
+  # finish an unclosed epilogue, at the very next launch of sclaude.
+  #
+  # So the line with the command was removed rather than left "just in case".
+  # A hint that describes a different path from the one things will actually
+  # take is worse than no hint: the human does extra work and then stops
+  # trusting the other hints as well. The command has not gone anywhere — it
+  # is in --help — but it is no longer the ordinary path.
+  if [[ "$ran" -ne 1 ]]; then
+    warn ""
+    warn "  The epilogue did not start — the status in issue #$issue is unchanged."
+    [[ -n "$estate" ]] && warn "  sclaude will offer to finish it the next time you open the menu."
+    return 1
+  fi
   if [[ -n "$estate" ]]; then
-    if [[ "$ran" -ne 1 ]]; then
-      # There used to be a command here that the human had to remember and type
-      # themselves. Now there is nothing to type: the menu itself offers to
-      # finish an unclosed epilogue, at the very next launch of sclaude.
-      #
-      # So the line with the command was removed rather than left "just in case".
-      # A hint that describes a different path from the one things will actually
-      # take is worse than no hint: the human does extra work and then stops
-      # trusting the other hints as well. The command has not gone anywhere — it
-      # is in --help — but it is no longer the ordinary path.
-      warn ""
-      warn "  The epilogue did not start — the status in issue #$issue is unchanged."
-      warn "  sclaude will offer to finish it the next time you open the menu."
-      return 1
-    fi
     # The epilogue took place — its state has done its work and goes. There is
     # no longer a "done" mark on disk: nobody read a closed record, while it
     # would have accumulated a file per completed feature.
@@ -2225,5 +2266,11 @@ run_status() {
   # path, and marking that as written would silence the epilogue for good.
   [[ -n "$fingerprint" && -n "$wt" ]] \
     && state_set "$wt/.sclaude/local/feature/state.json" status.fingerprint "$fingerprint" 2>/dev/null
+  # And the red words armed above are cleared only by a green session that
+  # said its comments are written (session_closed): one cut off after its
+  # first reply leaves the red words standing, and the next green pass tries
+  # again (status_green_again).
+  [[ -n "$wt" && "$preview_red" != 1 && "$written" -eq 1 ]] \
+    && state_set "$wt/.sclaude/local/feature/state.json" status.preview_red null 2>/dev/null
   return 0
 }

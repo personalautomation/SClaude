@@ -529,26 +529,28 @@ def shared_schema_asks(command):
 
 
 # `sclaude core-open` lets the session change sclaude, in its tree's workshop
-# (workshop.sh). A step's session asks the person first, every session anew:
-# Claude Code puts the question, and the model cannot answer it, in auto mode
-# too. The reviews run under --step friction — the retrospective and the
-# friction and deferred reviews, which all start in plan mode, so the plan the
-# person approved is the yes — and open it without a question.
-CORE_OPEN_ASK = ("this session asks to change sclaude itself: `sclaude core-open` opens the "
-                 "tree's workshop, a copy of sclaude's checkout, for this session to change "
-                 "and commit in. sclaude publishes the change once the session has reviewed "
-                 "it, after checking it for the product's details. Allow it only if you want "
-                 "sclaude changed from this session.")
+# (workshop.sh): only the sessions run under --step friction — the
+# retrospective and the friction and deferred reviews, which start in plan
+# mode, so the plan the person approved is the yes. A step's session is
+# refused it, and the refusal reaches the friction log, whose review is the
+# one to change sclaude for what got in the step's way.
+CORE_OPEN_NO = ("a step's session does not change sclaude itself: say in "
+                ".sclaude/local/feature/friction.log what in sclaude got in your way and what "
+                "the fix would be — the friction review after this session reads it and "
+                "changes sclaude in the workshop.")
+# Its ending instead of TAIL: the step's own work goes on, and the person has
+# nothing to decide. collect-denials.py knows it as the hook's own (OWN_MARKERS).
+CORE_OPEN_TAIL = "  Then carry on with the step's own work."
 CORE_OPEN_FREE = ("friction",)
 
 
-def core_open_asks(command, step):
-    """The question to put before a step's session opens the workshop, or None."""
+def core_open_refused(command, step):
+    """Why a step's session may not open the workshop, or None."""
     if step in CORE_OPEN_FREE:
         return None
     for words in segments(command) or []:
         if words[:2] == ["sclaude", "core-open"]:
-            return CORE_OPEN_ASK
+            return CORE_OPEN_NO
     return None
 
 
@@ -1161,7 +1163,7 @@ def refuses(command, step, cwd=None, depth=0):
     return None
 
 
-def deny(reason, step="", subject=""):
+def deny(reason, step="", subject="", tail=None):
     # The refusal reaches the log: between steps the review session will go
     # through it and decide whether the ban was deliberate or is getting in the
     # way by oversight.
@@ -1170,7 +1172,7 @@ def deny(reason, step="", subject=""):
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": reason + TAIL,
+            "permissionDecisionReason": reason + (TAIL if tail is None else tail),
         }
     }, ensure_ascii=False))
     sys.exit(0)
@@ -1230,9 +1232,11 @@ if payload.get("tool_name") == "Bash":
     except Exception as exc:  # noqa: BLE001
         reason = "the ban check failed on this command (%s: %s), so it is refused" % (
             type(exc).__name__, exc)
+    if not reason and core_open_refused(command, step):
+        deny(CORE_OPEN_NO, step, command, CORE_OPEN_TAIL)
     if reason:
         deny(reason, step, command)
-    question = core_open_asks(command, step) or shared_schema_asks(command)
+    question = shared_schema_asks(command)
     if question:
         # Asked of the person at the terminal rather than refused: not our
         # refusal, so not in the friction log either.

@@ -474,6 +474,12 @@ cmd_resume() {
 
   if [[ "$step" == "done" ]]; then
     echo "Feature '$slug' has been through every step."
+    # A sync's friction review left open after the steps holds the run as one
+    # between steps does (sync_with_main): it comes first.
+    local dkey; dkey="$(friction_pending "$fstate" || true)"
+    if [[ -n "$dkey" ]] && ! run_friction "$wt" "$slug" "$dkey"; then
+      return 0
+    fi
     if [[ -n "$cleanup_left" ]]; then
       cmd_done "$slug" || true
     else
@@ -1059,8 +1065,15 @@ cmd_epilogue() {
   merged="$(state_get "$file" merged || true)";  [[ "$merged" == "null" ]] && merged=""
   preview="$(state_get "$file" preview || echo 0)"
   prod="$(state_get "$file" prod || echo 0)"
+  # Whether it was about a red preview: without it the resumed session would
+  # be told nothing was deployed.
+  local preview_red; preview_red="$(state_get "$file" preview_red || echo 0)"
+  [[ "$preview_red" == 1 ]] || preview_red=0
 
-  run_status "$slug" "$issue" "$pr" "$merged" "$preview" "$prod"
+  # The tree when it is still there: a green epilogue finished here clears
+  # the red words' flag in its state, or every green pass would write again.
+  local wt; wt="$(feature_worktree "$slug" 2>/dev/null)" || wt=""
+  run_status "$slug" "$issue" "$pr" "$merged" "$preview" "$prod" "$wt" "$preview_red"
 }
 
 # Erasing a step's traces and starting it afresh — a "safe boot" for a feature
@@ -1231,6 +1244,9 @@ cmd_done() {
   [[ -n "$slug" ]] || die "name the feature: $SELF done <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
   branch="$(state_get "$wt/.sclaude/local/feature/state.json" branch)" || die "the state carries no branch"
+  # The retrospective and the clean-up come after any ship: a ship question
+  # a pass cut off left marked is not pending any more (position).
+  state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping null 2>/dev/null || true
 
   IFS=$'\t' read -r merged pr < <(gh pr view "$branch" --repo "$(git -C "$REPO" remote get-url origin)" \
     --json state,number --jq '[.state, .number] | @tsv' 2>/dev/null) || true

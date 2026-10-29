@@ -654,11 +654,25 @@ sync_with_main() {
     session_runs "$state" sync drop "$session"
     return 1
   fi
-  if sync_settled "$wt"; then
+  local settled=""
+  sync_settled "$wt" && settled=1
+  if [[ -n "$settled" ]]; then
     session_runs "$state" sync finish "$session"
-    return 3
+  else
+    session_runs "$state" sync end "$session"
   fi
-  session_runs "$state" sync end "$session"
+  # What got in its way, as after a step's session, once its end is recorded:
+  # its friction review reads the log, and changes sclaude where sclaude was in
+  # the way (run_friction; an empty log costs nothing). Keyed by the sync's
+  # run, as a step's session by its.
+  local runs; runs="$(sync_runs_info "$state" | cut -f1)"
+  # Not finished, it holds the cycle as a step's does: the run stops, and
+  # `sclaude <feature>` returns to it first.
+  if ! run_friction "$wt" "$slug" "sync-${runs:-1}"; then
+    info "  The feature waits for it: $SELF $slug"
+    return 1
+  fi
+  [[ -n "$settled" ]] && return 3
   echo ""
   warn "The branch still does not merge cleanly with main, or is not pushed."
   if [[ -n "$reviewed" ]]; then

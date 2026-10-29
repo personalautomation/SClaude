@@ -15,7 +15,7 @@ When you are done, `git merge-tree --write-tree HEAD origin/main` must exit 0 an
 
 <include:questions>
 
-<block:workshop>
+<include:friction>
 
 <include:report>
 

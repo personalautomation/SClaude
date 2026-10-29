@@ -164,6 +164,20 @@ with tempfile.TemporaryDirectory() as wt:
     check("resumed-stall-cleared", resumed[0].get("stalled"), None)
     check("resumed-stall-outcome", resumed[0].get("outcome"), "reviewed")
 
+    # A sync's friction review (sync-N, sync.sh) is named in its row.
+    shell(wt, '''
+        f="$wt/.sclaude/local/feature/state.json"
+        session_runs "$f" sync open y1111111
+        session_runs "$f" sync finish y1111111
+        session_runs "$f" friction.sync-1 open z1111111
+        session_runs "$f" friction.sync-1 finish z1111111 fixed
+        state_set "$f" friction.sync-1.done true
+        state_set "$f" friction.sync-1.was z1111111
+        state_set "$f" friction.sync-1.fixed true
+    ''')
+    sync_row = [r for r in render(path) if r.startswith("| sync with main")][0]
+    check("sync-row-names-its-friction-review", "—" not in sync_row.split("|")[6], True)
+
     status_rows = [r for r in rows if r.startswith("| status update")]
     check("epilogue-is-a-row", len(status_rows), 1)
     check("epilogue-row-done", status_rows[0].split("|")[2].strip(), "done")

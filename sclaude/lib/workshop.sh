@@ -18,11 +18,11 @@
 # (a feature's, or a deferred review's), at .sclaude/local/instruments, and
 # shared by every session of that tree:
 #
-#   * `sclaude core-open` lets the session write there. In a step it is asked
-#     of the person, by Claude Code itself (forbidden-commands.py answers
-#     "ask"), for every session; the retrospective and the reviews, which
-#     start in plan mode, so the person approved their plan, get it without
-#     a question;
+#   * `sclaude core-open` lets the session write there. Only the
+#     retrospective and the reviews open it, without a question: they start
+#     in plan mode, so the person approved their plan. A step's session is
+#     refused it and says in the friction log what got in its way
+#     (forbidden-commands.py CORE_OPEN_NO);
 #   * the session commits there, reviews its change — sreview for a
 #     maintainer of sclaude (MAINTAINERS), a review of its choosing for
 #     anybody else — and says so with `sclaude core-ready`;
@@ -595,18 +595,15 @@ workshop_remove() {
 }
 
 # The prompt's paragraph on changing sclaude (prompts/_workshop.md), for a
-# session of <tree>: `ask` for a step, whose `sclaude core-open` Claude Code
-# asks the person about, `free` for a review session, whose is not asked.
-# Empty with no tree: the epilogue's is gone.
+# session of <tree> that may: the retrospective and the friction and monthly
+# reviews, whose approved plan is the yes. Empty with no tree.
 #
-#   workshop_rules <tree> ask|free
+#   workshop_rules <tree>
 workshop_rules() {
-  local tree="$1" mode="$2" maintainer="" other=1
+  local tree="$1" maintainer="" other=1
   [[ -n "$tree" && -f "$PROMPTS/_workshop.md" ]] || return 0
   developer_is_maintainer && { maintainer=1; other=""; }
   SCLAUDE_V_WORKSHOP="$(workshop_dir "$tree")" SCLAUDE_V_INSTRUMENTS="$INSTRUMENTS" \
-    SCLAUDE_V_CORE_ASK="$([[ "$mode" == ask ]] && echo 1)" \
-    SCLAUDE_V_CORE_FREE="$([[ "$mode" == free ]] && echo 1)" \
     SCLAUDE_V_CORE_MAINTAINER="$maintainer" SCLAUDE_V_CORE_OTHER="$other" \
     python3 "$LIB/render_prompt.py" "$PROMPTS/_workshop.md" "$PROMPTS"
 }

@@ -69,7 +69,7 @@ The orchestrator captured the PR state as of the start of this step — checks a
 
    When a fix changes something the pull request's description states — a mechanism, a list, a count of tests — rewrite that part of the description in the same round (`gh pr view <pr> --json body --jq .body`, edit, `gh pr edit <pr> --body-file <file>`). It was written at step 3, and the merge summary and the issue's status comment are written from it: once it said "16 cases" for the 52 the review rounds left, and the issue's status repeated it.
 
-   **When a thread ends in a change of what the feature does, the record changes with the code.** A decision of mine that moves behaviour away from the plan — an acceptance criterion now worded wrong, a prompt, a route or a migration the plan said there would be none of — goes into `.sclaude/local/feature/plan.md` the same round: the criterion's old wording stays, the change is noted under a `## Agreed during review` section at its end. Never reword or add an acceptance criterion yourself: ask me through `AskUserQuestion` with the wording you propose — for a new one, under the next free identifier — and I edit it in the issue or add it there — QA ticks the list there, and a box ticked against the old wording accepts what was never built. Once a criterion was changed in review, the plan was left on the old rule, and the automatic QA ticked the old text.
+   **When a thread ends in a change of what the feature does, the record changes with the code.** A decision of mine that moves behaviour away from the plan — an acceptance criterion now worded wrong, a prompt, a route or a migration the plan said there would be none of — goes into `.sclaude/local/feature/plan.md` the same round: the change is noted under a `## Agreed during review` section at its end. Never reword or add an acceptance criterion on your own: ask me through `AskUserQuestion` with the wording you propose — for a new one, under the next free identifier. On my yes, put that wording into the plan's acceptance criteria under its identifier, in place of the old line (the old wording stays in `## Agreed during review`), and leave the issue to `sclaude`: as the review closes it adds a new criterion to the issue, shows me a reworded one beside the issue's text and writes it there at my yes — QA ticks the list there, and a box ticked against the old wording accepts what was never built. Once a criterion changed in review was left for me to carry into the issue by hand, nobody did, and the automatic QA ticked the old text.
 
 <if:issue>   Record the decision in the `User request` comment on the issue too: a `### Added during review` section at the end of the comment (or extend it), one line per decision, what I asked for in my terms. Restate, don't extend or compress; don't touch what is above it. Re-read the comment before rewriting it — I may have edited it in GitHub — and rewrite it in place, never post a second one:
 
@@ -102,8 +102,6 @@ The orchestrator captured the PR state as of the start of this step — checks a
 <include:questions>
 
 <include:friction>
-
-<block:workshop>
 
 **How this session ends.** You are step 4, the last one; the `sclaude` orchestrator drives the steps from outside. There are no further sessions: merge, migration promote and `vercel --prod` I do by hand, and the orchestrator reminds me of them when I exit.
 

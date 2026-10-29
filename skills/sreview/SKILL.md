@@ -123,7 +123,11 @@ changes no file and posts nothing. Its scope, in plain words:
   declined, with its reason, and every finding fixed. Tell it: a finding that
   restates a declined one or contradicts a policy is not reported, reworded or
   on another line, unless the code it rests on changed so the reason no longer
-  holds — then it says which change.
+  holds — then it says which change;
+- **what describes the code**: when the repository's `CLAUDE.md` names
+  documents that follow a change — a README, docs, a diagram or map built from
+  a model — it reads them against the change, and a place that no longer
+  describes the code is a finding like any other.
 
 It answers in sclaude's format, so PR mode can post it unchanged:
 

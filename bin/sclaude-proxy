@@ -792,7 +792,8 @@ async def own_page(target, host, headers=None):
         if (parse_qs(url.query).get("start") or [""])[0] == "1" and found[1] \
                 and not await asyncio.to_thread(answers, found[1]):
             start_state(label, found[0])
-        return respond("200 OK", process_map().page(label))
+        model = process_map()
+        return respond("200 OK", model.page(label, model.config_of(found[0])))
     if url.path == "/__sclaude/code":
         # code-server on the tree, its service started first when it is down.
         # From this machine only: the phone has the gate's own.
@@ -828,8 +829,10 @@ async def own_page(target, host, headers=None):
             "Location: %s/?%s" % (CODE_LOCAL, urlencode({"folder": found[0]})),))
     if url.path == "/__sclaude/bpmn":
         # The whole cycle with no feature's place on it: the printed page,
-        # drawn from the model now rather than read from a build.
-        return respond("200 OK", process_map().doc())
+        # drawn from the model now rather than read from a build, as this
+        # project's config runs it.
+        model, main = process_map(), feature("main")
+        return respond("200 OK", model.doc(model.config_of(main[0]) if main else None))
     if url.path == "/__sclaude/dora":
         return respond("200 OK", await asyncio.to_thread(dora_page))
     if url.path == "/__sclaude/flow/state":

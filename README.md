@@ -39,10 +39,13 @@ file's source, so open it from a checkout. The decks are built from
 sources and rebuild rather than editing the built pages.
 
 Beside them, [`bpmn_diagrams.html`](docs/presentations/bpmn_diagrams.html)
-is the process map: the cycle at a glance, a feature's states, the whole
+is the process map: the cycle at a glance, the whole
 process as BPMN with every lane and every way back, how a session changes
 sclaude itself (the blocks marked W), the friction review that follows the
-sessions marked F, and every command with the place it leads to. To print it, choose the paper and the scale on the
+sessions marked F, and every command with the place it leads to. It is drawn
+for `sclaude/config.example.json`; a project's own map, on its proxy, shows the
+cycle its `.sclaude/config.json` runs — the review on CI or on this machine, QA
+on a board or none, who merges — and nothing it does not. To print it, choose the paper and the scale on the
 page itself, above the whole process (A4 landscape at 100% is recommended;
 "Fit the width" puts the whole width on one sheet, the map going on down):
 the large map is cut between lanes into overlapping sheets that glue
@@ -84,8 +87,8 @@ lost in an overgrown conversation. SDD's five names fall across them unevenly:
 | **6. epilogue** | — | after production: the outcome written into the issue and its parents, so an epic shows where it stands |
 | **7. retro** | — | before the feature is cleaned up: what you may have missed, how you could work better, what sclaude could do better |
 
-When tests fail, a separate session fixes them. After every step's session and
-every fixing session a short
+When tests fail, a separate session fixes them. After every step's session, every
+sync with main and every fixing session a short
 **friction review** looks at what sclaude's safety rules refused, and loosens a
 rule that was in the way.
 
@@ -102,7 +105,7 @@ code exists is what shift-left asks for.
 | code | your yes **and** the product's tests passing |
 | pr | a pull request that exists on GitHub |
 | review | the automatic review has nothing left open — no thread unresolved, no check running or red — **and** the product's local tests passing; the pull request stays open for QA. No session at all when the review found nothing. The preview and its tests come after the step: a red preview puts the feature back on it |
-| fix after a regression | the same tests run again and pass. Two sessions that do not get them green stop the cycle for you. A session that finds the cause outside the branch changes nothing and leaves a note; the tests then run once more by themselves (a flaky test goes green), and a second such note stops the cycle with it for you |
+| fix after a regression | the same tests run again and pass. Two sessions that do not get them green stop the cycle for you. A session that finds the cause outside the branch changes nothing and leaves a note; the tests then run once more by themselves (a flaky test goes green), and a second such note stops the cycle with it for you. A note is kept in the feature's `regression.notes` once it is answered, for whatever it says would have to change |
 | sync | sclaude's own check after the session: no merge left under way, nothing uncommitted, the branch merging cleanly with main, and pushed. Otherwise the session is offered again. Then the preview, its tests and QA run on what it pushed |
 | epilogue | the session actually ran; one that never started is offered again from the menu |
 | retro | its session finished. A later `sclaude done` goes back into the same conversation, told what ran since — a rollback, another round — and asked to check its report against it; with nothing run since, it asks first |
@@ -178,8 +181,9 @@ asks first.
 
 While production carries a feature whose last production tests were red — the
 rollback failed, you declined it, another release sits on top, or the tests
-could not run — sclaude holds the feature: nothing is shipped, closed or
-cleaned up, and it says which way out fits. `sclaude regression <name> prod`
+could not run in a broken environment — sclaude holds the feature, and the menu shows it as
+`steps done, production held`: nothing is shipped, closed or cleaned up, and it says which
+way out fits. `sclaude regression <name> prod`
 runs the production tests again and, green, lifts the hold;
 `sclaude rollback <name>` puts the previous release back and sends the fix to
 the review step; `sclaude return <name>` sends the fix forward from the review
@@ -434,11 +438,11 @@ repository is public and the session has read your project. It fixes sclaude
 in the feature's workshop instead, a copy of the checkout at
 `.sclaude/local/instruments` that every session of the feature shares:
 
-- a step's session runs `sclaude core-open`, and Claude Code asks you first,
-  in its window, every session anew; a "no" leaves sclaude alone, and the
-  finding is put off for the monthly review;
+- a step's session does not change sclaude: it writes what got in its way in
+  the feature's friction log, and the friction review after it fixes sclaude;
 - the retrospective and the friction and monthly reviews start in plan mode,
-  so the plan you approve is your yes: they open it without a question;
+  so the plan you approve is your yes: they run `sclaude core-open` and open
+  the workshop without a question;
 - the session commits there, reviews its change — `/sreview` if you are a
   maintainer, any review you like otherwise — and runs `sclaude core-ready`.
   Answering "stop" to sreview's "go on?" counts as a finished review.
@@ -563,7 +567,7 @@ the same pull request.
 **Step 4, review.** The project's automatic review reads the pull request, and
 a session fixes what it found, one round at a time. The step closes when the
 review has nothing left open, the preview is deployed and its tests pass. When the
-report says the rounds stopped converging, sclaude says so once and names the
+report says the rounds stopped converging, or that the fixes are feeding the review two rounds running, sclaude says so once and names the
 keys that end the search for new findings; once you end it, one question with
 three answers settles the rest: check the fixes, close the step, or leave it.
 
@@ -661,6 +665,7 @@ is stopped, database included (data kept), and starts again on the next visit.
 | `SCLAUDE_DOCKER_START=off` | never start Docker |
 | `SCLAUDE_DOCKER_WAIT` | how long to wait for Docker to come up, in seconds (120) |
 | `SCLAUDE_DOCKER_DESKTOP` | where Docker Desktop is, when it is somewhere unusual |
+| `SCLAUDE_DB_WAIT` | how long a feature's own database may take to answer after its start reported a failure, in seconds (120) |
 
 ### What sclaude writes, and where
 
@@ -748,8 +753,10 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   history starts with sessions run since sclaude keeps it. Checkboxes above
   the maps put under each block what it took: ✋ your input — each message to
   Claude after its turn, each answer to its question or to sclaude's, each
-  command run on the feature at the terminal — and Claude's cost in dollars,
-  each checkbox showing the whole feature's total beside it.
+  command run on the feature at the terminal — Claude's cost in dollars, and
+  ⏳ how long a question waited for your answer, Claude's or sclaude's, nights
+  included; a block with none shows none. Each checkbox shows the whole
+  feature's total beside it.
 - `localhost:3000/__sclaude/dora` — the product's metrics, linked under main
   as "main — DORA metrics": DORA, delivery, development quality, Claude's work
   and token efficiency. Production deploys and builds come from Vercel, each

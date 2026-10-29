@@ -332,12 +332,12 @@ export SCLAUDE_SESSION=%(session)s
     check("kept-unpublished", "never published" in out, True)
     check("branch-kept", git(live, "rev-parse", "--verify", "-q", branch + "^{commit}", check_=False), head)
 
-    # The prompt's paragraph: a step is asked, a review is not.
-    ask_text = sh('workshop_rules "%s" ask' % tree)
-    free_text = sh('workshop_rules "%s" free' % tree, maintainer=False)
-    check("rules-ask", "Claude Code asks me" in ask_text and "/sreview" in ask_text, True)
-    check("rules-free", "without a question" in free_text and "--review" in free_text, True)
-    check("rules-no-tags", "<if:" in ask_text or "<if:" in free_text, False)
+    # The prompt's paragraph, for the sessions that may: no question asked.
+    mine = sh('workshop_rules "%s"' % tree)
+    theirs = sh('workshop_rules "%s"' % tree, maintainer=False)
+    check("rules-maintainer", "without a question" in mine and "/sreview" in mine, True)
+    check("rules-other", "without a question" in theirs and "--review" in theirs, True)
+    check("rules-no-tags", "<if:" in mine or "<if:" in theirs, False)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

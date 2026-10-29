@@ -867,7 +867,7 @@ regression_run_body() {
   # the head of the run meant the gate destroyed the message on its way to
   # re-deriving it: four minutes of suite, a fixing session, the same paragraph
   # written again. It is cleared where it is answered — by the gate, once the
-  # human says the cause has been dealt with.
+  # human says to run again — and kept in regression.notes (blocked_note_keep).
 
   regression_notify_start "$slug" "$stage" "$base" "$(wc -w <<< "$parts")" "$total_expected"
 
@@ -1186,6 +1186,24 @@ regression_clear_mark() {
   clear_regression_label "$repo" "$stage" "$numbers"
 }
 
+# Takes a blocked note off, keeping it in regression.notes beside it.
+#
+# A note says what failed, why, and what would have to change and who could
+# change it. Deleted when the stage went green on a rerun, or when the person
+# answered its question, the last part went with it: a flaky test's fix,
+# named as belonging to a change of its own, reached no issue, no deferred
+# entry and no report. The notes file lives in the feature's folder, where the
+# retrospective reads it before the clean-up removes the tree.
+#
+#   blocked_note_keep <wt> <stage> <why>
+blocked_note_keep() {
+  local note="$1/.sclaude/local/feature/regression.blocked"
+  [[ -s "$note" ]] || { rm -f "$note"; return 0; }
+  { printf '=== %s · %s · %s\n' "$(date -Iseconds)" "$2" "$3"
+    cat "$note"; printf '\n'; } >> "$1/.sclaude/local/feature/regression.notes" 2>/dev/null
+  rm -f "$note"
+}
+
 regression_gate() {
   local wt="$1" slug="$2" stage="$3"
   local state="$wt/.sclaude/local/feature/state.json"
@@ -1259,11 +1277,13 @@ regression_gate() {
       info "  $line"
     done < "$note"
     echo ""
+    # Not "has it been dealt with": the commonest note is a flaky test, with
+    # nothing to deal with, and a yes to that question was a yes to a rerun.
     local fixed=""
-    ask "${BOLD}  Has that been dealt with? [y/n] ${OFF}" fixed yn || true
+    ask "${BOLD}  Run the $stage regression again? [y/n] ${OFF}" fixed yn || true
     if is_yes "$fixed"; then
-      rm -f "$note"
-      info "  Running $stage again."
+      blocked_note_keep "$wt" "$stage" "run again at the person's word"
+      info "  Running $stage again; the note is kept in .sclaude/local/feature/regression.notes."
     else
       info "  Leaving it: the run would fail the same way."
       info "  The note is .sclaude/local/feature/regression.blocked; carry on with: $SELF $slug"
@@ -1285,21 +1305,26 @@ regression_gate() {
     # against a tree nobody deployed. So a moved tree is deployed first.
     #
     # Unknown counts as moved (deploy_unchanged is false on no record), and a
-    # redeploy that fails ends the gate: a run against the old address answers
-    # a question nobody asked.
+    # redeploy that fails is the stage's red below: a run against the old
+    # address answers a question nobody asked.
     if [[ "$stage" == "preview" ]] && ! deploy_unchanged "$wt" preview; then
       echo ""
       info "  The branch moved since its preview was deployed — deploying it again."
       preview_apply_migrations "$wt" || true
-      if ! preview_ship "$wt"; then
-        alarm "  The preview could not be redeployed, so the $stage regression was not run again."
-        info "  Carry on when it can be deployed with: $SELF $slug"
-        return 1
-      fi
     fi
-    regression_run "$wt" "$slug" "$stage" "$only"
-    rc=$?
-    only=""
+    # A deploy that fails is the stage's red, fixed the way a red run is:
+    # its session told which command failed (preview_ship records it), the
+    # attempts counted, the deploy tried again on the fix.
+    if [[ "$stage" == "preview" ]] && ! deploy_unchanged "$wt" preview && ! preview_ship "$wt"; then
+      rc=1
+      only=""
+      state_set "$state" "regression.$stage.failed_at" "the deploy"
+      state_set "$state" "regression.$stage.status" failed
+    else
+      regression_run "$wt" "$slug" "$stage" "$only"
+      rc=$?
+      only=""
+    fi
 
     if [[ "$rc" -eq 0 ]]; then
       # Green, and if a session preceded this run it is the one that did it.
@@ -1314,7 +1339,11 @@ regression_gate() {
       last_fix="$(state_get "$state" "regression.$stage.fix_status" 2>/dev/null || true)"
       [[ -n "$last_fix" && "${last_fix##* }" != "blocked" ]] \
         && fix_status_set "$state" "$stage" green
-      rm -f "$wt/.sclaude/local/feature/regression.blocked"
+      if [[ -s "$wt/.sclaude/local/feature/regression.blocked" ]]; then
+        info "  The note the fixing session left is kept in .sclaude/local/feature/regression.notes:"
+        info "  whatever it says would have to change is not done by a green run."
+      fi
+      blocked_note_keep "$wt" "$stage" "green on a rerun"
       state_set "$state" "regression.$stage.attempts" 0
       regression_clear_mark "$wt" "$stage"
       state_set "$state" "regression.$stage.orchestrator_fixes" 0
@@ -1359,7 +1388,11 @@ regression_gate() {
       local failed_part
       failed_part="$(state_get "$state" "regression.$stage.failed_at" 2>/dev/null || true)"
       [[ -n "$failed_part" && "$failed_part" != "null" ]] || failed_part="a part"
-      info "  Failed on: $failed_part. The log is .sclaude/local/feature/regression.log"
+      if [[ "$failed_part" == "the deploy" ]]; then
+        info "  Failed on: the deploy. Its output was in the terminal above."
+      else
+        info "  Failed on: $failed_part. The log is .sclaude/local/feature/regression.log"
+      fi
       notify_feature "$slug" "Regression still red on $stage
 $attempts fixing session(s) did not help — it needs you.
 Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
@@ -1669,6 +1702,27 @@ regression_fix_block() {
   [[ "$kept" == "null" ]] && kept=""
   [[ -n "$kept" && -s "$kept" ]] || kept="$log"
 
+  local dfail; dfail="$(state_get "$state" "regression.$stage.deploy_failed" 2>/dev/null || true)"
+  [[ "$dfail" == "null" ]] && dfail=""
+  if [[ -n "$dfail" ]]; then
+    # Not the suite: the deploy itself (preview_ship, remind_prod), whose
+    # output stayed in the terminal.
+    printf '**The %s deploy failed at `%s`.**\n\n' "$stage" "$dfail"
+    printf 'Its output is not kept: run that command again from the main repository to see the error '
+    printf '(for a Vercel build, `vercel inspect --logs <url>` shows its log). Find the cause in the code, '
+    printf 'the build or a migration and fix it. A cause outside the code — the login to Vercel, the network, '
+    printf 'a limit — is not yours to fix: say so in `.sclaude/local/feature/regression.blocked`, and change nothing.\n\n'
+    if [[ "$stage" == "prod" ]]; then
+      printf 'Production still runs the release it had; if the promote ran, its database may already carry the new migrations.\n\n'
+      # Its suite, run after the failure when the promote began (remind_prod).
+      if [[ "$(state_get "$state" regression.prod.after_failure 2>/dev/null || true)" == red ]]; then
+        printf 'Production'"'"'s suite, run after the failure, is **red** on `%s` — the old code on the new schema. Its last lines:\n\n' "${failed:-a part}"
+        printf '```\n%s\n```\n\n' "$(tail -30 "$log" 2>/dev/null)"
+      fi
+    else
+      printf 'Commit and push the fix; sclaude deploys the branch again after you, and that deploy, then the suite against it, is the judge.\n\n'
+    fi
+  else
   printf '**The %s regression failed on `%s`.**\n\n' "$stage" "${failed:-a part}"
   if [[ "$rolled" == "done" && "$kept" != "$log" ]]; then
     printf 'That run'"'"'s full output is kept at `%s` — read it rather than\n' "${kept#$wt/}"
@@ -1680,6 +1734,7 @@ regression_fix_block() {
   printf '```\n%s\n```\n\n' "$(tail -30 "$kept" 2>/dev/null)"
   local reason; reason="$(state_get "$state" "regression.$stage.reason" 2>/dev/null || true)"
   [[ -n "$reason" && "$reason" != "null" ]] && printf '### The reason given\n\n%s\n\n' "$reason"
+  fi
   # A merged pull request cannot be reopened, so the fix needs a new one — from
   # this same branch. sclaude follows the feature by the branch its state
   # names: the PR it records, whether that PR is merged, what the preview
@@ -1705,7 +1760,7 @@ regression_fix_block() {
     cat "$PROMPTS/_rollback-fix.md" 2>/dev/null
     printf '\n'
   fi
-  [[ "$mode" == "gate" ]] && cat "$PROMPTS/_regression-fail.md" 2>/dev/null
+  [[ "$mode" == "gate" && -z "$dfail" ]] && cat "$PROMPTS/_regression-fail.md" 2>/dev/null
   return 0
 }
 
@@ -1759,6 +1814,9 @@ regression_fix() {
   # the person is asked.
   local failed resume=""
   failed="$(state_get "$state" "regression.$stage.failed_at" 2>/dev/null || true)"
+  # A deploy that failed is what the session fixes, not the suite's part.
+  local dfail; dfail="$(state_get "$state" "regression.$stage.deploy_failed" 2>/dev/null || true)"
+  [[ -n "$dfail" && "$dfail" != "null" ]] && failed="the deploy"
   session="$(state_get "$state" "regression.$stage.fix_session" 2>/dev/null || true)"
   if [[ -n "$failed" && "$failed" != "null" \
         && "$(state_get "$state" "regression.$stage.fix_for" 2>/dev/null || true)" == "$failed" ]] \
@@ -1823,14 +1881,15 @@ regression_fix() {
   # off only now that a session is opening: one that never starts (its rules
   # unreadable, its prompt missing) leaves it for the next start's question.
   history_add "$state" "fix.$stage" start session="$session"
-  rm -f "$wt/.sclaude/local/feature/regression.blocked"
+  blocked_note_keep "$wt" "$stage" "a fixing session opened"
   session_watch_start "$wt" "$session"
   if [[ -n "$resume" ]]; then
     # One wording for a session that ended on a fix and one that ended on a
     # note: which it was is not kept once an orchestrator fix overwrites the
     # status, and the session knows anyway.
-    prompt="$(printf '**The %s regression ran again and failed on the same part.** If you ended last time on a note, it was taken off: write `.sclaude/local/feature/regression.blocked` again if the cause is still outside this tree, or this session ends as a fix that did not hold.\n\n%s\n\n%s\n' \
-      "$stage" "$(marker_gone .sclaude/local/feature/session-done)" "$SCLAUDE_B_REGRESSION")"
+    prompt="$(printf '**The %s %s again.** If you ended last time on a note, it was taken off: write `.sclaude/local/feature/regression.blocked` again if the cause is still outside this tree, or this session ends as a fix that did not hold.\n\n%s\n\n%s\n' \
+      "$stage" "$([[ "$failed" == "the deploy" ]] && echo "deploy failed" || echo "regression ran again and failed on the same part")" \
+      "$(marker_gone .sclaude/local/feature/session-done)" "$SCLAUDE_B_REGRESSION")"
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --resume "$session" \
         --model "$model" --effort "$effort" \
         --permission-mode "$mode" "${extra[@]}" -n "$name" "$prompt" )
@@ -1903,7 +1962,7 @@ regression_fix() {
   # would stop the next run with "has that been dealt with?" about a cause the
   # fix was for. If the fix did not help, the next red run writes a new one.
   if [[ "$(state_get "$state" "friction.fix-$stage-$number.fixed" 2>/dev/null || true)" == "true" ]]; then
-    rm -f "$wt/.sclaude/local/feature/regression.blocked"
+    blocked_note_keep "$wt" "$stage" "the friction review changed sclaude"
     return 4
   fi
 

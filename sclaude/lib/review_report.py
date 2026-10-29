@@ -367,6 +367,12 @@ def chain(per_round):
     return " ".join(words)
 
 
+# The verdict's sentence for a last round whose findings sit mostly on earlier
+# fixes; feeding_streak() applies the same test to each round, for stuck().
+FEEDING = ("Half or more of the last round's findings sit on earlier fixes: "
+           "the fixes are feeding the review.")
+
+
 def verdict(per_round, acted, near_last, last_found, open_now):
     """The trend in a sentence, from the figures alone."""
     words = []
@@ -391,8 +397,7 @@ def verdict(per_round, acted, near_last, last_found, open_now):
         words.append("Under %d%% of the latest findings were fixed: the review is mostly "
                      "asking for what nobody fixes." % (ACTED_ON_FLOOR * 100))
     if last_found and near_last * 2 >= last_found:
-        words.append("Half or more of the last round's findings sit on earlier fixes: "
-                     "the fixes are feeding the review.")
+        words.append(FEEDING)
     if open_now == 0:
         words.append("Nothing is open.")
     return " ".join(words)
@@ -598,7 +603,7 @@ def main():
                 # "-" for "not stuck", so that a file left empty — threads
                 # nobody could read, a report that stopped early — tells
                 # sclaude to keep the verdict it had, not to clear it.
-                fh.write(said if stuck(per_round, said) else "-")
+                fh.write(said if stuck(per_round, said, feeding_streak(done)) else "-")
         except OSError:
             pass
     return 0
@@ -609,12 +614,33 @@ def main():
 # says so, over enough rounds that one bad round is not it. The report wrote
 # "Not converging" eighteen rounds in a row on one feature, and each was
 # followed by a fresh session, until the person stopped it by hand.
+#
+# Or that the fixes are feeding the review, FEEDING_ROUNDS rounds running:
+# rounds can converge in count and still go on for ever on their own fixes. On
+# one feature the report said so in four of the last six rounds, and four fresh
+# sessions followed, each fixing the comments the last one wrote, with nobody
+# told how to stop it. Running, because FEEDING itself reads the last round
+# alone: one finding left, on an earlier fix, says it too.
 STUCK_ENV = "SCLAUDE_REPORT_STUCK"
 STUCK_ROUNDS = 4
+FEEDING_ROUNDS = 2
 
 
-def stuck(per_round, said):
-    return len(per_round) >= STUCK_ROUNDS and said.startswith("Not converging")
+def stuck(per_round, said, feeding=0):
+    return len(per_round) >= STUCK_ROUNDS and (
+        said.startswith("Not converging") or feeding >= FEEDING_ROUNDS)
+
+
+def feeding_streak(rounds):
+    """How many rounds running, back from the last, had half or more of their
+    findings on earlier fixes — FEEDING's test, round by round."""
+    streak = 0
+    for group in reversed(rounds):
+        found = group["threads"]
+        if not found or sum(1 for t in found if t["near_fix"]) * 2 < len(found):
+            break
+        streak += 1
+    return streak
 
 
 def logged_reversals(log, slug):

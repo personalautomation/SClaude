@@ -163,13 +163,19 @@ try:
 
     # A preview deploy tells the topic when it starts and how it ended, once:
     # the address it got, or that it failed after every try, loud.
+    fixes = os.path.join(tmp, "fixes")
+
     def shipped(succeed):
         ask_dir = tempfile.mkdtemp()
         wtree = tempfile.mkdtemp()
         os.makedirs(os.path.join(wtree, ".sclaude", "local", "feature"))
-        stub = ('preview_deploy() { %s; }\ndeploy_remember() { :; }\nalarm() { echo "$*" >&2; }\n'
+        # A deploy that fails its tries records the command at work, for the
+        # session the gate opens on it.
+        stub = ('preview_deploy() { [[ -n "$SCLAUDE_BLOCK_AT" ]] && echo "vercel x" > "$SCLAUDE_BLOCK_AT"; %s; }\n'
+                'deploy_remember() { :; }\nalarm() { echo "$*" >&2; }\n'
+                'state_set() { [[ "$2" == regression.preview.deploy_failed ]] && echo "$3" > %s; return 0; }\n'
                 'PREVIEW_TRIES=2; PREVIEW_RETRY_PAUSE=0\n'
-                % ('echo https://p.example > "$SCLAUDE_VERCEL_URL_FILE"' if succeed else 'return 2'))
+                % ('echo https://p.example > "$SCLAUDE_VERCEL_URL_FILE"' if succeed else 'return 2', fixes))
         run_bash(stub + 'preview_ship "%s"' % wtree, tmp,
                  env=dict(os.environ, SCLAUDE_ASK_TTY="0", ASK_DIR=ask_dir, ASK_SLUG="demo"))
         feed = os.path.join(ask_dir, "ask", "demo", "notes", "feed.tsv")
@@ -181,6 +187,7 @@ try:
     check("preview-failure-told-loud-once", shipped(False),
           ["say 🚀 Deploy started: preview",
            "alarm 🚀 Deploy failed: preview · 2 tries, the log is in the terminal"])
+    check("preview-failure-names-the-command", open(fixes).read().strip(), "vercel x")
 
     # `cd` from the first line survives into the second. The whole block runs in
     # one subshell for this reason, and the prod block leans on it: `cd $REPO`,

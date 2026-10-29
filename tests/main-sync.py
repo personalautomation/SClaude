@@ -72,6 +72,9 @@ render_prompt() { echo "prompt for $1"; }
 ask_feed() { printf '%s\n' "$2" >> "$FEED"; }
 session_closed() { rm -f "$1"; ask_feed say "$(phase_line finished sync "${7:-}")"; }
 claude_launch() { echo "$*" > "$LAUNCHED"; bash -c "$CLAUDE_DOES"; }
+# The friction review after the sync (run.sh): done, or with FRICTION_FAILS
+# not finished.
+run_friction() { [[ -z "${FRICTION_FAILS:-}" ]]; }
 '''
 
 
@@ -150,6 +153,18 @@ with tempfile.TemporaryDirectory() as tmp:
     check("logs: merges now", run(wt, 'merge_conflicts "$PWD"', **env)[0], 0)
     with open(feed) as fh:
         check("logs: the topic hears it", "🔀 Step 5/7 finished: sync with main" in fh.read(), True)
+
+    # Its friction review not finished holds the run, as after a step.
+    seed, wt = setup(tmp, "friction")
+    commit(seed, "app.txt", "one\nmain\nthree\n", "main's change")
+    git(seed, "push", "-q", "origin", "HEAD:main")
+    commit(wt, "app.txt", "one\nfeature\nthree\n", "feature's change")
+    git(wt, "push", "-q")
+    resolve = ("git merge -q origin/main >/dev/null 2>&1; printf 'one\\nboth\\nthree\\n' > app.txt; "
+               "git add app.txt; git commit -q --no-edit; git push -q origin feat/9-x; "
+               "echo done > .sclaude/local/feature/session-done")
+    rc, out = run(wt, 'sync_with_main "$PWD" 9-x', **dict(env, CLAUDE_DOES=resolve, FRICTION_FAILS="1"))
+    check("friction: an unfinished review stops the run", (rc, "waits for it" in out), (1, True))
 
     # A conflict in the code: a session merges, resolves, pushes.
     seed, wt = setup(tmp, "code")

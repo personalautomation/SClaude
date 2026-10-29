@@ -263,7 +263,7 @@ PY
 # "cancelled" is needed.
 # Every answer a published question got, where from, and its bytes as read.
 #
-#   ask_log <prompt> <from> <reply> <tty-still-read>
+#   ask_log <prompt> <from> <reply> <tty-still-read> [seconds it waited]
 #
 # Once an "n" typed at "Merge origin/main into …? [y/N]" was
 # followed by the merge, and neither the terminal nor the bot could say what
@@ -291,7 +291,8 @@ ask_log() {
       ASK_TREE="$tree" ASK_TREE_OF="$ASK_SLUG"
     fi
     [[ "${ASK_TREE_OF:-}" == "$ASK_SLUG" ]] \
-      && history_add "$ASK_TREE/.sclaude/local/feature/state.json" ask answered from="${2:-none}"
+      && history_add "$ASK_TREE/.sclaude/local/feature/state.json" ask answered from="${2:-none}" \
+           ${5:+waited="$5"}
   fi
 }
 

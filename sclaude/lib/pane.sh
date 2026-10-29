@@ -264,6 +264,26 @@ pane_marked() {
 # feature's worktree. Appended to, run after run.
 PANE_LOG=".sclaude/local/feature/claude-tab.log"
 
+# How the last claude run in a tab ended, from PANE_LOG: its exit code on the
+# first line, then the last few lines it wrote on stderr. Nothing when the log
+# has no finished run. For a session that left at once: its tab closed with
+# it, and the terminal sclaude runs in never saw what it printed.
+#
+#   pane_last_exit <wt>
+pane_last_exit() {
+  local log="$1/$PANE_LOG"
+  [[ -s "$log" ]] || return 0
+  awk '
+    / started$/ && /^=== / { n = 0; code = ""; next }
+    /^=== .* exit [0-9]+$/ { code = $NF; next }
+    { if (length($0)) said[n++] = $0 }
+    END {
+      if (code == "") exit
+      print code
+      for (i = (n > 5 ? n - 5 : 0); i < n; i++) print said[i]
+    }' "$log"
+}
+
 # One launch of claude, in a tab or in place. claude_launch around it adds the
 # return after a usage limit.
 claude_launch_once() {

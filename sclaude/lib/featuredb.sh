@@ -269,6 +269,40 @@ docker_ensure() {
   return 0
 }
 
+# Waits for a stack whose start failed to answer `status` after all.
+#
+# A failed start is not always a stack that is down. Started a second time
+# while its containers are still coming up — after Docker itself has just
+# started, or beside a lazy start of the dev server — the CLI says "already
+# running … container is not ready: starting" and exits non-zero, and a moment
+# later the stack is up. Taken at its word, the feature fell back to the shared
+# local database, which lacks the feature's own migrations, and its pages
+# failed on columns that database has never had.
+#
+# Only while the stack's database container is running: one that is not there
+# or has stopped — a port taken, a broken config — is a start that failed, and
+# the fall-back stays as quick as it was, rather than costing the whole wait on
+# every step and every lazy start of the dev server. Bounded by SCLAUDE_DB_WAIT
+# seconds (120 by default).
+db_wait_up() {
+  local wt="$1" cli="$2" dir="$3" waited=0 limit="${SCLAUDE_DB_WAIT:-120}" db
+  [[ "$limit" =~ ^[0-9]+$ ]] || limit=120
+  db="$(db_container "$(db_project_id "$wt")")"
+  [[ "$(docker inspect -f '{{.State.Running}}' "$db" 2>/dev/null)" == "true" ]] || return 1
+  # Said before the wait: it can run to the limit with nothing else printed.
+  info "  database: the start reported a failure, but its container is running — waiting up to ${limit}s for it…"
+  while (( waited < limit )); do
+    [[ "$(docker inspect -f '{{.State.Running}}' "$db" 2>/dev/null)" == "true" ]] || return 1
+    (cd "$wt" && $cli status --workdir "$dir" -o env) >/dev/null 2>&1 && {
+      info "  database: the stack came up after all (${waited}s)"
+      return 0
+    }
+    sleep 2
+    waited=$((waited + 2))
+  done
+  return 1
+}
+
 # Starts this feature's stack if it should have one, and writes the file that
 # points the feature at it. Removes that file whenever the feature should not
 # have one — a feature switched to the cloud project must not keep sourcing a
@@ -306,7 +340,8 @@ ensure_db() {
       info "  database: starting this feature's own Supabase (a new one takes about a minute)…"
     fi
     exclude="$(project_get database.local.exclude "$wt" 2>/dev/null | paste -sd, -)"
-    if ! (cd "$wt" && $cli start --workdir "$dir" ${exclude:+-x "$exclude"}) >> "$log" 2>&1; then
+    if ! (cd "$wt" && $cli start --workdir "$dir" ${exclude:+-x "$exclude"}) >> "$log" 2>&1 \
+       && ! db_wait_up "$wt" "$cli" "$dir"; then
       rm -f "$envf"
       warn "  database: supabase start failed — see .sclaude/local/feature/db.log; sharing the main local database"
       return 0

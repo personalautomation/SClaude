@@ -168,11 +168,13 @@ breaks the other silently — grep before you edit:
   writes it and `approved` in `sclaude/hooks/write-guard.py` reads it, and
   `--workshop DIR` names the record as `DIR.json`. `tests/write-guard.py` and
   `tests/workshop.py` check each side.
-- `sclaude core-open` is asked of the person in a step and not in a review by
-  `core_open_asks` and `CORE_OPEN_FREE` (`--step friction`) in
-  `sclaude/hooks/forbidden-commands.py`; `sclaude/prompts/_workshop.md` tells
-  the session which, by `workshop_rules` in `workshop.sh`. `tests/hooks.py`
-  checks the hook.
+- `sclaude core-open` is refused a step's session and let through for the
+  reviews by `core_open_refused` and `CORE_OPEN_FREE` (`--step friction`) in
+  `sclaude/hooks/forbidden-commands.py`; only the retrospective's prompt and
+  the friction and deferred reviews' carry `prompts/_workshop.md`
+  (`workshop_rules` in `workshop.sh`, `render_prompt` in `run.sh`), and the
+  process map's W follows the prompts. `tests/hooks.py` and
+  `tests/process.py` check each side.
 - sreview's mark of a finished run, `$S/branches/<branch>.reviewed` holding
   the head it finished on, is written by `skills/sreview/SKILL.md` ("Report")
   and read by `workshop_sreview_mark` in `workshop.sh` before `core-ready`
@@ -249,14 +251,20 @@ drives are not. So no session sclaude runs changes this checkout, and none
 pushes it: the live checkout is read-only to every one of them
 (`sclaude_guard_args` in `sclaude/lib/steps.sh`, `sclaude/hooks/write-guard.py
 --readonly`), and a push from it or from a worktree of it is refused
-(`OWN_CHECKOUT` in `sclaude/hooks/forbidden-commands.py`). A session that
-finds something to fix in sclaude fixes it in its tree's workshop, a worktree
-of this checkout at `.sclaude/local/instruments` (`sclaude/lib/workshop.sh`):
+(`OWN_CHECKOUT` in `sclaude/hooks/forbidden-commands.py`). A step's
+session that runs into something to fix in sclaude logs it in the friction
+log; the retrospective and the friction and deferred reviews fix sclaude, in
+the tree's workshop, a worktree of this checkout at
+`.sclaude/local/instruments` (`sclaude/lib/workshop.sh`):
 
-- `sclaude core-open` lets it write there — asked of the person by Claude Code
-  in a step, every session anew; given without a question to the
-  retrospective and to the friction and deferred reviews, which start in plan
-  mode, so the approved plan is the yes;
+- `sclaude core-open` lets such a session write there, without a question:
+  they start in plan mode, so the approved plan is the yes; a step's session
+  is refused it, and the refusal reaches the friction log too;
+
+  <!-- Changed by Claude on 2026-10-29 at the user's decision: only the
+  retrospective and the friction and deferred reviews change sclaude; a
+  step's session logs what got in its way, and its friction review fixes
+  it. Before, a step's session could open the workshop at the person's yes. -->
 - it commits there and reviews its change — `/sreview` for a maintainer of
   sclaude (`MAINTAINERS`), whatever review they choose for anybody else — and
   runs `sclaude core-ready`;
@@ -337,6 +345,27 @@ The README is for people using the tools: what each does, and what they do
 with it. How a part works inside and why goes to `docs/sclaude.md` or
 `docs/keepawake.md`, which are updated the same way when the push changes
 something they describe.
+
+The process map is read the same way. A change to the cycle's path — a way
+back, a hold, a gate's outcomes, a question asked, where a feature stands and
+what the menu calls it, what happens to the issue — is checked against the
+whole model in `sclaude/lib/process.py`: every map's nodes, edges and
+details, `POSITIONS`, the commands' places and `WHEN`, and `position`; the
+map is corrected in the same push. A block, an arrow or a word that only
+some configs run goes in `NEEDS`, `PASS` and `VARIANTS`, not into every
+project's map. `tests/process.py` checks that the model
+agrees with the code's names — commands, steps, the places `position` answers
+— and that the built page is current, not what the map says: a block drawn in
+the wrong place, or a way out never drawn, passes it.
+
+A review of a change here — `/sreview`, or whatever review is used — reads
+the README, the docs and the process map against the change as part of it: a
+place they no longer describe the code is a finding.
+
+<!-- Both paragraphs above were added by Claude on 2026-10-29 at the user's
+request ("if nothing in the instructions would update the process map, add
+it"): the map drew the production hold between the review and the merge
+check, with no way out, and no test or review could see it. -->
 
 Shell files have no test runner of their own; check them with `bash -n`.
 

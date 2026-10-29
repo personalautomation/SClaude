@@ -149,6 +149,17 @@ is nothing to press blindly there. The numbered list above labelled buttons is
 removed in doing so — it would repeat them — while the lines that explain the
 question stay.
 
+A question answered in words — "What is not working?" — waits on the channel
+and the terminal at once, by turns of `ASK_POLL`, and a read with a time limit
+has no line editing: readline drops what was typed when its time runs out.
+So the wait takes only the first key, and the line is then read with readline,
+that key already in it and no limit: the arrows move the cursor, and the
+answer from the phone is no longer taken once somebody has begun to type at
+the laptop. An arrow pressed before any text is dropped whole. The feature's
+end is still watched while the line is typed, by a subshell beside readline:
+a key pressed by someone who then left does not hold the process once the
+feature is ended from the bot.
+
 **The checkbox does not carry over into the chat: an inline keyboard has neither
 a space bar nor a state that would survive a press.** What it does have is the
 row's width, and the two purposes lay themselves out along it side by side with
@@ -222,11 +233,21 @@ with the tree at the clean-up. state.json keeps where each stands now and a
 conversation's first start and last end; the history keeps every time a
 place was entered. `history` in `process.py` turns it into the places in
 order: the ones named, those between filled in along the map's shortest way
-when it is short (a long way round would be a guess),
+when it is short (a long way round would be a guess; none between a plan's
+or a pr's session and the next of its own, which took up one broken off),
 the time between two places given to the first check or person on that way
 (what it waited on), a conversation resumed with nothing between counted as
 one stay of several sittings, and the friction reviews and workshop passes as
-ways of their own. `sclaude _flow` sends it with the position, and the page
+ways of their own. A status session says in its row what it is about
+(`about`, set by `run_status`): before the merge it is the preview's, red or
+written again green, and plays on the epilogue's copy beside the preview: a
+step aside from wherever the run or the menu wrote it, never a deviation,
+the way on going from the place before it; the player reads the mark rather
+than guessing it from the places around. Where the feature left the map — a jump the map has no way
+for, a map of its own reached from no block carrying its letter
+(`deviations`) — the place is marked: the History tab counts them, and the
+play stops there, rings the places, draws the way it took as a ghost and
+says what happened, since there the map or the code is wrong. `sclaude _flow` sends it with the position, and the page
 plays it.
 
 What each place took goes with it (`metrics`), shown under the blocks by
@@ -242,7 +263,7 @@ counts there. The transcripts are read through a cache beside
 the history (`transcripts.json`), so a poll reads only what grew, and a
 conversation still going at most once a minute.
 
-Besides the cycle at a glance, a feature's states and the whole process, two
+Besides the cycle at a glance and the whole process, two
 maps take apart what the whole one marks on its sessions: W, a session
 changing sclaude in its workshop and the publishing after it, and F, the
 friction review after it — each a block on the whole map leading in, and
@@ -251,8 +272,17 @@ its own lanes for the rest.
 The maps are BPMN with vertical lanes and the flow running down, so the width
 is a page's and the length is what splits. An edge running down bends in the
 gap above its target; one that would cross a node in its way takes a channel
-on the left, and one running back up takes a channel on the right — no line
-crosses a node, and every way back is the same dashed red. Printed (A4
+on the left — on the right, inside the ways back, when both its lanes are
+right of the middle — and the ways running back up take a channel on the
+right. Ways round by a channel into one block share it, one channel per
+block and side: each runs along its row into that trunk, a small arrow where
+it joins and a chevron on the trunk past it, and the trunk goes in with the
+arrow — no line crosses a node, and every way back is the same dashed red.
+Each gap between rows is as tall as what turns in it, and no taller; where
+nothing turns in it — the ways leave the upper row from its blocks' middles,
+none comes in by a channel — the lower row rises into the upper one's height,
+a block in the same lane kept 30 px under the one above, every run clear of
+the line the feature's page writes under each block. Printed (A4
 landscape), the large map is cut into sheets between lanes, never through
 one, each sheet a window on the same drawing that overlaps its neighbours, so
 they glue. The page cuts the sheets again in the browser for the paper and
@@ -273,11 +303,55 @@ session's model, effort and permission mode (`SPEC`, checked against
 it does at more length than fits on it (`DETAILS`), and which commands lead
 to it; an arrow's two ends and why it is taken.
 
+**A project's map is the cycle its config runs.** The model holds every way
+sclaude can run a cycle; `for_config` in `process.py` draws one config's:
+`NEEDS` names the blocks and arrows a setting decides (the review on CI or on
+this machine, the gates of the regression parts a project has, QA where the
+board has its columns, the merge offer), `PASS` carries an arrow past a block
+taken out, and `VARIANTS` gives the words a setting changes (who merges, who
+accepts). `setting` reads each one as sclaude does (`project_review_mode`,
+`project_flow_mode`, `project_regression_parts`), and `config_of` finds the
+config as `project_get` does: the main checkout's, a key it lacks taken from
+the tree's copy. The proxy draws a feature's map and main's whole map by it,
+`_flow` plays the history on the same map, and the printed page is drawn for
+`config.example.json`. `tests/process.py` draws every combination of
+`review`, `qa` and `merge`, and a config with none of the sections: every
+arrow between drawn blocks, every block reached, at most one reviewer.
+
+**R and S are maps of their own.** A stage's regression — the run, its
+fixing sessions, the stop after two, production's rollback and hold — and
+the check of main with the sync session leave the whole process for maps of
+their own (`REGRESSION_*`, `SYNC_*` in `process.py`); the blocks keep their
+ids, so `position`, the commands and the lighting reach them there, and the
+whole process marks where each runs with an R or an S. A run or a sync is
+played as a pass on its map (`_regression_way`, `_sync_way`), each place
+with its own time, so what it took — your input, Claude's cost, the wait for
+your answers, the minutes
+— counts on that map, summed over every pass, and the step it came from
+keeps only its own.
+
+**F and W turn while they are at work.** A badge carries a ring that the
+feature's page turns (`busy` in `process.py`, handed over by `_flow`): F on
+the block of the session a friction review left open follows — its key is
+the step and a number, `review-3`, `fix-local-1` — R on the block a suite
+runs from while it runs or a fixing session is open, S where a sync with main
+is going, and W on the block of a
+session the workshop's record (`.sclaude/local/instruments.json`) lets write
+sclaude, while that session's run is open. With reduced motion the ring
+stands still, thick.
+
 **Where a feature stands is the state's, not the map's.** `position` in
 `process.py` reads `state.json` — the step, an open fixing session, a running
-regression, a sync left open, QA's mark (`qa.sha`, `qa.accepted`), the
-hand-off, the production hold as `prod_red_hold` sees it, the retrospective's
-runs — plus GitHub's word on the pull request and the epilogue's own record,
+regression, a sync left open (during a step, only one going — a sync left
+unfinished has an end, and the step opens past it), the local review's
+passes running
+(`review.local.running`), QA's mark (`qa.sha`, `qa.accepted`), the
+hand-off, the ship under way (`prod_pass.shipping`), the production hold as
+`prod_red_hold` sees it, the retrospective's runs, open or ended; an open
+friction review is said in the line under the place, since it has none on
+this map. A start mark older than three hours is a run that was killed, and
+not believed — except the ship's, whose question may wait a night: the next
+pass of `remind_prod` takes it off — plus GitHub's word on the pull request and the epilogue's own record,
 which `cmd_flow` (`sclaude _flow <name>`) passes it. `_flow` is a report: no
 update of sclaude, no question channel, one line of JSON on stdout with the
 node, the menu's words for the step, and the action list from
@@ -357,9 +431,17 @@ has the list; the issue is where a correction lands.
 What the person decides after planning reaches the issue from the step it was
 decided in: step 2 and step 4 both add it to the `User request` comment
 (`### Added during development`, `### Added during review`) and note it in the
-plan. A criterion that has to change is the person's to edit in the issue; the
-session proposes the wording and never writes it. Once a review decision changed
-a criterion and only the code knew: the automatic QA ticked the old wording.
+plan. A criterion that has to change is the person's decision: the session
+proposes the wording, and on their yes rewords it in the plan, under the same
+identifier. Once a review decision changed a criterion and only the code knew:
+the automatic QA ticked the old wording. Then the change was noted in the plan
+and left to the person to carry into the issue, and nobody did, with the same
+result. So as the review closes, before QA, sclaude adds a criterion new in the
+plan to the issue (`extend_acceptance`), shows each one the plan words
+otherwise beside the issue's text, and writes the plan's wording there at the
+person's yes, its box emptied (`reword_acceptance`, `acceptance.py --reword`).
+Asked, not written: a criterion the person reworded in GitHub differs from the
+plan too, and there the issue is right; a no is kept for that same difference.
 
 Each criterion is identified `AC1`, `AC2`, and the identifier is what the rest
 of the cycle points at:
@@ -522,11 +604,14 @@ it (`workshop.py`), lists the sessions in `approved`. `write-guard.py
 --workshop DIR` treats the workshop as read-only for any other session, and
 the record as read-only for all. `sclaude core-open` adds the session that
 runs it, which it knows by `SCLAUDE_SESSION` (`claude_launch` exports it).
-`forbidden-commands.py` answers that call with "ask" in a step, so Claude Code
-puts the question to the person — the model cannot answer it, in auto mode
-too — every session anew; under `--step friction` (the retrospective, the
-friction review, the monthly review) it lets it through, since all three
-start in plan mode and the plan the person approved is the yes. The prompts say which by `workshop_rules` (`prompts/_workshop.md`).
+`forbidden-commands.py` lets that call through only under `--step friction`
+(the retrospective, the friction review, the monthly review), which all
+start in plan mode, so the plan the person approved is the yes. A step's
+session is refused it: what in sclaude got in its way goes to the friction
+log — the refusal itself lands there — and the friction review after the
+session changes sclaude. Only those sessions' prompts carry the workshop's
+paragraph (`workshop_rules`, `prompts/_workshop.md`), and the process map
+marks them W.
 
 Every session's write guard reads leniently (`--lenient`): a target it cannot
 tell — a loop's `"$f"`, a `$( … )`, a directory in a variable — is refused
@@ -787,7 +872,11 @@ project has none. With Docker down sclaude starts it — Docker Desktop from WSL
 or `docker.service` where sudo needs no password — and waits up to
 `SCLAUDE_DOCKER_WAIT` seconds (120); `SCLAUDE_DOCKER_DESKTOP` names the
 launcher when it is somewhere unusual. A start that fails is not retried for
-ten minutes. Only when Docker stays down does the feature fall back to the
+ten minutes. A stack whose start exits with an error — as it does when started
+again while its containers are still coming up — is given up to
+`SCLAUDE_DB_WAIT` seconds (120) to answer `status` before it counts as down:
+the shared database it would fall back to lacks the feature's own migrations.
+Only when Docker or the stack stays down does the feature fall back to the
 shared local database, and it says so. `SCLAUDE_DOCKER_START=off` starts
 nothing.
 
@@ -809,7 +898,11 @@ Once step 4 has closed, sclaude goes on by itself (`remind_prod` in
 **The preview is not asked about.** It is what QA looks at, and nothing after it
 can happen without one, so sclaude deploys it (`preview_ship`), up to
 `PREVIEW_TRIES` (three) times on a failure, and runs the preview regression
-against it. A tree already deployed and green is not deployed again; `sclaude
+against it. A deploy that still fails is the stage's red in the regression
+gate: the fixing session a red run gets, told which command failed
+(`SCLAUDE_BLOCK_AT`, since the block's output stays in the terminal), the
+migrations and the deploy again on its fix, the same two attempts and the
+question after them. A tree already deployed and green is not deployed again; `sclaude
 preview <name>` and the menu's "Deploy a preview" still do it on purpose.
 
 The preview is deployed **from the main repository with a path to the
@@ -832,6 +925,14 @@ is needed sclaude determines by whether the branch touches the migrations
 directory. The chain breaks off at the first error, so that a promote that did
 not go through does not drag a deploy along with it. The production regression
 follows, and a red one rolls production back (see "Production rollback").
+A ship that fails is looked into at once, time being dear there: production
+keeps the release it had — `vercel --prod` switches it whole — but when the
+promote began, the old code may stand on the new migrations, so production's
+suite runs against it first. Then a fixing session opens, told which command
+failed and, when it is red, what production's suite says. A fix in the code
+goes the way a red production's does: step 4 reopened, a new pull request from
+the same branch, the whole way round. A cause outside the code — Vercel's
+login, the network — it writes down, and the next run offers the ship again.
 
 ## Step 5: the sync with main
 
@@ -883,7 +984,16 @@ to lines the branch does not touch leave the yes standing; a change of the
 function header above the branch's lines does not, nor anything that cannot be
 read: in doubt, QA looks again. A session
 that ends otherwise stops the run, and the feature shows `5/7 sync` in the menu
-until `sclaude <feature>` finishes it; its conversation is resumed then.
+until `sclaude <feature>` finishes it; its conversation is resumed then. On
+the maps such a sync stands still on the block it ran ahead of: its S drawn
+in the colour of a wait on you (`stalled` in `process.py`), the command in its
+note — while the pull request is open; merged or closed, there is nothing left
+to sync.
+
+Like a step's session, the sync writes what got in its way into the friction
+log (`<include:friction>` in `sync.md`), and once its end is recorded a
+friction review follows, keyed by its run (`sync-2`), its row in the issue
+naming it. Not finished, that review holds the run as a step's does.
 
 A pull request already handed over for the merge goes back to a draft
 whenever origin's branch moved during a sync (`sync_gate`), even one that
@@ -1059,7 +1169,11 @@ the review is handed the failure. A red production GitHub cannot attribute
 way, and `return` with it, until GitHub answers: neither ships past it nor
 takes it for a QA hand-back. Only a broken environment is recorded as one
 that could not run: a project with no production suite or address has nothing
-to hold on, and is not held. Sessions cannot do it:
+to hold on, and is not held. The process map draws the hold where the cycle
+first reaches it, off `Production green?` beside the rollback, though every
+later pass checks it first; the menu names it `steps done, production held`, and a
+production regression still running `steps done, production regression running` (both
+read through `position`). Sessions cannot do it:
 `VERCEL_READS` in the hook is an allowlist and `rollback` is not in it, so it was
 already refused — `rollback status` was added beside the other reads, because a
 session looking at a red production has a reason to ask whether one is in flight.
@@ -1151,7 +1265,12 @@ while a review pass runs, ⏭ on the feature's topic (`review_stuck_say`). Said,
 not asked: the session was closed by the orchestrator, nobody is bound to be
 there, and a question would hold the rounds until somebody answered. On one
 pull request the verdict said "Not converging" eighteen rounds in a row, each
-followed by a fresh session, until the person stopped it by hand.
+followed by a fresh session, until the person stopped it by hand. The same
+warning follows "the fixes are feeding the review" said two rounds running,
+after four rounds or more (`feeding_streak`): the count can fall and the rounds
+still go on, each on the last one's fixes — four fresh sessions in a row once
+rewrote comments the one before had written. Not on one round: a last finding
+that happens to sit on an earlier fix says it too.
 
 **A second pull request starts its own report.** A feature reopened after
 its merge — a retrospective's fixes, a rollback — goes on under a new pull
@@ -1320,8 +1439,14 @@ The section says the rest in words, which is the one place a qualifier fits — 
 it names the deployed commit, so that a claim outlives the worktree that recorded
 it. The labels are created on demand if the repository does not have
 them yet. If prod is postponed there will be no `deployed-prod` label, and the
-section will say the feature is waiting for the merge: a section that cannot be
-trusted is worse than none. `deployed-locally` is deliberately absent: it would
+section will say the feature is not in production: a section that cannot be
+trusted is worse than none. While the merge is waited for, or after a pull
+request closed without one, no session writes it — the pull request's own
+state says that — and sclaude puts the labels on by itself (`STATUS_LABELS_ONLY`). A red preview's status is
+not left standing that long, though: when the preview goes green after it,
+the status is written again (`status.preview_red`, set by every red run that
+got to its session and cleared only by a green session that said its words are
+written), tried on each green pass until it is. `deployed-locally` is deliberately absent: it would
 be true of every issue while `next dev` is alive and false the moment the laptop
 is closed — and besides, nobody but the machine's owner can open such a
 deployment.
@@ -1355,7 +1480,7 @@ does have an outcome, and the orchestrator knows it exactly:
 |---|---|
 | `green` | The re-run passed after this session. It is the one that fixed the stage. |
 | `red` | The session finished and the stage failed again. The attempt was counted. |
-| `blocked` | The cause was outside the branch. Nothing was changed and the attempt was given back — deliberately not `red`, or the row numbers would disagree with `attempts`. The gate runs the stage once more by itself, and a green run then keeps `blocked` here: the session did not fix it. |
+| `blocked` | The cause was outside the branch. Nothing was changed and the attempt was given back — deliberately not `red`, or the row numbers would disagree with `attempts`. The gate runs the stage once more by itself, and a green run then keeps `blocked` here: the session did not fix it. The note itself is appended to `regression.notes` whenever it is taken off (`blocked_note_keep`), and the retrospective reads it: what it says would have to change is not done by a green run. |
 | `stalled` | `claude` exited at the door, leaving no assistant record. Nothing ran, so the stage was not left red by it. |
 | `open` | Interrupted, with a conversation to return to. |
 | `—` | No record: the feature predates the field. Nothing is guessed backwards from how the stage ended. |

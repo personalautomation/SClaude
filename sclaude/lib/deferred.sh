@@ -453,7 +453,7 @@ cmd_deferred() {
   cp "$root/.sclaude/config.json" "$config" 2>/dev/null || echo '{}' > "$config"
   prompt="$(D_FILES="${list%$'\n'}" D_STAMPS="${stamps%$'\n'}" D_WT="$wt" D_BRANCH="$branch" \
     D_RULES="$(product_rules_dir "$wt")" D_INSTRUMENTS="$INSTRUMENTS" \
-    D_DONE="$done_file" D_TODAY="$(date +%F)" D_WORKSHOP="$(workshop_rules "$wt" free)" \
+    D_DONE="$done_file" D_TODAY="$(date +%F)" D_WORKSHOP="$(workshop_rules "$wt")" \
     D_MEMORY="$(transcript_dir "$root")/memory" D_CONFIG="$config" \
     python3 - "$PROMPTS/friction-deferred.md" <<'PY'
 import os, sys

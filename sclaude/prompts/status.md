@@ -1,6 +1,6 @@
-The feature "<feature>" has been through the whole cycle, and I've already answered all the deployment questions. Your job is to record the outcome in issue **#<issue>** and in all of its parents, so the state of an epic is visible at a glance without walking its children one by one — and, where the product no longer does what an issue's description says, how it actually behaves.
+Your job is to record where the feature "<feature>" stands now in issue **#<issue>** and in all of its parents, so the state of an epic is visible at a glance without walking its children one by one — and, where the product no longer does what an issue's description says, how it actually behaves.
 
-This session closes the feature's story in its issues, and there's no code in it: you're in the main repository, not the feature's worktree, which may already be gone if this session is resumed after the feature was closed. All you do is write at most one comment per issue via `gh` — never the issue's description. You may read code to check what the product does (see **Current behaviour** below), but you change nothing in the repository.
+This runs whenever the cycle stops after its steps — a red preview, the wait for the merge, a red production — and once more at its end; **What actually happened** below says which, and that is all you may claim: never write that the cycle is through unless it says so. There's no code in this session: you're in the main repository, not the feature's worktree, which may already be gone if this session is resumed after the feature was closed. All you do is write at most one comment per issue via `gh` — never the issue's description. You may read code to check what the product does (see **Current behaviour** below), but you change nothing in the repository.
 
 ## What actually happened
 
@@ -33,9 +33,9 @@ Every issue in the chain may get a **Current status** comment: a short answer to
 The comment differs by level, and that's the main thing to understand:
 
 - **The feature itself** (level 0) — what was done and where it is: in production, on preview, awaiting merge. Two or three sentences. Don't retell the plan or list commits: both are already in the pull request, and this comment exists precisely so nobody has to open it.
-- **Parent and above** — not about the feature, but about itself: how many children are closed, what reached production, what's left. That's the whole point. Mention the closed feature in one line, but don't make it the content of the comment: in a month the reader cares about the epic, not which of ten issues closed last.
+- **Parent and above** — not about the feature, but about itself: how many children are closed, what reached production, what's left. That's the whole point. Mention the feature in one line, but don't make it the content of the comment: in a month the reader cares about the epic, not which of ten issues moved last.
 
-**Write what happened, not what was planned.** No production deploy — say so: the work is on preview and awaiting merge. The temptation to write "deployed" is strong because the cycle did finish, but a status you can't trust is worse than no status: people will go check behind it, every time.
+**Write what happened, not what was planned.** No production deploy — say so: the work is on preview and awaiting merge. The temptation to write "deployed" is strong once the steps are done, but a status you can't trust is worse than no status: people will go check behind it, every time.
 
 **Don't rewrite an existing comment from scratch.** Read what's there: replace what's stale, keep what's right. The previous one was written by a session like yours for a different feature, or corrected by me — and it didn't stop being true because one more issue closed.
 
@@ -128,7 +128,7 @@ At most one status comment per issue, and no other comments. The orchestrator ke
 
 **When it doesn't work.** An issue won't open, `gh` errors, you lack edit rights — tell me in words and move on down the chain. One inaccessible issue is no reason to abandon the rest.
 
-**How this session ends.** You're not a step of the cycle but its epilogue: the steps are over, <if:pr-number>the pull request is closed, </if:pr-number>the worktree is gone, and the orchestrator launches nothing after you.
+**How this session ends.** You're not a step of the cycle: its steps are over, and nothing the orchestrator does next — a fix, the merge, production, the clean-up — waits on you.
 
 <include:report>
 

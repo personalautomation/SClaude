@@ -17,7 +17,10 @@
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 
 def _cfg(path):
@@ -358,7 +361,7 @@ if gate is not None:
     fix_fn = re.search(r'\nregression_fix\(\) \{\n(.*?)\n\}\n', regression, re.S)
     fix_body = fix_fn.group(1) if fix_fn else ""
     check_true("fix-drops-the-note-at-the-launch",
-               re.search(r'rm -f "\$wt/\.sclaude/local/feature/regression\.blocked"\n\s*session_watch_start',
+               re.search(r'blocked_note_keep "\$wt" "\$stage" "[^"]+"\n\s*session_watch_start',
                          fix_body) is not None)
     check_true("gate-does-not-drop-the-note-before-the-fix",
                re.search(r'regression\.blocked"\n\s*regression_fix', blocked_body) is None)
@@ -407,6 +410,30 @@ if gate is not None:
 # to re-deriving it. An earlier version cleared it at the head of regression_run
 # and so spent four minutes of suite plus a fixing session reproducing a
 # conclusion that was already written down.
+# A note is kept, not deleted, whenever it is taken off: what it says would
+# have to change outlives the run that answered it (blocked_note_keep).
+check("note-never-deleted-bare",
+      re.findall(r'rm -f [^\n]*regression\.blocked', regression), [])
+keep_fn = re.search(r'\nblocked_note_keep\(\) \{\n.*?\n\}\n', regression, re.S)
+check_true("note-keep-found", keep_fn is not None)
+if keep_fn is not None:
+    keep_dir = tempfile.mkdtemp(prefix="sclaude-note-")
+    try:
+        feat = os.path.join(keep_dir, ".sclaude", "local", "feature")
+        os.makedirs(feat)
+        with open(os.path.join(feat, "regression.blocked"), "w") as fh:
+            fh.write("A flaky test; give its frame loop a timer fallback.\n")
+        for _ in range(2):
+            subprocess.run(["bash", "-c", keep_fn.group(0) +
+                            'blocked_note_keep "%s" local "green on a rerun"' % keep_dir])
+        with open(os.path.join(feat, "regression.notes")) as fh:
+            kept = fh.read()
+        check_true("note-keep-moves-it", not os.path.exists(os.path.join(feat, "regression.blocked")))
+        check_true("note-keep-keeps-the-text", "timer fallback" in kept)
+        check_true("note-keep-says-when-and-why", "· local · green on a rerun" in kept)
+        check("note-keep-twice-keeps-once", kept.count("timer fallback"), 1)
+    finally:
+        shutil.rmtree(keep_dir, ignore_errors=True)
 run_fn = re.search(r'\nregression_run\(\) \{\n(.*?)\n\}\n', regression, re.S)
 check_true("run-found", run_fn is not None)
 if run_fn is not None:
@@ -427,7 +454,8 @@ if gate is not None:
                re.search(r'\bask\b', preflight) is not None)
     # Cleared where it is answered, and only there.
     check_true("gate-clears-the-note-on-yes",
-               re.search(r'is_yes.*\n\s*rm -f "\$note"', preflight) is not None)
+               re.search(r'is_yes.*\n\s*blocked_note_keep "\$wt"', preflight) is not None)
+    check_true("gate-asks-to-run-again", "Run the $stage regression again?" in preflight)
     # A "no" must not fall through into the run: that is the whole saving.
     check_true("gate-declines-to-run-while-blocked",
                re.search(r'\belse\b(?:.*\n)*?\s*return 1', preflight) is not None)
@@ -502,7 +530,8 @@ check_true("prod-does-not-use-the-gate",
            re.search(r'regression_gate "\$wt" "\$slug" prod', deploy) is None)
 check_true("prod-runs-the-suite-itself",
            re.search(r'regression_run "\$wt" "\$slug" prod', deploy) is not None)
-run_at = deploy.find('regression_run "$wt" "$slug" prod')
+# The run after the ship, not the one a failed ship makes first.
+run_at = deploy.find('regression_run "$wt" "$slug" prod', deploy.find('remind_prod() {'))
 rollback_at = deploy.find('rollback_prod "$wt" "$slug" --auto')
 check_true("prod-rolls-back-after-its-own-run", -1 < run_at < rollback_at)
 
@@ -1073,7 +1102,7 @@ fix_body = regression[regression.find("regression_fix() {"):]
 check_true("fix-reports-an-orchestrator-fix",
            'friction.fix-$stage-$number.fixed' in fix_body and "return 4" in fix_body)
 check_true("fix-drops-the-stale-blocked-note",
-           re.search(r'fixed" 2>/dev/null \|\| true\)" == "true" \]\]; then\n\s*rm -f "\$wt/.sclaude/local/feature/regression.blocked"\n\s*return 4',
+           re.search(r'fixed" 2>/dev/null \|\| true\)" == "true" \]\]; then\n\s*blocked_note_keep "\$wt" "\$stage" "[^"]+"\n\s*return 4',
                      fix_body) is not None)
 gate_body = regression[regression.find("regression_gate() {"):regression.find("regression_rewind() {")]
 check_true("gate-reruns-after-an-orchestrator-fix",
@@ -1380,8 +1409,10 @@ regression_fix() {
   %s
   return 0
 }
+SHIPS=0
 preview_ship() {
   echo SHIP
+  SHIPS=$((SHIPS + 1))
   %s
 }
 regression_gate "%s" demo preview
@@ -1389,7 +1420,9 @@ echo "rc=$?"
 """ % (" ".join(str(r) for r in runs),
        'git -C "%s" -c user.email=t@t -c user.name=t commit -q --allow-empty -m fix'
        % wt if fix_commits else ":",
-       'deploy_remember "%s" preview' % wt if ship_ok else "return 1",
+       ('deploy_remember "%s" preview' % wt if ship_ok is True
+        else '[[ "$SHIPS" -gt 1 ]] && deploy_remember "%s" preview || return 1' % wt if ship_ok == "once"
+        else "return 1"),
        wt)
         return subprocess.run(["bash", "-c", body], capture_output=True,
                               text=True, timeout=60).stdout.split()
@@ -1408,9 +1441,68 @@ check("preview-gate-fix-is-deployed-before-the-rerun",
 # A session that committed nothing leaves the deployment as it was.
 check("preview-gate-no-commit-no-deploy",
       preview_gate("head", [1, 0], fix_commits=False), ["RAN", "FIX", "RAN", "rc=0"])
-# A redeploy that fails ends the gate rather than running the old address.
-check("preview-gate-failed-redeploy-stops",
-      preview_gate("f" * 40, [0], ship_ok=False), ["SHIP", "rc=1"])
+# A redeploy that fails is the stage's red, not a run against the old
+# address: a fixing session, then the deploy again on its fix.
+check("preview-gate-failed-redeploy-is-fixed",
+      preview_gate("f" * 40, [0], ship_ok="once"), ["SHIP", "FIX", "SHIP", "RAN", "rc=0"])
+# A failed ship, run (ship_failed): production's suite first when the promote
+# began, then a fixing session, and what follows goes by what it did.
+def ship_failed(fix_rc, commits, began=""):
+    with tempfile.TemporaryDirectory() as wt:
+        git = lambda *a: subprocess.run(["git", "-C", wt, *a], check=True, capture_output=True)
+        git("init", "-q")
+        git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base")
+        os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+        with open(os.path.join(wt, ".git", "info", "exclude"), "a") as fh:
+            fh.write(".sclaude/local/feature\n")
+        with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
+            json.dump({"feature": "demo"}, fh)
+        inst = os.path.join(wt, "inst")
+        os.makedirs(os.path.join(inst, "bin"))
+        with open(os.path.join(inst, "bin", "sclaude"), "w") as fh:
+            fh.write("#!/bin/sh\necho EXEC\n")
+        os.chmod(os.path.join(inst, "bin", "sclaude"), 0o755)
+        body = "set -uo pipefail\n"
+        body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
+        body += 'REGRESSION_MAX_ATTEMPTS=2; SELF=sclaude; INSTRUMENTS="%s"\n' % inst
+        for name in ("io", "ui", "steps", "state", "worktree", "regression", "deploy"):
+            body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
+        body += """
+warn() { :; }; info() { :; }; say() { :; }; alarm() { :; }
+blocked_note_keep() { echo KEEP; }
+regression_run() { echo RAN; return 1; }
+regression_rewind() { echo REWIND; }
+cmd_resume() { echo RESUME; }
+fix_status_set() { echo "STATUS:$3"; }
+regression_fix() {
+  echo FIX
+  %s
+  [[ %d -eq 3 ]] && echo outside > "%s/.sclaude/local/feature/regression.blocked"
+  return %d
+}
+ship_failed "%s" demo "vercel --prod" "%s"
+echo "rc=$?"
+""" % ('git -C "%s" -c user.email=t@t -c user.name=t commit -q --allow-empty -m fix' % wt if commits else ":",
+       fix_rc, wt, fix_rc, wt, began)
+        out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=60).stdout.split()
+        with open(os.path.join(wt, ".sclaude/local/feature", "state.json")) as fh:
+            return out, json.load(fh)
+
+out, st = ship_failed(0, True, began="1")
+check("failed-ship-asks-production-first-then-fixes-round",
+      out, ["RAN", "FIX", "STATUS:fixed", "REWIND", "RESUME", "rc=0"])
+check("failed-ship-names-the-command-and-the-red",
+      (st["regression"]["prod"]["deploy_failed"], st["regression"]["prod"]["after_failure"]),
+      ("vercel --prod", "red"))
+check("failed-ship-outside-the-code-waits", ship_failed(3, False)[0], ["FIX", "STATUS:blocked", "outside", "KEEP", "rc=0"])
+check("failed-ship-a-note-beside-a-fix-is-shown-and-kept",
+      ship_failed(3, True)[0], ["FIX", "outside", "KEEP", "STATUS:fixed", "REWIND", "RESUME", "rc=0"])
+check("failed-ship-fixed-sclaude-and-code-keeps-the-fix",
+      ship_failed(4, True)[0], ["FIX", "STATUS:fixed", "REWIND", "EXEC"])
+check("failed-ship-fixed-sclaude-restarts", ship_failed(4, False)[0], ["FIX", "STATUS:orchestrator-fixed", "EXEC"])
+check("failed-ship-nothing-changed-stops", ship_failed(0, False)[0], ["FIX", "STATUS:unchanged", "rc=0"])
+check("failed-ship-no-session-stops", ship_failed(5, False)[0], ["FIX", "rc=0"])
+
 # A green verdict holds for the tree it ran on, and for no other: after a
 # production rollback the fix comes round with the old verdict still recorded,
 # and the gate used to return on it without running the suite.
@@ -1584,7 +1676,11 @@ check_true("ship-question-says-production-is-red",
 check_true("promote-commits-only-what-is-staged",
            "git diff --cached --quiet || git commit -m 'chore(db): promote migrations for $slug'" in remind_src)
 tried = re.search(r'\n  if \[\[ "\$prod_tried" -eq 1 \]\]; then\n(.*?)\n  fi\n', remind_src, re.S)
-check_true("failed-ship-stops-before-the-close", tried is not None and "return 0" in tried.group(1)
+# A ship that failed goes to a fixing session at once, production's suite run
+# first when the promote began: a fix in the code reopens step 4, a cause
+# outside it waits for the ship to be offered again.
+check_true("failed-ship-stops-before-the-close", tried is not None
+           and 'ship_failed "$wt" "$slug" "$failed" "$began"' in tried.group(1) and "return $?" in tried.group(1)
            and "run_status" not in tried.group(1)
            and "db_main_up" in tried.group(1)
            and remind_src.find(tried.group(0)) < remind_src.find('issue_close_done "$issue" declined'))

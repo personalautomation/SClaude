@@ -59,9 +59,19 @@ deploy_head() {
 # that worked must not be reported as broken because a note could not be filed.
 deploy_remember() {
   local wt="$1" stage="$2" sha url
+  # Deployed, by whichever way: a failure recorded before is over
+  # (regression_fix_block would tell a later session of it).
+  state_set "$wt/.sclaude/local/feature/state.json" "regression.$stage.deploy_failed" null 2>/dev/null || true
+  state_set "$wt/.sclaude/local/feature/state.json" "regression.$stage.after_failure" null 2>/dev/null || true
   sha="$(deploy_head "$wt" "$stage")" || return 0
   [[ -n "$sha" ]] || return 0
   state_set "$wt/.sclaude/local/feature/state.json" "deploy.$stage.sha" "$sha" 2>/dev/null || true
+  # The pull request it was shipped for: the process map tells by it whether
+  # production carries the feature (prod_held in process.py), with no GitHub.
+  local pr
+  pr="$(state_get "$wt/.sclaude/local/feature/state.json" pr 2>/dev/null || true)"
+  [[ "$stage" == "prod" && "$pr" =~ ^[0-9]+$ ]] \
+    && state_set "$wt/.sclaude/local/feature/state.json" deploy.prod.pr "$pr" 2>/dev/null || true
 
   # For prod, the deployment's own address as well as the commit. `vercel
   # rollback` takes a url or an id and cannot be given a sha, so a record that
@@ -505,6 +515,10 @@ run_block() {
     for cmd in "$@"; do
       echo ""
       echo "${BLUE}\$ $cmd${OFF}"
+      # Which command is at work, for a caller that names what failed to the
+      # session fixing it (preview_ship, remind_prod): the block's own output
+      # stays in the terminal.
+      [[ -n "${SCLAUDE_BLOCK_AT:-}" ]] && printf '%s\n' "$cmd" > "$SCLAUDE_BLOCK_AT"
       if [[ "$cmd" == vercel\ * ]]; then
         run_vercel "$cmd" || exit 1
       else
@@ -679,20 +693,21 @@ preview_deploy() {
 # and hands back only a pass or a fail. The state is the record the
 # regression reads from.
 preview_ship() {
-  local wt="$1" url_file try
+  local wt="$1" url_file try state="$1/.sclaude/local/feature/state.json"
+  local at="$1/.sclaude/local/feature/deploy.at"
   url_file="$wt/.sclaude/local/feature/preview.url"
   rm -f "$url_file"
   ask_feed say "$(phase_line started deploy preview)"
   history_add "$wt/.sclaude/local/feature/state.json" deploy.preview start
   for ((try = 1; try <= PREVIEW_TRIES; try++)); do
-    if SCLAUDE_VERCEL_URL_FILE="$url_file" preview_deploy "$wt"; then
+    if SCLAUDE_BLOCK_AT="$at" SCLAUDE_VERCEL_URL_FILE="$url_file" preview_deploy "$wt"; then
       deploy_remember "$wt" preview
       if [[ -s "$url_file" ]]; then
         state_set "$wt/.sclaude/local/feature/state.json" regression.preview.url "$(< "$url_file")"
       fi
       history_add "$wt/.sclaude/local/feature/state.json" deploy.preview done
       ask_feed say "$(phase_line finished deploy preview)$([[ -s "$url_file" ]] && printf ' · %s' "$(< "$url_file")")"
-      rm -f "$url_file"
+      rm -f "$url_file" "$at"
       return 0
     fi
     if [[ "$try" -lt "$PREVIEW_TRIES" ]]; then
@@ -703,12 +718,18 @@ preview_ship() {
     else
       # The topic's line is the phase's, with a sound; the terminal's names
       # the log right above it.
-      alarm_here "  The preview deploy failed $PREVIEW_TRIES times — this needs a person to read the log above."
+      alarm_here "  The preview deploy failed $PREVIEW_TRIES times — the log is above."
       history_add "$wt/.sclaude/local/feature/state.json" deploy.preview failed
       ask_feed alarm "$(phase_line failed deploy preview) · $PREVIEW_TRIES tries, the log is in the terminal"
     fi
   done
-  rm -f "$url_file"
+  # The command that failed, for the session the gate opens on it
+  # (regression_fix_block): the block's output stays in the terminal.
+  state_set "$state" regression.preview.deploy_failed "$(cat "$at" 2>/dev/null || echo the deploy)" 2>/dev/null || true
+  # What the preview serves is not what was meant to go up: the gate deploys
+  # again rather than run the suite against it (deploy_unchanged).
+  state_set "$state" deploy.preview.sha null 2>/dev/null || true
+  rm -f "$url_file" "$at"
   return 1
 }
 
@@ -1625,8 +1646,86 @@ merge_wait() {
   return 0
 }
 
+# A ship to production that failed, looked into at once: time is dear there.
+# Production keeps the release it had — vercel switches it whole — but a
+# promote that began may have put the new migrations under it, so its suite is
+# asked first. Then a fixing session, told which command failed and what the
+# suite said (regression_fix_block), and by what it did:
+#   a fix committed — step 4 reopened for its pull request, the whole way
+#     round, as after a red production; resumed at once, or by the restarted
+#     sclaude when the friction review fixed sclaude too;
+#   sclaude fixed (4) — restarted, the ship offered again;
+#   a cause outside the code (3) — its note shown, the ship offered next run;
+#   nothing changed, or no session (5) — the person's, the ship offered again.
+#
+#   ship_failed <wt> <slug> <the command that failed> <1 when the promote began>
+ship_failed() {
+  local wt="$1" slug="$2" failed="$3" began="$4"
+  local state="$1/.sclaude/local/feature/state.json" before fix_rc=0 moved=""
+  if [[ -n "$began" ]]; then
+    info "  The promote began: production may run its old code on the new migrations. Its suite says how it is:"
+    local now_rc=0
+    regression_run "$wt" "$slug" prod || now_rc=$?
+    case "$now_rc" in
+      0) info "  Production answers green." ;;
+      1) alarm "  Production is red now — its old code on the new schema."
+         state_set "$state" regression.prod.after_failure red 2>/dev/null || true ;;
+      *) warn "  Production's suite could not run — see above." ;;
+    esac
+  fi
+  state_set "$state" regression.prod.deploy_failed "${failed:-the ship}" 2>/dev/null || true
+  before="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
+  info "  It failed at: ${failed:-the ship}. A session looks into it now."
+  regression_fix "$wt" "$slug" prod || fix_rc=$?
+  [[ "$fix_rc" -ne 5 && "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$before" ]] && moved=1
+  # A note beside a fix — part of the cause outside the code — is shown and
+  # kept, not left for the next gate to read as its own.
+  if [[ -n "$moved" && "$fix_rc" -eq 3 ]]; then
+    warn "  The session also left a note — part of the cause is outside the code:"
+    sed 's/^/    /' "$wt/.sclaude/local/feature/regression.blocked" 2>/dev/null
+    blocked_note_keep "$wt" prod "the ship failed"
+  fi
+  if [[ -n "$moved" ]]; then
+    fix_status_set "$state" prod fixed
+    regression_rewind "$wt" "$slug" prod
+    info "  The fix goes the whole way round: step 4 is reopened for its pull request."
+  fi
+  case "$fix_rc" in
+    4)
+      [[ -n "$moved" ]] || fix_status_set "$state" prod orchestrator-fixed
+      info "  The friction review fixed the orchestrator — restarting sclaude."
+      exec "$INSTRUMENTS/bin/sclaude" "$slug" ;;
+    5)
+      info "  Put it right and carry on: $SELF $slug"
+      return 0 ;;
+  esac
+  if [[ -n "$moved" ]]; then
+    cmd_resume "$slug"
+    return $?
+  fi
+  if [[ "$fix_rc" -eq 3 ]]; then
+    fix_status_set "$state" prod blocked
+    warn "  The cause is outside the code, says the session:"
+    sed 's/^/    /' "$wt/.sclaude/local/feature/regression.blocked" 2>/dev/null
+    blocked_note_keep "$wt" prod "the ship failed"
+    info "  Put it right; the next $SELF $slug offers the ship again."
+    return 0
+  fi
+  fix_status_set "$state" prod unchanged
+  warn "  The session changed nothing in the branch."
+  info "  Put it right and carry on: $SELF $slug — the ship is offered again."
+  return 0
+}
+
 remind_prod() {
   local wt="$1" slug="$2" pr branch merged migrations=""
+  # A ship marked by a pass that was cut off is not going on: this pass asks
+  # again, and marks it again (below).
+  state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping null 2>/dev/null || true
+  # A ship that failed before is not this pass's: its fix (regression_fix_block)
+  # is over, or the ship is asked about again below.
+  state_set "$wt/.sclaude/local/feature/state.json" regression.prod.deploy_failed null 2>/dev/null || true
+  state_set "$wt/.sclaude/local/feature/state.json" regression.prod.after_failure null 2>/dev/null || true
   local issue preview_done=0 prod_done=0 prod_tried=0 qa_skipped=0
   # What `deployed-preview` is actually about, which is not preview_done.
   #
@@ -1787,6 +1886,8 @@ remind_prod() {
     info "Preview already deployed at $(deploy_head "$wt" preview | cut -c1-8) — unchanged and green, skipping."
     info "  To send it again anyway: $SELF preview $slug"
     preview_apply_migrations "$wt" || true
+    # A red status a green rewrite did not get written over is tried again.
+    status_green_again "$slug" "$issue" "$pr" "${merged:-}" "$wt"
     preview_live=1
   elif [[ "${merged:-}" == "MERGED" ]]; then
     echo ""
@@ -1797,9 +1898,10 @@ remind_prod() {
     qa_skipped=1
   else
     preview_apply_migrations "$wt" || true
-    if preview_ship "$wt"; then
-      preview_done=1
-    fi
+    # Deployed or not, the gate takes it on: a deploy that failed its tries
+    # is its red, fixed as a red run is.
+    preview_ship "$wt" || true
+    preview_done=1
   fi
 
   # The preview regression, and the board's column behind it.
@@ -1829,6 +1931,7 @@ remind_prod() {
   if [[ "$preview_done" -eq 1 ]]; then
     if regression_gate "$wt" "$slug" preview; then
       preview_live=1
+      status_green_again "$slug" "$issue" "$pr" "${merged:-}" "$wt"
       qa_retest "$wt" "$issue" "$pr" fresh || true
       [[ -n "$issue" ]] && issue_qa_ready "$issue"
       qa_sent "$wt"
@@ -1967,9 +2070,10 @@ remind_prod() {
     fi
     # Closed without a merge: there is nothing left to wait for, and the
     # reminder below would tell the person to merge a pull request that no
-    # longer can be.
+    # longer can be. No status session for it — the pull request's own state
+    # says it — but the labels the preview earned go on, sclaude's own work.
     if [[ "$wait_rc" -eq 2 ]]; then
-      run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" 0 "$wt"
+      STATUS_LABELS_ONLY=1 run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" 0 "$wt"
       return 0
     fi
   fi
@@ -2045,11 +2149,10 @@ remind_prod() {
       local promote_cmd; promote_cmd="$(project_get database.promote "$wt" 2>/dev/null || true)"
       info "  that, from $REPO: ${migrations:+${promote_cmd:-the promote command}, then }vercel --prod."
     fi
-    # We write the outcome here too: the feature is not in prod, but it exists,
-    # it is on preview and waiting for the merge — and that is exactly what an
-    # epic's reader needs to know today rather than in a week. The section will
-    # be rewritten later by the next session, of this feature or another.
-    run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" 0 "$wt"
+    # No status session for waiting on the merge — a session per wait spent
+    # money to restate the pull request's state — but the labels the preview
+    # earned go on the issue chain (deployed-preview), sclaude's own work.
+    STATUS_LABELS_ONLY=1 run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" 0 "$wt"
     return 0
   fi
 
@@ -2173,6 +2276,13 @@ remind_prod() {
     fi
   fi
 
+  # The question and the ship it leads to: the process map stands the feature
+  # on them meanwhile (position in process.py), however long the answer takes
+  # — it may come from the phone the next morning. Taken off below whatever
+  # the answer, and by the next pass when this one is cut off at the question,
+  # which that pass asks again.
+  [[ "$prod_same" -eq 0 ]] \
+    && { state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping "$(date -Iseconds)" 2>/dev/null || true; }
   if [[ "$prod_same" -eq 1 ]]; then
     echo ""
     info "Production already at $(deploy_head "$wt" prod | cut -c1-8) — unchanged, skipping."
@@ -2216,7 +2326,7 @@ remind_prod() {
     local snapshot=""
     [[ -n "$promote_cmd" ]] && snapshot="$(environment_snapshot "$REPO")"
 
-    if run_block \
+    if SCLAUDE_BLOCK_AT="$wt/.sclaude/local/feature/deploy.at" run_block \
       "Production" \
       "$prod_red${prod_note:-The branch adds migrations: promote first, then ship.}" \
       "$prod_ask" \
@@ -2232,7 +2342,7 @@ remind_prod() {
     fi
   else
     write_vercelignore "$REPO"
-    if run_block \
+    if SCLAUDE_BLOCK_AT="$wt/.sclaude/local/feature/deploy.at" run_block \
       "Production" \
       "$prod_red${prod_note:-The branch adds no migrations.}" \
       "$prod_ask" \
@@ -2246,9 +2356,12 @@ remind_prod() {
     fi
   fi
 
+  state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping null 2>/dev/null || true
+
   # Production starts with a question, which reaches the phone by itself:
   # the topic hears only how it ended.
   if [[ "$prod_done" -eq 1 ]]; then
+    state_set "$wt/.sclaude/local/feature/state.json" regression.prod.deploy_failed null 2>/dev/null || true
     history_add "$wt/.sclaude/local/feature/state.json" deploy.prod done
     local prod_url; prod_url="$(project_prod_url "$wt" 2>/dev/null || true)"
     ask_feed say "$(phase_line finished deploy production)${prod_url:+ · $prod_url}"
@@ -2268,9 +2381,12 @@ remind_prod() {
     db_main_up
     echo ""
     warn "The ship to production failed — see above. Nothing is closed or cleaned up."
-    info "  Put it right and carry on: $SELF $slug"
-    info "  The worktree stays: $wt"
-    return 0
+    local failed; failed="$(cat "$wt/.sclaude/local/feature/deploy.at" 2>/dev/null)"
+    rm -f "$wt/.sclaude/local/feature/deploy.at"
+    local began=""
+    [[ -n "${promote_cmd:-}" && -n "$failed" && "$failed" != "cd $REPO" && "$failed" != git\ pull* ]] && began=1
+    ship_failed "$wt" "$slug" "$failed" "$began"
+    return $?
   fi
 
   # The features that went out with this one are in production too, and their

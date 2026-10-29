@@ -311,6 +311,37 @@ echo "rc=$?"
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+# How the last run in a tab ended, for a session that left at once: the tab
+# closed with it, and only its log saw what it printed.
+tmp = tempfile.mkdtemp()
+try:
+    wt = os.path.join(tmp, "wt")
+    os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"))
+    log = os.path.join(wt, ".sclaude", "local", "feature", "claude-tab.log")
+
+    def last_exit(text):
+        with open(log, "w") as fh:
+            fh.write(text)
+        script = 'source "%s/pane.sh"; pane_last_exit "%s"' % (LIB, wt)
+        return subprocess.run(["bash", "-c", script], capture_output=True,
+                              text=True).stdout.splitlines()
+
+    earlier = ("=== 2026-01-01T10:00:00+00:00 1-plan/x started\n"
+               "an old complaint\n"
+               "=== 2026-01-01T10:20:00+00:00 exit 143\n")
+    check("tab-exit-interrupted", last_exit(
+        earlier + "=== 2026-01-02T09:00:00+00:00 3-pr/x started\n"
+                  "=== 2026-01-02T09:00:01+00:00 exit 130\n"), ["130"])
+    check("tab-exit-with-its-words", last_exit(
+        earlier + "=== 2026-01-02T09:00:00+00:00 3-pr/x started\n"
+                  "Error: no such session\n\n"
+                  "=== 2026-01-02T09:00:01+00:00 exit 1\n"), ["1", "Error: no such session"])
+    check("tab-exit-still-running", last_exit(
+        earlier + "=== 2026-01-02T09:00:00+00:00 3-pr/x started\n"), [])
+    check("tab-exit-no-log", last_exit(""), [])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
 for name, want, got in failures:
     print("FAIL %s: want %r, got %r" % (name, want, got))
 if failures:

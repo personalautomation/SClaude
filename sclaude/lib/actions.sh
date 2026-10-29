@@ -333,8 +333,8 @@ cmd_flow() {
     [[ "${verbs[$i]}" == nothing || "${verbs[$i]}" == back ]] && continue
     printf '%s\t%s\n' "${verbs[$i]}" "${labels[$i]}"
   done | python3 -c '
-import json, sys
-node, title, why, where, feature, lib, state = sys.argv[1:8]
+import json, os, sys
+node, title, why, where, feature, lib, state, pr_state = sys.argv[1:9]
 actions = []
 for line in sys.stdin:
     verb, _, rest = line.rstrip("\n").partition("\t")
@@ -347,15 +347,40 @@ sys.path.insert(0, lib)
 try:
     import process
     read = process.transcripts_of(state)
-    with open(state) as fh:
-        history = process.history(json.load(fh), process.read_history(state),
-                                  node if node in process.NODES else None, read)
+    # Played on the map the project draws (the page does the same), so the
+    # ways filled in between two places run through blocks it has.
+    tree = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(state))))
+    with open(state) as fh, process.configured(process.config_of(tree)):
+        data = json.load(fh)
+        # A place the map of this project does not draw is lit where the flow goes
+        # on from it (a merge awaited on a project with no QA board).
+        node = process.on_map(node) or node
+        drawn = process.all_nodes()
+        title = drawn[node][3] if node in drawn else title
+        history = process.history(data, process.read_history(state),
+                                  node if node in drawn else None, read)
     read.done()
 except Exception:
     history = None
+# The F and W rings that turn: a friction review open, a session writing
+# sclaude in the workshop (its record beside it).
+try:
+    with open(state) as fh:
+        data = json.load(fh)
+    try:
+        with open(os.path.join(tree, ".sclaude", "local", "instruments.json")) as fh:
+            workshop = json.load(fh)
+    except (OSError, ValueError):
+        workshop = None
+    busy = process.busy(data, workshop)
+    notes = process.busy_notes(data, workshop)
+    stalled = process.stalled(data, pr_state)
+except Exception:
+    busy, notes, stalled = {}, {}, {}
 print(json.dumps({"feature": feature, "node": node, "title": title, "why": why,
-                  "where": where, "actions": actions, "history": history}))
-' "$node" "$title" "$why" "$where" "$slug" "$LIB" "$state"
+                  "where": where, "actions": actions, "history": history, "busy": busy,
+                  "notes": notes, "stalled": stalled}))
+' "$node" "$title" "$why" "$where" "$slug" "$LIB" "$state" "$pr_state"
 }
 
 # Gathers the applicable actions and carries out the chosen one.

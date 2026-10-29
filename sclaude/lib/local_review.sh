@@ -143,9 +143,19 @@ local_review() {
   local rc=0
   local_review_run "$@" || rc=$?
   trap - INT TERM HUP
+  local_review_mark "$1" null
   [[ "$rc" -eq 0 || ${#LOCAL_REVIEW_TOLD[@]} -eq 0 ]] \
     || ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · it did not finish, see the terminal"
   return "$rc"
+}
+
+# When the passes began, for the process map (position in process.py), which
+# stands the feature on them meanwhile; null once they end, however they end.
+# One left by a kill is believed for three hours at most.
+#
+#   local_review_mark <wt> <time|null>
+local_review_mark() {
+  state_set "$1/.sclaude/local/feature/state.json" review.local.running "$2" 2>/dev/null || true
 }
 
 local_review_run() {
@@ -201,12 +211,13 @@ local_review_run() {
   # of the review by these two, here and at the end.
   ask_feed say "$(phase_line started local-review "${pr:-?}" "$round" $verify)"
   history_add "$wt/.sclaude/local/feature/state.json" review.local start
+  local_review_mark "$wt" "$(date -Iseconds)"
   # An array: a "?" for a missing PR, split from a string, globbed.
   LOCAL_REVIEW_TOLD=("${pr:-?}" "$round" $verify)
   # Ctrl-C between passes too — while a pass's answer is recorded, or the
   # report printed — ends what the topic heard start: exit leaves the subshell
   # local_review runs in before its wrapper could say it.
-  local between='ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · stopped"; exit 130'
+  local between='local_review_mark "$wt" null; ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · stopped"; exit 130'
   trap "$between" INT TERM HUP
   while :; do
     if ! earlier="$(python3 "$LIB/local_review.py" prompt "$wt" "$pr" "$repo" "$journal" 2>>"$(local_review_file "$wt" .log)")"; then
@@ -244,7 +255,7 @@ local_review_run() {
              >"$answer.part" 2>"$(local_review_file "$wt" .log)" </dev/null ) &
     local pid=$!
     # The end told here too, the pass stopped first.
-    trap 'kill -TERM "$pid" 2>/dev/null; stty echo < /dev/tty 2>/dev/null; printf '"'"'\033[?25h'"'"' >&2; ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · stopped"; exit 130' INT TERM HUP
+    trap 'kill -TERM "$pid" 2>/dev/null; local_review_mark "$wt" null; stty echo < /dev/tty 2>/dev/null; printf '"'"'\033[?25h'"'"' >&2; ask_feed say "$(phase_line ended local-review "${LOCAL_REVIEW_TOLD[@]}") · stopped"; exit 130' INT TERM HUP
     local stopped=0
     local_review_wait "$wt" "$pid" "$pass" "$began" "$verify" "$round" || stopped=1
     trap "$between" INT TERM HUP

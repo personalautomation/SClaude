@@ -3,7 +3,7 @@ The feature "<feature>" <if:pr-number>is merged</if:pr-number><if:no-change>has 
 **What to read.**
 
 <if:terminal>- `<terminal>` — the `sclaude` terminal as I saw it, from its first run on this feature to this one: everything `sclaude` printed — each session's last message and every change to the plan among it — and everything I typed. The sessions' own screens are not in it; a session that ran in this same window is one bracketed line naming it. Runs are separated by `=====` headings saying when each started. A run that went through the menu to another feature is included whole; skip the parts about other features. This is your main source — read all of it, in chunks if it is long.
-</if:terminal>- `<worktree>/.sclaude/local/feature/` — `state.json` (steps, sessions, regression attempts, friction verdicts), `plan.md`, the friction logs, `review-yours` if present.
+</if:terminal>- `<worktree>/.sclaude/local/feature/` — `state.json` (steps, sessions, regression attempts, friction verdicts), `plan.md`, the friction logs, `review-yours` and `regression.notes` (what a regression fixing session found outside the branch, and what it said would have to change) if present.
 - <if:pr-number>The pull request #<pr-number><if:issue> and the issue #<issue></if:issue></if:pr-number><if:no-change>The issue #<issue></if:no-change>, with `gh`, if you need what was said there.
 - The session transcripts, only when you need what happened inside a session or there is no recording of the terminal — they are large: `<transcripts>/<session id>.jsonl`, the ids are in `state.json`. The raw terminal recordings are listed in `<terminal-raw>`.
 

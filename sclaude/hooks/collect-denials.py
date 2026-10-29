@@ -72,6 +72,7 @@ OWN_MARKERS = (
     "Tell the human and stop — the next move is theirs.",
     "tell the human and stop.",
     "Then present the plan again.",
+    "Then carry on with the step's own work.",
 )
 # The write guard's refusals are not among them: it writes nothing to the
 # log itself, so a refusal of its own, one getting in the way of real work
@@ -283,7 +284,9 @@ def main(argv):
         return 0
     step, paths = argv[0], argv[1:]
     for path in paths:
-        for source, subject, reason in denials(path, step):
+        # The rules the session ran under, when not its step's own (a sync
+        # runs under the review step's, sync.sh).
+        for source, subject, reason in denials(path, os.environ.get("SCLAUDE_POLICY_STEP") or step):
             note(step, source, subject, reason)
     return 0
 

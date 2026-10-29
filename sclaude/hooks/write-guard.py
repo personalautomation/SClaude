@@ -21,6 +21,8 @@
 #                   opened it (`sclaude core-open`, which records the session
 #                   in DIR.json; the record itself is never the session's to
 #                   write).
+#   --step          the session is a step's, which may not open the workshop:
+#                   the refusal points it at the friction log instead.
 #   --lenient       what cannot be told — a target in a variable, a directory
 #                   that is not known — is refused only when the command names
 #                   a read-only place at all. sclaude passes it for every
@@ -55,13 +57,17 @@ from _shell import (GIT_VALUED, KEYWORDS, QUOTED, closing_at, inner_command, str
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
 # Said of every path the session may not write. With a workshop the way to
-# change sclaude is named; without one (the epilogue, whose tree is gone) the
-# change waits as a deferred entry.
+# change sclaude is named: the workshop for the reviews, the friction log for
+# a step, which may not open it (forbidden-commands.py CORE_OPEN_NO); without
+# one (the epilogue, whose tree is gone) the change waits as a deferred entry.
 READONLY_REASON = ("this session may not change {dir}: sclaude's live checkout is read-only "
                    "to every sclaude session, since the others run from it.")
 WORKSHOP_REASON = (" Change sclaude in this tree's workshop, {workshop}, instead: "
                    "`sclaude core-open` opens it for this session.")
 NO_WORKSHOP_REASON = (" Leave the change as a deferred entry of class sclaude-default.")
+STEP_REASON = (" Say in .sclaude/local/feature/friction.log what in sclaude got in your way "
+               "and what the fix would be — the friction review after this session reads "
+               "it — and carry on with the step's own work.")
 # Said where the place a command writes cannot be told, rather than the reason
 # above, which then named a place the command never meant: a loop's
 # `>…/$(basename $t).out` into the scratchpad was told it may not change sclaude.
@@ -608,7 +614,8 @@ def main():
     why = None
     if readonly:
         why = READONLY_REASON.format(dir=", ".join(readonly)) + (
-            WORKSHOP_REASON.format(workshop=workshop) if workshop else NO_WORKSHOP_REASON)
+            STEP_REASON if "--step" in argv
+            else WORKSHOP_REASON.format(workshop=workshop) if workshop else NO_WORKSHOP_REASON)
     if workshop:
         # The record says who may write in the workshop, and is never the
         # session's to write; the workshop is read-only until it says so.

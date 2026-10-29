@@ -219,9 +219,10 @@ guard_entry() {
 # reviews, which a person approves (review_guard_settings), never by the step
 # they would free.
 #
-# Nor is sclaude's live checkout, which every other session runs from: a step
-# changes sclaude in the tree's workshop, once the person has let it
-# (`sclaude core-open`, workshop.sh). Read leniently, as every session's
+# Nor is sclaude's live checkout, which every other session runs from, nor
+# the tree's workshop: a step does not change sclaude, it says what got in its
+# way in the friction log, and the friction review after it changes sclaude
+# (forbidden-commands.py CORE_OPEN_NO). Read leniently, as every session's
 # guard is: a step writes through variables all day, and only a write that
 # names the checkout is refused for a target it cannot tell.
 #
@@ -229,7 +230,7 @@ guard_entry() {
 team_guard_entry() {
   local -a args=()
   mapfile -t args < <(sclaude_guard_args "${1:-}")
-  guard_entry --team "${args[@]}" --lenient
+  guard_entry --team --step "${args[@]}" --lenient
 }
 
 # The write guard's arguments for sclaude's checkout: read-only, but for what
@@ -603,6 +604,9 @@ cycle_total() { cycle_number retro; }
 #   4/7 done, waiting for merge   the pull request is open
 #   4/7 done, local regression running   the suite after the step is running
 #   5/7 sync                      open, and a sync with main was broken off
+#   steps done, shipping to production   merged, asked to ship, or shipping
+#   steps done, production regression running   merged, its suite on production
+#   steps done, production held   merged, production red and not rolled back
 #   6/7 epilogue                  merged, and an epilogue was broken off
 #   7/7 retro                     merged; the clean-up with its retro is next
 #   all done                      the retro has run, or the feature changed
@@ -629,8 +633,7 @@ step_label() {
   local running
   case "$merged" in
     OPEN)
-      # Only here, and once: it is a python start, for every feature the
-      # menu lists.
+      # A python start, once per feature the menu lists; so is MERGED's.
       running="$(open_pr_phase "$state")"
       if [[ "$running" == sync ]]; then
         echo "$(cycle_number sync)/$total sync"
@@ -643,19 +646,23 @@ step_label() {
     MERGED) ;;
     *) echo "${#STEPS[@]}/$total done"; return ;;
   esac
-  if retro_ran "$state"; then
-    echo "all done"
-    return
-  fi
+  # Merged: where the process map puts it (position), so the menu and the map
+  # never name it differently. Production's two places carry no step number,
+  # since the bot marks the step a label's number names and neither is a
+  # step; they keep " done", by which the bot tells the steps are over
+  # (keepawake/telegramd.py). Unknown — the map could not say — is as without
+  # GitHub.
   slug="$(state_get "$state" feature 2>/dev/null || true)"
   estate="$(epilogue_dir)/$slug.json"
-  if [[ -n "$slug" && -f "$estate" ]] \
-     && [[ -n "$(state_get "$estate" session 2>/dev/null || true)" ]] \
-     && [[ "$(state_get "$estate" done 2>/dev/null || echo false)" != "true" ]]; then
-    echo "$(cycle_number epilogue)/$total epilogue"
-  else
-    echo "$total/$total retro"
-  fi
+  case "$(python3 "$LIB/process.py" position "$state" MERGED "$estate" 2>/dev/null | cut -f1)" in
+    prod) echo "steps done, production regression running" ;;
+    ship) echo "steps done, shipping to production" ;;
+    hold_ways) echo "steps done, production held" ;;
+    epilogue) echo "$(cycle_number epilogue)/$total epilogue" ;;
+    cleanup) echo "all done" ;;
+    done_cmd|retro) echo "$total/$total retro" ;;
+    *) echo "${#STEPS[@]}/$total done" ;;
+  esac
 }
 
 # What a feature with its pull request open is at, past "waiting for merge":
@@ -1060,6 +1067,10 @@ friction_of() {
     return
   fi
   [[ "$1" =~ ^([a-z]+)-([0-9]+)$ ]] && { step="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"; }
+  if [[ "$step" == sync ]]; then
+    echo "after the sync with main${n:+ $n}"
+    return
+  fi
   # A key that names no step (`sclaude friction` past the steps): said as it is.
   if [[ "$(step_index "$step")" -lt 0 ]]; then
     echo "of $1"
@@ -1135,7 +1146,11 @@ step_run_session() {
 import json, re, sys
 path, key = sys.argv[1:3]
 with open(path) as fh:
-    steps = json.load(fh).get("steps") or {}
+    data = json.load(fh)
+steps = dict(data.get("steps") or {})
+# A sync with main keeps its runs beside the steps', not among them.
+if isinstance(data.get("sync"), dict):
+    steps.setdefault("sync", data["sync"])
 m = re.fullmatch(r"([a-z]+)-([0-9]+)", key)
 if m and m.group(1) in steps:
     runs = [r for r in (steps[m.group(1)].get("runs") or []) if isinstance(r, dict)]

@@ -454,7 +454,9 @@ workshop_publish() {
   info "${BOLD}sclaude's change from this tree's workshop${OFF}"
   # Not what main has already: a try that stopped after its rebase leaves
   # start below the main it rebased on, and those commits are nobody's change.
-  git -C "$ws" log --format='     %h %s' "$start..HEAD" --not origin/main 2>/dev/null
+  # --no-pager: printed straight to the terminal, a list longer than the screen
+  # would stop publishing in less until somebody pressed q.
+  git --no-pager -C "$ws" log --format='     %h %s' "$start..HEAD" --not origin/main 2>/dev/null
   # sclaude's own git, not the session's: its hooks and its trailer are for
   # what the session commits.
   local -a G=(env -u GIT_CONFIG_COUNT git -C "$ws")

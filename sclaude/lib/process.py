@@ -87,7 +87,7 @@ NODES = {
               "your yes; a no goes back with what is wrong", ""),
     # step 3
     "pr": ("session", 9, "session", "3 · pr",
-           "manuals updated, a draft PR by the pr skill, the criteria as QA's checklist", "FS"),
+           "manuals updated, a draft PR by the pr skill, the criteria for QA", "FS"),
     "pr_check": ("sclaude", 10, "gate", "PR there, all pushed?",
                  "a pull request on GitHub carrying every commit", ""),
     "draft_pr": ("github", 10, "task", "Draft PR",
@@ -179,7 +179,7 @@ DETAILS = {
     "works": "sclaude asks whether everything works as it should. A no takes what is wrong back to the same session as your message; Enter alone leaves the step for later.",
     "reg_local": "The project's suite (its config's regression parts) against the feature's own server and database. An unpublished branch is put on top of main first. Green closes step 2; at step 4 it runs again before the step closes.",
     "fix_local": "A separate session gets the failing log and fixes the cause, then the suite runs again. Two sessions that do not make it green stop the cycle and tell you: a third guess at the same failure rarely helps.",
-    "pr": "Updates the manuals the change touches and opens a draft pull request through the pr skill, with the criteria copied in as QA's unticked checklist and Closes #N for the issue.",
+    "pr": "Updates the manuals the change touches and opens a draft pull request through the pr skill, with the criteria copied in as a plain list (QA ticks them in the issue) and Closes #N for the issue.",
     "pr_check": "sclaude looks for the pull request on GitHub and for commits it does not carry. Missing either: the session is sent back to finish, at most twice.",
     "draft_pr": "The draft is assigned to its author and put in the issue's milestone. Who reviews it is the project's review setting.",
     "ci_review": "With review set to github, the project's review workflow in Actions reviews the pull request on every push and posts its findings as threads. sclaude waits for its check before step 4 opens a session, and each round's next findings come from its run on the round's push.",

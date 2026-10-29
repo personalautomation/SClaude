@@ -24,7 +24,7 @@ Commit as soon as each piece works, following the project's commit rules, with `
 Requirement: AC2. A draft opens by direct link for its author and 404s for anyone else.
 ```
 
-The identifier is a prefix, not a replacement: the wording stays because the footers are read by people and collected into the pull request, where `AC2` alone would send a reader off to find out what it meant. Copy the criterion's text as it stands in the list rather than paraphrasing it — a footer that drifts from the criterion it names is worse than one that doesn't name it.
+The identifier is a prefix, not a replacement: the wording stays because the footers are read by people and collected into the pull request, where `AC2` alone would send a reader off to find out what it meant. Copy the criterion's text as it stands in the list rather than paraphrasing it — a footer that drifts from the criterion it names is worse than one that doesn't name it. A footer is one line: a criterion with a list under its first line goes on it whole, its first line and then each item, separated by `; ` — `Requirement: AC6. The total shows:; for one order, its sum; a dash otherwise.`
 
 A commit nobody asked for carries no `Requirement:` footer.
 

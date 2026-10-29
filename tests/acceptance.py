@@ -242,6 +242,58 @@ for name, line in (("star", "* [ ] AC1. X."), ("plus", "+ AC1. X."),
                    ("ticked", "- [x] AC1. X.")):
     check("plan-shape-%s" % name,
           plan_content("## Acceptance criteria\n\n%s\n" % line), ["- [ ] AC1. X."])
+# A criterion whose first line leads into a list keeps the list: without it
+# the line promises nothing. Deeper items keep their depth; prose under it and
+# the next criterion end nothing early, and are not taken in.
+CASES = ("## Acceptance criteria\n\n"
+         "- [ ] AC1. The total shows:\n"
+         "    - for one order, its sum;\n"
+         "    - for a bundle:\n"
+         "        - the sum of its parts;\n"
+         "    - a dash otherwise.\n"
+         "- [ ] AC2. Plain.\n")
+CASES_TEXT = ("The total shows:\n"
+              "  - for one order, its sum;\n"
+              "  - for a bundle:\n"
+              "      - the sum of its parts;\n"
+              "  - a dash otherwise.")
+check("plan-cases-carried", plan_content(CASES),
+      ["- [ ] AC1. " + CASES_TEXT, "- [ ] AC2. Plain."])
+check("plan-cases-written-loose",
+      plan_content("## Acceptance criteria\n\n- AC1:\n\n  - one.\n\n  - two.\n\n"
+                   "Prose after the list.\n\n  - not its.\n"),
+      ["- [ ] AC1.\n  - one.\n  - two."])
+check("plan-wrapped-prose-is-not-a-case",
+      plan_content("## Acceptance criteria\n\n- AC1. X\n  wrapped on.\n"),
+      ["- [ ] AC1. X"])
+
+# A box on a case is dropped: the criterion's box is the one QA ticks.
+check("plan-case-box-dropped",
+      plan_content("## Acceptance criteria\n\n- [ ] AC1. Shows:\n  - [ ] one\n  - [x] two\n"),
+      ["- [ ] AC1. Shows:\n  - one\n  - two"])
+# In a list indented as a whole, an item beside the criterion is not its case.
+check("plan-sibling-is-not-a-case",
+      plan_content("## Acceptance criteria\n\n  - AC1. X.\n  - Out of scope: Y.\n"),
+      ["- [ ] AC1. X."])
+# A criterion that is its identifier and a list is a criterion.
+check("plan-identifier-and-cases",
+      plan_content("## Acceptance criteria\n\n- AC1:\n  - one\n  - two\n- AC2. X\n"),
+      ["- [ ] AC1.\n  - one\n  - two", "- [ ] AC2. X"])
+check("plan-identifier-and-cases-verdict",
+      plan_verdict("## Acceptance criteria\n\n- AC1:\n  - one\n"), "criteria")
+# Tabs count as columns, so the text carries none and a mixed list nests.
+check("plan-case-tabs",
+      plan_content("## Acceptance criteria\n\n- AC1. X:\n\t- a\n\t\t- b\n        - c\n"),
+      ["- [ ] AC1. X:\n  - a\n      - b\n      - c"])
+check("plan-tab-in-the-text",
+      plan_content("## Acceptance criteria\n\n- AC1: Shows\tthe total\n"),
+      ["- [ ] AC1. Shows the total"])
+check("tab-in-the-text-same-both-sides",
+      parse(comment("- [ ] AC1. ab\tc"))[0][1], plan_content(
+          "## Acceptance criteria\n\n- AC1 ab\tc\n")[0][len("- [ ] AC1. "):])
+check("issue-identifier-and-cases",
+      parse(comment("- [ ] AC1.\n  - one")), [("AC1", "\n  - one", False)])
+
 # But prose that merely mentions an identifier is not a criterion.
 check("plan-prose-mention-is-not-a-criterion",
       plan_verdict("## Acceptance criteria\n\nAC1 is covered below.\n"), "empty")
@@ -552,6 +604,39 @@ check("reword-lists-a-body-as-body", reword("71", REWORDED)[0], "body")
 stub(None)
 check("reword-unreadable", reword("71", REWORDED)[0], "unreadable")
 
+
+# Cases: a criterion that lost its list in the issue reads differently, one
+# that has it reads the same, and a note QA wrote under it changes neither.
+written = "\n".join(plan_content(CASES))
+check("cases-read-back", parse(comment(written))[0][1], CASES_TEXT)
+with_note = written.replace("    - the sum of its parts;\n",
+                            "    - the sum of its parts;\n  QA: seen on a phone.\n")
+stub(issue(human, (6, comment(with_note.replace("- [ ]", "- [x]")))))
+check("cases-note-is-not-a-difference", reword("71", CASES), ("unchanged", []))
+cut = comment("- [x] AC1. The total shows:\n"
+              "  QA: checked.\n"
+              "- [x] AC2. Plain.")
+stub(issue(human, (6, cut)))
+check("cases-lost-differ", reword("71", CASES),
+      ("differs", ["AC1\tThe total shows:\t"
+                   + CASES_TEXT.replace("\n", " ⏎ ")]))
+edited = []
+acceptance.issue_comments.edit = \
+    lambda cid, text, cwd=None: edited.append((cid, text)) or True
+check("cases-written-word", reword("71", CASES, write=True)[0], "reworded")
+check("cases-written", parse(edited[-1][1])[0][1:], (CASES_TEXT, False))
+check_true("cases-written-keep-the-note", "  QA: checked." in edited[-1][1])
+stub(issue(human, (6, edited[-1][1])))
+check("cases-written-once", reword("71", CASES), ("unchanged", []))
+loose = comment("- [ ] AC1. X:\n\n  - one.\n  QA: seen.\n\n  - two.\n- [ ] AC2. Plain.")
+stub(issue(human, (6, loose)))
+reword("71", CASES, write=True)
+check("cases-loose-rewritten-tight", section(edited[-1][1]),
+      "- [ ] AC1. " + CASES_TEXT + "\n  QA: seen.\n- [ ] AC2. Plain.")
+stub(issue(human, (6, comment(written))))
+tick_all("71")
+check("cases-ticked", [d for _, _, d in parse(edited[-1][1])], [True, True])
+check_true("cases-tick-leaves-the-cases", "  - a dash otherwise." in edited[-1][1])
 
 # --- the comment id ------------------------------------------------------------
 

@@ -340,6 +340,9 @@ ensure_db() {
       info "  database: starting this feature's own Supabase (a new one takes about a minute)…"
     fi
     exclude="$(project_get database.local.exclude "$wt" 2>/dev/null | paste -sd, -)"
+    # No lock around the start: a double start was seen once and the stack
+    # survived it, while each lock tried brought a new failure of its own (a
+    # descriptor kept by Docker Desktop, a wait against the proxy's limit).
     if ! (cd "$wt" && $cli start --workdir "$dir" ${exclude:+-x "$exclude"}) >> "$log" 2>&1 \
        && ! db_wait_up "$wt" "$cli" "$dir"; then
       rm -f "$envf"

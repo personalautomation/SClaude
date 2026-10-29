@@ -6,7 +6,7 @@
 # is presented, and capture_plan in plan.sh, which takes the approved one from
 # the transcript. One function for both, because the input's shape has changed
 # under us once already — the plan used to arrive as text and now mostly comes
-# as a path to a file — and two copies of the fallback would drift the next time
+# as a path to a file — and two copies of the reading would drift the next time
 # it changes, leaving the gate and the saved plan disagreeing about what was
 # presented.
 import os
@@ -18,6 +18,11 @@ def plan_text(tool_input):
     The text itself when the call carries it; otherwise the file the call names.
     An input with neither is normal rather than a failure: verified on a live
     session where, of four calls, only the first carried the text.
+
+    A file is read as it stands now, so a file edited after its call was
+    presented gives the later version. Accepted on purpose: the file's
+    earlier versions are in no record this reads, and rebuilding them from
+    the transcript's edits would be a second, fragile copy of the plan.
     """
     if not isinstance(tool_input, dict):
         return None

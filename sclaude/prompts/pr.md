@@ -12,7 +12,7 @@ Work through the `/pr` skill — invoke it. It differs from its usual course bec
 
   Then use the footers the way the skill says, but as a check rather than a source. Walk `git log origin/main..HEAD --format='%(trailers:key=Requirement,valueonly)'` and compare:
 
-  - a footer whose text has drifted from the criterion it names — the criterion's wording wins, and say so when you report;
+  - a footer whose text has drifted from the criterion it names — the criterion's wording wins, and say so when you report. A criterion with a list under it is named on one line, its first line and items joined by `; `: that is its wording, not drift;
   - a footer with no identifier — something asked for during development that isn't in the list. Add it to the section as an unnumbered item and tell me: it's either a criterion we missed or scope that grew, and I decide which.
   - a criterion with no footer anywhere — either it wasn't built or a commit was missing its footer. **Ask me before opening the pull request**; don't tick it, and don't quietly drop it from the list.
 

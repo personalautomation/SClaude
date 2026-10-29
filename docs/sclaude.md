@@ -450,7 +450,7 @@ of the cycle points at:
 | --- | --- |
 | 1. plan | Agrees them with the human, writes them into the issue and puts them at the head of the plan |
 | 2. code | Gets them in the prompt; commits name one in a `Requirement:` footer (`Requirement: AC2. <the criterion's text>`); the step's closing report goes through the list criterion by criterion |
-| 3. pr | Copies them into the pull request's "Requested by the customer (for QA)" section as an unticked checklist, and uses the footers to find criteria nothing was committed for |
+| 3. pr | Copies them into the pull request's "Requested by the customer (for QA)" section as a plain list, without boxes (QA ticks them in the issue), and uses the footers to find criteria nothing was committed for |
 | 4. review, epilogue | Read them; neither writes to the section, and neither ticks a box |
 
 The footer carries the identifier **and** the text. The `pr` skill's convention

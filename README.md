@@ -561,8 +561,8 @@ pushed yet is put on top of main before those tests, without a question, when
 it rebases cleanly.
 
 **Step 3, pr.** The pull request, opened as a draft by the `pr` skill, with the
-criteria copied in as an unticked checklist for QA, and the manuals updated in
-the same pull request.
+criteria copied in as a plain list for QA, who ticks them in the issue, and the
+manuals updated in the same pull request.
 
 **Step 4, review.** The project's automatic review reads the pull request, and
 a session fixes what it found, one round at a time. The step closes when the
@@ -698,7 +698,7 @@ run it on its own.
 It works on a `feat/…` branch, checks that commits follow Conventional Commits,
 runs the project's checks and opens the pull request. The description has
 **Summary** — what changed; **Requested by the customer (for QA)** — what was
-asked for, as observable behaviour, for QA to tick; then **How to verify** and
+asked for, as observable behaviour, for QA to check; then **How to verify** and
 any **Notes**. It also updates the product's manuals. It never merges or
 deploys.
 

@@ -883,16 +883,19 @@ qa_product_same() {
 }
 
 # The hash of a commit's change against <base> on the paths given, less what
-# only says where it lies: the line numbers in `@@` (the function context after
-# them stays) and the `index` blob ids, which move with main's edits elsewhere
-# in a file. Not patch-id, which ignores whitespace — a line re-indented out of
-# a Python block is a change QA has not seen. Binary files by their content
-# (`--binary`), every file by its bytes rather than a textconv driver's view of
-# it, and renames found whatever the person's git config says, less their
-# `similarity index` line, which moves with main's edits to the file — with
-# renames off, a renamed file reads as all of it deleted and added, and any
-# such edit would ask QA again. Streamed rather than held in a variable, which
-# would drop NUL bytes. A diff that fails is a failure, not an empty change.
+# only says where it lies: the line numbers in `@@` and the `index` blob ids,
+# which move with main's edits elsewhere in a file. The function context after
+# the line numbers stays: in doubt this errs toward "changed", since a header
+# main edits above the branch's lines costs QA a second look, while a false
+# "same" lets an unseen change ship. Not patch-id, which ignores whitespace — a
+# line re-indented out of a Python block is a change QA has not seen. Binary
+# files by their content (`--binary`), every file by its bytes rather than a
+# textconv driver's view of it, and renames found whatever the person's git
+# config says, less their `similarity index` line, which moves with main's
+# edits to the file — with renames off, a renamed file reads as all of it
+# deleted and added, and any such edit would ask QA again. Streamed rather than
+# held in a variable, which would drop NUL bytes. A diff that fails is a
+# failure, not an empty change.
 #
 #   qa_own_diff <wt> <base> <commit> <pathspec>...
 qa_own_diff() {

@@ -65,6 +65,87 @@ from issue_comments import AC_CLOSE, AC_OPEN  # noqa: E402,F401
 CRITERION = re.compile(
     r"^\s*-\s*\[(?P<done>[ xX])\]\s*(?P<id>AC\d+)\s*[.:)]*\s*(?P<text>.*?)\s*$")
 
+# A criterion's cases: the list items indented under it, when its first line
+# only leads into them ("The total shows:" and one item per case). They are
+# part of its text — without them the line promises nothing, and a box ticked
+# against it accepts nothing either.
+#
+# Only list items count. QA writes its note under a criterion as an indented
+# line too, and that note is the issue's, never the plan's: read as part of the
+# text, it would make every criterion QA wrote under read differently from the
+# plan, and a rewording at the person's yes would erase it. A criterion the plan
+# wraps onto an indented line of prose is read without that line, for the same
+# reason: the two cannot be told apart. A note QA writes as a list item is
+# the other side of that: it reads as a case, so the criterion reads
+# differently from the plan, and a rewording the person approves, having seen
+# both texts, may replace it — guessing which items are notes would be wrong
+# either way. A box on a case is dropped, like the plan's tick on the
+# criterion: the criterion's own box is the one QA ticks.
+#
+# Rarer shapes are not read, on purpose: a case wrapped onto a second line, a
+# criterion among another one's cases, a code sample under a criterion. Plans
+# write one line per item, each such shape would be a rule of its own here,
+# and a loss shows plainly in the issue the person reads.
+CASE = re.compile(r"^(?P<indent> +)(?P<mark>(?:[-*+]|\d+[.)])\s+)"
+                  r"(?:\[[ xX]\]\s*)?(?P<rest>\S.*?)\s*$")
+
+
+def with_cases(lines, pattern):
+    """Each line `pattern` matches, with the cases under it: (match, cases, at).
+
+    `cases` is the text the criterion carries on, "" when it has none: every
+    item under it on a line of its own, the shallowest two spaces in and the
+    deeper ones as much further as they were, a tab in the indent counted as
+    four columns.
+    `at` lists the indices of the criterion's line and of its cases' lines,
+    for a writer replacing them. The lines under a criterion end at the next
+    criterion, or a line no deeper than the criterion's own (an item beside
+    it); a blank line ends nothing, since a list written loose is the same
+    list. A note on a line of prose among them is passed over and left out;
+    one written as a list item is a case (see CASE).
+    """
+    out = []
+    current = None
+    for index, line in enumerate(lines):
+        # Tabs in the indent count as four columns; one inside the text is a
+        # space, so the text reads the same wherever its line starts.
+        body = line.lstrip(" \t")
+        line = line[:len(line) - len(body)].expandtabs(4) + body.replace("\t", " ")
+        found = pattern.match(line)
+        indent = len(line) - len(line.lstrip(" "))
+        if found:
+            current = (found, [], [index], indent)
+            out.append(current)
+            continue
+        if current is None:
+            continue
+        case = CASE.match(line)
+        if not line.strip():
+            continue
+        if indent <= current[3]:
+            current = None
+        elif case:
+            current[1].append(case)
+            current[2].append(index)
+    result = []
+    for found, cases, at, _ in out:
+        text = ""
+        if cases:
+            depth = min(len(c.group("indent")) for c in cases)
+            text = "".join("\n  %s%s%s" % (c.group("indent")[depth:],
+                                            c.group("mark"), c.group("rest"))
+                           for c in cases)
+        result.append((found, text, at))
+    return result
+
+
+def criterion_line(cid, body):
+    """A criterion written into the issue's section, its box empty."""
+    head, cases = (body.split("\n", 1) + [""])[:2]
+    line = ("- [ ] %s. %s" % (cid, head)).rstrip()
+    return line + ("\n" + cases if cases else "")
+
+
 # What the old issue template carried before step 1 had filled anything in. A
 # section holding only this is empty, not written — otherwise the placeholder
 # itself would be handed to step 2 as a requirement. New issues no longer get
@@ -123,15 +204,12 @@ def criteria(text):
     context above the list, and a criterion is recognised by its shape.
     """
     out = []
-    for line in (text or "").splitlines():
-        found = CRITERION.match(line)
-        if not found:
-            continue
+    for found, cases, _ in with_cases((text or "").splitlines(), CRITERION):
         text = found.group("text").strip()
-        if not text or text == PLACEHOLDER:
+        if not (text or cases) or text == PLACEHOLDER:
             continue
         out.append((found.group("id"),
-                    text,
+                    text + cases,
                     found.group("done").lower() == "x"))
     return out
 
@@ -223,13 +301,11 @@ def plan_section(text):
 def plan_criteria(section_text):
     """The criteria in the plan's section, as a list of (id, text)."""
     out = []
-    for line in (section_text or "").splitlines():
-        found = PLAN_CRITERION.match(line)
-        if not found:
-            continue
+    for found, cases, _ in with_cases((section_text or "").splitlines(),
+                                      PLAN_CRITERION):
         text = found.group("text").strip()
-        if text and text != PLACEHOLDER:
-            out.append((found.group("id"), text))
+        if (text or cases) and text != PLACEHOLDER:
+            out.append((found.group("id"), text + cases))
     return out
 
 
@@ -262,7 +338,7 @@ def plan_content(text):
     section_text = plan_section(text) or ""
     found = plan_criteria(section_text)
     if found:
-        return ["- [ ] %s. %s" % (cid, body) for cid, body in found]
+        return [criterion_line(cid, body) for cid, body in found]
     for line in section_text.splitlines():
         match = NONE_DECLARED.match(line)
         if match:
@@ -470,7 +546,7 @@ def extend(number, plan_text, cwd=None):
         return "differs", ["%s is only in the plan" % cid for cid, _ in added] + differ
 
     new_lines = inner.rstrip("\n").splitlines() + \
-        ["- [ ] %s. %s" % (cid, body) for cid, body in added]
+        [criterion_line(cid, body) for cid, body in added]
     new = merge_section(text, new_lines)
     if new is None:
         return "torn", []
@@ -493,9 +569,10 @@ def reword(number, plan_text, cwd=None, write=False):
 
     Only criteria both sides have and word differently are touched. Their box
     is emptied: a tick was given to the old text. Every other line, the ticks
-    and any note QA left stay as they were, the promise sync() and extend()
-    keep. One a person reworded in GitHub reads differently too, which is why
-    nothing is written without that yes.
+    and a prose note QA left stay as they were, as sync() and extend() keep
+    everything; a note written as a list item is a case (see CASE) and goes
+    with the wording. A criterion a person reworded in GitHub reads
+    differently too, which is why nothing is written without that yes.
 
     "differs"     — details are "<id>\\t<issue's text>\\t<plan's text>" lines;
     "reworded"    — with `write`, those criteria now read as the plan does;
@@ -513,7 +590,10 @@ def reword(number, plan_text, cwd=None, write=False):
                if cid in planned and planned[cid] != have]
     if not changed:
         return "unchanged", []
-    details = ["%s\t%s\t%s" % row for row in changed]
+    # One line a criterion, for the shell reading them with `read`: the
+    # breaks before its cases are shown, not kept.
+    details = ["\t".join(part.replace("\n", " ⏎ ") for part in row)
+               for row in changed]
     # Before the listing's word: a yes to writing a description is a yes to
     # nothing, so the person is not asked for one.
     if own is None:
@@ -521,13 +601,17 @@ def reword(number, plan_text, cwd=None, write=False):
     if not write:
         return "differs", details
     new_text = dict((cid, body) for cid, _, body in changed)
-    lines = []
-    for line in section(text).split("\n"):
-        found = CRITERION.match(line)
-        if found and found.group("id") in new_text:
-            cid = found.group("id")
-            line = "- [ ] %s. %s" % (cid, new_text[cid])
-        lines.append(line)
+    lines = section(text).split("\n")
+    # The criterion's line and its cases make way for the plan's wording, and
+    # the blank lines of a list written loose with them; a prose note QA left
+    # among them stays where it was.
+    for found, _, at in reversed(with_cases(lines, CRITERION)):
+        cid = found.group("id")
+        if cid in new_text:
+            for index in reversed(range(at[0] + 1, at[-1] + 1)):
+                if index in at or not lines[index].strip():
+                    del lines[index]
+            lines[at[0]] = criterion_line(cid, new_text[cid])
     new = merge_section(text, lines)
     if new is None:
         return "torn", details

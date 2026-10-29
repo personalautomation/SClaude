@@ -870,6 +870,14 @@ use, and unused old ones are cleaned up. On the Windows side it only reports —
 newer WSL, applications `winget upgrade` lists — because updating those from
 inside WSL would shut WSL down or need elevation.
 
+A Node that does not start — a major that needs a system library WSL leaves
+out, as Node 26 needs `libatomic1` — is named with the `sudo apt install` that
+fixes it. When it is the node the run uses — the default follows `lts/*`,
+which nvm moves to a new LTS as soon as it unpacks it — the steps that need
+node are skipped rather than failing one by one. The fix is that package, not
+the older version.
+`sclaude doctor` names the same gap.
+
 It runs every day at 10:00 (and catches up after a missed day). Logs are in
 `~/.local/state/wsl-update/`.
 

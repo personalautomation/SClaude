@@ -58,6 +58,27 @@ with tempfile.TemporaryDirectory() as home:
                   fix in (lines[at + 1] if at + 1 < len(lines) else ""), True)
     check("outside-a-repo-said", "not inside a git repository" in out, True)
 
+    # A node on PATH that dies at the loader is a gap, not a ✓, and the fix
+    # names the package that carries the missing library.
+    fake = os.path.join(home, "fake-bin")
+    os.makedirs(fake)
+    with open(os.path.join(fake, "node"), "w") as fh:
+        fh.write("#!/bin/sh\necho 'node: error while loading shared libraries: "
+                 "libatomic.so.1: cannot open shared object file: "
+                 "No such file or directory' >&2\nexit 127\n")
+    os.chmod(os.path.join(fake, "node"), 0o755)
+    broken = dict(env, PATH=fake + os.pathsep + env["PATH"])
+    done = subprocess.run([os.path.join(ROOT, "bin", "sclaude"), "doctor"],
+                          cwd=home, env=broken, capture_output=True, text=True,
+                          timeout=120)
+    lines = done.stdout.splitlines()
+    at = next((i for i, l in enumerate(lines)
+               if "node does not start: libatomic.so.1 is missing" in l), None)
+    check("broken-node-reported", at is not None, True)
+    if at is not None:
+        check("broken-node-names-the-package",
+              "sudo apt install libatomic1" in (lines[at + 1] if at + 1 < len(lines) else ""), True)
+
     # A project's own checks: run in its root, a pass is a ✓, a failure a !
     # with the check's last line and the fix under it.
     repo = os.path.join(home, "product")

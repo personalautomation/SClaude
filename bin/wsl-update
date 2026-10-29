@@ -306,6 +306,29 @@ load_nvm() {
   . "$NVM_DIR/nvm.sh" >/dev/null 2>&1
 }
 
+# Set by update_node when the node this run uses does not start; the steps that
+# need it say so once instead of each failing on its own.
+NODE_BROKEN=""
+
+# node_starts <node binary> — true when it runs. When it does not, records the
+# failure with the fix: a new major can need a system library the distribution
+# leaves out (Node 26 wants libatomic.so.1), and installing one needs sudo, which
+# a run from the timer has no terminal for. The package is named the way Debian
+# names shared libraries (libatomic.so.1 → libatomic1), as `sclaude doctor` does.
+node_starts() {
+  local err libs why
+  err=$("$1" -v 2>&1 >/dev/null) && return 0
+  libs=$(sed -n 's/.*error while loading shared libraries: \([^:]*\):.*/\1/p' <<<"$err" | paste -sd' ')
+  if [ -n "$libs" ]; then
+    why="$libs is missing — sudo apt install $(tr ' ' '\n' <<<"$libs" | sed -E 's/\.so\.([0-9]+).*/\1/' | paste -sd' '), then run wsl-update again"
+  else
+    why="$1 -v fails: $err"
+  fi
+  printf '   \033[31mERROR\033[0m: Node does not start: %s\n' "$why"
+  FAILED+=("node does not start")
+  return 1
+}
+
 update_node() {
   say "Node.js (nvm, the lts/* channel)"
   if [ ! -s "$NVM_DIR/nvm.sh" ]; then
@@ -313,6 +336,13 @@ update_node() {
     return 0
   fi
   load_nvm || { FAILED+=("nvm load"); return 1; }
+
+  # Installing would not help a node that does not start: nvm runs it to update
+  # npm and carry the packages over, and fails half-way.
+  if have node && ! node_starts "$(command -v node)"; then
+    NODE_BROKEN=1
+    return 1
+  fi
 
   local before after target
   before=$(node -v 2>/dev/null)
@@ -333,14 +363,39 @@ update_node() {
     return 0
   fi
 
+  local installed=0
   if [ -n "$target" ] && [ -n "$before" ]; then
     step "nvm install $target" nvm install --lts --reinstall-packages-from="$before" --latest-npm \
-      || { pending "Node $target is available (installed: $before)"; return 1; }
+      && installed=1
   else
     # Either Node is not there yet or the registry did not answer: there is
     # nothing to carry the packages from or nothing to carry them to — we install
     # without --reinstall-packages-from, which would have failed.
-    step "nvm install --lts" nvm install --lts --latest-npm || return 1
+    step "nvm install --lts" nvm install --lts --latest-npm && installed=1
+  fi
+  # nvm points lts/* at the new version as soon as it is unpacked, whether the
+  # rest of the install worked or not, and the default this script sets follows
+  # lts/*. A new node that does not start fails the install half-way: it is
+  # named here with what it lacks, and when it is the node this run uses, the
+  # steps that need node are skipped. The old version is not made the default
+  # instead — the fix is the missing library, not staying behind. The global
+  # packages were not carried over. Under a pinned default the next run
+  # installs again from $before and carries them; when the default follows
+  # lts/* it finds the LTS current and will not, so the command is named.
+  local fresh
+  nvm use default >/dev/null 2>&1
+  fresh=$(nvm version 'lts/*' 2>/dev/null)
+  if [ -x "$NVM_DIR/versions/node/$fresh/bin/node" ] \
+     && ! node_starts "$NVM_DIR/versions/node/$fresh/bin/node"; then
+    if ! node -v >/dev/null 2>&1; then
+      NODE_BROKEN=1
+      [ -n "$before" ] && note "once Node $fresh starts, carry the global packages over: nvm use $fresh && nvm reinstall-packages $before"
+    fi
+    return 1
+  fi
+  if [ "$installed" -eq 0 ]; then
+    [ -n "$before" ] && pending "Node $target is available (installed: $before)"
+    return 1
   fi
 
   nvm alias default 'lts/*' >/dev/null 2>&1
@@ -400,6 +455,10 @@ prune_node_versions() {
 
 update_npm_and_globals() {
   say "npm and the global packages"
+  if [ -n "$NODE_BROKEN" ]; then
+    skip "npm" "Node does not start (see the Node.js step)"
+    return 0
+  fi
   load_nvm
 
   local npm_before npm_after
@@ -455,6 +514,10 @@ update_claude() {
 
 update_claude_plugins() {
   say "Claude Code plugins"
+  if [ -n "$NODE_BROKEN" ]; then
+    skip "plugins" "Node does not start (see the Node.js step)"
+    return 0
+  fi
   if ! have claude; then
     skip "plugins" "claude not found"
     return 0
@@ -495,6 +558,10 @@ update_claude_plugins() {
 
 update_chromium() {
   say "Chromium (Playwright — the browser for the chrome-devtools MCP)"
+  if [ -n "$NODE_BROKEN" ]; then
+    skip "chromium" "Node does not start (see the Node.js step)"
+    return 0
+  fi
   local pw="$HOME/.cache/ms-playwright"
   if [ ! -d "$pw" ]; then
     skip "chromium" "$pw does not exist — the browser was never installed"
@@ -697,7 +764,7 @@ report_containers() {
   fi
   load_nvm
 
-  local label=com.supabase.cli.workdir wd pins all_pins="" name image base tag want behind
+  local label=com.supabase.cli.workdir wd pins all_pins="" name image base tag want behind unasked=""
   while IFS= read -r wd; do
     [ -n "$wd" ] || continue
     # A feature's own stack, sclaude's to manage; one made before its folder
@@ -707,6 +774,8 @@ report_containers() {
       note "a Supabase stack belongs to $wd, which no longer exists — remove it: docker rm -f \$(docker ps -aq --filter label=$label=$wd)"
       continue
     fi
+    # What the CLI pins is asked through npx; an orphan above needs Docker alone.
+    [ -n "$NODE_BROKEN" ] && { unasked=1; continue; }
     pins=$(supabase_pins "$wd")
     if [ -z "$pins" ]; then
       info "${wd/#$HOME/\~}: the Supabase CLI did not say what it pins — skipped"
@@ -727,6 +796,7 @@ report_containers() {
     fi
   done < <(docker ps -a --filter "label=$label" --format "{{.Label \"$label\"}}" | sort -u)
 
+  [ -n "$unasked" ] && skip "supabase images" "Node does not start (see the Node.js step)"
   # Without a single answer from the CLI nothing is known to be unpinned.
   [ -n "$all_pins" ] || return 0
   local used removed=() size pulled cutoff
@@ -850,6 +920,10 @@ prune_caches() {
 
 report_projects() {
   say "Project dependencies (a report only, nothing is changed)"
+  if [ -n "$NODE_BROKEN" ]; then
+    skip "projects" "Node does not start (see the Node.js step)"
+    return 0
+  fi
   load_nvm
 
   local dir name outdated vulns line
@@ -913,7 +987,7 @@ summary() {
   if [ ${#UPDATED[@]} -gt 0 ]; then
     info "${GREEN}updated:${RESET}"
     printf "     ${GREEN}✓ %s${RESET}\n" "${UPDATED[@]}"
-  elif [ ${#PENDING[@]} -eq 0 ]; then
+  elif [ ${#PENDING[@]} -eq 0 ] && [ ${#FAILED[@]} -eq 0 ]; then
     info "no changes — everything is already up to date"
   else
     info "nothing was updated"
@@ -969,4 +1043,5 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 fi
 
 main "$@"
+exit
 }

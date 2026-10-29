@@ -46,8 +46,7 @@ doctor_tools() {
       doctor_bad "$tool is not on PATH" "every step needs it"
     fi
   done
-  command -v node >/dev/null 2>&1 && doctor_ok "node" \
-    || doctor_warn "node is not on PATH" "needed by projects that run npm scripts in their regression"
+  doctor_node
   command -v script >/dev/null 2>&1 && doctor_ok "script" \
     || doctor_warn "script is not on PATH" "the terminal is not recorded for the retrospective before sclaude done: apt install bsdutils"
   command -v tmux >/dev/null 2>&1 && doctor_ok "tmux" \
@@ -58,6 +57,30 @@ doctor_tools() {
     *":$HOME/.local/bin:"*) doctor_ok "~/.local/bin is on PATH" ;;
     *) doctor_bad "~/.local/bin is not on PATH" "add it in your shell rc; install.sh links everything there" ;;
   esac
+}
+
+# Being on PATH is not enough: a new Node major can need a system library the
+# distribution leaves out (Node 26 wants libatomic.so.1), and then node, npm,
+# npx and every hook and MCP server started through them die at the loader.
+# The package is named the way Debian names shared libraries
+# (libatomic.so.1 → libatomic1).
+doctor_node() {
+  local err libs
+  if ! command -v node >/dev/null 2>&1; then
+    doctor_warn "node is not on PATH" "needed by projects that run npm scripts in their regression"
+    return
+  fi
+  if err="$(node -v 2>&1 >/dev/null)"; then
+    doctor_ok "node"
+    return
+  fi
+  libs="$(sed -n 's/.*error while loading shared libraries: \([^:]*\):.*/\1/p' <<<"$err" | paste -sd' ')"
+  if [[ -n "$libs" ]]; then
+    doctor_bad "node does not start: $libs is missing" \
+      "sudo apt install $(tr ' ' '\n' <<<"$libs" | sed -E 's/\.so\.([0-9]+).*/\1/' | paste -sd' ')"
+  else
+    doctor_bad "node does not start" "see what it says: node -v"
+  fi
 }
 
 doctor_github() {

@@ -113,7 +113,26 @@ PLANNING = [
     ("node -p 1 && rm -rf /tmp/x", DENY),
     # `python` likewise: `-c` prints, a script may do anything.
     ("python3 scripts/seed.py", DENY),
-    ("python3 - <<'EOF'\nprint(1)\nEOF", DENY),
+    ("python3 x.py <<'EOF'\n1\nEOF", DENY),
+    ("python3 - < x.py", DENY),
+    ("cat x.py | python3 -", DENY),
+    ("python3 -W ignore - <<'EOF'\nprint(1)\nEOF", DENY),
+    ("python3 - <<'EOF' > f.py\nprint(1)\nEOF", DENY),
+    ("python3 - <<'EOF'\nprint(1)\nEOF\nrm -rf x", DENY),
+    ("python3 - <<'EOF' && rm -rf x\nprint(1)\nEOF", DENY),
+    ("python3 - <<EOF\nprint('$(rm -rf x)')\nEOF", DENY),
+    # What a substitution runs is judged as a command: the words around it
+    # read, and these all passed.
+    ("echo $(rm -rf x)", DENY),
+    ("echo \"$(rm -rf x)\"", DENY),
+    ("x=$(rm -rf x)", DENY),
+    ("diff <(rm x) y", DENY),
+    ("echo `rm x`", DENY),
+    ("echo $(cat $(rm x))", DENY),
+    ("cat <<EOF\n$(rm -rf x)\nEOF", DENY),
+    ("echo $(cat f", DENY),
+    ("echo \"$((1 + $(rm x)))\"", DENY),
+    ("python3 - <<'EOF' >f.py\nprint(1)\nEOF", DENY),
     ("python3 -c 1 > f.py", DENY),
     ("python3 -c 1 && rm -rf /tmp/x", DENY),
     # `worktree` and `stash` write, except for their listing actions.
@@ -156,6 +175,22 @@ PLANNING = [
     ("python3 --version", ALLOW),
     ("python -V", ALLOW),
     ("python3 -Ic 1", ALLOW),
+    # A program in a heredoc stands in the command, like `-c`'s: a live
+    # planning session had exactly the first one refused, then ran the same
+    # code through `-c`.
+    ("cd /tmp && python3 -I - <<'EOF'\nimport json\nprint(1)\nEOF", ALLOW),
+    ("python3 - <<'EOF'\nprint(1)\nEOF", ALLOW),
+    ("python3 - << EOF 2>&1 | head\nprint(1)\nEOF", ALLOW),
+    ("python3 - <<'EOF' 2> /dev/null\nprint(1)\nEOF", ALLOW),
+    ("node <<'EOF'\nconsole.log(1)\nEOF", ALLOW),
+    ("python3 - <<<'print(1)'", ALLOW),
+    ("python3 - <<'EOF' 2>/dev/null\nprint(1)\nEOF", ALLOW),
+    ("python3 - <<'EOF' >" + SCRATCH + "/p/s/scratchpad/o.txt\nprint(1)\nEOF", ALLOW),
+    ("python3 - data.json <<'EOF'\nimport sys\nprint(sys.argv[1])\nEOF", ALLOW),
+    ("echo \"$((n > 0))\"", ALLOW),
+    ("echo $(date) `git rev-parse HEAD`", ALLOW),
+    ("cat <<'EOF'\n$(rm -rf x)\nEOF", ALLOW),
+    ("echo '$(rm -rf x)'", ALLOW),
     ("python3 -W ignore -c 1", ALLOW),
     ("node --import ./alias.mjs -e 1", ALLOW),
     # A live planning session lost exactly this to the ban on `worktree`.

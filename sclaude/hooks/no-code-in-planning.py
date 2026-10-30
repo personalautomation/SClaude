@@ -41,7 +41,7 @@ except Exception as _exc:  # noqa: BLE001
     sys.exit(0)
 _failsafe.install("planning guard (no-code-in-planning.py)")
 from _friction import note
-from _shell import HEREDOC, strip_heredocs, strip_wrappers, tokenize
+from _shell import HEREDOC, strip_heredocs, strip_wrappers, substitutions, tokenize
 
 REASON = (
     "Step 1 is planning, and writing is forbidden here even after the plan is "
@@ -92,9 +92,15 @@ FLAG_WRITERS = {
 #
 # `python -c` is the counterpart of `node -e`, and was left behind on the ban
 # on the name: planning sessions lost a JSON read and an image header read to
-# it, and fell back to grepping the file. A script (`python3 x.py`,
-# `python3 - <<EOF`) still runs whatever it holds, so it stays a write. `-V`
-# is safe here: for python it is the version, never verbose.
+# it, and fell back to grepping the file. A script (`python3 x.py`) still
+# runs whatever it holds, so it stays a write. `-V` is safe here: for python
+# it is the version, never verbose.
+#
+# A program fed in as a heredoc (`python3 - <<'EOF'`) is the same as `-c`:
+# its code stands in the command, where the session and the human see it.
+# Refusing it protected nothing: a live planning session had a read-only
+# analysis refused that way and ran the very same code through `-c` a moment
+# later, having only re-quoted it by hand. See program_in_command().
 PYTHON_READ = ("-c", "-V", "--version", "-h", "--help")
 READ_FLAGS = {
     "node": ("-p", "--print", "-e", "--eval", "-v", "--version", "-h", "--help"),
@@ -102,6 +108,8 @@ READ_FLAGS = {
     "python3": PYTHON_READ,
     "npx": ("--help", "-h", "--version"),
 }
+# The ones that take a program on stdin; npx runs a package, not a program.
+INTERPRETERS = ("node", "python", "python3")
 
 # The git subcommands that change the working tree or the history. Reading git
 # (log, diff, show, status) is needed by step 1 constantly.
@@ -319,6 +327,60 @@ def reads_only(rest, flags):
     return False
 
 
+def program_in_command(rest):
+    """Does an interpreter read its program from a heredoc in the command?
+
+    That is `python3 - <<'EOF'`, `node <<EOF` or `python3 - <<<'print(1)'`:
+    the program is text standing in the command, like `-c`'s. Before `-`
+    every argument must be a flag; a word that is not is a script's name, a
+    flag's value (`-W ignore`, left a write rather than learn every
+    interpreter's value flags) or a file fed to stdin (`- < x.py`), and in
+    each the program is not in sight. After `-` the words are the program's
+    own arguments (`python3 - data.json <<'EOF'`). An output redirection is
+    skipped here with its target: writes() has judged it already. The words
+    are the ones as written, paths kept: strip_wrappers() leaves `null` of
+    `2>/dev/null`.
+    """
+    heredoc, skip, dash = False, False, False
+    for arg in rest:
+        if skip:
+            skip = False
+            continue
+        if arg.startswith("<<"):
+            heredoc = True
+            # A delimiter or a here-string standing as a word of its own.
+            skip = arg in ("<<", "<<-", "<<<")
+            continue
+        if re.match(r"\d*>|&>", arg):
+            skip = re.fullmatch(r"\d*>>?|&>>?", arg) is not None
+            continue
+        if arg == "-":
+            dash = True
+            continue
+        if arg.startswith("-") or dash:
+            continue
+        return False
+    return heredoc
+
+
+def substitution_writes(command):
+    """Does a substitution in the command run something that writes?
+
+    `$(( … ))` is arithmetic, not a command: its `>` compares, and only the
+    substitutions inside it run. None from substitutions() is a write.
+    """
+    inner = substitutions(command)
+    if inner is None:
+        return True
+    for part in inner:
+        if part.startswith("(") and part.endswith(")"):
+            if substitution_writes(part[1:-1]):
+                return True
+        elif writes(part):
+            return True
+    return False
+
+
 def edits_in_place(rest, flags):
     """Is there a flag among the arguments for editing a file in place?
 
@@ -350,6 +412,13 @@ def writes(command):
     """Does it look as though the command changes files."""
     if only_writes_log(command):
         return False
+    # What a substitution runs is a command of its own, judged as one. Nothing
+    # here looked inside them, and `echo $(rm -rf x)`, `x=$(rm x)` and a bare
+    # heredoc body holding `$(rm x)` all passed: the words around the
+    # substitution read. A line whose substitutions cannot be told (a bracket
+    # or a heredoc left open) cannot be judged, so it writes.
+    if substitution_writes(command):
+        return True
     # Redirecting output to a file: > file, >> file. It does not count inside
     # quotes, so we look at the string without them.
     #
@@ -405,8 +474,8 @@ def writes(command):
     if current:
         chains.append(current)
 
-    for words in chains:
-        words = strip_wrappers(words)
+    for raw in chains:
+        words = strip_wrappers(raw)
         if not words:
             continue
         name = words[0]
@@ -414,6 +483,9 @@ def writes(command):
         if name in READ_FLAGS and reads_only(rest, READ_FLAGS[name]):
             # Reading closes this command, not the chain: `node -p 1 && rm -rf
             # x` still writes. The same reasoning as for FLAG_WRITERS below.
+            continue
+        if name in INTERPRETERS and program_in_command(raw[len(raw) - len(rest):]):
+            # Likewise this command alone.
             continue
         if name in WRITERS:
             return True

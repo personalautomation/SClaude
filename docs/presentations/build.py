@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Build the two slide decks from src/ into self-contained HTML pages, and
+"""Build the slide decks from src/ into self-contained HTML pages, and
 the process map from sclaude/lib/process.py.
 
 Each deck is src/head.html + the deck's slides + src/tail.html. The decks
 link to each other: by default through their sibling file names, so the
 pages work from a checkout; --stack-url and --sclaude-url replace those
-links when the pages are published somewhere else.
+links when the pages are published somewhere else. A screenshot a deck
+shows is src/img/<name>, written {{IMG:<name>}} and inlined as a data URI.
 
     python3 docs/presentations/build.py
     python3 docs/presentations/build.py --out ~/decks --stack-url URL --sclaude-url URL
 """
 
 import argparse
+import base64
+import re
 import sys
 from pathlib import Path
 
@@ -25,12 +28,21 @@ import process  # noqa: E402
 PROCESS = "bpmn_diagrams.html"
 
 DECKS = [
-    # file, title, the mark at the foot of each slide, the link to the other deck
+    # file, title, the mark at the foot of each slide, the link to another deck
+    # (empty for a deck that stands on its own)
     ("sclaude_in_details.html", "sclaude in Depth", "sclaude · in depth",
      '<a href="{{STACK}}" target="_blank" rel="noopener">&larr; stack deck</a>'),
     ("sclaude_instruments.html", "Laptop-to-Phone AI Stack", "AI stack for PoC & MVP",
      '<a href="{{SCLAUDE}}" target="_blank" rel="noopener">sclaude deck &rarr;</a>'),
+    ("vibe_coding_story.html", "Why sclaude Exists", "why sclaude exists", ""),
 ]
+
+
+def inline_images(page):
+    def data_uri(m):
+        img = SRC / "img" / m.group(1)
+        return "data:image/webp;base64," + base64.b64encode(img.read_bytes()).decode()
+    return re.sub(r"\{\{IMG:([\w.-]+\.webp)\}\}", data_uri, page)
 
 
 def main():
@@ -50,6 +62,7 @@ def main():
                 + tail.replace("{{MARK}}", mark).replace("{{OTHER}}", other))
         for key, url in links.items():
             page = page.replace(key, url)
+        page = inline_images(page)
         (args.out / name).write_text(page)
         print(args.out / name)
     (args.out / PROCESS).write_text(process.doc())

@@ -13,7 +13,7 @@ You are reviewing friction: what got in a session's way, and the fix for it. Mos
 
 <workshop-rules>
 
-Commit everything else in the worktree, on the feature's branch, `<branch>`, by the project's commit rules — never on its `main`, and no new branch or pull request: it reaches `main` with this feature's pull request and goes through its review like any other change. Don't push; `sclaude` pushes the branch after this session. Keep it to what the friction calls for — the feature's own code is the steps' work, not yours. Say in the plan which file each change goes to, and in the report which commits you made.
+**Committing.** Commit everything else in the worktree, on the feature's branch, `<branch>`, by the project's commit rules, except that these commits carry no `Requirement:` footer whatever those rules say: a change to the tooling is not something the customer asked the feature for, and the pull-request step collects every such footer on the branch into the list QA tests the feature against — say in the body why the change was made. Never on its `main`, and no new branch or pull request: it reaches `main` with this feature's pull request and goes through its review like any other change. Don't push; `sclaude` pushes the branch after this session. Keep it to what the friction calls for — the feature's own code is the steps' work, not yours. Say in the plan which file each change goes to, and in the report which commits you made.
 
 **What to read.**
 

@@ -28,8 +28,8 @@ counts. Anything going wrong — no claude, a timeout, an answer that is not the
 JSON asked for — leaves every row as it came.
 
 Each row that is put off is also counted: how many entries of its class the
-deferred files hold since the last monthly review, this one included, and in
-which features. The count is worked out from the rows, not kept in a field:
+deferred files hold since the last monthly review, in the folders' trees
+and on origin/main, this one included, and in which features. The count is worked out from the rows, not kept in a field:
 each feature has a file of its own so that two branches never edit the same
 lines, and a counter two branches raise would conflict at every merge.
 
@@ -86,28 +86,101 @@ def tail(path):
     return "/".join(os.path.normpath(os.path.abspath(path)).split(os.sep)[-3:])
 
 
+def git(folder, *args):
+    try:
+        done = subprocess.run(["git", "-C", folder] + list(args), capture_output=True,
+                              text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def upstream(folder):
+    """The folder as origin/main has it: its files' rows by path, and its
+    last-reviewed stamp. Rows put off after a review go to main from a tree
+    of their own (deferred_to_main) and leave the branch, and the checkout the
+    folder is in is not pulled for them: read from its tree alone, a rule put
+    off twice in one feature counted as the first time both times. The folder
+    need not exist here — a product's first rows leave none behind. No fetch:
+    the push updated this repository's origin/main, and a fetch could eat the
+    call's minute. Nothing on any failure."""
+    base = os.path.realpath(folder)
+    while base != os.path.dirname(base) and not os.path.isdir(base):
+        base = os.path.dirname(base)
+    top = git(base, "rev-parse", "--show-toplevel")
+    if not top:
+        return {}, ""
+    rel = os.path.relpath(os.path.realpath(folder), top.strip())
+    if rel.startswith(".."):
+        return {}, ""
+    rel = rel.replace(os.sep, "/")
+    names = git(top.strip(), "ls-tree", "--name-only", "origin/main", "--", rel + "/") or ""
+    files, stamp = {}, ""
+    for name in names.splitlines():
+        text = git(top.strip(), "show", "origin/main:" + name)
+        if text is None:
+            continue
+        if name.endswith(".tsv"):
+            files[os.path.join(folder, os.path.basename(name))] = [
+                l for l in text.splitlines() if l.strip() and not l.startswith("#")]
+        elif os.path.basename(name) == "last-reviewed" and re.match(r"\d{4}-\d{2}-\d{2}$", text.strip()):
+            stamp = text.strip()
+    return files, stamp
+
+
+def folder_rows(folder, own, own_rows, own_only=False):
+    """A folder's rows since its last review, from its tree and from
+    origin/main, the feature's own file merged into its copy here (with
+    own_only, that file alone); and whether the folder had one. The later
+    of the tree's and main's last-reviewed bounds the rows main holds, the
+    tree's the rest. A row the unpulled tree holds and main does not is
+    either not on main yet or one the review on main took out; it is
+    counted, since a count one too high costs nothing and one too low hides
+    a rule that came back."""
+    upstream_files, upstream_stamp = upstream(folder)
+    tree_since = last_reviewed(folder)
+    main_since = max(tree_since, upstream_stamp)
+    files = {p: read_rows(p) for p in glob.glob(os.path.join(glob.escape(folder), "*.tsv"))}
+    seen = False
+    out = []
+    for path in sorted(set(files) | set(upstream_files)):
+        tree = files.get(path, [])
+        # The same file is the same rules folder's: <folder>/deferred/<feature>.tsv.
+        # Another person's file of the same feature is theirs, and counts.
+        mine = collections.Counter()
+        if own and not seen and tail(path) == tail(own):
+            seen = True
+            mine = collections.Counter(own_rows)
+        elif own_only:
+            continue
+        on_main = collections.Counter(upstream_files.get(path, []))
+        for r, n in (collections.Counter(tree) | mine | on_main).items():
+            out.extend([(main_since, r)] * on_main[r] + [(tree_since, r)] * (n - on_main[r]))
+    return out, seen
+
+
 def deferred_rows(folders, own):
-    """Every row the deferred files hold since each folder's last review. The
-    feature's own file is read from its tree as well as from main, and an
-    identical row counted as often as the fuller copy has it: rows sent to
-    main leave the branch, and rows not sent yet are on the branch alone."""
+    """Every row the deferred files hold since each folder's last review. Each
+    folder is read from its tree and from origin/main (upstream), and an
+    identical row counted as often as the fullest copy has it: rows sent to
+    main leave the branch, and rows not sent yet are on the branch alone.
+    When no folder given has a copy of the feature's own file, its own folder
+    is read the same way — that file alone if the folder was given, all of it
+    if not: a product's first rows leave no folder in the checkout."""
     out = []
     own_rows = read_rows(own) if own else []
     seen_own = False
     for folder in folders:
-        since = last_reviewed(folder)
-        for path in sorted(glob.glob(os.path.join(folder, "*.tsv"))):
-            rows = read_rows(path)
-            # The same file is the same rules folder's: <folder>/deferred/<feature>.tsv.
-            # Another person's file of the same feature is theirs, and counts.
-            if own and not seen_own and tail(path) == tail(own):
-                seen_own = True
-                a, b = collections.Counter(rows), collections.Counter(own_rows)
-                rows = list((a | b).elements())
-            out.extend((since, r) for r in rows)
+        rows, seen = folder_rows(folder, "" if seen_own else own, own_rows)
+        seen_own = seen_own or seen
+        out.extend(rows)
     if own and not seen_own:
-        since = last_reviewed(os.path.dirname(own))
-        out.extend((since, r) for r in own_rows)
+        given = {tail(os.path.join(f, "x")).rsplit("/", 1)[0] for f in folders}
+        rows, seen = folder_rows(os.path.dirname(own), own, own_rows,
+                                 own_only=tail(own).rsplit("/", 1)[0] in given)
+        out.extend(rows)
+        if not seen:
+            out.extend((last_reviewed(os.path.dirname(own)), r) for r in own_rows)
     rows = []
     for since, r in out:
         f = r.split("\t")

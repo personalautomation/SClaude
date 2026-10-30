@@ -192,6 +192,15 @@ breaks the other silently — grep before you edit:
   side alone would leave a session unable to write where it was let, or a
   maintainer's change published unreviewed. -->
 
+- The `**Committing.**` lead in `sclaude/prompts/_friction-body.md` is what
+  the endings of `friction.md` and `friction-fix.md` send the session to by
+  name; `tests/regression.py` checks the lead and that both name it below
+  `<body>`.
+
+  <!-- Added by Claude on 2026-10-30 during review of the change that put the
+  friction commits' footer exception there: renamed on one side alone, the
+  endings would point at nothing. -->
+
 - The process map, `sclaude/lib/process.py`, names every command
   `bin/sclaude` dispatches (`COMMANDS`), every verb of the action list in
   `sclaude/lib/actions.sh`, the steps as `STEPS` and `cycle_number` number

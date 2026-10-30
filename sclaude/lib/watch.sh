@@ -299,6 +299,8 @@ watch_rewind() {
     && state_set "$state" reopened_pr "$pr" 2>/dev/null || true
   state_set "$state" regression.preview.status null 2>/dev/null || true
   state_set "$state" regression.preview.attempts 0 2>/dev/null || true
+  # A new round, so its first red is rerun once before a session (the gate).
+  state_set "$state" regression.preview.orchestrator_fixes 0 2>/dev/null || true
   # Counted for the merge summary (pr_handoff.py): how often the work came
   # back is what tells a merger whether "QA accepted it" was the first look or
   # the fourth.

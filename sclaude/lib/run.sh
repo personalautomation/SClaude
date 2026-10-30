@@ -570,6 +570,8 @@ run_step() {
     [[ -n "$tested" && "$tested" != "null" ]] \
       || state_set "$state" regression.local.status null
     state_set "$state" regression.local.attempts 0
+    # A new round, so its first red is rerun once before a session (the gate).
+    state_set "$state" regression.local.orchestrator_fixes 0
   fi
 
   echo ""

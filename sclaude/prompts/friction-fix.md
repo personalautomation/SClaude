@@ -6,7 +6,7 @@ This is not a step of the cycle. A fixing session runs with the settings of the 
 
 **One thing to weigh that a step's review does not.** A fixing session is opened at most twice per stage, and only when a run is already red — so an obstacle here costs more than the same obstacle in a step: the feature is stuck, the clock is running, and the human is usually not watching. Judge accordingly. But the opposite also holds: a ban that fired here may be right precisely because a fixing session is the wrong place to do that thing — deploying, merging and promoting are my steps whether the regression is red or green.
 
-**How this ends.** Present me a plan: what to lift, why that's safe, and exactly what changes in which file. Once I approve, make the change yourself and commit it in the worktree, on the feature's branch, by the project's commit rules.
+**How this ends.** Present me a plan: what to lift, why that's safe, and exactly what changes in which file. Once I approve, make the change yourself and commit it in the worktree, on the feature's branch, as **Committing** above says.
 
 If there's nothing to fix — every entry is a deliberate ban — say so and change nothing. An empty change is worse than no change.
 

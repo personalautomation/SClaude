@@ -221,9 +221,114 @@ def follows_class(tmp):
           ["claude-md-b", "claude-md-b", "claude-md-c"])
 
 
+def sh(cwd, *args):
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+               GIT_COMMITTER_EMAIL="t@t")
+    subprocess.run(["git"] + list(args), cwd=cwd, env=env, check=True, capture_output=True)
+
+
+def pushed(tmp, rows, stamp=None):
+    """A checkout at tmp/main whose origin/main holds team/deferred/feat.tsv
+    with these rows (and last-reviewed), its own tree without them."""
+    repo = os.path.join(tmp, "main")
+    sh(tmp, "init", "-q", "--bare", "origin.git")
+    sh(tmp, "init", "-q", "-b", "main", "main")
+    sh(repo, "remote", "add", "origin", os.path.join(tmp, "origin.git"))
+    sh(repo, "commit", "-q", "--allow-empty", "-m", "start")
+    folder = os.path.join(repo, "team", "deferred")
+    os.makedirs(folder)
+    with open(os.path.join(folder, "feat.tsv"), "w") as fh:
+        fh.write("".join(r + "\n" for r in rows))
+    if stamp:
+        with open(os.path.join(folder, "last-reviewed"), "w") as fh:
+            fh.write(stamp + "\n")
+    sh(repo, "add", "-A")
+    sh(repo, "commit", "-q", "-m", "put off")
+    sh(repo, "push", "-q", "origin", "HEAD:main")
+    sh(repo, "reset", "-q", "--hard", "HEAD~1")
+    return folder
+
+
+SENT = row("2026-10-22", "feat", "claude-md-a", "Proposal: a, sent to main")
+AGAIN = [row("2026-10-24", "feat", "claude-md-a", "Proposal: a again")]
+
+
+def upstream(tmp):
+    # Rows put off after a review go to main from a tree of their own and
+    # leave the branch; the checkout the folders are read in is not pulled.
+    # Read from trees alone, a rule put off twice in a feature was the first
+    # time both times.
+    folder = pushed(tmp, [SENT])
+    rc, out, said = run(tmp, AGAIN, "[]")
+    check("a row only on origin/main is counted",
+          any(n.startswith("claude-md-a: 2nd time") for n in said), True)
+    with open(os.path.join(folder, "feat.tsv"), "w") as fh:
+        fh.write(SENT + "\n")
+    rc, out, said = run(tmp, AGAIN, "[]", own_rows=[SENT])
+    check("a row in the tree, on main and in the feature's file is counted once",
+          any(n.startswith("claude-md-a: 2nd time") for n in said), True)
+
+
+def upstream_no_folder(tmp):
+    # A product's first rows: sent to main, the folder gone from the checkout,
+    # so no folder is given — the feature's own folder is read on main.
+    folder = pushed(tmp, [SENT])
+    shutil.rmtree(os.path.join(tmp, "main", "team"), ignore_errors=True)
+    notes = os.path.join(tmp, "notes")
+    subprocess.run([sys.executable, SCRIPT, "--notes", notes, "--own", os.path.join(folder, "feat.tsv")],
+                   input=AGAIN[0] + "\n", capture_output=True, text=True,
+                   env=dict(os.environ, PATH="/usr/bin:/bin"), timeout=60)
+    check("a folder only on origin/main is read for the feature's file",
+          any(n.startswith("claude-md-a: 2nd time") for n in open(notes).read().splitlines()), True)
+
+
+def upstream_stamp(tmp):
+    # The monthly review's stamp is on main, the checkout has an older one:
+    # the rows main holds from before it are not counted.
+    old = row("2026-10-10", "older", "claude-md-a", "Proposal: a, reviewed already")
+    pushed(tmp, [old], stamp="2026-10-20")
+    rc, out, said = run(tmp, AGAIN, "[]", reviewed="2026-10-01")
+    check("the later stamp, main's, bounds the count",
+          any(n.startswith("claude-md-a: 1st time") for n in said), True)
+
+
+def upstream_stamp_branch_rows(tmp):
+    # Main's stamp bounds main's rows: a row the branch holds and main does
+    # not was never in front of that review.
+    pushed(tmp, [], stamp="2026-10-20")
+    mine = row("2026-10-15", "feat", "claude-md-a", "Proposal: a, on the branch only")
+    rc, out, said = run(tmp, AGAIN, "[]", own_rows=[mine])
+    check("a branch row before main's stamp still counts",
+          any(n.startswith("claude-md-a: 2nd time") for n in said), True)
+
+
+def glob_in_path(tmp):
+    # A folder whose path a glob would read as a pattern.
+    base = os.path.join(tmp, "a[1]")
+    os.makedirs(base)
+    mine = row("2026-10-22", "feat", "claude-md-a", "Proposal: a, earlier")
+    other = row("2026-10-21", "other", "claude-md-a", "Proposal: a, another feature's")
+    rc, out, said = run(base, AGAIN, "[]", own_rows=[mine], main_rows=[other])
+    check("a path with [ ] in it is read, other features' files too",
+          any(n.startswith("claude-md-a: 3rd time") for n in said), True)
+
+
+def upstream_stamp_tree_rows(tmp):
+    # A row the unpulled tree holds and main does not — not on main yet, or
+    # taken out by the review there — is counted: one too many costs nothing,
+    # one too few hides a rule that came back.
+    pushed(tmp, [], stamp="2026-10-20")
+    other = row("2026-10-15", "other", "claude-md-a", "Proposal: a, not on main")
+    rc, out, said = run(tmp, AGAIN, "[]", main_rows=[other])
+    check("a row only the tree holds counts under main's later stamp",
+          any(n.startswith("claude-md-a: 2nd time") for n in said), True)
+
+
 def main():
     for fn in (same, covered, invented, broken, counted, no_material, batch, other_person, not_a_rule,
-               follows_class):
+               follows_class, upstream, upstream_no_folder, upstream_stamp,
+               upstream_stamp_branch_rows, glob_in_path,
+               upstream_stamp_tree_rows):
         case(fn)
     for name, want, got in failures:
         print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))

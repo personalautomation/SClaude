@@ -1182,6 +1182,8 @@ cmd_reset() {
   local rs
   for rs in local preview prod; do
     state_set "$state" "regression.$rs.attempts" 0
+    # A new round, so its first red is rerun once before a session (the gate).
+    state_set "$state" "regression.$rs.orchestrator_fixes" 0
   done
 
   prepare_worktree "$wt"

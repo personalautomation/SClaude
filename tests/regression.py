@@ -14,6 +14,7 @@
 # constants in the file.
 #
 # Run it with: python3 tests/regression.py
+import glob
 import json
 import os
 import re
@@ -349,6 +350,49 @@ if gate is not None:
     green_side = green_side[:green_side.find("return 0")]
     check_true("green-keeps-a-blocked-row", '!= "blocked"' in green_side)
     check_true("green-drops-the-blocked-note", "regression.blocked" in green_side)
+    # The first red nobody has looked at is run again once, by itself, before
+    # a fixing session is spent on it: the commonest red is a flake. Not a
+    # deploy that failed (preview_ship has retried it), and not after the
+    # person's own "run again" at the gate's door.
+    first = blocked_body[blocked_body.find('if [[ "$reran" -lt 1'):]
+    first = first[:first.find("\n    fi\n")]
+    check_true("gate-reruns-the-first-red-before-a-session",
+               0 < blocked_body.find('if [[ "$reran" -lt 1')
+               < blocked_body.find('regression_fix "$wt"')
+               and re.search(r"\n\s*continue$", first) is not None)
+    check_true("gate-first-rerun-only-before-any-session", '"$attempts" -eq 0' in first)
+    check_true("gate-first-rerun-not-after-an-orchestrator-fix", '"$ofixes" -eq 0' in first)
+    # So a new round clears that count wherever it clears the attempts of a
+    # stage the gate serves, or its first red would open a session with no
+    # rerun. Every such reset outside the gate is found, not listed.
+    found = 0
+    for lib in sorted(glob.glob(os.path.join(ROOT, "bin", "*")) + glob.glob(os.path.join(ROOT, "sclaude", "lib", "*.sh"))):
+        if lib.endswith("regression.sh") or not os.path.isfile(lib):
+            continue
+        try:
+            lines = open(lib, encoding="utf-8").read().splitlines()
+        except UnicodeDecodeError:
+            continue
+        lib = os.path.relpath(lib, ROOT)
+        for i, line in enumerate(lines):
+            m = re.search(r'state_set "\$\w+(?:/[^"]*)?"? "?regression\.([\w$]+)\.attempts"? 0\b', line)
+            if not m or m.group(1) == "prod":
+                continue
+            near = "\n".join(lines[i + 1:i + 4])
+            found += 1
+            check_true("new-round-clears-orchestrator-fixes %s:%d" % (lib, i + 1),
+                       re.search(r'regression\.%s\.orchestrator_fixes"? 0\b' % re.escape(m.group(1)),
+                                 near) is not None)
+    check("new-round-resets-found", found, 3)
+    check_true("gate-first-rerun-repeats-the-red-run", 'only="$ran_only"' in first)
+    check_true("gate-first-rerun-not-for-a-deploy", '!= "the deploy"' in first)
+    check_true("gate-first-rerun-is-not-asked", "ask " not in first)
+    check_true("gate-first-rerun-counter-is-per-gate", 'local reran=0' in blocked_body)
+    check_true("gate-person-rerun-counts-as-the-first",
+               re.search(r'run again at the person\'s word"\n\s*reran=1', blocked_body) is not None)
+    check_true("green-after-first-rerun-is-noted",
+               "green on a rerun, no fixing session" in green_side
+               and "regression.notes" in green_side)
     # A person who declines a third fixing session takes the step back: the
     # gate says so, and after_step drops the mark that would rerun the suite.
     # An explicit no only: no answer at all settles nothing.
@@ -812,6 +856,16 @@ for marker in ("**What to decide.**", "- The friction log", "`classifier` —"):
     for name, text in (("step", head_step), ("fix", head_fix)):
         check_true("friction-%s-does-not-repeat-%s" % (name, marker[:14].strip("*- `")),
                    marker not in text)
+
+# Both endings send the session to the body's paragraph on committing by its
+# lead, which carries the exception to the product's commit rules: renamed on
+# the body's side alone, they would point at nothing.
+check("body-has-committing-lead-once",
+      len(re.findall(r"^\*\*Committing\.\*\* ", friction_body, re.M)), 1)
+for name, text in (("step", head_step), ("fix", head_fix)):
+    ending = text.find("as **Committing** above says")
+    check_true("friction-%s-names-committing-below-body" % name,
+               ending > text.find("\n<body>\n") >= 0)
 
 # The substitution tags sit on both sides of the seam, so the splice has to
 # happen before the substitutions run. Guarding where each tag lives keeps that
@@ -1370,7 +1424,7 @@ check_true("full-local-run-restarts-the-dev-server",
 # the fix — then record a green verdict against a tree nobody deployed. Run for
 # real: the gate, deploy_unchanged and the state are the real ones; the deploy,
 # the suite and the session are stubs that say what they did.
-def preview_gate(deployed, runs, fix_commits=True, ship_ok=True, verdict=None):
+def preview_gate(deployed, runs, fix_commits=True, ship_ok=True, verdict=None, notes=False):
     with tempfile.TemporaryDirectory() as wt:
         git = lambda *a: subprocess.run(["git", "-C", wt, *a], check=True,
                                         capture_output=True)
@@ -1424,8 +1478,12 @@ echo "rc=$?"
         else '[[ "$SHIPS" -gt 1 ]] && deploy_remember "%s" preview || return 1' % wt if ship_ok == "once"
         else "return 1"),
        wt)
-        return subprocess.run(["bash", "-c", body], capture_output=True,
-                              text=True, timeout=60).stdout.split()
+        out = subprocess.run(["bash", "-c", body], capture_output=True,
+                             text=True, timeout=60).stdout.split()
+        if notes:
+            path = os.path.join(wt, ".sclaude/local/feature", "regression.notes")
+            out.append(open(path).read() if os.path.exists(path) else "")
+        return out
 
 
 # The deployment is the tree: nothing is deployed, the suite runs.
@@ -1434,13 +1492,21 @@ check("preview-gate-deployed-tree-runs",
 # The tree moved since the deploy: it is deployed first.
 check("preview-gate-moved-tree-deploys-first",
       preview_gate("f" * 40, [0]), ["SHIP", "RAN", "rc=0"])
-# The case that went wrong: a red run, a session that commits a fix, and the
-# rerun — which now runs against a deployment of the fix.
+# A first red goes round once more before any session: a flake goes green.
+check("preview-gate-first-red-is-rerun",
+      preview_gate("head", [1, 0]), ["RAN", "RAN", "rc=0"])
+# And the flake stays on record, so a stage that is green by itself is not
+# taken for one that never went red.
+check_true("preview-gate-green-rerun-is-noted",
+           "· preview · green on a rerun, no fixing session\nRed at first on: "
+           in preview_gate("head", [1, 0], notes=True)[-1])
+# The case that went wrong: a red run (twice), a session that commits a fix,
+# and the rerun — which now runs against a deployment of the fix.
 check("preview-gate-fix-is-deployed-before-the-rerun",
-      preview_gate("head", [1, 0]), ["RAN", "FIX", "SHIP", "RAN", "rc=0"])
+      preview_gate("head", [1, 1, 0]), ["RAN", "RAN", "FIX", "SHIP", "RAN", "rc=0"])
 # A session that committed nothing leaves the deployment as it was.
 check("preview-gate-no-commit-no-deploy",
-      preview_gate("head", [1, 0], fix_commits=False), ["RAN", "FIX", "RAN", "rc=0"])
+      preview_gate("head", [1, 1, 0], fix_commits=False), ["RAN", "RAN", "FIX", "RAN", "rc=0"])
 # A redeploy that fails is the stage's red, not a run against the old
 # address: a fixing session, then the deploy again on its fix.
 check("preview-gate-failed-redeploy-is-fixed",

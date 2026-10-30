@@ -2,7 +2,7 @@ A session of step "<step>" of the feature "<feature>" has ended, and something g
 
 <body>
 
-**How this ends.** Present me a plan: what to lift, why that's safe, and exactly what changes in which file. Split it by step — step 1 has its own permissions, steps 2–4 theirs. Once I approve, make the change yourself and commit it in the worktree, on the feature's branch, by the project's commit rules.
+**How this ends.** Present me a plan: what to lift, why that's safe, and exactly what changes in which file. Split it by step — step 1 has its own permissions, steps 2–4 theirs. Once I approve, make the change yourself and commit it in the worktree, on the feature's branch, as **Committing** above says.
 
 If there's nothing to fix — every entry is a deliberate ban — say so and change nothing. An empty change is worse than no change.
 

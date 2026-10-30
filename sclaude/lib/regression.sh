@@ -1270,6 +1270,8 @@ regression_gate() {
   # nothing to learn from running, and saying so costs a second rather than
   # minutes.
   local note="$wt/.sclaude/local/feature/regression.blocked"
+  # A rerun before any fixing session, once a gate (below). A yes here is one.
+  local reran=0 rerun_part="" ran_only=""
   if [[ -s "$note" ]]; then
     echo ""
     warn "  The last $stage run was blocked by a cause outside this branch:"
@@ -1283,6 +1285,7 @@ regression_gate() {
     ask "${BOLD}  Run the $stage regression again? [y/n] ${OFF}" fixed yn || true
     if is_yes "$fixed"; then
       blocked_note_keep "$wt" "$stage" "run again at the person's word"
+      reran=1
       info "  Running $stage again; the note is kept in .sclaude/local/feature/regression.notes."
     else
       info "  Leaving it: the run would fail the same way."
@@ -1321,6 +1324,7 @@ regression_gate() {
       state_set "$state" "regression.$stage.failed_at" "the deploy"
       state_set "$state" "regression.$stage.status" failed
     else
+      ran_only="$only"
       regression_run "$wt" "$slug" "$stage" "$only"
       rc=$?
       only=""
@@ -1344,6 +1348,9 @@ regression_gate() {
         info "  whatever it says would have to change is not done by a green run."
       fi
       blocked_note_keep "$wt" "$stage" "green on a rerun"
+      # The flake stays on record: green by itself is not "nothing happened".
+      [[ -n "$rerun_part" ]] && printf '=== %s · %s · green on a rerun, no fixing session\nRed at first on: %s\n\n' \
+        "$(date -Iseconds)" "$stage" "$rerun_part" >> "$wt/.sclaude/local/feature/regression.notes" 2>/dev/null
       state_set "$state" "regression.$stage.attempts" 0
       regression_clear_mark "$wt" "$stage"
       state_set "$state" "regression.$stage.orchestrator_fixes" 0
@@ -1378,6 +1385,28 @@ regression_gate() {
     # is not a limit. It is cleared by a green run above.
     attempts="$(state_get "$state" "regression.$stage.attempts" 2>/dev/null || echo 0)"
     [[ "$attempts" =~ ^[0-9]+$ ]] || attempts=0
+
+    # The first red no session has looked at yet is run again once, without
+    # asking. The commonest red is a test that flaked on a loaded machine, and
+    # a fixing session is the dearest way to learn it: one spent half an hour
+    # to conclude the cause was outside, and the rerun after it went green. A
+    # deploy that failed is not rerun here: preview_ship has tried it already.
+    # "No session yet" is read from the state as well: a session whose friction
+    # review fixed sclaude gives its attempt back, and on the preview restarts
+    # sclaude, which would take its red for a first one. The rerun repeats the
+    # red run, a manuals-only one included, not the whole stage.
+    local red_at ofixes
+    red_at="$(state_get "$state" "regression.$stage.failed_at" 2>/dev/null || true)"
+    ofixes="$(state_get "$state" "regression.$stage.orchestrator_fixes" 2>/dev/null || echo 0)"
+    [[ "$ofixes" =~ ^[0-9]+$ ]] || ofixes=0
+    if [[ "$reran" -lt 1 && "$attempts" -eq 0 && "$ofixes" -eq 0 && "$red_at" != "the deploy" ]]; then
+      reran=1
+      only="$ran_only"
+      [[ -n "$red_at" && "$red_at" != "null" ]] && rerun_part="$red_at" || rerun_part="a part"
+      info "  Running $stage again once before opening a fixing session: a flaky failure goes green on its own."
+      continue
+    fi
+    rerun_part=""
 
     if [[ "$attempts" -ge "$REGRESSION_MAX_ATTEMPTS" ]]; then
       echo ""

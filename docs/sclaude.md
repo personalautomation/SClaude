@@ -458,6 +458,12 @@ is that a `Requirement:` line reads on its own — it is collected into a pull
 request people read — and a bare `AC2` would send a reader off to find out what
 it meant. The identifier is a prefix to it, not a replacement.
 
+A friction review's commit carries no footer (`_friction-body.md`), whatever
+the product's commit rules ask: it rides on the feature's branch, and a footer
+there would join the criteria QA tests the feature against — a change to the
+tooling the customer never asked for, and one the feature's review may reword
+after the list was written.
+
 Nothing ticks a box except a person. A tick is the claim that somebody looked at
 a deployment and it was right, and that is the one thing in this cycle no part
 of it can establish for itself — the same reason `In QA` → `Done` is a human's
@@ -1484,6 +1490,14 @@ does have an outcome, and the orchestrator knows it exactly:
 | `stalled` | `claude` exited at the door, leaving no assistant record. Nothing ran, so the stage was not left red by it. |
 | `open` | Interrupted, with a conversation to return to. |
 | `—` | No record: the feature predates the field. Nothing is guessed backwards from how the stage ended. |
+
+A stage that went green on the rerun the gate makes before its first fixing
+session has no row here: no session ran. The gate runs a red stage once more
+by itself before spending a session on it (a deploy that failed aside, since
+`preview_ship` retried it already), because the commonest red is a test that
+flaked on a loaded machine; one session spent half an hour to conclude just
+that. The flake stays on record as a line in `regression.notes`, so a stage
+green by itself is not taken for one that never went red.
 
 The outcomes live in `regression.<stage>.fix_status`, space-joined and aligned
 with `fixes` position for position — `state_set` writes scalars, which is what

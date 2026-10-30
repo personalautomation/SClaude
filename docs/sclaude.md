@@ -259,7 +259,13 @@ terminal (`history_command`, once per process) — counted on the place the
 feature stood on then; and each conversation's cost from Claude Code's own
 account, followed into the conversations it was carried on in, on the place
 it ran. A workshop's work happens in the conversation that opened it and
-counts there. The transcripts are read through a cache beside
+counts there. Each stay carries its own share too (`m`): a moment goes to the
+stay it falls in, else the last one at that place begun before it, and a
+conversation's cost to the stay it was last opened in; a sync's counts on the
+glance under the block its pass began ahead of. The player adds the shares
+up as it goes, so a map playing shows what was played so far, the place
+playing now as "before+its own"; the maps outside the play, and every map
+once it has played, keep the totals. The transcripts are read through a cache beside
 the history (`transcripts.json`), so a poll reads only what grew, and a
 conversation still going at most once a minute.
 

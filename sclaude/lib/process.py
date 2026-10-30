@@ -626,10 +626,11 @@ PASS = {
 
 # The words, and for a few the lane, a setting changes: block -> [(name,
 # values, {field: value})], the first that matches taken. Fields: lane,
-# kind, title, text, details.
+# row, kind, title, text, details. A block moved to another lane takes a row
+# of its own there when the one it had is taken.
 VARIANTS = {
     "merge": [("merge", {"auto"}, {
-        "lane": "sclaude", "title": "Merged by sclaude",
+        "lane": "sclaude", "row": 22.5, "title": "Merged by sclaude",
         "text": "merge: auto — once QA passed and GitHub says the way is clear",
         "details": "With merge set to auto, sclaude merges the pull request itself once QA passed and GitHub says the way is clear; a red check of the merge with main holds it until the branch or main moves."}),
               ("merge", {"both"}, {"text": "offered here once QA passed, or merge it on GitHub"})],
@@ -693,6 +694,7 @@ def for_config(cfg, nodes, edges):
         for name, values, fields in VARIANTS.get(nid, []):
             if setting(cfg, name) in values:
                 lane, kind = fields.get("lane", lane), fields.get("kind", kind)
+                row = fields.get("row", row)
                 title, text = fields.get("title", title), fields.get("text", text)
                 break
         flags = "".join(f for f in flags if _needs(cfg, (nid, f)))
@@ -1820,13 +1822,14 @@ def deviations(steps):
 #           question (claude_usage's `human`, not capped), and sclaude's own
 #           (`ask answered waited=`, ask_once in ui.sh).
 #
-# Both as {map: {node: total}}, the friction review's over every review. A
-# workshop's work is done in the conversation of the step or the review that
-# opened it, and counts there.
+# Both as {map: {node: total}}, the friction review's over every review;
+# each stay carries its own share as well ("m", {kind: n}), which the player
+# adds up step by step. A workshop's work is done in the conversation of the
+# step or the review that opened it, and counts there.
 
 def _session_place(rows, opened=None):
     """Where each conversation ran, from the rows that opened it; with
-    `opened`, a dict, when each was first opened too."""
+    `opened`, a dict, when it was last opened there too."""
     out = {}
     for r in rows:
         if r["op"] not in ("open", "start") or not r.get("session"):
@@ -1838,19 +1841,21 @@ def _session_place(rows, opened=None):
             out[r["session"]] = ("regression", "fix_" + rest)
         elif r["what"] == "sync":
             out[r["session"]] = ("sync", "sync")
-            if opened is not None:
-                opened.setdefault(r["session"], r["at"])
         elif r["what"] in ("retro", "epilogue"):
             out[r["session"]] = ("detail", r["what"])
         elif head == "friction":
             out[r["session"]] = ("friction", "f_review")
+        else:
+            continue
+        if opened is not None:
+            opened[r["session"]] = r["at"]
     return out
 
 
 def metrics(rows, steps, passes, transcripts):
     stays = [("detail", s) for s in steps if "n" in s]
     stays += [(m, s) for m, ps in passes.items() for p in ps for s in p["steps"]]
-    timed = [(m, s["n"], _when(s["from"]), _when(s.get("to")) or _when(s["from"]))
+    timed = [(m, s["n"], _when(s["from"]), _when(s.get("to")) or _when(s["from"]), s)
              for m, s in stays if s.get("from")]
 
     def place(at, inside_only=False):
@@ -1864,6 +1869,19 @@ def metrics(rows, steps, passes, transcripts):
             return None
         before = [t for t in timed if t[0] == "detail" and t[2] <= when]
         return max(before, key=lambda t: t[2])[:2] if before else None
+
+    def stay_of(where, at):
+        """The stay at that place the moment falls in, else the last one
+        begun before it, else the first, timed or not: where the player adds
+        it up."""
+        mine = [t for t in timed if t[:2] == where]
+        if not mine:
+            return next((st for m, st in stays if (m, st["n"]) == where), None)
+        when = _when(at)
+        inside = [t for t in mine if when and t[2] <= when <= t[3]]
+        before = [t for t in mine if when and t[2] <= when]
+        return (min(inside, key=lambda t: t[3] - t[2]) if inside else
+                max(before, key=lambda t: t[2]) if before else mine[0])[4]
 
     out = {"input": {}, "cost": {}, "wait": {}}
     detail = [t for t in timed if t[0] == "detail"]
@@ -1885,9 +1903,16 @@ def metrics(rows, steps, passes, transcripts):
         if where and n:
             box = out[kind].setdefault(where[0], {})
             box[where[1]] = round(box.get(where[1], 0) + n, 4)
+            # And on the stay itself, for the player's count step by step.
+            stay = stay_of(where, at)
+            if stay is not None:
+                box = stay.setdefault("m", {})
+                box[kind] = round(box.get(kind, 0) + n, 4)
             # The glance draws no sync: what one took counts under the block
-            # it ran ahead of ("ahead", the page's totals for the overview).
-            node = ahead(at) if where[0] == "sync" else None
+            # it ran ahead of ("ahead", the page's totals for the overview),
+            # by when its pass began: a pass broken off and resumed later is
+            # still drawn ahead of that one.
+            node = ahead((stay or {}).get("from") or at) if where[0] == "sync" else None
             if node:
                 box = out[kind].setdefault("ahead", {})
                 box[node] = round(box.get(node, 0) + n, 4)
@@ -3285,6 +3310,8 @@ const player = (() => {
       delete el.__pl;
     });
     document.body.classList.remove('playing');
+    played = null; current = null;
+    drawMetrics();
   }
   function stop() {
     token++; paused = false; clear(); bar.hidden = true; playing = null;
@@ -3293,6 +3320,16 @@ const player = (() => {
     document.querySelectorAll('#hist li.on').forEach((li) => li.classList.remove('on'));
     document.querySelectorAll('.play').forEach((b) => { b.textContent = '▶'; b.classList.remove('on'); });
   }
+  // What the person put in and Claude cost, by kind: {input, cost, wait}.
+  function addUp(into, m) {
+    Object.entries(m || {}).forEach(([k, v]) => { into[k] = (into[k] || 0) + v; });
+    return into;
+  }
+  // While a play runs, the metrics under a block are what was played so far:
+  // the stays done there (`played`, by map:node), and on the one playing now
+  // its own share after a plus (`current`). A map the play does not go on
+  // (`inPlay`) keeps its totals, and so does every map once it has played.
+  let played = null, current = null, inPlay = new Set();
   // The detailed map's places as the overview draws them; one place
   // standing for several in a row is entered once, their times summed.
   function onMap(steps, map) {
@@ -3305,6 +3342,7 @@ const player = (() => {
       if (last && !last.pass && last.n === n) {
         last.off = last.off || s.off;
         if (s.s != null) last.s = (last.s || 0) + s.s;
+        if (s.m) last.m = addUp(Object.assign({}, last.m), s.m);
         last.to = s.to || last.to; last.here = last.here || s.here;
         return;
       }
@@ -3375,13 +3413,20 @@ const player = (() => {
       if (e) e.classList.add('pl-went');
       g.classList.add('pl-seen');
       tag(g, s.n, s.s);
+      done(s);
     }
+    drawMetrics();
+  }
+  function done(s) {
+    const key = s.map + ':' + s.n;
+    played[key] = addUp(played[key] || {}, s.m);
   }
   async function run(steps, label, start) {
     stop();
     start = start || 0;
     const mine = ++token;
     playing = {steps: steps, label: label};
+    played = {}; inPlay = new Set(steps.map((s) => s.map));
     document.body.classList.add('playing');
     bar.hidden = false;
     showTab('history');
@@ -3417,14 +3462,20 @@ const player = (() => {
         + (s.from ? ' · ' + when(s.from) + (s.to && s.to !== s.from ? ' – ' + when(s.to) : '') : '')
         + (s.here ? ' · it is here now' : ''));
       g.classList.add('pl-now');
+      current = {key: s.map + ':' + s.n, m: s.m || {}};
+      drawMetrics();
       const c = clock(g, s.s, ms, mine);
       if (!await sleep(ms, mine)) return;
       c.remove();
       g.classList.remove('pl-now'); g.classList.add('pl-seen');
       tag(g, s.n, s.s);
+      done(s); current = null;
+      drawMetrics();
       prev = s;
     }
     say(label + ' · played' + (steps.length ? '' : ': nothing recorded yet'));
+    played = null;
+    drawMetrics();
     pick(-1);
     document.querySelectorAll('.play.on').forEach((b) => { b.textContent = '▶'; b.classList.remove('on'); });
   }
@@ -3591,8 +3642,12 @@ const player = (() => {
   const took = (s) => s < 3600 ? Math.max(1, Math.round(s / 60)) + ' min'
     : s < 86400 ? Math.floor(s / 3600) + ' h' + (Math.round(s % 3600 / 60) ? ' ' + Math.round(s % 3600 / 60) + ' min' : '')
     : Math.floor(s / 86400) + ' d ' + Math.round(s % 86400 / 3600) + ' h';
-  const SHOW = {input: (n) => '✋ ' + n, cost: (n) => '$' + (n < 10 ? n.toFixed(2) : Math.round(n)),
-                wait: (n) => '⏳ ' + took(n)};
+  // With `more`, what a stay playing now adds to the count before it.
+  const plus = (put, n, more) => more == null ? put(n) : (n ? put(n) : '') + '+' + put(more);
+  const money = (n) => '$' + (n < 10 ? n.toFixed(2) : Math.round(n));
+  const SHOW = {input: (n, more) => '✋ ' + plus(String, n, more),
+                cost: (n, more) => plus(money, n, more),
+                wait: (n, more) => '⏳ ' + plus(took, n, more)};
   function totals(kind, map) {
     const m = ((data || {}).metrics || {})[kind] || {};
     if (map !== 'overview') return m[map] || {};
@@ -3621,7 +3676,20 @@ const player = (() => {
     const on = [...document.querySelectorAll('.metrics input:checked')].map((c) => c.value);
     ['detail', 'overview'].concat(PASSES).forEach((map) => {
       const per = {};
-      on.forEach((kind) => Object.entries(totals(kind, map)).forEach(([n, v]) => {
+      if (played && inPlay.has(map)) {
+        // ✋3+2: three before this stay, two in it; a stay done shows 5.
+        const keys = new Set(Object.keys(played).concat(current ? [current.key] : []));
+        keys.forEach((key) => {
+          if (!key.startsWith(map + ':')) return;
+          const n = key.slice(map.length + 1), was = played[key] || {};
+          const now = current && current.key === key ? current.m : null;
+          on.forEach((kind) => {
+            const a = was[kind] || 0, b = now ? now[kind] || 0 : 0;
+            if (b) (per[n] = per[n] || []).push(SHOW[kind](a, b));
+            else if (a) (per[n] = per[n] || []).push(SHOW[kind](a));
+          });
+        });
+      } else on.forEach((kind) => Object.entries(totals(kind, map)).forEach(([n, v]) => {
         if (v) (per[n] = per[n] || []).push(SHOW[kind](v));
       }));
       Object.entries(per).forEach(([n, words]) => {
@@ -3721,7 +3789,7 @@ def play_head(map_name, label, passes=False):
 
 
 PLAYER_BAR = """<div id="player" hidden><button type="button" class="pl-pause" title="Pause">⏸</button>
-<select class="pl-speed" aria-label="Speed"><option value="1">×1</option><option value="2">×2</option>
+<select class="pl-speed" aria-label="Speed"><option value="0.5">×0.5</option><option value="1" selected>×1</option><option value="2">×2</option>
 <option value="4">×4</option></select><span class="pl-text"></span>
 <button type="button" class="pl-stop" title="Stop (Esc)">✕</button></div>
 <div id="pl-off" role="dialog" aria-labelledby="pl-off-h" hidden><h3 id="pl-off-h">⚠ The feature left the map here</h3>

@@ -204,6 +204,9 @@ for name, cfg in configs:
     check("%s: every block reached from the start" % name, set(nodes) <= seen | {"end"} | set(
         n for n in nodes if n.startswith("f_") or n.startswith("w_")), str(set(nodes) - seen))
     check("%s: the end reached" % name, "end" in seen)
+    cells = [(n[0], n[1]) for n in nodes.values()]
+    check("%s: no two blocks in one cell" % name, len(cells) == len(set(cells)),
+          str(sorted(c for c in cells if cells.count(c) > 1)))
     check("%s: one reviewer at most" % name, not ("ci_review" in nodes and "local_pass" in nodes))
     n2, e2 = process.for_config(cfg, process.OVERVIEW_NODES, process.OVERVIEW_EDGES)
     check("%s: the glance's arrows drawn" % name, all(a in n2 and b in n2 for a, b, *_ in e2))
@@ -743,6 +746,47 @@ check("metrics: each time the person stepped in counts where the feature stood",
       and m["input"]["detail"].get("review") is None, str(m))
 check("metrics: a session costs where it ran",
       m["cost"] == {"detail": {"code": 2.5}, "friction": {"f_review": 0.5}}, str(m))
+h = process.history({}, mrows + [{"at": at("13:30"), "what": "steps.code", "op": "open", "session": "c2"},
+                                 {"at": at("14:00"), "what": "steps.code", "op": "end", "session": "c2"}],
+                    "review", dict(summaries, c2={"human": [[at("13:40"), 5, 0]], "cost": 1.0}).get)
+stays = [v.get("m") for v in h["visits"] if v.get("n") == "code"]
+check("metrics: each stay carries its own share, for the player's count",
+      stays == [{"input": 2, "wait": 90, "cost": 2.5}, {"input": 1, "wait": 5, "cost": 1.0}]
+      and h["metrics"]["input"]["detail"]["code"] == 3, str(stays))
+h = process.history({}, [{"at": at("08:00"), "what": "steps.review", "op": "open", "session": "r0"},
+                         {"at": at("09:00"), "what": "steps.review", "op": "end", "session": "r0"},
+                         {"at": at("10:00"), "what": "steps.code", "op": "open", "session": "c1"},
+                         {"at": at("11:00"), "what": "steps.code", "op": "end", "session": "c1"},
+                         {"at": at("15:00"), "what": "steps.review", "op": "open", "session": "c1"},
+                         {"at": at("16:00"), "what": "steps.review", "op": "end", "session": "c1"}],
+                    "review", {"c1": {"human": [], "cost": 2.0}}.get)
+check("metrics: a resumed conversation costs on the stay it was opened in last, where it is counted",
+      [v.get("m") for v in h["visits"] if v.get("n") == "review"] == [None, {"cost": 2.0}], str(h["visits"]))
+sy = process.history({}, [{"at": at("10:00"), "what": "steps.code", "op": "open", "session": "c0"},
+                          {"at": at("10:05"), "what": "sync", "op": "open", "session": "c1"},
+                          {"at": at("10:10"), "what": "sync", "op": "finish", "session": "c1"},
+                          {"at": at("14:00"), "what": "sync", "op": "open", "session": "c1"},
+                          {"at": at("14:10"), "what": "sync", "op": "finish", "session": "c1"}],
+                     "code", {"c1": {"human": [], "cost": 1.0}}.get)["passes"]["sync"]
+got = [[x.get("m") for x in p["steps"] if x["n"] == "sync"] for p in sy]
+check("metrics: a conversation opened again by a later sync costs on that sync's stay",
+      got == [[None], [{"cost": 1.0}]], str(got))
+ms = process.history({}, [{"at": at("09:00"), "what": "steps.plan", "op": "open", "session": "p"},
+                          {"at": at("09:30"), "what": "steps.plan", "op": "finish", "session": "p"},
+                          {"at": at("09:50"), "what": "sync", "op": "open", "session": "s1"},
+                          {"at": at("10:00"), "what": "sync", "op": "end", "session": "s1"},
+                          {"at": at("10:05"), "what": "steps.code", "op": "open", "session": "c"},
+                          {"at": at("11:00"), "what": "steps.code", "op": "finish", "session": "c"},
+                          {"at": at("11:10"), "what": "sync", "op": "open", "session": "s1"},
+                          {"at": at("11:20"), "what": "sync", "op": "finish", "session": "s1"},
+                          {"at": at("11:30"), "what": "steps.review", "op": "open", "session": "r"}],
+                     "review", {"s1": {"human": [], "cost": 5.0}}.get)["metrics"]["cost"]
+check("metrics: a sync broken off and resumed counts on the glance where its pass began",
+      ms.get("ahead") == {"code": 5.0}, str(ms))
+check("the player keeps the totals on maps it does not play, and after it played",
+      "played && inPlay.has(map)" in page and "played = null;\n    drawMetrics();\n    pick(-1);" in page)
+check("the player counts a stay after a plus, and plays at half speed",
+      "SHOW[kind](a, b)" in page and 'value="0.5"' in page)
 w = process.history({}, mrows + [{"at": at("11:26"), "what": "ask", "op": "answered", "waited": "600"},
                                  {"at": at("11:27"), "what": "ask", "op": "answered", "waited": "0"}],
                     "review", {"c1": {"human": [[at("09:30"), 60, 3, 7200]], "cost": 0}}.get)["metrics"]["wait"]

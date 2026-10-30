@@ -757,7 +757,10 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   command run on the feature at the terminal — Claude's cost in dollars, and
   ⏳ how long a question waited for your answer, Claude's or sclaude's, nights
   included; a block with none shows none. Each checkbox shows the whole
-  feature's total beside it.
+  feature's total beside it. While a map plays, its blocks count up instead:
+  what was played there so far, and on the place playing now its own share
+  after a plus — ✋ 3+2 is three before it and two in it; the totals come back
+  when the play ends or is stopped. The player plays at ×0.5 to ×4.
 - `localhost:3000/__sclaude/dora` — the product's metrics, linked under main
   as "main — DORA metrics": DORA, delivery, development quality, Claude's work
   and token efficiency. Production deploys and builds come from Vercel, each

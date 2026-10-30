@@ -329,6 +329,21 @@ instruments_committed_only() {
   return 1
 }
 
+# The Claude processes whose working directory is sclaude's checkout or inside
+# it, one a line, as "pid N: claude in <dir>, up <time>"; nothing for none.
+# A session sclaude watches runs from a product's tree, never from here.
+instruments_workers() {
+  local root pid dir
+  root="$(readlink -f "$INSTRUMENTS" 2>/dev/null)" || return 0
+  [[ -n "$root" ]] || return 0
+  for pid in $(pgrep -x claude 2>/dev/null); do
+    dir="$(readlink -f "/proc/$pid/cwd" 2>/dev/null)" || continue
+    [[ "$dir" == "$root" || "$dir" == "$root"/* ]] || continue
+    echo "pid $pid: claude in $dir, up $(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
+  done
+  return 0
+}
+
 # Says so, loudly, when a review session changed sclaude's checkout after all.
 # The write guard refuses the writes it can name, and a list of commands can
 # never name them all — rsync, tar -C, unzip -d, patch, awk -i inplace — so
@@ -345,6 +360,13 @@ instruments_committed_only() {
 # tree clean before and after, with the same config and hooks, is said
 # quietly, with the commits named; whatever else changed is loud, the commits
 # named with it.
+#
+# Whatever else changed names, after the session watched, the Claude sessions
+# working in the checkout itself (instruments_workers), when there are any: one
+# ran a review loop there, committing and then resetting and
+# rebasing, and the warning blamed the session watched, which cannot commit,
+# with "another session would look the same" as its only hint. An idle one is
+# listed too, so the session watched stays named as a possible cause.
 instruments_unchanged() {
   local now; now="$(instruments_state)"
   [[ "$now" == "$1" ]] && return 0
@@ -359,9 +381,16 @@ instruments_unchanged() {
     printf '%s\n' "$made"
     return 0
   fi
+  local workers; workers="$(instruments_workers)"
   warn ""
-  warn "  The $2 changed sclaude's own checkout ($INSTRUMENTS), which it may only read."
-  warn "  Another session working there at the same time would look the same."
+  if [[ -n "$workers" ]]; then
+    warn "  sclaude's own checkout ($INSTRUMENTS) changed while the $2 ran, which may only read it."
+    warn "  Claude sessions work in the checkout itself — look at theirs first:"
+    sed 's/^/     /' <<< "$workers" >&2
+  else
+    warn "  The $2 changed sclaude's own checkout ($INSTRUMENTS), which it may only read."
+    warn "  Another session working there at the same time would look the same."
+  fi
   [[ -n "$made" ]] && { warn "  Committed meanwhile:"; printf '%s\n' "$made" >&2; }
   warn "  Look before anything else runs from it: git -C $INSTRUMENTS status; git -C $INSTRUMENTS log -3"
   return 1

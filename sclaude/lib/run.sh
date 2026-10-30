@@ -2223,6 +2223,10 @@ friction_propose_project() {
 # Each put-off is a review of the key's own, in its runs: a fix session's key
 # stands for all its rounds, and the state kept only the last one's.
 #
+# Once the rows are on the screen, a step that fails says which one before the
+# log goes to a session: the screen said "put off" and a session opened all the
+# same, with nothing to tell why.
+#
 #   friction_defer_proposals <wt> <slug> <key> <step>
 friction_defer_proposals() {
   local wt="$1" slug="$2" key="$3" step="$4"
@@ -2280,18 +2284,24 @@ friction_defer_proposals() {
   # them a second time.
   local existed=0 size=0
   [[ -f "$file" ]] && { existed=1; size="$(stat -c %s "$file" 2>/dev/null || echo 0)"; }
-  deferred_ensure "$wt" "$slug" || return 1
-  git -C "$wt" diff --quiet HEAD -- "$file" 2>/dev/null || return 1
-  printf '%s\n' "$rows" >> "$file" 2>/dev/null || return 1
+  deferred_ensure "$wt" "$slug" \
+    || { friction_defer_failed "the deferred file $file could not be made"; return 1; }
+  git -C "$wt" diff --quiet HEAD -- "$file" 2>/dev/null \
+    || { friction_defer_failed "the deferred file $file has uncommitted changes"; return 1; }
+  printf '%s\n' "$rows" >> "$file" 2>/dev/null \
+    || { friction_defer_failed "the rows could not be written to $file"; return 1; }
   session_runs "$state" "friction.$key" open "$run_id"
   local nth
   nth="$(python3 -c 'import json,sys; print(len(((json.load(open(sys.argv[1])).get("friction") or {}).get(sys.argv[2]) or {}).get("runs") or []))' \
            "$state" "$key" 2>/dev/null || echo 1)"
   [[ "$nth" =~ ^[1-9][0-9]*$ ]] || nth=1
-  if ! { git -C "$wt" add -- "$file" 2>/dev/null \
+  local said
+  if ! said="$( { git -C "$wt" add -- "$file" 2>/dev/null \
          && git -C "$wt" commit -q -m "chore(sclaude): put off $n CLAUDE.md proposal(s) from $key, review $nth" \
               -m "The friction log after '$key' held nothing but proposals, so sclaude put them off to the monthly review itself, with no session." \
-              -- "$file" >/dev/null 2>&1; }; then
+              -- "$file" >/dev/null; } 2>&1)"; then
+    said="$(grep -m1 . <<< "$said")"
+    friction_defer_failed "the commit of the deferred file failed${said:+: $said}"
     git -C "$wt" reset -q -- "$file" 2>/dev/null || true
     local rel; rel="$(git -C "$wt" ls-files --full-name --error-unmatch -- "$file" 2>/dev/null)" || rel=""
     if [[ -n "$rel" ]] && git -C "$wt" cat-file -e "HEAD:$rel" 2>/dev/null; then
@@ -2319,6 +2329,14 @@ friction_defer_proposals() {
   echo ""
   info "  friction after '$key': $n CLAUDE.md proposal(s), put off to the monthly review — no session needed"
   return 0
+}
+
+# The line friction_defer_proposals ends on when it leaves the log to a session
+# after all.
+#
+#   friction_defer_failed <what failed>
+friction_defer_failed() {
+  info "  Not put off after all: $1 — a friction session takes the log."
 }
 
 # Pushes what a regression's fixing session committed and the open pull

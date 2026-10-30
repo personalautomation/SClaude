@@ -600,6 +600,14 @@ public, and a session works from a private product. Steps used to commit and
 push its `main` themselves, and the review sessions could not touch it at all,
 so a clear bug in a hook waited a month in a deferred file.
 
+What the guard cannot name — rsync, patch, an unpacked archive — is caught
+after a review session by the checkout's own state (`instruments_unchanged`):
+commits alone over a clean tree are said quietly, anything else loudly. When
+Claude processes have their working directory in the checkout itself
+(`instruments_workers`), the loud warning lists them, by pid and directory,
+after the session watched: a session that ran its own review loop there, committing and then
+rebasing, was once blamed on the review watched, which cannot commit.
+
 A session changes sclaude in its tree's workshop instead (`workshop.sh`): a
 worktree of the checkout at `<tree>/.sclaude/local/instruments`, made from
 `origin/main` by the first `sclaude core-open` and shared by every session of
@@ -1250,8 +1258,12 @@ the three it was.
 **A session's context is bounded per round, not per session.** On one pull
 request five rounds of fixes ran in one conversation, and every file each fix
 read stayed in its context. The session now fixes through subagents and keeps
-only the coordination; and once the automatic review closes every thread it
-fixed and posts new ones, it writes `.sclaude/local/feature/review-round` and
+only the coordination. It fixes in place a finding of a line or two, and a
+round whose findings all sit in a few dozen lines it has already read: a
+subagent would read them again, and the context limit below bounds the
+conversation anyway — sessions that fixed such a round themselves reported it
+as a deviation every time. Once
+the automatic review closes every thread it fixed and posts new ones, it writes `.sclaude/local/feature/review-round` and
 stops. A watcher started beside every review session sees the file and ends
 the `claude` process (found by `--session-id`/`--resume` and its id). Claude
 Code may carry a running conversation on under a new id, in a new transcript
@@ -1583,7 +1595,11 @@ appended to `friction.log.reviewed` and kept apart as
 every review's entries, and a review handed all of it read the earlier steps'
 again and put the same refusal off twice. `sclaude friction`, a re-read, still
 reads everything. A log of nothing but proposed `CLAUDE.md` rules needs no
-session: sclaude puts them off to the monthly review itself. It no longer
+session: sclaude puts them off to the monthly review itself. When a step of
+that fails once the rows are on the screen — the deferred file, the append,
+the commit — it says which, git's first line included, before the log goes to
+a session after all: on one feature the screen said "put off", a session
+opened, and nothing said why. It no longer
 asks by default: the question held the cycle between a fix session and the
 review of its fixes until it was answered, and the answer was nearly always
 "put off". `SCLAUDE_FRICTION_ASK=on` asks again, for a rule a decision of the

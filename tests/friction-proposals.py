@@ -81,7 +81,7 @@ def functions(source, names):
     return "\n".join(out)
 
 
-DEFER = functions(RUN, ["friction_defer_proposals"])
+DEFER = functions(RUN, ["friction_defer_proposals", "friction_defer_failed"])
 tmp = tempfile.mkdtemp()
 try:
     wt = os.path.join(tmp, "myapp-45-x")
@@ -238,6 +238,13 @@ try:
                                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
     check("refused-new-left-to-session", out.stdout.strip().splitlines()[-1:], ["rc=1"])
     check("refused-new-file-gone", os.path.exists(fresh), False)
+    # The screen said the rows were put off: the step that failed is named
+    # before a session takes the log.
+    said = subprocess.run(["bash", "-c", script.replace("info() { :; }", "info() { echo \"$*\"; }")],
+                          capture_output=True, text=True,
+                          env=dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")).stdout
+    check("refused-commit-named", "Not put off after all: the commit of the deferred file failed" in said, True)
     os.remove(refuse)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)

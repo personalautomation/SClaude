@@ -502,6 +502,23 @@ try:
                  'instruments_unchanged "$s" review 2>&1 || echo changed' % (inst, inst), repo)
     check("instruments-changed-said", "changed sclaude's own checkout" in changed and "changed" in changed, True)
     subprocess.run(["git", "-C", inst, "checkout", "-q", "a"], check=True)
+    # A Claude session working in the checkout itself is listed by its pid,
+    # after the session watched, which runs from a product's tree.
+    fake = os.path.join(tmp, "claude")
+    shutil.copy("/bin/sleep", fake)
+    worker = subprocess.Popen([fake, "30"], cwd=inst)
+    try:
+        led = sh('INSTRUMENTS="%s"; s="$(instruments_state)"; echo 2 > "%s/a"; '
+                 'instruments_unchanged "$s" review 2>&1 || echo changed' % (inst, inst), repo)
+    finally:
+        worker.kill()
+        worker.wait()
+    check("instruments-workers-named",
+          ("Claude sessions work in the checkout itself" in led, "pid %d: claude in" % worker.pid in led,
+           "while the review ran, which may only read it" in led,
+           "Another session working there" in led, led.endswith("changed")),
+          (True, True, True, False, True))
+    subprocess.run(["git", "-C", inst, "checkout", "-q", "a"], check=True)
     # Another session's commit, over a tree as clean as before, is named and
     # not blamed on the session watched: it cannot commit.
     other = sh('info() { echo "INFO $*"; }; INSTRUMENTS="%s"; s="$(instruments_state)"; '

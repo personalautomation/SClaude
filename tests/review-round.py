@@ -627,6 +627,13 @@ echo "watcher=[$SESSION_WATCHER]"
         prompt = fh.read()
     check("prompt-names-the-marker", "> .sclaude/local/feature/review-round" in prompt, True)
     check("prompt-uses-subagents", "Fix through subagents" in prompt, True)
+    # A round in a few dozen lines already read is fixed by the session itself:
+    # the context limit bounds the conversation anyway.
+    check("prompt-small-round-fixes-itself",
+          "a few dozen lines in all" in prompt
+          and "once yours is past its limit" in prompt
+          and "not a deviation to report" in prompt
+          and "ends with this round" not in prompt, True)
     check("code-watches-the-same-file", 'echo "$1/.sclaude/local/feature/review-round"' in RUN, True)
 
     # --- the context a session holds: its own requests, not a subagent's ------

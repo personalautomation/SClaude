@@ -57,7 +57,10 @@ lock_take() {
       flock 9 || exit 1
     fi
     : > "$__lock_ready"
-    while kill -0 "$$" 2>/dev/null; do sleep 1; done
+    # The sleep gets no copy of the locked descriptor: lock_release kills this
+    # shell, and a sleep holding one kept the queue taken for up to a second
+    # after, so the same run taking it again was told another one held it.
+    while kill -0 "$$" 2>/dev/null; do sleep 1 9>&-; done
   ) </dev/null >/dev/null 2>&1 &
   __lock_pid=$!
   __lock_started="$(date +%s)"

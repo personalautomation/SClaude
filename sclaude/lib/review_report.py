@@ -57,7 +57,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pr_context import (SKIP_SECONDS, decline_of, gh_json, is_claude_review,  # noqa: E402
-                        review_mode, yours)
+                        review_mode, thread_line, yours)
 from local_review import rows as journal_rows  # noqa: E402
 
 QUERY = """
@@ -143,7 +143,7 @@ def threads(cwd, pr, repo):
                 fate = "no fix" if declined(comments[1:]) else "fixed"
             else:
                 fate = "no fix" if first.get("url") in left else "open"
-            line = t.get("line") or t.get("originalLine")
+            line = thread_line(t)
             own = DISCUSSION.search(first.get("url") or "")
             own = own.group(1) if own else None
             out.append({

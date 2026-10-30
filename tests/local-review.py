@@ -25,6 +25,8 @@
 #     terminal stops the pass with nothing of it posted or recorded, and
 #     either way a later head is only checked against the open findings,
 #     with nothing new posted;
+#   * a finding GitHub took only on its file reaches the next run by the
+#     line and the claim its body names;
 #   * the step prompts render with the review's mode and without it.
 #
 # Run it with: python3 tests/local-review.py
@@ -364,7 +366,21 @@ try:
         said = json.load(fh)["conversation"][-1]
     check_true("outside-pr-in-conversation", "`elsewhere:4` (not in this pull request's diff)" in said)
     check("outside-pr-not-signed", pr_context.signed_locally(said), False)
-    prompts()
+    # The thread on the file has no line of its own: the next run is handed
+    # it by the line its body names and by its claim, not by that first line.
+    check_true("file-level-handed-by-claim", "fileonly:9 — **on the file**" in prompts())
+    # Step 4's snapshot reads the same line, open and resolved; a person's
+    # comment that happens to open so is not the review's and names nothing.
+    nodes = [{"path": t["path"], "line": t["line"], "originalLine": t["line"],
+              "isResolved": t["isResolved"], "comments": {"nodes": t["comments"]}}
+             for t in threads() if t["path"] == "fileonly"]
+    still, gone = pr_context.open_threads(repo, 7, "o/r", nodes=nodes)
+    check("snapshot-file-level-line", [t["line"] for t in still], [9])
+    nodes[0]["isResolved"] = True
+    check("snapshot-resolved-file-level-line",
+          [t["line"] for t in pr_context.open_threads(repo, 7, "o/r", nodes=nodes)[1]], [9])
+    check("person-names-no-line", pr_context.thread_line(
+        {"comments": {"nodes": [{"body": "Line 4 (outside the diff).\n\nmine"}]}}), None)
 
     # Headings as models drift from the format are read all the same; a
     # count the headings do not add up to is refused, not half recorded.

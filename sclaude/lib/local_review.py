@@ -42,8 +42,9 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pr_context import (LOCAL_SIGNATURE, RESOLVER_PREFIX, decline_of, gh,  # noqa: E402
-                        headline, review_threads, signed_locally, split_yours, yours)
+from pr_context import (LOCAL_SIGNATURE, OUTSIDE_DIFF, RESOLVER_PREFIX,  # noqa: E402
+                        decline_of, gh, headline, review_threads, signed_locally,
+                        split_yours, thread_line, yours)
 
 # A finding's heading as the prompt asks for it, `### <path>:<line> — <title>`,
 # and the ways a model drifts from it: the path in backticks, a range of
@@ -99,7 +100,7 @@ def threads(cwd, pr, repo):
                     "review": (((first.get("author") or {}).get("__typename")) == "Bot"
                                or signed_locally(first.get("body"))),
                     "path": t.get("path") or "?",
-                    "line": t.get("line") or t.get("originalLine") or "?", "url": url,
+                    "line": thread_line(t) or "?", "url": url,
                     "bodies": [c.get("body") or "" for c in comments],
                     "decision": decline_of(comments[1:])})
     return out
@@ -213,7 +214,7 @@ def post(cwd, pr, repo, head, f):
     # GitHub takes a line only inside the diff's hunks, and a finding often
     # points at unchanged code beside them. On the file the thread has no
     # line of its own, so the body names it.
-    body = "Line %d (outside the diff).\n\n%s" % (f["line"], body)
+    body = (OUTSIDE_DIFF + "\n\n%s") % (f["line"], body)
     base[base.index("-f") + 1] = "body=%s" % body
     out, refused = gh_try(base + ["-f", "subject_type=file"], cwd)
     if out is not None:

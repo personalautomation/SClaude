@@ -472,6 +472,28 @@ DECLINE_PREFIX = "Left as it is"
 # machine posts (local_review.py): it posts under the person's account, and
 # this is how its words are told from theirs.
 LOCAL_SIGNATURE = "<sub>Local review"
+# The first line of a local finding GitHub took on its file rather than on its
+# line (local_review.py's post): the thread has no line of its own, so the body
+# names it. headline() and thread_line() read it back; without that, every
+# such thread reached the next run as "path:? — Line N (outside the diff).",
+# with nothing to tell one from another.
+OUTSIDE_DIFF = "Line %d (outside the diff)."
+OUTSIDE_DIFF_LINE = re.compile(r"^Line (\d+) \(outside the diff\)\.$")
+
+
+def outside_diff(body):
+    """The line a local finding taken only on its file names in its first
+    line, or None — for a comment the local review signed alone."""
+    first = next((l.strip() for l in (body or "").splitlines() if l.strip()), "")
+    m = OUTSIDE_DIFF_LINE.match(first)
+    return int(m.group(1)) if m and signed_locally(body) else None
+
+
+def thread_line(t):
+    """A review thread's line, as review_threads gives the thread: GitHub's,
+    else the one outside_diff() reads from its first comment; None."""
+    first = ((((t.get("comments") or {}).get("nodes")) or [{}])[0] or {}).get("body")
+    return t.get("line") or t.get("originalLine") or outside_diff(first)
 
 
 def decline_of(comments):
@@ -500,7 +522,10 @@ def signed_locally(body):
 
 
 def headline(body):
-    line = next((l.strip() for l in (body or "").splitlines() if l.strip()), "")
+    lines = [l.strip() for l in (body or "").splitlines() if l.strip()]
+    if outside_diff(body) is not None:
+        lines = lines[1:]
+    line = lines[0] if lines else ""
     if line.startswith("**") and line.find("**", 2) > 2:
         line = line[:line.find("**", 2) + 2]
     if line.startswith(RESOLVER_PREFIX):
@@ -545,7 +570,7 @@ def open_threads(cwd, pr, repo, nodes=None):
                      "body": (c.get("body") or "").strip()}
                     for c in ((t.get("comments") or {}).get("nodes") or [])]
         path = t.get("path") or "?"
-        line = t.get("line") or t.get("originalLine") or "?"
+        line = thread_line(t) or "?"
         if t.get("isResolved"):
             resolved.append({
                 "path": path, "line": line,

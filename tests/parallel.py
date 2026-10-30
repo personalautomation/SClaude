@@ -14,7 +14,8 @@
 #     has reset, and says so to claude_launch through a file;
 #   * claude_launch opens that session again with `--resume`, its name, and a
 #     word to carry on — not the opening prompt;
-#   * lock_take makes a second holder wait for the first;
+#   * lock_take makes a second holder wait for the first, and the queue
+#     given up is free at once, with nobody named as holding it;
 #   * pr_context.py reads a "resets 4am (Europe/Lisbon)" from a review log;
 #   * the threads a person decided to leave are kept apart: the snapshot lists
 #     them separately, close_state answers `yours`, and a findings check left
@@ -215,6 +216,21 @@ t1 = float(re.search(r"took (\S+)", first_out).group(1))
 t2 = float(re.search(r"took (\S+)", second.stdout).group(1))
 check("second-starts-after-the-first", t2 - t1 >= 1.0, True)
 check("holder-note-gone", os.path.exists(lock + ".holder"), False)
+
+# The same shell takes the queue again right after giving it up, as a stage
+# run again after a red run does: nobody else holds it, so nobody is named.
+again = subprocess.run(["bash", "-c", """
+source "%s/lock.sh"
+warn() { echo "WARN $*"; }; info() { echo "INFO $*"; }
+lock_take fd "%s" "feature-a, local" "a regression"
+echo "took ${fd:-nothing}"
+lock_release "$fd" "%s"
+lock_take fd "%s" "feature-a, local" "a regression"
+echo "took ${fd:-nothing}"
+lock_release "$fd" "%s"
+""" % (LIB, lock, lock, lock, lock)], capture_output=True, text=True, timeout=30)
+check("retake-takes-twice", len(re.findall(r"^took \d+$", again.stdout, re.M)), 2)
+check("retake-says-nothing", again.stdout.replace("took", "").strip(" \n0123456789"), "")
 
 # --- the reset in a review log -------------------------------------------------
 now = datetime.datetime(2026, 10, 6, 17, 5, tzinfo=datetime.timezone.utc)

@@ -89,8 +89,17 @@ FLAG_WRITERS = {
 # session lost `npx supabase db --help` to the ban on the name, twice, while
 # working out how the migration history could be read. `-v` stays out: for
 # many tools it means verbose, not version.
+#
+# `python -c` is the counterpart of `node -e`, and was left behind on the ban
+# on the name: planning sessions lost a JSON read and an image header read to
+# it, and fell back to grepping the file. A script (`python3 x.py`,
+# `python3 - <<EOF`) still runs whatever it holds, so it stays a write. `-V`
+# is safe here: for python it is the version, never verbose.
+PYTHON_READ = ("-c", "-V", "--version", "-h", "--help")
 READ_FLAGS = {
     "node": ("-p", "--print", "-e", "--eval", "-v", "--version", "-h", "--help"),
+    "python": PYTHON_READ,
+    "python3": PYTHON_READ,
     "npx": ("--help", "-h", "--version"),
 }
 
@@ -284,13 +293,19 @@ VALUE_FLAGS = {
 def reads_only(rest, flags):
     """Is there a flag among the arguments that makes this command read?
 
-    Whole tokens are compared, unlike edits_in_place: that one looks for a
-    letter anywhere in a cluster, which is right for `-i` joining its
-    neighbours (`sed -ne`), and wrong here — a cluster containing "e" for some
-    other reason must not read as `node -e`. The long form carries its argument
+    A whole token is compared, or a short cluster's last letter: that is
+    where python requires `-c` to stand (`python3 -Ic`), and it holds for
+    every command here, so `node -xe` reads as `-e`. edits_in_place looks for
+    a letter anywhere in a cluster, which is right for `-i` joining its
+    neighbours (`sed -ne`); here a letter mid-cluster belongs to some other
+    flag. The long form carries its argument
     through `=` (`--eval=1+1`), so we compare the part before it.
 
     After `--` there are no more flags: those are the script's own arguments.
+    A reading flag after a script's name (`python3 x.py -c 1`) passes too:
+    telling the script from a flag's value (`node --import x -e 1`,
+    `python3 -W ignore -c 1`) would take each interpreter's value flags, and
+    `-c` and `-e` may write anyway, so it would close nothing.
     """
     for arg in rest:
         if arg == "--":
@@ -298,6 +313,8 @@ def reads_only(rest, flags):
         if not arg.startswith("-") or arg == "-":
             continue
         if arg.split("=", 1)[0] in flags:
+            return True
+        if not arg.startswith("--") and "-" + arg[-1] in flags:
             return True
     return False
 

@@ -111,6 +111,11 @@ PLANNING = [
     ("node scripts/seed.mjs", DENY),
     ("node -p \"1\" > f.js", DENY),
     ("node -p 1 && rm -rf /tmp/x", DENY),
+    # `python` likewise: `-c` prints, a script may do anything.
+    ("python3 scripts/seed.py", DENY),
+    ("python3 - <<'EOF'\nprint(1)\nEOF", DENY),
+    ("python3 -c 1 > f.py", DENY),
+    ("python3 -c 1 && rm -rf /tmp/x", DENY),
     # `worktree` and `stash` write, except for their listing actions.
     ("git worktree add ../x", DENY),
     ("git worktree remove x", DENY),
@@ -147,6 +152,12 @@ PLANNING = [
     ("node -p \"1+1\"", ALLOW),
     ("node -e \"console.log(1)\"", ALLOW),
     ("node --version", ALLOW),
+    ("python3 -c \"import json; print(json.load(open('f.json')))\" 2>&1 | head -20", ALLOW),
+    ("python3 --version", ALLOW),
+    ("python -V", ALLOW),
+    ("python3 -Ic 1", ALLOW),
+    ("python3 -W ignore -c 1", ALLOW),
+    ("node --import ./alias.mjs -e 1", ALLOW),
     # A live planning session lost exactly this to the ban on `worktree`.
     ("git worktree list; git branch -r | head -20; grep -rn \"categories\" "
      "--include=*.ts app lib | grep -n \"select\\|from(\\\"event\" | head", ALLOW),

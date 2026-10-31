@@ -114,6 +114,16 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-10-24 with step 5, the sync with main: the
   steps after it moved up by one, and a list one short marks the wrong one. -->
 
+- The sign-in link `<dev-url>/__sclaude/login?as=<email>&next=<path>` and
+  `/__sclaude/users` are spelled out for the session in
+  `sclaude/prompts/_dev-server.md` and served by `login_page`/`users_page` in
+  `bin/sclaude-proxy` (`dev_login.py` issues the token), and built by
+  `skills/sdemo/demo.py` (with `f=` on the phone's origin, `phone_origin` in
+  `keepawake/telegramd.py`); `tests/dev-login.py` runs the proxy and checks
+  the prompt and demo.py's links name the same.
+
+  <!-- Added by Claude on 2026-10-31 with signing in as another user. -->
+
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/run.sh`, which decides by it
   whether a review round stays in the same session; `tests/review-round.py`

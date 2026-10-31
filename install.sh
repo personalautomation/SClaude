@@ -143,6 +143,8 @@ ln -sfn "$REPO/skills/sreview" "$SKILLS/sreview"
 echo "symlinked: $SKILLS/sreview"
 ln -sfn "$REPO/skills/isleep" "$SKILLS/isleep"
 echo "symlinked: $SKILLS/isleep"
+ln -sfn "$REPO/skills/sdemo" "$SKILLS/sdemo"
+echo "symlinked: $SKILLS/sdemo"
 # /isleep's night outlives a session through hooks every session runs; they do
 # nothing while no night is on. A settings file that does not read leaves
 # them out with a word, and the rest of the install goes on.

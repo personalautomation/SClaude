@@ -15,7 +15,10 @@
 #                               or the list of features to choose from
 #   /__sclaude/                 the list, whatever the host
 #   /__sclaude/login?f=<feature> that feature, signed in as the developer
-#                               when the project asks for it (dev_login.py)
+#                               when the project asks for it (dev_login.py);
+#                               &as=<email> as that user of the feature's own
+#                               local database, &next=<path> landing there
+#   /__sclaude/users?f=<feature> the users of that database, a sign-in each
 #
 # Which feature lives where is read, never remembered. sclaude links
 # ~/.claude/sclaude/dev/<feature> to the worktree, and the worktree's
@@ -332,7 +335,7 @@ def page(title, body):
 
 def probe_features():
     """[(label, wt, live dev server?, [(name, port), …live services],
-    sign-in offered?)] — every blocking connect() and git call a listing
+    sign-in offered?, as anybody of its own database?)] — every blocking connect() and git call a listing
     needs, gathered in one pass off the event loop (see gather_listing). A
     feature's own services are probed only once each, same cost `answers`
     already pays for the dev server itself."""
@@ -340,7 +343,9 @@ def probe_features():
     for label, wt, fport, base in features():
         live = [(name, sport) for name, sport in services(label, wt, base)
                 if answers(sport)]
-        out.append((label, wt, answers(fport), live, dev_login.offered(wt)))
+        offered = dev_login.offered(wt)
+        out.append((label, wt, answers(fport), live, offered,
+                    offered and bool(dev_login.own_db(wt)) and dev_login.anybody(wt)))
     return out
 
 
@@ -351,7 +356,7 @@ def listing(host, probed, note="", code_up=None):
     local = is_local(host)
     port = host.rsplit(":", 1)[1] if ":" in host and not host.endswith("]") else ""
     rows = []
-    for label, wt, live, live_services, login in probed:
+    for label, wt, live, live_services, login, anybody in probed:
         if local:
             plain = "http://%s.localhost%s/" % (label, ":" + port if port else "")
         else:
@@ -362,6 +367,9 @@ def listing(host, probed, note="", code_up=None):
         href = "/__sclaude/login?f=%s" % label if login else plain
         other = (" <a class=alt href='%s'>without signing in</a>" % html.escape(plain)
                  if login else "")
+        if anybody:
+            other += (" <a class=alt href='/__sclaude/users?f=%s'>as another user</a>"
+                      % html.escape(label))
         rows.append(
             "<tr><td><a href='%s'>%s</a>%s</td>"
             "<td class='%s'>%s</td><td class=path>%s</td></tr>" % (
@@ -702,23 +710,37 @@ def respond(status, body, extra=(), kind="text/html; charset=utf-8"):
 SESSION_COOKIE = re.compile(r"^sb-.+-auth-token(\.\d+)?$")
 
 
+def session_cookies(header):
+    """The names of the product's session cookies a Cookie header carries."""
+    return [name for name in (part.strip().partition("=")[0] for part in header.split(";"))
+            if SESSION_COOKIE.match(name)]
+
+
 def signed_in(header):
-    return any(SESSION_COOKIE.match(part.strip().partition("=")[0])
-               for part in header.split(";"))
+    return bool(session_cookies(header))
 
 
 async def login_page(url, host, headers):
-    """/__sclaude/login: open a feature, signed in as the developer.
+    """/__sclaude/login: open a feature, signed in as the developer — or, with
+    `as`, as that user of the feature's own local database.
 
     Done on the feature's own host, where its cookies are: a browser that
     already holds a session there keeps it — the developer's, or another user
-    somebody signed in as on purpose — and is only sent on. Off this machine
+    somebody signed in as on purpose — and is only sent on. A link that names
+    `as` is asked for that user, so a session already there is dropped first
+    (its cookies expired on the way) and the new one taken. Off this machine
     every feature shares one host (the cookie routes it), so a session cookie
     there may be another feature's and says nothing: the phone always signs
     in afresh. A project with no devLogin gets the feature as it is."""
     query = parse_qs(url.query)
     label = (query.get("f") or [""])[0] or host_label(host)
     nxt = dev_login.safe_next((query.get("next") or ["/"])[0])
+    asked = (query.get("as") or [""])[0]
+    who = dev_login.valid_address(asked)
+    if asked and not who:
+        return respond("400 Bad Request", page("Not signed in", (
+            "<h1>Not signed in</h1><p>%s is not an address to sign in as.</p>")
+            % html.escape(asked)))
     found = feature(label)
     if not found:
         return respond("404 Not Found",
@@ -729,26 +751,63 @@ async def login_page(url, host, headers):
     origin = "http://%s.localhost%s" % (label, ":" + port if port else "")
     if local and host_label(host) != label:
         # To the feature's host first, which is where its cookies are read.
+        there = {"next": nxt}
+        if who:
+            there["as"] = who
         return respond("303 See Other", "", (
-            "Location: %s/__sclaude/login?%s" % (origin, urlencode({"next": nxt})),))
+            "Location: %s/__sclaude/login?%s" % (origin, urlencode(there)),))
     routed = () if local else (
         "Set-Cookie: %s=%s; Path=/; SameSite=Lax" % (COOKIE, label),)
     offered = await asyncio.to_thread(dev_login.offered, wt)
-    if not offered or (local and signed_in(headers.get("cookie", ""))):
+    cookie = headers.get("cookie", "")
+    if not offered or (local and not who and signed_in(cookie)):
         return respond("303 See Other", "", ("Location: %s" % nxt,) + routed)
     # Its database comes up with its server: until it answers there is no
     # Supabase to ask, and the page reloads this same address.
     if not await asyncio.to_thread(answers, fport):
         return status_page(label, wt, start_state(label, wt))
     try:
-        where = await asyncio.to_thread(dev_login.link, wt, nxt)
+        where = await asyncio.to_thread(dev_login.link, wt, nxt, who)
     except dev_login.Refused as exc:
         return respond("409 Conflict", page("Not signed in", (
             "<h1>%s: not signed in</h1><p>%s.</p><p><a href='%s'>Open it without "
             "signing in</a></p>") % (html.escape(label), html.escape(str(exc)),
                                     html.escape(nxt if not local else origin + nxt))),
             routed)
-    return respond("303 See Other", "", ("Location: %s" % where,) + routed)
+    # The session the browser held goes, every chunk of it: a new one shorter
+    # than the old would otherwise leave the old one's tail behind it — after
+    # `as`, and on the phone, where a fresh token is taken over whatever is
+    # there, maybe another feature's.
+    dropped = tuple("Set-Cookie: %s=; Path=/; Max-Age=0; SameSite=Lax" % name
+                    for name in session_cookies(cookie))
+    return respond("303 See Other", "", ("Location: %s" % where,) + routed + dropped)
+
+
+async def users_page(url, host):
+    """/__sclaude/users: the users of a feature's own local database, each a
+    link that signs in as them."""
+    label = (parse_qs(url.query).get("f") or [""])[0] or host_label(host)
+    found = feature(label)
+    if not found:
+        return respond("404 Not Found",
+                       await gather_listing(host, "No such feature: %s" % label))
+    wt, fport, _base = found
+    if not await asyncio.to_thread(answers, fport):
+        return status_page(label, wt, start_state(label, wt))
+    try:
+        people = await asyncio.to_thread(dev_login.users, wt)
+    except dev_login.Refused as exc:
+        return respond("409 Conflict", page("Users", "<h1>%s: users</h1><p>%s.</p>" % (
+            html.escape(label), html.escape(str(exc)))))
+    rows = "".join("<li><a href='%s'>%s</a></li>" % (
+        html.escape("/__sclaude/login?" + urlencode({"f": label, "as": who})), html.escape(who))
+        for who in people)
+    return respond("200 OK", page("Users", (
+        "<h1>%s: sign in as</h1>%s<p class=path>Any page of the feature signs in as one "
+        "of them with <code>/__sclaude/login?as=&lt;email&gt;&amp;next=&lt;path&gt;</code> "
+        "on its own address, both URL-encoded (<code>qa%%2Ba%%40example.com</code>).</p>") % (
+            html.escape(label), "<ul>%s</ul>" % rows if rows else
+            "<p>This database has no users yet: run the project's seed.</p>")))
 
 
 async def own_page(target, host, headers=None):
@@ -756,6 +815,8 @@ async def own_page(target, host, headers=None):
     url = urlsplit(target)
     if url.path == "/__sclaude/login":
         return await login_page(url, host, headers or {})
+    if url.path == "/__sclaude/users":
+        return await users_page(url, host)
     if url.path == "/__sclaude/select":
         label = (parse_qs(url.query).get("f") or [""])[0]
         if not feature(label):

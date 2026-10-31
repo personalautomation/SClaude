@@ -8,6 +8,7 @@ they live here, symlinked into `~/.local/bin` and `~/.claude/skills`.
 | [`sclaude`](#binsclaude) | runs a feature from issue to production with Claude doing the work and a person making the decisions |
 | [`skills/pr`](#skillspr) | a `/pr` skill: opens a pull request the way the team does it |
 | [`skills/sreview`](#skillssreview) | a `/sreview` skill: review and fix in iterations until the review finds nothing substantive |
+| [`skills/sdemo`](#skillssdemo) | a `/sdemo` skill: links to check a feature by hand, each signed in as its user, with what to check; `/sdemo ac` by its acceptance criteria |
 | [`skills/isleep`](#skillsisleep) | an `/isleep` skill: night mode — Claude carries on alone, decides instead of asking, and reports in the morning |
 | [`sclaude-proxy`](#binsclaude-proxy) | one address per feature: `http://<feature>.localhost:3000` |
 | [`chrome-debug`](#binchrome-debug) | the Chrome that Claude drives to check its work |
@@ -749,6 +750,28 @@ sclaude it takes the check commands, the review mode and the review rules from
 there, and with a pull request open keeps the findings as its threads. It
 commits once per iteration; pushing is left to the project's own rules.
 
+## skills/sdemo
+
+`/sdemo [feature] [what to show]` gives you a feature to check by hand: a few
+scenarios, each a link that opens a page of the feature already signed in as
+the user it should be seen as, with what to look at there underneath. Plain
+`/sdemo` shows the main functionality, the key places the feature changed;
+`/sdemo ac` walks you through the acceptance criteria in the issue, a scenario
+per criterion (or a few together), and names the ones no page can show. The
+scenarios come from what the feature changed and its acceptance criteria;
+the users from the feature's own database (see *Signed in without a
+password* under [bin/sclaude-proxy](#binsclaude-proxy)), so it works on a
+feature with a local database of its own and a project with `devLogin`.
+
+The links are for where you are: on the laptop `http://<feature>.localhost:3000/…`;
+when a device of your tailnet has traffic now — you are on the phone — the
+address the bot opens features at on a phone (the `tailscale serve` name, or
+the tailnet address). Say "I'm on the laptop" or "on the phone" and it follows
+that instead; the other place's link is given at the end, when there is a
+phone address at all (`tailscale serve` or the tailnet's).
+`skills/sdemo/demo.py link <email> <path>` makes one such link by hand, `users` lists
+who can sign in and `criteria` prints the criteria.
+
 ## skills/isleep
 
 `/isleep [task]` when you go to sleep and the session has to carry on. First
@@ -862,6 +885,25 @@ commands' section.
 Different addresses rather than different ports keep features apart in one
 browser: cookies ignore the port, so on ports alone signing in to one feature
 would sign you out of another.
+
+**Signed in without a password.** When the product's `.sclaude/config.json`
+names its route for email links (`"devLogin": {"path": "/auth/confirm"}`, the
+route that verifies `token_hash`), a feature in the list opens signed in as
+you: the first line of `~/.claude/sclaude/dev-login`, else your
+`git user.email`. "without signing in" beside it opens it as it is.
+On a feature with a local database of its own you can sign in as anybody in
+it:
+
+- "as another user" beside the feature (`/__sclaude/users?f=<feature>`) lists
+  that database's users, a sign-in link each;
+- `http://<feature>.localhost:3000/__sclaude/login?as=<email>&next=<path>`
+  signs in as that user and opens `<path>`, dropping the session the browser
+  had there. Both are URL-encoded: `qa%2Badmin%40example.com`, not
+  `qa+admin@…`, whose `+` reads as a space. Ask a step's session for links to test a feature as some user
+  and it gives you these.
+
+Only users that exist are signed in, never created. On a shared environment
+only your own address signs in, and on a protected one nothing does.
 
 Only this machine and your Tailscale network are let in; anybody else on the
 same Wi-Fi gets `403`. `SCLAUDE_PROXY_ALLOW` replaces the list with networks of

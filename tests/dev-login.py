@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 #
 # dev_login.py and sclaude-proxy's /__sclaude/login: a feature opens signed in
-# as the developer, through a magic-link token from its own Supabase, and never
-# on a protected environment.
+# as the developer, through a recovery token from its own Supabase, and never
+# on a protected environment; `as=<email>` signs in as another user of the
+# feature's own local database, and nowhere else; /__sclaude/users lists them.
+# The step prompt spells the same link out, and skills/sdemo/demo.py builds
+# it; both are checked to.
 #
 # A fake GoTrue stands in for Supabase's admin API and records what it was
 # asked; a fake dev server stands in for the feature's `next dev`.
@@ -47,6 +50,7 @@ def serve(handler):
 
 
 ASKED = []
+ASKED_URL = []
 
 
 class GoTrue(http.server.BaseHTTPRequestHandler):
@@ -64,6 +68,18 @@ class GoTrue(http.server.BaseHTTPRequestHandler):
             out, code = {"hashed_token": "h4sh", "verification_type": "recovery"}, 200
         data = json.dumps(out).encode()
         self.send_response(code)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        ASKED.append((self.path, self.headers.get("apikey"), None))
+        query = parse_qs(urlsplit(self.path).query)
+        page, per = int(query["page"][0]), int(query["per_page"][0])
+        people = [{"email": "seed@example.com"}, {"email": "Bob@example.com"},
+                  {"phone": "+1"}, {"email": "dev@example.com"}]
+        data = json.dumps({"users": people[(page - 1) * per:page * per]}).encode()
+        self.send_response(200)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -122,7 +138,11 @@ def request(port, host, path, cookie=None):
     headers = {}
     for line in head.split("\r\n")[1:]:
         name, _, value = line.partition(":")
-        headers.setdefault(name.strip().lower(), value.strip())
+        name = name.strip().lower()
+        if name == "set-cookie" and name in headers:
+            headers[name] += "\n" + value.strip()
+        else:
+            headers.setdefault(name, value.strip())
     return head.split("\r\n")[0], headers, body.decode("utf-8", "replace")
 
 
@@ -136,6 +156,7 @@ def main():
     gotrue, gport = serve(GoTrue)
     dev, dport = serve(Dev)
     supa = "http://127.0.0.1:%d" % gport
+    ASKED_URL.append(supa)
     try:
         write(login_file, "\n  dev@example.com \n")
         check("the address comes from the file", dev_login.email(), "dev@example.com")
@@ -173,6 +194,30 @@ def main():
         check("Supabase was asked for this address with the secret key",
               ASKED[-1], ("/auth/v1/admin/generate_link", "sb_secret_x",
                           {"type": "recovery", "email": "dev@example.com"}))
+
+        # As somebody else, on the feature's own database.
+        got = parse_qs(urlsplit(dev_login.link(main_wt, "/x", "seed@example.com")).query)
+        check("as= asks for that user", (ASKED[-1][2], got.get("next")),
+              ({"type": "recovery", "email": "seed@example.com"}, ["/x"]))
+        check("its users, sorted, addresses only", dev_login.users(main_wt),
+              ["Bob@example.com", "dev@example.com", "seed@example.com"])
+        check("listed with the secret key", ASKED[-1][:2],
+              ("/auth/v1/admin/users?page=1&per_page=200", "sb_secret_x"))
+        dev_login.USERS_PER_PAGE = 2
+        check("every page of them", dev_login.users(main_wt),
+              ["Bob@example.com", "dev@example.com", "seed@example.com"])
+        check("read until a short page", ASKED[-1][0], "/auth/v1/admin/users?page=3&per_page=2")
+        dev_login.USERS_PER_PAGE = 200
+        try:
+            dev_login.link(main_wt, "/", "nobody@example.com")
+            check("an unknown as= is refused", "linked", "refused")
+        except dev_login.Refused as exc:
+            check("an unknown as= is refused, not pointing at the file",
+                  "nobody@example.com" in str(exc) and login_file not in str(exc), True)
+        for value, want in (("a@b.c", "a@b.c"), (" a@b.c ", "a@b.c"), ("ab.c", ""),
+                            ("a b@c", ""), ("a@b@c", ""), ("<a>@b", ""), ("a@b\r\nX: y", ""),
+                            ("", ""), ("a@" + "b" * 260, "")):
+            check("valid_address(%r)" % value, dev_login.valid_address(value), want)
 
         write(login_file, "refused@example.com\n")
         try:
@@ -215,6 +260,28 @@ def main():
         os.symlink(os.path.join(main_wt, ".env.dev"), os.path.join(main_wt, ".env.local"))
         dev_login.link(main_wt)
         check("a runnable environment signs in with its key", ASKED[-1][1], "dev")
+        asked = len(ASKED)
+        try:
+            dev_login.link(main_wt, "/", "seed@example.com")
+            check("a shared environment refuses as=", "linked", "refused")
+        except dev_login.Refused as exc:
+            check("a shared environment refuses as=, naming who it does sign in as",
+                  "dev@example.com" in str(exc), True)
+        try:
+            dev_login.users(main_wt)
+            check("a shared environment lists nobody", "listed", "refused")
+        except dev_login.Refused:
+            check("a shared environment lists nobody", True, True)
+        check("and Supabase is not asked for either", len(ASKED), asked)
+        dev_login.link(main_wt, "/", "DEV@example.com")
+        check("as= naming the developer still signs in there",
+              ASKED[-1][2]["email"], "DEV@example.com")
+
+        with open(os.path.join(ROOT, "sclaude", "prompts", "_dev-server.md")) as fh:
+            prompt = fh.read()
+        check("the step prompt gives the link the proxy reads",
+              "<dev-url>/__sclaude/login?as=<email>&next=<path>" in prompt
+              and "<dev-url>/__sclaude/users" in prompt, True)
 
         check_proxy(root, main_wt, dport, login_file)
     finally:
@@ -226,6 +293,32 @@ def main():
         print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))
     print("%d/%d passed" % (total - len(failures), total))
     return 1 if failures else 0
+
+
+def load_demo(registry, port):
+    """skills/sdemo/demo.py, pointed at the bench's registry and proxy."""
+    import importlib.util
+    os.environ["SCLAUDE_DEV_REGISTRY"] = registry
+    os.environ["SCLAUDE_PROXY_PORT"] = str(port)
+    spec = importlib.util.spec_from_file_location(
+        "demo", os.path.join(ROOT, "skills", "sdemo", "demo.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # Nothing of this machine's tailnet or bot: the bench's own answers.
+    module.real_phone_origin = module.phone_origin
+    module.active_peers = lambda: []
+    module.phone_origin = lambda: ""
+    return module
+
+
+def demo_out(demo, wt, args, where=""):
+    """demo.py link's lines for a tree, as the skill reads them."""
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        demo.cmd_link(args, "f1", wt, where)
+    return buf.getvalue().splitlines()
 
 
 def check_proxy(root, wt, dport, login_file):
@@ -285,12 +378,121 @@ def check_proxy(root, wt, dport, login_file):
               urlsplit(headers.get("location", "")).path, "/auth/confirm")
         check("and the feature picked by the cookie",
               headers.get("set-cookie", "").startswith("sclaude_feature=f1;"), True)
+        check("and the session there dropped first",
+              "sb-127-auth-token=; Path=/; Max-Age=0" in headers.get("set-cookie", ""), True)
+
+        # The shared dev environment: no "as another user", and as= refused.
+        check("no other users offered on a shared environment",
+              "as another user" in request(port, host, "/")[2], False)
+        status, _, body = request(port, "f1." + host, "/__sclaude/login?as=seed@example.com")
+        check("as= on a shared environment: not signed in",
+              (status, "dev@example.com" in body), ("HTTP/1.1 409 Conflict", True))
+        shared = load_demo(registry, port)
+        check("demo: somebody else on a shared environment is warned of as refused",
+              [l for l in demo_out(shared, wt, ["seed@example.com"]) if l.startswith("warn:")],
+              ["warn: the link will be refused: f1 has no local database of its own, so it "
+               "signs in only as dev@example.com"])
+        check("demo: the developer there is not warned of",
+              [l for l in demo_out(shared, wt, ["dev@example.com"]) if l.startswith("warn:")], [])
+        email = shared.dev_login.email
+        shared.dev_login.email = lambda: ""
+        check("demo: with nobody to sign in as, refused and the file named",
+              [l for l in demo_out(shared, wt, ["dev@example.com"]) if l.startswith("warn:")],
+              ["warn: the link will be refused: nobody to sign in as — put an address in %s"
+               % login_file])
+        shared.dev_login.email = email
+
+        own = os.path.join(wt, ".sclaude", "local", "feature", "db.env")
+        write(own, "NEXT_PUBLIC_SUPABASE_URL=https://x.supabase.co\nSUPABASE_SECRET_KEY=k\n")
+        check("a db.env off this machine: no other users offered",
+              "as another user" in request(port, host, "/")[2], False)
+        write(own, "NEXT_PUBLIC_SUPABASE_URL=%s\nSUPABASE_SECRET_KEY=sb_secret_x\n"
+              % ASKED_URL[0])
+        _, _, body = request(port, host, "/")
+        check("its own database: other users offered",
+              "href='/__sclaude/users?f=f1'" in body, True)
+        status, _, body = request(port, "f1." + host, "/__sclaude/users")
+        check("the users page links a sign-in each",
+              (status, "/__sclaude/login?f=f1&amp;as=seed%40example.com" in body),
+              ("HTTP/1.1 200 OK", True))
+
+        # /sdemo's links, read back by the proxy itself.
+        demo = load_demo(registry, port)
+        demo.phone_origin = lambda: "https://node.example.ts.net"
+        laptop, phone = demo.links("f1", "seed@example.com", "/a?b=1&c=2")
+        check("demo: the laptop link is the feature's host",
+              laptop.startswith("http://f1.localhost:%d/__sclaude/login?" % port), True)
+        check("demo: the phone link names the feature on the phone's origin",
+              phone.startswith("https://node.example.ts.net/__sclaude/login?f=f1&"), True)
+        check("demo: a feature named is its tree", demo.feature("f1"),
+              ("f1", os.path.realpath(wt)))
+        for name, link, at in (("laptop", laptop, "f1." + host),
+                               ("phone", phone, "100.64.0.1:%d" % port)):
+            target = link.split("/", 3)[3]
+            status, headers, _ = request(port, at, "/" + target)
+            check("demo: the %s link signs in as its user, landing on the whole page" % name,
+                  (status, ASKED[-1][2]["email"],
+                   parse_qs(urlsplit(headers.get("location", "")).query).get("next")),
+                  ("HTTP/1.1 303 See Other", "seed@example.com", ["/a?b=1&c=2"]))
+
+        demo.active_peers = lambda: ["phone"]
+        check("demo: away, the phone link first",
+              demo_out(demo, wt, ["seed@example.com", "/x"])[:2],
+              ["where: phone — tailnet traffic from phone", "link: " + demo.links(
+                  "f1", "seed@example.com", "/x")[1]])
+        demo.phone_origin = lambda: ""
+        out = demo_out(demo, wt, ["seed@example.com", "x"], "phone")
+        check("demo: no phone address, the laptop link alone, and said where it is for",
+              (out[0].startswith("where: laptop — as asked; no address a phone can open"),
+               out[1].startswith("link: http://f1.localhost"),
+               any(l.startswith("other:") for l in out)), (True, True, False))
+        check("demo: a page that is no path is said, not swapped silently",
+              any("opens / instead" in l for l in out), True)
+        import types
+        fake = types.ModuleType("keepawake.telegramd")
+        sys.modules["keepawake.telegramd"] = fake
+        import keepawake
+        for origin, want in (("https://node.example.ts.net", "https://node.example.ts.net"),
+                             ("http://100.64.0.1:3000", "http://100.64.0.1:3000"),
+                             ("http://127.0.0.1:3000", ""), ("http://localhost:3000", ""),
+                             ("http://0.0.0.0:3000", ""), ("http://[::]:3000", ""),
+                             ("http://[:3000", "")):
+            fake.phone_origin = lambda origin=origin: origin
+            keepawake.telegramd = fake
+            check("demo: phone_origin(%s)" % origin, demo.real_phone_origin(), want)
+        del sys.modules["keepawake.telegramd"]
+        del keepawake.telegramd
+        check("demo: an unknown user is warned of",
+              any("not a user" in l for l in demo_out(demo, wt, ["nobody@example.com"])), True)
+
+        status, headers, _ = request(port, host,
+                                     "/__sclaude/login?f=f1&as=seed@example.com&next=/y")
+        check("as= survives the way to the feature's host", headers.get("location"),
+              "http://f1.localhost:%d/__sclaude/login?next=%%2Fy&as=seed%%40example.com" % port)
+        status, headers, _ = request(port, "f1." + host,
+                                     "/__sclaude/login?as=seed@example.com&next=/y",
+                                     cookie="a=1; sb-127-auth-token.0=x; sb-127-auth-token.1=y")
+        where = urlsplit(headers.get("location", ""))
+        check("signed in already, as= still takes a fresh token for that user",
+              (status, where.path, ASKED[-1][2]),
+              ("HTTP/1.1 303 See Other", "/auth/confirm",
+               {"type": "recovery", "email": "seed@example.com"}))
+        dropped = headers.get("set-cookie", "").split("\n")
+        check("and the old session goes, every chunk of it, nothing else",
+              sorted(dropped), ["sb-127-auth-token.0=; Path=/; Max-Age=0; SameSite=Lax",
+                                "sb-127-auth-token.1=; Path=/; Max-Age=0; SameSite=Lax"])
+        status, _, _ = request(port, "f1." + host, "/__sclaude/login?as=not-an-address")
+        check("as= that is not an address", status, "HTTP/1.1 400 Bad Request")
+        os.remove(own)
 
         os.remove(os.path.join(wt, ".env.local"))
         os.symlink(os.path.join(wt, ".env.prod"), os.path.join(wt, ".env.local"))
         status, _, body = request(port, "f1." + host, "/__sclaude/login")
         check("on production: not signed in, and why",
               (status, "prod" in body), ("HTTP/1.1 409 Conflict", True))
+        check("demo: on production the link is said to be refused",
+              any(l.startswith("warn: the link will be refused") and "prod" in l
+                  for l in demo_out(load_demo(registry, port), wt, ["dev@example.com"])), True)
     finally:
         proc.terminate()
         proc.wait(timeout=5)

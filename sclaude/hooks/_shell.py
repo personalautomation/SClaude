@@ -142,16 +142,64 @@ def mask_quoted(command):
     return "".join(out)
 
 
+# What the body of a substitution in double quotes becomes for shlex.
+QUOTED_BODY = "\x04"
+
+
+def readable(command, heredocs=False):
+    """The command as shlex can read it: heredoc bodies cut out, and the body
+    of every `$( … )` and backtick standing in double quotes replaced by
+    QUOTED_BODY; None when scan() cannot read the line, or when it holds a
+    backtick out of quotes. scan() reads that body whole, heredocs and all,
+    and the shell splits its output into words (`git push `echo origin
+    main``): every way of masking it tried let a ban through or refused an
+    ordinary read, so such a line is read as it always was.
+
+    Such a body has quotes of its own, and shlex, which does not know that,
+    reads `"$(node -p 'require("./x")')"` as a closed quote, a bare word and a
+    quote left open: an ordinary line was refused as unparsable. The body is
+    judged anyway, as a command of its own, by every hook that reads the line
+    (substitutions()); the word around it keeps its `$(` and `)`.
+
+    Both kinds of span are the ones scan() reads, so the two agree on what is
+    a substitution and what a heredoc: `"$$("` is none, and a `<<EOF` in
+    quotes, or in a body masked away, opens nothing. While a reader of its own
+    did the masking and a regex the heredocs, each disagreement hid the lines
+    after it from every ban. With `heredocs` their bodies stay, for a reader
+    that judges them too.
+    """
+    spans = []
+    if scan(command, 0, False, spans) is None or any(k == "tick" for _, _, k in spans):
+        return None
+    # A span inside a masked body goes with it.
+    kept, reach = [], -1
+    for start, stop, kind in sorted(spans, key=lambda s: (s[0], -s[1])):
+        if start >= reach:
+            kept.append((start, stop, kind))
+            reach = stop
+    for start, stop, kind in reversed(kept):
+        if kind == "doc" and not heredocs:
+            # The body and its delimiter line, and the newline after them;
+            # in a substitution `EOF)` keeps its bracket.
+            stop += command[stop:stop + 1] == "\n"
+            command = command[:start] + command[stop:]
+        elif kind == "sub":
+            command = command[:start] + QUOTED_BODY + command[stop:]
+    return command
+
+
 def tokenize(command, mask=False):
     """The command's words with the separators split off, or None.
 
     None means "parsing did not work out" — an unclosed quote. Such a string
     cannot be judged, and each hook decides for itself what to do about it: both
     choose to forbid, but their reasons differ. With `mask`, a `>` in quotes
-    comes out as QUOTED_GT.
+    comes out as QUOTED_GT. A substitution comes out with its body masked as
+    readable() says.
     """
     try:
-        command = strip_heredocs(command)
+        # A line scan() cannot read is taken as the regex reads it.
+        command = readable(command) or strip_heredocs(command)
         return shlex.split(split_separators(mask_quoted(command) if mask else command))
     except ValueError:
         return None
@@ -222,14 +270,14 @@ def substitutions(command):
     return None if found is None else found[1]
 
 
-def body_end(text, start):
+def body_end(text, start, spans=None):
     """The index of the `)` that closes a substitution whose body starts at
-    `start`, or None when nothing does."""
-    found = scan(text, start, True)
+    `start`, or None when nothing does. `spans` as in scan()."""
+    found = scan(text, start, True, spans)
     return None if found is None else found[0]
 
 
-def scan(text, i, closing):
+def scan(text, i, closing, spans=None):
     """Read `text` from `i` as the shell does: (where it ends, the bodies of the
     substitutions met on the way), or None when something is left open.
 
@@ -240,6 +288,11 @@ def scan(text, i, closing):
     heredoc's body is text; in double quotes only `$(` and backticks expand,
     and in a heredoc's body too, when its delimiter is not quoted, while an
     apostrophe there is no quote.
+
+    With `spans`, (start, stop, "sub") is added to it for each body that
+    stands in double quotes, (start, stop, "tick") for a backtick body out of
+    them, and (start, stop, "doc") for each heredoc's body
+    with its delimiter line, in a substitution's body too (readable).
     """
     out, quote, depth, heredocs = [], "", 1, []
     while i < len(text):
@@ -263,10 +316,12 @@ def scan(text, i, closing):
         # Process substitution is not one inside double quotes: there `->(`
         # is text, and only $( and backticks expand.
         if (ch == "$" or (ch in "<>" and not quote)) and text[i + 1:i + 2] == "(":
-            j = body_end(text, i + 2)
+            j = body_end(text, i + 2, spans)
             if j is None:
                 return None
             out.append(text[i + 2:j])
+            if spans is not None and quote == '"':
+                spans.append((i + 2, j, "sub"))
             i = j + 1
             continue
         if ch == "`":
@@ -274,6 +329,8 @@ def scan(text, i, closing):
             if j == -1:
                 return None
             out.append(text[i + 1:j])
+            if spans is not None:
+                spans.append((i + 1, j, "sub" if quote == '"' else "tick"))
             i = j + 1
             continue
         if text.startswith("$$", i):
@@ -312,6 +369,8 @@ def scan(text, i, closing):
                 if body is None:
                     return None
                 start, i = body
+                if spans is not None:
+                    spans.append((start, i, "doc"))
                 if not quoted:
                     inner = expansions(text, start, i)
                     if inner is None:

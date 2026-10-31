@@ -41,7 +41,7 @@ except Exception as _exc:  # noqa: BLE001
     sys.exit(0)
 _failsafe.install("planning guard (no-code-in-planning.py)")
 from _friction import note
-from _shell import HEREDOC, strip_heredocs, strip_wrappers, substitutions, tokenize
+from _shell import HEREDOC, readable, strip_heredocs, strip_wrappers, substitutions, tokenize
 
 REASON = (
     "Step 1 is planning, and writing is forbidden here even after the plan is "
@@ -427,8 +427,10 @@ def writes(command):
     # plan.md asks step 1 to post was refused as a write — its marker
     # `<!-- sclaude:user-request -->` ends in `-->`, which parsed as a
     # redirection into `##`, the heading on the next line. tokenize() below
-    # already stripped heredocs; this scan runs before it and did not.
-    unquoted = re.sub(r"'[^']*'|\"[^\"]*\"", "", strip_heredocs(command))
+    # already stripped heredocs; this scan runs before it and did not. It
+    # reads the line tokenize() reads: in the raw one an apostrophe in
+    # `"$(echo "it's")"` paired with a later one and hid the `>` between them.
+    unquoted = re.sub(r"'[^']*'|\"[^\"]*\"", "", readable(command) or strip_heredocs(command))
     for match in re.finditer(r"(?<![0-9<>])>>?(?!&)\s*([^\s;|&<>()]*)", unquoted):
         # The target decides. The bare `>` used to be enough, and it made
         # `cmd >/dev/null 2>&1` a write — the ordinary way to silence a probe,

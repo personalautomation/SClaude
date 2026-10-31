@@ -56,7 +56,8 @@ KINDS = {
     "permission-rule": "rule",
 }
 
-# The tails our hooks append to their reasons: TAIL from forbidden-commands.py,
+# The tails our hooks append to their reasons: TAIL and the other endings from
+# forbidden-commands.py,
 # the ending of REASON from no-code-in-planning.py, and TAIL from
 # plan-on-disk.py. We recognise our own refusals by them — the first
 # two hooks have already written those, and a second time is not wanted; the
@@ -73,6 +74,7 @@ OWN_MARKERS = (
     "tell the human and stop.",
     "Then present the plan again.",
     "Then carry on with the step's own work.",
+    "Write it more plainly, as separate calls, and carry on.",
 )
 # The write guard's refusals are not among them: it writes nothing to the
 # log itself, so a refusal of its own, one getting in the way of real work

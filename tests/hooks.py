@@ -88,6 +88,11 @@ def run(hook, command, step=None, tool="Bash", tool_input=None, env=None,
 # (command, expectation). Every wrapper is checked both bare and with an
 # argument: it was the wrapper's argument that threw the parsing off.
 PLANNING = [
+    # The redirection scan reads the line tokenize() reads: in the raw one the
+    # body's apostrophe paired with a later one and hid the `>`.
+    ("echo \"$(echo \"it's\")\" > plan.md; echo \"it's\"", DENY),
+    ("echo \"$(printf \"'\")\" > notes.md \"'\"", DENY),
+    ("echo \"$(echo \"it's\")\"", ALLOW),
     # Writing is forbidden, in any wrapper.
     ("rm -rf /tmp/x", DENY),
     ("setsid rm -rf /tmp/x", DENY),
@@ -356,6 +361,38 @@ FORBIDDEN = [
     ("coproc git push origin main", DENY),
     ("x=$(gh pr merge 5)", DENY),
     ("echo \"$(gh pr merge 5)\"", DENY),
+    # A body in double quotes has quotes of its own, which shlex took for the
+    # outer ones: an ordinary line was refused as unparsable.
+    ("bash -c \"$(node -p 'require(\"./x.json\").a.replace(\"b ||\",\"c ||\")')\" 2>&1 | head -2", ALLOW),
+    ("echo \"$(cat \"f g\")\" `echo \"h\"`", ALLOW),
+    ("echo \"`cat \"f\"`\"", ALLOW),
+    ("bash -c \"$(echo \"gh pr merge 5\")\"", ALLOW),
+    ("bash -c \"$(gh pr merge \"5\")\"", DENY),
+    ("x=\"$(git push origin \"main\")\"", DENY),
+    ("echo \"$(gh pr merge 5\"", DENY),
+    # `$$` is the process id, and the bracket after it text: masking it as a
+    # body hid the commands up to the next `)`.
+    ("echo \"$$(\" ; gh pr merge 5 ; echo \")\"", DENY),
+    # A body keeps its lines: one ended a false heredoc, and without it the
+    # merge below read as the heredoc's text.
+    ("echo \"<<EOF $(true\nEOF\n)\"\ngh pr merge 5\nEOF", DENY),
+    ("x=$(echo \"$(echo \"it's\")\")", ALLOW),
+    # A `<<WORD` in quotes or in a masked body opens no heredoc, and a real
+    # one in a body ends on `EOF)`.
+    ("echo \"$(echo '<<EOF')\"\ngh pr merge 5", DENY),
+    ("echo \"<<EOF\"\ngh pr merge 5\nEOF", DENY),
+    ("git log --format=\"$(cat <<EOF\n%h\nEOF)\"", ALLOW),
+    ("cat <<A <<B\nit's\nA\nit's\nB\ngh pr merge 5", DENY),
+    ("cat <<A <<B\nit's\nA\nit's\nB\necho ok", ALLOW),
+    ("x=`cat <<EOF\nit's fine\nEOF\n`\necho ok", ALLOW),
+    ("x=`cat <<EOF\nit's fine\nEOF\n`\ngh pr merge 5", DENY),
+    ("x=`gh pr merge 5`", DENY),
+    # Out of quotes a body keeps its words: the shell splits its output.
+    ("git push `echo origin main`", DENY),
+    ("bash -c `cat x.sh`", DENY),
+    ("x=`grep \"a; gh pr merge 5\" f`", ALLOW),
+    ("supabase db push `echo \"--db-url=postgres://u:p@db.example.com/postgres\"`", DENY),
+    ("git commit -F - <<'EOF'\nit's \"$(x\"\nEOF\necho \"$(cat \"f\")\"", ALLOW),
     ("echo `gh pr merge 5`", DENY),
     ("diff <(gh pr merge 5) x", DENY),
     ("echo $(echo $(gh pr merge 5))", DENY),
@@ -799,6 +836,9 @@ def main():
         ("npx --yes supabase db reset --workdir /home/u/myapp",
          {"SUPABASE_WORKDIR": own}, DENY),
         ("supabase db reset --workdir=/elsewhere", {"SUPABASE_WORKDIR": own}, DENY),
+        ("supabase --workdir ../other db reset; echo \"$(echo \"it's\")\"", {"SUPABASE_WORKDIR": own}, DENY),
+        ("bash <<EOF\nsupabase --workdir ../other db reset\nEOF", {"SUPABASE_WORKDIR": own}, DENY),
+        ("bash -c \"$(cat <<EOF\nsupabase --workdir ../other db reset\nEOF\n)\"", {"SUPABASE_WORKDIR": own}, DENY),
         # No stack of its own — the flag is nobody's business here.
         ("supabase db reset --workdir /elsewhere", {}, ALLOW),
     ]
@@ -1061,11 +1101,23 @@ def main():
         if not any(marker in tail for tail in (
                 const("_failsafe.py", "TAIL"),
                 const("forbidden-commands.py", "CORE_OPEN_TAIL"),
+                const("forbidden-commands.py", "UNPARSED_TAIL"),
                 const("no-code-in-planning.py", "REASON"),
                 const("plan-on-disk.py", "TAIL"),
                 const("write-guard.py", "REASON"),
                 const("write-guard.py", "READONLY_REASON"))):
             failures.append(("markers", marker, "a hook's tail", "matched nothing"))
+
+    # A line the hook cannot read is refused with an ending that sends the
+    # session on, not to the person.
+    said = subprocess.run([sys.executable, os.path.join(HOOKS, "forbidden-commands.py"),
+                           "--step", "review", "--root", PRODUCT],
+                          input=json.dumps({"tool_name": "Bash",
+                                            "tool_input": {"command": "echo \"$(cat 'f\""}}),
+                          capture_output=True, text=True, timeout=20,
+                          env=dict(os.environ, CLAUDE_PROJECT_DIR=PRODUCT)).stdout
+    if const("forbidden-commands.py", "UNPARSED_TAIL") not in said:
+        failures.append(("review", "unparsable line", "UNPARSED_TAIL", said.strip()[:120]))
 
     # A hook that breaks refuses rather than letting the call through: every
     # module it loads, broken in turn, and an empty core.json, which used to
@@ -1116,7 +1168,7 @@ def main():
                              "logged" if got else "dropped"))
     total = len(PLANNING) + len(FORBIDDEN) + len(BY_STEP) + 2 + len(workdir_cases) + \
         len(shared_cases) + 1 + 1 + 3 + len(plan_cases) + 3 + \
-        len(const("collect-denials.py", "OWN_MARKERS")) + len(branch_cases) + \
+        len(const("collect-denials.py", "OWN_MARKERS")) + 1 + len(branch_cases) + \
         len(denial_cases) + len(broken_cases)
     for step, command, want, got in failures:
         print("FAIL [%s] %s — expected %s, got %s" % (step, command, want, got))

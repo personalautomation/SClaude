@@ -68,7 +68,7 @@ _failsafe.install("ban check (forbidden-commands.py)")
 from _friction import note  # noqa: E402
 from _shell import (GIT_VALUED, SEPARATORS, call_form, closing_at, inner_command, script_call,  # noqa: E402
                     redirect_targets, strip_heads, strip_keywords, strip_redirections, strip_runners,
-                    strip_wrappers,
+                    readable, strip_wrappers,
                     substitutions, tokenize, ungroup)
 import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
 import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
@@ -454,12 +454,15 @@ def workdir_refuses(command):
 
     Read from the raw command rather than from segments(): the shared tokenizer
     keeps only the last component of a path — it exists to name programs — and
-    here the path is the whole question."""
+    here the path is the whole question. Heredocs included: a shell can run
+    one. Its quoted substitutions are masked as tokenize() masks them
+    (readable): once a raw line that shlex could not read was refused anyway,
+    and an apostrophe in such a body switched this ban off."""
     own = os.environ.get("SUPABASE_WORKDIR")
     if not own or not rule_on("supabase-workdir"):
         return None
     try:
-        words = shlex.split(command)
+        words = shlex.split(readable(command, heredocs=True) or command)
     except ValueError:
         return None
     if not any(os.path.basename(w) == "supabase" for w in words):
@@ -555,6 +558,15 @@ def core_open_refused(command, step):
 
 
 TAIL = _failsafe.TAIL
+
+# A line the hook cannot read is no ban, and nothing waits on the person: the
+# same work spelled more plainly goes through. Its ending instead of TAIL,
+# which once stopped a session over a quoted `"$(cmd "arg")"` it misread;
+# collect-denials.py knows it as the hook's own (OWN_MARKERS).
+UNPARSED = "the command could not be parsed, and the step's bans outweigh convenience"
+UNJUDGED = "a substitution in the command is left open, so it cannot be judged"
+UNNESTED = "a command nested this deep cannot be judged"
+UNPARSED_TAIL = "  Write it more plainly, as separate calls, and carry on."
 
 
 def segments(command, raw=False):
@@ -1059,7 +1071,7 @@ def refuses(command, step, cwd=None, depth=0):
     """The reason to refuse this command, or None."""
     parts = segments(command)
     if parts is None:
-        return "the command could not be parsed, and the step's bans outweigh convenience"
+        return UNPARSED
 
     reason = workdir_refuses(command)
     if reason:
@@ -1068,7 +1080,7 @@ def refuses(command, step, cwd=None, depth=0):
     # What a substitution runs is a command of its own, judged as one.
     inner_parts = substitutions(command)
     if inner_parts is None:
-        return "a substitution in the command is left open, so it cannot be judged"
+        return UNJUDGED
 
     table = {tuple(call_form(list(d["words"]))): d["why"] for d in POLICY.get("deny", [])}
 
@@ -1118,7 +1130,7 @@ def refuses(command, step, cwd=None, depth=0):
             # Deep enough for any honest use; a string nested further than this
             # is refused rather than followed.
             if depth >= 3:
-                return "a command nested this deep cannot be judged"
+                return UNNESTED
             reason = refuses(inner, step, where, depth + 1)
             if reason:
                 return reason
@@ -1155,7 +1167,7 @@ def refuses(command, step, cwd=None, depth=0):
         return reason
     for inner in inner_parts:
         if depth >= 3:
-            return "a command nested this deep cannot be judged"
+            return UNNESTED
         for there in visited:
             reason = refuses(inner, step, there, depth + 1)
             if reason:
@@ -1235,7 +1247,7 @@ if payload.get("tool_name") == "Bash":
     if not reason and core_open_refused(command, step):
         deny(CORE_OPEN_NO, step, command, CORE_OPEN_TAIL)
     if reason:
-        deny(reason, step, command)
+        deny(reason, step, command, UNPARSED_TAIL if reason in (UNPARSED, UNJUDGED, UNNESTED) else None)
     question = shared_schema_asks(command)
     if question:
         # Asked of the person at the terminal rather than refused: not our

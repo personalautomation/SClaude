@@ -900,8 +900,9 @@ echo "watcher=[$SESSION_WATCHER]"
     check("resumed-review-says-what-it-is-handed",
           '${brief:+ · $brief}' in RUN[RUN.index("review_brief() {"):]
           and 'brief="$(review_brief "$wt" "$step" resumed)"' in RUN, True)
-    check("auto-closed-gate-asks-nobody",
-          gate.index('review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"')
+    check("auto-closed-gate-unasked-only-with-go-on",
+          '[[ -n "${SESSION_AUTO_CLOSED:-}" && "$go_on" -eq 1 ]]' in gate
+          and gate.index('review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"')
           < gate.index("Back to a review session for it?"), True)
     reopen = RUN[RUN.index("review_reopen() {"):]
     reopen = reopen[:reopen.index("\n}\n")]
@@ -922,7 +923,8 @@ echo "watcher=[$SESSION_WATCHER]"
     # fixed word (and a fixed split for --open-since), local_review a fixed
     # count and says it ran, and `ask` answers from a list (no once it runs
     # out) and says what it was asked.
-    def enough_gate(said, word, count, mode="local", split="0 0", answers=(), done=False, go_on=False):
+    def enough_gate(said, word, count, mode="local", split="0 0", answers=(), done=False, go_on=False,
+                    auto=False):
         wt = os.path.join(tmp, "enough-wt")
         fake = os.path.join(tmp, "enough-lib")
         os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"), exist_ok=True)
@@ -946,10 +948,11 @@ echo "watcher=[$SESSION_WATCHER]"
                  'ANSWERS=(%s); is_yes() { [[ "$1" == y ]]; }\n'
                  'ask() { echo "ASKED: $1"; printf -v "$2" %%s "${ANSWERS[0]:-n}"; ANSWERS=("${ANSWERS[@]:1}"); }\n'
                  'say() { echo "$*"; }\ninfo() { echo "$*"; }\nwarn() { echo "$*"; }\n'
-                 'run_step() { echo "RUN_STEP $3"; }\n'
+                 'run_step() { echo "RUN_STEP $3"; }\nreview_reopen() { echo REOPEN; }\n'
+                 'SESSION_AUTO_CLOSED=%s\n'
                  'review_close_gate %s x 143; echo "RC=$?"\n') % (
                      fake, mode, count, count, "true" if done else "false",
-                     " ".join(answers), wt)
+                     " ".join(answers), "1" if auto else "", wt)
         out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=60,
                              env=dict(os.environ, PATH=os.environ["PATH"]), stdin=subprocess.DEVNULL)
         with open(state) as fh:
@@ -998,6 +1001,16 @@ echo "watcher=[$SESSION_WATCHER]"
     # Off for this step 4 only: the box is left as the person set it.
     check("go-on-ceiling-this-step", (left["steps"]["review"].get("go_on"),
                                       left["steps"]["review"].get("go_on_ceiling")), (True, True))
+    # A session sclaude closed: back unasked with [g] ticked, through the
+    # question without it — a yes reopens it as the unasked way does, a no
+    # holds the rounds.
+    out, left = enough_gate("", "open: 3 review thread(s) open", 2, go_on=True, auto=True)
+    check("auto-closed-go-on-unasked", "REOPEN" in out and "ASKED" not in out, True)
+    out, left = enough_gate("", "open: 3 review thread(s) open", 2, answers=("y",), auto=True)
+    check("auto-closed-asks-without-go-on",
+          "ASKED: Back to a review session" in out and "REOPEN" in out and "RUN_STEP" not in out, True)
+    out, left = enough_gate("", "open: 3 review thread(s) open", 2, answers=("n", "n"), auto=True)
+    check("auto-closed-no-holds", "REOPEN" not in out and "RUN_STEP" not in out and "RC=1" in out, True)
     out, left = enough_gate("", "open: 3 review thread(s) open", "failed", answers=("y",), go_on=True)
     check("go-on-retries", out.count("REVIEWED"), 11)
     check("go-on-asks-after-retries", out.count("ASKED: Go on with this head unreviewed"), 1)

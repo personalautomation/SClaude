@@ -844,7 +844,13 @@ regression_run_body() {
   echo "${BOLD}${BLUE}── $(phase_title regression "$stage")${total_expected:+ (expected $(regression_duration "$total_expected"))} ──${OFF}"
   [[ -n "$base" ]] && info "   $base"
 
-  local one
+  local one added=""
+  # Said above the list, not beside a part: each part's line is rewritten as
+  # it runs. On a whole stage only: a run of a few parts (`only` — the
+  # manual list, one part again) takes them from another list or none, and
+  # the whole run before it named the stage's.
+  [[ -z "$only" ]] && added="$(project_regression_added "$stage" "$wt" 2>/dev/null || true)"
+  [[ -n "$added" ]] && info "   this branch adds to main's list: $added"
   for part in $parts; do
     one="$(regression_expected "$wt" "$stage" "$part" || true)"
     printf '  %s%s\n' "$part" \

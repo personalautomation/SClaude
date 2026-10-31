@@ -1021,7 +1021,9 @@ session_ended() {
   # The session said it was done and the watcher closed it: its report is
   # printed here, since claude's screen went with it, and the gates after it
   # act on what they find without asking — the person did not type /exit, so
-  # nobody is at the session's end to answer. See done_marker.
+  # nobody is at the session's end to answer. See done_marker. Step 4's gate
+  # is the exception: whether its rounds go on unasked is [g]'s to say
+  # (review_close_gate).
   SESSION_AUTO_CLOSED=""
   session_closed "$(done_marker "$wt")" "$wt" "$session" "" "$(review_tally "$wt" "$step")" \
     step "$step" "$(step_session_number "$state" "$step" "$session")" \
@@ -3052,13 +3054,16 @@ review_close_gate() {
   standing="$(python3 "$LIB/pr_context.py" --brief "$wt" "$pr" "$repo" \
                 "$(review_last_look "$wt")" 2>/dev/null || true)"
   [[ -n "$standing" ]] && warn "    $standing"
-  # A session sclaude closed goes back by itself, unless [g] did it so
-  # many times that its ceiling hands the choice to the person.
+  # Back to a session by itself only with [g] ticked, short of its ceiling;
+  # otherwise the person is asked, whoever closed the session. A session
+  # sclaude closed went back unasked once, [g] or not: fifteen rounds ran
+  # through one morning on a two-line change, each feeding the next, with the
+  # box unticked and its line promising a question that never came.
   local go_on=0
   if review_go_on "$wt"; then
     review_go_on_round "$wt" && go_on=1 || go_on=2
   fi
-  if [[ -n "${SESSION_AUTO_CLOSED:-}" && "$go_on" -ne 2 ]]; then
+  if [[ -n "${SESSION_AUTO_CLOSED:-}" && "$go_on" -eq 1 ]]; then
     review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"
     return 1
   fi
@@ -3071,6 +3076,12 @@ review_close_gate() {
     ask "${BOLD}Back to a review session for it? [y/n] ${OFF}" answer yn
   fi
   if is_yes "$answer"; then
+    # A session sclaude closed: review_reopen picks the session, a fresh one
+    # for a new round, as it does unasked.
+    if [[ -n "${SESSION_AUTO_CLOSED:-}" ]]; then
+      review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"
+      return 1
+    fi
     run_step "$wt" "$slug" review
     return 1
   fi
@@ -3169,7 +3180,8 @@ review_yours_wait() {
 }
 
 # Where a review that is not done goes, when its session was closed by the
-# orchestrator rather than by a person — so nobody is there to be asked.
+# orchestrator rather than by a person: unasked with [g] ticked, on the
+# person's yes without it (review_close_gate).
 #
 #   review_reopen <wt> <slug> <pr> <repo> <waited>
 #
@@ -3208,11 +3220,11 @@ review_reopen() {
 # by review_report), and how
 # to end the search: each round's new findings went to a fresh session for as
 # long as the person did not press `s` — eighteen rounds on one feature, most
-# of their findings in what users do not see. Said, not asked: this runs when
-# the orchestrator closed the session, with nobody bound to be there, and a
-# question would hold the rounds until somebody answered. The keys that end
-# the search are already there: `s` while a review pass runs, ⏭ on the
-# topic's message of the pass and of the session (review_enough).
+# of their findings in what users do not see. Said, not asked: whether the
+# rounds wait for somebody is [g]'s to say, and without it the question after
+# this is asked anyway (review_close_gate). The keys that end the search are
+# there too: `s` while a review pass runs, ⏭ on the topic's message of the
+# pass and of the session (review_enough).
 #
 #   review_stuck_say <wt>
 review_stuck_say() {

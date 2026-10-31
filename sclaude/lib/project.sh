@@ -33,9 +33,11 @@
 # key set in the main checkout (`merge: auto`, uncommitted or merged after the
 # feature began) reached one feature and not the next. The worktree's answers
 # only with no main checkout's at all; project_get also takes from it a key
-# the main checkout does not have yet, a feature in flight adding it. One key
-# is read from the worktree alone: see regression_serve_command; and the
-# check before a merge reads the merged tree's (merge_build_check).
+# the main checkout does not have yet, a feature in flight adding it, and a
+# regression stage takes the parts the worktree's list adds to main's
+# (project_regression_parts). One key is read from the worktree alone: see
+# regression_serve_command; and the check before a merge reads the merged
+# tree's (merge_build_check).
 project_config() {
   local wt="${1:-}"
   if [[ -n "${REPO:-}" && -f "$REPO/.sclaude/config.json" ]]; then
@@ -120,9 +122,42 @@ project_has() {
 
 # The parts of a regression stage, in order. Empty means the project has no
 # regression for that stage, and the gate skips it.
+#
+# Main's list, and in it each part the worktree's list adds, right after the
+# part before it there. The stage's key is main's, so a branch that added a
+# check to it went through its own regression without that check, which then
+# ran first on the next feature's. A part the branch drops still runs: no
+# branch switches a check off for itself before the merge. An added part's
+# command is the worktree's, a key main lacks (project_get).
 project_regression_parts() {
-  local stage="$1" wt="${2:-}"
-  project_get "regression.$stage" "$wt" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'
+  local stage="$1" wt="${2:-}" file own p i at=0
+  local -a out=() mine=()
+  file="$(project_config "$wt")" || return 0
+  mapfile -t out < <(project_value "$file" "regression.$stage")
+  own="${wt:+$wt/.sclaude/config.json}"
+  if [[ -n "$own" && -f "$own" && "$own" != "$file" ]]; then
+    mapfile -t mine < <(project_value "$own" "regression.$stage")
+    for p in "${mine[@]}"; do
+      for i in "${!out[@]}"; do
+        [[ "${out[$i]}" == "$p" ]] && { at=$((i + 1)); continue 2; }
+      done
+      out=("${out[@]:0:$at}" "$p" "${out[@]:$at}")
+      at=$((at + 1))
+    done
+  fi
+  echo "${out[*]}"
+}
+
+# The parts project_regression_parts runs for this branch only: the ones its
+# list adds to main's.
+project_regression_added() {
+  local stage="$1" wt="${2:-}" file main p out=""
+  file="$(project_config "$wt")" || return 0
+  main=" $(project_value "$file" "regression.$stage" | tr '\n' ' ')"
+  for p in $(project_regression_parts "$stage" "$wt"); do
+    [[ "$main" == *" $p "* ]] || out+="${out:+ }$p"
+  done
+  echo "$out"
 }
 
 # The command behind a named part. Empty means the part is not described, which

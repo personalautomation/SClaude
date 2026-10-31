@@ -133,6 +133,27 @@ try:
     out, _, _ = run_bash('REPO=%s; project_config_with database.local %s' % (proj, wt), tmp)
     check("section-main-lacks-from-the-worktree", out.strip(), os.path.join(wt, ".sclaude/config.json"))
 
+    # A regression stage: main's list, with what the branch's list adds in
+    # its place there; a part the branch drops still runs; without a copy of
+    # its own, or with none for the stage, main's list as it is.
+    with open(os.path.join(wt, ".sclaude/config.json"), "w") as fh:
+        json.dump({"commands": {"unit": "u", "types": "t"},
+                   "regression": {"local": ["unit", "types", "e2e"], "preview": ["e2e"]}}, fh)
+    out, _, _ = run_bash('REPO=%s; project_regression_parts local %s' % (proj, wt), tmp)
+    check("branch-adds-in-place", out.strip(), "unit types typecheck e2e")
+    out, _, _ = run_bash('REPO=%s; project_regression_added local %s' % (proj, wt), tmp)
+    check("branch-added-named", out.strip(), "unit types")
+    with open(os.path.join(wt, ".sclaude/config.json"), "w") as fh:
+        json.dump({"regression": {"local": ["typecheck", "lint"]}}, fh)
+    out, _, _ = run_bash('REPO=%s; project_regression_parts local %s' % (proj, wt), tmp)
+    check("branch-drop-still-runs", out.strip(), "typecheck lint e2e")
+    out, _, _ = run_bash('REPO=%s; project_regression_parts preview %s' % (proj, wt), tmp)
+    check("branch-without-stage-main-list", out.strip(), "e2e")
+    out, _, _ = run_bash('REPO=%s; project_regression_added preview %s' % (proj, wt), tmp)
+    check("branch-without-stage-adds-nothing", out.strip(), "")
+    out, _, _ = run_bash('REPO=%s; project_regression_parts local' % proj, tmp)
+    check("no-worktree-main-list", out.strip(), "typecheck e2e")
+
     # --- no config at all ----------------------------------------------------
     #
     # The whole point of the move: absence, not this product's answers.

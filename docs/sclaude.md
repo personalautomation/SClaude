@@ -39,7 +39,12 @@ in the main checkout — `merge: auto`, committed or not — reaches each featur
 at once. A worktree's copy answers only a key the main checkout has none of,
 a feature adding it; the readers that take a whole section (the feature's
 database, the board) take it from there too when the main checkout has none
-of it (`project_config_with`). One key is the other way round:
+of it (`project_config_with`). A regression stage's list is main's, with each
+part the worktree's list adds to it run too, in its place there, and named
+above the list when a whole stage starts (`project_regression_parts`,
+`project_regression_added`): a branch that added a check otherwise went
+through its own regression without it. A part the branch drops still runs
+until the merge. One key is the other way round:
 `commands["e2e:server"]`, how the local e2e serves the run's build, comes from
 the worktree's copy alone (`regression_serve_command`), because whether a
 build can stand in for the dev server depends on the branch's code. A change
@@ -1364,8 +1369,13 @@ ends on a verdict from the findings per round. When it says "Not converging"
 over four rounds or more (`stuck` in `review_report.py`), the next fresh
 session is preceded by a warning that names the keys ending the search — `s`
 while a review pass runs, ⏭ on the feature's topic (`review_stuck_say`). Said,
-not asked: the session was closed by the orchestrator, nobody is bound to be
-there, and a question would hold the rounds until somebody answered. On one
+not asked: whether the rounds wait for somebody is `[g]`'s to say. With it
+ticked, a session the orchestrator closed goes back to a review session by
+itself (`review_reopen`); without it, sclaude asks "Back to a review session
+for it?" first, whoever closed the session (`review_close_gate`), and a yes
+takes the same way. It once went back unasked whatever the box said, and one
+two-line change took fifteen rounds that way through a morning, the box
+unticked and its line promising a question. On one
 pull request the verdict said "Not converging" eighteen rounds in a row, each
 followed by a fresh session, until the person stopped it by hand. The same
 warning follows "the fixes are feeding the review" said two rounds running,

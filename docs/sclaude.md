@@ -579,7 +579,9 @@ context to work through.
 A step is closed by a result sclaude checks after the session ends, not by the
 session saying it is done (`after_step` in `run.sh`). Step 1 closes on an
 approved plan whose text could be read back from the transcript; step 2 on the
-person's "yes, it works" **and** a green local regression; step 3 on a pull
+person's "yes, it works" **and** a green local regression — the yes given in
+the session's own dialog (`Accept work`, read back by `code_accepted`), or at
+sclaude's question after a session left with /exit; step 3 on a pull
 request that exists and carries every commit; step 4 on an automatic review
 with nothing left open **and** a green local regression. While the result is
 missing the step stays current. A session that ended by itself is sent back

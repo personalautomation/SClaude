@@ -53,13 +53,23 @@ The orchestrator runs this step with restrictions: `gh pr create`, merge, deploy
 
 <include:report>
 
-**When the work is done, `sclaude` closes this session itself.** Write the marker first — `echo done > .sclaude/local/feature/session-done` — and then the report, with no tool call after it. About thirty seconds after your turn ends the session is closed and the report printed in the orchestrator's terminal; if I type anything in those thirty seconds, the closing is called off and the marker removed; write it again when you are done again. After the session closes, sclaude asks me whether everything works; if I say no, I come back to this same conversation with what is wrong. Leave the marker out when something needs my answer before the work can be called done — then I close the session myself.
+**When the work is done, I accept it here, in this session.** In this step the report above is not the last message: write it in full, then — with no tool call between the two — put one question to me with `AskUserQuestion` — this question and no other, its header and both option labels exactly as written here, in English, with no `(Recommended)` mark, whatever language we speak; the question text and the descriptions are yours, in my language. `sclaude` prints the report given before the question, so after `Accept` nothing but the one line below follows it — no second report:
 
-Once the work is done, tell me in that one message — in your own words, but cover all of it:
+- header: `Accept work`;
+- question: whether I accept the work — everything works as it should, and the step can close;
+- option `Accept` — everything works: the session closes and `sclaude` goes on to step 3 without asking again;
+- option `Remarks` — something is wrong or missing: I write it in the notes or as my own answer, and we carry on here.
+
+**On `Accept`** with no notes: write the marker — `echo accepted > .sclaude/local/feature/session-done` — then one short line that the step is accepted, with no tool call after it. `sclaude` closes the session a few seconds later and continues by itself: the regression, then step 3.
+
+**On anything else** — `Remarks`, my own answer, notes beside `Accept`, the dialog dismissed — write no marker. Take what I said as the next thing to fix; if I chose `Remarks` without saying what, ask me what is wrong. When it is fixed, report again and ask the same question again. Typing to you after `Accept` takes it back too: the marker is removed, and you ask again when you are done again.
+
+Leave the question out when something needs my answer before the work can be called done — a proposal, a decision only I can make: then put that to me instead, and I close the session myself with `/exit`; `sclaude` asks me then whether everything works, and a no brings me back to this same conversation with what is wrong.
+
+The report, before the question — in your own words, but cover all of it:
 
 - the work in this session is done — what's ready, and what's left open;
 - **each acceptance criterion by identifier, and where it stands**: done and verified how, done but unverified, or not done and why. Go through the list rather than summarising it — a criterion you don't mention reads as one you forgot, and this is the last moment it's cheap to fix. If there were no criteria, say that instead;
-- with the marker written, that `sclaude` closes this session itself; without it, that I should now close Claude with `/exit`;
-- after that the `sclaude` orchestrator continues — it asks me to confirm the work, then launches step 3 itself.
+- that on `Accept` `sclaude` closes this session itself and launches step 3; without the question, that I should now close Claude with `/exit`.
 
-Then stop. Don't offer to open a pull request and don't ask whether to: I can't say yes anyway, since the next step starts when this session closes.
+Don't offer to open a pull request and don't ask whether to: the next step starts when this session closes.

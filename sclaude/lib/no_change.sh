@@ -203,6 +203,7 @@ no_change_finish() {
     info "  No local regression, pull request, review, preview or production to go through."
     step_run "$wt" code close
     state_set "$state" steps.code.auto_returns null 2>/dev/null || true
+    state_set "$state" steps.code.gate null 2>/dev/null || true
     state_set "$state" steps.code.done true
     state_set "$state" steps.code.finished "$(date -Iseconds)"
   else

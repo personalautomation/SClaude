@@ -592,7 +592,8 @@ run_step() {
   local map; map="$(flow_address "$wt")" && info "   Where it stands: $map"
   info "   $model / $effort / $mode · $wt"
   # A step whose session is finished, and which waits only on the local
-  # regression (after_step marks it), goes back to its closing check.
+  # regression (after_step marks it, and session_ended on step 2's accept in
+  # the session, before the friction review), goes back to its closing check.
   # Resuming the session instead put the person in front of its old report:
   # the watcher clears the marker on the way in, nothing in the session writes
   # it again, and the conversation stood open until somebody typed /exit.
@@ -1029,6 +1030,16 @@ session_ended() {
     step "$step" "$(step_session_number "$state" "$step" "$session")" \
     && SESSION_AUTO_CLOSED=1
   [[ "$step" == "review" && -n "$SESSION_AUTO_CLOSED" ]] && review_round_ends "$wt"
+  # Step 2 asks its question in its own dialog (code_accepted). A yes there
+  # finishes the session as the terminal's yes does: the step waits for the
+  # regression alone (`steps.code.gate`), so after_step asks nothing, and a
+  # start after an interruption on the way — the friction review cut off, a
+  # Ctrl-C — goes to the regression rather than back into this session.
+  # after_step writes the criteria: before reading the yes on a pass that is
+  # not back at the gate, and on every pass before the step closes.
+  if [[ "$step" == "code" && -n "$SESSION_AUTO_CLOSED" ]] && code_accepted "$wt" "$session"; then
+    state_set "$state" "steps.$step.gate" true
+  fi
   # Left by the person in a tab of its own: the tab closed with its last
   # message, which is often the one that says what is left — once a review
   # session's account of what it resolved and what it waits for went with it.
@@ -1459,14 +1470,29 @@ after_step() {
       ;;
     *)
       # Criteria the session agreed with the human mid-step are in the plan
-      # only; QA ticks in the issue. Before the question, on every exit: the
-      # list should not wait for the human to call the step done.
-      # Back at the gate (run_step, `steps.code.gate`) the person has said yes
-      # already, about the same session's work: nothing to ask again.
-      [[ "$gate_only" == "gate" ]] && answer=y || {
-      extend_acceptance "$wt"
-      ask "${BOLD}Please check everything yourself after AI. Do you confirm that everything works as it should? [y/n] ${OFF}" answer yn
-      }
+      # only; QA ticks in the issue. Written as the session ends — before the
+      # question, or on an accept in the session — so that the list does not
+      # wait for the person or the regression; and again before the step
+      # closes, since step 3 copies the issue's list into the pull request:
+      # that one catches a write cut off or refused, a pass back at the gate,
+      # and criteria a fixing session added. It writes only what the issue
+      # lacks, and leaves rewordings to the first write and to step 4. Never a hold: a write GitHub
+      # refuses is warned about, and the plan keeps the list (sync_acceptance).
+      # Once the person has said yes about this session's work there is
+      # nothing to ask again: back at the gate (run_step, `steps.code.gate`),
+      # or straight from session_ended when they accepted it in the session
+      # itself, through the question code.md ends on (code_accepted, which
+      # sets the same gate). Without it — the session left with /exit, a
+      # proposal still open — the question is asked here, as before.
+      [[ "$gate_only" == "gate" ]] || extend_acceptance "$wt"
+      if [[ "$gate_only" == "gate" ]]; then
+        answer=y
+      elif [[ "$(state_get "$state" "steps.$step.gate" 2>/dev/null || true)" == "true" ]]; then
+        answer=y
+        info "  You accepted the work in the session."
+      else
+        ask "${BOLD}Please check everything yourself after AI. Do you confirm that everything works as it should? [y/n] ${OFF}" answer yn
+      fi
       if ! is_yes "$answer"; then
         # Back to the same session, which knows what it built: a person is in
         # the loop, so there is no limit on how often. What they say is wrong
@@ -1519,6 +1545,9 @@ after_step() {
           return 0
         fi
       fi
+      # `reworded`: a criterion worded otherwise in the issue was reported by
+      # the write above, and step 4 asks about it (reword_acceptance).
+      extend_acceptance "$wt" reworded
       ;;
   esac
 
@@ -3509,8 +3538,9 @@ review_carry_on() {
 #   * pr — capture_pr finds the pull request, and its head is what was pushed;
 #   * plan — the approval is the person's own decision, made in the session
 #     (it is also the marker: step 1 cannot write files);
-#   * code — sclaude asks the person whether it works, and a "no" goes back to
-#     the same session;
+#   * code — the person accepts the work in the session's own dialog
+#     (code_accepted); after a session left with /exit sclaude asks whether
+#     it works, and a "no" goes back to the same session;
 #   * friction and the epilogue — the person approved the plan in the session,
 #     and nothing after them waits on a check.
 #
@@ -3518,6 +3548,29 @@ review_carry_on() {
 # ask, since nobody typed /exit (see auto_return).
 done_marker() {
   echo "$1/.sclaude/local/feature/session-done"
+}
+
+# Whether the person accepted step 2's work in the session's own dialog,
+# during this launch of it: the question code.md ends on, answered "Accept"
+# with nothing typed after it (session_end.py accepted). Counted from the
+# launch — the run's `resumed`, or its `started` (session_runs) — so that an
+# answer given in an earlier launch of a resumed conversation is not taken
+# for this one's.
+#
+#   code_accepted <wt> <session>
+code_accepted() {
+  local wt="$1" session="$2" since
+  since="$(python3 - "$wt/.sclaude/local/feature/state.json" "$session" <<'PY' 2>/dev/null
+import datetime, json, sys
+with open(sys.argv[1]) as fh:
+    runs = ((json.load(fh).get("steps") or {}).get("code") or {}).get("runs") or []
+mine = [r for r in runs if isinstance(r, dict) and r.get("session") == sys.argv[2]]
+began = (mine[-1].get("resumed") or mine[-1].get("started")) if mine else ""
+print(int(datetime.datetime.fromisoformat(began).timestamp()) if began else 0)
+PY
+)"
+  [[ "$since" =~ ^[0-9]+$ ]] || since=0
+  [[ "$(python3 "$LIB/session_end.py" accepted "$(session_transcript "$wt" "$session")" "$since" 2>/dev/null)" == yes ]]
 }
 
 # What a conversation opened again with a message is told of its marker.
@@ -3597,7 +3650,7 @@ session_watch_start() {
   label="${label##*/}${kind:+ ($kind)}"
   rm -f "$limit_file"
   (
-    marker="" since="" ended="" size="" seen="" verdict=""
+    marker="" since="" ended="" size="" seen="" verdict="" grace=""
     lseen="" hit="" told="" acted="" due=0
     # The process is found by any id the conversation has had: Claude Code
     # may carry it on under a new one while it runs, and the transcript with
@@ -3672,7 +3725,13 @@ session_watch_start() {
         human) [[ -n "$marker" ]] && rm -f "$marker"; ended="" ;;
         ended)
           [[ -n "$ended" ]] || ended="$(date +%s)"
-          if (( $(date +%s) - ended >= ${SESSION_GRACE:-30} )); then
+          # The grace is for reading the report. Step 2's marker says
+          # `accepted` once the person has read it and answered its question
+          # (code.md): there is nothing left to wait for.
+          grace="${SESSION_GRACE:-30}"
+          [[ "$marker" == "$done" && "$(head -c 16 "$done" 2>/dev/null)" == accepted* ]] \
+            && grace="${SESSION_ACCEPT_GRACE:-3}"
+          if (( $(date +%s) - ended >= grace )); then
             # What session_ended looks for to know it was not a person's /exit.
             [[ -n "$marker" ]] || echo "${said:-plan approved}" > "$done"
             pkill -TERM -f -- "(--session-id|--resume) ($ids)( |$)" 2>/dev/null || true

@@ -122,6 +122,16 @@ breaks the other silently — grep before you edit:
   `run.sh` and spelled out in `sclaude/prompts/review.md`;
   `tests/review-round.py` checks the two agree.
 
+- Step 2's closing question — the header `Accept work`, the option `Accept`
+  and the marker word `accepted` — is spelled out in `sclaude/prompts/code.md`
+  and read by `ACCEPT_HEADER`/`ACCEPT_LABEL` in `sclaude/lib/session_end.py`
+  (`code_accepted` in `run.sh`) and the watcher's short grace in
+  `session_watch_start`; `tests/code-accept.py` checks the sides agree.
+  Reworded on one side alone, sclaude asks again in its terminal, or a
+  session closes on half a report.
+
+  <!-- Added by Claude on 2026-10-31 with step 2 accepted in its own dialog. -->
+
 - `as on r<id>`, the reply `sclaude/prompts/review.md` asks for when a
   declined thread repeats an earlier one, is read by `CITED` in
   `sclaude/lib/review_report.py`; `tests/review-report.py` checks both sides.

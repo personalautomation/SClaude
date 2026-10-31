@@ -557,8 +557,11 @@ was given stays readable.
 
 **Step 2, code.** A fresh session builds it, with the approved plan as its
 brief. Each commit names the criterion it serves in a `Requirement:` footer.
-Claude checks its work in Chrome at the feature's address. The step closes when
-you say it is done **and** the product's local tests pass. A branch not
+Claude checks its work in Chrome at the feature's address. It ends on one
+question in its own dialog: **Accept**, and the session closes and sclaude goes
+on with no question of its own; **Remarks**, and you say what is wrong and the
+session carries on. The step closes when you accept the work **and** the
+product's local tests pass. A branch not
 pushed yet is put on top of main before those tests, without a question, when
 it rebases cleanly.
 

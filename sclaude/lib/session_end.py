@@ -22,6 +22,8 @@
 #   session_end.py watch-said <transcript> <after> <line>
 #                                               → none | human | ended | working
 #   session_end.py approved <transcript>        → when the plan was approved
+#   session_end.py accepted <transcript> <after> → yes | no: step 2's work
+#                                                 accepted in its own dialog
 #   session_end.py last <transcript>            → the last message's text
 #   session_end.py first <transcript>           → the text that ended the first
 #                                                 turn, before anybody answered
@@ -276,6 +278,61 @@ def approved(path):
     return moment
 
 
+# Step 2 ends on a question in the session's own dialog (prompts/code.md):
+# its header and the label of the answer that accepts the work, spelled out
+# there in English whatever language the session speaks. The person's
+# "Accept" there is the yes sclaude used to ask for after the session closed.
+ACCEPT_HEADER = "Accept work"
+ACCEPT_LABEL = "Accept"
+
+
+def acceptance(result):
+    """True or False when an AskUserQuestion result answers step 2's
+    question, None when it is about anything else. Notes added to "Accept"
+    are remarks: the work is not accepted with something still to say."""
+    if not isinstance(result, dict):
+        return None
+    answers = result.get("answers") or {}
+    notes = result.get("annotations") or {}
+    for question in result.get("questions") or []:
+        if not isinstance(question, dict) or question.get("header") != ACCEPT_HEADER:
+            continue
+        text = question.get("question")
+        said = (notes.get(text) or {}) if isinstance(notes, dict) else {}
+        label = str(answers.get(text) or "") if isinstance(answers, dict) else ""
+        # The questions' rule marks a recommendation "(Recommended)" (code.md
+        # asks for the bare label, and a session may follow the other rule).
+        # Nothing else: "Accept (but …)" typed as an answer is a remark.
+        return label in (ACCEPT_LABEL, ACCEPT_LABEL + " (Recommended)") \
+            and not (isinstance(said, dict) and str(said.get("notes") or "").strip())
+    return None
+
+
+def accepted(path, after):
+    """Whether the person accepted step 2's work in the session, after
+    `after` (seconds since the epoch: this launch of the session).
+
+    The last answer to step 2's question counts, and only while nobody has
+    typed since: a person who goes on talking after "Accept" has taken it
+    back, and the session asks again when it is done again.
+    """
+    asked, state = set(), False
+    for entry in entries(path):
+        moment = when(entry)
+        if state and typed_by_a_person(entry):
+            state = False
+        for block in (entry.get("message") or {}).get("content") or []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and block.get("name") == "AskUserQuestion":
+                asked.add(block.get("id"))
+            elif block.get("type") == "tool_result" and block.get("tool_use_id") in asked:
+                verdict = acceptance(entry.get("toolUseResult"))
+                if verdict is not None:
+                    state = bool(verdict) and moment is not None and moment >= after
+    return state
+
+
 def limit(path, after=0):
     """The usage limit the session is standing on, as (entry, resets, kind).
 
@@ -360,11 +417,28 @@ def last(path):
     prompts ask for the report. A plan still waiting on its dialog is the
     report — the retrospective may be closed there (watch_said), and its
     prompts say a plan carries every section — in place of the text before it.
+
+    Step 2 gives its report before its question (ACCEPT_HEADER), with no
+    tool call between them, and after "Accept" writes its marker and one
+    line: the report is the text before the question, kept ahead of that
+    line until somebody types again.
     """
-    texts = []
+    texts, carried, asked = [], [], {}
     for entry in entries(path):
         kind = entry.get("type")
         if kind == "user":
+            # Somebody typing ends what an accept carried: the person, or
+            # sclaude's message a launch opens on, which is marked as typed.
+            # A notification or a reminder in the seconds before the close
+            # does not.
+            if typed_by_a_person(entry):
+                carried = []
+            for block in (entry.get("message") or {}).get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "tool_result" \
+                        and block.get("tool_use_id") in asked:
+                    verdict = acceptance(entry.get("toolUseResult"))
+                    if verdict is not None:
+                        carried = asked[block.get("tool_use_id")] if verdict else []
             texts = []
         elif kind == "assistant":
             for block in (entry.get("message") or {}).get("content") or []:
@@ -374,7 +448,10 @@ def last(path):
                 elif isinstance(block, dict) and block.get("type") == "text" \
                         and (block.get("text") or "").strip():
                     texts.append(block["text"].strip())
-    return without_exit("\n\n".join(texts))
+                elif isinstance(block, dict) and block.get("type") == "tool_use" \
+                        and block.get("name") == "AskUserQuestion":
+                    asked[block.get("id")] = list(texts)
+    return without_exit("\n\n".join(carried + texts))
 
 
 def first(path):
@@ -460,6 +537,12 @@ def main():
         moment = approved(args[1])
         if moment is not None:
             sys.stdout.write("%d\n" % int(moment))
+    elif len(args) == 3 and args[0] == "accepted":
+        try:
+            after = float(args[2])
+        except ValueError:
+            after = 0.0
+        sys.stdout.write(("yes" if accepted(args[1], after) else "no") + "\n")
     elif len(args) in (2, 3) and args[0] == "limit":
         try:
             after = float(args[2]) if len(args) == 3 else 0.0

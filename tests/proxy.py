@@ -755,16 +755,24 @@ def main():
             worker.kill()
             worker.wait()
 
-        # A request routed by the cookie asks the server to close after it, so
-        # the next request — maybe after a switch — is routed afresh; one
-        # routed by the host keeps its connection.
+        # Every request handed to a server asks it to close after answering, so
+        # the next request — maybe after a switch, maybe for the proxy's own
+        # /__sclaude/login opened beside a page of the feature — comes on a
+        # fresh connection and is routed afresh; a WebSocket upgrade keeps its
+        # own Connection header.
         echo_srv, echo_port = connection_echo()
         ups.append(echo_srv)
         register(registry, root, "h", echo_port)
         _, _, body = request(port, host, cookie="sclaude_feature=h")
         check("a cookie-routed request closes after the answer", body, "connection=close")
         _, _, body = request(port, "h." + host)
-        check("a host-routed request keeps its connection", body, "connection=")
+        check("a host-routed request closes after the answer", body, "connection=close")
+        _, _, body = raw_request(port, "GET / HTTP/1.1\r\nHost: h.%s\r\n"
+                                 "Connection: keep-alive\r\n\r\n" % host)
+        check("a kept-alive request closes after the answer", body, "connection=close")
+        _, _, body = raw_request(port, "GET / HTTP/1.1\r\nHost: h.%s\r\n"
+                                 "Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n" % host)
+        check("a WebSocket upgrade keeps its Connection header", body, "connection=Upgrade")
 
         status, _, body = request(port, host, "/__sclaude/ping")
         check("ping answers cheaply", (status, body), ("HTTP/1.1 200 OK", "sclaude-proxy"))

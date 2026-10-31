@@ -4,7 +4,7 @@
 #
 # Each feature's `next dev` listens on a port of its own (feature_port in
 # sclaude/lib/worktree.sh), and nobody is meant to remember those. This listens
-# on the one port everybody already knows and hands each connection to the
+# on the one port everybody already knows and hands each request to the
 # server the Host header names. Chrome resolves every *.localhost name to the
 # loopback by itself, so no DNS or hosts file is involved — and a different host
 # is also what keeps two features' cookies apart, which different ports alone
@@ -26,16 +26,16 @@
 # a crash: a feature whose server is down is listed as not running, and a link
 # to a tree that is gone is skipped.
 #
-# Routing is per connection, by its first request. A browser does not carry
-# requests for two hosts over one HTTP/1.1 connection, so the first Host is the
-# Host of the whole connection, and after it the bytes are only copied both
-# ways. That is also why a WebSocket (Next's HMR) needs no code of its own: its
-# upgrade is a request like any other, and what follows it is more bytes.
-# The one place a connection could change its mind is the cookie. Every page of
-# this proxy closes its connection, and so does every request routed by the
-# cookie — the server is asked to close after answering (close_after) — so
-# pooled connections, a browser's or `tailscale serve`'s, never carry a request
-# to the feature the cookie named a moment ago.
+# Routing is per request, by closing after each one. A connection is routed by
+# its first request and after it the bytes are only copied both ways, so every
+# request handed to a dev server asks it to close after answering (close_after).
+# A browser keeps its connections, and so does `tailscale serve`: without the
+# close, the next request on a connection that once reached a feature — a sign-in
+# link to this proxy's own /__sclaude/login, or a page after the cookie switched
+# to another feature — would go on to that feature's server as bytes, unread
+# here. The proxy's own pages close their connection too. A WebSocket (Next's
+# HMR) needs no code of its own: its upgrade is a request like any other, left
+# open because it is one long exchange, and what follows it is more bytes.
 #
 # Started by systemd through sclaude-proxy.socket, which owns the port. Run by
 # hand it binds the port itself:
@@ -1116,10 +1116,8 @@ async def handle(reader, writer):
             return
 
         label = host_label(host)
-        by_cookie = False
         if not label:
             label = cookie_label(headers.get("cookie", ""))
-            by_cookie = bool(label)
         if not label:
             writer.write(respond("200 OK", await gather_listing(host)))
             await writer.drain()
@@ -1144,15 +1142,16 @@ async def handle(reader, writer):
 
         LAST_SEEN[label] = time.time()
         STARTING.pop(label, None)
-        # A connection routed by the cookie carries one request. The routing is
-        # decided once per connection, and a bare host is where the cookie
-        # changes: a browser's pooled connections, and those `tailscale serve`
-        # keeps to this port for every phone, would otherwise carry the next
-        # request — after a switch to another feature — to this one. So the
-        # server is asked to close after answering, and the next request comes
-        # on a fresh connection and is routed afresh. A WebSocket upgrade is
-        # left alone: it is one long exchange by design.
-        if by_cookie and headers.get("upgrade", "").lower() != "websocket":
+        # Every connection routed here carries one request: the routing is decided
+        # once per connection, so a pooled connection — a browser's, or one
+        # `tailscale serve` keeps for every phone — would otherwise carry the
+        # next request past this proxy: its own /__sclaude/ pages (a sign-in
+        # link opened beside a page of the feature) or, after the cookie
+        # switched, a page of another feature. So the server is asked to close
+        # after answering, and the next request comes on a fresh connection and
+        # is routed afresh. A WebSocket upgrade is left alone: it is one long
+        # exchange by design.
+        if headers.get("upgrade", "").lower() != "websocket":
             head = close_after(head)
         upstream.write(head)
         await asyncio.gather(pipe(reader, upstream), pipe(up_reader, writer))

@@ -811,7 +811,7 @@ session.
 3100–3199 and records it in `.sclaude/local/feature/state.json`, so a feature keeps its port
 and its address between runs; a lock keeps two features started together from
 claiming the same one. Nobody needs to know the ports: `sclaude-proxy` holds
-:3000 and hands each connection to the server its host names (see
+:3000 and hands each request to the server its host names (see
 [bin/sclaude-proxy](../README.md#binsclaude-proxy)). The host rather than only the port is
 what keeps two features apart in one browser — cookies ignore the port, so on
 bare ports a sign-in on one feature would sign the other one out.

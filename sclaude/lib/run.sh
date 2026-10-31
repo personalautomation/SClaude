@@ -480,6 +480,12 @@ run_step() {
   local wt="$1" slug="$2" step="$3" told="${4:-}"
   local state="$wt/.sclaude/local/feature/state.json"
   local model effort mode session prompt pr
+  # While a review session works in its own tab, this terminal takes the
+  # review's boxes, [s] and [g] (review_pane_keys); the tab wait in
+  # claude_launch_once calls it. Set in the launch's own subshell below
+  # (pane_keys_for), not here: bash's `local` reaches every function this one
+  # calls, and the friction review launched after the session would take the
+  # boxes too.
 
   model="$(step_model "$step")"
   effort="$(step_effort "$step")"
@@ -828,7 +834,7 @@ run_step() {
     # first round's count until the session finally ended.
     issue_sync "$wt"
     session_watch_start "$wt" "$session" "" "" "$step"
-    ( cd "$wt" && dev_env_load "$wt" && session_git_env "$session" && claude_launch --resume "$session" \
+    ( cd "$wt" && dev_env_load "$wt" && pane_keys_for "$step" "$wt" && session_git_env "$session" && claude_launch --resume "$session" \
         --model "$model" --effort "$effort" \
         --permission-mode "$mode" "${extra[@]}" -n "$(session_label step "$state" "$step" "$session")/$slug" ${opening:+"$opening"} )
     session_watch_stop
@@ -883,7 +889,7 @@ run_step() {
     state_set "$state" "steps.$step.gate" null
     issue_sync "$wt"
     session_watch_start "$wt" "$session" "" "" "$step"
-    ( cd "$wt" && dev_env_load "$wt" && session_git_env "$session" && claude_launch --session-id "$session" \
+    ( cd "$wt" && dev_env_load "$wt" && pane_keys_for "$step" "$wt" && session_git_env "$session" && claude_launch --session-id "$session" \
         --model "$model" --effort "$effort" \
         --permission-mode "$mode" "${extra[@]}" -n "$(session_label step "$state" "$step" "$session")/$slug" "$prompt" )
     session_watch_stop
@@ -1526,6 +1532,9 @@ after_step() {
   # feature is sent back to starts without it.
   if [[ "$step" == "review" ]]; then
     state_set "$state" steps.review.enough null
+    # [g] is the person's for the whole review; its rounds count afresh.
+    state_set "$state" steps.review.go_on_rounds null
+    state_set "$state" steps.review.go_on_ceiling null
     review_said_drop
   fi
   # The step closed for real, so it is no longer a reopened one. The mark
@@ -1715,7 +1724,10 @@ run_friction() {
   # classifier alone leaves the log empty, and without the gathering the review
   # would not come up at all. That is exactly how three refusals in step 4 of
   # one feature were lost.
-  [[ -n "$reread" ]] || collect_denials "$wt" "$step" "$(step_run_session "$state" "$key")"
+  # A key held under [g] had its session's refusals gathered when it was
+  # held (friction_hold): gathered again they would be in the log twice.
+  [[ -n "$reread" || "$(state_get "$state" steps.review.friction_held 2>/dev/null || true)" == "$key" ]] \
+    || collect_denials "$wt" "$step" "$(step_run_session "$state" "$key")"
 
   # Empty means there is nothing to review and we do not start a session. When
   # re-reading we look at what was reviewed: there is no fresh log in that case by
@@ -1760,10 +1772,30 @@ run_friction() {
   if [[ -z "$reread" && -z "$pending" ]] \
      && friction_defer_proposals "$wt" "$slug" "$key" "$step"; then
     { cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log"; } || true
+    # What [g] held was in that log, and went with it. Put off, the review
+    # has ended here: owed for this key, it is owed no more.
+    friction_log_read "$state" "$key"
+    if [[ "$(state_get "$state" friction_owed 2>/dev/null || true)" == "$key" ]]; then
+      state_set "$state" friction_owed null 2>/dev/null || true
+      state_set "$state" friction_owed_told null 2>/dev/null || true
+    fi
     history_add "$state" "friction.$key" deferred
     # Entries alone skip the pull request (deferred_to_main).
     deferred_to_main "$wt" "$deferred_from" || friction_push_project "$wt" "$deferred_from"
     return 0
+  fi
+  if [[ -z "$reread" && -z "$pending" ]] && friction_hold "$wt" "$key" "$step"; then
+    return 0
+  fi
+  # A review that cannot be held — one cut off and resumed, a re-read —
+  # waits for the terminal while [g] runs step 4: opened without one (the
+  # phone's menu, its go button), it is a plan-mode review nobody is there to
+  # answer. Owed still, as a review that did not take place is.
+  if [[ -n "$reread" || -n "$pending" ]] && [[ -z "${FRICTION_NO_HOLD:-}" ]] \
+     && ! [[ -t 0 && -t 1 ]] && declare -F review_go_on >/dev/null && review_go_on "$wt" \
+     && [[ "$(state_get "$state" step 2>/dev/null || true)" == review ]]; then
+    info "  The friction review $key waits for you at the terminal: $SELF friction $slug"
+    return 1
   fi
   # What is being reviewed, and which prompt says so.
   #
@@ -1786,6 +1818,10 @@ run_friction() {
     # The sync with main, numbered as a step of the cycle but no step of
     # STEP_SPEC: step_title has no name for it.
     label="sync"
+    head_prompt="$PROMPTS/friction.md"
+  elif [[ "$step" == unread ]]; then
+    # friction_before_retro: entries of any step that no review read.
+    label="any, read before the retrospective"
     head_prompt="$PROMPTS/friction.md"
   else
     label="$(step_title "$step")"
@@ -1819,6 +1855,10 @@ run_friction() {
   # described a paragraph above about the round trip through cmd_friction.
   [[ -n "$reread" || -n "$pending" ]] \
     || { cp "$log" "$batch" 2>/dev/null; cat "$log" >> "$reviewed" 2>/dev/null && rm -f "$log" || true; }
+  # Whatever [g] held (friction_hold) was in that log: this review reads it,
+  # and nothing is owed for the held keys any more, nor for an `unread-N` the
+  # check before the retrospective waited on.
+  [[ -n "$reread" || -n "$pending" ]] || friction_log_read "$state" "$key"
   # What this review reads: its own entries, kept apart as they were moved —
   # .reviewed holds every review's, and the review after step 2 read step 1's
   # again and deferred the same refusal twice. A re-read (`sclaude friction`)
@@ -2098,6 +2138,11 @@ sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSH
     "$([[ -n "$changed" ]] && echo fixed || echo reviewed)"
   state_set "$state" "friction.$key.done" true
   state_set "$state" "friction.$key.finished" "$(date -Iseconds)"
+  # Owed before the retrospective (friction_before_retro), and now read.
+  if [[ "$(state_get "$state" friction_owed 2>/dev/null || true)" == "$key" ]]; then
+    state_set "$state" friction_owed null 2>/dev/null
+    state_set "$state" friction_owed_told null 2>/dev/null
+  fi
   # And we forget the id: the review took place, and there is nowhere left to
   # return to. Left behind, it is as poisonous as a step's dead id, only the
   # other way round — it is alive. The next step's review reads this same field,
@@ -2202,6 +2247,128 @@ friction_propose_project() {
   # Pushed, or carried by hand from $wt: the local copy is of no use either way.
   git -C "$wt" branch -D "$new" >/dev/null 2>&1 || true
   rm -rf "$tmp"
+}
+
+# Holds a review session's friction review while the review goes on by
+# itself (review_go_on): the review is a session in plan mode, waiting for
+# the person to approve its plan, and with them away it would stop the
+# rounds [g] was ticked to keep going — a review session's, and any other
+# step 4 runs: a sync with main, a regression's fixing session. Nothing is lost: the entries stay in
+# the log, each later session's added to them, and the first friction review
+# after the box comes off reads them all — the next session's, or at the
+# latest friction_before_retro's. Not a plan approved for them: that is the
+# person's yes to loosening a rule, and nobody is there to give it.
+#
+#   friction_hold <wt> <key> <step>   → 0 when held
+friction_hold() {
+  local wt="$1" key="$2" step="$3" state="$1/.sclaude/local/feature/state.json" n
+  [[ -z "${FRICTION_NO_HOLD:-}" && "$(state_get "$state" step 2>/dev/null || true)" == review ]] \
+    && declare -F review_go_on >/dev/null && review_go_on "$wt" || return 1
+  state_set "$state" steps.review.friction_held "$key" 2>/dev/null || return 1
+  # For the issue's Friction column: held, not "never got this far".
+  state_set "$state" "friction.$key.held" true 2>/dev/null || true
+  state_set "$state" "friction.$key.read_in" null 2>/dev/null || true
+  history_add "$state" "friction.$key" held
+  n="$(grep -cE '^20[0-9]{2}-' "$wt/.sclaude/local/feature/friction.log" 2>/dev/null)" || n="${n:-0}"
+  info "  [g] go on by itself is ticked: the friction review waits for you, $n entr$([[ "$n" == 1 ]] && echo y || echo ies) kept;"
+  info "  the next friction review reads them, and whatever later sessions add — at the latest, before the retrospective."
+  ask_feed say "Friction review held for you ([g]): $n entr$([[ "$n" == 1 ]] && echo y || echo ies) kept, read before the retrospective at the latest."
+  return 0
+}
+
+# The log was read under <key>, by a review or by the put-off of proposals:
+# every key [g] held is settled by it — its node says which review read it,
+# for the issue's Friction column — and so is an owed key it read for (an
+# `unread-N` or a held one), unless it is <key> itself.
+#
+#   friction_log_read <state> <key>
+friction_log_read() {
+  python3 - "$1" "$2" <<'PY' 2>/dev/null || true
+import json, sys
+path, key = sys.argv[1:3]
+with open(path) as fh:
+    data = json.load(fh)
+review = (data.get("steps") or {}).get("review") or {}
+held = {review.pop("friction_held", None)}
+for k, node in (data.get("friction") or {}).items():
+    if isinstance(node, dict) and node.get("held") and k != key:
+        node.pop("held")
+        node["read_in"] = key
+        held.add(k)
+# An owed key whose entries this review read: an unread-N, or one [g] held.
+# Not the key running now — its own end clears it, and a review cut off
+# leaves it owed.
+owed = str(data.get("friction_owed") or "")
+if owed and owed != key and (owed.startswith("unread-") or owed in held):
+    data["friction_owed"] = None
+    data["friction_owed_told"] = None
+with open(path, "w") as fh:
+    json.dump(data, fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
+PY
+}
+
+# Every friction review still owed, before the retrospective: one [g] held in
+# step 4 (friction_hold), one left open — cut off, never finished — and a log
+# with entries no review read. The retrospective reads the friction logs, and
+# the clean-up after it takes the tree and the log with it, so this is the
+# last place they can be read. Always run, with [g] or without: a hold is one
+# way to leave entries unread, and not the only one. Returns 1 when one is
+# still owed: the retrospective and the clean-up wait for it.
+#
+#   friction_before_retro <wt> <slug>
+friction_before_retro() {
+  local wt="$1" slug="$2" state="$1/.sclaude/local/feature/state.json" key held n tried=" "
+  local log="$1/.sclaude/local/feature/friction.log"
+  # The rounds are over by the retrospective, and a review run here is never
+  # held, whatever [g] says (friction_hold): the person's box is theirs to
+  # keep, so it is not touched.
+  local FRICTION_NO_HOLD=1
+  # One review at a time, until nothing is owed: a pending review reads only
+  # its own batch, so the log and a held key can still be owed after it.
+  while :; do
+    held="$(state_get "$state" steps.review.friction_held 2>/dev/null || true)"
+    [[ "$held" == null ]] && held=""
+    # A held key whose entries a later review already read owes nothing.
+    if [[ -n "$held" && ! -s "$log" ]]; then
+      state_set "$state" steps.review.friction_held null 2>/dev/null || true
+      held=""
+    fi
+    key="$(friction_pending "$state" || true)"
+    [[ -n "$key" ]] || key="$held"
+    if [[ -z "$key" && -s "$log" ]]; then
+      n="$(python3 -c 'import json, sys
+print(1 + sum(1 for k in (json.load(open(sys.argv[1])).get("friction") or {}) if k.startswith("unread-")))' "$state" 2>/dev/null || echo 1)"
+      key="unread-$n"
+    fi
+    if [[ -z "$key" ]]; then
+      state_set "$state" friction_owed null 2>/dev/null || true
+      state_set "$state" friction_owed_told null 2>/dev/null || true
+      return 0
+    fi
+    # Once each: a review that ran and still left its key owed would come
+    # round for ever.
+    [[ "$tried" == *" $key "* ]] && { warn "  The friction review $key ran and is still owed."; return 1; }
+    tried+="$key "
+    # Where the feature stands meanwhile, for the map and the menu (position).
+    state_set "$state" friction_owed "$key" 2>/dev/null || true
+    echo ""
+    info "  Friction no review has read yet ($key): it comes before the retrospective and the clean-up."
+    # A friction review is a conversation; the clean-up from a timer or a phone
+    # has nobody to hold it, and must not remove the log unread. The topic is
+    # told once a key, not on every call that finds it still owed.
+    # Kept apart from friction_owed, which an attempt at the terminal sets
+    # too: the topic must hear of it on the first wait without one.
+    if ! [[ -t 0 && -t 1 ]]; then
+      warn "  It needs you at the terminal."
+      if [[ "$(state_get "$state" friction_owed_told 2>/dev/null || true)" != "$key" ]]; then
+        ask_feed say "The retrospective and the clean-up wait for a friction review at the terminal: $SELF done $slug"
+        state_set "$state" friction_owed_told "$key" 2>/dev/null || true
+      fi
+      return 1
+    fi
+    run_friction "$wt" "$slug" "$key" || return 1
+  done
 }
 
 # Puts off a friction log that holds only proposed CLAUDE.md rules, without a
@@ -2710,7 +2877,7 @@ instruments_sync() {
 # Its answer, as `pr_context.py --close` gives it: `ok`, `pending` or
 # `open: <why>`. Anything unreadable is `ok`.
 review_close_gate() {
-  local wt="$1" slug="$2" pr="$3" word waited=0 announced=0 answer repo said="" said_read=0
+  local wt="$1" slug="$2" pr="$3" word waited=0 announced=0 answer repo said="" said_read=0 failed=0 go_box=""
   [[ -n "$pr" && "$pr" != "null" ]] || return 0
   command -v gh >/dev/null 2>&1 || return 0
   repo="$(gh_repo 2>/dev/null || true)"
@@ -2742,20 +2909,25 @@ review_close_gate() {
           count="$(local_review_count "$wt" "$pr")" || count="?"
           echo ""
           info "  You ended the search for new findings; $count thread(s) are open on PR #$pr."
-          # One choice of three, asked once: as two yes/no questions in a row
-          # it was answered twice, the second only after the first's "no".
-          info "    1) Check the fixes with a review pass — it resolves the threads they fixed and looks for nothing new"
-          info "    2) Close step 4 now, with the $count thread(s) as they are"
-          info "    3) Leave it open and come back later"
-          # Asked again on anything but 1-3: a stray Enter left in the terminal
-          # read as "leave it open" and ended the step. No answer at all
-          # (nobody to ask) leaves it open, as before.
-          while :; do
-            ask "${BOLD}Choose 1-3: ${OFF}" answer "pick:3" \
-              "Check the fixes" "Close step 4" "Leave it open" || { answer=3; break; }
-            [[ "$answer" == [123] ]] && break
-            printf '%s\n' "  Answer 1, 2 or 3." >&2
-          done
+          if review_go_on "$wt"; then
+            info "  [g] go on by itself is ticked: checking the fixes with a review pass."
+            answer=1
+          else
+            # One choice of three, asked once: as two yes/no questions in a
+            # row it was answered twice, the second only after the first's "no".
+            info "    1) Check the fixes with a review pass — it resolves the threads they fixed and looks for nothing new"
+            info "    2) Close step 4 now, with the $count thread(s) as they are"
+            info "    3) Leave it open and come back later"
+            # Asked again on anything but 1-3: a stray Enter left in the
+            # terminal read as "leave it open" and ended the step. No answer
+            # at all (nobody to ask) leaves it open, as before.
+            while :; do
+              ask "${BOLD}Choose 1-3: ${OFF}" answer "pick:3" \
+                "Check the fixes" "Close step 4" "Leave it open" || { answer=3; break; }
+              [[ "$answer" == [123] ]] && break
+              printf '%s\n' "  Answer 1, 2 or 3." >&2
+            done
+          fi
           if [[ "$answer" != 1 ]]; then
             if [[ "$answer" != 2 ]]; then
               info "  Left open. Come back with: $SELF $slug"
@@ -2769,12 +2941,30 @@ review_close_gate() {
         fi
         count="$(local_review "$wt" "$pr")" || count="failed"
         if [[ "$count" == "failed" ]]; then
+          failed=$((failed + 1))
           warn ""
           warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
-          ask "${BOLD}Go on with this head unreviewed? [y/n] ${OFF}" answer yn
-          if ! is_yes "$answer"; then
+          # A "no" is not "leave": the review is what the person wants, so it
+          # runs again here, rather than at the next `sclaude` they would
+          # have to type. Only no answer at all (nobody to ask) leaves it open.
+          if review_go_on "$wt" && [[ "$failed" -le "$REVIEW_GO_ON_RETRIES" ]]; then
+            # After a pause that grows, a minute more each time: a failure
+            # that lasts — a usage limit, the network — would otherwise spend
+            # every retry in a minute.
+            info "  [g] go on by itself is ticked: reviewing it again in $((failed * REVIEW_GO_ON_PAUSE))s ($failed of $REVIEW_GO_ON_RETRIES)."
+            if review_go_on_pause "$wt" $((failed * REVIEW_GO_ON_PAUSE)); then
+              local_due=1
+              continue
+            fi
+          fi
+          if ! ask "${BOLD}Go on with this head unreviewed? n reviews it again [y/n] ${OFF}" answer yn; then
             info "  Left open. Come back with: $SELF $slug"
             return 1
+          fi
+          if ! is_yes "$answer"; then
+            info "  Reviewing it again; Ctrl-C leaves, and the next \`$SELF\` starts it again."
+            local_due=1
+            continue
           fi
         elif [[ "$count" -gt 0 ]]; then
           # The report printed as the session ended was made before this
@@ -2805,11 +2995,13 @@ review_close_gate() {
     # before, but what the reviews after it find new is left on the pull
     # request (see below). A local review takes its keys itself.
     # Read once a wait, and kept here after: a python per poll for a hint.
-    [[ "$said_read" -eq 1 ]] || { said="$(review_enough "$wt")"; said_read=1; }
+    # [g] too: it decides the questions after this wait in Actions as well.
+    [[ "$said_read" -eq 1 ]] || { said="$(review_enough "$wt")"; go_box="$(review_go_box "$wt")"; said_read=1; }
     if [[ -t 1 ]]; then
       local hint="only if you want to step in: ${BOLD}[s]${OFF} last review for new findings" what="the review"
       [[ "$local_due" -eq 1 ]] && { what="the checks"; hint=""; }
       [[ -n "$said" && -n "$hint" ]] && hint="the last review for new findings · ${BOLD}[s]${OFF} takes it back"
+      [[ -n "$hint" ]] && hint+=" · $go_box ${BOLD}[g]${OFF} go on by itself"
       printf '\r\033[2K  %sRunning by itself%s — waiting for %s of PR #%s (%s so far)%s' \
         "$DIM" "$OFF" "$what" "$pr" "$(regression_duration "$waited")" "${hint:+ · $hint}"
     fi
@@ -2818,6 +3010,9 @@ review_close_gate() {
     waited=$((waited + SECONDS - began))
     # Cleared before the next look: what that prints starts a line of its own.
     [[ -t 1 ]] && printf '\r\033[2K'
+    if [[ "$POLL_KEY" == [gG] && "$local_due" -eq 0 ]]; then
+      review_go_on_toggle "$wt"; go_box="$(review_go_box "$wt")"
+    fi
     if [[ "$POLL_KEY" == [sS] && "$local_due" -eq 0 ]]; then
       if [[ -n "$said" ]]; then said=""; review_enough_set "$wt" ""
       else said=pass; review_enough_set "$wt" pass
@@ -2857,14 +3052,24 @@ review_close_gate() {
   standing="$(python3 "$LIB/pr_context.py" --brief "$wt" "$pr" "$repo" \
                 "$(review_last_look "$wt")" 2>/dev/null || true)"
   [[ -n "$standing" ]] && warn "    $standing"
-  if [[ -n "${SESSION_AUTO_CLOSED:-}" ]]; then
+  # A session sclaude closed goes back by itself, unless [g] did it so
+  # many times that its ceiling hands the choice to the person.
+  local go_on=0
+  if review_go_on "$wt"; then
+    review_go_on_round "$wt" && go_on=1 || go_on=2
+  fi
+  if [[ -n "${SESSION_AUTO_CLOSED:-}" && "$go_on" -ne 2 ]]; then
     review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"
     return 1
   fi
   # Said here too, before the person chooses: the rounds stopping converging
   # is what this answer is about.
   review_stuck_say "$wt"
-  ask "${BOLD}Back to a review session for it? [y/n] ${OFF}" answer yn
+  if [[ "$go_on" -eq 1 ]]; then
+    answer=y
+  else
+    ask "${BOLD}Back to a review session for it? [y/n] ${OFF}" answer yn
+  fi
   if is_yes "$answer"; then
     run_step "$wt" "$slug" review
     return 1

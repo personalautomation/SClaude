@@ -478,6 +478,12 @@ def latest_friction_cell(key):
     # step ran into no ban worth reporting, so no session was launched.
     if node.get("empty"):
         return "nothing"
+    # Held while [g] ran step 4's rounds (friction_hold): its entries are read
+    # by a later review, which says the verdict.
+    if node.get("read_in") and not node.get("session") and not node.get("done"):
+        return "read in %s" % node["read_in"]
+    if node.get("held") and not node.get("session") and not node.get("done"):
+        return "held"
     # `done` is asked before the id, and that order is the whole point. The id
     # used to be asked first, on the reasoning that a closed review has none —
     # but a review interrupted between `done` and the clearing of `session` has

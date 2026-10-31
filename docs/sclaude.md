@@ -1264,6 +1264,75 @@ of step 4's sessions, posting their findings on the pull request), or none
 green — step 4 opens no session at all and closes at once, saying which of
 the three it was.
 
+**The local review's keys are boxes the person can see.** While a pass runs
+(`local_review_wait`), `s` ends the search for new findings
+(`steps.review.enough`) and `g` lets the review go on by itself
+(`steps.review.go_on`, `review_go_on`); `s` is pressed again to take it back,
+`g` goes round auto → on → off (below), and the status line draws both as
+boxes until they apply — a word given twenty
+minutes into a pass is otherwise forgotten by the time the pass ends. With `g`
+ticked `review_close_gate` asks nothing: a pass that did not run runs again
+(`REVIEW_GO_ON_RETRIES`, ten in a row, then the question: one that keeps
+failing has a reason the person must see), the 1-3 choice after the search
+ended is "check the fixes", and what is open goes back to a review session
+— `REVIEW_GO_ON_ROUNDS` (30) times a step 4 (`steps.review.go_on_rounds`,
+`review_go_on_round`, counted afresh each step 4 and on a press of `g`), then
+it is off for that step 4 and the person is asked, a session sclaude closed
+included: rounds that never
+converge would otherwise go on paying all night. Before each retry of a failed
+pass it waits `REVIEW_GO_ON_PAUSE` (60s) times the retry's number, so a
+failure that lasts — a usage limit, the network — does not spend the retries
+in a minute; the wait shows the box, and `g` takes it off and asks at once.
+The friction review after each session of step 4 — a review session's, a
+sync's with main, a regression fix's — would stop them all the same
+— a plan-mode session waiting for its plan's approval — so under `g` it is
+held (`friction_hold`, `steps.review.friction_held`): the log stays, each
+later session's refusals added to it, and step 4 goes on to its next steps. A friction review asked
+for by a command typed at a terminal — `sclaude friction`, `sclaude sync` —
+is never held: the person is there; from the phone's menu, with no terminal,
+it may be, and a review it cannot hold — a re-read, one cut off and resumed —
+waits for the terminal.
+The first friction review after the box comes off reads all of it — the next
+session's — and at the latest `friction_before_retro`, which `sclaude done`
+runs before the retrospective, whatever `g` was: every review still owed, one
+held, one cut off and never finished, or a log no review read (keyed
+`unread-N`). The retrospective reads the logs and the clean-up removes them,
+so this is their last reader; with nobody at the terminal the retrospective
+and the clean-up wait for it, the topic told (`friction_owed` puts the feature
+there on the map). It runs one review at a time until nothing is owed — a
+review resumed reads only its own batch, so the log can still be owed after it
+— in the fresh run after a retrospective (`done_fresh`) too, whose log is the
+retrospective's own and would go with the tree. It holds nothing it runs,
+whatever `g` says (`FRICTION_NO_HOLD`), and leaves the box alone. Any friction
+review that reads the log reads what was held, and clears the held key. Not
+approved for the person: that plan is their yes to loosening a rule.
+
+Without `g`, a pass that did not run asks whether to go on unreviewed, and a
+"no" runs the review again instead of leaving: the person was there and wants
+the review, and leaving made them type `sclaude` to get it. `s` is cleared
+when step 4 closes or the cycle is sent back; `g` is not. It has three states
+in `steps.review.go_on`: `true` and `false`, the person's own, which outlast
+step 4 closing and a hand-back — to them it is all one review, the sessions
+only rotate to save context — and `null`, where the project's `sleep_mode`
+decides (`project_sleep_mode`): `on` always, `off` never, `auto` while an
+/isleep night over every session is on (`night.py active`) — not an
+`/isleep here` one. `g` goes
+round the three — auto → on → off → auto (`review_go_on_toggle`) — by the
+state kept, not by what the night makes of auto, so a press means the same
+however the box was drawn; the box shows `☑`, `☐`, or for auto `auto ☐`,
+`auto ☑ (night)`, `auto ☑ (sleep_mode)`. The 30-round ceiling turns it off
+for that step 4 only (`steps.review.go_on_ceiling`, drawn `☐ (30 rounds)`),
+cleared with the rounds' count when step 4 closes or the cycle is sent back,
+or by a press of `g`. A press at the ceiling always turns `[g]` on — the box
+was drawn off, so on is what the press asks for — and that on is the person's
+from then on. `g` during the retry wait is a press like any other and writes
+`false`.
+
+While a review session works in its own tab (the tab wait in `claude_launch_once`), the terminal
+sclaude waits in takes the same boxes: the launch hands it `PANE_KEYS` in its own subshell (`pane_keys_for`), so no friction review after it inherits them, and
+`review_pane_keys` draws `[s]` and `[g]` and takes their keys once a second,
+reading the state when a key is pressed and every ten seconds. `[s]` said there ends the search as in a pass: after the session sclaude asks whether to check its fixes, or checks them with `[g]` ticked.
+
 **A session's context is bounded per round, not per session.** On one pull
 request five rounds of fixes ran in one conversation, and every file each fix
 read stayed in its context. The session now fixes through subagents and keeps
@@ -1487,7 +1556,7 @@ deployment.
 ## The summary table in the issue
 
 The summary's **Friction** column says what became of the review for each step
-and each fixing session. Six answers, because one dash used to stand for four
+and each fixing session. Several answers, because one dash used to stand for four
 different things and a reader could not tell them apart — a step nobody had
 reached yet looked exactly like a step that ran into nothing. Each value is
 written by the orchestrator at the moment it happens; none is inferred when the
@@ -1502,6 +1571,8 @@ comment is assembled:
 | `` `id` fixed `` | The review ran and committed a rule change to the product, on the feature's branch: the tree's `HEAD` moved while it was open. |
 | `` `id` reviewed `` | The review ran and changed nothing — it read the entries and found every ban deliberate. |
 | `` `id` unread `` | Closed by hand through `sclaude reset`. The entries stayed in `.reviewed` with nobody reading them. |
+| `held` | Held while `[g]` ran step 4 by itself (`friction_hold`): the entries stay in the log for a later review. |
+| `read in <key>` | Held, then read by the review of `<key>`, whose cell says what it came to. |
 
 The **Status** column says how each fixing session ended. It was a dash for
 every one of them until it became clear what that cost: a stage with four

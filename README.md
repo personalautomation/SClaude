@@ -8,6 +8,7 @@ they live here, symlinked into `~/.local/bin` and `~/.claude/skills`.
 | [`sclaude`](#binsclaude) | runs a feature from issue to production with Claude doing the work and a person making the decisions |
 | [`skills/pr`](#skillspr) | a `/pr` skill: opens a pull request the way the team does it |
 | [`skills/sreview`](#skillssreview) | a `/sreview` skill: review and fix in iterations until the review finds nothing substantive |
+| [`skills/isleep`](#skillsisleep) | an `/isleep` skill: night mode — Claude carries on alone, decides instead of asking, and reports in the morning |
 | [`sclaude-proxy`](#binsclaude-proxy) | one address per feature: `http://<feature>.localhost:3000` |
 | [`chrome-debug`](#binchrome-debug) | the Chrome that Claude drives to check its work |
 | [`wsl-update`](#binwsl-update) | the daily update of the tooling in WSL |
@@ -572,6 +573,31 @@ report says the rounds stopped converging, or that the fixes are feeding the rev
 keys that end the search for new findings; once you end it, one question with
 three answers settles the rest: check the fixes, close the step, or leave it.
 
+With the review on this machine, its status line shows two boxes while a pass
+runs, ticked until they apply: `[s]` makes the pass the last that looks for
+new findings, and `[g]` lets the review go on by itself — no question after
+it: a pass that failed runs again after a pause that grows by a minute each
+time (ten times in a row, then you are asked), the fixes are
+checked and what is open goes back to a review session, for 30 rounds at
+most, then it is off for that step 4 and you are asked (a press of `[g]` then
+turns it on). In a project whose review runs in Actions, the wait for it shows
+`[g]` too. The friction review, which
+waits for you to approve its plan, is not opened after step 4's sessions (a
+review round's, a sync's, a regression fix's) — unless you typed `sclaude
+friction` or `sclaude sync` at the terminal yourself: their
+log is kept for the next friction review after the box comes off, and at the
+latest for the one before the retrospective; step 4 itself goes on. Each key pressed again
+takes its box back. `[g]` has three values, in turn on each press: `auto`
+(the default — the project's `sleep_mode` decides: by default, an /isleep night
+over every session, not an `/isleep here` one —
+and the box shows `auto ☑ (night)` or `auto ☐`), `on` (☑) and `off` (☐); on
+and off are yours and stay for the whole review, step 4 reopened included. `[x x]` stops the pass at once. A pass that did not run
+asks whether to go on with the head unreviewed, and `n` reviews it again
+rather than leaving sclaude. While a review session works in its own tab, the
+terminal sclaude waits in shows the same two boxes and takes `[s]` and `[g]`
+too; `[s]` said then ends the search, so after that session sclaude asks
+whether to check its fixes — or checks them, with `[g]` ticked.
+
 **QA, merge, production.** The issue moves to `In QA`, and sclaude waits — you
 can close the terminal; a background timer keeps watching the board. QA checks
 the criteria on the preview and ticks them in the issue.
@@ -607,8 +633,9 @@ offers production, runs the tests there, and rolls back if they fail.
 **Epilogue and retro.** A short session writes the outcome into the issue and
 every parent issue, so an epic shows where it stands without opening each child.
 The issue gets `deployed-preview` / `deployed-prod` labels, and its end date is
-filled in. Then `sclaude done` runs the retrospective and asks before removing
-the worktree and branches.
+filled in. Then `sclaude done` first runs every friction review still owed — one
+held under `[g]`, one cut off, a log no review read — then the retrospective,
+and asks before removing the worktree and branches.
 
 Every Claude session sclaude starts, its model and permissions, and where the
 issue's summary table shows it:
@@ -718,6 +745,51 @@ which settles similar findings in this run and later ones. In a project run by
 sclaude it takes the check commands, the review mode and the review rules from
 there, and with a pull request open keeps the findings as its threads. It
 commits once per iteration; pushing is left to the project's own rules.
+
+## skills/isleep
+
+`/isleep [task]` when you go to sleep and the session has to carry on. First
+it runs `/fewer-permission-prompts` for the project, into
+`.claude/settings.local.json`, so that a read-only command it asked about
+before does not hold the session at a permission prompt all night. Then Claude
+stops asking: each question it would have put to you it settles by the option
+it would have recommended, and wherever it would stop to ask whether to go on
+— another review round, the next item, a retry — it goes on. It does not end
+its turn while work is left, and waits for CI and the like in the background.
+
+It still does not do what it would need your word for by day — push, merge,
+deploy, delete what is not its own, write to other people, spend money; such a
+step is left ready, with the command that does it. Every decision is logged as
+it is taken, with what it was instead of and how to undo it, in
+`~/.local/state/isleep/<date>.md` — one log for every session of the night.
+Your first message in the morning gets the summary: the result, the decisions
+taken for you, what waits for you, what was set aside. `/isleep report` writes
+the summary without ending the night, `/isleep off` ends it.
+
+In a project sclaude runs, its `[g]` "go on by itself" is on while a night
+over every session is (not an `/isleep here` one), under `sleep_mode: auto`
+(the default): step 4's review rounds go on without asking, and in the
+morning they ask again. `on` keeps `[g]` on all the
+time, `off` leaves it to the box alone; a box you set yourself wins either way.
+
+The night is kept in `~/.local/state/isleep/night.json`, not only in the
+conversation, and covers every Claude session on the machine — already
+running or started during it, such as sclaude's next step; `/isleep here`
+keeps a night it starts to one. Hooks that `install.sh` adds to `~/.claude/settings.json`
+bring the rules into a new, compacted or resumed session and into a running
+one at its next tool call, refuse `AskUserQuestion` with "decide and log", and
+ask a turn that ends whether work is left (once per turn, at most 40 times a
+night in each session). `/isleep 8h` sets how long the night lasts (12 hours by default).
+
+The night ends when you type anything in any session: that session gives
+you the summary, and every other session the night reached is told at its
+next tool call that questions go to you again. A night that runs out its
+hours ends the same way, and your first message after it gets the summary.
+The prompt sclaude starts a step's session with, a headless
+`claude -p` and a `/loop` wakeup do not count as you — nor does a `/loop` you
+type, which reads the same. A session closed during the night is told when
+you resume it. By day the hooks do
+nothing; sessions started before the hooks were installed do not run them.
 
 ## bin/sclaude-proxy
 
@@ -925,8 +997,8 @@ features with what each step is doing (🟢 running, 🟡 waiting for you, ⚪ i
 ⚫ not started), a new feature — from an open issue, yours first and marked
 when something blocks it, with the branch name to correct, or from a name with
 a tick for creating its issue, as `sclaude new` offers at the terminal — and 🧩
-the project's config, every section explained, with `review`, `qa` and `merge`
-set by a button; 💻 Code-server; 🌐 Chrome and the list of every
+the project's config, every section explained, with `review`, `qa`, `merge`
+and `sleep_mode` set by a button; 💻 Code-server; 🌐 Chrome and the list of every
 feature; ⚙️ Settings — language, docs, restarting the bot (the screen waits
 and says when it is back), phone access. Each
 screen says under it what it is for. What you start there leaves a 📱 line in

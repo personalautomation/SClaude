@@ -141,6 +141,14 @@ ln -sfn "$REPO/skills/pr" "$SKILLS/pr"
 echo "symlinked: $SKILLS/pr"
 ln -sfn "$REPO/skills/sreview" "$SKILLS/sreview"
 echo "symlinked: $SKILLS/sreview"
+ln -sfn "$REPO/skills/isleep" "$SKILLS/isleep"
+echo "symlinked: $SKILLS/isleep"
+# /isleep's night outlives a session through hooks every session runs; they do
+# nothing while no night is on. A settings file that does not read leaves
+# them out with a word, and the rest of the install goes on.
+if python3 "$REPO/skills/isleep/night.py" install "$CLAUDE/settings.json"; then
+  echo "hooks: /isleep in $CLAUDE/settings.json"
+fi
 
 # settings.json points at ~/.claude/statusline.py — the symlink is what makes
 # that setting work after the machine is reinstalled.

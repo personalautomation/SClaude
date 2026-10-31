@@ -921,6 +921,10 @@ cmd_friction() {
   # run_friction works that out; here it is enough not to turn it away with the
   # emptiness check.
   local state="$wt/.sclaude/local/feature/state.json"
+  # Typed at a terminal, the person is here: [g] holds nothing it runs
+  # (friction_hold). From the phone's menu, with no terminal, it may; and a
+  # review it cannot hold waits for the terminal (run_friction).
+  local FRICTION_NO_HOLD=""; [[ -t 0 && -t 1 ]] && FRICTION_NO_HOLD=1
   local fkey; fkey="$(friction_pending "$state" || true)"
   if [[ -n "$fkey" ]]; then
     run_friction "$wt" "$slug" "$fkey"
@@ -1269,6 +1273,17 @@ cmd_done() {
   # before the retrospective, which then runs with the fix. The retrospective's
   # own unfinished change is asked about as it ends (workshop_after_session).
   local live_before; live_before="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)"
+  # Friction no review has read goes first: the retrospective reads the logs,
+  # and the clean-up removes them (friction_before_retro). After live_before,
+  # so that what such a review publishes to sclaude counts below too. Run in
+  # the fresh run after a retrospective (done_fresh) as well, where the log
+  # may hold the retrospective's own entries. A retrospective that ran in this
+  # process and published nothing is cleaned up after with its own entries
+  # unread, as it was before this check.
+  if ! friction_before_retro "$wt" "$slug"; then
+    info "  The retrospective and the clean-up wait for it: $SELF done $slug"
+    return 1
+  fi
   workshop_pending "$wt"
   # What it published moved sclaude's code: the retrospective, like the
   # clean-up below, runs in a fresh process, on the code it reads.
@@ -1495,6 +1510,9 @@ cmd_done() {
 cmd_sync() {
   require_repo
   local slug="${1:-}" wt branch behind ahead answer pr
+  # Typed at a terminal, the person is here: [g] holds nothing it runs
+  # (friction_hold). From the phone's menu, with no terminal, it may.
+  local FRICTION_NO_HOLD=""; [[ -t 0 && -t 1 ]] && FRICTION_NO_HOLD=1
   local ASK_SLUG="$slug"   # its questions go to its channel (ask_channel)
   [[ -n "$slug" ]] || die "name the feature: $SELF sync <name>"
   wt="$(feature_worktree "$slug")" || die "no such feature: $slug"

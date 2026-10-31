@@ -163,6 +163,19 @@ project_review_mode() {
   esac
 }
 
+# When step 4's review goes on by itself where nobody set `[g]` by hand
+# (review_go_on in local_review.sh): `auto` while an /isleep night over every
+# session is on (`night.py active`; a `here` night does not count), `on` always, `off` never. Absent or unknown is `auto`.
+# Read like `review`, from the main checkout first.
+project_sleep_mode() {
+  local mode
+  mode="$(project_get sleep_mode "${1:-}" 2>/dev/null || true)"
+  case "$mode" in
+    on|off) echo "$mode" ;;
+    *) echo auto ;;
+  esac
+}
+
 # Who gives QA's word (`qa`) and who merges (`merge`): `github` (a person, on
 # GitHub; sclaude waits), `both` (the same, or a key pressed in sclaude's wait
 # does it from here) or `auto` (sclaude does it itself and waits for nobody).

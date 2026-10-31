@@ -114,7 +114,7 @@ echo ready
 
     PROMPT = "Fix it; then say \"done\" — it's $HOME `x`\nsecond line"
 
-    def run(extra_env=None, tty=True, interrupt_after=None):
+    def run(extra_env=None, tty=True, interrupt_after=None, keys_at=None):
         for f in (out, panes, focus):
             if os.path.exists(f):
                 os.remove(f)
@@ -152,6 +152,9 @@ echo "rc=$?"
         while True:
             if interrupt_after and not sent and time.time() - start > interrupt_after:
                 os.write(fd, b"\x03")
+                sent = True
+            if keys_at and not sent and time.time() - start > keys_at[0]:
+                os.write(fd, keys_at[1])
                 sent = True
             try:
                 r, _, _ = select.select([fd], [], [], 0.2)
@@ -291,6 +294,19 @@ echo "rc=$?"
     text = run({"PANE_TEST_SLEEP": "30"}, interrupt_after=3)
     check("ctrl-c-ends-the-session", time.time() - t0 < 15, True)
     check("ctrl-c-sclaude-goes-on", "rc=" in text, True)
+
+    # --- the caller's keys while the session runs in its tab (PANE_KEYS): this
+    # terminal is free, and each second's key is handed on, empty after none.
+    probe = os.path.join(tmp, "keys.sh")
+    pressed = os.path.join(tmp, "pressed")
+    with open(probe, "w") as fh:
+        fh.write('source "%s/ui.sh"\nPANE_KEYS=(keys_probe)\n'
+                 'keys_probe() { echo "[$1]" >> "%s"; }\n' % (LIB, pressed))
+    text = run({"PANE_TEST_SLEEP": "4", "PANE_TEST_PRELOAD": probe}, keys_at=(2.5, b"g"))
+    with open(pressed) as fh:
+        took = fh.read().split()
+    check("pane-keys-handed-on", "[g]" in took, True)
+    check("pane-keys-every-second", took.count("[]") >= 1, True)
 
     # --- a --resume goes to where the conversation went on --------------------
     # Claude Code may carry a conversation on under a new id and hide the old

@@ -243,6 +243,15 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-10-27 with the DORA page: a path or a heading
   changed on one side alone leaves the page missing or every failure unseen. -->
 
+- `night.py active` (`skills/isleep/night.py`) is what `review_go_on` in
+  `sclaude/lib/local_review.sh` asks, under `sleep_mode: auto`
+  (`project_sleep_mode` in `sclaude/lib/project.sh`, `CHOICES` in
+  `config_menu.py`), whether a night over every session is on; `tests/isleep.py` runs it and
+  `tests/config-menu.py` the setting. Renamed on one side alone, the night's
+  review rounds stop going on by themselves, without an error.
+
+  <!-- Added by Claude on 2026-10-31 with sleep_mode, at the user's word. -->
+
 - `sclaude new`'s options (`--issue`, `--blocked-ok`, `--create-issue`,
   `--no-issue`; `new_from_args` in `bin/sclaude`) and `sclaude config set` are
   what the bot's menu runs (`new_start` in `keepawake/webmenu.py`, `config_set`

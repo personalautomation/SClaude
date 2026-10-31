@@ -609,6 +609,8 @@ try:
     for name in ("io", "ui", "state", "steps", "project", "picker", "local_review"):
         body += 'source "%s/%s.sh"\n' % (LIB, name)
     body += 'LIB="%s"\nwarn() { echo "$*" >&2; }\ninfo() { echo "$*"; }\n' % LIB
+    # No real night reaches the box: auto draws as auto ☐ here.
+    body += 'INSTRUMENTS=/nonexistent\n'
     body += 'REPO=%s; n="$(local_review %s 7)"; echo "COUNT=$n"\n' % (repo, repo)
     master, slave = pty.openpty()
 
@@ -636,6 +638,11 @@ try:
 
     import time
     check_true("stop-now-hint", read_until(b"[x x] stop now", 20))
+    # The boxes: [g] ticked shows ticked on the status line, and is kept.
+    check_true("boxes-unticked", "☐ [s] last pass".encode() in seen and "auto ☐ [g] go on".encode() in seen)
+    # g goes round auto → on → off; on is left for the checks below.
+    os.write(master, b"g")
+    check_true("go-on-ticked", read_until(" ☑ [g] go on".encode(), 5))
     os.write(master, b"x")
     time.sleep(1.5)
     os.write(master, b"x")
@@ -655,7 +662,9 @@ try:
         check_true("stop-now-keeps-last-answer", "never" not in fh.read())
     check("stop-now-no-part", os.path.exists(answer_file + ".part"), False)
     with open(state) as fh:
-        check("stop-now-kept", json.load(fh)["steps"]["review"]["enough"], "now")
+        left = json.load(fh)["steps"]["review"]
+    check("stop-now-kept", left["enough"], "now")
+    check("go-on-kept", left.get("go_on"), True)
     prompts()
 
     # The same stop pressed in the feature's topic, with no terminal at all:

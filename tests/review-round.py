@@ -33,7 +33,9 @@
 import importlib.util
 import json
 import os
+import pty
 import re
+import select
 import shutil
 import signal
 import subprocess
@@ -920,20 +922,23 @@ echo "watcher=[$SESSION_WATCHER]"
     # fixed word (and a fixed split for --open-since), local_review a fixed
     # count and says it ran, and `ask` answers from a list (no once it runs
     # out) and says what it was asked.
-    def enough_gate(said, word, count, mode="local", split="0 0", answers=(), done=False):
+    def enough_gate(said, word, count, mode="local", split="0 0", answers=(), done=False, go_on=False):
         wt = os.path.join(tmp, "enough-wt")
         fake = os.path.join(tmp, "enough-lib")
         os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"), exist_ok=True)
         os.makedirs(fake, exist_ok=True)
         state = os.path.join(wt, ".sclaude", "local", "feature", "state.json")
         with open(state, "w") as fh:
-            json.dump({"steps": {"review": {"enough": said}}} if said else {}, fh)
+            review = dict({"enough": said} if said else {}, **({"go_on": True} if go_on else {}))
+            if go_on is not True and go_on:
+                review["go_on_rounds"] = go_on
+            json.dump({"steps": {"review": review}} if review else {}, fh)
         with open(os.path.join(fake, "pr_context.py"), "w") as fh:
             fh.write("import sys\nprint(%r if '--open-since' in sys.argv else %r)\n" % (split, word))
         body = 'source "%s/state.sh"\nsource "%s/local_review.sh"\n' % (LIB, LIB)
         body += functions(RUN, ["review_close_gate", "review_enough_close", "review_session_since",
                                 "review_stuck_say"])
-        body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5\n'
+        body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5; REVIEW_GO_ON_PAUSE=0\n'
                  'gh_repo() { echo o/r; }\nproject_review_mode() { echo %s; }\n'
                  'local_review() { echo REVIEWED >&2; [[ %s == failed ]] && return 1; echo %s; }\n'
                  'local_review_count() { echo 3; }\nlocal_review_done() { %s; }\n'
@@ -941,6 +946,7 @@ echo "watcher=[$SESSION_WATCHER]"
                  'ANSWERS=(%s); is_yes() { [[ "$1" == y ]]; }\n'
                  'ask() { echo "ASKED: $1"; printf -v "$2" %%s "${ANSWERS[0]:-n}"; ANSWERS=("${ANSWERS[@]:1}"); }\n'
                  'say() { echo "$*"; }\ninfo() { echo "$*"; }\nwarn() { echo "$*"; }\n'
+                 'run_step() { echo "RUN_STEP $3"; }\n'
                  'review_close_gate %s x 143; echo "RC=$?"\n') % (
                      fake, mode, count, count, "true" if done else "false",
                      " ".join(answers), wt)
@@ -975,6 +981,27 @@ echo "watcher=[$SESSION_WATCHER]"
     check("unsaid-reviewed", "REVIEWED" in out and "Check the fixes" not in out, True)
     out, left = enough_gate("pass", "ok", 0, answers=("1",))
     check("nothing-open-closes", "RC=0" in out, True)
+    # A pass that did not run: "no" reviews it again rather than leaving.
+    out, left = enough_gate("", "open: 3 review thread(s) open", "failed", answers=("n", "y"))
+    check("failed-no-reviews-again", out.count("REVIEWED"), 2)
+    check("failed-asked-twice", out.count("ASKED: Go on with this head unreviewed"), 2)
+    # Going on by itself ([g]): nothing asked after the review — the fixes
+    # checked, what is open sent back to a session, a failed pass run again
+    # ten times before the question.
+    out, left = enough_gate("now", "open: 3 review thread(s) open", 2, go_on=True)
+    check("go-on-checks-unasked", "REVIEWED" in out and "Choose 1-3" not in out, True)
+    check("go-on-back-to-session", "RUN_STEP review" in out and "ASKED" not in out and "RC=1" in out, True)
+    check("go-on-round-counted", left["steps"]["review"].get("go_on_rounds"), 1)
+    # At its ceiling the box comes off and the person is asked again.
+    out, left = enough_gate("now", "open: 3 review thread(s) open", 2, go_on=30)
+    check("go-on-ceiling-asks", "ASKED: Back to a review session" in out and "RUN_STEP" not in out, True)
+    # Off for this step 4 only: the box is left as the person set it.
+    check("go-on-ceiling-this-step", (left["steps"]["review"].get("go_on"),
+                                      left["steps"]["review"].get("go_on_ceiling")), (True, True))
+    out, left = enough_gate("", "open: 3 review thread(s) open", "failed", answers=("y",), go_on=True)
+    check("go-on-retries", out.count("REVIEWED"), 11)
+    check("go-on-asks-after-retries", out.count("ASKED: Go on with this head unreviewed"), 1)
+
     # In Actions: only threads posted after the session began are left open.
     out, left = enough_gate("pass", "open: 2 review thread(s) open", 0, mode="github", split="0 2")
     check("github-new-left", "RC=0" in out and "ASKED" not in out, True)
@@ -984,6 +1011,151 @@ echo "watcher=[$SESSION_WATCHER]"
     out, left = enough_gate("now", "open: red: build", 0, mode="github")
     check("github-red-to-session", "ASKED" in out, True)
     check("github-red-word-kept", left["steps"]["review"].get("enough"), "now")
+
+    # --- [g] holds the friction review; before the retro every owed one runs --
+    def held(go_on, call, fails=False, log=True, extra=None):
+        wt = tempfile.mkdtemp()
+        feat = os.path.join(wt, ".sclaude", "local", "feature")
+        os.makedirs(feat)
+        st = os.path.join(feat, "state.json")
+        data = {"step": "review", "steps": {"review": {"go_on": True} if go_on else {}}}
+        data.update(extra or {})
+        with open(st, "w") as fh:
+            json.dump(data, fh)
+        if log:
+            with open(os.path.join(feat, "friction.log"), "w") as fh:
+                fh.write("2026-10-31T01:00:00 code hook a refusal\n  its reason\n"
+                     "2026-10-31T01:05:00 code hook another\n")
+        body = 'source "%s/state.sh"\nsource "%s/local_review.sh"\n' % (LIB, LIB)
+        body += functions(RUN, ["friction_hold", "friction_before_retro"])
+        body += ('info() { echo "$*"; }\nwarn() { echo "$*"; }\nask_feed() { echo "FEED $2"; }\n'
+                 # As the real one: the review closed, and the log read and
+                 # moved unless it resumes an open review (its own batch).
+                 'run_friction() { echo "FRICTION $3"; [[ %d -eq 1 ]] && return 1\n'
+                 '  local st="$1/.sclaude/local/feature/state.json"\n'
+                 '  if [[ -z "$(state_get "$st" "friction.$3.session" || true)" ]]; then\n'
+                 '    rm -f "$1/.sclaude/local/feature/friction.log"; state_set "$st" steps.review.friction_held null\n'
+                 '  fi\n'
+                 '  state_set "$1/.sclaude/local/feature/state.json" "friction.$3.done" true; }\n'
+                 '%s; echo "RC=$?"\n') % (1 if fails else 0, call.replace("WT", wt))
+        # A terminal of its own: the review before the retro needs one.
+        master, slave = pty.openpty()
+        out = subprocess.run(["bash", "-c", body], stdin=slave, stdout=slave, stderr=slave, timeout=30)
+        os.close(slave)
+        seen = b""
+        while True:
+            ready, _, _ = select.select([master], [], [], 0.2)
+            if not ready:
+                break
+            try:
+                chunk = os.read(master, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            seen += chunk
+        os.close(master)
+        with open(st) as fh:
+            return seen.decode(errors="replace"), json.load(fh)["steps"]["review"]
+    out, left = held(True, "friction_hold WT review-3 review")
+    check("friction-held", "RC=0" in out and left.get("friction_held") == "review-3", True)
+    check("friction-held-told", "FEED Friction review held for you" in out and "2 entries kept" in out, True)
+    out, left = held(False, "friction_hold WT review-3 review")
+    check("friction-not-held-unticked", "RC=1" in out and "friction_held" not in left, True)
+    out, left = held(True, "friction_hold WT code-1 code", extra={"step": "code"})
+    check("friction-not-held-other-step", "RC=1" in out, True)
+    # Any friction review while the feature is at step 4: a sync's too.
+    out, left = held(True, "friction_hold WT sync-1 sync")
+    check("friction-held-sync-in-step-4", "RC=0" in out and left.get("friction_held") == "sync-1", True)
+    # Asked for by hand, never held.
+    out, left = held(True, "FRICTION_NO_HOLD=1 friction_hold WT review-3 review")
+    check("friction-not-held-by-hand", "RC=1" in out, True)
+    out, left = held(True, "friction_hold WT review-3 review; friction_before_retro WT feat")
+    check("friction-read-before-retro", "FRICTION review-3" in out and left.get("friction_held") is None, True)
+    # [g] still ticked does not hold the review run there, and stays the
+    # person's: untouched.
+    check("friction-check-keeps-go-on", left.get("go_on"), True)
+
+    # A review that reads the log settles every key [g] held, and an unread-N.
+    wt = tempfile.mkdtemp()
+    st = os.path.join(wt, "state.json")
+    with open(st, "w") as fh:
+        json.dump({"friction_owed": "unread-1", "friction_owed_told": "unread-1",
+                   "steps": {"review": {"friction_held": "review-3"}},
+                   "friction": {"review-2": {"held": True}, "review-3": {"held": True}}}, fh)
+    subprocess.run(["bash", "-c", 'source "%s/state.sh"\n%s\nfriction_log_read "%s" review-4'
+                    % (LIB, functions(RUN, ["friction_log_read"]), st)], timeout=30)
+    with open(st) as fh:
+        got = json.load(fh)
+    check("friction-read-settles-held", (got["steps"]["review"].get("friction_held"),
+                                         got["friction"]["review-2"].get("read_in"),
+                                         got["friction"]["review-3"].get("held"),
+                                         got.get("friction_owed")), (None, "review-4", None, None))
+    def owed_after(owed, key, held=None):
+        with open(st, "w") as fh:
+            json.dump({"friction_owed": owed, "steps": {"review": {"friction_held": held} if held else {}},
+                       "friction": {held: {"held": True}} if held else {}}, fh)
+        subprocess.run(["bash", "-c", 'source "%s/state.sh"\n%s\nfriction_log_read "%s" %s'
+                        % (LIB, functions(RUN, ["friction_log_read"]), st, key)], timeout=30)
+        with open(st) as fh:
+            return json.load(fh).get("friction_owed")
+    # The key running now stays owed until its own end; a held one read
+    # under another key does not.
+    check("friction-owed-running-kept", owed_after("unread-1", "unread-1"), "unread-1")
+    check("friction-owed-held-settled", owed_after("review-3", "sync-2", held="review-3"), None)
+
+    # --- [g]'s three states: the person's word, else the project's sleep_mode --
+    def go_on(said, mode, call):
+        wt = tempfile.mkdtemp()
+        os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"))
+        st = os.path.join(wt, ".sclaude", "local", "feature", "state.json")
+        with open(st, "w") as fh:
+            json.dump({"steps": {"review": {} if said is None else {"go_on": said}}}, fh)
+        body = ('source "%s/state.sh"\nsource "%s/local_review.sh"\nINSTRUMENTS=/nonexistent\n'
+                'project_sleep_mode() { echo %s; }\n%s\n') % (LIB, LIB, mode, call.replace("WT", wt))
+        out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=30).stdout
+        with open(st) as fh:
+            return out.strip(), json.load(fh)["steps"]["review"].get("go_on")
+    on = 'review_go_on WT && echo ON || echo OFF'
+    check("go-on-setting-on", go_on(None, "on", on)[0], "ON")
+    check("go-on-setting-off", go_on(None, "off", on)[0], "OFF")
+    check("go-on-auto-no-night", go_on(None, "auto", on)[0], "OFF")
+    check("go-on-person-off-beats-setting", go_on(False, "on", on)[0], "OFF")
+    check("go-on-person-on-beats-setting", go_on(True, "off", on)[0], "ON")
+    check("go-on-box-says-why", go_on(None, "on", "review_go_box WT")[0], "auto ☑ (sleep_mode)")
+    check("go-on-box-auto-off", go_on(None, "off", "review_go_box WT")[0], "auto ☐")
+    check("go-on-box-on", go_on(True, "off", "review_go_box WT")[0], "☑")
+    # g goes round auto → on → off → auto, by the state kept, whatever the
+    # setting makes of auto.
+    check("go-on-toggle-auto-to-on", go_on(None, "on", "review_go_on_toggle WT")[1], True)
+    check("go-on-toggle-on-to-off", go_on(True, "on", "review_go_on_toggle WT")[1], False)
+    check("go-on-toggle-off-to-auto", go_on(False, "on", "review_go_on_toggle WT")[1], None)
+    # At the ceiling: off and drawn so, whatever the box; a press ticks it.
+    capped = 'state_set WT/.sclaude/local/feature/state.json steps.review.go_on_ceiling true; '
+    check("go-on-ceiling-off", go_on(True, "on", capped + on)[0], "OFF")
+    check("go-on-ceiling-drawn", go_on(None, "on", capped + "review_go_box WT")[0], "☐ (30 rounds)")
+    check("go-on-ceiling-press-ticks", go_on(None, "on", capped + "review_go_on_toggle WT; " + on)[0], "ON")
+    out, left = held(True, "friction_hold WT review-3 review >/dev/null; friction_before_retro WT feat",
+                     fails=True)
+    check("friction-unread-holds-retro", "RC=1" in out and left.get("friction_held") == "review-3", True)
+    # Without [g] too: a log no review read, and a review left open.
+    out, left = held(False, "friction_before_retro WT feat")
+    check("friction-unread-log-read", "FRICTION unread-1" in out and "RC=0" in out, True)
+    out, left = held(False, "friction_before_retro WT feat", log=False,
+                     extra={"friction": {"code-2": {"session": "s", "done": False}}})
+    check("friction-open-resumed", "FRICTION code-2" in out, True)
+    out, left = held(False, "friction_before_retro WT feat", log=False)
+    check("friction-nothing-owed", "FRICTION" not in out and "RC=0" in out, True)
+    # A review left open reads only its own batch: the held log is read after it.
+    out, left = held(False, "friction_before_retro WT feat",
+                     extra={"friction": {"code-2": {"session": "s", "done": False}},
+                            "steps": {"review": {"friction_held": "review-5"}}})
+    check("friction-open-then-held", ("FRICTION code-2" in out, "FRICTION review-5" in out, "RC=0" in out),
+          (True, True, True))
+    # A held key whose log a later review read owes nothing: no review for it.
+    out, left = held(False, "friction_before_retro WT feat", log=False,
+                     extra={"steps": {"review": {"friction_held": "review-5"}}})
+    check("friction-held-already-read", "FRICTION" not in out and left.get("friction_held") is None, True)
 
     # --- rounds that stopped converging are said, once, and not asked --------
     def stuck_say(review, pr=7):

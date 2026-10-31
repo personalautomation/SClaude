@@ -44,6 +44,13 @@ CHOICES = {
     ],
 }
 
+CHOICES["sleep_mode"] = [
+    ("auto", "step 4 goes on by itself, as [g] does, while an /isleep night "
+             "over every session is on (not /isleep here)"),
+    ("on", "step 4 always goes on by itself"),
+    ("off", "only where [g] is ticked by hand"),
+]
+
 CHOICES["metricsTeam"] = [
     ("real", "the metrics page compares the people whose work is in the records"),
     ("demo", "three generated teammates beside them, drawn from the real figures, "
@@ -59,7 +66,7 @@ def default(key):
     return DEFAULTS.get(key) or (CHOICES[key][0][0] if key in CHOICES else "")
 
 # A README line that opens a section: its key, a run of spaces, a dash.
-SECTION = re.compile(r"^([a-z][a-zA-Z]*)\s+— (.*)$")
+SECTION = re.compile(r"^([a-z][a-zA-Z_]*)\s+— (.*)$")
 
 
 def explanations(example):

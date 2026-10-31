@@ -810,6 +810,9 @@ step_rewind_to() {
   done
   # The person's "enough" was about the round it was said in (review_enough).
   state_set "$state" steps.review.enough null 2>/dev/null || true
+  # [g] is the person's for the whole review; its rounds count afresh.
+  state_set "$state" steps.review.go_on_rounds null 2>/dev/null || true
+  state_set "$state" steps.review.go_on_ceiling null 2>/dev/null || true
   declare -F review_said_drop >/dev/null && review_said_drop
 
   state_set "$state" step "$target"
@@ -1100,6 +1103,11 @@ friction_of() {
     echo "after the sync with main${n:+ $n}"
     return
   fi
+  # friction_before_retro: entries of any step that no review read.
+  if [[ "$step" == unread ]]; then
+    echo "of what no review read, before the retrospective${n:+ $n}"
+    return
+  fi
   # A key that names no step (`sclaude friction` past the steps): said as it is.
   if [[ "$(step_index "$step")" -lt 0 ]]; then
     echo "of $1"
@@ -1217,6 +1225,9 @@ step_close_merged() {
     fi
   done
   state_set "$state" steps.review.enough null 2>/dev/null || true
+  # [g] is the person's for the whole review; its rounds count afresh.
+  state_set "$state" steps.review.go_on_rounds null 2>/dev/null || true
+  state_set "$state" steps.review.go_on_ceiling null 2>/dev/null || true
   declare -F review_said_drop >/dev/null && review_said_drop
   state_set "$state" step "done"
   state_set "$state" reopened null 2>/dev/null || true

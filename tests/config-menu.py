@@ -116,6 +116,23 @@ try:
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.strip()
     check("tree-when-main-has-none", out, "off")
 
+    # sleep_mode: auto, on, off — absent or unknown is auto, so a night still
+    # drives the review where nobody chose; its README line names a row.
+    check("sleep-choices", [l.split("\t")[0] for l in menu("choices", "sleep_mode")[1].splitlines()],
+          ["auto", "on", "off"])
+    sleep = 'source "%s/project.sh"; REPO=%s; project_sleep_mode %s' % (LIB, repo, wt)
+    for value, want in (("off", "off"), ("on", "on"), ("asleep", "auto"), (None, "auto")):
+        write(config, {} if value is None else {"sleep_mode": value})
+        out = subprocess.run(["bash", "-c", sleep], capture_output=True, text=True).stdout.strip()
+        check("sleep-mode-%s" % value, out, want)
+    write(config, {})
+    rows = dict(l.split("\t", 1) for l in menu("rows", config, EXAMPLE)[1].splitlines())
+    check_true("sleep-row-explained", "goes on by itself" in rows.get("sleep_mode", ""))
+    rc, _ = menu("set", config, "sleep_mode", "on")
+    check("sleep-set-rc", rc, 0)
+    with open(config) as fh:
+        check("sleep-set", json.load(fh).get("sleep_mode"), "on")
+
     # qa and merge: three words each; an absent merge is the offer sclaude
     # made before the key existed.
     for key in ("qa", "merge"):

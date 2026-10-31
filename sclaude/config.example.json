@@ -138,12 +138,22 @@
     "            for showing the page with a team. Generated data: never",
     "            present it as anybody's real work. Set it in",
     "            .sclaude/local/config.json instead to turn the demo on for",
-    "            one machine only: that file is outside git, and wins."
+    "            one machine only: that file is outside git, and wins.",
+    "sleep_mode — when step 4's review goes on by itself, as `[g]` does",
+    "            (no question after a review pass: a failed pass runs again,",
+    "            the fixes are checked, open findings go back to a review",
+    "            session): \"auto\" (while the person's /isleep night over",
+    "            every session is on — not an `/isleep here` one —",
+    "            and asking again once they are back; the default), \"on\"",
+    "            (always) or \"off\" (only where `[g]` is ticked by hand).",
+    "            A `[g]` set by hand on a feature, on or off, wins over it."
   ],
 
   "qa": "github",
 
   "merge": "both",
+
+  "sleep_mode": "auto",
 
   "maintainers": ["lead@example.com"],
 

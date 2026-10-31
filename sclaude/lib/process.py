@@ -134,14 +134,16 @@ NODES = {
                  "Current status on the issue and every parent; deployed-* labels", ""),
     "done_cmd": ("sclaude", 30, "task", "sclaude done",
                  "called by the run after the epilogue; by hand later", ""),
-    "retro": ("session", 31, "session", "7 · retro",
+    "friction_left": ("session", 31, "session", "Friction check",
+                      "always: every friction review still owed runs here", "F"),
+    "retro": ("session", 32, "session", "7 · retro",
               "what was missed, what could work better, what sclaude could do better", "W"),
-    "retro_fix": ("sclaude", 32, "gate", "The retro changed the code?",
+    "retro_fix": ("sclaude", 33, "gate", "The retro changed the code?",
                   "yes — its commits go out from step 3", ""),
-    "cleanup": ("person", 33, "gate", "Clean up?",
+    "cleanup": ("person", 34, "gate", "Clean up?",
                 "remove the worktree, branches, database; the record stays", ""),
-    "end": ("sclaude", 34, "end", "Done", "", ""),
-    "kept": ("person", 34, "end", "Kept", "later: sclaude done <name>", ""),
+    "end": ("sclaude", 35, "end", "Done", "", ""),
+    "kept": ("person", 35, "end", "Kept", "later: sclaude done <name>", ""),
 }
 
 # How each session runs: model · effort · permission mode. Shown in the note
@@ -183,11 +185,11 @@ DETAILS = {
     "pr_check": "sclaude looks for the pull request on GitHub and for commits it does not carry. Missing either: the session is sent back to finish, at most twice.",
     "draft_pr": "The draft is assigned to its author and put in the issue's milestone. Who reviews it is the project's review setting.",
     "ci_review": "With review set to github, the project's review workflow in Actions reviews the pull request on every push and posts its findings as threads. sclaude waits for its check before step 4 opens a session, and each round's next findings come from its run on the round's push.",
-    "local_pass": "With review set to local, read-only claude -p passes review the pull request here and post their findings as threads signed by this machine. A key in the terminal or in the topic ends the search.",
+    "local_pass": "With review set to local, read-only claude -p passes review the pull request here and post their findings as threads signed by this machine. A key in the terminal or in the topic ends the search; another, in the terminal, lets the review go on by itself, past the questions after it — a box of three states going round auto → on → off: auto follows the project's sleep_mode (on, off, or by default an /isleep night over every session, not an /isleep here one).",
     "review_found": "Findings, unresolved threads, comments and red checks are gathered before any session. Nothing to answer: step 4 closes with no session at all.",
-    "review": "The session fixes the findings through subagents, keeping only the coordination, pushes, and stops once the automatic review has confirmed the fixes and posted the next round.",
+    "review": "The session fixes the findings through subagents, keeping only the coordination, pushes, and stops once the automatic review has confirmed the fixes and posted the next round. While it works in its own tab, the terminal takes the review's boxes, [s] and [g].",
     "round": "A watcher ends the session when the round closes. Under 40% context the same conversation takes the new findings; above it a fresh one does, after the round's friction review. Rounds that stop converging are said once.",
-    "review_close": "Leaving step 4 closes it only when nothing is open — no unresolved thread, no running or red check — and the local regression is green again. Otherwise sclaude waits, says what is open, and offers the session back.",
+    "review_close": "Leaving step 4 closes it only when nothing is open — no unresolved thread, no running or red check — and the local regression is green again. Otherwise sclaude waits, says what is open, and offers the session back. With [g] on it asks nothing: what is open goes back to a session by itself (30 rounds a step 4, then it asks), a pass that did not run is tried again ten times with growing pauses, and after the search ended the fixes are checked.",
     "hold_ways": "Production carries this feature and its regression there was not green, with nothing rolled back: the rollback failed or was refused, another release landed on top and the repeated run was red too, or the suite could not run in a broken environment (a project with no production suite or address is not held). A red run made by hand lands here as well. Every later pass of sclaude <name> checks this first and stops on it, so nothing is shipped, closed or cleaned up. The ways out: sclaude regression <name> prod runs production's suite again, and green goes on to the epilogue; sclaude rollback puts the previous release back and sends the fix to step 4; sclaude return fixes forward from step 4.",
     "merge_check": "git merge-tree tells in memory whether the branch merges cleanly with main — no session, no GitHub call. Asked before the preview, after QA's yes, and every two minutes while waiting for the merge.",
     "sync": "Merges origin/main into the branch (never a rebase), resolves each conflict keeping both sides' intent, checks the result as the project's CLAUDE.md says and pushes. sclaude then checks it settled; a pull request handed over goes back to a draft.",
@@ -208,6 +210,7 @@ DETAILS = {
     "fix_prod": "Opens in step 4 with the failing run's log, told that production runs the previous release and that the local suite is the check that matters. The fix goes round again: local, merge, preview, production.",
     "epilogue": "A short session writes a Current status comment on the issue and on every parent up the chain, and Current behaviour where the product now differs from a description. Labels deployed-preview and deployed-prod are set by how each stage ended.",
     "done_cmd": "Called by the run itself once production is settled, with no question of its own; by hand from the menu or the terminal later, after a no to the clean-up. It checks the merge with GitHub, runs the retrospective, then asks once before removing anything.",
+    "friction_left": "Before the retrospective, always, as a safety net — with nothing owed it is a check that passes at once: every friction review still owed — one held while [g] ran step 4's rounds, one cut off and never finished, a log with entries no review read. The retrospective reads the logs and the clean-up removes them, so this is their last reader; with nobody at the terminal the retrospective and the clean-up wait for it.",
     "retro": "Reads the plan, the friction logs and the terminal's record of the cycle: what you may have missed, how the work could go better, what sclaude could do better. It may fix sclaude in its workshop.",
     "retro_fix": "Commits the retrospective made on the feature's branch go out the way the feature's own did: back to step 3 for their pull request and the review.",
     "cleanup": "Shows what would go and asks once: Remove all of it? Yes appends the cycle's record to ~/.claude/sclaude/cycles.jsonl and removes the worktree, the branches and the feature's database; no keeps all of it.",
@@ -220,6 +223,7 @@ DETAILS = {
     "f_rules": "A log of nothing but proposed CLAUDE.md rules needs no session: they are put off to the monthly review, where how often a class comes back decides it. With SCLAUDE_FRICTION_ASK=on you are asked first, and now hands them to a review told to write them in.",
     "f_classify": "One call of a small model reads the proposals, the classes already put off and CLAUDE.md, and says of each: the same as a class already there, a rule CLAUDE.md already states, or new. Checked, not trusted; a failure leaves the rows as they came.",
     "f_review": "A session in plan mode, in the feature's tree, reads this session's entries and its transcript and decides each one. It may change the product's rules on the feature's branch, and sclaude itself in the workshop. It ends with a verdict line.",
+    "f_away": "With [g] ticked in step 4 the review goes on by itself, and a friction review would stop it waiting for its plan's approval. So the log is kept, every later session's entries added to it, and the first friction review after the box comes off reads them all — at the latest the one sclaude done runs before the retrospective, which waits for it.",
     "f_hold": "A review interrupted, or one that never started, stays open: after a step's session, a review round or a sync the run waits until sclaude friction finishes it or sclaude reset closes it; after a fixing session the stage goes on, and the next review waits for it.",
     "f_plan": "The review starts in plan mode, so nothing changes before you approve its plan: which file each change goes to, and why.",
     "f_decide": "A restriction that blocked ordinary work and protects nothing is lifted; one working as intended is explained; one a single feature is not enough evidence for is put off; a bug in sclaude's own code is fixed in sclaude.",
@@ -315,7 +319,8 @@ EDGES = [
     ("prod", "epilogue", "green, red, or main not ready", ""),
     ("prod", "review", "red: rolled back, or held; the ship failed", "back"),
     ("epilogue", "done_cmd", "", ""),
-    ("done_cmd", "retro", "", ""),
+    ("done_cmd", "friction_left", "", ""),
+    ("friction_left", "retro", "", ""),
     ("retro", "retro_fix", "", ""),
     ("retro_fix", "pr", "yes — step 3 again", "back"),
     ("retro_fix", "cleanup", "no", ""),
@@ -431,6 +436,7 @@ FRICTION_NODES = {
     "f_rules": ("sclaude", 3, "gate", "Only proposed rules?", "rules for the project's CLAUDE.md, nothing else", ""),
     "f_classify": ("monthly", 3, "task", "Matched, no session", "a small model names each one's class", ""),
     "f_review": ("review", 4, "session", "Friction review", "reads the log and the transcript, plans a change for each entry", "W"),
+    "f_away": ("sclaude", 5, "hold", "Kept for you", "[g] ticked: read before the retro at the latest", ""),
     "f_hold": ("sclaude", 4, "hold", "Held", "an open review holds the next step", ""),
     "f_plan": ("person", 5, "user", "Approve its plan", "which file each change goes to", ""),
     "f_decide": ("review", 6, "gate", "Each entry: which kind?", "in the way, as intended, unsure, or a bug", ""),
@@ -450,6 +456,8 @@ FRICTION_EDGES = [
     ("f_empty", "f_rules", "entries", ""),
     ("f_rules", "f_classify", "yes", "msg"),
     ("f_rules", "f_review", "no", ""),
+    ("f_rules", "f_away", "no, [g] in step 4", ""),
+    ("f_away", "f_review", "the box off, or before the retro", "back"),
     ("f_review", "f_hold", "cut off", ""),
     ("f_hold", "f_review", "friction", "back"),
     ("f_review", "f_plan", "", ""),
@@ -565,6 +573,7 @@ POSITIONS = {
     "local_pass": "o_review",
     "epilogue": "o_epilogue",
     "done_cmd": "o_retro",
+    "friction_left": "o_retro",
     "retro": "o_retro",
     "cleanup": "o_end",
     "end": "o_end",
@@ -587,6 +596,9 @@ NEEDS = {
     "local_pass": ("review", {"local"}),
     ("draft_pr", "ci_review"): ("review", {"github"}),
     ("draft_pr", "local_pass"): ("review", {"local"}),
+    "f_away": ("review", {"local"}),
+    ("f_rules", "f_away"): ("review", {"local"}),
+    ("f_away", "f_review"): ("review", {"local"}),
     ("draft_pr", "review_found"): ("review", {"off"}),
     "r_local": ("regression.local", {True}),
     "r_stop": ("regression.local", {True}),
@@ -1061,6 +1073,7 @@ BADGE_WHY = {
     ("plan", "F"): "F — what the safety rules refused the plan's session is reviewed once it ends.",
     ("code", "F"): "F — what the safety rules refused step 2's session is reviewed once it ends.",
     ("pr", "F"): "F — what the safety rules refused step 3's session is reviewed once it ends.",
+    ("friction_left", "F"): "F — the friction reviews still owed run here, one after another, before the retrospective.",
     ("review", "F"): "F — what the safety rules refused a review round is reviewed when the round goes to a fresh session.",
     ("retro", "W"): "W — the retrospective may fix what it found in sclaude, in the workshop; its approved plan is the yes.",
     ("f_review", "W"): "W — a bug in sclaude the review finds it fixes in the workshop; its approved plan is the yes.",
@@ -1173,6 +1186,8 @@ def _in_step(state, step):
 
 def _past_steps(state, pr_state, epilogue):
     if state.get("no_change"):
+        if state.get("friction_owed"):
+            return "friction_left", "a friction review still owed waits before the retrospective: sclaude done at the terminal"
         return "cleanup", "no change to the code: only the clean-up is left"
     if pr_state == "OPEN":
         runs = _runs(state.get("sync"))
@@ -1200,6 +1215,10 @@ def _past_steps(state, pr_state, epilogue):
         if prod_held(state):
             return "hold_ways", "production carries the feature, and its last run was not green"
         retro = _runs(state.get("retro"))
+        if not retro and ((state.get("steps") or {}).get("review") or {}).get("friction_held"):
+            return "friction_left", "a friction review held in step 4 comes before the retrospective"
+        if state.get("friction_owed"):
+            return "friction_left", "a friction review still owed waits before the retrospective: sclaude done at the terminal"
         last = retro[-1] if retro else {}
         # Resumed, a retrospective keeps the end it had (session_runs): it is
         # open again while taken up after that end.
@@ -1377,6 +1396,8 @@ def _friction_way(rows, workshop_sessions):
     way = [{"n": n} for n in ("f_trip", "f_log", "f_empty", "f_rules")]
     sitting, outcome, verdict, session = None, "", "", ""
     for r in rows:
+        if r["op"] == "held" and way[-1]["n"] != "f_away":
+            way.append({"n": "f_away", "from": r["at"]})
         if r["op"] == "open":
             if way[-1]["n"] == "f_review":
                 way[-1]["k"] = way[-1].get("k", 1) + 1

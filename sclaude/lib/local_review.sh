@@ -193,14 +193,22 @@ local_review_run() {
   if [[ -n "$verify" ]]; then
     info "  Checking the fixes on PR #${pr:-?} ($LOCAL_REVIEW_MODEL): ${base:0:7}..${head:0:7}." >&2
     info "  You ended the search for new findings, so this only resolves the ones the commits fixed." >&2
+    if keys_usable; then
+      info "  To step in, press a key while it runs — no Enter, nothing shows; the box stays ticked until it applies:" >&2
+      info "    $(review_go_box "$wt") [g]  go on by itself: no question after this review (g goes round auto → on → off)" >&2
+    fi
   else
     info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${base:0:7}..${head:0:7}." >&2
     info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
     if keys_usable; then
-      info "  It needs nothing from you. To step in, press a key while it runs — no Enter, nothing shows:" >&2
-      info "    [s]    this pass is the last that looks for new findings (s again takes it back)" >&2
-      info "    [x x]  stop it now, dropping only what this pass found so far" >&2
-      info "  Either way what is open goes to the review session, and sclaude asks you before it checks the fixes." >&2
+      info "  It needs nothing from you. To step in, press a key while it runs — no Enter, nothing shows." >&2
+      info "  [s] ticks a box, and it stays ticked on the line below until it applies; pressed again it is taken back." >&2
+      info "  [g] goes round auto → on → off: auto follows the project's sleep_mode (by default, an /isleep night over every session)." >&2
+      info "    $(review_box "$(review_enough "$wt")") [s]    this pass is the last that looks for new findings" >&2
+      info "    $(review_go_box "$wt") [g]    go on by itself: no question after the review — a pass that failed runs again," >&2
+      info "               the fixes are checked and what is open goes back to a review session without asking" >&2
+      info "      [x x]  stop it now, dropping only what this pass found so far" >&2
+      info "  Either way what is open goes to the review session; unless [g] is ticked, sclaude asks you first." >&2
     fi
   fi
 
@@ -319,21 +327,25 @@ local_review_run() {
 #
 # The keys end the search for new findings (review_enough): `s` lets this
 # pass finish and be posted, and it is the last to look; pressed again it
-# takes that back. `x` stops the pass now — what it had found is not posted,
+# takes that back. `g` goes round [g]'s three states, auto → on → off
+# (review_go_on_toggle). Both are drawn as boxes on the status line, ticked
+# until they apply, so a word given
+# minutes ago is still seen. `x` stops the pass now — what it had found is not posted,
 # since a finding exists only in the answer the pass ends with — and so wants
 # pressing twice. Either way what is open goes to the review session. Nothing
 # here asks Telegram: a question every round would be noise on the phone —
 # the topic's message that the pass started carries the same two as buttons
 # instead (review_said_take), and a press is taken here as a key is. Without
 # a terminal it is a wait for those. Everything goes to stderr: local_review answers on stdout.
-# A check of the fixes (verify) takes no keys: the search is over already.
+# A check of the fixes (verify) takes only `g`: the search is over already.
 # Returns 1 when the person stopped the pass.
 local_review_wait() {
-  local wt="$1" pid="$2" pass="$3" began="$4" verify="${5:-}" round="${6:-1}" armed=0 armed_at=0 said hint t tty="" which said_file
+  local wt="$1" pid="$2" pass="$3" began="$4" verify="${5:-}" round="${6:-1}" armed=0 armed_at=0 said go="" hint t tty="" which said_file
   # The round counts heads reviewed; a pass is another read of this head,
   # after one that found the cap, so the first pass goes unsaid.
   which="round $round"; [[ "$pass" -gt 1 ]] && which+=", pass $pass"
   said="$(review_enough "$wt")"
+  go="$(review_go_box "$wt")"
   said_file="$(review_said_file)" || said_file=""
   # No echo while it waits: a key pressed between two reads would otherwise
   # land on the status line. No cursor either: blinking after the last key in
@@ -349,13 +361,11 @@ local_review_wait() {
     if [[ -n "$tty" ]]; then
       t=$((SECONDS - began))
       if [[ -n "$verify" ]]; then
-        hint="checking the fixes only"
+        hint="checking the fixes only · $go ${BOLD}[g]${OFF} go on by itself"
       elif [[ "$armed" -eq 1 ]]; then
         hint="press ${BOLD}[x]${OFF} again: stop now and drop this pass · any other key: carry on"
-      elif [[ "$said" == pass ]]; then
-        hint="the last pass for new findings · ${BOLD}[s]${OFF} takes it back · ${BOLD}[x x]${OFF} stop now"
       else
-        hint="only if you want to step in: ${BOLD}[s]${OFF} last pass for new findings · ${BOLD}[x x]${OFF} stop now"
+        hint="$(review_box "$said") ${BOLD}[s]${OFF} last pass for new findings · $go ${BOLD}[g]${OFF} go on by itself · ${BOLD}[x x]${OFF} stop now"
       fi
       # Not "Human in the loop", as the waits that need the person say: this
       # one goes on by itself, and the keys are there only to step in.
@@ -374,7 +384,8 @@ local_review_wait() {
         back) said=""; [[ "$POLL_KEY" == [sS] ]] && POLL_KEY="" ;;
       esac
     fi
-    [[ -n "$POLL_KEY" && -z "$verify" ]] || continue
+    [[ -n "$POLL_KEY" ]] || continue
+    [[ -n "$verify" && "$POLL_KEY" != [gG] ]] && continue
     case "$POLL_KEY" in
       x|X)
         if [[ "$armed" -eq 1 ]]; then
@@ -388,6 +399,8 @@ local_review_wait() {
       s|S)
         if [[ "$said" == pass ]]; then said=""; else said=pass; fi
         review_enough_set "$wt" "$said" ;;
+      g|G)
+        review_go_on_toggle "$wt"; go="$(review_go_box "$wt")" ;;
     esac
     armed=0
   done
@@ -418,6 +431,193 @@ review_enough() {
 
 review_enough_set() {
   state_set "$1/.sclaude/local/feature/state.json" steps.review.enough "${2:-null}" 2>/dev/null || true
+}
+
+# The person's word that the review goes on by itself, `g` while a pass runs:
+# none of the questions after the review is asked. A pass that did not run
+# is run again (REVIEW_GO_ON_RETRIES times in a row, then asked: one that
+# keeps failing fails for a reason a person has to see), the fixes are
+# checked once the search is over, and what is open goes back to a review
+# session — REVIEW_GO_ON_ROUNDS times a step 4, then it is off for that step 4
+# (review_go_on_capped) and the person asked: rounds that never converge would otherwise go on paying
+# all night.
+#
+# Three states in steps.review.go_on: true, ticked by the person; false,
+# taken off by them; null, the project's sleep_mode decides (project_sleep_mode):
+# `on` ticks it for every feature, `off` leaves it off, and `auto`, the
+# default, ticks it while an /isleep night over every session is on
+# (skills/isleep/night.py active) — not an `/isleep here` one. The person's word, either way, outlasts step 4 closing and the
+# cycle being sent back — to them it is all one review, the sessions only
+# rotate to save context; the rounds' count starts again each step 4.
+REVIEW_GO_ON_RETRIES="${REVIEW_GO_ON_RETRIES:-10}"
+# The pause before the n-th retry, n times this many seconds.
+REVIEW_GO_ON_PAUSE="${REVIEW_GO_ON_PAUSE:-60}"
+REVIEW_GO_ON_ROUNDS="${REVIEW_GO_ON_ROUNDS:-30}"
+
+review_go_on() {
+  review_go_on_capped "$1" && return 1
+  case "$(state_get "$1/.sclaude/local/feature/state.json" steps.review.go_on 2>/dev/null || true)" in
+    true) return 0 ;;
+    false) return 1 ;;
+  esac
+  [[ -n "$(review_go_on_by "$1")" ]]
+}
+
+# What ticks [g] when the person said nothing: `sleep_mode` (set to on),
+# `night` (auto, a night on), or nothing. Either reader missing reads as off.
+#
+#   review_go_on_by <wt>
+review_go_on_by() {
+  local mode=auto night="${INSTRUMENTS:-}/skills/isleep/night.py"
+  declare -F project_sleep_mode >/dev/null && mode="$(project_sleep_mode "$1" 2>/dev/null || echo auto)"
+  case "$mode" in
+    on)  echo sleep_mode ;;
+    off) ;;
+    *)   [[ -f "$night" ]] && python3 "$night" active >/dev/null 2>&1 && echo night ;;
+  esac
+  return 0
+}
+
+# The 30-round ceiling's mark: [g] off for this step 4 only, whatever the
+# box says, and the person asked. Cleared with the rounds' count, when step 4
+# closes or the cycle is sent back — the next step 4 follows the box again —
+# and by any press of `g`, which is the person's word from then on.
+review_go_on_capped() {
+  [[ "$(state_get "$1/.sclaude/local/feature/state.json" steps.review.go_on_ceiling 2>/dev/null || true)" == true ]]
+}
+
+# `g`: the box's three states in turn, auto → on → off → auto. By the state
+# kept, not by what the night makes of auto: a press means the same however
+# the box was drawn a moment before.
+#
+#   review_go_on_toggle <wt>
+review_go_on_toggle() {
+  # Pressed at the ceiling, the box was drawn off: the press ticks it.
+  review_go_on_capped "$1" && { review_go_on_set "$1" true; return 0; }
+  case "$(state_get "$1/.sclaude/local/feature/state.json" steps.review.go_on 2>/dev/null || true)" in
+    true)  review_go_on_set "$1" false ;;
+    false) review_go_on_set "$1" "" ;;
+    *)     review_go_on_set "$1" true ;;
+  esac
+}
+
+# The box as drawn: ☑ on, ☐ off, and for auto what the setting makes of it,
+# with why when it ticks it.
+#
+#   review_go_box <wt>   → ☑ | ☐ | auto ☐ | auto ☑ (night) | auto ☑ (sleep_mode)
+review_go_box() {
+  local by
+  review_go_on_capped "$1" && { printf '☐ (%s rounds)' "$REVIEW_GO_ON_ROUNDS"; return 0; }
+  case "$(state_get "$1/.sclaude/local/feature/state.json" steps.review.go_on 2>/dev/null || true)" in
+    true)  printf '☑'; return 0 ;;
+    false) printf '☐'; return 0 ;;
+  esac
+  by="$(review_go_on_by "$1")"
+  if [[ -n "$by" ]]; then printf 'auto ☑ (%s)' "$by"; else printf 'auto ☐'; fi
+}
+
+# true, false, or "" for null (the setting decides). The count of its rounds
+# starts again either way.
+review_go_on_set() {
+  state_set "$1/.sclaude/local/feature/state.json" steps.review.go_on "${2:-null}" 2>/dev/null || true
+  state_set "$1/.sclaude/local/feature/state.json" steps.review.go_on_rounds null 2>/dev/null || true
+  state_set "$1/.sclaude/local/feature/state.json" steps.review.go_on_ceiling null 2>/dev/null || true
+}
+
+# One more round [g] sends back to a review session, counted; at the ceiling
+# [g] is off for this step 4 instead (steps.review.go_on_ceiling, the box left
+# as it was), and the caller asks.
+#
+#   review_go_on_round <wt>   → 0: go back; 1: the ceiling, ask
+review_go_on_round() {
+  local state="$1/.sclaude/local/feature/state.json" used
+  used="$(state_get "$state" steps.review.go_on_rounds 2>/dev/null || true)"
+  [[ "$used" =~ ^[0-9]+$ ]] || used=0
+  if [[ "$used" -ge "$REVIEW_GO_ON_ROUNDS" ]]; then
+    warn "  [g] go on by itself sent the review back $used times, its ceiling: it is off for this step 4, and you decide."
+    # Off for this step 4 only (review_go_on_capped): written as the box's
+    # off, it would outlast the step as the person's word, and no later night
+    # would drive this feature again.
+    state_set "$state" steps.review.go_on_ceiling true 2>/dev/null || true
+    return 1
+  fi
+  state_set "$state" steps.review.go_on_rounds "$((used + 1))" 2>/dev/null || true
+  info "  [g] go on by itself is ticked: back to a review session ($((used + 1)) of $REVIEW_GO_ON_ROUNDS rounds)."
+  return 0
+}
+
+# The boxes while a review session works in its own tab (pane_keys_for,
+# called by the tab wait in claude_launch_once once a second): [s] and [g] as during a
+# pass, drawn on a status line of their own. [s] said now ends the search, as
+# ⏭ on the session's start in the topic does: after the session sclaude asks
+# whether to check its fixes, or checks them with [g] ticked. The state is read when a key is pressed
+# and every ten seconds, not every second: a python per poll for a hint, and
+# a press from the phone shows within ten seconds.
+#
+#   review_pane_keys <wt> <key>
+REVIEW_PANE_TICK=0
+review_pane_keys() {
+  local wt="$1" key="${2:-}"
+  case "$key" in
+    s|S) if [[ -n "$(review_enough "$wt")" ]]; then review_enough_set "$wt" ""; else review_enough_set "$wt" pass; fi
+         REVIEW_PANE_TICK=0 ;;
+    g|G) review_go_on_toggle "$wt"
+         REVIEW_PANE_TICK=0 ;;
+  esac
+  if (( REVIEW_PANE_TICK % 10 == 0 )); then
+    REVIEW_PANE_SAID="$(review_enough "$wt")"
+    REVIEW_PANE_GO="$(review_go_box "$wt")"
+    # No cursor: blinking after the last box, it read as a field to type in.
+    (( REVIEW_PANE_TICK == 0 )) && printf '\033[?25l' >&2
+  fi
+  REVIEW_PANE_TICK=$((REVIEW_PANE_TICK + 1))
+  printf '\r\033[2K  %sThe session works in its tab%s · %s %s[s]%s last round for new findings · %s %s[g]%s go on by itself' \
+    "$DIM" "$OFF" "$(review_box "$REVIEW_PANE_SAID")" "$BOLD" "$OFF" "$REVIEW_PANE_GO" "$BOLD" "$OFF" >&2
+}
+
+# Which keys a step's session launch hands the tab wait (PANE_KEYS): the
+# review's boxes for step 4, none otherwise. Called in the launch's own
+# subshell, so the array ends with it.
+#
+#   pane_keys_for <step> <wt>
+pane_keys_for() {
+  PANE_KEYS=()
+  [[ "$1" == review ]] && PANE_KEYS=(review_pane_keys "$2")
+  return 0
+}
+
+# The pause before [g] retries a failed pass, with its box on a status line:
+# `g` takes it off, and the question is asked at once instead of after the
+# wait. Returns 1 when [g] is off by its end: `g` pressed, or a night that
+# ticked it ended meanwhile.
+#
+#   review_go_on_pause <wt> <seconds>
+review_go_on_pause() {
+  # The box drawn once: each drawing is three pythons (the state, the
+  # setting, the night), and the wait is up to ten minutes of seconds.
+  local wt="$1" left="$2" box
+  box="$(review_go_box "$wt")"
+  while (( left > 0 )); do
+    keys_usable && printf '\r\033[2K  %sWaiting to retry%s (%ds) · %s %s[g]%s go on by itself — g takes it off' \
+      "$DIM" "$OFF" "$left" "$box" "$BOLD" "$OFF" >&2
+    poll_pause 1
+    left=$((left - 1))
+    if [[ "$POLL_KEY" == [gG] ]]; then
+      review_go_on_set "$wt" false
+      keys_usable && printf '\r\033[2K' >&2
+      return 1
+    fi
+  done
+  keys_usable && printf '\r\033[2K' >&2
+  # Asked again at the end: a night that ended meanwhile untick the box.
+  review_go_on "$wt"
+}
+
+# A box for a key's word: ticked when the word is given.
+#
+#   review_box <word>   → ☑ for a word, ☐ for none
+review_box() {
+  if [[ -n "$1" ]]; then printf '☑'; else printf '☐'; fi
 }
 
 # The same word said from the phone: the buttons the bot puts on the topic's

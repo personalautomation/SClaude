@@ -375,10 +375,27 @@ claude_launch_once() {
   # nobody to carry on after it: no next step, no friction review. It ends the
   # session instead, and sclaude goes on as after an /exit. A sclaude tab
   # closed by its cross does the same, rather than leave claude orphaned.
-  trap 'pkill -TERM -P "$pid" 2>/dev/null || true' INT TERM HUP
+  # The caller's keys for this wait, if it has any (PANE_KEYS: a command, the
+  # key pressed appended): the session is in another tab, so this terminal's
+  # keys are free. Called once a second, with an empty key after none.
+  local keys=""
+  [[ -n "${PANE_KEYS[*]:-}" ]] && keys_usable && keys=1
+  # No echo meanwhile: a key pressed while the caller reads its state, between
+  # two reads, would land on its status line. The mode is saved and given
+  # back as it was, on the way out too.
+  local mode=""
+  [[ -n "$keys" ]] && { mode="$(stty -g < /dev/tty 2>/dev/null)"; stty -echo < /dev/tty 2>/dev/null; }
+  trap 'pkill -TERM -P "$pid" 2>/dev/null || true; [[ -n "$mode" ]] && stty "$mode" < /dev/tty 2>/dev/null' INT TERM HUP
   while kill -0 "$pid" 2>/dev/null; do
-    sleep 1
+    if [[ -n "$keys" ]]; then
+      poll_pause 1
+      "${PANE_KEYS[@]}" "$POLL_KEY"
+    else
+      sleep 1
+    fi
   done
+  [[ -n "$keys" ]] && printf '\r\033[2K\033[?25h' >&2
+  [[ -n "$mode" ]] && stty "$mode" < /dev/tty 2>/dev/null
   trap - INT TERM HUP
 
   local status=1

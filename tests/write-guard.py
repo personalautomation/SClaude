@@ -412,6 +412,88 @@ try:
              "session_id": "s0"}), capture_output=True, text=True).stdout
         check("workshop-refusal-names-friction-log-%s" % name,
               ("friction.log" in out, "core-open" in out), (friction, not friction))
+    # The refusal names the workshop, not the live checkout, when the
+    # workshop is what the call would change.
+    out = subprocess.run([sys.executable, HOOK] + args + ["--step"], input=json.dumps(
+        {"tool_name": "Write", "tool_input": {"file_path": target}, "cwd": repo,
+         "session_id": "s0"}), capture_output=True, text=True).stdout
+    reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+    check("workshop-refusal-names-the-workshop",
+          (reason.startswith("this session may not change %s:" % workshop), orchestrator in reason),
+          (True, False))
+    # A program written in the line and run in the closed workshop: one that
+    # writes is refused, one that only reads passes, and so does one that
+    # runs elsewhere, whatever it reads or mentions there.
+    rel = os.path.relpath(workshop, repo)
+    for name, command, want in (
+            ("heredoc-in-workshop-writes",
+             "cd %s && python3 - <<'EOF'\np='a.sh'\ns=open(p).read()\nopen(p,'w').write(s)\nEOF"
+             % rel, "deny"),
+            ("dash-c-in-workshop-writes",
+             "cd %s && python3 -c \"open('a.sh','w').write('x')\"" % rel, "deny"),
+            ("node-e-in-workshop-writes",
+             "cd %s && node -e \"require('fs').writeFileSync('a.sh','x')\"" % rel, "deny"),
+            ("here-string-in-workshop-writes",
+             "cd %s && python3 - <<<\"open('a.sh','w').write('x')\"" % rel, "deny"),
+            ("heredoc-in-workshop-reads",
+             "cd %s && python3 - <<'EOF'\nprint(open('a.sh').read())\nEOF" % rel, "allow"),
+            ("shutil-which-in-workshop",
+             "cd %s && python3 -c \"import shutil; print(shutil.which('git'))\"" % rel, "allow"),
+            ("heredoc-elsewhere-writes",
+             "python3 - <<'EOF'\nopen('/tmp/x.txt','w').write('x')\nEOF", "allow"),
+            ("reads-workshop-writes-tree",
+             "python3 - <<'EOF'\nsrc = open('%s/README.md').read()\nopen('out.txt','w').write(src)\nEOF"
+             % workshop, "allow"),
+            ("writes-log-mentions-workshop",
+             "python3 - <<'EOF'\nopen('.sclaude/local/feature/friction.log','a').write('fix in %s/x.py')\nEOF"
+             % rel, "allow"),
+            ("cat-heredoc-in-workshop", "cd %s && cat <<'EOF'\nopen(p,'w')\nEOF" % rel, "allow"),
+            ("script-file-in-workshop", "cd %s && python3 tests/x.py" % rel, "allow"),
+            ("script-file-stdin-in-workshop",
+             "cd %s && python3 hooks/x.py <<'P'\n{\"command\": \"open('a','w')\"}\nP" % rel, "allow"),
+            ("script-argument-dash-e", "cd %s && python3 tool.py -e x.unlink" % rel, "allow"),
+            ("two-programs-each-its-own",
+             "cd %s && python3 - <<'A'\nprint(1)\nA\ncd %s && python3 - <<'B'\nopen('x','w')\nB"
+             % (rel, repo), "allow"),
+            ("dash-c-with-stdin-then-program",
+             "python3 -c 'print(open(0).read())' <<'A'\nos.remove(p)\nA\ncd %s && python3 - <<'B'\nprint(2)\nB"
+             % rel, "allow"),
+            ("wrapped-interpreter-then-program",
+             "uv run python - <<'A'\nopen('o','w')\nA\ncd %s && python3 - <<'B'\nprint(2)\nB" % rel,
+             "allow"),
+            ("grep-heredoc-then-program",
+             "grep -c python3 <<'A'\nopen('x','w')\nA\ncd %s && python3 - <<'B'\nprint(2)\nB" % rel,
+             "allow"),
+            ("assignment-heredoc-then-program",
+             "msg=$(cat <<'EOF'\nfix: x\n\nos.remove(p) dropped\nEOF\n)\ncd %s && python3 - <<'B'\nprint(1)\nB"
+             % rel, "allow"),
+            ("stuck-heredoc-then-program",
+             "cat<<'EOF' > n.txt\nshutil.rmtree(d)\nEOF\ncd %s && python3 - <<'B'\nprint(1)\nB" % rel,
+             "allow"),
+            ("piped-program-then-writer-elsewhere",
+             "cd %s && python3 - <<'A' | head\nprint(1)\nA\ncd %s && python3 - <<'B'\nopen('x','w')\nB"
+             % (rel, repo), "allow"),
+            ("program-in-if-then-writer-elsewhere",
+             "cd %s && if true; then python3 - <<'A'\nprint(1)\nA\nfi\ncd %s && python3 - <<'B'\nopen('x','w')\nB"
+             % (rel, repo), "allow"),
+            ("data-and-program-on-one-line",
+             "cd %s && cat > %s/x <<'A' && python3 - <<'B'\nos.remove(p)\nA\nprint(1)\nB"
+             % (rel, repo), "allow"),
+            ("piped-writer-in-workshop",
+             "cd %s && python3 - <<'A' | head\nopen('x','w')\nA" % rel, "deny"),
+            ("two-programs-writer-in-workshop",
+             "python3 - <<'A'\nprint(1)\nA\ncd %s && python3 - <<'B'\nopen('x','w')\nB" % rel,
+             "deny"),
+            ("script-file-grep-write-word", "cd %s && python3 tests/x.py | grep unlink" % rel,
+             "allow")):
+        check("program-%s" % name, in_workshop("s0", "Bash", command=command), want)
+    # Run from inside the workshop, a program run elsewhere is not judged
+    # there: `.` is no mention of it.
+    out = subprocess.run([sys.executable, HOOK] + args + ["--lenient"], input=json.dumps(
+        {"tool_name": "Bash", "tool_input": {"command": "cd %s && python3 -c \"open('out.txt','w')\""
+                                             % repo}, "cwd": workshop, "session_id": "s0"}),
+        capture_output=True, text=True).stdout
+    check("program-from-workshop-runs-elsewhere", '"deny"' in out, False)
     check("workshop-closed-without-record", in_workshop("s1", file_path=target), "deny")
     with open(record, "w") as fh:
         json.dump({"approved": ["s1"]}, fh)

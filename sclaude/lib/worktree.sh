@@ -804,11 +804,13 @@ side_worktrees_offer() {
 # has happened. In the main repo the directory is always there from the last
 # `npm run dev`, so this can be run into exactly here. A symlink to a shared
 # .next will not do: a `next dev` in the worktree would overwrite the main repo's
-# build.
+# build. A typecheck script that runs `next typegen` writes the types itself,
+# and there is nothing to warn about.
 check_next_types() {
   local wt="$1"
   [[ -f "$wt/tsconfig.json" ]] || return 0
   grep -q '\.next/types' "$wt/tsconfig.json" || return 0
+  grep -q '"typecheck": *"[^"]*next typegen' "$wt/package.json" 2>/dev/null && return 0
   [[ -d "$wt/.next/types" ]] && return 0
   warn ""
   warn "  this worktree has no .next/types yet — npm run typecheck will fail on"

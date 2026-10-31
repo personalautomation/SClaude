@@ -32,7 +32,8 @@
 #
 # Reading is never refused. Like every hook here it guards against an
 # accident, not against a session set on getting round it: a script written
-# elsewhere and run is out of its sight.
+# elsewhere and run is out of its sight. A program written in the line itself
+# (`python3 - <<'EOF'`, `node -e`) is not: PROGRAM_WRITES.
 import json
 import os
 import re
@@ -51,8 +52,8 @@ except Exception as _exc:  # noqa: BLE001
           'refused.  Tell the human and stop \u2014 the next move is theirs."}}')
     sys.exit(0)
 _failsafe.install("write guard (write-guard.py)")
-from _shell import (GIT_VALUED, KEYWORDS, QUOTED, closing_at, inner_command, strip_heads,  # noqa: E402
-                    strip_wrappers,
+from _shell import (GIT_VALUED, KEYWORDS, QUOTED, closing_at, inner_command, scan,  # noqa: E402
+                    strip_heads, strip_wrappers,
                     substitutions, tokenize, ungroup)
 
 TEAM = re.compile(r"(^|/)\.sclaude/team(/|$)")
@@ -65,6 +66,12 @@ READONLY_REASON = ("this session may not change {dir}: sclaude's live checkout i
 WORKSHOP_REASON = (" Change sclaude in this tree's workshop, {workshop}, instead: "
                    "`sclaude core-open` opens it for this session.")
 NO_WORKSHOP_REASON = (" Leave the change as a deferred entry of class sclaude-default.")
+# Said of the workshop alone while this session has not opened it: the reason
+# above named the live checkout, and a session refused a write into the
+# workshop went looking for how its path led there.
+CLOSED_REASON = ("this session may not change {workshop}: it is this tree's workshop, "
+                 "a worktree of sclaude's checkout, and this session has not opened it.")
+CORE_OPEN_REASON = (" `sclaude core-open` opens it for this session.")
 STEP_REASON = (" Say in .sclaude/local/feature/friction.log what in sclaude got in your way "
                "and what the fix would be — the friction review after this session reads "
                "it — and carry on with the step's own work.")
@@ -155,6 +162,85 @@ def git_reads(sub, rest):
         return any(f in CONFIG_READS for f in flags) or plain[:1] in (["get"], ["list"]) \
             or len(plain) == 1
     return False
+
+
+# An interpreter that runs a program written in the line, from a heredoc or
+# `-c`/`-e`, and what in that program writes a file. Its words name no target
+# the way `cp` does, and `cd <workshop> && python3 - <<'EOF' … open(p, 'w')`
+# rewrote a file there unseen. A program that runs in a read-only place and
+# writes is refused: its paths are not read, so one relative to it may land
+# there. One that only reads passes, as reading always does, and so does one
+# that writes but runs elsewhere, whatever paths it reads or mentions.
+INTERPRETER = re.compile(r"^(?:python[\d.]*|node|perl|ruby)$")
+PROGRAM_WRITES = re.compile(
+    r"\bopen\([^)]*['\"][rwax]*[wax+][bt]*['\"]"
+    r"|\.write_(?:text|bytes)\(|\bos\.(?:remove|unlink|rename|replace|rmdir|truncate)\("
+    r"|\bshutil\.(?:copy\w*|move|rmtree)\("
+    r"|\.(?:writeFile|appendFile|rm|rmdir|rename|unlink|copyFile|truncate)(?:Sync)?\("
+    r"|\bunlink\b|\bFile\.(?:write|delete|rename)\b")
+
+
+def reads_program(words):
+    """Whether an interpreter's call reads its program from a heredoc: an
+    interpreter, then only flags or `-` before the `<<`. After a script's name
+    the heredoc is the script's stdin, data rather than program."""
+    if not words or not INTERPRETER.match(words[0].rsplit("/", 1)[-1]):
+        return False
+    for w in words[1:]:
+        if re.match(r"\d*<<(?!<)", w):
+            return True
+        if not w.startswith("-"):
+            return False
+    return False
+
+
+def heredoc_programs(command, cwd):
+    """(body, directory) for each heredoc that holds an interpreter's program.
+
+    A body belongs to the command on its own line that opens it: the calls of
+    that line are the ones calls() finds through it and not before it, and
+    the line's k-th body is its k-th `<<`. Matching each body on its own line
+    keeps a misreading there, such as a heredoc in a substitution, from
+    handing the body to a call on another line. The directory is the call's,
+    followed through `cd` as calls() follows it.
+    """
+    spans = []
+    if scan(command, 0, False, spans) is None:
+        return []
+    out, by_line = [], {}
+    for start, stop, kind in sorted(spans):
+        if kind == "doc":
+            line = command.rfind("\n", 0, start - 1) + 1
+            by_line.setdefault(line, []).append((start, stop))
+    for line, bodies in by_line.items():
+        end = bodies[0][0]
+        before = calls(command[:line], cwd) or [] if line else []
+        through = calls(command[:end], cwd)
+        if through is None:
+            continue
+        opened = [(words, where) for words, where in through[len(before):]
+                  for w in words if re.match(r"\d*<<(?!<)", w)]
+        for (start, stop), (words, where) in zip(bodies, opened):
+            if reads_program(words):
+                out.append((command[start:stop], where))
+    return out
+
+
+def program_text(words):
+    """The program an interpreter's call runs from its own words, or None:
+    the value of -c or -e (`-c` stuck to its value too), or a here-string.
+    Only before the first plain word: after a script's name the words are
+    its arguments. A heredoc program is heredoc_programs()'."""
+    for k, w in enumerate(words[1:], 1):
+        if w.startswith("<<<"):
+            return unmask(w[3:])
+        if re.fullmatch(r"-[A-Za-z]*[ce]", w):
+            return unmask(words[k + 1]) if k + 1 < len(words) else None
+        if re.match(r"-[ce].", w):
+            return unmask(w[2:])
+        if not w.startswith("-"):
+            return None
+    return None
 
 
 # Writers whose last argument alone is written: the rest is read. `-t DIR`
@@ -568,6 +654,12 @@ def refuses(payload, team, readonly, depth=0, allow=(), lenient=False, why=None)
                     return reason
             if git_writes_in(command, cwd, inside, unknown):
                 return reason
+            programs = [(program_text(words), where) for words, where in found
+                        if INTERPRETER.match(words[0].rsplit("/", 1)[-1])]
+            for text, where in programs + heredoc_programs(command, cwd):
+                if text and PROGRAM_WRITES.search(text) and \
+                        (not lenient if where is None else inside(where)):
+                    return reason
         # The path as it resolves, from the directory the call runs in:
         # `cd .sclaude/team && echo x > policy.json` names no team path in a
         # word. Where the directory cannot be told, the word alone.
@@ -616,18 +708,25 @@ def main():
         why = READONLY_REASON.format(dir=", ".join(readonly)) + (
             STEP_REASON if "--step" in argv
             else WORKSHOP_REASON.format(workshop=workshop) if workshop else NO_WORKSHOP_REASON)
+    closed = False
     if workshop:
         # The record says who may write in the workshop, and is never the
         # session's to write; the workshop is read-only until it says so.
         readonly.append(workshop + ".json")
-        if not approved(workshop + ".json", payload.get("session_id")):
-            readonly.append(workshop)
+        closed = not approved(workshop + ".json", payload.get("session_id"))
     data = payload.get("tool_input") or {}
     _failsafe.CONTEXT["subject"] = str(data.get("command") or data.get("file_path") or "")
     # A hook that raises exits non-zero, and Claude Code runs the call anyway.
     # Refused instead: an unreadable call near a guarded place is refused too.
     try:
         reason = refuses(payload, team, readonly, 0, allow, lenient, why)
+        # The closed workshop is judged on its own, so that its refusal names
+        # it rather than the live checkout.
+        if not reason and closed:
+            closed_why = CLOSED_REASON.format(workshop=workshop) + (
+                STEP_REASON if "--step" in argv else CORE_OPEN_REASON)
+            reason = refuses(payload, team, readonly + [workshop], 0, allow, lenient,
+                             closed_why)
     except Exception as exc:  # noqa: BLE001
         reason = "the write guard failed on this call (%s: %s), so it is refused" % (
             type(exc).__name__, exc)

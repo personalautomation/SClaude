@@ -600,6 +600,14 @@ public, and a session works from a private product. Steps used to commit and
 push its `main` themselves, and the review sessions could not touch it at all,
 so a clear bug in a hook waited a month in a deferred file.
 
+A program written in the line itself — a heredoc fed to `python3 -`, a
+`node -e` — names no target the way `cp` does, so the guard reads the
+program: one that holds a write (`PROGRAM_WRITES`) and runs in a read-only
+place is refused, since a relative path there lands in it. One that only
+reads passes, and so does one run elsewhere. A step's session once rewrote a file in the closed
+workshop that way, while the Edit that would have put it back was refused.
+A script in a file is still out of sight.
+
 What the guard cannot name — rsync, patch, an unpacked archive — is caught
 after a review session by the checkout's own state (`instruments_unchanged`):
 commits alone over a clean tree are said quietly, anything else loudly. When
@@ -622,7 +630,8 @@ feature, since the repository is public.
 **Who may write there.** `.sclaude/local/instruments.json`, the record beside
 it (`workshop.py`), lists the sessions in `approved`. `write-guard.py
 --workshop DIR` treats the workshop as read-only for any other session, and
-the record as read-only for all. `sclaude core-open` adds the session that
+the record as read-only for all; a refusal there names the workshop, not
+the live checkout (`CLOSED_REASON`). `sclaude core-open` adds the session that
 runs it, which it knows by `SCLAUDE_SESSION` (`claude_launch` exports it).
 `forbidden-commands.py` lets that call through only under `--step friction`
 (the retrospective, the friction review, the monthly review), which all

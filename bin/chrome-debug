@@ -12,6 +12,9 @@
 #   chrome-debug --stop       close it
 #   chrome-debug --keep       skip the restart a misplaced window would need
 #   chrome-debug --tab <url>  open the URL in a background tab, window untouched
+#   chrome-debug --window <url>...   open the URLs in a new window with cookies
+#                             of its own, one tab after another; prints its id
+#   chrome-debug --close-window <id> close such a window, its cookies with it
 #   chrome-debug --help       print this
 #
 # CHROME_DEBUG_PORT and CHROME_DEBUG_PROFILE move it off 9222 and off the shared
@@ -93,8 +96,10 @@ alive() { curl -sf -m 2 "http://127.0.0.1:$PORT/json/version" >/dev/null 2>&1; }
 #   cdp front        ->  fronted | failed
 #   cdp restore      ->  restored | failed
 #   cdp open <url>   ->  opened | failed
+#   cdp window <url>...  ->  <context id> | failed
+#   cdp close-window <id> -> closed | failed
 cdp() {
-  PORT="$PORT" python3 - "$1" "${2:-}" <<'PY' 2>/dev/null
+  PORT="$PORT" python3 - "$@" <<'PY' 2>/dev/null
 import base64, json, os, socket, struct, sys, time, urllib.request
 
 PORT = int(os.environ["PORT"])
@@ -224,6 +229,21 @@ def http(path):
         return json.load(r)
 
 
+def shared_pages():
+    """The page targets of the browser's own profile — not those of a window
+    with cookies of its own (--window), which is a demo's, not the window the
+    person and the sessions work in: a tab there is no answer to "is this
+    feature open?", and that window is not the one to bring forward."""
+    pages = [t for t in http("/json/list") if t.get("type") == "page"]
+    browser = WS(http("/json/version")["webSocketDebuggerUrl"])
+    own = set(browser.call("Target.getBrowserContexts").get("browserContextIds") or [])
+    if not own:
+        return pages
+    apart = {t["targetId"] for t in browser.call("Target.getTargets").get("targetInfos") or []
+             if t.get("browserContextId") in own}
+    return [t for t in pages if t["id"] not in apart]
+
+
 def windows():
     """Every browser window, with the geometry and the page targets that answer for it.
 
@@ -236,7 +256,7 @@ def windows():
     background tab for a hidden window. Together they only agree on a window
     nobody can see.
     """
-    pages = [t for t in http("/json/list") if t.get("type") == "page"]
+    pages = shared_pages()
     if not pages:
         return []
     browser = WS(http("/json/version")["webSocketDebuggerUrl"])
@@ -314,9 +334,8 @@ if sys.argv[1] == "tab":
     url = sys.argv[2]
     origin = "/".join(url.split("/")[:3])
     try:
-        for tab in http("/json/list"):
-            if tab.get("type") == "page" and \
-                    "/".join(tab.get("url", "").split("/")[:3]) == origin:
+        for tab in shared_pages():
+            if "/".join(tab.get("url", "").split("/")[:3]) == origin:
                 print("present")
                 sys.exit(0)
         browser = WS(http("/json/version")["webSocketDebuggerUrl"])
@@ -327,13 +346,70 @@ if sys.argv[1] == "tab":
     print("opened")
     sys.exit(0)
 
+# window: pages that must not share the cookies of the window somebody works
+# in — a demo signed in as another user, which in the shared jar would sign
+# every tab of that feature in as that user. A browser context is Chrome's
+# incognito profile: its own cookie jar, its own window, gone when closed.
+# The tabs open one after another, each once the one before has loaded: tabs
+# that sign in to one site at the same moment race for the same cookies. A
+# page of sclaude-proxy's own (/__sclaude/) that reloads itself is not loaded
+# yet: it waits for the feature's server to start. One that does not — a
+# refusal, a server that did not start — is as loaded as it will get.
+def settled(target, deadline):
+    """Wait until the tab is done loading a page of its own, or the deadline."""
+    while time.time() < deadline:
+        try:
+            page = WS("ws://127.0.0.1:%d/devtools/page/%s" % (PORT, target))
+            href, ready, reloads = page.call("Runtime.evaluate", {
+                "expression": "[location.href, document.readyState, "
+                              "!!document.querySelector('meta[http-equiv=refresh i]')]",
+                "returnByValue": True})["result"]["value"]
+            path = "/" + href.split("://", 1)[-1].partition("/")[2]
+            if ready == "complete" and href != "about:blank" and \
+                    not (path.startswith("/__sclaude/") and reloads):
+                return
+        except (IOError, OSError, KeyError, ValueError):
+            pass  # mid-navigation: the context it would evaluate in is gone
+        time.sleep(0.3)
+
+
+if sys.argv[1] == "window":
+    context = None
+    try:
+        browser = WS(http("/json/version")["webSocketDebuggerUrl"])
+        context = browser.call("Target.createBrowserContext")["browserContextId"]
+        for url in sys.argv[2:]:
+            target = browser.call("Target.createTarget", {
+                "url": url, "browserContextId": context})["targetId"]
+            # A feature's server can take a minute to start.
+            settled(target, time.time() + 90)
+    except (IOError, OSError, KeyError, IndexError):
+        # Half a window, signed in, whose id nobody gets: closed, not left.
+        if context:
+            try:
+                browser.call("Target.disposeBrowserContext", {"browserContextId": context})
+            except (IOError, OSError):
+                pass
+        print("failed")
+        sys.exit(0)
+    print(context)
+    sys.exit(0)
+
+if sys.argv[1] == "close-window":
+    try:
+        browser = WS(http("/json/version")["webSocketDebuggerUrl"])
+        browser.call("Target.disposeBrowserContext", {"browserContextId": sys.argv[2]})
+    except (IOError, OSError, KeyError, IndexError):
+        print("failed")
+        sys.exit(0)
+    print("closed")
+    sys.exit(0)
+
 if sys.argv[1] == "open":
     url = sys.argv[2]
     try:
         browser = WS(http("/json/version")["webSocketDebuggerUrl"])
-        for tab in http("/json/list"):
-            if tab.get("type") != "page":
-                continue
+        for tab in shared_pages():
             if tab.get("url", "").rstrip("/") == url.rstrip("/"):
                 WS(tab["webSocketDebuggerUrl"]).call("Page.bringToFront")
                 break
@@ -501,7 +577,7 @@ stop() { pkill -f "user-data-dir=$PROFILE"; }
 # The usage lives in the header comment and is printed from there, so the two
 # cannot drift apart: editing one edits the other.
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-  sed -n '3,19p' "$(readlink -f "$0")" | sed 's/^# \{0,1\}//'
+  sed -n '3,22p' "$(readlink -f "$0")" | sed 's/^# \{0,1\}//'
   exit 0
 fi
 
@@ -519,6 +595,29 @@ if [ "${1:-}" = "--tab" ]; then
     exit 0
   fi
   set -- "$2"
+fi
+
+# A window of its own needs a browser to be in: one that is not running is
+# started first, the ordinary way, and the window opens beside its own.
+if [ "${1:-}" = "--window" ]; then
+  shift
+  [ $# -gt 0 ] || { echo "chrome-debug: --window needs a URL" >&2; exit 2; }
+  if ! alive; then
+    "$(readlink -f "$0")" >/dev/null || exit 1
+  fi
+  context=$(cdp window "$@")
+  case "$context" in
+    ""|failed) echo "chrome-debug: window failed" >&2; exit 1 ;;
+    *) echo "chrome-debug: window $context — $# tab(s)" ;;
+  esac
+  exit 0
+fi
+
+if [ "${1:-}" = "--close-window" ]; then
+  [ -n "${2:-}" ] || { echo "chrome-debug: --close-window needs an id" >&2; exit 2; }
+  alive || { echo "chrome-debug: not running"; exit 0; }
+  echo "chrome-debug: $(cdp close-window "$2") $2"
+  exit 0
 fi
 
 KEEP=

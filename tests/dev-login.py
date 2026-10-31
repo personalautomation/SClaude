@@ -121,8 +121,8 @@ def write(path, text):
         fh.write(text)
 
 
-def request(port, host, path, cookie=None):
-    lines = ["GET %s HTTP/1.1" % path, "Host: %s" % host]
+def request(port, host, path, cookie=None, extra=()):
+    lines = ["GET %s HTTP/1.1" % path, "Host: %s" % host] + list(extra)
     if cookie:
         lines.append("Cookie: %s" % cookie)
     with socket.create_connection(("127.0.0.1", port), timeout=10) as s:
@@ -464,6 +464,140 @@ def check_proxy(root, wt, dport, login_file):
         del keepawake.telegramd
         check("demo: an unknown user is warned of",
               any("not a user" in l for l in demo_out(demo, wt, ["nobody@example.com"])), True)
+
+        # open: a window of its own per user, through a chrome-debug that
+        # only writes down what it was asked; the previous demo's go first.
+        import contextlib
+        import io
+        stub = os.path.join(root, "stubbin")
+        os.makedirs(stub, exist_ok=True)
+        asked = os.path.join(root, "chrome-asked")
+        with open(os.path.join(stub, "chrome-debug"), "w") as fh:
+            fh.write('#!/bin/sh\necho "$*" >> %s\n'
+                     '[ "$1" = --window ] && echo "chrome-debug: window ctx$# — tabs"\n'
+                     'exit 0\n' % asked)
+        os.chmod(os.path.join(stub, "chrome-debug"), 0o755)
+        saved_path, os.environ["PATH"] = os.environ["PATH"], stub + os.pathsep + os.environ["PATH"]
+        demo.WINDOWS = os.path.join(root, "sdemo-windows")
+        try:
+            for _ in range(2):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    demo.cmd_open(["seed@example.com", "/a", "dev@example.com", "/b",
+                                   "seed@example.com", "/c"], "f1", wt)
+        finally:
+            os.environ["PATH"] = saved_path
+        with open(asked) as fh:
+            calls = fh.read().splitlines()
+        seed = lambda p: demo.links("f1", "seed@example.com", p)[0]
+        dev = demo.links("f1", "dev@example.com", "/b")[0]
+        check("demo open: one window per user, the user's pages in order, laptop links",
+              calls[:2], ["--window %s %s" % (seed("/a"), seed("/c")), "--window " + dev])
+        check("demo open: the next open closes the previous windows first",
+              calls[2:4], ["--close-window ctx3", "--close-window ctx2"])
+        os.environ["PATH"] = stub + os.pathsep + saved_path
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                demo.cmd_open(["nobody@example.com", "/a"], "f1", wt)
+        finally:
+            os.environ["PATH"] = saved_path
+        with open(asked) as fh:
+            after = fh.read().splitlines()
+        check("demo open: a user the database refuses gets no window",
+              (any(l.startswith("--window") for l in after[len(calls):]),
+               "failed: nobody@example.com — not opened, the sign-in would be refused"
+               in out.getvalue().splitlines()), (False, True))
+
+        # A recorded demo: where demo.py puts it is where the proxy serves it
+        # from, the video by ranges, and nothing but its own files.
+        proxy_src = open(PROXY).read()
+        check("demo: demo.py and the proxy name the same directory and address",
+              ('DEMO_DIR = "%s"' % demo.DEMO_DIR in proxy_src,
+               'DEMO_PREFIX = "%s"' % demo.DEMO_PREFIX in proxy_src), (True, True))
+        player = open(os.path.join(ROOT, "skills", "sdemo", "player.html")).read()
+        filler = open(os.path.join(ROOT, "skills", "sdemo", "play.mjs")).read()
+        check("demo: play.mjs fills the markers player.html has",
+              [m in player and m in filler for m in ('/*DEMO*/null', '/*FEATURE*/""')],
+              [True, True])
+        recorded = os.path.join(wt, demo.DEMO_DIR, "20261031-120000")
+        write(os.path.join(recorded, "index.html"), "<h1>the demo</h1>")
+        write(os.path.join(recorded, "scenario-1.webm"), "0123456789")
+        write(os.path.join(recorded, "demo.mjs"), "export default {}")
+        page_url = demo.demo_links("f1", "20261031-120000")[0]
+        check("demo: the page's laptop address is on the feature's host",
+              page_url, "http://f1.localhost:%d/__sclaude/demo/f1/20261031-120000/" % port)
+        tail = "/__sclaude/demo/f1/20261031-120000"
+        status, headers, body = request(port, host, tail + "/")
+        check("demo: the page is served", (status.split(" ", 1)[1], body),
+              ("200 OK", "<h1>the demo</h1>"))
+        status, headers, _ = request(port, host, tail)
+        check("demo: without the slash, sent under it",
+              (status.split(" ", 1)[1], headers.get("location")), ("303 See Other", tail + "/"))
+        status, headers, body = request(port, host, tail + "/scenario-1.webm",
+                                        extra=["Range: bytes=2-5"])
+        check("demo: a video by ranges", (status.split(" ", 1)[1], body,
+                                          headers.get("content-range")),
+              ("206 Partial Content", "2345", "bytes 2-5/10"))
+        status, _, body = request(port, host, tail + "/scenario-1.webm", extra=["Range: bytes=-3"])
+        check("demo: the last bytes of a video", body, "789")
+        write(os.path.join(recorded, "scenario-1.vtt"), "WEBVTT\n")
+        status, headers, _ = request(port, host, tail + "/scenario-1.vtt")
+        check("demo: the captions are served as WebVTT",
+              (status.split(" ", 1)[1], headers.get("content-type")),
+              ("200 OK", "text/vtt; charset=utf-8"))
+        with open(os.path.join(recorded, "big.webm"), "wb") as fh:
+            fh.write(b"x" * (5 * 1024 * 1024))
+        status, headers, _ = request(port, host, tail + "/big.webm", extra=["Range: bytes=0-"])
+        check("demo: an open range is answered a piece at a time",
+              (status.split(" ", 1)[1], headers.get("content-range")),
+              ("206 Partial Content", "bytes 0-4194303/5242880"))
+        status, headers, _ = request(port, host, tail + "/big.webm",
+                                     extra=["Range: bytes=-5000000"])
+        check("demo: a range asked in full is answered in full",
+              headers.get("content-range"), "bytes 242880-5242879/5242880")
+        for bad in ("/demo.mjs", "/../../feature/state.json", "/.hidden.json", "/nothere.webm"):
+            status, _, _ = request(port, host, tail + bad)
+            check("demo: %s is not served" % bad, status.split(" ", 1)[1], "404 Not Found")
+        status, _, _ = request(port, host, "/__sclaude/demo/nofeature/20261031-120000/")
+        check("demo: an unknown feature's demo is not served", status.split(" ", 1)[1],
+              "404 Not Found")
+
+        # demo.py play: play.mjs run on a copy of the script in a demo of its
+        # own, and the page's link to the feature's topic. node and
+        # sclaude-notify are stand-ins that write down what they were asked.
+        with open(os.path.join(stub, "node"), "w") as fh:
+            fh.write('#!/bin/sh\necho "$*" >> %s\nwhile [ $# -gt 0 ]; do '
+                     '[ "$1" = --out ] && echo "<h1>x</h1>" > "$2/index.html" && '
+                     'echo \'{"title": "T"}\' > "$2/demo.json"; shift; done\n' % asked)
+        with open(os.path.join(stub, "sclaude-notify"), "w") as fh:
+            fh.write('#!/bin/sh\necho "notify $*" >> %s\n' % asked)
+        for name in ("node", "sclaude-notify"):
+            os.chmod(os.path.join(stub, name), 0o755)
+        os.remove(asked)
+        script = os.path.join(root, "my-demo.mjs")
+        write(script, "export default {scenarios: []}")
+        os.environ["PATH"] = stub + os.pathsep + saved_path
+        try:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                demo.cmd_play([script], "f1", wt, "laptop", False)
+        finally:
+            os.environ["PATH"] = saved_path
+        with open(asked) as fh:
+            calls = fh.read().splitlines()
+        ran = calls[0].split()
+        made = ran[1]
+        check("demo play: play.mjs runs a copy, in a demo of the feature's own",
+              (ran[0] == os.path.join(ROOT, "skills", "sdemo", "play.mjs") or
+               os.path.realpath(ran[0]) == os.path.realpath(os.path.join(ROOT, "skills", "sdemo", "play.mjs")),
+               os.path.dirname(os.path.dirname(made)) == os.path.join(wt, demo.DEMO_DIR),
+               os.path.isfile(made), ran[ran.index("--base") + 1], ran[ran.index("--feature") + 1]),
+              (True, True, True, "http://f1.localhost:%d" % port, "f1"))
+        demo_id = os.path.basename(os.path.dirname(made))
+        check("demo play: the page's link is said, and sent to the topic",
+              ("link: " + demo.demo_links("f1", demo_id)[0] in out.getvalue().splitlines(),
+               calls[1] == "notify --quiet --in %s 🎬 T" % wt,
+               calls[2] == demo.demo_links("f1", demo_id)[0]), (True, True, True))
 
         status, headers, _ = request(port, host,
                                      "/__sclaude/login?f=f1&as=seed@example.com&next=/y")

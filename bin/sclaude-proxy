@@ -19,6 +19,7 @@
 #                               &as=<email> as that user of the feature's own
 #                               local database, &next=<path> landing there
 #   /__sclaude/users?f=<feature> the users of that database, a sign-in each
+#   /__sclaude/demo/<feature>/<id>/ a demo /sdemo recorded (skills/sdemo)
 #
 # Which feature lives where is read, never remembered. sclaude links
 # ~/.claude/sclaude/dev/<feature> to the worktree, and the worktree's
@@ -904,11 +905,76 @@ async def own_page(target, host, headers=None):
                            kind="application/json; charset=utf-8")
         body = await flow_state(label, found[0])
         return respond("200 OK", body, kind="application/json; charset=utf-8")
+    if url.path.startswith(DEMO_PREFIX):
+        return await asyncio.to_thread(demo_file, url.path, (headers or {}).get("range", ""))
     if url.path == "/__sclaude/clear":
         return respond("303 See Other", "", (
             "Location: /__sclaude/",
             "Set-Cookie: %s=; Path=/; Max-Age=0; SameSite=Lax" % COOKIE))
     return respond("200 OK", await gather_listing(host))
+
+
+# --- a recorded demo ----------------------------------------------------------
+#
+# /sdemo records a feature's demo into DEMO_DIR/<id>/ of its tree
+# (skills/sdemo/demo.py names the same directory): a page, what the run
+# noted, a video a scenario. Served under the feature's name rather than by
+# the host, so one link works on the laptop and from the phone alike; with
+# Range, which a phone's player asks a video by, and needs to seek.
+DEMO_PREFIX = "/__sclaude/demo/"
+DEMO_DIR = ".sclaude/local/demo"
+DEMO_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+DEMO_KINDS = {".html": "text/html; charset=utf-8", ".json": "application/json; charset=utf-8",
+              ".webm": "video/webm", ".mp4": "video/mp4", ".vtt": "text/vtt; charset=utf-8"}
+# A video goes out a piece at a time: a range left open (bytes=N-, what a
+# player asks first and on every seek) is answered with at most this much,
+# and the player asks for the rest. A range given both ends is answered as
+# asked — players ask for small ones.
+DEMO_CHUNK = 4 * 1024 * 1024
+RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
+def demo_file(path, wanted=""):
+    parts = path[len(DEMO_PREFIX):].split("/")
+    if len(parts) == 2 and DEMO_ID.match(parts[1]):
+        # The page names its videos relative to itself: under the slash.
+        return respond("303 See Other", "", ("Location: %s/" % path,))
+    if len(parts) != 3 or not DEMO_ID.match(parts[1]):
+        return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>"))
+    label, demo, name = parts
+    name = name or "index.html"
+    kind = DEMO_KINDS.get(os.path.splitext(name)[1])
+    found = feature(label)
+    if not found or not kind or not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$", name):
+        return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>"))
+    file = os.path.join(found[0], DEMO_DIR, demo, name)
+    try:
+        size = os.path.getsize(file)
+        span = RANGE.match(wanted.strip())
+        start, end, status = 0, size - 1, "200 OK"
+        if span and (span.group(1) or span.group(2)):
+            if span.group(1):
+                start = int(span.group(1))
+                end = min(int(span.group(2)), size - 1) if span.group(2) else size - 1
+            else:
+                start = max(0, size - int(span.group(2)))
+            if span.group(1) and not span.group(2):
+                end = min(end, start + DEMO_CHUNK - 1)
+            if start > end or start >= size:
+                return respond("416 Range Not Satisfiable", "", (
+                    "Content-Range: bytes */%d" % size,))
+            status = "206 Partial Content"
+        with open(file, "rb") as fh:
+            fh.seek(start)
+            data = fh.read(end - start + 1)
+    except OSError:
+        return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>"))
+    head = ["HTTP/1.1 %s" % status, "Content-Type: %s" % kind,
+            "Content-Length: %d" % len(data), "Accept-Ranges: bytes",
+            "Cache-Control: no-store", "Connection: close"]
+    if status.startswith("206"):
+        head.append("Content-Range: bytes %d-%d/%d" % (start, end, size))
+    return ("\r\n".join(head) + "\r\n\r\n").encode("latin-1") + data
 
 
 def dora_page():

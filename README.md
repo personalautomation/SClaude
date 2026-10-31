@@ -8,7 +8,7 @@ they live here, symlinked into `~/.local/bin` and `~/.claude/skills`.
 | [`sclaude`](#binsclaude) | runs a feature from issue to production with Claude doing the work and a person making the decisions |
 | [`skills/pr`](#skillspr) | a `/pr` skill: opens a pull request the way the team does it |
 | [`skills/sreview`](#skillssreview) | a `/sreview` skill: review and fix in iterations until the review finds nothing substantive |
-| [`skills/sdemo`](#skillssdemo) | a `/sdemo` skill: links to check a feature by hand, each signed in as its user, with what to check; `/sdemo ac` by its acceptance criteria |
+| [`skills/sdemo`](#skillssdemo) | a `/sdemo` skill: a recorded demo of a feature — clicked through as its users, with captions on what to look at, a step to take over from — or `live` in chrome-debug, or plain signed-in links; `/sdemo ac` by its acceptance criteria |
 | [`skills/isleep`](#skillsisleep) | an `/isleep` skill: night mode — Claude carries on alone, decides instead of asking, and reports in the morning |
 | [`sclaude-proxy`](#binsclaude-proxy) | one address per feature: `http://<feature>.localhost:3000` |
 | [`chrome-debug`](#binchrome-debug) | the Chrome that Claude drives to check its work |
@@ -752,16 +752,31 @@ commits once per iteration; pushing is left to the project's own rules.
 
 ## skills/sdemo
 
-`/sdemo [feature] [what to show]` gives you a feature to check by hand: a few
-scenarios, each a link that opens a page of the feature already signed in as
-the user it should be seen as, with what to look at there underneath. Plain
-`/sdemo` shows the main functionality, the key places the feature changed;
-`/sdemo ac` walks you through the acceptance criteria in the issue, a scenario
-per criterion (or a few together), and names the ones no page can show. The
-scenarios come from what the feature changed and its acceptance criteria;
-the users from the feature's own database (see *Signed in without a
-password* under [bin/sclaude-proxy](#binsclaude-proxy)), so it works on a
-feature with a local database of its own and a project with `devLogin`.
+`/sdemo [feature] [what to show]` shows you a feature working. Claude reads
+what the feature changed, picks a few scenarios — each seen as the user it
+should be seen as, from the feature's own database — and writes them as a
+Playwright script; the player signs in as each user (see *Signed in without a
+password* under [bin/sclaude-proxy](#binsclaude-proxy)), clicks and types
+through the steps, and puts captions on the page as it goes: what each step
+does, where to look, why it matters. You get one link — also sent to the
+feature's Telegram topic — to a page with:
+
+- a video per scenario, and what it shows, what to look at and why this case;
+- its steps beside it, the one under way written out large under the video
+  (and as the video's captions in full screen); tap a step to jump there;
+- checks marked ✓ or ✗;
+- **take over** on every step: that page, signed in as that user, to go on by
+  hand.
+
+`/sdemo ac` walks through the acceptance criteria in the issue instead, a
+scenario per criterion (or a few together), and names the ones no page can
+show. `/sdemo live` plays the same in the laptop's chrome-debug, a window per
+user with cookies of its own: ⏸ on the page hands it to you, ▶ goes on, ⏭
+goes to the next scenario, ⏹ ends the script and leaves the windows signed
+in. `/sdemo links` gives plain
+links instead — one per scenario, signed in, with what to check under it —
+and `/sdemo links open` opens them in chrome-debug, a window per user, closing
+the previous demo's windows.
 
 The links are for where you are: on the laptop `http://<feature>.localhost:3000/…`;
 when a device of your tailnet has traffic now — you are on the phone — the
@@ -769,8 +784,16 @@ address the bot opens features at on a phone (the `tailscale serve` name, or
 the tailnet address). Say "I'm on the laptop" or "on the phone" and it follows
 that instead; the other place's link is given at the end, when there is a
 phone address at all (`tailscale serve` or the tailnet's).
-`skills/sdemo/demo.py link <email> <path>` makes one such link by hand, `users` lists
-who can sign in and `criteria` prints the criteria.
+
+The videos are AV1, with H.264 beside it for the browsers that do not play
+AV1 (older iPhones), when `ffmpeg` is installed with both (`sudo apt install
+ffmpeg`); without it, the recording's own WebM, which Safari before 17.4 does
+not play. A demo is kept in the feature's `.sclaude/local/demo/`.
+
+`skills/sdemo/demo.py` does each part by hand: `play <script.mjs> [--live]`
+plays a script, `link <email> <path>` makes one link, `open <email> <path>…`
+opens links in chrome-debug, `users` lists who can sign in and `criteria`
+prints the criteria.
 
 ## skills/isleep
 
@@ -969,6 +992,8 @@ chrome-debug http://localhost:3000/some/page   # the same, and go to that page
 chrome-debug --stop              # close it
 chrome-debug --keep              # skip the restart a misplaced window would need
 chrome-debug --tab http://a.localhost:3000/   # open a background tab, leave the window alone
+chrome-debug --window URL...     # a new window with cookies of its own, the URLs as its tabs; prints its id
+chrome-debug --close-window ID   # close such a window, its cookies with it
 ```
 
 `CHROME_DEBUG_PORT` (9222) and `CHROME_DEBUG_PROFILE` change the port and the

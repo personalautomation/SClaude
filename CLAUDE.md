@@ -124,6 +124,17 @@ breaks the other silently — grep before you edit:
 
   <!-- Added by Claude on 2026-10-31 with signing in as another user. -->
 
+- A recorded demo, `.sclaude/local/demo/<id>/` in a feature's tree, is made
+  by `DEMO_DIR` in `skills/sdemo/demo.py` and served by `DEMO_DIR` and
+  `DEMO_PREFIX` (`demo_file`) in `bin/sclaude-proxy`; the files in it are
+  named by `skills/sdemo/play.mjs`, and the page is `player.html` with its
+  `/*DEMO*/` and `/*FEATURE*/` markers filled by play.mjs. The script's
+  helpers (`d.say`, `d.click`…) are spelled out for the session in
+  `skills/sdemo/SKILL.md`. `tests/dev-login.py` checks the two sides of the
+  directory and the address.
+
+  <!-- Added by Claude on 2026-10-31 with the recorded demo of /sdemo. -->
+
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/run.sh`, which decides by it
   whether a review round stays in the same session; `tests/review-round.py`

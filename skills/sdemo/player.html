@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Feature demo</title>
+<!-- Written by play.mjs beside the videos: DEMO below is replaced by what the
+     run recorded (demo.json). Served by sclaude-proxy at
+     /__sclaude/demo/<feature>/<id>/. -->
+<style>
+:root{--bg:#f7f7f5;--card:#fff;--ink:#1c1917;--mute:#78716c;--line:#e7e5e4;--acc:#2563eb;
+--ok:#15803d;--bad:#b91c1c;--now:#eff6ff}
+@media (prefers-color-scheme:dark){:root{--bg:#18181b;--card:#232326;--ink:#f4f4f5;--mute:#a1a1aa;
+--line:#3f3f46;--acc:#60a5fa;--ok:#4ade80;--bad:#f87171;--now:#1e293b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,sans-serif}
+main{max-width:1180px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:22px;margin:0 0 2px}
+.sub{color:var(--mute);font-size:13px;margin-bottom:16px}
+nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}
+nav a{font-size:13px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;color:var(--ink);
+text-decoration:none;background:var(--card)}
+section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:22px}
+section h2{font-size:18px;margin:0}
+.who{color:var(--mute);font-size:13px;margin-bottom:10px}
+.grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px}
+@media (max-width:820px){.grid{grid-template-columns:1fr}}
+video{width:100%;border-radius:10px;background:#000;display:block}
+.about h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:10px 0 2px}
+.about ul{margin:0;padding-left:18px}
+ol{list-style:none;margin:12px 0 0;padding:0}
+li{display:flex;gap:8px;align-items:baseline;padding:6px 8px;border-radius:8px;cursor:pointer}
+li.now{background:var(--now)}
+li .t{font-variant-numeric:tabular-nums;color:var(--mute);font-size:12px;min-width:38px}
+li .x{flex:1}
+li .ok{color:var(--ok)}li .bad{color:var(--bad)}
+li a{font-size:12px;color:var(--acc);white-space:nowrap}
+.err{color:var(--bad);font-size:14px;margin-top:8px}
+div.now{margin-top:10px;font-size:17px;min-height:1.5em}
+div.now:empty{display:none}
+.sm{font-size:13px;color:var(--mute);margin-top:2px}
+div.now .sm{font-size:15px}
+.take{display:inline-block;margin-top:10px;font-size:14px;color:var(--acc)}
+</style>
+</head>
+<body>
+<main id=app></main>
+<script>
+const DEMO = /*DEMO*/null;
+const FEATURE = /*FEATURE*/"";
+// On a narrow screen the video's own captions are too small to read: its
+// text track is on by default there, and the step under way is written out
+// under the video everywhere.
+const PHONE = matchMedia("(max-width: 820px)").matches;
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
+const clock = (t) => Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padStart(2, "0");
+// Signed in as the scenario's user, at that address: on the feature's own
+// host on the laptop, on the shared one (f= routes it) from the phone.
+function takeOver(as, url) {
+  let next = "/";
+  try { const u = new URL(url); next = u.pathname + u.search + u.hash; } catch {}
+  return "/__sclaude/login?" + new URLSearchParams({f: FEATURE, as, next});
+}
+const app = document.getElementById("app");
+document.title = DEMO.title;
+app.innerHTML = `<h1>${esc(DEMO.title)}</h1><div class=sub>${DEMO.scenarios.length} scenario${DEMO.scenarios.length === 1 ? "" : "s"} · recorded
+${esc(new Date(DEMO.made).toLocaleString())} · tap a step to jump there; "take over" opens that page signed in,
+to go on by hand</div><nav>${DEMO.scenarios.map((s, i) => `<a href="#s${i + 1}">${i + 1}. ${esc(s.title)}</a>`).join("")}</nav>` +
+DEMO.scenarios.map((s, i) => `<section id="s${i + 1}"><h2>${i + 1}. ${esc(s.title)}</h2>
+<div class=who>as ${esc(s.as)}</div><div class=grid><div>
+${s.sources && s.sources.length ? `<video controls playsinline preload=metadata data-i=${i}>${s.sources.map((v) =>
+  `<source src="${esc(v.src)}" type='${esc(v.type)}'>`).join("")}${s.captions ?
+  `<track kind=captions srclang=en label="Steps" src="${esc(s.captions)}"${PHONE ? " default" : ""}>` : ""}</video>
+<div class=now data-i=${i}></div>` : ""}
+${s.error ? `<div class=err>⚠ ${esc(s.error)}</div>` : ""}</div>
+<div class=about>${s.shows ? `<h3>What this shows</h3><div>${esc(s.shows)}</div>` : ""}
+${s.look.length ? `<h3>Look at</h3><ul>${s.look.map((l) => `<li style="display:list-item;padding:0;cursor:auto">${esc(l)}</li>`).join("")}</ul>` : ""}
+${s.why ? `<h3>Why this case</h3><div>${esc(s.why)}</div>` : ""}
+<a class=take href="${esc(takeOver(s.as, s.path))}">Take over from the start →</a>
+<ol data-i=${i}>${s.steps.map((st, j) => `<li data-t="${st.t}" data-j=${j}><span class=t>${clock(st.t)}</span>
+<span class=x>${st.ok === true ? "<span class=ok>✓</span> " : st.ok === false || st.error ? "<span class=bad>✗</span> " : ""}${esc(st.text || st.kind)}
+${st.look ? `<div class=sm>👀 ${esc(st.look)}</div>` : ""}${st.why ? `<div class=sm>💡 ${esc(st.why)}</div>` : ""}
+${st.error ? `<div class=err>${esc(st.error)}</div>` : ""}</span>
+<a href="${esc(takeOver(s.as, st.url))}" onclick="event.stopPropagation()">take over</a></li>`).join("")}</ol>
+</div></div></section>`).join("");
+for (const ol of document.querySelectorAll("ol[data-i]")) {
+  const video = document.querySelector(`video[data-i="${ol.dataset.i}"]`);
+  if (!video) continue;
+  ol.addEventListener("click", (e) => {
+    const li = e.target.closest("li[data-t]");
+    if (!li) return;
+    video.currentTime = Math.max(0, +li.dataset.t - 0.3);
+    video.play();
+  });
+  const box = document.querySelector(`.now[data-i="${ol.dataset.i}"]`);
+  video.addEventListener("timeupdate", () => {
+    let now = null;
+    for (const li of ol.children) if (+li.dataset.t <= video.currentTime + 0.2) now = li;
+    for (const li of ol.children) li.classList.toggle("now", li === now);
+    const html = now ? now.querySelector(".x").innerHTML : "";
+    if (box && box.dataset.at !== (now ? now.dataset.j : "")) {
+      box.dataset.at = now ? now.dataset.j : "";
+      box.innerHTML = html;
+    }
+  });
+}
+</script>
+</body>
+</html>

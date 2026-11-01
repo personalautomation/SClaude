@@ -128,12 +128,37 @@ breaks the other silently — grep before you edit:
   by `DEMO_DIR` in `skills/sdemo/demo.py` and served by `DEMO_DIR` and
   `DEMO_PREFIX` (`demo_file`) in `bin/sclaude-proxy`; the files in it are
   named by `skills/sdemo/play.mjs`, and the page is `player.html` with its
-  `/*DEMO*/` and `/*FEATURE*/` markers filled by play.mjs. The script's
+  `/*DEMO*/` and `/*FEATURE*/` markers filled by play.mjs. `latest_demo` in
+  the proxy reads the newest one's `demo.json` for the list of features and
+  for the process map's link (`demo` of `page` in `sclaude/lib/process.py`). The script's
   helpers (`d.say`, `d.click`…) are spelled out for the session in
   `skills/sdemo/SKILL.md`. `tests/dev-login.py` checks the two sides of the
   directory and the address.
+- The demo's comment on the issue is headed by `DEMO`, declared in
+  `sclaude/lib/issue_comments.py` and imported by `skills/sdemo/demo.py`,
+  which writes it only for sclaude (`SCLAUDE_SESSION`, set by
+  `session_git_env` in `sclaude/lib/run.sh` and by `demo_refresh`).
+  `sclaude/prompts/code.md` tells step 2 to run `/sdemo`, and again after
+  remarks when `demo.py stale` says the code changed;
+  `demo_refresh` in `sclaude/lib/deploy.sh` asks `demo.py stale` (exit 0 with
+  `stale:` — record again) once the preview's regression is green, before
+  `issue_qa_ready`, where `project_flow_mode qa` is not `auto` (a delta and
+  the whole demo), or before the last `run_status` where it is (the whole
+  demo), with `SCLAUDE_DEMO_STAGE`, which `stage` in demo.py reads into the
+  history (`history.json` beside the demos, the feature's page written from
+  it and served by `demo_file` at `/__sclaude/demo/<feature>/`); it starts a
+  session with the
+  skill (`demo.py replay` without claude); the videos go through
+  `bin/sclaude-notify --video` and `gh issue comment --attach`;
+  `tests/dev-login.py` runs the comment, `stale` and `replay`. The ref
+  `refs/sclaude/demo/<label>` (`DEMO_REF` in demo.py) holds the last full
+  demo's tree and is deleted by `remove_worktree` in
+  `sclaude/lib/worktree.sh` once the tree is gone; `TEXT_ONLY` in demo.py is
+  what `bin/sclaude-notify` says when the videos were refused and the text
+  went. `tests/dev-login.py` checks both pairs.
 
-  <!-- Added by Claude on 2026-10-31 with the recorded demo of /sdemo. -->
+  <!-- Added by Claude on 2026-10-31 with the recorded demo of /sdemo; the
+  issue comment and the steps' demo on 2026-11-01. -->
 
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/run.sh`, which decides by it

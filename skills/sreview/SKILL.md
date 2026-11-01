@@ -171,7 +171,17 @@ Look one step wider than the findings in hand: if the class plainly has
 neighbours (the same pattern elsewhere in the branch, the obvious next variant),
 ask so the answer covers them too.
 
-**Every answer becomes a policy.** Append to `$S/policies.md`:
+**Every answer is written down — in the narrowest place that holds it.** A
+policy in `$S/policies.md` is read by every later review of the repository, so
+it goes there only when it applies across it: to many files or parts, and to
+work not yet written. An answer about one function, file, feature or prompt
+goes beside what it governs instead — a comment at that code saying the rule
+and why, or the doc or prompt of that part — where the next change to it reads
+it, and the branch log names where it went. When unsure, the specific place:
+a rule that turns out to be wider is moved up later more easily than a global
+one nobody needs is noticed.
+
+A policy for `$S/policies.md`:
 
 ```
 ### P-<n>: <the principle in one line>
@@ -181,9 +191,9 @@ ask so the answer covers them too.
 - Decided: <YYYY-MM-DD>, <branch>
 ```
 
-Then apply it at once to every finding of this iteration it covers. A later
-answer that contradicts a policy replaces it — edit the policy, don't stack a
-second one.
+Then apply it, wherever it was written, at once to every finding of this
+iteration it covers. A later answer that contradicts a rule replaces it — edit
+it where it stands, don't stack a second one.
 
 ## 4. Fix — through subagents where it pays
 

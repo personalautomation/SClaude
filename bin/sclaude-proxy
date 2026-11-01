@@ -336,7 +336,8 @@ def page(title, body):
 
 def probe_features():
     """[(label, wt, live dev server?, [(name, port), …live services],
-    sign-in offered?, as anybody of its own database?)] — every blocking connect() and git call a listing
+    sign-in offered?, as anybody of its own database?, latest demo or None)]
+    — every blocking connect() and git call a listing
     needs, gathered in one pass off the event loop (see gather_listing). A
     feature's own services are probed only once each, same cost `answers`
     already pays for the dev server itself."""
@@ -346,7 +347,8 @@ def probe_features():
                 if answers(sport)]
         offered = dev_login.offered(wt)
         out.append((label, wt, answers(fport), live, offered,
-                    offered and bool(dev_login.own_db(wt)) and dev_login.anybody(wt)))
+                    offered and bool(dev_login.own_db(wt)) and dev_login.anybody(wt),
+                    latest_demo(wt)))
     return out
 
 
@@ -357,7 +359,7 @@ def listing(host, probed, note="", code_up=None):
     local = is_local(host)
     port = host.rsplit(":", 1)[1] if ":" in host and not host.endswith("]") else ""
     rows = []
-    for label, wt, live, live_services, login, anybody in probed:
+    for label, wt, live, live_services, login, anybody, demo in probed:
         if local:
             plain = "http://%s.localhost%s/" % (label, ":" + port if port else "")
         else:
@@ -398,6 +400,13 @@ def listing(host, probed, note="", code_up=None):
                 "/__sclaude/bpmn" if label == "main"
                 else "/__sclaude/flow?f=%s" % html.escape(label),
                 html.escape(label), MAP_NAME))
+        # The feature's latest demo (/sdemo), when one was recorded.
+        if demo:
+            rows.append(
+                "<tr><td class=sub><a href='%s'>%s — 🎬 demo: %s</a></td><td></td>"
+                "<td class=path>%s</td></tr>" % (
+                    html.escape(demo_href(label, demo[0])), html.escape(label),
+                    html.escape(demo[1]), html.escape(demo[2])))
         if label == "main":
             rows.append(
                 "<tr><td class=sub><a href='/__sclaude/dora'>main — %s</a></td><td></td>"
@@ -855,7 +864,9 @@ async def own_page(target, host, headers=None):
                 and not await asyncio.to_thread(answers, found[1]):
             start_state(label, found[0])
         model = process_map()
-        return respond("200 OK", model.page(label, model.config_of(found[0])))
+        demo = await asyncio.to_thread(latest_demo, found[0])
+        return respond("200 OK", model.page(label, model.config_of(found[0]),
+                                            (demo_href(label, demo[0]), demo[1]) if demo else None))
     if url.path == "/__sclaude/code":
         # code-server on the tree, its service started first when it is down.
         # From this machine only: the phone has the gate's own.
@@ -934,11 +945,53 @@ DEMO_CHUNK = 4 * 1024 * 1024
 RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 
+def demo_href(label, demo=""):
+    """A recording's page, or with no `demo` the feature's demo page."""
+    return "%s%s/%s" % (DEMO_PREFIX, label, demo + "/" if demo else "")
+
+
+def latest_demo(wt):
+    """(address, title, when recorded) of the feature's demos, or None — what
+    the list and the process map link to: the feature's demo page, or the
+    newest recording's own page where no feature page was written yet."""
+    root = os.path.join(wt, DEMO_DIR)
+    try:
+        names = sorted((n for n in os.listdir(root) if DEMO_ID.match(n)), reverse=True)
+    except OSError:
+        return None
+    for name in names:
+        if not os.path.isfile(os.path.join(root, name, "index.html")):
+            continue
+        try:
+            with open(os.path.join(root, name, "demo.json")) as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            data = {}
+        # A recording that did not play, or a delta, is not the feature's
+        # demo: demo.py publishes neither as that (skills/sdemo).
+        if data.get("kind") == "delta" or any(
+                isinstance(s, dict) and s.get("error") for s in data.get("scenarios") or []):
+            continue
+        when = str(data.get("made") or "")[:16].replace("T", " ")
+        whole = os.path.isfile(os.path.join(root, "index.html"))
+        return name if not whole else "", str(data.get("title") or "the feature"), \
+            "recorded %s" % when if when else ""
+    return None
+
+
 def demo_file(path, wanted=""):
     parts = path[len(DEMO_PREFIX):].split("/")
-    if len(parts) == 2 and DEMO_ID.match(parts[1]):
-        # The page names its videos relative to itself: under the slash.
+    # The page names its videos relative to itself: under the slash.
+    if len(parts) == 1 and LABEL.match(parts[0]) or len(parts) == 2 and DEMO_ID.match(parts[1]):
         return respond("303 See Other", "", ("Location: %s/" % path,))
+    # The feature's own demo page: the latest full demo and every delta.
+    if len(parts) == 2 and parts[1] == "":
+        found = feature(parts[0])
+        try:
+            with open(os.path.join(found[0], DEMO_DIR, "index.html"), "rb") as fh:
+                return respond("200 OK", fh.read().decode("utf-8", "replace"))
+        except (OSError, TypeError):
+            return respond("404 Not Found", page("No demo", "<h1>No demo of this feature</h1>"))
     if len(parts) != 3 or not DEMO_ID.match(parts[1]):
         return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>"))
     label, demo, name = parts

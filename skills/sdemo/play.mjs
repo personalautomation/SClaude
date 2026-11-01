@@ -12,7 +12,8 @@
 // where the results go (DEMO_DIR). The script is a module the skill writes:
 //
 //   export default {
-//     title: "…", viewport: "desktop" | "phone",
+//     title: "…", viewport: "desktop" | "phone",   (a scenario may set its own)
+//     kind: "main" | "delta", change: "…",   (a delta: only what changed)
 //     scenarios: [{
 //       title: "…", as: "<email>", path: "/start",
 //       shows: "…", look: ["…"], why: "…",
@@ -188,9 +189,18 @@ const contexts = new Map(); // live: a context per user, its windows
 class Skip extends Error {}
 class Stop extends Error {}
 
-// Live, the person's controls are answered here, before each step. One rule
-// for a tab the person closes, whenever they close it: it skips its own
-// scenario and changes nothing else — a pause stays a pause.
+// Live, the person's controls are answered here, before each step.
+//
+// A tab the person closes means one thing, whenever they close it — signing
+// in, under the card, a step or a check, paused or not: "done with this
+// scenario". It is recorded as skipped by them, not failed, and the step it
+// cut off leaves the record (no ✗ for a check it cut short, no step that never
+// ran). It changes nothing else: a pause pressed in another window stays a
+// pause, so the demo does not start opening windows while the person works in
+// one; with every window closed while paused nobody is left to press ▶, and
+// the demo stops (main's wait between scenarios). Before this rule each moment
+// read a closed tab its own way — a failed sign-in, a failed step, a pause
+// lifted or held for ever — and review rounds kept finding the next one.
 async function gate(page) {
   if (!LIVE) return;
   // A stop outranks the closed tab that may follow it.
@@ -365,9 +375,12 @@ async function signIn(context, s) {
 }
 
 async function scenario(browser, demo, s, i, contexts) {
+  // A scenario may set its own viewport: the same path shown on a desktop and
+  // on a phone is two scenarios, one of each.
+  const viewport = VIEWPORTS[s.viewport] ? s.viewport : VIEWPORTS[demo.viewport] ? demo.viewport : "desktop";
   const record = { title: s.title, as: s.as, path: s.path || "/", shows: s.shows || "", why: s.why || "",
-    look: Array.isArray(s.look) ? s.look : s.look ? [s.look] : [], steps: [] };
-  const size = VIEWPORTS[demo.viewport] || VIEWPORTS.desktop;
+    look: Array.isArray(s.look) ? s.look : s.look ? [s.look] : [], steps: [], viewport };
+  const size = VIEWPORTS[viewport];
   let context = LIVE ? contexts.get(s.as) : null;
   if (!context) {
     // Live, the window is the person's and keeps its own size: the phone's
@@ -450,6 +463,14 @@ async function scenario(browser, demo, s, i, contexts) {
   return record;
 }
 
+// The local time with its offset (2026-11-01T14:05:00+03:00): shown as
+// written, it is the developer's clock, as the commits beside it are.
+function localTime() {
+  const d = new Date(), off = -d.getTimezoneOffset(), pad = (n) => String(Math.floor(Math.abs(n))).padStart(2, "0");
+  const local = new Date(d.getTime() + off * 60000).toISOString().slice(0, 19);
+  return `${local}${off >= 0 ? "+" : "-"}${pad(off / 60)}:${pad(off % 60)}`;
+}
+
 async function main() {
   const demo = (await import(pathToFileURL(path.resolve(scriptPath)).href)).default;
   if (!demo || !Array.isArray(demo.scenarios) || !demo.scenarios.length) {
@@ -465,8 +486,11 @@ async function main() {
   fs.mkdirSync(OUT, { recursive: true });
   const { chromium } = playwright();
   const browser = LIVE ? await chromium.connectOverCDP(CDP) : await chromium.launch();
+  // kind "delta": only what changed for the user since the last full demo,
+  // `change` saying what, in a sentence (demo.py keeps the history of both).
   const results = { title: demo.title || "Demo", viewport: demo.viewport || "desktop",
-    made: new Date().toISOString(), live: LIVE, scenarios: [] };
+    made: localTime(), live: LIVE, kind: demo.kind === "delta" ? "delta" : "main",
+    change: String(demo.change || ""), scenarios: [] };
   let stopped = false;
   for (const [i, s] of demo.scenarios.entries()) {
     // Live, a pause or a stop pressed as the last scenario ended holds the
@@ -548,55 +572,31 @@ function vtt(r) {
   return "WEBVTT\n\n" + cues.join("\n\n") + "\n";
 }
 
-// What the browser picks from, best first. Playwright writes VP8 WebM at a
-// fixed, generous rate, which Safari before 17.4 does not play at all. With
-// an ffmpeg (Ubuntu's has both encoders; Playwright's own is built for VP8
-// alone) the recording becomes:
-//   - AV1 (SVT-AV1): a screen recording is sharp text on flat colour that
-//     barely moves, which camera-tuned settings blur. AV1's screen-content
-//     tools — palette blocks and intra block copy, forced on with scm=1,
-//     since this is always a screen — keep it sharp at a fraction of the
-//     size. Taken by Chrome, Firefox, and the iPhones that decode it in
-//     hardware;
-//   - H.264 MP4, tuned for still images (less deblocking, sharper edges):
-//     what every other browser and Telegram play.
-// Both 4:2:0: 4:4:4 would keep coloured text sharper, but no phone decodes
-// it in hardware. A key frame every 4 s: a frame that repeats costs next to
-// nothing either way, and a tap on a step seeks from the nearest one.
-// Without one, the WebM alone.
+// What the page plays. Playwright writes VP8 WebM at a fixed, generous
+// rate, which Safari before 17.4 does not play. With an ffmpeg that has
+// libx264 (Ubuntu's does; Playwright's own is built for VP8 alone) it becomes
+// H.264 MP4: every browser and Telegram play it, at about a quarter of the
+// size. A screen recording is sharp text on flat colour that barely moves:
+// tuned for still images (less deblocking) the text stays sharp; 4:2:0, since
+// no phone decodes 4:4:4 in hardware; a key frame every 4 s, which costs
+// little where frames repeat and keeps a tap on a step quick to seek.
+// AV1 was measured against it on such a recording (SVT-AV1 1.7, its
+// screen-content tools on): 1% smaller at three times the encoding time, 7%
+// at six — not worth a second file. Without ffmpeg, the WebM alone.
 function squeeze(name) {
   const src = path.join(OUT, name);
   const webm = [{ src: name, type: "video/webm" }];
-  let encoders = "";
+  const mp4 = name.replace(/\.webm$/, ".mp4");
   try {
-    encoders = execFileSync("ffmpeg", ["-hide_banner", "-encoders"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", src, "-c:v", "libx264", "-preset", "slow",
+      "-crf", "26", "-tune", "stillimage", "-pix_fmt", "yuv420p", "-profile:v", "high", "-g", "100",
+      "-movflags", "+faststart", "-an", path.join(OUT, mp4)], { stdio: "ignore" });
+    if (!fs.statSync(path.join(OUT, mp4)).size) return webm;
   } catch {
     return webm;
   }
-  const ff = (out, codec) => {
-    try {
-      execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", src, ...codec, "-an", path.join(OUT, out)],
-        { stdio: "ignore" });
-      return fs.statSync(path.join(OUT, out)).size > 0;
-    } catch {
-      return false;
-    }
-  };
-  const base = name.replace(/\.webm$/, "");
-  const sources = [];
-  if (/libsvtav1/.test(encoders)) {
-    const av1 = ["-c:v", "libsvtav1", "-preset", "8", "-crf", "38", "-pix_fmt", "yuv420p", "-g", "100"];
-    if (ff(base + ".av1.mp4", [...av1, "-svtav1-params", "scm=1", "-movflags", "+faststart"]) ||
-        ff(base + ".av1.mp4", [...av1, "-movflags", "+faststart"]))
-      sources.push({ src: base + ".av1.mp4", type: 'video/mp4; codecs="av01.0.08M.08"' });
-  }
-  if (/libx264/.test(encoders) && ff(base + ".mp4", ["-c:v", "libx264", "-preset", "slow", "-crf", "26",
-    "-tune", "stillimage", "-pix_fmt", "yuv420p", "-profile:v", "high", "-g", "100", "-movflags", "+faststart"]))
-    sources.push({ src: base + ".mp4", type: "video/mp4" });
-  // The WebM goes only when a source every browser plays took its place.
-  if (!sources.some((v) => v.type === "video/mp4")) return [...sources, ...webm];
   fs.unlinkSync(src);
-  return sources;
+  return [{ src: mp4, type: "video/mp4" }];
 }
 
 main().catch((err) => {

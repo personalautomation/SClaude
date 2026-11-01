@@ -53,6 +53,8 @@ The orchestrator runs this step with restrictions: `gh pr create`, merge, deploy
 
 <include:report>
 
+**Before the report, show me the work: run the `sdemo` skill, `/sdemo`.** It records the feature's main functionality — signed in as the users each scenario needs, clicking through, with captions on what to look at, on a desktop and on a phone — and sends the page's link with the videos to the feature's Telegram topic and to a comment of its own on the issue. Put that link first in the report, so I can watch before I answer. After fixing my remarks, record again before asking again — but only when the code changed since the last demo: `python3 ~/.claude/skills/sdemo/demo.py stale` exits 0 with `stale:` when it did, and 1 with `fresh:` when the demo still shows the code as it is; a demo costs minutes and a model's work. Then first `/sdemo delta` — a short recording of only what changed for me since the last demo, so I need not watch the whole one again; none when nothing changed for a user — and then `/sdemo`, the whole feature again. Put both links first in the report. If no demo can be made — nobody in the feature's database to sign in as, the player failing twice on the same step — say why in one line and ask all the same: the demo is a way to check the work, not a condition for accepting it.
+
 **When the work is done, I accept it here, in this session.** In this step the report above is not the last message: write it in full, then — with no tool call between the two — put one question to me with `AskUserQuestion` — this question and no other, its header and both option labels exactly as written here, in English, with no `(Recommended)` mark, whatever language we speak; the question text and the descriptions are yours, in my language. `sclaude` prints the report given before the question, so after `Accept` nothing but the one line below follows it — no second report:
 
 - header: `Accept work`;
@@ -68,6 +70,7 @@ Leave the question out when something needs my answer before the work can be cal
 
 The report, before the question — in your own words, but cover all of it:
 
+- the demo's link (above), or why there is none;
 - the work in this session is done — what's ready, and what's left open;
 - **each acceptance criterion by identifier, and where it stands**: done and verified how, done but unverified, or not done and why. Go through the list rather than summarising it — a criterion you don't mention reads as one you forgot, and this is the last moment it's cheap to fix. If there were no criteria, say that instead;
 - that on `Accept` `sclaude` closes this session itself and launches step 3; without the question, that I should now close Claude with `/exit`.

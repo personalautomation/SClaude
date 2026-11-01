@@ -14,6 +14,7 @@
 import http.server
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -295,6 +296,40 @@ def main():
     return 1 if failures else 0
 
 
+# gh for demo.py's issue comment: the issue's comments live in a JSON file.
+GH_STUB = """import json, sys
+store, log = %s, %s
+args = sys.argv[1:]
+comments = json.load(open(store))
+with open(log, "a") as fh:
+    fh.write("gh " + " ".join(args[:3]) + "\\n")
+if args[:2] == ["issue", "view"]:
+    print(json.dumps({"body": "", "comments": comments}))
+elif args[:2] == ["issue", "comment"]:
+    n = max([int(c["url"].rsplit("-", 1)[1]) for c in comments] + [0]) + 1
+    body = open(args[args.index("--body-file") + 1]).read()
+    attached = [args[i + 1] for i, a in enumerate(args) if a == "--attach"]
+    comments.append({"body": body, "attached": attached,
+                     "url": "https://x/issues/7#issuecomment-%%d" %% n})
+    json.dump(comments, open(store, "w"))
+elif args[:3] == ["api", "-X", "DELETE"]:
+    cid = args[3].rsplit("/", 1)[1]
+    with open(log, "a") as fh:
+        fh.write("gh delete %%s\\n" %% cid)
+    json.dump([c for c in comments if not c["url"].endswith("-" + cid)], open(store, "w"))
+elif args[:3] == ["api", "-X", "PATCH"]:
+    cid = args[3].rsplit("/", 1)[1]
+    with open(log, "a") as fh:
+        fh.write("gh patch %%s\\n" %% cid)
+    for c in comments:
+        if c["url"].endswith("-" + cid):
+            c["body"] = json.loads(sys.stdin.read())["body"]
+    json.dump(comments, open(store, "w"))
+else:
+    sys.exit(1)
+"""
+
+
 def load_demo(registry, port):
     """skills/sdemo/demo.py, pointed at the bench's registry and proxy."""
     import importlib.util
@@ -558,6 +593,12 @@ def check_proxy(root, wt, dport, login_file):
         for bad in ("/demo.mjs", "/../../feature/state.json", "/.hidden.json", "/nothere.webm"):
             status, _, _ = request(port, host, tail + bad)
             check("demo: %s is not served" % bad, status.split(" ", 1)[1], "404 Not Found")
+        _, _, body = request(port, host, "/__sclaude/")
+        check("demo: the list links the feature's latest demo",
+              "href='/__sclaude/demo/f1/20261031-120000/'" in body, True)
+        _, _, body = request(port, host, "/__sclaude/flow?f=f1")
+        check("demo: the process map links it too",
+              'href="/__sclaude/demo/f1/20261031-120000/"' in body, True)
         status, _, _ = request(port, host, "/__sclaude/demo/nofeature/20261031-120000/")
         check("demo: an unknown feature's demo is not served", status.split(" ", 1)[1],
               "404 Not Found")
@@ -568,7 +609,8 @@ def check_proxy(root, wt, dport, login_file):
         with open(os.path.join(stub, "node"), "w") as fh:
             fh.write('#!/bin/sh\necho "$*" >> %s\nwhile [ $# -gt 0 ]; do '
                      '[ "$1" = --out ] && echo "<h1>x</h1>" > "$2/index.html" && '
-                     'echo \'{"title": "T"}\' > "$2/demo.json"; shift; done\n' % asked)
+                     '{ [ -n "$DEMO_JSON" ] && echo "$DEMO_JSON" || echo \'{"title": "T"}\'; } '
+                     '> "$2/demo.json"; shift; done\n' % asked)
         with open(os.path.join(stub, "sclaude-notify"), "w") as fh:
             fh.write('#!/bin/sh\necho "notify $*" >> %s\n' % asked)
         for name in ("node", "sclaude-notify"):
@@ -576,15 +618,31 @@ def check_proxy(root, wt, dport, login_file):
         os.remove(asked)
         script = os.path.join(root, "my-demo.mjs")
         write(script, "export default {scenarios: []}")
-        os.environ["PATH"] = stub + os.pathsep + saved_path
-        try:
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                demo.cmd_play([script], "f1", wt, "laptop", False)
-        finally:
-            os.environ["PATH"] = saved_path
-        with open(asked) as fh:
-            calls = fh.read().splitlines()
+        # A gh that keeps the issue's comments in a file: view reads them,
+        # comment adds one, PATCH rewrites one.
+        issue_file = os.path.join(root, "issue-comments.json")
+        write(issue_file, "[]")
+        with open(os.path.join(stub, "gh"), "w") as fh:
+            fh.write("#!/usr/bin/env python3\n" + GH_STUB % (repr(issue_file), repr(asked)))
+        os.chmod(os.path.join(stub, "gh"), 0o755)
+
+        def play(session):
+            if os.path.exists(asked):
+                os.remove(asked)
+            os.environ["PATH"] = stub + os.pathsep + saved_path
+            if session:
+                os.environ["SCLAUDE_SESSION"] = "s1"
+            try:
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    demo.cmd_play([script], "f1", wt, "laptop", False)
+            finally:
+                os.environ["PATH"] = saved_path
+                os.environ.pop("SCLAUDE_SESSION", None)
+            with open(asked) as fh:
+                return out.getvalue().splitlines(), fh.read().splitlines()
+
+        said, calls = play(False)
         ran = calls[0].split()
         made = ran[1]
         check("demo play: play.mjs runs a copy, in a demo of the feature's own",
@@ -594,10 +652,164 @@ def check_proxy(root, wt, dport, login_file):
                os.path.isfile(made), ran[ran.index("--base") + 1], ran[ran.index("--feature") + 1]),
               (True, True, True, "http://f1.localhost:%d" % port, "f1"))
         demo_id = os.path.basename(os.path.dirname(made))
-        check("demo play: the page's link is said, and sent to the topic",
-              ("link: " + demo.demo_links("f1", demo_id)[0] in out.getvalue().splitlines(),
-               calls[1] == "notify --quiet --in %s 🎬 T" % wt,
-               calls[2] == demo.demo_links("f1", demo_id)[0]), (True, True, True))
+        check("demo play: outside sclaude, the links are said here and go nowhere else",
+              ("link: " + demo.demo_links("f1")[0] in said, len(calls),
+               any(l.startswith("kept here:") for l in said)), (True, 1, True))
+        with open(os.path.join(os.path.dirname(made), "demo.json")) as fh:
+            check("demo play: the demo notes the commit it shows",
+                  json.load(fh).get("head"), demo.git_head(wt))
+
+        state_path = os.path.join(wt, ".sclaude", "local", "feature", "state.json")
+        with open(state_path) as fh:
+            state_before = fh.read()
+        with open(state_path, "w") as fh:
+            json.dump(dict(json.loads(state_before), issue=7), fh)
+        try:
+            said, calls = play(True)
+            this = os.path.basename(os.path.dirname(calls[0].split()[1]))
+            check("demo play: in sclaude, the topic gets both links",
+                  (calls[1] == "notify --quiet --in %s 🎬 T" % wt,
+                   calls[2] == "💻 http://127.0.0.1:%d/__sclaude/demo/f1/" % port),
+                  (True, True))
+            with open(issue_file) as fh:
+                posted = json.load(fh)
+            check("demo play: in sclaude, the issue gets a demo comment",
+                  (said[-1], len(posted), posted[0]["body"].startswith(demo.DEMO_MARKER),
+                   "/__sclaude/demo/f1/" in posted[0]["body"]),
+                  ("issue: posted on #7 with 0 video(s)", 1, True, True))
+            said, calls = play(True)
+            with open(issue_file) as fh:
+                posted = json.load(fh)
+            check("demo play: recorded again, the new comment replaces the old",
+                  (said[-1], len(posted), posted[0]["url"].endswith("-2"),
+                   any(l.startswith("gh delete 1") for l in calls)),
+                  ("issue: posted on #7 with 0 video(s), the earlier one deleted", 1, True, True))
+        finally:
+            with open(state_path, "w") as fh:
+                fh.write(state_before)
+
+        # The videos a comment carries: each scenario's MP4 under its row,
+        # none above GitHub's size for an attachment.
+        clips_dir = os.path.join(root, "clips")
+        write(os.path.join(clips_dir, "scenario-1.mp4"), "x")
+        with open(os.path.join(clips_dir, "scenario-2.mp4"), "wb") as fh:
+            fh.truncate(demo.ATTACH_MAX + 1)
+        res = {"title": "T", "scenarios": [
+            {"title": "A", "as": "a@x", "steps": [], "sources": [{"src": "scenario-1.mp4"}]},
+            {"title": "B", "as": "b@x", "steps": [], "viewport": "phone",
+             "sources": [{"src": "scenario-2.mp4"}]}]}
+        body = demo.demo_body(res, "", "http://h/", clips_dir)
+        check("demo comment: a scenario's video is attached under it, a too big one is not",
+              (demo.videos(clips_dir, res) == [os.path.join(clips_dir, "scenario-1.mp4")],
+               body.count("![](./"), "![](./scenario-1.mp4)" in body, "📱 phone" in body),
+              (True, 1, True, True))
+
+        # A delta: measured from the last full demo, kept in the history with
+        # the stages, the commits and the change; told in the topic, and put
+        # into the issue with the full demo that follows it.
+        with open(state_path, "w") as fh:
+            json.dump(dict(json.loads(state_before), issue=7), fh)
+        write(os.path.join(wt, "delta.txt"), "x")
+        subprocess.run(["git", "-C", wt, "add", "delta.txt"], check=True)
+        subprocess.run(["git", "-C", wt, "-c", "user.email=t@x", "-c", "user.name=t",
+                        "commit", "-qm", "feat: the change"], check=True)
+        os.environ["DEMO_JSON"] = json.dumps({"title": "T", "kind": "delta",
+                                              "change": "The button is now green"})
+        os.environ["SCLAUDE_DEMO_STAGE"] = "preview"
+        try:
+            said, calls = play(True)
+        finally:
+            del os.environ["DEMO_JSON"]
+        delta = demo.history(wt)[-1]
+        check("demo delta: kept with where it is measured from, its commits and change",
+              (delta["kind"], delta["stage"], delta["from"], delta["change"],
+               [c.split(" ", 1)[1] for c in delta["commits"]]),
+              ("delta", "preview", "by hand", "The button is now green", ["feat: the change"]))
+        check("demo delta: told in the topic, not posted on the issue alone",
+              (any("Δ by hand → preview: The button is now green" in l for l in calls),
+               any(l.startswith("issue:") for l in said)), (True, False))
+        try:
+            said, calls = play(True)
+        finally:
+            del os.environ["SCLAUDE_DEMO_STAGE"]
+            with open(state_path, "w") as fh:
+                fh.write(state_before)
+        with open(issue_file) as fh:
+            posted = json.load(fh)
+        check("demo delta: the next full demo's comment carries it",
+              ("#### Δ What changed, by hand → preview" in posted[-1]["body"],
+               "The button is now green" in posted[-1]["body"]), (True, True))
+        _, _, body = request(port, host, "/__sclaude/demo/f1/")
+        check("demo: the feature's page shows the full demo and the change",
+              ("The button is now green" in body, "What changed, newest first" in body), (True, True))
+
+        # stale: the code against the last demo's commit.
+        def stale():
+            out = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(out):
+                    demo.cmd_stale("f1", wt)
+                code = 0
+            except SystemExit as exc:
+                code = exc.code
+            return code, out.getvalue().split(":")[0]
+        check("demo stale: nothing changed since the demo", stale(), (1, "fresh"))
+        write(os.path.join(wt, "notes.md"), "a doc")
+        check("demo stale: a doc is not the code", stale(), (1, "fresh"))
+        write(os.path.join(wt, "app.ts"), "export const x = 1")
+        subprocess.run(["git", "-C", wt, "add", "app.ts"], check=True)
+        check("demo stale: a change to the code since", stale(), (0, "stale"))
+        subprocess.run(["git", "-C", wt, "rm", "-q", "--cached", "app.ts"], check=True)
+        os.remove(os.path.join(wt, "app.ts"))
+        os.remove(os.path.join(wt, "notes.md"))
+        write(os.path.join(wt, "new.ts"), "export const y = 2")
+        check("demo stale: a new file nobody added yet is a change", stale(), (0, "stale"))
+        os.remove(os.path.join(wt, "new.ts"))
+        check("demo stale: the files back as the demo saw them, no change", stale(), (1, "fresh"))
+
+        # A full demo with a scenario that did not play is kept apart: not
+        # published, and no demo to measure the code against.
+        before = demo.last_main(wt)["id"]
+        os.environ["DEMO_JSON"] = json.dumps({"title": "T", "scenarios": [
+            {"title": "A", "as": "a@x", "error": "not signed in: refused", "steps": []}]})
+        try:
+            said, calls = play(True)
+        finally:
+            del os.environ["DEMO_JSON"]
+        ref = subprocess.run(["git", "-C", wt, "rev-parse", "-q", "--verify", demo.DEMO_REF % "f1"],
+                             capture_output=True, text=True).stdout.strip()
+        check("demo: one ref per feature holds the last full demo's tree, not a failed one's",
+              (ref, len(subprocess.run(["git", "-C", wt, "for-each-ref", "refs/sclaude/demo/"],
+                                       capture_output=True, text=True).stdout.splitlines())),
+              (demo.last_main(wt)["tree"], 1))
+        notify_src = open(os.path.join(ROOT, "bin", "sclaude-notify")).read()
+        check("demo: sclaude-notify says the text went in the words demo.py reads",
+              re.search(r'sys\.stderr\.write\("sclaude-notify: the videos did not go \(%%s\); %s\\n"'
+                        % re.escape(demo.TEXT_ONLY), notify_src) is not None, True)
+        check("demo: the feature's removal deletes the ref demo.py keeps",
+              'update-ref -d "%s"' % (demo.DEMO_REF % "$label")
+              in open(os.path.join(ROOT, "sclaude", "lib", "worktree.sh")).read(), True)
+        check("demo: a demo that did not play is not published, nor the last one",
+              (any(l.startswith("not published: 1 scenario") for l in said),
+               any(l.startswith("notify") for l in calls), demo.last_main(wt)["id"]),
+              (True, False, before))
+
+        # replay: the last demo's own script, played again.
+        last = demo.last_main(wt)["id"]
+        if os.path.exists(asked):
+            os.remove(asked)
+        os.environ["PATH"] = stub + os.pathsep + saved_path
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                demo.cmd_replay("f1", wt, "laptop")
+        finally:
+            os.environ["PATH"] = saved_path
+        with open(asked) as fh:
+            played = fh.readline().split()
+        check("demo replay: the last demo's script is played again",
+              os.path.dirname(played[1]) != os.path.join(wt, demo.DEMO_DIR, last)
+              and open(played[1]).read() == open(os.path.join(
+                  wt, demo.DEMO_DIR, last, "demo.mjs")).read(), True)
 
         status, headers, _ = request(port, host,
                                      "/__sclaude/login?f=f1&as=seed@example.com&next=/y")

@@ -7,6 +7,9 @@
 #   echo "..." | sclaude-notify                   the text on stdin
 #   sclaude-notify --in <worktree> "..."          to that feature's topic
 #   sclaude-notify --in <worktree> --as <name> "..."
+#   sclaude-notify --video a.mp4 [--video b.mp4]… "..."   the videos, the text
+#                                                 as their caption (an album
+#                                                 when there are several)
 #
 # With --in the message goes to the feature's topic (the thread in its
 # worktree's .sclaude/local/feature/telegram.json, which the bot keeps), so a
@@ -33,13 +36,14 @@ set -uo pipefail
 
 ENV_FILE="$HOME/.config/keepawake/env"
 
-quiet="" feature="" name=""
+quiet="" feature="" name="" videos=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --quiet) quiet=1; shift ;;
     # Last with no value, shift 2 would shift nothing and loop for ever.
     --in) feature="${2:-}"; shift; [[ $# -gt 0 ]] && shift ;;
     --as) name="${2:-}"; shift; [[ $# -gt 0 ]] && shift ;;
+    --video) [[ -f "${2:-}" ]] && videos+="${2}"$'\n'; shift; [[ $# -gt 0 ]] && shift ;;
     *) break ;;
   esac
 done
@@ -79,7 +83,7 @@ chat="${chat%\"}"; chat="${chat#\"}"
 # The checkout this script lives in, through the link in ~/.local/bin: the
 # bot's record of a topic is named by its code, which is imported from there.
 root="$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")"
-python3 - "$token" "$chat" "$text" "${quiet:-}" "$feature" "$root" "$name" <<'PY' || exit 0
+python3 - "$token" "$chat" "$text" "${quiet:-}" "$feature" "$root" "$name" "$videos" <<'PY' || exit 0
 import html
 import json
 import os
@@ -89,6 +93,7 @@ import urllib.parse
 import urllib.request
 
 token, chat, text, quiet, feature, root, name = sys.argv[1:8]
+videos = [v for v in sys.argv[8].split("\n") if v] if len(sys.argv) > 8 else []
 
 # The feature's topic, when it has one: the bot keeps its id in the worktree.
 thread = 0
@@ -126,14 +131,55 @@ if quiet:
 url = "https://api.telegram.org/bot%s/sendMessage" % token
 
 
-def send(params):
-    req = urllib.request.Request(url, data=urllib.parse.urlencode(params).encode())
-    with urllib.request.urlopen(req, timeout=15) as resp:
+def multipart(fields, files):
+    """A multipart/form-data body: (content type, bytes)."""
+    edge = "sclaude%s" % os.urandom(8).hex()
+    out = []
+    for key, value in fields.items():
+        out.append(("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n"
+                    % (edge, key, value)).encode())
+    for key, path in files.items():
+        with open(path, "rb") as fh:
+            data = fh.read()
+        out.append(("--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\n"
+                    "Content-Type: video/mp4\r\n\r\n" % (edge, key, os.path.basename(path))).encode()
+                   + data + b"\r\n")
+    out.append(("--%s--\r\n" % edge).encode())
+    return "multipart/form-data; boundary=" + edge, b"".join(out)
+
+
+def send(params, raw):
+    """sendMessage — or, with videos, the videos with `raw`, the same text
+    unescaped, as their caption: one by sendVideo, several as an album by
+    sendMediaGroup (ten at most)."""
+    if not videos:
+        req = urllib.request.Request(url, data=urllib.parse.urlencode(params).encode())
+    else:
+        fields = {k: v for k, v in params.items() if k not in ("text", "parse_mode")}
+        files = {"v%d" % i: v for i, v in enumerate(videos[:10])}
+        # A caption holds 1024 characters: the text is cut before it is
+        # escaped, so the cut never falls inside an entity or a tag.
+        caption = markup(raw[:900])
+        if len(files) == 1:
+            method = "sendVideo"
+            fields.update(video="attach://v0", caption=caption,
+                          parse_mode="HTML", supports_streaming="true")
+        else:
+            method = "sendMediaGroup"
+            fields["media"] = json.dumps([dict(
+                {"type": "video", "media": "attach://" + k, "supports_streaming": True},
+                **({"caption": caption, "parse_mode": "HTML"} if i == 0 else {}))
+                for i, k in enumerate(files)])
+        kind, data = multipart(fields, files)
+        req = urllib.request.Request(url.rsplit("/", 1)[0] + "/" + method, data=data,
+                                     headers={"Content-Type": kind})
+    with urllib.request.urlopen(req, timeout=120 if videos else 15) as resp:
         return json.load(resp)
 
 
-try:
-    out = None
+def deliver():
+    """The message to the feature's topic, or to the main chat when it has
+    none or the topic is gone; Telegram's answer."""
     if thread:
         # A topic gone — deleted by hand, or topics turned off — answers 400
         # in the words TOPIC_GONE in keepawake/telegramd.py lists: the main
@@ -141,7 +187,7 @@ try:
         # not a lost topic, and the message is not moved for it.
         gone = (b"thread not found", b"topic_id_invalid", b"topic_deleted", b"not a forum")
         try:
-            out = send(dict(params, message_thread_id=thread))
+            out = send(dict(params, message_thread_id=thread), text)
             # Into the bot's record of the topic, which it deletes with the
             # topic: a deleted topic leaves its messages in the chat's "All"
             # view. The path is the bot's own (keepawake/state.py).
@@ -150,20 +196,50 @@ try:
                 from keepawake.state import topic_ledger
                 ledger = topic_ledger(thread)
                 os.makedirs(os.path.dirname(ledger), exist_ok=True)
+                sent_ids = out.get("result")
                 with open(ledger, "a") as fh:
-                    fh.write("%d\n" % int((out.get("result") or {}).get("message_id")))
+                    for m in sent_ids if isinstance(sent_ids, list) else [sent_ids or {}]:
+                        fh.write("%d\n" % int(m.get("message_id")))
             except Exception:
                 pass
+            return out
         except urllib.error.HTTPError as exc:
             refused = exc.read()
             if exc.code != 400 or not any(w in refused.lower() for w in gone):
                 # Read once already; the report below reads it again.
                 exc.read = lambda: refused
                 raise
-            out = None
-    if out is None:
-        # The main chat, where the name says which feature this is about.
-        out = send(dict(params, text=markup("%s: %s" % (name, text)) if name else body))
+    # The main chat, where the name says which feature this is about.
+    raw = "%s: %s" % (name, text) if name else text
+    return send(dict(params, text=markup(raw)), raw)
+
+
+try:
+    try:
+        out = deliver()
+    except urllib.error.URLError as exc:
+        # The videos are the extra: when Telegram certainly did not take
+        # them, the text goes the same way as an ordinary message, so its
+        # links still arrive. Certainly: a 4xx refusal (but 429, a rate limit
+        # the text would meet too), or a failure while the request was still
+        # going out — urllib wraps those in URLError. A 5xx, or a timeout
+        # waiting for the answer (a bare TimeoutError, not caught here), may
+        # come after Telegram posted the album, and the links would arrive
+        # twice.
+        code = getattr(exc, "code", None)
+        if not videos or (code is not None and not (400 <= code < 500 and code != 429)):
+            raise
+        why = ""
+        if code is not None:
+            try:
+                why = json.loads(exc.read().decode()).get("description", "")
+            except Exception:
+                why = ""
+        videos = []
+        out = deliver()
+        # Its last words are what demo.py reads (TEXT_ONLY in skills/sdemo).
+        sys.stderr.write("sclaude-notify: the videos did not go (%s); the text did\n"
+                         % (why or ("HTTP %d" % code if code else str(exc.reason))))
     if not out.get("ok"):
         sys.stderr.write("sclaude-notify: telegram refused: %s\n"
                          % out.get("description", "no reason given"))

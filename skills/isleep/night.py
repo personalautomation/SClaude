@@ -34,8 +34,10 @@ The night ends at the person's first input in any session: a prompt typed
 anywhere means they are back. What is not the person's is told apart — a
 headless `claude -p`, the prompt sclaude launched a session with (on the
 command line of a claude process that has SCLAUDE_SESSION — a prompt the
-person gives `claude` on its command line counts as theirs), and a /loop
-wakeup.
+person gives `claude` on its command line counts as theirs), a /loop
+wakeup, and what Claude Code delivers as a prompt on its own: a message from
+another Claude session — a subagent's report among them — and a background
+task's notification.
 A /loop the person types is taken for a wakeup too: a wakeup repeats the
 /loop input word for word, so the two cannot be told apart.
 
@@ -323,9 +325,17 @@ def headless(argv):
     return "-p" in argv or "--print" in argv
 
 
+# How Claude Code opens a prompt it delivers itself rather than the person: a
+# message from another session or a subagent, and a background task's
+# notification. A night ended by a subagent's report is a night the person
+# slept through with nobody deciding.
+NOT_TYPED = ("<<autonomous-loop", "/loop", "Another Claude session sent a message:",
+             "<agent-message", "<task-notification>")
+
+
 def from_person(prompt):
     """False for a prompt that is not the person typing (see the head)."""
-    if prompt.startswith(("<<autonomous-loop", "/loop")):
+    if prompt.startswith(NOT_TYPED):
         return False
     pid = claude_pid()
     argv = argv_of(pid) if pid else []

@@ -727,9 +727,16 @@ stop_dev() {
 # (ask_feature_end in io.sh). The bot's record of the topic lives in the
 # worktree, so it is read before the worktree goes.
 remove_worktree() {
-  local wt="$1" record=""
+  local wt="$1" record="" label
   declare -F ask_record >/dev/null && record="$(ask_record "$wt")"
+  label="$(state_get "$wt/.sclaude/local/feature/state.json" dev.label 2>/dev/null)"
   remove_worktree_tree "$wt" || return 1
+  # The ref that keeps the tree the feature's last demo played
+  # (skills/sdemo/demo.py, DEMO_REF) goes with the tree, once it is gone,
+  # whichever way it went: nothing else would ever delete it, and it holds
+  # those files from gc. A removal git refused leaves the tree, its work and
+  # its demo standing.
+  [[ -n "$label" ]] && git -C "$REPO" update-ref -d "refs/sclaude/demo/$label" >/dev/null 2>&1
   declare -F ask_feature_end >/dev/null && ask_feature_end "$record"
   return 0
 }

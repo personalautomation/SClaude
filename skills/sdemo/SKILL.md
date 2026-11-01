@@ -1,7 +1,7 @@
 ---
 name: sdemo
 description: A feature's demo, played for the person. `/sdemo` records a demo of the feature's main functionality — Playwright signs in as each scenario's user, clicks and types through it, with captions on the page saying what each step shows, where to look and why it matters — and gives one link to a page with a video per scenario, the steps beside it, and "take over" links that open any step's page signed in to go on by hand; `/sdemo ac` walks through the acceptance criteria instead; `/sdemo live` plays it in the laptop's chrome-debug with ⏸ to take over; `/sdemo links` gives plain signed-in links with what to check (`links open` opens them in chrome-debug). Links are for where the person is — the laptop's <feature>.localhost, or the tailnet's address on the phone. Use when the user invokes /sdemo, or asks to demo, show, try or check a feature.
-argument-hint: "[ac] [live | links [open]] [feature] [what to show]"
+argument-hint: "[ac | delta] [live | links [open]] [feature] [what to show]"
 ---
 
 # sdemo — the feature, shown
@@ -22,6 +22,11 @@ What to show:
   job, an email) is said at the end with how to check it otherwise. Without
   criteria (no issue, none written) say so and show the main functionality.
 
+- **`/sdemo delta`** — only what changed for the user since the last full
+  demo: a short recording to watch instead of the whole one again (section
+  4a). Nothing changed for the user — a refactoring, a fix nobody sees, tests —
+  and there is no delta: say so, and record nothing.
+
 What the person asked to be shown comes first and is never left out.
 
 How it is shown:
@@ -30,8 +35,10 @@ How it is shown:
   records them; the person gets one link to a page with a video per
   scenario, its steps beside it (tap one to jump there), what each shows and
   why, and a **take over** link on every step that opens that page signed in
-  as that user, to go on by hand. The link also goes to the feature's
-  Telegram topic.
+  as that user, to go on by hand. In a session sclaude runs, the link and
+  the videos also go to the feature's Telegram topic and to a comment of its
+  own on the feature's issue, which replaces the one before; anywhere else
+  the link is given here alone.
 - **`live`** — the same script, played in the laptop's chrome-debug, a
   window per user with cookies of its own. The page carries ⏸ ▶ ⏭ ⏹: on
   pause the page is the person's, ▶ goes on, ⏹ ends the script and leaves
@@ -60,6 +67,14 @@ and what this conversation built. For a script, read the components the
 steps go through too: the names on buttons, links and fields are what the
 steps find them by.
 
+**Desktop and phone.** Show the feature both ways: the main path, and every
+place whose layout differs on a phone — a menu that folds, a table that becomes
+cards, a dialog that becomes a sheet — get a scenario with `viewport: "phone"`
+beside the desktop one, its title ending in "(phone)". Read the components'
+small-screen branches first: on a phone the names and the way in differ (a
+menu button before the item). A place that looks the same on both needs only
+one. In `ac` mode a criterion about one of them shows that one.
+
 ## 3. Who sees each one
 
 One user for every scenario is fine, and the default: the one whose data
@@ -79,13 +94,14 @@ scenario, say so and say what user it needs — do not create one unasked.
 
 ## 4. The script (default and `live`)
 
-Write it to `<tree>/.sclaude/local/demo/script.mjs` (kept out of git), a
+Write it to `<tree>/.sclaude/local/demo/script.mjs` (a delta to
+`delta.mjs`; both kept out of git), a
 module whose default export is the demo:
 
 ```js
 export default {
   title: "Event view: what owners and guests see",
-  viewport: "desktop",            // or "phone", when the feature is a phone's (live keeps the window's size)
+  viewport: "desktop",            // the default; a scenario may set "phone" (live keeps the window's size)
   scenarios: [
     {
       title: "AC1. The owner sees every field",
@@ -135,6 +151,21 @@ A demo acts on the feature's own local database as a person would: it may
 create and change data there; it does not delete the seed's users or data
 other scenarios need.
 
+## 4a. A delta
+
+`python3 $D/demo.py last` names the last full demo — the commit it shows and
+its script. Read what changed since: `git diff <its head>` and `git log <its
+head>..HEAD`, and the old script. Decide first whether any of it changes what
+a user sees or does; if none does, say so in a line and stop.
+
+Otherwise write a script with `kind: "delta"` and `change:` — the change for
+the user in one sentence, in business terms ("A guest now sees the price, not
+"price hidden""), the way a release note says it. Its scenarios show only the
+places that changed, each one's `shows` saying what it was before and what it
+is now, desktop and phone where the change differs between them. A delta is
+recorded before the full demo that follows it: played, it goes to the
+feature's topic, and into the issue with that full demo.
+
 ## 5. Playing it
 
 ```bash
@@ -144,7 +175,33 @@ python3 $D/demo.py play <tree>/.sclaude/local/demo/script.mjs [--live] [--featur
 Run it with a long timeout (ten minutes) or in the background: it takes the
 demo's length and more. Recorded, it prints a line per scenario (`done`, or what failed), then
 `where:`, `link:` and `other:` for the demo's page, the way section 6 reads
-them, and `sent:` when the link went to the feature's Telegram topic.
+them. In a session sclaude runs (`SCLAUDE_SESSION` is set) it then sends
+the links and the scenarios' videos to the feature's Telegram topic (`sent:`)
+and posts them, with how each scenario went and the commit shown, as the
+issue's demo comment, the earlier one deleted (`issue: posted on #N with K
+video(s)`, or why not); anywhere else it says
+`kept here:` and sends nothing — give the links in the answer, as always.
+A recording with a scenario that did not play — not signed in, a step that
+could not be done — says `not published:` and goes nowhere: the topic, the
+issue and the feature's page keep the demo they had, and `stale` measures from
+that one. Fix the script and play it again; never report such a run's links as
+sent.
+
+Every recording goes into the feature's history, and the feature's demo page
+— `/__sclaude/demo/<feature>/`, the address `link:` gives — shows the latest
+full demo and every delta before it, newest first: between which stages, when,
+by which commits, what changed, its videos. The stage is the step's in a
+session sclaude runs (`2-code`), or the one sclaude names (`preview`,
+`epilogue`).
+
+`python3 $D/demo.py stale` says whether the product's code changed since the
+last full demo recorded in the tree: exit 0 with `stale:` or `none:` — record one;
+exit 1 with `fresh:` — the demo shows the code as it is. It compares the files
+as they are with the files the demo played — committed or not, new ones
+included, unless `.gitignore` names them; docs (`*.md`) and `.sclaude/` do not
+count. `python3 $D/demo.py replay` plays the last demo's
+script again as it is, with no model — what sclaude falls back to before the
+QA when it cannot start a session to write the demo again.
 
 Before giving the link, read `<tree>/.sclaude/local/demo/<id>/demo.json`: a
 scenario with `error`, or a step with `error` or `ok: false` that should have

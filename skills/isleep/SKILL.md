@@ -41,7 +41,8 @@ session of the night:
   person's are told apart and keep the night: a headless `claude -p`, the
   prompt sclaude launched a step's session with (a prompt the person gives
   `claude` on its command line is theirs), a `/loop` wakeup — and so also a `/loop` the person types,
-  which reads the same; a headless run is not nudged at its stop either,
+  which reads the same —, a message from another Claude session or a
+  subagent's report, and a background task's notification; a headless run is not nudged at its stop either,
   since its last answer is its output;
 - a night that runs out its hours ends the same way: its sessions are told,
   and the person's first prompt, whenever it comes, gets the summary;
@@ -101,9 +102,9 @@ a question, and a stop that waits for the person waits all night. So:
    failure: if the honest answer to "should I continue?" is "it would help", do
    it. `/sreview`'s "ask every N iterations" is answered *yes* until the review
    finds nothing substantive; its per-class questions are settled by your
-   recommendation, and each policy made that way is written with
-   `(isleep — to confirm)` after it, so a later run knows the person never said
-   it.
+   recommendation, and each rule made that way — a policy or a comment
+   beside the code — is written with `(isleep — to confirm)` after it, so a
+   later run knows the person never said it.
 3. **Do not end the turn while there is work.** A turn that ends is a session
    that sleeps too. Waiting for something — a CI run, a deploy, a long build —
    goes through `Monitor` or a background command, not through ending the turn with "I'll check later". Stop only when the work is done, or

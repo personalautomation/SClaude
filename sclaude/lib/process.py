@@ -82,9 +82,9 @@ NODES = {
            "a comment of their own, AC1, AC2, …", ""),
     # step 2
     "code": ("session", 6, "session", "2 · code",
-             "builds it, checks it in Chrome, commits with Requirement: ACn", "FRS"),
+             "builds it, checks it in Chrome, commits with Requirement: ACn, records a demo", "FRS"),
     "works": ("person", 7, "gate", "Does it work?",
-              "Accept in the session's dialog, or remarks to it", ""),
+              "the demo's link, then Accept in the session's dialog, or remarks to it", ""),
     # step 3
     "pr": ("session", 9, "session", "3 · pr",
            "manuals updated, a draft PR by the pr skill, the criteria for QA", "FS"),
@@ -177,7 +177,7 @@ DETAILS = {
     "approve": "You correct the scope, then approve the plan in Claude Code's plan dialog. The criteria are what QA will tick later, so this is where a missing one costs least.",
     "plan_check": "sclaude reads the approved plan back from the session's transcript into .sclaude/local/feature/plan.md, the bridge to step 2. Not found: the same session is sent back to present it again, at most twice.",
     "ac": "The criteria go into a comment of their own on the issue, between sclaude's markers; the issue's description is never edited. QA ticks them there.",
-    "code": "A fresh session builds from the plan, checks the result in Chrome at the feature's own address, and commits with a Requirement: ACn footer naming the criterion each commit serves. It closes with a report criterion by criterion.",
+    "code": "A fresh session builds from the plan, checks the result in Chrome at the feature's own address, and commits with a Requirement: ACn footer naming the criterion each commit serves. It closes with a report criterion by criterion. Before its question it records a demo of the feature (/sdemo), desktop and phone; when fixing remarks changed the code, a delta of what changed for the user and the whole demo again before asking again: the link goes first in the report, and with the videos to the feature's topic and into a demo comment on the issue.",
     "works": "The session ends on one question in its own dialog: Accept, and it closes and sclaude goes on without asking; Remarks, and you say what is wrong and it carries on. A session you leave with /exit gets the question in sclaude's terminal instead: a no takes what is wrong back to the same session as your message, Enter alone leaves the step for later.",
     "reg_local": "The project's suite (its config's regression parts) against the feature's own server and database. An unpublished branch is put on top of main first. Green closes step 2; at step 4 it runs again before the step closes.",
     "fix_local": "A separate session gets the failing log and fixes the cause, then the suite runs again. Two sessions that do not make it green stop the cycle and tell you: a third guess at the same failure rarely helps.",
@@ -194,7 +194,7 @@ DETAILS = {
     "merge_check": "git merge-tree tells in memory whether the branch merges cleanly with main — no session, no GitHub call. Asked before the preview, after QA's yes, and every two minutes while waiting for the merge.",
     "sync": "Merges origin/main into the branch (never a rebase), resolves each conflict keeping both sides' intent, checks the result as the project's CLAUDE.md says and pushes. sclaude then checks it settled; a pull request handed over goes back to a draft.",
     "preview": "Deploys the worktree to a preview from the main repository (up to three tries), applies the branch's migrations there, and runs the preview regression against the deployment. An unchanged tree already green is not deployed again. A deploy that fails three times goes to the fixing session as a red run does — the command that failed named — and deploys again; after two such sessions it is yours.",
-    "preview_ok": "Green: the issue goes to In QA. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there.",
+    "preview_ok": "Green: when the product's code changed since the last demo, a headless session records a delta of what changed for the user and the whole demo again, and the issue's demo comment is replaced — QA sees the feature as it is and what changed; then the issue goes to In QA. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there.",
     "fix_preview": "A fixing session in step 4, where the pull request is open and pushes reach the branch, with the failing run's log. The fix goes the whole way round again.",
     "in_qa": "The issue moves to In QA only after the preview's tests passed, so the column says something true. The QA watch starts: a systemd timer looks at the issue's column every few minutes and tells the feature's topic; it hands the pull request over when QA says Done, even with nobody at the terminal. It changes nothing else.",
     "qa_check": "QA opens the preview, checks each acceptance criterion and ticks it in the issue's comment. Nothing ticks a box but a person, unless the project's qa setting says so.",
@@ -661,6 +661,13 @@ VARIANTS = {
     "o_ghreview": [("review", {"local"}, {
         "lane": "sclaude", "title": "Local review", "text": "passes on this machine"})],
     "o_qa": [("qa", {"auto"}, {"lane": "sclaude", "title": "QA: auto", "text": "accepted when the preview is green"})],
+    # The demo for QA is recorded only where a person does QA; with qa: auto
+    # it is brought up to the code before the last epilogue instead
+    # (demo_refresh in deploy.sh).
+    "preview_ok": [("qa", {"auto"}, {
+        "details": "Green: the issue goes to In QA. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there."})],
+    "epilogue": [("qa", {"auto"}, {
+        "details": "A short session writes a Current status comment on the issue and on every parent up the chain, and Current behaviour where the product now differs from a description. Labels deployed-preview and deployed-prod are set by how each stage ended. Nobody does QA here, so before the last one, when the product's code changed since the feature's demo, the demo is recorded again for the issue."})],
     "o_prod": [("regression.prod", {False}, {"kind": "task", "text": "shipped on your yes"})],
     "o_preview": [("regression.preview", {False}, {"kind": "task", "text": "deployed"})],
     "o_merge": [("merge", {"auto"}, {"lane": "sclaude", "text": "by sclaude: merge auto"}),
@@ -3842,15 +3849,16 @@ h2.first-map{margin-top:0}
 """
 
 
-def page(label, cfg=None):
+def page(label, cfg=None, demo=None):
     """A feature's map: the same drawing as its project's config draws it,
     with its place lit and its actions, kept current by polling
-    /__sclaude/flow/state."""
+    /__sclaude/flow/state. `demo` is (address, title) of the feature's latest
+    recorded demo (skills/sdemo), linked beside the feature, or None."""
     with configured(example_config() if cfg is None else cfg):
-        return _page(label)
+        return _page(label, demo)
 
 
-def _page(label):
+def _page(label, demo=None):
     detail = Diagram(*node_sets()[0])
     overview = Diagram(*node_sets()[1])
     script = LIVE_SCRIPT % {
@@ -3862,7 +3870,7 @@ def _page(label):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>%s — sclaude map</title>
 <style>%s%s</style></head><body><main>
-<p class="muted"><a href="/__sclaude/">features</a> · <a href="/__sclaude/select?f=%s">open the feature</a></p>
+<p class="muted"><a href="/__sclaude/">features</a> · <a href="/__sclaude/select?f=%s">open the feature</a>%s</p>
 <h1>%s</h1>
 %s
 <div class="metrics"><span class="muted">Show on the maps:</span>
@@ -3897,7 +3905,9 @@ def _page(label):
 <button id="clear" type="button" hidden>Clear the selection</button>
 %s
 </main><script>%s%s%s</script></body></html>
-""" % (esc(label), STYLE, LIVE_STYLE + PLAY_STYLE, esc(label), esc(label), LEGEND,
+""" % (esc(label), STYLE, LIVE_STYLE + PLAY_STYLE, esc(label),
+       ' · <a href="%s">🎬 demo: %s</a>' % (esc(demo[0]), esc(demo[1])) if demo else "",
+       esc(label), LEGEND,
        play_head("detail", "The whole process"), detail.svg(),
        play_head("overview", "The cycle at a glance"), overview.svg(),
        play_head("workshop", "How a session changes sclaude", passes=True), Diagram(*node_sets()[2]).svg(),

@@ -558,8 +558,13 @@ was given stays readable.
 
 **Step 2, code.** A fresh session builds it, with the approved plan as its
 brief. Each commit names the criterion it serves in a `Requirement:` footer.
-Claude checks its work in Chrome at the feature's address. It ends on one
-question in its own dialog: **Accept**, and the session closes and sclaude goes
+Claude checks its work in Chrome at the feature's address. Before it asks, it
+records a demo of the feature, on a desktop and on a phone
+([skills/sdemo](#skillssdemo)) — after your remarks that changed the code, a
+short delta of only what changed for a user, then the whole demo again — and
+gives the link first in its report; the link
+and the videos go to the feature's topic and to a demo comment on the issue,
+where QA finds them. It ends on one question in its own dialog: **Accept**, and the session closes and sclaude goes
 on with no question of its own; **Remarks**, and you say what is wrong and the
 session carries on. The step closes when you accept the work **and** the
 product's local tests pass. A branch not
@@ -572,7 +577,15 @@ manuals updated in the same pull request.
 
 **Step 4, review.** The project's automatic review reads the pull request, and
 a session fixes what it found, one round at a time. The step closes when the
-review has nothing left open, the preview is deployed and its tests pass. When the
+review has nothing left open, the preview is deployed and its tests pass.
+Once the preview's tests pass, before the issue goes to QA, when the
+product's code changed since the last demo — the review may have changed what
+the feature does — a headless session records a delta of what changed for the
+user and the whole demo again, starting from the last script and what changed,
+and the issue's demo comment is replaced: step 2's demo is for you accepting
+the work, this one for QA to see what the feature is and what changed. Only
+where a person does QA (`qa: github` or `both`); with `qa: auto` the whole demo
+is recorded again before the last epilogue instead, and no delta. When the
 report says the rounds stopped converging, or that the fixes are feeding the review two rounds running, sclaude says so once and names the
 keys that end the search for new findings; once you end it, one question with
 three answers settles the rest: check the fixes, close the step, or leave it.
@@ -706,6 +719,7 @@ is stopped, database included (data kept), and starts again on the next visit.
 | `.sclaude/config.json` | what the product is | the product | yes | no harm if it is |
 | `.sclaude/team/`, `.sclaude/people/<name>/` | rules, prompt additions, deferred findings | the product | yes | no harm if it is |
 | `.sclaude/local/feature/` | one feature's working state: the plan, logs, its database settings | the feature's worktree | never | never |
+| `.sclaude/local/demo/` | the feature's recorded demos: videos, steps, the page | the feature's worktree | never | never |
 | `.sclaude/local/terminal/` | terminal recordings the retrospective reads | the product's main checkout | never | never |
 | `.sclaude/local/dora/` | the product's DORA page and what it was built from | the product's main checkout | never | never |
 | `.vercelignore` | keeps `.env*` and sclaude's files out of a deploy | each tree sclaude deploys | no, unless the product tracks its own | — |
@@ -743,9 +757,11 @@ stops by itself once a review finds nothing substantive.
 Each review is a fresh subagent that has not seen the fixes, told what was
 already decided so it does not raise it again. Fixes go to subagents where they
 are more than a line or two. Questions are asked once per iteration, about a
-class of findings rather than one line, and each answer is kept as a policy in
+class of findings rather than one line, and each answer is kept where it
+applies: one that holds across the repository as a policy in
 `<git common dir>/sreview/policies.md` — outside git, shared by every worktree —
-which settles similar findings in this run and later ones. In a project run by
+which settles similar findings in this run and later ones; one about a single
+part of the code as a comment beside that code, or in its doc. In a project run by
 sclaude it takes the check commands, the review mode and the review rules from
 there, and with a pull request open keeps the findings as its threads. It
 commits once per iteration; pushing is left to the project's own rules.
@@ -758,15 +774,28 @@ should be seen as, from the feature's own database — and writes them as a
 Playwright script; the player signs in as each user (see *Signed in without a
 password* under [bin/sclaude-proxy](#binsclaude-proxy)), clicks and types
 through the steps, and puts captions on the page as it goes: what each step
-does, where to look, why it matters. You get one link — also sent to the
-feature's Telegram topic — to a page with:
+does, where to look, why it matters. You get one link to a page — run by
+sclaude's steps, also sent with the videos to the feature's Telegram topic, as
+📱 for the phone (the tailnet's address) and 💻 for the laptop, and kept with
+the videos in a demo comment on the feature's issue; run by hand, given in the
+terminal only — with:
 
-- a video per scenario, and what it shows, what to look at and why this case;
+- a video per scenario — on a desktop, and on a phone where the layout differs
+  there — and what it shows, what to look at and why this case;
 - its steps beside it, the one under way written out large under the video
   (and as the video's captions in full screen); tap a step to jump there;
 - checks marked ✓ or ✗;
 - **take over** on every step: that page, signed in as that user, to go on by
   hand.
+
+Each feature has one demo page, `/__sclaude/demo/<feature>/`: the latest full
+demo, and below it every delta — a short recording of only what changed for a
+user, kept each time the demo is recorded again after a change — newest first:
+between which stages (`2-code → 2-code`, `2-code → preview`), when, by which
+commits, the change in a sentence, and its videos. `/sdemo delta` records one
+by hand; when nothing changed for a user, it records nothing. The page is
+linked from the proxy's list of features, under the feature, and from its
+process map.
 
 `/sdemo ac` walks through the acceptance criteria in the issue instead, a
 scenario per criterion (or a few together), and names the ones no page can
@@ -785,13 +814,14 @@ the tailnet address). Say "I'm on the laptop" or "on the phone" and it follows
 that instead; the other place's link is given at the end, when there is a
 phone address at all (`tailscale serve` or the tailnet's).
 
-The videos are AV1, with H.264 beside it for the browsers that do not play
-AV1 (older iPhones), when `ffmpeg` is installed with both (`sudo apt install
-ffmpeg`); without it, the recording's own WebM, which Safari before 17.4 does
-not play. A demo is kept in the feature's `.sclaude/local/demo/`.
+The videos are H.264 when `ffmpeg` is installed (`sudo apt install ffmpeg`),
+which every browser and Telegram play; without it, the recording's own WebM,
+four times the size, which Safari before 17.4 does not play. A demo is kept in the feature's `.sclaude/local/demo/`.
 
 `skills/sdemo/demo.py` does each part by hand: `play <script.mjs> [--live]`
-plays a script, `link <email> <path>` makes one link, `open <email> <path>…`
+plays a script, `replay` plays the last one again, `stale` says whether the
+code changed since the last demo,
+`link <email> <path>` makes one link, `open <email> <path>…`
 opens links in chrome-debug, `users` lists who can sign in and `criteria`
 prints the criteria.
 

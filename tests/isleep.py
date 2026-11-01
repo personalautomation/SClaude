@@ -5,7 +5,8 @@
 # Every session on the machine runs these hooks, so the cheap ways to be wrong
 # are a hook that acts with no night on — refusing a question, or keeping a
 # session from ending, by day — and a night that a prompt not typed by the
-# person ends: sclaude's launch prompt, a headless run, a /loop wakeup. The
+# person ends: sclaude's launch prompt, a headless run, a /loop wakeup, a
+# subagent's report or a task's notification delivered as a prompt. The
 # other way is a night that does not reach a session: a compacted one, a new
 # one, or one already running when it began.
 #
@@ -104,6 +105,11 @@ try:
         check("the prompt sclaude launched a session with does not end it", on(state))
         hook(state, "prompt", "c", prompt="<<autonomous-loop-dynamic>>")
         check("a loop wakeup does not end it", on(state))
+        hook(state, "prompt", "c", prompt='Another Claude session sent a message:\n'
+             '<agent-message from="a1">\n[Subagent hand-back] FINDINGS: 2\n</agent-message>')
+        check("a subagent's report does not end it", on(state))
+        hook(state, "prompt", "c", prompt="<task-notification>\n<task-id>x</task-id>")
+        check("a background task's notification does not end it", on(state))
         check("/isleep report keeps it",
               hook(state, "prompt", "a", prompt="/isleep report") is None and on(state))
 

@@ -1720,6 +1720,88 @@ ship_failed() {
   return 0
 }
 
+# The demo, recorded again after step 2 — only when the product's code changed
+# since the last full one (`demo.py stale`); a demo costs minutes and a
+# model's work. Step 2's is for the person accepting the work; this one is for
+# whoever looks next:
+#   preview   once the preview's regression is green, before the issue goes
+#             to QA — where QA moves it on the board (qa: github, both): a
+#             delta, only what changed for the user since the last full demo,
+#             then the whole feature again;
+#   epilogue  before the last epilogue, where nobody does QA (qa: auto): the
+#             whole feature, for the issue's record, and no delta.
+# The review may have changed what the feature does, not only how, so a
+# model writes it again: a headless session with the sdemo skill, given the
+# last full demo's script and what changed since. Nobody watches it, so it
+# writes nowhere but the feature's demo directory: dontAsk refuses whatever
+# the list does not name — the person's own permission mode would let it
+# edit the tree it runs in — and an Edit rule on an absolute path (`//…`)
+# covers every file-writing tool. Not the product's code, not sclaude's
+# checkout, which every session sclaude runs may only read. Without claude, the old
+# script is played as it is (`demo.py replay`). A feature that never had a
+# demo gets none here. Breaks nothing: the pass goes on.
+#
+#   demo_refresh <wt> <preview|epilogue>
+demo_refresh() {
+  local wt="$1" stage="$2" tool="$INSTRUMENTS/skills/sdemo/demo.py" verdict head script log
+  [[ -f "$tool" ]] || return 0
+  verdict="$(cd "$wt" && python3 "$tool" stale 2>/dev/null)" || return 0
+  [[ "$verdict" == stale:* ]] || return 0
+  head="$(cd "$wt" && python3 "$tool" last 2>/dev/null | sed -n 's/^head: //p')"
+  script="$(cd "$wt" && python3 "$tool" last 2>/dev/null | sed -n 's/^script: //p')"
+  log="$wt/.sclaude/local/demo/refresh.log"
+  echo ""
+  if [[ "$stage" == preview ]]; then
+    info "The code changed since the feature's demo — recording what changed, and the whole of it, for QA."
+  else
+    info "The code changed since the feature's demo — recording it again for the issue."
+  fi
+  info "  ${verdict#stale: }"
+  # As a step's session would: the links and the videos go to the feature's
+  # topic and the issue's demo comment is replaced (demo.py publishes only
+  # for sclaude), at this stage of the history.
+  if command -v claude >/dev/null 2>&1 && [[ -f "$script" && -n "$head" ]]; then
+    info "  A session writes it again from the last one (sdemo skill); its log: $log"
+    ( cd "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" timeout 2400 \
+        claude -p "$(demo_refresh_prompt "$script" "$head" "$stage")" \
+        --model "$(step_model code)" --permission-mode dontAsk \
+        --allowedTools "Read" "Grep" "Glob" "Skill" "Edit(/$wt/.sclaude/local/demo/**)" \
+          "Bash(python3 $tool:*)" "Bash(python3 ~/.claude/skills/sdemo/demo.py:*)" \
+          "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" \
+        --disallowedTools "NotebookEdit" "Bash(gh:*)" "Bash(git push:*)" "Bash(git commit:*)" \
+        >"$log" 2>&1 </dev/null )
+  else
+    ( cd "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
+        python3 "$tool" replay </dev/null ) >"$log" 2>&1
+  fi
+  if [[ "$(cd "$wt" && python3 "$tool" stale 2>/dev/null)" == fresh:* ]]; then
+    info "  Recorded again; the feature's demo page and the issue's demo comment show it."
+  else
+    warn "  the demo was not recorded again ($log); the issue keeps the earlier one"
+  fi
+  return 0
+}
+
+# What that session is told: the skill does the work; this says where to
+# start from, what to record at this stage, and that nobody is there to ask.
+demo_refresh_prompt() {
+  local script="$1" head="$2" stage="$3" what
+  if [[ "$stage" == preview ]]; then
+    what="Record two things, in this order, for QA: first a delta (/sdemo delta) — only what changed for the user since that demo, none if nothing did — then the whole feature again (/sdemo)."
+  else
+    what="Record the whole feature again (/sdemo), for the issue's record; no delta."
+  fi
+  cat <<EOF
+Use the sdemo skill for the feature in this tree. Nobody is at the terminal: decide by yourself, ask nothing.
+
+The last full demo was recorded on commit ${head:0:7}, from the script $script. The code has changed since — the review may have changed what the feature does, not only how. Read what changed (git diff $head, git log $head..HEAD) and start from that script: keep the scenarios that still show the feature as it is, rewrite the ones the change touched, add any the change added, and drop what no longer exists. Show the feature on a desktop and on a phone, as the skill says.
+
+$what
+
+Call demo.py by its full path, one command at a time and nothing chained to it — python3 $INSTRUMENTS/skills/sdemo/demo.py last, … play — since only that is allowed here. Check each recording's demo.json; fix a script that failed and play it again, twice at most. End with one line: the feature's demo page, or why there is none.
+EOF
+}
+
 remind_prod() {
   local wt="$1" slug="$2" pr branch merged migrations=""
   # A ship marked by a pass that was cut off is not going on: this pass asks
@@ -1935,6 +2017,9 @@ remind_prod() {
     if regression_gate "$wt" "$slug" preview; then
       preview_live=1
       status_green_again "$slug" "$issue" "$pr" "${merged:-}" "$wt"
+      # Green, and before QA is sent to it: what changed and the whole feature,
+      # for QA to see — where a person does QA.
+      [[ "$(project_flow_mode qa "$wt")" != auto ]] && demo_refresh "$wt" preview
       qa_retest "$wt" "$issue" "$pr" fresh || true
       [[ -n "$issue" ]] && issue_qa_ready "$issue"
       qa_sent "$wt"
@@ -2555,6 +2640,9 @@ remind_prod() {
   # production already there, described a different outcome from the pass
   # that shipped it: the fingerprint missed, and a second epilogue rewrote the
   # same status.
+  # Nobody did QA: the issue's demo is brought up to the code here, for its
+  # record, before the epilogue writes the issue's last word.
+  [[ "$(project_flow_mode qa "$wt")" == auto ]] && demo_refresh "$wt" epilogue
   run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_live" "$wt"
 
   # The pass got here for this pull request and this production, the epilogue

@@ -45,6 +45,12 @@ STATUS = "<!-- sclaude:status -->"
 # rather than repeated when QA accepts a later head.
 MERGE_READY = "<!-- sclaude:merge-ready -->"
 
+# The demo /sdemo recorded of the feature (skills/sdemo/demo.py, in a session
+# sclaude runs): its page's links and the commit it shows. Heads its comment,
+# which is rewritten in place each time the demo is recorded again — step 2
+# before its question, step 4 when the review changed the code.
+DEMO = "<!-- sclaude:demo -->"
+
 # The incident a production rollback writes on the feature's issue
 # (rollback.sh, which declares it too and writes the comment). Nothing rewrites
 # it; it is here so the epilogue can tell it from the other comments of ours:

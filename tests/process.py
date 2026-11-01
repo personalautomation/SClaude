@@ -437,7 +437,7 @@ check("_flow is a report", re.search(r"status\|ls\|dev\|[^\n]*\|_flow\|", sclaud
 check("_flow is dispatched", "_flow)" in dispatch and "cmd_flow" in dispatch)
 proxy = read("bin", "sclaude-proxy")
 check("the proxy serves the map as the project's config draws it",
-      '"/__sclaude/flow"' in proxy and "model.page(label, model.config_of(found[0]))" in proxy)
+      '"/__sclaude/flow"' in proxy and "model.page(label, model.config_of(found[0])," in proxy)
 check("the proxy runs _flow", '"_flow"' in proxy)
 check("the proxy lists the map", "/__sclaude/flow?f=" in proxy and 'MAP_NAME = "Process map (BPMN)"' in proxy)
 check("the proxy serves the whole map for main, by its config",

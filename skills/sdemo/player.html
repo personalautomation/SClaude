@@ -26,6 +26,8 @@ section h2{font-size:18px;margin:0}
 .grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px}
 @media (max-width:820px){.grid{grid-template-columns:1fr}}
 video{width:100%;border-radius:10px;background:#000;display:block}
+video.phone{width:auto;max-width:100%;max-height:80vh;margin:0 auto}
+.vp{font-size:12px;color:var(--mute);margin-left:6px}
 .about h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:10px 0 2px}
 .about ul{margin:0;padding-left:18px}
 ol{list-style:none;margin:12px 0 0;padding:0}
@@ -40,6 +42,7 @@ div.now{margin-top:10px;font-size:17px;min-height:1.5em}
 div.now:empty{display:none}
 .sm{font-size:13px;color:var(--mute);margin-top:2px}
 div.now .sm{font-size:15px}
+.chg{font-size:16px;margin:4px 0 8px}
 .take{display:inline-block;margin-top:10px;font-size:14px;color:var(--acc)}
 </style>
 </head>
@@ -63,12 +66,12 @@ function takeOver(as, url) {
 }
 const app = document.getElementById("app");
 document.title = DEMO.title;
-app.innerHTML = `<h1>${esc(DEMO.title)}</h1><div class=sub>${DEMO.scenarios.length} scenario${DEMO.scenarios.length === 1 ? "" : "s"} · recorded
+app.innerHTML = `<div class=sub><a href="../">← the feature's demos</a></div><h1>${DEMO.kind === "delta" ? "Δ " : ""}${esc(DEMO.title)}</h1>${DEMO.change ? `<p class=chg>${esc(DEMO.change)}</p>` : ""}<div class=sub>${DEMO.scenarios.length} scenario${DEMO.scenarios.length === 1 ? "" : "s"} · recorded
 ${esc(new Date(DEMO.made).toLocaleString())} · tap a step to jump there; "take over" opens that page signed in,
 to go on by hand</div><nav>${DEMO.scenarios.map((s, i) => `<a href="#s${i + 1}">${i + 1}. ${esc(s.title)}</a>`).join("")}</nav>` +
 DEMO.scenarios.map((s, i) => `<section id="s${i + 1}"><h2>${i + 1}. ${esc(s.title)}</h2>
-<div class=who>as ${esc(s.as)}</div><div class=grid><div>
-${s.sources && s.sources.length ? `<video controls playsinline preload=metadata data-i=${i}>${s.sources.map((v) =>
+<div class=who>as ${esc(s.as)}<span class=vp>${s.viewport === "phone" ? "📱 phone" : "🖥 desktop"}</span></div><div class=grid><div>
+${s.sources && s.sources.length ? `<video controls playsinline preload=metadata data-i=${i}${s.viewport === "phone" ? " class=phone" : ""}>${s.sources.map((v) =>
   `<source src="${esc(v.src)}" type='${esc(v.type)}'>`).join("")}${s.captions ?
   `<track kind=captions srclang=en label="Steps" src="${esc(s.captions)}"${PHONE ? " default" : ""}>` : ""}</video>
 <div class=now data-i=${i}></div>` : ""}

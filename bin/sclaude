@@ -1460,7 +1460,8 @@ cmd_done() {
   remove_worktree "$wt" || die "could not remove the worktree"
 
   # Never a plain -D: a squash-merged branch goes when its tip is the merged
-  # PR's head, and one with commits past the PR stays (branch_delete_merged).
+  # PR's head, or its commits past it change nothing main lacks; any other
+  # stays (branch_delete_merged).
   # Without a pull request there is no merged head to compare with: what the
   # branch held is on main already, or was dropped at no_change_settle.
   local kept=0

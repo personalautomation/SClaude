@@ -5,12 +5,14 @@
 # A squash merge leaves the branch's commits out of main, so `git branch -d`
 # refused every such branch and `done` kept it, saying it carried commits not
 # in main, which was false. branch_delete_merged forces it when the local tip
-# is the head of the merged pull request, and keeps a branch with commits past
-# it. Guarded here, with gh faked:
+# is the head of the merged pull request, or when its commits past that head
+# change nothing main lacks. Guarded here, with gh faked:
 #
 #   * merged into main the ordinary way: deleted by -d;
 #   * squash-merged, tip at the pull request's head: deleted;
 #   * a commit past the pull request's head: kept;
+#   * commits past the head whose change main already holds: deleted;
+#   * commits past the head that main lacks, or that conflict with it: kept;
 #   * no merged pull request: kept;
 #   * `done` and the branch review both use it.
 #
@@ -82,6 +84,54 @@ try:
     commit(repo, "after the merge")
     git(repo, "switch", "-q", "main")
     check("past the head: kept", delete(repo, "feat/past", head), ("RC 1", True))
+
+    # Past the head, but main already holds the change: a commit carried to
+    # main by hand, and one added and taken back on the branch.
+    git(repo, "switch", "-q", "-c", "feat/sq2")
+    head = commit(repo, "sq2")
+    git(repo, "switch", "-q", "main")
+    git(repo, "merge", "-q", "--squash", "feat/sq2")
+    git(repo, "commit", "-q", "-m", "sq2 (#2)")
+    git(repo, "switch", "-q", "feat/sq2")
+    commit(repo, "carried")
+    commit(repo, "noise")
+    git(repo, "rm", "-q", "noise")
+    git(repo, "commit", "-q", "-m", "noise taken back")
+    git(repo, "switch", "-q", "main")
+    commit(repo, "carried")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    check("past the head, on main already: deleted", delete(repo, "feat/sq2", head),
+          ("RC 2", False))
+
+    # The same, but main lacks what the branch added after the merge.
+    git(repo, "switch", "-q", "-c", "feat/sq3")
+    head = commit(repo, "sq3")
+    git(repo, "switch", "-q", "main")
+    git(repo, "merge", "-q", "--squash", "feat/sq3")
+    git(repo, "commit", "-q", "-m", "sq3 (#3)")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "switch", "-q", "feat/sq3")
+    commit(repo, "only on the branch")
+    git(repo, "switch", "-q", "main")
+    check("past the head, not on main: kept", delete(repo, "feat/sq3", head), ("RC 1", True))
+
+    # Past the head, a deletion that conflicts with main: main edits the file,
+    # the branch deletes it. merge-tree leaves main's version and prints main's
+    # own tree first, so only its exit code keeps the branch.
+    git(repo, "switch", "-q", "-c", "feat/sq4")
+    head = commit(repo, "sq4")
+    git(repo, "switch", "-q", "main")
+    git(repo, "merge", "-q", "--squash", "feat/sq4")
+    git(repo, "commit", "-q", "-m", "sq4 (#4)")
+    with open(os.path.join(repo, "sq4"), "w") as fh:
+        fh.write("main's\n")
+    git(repo, "commit", "-q", "-am", "sq4 on main")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "switch", "-q", "feat/sq4")
+    git(repo, "rm", "-q", "sq4")
+    git(repo, "commit", "-q", "-m", "sq4 gone on the branch")
+    git(repo, "switch", "-q", "main")
+    check("past the head, conflicting: kept", delete(repo, "feat/sq4", head), ("RC 1", True))
 
     # No merged pull request.
     check("no pull request: kept", delete(repo, "feat/past", ""), ("RC 1", True))

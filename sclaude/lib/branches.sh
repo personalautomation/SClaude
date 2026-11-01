@@ -40,16 +40,30 @@ merged_pr_head() {
 # Deletes a local branch whose work is in main: `git branch -d`, and when git
 # refuses, -D if the local tip is the head of the branch's merged pull request.
 # A squash merge leaves the branch's commits out of main, so -d refuses every
-# squash-merged branch; the matching head says nothing is lost. A branch with
-# commits past its pull request is left alone.
+# squash-merged branch; the matching head says nothing is lost.
+#
+# Commits past the pull request's head are let go too when main already holds
+# what they change: sclaude's own housekeeping lands on the branch after the
+# merge (the deferred entries left to main, a prompt fix carried to main by
+# hand), and the branch was kept for commits whose content was on main. The
+# test is a merge of the tip into origin/main from the merged head: a result
+# with main's own tree adds nothing. Anything else is left alone, and so is
+# every branch when git is too old for --merge-base (a refusal, not a guess).
 #
 #   branch_delete_merged <branch>  → 0 deleted, 2 deleted as squash-merged, 1 kept
 branch_delete_merged() {
-  local branch="$1" tip head
+  local branch="$1" tip head merged
   git -C "$REPO" branch -d "$branch" >/dev/null 2>&1 && return 0
   tip="$(git -C "$REPO" rev-parse -q --verify "refs/heads/$branch" 2>/dev/null)" || return 1
   head="$(cd "$REPO" && merged_pr_head "$branch")"
-  [[ -n "$head" && "$tip" == "$head" ]] || return 1
+  [[ -n "$head" ]] || return 1
+  if [[ "$tip" != "$head" ]]; then
+    git -C "$REPO" merge-base --is-ancestor "$head" "$tip" 2>/dev/null || return 1
+    merged="$(git -C "$REPO" merge-tree --write-tree --merge-base="$head" \
+                origin/main "$tip" 2>/dev/null)" || return 1
+    [[ "$merged" == "$(git -C "$REPO" rev-parse -q --verify 'origin/main^{tree}')" ]] \
+      || return 1
+  fi
   git -C "$REPO" branch -D "$branch" >/dev/null 2>&1 && return 2
   return 1
 }
@@ -169,13 +183,14 @@ review_branches() {
 
   while IFS=$'\t' read -r _ branch reason; do
     [[ -z "$branch" ]] && continue
-    # Only commits beyond a merged PR go to the human (branch_delete_merged).
+    # Only commits a merged PR and main do not hold go to the human
+    # (branch_delete_merged).
     local rc=0
     branch_delete_merged "$branch" || rc=$?
     if [[ "$rc" == 0 ]]; then
       echo "  ${GREEN}deleted${OFF} $branch"
     elif [[ "$rc" == 2 ]]; then
-      echo "  ${GREEN}deleted${OFF} $branch (squash-merged, the PR head matches)"
+      echo "  ${GREEN}deleted${OFF} $branch (squash-merged)"
     else
       warn "  $branch — git refused: it carries commits in neither main nor a merged PR"
       ask "  Force-delete it (git branch -D)? [y/n] " answer yn

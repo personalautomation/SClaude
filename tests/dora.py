@@ -89,7 +89,7 @@ def run_checks(root):
     check("rollback.sh writes the marker searched for",
           'ROLLBACK_MARKER="%s"' % dora.ROLLBACK_MARKER in rollback, True)
     check("rollback.sh writes the heading searched for",
-          "## %s — " % dora.ROLLBACK_HEADING in rollback, True)
+          "printf '## %s\\n" % dora.ROLLBACK_HEADING in rollback, True)
 
     # --- which commits each deploy shipped -------------------------------------
     repo = os.path.join(root, "repo")

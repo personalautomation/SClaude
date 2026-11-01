@@ -31,6 +31,7 @@
 #
 # Run it with: python3 tests/local-review.py
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -396,6 +397,11 @@ try:
     git("push", "-q", cwd=repo)
     with open(journal) as fh:
         before = fh.read()
+    # A pass a model ran is a session sclaude named, and its row keeps the
+    # name: the issue's summary lists it.
+    named = json.loads(before.splitlines()[-1]).get("session") or ""
+    check_true("pass-session-journaled",
+               re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", named))
     _, _, rc = review("### a.txt:1 — one\nx\n\n## Something else\n\nFINDINGS: 2\n")
     check("count-mismatch-fails", rc, 1)
     with open(journal) as fh:

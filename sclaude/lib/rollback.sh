@@ -862,7 +862,9 @@ rollback_incident() {
 
   body="$(
     printf '%s\n' "$ROLLBACK_MARKER"
-    printf '## Production rolled back — %s\n\n' "$(date '+%Y-%m-%d %H:%M')"
+    # The heading names the kind of comment and nothing of the feature, so
+    # that it is found the same way on every issue; the time goes below it.
+    printf '## Production rolled back\n\n%s\n\n' "$(date '+%Y-%m-%d %H:%M')"
     printf 'The production regression failed on `%s` after this feature shipped, so ' "$failed"
     printf 'production was restored to the release before it. Nothing was fixed first: a '
     printf 'fixing session against a live broken production is minutes with nobody served.\n\n'

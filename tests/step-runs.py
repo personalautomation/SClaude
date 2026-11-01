@@ -238,6 +238,68 @@ with tempfile.TemporaryDirectory() as wt:
     check("per-run-running-queued", cells["review (3)"], "queued")
     check("per-run-single-row-step", cells["development"], "nothing")
 
+def render_all(state_path, running=""):
+    body = re.search(r"body=\"\$\(SCLAUDE_STEPS=.*?<<'PY'[^\n]*\n(.*?)\nPY\n", github, re.S).group(1)
+    spec = "plan=planning\ncode=development\npr=pull request\nreview=review\n"
+    env = {**os.environ, "SCLAUDE_STEPS": spec, "TZ": "UTC"}
+    env.pop("SCLAUDE_SUMMARY_RUNNING", None)
+    if running:
+        env["SCLAUDE_SUMMARY_RUNNING"] = running
+    return subprocess.run([sys.executable, "-", state_path], input=body, text=True,
+                          capture_output=True, env=env, check=True).stdout
+
+
+# The heading names the kind of comment and nothing of the feature; every
+# local review pass a model ran is a row; the retrospective while it runs is
+# in progress, not interrupted.
+with tempfile.TemporaryDirectory() as wt:
+    feature = os.path.join(wt, ".sclaude/local/feature")
+    os.makedirs(feature)
+    path = os.path.join(feature, "state.json")
+    with open(path, "w") as fh:
+        json.dump({"feature": "42-some-thing", "step": "done", "pr": 7,
+                   "retro": {"runs": [{"session": "t1111111-x", "started": "2026-10-02T10:00:00+00:00"}]}}, fh)
+    with open(os.path.join(feature, "local-review-rounds.jsonl"), "w") as fh:
+        for row in ({"at": "2026-10-01T09:00:00+00:00", "seconds": 120, "new": 3, "session": "p1111111-a"},
+                    {"at": "2026-10-01T09:30:00+00:00", "seconds": 0, "new": 0},
+                    {"at": "2026-10-01T10:00:00+00:00", "seconds": 60, "new": 1}):
+            fh.write(json.dumps(row) + "\n")
+    out = render_all(path, running="retro")
+    lines = out.splitlines()
+    check("heading-is-the-first-visible-line", lines[1], "## Sessions and progress")
+    check("heading-names-nothing-of-the-feature", "42" in lines[1] or "some-thing" in lines[1], False)
+    check("feature-below-the-heading", "Feature `42-some-thing`" in lines[3], True)
+    passes = [r for r in lines if r.startswith("| local review")]
+    check("a-row-per-pass-a-model-ran", len(passes), 2)
+    check("pass-row-names-session-and-findings",
+          [c.strip() for c in passes[0].split("|")[1:6]],
+          ["local review (1) - 3 \U0001F4AC", "done", "`p1111111`", "2026-10-01 09:00", "2026-10-01 09:02"])
+    check("pass-from-before-ids-has-a-dash", passes[1].split("|")[3].strip(), "—")
+    retro = [r for r in lines if r.startswith("| retrospective")]
+    check("running-retro-in-progress", retro[0].split("|")[2].strip(), "in progress")
+    # Not said to be running, an open run is one cut off: interrupted.
+    retro = [r for r in render_all(path).splitlines() if r.startswith("| retrospective")]
+    check("open-retro-not-running-interrupted", retro[0].split("|")[2].strip(), "interrupted")
+    # A resumed one keeps its earlier end, and still runs when it is said to.
+    with open(path) as fh:
+        st = json.load(fh)
+    st["retro"]["runs"][0].update(finished="2026-10-02T10:30:00+00:00", done=True,
+                                  resumed="2026-10-02T11:00:00+00:00")
+    with open(path, "w") as fh:
+        json.dump(st, fh)
+    retro = [r for r in render_all(path, running="retro").splitlines() if r.startswith("| retrospective")]
+    check("resumed-retro-running", retro[0].split("|")[2].strip(), "in progress")
+    check("resumed-retro-head", "· step 7/7 retro" in render_all(path, running="retro"), True)
+    check("finished-retro-head", "· all done" in render_all(path), True)
+    # The journal is UTC; the row is in the machine's own time.
+    env = {**os.environ, "SCLAUDE_STEPS": "review=review\n", "TZ": "Etc/GMT-3"}
+    body = re.search(r"body=\"\$\(SCLAUDE_STEPS=.*?<<'PY'[^\n]*\n(.*?)\nPY\n", github, re.S).group(1)
+    local = subprocess.run([sys.executable, "-", path], input=body, text=True,
+                           capture_output=True, env=env, check=True).stdout
+    first = [r for r in local.splitlines() if r.startswith("| local review (1)")][0]
+    check("pass-in-local-time", [c.strip() for c in first.split("|")[4:6]],
+          ["2026-10-01 12:00", "2026-10-01 12:02"])
+
 for name, want, got in failures:
     print("FAIL %s\n  expected: %r\n  got:      %r" % (name, want, got))
 if failures:

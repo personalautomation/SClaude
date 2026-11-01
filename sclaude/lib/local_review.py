@@ -340,6 +340,10 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
            # Found as many as the cap: likely stopped with more unsaid, so this
            # head is not done — the next call reads the same range again.
            "more": int(cap) > 0 and count >= int(cap)}
+    # The pass's own conversation, when a model ran it (local_review.sh): the
+    # issue's summary lists it among the feature's sessions.
+    if os.environ.get("SCLAUDE_REVIEW_SESSION"):
+        row["session"] = os.environ["SCLAUDE_REVIEW_SESSION"]
     with open(journal, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     after = threads(cwd, pr, repo)

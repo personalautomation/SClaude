@@ -179,6 +179,10 @@ PY
   ask_feed say "$(phase_line "$([[ -n "$last" ]] && echo resumed || echo started)" retro)"
 
   [[ -f "$fstate" ]] && session_runs "$fstate" retro open "$session"
+  # The issue's summary was last written by the epilogue: the friction review
+  # before this one and this conversation itself are only in the state until
+  # the clean-up writes it again.
+  SCLAUDE_SUMMARY_RUNNING=retro issue_sync "$wt"
   local project_before project_after
   project_before="$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)"
 
@@ -218,6 +222,9 @@ PY
     elif [[ -z "$last" ]]; then
       session_runs "$fstate" retro drop "$session"
     fi
+    # Written again as it ends: the "in progress" its start wrote would
+    # otherwise stand until a clean-up that may not follow.
+    issue_sync "$wt"
   fi
 
   # Deferred entries go to main by themselves (deferred_to_main): three lines

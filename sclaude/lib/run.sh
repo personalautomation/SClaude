@@ -2139,10 +2139,12 @@ sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSH
   if [[ -n "$project_before" && -n "$project_after" && "$project_before" != "$project_after" ]]; then
     changed=1
     # Entries the review put off go to main by themselves (deferred_to_main);
-    # what else it committed follows them to the pull request.
-    deferred_to_main "$wt" "$project_before" || true
+    # what else it committed follows them to the pull request. Whether they
+    # went is passed on: a merged branch's fix is then carried without them.
+    local entries_sent=""
+    deferred_to_main "$wt" "$project_before" && entries_sent=1
     [[ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" == "$project_before" ]] \
-      || friction_push_project "$wt" "$project_before"
+      || friction_push_project "$wt" "$project_before" "$entries_sent"
   fi
 
   # A session that never got going did not review anything — it refused to
@@ -2232,15 +2234,16 @@ sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSH
 # red production regression) would carry the fix nowhere: no open pull request
 # takes it to main, and `sclaude done` deletes the branch. Then the review's
 # own commits, from <from>, go onto a new branch from main with a pull request
-# of their own.
+# of their own. <entries-sent> says deferred_to_main sent the deferred entries
+# of that range to main already (friction_propose_project).
 #
-#   friction_push_project <wt> [from]
+#   friction_push_project <wt> [from] [entries-sent]
 friction_push_project() {
-  local wt="$1" from="${2:-}" branch
+  local wt="$1" from="${2:-}" sent="${3:-}" branch
   branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   [[ -n "$branch" && "$branch" != "HEAD" && "$branch" != "main" ]] || return 0
   if [[ -n "$from" && "$( (cd "$wt" && branch_pr_state "$branch") )" == "MERGED" ]]; then
-    friction_propose_project "$wt" "$from" "$branch"
+    friction_propose_project "$wt" "$from" "$branch" "$sent"
     return 0
   fi
   if git -C "$wt" push -q origin "$branch" 2>/dev/null; then
@@ -2254,30 +2257,84 @@ friction_push_project() {
 # The friction review's commits, from..HEAD of the tree, on a branch of their
 # own from origin/main, pushed with a pull request: the feature's branch has
 # merged, and they would reach main no other way.
+#
+# With <entries-sent>, the range's deferred entries are on main already
+# (deferred_to_main), and the branch holds a commit taking them back off it.
+# Picked as they are, a commit that added them conflicts with the copy main
+# holds, and the one taking them off would delete main's copy; so each commit
+# is carried without the deferred folders, and one that touched nothing else
+# is left out. Without it the entries are still the branch's alone, and are
+# picked with the rest.
+#
+#   friction_propose_project <wt> <from> <branch> [entries-sent]
 friction_propose_project() {
-  local wt="$1" from="$2" branch="$3" new tmp pr commits
+  local wt="$1" from="$2" branch="$3" sent="${4:-}" new tmp pr commits
   new="sclaude/friction-${branch##*/}-$(date +%Y%m%d-%H%M%S)"
   tmp="$(mktemp -d)"
   git -C "$wt" fetch -q origin main 2>/dev/null || true
   # The review's own commits only: a merge of main into the feature puts
   # main's commits in the range too, and picked onto main they come out empty
-  # and stop the cherry-pick.
-  commits="$(git -C "$wt" rev-list --reverse --no-merges HEAD "^$from" ^origin/main 2>/dev/null)"
+  # and stop the cherry-pick. With the entries sent, only those that change
+  # something outside the deferred folders.
+  # A list git could not make is not an empty one: it falls through to the
+  # advice to carry them by hand, rather than to "nothing to carry".
+  if [[ -n "$sent" ]]; then
+    if commits="$(git -C "$wt" rev-list --reverse --no-merges HEAD "^$from" ^origin/main \
+          -- . "${DEFERRED_EXCLUDES[@]}" 2>/dev/null)" && [[ -z "$commits" ]]; then
+      info "  $branch has merged; the friction review's deferred entries are on main, and it holds nothing else to carry"
+      rm -rf "$tmp"
+      return 0
+    fi
+  else
+    commits="$(git -C "$wt" rev-list --reverse --no-merges HEAD "^$from" ^origin/main 2>/dev/null)"
+  fi
   if git -C "$wt" worktree add -q -b "$new" "$tmp/tree" origin/main 2>/dev/null \
       && [[ -n "$commits" ]] \
-      && git -C "$tmp/tree" cherry-pick $commits >/dev/null 2>&1 \
+      && friction_carry "$wt" "$tmp/tree" "$sent" "$commits" \
       && git -C "$tmp/tree" push -q -u origin "$new" 2>/dev/null; then
     pr="$(cd "$tmp/tree" && gh pr create --base main --head "$new" --fill 2>/dev/null)" || pr=""
     info "  $branch has merged; the friction review's fix goes to main as ${pr:-$new (open its pull request by hand)}"
   else
     git -C "$tmp/tree" cherry-pick --abort >/dev/null 2>&1 || true
     warn "  $branch has merged, and the friction review's fix could not be put on a branch of its own."
-    warn "  Its commits are $from..HEAD in $wt: carry them to main by hand."
+    if [[ -n "$sent" ]]; then
+      # Not the whole range: its deferred commits would undo main's entries.
+      local named="$from..HEAD"
+      # shellcheck disable=SC2086  # one word per commit
+      [[ -n "$commits" ]] && named="$(git -C "$wt" rev-parse --short $commits | xargs)"
+      warn "  Its commits are $named in $wt: carry them to main by hand,"
+      warn "  leaving out the deferred folders — their entries are on main already."
+    else
+      warn "  Its commits are $from..HEAD in $wt: carry them to main by hand."
+    fi
   fi
   git -C "$wt" worktree remove --force "$tmp/tree" >/dev/null 2>&1 || true
   # Pushed, or carried by hand from $wt: the local copy is of no use either way.
   git -C "$wt" branch -D "$new" >/dev/null 2>&1 || true
   rm -rf "$tmp"
+}
+
+# Puts <commits> onto <tree>, in order: picked whole, or with <entries-sent>
+# each one's change outside the deferred folders, under its own message
+# (friction_propose_project).
+#
+#   friction_carry <wt> <tree> <entries-sent> <commits>
+friction_carry() {
+  local wt="$1" tree="$2" sent="$3" commits="$4" c
+  if [[ -z "$sent" ]]; then
+    # shellcheck disable=SC2086  # one word per commit
+    git -C "$tree" cherry-pick $commits >/dev/null 2>&1
+    return
+  fi
+  for c in $commits; do
+    # Plumbing, with its format spelled out, and an apply that judges no
+    # whitespace: a person's diff and apply settings (no prefixes, colour, an
+    # external diff, whitespace errors) would refuse what a cherry-pick takes.
+    git -C "$wt" diff-tree -p --binary --no-ext-diff --no-textconv --no-color \
+        --src-prefix=a/ --dst-prefix=b/ "$c^" "$c" -- . "${DEFERRED_EXCLUDES[@]}" \
+      | git -C "$tree" apply --index --3way --whitespace=nowarn >/dev/null 2>&1 || return 1
+    git -C "$tree" commit -q --no-verify -C "$c" >/dev/null 2>&1 || return 1
+  done
 }
 
 # Holds a review session's friction review while the review goes on by

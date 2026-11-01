@@ -668,7 +668,7 @@ issue's summary table shows it:
 | 6. epilogue | sonnet / medium | `auto` | The outcome as one comment per issue, on the feature's issue and every parent; changes nothing in the repository | a row |
 | 7. retro | opus / medium | `plan` | What you missed, how to work better, what sclaude could do better. What it fixes goes on the feature's branch and sends the feature back to step 3 | a row |
 | friction review | opus / medium | `plan` | After each step and fix session: reads what the safety rules refused, and loosens a rule that was in the way | the Friction column of that row |
-| local review pass | opus, `claude -p` | read-only | With the project's review set to `local`: finds problems in the pull request before step 4's session | not in the table: the findings land on the pull request, the report in the feature's Telegram topic |
+| local review pass | opus, `claude -p` | read-only | With the project's review set to `local`: finds problems in the pull request before step 4's session | a row per pass the journal recorded, with the findings it posted; the findings land on the pull request, the report in the feature's Telegram topic |
 | friction matching | haiku, `claude -p` | no tools | One call that matches proposed rules to the ones already put off | not in the table: it is not a session |
 | monthly friction review | opus / medium | `plan` | `sclaude deferred`: the rules put off across features | not on a feature's issue: it belongs to none |
 

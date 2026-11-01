@@ -1358,7 +1358,8 @@ qa_accept_here() {
     declare -F developer_name >/dev/null && who="$(developer_name 2>/dev/null || true)"
     who="from sclaude${who:+ by $who}, in the wait for QA."
   fi
-  gh issue comment "$issue" --repo "$(gh_repo)" --body "Accepted $who" >/dev/null 2>&1 \
+  # A heading that names the kind of comment, the same on every issue.
+  gh issue comment "$issue" --repo "$(gh_repo)" --body "$(printf '## QA Accepted\n\nAccepted %s' "$who")" >/dev/null 2>&1 \
     || warn "  Could not comment on issue #$issue that sclaude accepted it."
   return 0
 }

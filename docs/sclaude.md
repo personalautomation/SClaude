@@ -1567,6 +1567,36 @@ deployment.
 
 ## The summary table in the issue
 
+Every comment of its own that sclaude writes on an issue, and the summary it
+writes on a pull request, opens with a heading that names its kind and
+nothing of the feature — `## Sessions and
+progress`, `## User request`, `## Acceptance criteria`, `## Current status`,
+`## Ready to merge`, `## QA Accepted`, `## Production rolled back`, and the
+`## Handed over` a pull-request step writes for another issue — so a reader,
+or a tool, finds the same kind of comment the same way on every issue. What
+belongs to the feature (its name and step, a time, the issue a hand-over comes
+from) goes on the lines below. The summary's own marker,
+`<!-- sclaude:<feature> -->`, stays above the heading: it is how sclaude finds
+its comment to rewrite it. The local review's findings on a pull request
+are another kind: each is about a line, titled by the finding, and found by
+its thread rather than by a heading.
+
+The table lists every Claude session of the feature: the steps' own, the
+fixing sessions, the sync, the epilogue and the retrospective, and each pass
+of the local review (`claude -p`) that the journal recorded, read from
+`local-review-rounds.jsonl` beside the state, with the findings it posted and
+its times in the machine's own clock. A pass is started with a session id of
+its own, which the journal keeps; a pass journaled before that has a dash for
+its id. A pass in which no model ran — a head with nothing open to check — is
+no session and has no row, and neither has one that left no record: stopped
+half-way, or an answer that could not be recorded. The summary is written
+again as the retrospective starts, which `run_retro` marks as running, so the
+friction review before it and the retrospective itself are on it while it
+runs, rather than only after the clean-up. It is written once more as the
+retrospective ends, once its run is closed: the clean-up that would rewrite it
+may not follow — declined, or cut short — and the "in progress" of the start
+would stand.
+
 The summary's **Friction** column says what became of the review for each step
 and each fixing session. Several answers, because one dash used to stand for four
 different things and a reader could not tell them apart — a step nobody had

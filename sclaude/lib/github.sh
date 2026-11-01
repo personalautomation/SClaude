@@ -396,7 +396,7 @@ PY
   done
 
   body="$(SCLAUDE_STEPS="$spec" SCLAUDE_FIXES="$fixes" python3 - "$state" <<'PY' 2>/dev/null
-import json, os, sys
+import datetime, json, os, sys
 
 ORDER, TITLES = [], {}
 for line in os.environ.get("SCLAUDE_STEPS", "").splitlines():
@@ -639,6 +639,52 @@ for name in ORDER:
             run_friction_cell(name, number, last, run_status, per_run),
         ))
 
+# The local review's passes, beneath the review's own sessions: each one is
+# a conversation of its own (`claude -p`, local_review.sh), and a reader
+# counting the feature's sessions should find them here as well. Read from
+# the journal beside the state; a pass with no model run (a head with nothing
+# open to check, `seconds` 0) is no session and has no row. A pass journaled
+# before passes were named has a dash for its id.
+def review_pass_rows():
+    path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])),
+                        "local-review-rounds.jsonl")
+    passes = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and int(row.get("seconds") or 0) > 0:
+                    passes.append(row)
+    except OSError:
+        return
+    for number, row in enumerate(passes, start=1):
+        sid = row.get("session") or ""
+        began = ended = ""
+        # The journal is in UTC, the state in the machine's own time, and
+        # when() reads the clock off the string: the pass is put in local time
+        # first, or it reads hours apart from the step it reviewed.
+        try:
+            start = datetime.datetime.fromisoformat(row.get("at") or "").astimezone()
+            began = start.isoformat()
+            ended = (start + datetime.timedelta(seconds=int(row["seconds"]))).isoformat()
+        except (ValueError, TypeError):
+            pass
+        found = row.get("new")
+        rows.append("| %s%s%s | done | %s | %s | %s | — |" % (
+            "local review",
+            " (%d)" % number if len(passes) > 1 else "",
+            " - %d %s" % (found, COMMENTS_ICON) if isinstance(found, int) else "",
+            "`%s`" % sid[:8] if sid else "—",
+            when(began),
+            when(ended),
+        ))
+
+
+review_pass_rows()
+
 # The fixing sessions, as rows of their own beneath the steps.
 #
 # In the same table rather than a second one: they are part of the same story,
@@ -688,10 +734,21 @@ def run_rows(node, name, friction=False):
     runs = [r for r in ((s.get(node) or {}).get("runs") or []) if isinstance(r, dict)]
     for number, run in enumerate(runs, start=1):
         sid = run.get("session") or ""
+        # Running only when the caller says so: run_retro writes the summary
+        # as the retrospective starts (SCLAUDE_SUMMARY_RUNNING). Read from the
+        # runs, a resumed conversation keeps its earlier end and one cut off
+        # keeps no end at all, and neither says whether it runs now.
+        # Before `done`: a resumed run keeps the mark of its earlier close.
+        if number == len(runs) and os.environ.get("SCLAUDE_SUMMARY_RUNNING") == node:
+            word = "in progress"
+        elif run.get("done"):
+            word = "done"
+        else:
+            word = "interrupted"
         rows.append("| %s%s | %s | %s | %s | %s | %s |" % (
             name,
             " (%d)" % number if len(runs) > 1 else "",
-            "done" if run.get("done") else "interrupted",
+            word,
             "`%s`" % sid[:8] if sid else "—",
             when(run.get("started")),
             when(run.get("finished")),
@@ -717,7 +774,10 @@ retro_runs = run_rows("retro", "retrospective")
 # the retrospective.
 TOTAL = len(ORDER) + 3
 if current == "done":
-    if s.get("no_change") or s.get("cleaned") or (retro_runs and retro_runs[-1].get("done")):
+    # A running retrospective first: resumed, its run is marked done already.
+    if retro_runs and os.environ.get("SCLAUDE_SUMMARY_RUNNING") == "retro":
+        head = "step %d/%d retro" % (TOTAL, TOTAL)
+    elif s.get("no_change") or s.get("cleaned") or (retro_runs and retro_runs[-1].get("done")):
         head = "all done"
     elif retro_runs:
         head = "step %d/%d retro" % (TOTAL, TOTAL)
@@ -731,9 +791,13 @@ else:
     index = ORDER.index(current) + 1 if current in ORDER else 0
     head = "step %d/%d %s" % (index, TOTAL, TITLES.get(current, current))
 
+# The heading names the kind of comment and nothing of the feature, so that
+# it is found the same way on every issue; the feature and its step follow.
 out = [
     "<!-- sclaude:%s -->" % slug,
-    "**Feature `%s`** · %s" % (slug, head),
+    "## Sessions and progress",
+    "",
+    "Feature `%s` · %s" % (slug, head),
     "",
     "| Step | Status | Session | Started | Finished | Friction |",
     "|---|---|---|---|---|---|",

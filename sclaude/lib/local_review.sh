@@ -249,12 +249,15 @@ local_review_run() {
     else text="$(local_review_prompt "$pr" "$head" "$scope" "$earlier")"
     fi
     began=$SECONDS
+    # Named by sclaude, as every other session is, so that the issue's summary
+    # can list the pass (the journal keeps it, record in local_review.py).
+    local pass_session; pass_session="$(python3 -c 'import uuid; print(uuid.uuid4())')"
     # In the background, so that the wait can take the keys above: a review
     # that goes round after round is where the person decides it is enough.
     # A background job of a script ignores Ctrl-C, so the trap passes it on.
     # Into a file of its own until it ends: a pass stopped half-way leaves
     # the last whole answer where it was.
-    ( cd "$wt" && exec claude -p "$text" \
+    ( cd "$wt" && exec claude -p "$text" --session-id "$pass_session" \
              --model "$LOCAL_REVIEW_MODEL" \
              --allowedTools "Read" "Grep" "Glob" "Skill" "Agent" \
                "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git blame:*)" \
@@ -278,7 +281,8 @@ local_review_run() {
     # The last pass allowed records no "more": the head is done with what it
     # has, rather than read again on every later call.
     cap="$LOCAL_REVIEW_CAP"; [[ "$pass" -ge "$LOCAL_REVIEW_PASSES" || -n "$verify" ]] && cap=0
-    if ! read -r count new more < <(python3 "$LIB/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
+    if ! read -r count new more < <(SCLAUDE_REVIEW_SESSION="$pass_session" \
+                                    python3 "$LIB/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
                                       "$base" "$head" "$((SECONDS - began))" "$journal" "$cap" ${verify:+verify} \
                                       2>>"$(local_review_file "$wt" .log)") || [[ -z "${count:-}" ]]; then
       # A later pass that fails leaves the earlier ones recorded: the head

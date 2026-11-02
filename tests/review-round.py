@@ -69,8 +69,9 @@ def functions(source, names):
 
 with open(os.path.join(LIB, "run.sh")) as fh:
     RUN = fh.read()
-WATCH = 'source "%s/state.sh"\nLIB="%s"\n' % (LIB, LIB) + functions(
-    RUN, ["round_marker", "done_marker", "session_watch_start", "session_watch_stop"])
+WATCH = 'source "%s/state.sh"\nsource "%s/pane.sh"\nLIB="%s"\n' % (LIB, LIB, LIB) + functions(
+    RUN, ["round_marker", "done_marker", "session_watch_start", "session_watch_stop"]) + "\n" + \
+    re.search(r"^stop_file\(\) \{ .*\}\n", RUN, re.M).group(0)
 END = os.path.join(LIB, "session_end.py")
 
 tmp = tempfile.mkdtemp()
@@ -229,6 +230,143 @@ session_watch_stop
         check("%s-id-without-flag-left-alone" % marker, mentions.poll(), None)
         for p in (target, resumed_other, mentions):
             p.kill()
+
+    # --- the person's word from sclaude's tab (session_keys in pane.sh) -------
+    # The word is a file named by the session in the temporary directory,
+    # which this run's fresh uuid keeps apart from any other.
+    ctl = os.path.join(tempfile.gettempdir(), "sclaude-ctl-" + session)
+    watched_mark = os.path.join(tempfile.gettempdir(), "sclaude-watch-" + session)
+
+    def word(text):
+        def write():
+            # Once the watcher has started: it takes an old word away.
+            with open(ctl, "w") as fh:
+                fh.write(text + "\n")
+            return []
+        return write
+
+    # [n]: no marker and a turn still running, closed at once, marked done.
+    target = fake("--resume %s" % session)
+    watched(None, word("next"), until=lambda: gone(target))
+    check("n-closes-it", gone(target), True)
+    check("n-writes-the-marker", os.path.exists(done_file), True)
+    check("watched-mark-removed-on-stop", os.path.exists(watched_mark), False)
+    target.kill()
+    for f in (done_file, ctl):
+        if os.path.exists(f):
+            os.remove(f)
+
+    # [N] is written and closed as [n]; the retrospective is closed with no
+    # marker, as its /exit would.
+    for said, kind, marked in (("next-later", "", True), ("next", "retro", False)):
+        target = fake("--resume %s" % session)
+        args = '"%s" "%s"' % (wt, session) if not kind else \
+            '"" "%s" "%s" "%s" retro "nothing"' % (session, done_file, wt)
+        watched(None, word(said), until=lambda: gone(target), args=args)
+        check("%s-%s-closes-it" % (said, kind or "step"), gone(target), True)
+        check("%s-%s-marker" % (said, kind or "step"), os.path.exists(done_file), marked)
+        target.kill()
+        for f in (done_file, ctl):
+            if os.path.exists(f):
+                os.remove(f)
+
+    # session_watch_stop: [R] stops sclaude after any session but a step's;
+    # [N] leaves this sclaude's stop mark for the stop before the next step.
+    def stopped(said, kind):
+        script = WATCH + """
+export HOME="%s"
+say_here() { echo "$*"; }
+info() { echo "$*"; }
+SESSION_POLL=30
+session_watch_start "%s" "%s" "" "" %s
+echo %s > "$(session_ctl_file "%s")"
+session_watch_stop
+echo "went-on stop=[$([[ -e "$(stop_file)" ]] && echo 1)]"
+rm -f "$(stop_file)"
+""" % (home, wt, session, kind, said, session)
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                             timeout=60).stdout
+        if os.path.exists(ctl):
+            os.remove(ctl)
+        return out
+
+    out = stopped("later", '""')
+    check("R-stops-a-fix-session", ("went-on" in out, "Closed at your word ([R])" in out), (False, True))
+    check("R-leaves-a-step-to-session-ended", "went-on stop=[]" in stopped("later", "code"), True)
+    check("N-exported", "went-on stop=[1]" in stopped("next-later", '""'), True)
+
+    # [k]: a marker and an ended turn, and the session stays. A state of its
+    # own, beside the word.
+    keep = os.path.join(tempfile.gettempdir(), "sclaude-keep-" + session)
+
+    def kept():
+        open(keep, "w").close()
+        return []
+
+    target = fake("--resume %s" % session)
+    watched(done_file, lambda: kept() + [turn_end()])
+    check("k-keeps-it-open", target.poll(), None)
+    check("k-keeps-the-marker", os.path.exists(done_file), True)
+    check("k-off-with-the-watcher", os.path.exists(keep), False)
+    target.kill()
+    for f in (done_file, ctl, keep):
+        if os.path.exists(f):
+            os.remove(f)
+
+    # [r] on a session whose work is done and that [k] keeps: the watcher
+    # ends this process and leaves the word for claude_launch, takes the
+    # marker off as a resume does, the reopened conversation is not closed on
+    # the old "ended", and [k] stands. And without [k]: the same — nothing
+    # closes it, the grace notwithstanding.
+    # Stamped now, not a second ahead as stamp() does: the reopening below
+    # comes two seconds later, and the approval has to be before it.
+    def plan_approved():
+        return [{"type": "assistant", "timestamp": stamp(0),
+                 "message": {"stop_reason": "tool_use",
+                             "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {}}]}},
+                {"type": "user", "timestamp": stamp(0),
+                 "message": {"content": [{"type": "tool_result",
+                                          "content": "User has approved your plan."}]}},
+                dict(turn_end("The plan is approved."), timestamp=stamp(0))]
+
+    # Held by [k] until the press; [k] taken off with it or left on.
+    for name, marker, kind_args, before, keep_on in (
+            ("marker-kept", done_file, None, lambda: [turn_end()], True),
+            ("marker", done_file, None, lambda: [turn_end()], False),
+            ("plan", None, '"%s" "%s" "" "" plan' % (wt, session), plan_approved, False)):
+        target = fake("--resume %s" % session)
+        reopened = []
+
+        def restart_after_ended():
+            kept()
+            for e in before():
+                say(e)
+            time.sleep(2.0)          # several polls: the watcher holds "ended"
+            # The word first: a poll between the two would find neither, and
+            # close it on the old end.
+            with open(ctl, "w") as fh:
+                fh.write("restart\n")
+            if not keep_on:
+                os.remove(keep)
+            deadline = time.time() + 15
+            while not gone(target) and time.time() < deadline:
+                time.sleep(0.1)
+            reopened.append(fake("--resume %s" % session))
+            time.sleep(1.5)          # several polls more, past a grace of 0
+            return []
+
+        watched(marker, restart_after_ended, args=kind_args)
+        check("r-%s-ends-the-old-process" % name, gone(target), True)
+        check("r-%s-reopened-not-closed" % name,
+              bool(reopened) and reopened[0].poll() is None, True)
+        check("r-%s-takes-the-marker-off" % name, os.path.exists(done_file), False)
+        with open(ctl) as fh:
+            check("r-%s-word-for-claude-launch" % name, fh.read().strip(), "restarting")
+        for p in [target] + reopened:
+            p.kill()
+        for f in (done_file, ctl, keep):
+            if os.path.exists(f):
+                os.remove(f)
 
     # --- the turn that wrote the marker is still running: nothing yet ---------
     target = fake("--resume %s" % session)

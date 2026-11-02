@@ -480,6 +480,7 @@ run_step() {
   local wt="$1" slug="$2" step="$3" told="${4:-}"
   local state="$wt/.sclaude/local/feature/state.json"
   local model effort mode session prompt pr
+  stop_asked "step '$(step_title "$step")'" "$slug" && return 0
   # While a review session works in its own tab, this terminal takes the
   # review's boxes, [s] and [g] (review_pane_keys); the tab wait in
   # claude_launch_once calls it. Set in the launch's own subshell below
@@ -594,6 +595,8 @@ run_step() {
   # A step whose session is finished, and which waits only on the local
   # regression (after_step marks it, and session_ended on step 2's accept in
   # the session, before the friction review), goes back to its closing check.
+  # So does step 1 or 2 closed with [n] or [N] in sclaude's tab
+  # (session_take_as_done) and left on the way.
   # Resuming the session instead put the person in front of its old report:
   # the watcher clears the marker on the way in, nothing in the session writes
   # it again, and the conversation stood open until somebody typed /exit.
@@ -608,7 +611,7 @@ run_step() {
   # answer for it.
   if [[ -z "$told" && -z "${RUN_STEP_IN_GATE:-}" \
         && "$(state_get "$state" "steps.$step.gate" 2>/dev/null || true)" == "true" ]]; then
-    info "   The session is finished; the step waits only for the regression."
+    info "   The session is finished; the step waits only for its closing checks."
     [[ "$step" == "review" ]] && { regression_push_fix "$wt" "${pr:-}" || true; }
     SESSION_AUTO_CLOSED=""
     after_step "$wt" "$slug" "$step" gate
@@ -956,6 +959,18 @@ session_ended() {
     fi
     return 0
   fi
+  # The person's word from sclaude's tab, if they gave one (session_keys in
+  # pane.sh). Forward ([n], [N]) is acted on below, once the watcher's marker
+  # has made it a session sclaude closed. Again, later ([R]) closed it as
+  # /exit would, so a marker it wrote meanwhile is not acted on: the
+  # person's word came after it.
+  local said_key taken_at=""
+  said_key="$(session_ctl_take "$session")"
+  [[ "$said_key" == later ]] && rm -f "$(done_marker "$wt")" "$(round_marker "$wt")"
+  # When the key closed it: the marker the watcher wrote then (capture_plan).
+  # To the fraction of a second: the plan's call may be written in the same
+  # second, just before.
+  [[ "$said_key" == next* ]] && taken_at="$(stat -c %.Y "$(done_marker "$wt")" 2>/dev/null || true)"
   # The review round is over: the automatic review closed every finding this
   # session fixed, and posted new ones. While its context is light the same
   # session takes them; once it is heavy they go to a session of their own,
@@ -1040,6 +1055,11 @@ session_ended() {
   if [[ "$step" == "code" && -n "$SESSION_AUTO_CLOSED" ]] && code_accepted "$wt" "$session"; then
     state_set "$state" "steps.$step.gate" true
   fi
+  # [n] or [N] in sclaude's tab is the same yes, and for step 1 the approval
+  # of the plan on screen: after_step then goes on without asking.
+  if [[ "$said_key" == next* && -n "$SESSION_AUTO_CLOSED" ]]; then
+    session_take_as_done "$wt" "$step" "$taken_at" || true
+  fi
   # Left by the person in a tab of its own: the tab closed with its last
   # message, which is often the one that says what is left — once a review
   # session's account of what it resolved and what it waits for went with it.
@@ -1096,7 +1116,70 @@ session_ended() {
   # address complaints it had already addressed.
   watch_seen "$slug"
 
+  # [R]: everything a person's /exit is followed by has run, the friction
+  # review included; the step's checks are not, and the step stays.
+  if [[ "$said_key" == later ]]; then
+    echo ""
+    say_here "${BOLD}Closed at your word ([R]): the step stays where it is.${OFF}"
+    info "  Come back with: $SELF $slug — it opens this conversation again."
+    return 0
+  fi
+
   after_step "$wt" "$slug" "$step"
+}
+
+# What [n] and [N] in sclaude's tab take as said for a step's session
+# (session_keys in pane.sh), beside the marker the watcher writes: the
+# answers that end steps 1 and 2 in the session itself — the plan on screen
+# approved, step 2's work accepted. Marked as the step's gate, which
+# after_step reads as that yes; step 1's plan is read back now, its call still
+# unanswered in the transcript (capture_plan reads the gate). With no plan
+# presented there is nothing to take, and it returns 1: after_step then sends
+# the session back to present one, as after any end without a plan. Steps 3
+# and 4 end on their marker alone.
+#
+#   session_take_as_done <wt> <step> [<seconds it was closed at>]
+session_take_as_done() {
+  local wt="$1" step="$2" taken_at="${3:-}" state="$1/.sclaude/local/feature/state.json"
+  case "$step" in
+    plan)
+      state_set "$state" "steps.$step.gate" true
+      state_set "$state" "steps.$step.taken_at" "${taken_at:-null}"
+      if ! capture_plan "$wt"; then
+        state_set "$state" "steps.$step.gate" null
+        warn "  No plan was presented in the session, so there is none to take as approved."
+        return 1
+      fi ;;
+    code)
+      state_set "$state" "steps.$step.gate" true
+      # Written as the session ends, as on a yes in the session (after_step).
+      extend_acceptance "$wt" ;;
+  esac
+  return 0
+}
+
+# Where [N] in sclaude's tab stops the run: everything after the session ran
+# as on its own end, and sclaude stops before the next step's session, or
+# before the preview after step 4 (session_watch_stop marks it). Said once:
+# the run unwinds after it, and nothing below opens a session.
+#
+# The mark is a file named by this sclaude's process ($$, the same in its
+# subshells and kept by code_reload's exec), not a variable in the
+# environment: the sessions launched before the stop is reached copy every
+# exported variable, and a sclaude run inside one of them would stop too.
+# With the process's start time beside the pid: a mark left by a run that
+# never reached a stop (after the epilogue, a Ctrl-C) is not taken by a later
+# sclaude given the same pid.
+#
+#   stop_asked <what would begin> <slug>
+stop_file() { printf '%s/sclaude-stop-%s-%s' "${TMPDIR:-/tmp}" "$$" "$(awk '{print $22}' "/proc/$$/stat" 2>/dev/null)"; }
+stop_asked() {
+  [[ -e "$(stop_file)" ]] || return 1
+  rm -f "$(stop_file)"
+  echo ""
+  say_here "${BOLD}Stopped before $1, as you asked ([N]).${OFF}"
+  info "  Come back with: $SELF $2"
+  return 0
 }
 
 # The approved plan's acceptance criteria, copied into the issue — once.
@@ -1270,6 +1353,9 @@ after_step() {
   case "$step" in
     plan)
       if ! capture_plan "$wt"; then
+        # Back to the session next time, not to this check: a gate marked by
+        # [n] or [N] (session_take_as_done) found nothing to close on.
+        state_set "$state" "steps.$step.gate" null
         warn "  No approved plan in this session — the step is not finished."
         auto_return "$wt" "$slug" "$step" \
           "**sclaude could not read the approved plan's text**, so step 1 is not finished: the plan was approved, but the text behind it was not kept. Present the plan for approval again, in full." \
@@ -1489,7 +1575,7 @@ after_step() {
         answer=y
       elif [[ "$(state_get "$state" "steps.$step.gate" 2>/dev/null || true)" == "true" ]]; then
         answer=y
-        info "  You accepted the work in the session."
+        info "  You accepted the work: in the session, or with [n] in this terminal."
       else
         ask "${BOLD}Please check everything yourself after AI. Do you confirm that everything works as it should? [y/n] ${OFF}" answer yn
       fi
@@ -3681,15 +3767,35 @@ marker_gone() {
 # moment counted from (session_end.py watch-said). The watcher writes the
 # marker itself, for session_closed.
 #
+# The person may also have the last word from sclaude's tab (session_keys in
+# pane.sh): [n] makes the watcher write the done marker itself and close the
+# session at once, as finished; with [k] it closes nothing until the key is
+# pressed again, and a session kept so ends with the person's /exit, its
+# marker standing. [r] makes it treat the reopened conversation as a resumed
+# one: no marker, nothing before the reopening counted.
+#
 # SESSION_POLL and SESSION_GRACE are seconds, overridable for the tests.
 session_watch_start() {
   local wt="$1" session="$2" done="${3:-}" cwd="${4:-$1}" kind="${5:-}" said="${6:-}"
-  local round="" transcript
+  local round="" transcript ctl
   SESSION_WATCHER=""
+  SESSION_WATCHED=""
   [[ -n "$session" ]] || return 0
   [[ -n "$wt" ]] && round="$(round_marker "$wt")"
   [[ -n "$done" ]] || done="$(done_marker "$wt")"
   rm -f ${round:+"$round"} "$done"
+  # The person's word from sclaude's tab (session_keys in pane.sh): [n] closes
+  # the session as if it had written its marker, [k] keeps it open. A word
+  # left by an earlier launch is not this one's. The watched file tells the
+  # keys that there is a watcher to act on them, and of which kind.
+  ctl="$(session_ctl_file "$session")"
+  local keep; keep="$(session_keep_file "$session")"
+  rm -f "$ctl" "$keep"
+  SESSION_WATCHED="$(session_watched_file "$session")"
+  SESSION_WATCHED_ID="$session"
+  SESSION_WATCHED_KIND="${kind:--}"
+  rm -f "$SESSION_WATCHED"
+  local watched_mark="$SESSION_WATCHED"
   transcript="$(transcript_dir "$cwd")/$session.jsonl"
   # Only an approval given while this watcher runs counts: a session reopened
   # after an earlier approval — sclaude interrupted before the step closed —
@@ -3707,7 +3813,7 @@ session_watch_start() {
   label="${label##*/}${kind:+ ($kind)}"
   rm -f "$limit_file"
   (
-    marker="" since="" ended="" size="" seen="" verdict="" grace=""
+    marker="" since="" ended="" size="" seen="" verdict="" grace="" word=""
     lseen="" hit="" told="" acted="" due=0
     # The process is found by any id the conversation has had: Claude Code
     # may carry it on under a new one while it runs, and the transcript with
@@ -3715,6 +3821,38 @@ session_watch_start() {
     # launched with, which claude_launch may have taken from further along.
     ids="$session"
     while sleep "${SESSION_POLL:-5}"; do
+      word="$(cat "$ctl" 2>/dev/null || true)"
+      if [[ "$word" == next || "$word" == next-later ]]; then
+        # [n] or [N]: the work is taken as done, so the marker is written
+        # here, the way the session would have — the done one, never a review
+        # round's, since the person asked for the step to go on, not for
+        # another round. Not for the retrospective, whose marker says it has
+        # nothing to act on: it is closed as its /exit would close it.
+        [[ -n "$round" ]] && rm -f "$round"
+        [[ "$kind" == retro || -s "$done" ]] || echo "closed from sclaude's terminal ([n])" > "$done"
+        rm -f "$watched_mark"
+        pkill -TERM -f -- "(--session-id|--resume) ($ids)( |$)" 2>/dev/null || true
+        exit 0
+      fi
+      if [[ "$word" == restart ]]; then
+        # [r]: the step goes again — the conversation is opened again
+        # (claude_launch), and this watcher goes on for it as a resumed
+        # session's would (session_watch_start): no marker standing, nothing
+        # before the reopening counted, an approval or a said line included.
+        # The same as [R] and the next `sclaude <feature>`, only at once. So,
+        # as after any resume, a session that does not write its marker again
+        # ends as one a person left. Leaving the marker instead closed the
+        # reopened conversation once the grace ran out — within three seconds
+        # of step 2's accept — and an old approval did the same to a plan.
+        rm -f ${round:+"$round"} "$done"
+        # To the fraction of a second: an approval given in the same second,
+        # just before the press, is not the reopened conversation's.
+        started="$(date +%s.%N)"
+        ended="" seen="" verdict=""
+        echo restarting > "$ctl"
+        pkill -TERM -f -- "(--session-id|--resume) ($ids)( |$)" 2>/dev/null || true
+        continue
+      fi
       size="$(stat -c %s "$transcript" 2>/dev/null || echo 0)"
       if [[ "$size" != "$lseen" ]]; then
         # Only a transcript that grew can have gone on in another one.
@@ -3788,9 +3926,13 @@ session_watch_start() {
           grace="${SESSION_GRACE:-30}"
           [[ "$marker" == "$done" && "$(head -c 16 "$done" 2>/dev/null)" == accepted* ]] \
             && grace="${SESSION_ACCEPT_GRACE:-3}"
-          if (( $(date +%s) - ended >= grace )); then
+          # [k]: kept open on the person's word, until they take it back.
+          if [[ ! -e "$keep" ]] && (( $(date +%s) - ended >= grace )); then
             # What session_ended looks for to know it was not a person's /exit.
             [[ -n "$marker" ]] || echo "${said:-plan approved}" > "$done"
+            # No watcher from here: the keys that need one are not offered
+            # to a launch after this (session_key_has).
+            rm -f "$watched_mark"
             pkill -TERM -f -- "(--session-id|--resume) ($ids)( |$)" 2>/dev/null || true
             exit 0
           fi ;;
@@ -3799,14 +3941,47 @@ session_watch_start() {
     done
   ) &
   SESSION_WATCHER=$!
+  # Its kind and its pid, for the keys: one left by a watcher that is gone —
+  # a sclaude killed — is no watcher.
+  echo "${kind:--} $SESSION_WATCHER" > "$SESSION_WATCHED"
   return 0
 }
 
 session_watch_stop() {
-  [[ -n "${SESSION_WATCHER:-}" ]] || return 0
-  kill "$SESSION_WATCHER" 2>/dev/null || true
-  wait "$SESSION_WATCHER" 2>/dev/null || true
-  SESSION_WATCHER=""
+  local kind="" word="" ctl=""
+  if [[ -n "${SESSION_WATCHED:-}" ]]; then
+    # From the variable: the watcher takes its mark off as it closes the session.
+    kind="${SESSION_WATCHED_KIND:-}"
+    ctl="$(session_ctl_file "$SESSION_WATCHED_ID")"
+    word="$(cat "$ctl" 2>/dev/null || true)"
+    rm -f "$SESSION_WATCHED" "$(session_keep_file "$SESSION_WATCHED_ID")"
+  fi
+  SESSION_WATCHED=""
+  if [[ -n "${SESSION_WATCHER:-}" ]]; then
+    kill "$SESSION_WATCHER" 2>/dev/null || true
+    wait "$SESSION_WATCHER" 2>/dev/null || true
+    SESSION_WATCHER=""
+  fi
+  # The person's word from sclaude's tab about when to go on (session_keys
+  # in pane.sh). [N]: everything after this session runs as on its own end,
+  # and sclaude stops where the next step would begin (stop_asked).
+  [[ "$word" == next-later ]] && : > "$(stop_file)"
+  # [R] on any session but a step's, whose end session_ended handles: closed
+  # as /exit would close it, and sclaude stops right here, as if its terminal
+  # had been closed while the session ran. Every such session is opened again
+  # where it was by the next run, which finds its record unfinished.
+  if [[ "$word" == later ]]; then
+    case "$kind" in
+      plan|code|pr|review) ;;
+      *)
+        rm -f "$ctl"
+        stty sane 2>/dev/null || true
+        echo ""
+        say_here "${BOLD}Closed at your word ([R]): sclaude stops here.${OFF}"
+        info "  Come back with: $SELF${ASK_SLUG:+ $ASK_SLUG} — it opens this conversation again."
+        exit 0 ;;
+    esac
+  fi
   return 0
 }
 

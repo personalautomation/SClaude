@@ -1340,6 +1340,74 @@ sclaude waits in takes the same boxes: the launch hands it `PANE_KEYS` in its ow
 `review_pane_keys` draws `[s]` and `[g]` and takes their keys once a second,
 reading the state when a key is pressed and every ten seconds. `[s]` said there ends the search as in a pass: after the session sclaude asks whether to check its fixes, or checks them with `[g]` ticked.
 
+**A session closed, reopened or kept on the person's word.** Every session
+sclaude starts in a tab gives sclaude's own tab keys of its own (`session_keys`
+in `pane.sh`, called by the same tab wait before the caller's `PANE_KEYS`, which
+get any key it does not take). They change nothing in what follows a session:
+forward is the session's own end, again is the person's `/exit`. The letter
+says which, the case says when. The word is a file named by the session,
+`$TMPDIR/sclaude-ctl-<session>` (`session_ctl_file`), because the ones that act
+on it are other processes, or come after a code reload:
+
+- `n` writes `next`. The watcher (`session_watch_start`) writes the done
+  marker itself, drops a review round's marker, and ends the process. For the
+  retrospective it writes none, since its marker means "nothing to act on".
+  In `session_ended` the session counts as one sclaude closed, and
+  `session_take_as_done` gives the answers that end steps 1 and 2 in the
+  session. For step 2 it marks the gate, the yes that `after_step` reads.
+  For step 1 it marks the gate, so `capture_plan` takes the `ExitPlanMode`
+  call left unanswered when the session was closed. A call the hook refused
+  has its answer, so it is never taken. An answer written after the press
+  (`steps.plan.taken_at`, the time of the watcher's marker, to the fraction
+  of a second) does not count,
+  because Claude Code may record the call as interrupted as it goes. The point is the turn this saves: an
+  approval given in the dialog is read with the whole conversation behind it.
+- `N` writes `next-later`. It is closed and ended exactly as `n`, and
+  `session_watch_stop` also leaves `$TMPDIR/sclaude-stop-<pid>-<start>`
+  (`stop_file`). The pid and start time are sclaude's own, which its
+  subshells share and a code reload's `exec` keeps; a mark left by a run
+  that never reached a stop is not taken by a later sclaude given the same
+  pid. It is a file rather than an exported variable, because the
+  sessions launched before the stop copy the environment, and a sclaude run
+  inside one of them would stop too. `stop_asked` stops the run at the entry
+  of the next `run_step` or of `remind_prod`. An `auto_return` reaches `run_step` too, and stops
+  there, so its caller says what to do by hand.
+- `r` writes `restart`: the step goes again at once, as `R` and the next
+  `sclaude <feature>` would make it go later. The watcher treats the
+  reopened conversation as a resumed session's watcher does: it takes off
+  any marker, and counts nothing written before the reopening, an approval
+  included. It then writes `restarting` and ends the claude process. Left to
+  `claude_launch` alone, the watcher would still hold the old "its work is
+  done" and close the reopened conversation within a poll. As after any
+  resume, a session that does not write its marker again ends as one a
+  person left. Without a watcher, the key writes
+  `restarting` and ends the process itself. `claude_launch` then opens the
+  same conversation again with `--resume` and no prompt, in the same loop
+  that brings a session back after a usage limit. A restart word left over
+  from an earlier launch is dropped as a launch begins.
+- `R` writes `later` and ends the process as `/exit` would. For a step's
+  session, `session_ended` drops any marker, runs what follows an `/exit` up
+  to and including the friction review, and returns before `after_step`. The
+  next start resumes the recorded session. For any other kind,
+  `session_watch_stop` exits sclaude at once, as a closed terminal would.
+  Each of those kinds is opened again where it was by the next run, which
+  finds its record unfinished.
+- `k` is a state rather than a word about the end, so it has a file of its
+  own, `$TMPDIR/sclaude-keep-<session>` (`session_keep_file`), and `r` leaves
+  it standing. The watcher closes nothing while it stands. Its marker stays,
+  so an `/exit` then reads as a session that finished — unless `r` reopened
+  it meanwhile, which takes the marker off as any resume does.
+
+Every key is pressed twice within five seconds, and `n` and `N` are two
+different keys. `n`, `N`, `R` and `k` need a live watcher.
+`session_watch_start` marks one with `$TMPDIR/sclaude-watch-<session>`
+(`session_watched_file`), which holds its kind and its pid. The watcher takes
+the mark off when it closes the session itself, and a mark whose pid is gone
+offers nothing: a launch after the close (the workshop's reopening) or after
+a sclaude that was killed is not offered keys that nothing would carry out.
+`session_watch_stop` tells a step's session from the rest by the kind it was
+given.
+
 **A session's context is bounded per round, not per session.** On one pull
 request five rounds of fixes ran in one conversation, and every file each fix
 read stayed in its context. The session now fixes through subagents and keeps

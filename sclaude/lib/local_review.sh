@@ -137,7 +137,7 @@ review_actions_sync() {
 local_review() {
   # What it told the topic it started, for the end when it leaves early:
   # GitHub not answering, an answer it could not record. A pass the person
-  # stopped with [x x] still ends as finished, with what is open; Ctrl-C is
+  # stopped with [n n] still ends as finished, with what is open; Ctrl-C is
   # told by the pass's own trap.
   local -a LOCAL_REVIEW_TOLD=()
   local rc=0
@@ -207,7 +207,7 @@ local_review_run() {
       info "    $(review_box "$(review_enough "$wt")") [s]    this pass is the last that looks for new findings" >&2
       info "    $(review_go_box "$wt") [g]    go on by itself: no question after the review — a pass that failed runs again," >&2
       info "               the fixes are checked and what is open goes back to a review session without asking" >&2
-      info "      [x x]  stop it now, dropping only what this pass found so far" >&2
+      info "      [n n]  forward, now: stop it, dropping only what this pass found so far" >&2
       info "  Either way what is open goes to the review session; unless [g] is ticked, sclaude asks you first." >&2
     fi
   fi
@@ -367,9 +367,9 @@ local_review_wait() {
       if [[ -n "$verify" ]]; then
         hint="checking the fixes only · $go ${BOLD}[g]${OFF} go on by itself"
       elif [[ "$armed" -eq 1 ]]; then
-        hint="press ${BOLD}[x]${OFF} again: stop now and drop this pass · any other key: carry on"
+        hint="press ${BOLD}[n]${OFF} again: stop now and drop this pass · any other key: carry on"
       else
-        hint="$(review_box "$said") ${BOLD}[s]${OFF} last pass for new findings · $go ${BOLD}[g]${OFF} go on by itself · ${BOLD}[x x]${OFF} stop now"
+        hint="$(review_box "$said") ${BOLD}[s]${OFF} last pass for new findings · $go ${BOLD}[g]${OFF} go on by itself · ${BOLD}[n n]${OFF} stop now"
       fi
       # Not "Human in the loop", as the waits that need the person say: this
       # one goes on by itself, and the keys are there only to step in.
@@ -383,7 +383,7 @@ local_review_wait() {
     # turns the last pass over, and would undo the word the phone just gave.
     if [[ -z "$verify" && -n "$said_file" && -f "$said_file" ]]; then
       case "$(review_said_take "$wt" wait)" in
-        now)  POLL_KEY=x; armed=1 ;;
+        now)  POLL_KEY=n; armed=1 ;;
         pass) said=pass; [[ "$POLL_KEY" == [sS] ]] && POLL_KEY="" ;;
         back) said=""; [[ "$POLL_KEY" == [sS] ]] && POLL_KEY="" ;;
       esac
@@ -391,7 +391,9 @@ local_review_wait() {
     [[ -n "$POLL_KEY" ]] || continue
     [[ -n "$verify" && "$POLL_KEY" != [gG] ]] && continue
     case "$POLL_KEY" in
-      x|X)
+      # Lower case only: the letter and case of the session keys in
+      # sclaude's tab (session_keys in pane.sh), where n is forward, now.
+      n)
         if [[ "$armed" -eq 1 ]]; then
           review_enough_set "$wt" now
           kill -TERM "$pid" 2>/dev/null
@@ -423,7 +425,7 @@ local_review_wait() {
 # Ctrl-C or a session in between does not forget it.
 #
 #   pass  said with `s`: the pass running when it was said was the last;
-#   now   said with `x x`: that pass was stopped. Otherwise the same.
+#   now   said with `n n`: that pass was stopped. Otherwise the same.
 #
 review_enough() {
   local said
@@ -630,7 +632,7 @@ review_box() {
 #
 #   pass  the last pass, or round, for new findings — the terminal's [s];
 #   back  taken back — [s] again;
-#   now   stop the running pass — [x x]. Taken outside a pass's wait (a press
+#   now   stop the running pass — [n n]. Taken outside a pass's wait (a press
 #         that came as the pass ended) it is a pass: there is nothing to stop.
 #
 #   review_said_take <wt> [wait]   → the word taken, "" for none

@@ -2,7 +2,7 @@
 #
 # The review's keys on the phone. While a review pass runs, the terminal
 # takes [s] (the last pass for new findings, again to take it back) and
-# [x x] (stop the pass now); the topic's message that the pass started gets
+# [n n] (stop the pass now); the topic's message that the pass started gets
 # the same as buttons, and so does the message that a fix session started —
 # whose [s] means that no new search follows it, only a check of its fixes.
 #

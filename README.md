@@ -549,6 +549,29 @@ The chosen issue suggests a branch name, which you can edit. sclaude creates the
 worktree, moves the issue to `In progress` on the board and fills in its start
 date.
 
+**Closing a session from sclaude's terminal.** Under Windows Terminal in WSL a
+session runs in a tab of its own, and while it works the tab sclaude waits in
+takes keys of its own; they are listed under the line that says the session
+started. Every session sclaude starts closes by itself once its work is done;
+these give you the word instead, and change nothing else: going forward is
+the session's own end, going again is your `/exit`. The letter says which, the
+case says when — lower case goes on now, upper case stops sclaude until the
+next `sclaude <feature>`. Every key is pressed twice in a row, so a stray one
+does nothing:
+
+| key | what happens |
+|---|---|
+| `n` | forward, now: closed as if it had ended itself — its marker written, the plan on screen counted as approved, step 2's work as accepted, so you skip the turn Claude would spend reading your approval; its friction review and the step's checks run, then the next step |
+| `N` | forward, later: the same, and sclaude stops before the next step's session (after step 4, before the preview) |
+| `r` | again, now: closed as `/exit` closes it, and the same conversation opens again at once, with no message to it |
+| `R` | again, later: closed as `/exit` closes it, and sclaude stops; the next `sclaude <feature>` opens this conversation again. A step's session has its friction review first |
+| `k` | keep it open: it does not close by itself when its work is done, and you leave it with `/exit`; twice again, and it closes as usual |
+
+The retrospective has no marker written for it by `n`: its own marker means
+"nothing to act on", so `n` closes it as its `/exit` would. With no tab (over
+ssh, or inside code-server), claude has the terminal to itself and there are
+no keys.
+
 **Step 1, plan.** Claude gets the issue, its parent issues and the manuals'
 contents up front. It tells you what it understood and waits; you correct it,
 and only then does it plan. The plan ends with **acceptance criteria**: a
@@ -610,7 +633,7 @@ takes its box back. `[g]` has three values, in turn on each press: `auto`
 (the default — the project's `sleep_mode` decides: by default, an /isleep night
 over every session, not an `/isleep here` one —
 and the box shows `auto ☑ (night)` or `auto ☐`), `on` (☑) and `off` (☐); on
-and off are yours and stay for the whole review, step 4 reopened included. `[x x]` stops the pass at once. A pass that did not run
+and off are yours and stay for the whole review, step 4 reopened included. `[n n]` (forward, now — the letter of the session keys below) stops the pass at once. A pass that did not run
 asks whether to go on with the head unreviewed, and `n` reviews it again
 rather than leaving sclaude. While a review session works in its own tab, the
 terminal sclaude waits in shows the same two boxes and takes `[s]` and `[g]`

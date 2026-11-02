@@ -1805,6 +1805,8 @@ EOF
 
 remind_prod() {
   local wt="$1" slug="$2" pr branch merged migrations=""
+  # [N] in sclaude's tab during step 4: production is the next step.
+  stop_asked "the preview, QA and production" "$slug" && return 0
   # A ship marked by a pass that was cut off is not going on: this pass asks
   # again, and marks it again (below).
   state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping null 2>/dev/null || true

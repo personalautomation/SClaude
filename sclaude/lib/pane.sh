@@ -127,19 +127,38 @@ claude_launch() {
   # The session's id reaches its commands: `sclaude core-open` and
   # `core-ready` name the session they are run by (workshop.sh).
   [[ -n "$session" ]] && export SCLAUDE_SESSION="$session"
+  # The id the tab wait's session keys act on (session_keys): not
+  # SCLAUDE_SESSION, which a sclaude run from inside a session inherits.
+  SESSION_KEYS_ID="$session"
+  # A restart nobody carried out — pressed in a launch outside the loop
+  # below — is not this launch's to reopen.
+  local ctl; ctl="$(session_ctl_file "$session")"
+  [[ -n "$session" && "$(cat "$ctl" 2>/dev/null)" == restart* ]] && rm -f "$ctl"
   claude_launch_once "$@"
   status=$?
-  # Closed by the session watcher because the usage limit had reset, not
-  # ended: opened again where it stopped (claude_again_args).
+  # Closed by the session watcher because the usage limit had reset, or by
+  # [r] in sclaude's tab (session_keys), not ended: opened again where it
+  # stopped (claude_again_args). After the limit with a word to carry on; after
+  # [r] silently, so that the reopening costs no turn of its own.
   local limit_file="${TMPDIR:-/tmp}/sclaude-limit-$session"
-  while [[ -n "$session" && -s "$limit_file" ]]; do
-    rm -f "$limit_file"
+  while [[ -n "$session" ]]; do
+    local word=()
+    if [[ -s "$limit_file" ]]; then
+      rm -f "$limit_file"
+      echo ""
+      info "   The usage limit has reset — resuming the session where it stopped."
+      word=("$CLAUDE_LIMIT_RESUME")
+    elif [[ "$(cat "$ctl" 2>/dev/null)" == restarting ]]; then
+      rm -f "$ctl"
+      echo ""
+      info "   Reopening the same conversation, as you asked ([r])."
+    else
+      break
+    fi
     claude_again_args "$@"
     resume_latest "${CLAUDE_AGAIN[@]}"
     CLAUDE_AGAIN=("${CLAUDE_LATEST[@]}")
-    echo ""
-    info "   The usage limit has reset — resuming the session where it stopped."
-    claude_launch_once "${CLAUDE_AGAIN[@]}" "$CLAUDE_LIMIT_RESUME"
+    claude_launch_once "${CLAUDE_AGAIN[@]}" "${word[@]}"
     status=$?
   done
   # What it changed in sclaude, in the tree's workshop: published, or the
@@ -244,6 +263,167 @@ named_with_icon() {
   [[ -n "$icon" ]] || { printf '%s' "$name"; return; }
   head="${name%%/*}"
   printf '%s %s/%s' "$head" "$icon" "${name#*/}"
+}
+
+# The session's keys in sclaude's tab, while the session runs in its own.
+#
+# A session ends itself: it writes its marker, or the plan is approved, and
+# the watcher closes it (session_watch_start). Agreeing with it in the session
+# costs a turn — an approval in the plan dialog is read with the whole
+# conversation behind it — and some sessions are better closed, or kept, on
+# the person's word. So this terminal, free while the session works in its
+# tab, takes these keys (session_keys, from the tab wait in
+# claude_launch_once). The letter says where the work goes on, the case when:
+#
+#   [n] forward, now: the session is closed as if it had ended itself — the
+#       watcher writes its marker, and for a step the plan on screen counts as
+#       approved and step 2's work as accepted (session_take_as_done in
+#       run.sh); everything after runs as on that end, the friction review
+#       and the step's checks included, and the cycle goes on;
+#   [N] forward, later: the same, and sclaude stops where the next step, or
+#       production after step 4, would begin (stop_asked in run.sh);
+#   [r] again, now: the session is closed as /exit would close it, and the
+#       same conversation is opened again at once, without a message
+#       (claude_launch): a fresh claude process, nothing for it to read;
+#   [R] again, later: closed as /exit would close it, and sclaude stops; the
+#       next `sclaude <feature>` opens this conversation again — a step's
+#       after its friction review (session_ended in run.sh), any other kind
+#       at once, as if the terminal had been closed (session_watch_stop);
+#   [k] keep it open: the watcher does not close it on its marker or the
+#       plan's approval; pressed again, it does. A state rather than a word
+#       about the end, so it has a file of its own (session_keep_file), which
+#       [r] leaves standing.
+#
+# Every key is pressed twice within five seconds: a stray one changes
+# nothing. [n], [N], [R] and [k] need the watcher, which writes the marker and
+# does the closing; the retrospective, whose own marker means "nothing to act
+# on", has no marker written for it, and [n] closes it as its /exit would.
+#
+# The word is a file named by the session (session_ctl_file), since the ones
+# who read it — the watcher, claude_launch, session_ended — are other
+# processes or come after a code reload. [r] is the watcher's to carry out
+# where there is one: it goes on for the reopened conversation as a resumed
+# session's watcher would — the marker off, nothing before the reopening
+# counted — then writes `restarting` for claude_launch and ends the process.
+# Left to claude_launch alone, the watcher still held the old "its work is
+# done" and closed the reopened conversation within a poll. Without a tab there are no keys:
+# claude has the terminal.
+SESSION_KEYS_ARMED=""
+SESSION_KEYS_AT=0
+session_ctl_file()     { printf '%s/sclaude-ctl-%s' "${TMPDIR:-/tmp}" "$1"; }
+session_keep_file()    { printf '%s/sclaude-keep-%s' "${TMPDIR:-/tmp}" "$1"; }
+# Written by session_watch_start with the watcher's kind, removed when it stops.
+session_watched_file() { printf '%s/sclaude-watch-%s' "${TMPDIR:-/tmp}" "$1"; }
+
+# The word the person gave for a session that has ended, taken: next,
+# next-later or later (a restart is taken by claude_launch). Empty when none.
+#
+#   session_ctl_take <session>
+session_ctl_take() {
+  local file word
+  file="$(session_ctl_file "$1")"
+  word="$(cat "$file" 2>/dev/null || true)"
+  rm -f "$file"
+  case "$word" in next|next-later|later) printf '%s' "$word" ;; esac
+}
+
+# Whether a watcher runs beside this session: its mark names its pid.
+session_watcher_alive() {
+  local kind pid
+  { read -r kind pid < "$(session_watched_file "$SESSION_KEYS_ID")"; } 2>/dev/null || return 1
+  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null
+}
+
+# Whether this session takes the key: see above.
+session_key_has() {
+  case "$1" in
+    r) return 0 ;;
+    n|N|R|k) session_watcher_alive ;;
+    *) return 1 ;;
+  esac
+}
+
+session_key_words() {
+  case "$1" in
+    n) echo "forward, now: close it as if it had finished, and go on" ;;
+    N) echo "forward, later: close it as if it had finished; sclaude stops before the next step" ;;
+    r) echo "again, now: close it and reopen the same conversation" ;;
+    R) echo "again, later: close it; sclaude stops, and opens this conversation next time" ;;
+    k) echo "keep it open: no closing by itself (again to undo)" ;;
+  esac
+}
+
+# A line above the status line, which the next tick draws again.
+session_keys_say() {
+  printf '\r\033[2K' >&2
+  info "   $*"
+}
+
+# The keys this session takes, said once as the wait begins.
+session_keys_legend() {
+  local k
+  info "   Keys here while it runs, each pressed twice:"
+  for k in n N r R k; do
+    session_key_has "$k" && info "     [$k] $(session_key_words "$k")"
+  done
+  return 0
+}
+
+# The status line of a wait with no keys of the caller's.
+session_keys_line() {
+  local box='☐'
+  [[ -e "$(session_keep_file "$SESSION_KEYS_ID")" ]] && box='☑'
+  if session_key_has k; then
+    printf '\r\033[2K\033[?25l  %sThe session works in its tab%s · %s %s[k]%s keep it open' \
+      "${DIM:-}" "${OFF:-}" "$box" "${BOLD:-}" "${OFF:-}" >&2
+  else
+    printf '\r\033[2K\033[?25l  %sThe session works in its tab%s' "${DIM:-}" "${OFF:-}" >&2
+  fi
+}
+
+# One tick of the tab wait: <key> pressed, or empty. Returns 0 when the key
+# was this session's, 1 to hand it on to the caller's keys. The case counts:
+# n and N are two keys.
+#
+#   session_keys <key> <pid of the tab's script>
+session_keys() {
+  local key="${1:-}" pid="$2" ctl word now
+  [[ -n "$key" ]] || return 1
+  session_key_has "$key" || return 1
+  ctl="$(session_ctl_file "$SESSION_KEYS_ID")"
+  now="$(date +%s)"
+  if [[ "$SESSION_KEYS_ARMED" != "$key" ]] || (( now - SESSION_KEYS_AT > 5 )); then
+    SESSION_KEYS_ARMED="$key"
+    SESSION_KEYS_AT="$now"
+    session_keys_say "Press $key again — $(session_key_words "$key")."
+    return 0
+  fi
+  SESSION_KEYS_ARMED=""
+  if [[ "$key" == k ]]; then
+    local keep; keep="$(session_keep_file "$SESSION_KEYS_ID")"
+    if [[ -e "$keep" ]]; then
+      rm -f "$keep"
+      session_keys_say "[k] off: the session closes by itself once its work is done."
+    else
+      : > "$keep"
+      session_keys_say "[k] on: the session stays open after its work is done; leave it with /exit."
+    fi
+    return 0
+  fi
+  case "$key" in
+    n) word=next ;;
+    N) word=next-later ;;
+    r) word=restart ;;
+    R) word=later ;;
+  esac
+  # With no watcher, [r] is carried out here: there is no marker to take off.
+  [[ "$word" == restart ]] && ! session_watcher_alive && word=restarting
+  echo "$word" > "$ctl"
+  session_keys_say "[$key] $(session_key_words "$key")."
+  # Forward and a watched restart are the watcher's to close: it writes or
+  # takes off the session's marker first.
+  [[ "$word" == next* || "$word" == restart ]] || pkill -TERM -P "$pid" 2>/dev/null || true
+  return 0
 }
 
 # The mark a session that ran in a tab leaves for session_ended.
@@ -377,9 +557,12 @@ claude_launch_once() {
   # closed by its cross does the same, rather than leave claude orphaned.
   # The caller's keys for this wait, if it has any (PANE_KEYS: a command, the
   # key pressed appended): the session is in another tab, so this terminal's
-  # keys are free. Called once a second, with an empty key after none.
+  # keys are free. Called once a second, with an empty key after none. The
+  # session's own keys (session_keys) come first, for every session sclaude
+  # launches with an id; a key they take is not handed on.
   local keys=""
-  [[ -n "${PANE_KEYS[*]:-}" ]] && keys_usable && keys=1
+  [[ -n "${PANE_KEYS[*]:-}" || -n "${SESSION_KEYS_ID:-}" ]] && keys_usable && keys=1
+  [[ -n "$keys" && -n "${SESSION_KEYS_ID:-}" ]] && session_keys_legend
   # No echo meanwhile: a key pressed while the caller reads its state, between
   # two reads, would land on its status line. The mode is saved and given
   # back as it was, on the way out too.
@@ -389,7 +572,14 @@ claude_launch_once() {
   while kill -0 "$pid" 2>/dev/null; do
     if [[ -n "$keys" ]]; then
       poll_pause 1
-      "${PANE_KEYS[@]}" "$POLL_KEY"
+      if [[ -n "${SESSION_KEYS_ID:-}" ]] && session_keys "$POLL_KEY" "$pid"; then
+        POLL_KEY=""
+      fi
+      if [[ -n "${PANE_KEYS[*]:-}" ]]; then
+        "${PANE_KEYS[@]}" "$POLL_KEY"
+      else
+        session_keys_line
+      fi
     else
       sleep 1
     fi

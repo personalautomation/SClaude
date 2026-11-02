@@ -443,7 +443,7 @@ STRINGS = {
     "feat.actions":      ("⚙️ Действия", "⚙️ Actions"),
     "feat.new":          ("✨ Новая фича", "✨ New feature"),
     # The review's keys on the topic's message that a pass or a fix session
-    # started (review_keys.py): the terminal's [s] and [x x].
+    # started (review_keys.py): the terminal's [s] and [n n].
     "rv.last.pass":      ("⏭ Последний проход за новыми замечаниями",
                           "⏭ Last pass for new findings"),
     "rv.last.round":     ("⏭ Последний раунд: дальше только проверка фиксов",

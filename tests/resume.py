@@ -649,7 +649,7 @@ def case_i():
         fh.write('{"type":"assistant","message":{"content":[]}}\n')
     out = w.resume(timeout=60)
     check_true("gate-mark-goes-to-the-gate",
-               "waits only for the regression" in out)
+               "waits only for its closing checks" in out)
     check("gate-mark-does-not-resume-the-session",
           "code-session" in w.sessions, False)
     check("gate-mark-does-not-ask-again",
@@ -674,7 +674,7 @@ def case_j():
         fh.write('{"type":"assistant","message":{"content":[]}}\n')
     out = w.resume(timeout=60)
     check_true("review-gate-mark-goes-to-the-gate",
-               "waits only for the regression" in out)
+               "waits only for its closing checks" in out)
     check("review-gate-mark-does-not-resume-the-session",
           "review-session" in w.sessions, False)
 

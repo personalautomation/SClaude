@@ -428,9 +428,11 @@ if gate is not None:
                "local RUN_STEP_IN_GATE=1" in after_body.split("case ", 1)[0])
     # Not a green run, a refused push or the look at the threads: the next
     # start comes back to those checks. Only the two stops that need step 4's
-    # session (another branch, the reopened pull request still merged) drop it.
+    # session (another branch, the reopened pull request still merged) drop it,
+    # and step 1's without a plan (a gate marked by [n] in sclaude's tab found
+    # none to close on).
     check("gate-mark-cleared-only-where-said",
-          after_body.count('"steps.$step.gate" null'), 6)
+          after_body.count('"steps.$step.gate" null'), 7)
     check("review-gate-mark-off-at-the-session-stops",
           len(re.findall(r'info "  Come back with: \$SELF \$slug"\n(?:\s*#.*\n)*\s*state_set "\$state" "steps\.\$step\.gate" null\n\s*return 0',
                          after_body)), 2)

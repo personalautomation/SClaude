@@ -26,12 +26,26 @@
 #
 # A non-zero code means "there was no approved plan in this session": the step
 # then does not close, rather than closing with an empty bridge to step 2.
+#
+# One more approval is not in the transcript: [n] or [N] pressed in sclaude's
+# tab while the plan dialog was open (session_take_as_done in run.sh), which
+# marks the step's gate. The session was closed with the call unanswered, and
+# that call, the last thing in the conversation, is the plan approved. A call
+# the hook on ExitPlanMode refused has its answer, and is not taken. An answer
+# written once the key closed the session (`steps.plan.taken_at`, the
+# watcher's marker's time) does not count: Claude Code may record the open
+# call as interrupted as it goes, and that is the closing, not a refusal.
 capture_plan() {
-  local wt="$1" session
-  session="$(state_get "$wt/.sclaude/local/feature/state.json" steps.plan.session)" || return 1
+  local wt="$1" session pending=""
+  local state="$wt/.sclaude/local/feature/state.json"
+  session="$(state_get "$state" steps.plan.session)" || return 1
   [[ -n "$session" ]] || return 1
+  if [[ "$(state_get "$state" steps.plan.gate 2>/dev/null || true)" == "true" ]]; then
+    pending="$(state_get "$state" steps.plan.taken_at 2>/dev/null || true)"
+    [[ "$pending" =~ ^[0-9]+(\.[0-9]+)?$ ]] || pending=0
+  fi
 
-  python3 - "$wt" "$session" "$LIB" <<'PY'
+  python3 - "$wt" "$session" "$LIB" "$pending" <<'PY'
 import json
 import os
 import sys
@@ -69,6 +83,20 @@ except OSError:
 # as a parameter — it reads a file whose path it puts into planFilePath — so an
 # empty input is not a failure but the current norm. presented_plan reads it
 # the same way the hook on ExitPlanMode does.
+import datetime
+
+
+def written(entry):
+    """When a transcript entry was written, in seconds; 0 when it says not."""
+    try:
+        return datetime.datetime.fromisoformat(
+            str(entry.get("timestamp")).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0
+
+
+# Taken from sclaude's terminal: the seconds the session was closed at.
+taken_at = float(sys.argv[4]) if sys.argv[4] else None
 approved = None
 pending = None
 for line in lines:
@@ -76,6 +104,8 @@ for line in lines:
         entry = json.loads(line)
     except ValueError:
         continue
+    if taken_at and written(entry) >= taken_at:
+        break
     content = (entry.get("message") or {}).get("content")
     if not isinstance(content, list):
         continue
@@ -88,6 +118,10 @@ for line in lines:
             if "has approved" in str(block.get("content")):
                 approved = pending
             pending = None
+
+# Approved from sclaude's terminal: the call left open when it was closed.
+if taken_at is not None and pending is not None:
+    approved = pending
 
 if approved is None:
     sys.exit(1)

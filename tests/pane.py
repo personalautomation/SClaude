@@ -149,13 +149,14 @@ echo "rc=$?"
         text = b""
         start = time.time()
         sent = False
+        # One (seconds, bytes) pair, or a list of them, sent in order.
+        keys = list(keys_at) if keys_at and isinstance(keys_at, list) else ([keys_at] if keys_at else [])
         while True:
             if interrupt_after and not sent and time.time() - start > interrupt_after:
                 os.write(fd, b"\x03")
                 sent = True
-            if keys_at and not sent and time.time() - start > keys_at[0]:
-                os.write(fd, keys_at[1])
-                sent = True
+            if keys and time.time() - start > keys[0][0]:
+                os.write(fd, keys.pop(0)[1])
             try:
                 r, _, _ = select.select([fd], [], [], 0.2)
                 if r:
@@ -307,6 +308,67 @@ echo "rc=$?"
         took = fh.read().split()
     check("pane-keys-handed-on", "[g]" in took, True)
     check("pane-keys-every-second", took.count("[]") >= 1, True)
+
+    # --- the session's own keys (session_keys): [r] twice reopens the same
+    # conversation without a message, a single press does nothing, and the
+    # keys that need a watcher are offered only with one. The stand-in
+    # records every launch.
+    launches = os.path.join(tmp, "launches")
+    write("claude", r'''
+echo "$*" | tr '\n' ' ' >> "$PANE_TEST_LAUNCHES"; echo >> "$PANE_TEST_LAUNCHES"
+sleep "${PANE_TEST_SLEEP:-0}"
+''')
+    ctl = os.path.join(tmp, "sclaude-ctl-0000")
+
+    def launched():
+        if not os.path.exists(launches):
+            return []
+        with open(launches) as fh:
+            return fh.read().splitlines()
+
+    for f in (launches, ctl):
+        if os.path.exists(f):
+            os.remove(f)
+    plain = os.path.join(tmp, "plain.sh")
+    with open(plain, "w") as fh:
+        fh.write('source "%s/ui.sh"\n' % LIB)
+    text = run({"PANE_TEST_SLEEP": "6", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": plain},
+               keys_at=[(2.0, b"r"), (2.6, b"r")])
+    got = launched()
+    check("r-twice-reopens", len(got) >= 2, True)
+    check("r-first-launch", got[:1], ["--session-id 0000 -n demo/code " + PROMPT.replace("\n", " ") + " "])
+    # Reopened silently: --resume, the name, and no prompt after it.
+    check("r-reopens-silently", got[1:2], ["--resume 0000 -n demo/code "])
+    check("r-word-taken", os.path.exists(ctl), False)
+    check("r-said", "Reopening the same conversation" in text, True)
+    check("keys-legend", "[r] again, now: close it and reopen the same conversation" in text, True)
+    # No watcher: [n], [N], [R] and [k] are not offered.
+    check("keys-legend-without-watcher",
+          any(k in text for k in ("[n]", "[N]", "[R]", "[k]")), False)
+
+    os.remove(launches)
+    text = run({"PANE_TEST_SLEEP": "4", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": plain},
+               keys_at=[(2.0, b"r")])
+    check("r-once-does-nothing", len(launched()), 1)
+    check("r-once-asks-again", "Press r again" in text, True)
+
+    # Under a watcher: [k] twice toggles the keep word; n then N arm two
+    # different keys and do nothing; [R] twice ends it and leaves its word.
+    os.remove(launches)
+    step = os.path.join(tmp, "step.sh")
+    with open(step, "w") as fh:
+        # A live watcher: its kind and a pid that runs (this script's own).
+        fh.write('source "%s/ui.sh"\necho "plan $$" > "%s/sclaude-watch-0000"\n' % (LIB, tmp))
+    text = run({"PANE_TEST_SLEEP": "9", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": step},
+               keys_at=[(2.0, b"k"), (2.5, b"k"), (3.0, b"n"), (3.5, b"N"), (4.0, b"R"), (4.5, b"R")])
+    check("R-ends-it-once", len(launched()), 1)
+    with open(ctl) as fh:
+        check("R-leaves-its-word", fh.read().strip(), "later")
+    check("watched-legend", "[N] forward, later" in text and "[k] keep it open" in text, True)
+    check("k-twice-said", "[k] on" in text, True)
+    check("case-is-another-key", "Press N again" in text, True)
+    os.remove(ctl)
+    os.remove(os.path.join(tmp, "sclaude-watch-0000"))
 
     # --- a --resume goes to where the conversation went on --------------------
     # Claude Code may carry a conversation on under a new id and hide the old

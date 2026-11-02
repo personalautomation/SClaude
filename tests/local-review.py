@@ -564,7 +564,7 @@ try:
     check("enough-pass-one-pass", prompts().count("---\n"), 1)
     check("enough-pass-posted", len(threads()) - posted_before, 2)
     check_true("enough-pass-said", "you ended the search" in err)
-    # Once the search is over (`s` or `x x`), a new head is only checked:
+    # Once the search is over (`s` or `n n`), a new head is only checked:
     # the model is told not to run /code-review, a thread it judges fixed is
     # resolved, and whatever it reports as new anyway is not posted.
     # The capped follow-up the word above sent away left its answer queued.
@@ -643,15 +643,15 @@ try:
         return marker in seen
 
     import time
-    check_true("stop-now-hint", read_until(b"[x x] stop now", 20))
+    check_true("stop-now-hint", read_until(b"[n n] stop now", 20))
     # The boxes: [g] ticked shows ticked on the status line, and is kept.
     check_true("boxes-unticked", "☐ [s] last pass".encode() in seen and "auto ☐ [g] go on".encode() in seen)
     # g goes round auto → on → off; on is left for the checks below.
     os.write(master, b"g")
     check_true("go-on-ticked", read_until(" ☑ [g] go on".encode(), 5))
-    os.write(master, b"x")
+    os.write(master, b"n")
     time.sleep(1.5)
-    os.write(master, b"x")
+    os.write(master, b"n")
     check_true("stop-now-count", read_until(b"COUNT=", 15))
     proc.wait(timeout=15)
     os.close(master)

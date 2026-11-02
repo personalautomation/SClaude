@@ -287,28 +287,6 @@ table.t td:first-child { font-weight: 600; }
   </div>
 </section>
 
-<section class="slide">
-  <div class="head">
-    <div class="eyebrow">The problem · what I found first</div>
-    <h2>Half their time went not into the product, but into tools</h2>
-  </div>
-  <div class="split grow" style="align-items:center">
-    <div class="col" style="gap:18px">
-      <div class="big" style="font-size:120px;color:var(--signal)">~50%</div>
-      <p class="lede">of the AI champions' time — and tokens — went into the tools they needed to automate how they develop features.</p>
-      <p class="punch" style="font-size:26px">And that is normal.</p>
-    </div>
-    <div class="card human" style="gap:12px">
-      <div class="k">What is not normal</div>
-      <ul class="ticks">
-        <li>Each of them, independently, built the same set of tools.</li>
-        <li>Each tripped over the holes their neighbour had solved long ago.</li>
-        <li>A zoo of bicycles, each just about coping with its owner's local tasks.</li>
-      </ul>
-    </div>
-  </div>
-</section>
-
 <section class="slide va-slide" aria-label="Everyone built their own tools">
   <h2 class="va-sr">Everyone built their own tools — and fell into the same holes</h2>
   <div class="va" data-scene="A" data-dur="7"></div>
@@ -413,12 +391,6 @@ table.t td:first-child { font-weight: 600; }
     <p class="punch">A small step. <em>A big payoff</em> within two months.</p>
     <p class="small muted">Then it went further: personal recommendations for everyone on how to improve their development. But that is a separate story.</p>
   </div>
-</section>
-
-<section class="slide va-slide" aria-label="One shared tool in the company's git">
-  <h2 class="va-sr">One shared tool in the company's git — everyone contributes, it grows</h2>
-  <div class="va" data-scene="B" data-dur="14"></div>
-  <button type="button" class="va-replay" aria-label="Replay the animation">&#8635; Replay</button>
 </section>
 
 <section class="slide">
@@ -1052,37 +1024,11 @@ table.t td:first-child { font-weight: 600; }
       <ul class="ticks xs">
         <li>Vercel: previews, production, rollback</li>
         <li>Supabase: Postgres, auth, storage</li>
+        <li>Cloudflare R2: media</li>
       </ul>
     </div>
   </div>
   <p class="small muted">Speed first, cost second; scale is a problem a PoC is happy to have later. No servers of our own and no staging: the laptop the developer already has is the build machine.</p>
-</section>
-
-<section class="slide">
-  <div class="head">
-    <div class="eyebrow">Why each tool · a question from my DMs</div>
-    <h2>Why is sclaude built for exactly this infrastructure?</h2>
-    <p class="lede">Because it lets you start fast, without paying to start. <a href="https://vercel.com/docs/plans/hobby" target="_blank" rel="noopener">Vercel</a>, <a href="https://supabase.com/pricing" target="_blank" rel="noopener">Supabase</a> and <a href="https://developers.cloudflare.com/r2/pricing/" target="_blank" rel="noopener">R2</a> all have wide free limits.</p>
-  </div>
-  <div class="chips">
-    <span class="chip cloud">Vercel · hosting and deploys</span>
-    <span class="chip auto">Supabase · database and auth</span>
-    <span class="chip signal">Cloudflare R2 · media storage</span>
-  </div>
-  <div class="grow" style="display:flex;align-items:center">
-    <div class="flow" style="width:100%;grid-template-columns:minmax(0,1fr) 40px minmax(0,1fr)">
-      <div class="card line" style="padding:30px 32px;gap:14px">
-        <div class="k">Start</div>
-        <div class="punch">Even the first production ran on the free tier.</div>
-      </div>
-      <div class="arrow">&rarr;</div>
-      <div class="card line" style="padding:30px 32px;gap:14px">
-        <div class="k">Then</div>
-        <div class="punch">The real production, for symbolic money — and it holds on an almost-free tier, stable enough.</div>
-        <p>If you think it through carefully.</p>
-      </div>
-    </div>
-  </div>
 </section>
 
 <section class="slide">
@@ -1098,14 +1044,14 @@ table.t td:first-child { font-weight: 600; }
     <div class="card"><div class="k">Process</div><h3>GitHub</h3><p>Issues, board, pull requests and CI next to the code.</p></div>
 
     <div class="lane">Built for AI</div>
-    <div class="cell hot"><span class="tool">Next.js</span>Small files keep the agent's context clear. The framework's conventions tell the model where things live and how to build them.</div>
+    <div class="cell hot"><span class="tool">Next.js</span>Small files and fixed conventions tell the model where things live, with no md notes: less context, a smaller bill.</div>
     <div class="cell"><span class="tool">Supabase</span>Plain SQL and Postgres, which models know well. One feature, one local database.</div>
     <div class="cell"><span class="tool">Vercel</span>A deploy is a git push. Each preview is where QA checks the agent's work.</div>
     <div class="cell"><span class="tool">GitHub</span>The agent works issues and pull requests through the gh CLI, which <a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Anthropic calls</a> the most context-efficient way in.</div>
 
     <div class="lane">Free to start</div>
     <div class="cell"><span class="tool">Next.js</span>Open source.</div>
-    <div class="cell"><span class="tool">Supabase</span>A free tier that can carry a product almost into production.</div>
+    <div class="cell"><span class="tool">Supabase</span>A free tier that carried even our first production.</div>
     <div class="cell"><span class="tool">Vercel</span>A free tier for previews and a first production.</div>
     <div class="cell"><span class="tool">GitHub</span>Free for a small team.</div>
 
@@ -1119,36 +1065,6 @@ table.t td:first-child { font-weight: 600; }
     <div class="k" style="flex:none">Why Postgres</div>
     <p style="color:var(--ink)">One database for both transactional and analytical load, deep tuning, access rules down to the row (RLS), and point-in-time history out of its write-ahead log. A PoC will not outgrow it.</p>
   </div>
-</section>
-
-<section class="slide">
-  <div class="head">
-    <div class="eyebrow">Why each tool · special thanks</div>
-    <h2>Next.js turned out to be a lucky framework for vibe-coding</h2>
-    <p class="lede">Out of the box it answers many questions about <a href="https://nextjs.org/docs/app/getting-started/project-structure" target="_blank" rel="noopener">the structure of a project</a>: where things go, how big files should be.</p>
-  </div>
-  <div class="grow" style="display:flex;align-items:center">
-    <div class="flow" style="width:100%;grid-template-columns:minmax(0,1fr) 40px minmax(0,1fr)">
-      <div class="card human" style="gap:12px;padding:26px 28px">
-        <div class="k">When I still developed myself</div>
-        <h3 style="font-size:28px">It saddened me</h3>
-        <ul class="ticks">
-          <li>Ten levels of nested folders to store the code</li>
-          <li>Very fine slicing into files</li>
-        </ul>
-      </div>
-      <div class="arrow">&rarr;</div>
-      <div class="card auto" style="gap:12px;padding:26px 28px">
-        <div class="k">In vibe-coding</div>
-        <h3 style="font-size:28px">Exceptionally lucky</h3>
-        <ul class="ticks">
-          <li class="plus">Even without md files, the AI knows where everything is</li>
-          <li class="plus">That saves context again</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-  <p class="punch" style="margin-bottom:14px">Less context spent — <em>and so the project's budget.</em></p>
 </section>
 
 <section class="slide">

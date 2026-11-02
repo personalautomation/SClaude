@@ -26,13 +26,15 @@ one page that opens in a browser from a checkout.
 
 ## Presentations
 
-Two slide decks for whoever decides whether a team should adopt all this —
+Slide decks for whoever decides whether a team should adopt all this —
 a CTO, a lead — rather than for the developer installing it:
 
 | deck | what it covers |
 |---|---|
 | [`sclaude_in_details.html`](docs/presentations/sclaude_in_details.html) | sclaude in depth: the fixed path of a feature, gates on evidence, rules in hooks, the friction review, the retrospective and the monthly review, AI review, the team setup |
 | [`sclaude_instruments.html`](docs/presentations/sclaude_instruments.html) | the stack for a PoC or an MVP and why each tool is in it; the whole development cycle from a phone: the Claude app, the Telegram bot, Tailscale and Termius as the spare key, keepawake |
+| [`vibe_coding_story.html`](docs/presentations/vibe_coding_story.html) | why sclaude exists: a team fragmented by uneven AI skills, everyone building the same tools, putting them in the company's git, metrics with no extra work, and why this stack |
+| [`sclaude_full_story.html`](docs/presentations/sclaude_full_story.html) | all three in one: the problem, the orchestrator, the tools around it (put together from the other decks by `full_story.py`) |
 
 Each is one self-contained page: open it in a browser and page through with
 the arrow keys; on a phone the slides stack into one column. GitHub shows the

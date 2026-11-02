@@ -29,7 +29,7 @@
     if (mark && n > 0) {
       var dm = document.createElement('span');
       dm.className = 'deckmark';
-      dm.textContent = mark;
+      dm.textContent = s.dataset.mark || mark;
       s.appendChild(dm);
     }
   });

@@ -7,6 +7,8 @@ link to each other: by default through their sibling file names, so the
 pages work from a checkout; --stack-url and --sclaude-url replace those
 links when the pages are published somewhere else. A screenshot a deck
 shows is src/img/<name>, written {{IMG:<name>}} and inlined as a data URI.
+The full story, one deck picked from all three, is put together by
+full_story.py.
 
     python3 docs/presentations/build.py
     python3 docs/presentations/build.py --out ~/decks --stack-url URL --sclaude-url URL
@@ -65,6 +67,9 @@ def main():
         page = inline_images(page)
         (args.out / name).write_text(page)
         print(args.out / name)
+    import full_story  # picks its slides from the decks above
+    full_story.write(args.out / full_story.NAME)
+    print(args.out / full_story.NAME)
     (args.out / PROCESS).write_text(process.doc())
     print(args.out / PROCESS)
 

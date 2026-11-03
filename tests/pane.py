@@ -339,18 +339,22 @@ sleep "${PANE_TEST_SLEEP:-0}"
     check("r-first-launch", got[:1], ["--session-id 0000 -n demo/code " + PROMPT.replace("\n", " ") + " "])
     # Reopened silently: --resume, the name, and no prompt after it.
     check("r-reopens-silently", got[1:2], ["--resume 0000 -n demo/code "])
+    check("tab-line-says-which-session",
+          "· new session." in text and "· same session, resumed." in text, True)
     check("r-word-taken", os.path.exists(ctl), False)
     check("r-said", "Reopening the same conversation" in text, True)
-    check("keys-legend", "[r] again, now: close it and reopen the same conversation" in text, True)
+    check("keys-legend", "Keys here, each pressed twice:" in text and "[r] reopen" in text, True)
     # No watcher: [n], [N], [R] and [k] are not offered.
     check("keys-legend-without-watcher",
           any(k in text for k in ("[n]", "[N]", "[R]", "[k]")), False)
 
     os.remove(launches)
-    text = run({"PANE_TEST_SLEEP": "4", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": plain},
+    # The press is said on the status line, drawn once a second: room for
+    # several draws after it, under the load of the whole suite.
+    text = run({"PANE_TEST_SLEEP": "7", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": plain},
                keys_at=[(2.0, b"r")])
     check("r-once-does-nothing", len(launched()), 1)
-    check("r-once-asks-again", "Press r again" in text, True)
+    check("r-once-asks-again", "[r] reopen — press r again to finish" in text, True)
 
     # Under a watcher: [k] twice toggles the keep word; n then N arm two
     # different keys and do nothing; [R] twice ends it and leaves its word.
@@ -364,9 +368,14 @@ sleep "${PANE_TEST_SLEEP:-0}"
     check("R-ends-it-once", len(launched()), 1)
     with open(ctl) as fh:
         check("R-leaves-its-word", fh.read().strip(), "later")
-    check("watched-legend", "[N] forward, later" in text and "[k] keep it open" in text, True)
-    check("k-twice-said", "[k] on" in text, True)
-    check("case-is-another-key", "Press N again" in text, True)
+    check("watched-legend", "[N] next, not now" in text and "[R] reopen, not now" in text, True)
+    # [k] is a box on the status line, ticked by two presses: no line of words.
+    check("k-twice-ticks-its-box", "☑ [k] kept open" in text and "[k] on:" not in text, True)
+    check("case-is-another-key", "press N again to finish" in text, True)
+    # A status line never wraps: a wrapped one is drawn again under itself
+    # every second.
+    with open(os.path.join(LIB, "pane.sh")) as fh:
+        check("status-line-does-not-wrap", "\\033[?7l" in fh.read(), True)
     os.remove(ctl)
     os.remove(os.path.join(tmp, "sclaude-watch-0000"))
 

@@ -1032,16 +1032,27 @@ echo "watcher=[$SESSION_WATCHER]"
     check("round-kept-across-a-return", round_since('review_round_begins "%s"' % wt), first)
     check("round-begins-after-its-end",
           round_since('review_round_ends "%s"; sleep 1; review_round_begins "%s"' % (wt, wt)) != first, True)
+    # The pass's headings are not info: an unindented info line goes to the
+    # feature's topic (ask_feed), which hears of the pass by its phase line.
+    with open(os.path.join(LIB, "local_review.sh")) as fh:
+        LR = fh.read()
+    check("pass-headings-stay-off-the-topic",
+          LR.count("printf '%s\\n' \"${BOLD}── ") == 2 and 'info "${BOLD}── ' not in LR, True)
+    # A pass run on the way into step 4 is reported before its session opens.
+    entry = RUN[RUN.index("run_step() {"):]
+    entry = entry[:entry.index("\n}\n")]
+    check("entry-pass-reported",
+          'local_review_done "$wt" && fresh_pass=0' in entry
+          and '[[ "$fresh_pass" -eq 1 && "$local_count" =~ ^[1-9][0-9]*$ ]] && review_report "$wt" "$slug"' in entry, True)
     check("not-done-says-where-it-stands",
-          'warn "    $standing"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
+          'warn "  $standing"' in gate and 'ask_feed warn "  $standing"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
           and '"$(review_last_look "$wt")"' in gate, True)
     check("resumed-review-says-what-it-is-handed",
           '${brief:+ · $brief}' in RUN[RUN.index("review_brief() {"):]
           and 'brief="$(review_brief "$wt" "$step" resumed)"' in RUN, True)
-    check("auto-closed-gate-unasked-only-with-go-on",
-          '[[ -n "${SESSION_AUTO_CLOSED:-}" && "$go_on" -eq 1 ]]' in gate
-          and gate.index('review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"')
-          < gate.index("Back to a review session for it?"), True)
+    check("gate-asks-only-at-the-go-on-ceiling",
+          'if [[ "$go_on" -eq 2 ]]; then\n    ask "${BOLD}Back to a review session for it?' in gate
+          and gate.count("Back to a review session for it?") == 1, True)
     reopen = RUN[RUN.index("review_reopen() {"):]
     reopen = reopen[:reopen.index("\n}\n")]
     check("new-round-gets-a-fresh-session",
@@ -1062,7 +1073,7 @@ echo "watcher=[$SESSION_WATCHER]"
     # count and says it ran, and `ask` answers from a list (no once it runs
     # out) and says what it was asked.
     def enough_gate(said, word, count, mode="local", split="0 0", answers=(), done=False, go_on=False,
-                    auto=False):
+                    auto=False, exited=False):
         wt = os.path.join(tmp, "enough-wt")
         fake = os.path.join(tmp, "enough-lib")
         os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"), exist_ok=True)
@@ -1082,15 +1093,15 @@ echo "watcher=[$SESSION_WATCHER]"
                  'gh_repo() { echo o/r; }\nproject_review_mode() { echo %s; }\n'
                  'local_review() { echo REVIEWED >&2; [[ %s == failed ]] && return 1; echo %s; }\n'
                  'local_review_count() { echo 3; }\nlocal_review_done() { %s; }\n'
-                 'review_report() { :; }\nreview_quota_rerun() { return 1; }\n'
+                 'review_report() { echo REPORT; }\nreview_quota_rerun() { return 1; }\n'
                  'ANSWERS=(%s); is_yes() { [[ "$1" == y ]]; }\n'
                  'ask() { echo "ASKED: $1"; printf -v "$2" %%s "${ANSWERS[0]:-n}"; ANSWERS=("${ANSWERS[@]:1}"); }\n'
                  'say() { echo "$*"; }\ninfo() { echo "$*"; }\nwarn() { echo "$*"; }\n'
                  'run_step() { echo "RUN_STEP $3"; }\nreview_reopen() { echo REOPEN; }\n'
-                 'SESSION_AUTO_CLOSED=%s\n'
+                 'SESSION_AUTO_CLOSED=%s; SESSION_EXITED=%s\n'
                  'review_close_gate %s x 143; echo "RC=$?"\n') % (
                      fake, mode, count, count, "true" if done else "false",
-                     " ".join(answers), "1" if auto else "", wt)
+                     " ".join(answers), "1" if auto else "", "1" if exited else "", wt)
         out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=60,
                              env=dict(os.environ, PATH=os.environ["PATH"]), stdin=subprocess.DEVNULL)
         with open(state) as fh:
@@ -1104,8 +1115,7 @@ echo "watcher=[$SESSION_WATCHER]"
         out, left = enough_gate(said, "open: 3 review thread(s) open", 2, answers=("1",))
         check("asked-before-check-%s" % said, "Check the fixes" in out and "ASKED: Choose 1-3" in out, True)
         check("checked-on-yes-%s" % said, "REVIEWED" in out, True)
-        check("open-goes-to-session-%s" % said, "back to a review session" in out.lower()
-              and "RC=1" in out, True)
+        check("open-goes-to-session-%s" % said, "RUN_STEP review" in out and "RC=1" in out, True)
     # No check, no close: left open, nothing reviewed — one question, not two.
     out, left = enough_gate("now", "open: 3 review thread(s) open", 2, answers=("3",))
     check("one-question", out.count("ASKED"), 1)
@@ -1139,16 +1149,27 @@ echo "watcher=[$SESSION_WATCHER]"
     # Off for this step 4 only: the box is left as the person set it.
     check("go-on-ceiling-this-step", (left["steps"]["review"].get("go_on"),
                                       left["steps"]["review"].get("go_on_ceiling")), (True, True))
-    # A session sclaude closed: back unasked with [g] ticked, through the
-    # question without it — a yes reopens it as the unasked way does, a no
-    # holds the rounds.
+    # Back to a session unasked, [g] or not: the person ends the rounds with
+    # the review's keys ([s], [n], [r]), not with an answer here. A session
+    # sclaude closed is reopened the way review_reopen picks.
     out, left = enough_gate("", "open: 3 review thread(s) open", 2, go_on=True, auto=True)
     check("auto-closed-go-on-unasked", "REOPEN" in out and "ASKED" not in out, True)
-    out, left = enough_gate("", "open: 3 review thread(s) open", 2, answers=("y",), auto=True)
-    check("auto-closed-asks-without-go-on",
-          "ASKED: Back to a review session" in out and "REOPEN" in out and "RUN_STEP" not in out, True)
-    out, left = enough_gate("", "open: 3 review thread(s) open", 2, answers=("n", "n"), auto=True)
-    check("auto-closed-no-holds", "REOPEN" not in out and "RUN_STEP" not in out and "RC=1" in out, True)
+    out, left = enough_gate("", "open: 3 review thread(s) open", 2, auto=True)
+    check("auto-closed-unasked-without-go-on",
+          "REOPEN" in out and "ASKED" not in out and "RUN_STEP" not in out and "RC=1" in out, True)
+    out, left = enough_gate("", "open: 3 review thread(s) open", 2)
+    check("unasked-without-go-on",
+          "RUN_STEP review" in out and "ASKED" not in out, True)
+    # Left by the person (/exit) with [g] off: held there, nothing asked.
+    out, left = enough_gate("", "open: 3 review thread(s) open", 2, exited=True)
+    check("exit-holds-the-rounds",
+          "RUN_STEP" not in out and "ASKED" not in out and "Come back with" in out and "RC=1" in out, True)
+    # With [g] ticked the person is away: the rounds go on.
+    out, left = enough_gate("", "open: 3 review thread(s) open", 2, exited=True, go_on=True)
+    check("exit-with-go-on-goes-on", "RUN_STEP review" in out and "RC=1" in out, True)
+    # Only at [g]'s ceiling a no holds the rounds.
+    out, left = enough_gate("", "open: 3 review thread(s) open", 2, answers=("n", "n"), go_on=30, auto=True)
+    check("ceiling-no-holds", "REOPEN" not in out and "RUN_STEP" not in out and "RC=1" in out, True)
     out, left = enough_gate("", "open: 3 review thread(s) open", "failed", answers=("y",), go_on=True)
     check("go-on-retries", out.count("REVIEWED"), 11)
     check("go-on-asks-after-retries", out.count("ASKED: Go on with this head unreviewed"), 1)
@@ -1158,10 +1179,21 @@ echo "watcher=[$SESSION_WATCHER]"
     check("github-new-left", "RC=0" in out and "ASKED" not in out, True)
     check("github-new-left-count", left["steps"]["review"].get("left_open"), 2)
     out, left = enough_gate("pass", "open: 3 review thread(s) open", 0, mode="github", split="1 2")
-    check("github-unsettled-to-session", "ASKED" in out and "RC=1" in out, True)
+    check("github-unsettled-to-session", "ASKED" not in out and "RUN_STEP review" in out and "RC=1" in out, True)
+    out, left = enough_gate("", "open: 3 review thread(s) open", 2, mode="github", split="1 2")
+    check("open-findings-left-to-the-table", "Step 4 is not done" not in out, True)
+    # No report on this head showed them: printed now (REVIEW_REPORTED).
+    check("unshown-findings-get-the-report", "REPORT" in out, True)
+    # bin/sclaude runs under set -u: unset before any report in the process.
+    check("reported-read-with-a-default", 'local reported="${REVIEW_REPORTED:-}"' in gate
+          and "${REVIEW_REPORTED%%" not in gate, True)
     out, left = enough_gate("now", "open: red: build", 0, mode="github")
-    check("github-red-to-session", "ASKED" in out, True)
+    check("github-red-to-session", "ASKED" not in out and "RUN_STEP review" in out, True)
     check("github-red-word-kept", left["steps"]["review"].get("enough"), "now")
+    check("red-check-said", "Step 4 is not done — red: build." in out, True)
+    # The question at [g]'s ceiling carries, on the phone, why step 4 is open.
+    check("ceiling-question-has-its-context",
+          'ask_note "Step 4 is not done — ${word#open: }."' in gate, True)
 
     # --- [g] holds the friction review; before the retro every owed one runs --
     def held(go_on, call, fails=False, log=True, extra=None):
@@ -1318,7 +1350,7 @@ echo "watcher=[$SESSION_WATCHER]"
             json.dump({"pr": pr, "steps": {"review": review}}, fh)
         body = 'source "%s/state.sh"\nsource "%s/local_review.sh"\n' % (LIB, LIB)
         body += functions(RUN, ["review_stuck_say"])
-        body += ('\nLIB="%s"\nwarn() { echo "WARN $*"; }\n'
+        body += ('\nLIB="%s"\nwarn() { echo "WARN $*"; }\nask_feed() { echo "FEED $2"; }\nask_note() { :; }\n'
                  'ask() { echo "ASKED"; }\n'
                  'review_stuck_say "%s"; review_stuck_say "%s"\n') % (LIB, wt, wt)
         out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=30,
@@ -1330,6 +1362,8 @@ echo "watcher=[$SESSION_WATCHER]"
     check("stuck-said-once", out.count("The review's report"), 1)
     check("stuck-not-asked", "ASKED" in out, False)
     check("stuck-names-the-keys", "[s]" in out and "⏭" in out, True)
+    # Said to the topic alone: the terminal has the red verdict and [s].
+    check("stuck-not-in-the-terminal", "WARN" in out, False)
     check("converging-not-said", stuck_say({"stuck": ""}).strip(), "")
     check("ended-search-not-said", stuck_say({"stuck": "Not converging.", "enough": "now"}).strip(), "")
     # Once per pull request: a feature reopened after its merge goes on under

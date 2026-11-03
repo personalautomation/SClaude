@@ -213,7 +213,7 @@ rollback_vercel() {
       # which is how this runs from the bot path — a rewriting line leaves raw
       # escape codes in the file and nothing ever clears them. The same guard
       # regression_run's spinner uses.
-      [[ -t 1 ]] && printf '\r\033[2K  waiting for the rollback to finish (%ss)…' "$waited"
+      [[ -t 1 ]] && printf '\r\033[2K\033[?7l  waiting for the rollback to finish (%ss)…\033[?7h' "$waited"
       sleep 5
       waited=$((waited + 5))
       continue

@@ -345,7 +345,7 @@ review_wait_state() {
       info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug" >&2
     fi
     # Not "Human in the loop": that marks the waits that need the person.
-    [[ -t 2 ]] && printf '\r\033[2K  %sRunning by itself%s — waiting for the review checks (%s so far, next check in %ss, any key checks now)' \
+    [[ -t 2 ]] && printf '\r\033[2K\033[?7l  %sRunning by itself%s — waiting for the review checks (%s so far, next check in %ss, any key checks now)\033[?7h' \
       "$DIM" "$OFF" "$(regression_duration "$waited")" "$MERGE_POLL" >&2
     poll_pause "$MERGE_POLL"
     waited=$((SECONDS - start))
@@ -400,7 +400,7 @@ review_quota_rerun() {
     >/dev/null 2>&1 || true
   while now="$(date +%s)"; (( now < due )); do
     left=$(( due - now ))
-    [[ -t 2 ]] && printf '\r\033[2K  %sRunning by itself%s — the review reruns in %s' \
+    [[ -t 2 ]] && printf '\r\033[2K\033[?7l  %sRunning by itself%s — the review reruns in %s\033[?7h' \
       "$DIM" "$OFF" "$(regression_duration "$left")" >&2
     sleep $(( left < 60 ? left : 60 ))
   done
@@ -588,8 +588,16 @@ run_step() {
   # goes on. The indented lines under the banner stay here (notices.py).
   # Where to look at it, before anything else: with a server per feature,
   # localhost:3000 is the list of features, and the feature's own address is
-  # the one thing a person needs from this header.
-  echo "   ${BOLD}Open it at $(dev_address "$wt")${OFF}"
+  # the one thing a person needs from this header. Through the proxy, the
+  # page that lists the feature's users, each a sign-in without a password
+  # (users_page in bin/sclaude-proxy): the address alone was said again by
+  # the dev server's line below, and landed on a sign-in form.
+  local users
+  if users="$(dev_users_address "$wt")"; then
+    echo "   ${BOLD}Sign in as any user: $users${OFF}"
+  else
+    echo "   ${BOLD}Open it at $(dev_address "$wt")${OFF}"
+  fi
   local map; map="$(flow_address "$wt")" && info "   Where it stands: $map"
   info "   $model / $effort / $mode · $wt"
   # A step whose session is finished, and which waits only on the local
@@ -613,7 +621,7 @@ run_step() {
         && "$(state_get "$state" "steps.$step.gate" 2>/dev/null || true)" == "true" ]]; then
     info "   The session is finished; the step waits only for its closing checks."
     [[ "$step" == "review" ]] && { regression_push_fix "$wt" "${pr:-}" || true; }
-    SESSION_AUTO_CLOSED=""
+    SESSION_AUTO_CLOSED=""; SESSION_EXITED=""
     after_step "$wt" "$slug" "$step" gate
     return 0
   fi
@@ -658,7 +666,15 @@ run_step() {
     if [[ "$review_mode" == "local" && -n "$(review_enough "$wt")" ]]; then
       local_count="$(local_review_count "$wt" "$pr")" || local_count=""
     elif [[ "$review_mode" == "local" ]]; then
+      # A pass that runs here — the first of step 4, or the first on a head
+      # nobody reviewed yet — is reported before the session opens, to the
+      # terminal and the topic, as the gate reports one it runs: the session
+      # started on findings whose numbers nobody had been shown. A head the
+      # gate reviewed already was reported there.
+      local fresh_pass=1
+      local_review_done "$wt" && fresh_pass=0
       local_count="$(local_review "$wt" "$pr")" || local_count="failed"
+      [[ "$fresh_pass" -eq 1 && "$local_count" =~ ^[1-9][0-9]*$ ]] && review_report "$wt" "$slug"
     fi
   fi
   [[ "$step" == "review" ]] && [[ -z "$local_count" || "$local_count" == "0" ]] \
@@ -1038,12 +1054,16 @@ session_ended() {
   # printed here, since claude's screen went with it, and the gates after it
   # act on what they find without asking — the person did not type /exit, so
   # nobody is at the session's end to answer. See done_marker. Step 4's gate
-  # is the exception: whether its rounds go on unasked is [g]'s to say
-  # (review_close_gate).
+  # goes back to a session unasked either way, unless the person left the
+  # session with [g] off (SESSION_EXITED below, review_close_gate).
   SESSION_AUTO_CLOSED=""
   session_closed "$(done_marker "$wt")" "$wt" "$session" "" "$(review_tally "$wt" "$step")" \
     step "$step" "$(step_session_number "$state" "$step" "$session")" \
     && SESSION_AUTO_CLOSED=1
+  # Left by the person — /exit, or Ctrl-C in sclaude's tab — with no key of
+  # sclaude's tab said: step 4's gate holds the rounds there (review_close_gate).
+  SESSION_EXITED=""
+  [[ -z "$SESSION_AUTO_CLOSED" && -z "$said_key" ]] && SESSION_EXITED=1
   [[ "$step" == "review" && -n "$SESSION_AUTO_CLOSED" ]] && review_round_ends "$wt"
   # Step 2 asks its question in its own dialog (code_accepted). A yes there
   # finishes the session as the terminal's yes does: the step waits for the
@@ -2667,8 +2687,7 @@ friction_defer_proposals() {
   state_set "$state" "friction.$key.verdict" deferred
   state_set "$state" "friction.$key.verdict_note" \
     "only CLAUDE.md proposals ($n), put off by sclaude without a session"
-  echo ""
-  info "  friction after '$key': $n CLAUDE.md proposal(s), put off to the monthly review — no session needed"
+  # Nothing more said: "Put off to the monthly review" above already did.
   return 0
 }
 
@@ -3044,7 +3063,8 @@ instruments_sync() {
 }
 
 # May step 4 close? Waits out a review still running, then, if anything is
-# left open, offers the session back. Returns 0 to go on closing.
+# left open, goes back to a review session unasked — held instead when the
+# person left the last one with [g] off. Returns 0 to go on closing.
 #
 #   review_close_gate <wt> <slug> <pr>
 #
@@ -3052,6 +3072,7 @@ instruments_sync() {
 # `open: <why>`. Anything unreadable is `ok`.
 review_close_gate() {
   local wt="$1" slug="$2" pr="$3" word waited=0 announced=0 answer repo said="" said_read=0 failed=0 go_box=""
+  local gate_reported=0
   [[ -n "$pr" && "$pr" != "null" ]] || return 0
   command -v gh >/dev/null 2>&1 || return 0
   repo="$(gh_repo 2>/dev/null || true)"
@@ -3144,7 +3165,7 @@ review_close_gate() {
           # The report printed as the session ended was made before this
           # run: once more with it, where the person decides whether to go
           # on fixing.
-          review_report "$wt" "$slug"
+          review_report "$wt" "$slug"; gate_reported=1
           # Open by its own count, not by asking GitHub again: a finding in
           # the conversation, or one still waiting to be posted, is no thread
           # for the pull request to show.
@@ -3176,7 +3197,7 @@ review_close_gate() {
       [[ "$local_due" -eq 1 ]] && { what="the checks"; hint=""; }
       [[ -n "$said" && -n "$hint" ]] && hint="the last review for new findings · ${BOLD}[s]${OFF} takes it back"
       [[ -n "$hint" ]] && hint+=" · $go_box ${BOLD}[g]${OFF} go on by itself"
-      printf '\r\033[2K  %sRunning by itself%s — waiting for %s of PR #%s (%s so far)%s' \
+      printf '\r\033[2K\033[?7l  %sRunning by itself%s — waiting for %s of PR #%s (%s so far)%s\033[?7h' \
         "$DIM" "$OFF" "$what" "$pr" "$(regression_duration "$waited")" "${hint:+ · $hint}"
     fi
     local began=$SECONDS
@@ -3217,35 +3238,72 @@ review_close_gate() {
   fi
   [[ "$word" == open:* ]] || return 0
 
-  warn ""
-  warn "  Step 4 is not done — ${word#open: }."
+  # Findings left open are what a report printed on this head says, its
+  # last round yellow (review_report.py): said again here, in two more lines,
+  # they were read as news. With no report on this head that showed these
+  # findings and rounds — the review in Actions posted more or finished a
+  # run while the gate waited, the person resolved some, a gate reached with
+  # no session before it — the report is printed now, and the topic hears
+  # it as it hears every report. Anything else that holds
+  # the step — a red check, a review still running — is not in the table,
+  # and is said.
+  # The feature's topic still hears both lines, as before: the report's
+  # message there carries the newest session's row only, and this is where
+  # the review stands from the fix session's last look (docs/keepawake.md).
   # And where the last round left it, counted from the fix session's last
-  # look: what the review confirmed fixed, what the session had seen and did
-  # not fix, what the review found since (brief in pr_context.py).
+  # look: what the review confirmed fixed, what the session had seen and
+  # did not fix, what the review found since (brief in pr_context.py).
   local standing
   standing="$(python3 "$LIB/pr_context.py" --brief "$wt" "$pr" "$repo" \
                 "$(review_last_look "$wt")" 2>/dev/null || true)"
-  [[ -n "$standing" ]] && warn "    $standing"
-  # Back to a session by itself only with [g] ticked, short of its ceiling;
-  # otherwise the person is asked, whoever closed the session. A session
-  # sclaude closed went back unasked once, [g] or not: fifteen rounds ran
-  # through one morning on a two-line change, each feeding the next, with the
-  # box unticked and its line promising a question that never came.
+  if [[ "$word" =~ ^open:\ ([0-9]+\ review\ thread\(s\)\ open|the\ review\ on\ this\ machine\ leaves\ [0-9]+\ finding\(s\)\ open)$ ]]; then
+    # Printed by this gate's own pass just now; else asked again, and said
+    # only when what it shows — the open findings and the rounds — is not
+    # what was last shown on this head.
+    if [[ "$gate_reported" -eq 0 ]]; then
+      local unless=""
+      # Unset until a report in this process showed something (set -u).
+      local reported="${REVIEW_REPORTED:-}"
+      [[ -n "$reported" && "${reported%% *}" == "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" ]] \
+        && unless="${reported#* }"
+      REVIEW_REPORT_UNLESS="$unless" review_report "$wt" "$slug"
+    fi
+    # And kept for a question that may follow ([g]'s ceiling, then "Close
+    # step 4 anyway?"): the phone shows a question with the lines before it
+    # (ask_note), and this is what that question is about.
+    ask_feed warn "Step 4 is not done — ${word#open: }."
+    ask_note "Step 4 is not done — ${word#open: }."
+    [[ -n "$standing" ]] && { ask_feed warn "  $standing"; ask_note "  $standing"; }
+  else
+    warn ""
+    warn "${BOLD}Step 4 is not done — ${word#open: }.${OFF}"
+    [[ -n "$standing" ]] && warn "  $standing"
+  fi
+  # Back to a session unasked, whoever closed the last one: the person ends
+  # the rounds with the review's keys — [s] (⏭ on the topic) makes the next
+  # session the last for new findings, [n]/[r] in sclaude's tab act at once —
+  # and a question here only held the rounds until somebody came to answer
+  # it. The one question left is [g]'s ceiling: thirty rounds unattended,
+  # and the person decides whether there is a thirty-first.
   local go_on=0
   if review_go_on "$wt"; then
     review_go_on_round "$wt" && go_on=1 || go_on=2
   fi
-  if [[ -n "${SESSION_AUTO_CLOSED:-}" && "$go_on" -eq 1 ]]; then
-    review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"
+  # Said before the next session: the rounds stopping converging is what
+  # [s] is for.
+  review_stuck_say "$wt"
+  # Except after the person left the session (/exit, Ctrl-C) with [g] off:
+  # that is their word to stop, and going back unasked reopened the same
+  # conversation within seconds when it had committed nothing new.
+  if [[ -n "${SESSION_EXITED:-}" && "$go_on" -eq 0 ]]; then
+    info "  You left the session: step 4 stays open. Come back with: $SELF $slug"
     return 1
   fi
-  # Said here too, before the person chooses: the rounds stopping converging
-  # is what this answer is about.
-  review_stuck_say "$wt"
-  if [[ "$go_on" -eq 1 ]]; then
-    answer=y
-  else
+  # Unsaid: the session's own heading follows, its status line with [s].
+  if [[ "$go_on" -eq 2 ]]; then
     ask "${BOLD}Back to a review session for it? [y/n] ${OFF}" answer yn
+  else
+    answer=y
   fi
   if is_yes "$answer"; then
     # A session sclaude closed: review_reopen picks the session, a fresh one
@@ -3377,12 +3435,10 @@ review_reopen() {
   since="$(review_session_since "$wt")"
   split="$(python3 "$LIB/pr_context.py" --open-since "$wt" "$pr" "$repo" "$since" 2>/dev/null || true)"
   read -r older newer <<<"$split"
+  # Which session it is, the session's heading says ("resuming" or not).
   if [[ "${older:-}" == "0" && "${newer:-0}" -gt 0 ]]; then
-    info "  The review posted $newer new finding(s) — a fresh session takes them."
     review_stuck_say "$wt"
     state_set "$state" steps.review.session null
-  else
-    info "  Back to the session that was fixing them."
   fi
   run_step "$wt" "$slug" review
 }
@@ -3417,10 +3473,13 @@ review_stuck_say() {
   [[ "$said_for" == "true" ]] && said_for="$pr"
   [[ "$verdict_pr" == "$pr" && "$said_for" != "$pr" ]] || return 0
   state_set "$state" steps.review.stuck_said "$pr" 2>/dev/null || true
-  echo ""
-  warn "  The review's report: $said"
-  warn "  To make this the last session for new findings: [s] while a review pass runs,"
-  warn "  or ⏭ on the feature's topic. The open findings still go to a session."
+  # To the feature's topic alone, where ⏭ is: the terminal has just printed
+  # the verdict in red under the report, and [s] stands on every status line
+  # of the review, so the same words there were read twice.
+  ask_feed warn "  The review's report: $said"
+  ask_feed warn "  To make this the last session for new findings: [s] while a review pass runs, or ⏭ on the feature's topic. The open findings still go to a session."
+  # A question after it ([g]'s ceiling) shows it on the phone as its context.
+  ask_note "  The review's report: $said"
   return 0
 }
 
@@ -3602,27 +3661,28 @@ cmd_review_stats() {
 }
 
 # Whether another review round is worth it: rounds, findings fixed and closed
-# without a fix, findings on earlier fixes, reversals, cost and the trend.
+# without a fix, findings on earlier fixes, cost and the trend.
 # Counted from the pull request and the feature's state, without a model.
 # Printed at the close of every review round and by `sclaude review-report`.
 #
 #   review_report <wt> <slug>
 review_report() {
-  local wt="$1" slug="$2" state pr repo root log=""
+  local wt="$1" slug="$2" state pr repo
   state="$wt/.sclaude/local/feature/state.json"
   pr="$(state_get "$state" pr 2>/dev/null || true)"
   [[ -n "$pr" && "$pr" != "null" ]] || return 0
   repo="$(gh_repo 2>/dev/null || true)"
-  root="$(scratch_root "$wt" 2>/dev/null || true)"
-  [[ -n "$root" ]] && log="$root/.sclaude/local/review-context.log"
-  echo ""
   # The last session's numbers go to the feature's topic as well, a message
   # per round (ask_notice) — not for the report between two passes of one
   # local review (REVIEW_REPORT_QUIET), which would send one each pass.
-  local brief stuck; brief="$(mktemp)"; stuck="$(mktemp)"
-  SCLAUDE_REPORT_BRIEF="$brief" SCLAUDE_REPORT_STUCK="$stuck" \
+  local brief stuck shown; brief="$(mktemp)"; stuck="$(mktemp)"; shown="$(mktemp)"
+  # <REVIEW_REPORT_UNLESS>: what the report last showed on this head, as it
+  # wrote it ("open:<ids> rounds:<finished>/<all>", review_report.py); the
+  # same again, it prints and sends nothing (review_close_gate).
+  SCLAUDE_REPORT_BRIEF="$brief" SCLAUDE_REPORT_STUCK="$stuck" SCLAUDE_REPORT_OPEN="$shown" \
+    SCLAUDE_REPORT_UNLESS="${REVIEW_REPORT_UNLESS:-}" \
     python3 "$LIB/review_report.py" "$wt" "$pr" "$repo" \
-    "$(state_get "$state" branch 2>/dev/null || true)" "$slug" "$log" 2>/dev/null || true
+    "$(state_get "$state" branch 2>/dev/null || true)" 2>/dev/null || true
   # The verdict, when the rounds stopped converging, for review_stuck_say;
   # "-" when they did not, and nothing when the report could not tell, which
   # keeps what was there.
@@ -3634,8 +3694,12 @@ review_report() {
     state_set "$state" steps.review.stuck_pr "$pr" 2>/dev/null || true
   fi
   local ASK_SLUG="$slug"
+  # The head the terminal last saw a report on, and what it showed: the open
+  # findings and the rounds (review_close_gate). Kept as it was when nothing was printed:
+  # the threads unreadable, or the same as last shown.
+  [[ -s "$shown" ]] && REVIEW_REPORTED="$(git -C "$wt" rev-parse HEAD 2>/dev/null) $(cat "$shown")"
   [[ -n "${REVIEW_REPORT_QUIET:-}" ]] || ask_notice "$(cat "$brief" 2>/dev/null)"
-  rm -f "$brief" "$stuck"
+  rm -f "$brief" "$stuck" "$shown"
 }
 
 cmd_review_report() {
@@ -3928,6 +3992,12 @@ session_watch_start() {
             && grace="${SESSION_ACCEPT_GRACE:-3}"
           # [k]: kept open on the person's word, until they take it back.
           if [[ ! -e "$keep" ]] && (( $(date +%s) - ended >= grace )); then
+            # A key's word read again, now: said since the top of this pass
+            # — [r] with [k] taken off between the two reads — it is the next
+            # pass's to act on. Closed here as ended, the press was lost.
+            case "$(cat "$ctl" 2>/dev/null || true)" in
+              next|next-later|restart) continue ;;
+            esac
             # What session_ended looks for to know it was not a person's /exit.
             [[ -n "$marker" ]] || echo "${said:-plan approved}" > "$done"
             # No watcher from here: the keys that need one are not offered

@@ -353,32 +353,62 @@ session_key_words() {
   esac
 }
 
+# The same, in a word or two, for the legend: the long words are said when a
+# key is pressed, where they are read.
+session_key_label() {
+  case "$1" in
+    n) echo "next" ;;
+    N) echo "next, not now" ;;
+    r) echo "reopen" ;;
+    R) echo "reopen, not now" ;;
+    k) echo "keep it open" ;;
+  esac
+}
+
 # A line above the status line, which the next tick draws again.
 session_keys_say() {
   printf '\r\033[2K' >&2
   info "   $*"
 }
 
-# The keys this session takes, said once as the wait begins.
+# The keys this session takes, said once as the wait begins: one line. Five
+# lines of them, every session, buried the lines above that said where the
+# feature stood; what a key does in full is said when it is pressed.
 session_keys_legend() {
-  local k
-  info "   Keys here while it runs, each pressed twice:"
-  for k in n N r R k; do
-    session_key_has "$k" && info "     [$k] $(session_key_words "$k")"
+  local k line=""
+  for k in n N r R; do
+    session_key_has "$k" && line+="${line:+ · }${BOLD:-}[$k]${OFF:-} $(session_key_label "$k")"
   done
+  [[ -n "$line" ]] && info "   ${DIM:-}Keys here, each pressed twice:${OFF:-} $line"
   return 0
+}
+
+# What the session's keys add to a wait's status line: [k]'s box, green when
+# ticked, and a key pressed once, waiting for its second press. Both on the
+# status line, not as lines of their own: a toggle said in words was two
+# lines a press, and four for a press taken back.
+session_keys_tail() {
+  local out="" now
+  if session_key_has k; then
+    if [[ -e "$(session_keep_file "$SESSION_KEYS_ID")" ]]; then
+      out=" · ${GREEN:-}☑${OFF:-} ${BOLD:-}[k]${OFF:-} ${GREEN:-}kept open${OFF:-}"
+    else
+      out=" · ☐ ${BOLD:-}[k]${OFF:-} keep open"
+    fi
+  fi
+  now="$(date +%s)"
+  if [[ -n "${SESSION_KEYS_ARMED:-}" ]] && (( now - SESSION_KEYS_AT <= 5 )); then
+    # The legend's word, not the long one: a status line wider than the
+    # terminal wrapped, and every redraw left a copy of it on the screen.
+    out+=" · ${YELLOW:-}[$SESSION_KEYS_ARMED] $(session_key_label "$SESSION_KEYS_ARMED") — press $SESSION_KEYS_ARMED again to finish${OFF:-}"
+  fi
+  printf '%s' "$out"
 }
 
 # The status line of a wait with no keys of the caller's.
 session_keys_line() {
-  local box='☐'
-  [[ -e "$(session_keep_file "$SESSION_KEYS_ID")" ]] && box='☑'
-  if session_key_has k; then
-    printf '\r\033[2K\033[?25l  %sThe session works in its tab%s · %s %s[k]%s keep it open' \
-      "${DIM:-}" "${OFF:-}" "$box" "${BOLD:-}" "${OFF:-}" >&2
-  else
-    printf '\r\033[2K\033[?25l  %sThe session works in its tab%s' "${DIM:-}" "${OFF:-}" >&2
-  fi
+  printf '\r\033[2K\033[?7l\033[?25l  %sThe session works in its tab%s%s\033[?7h' \
+    "${DIM:-}" "${OFF:-}" "$(session_keys_tail)" >&2
 }
 
 # One tick of the tab wait: <key> pressed, or empty. Returns 0 when the key
@@ -389,25 +419,21 @@ session_keys_line() {
 session_keys() {
   local key="${1:-}" pid="$2" ctl word now
   [[ -n "$key" ]] || return 1
-  session_key_has "$key" || return 1
+  # Another key cancels one pressed once: its yellow goes from the status line.
+  session_key_has "$key" || { SESSION_KEYS_ARMED=""; return 1; }
   ctl="$(session_ctl_file "$SESSION_KEYS_ID")"
   now="$(date +%s)"
   if [[ "$SESSION_KEYS_ARMED" != "$key" ]] || (( now - SESSION_KEYS_AT > 5 )); then
+    # Said on the status line (session_keys_tail), for five seconds.
     SESSION_KEYS_ARMED="$key"
     SESSION_KEYS_AT="$now"
-    session_keys_say "Press $key again — $(session_key_words "$key")."
     return 0
   fi
   SESSION_KEYS_ARMED=""
   if [[ "$key" == k ]]; then
     local keep; keep="$(session_keep_file "$SESSION_KEYS_ID")"
-    if [[ -e "$keep" ]]; then
-      rm -f "$keep"
-      session_keys_say "[k] off: the session closes by itself once its work is done."
-    else
-      : > "$keep"
-      session_keys_say "[k] on: the session stays open after its work is done; leave it with /exit."
-    fi
+    # Its box on the status line says it (session_keys_tail).
+    if [[ -e "$keep" ]]; then rm -f "$keep"; else : > "$keep"; fi
     return 0
   fi
   case "$key" in
@@ -549,8 +575,12 @@ claude_launch_once() {
   pid="$(cat "$dir/pid")"
   SCLAUDE_IN_PANE=1
 
-  info "   claude is running in a new tab ($title)."
-  info "   Ctrl-C here ends that session, the same as /exit there."
+  # And which conversation: a review round may go on in the one that fixed
+  # the last round's findings or start afresh, and the heading above says
+  # it only for a resume with something new to tell.
+  local which="new session" arg
+  for arg in "$@"; do [[ "$arg" == --resume ]] && { which="same session, resumed"; break; }; done
+  info "   claude is running in a new tab ($title) · $which."
   # Left here, Ctrl-C would end sclaude and leave the session running with
   # nobody to carry on after it: no next step, no friction review. It ends the
   # session instead, and sclaude goes on as after an /exit. A sclaude tab

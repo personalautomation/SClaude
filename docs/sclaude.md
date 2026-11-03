@@ -831,9 +831,14 @@ Chrome resolves `*.localhost` by itself, but Node asks the system resolver,
 and a stock WSL Ubuntu answers ENOTFOUND. The suite then has to answer those
 names itself, in a test fixture.
 
-Every step starts by printing the address — `Open it at
-http://<feature>.localhost:3000` under the step's header — and the feature's
-menu shows it beside the dev server's state.
+Every step starts by printing the address under the step's header. Where
+the proxy's page can list the feature's users — through the proxy, with
+`devLogin` in the project's config and a local database of the feature's own
+(`dev_users_address`) — it is that page, each user a sign-in without a
+password (`Sign in as any user: http://<feature>.localhost:3000/__sclaude/users`);
+otherwise `Open it at` the feature's address (`http://<feature>.localhost:3000`
+through the proxy, `http://localhost:<port>` without it). The feature's menu
+shows it beside the dev server's state.
 
 A port found held by a process from another directory is not ours to take back:
 the feature moves to another port and says so, rather than offering to kill
@@ -1284,8 +1289,8 @@ failing has a reason the person must see), the 1-3 choice after the search
 ended is "check the fixes", and what is open goes back to a review session
 — `REVIEW_GO_ON_ROUNDS` (30) times a step 4 (`steps.review.go_on_rounds`,
 `review_go_on_round`, counted afresh each step 4 and on a press of `g`), then
-it is off for that step 4 and the person is asked, a session sclaude closed
-included: rounds that never
+it is off for that step 4 and the person is asked "Back to a review session
+for it?", a session sclaude closed included: rounds that never
 converge would otherwise go on paying all night. Before each retry of a failed
 pass it waits `REVIEW_GO_ON_PAUSE` (60s) times the retry's number, so a
 failure that lasts — a usage limit, the network — does not spend the retries
@@ -1399,7 +1404,9 @@ on it are other processes, or come after a code reload:
   it meanwhile, which takes the marker off as any resume does.
 
 Every key is pressed twice within five seconds, and `n` and `N` are two
-different keys. `n`, `N`, `R` and `k` need a live watcher.
+different keys. The first press is said in yellow on the status line
+(`session_keys_tail`), not as a line of its own, and another key takes it
+off; so is `k`'s box, which turns green when ticked. `n`, `N`, `R` and `k` need a live watcher.
 `session_watch_start` marks one with `$TMPDIR/sclaude-watch-<session>`
 (`session_watched_file`), which holds its kind and its pid. The watcher takes
 the mark off when it closes the session itself, and a mark whose pid is gone
@@ -1437,15 +1444,23 @@ with the new findings and nothing else.
 **Rounds that stop converging are said, once.** The report after each round
 ends on a verdict from the findings per round. When it says "Not converging"
 over four rounds or more (`stuck` in `review_report.py`), the next fresh
-session is preceded by a warning that names the keys ending the search — `s`
-while a review pass runs, ⏭ on the feature's topic (`review_stuck_say`). Said,
-not asked: whether the rounds wait for somebody is `[g]`'s to say. With it
-ticked, a session the orchestrator closed goes back to a review session by
-itself (`review_reopen`); without it, sclaude asks "Back to a review session
-for it?" first, whoever closed the session (`review_close_gate`), and a yes
-takes the same way. It once went back unasked whatever the box said, and one
-two-line change took fifteen rounds that way through a morning, the box
-unticked and its line promising a question. On one
+session is preceded by a warning in the feature's topic that names the keys
+ending the search — `s` while a review pass runs, ⏭ on the topic
+(`review_stuck_say`); the terminal has the verdict in red under the report and
+`[s]` on every status line of the review, and is not told again. Said,
+not asked: what is open goes back to a review session unasked once the last
+one closed itself, or with `[g]` ticked (`review_close_gate`; a session the
+orchestrator closed by `review_reopen`), and the person ends the rounds with
+the review's keys — `s` or ⏭ for the search, `n`/`r` in sclaude's tab at
+once. A session the person left (`/exit`, Ctrl-C in sclaude's tab;
+`SESSION_EXITED`) with `[g]` off holds the rounds there: the step stays
+open until the next `sclaude <feature>`. Sent back unasked, it reopened the
+same conversation within seconds when it had committed nothing. A question here
+("Back to a review session for it?") once held the rounds until somebody
+came to answer it, though the keys already said everything it asked; it is
+left only at `[g]`'s ceiling below. Before the keys, one two-line change took
+fifteen rounds unasked through a morning, the box unticked and its line
+promising a question; the status line now says what each key does. On one
 pull request the verdict said "Not converging" eighteen rounds in a row, each
 followed by a fresh session, until the person stopped it by hand. The same
 warning follows "the fixes are feeding the review" said two rounds running,
@@ -1468,7 +1483,7 @@ one, the merged one's rounds, whose threads the report no longer reads, showed
 as rounds that found nothing, and the new pull request's first findings were
 taken for a review that stopped converging.
 
-**Leaving step 4's session does not close it on its own.** After the session exits, the step closes only once the automatic review has finished with the pushed head and left nothing open: no check running or red (the findings check among them) and no unresolved review thread (`pr_context.py --close`). Otherwise sclaude waits for a running review, says what is open, and offers the session back; closing anyway is a second, explicit answer.
+**Leaving step 4's session does not close it on its own.** After the session exits, the step closes only once the automatic review has finished with the pushed head and left nothing open: no check running or red (the findings check among them) and no unresolved review thread (`pr_context.py --close`). Otherwise sclaude waits for a running review and sends what is open back to a review session, unasked; a session the person left themselves with `[g]` off holds the step open instead, and the question — back to a session, then closing anyway — is left only at `[g]`'s ceiling. Two questions of the review on this machine stay: the 1-3 choice once the person ended the search (check the fixes, close, leave it), and "Go on with this head unreviewed?" after a pass that did not run. `[g]` answers the first itself, and takes the second's place for `REVIEW_GO_ON_RETRIES` (ten) retries with growing pauses, then asks it.
 
 **Every commit a step's session makes names it.** sclaude launches claude with `core.hooksPath` pointed at `sclaude/githooks` through `GIT_CONFIG_*` in that process's environment only; its `commit-msg` adds `Sclaude-Session: <id>` — the id the issue's table and `claude --resume` use — at the end of the trailer block, and every hook there then runs the project's own hook of the same name. A row in the issue finds its commits with `git log --grep=<id>`. Commits made by hand are untouched.
 

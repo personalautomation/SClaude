@@ -551,13 +551,14 @@ date.
 
 **Closing a session from sclaude's terminal.** Under Windows Terminal in WSL a
 session runs in a tab of its own, and while it works the tab sclaude waits in
-takes keys of its own; they are listed under the line that says the session
-started. Every session sclaude starts closes by itself once its work is done;
+takes keys of its own; they are listed, a word each, on one line under the
+line that says the session started, and `k` is a box on the status line. Every session sclaude starts closes by itself once its work is done;
 these give you the word instead, and change nothing else: going forward is
 the session's own end, going again is your `/exit`. The letter says which, the
 case says when — lower case goes on now, upper case stops sclaude until the
 next `sclaude <feature>`. Every key is pressed twice in a row, so a stray one
-does nothing:
+does nothing: the first press shows the key and what it does in yellow on the
+status line, and the second press or any other key clears it:
 
 | key | what happens |
 |---|---|
@@ -611,9 +612,14 @@ and the issue's demo comment is replaced: step 2's demo is for you accepting
 the work, this one for QA to see what the feature is and what changed. Only
 where a person does QA (`qa: github` or `both`); with `qa: auto` the whole demo
 is recorded again before the last epilogue instead, and no delta. When the
-report says the rounds stopped converging, or that the fixes are feeding the review two rounds running, sclaude says so once and names the
-keys that end the search for new findings; once you end it, one question with
-three answers settles the rest: check the fixes, close the step, or leave it.
+report says the rounds stopped converging, or that the fixes are feeding the review two rounds running, its verdict is red, and the
+feature's topic is told once, with the keys that end the search for new findings. What a round leaves open goes back
+to a review session without a question: `s` (⏭ on the topic) is how the rounds
+end, `n` and `r` in sclaude's tab act at once. Leaving the session yourself
+(`/exit`) stops them there, unless `[g]` is ticked: the step stays open until
+the next `sclaude <feature>`. Once you end the search, one
+question with three answers settles the rest: check the fixes, close the step,
+or leave it.
 
 With the review on this machine, its status line shows two boxes while a pass
 runs, ticked until they apply: `[s]` makes the pass the last that looks for
@@ -946,7 +952,7 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   records, the review log and the issues' acceptance criteria. It is rebuilt in the background whenever `sclaude` starts in
   the product and the page is over six hours old (`SCLAUDE_DORA_EVERY`, in
   seconds), and at once when a feature is finished; an open tab reloads
-  itself hourly. Every step's header prints it under "Open it at",
+  itself hourly. Every step's header prints it under the feature's address,
   and in the Telegram Mini App it is "🗺 Process map" in a feature's actions and
   on its card, which starts the feature's dev server too (and gives it one
   first when it has never had one).

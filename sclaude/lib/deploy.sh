@@ -1509,7 +1509,7 @@ qa_wait() {
     keys=""
     [[ "$mode" == both ]] && column_is "$now" "$QA_TO" && keys=", a accepts here"
     if [[ -t 1 ]]; then
-      printf '\r\033[2K  %sHuman in the loop%s — waiting for QA (%s so far, next check in %ss, any key checks now%s)' \
+      printf '\r\033[2K\033[?7l  %sHuman in the loop%s — waiting for QA (%s so far, next check in %ss, any key checks now%s)\033[?7h' \
         "$DIM" "$OFF" "$(regression_duration "$waited")" "$QA_POLL" "$keys"
     elif [[ $((waited - logged)) -ge 300 || "$waited" -eq 0 ]]; then
       # Without a terminal, a line every five minutes: this ends up in a log
@@ -1593,7 +1593,7 @@ merge_wait() {
       return 2
     fi
     if [[ -t 1 ]]; then
-      printf '\r\033[2K  %sHuman in the loop%s — waiting for the merge (%s so far, next check in %ss, any key checks now%s)' \
+      printf '\r\033[2K\033[?7l  %sHuman in the loop%s — waiting for the merge (%s so far, next check in %ss, any key checks now%s)\033[?7h' \
         "$DIM" "$OFF" "$(regression_duration "$waited")" "$MERGE_POLL" "$keys"
     elif [[ $((waited - logged)) -ge 300 || "$waited" -eq 0 ]]; then
       info "  waiting for the merge of PR #$pr${issue:+ (issue #$issue)} ($(regression_duration "$waited"))"

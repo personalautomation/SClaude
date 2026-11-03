@@ -6,7 +6,7 @@
 # it at the close of every review round, where the person decides whether the
 # feature goes on being fixed.
 #
-#   review_report.py <worktree> <pr> <repo> [branch] [feature] [review-context.log]
+#   review_report.py <worktree> <pr> <repo> [branch] [feature]
 #
 # What it measures is what reviews and test campaigns are usually judged by:
 #
@@ -18,10 +18,9 @@
 #     noise;
 #   * fix-induced findings — new findings on lines an earlier round's fix
 #     touched (imperfect debugging: a fix that brings the next finding with
-#     it), and the reversals the sessions declined (review-reversals). Both
-#     growing means the fixes are feeding the review;
+#     it). Growing, it means the fixes are feeding the review;
 #   * what it costs — the review sessions' spend as the status line reports it
-#     (run_cost), their time, and the automatic review's own runs;
+#     (run_cost), and their time;
 #   * findings raised again after a decline — a finding that repeats one the
 #     author closed without a fix: near it in the same file, or cited by the
 #     reply that declined it again ("as on r<id>", sclaude/prompts/review.md).
@@ -98,8 +97,47 @@ ROUND_GAP = datetime.timedelta(minutes=10)
 DISCUSSION = re.compile(r"discussion_r(\d+)")
 CITED = re.compile(r"(?:discussion_|\b)r(\d{6,})\b")
 
-# The per-run chain is cut to its two ends past this many runs.
-CHAIN_MAX = 30
+# Colour on a terminal only: the report is also read back by tests and sent
+# nowhere else in colour. NO_COLOR is honoured, as everywhere.
+COLOUR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+
+def paint(text, code):
+    return "\033[%sm%s\033[0m" % (code, text) if COLOUR and code else text
+
+
+GREEN, YELLOW, RED, BOLD, DIM = "32", "33", "31", "1", "2"
+
+
+def rule(title):
+    """A section's heading, as sclaude's other sections are drawn."""
+    return paint("── %s %s" % (title, "─" * max(3, 56 - len(title))), BOLD)
+
+
+def row(cells, open_col=8, fixed_col=6, base="", rnd=""):
+    """A table row, its open findings red and its fixes green once padded:
+    the colour codes would otherwise count in the widths. <base> colours the
+    rest of the row, cell by cell, so that red and green keep theirs."""
+    out = [paint("%-5s" % rnd, base) if base and rnd else "%-5s" % rnd]
+    fmt = ("%-7s", "%-11s", "%6s", "%6s", "%4s", "%5s", "%5s", "%6s", "%4s", "%8s", "%7s")
+    for i, (f, c) in enumerate(zip(fmt, cells)):
+        text = f % c
+        if i == open_col and isinstance(c, int) and c:
+            text = paint(text, RED)
+        elif i == fixed_col and isinstance(c, int) and c:
+            text = paint(text, GREEN)
+        elif base and text.strip():
+            text = paint(text, base)
+        out.append(text)
+    return ("  " + " ".join(out)).rstrip()
+
+
+def verdict_colour(said):
+    if said.startswith("Not converging") or FEEDING in said:
+        return RED
+    if said.startswith("Converging slowly") or said.startswith("Too few"):
+        return YELLOW
+    return GREEN
 
 
 def parse(ts):
@@ -360,11 +398,10 @@ def pct(part, whole):
     return "%d%%" % round(100.0 * part / whole) if whole else "-"
 
 
-def chain(per_round):
-    words = [str(n) for n in per_round]
-    if len(words) > CHAIN_MAX:
-        words = words[:5] + ["…"] + words[-(CHAIN_MAX - 5):]
-    return " ".join(words)
+# The verdict's moving average: the mean of the last TAIL_ROUNDS rounds,
+# against the mean of the last WINDOW_ROUNDS (fewer while there are fewer).
+TAIL_ROUNDS = 2
+WINDOW_ROUNDS = 5
 
 
 # The verdict's sentence for a last round whose findings sit mostly on earlier
@@ -381,15 +418,20 @@ def verdict(per_round, acted, near_last, last_found, open_now):
     if len(per_round) < 3:
         words.append("Too few rounds for a trend.")
     else:
-        # Two rounds at each end, three once there are enough to spare.
-        k = 3 if len(per_round) >= 8 else 2
-        head = sum(per_round[:k]) / float(k)
-        tail = sum(per_round[-k:]) / float(k)
-        if per_round[-1] > per_round[-2] >= per_round[-3]:
+        # A moving average: the last TAIL_ROUNDS rounds against the last
+        # WINDOW_ROUNDS. Compared with the first rounds instead, the verdict
+        # stayed "converging" while the findings rose again from 1 to 5: a
+        # first pass over the whole pull request finds the most, and any
+        # later stretch looks small beside it.
+        tail = sum(per_round[-TAIL_ROUNDS:]) / float(TAIL_ROUNDS)
+        window = per_round[-WINDOW_ROUNDS:]
+        mean = sum(window) / float(len(window))
+        if tail > mean:
             words.append("Not converging: findings per round are climbing.")
-        elif tail <= head * 0.5:
-            words.append("Converging: the last rounds found half or less of the first.")
-        elif tail < head:
+        elif tail <= mean * 0.5:
+            words.append("Converging: the last %d rounds found half or less of the last %d's average."
+                         % (TAIL_ROUNDS, len(window)))
+        elif tail < mean:
             words.append("Converging slowly.")
         else:
             words.append("Not converging: findings per round hold level.")
@@ -437,11 +479,11 @@ def brief(pr, session, verdict_line):
 
 def main():
     if len(sys.argv) < 4:
-        print("usage: review_report.py <worktree> <pr> <repo> [branch] [feature] [log]",
+        print("usage: review_report.py <worktree> <pr> <repo> [branch] [feature]",
               file=sys.stderr)
         return 2
     cwd, pr, repo = sys.argv[1:4]
-    branch, slug, log = (sys.argv[4:7] + ["", "", ""])[:3]
+    branch = (sys.argv[4:5] + [""])[0]
 
     # By the project's mode, as the summary for QA decides (pr_handoff.py),
     # not by whether a journal is left over from an earlier mode.
@@ -450,13 +492,34 @@ def main():
     bot = (local_runs(cwd, since) or []) if local else None
     found = threads(cwd, pr, repo)
     threads_failed = found is None
-    print("Review report — PR #%s%s" % (pr, ", reviewed on this machine" if local else ""))
     if found is None:
-        print("  The review threads could not be read (gh, network or permissions).")
         found = []
     if not local:
         bot = review_runs(cwd, branch, since)
     groups = rounds(found, bot)
+    # What the report shows, for step 4's gate (review_close_gate): a report
+    # showing the open findings and the rounds the terminal was last shown,
+    # on the same head, is not printed or sent again. The open findings by
+    # their threads, not their count — one resolved and another posted is
+    # the same count; the rounds, finished and running — a run that ended
+    # with nothing new still changes the table, the topic's numbers and the
+    # verdict.
+    shown = None if threads_failed else "open:%s rounds:%d/%d" % (
+        ",".join(sorted(str(t["id"]) for t in found if t["fate"] == "open")),
+        sum(1 for g in groups if not g["running"]), len(groups))
+    if shown is not None and os.environ.get(UNLESS_ENV) == shown:
+        return 0
+    path = os.environ.get(OPEN_ENV, "")
+    if path and shown is not None:
+        try:
+            with open(path, "w") as fh:
+                fh.write(shown)
+        except OSError:
+            pass
+    print("")
+    print(rule("Review report · PR #%s%s" % (pr, " · reviewed on this machine" if local else "")))
+    if threads_failed:
+        print("  The review threads could not be read (gh, network or permissions).")
     mark_near_fixes(found)
     mark_repeats(found)
     people = sessions(cwd, since)
@@ -471,121 +534,102 @@ def main():
     columns = []
 
     if groups:
+        table = []
         print("")
-        print("  %-7s %-11s %6s %6s %4s %5s %5s %6s %4s %8s %7s" % (
-            "session", "started", "time", "cost", "runs", "found", "fixed", "no fix", "open",
-            "on fixes", "repeats"))
+        print(paint("  %-5s %-7s %-11s %6s %6s %4s %5s %5s %6s %4s %8s %7s" % (
+            "round", "session", "started", "time", "cost", "runs", "found", "fixed", "no fix", "open",
+            "on fixes", "repeats"), DIM))
         for label, s, gs in by_session(groups, people):
             ts = [t for g in gs for t in g["threads"]]
             values = (len(gs), len(ts), count(ts, "fixed"), count(ts, "no fix"),
                       count(ts, "open"), sum(1 for t in ts if t["near_fix"]),
                       sum(1 for t in ts if t["repeat"]))
             columns.append((label, dict(zip(BRIEF_ROWS, values))))
-            print("  %-7s %-11s %6s %6s %4d %5d %5d %6d %4d %8d %7d" % ((
-                label,
-                s["start"].astimezone().strftime("%m-%d %H:%M") if s and s["start"] else "",
-                hours(s["seconds"]) if s and s["seconds"] else "",
-                "$%.2f" % sum(s["costs"]) if s and s["costs"] else "") + values))
-            # A session that went several rounds, a row each under it: what
-            # each review run found and what became of it. One row for all of
-            # them only grew. The cost is the launch's when the session was
-            # launched once a round — resumed for each, as a fix session is.
-            # Its time runs from its review run to the next one, the last
-            # to the session's end.
-            if s is not None and len(gs) > 1:
-                costs = s["costs"] if len(s["costs"]) == len(gs) else []
-                end = (s["start"] + datetime.timedelta(seconds=s["seconds"])
-                       if s["start"] and s["seconds"] else None)
-                for j, g in enumerate(gs, start=1):
-                    rt = g["threads"]
-                    until = gs[j]["at"] if j < len(gs) else end
-                    took = (until - g["at"]).total_seconds() if g["at"] and until and until > g["at"] else 0
-                    print("  %-7s %-11s %6s %6s %4d %5d %5d %6d %4d %8d %7d" % (
-                        "%s.%d" % (label, j),
-                        g["at"].astimezone().strftime("  %H:%M") if g["at"] else "",
-                        hours(took) if took else "", "$%.2f" % costs[j - 1] if costs else "",
-                        1, len(rt), count(rt, "fixed"), count(rt, "no fix"), count(rt, "open"),
-                        sum(1 for t in rt if t["near_fix"]), sum(1 for t in rt if t["repeat"])))
+            # A session that went several rounds has a row per round and none
+            # of its own: the session's row was their sum, read as a round
+            # of its own. Each round's cost is its launch's when the session
+            # was launched once a round — resumed for each, as a fix session
+            # is — and the session's whole on its first round otherwise. The
+            # first round runs from the session's start, each to the next
+            # review run, the last to the session's end: the rows add up to
+            # the session.
+            if s is None or len(gs) <= 1:
+                table.append((
+                    label,
+                    s["start"].astimezone().strftime("%m-%d %H:%M") if s and s["start"] else "",
+                    hours(s["seconds"]) if s and s["seconds"] else "",
+                    "$%.2f" % sum(s["costs"]) if s and s["costs"] else "") + values)
+                continue
+            per = s["costs"] if len(s["costs"]) == len(gs) else []
+            end = (s["start"] + datetime.timedelta(seconds=s["seconds"])
+                   if s["start"] and s["seconds"] else None)
+            for j, g in enumerate(gs, start=1):
+                rt = g["threads"]
+                began = (s["start"] or g["at"]) if j == 1 else g["at"]
+                until = gs[j]["at"] if j < len(gs) else end
+                took = (until - began).total_seconds() if began and until and until > began else 0
+                cost = per[j - 1] if per else (sum(s["costs"]) if j == 1 and s["costs"] else None)
+                table.append((
+                    "%s.%d" % (label, j),
+                    began.astimezone().strftime("%m-%d %H:%M") if began else "",
+                    hours(took) if took else "", "$%.2f" % cost if cost is not None else "",
+                    1, len(rt), count(rt, "fixed"), count(rt, "no fix"), count(rt, "open"),
+                    sum(1 for t in rt if t["near_fix"]), sum(1 for t in rt if t["repeat"])))
+        # The last round that ran is yellow while anything is open: it is
+        # where the review stands, and review_close_gate says no more of it.
+        # A session just opened, with no run yet, is not that round.
+        ran = [i for i, cells in enumerate(table) if cells[4]]
+        last = ran[-1] if ran and opened else None
+        # The review run's number, first: what the verdict and the topic
+        # call a round, which a session's label (2.1, 2.2…) does not count.
+        n = 0
+        for i, cells in enumerate(table):
+            runs = cells[4]
+            rnd = "" if not runs else str(n + 1) if runs == 1 else "%d-%d" % (n + 1, n + runs)
+            n += runs or 0
+            # A session no review run has followed yet — the one fixing now —
+            # has no findings to count: its zeros read as a round that found
+            # nothing. Its time and cost stay, the total counts them.
+            if not cells[4]:
+                cells = cells[:4] + ("",) * (len(cells) - 4)
+            print(row(cells, base=YELLOW + ";" + BOLD, rnd=rnd) if i == last else row(cells, rnd=rnd))
         seconds = sum(s["seconds"] or 0 for s in people)
         costs = [c for s in people for c in s["costs"]]
         values = (len(groups), total, fixed, nofix, opened, near_all, len(repeats))
-        print("  %-7s %-11s %6s %6s %4d %5d %5d %6d %4d %8d %7d" % ((
-            "total", "", hours(seconds) if seconds else "",
-            "$%.2f" % sum(costs) if costs else "") + values))
+        print(row(("total", "", hours(seconds) if seconds else "",
+                   "$%.2f" % sum(costs) if costs else "") + values))
         print("")
-        print("  Findings per review run, oldest first: %s%s" % (
-            chain(per_round), " (one more still running)" if len(done) < len(groups) else ""))
     else:
         print("  No review threads on the pull request.")
 
-    if found:
-        left = sum(1 for t in found if t["left_open"])
-        print("  Fixed: %d (%s). Closed without a fix: %d (%s)%s." % (
-            fixed, pct(fixed, total), nofix, pct(nofix, total),
-            ", %d of them waiting for you to resolve on GitHub" % left if left else ""))
+    # The figures under the table, a line each, and only the ones that say
+    # something: a line of zeros was read every round and meant nothing.
+    unsettled = {t["round"] for t in found if t["fate"] == "open"}
     # The share acted on, over the newest settled findings: an open finding
     # has not been decided yet. Nor has its round: a decline is a reply posted
     # as the finding is read, a fix closes its thread only after the fixing
     # session has run, so a round still being worked settles its declines
     # first, and the report printed as its findings arrive read them as the
     # whole of it ("Fixed: 0", and the verdict below the floor).
-    unsettled = {t["round"] for t in found if t["fate"] == "open"}
     settled = [t for t in found
                if t["fate"] != "open" and t["round"] not in unsettled][-ACTED_ON_SAMPLE:]
     acted = (count(settled, "fixed") / float(len(settled))) if settled else None
-    if acted is not None:
-        print("  Acted on, of the last %d settled findings: %d%%." % (len(settled), round(acted * 100)))
     if found:
-        again = sum(1 for t in repeats if t["fate"] == "no fix")
-        cited = sum(1 for t in repeats if t["cites_declined"])
-        print("  Raised again after a decline: %d finding%s (%d declined again, %d citing the "
-              "earlier thread)." % (len(repeats), "" if len(repeats) == 1 else "s", again, cited))
-
-    # Back and forth.
-    reversals = 0
-    try:
-        with open(os.path.join(cwd, ".sclaude/local/feature/review-reversals")) as fh:
-            reversals = sum(1 for line in fh if line.strip())
-    except OSError:
-        pass
-    reversals += logged_reversals(log, slug) if slug and log else 0
-    if found or reversals:
-        print("  Back and forth: %d finding%s on lines an earlier round fixed; %d declined "
-              "as undoing a settled fix." % (near_all, "" if near_all == 1 else "s", reversals))
-        spots = {}
-        for t in found:
-            spots.setdefault(t["path"], set()).add(t["round"])
-        hot = sorted(((len(r), p) for p, r in spots.items() if len(r) >= 3), reverse=True)[:3]
-        for n, p in hot:
-            print("    %s: findings in %d of %d rounds" % (p, n, len(groups)))
-
-    # What it cost.
-    if people:
-        costs = [c for s in people for c in s["costs"]]
-        priced = [i for i, s in enumerate(people, start=1) if s["costs"]]
-        if costs:
-            # Per fixed finding, over the sessions that have a cost: the
-            # others were not priced, and their fixes would flatter it.
-            fixed_priced = sum(count([t for g in gs for t in g["threads"]], "fixed")
-                               for label, s, gs in by_session(groups, people)
-                               if s is not None and s["costs"])
-            line = "  Cost: $%.2f over %d of %d sessions, last launch $%.2f" % (
-                sum(costs), len(priced), len(people), costs[-1])
-            if fixed_priced:
-                line += ", $%.2f per finding fixed from their runs" % (sum(costs) / fixed_priced)
-            print(line + ".")
-        else:
-            print("  Cost: not recorded for any session.")
-    if bot:
-        print("  %s: %d run%s, %s of %s." % (
-            "Local review" if local else "Automatic review",
-            len(bot), "" if len(bot) == 1 else "s", hours(sum(r["seconds"] for r in bot)),
-            "this machine's time, no Actions minutes" if local else "runner time"))
+        left = sum(1 for t in found if t["left_open"])
+        line = "  Fixed %d of %d (%s) · without a fix %d (%s)" % (
+            fixed, total, pct(fixed, total), nofix, pct(nofix, total))
+        if left:
+            line += ", %d waiting for you to resolve on GitHub" % left
+        if acted is not None:
+            line += " · acted on %d%% of the last %d" % (round(acted * 100), len(settled))
+        if len(done) < len(groups):
+            line += " · one review run still running"
+        print(line)
 
     last = done[-1]["threads"] if done else []
     said = verdict(per_round, acted, sum(1 for t in last if t["near_fix"]), len(last), opened)
     print("")
-    print("  " + said)
+    print("  " + paint(said, verdict_colour(said) + ";" + BOLD))
     path = os.environ.get(BRIEF_ENV, "")
     # Zeros from threads nobody could read are not a status to send.
     if path and not threads_failed:
@@ -622,6 +666,8 @@ def main():
 # told how to stop it. Running, because FEEDING itself reads the last round
 # alone: one finding left, on an earlier fix, says it too.
 STUCK_ENV = "SCLAUDE_REPORT_STUCK"
+OPEN_ENV = "SCLAUDE_REPORT_OPEN"
+UNLESS_ENV = "SCLAUDE_REPORT_UNLESS"
 STUCK_ROUNDS = 4
 FEEDING_ROUNDS = 2
 
@@ -641,21 +687,6 @@ def feeding_streak(rounds):
             break
         streak += 1
     return streak
-
-
-def logged_reversals(log, slug):
-    """Reversals already counted into the main tree's review-context.log for
-    this feature: review_context_log empties review-reversals as it counts."""
-    total = 0
-    try:
-        with open(log) as fh:
-            for line in fh:
-                parts = line.rstrip("\n").split("\t")
-                if len(parts) >= 11 and parts[1] == slug and parts[10].isdigit():
-                    total += int(parts[10])
-    except (OSError, TypeError):
-        pass
-    return total
 
 
 if __name__ == "__main__":

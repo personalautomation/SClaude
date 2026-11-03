@@ -108,12 +108,6 @@ with tempfile.TemporaryDirectory() as wt:
         ]}}}, fh)
     with open(os.path.join(feature, "review-yours"), "w") as fh:
         fh.write("%s\tleave it\n" % URL(10))
-    with open(os.path.join(feature, "review-reversals"), "w") as fh:
-        fh.write("%s\twould undo abc\n" % URL(9))
-    log = os.path.join(wt, "review-context.log")
-    with open(log, "w") as fh:
-        fh.write("t\tx\ts1\tfresh session\t1\t1\t1\t1\t1\t4\t2\n")
-        fh.write("t\tother\ts9\tdone\t1\t1\t1\t1\t1\t4\t5\n")
 
     # --- classification ------------------------------------------------------
     found = review_report.threads(wt, "7", "o/r")
@@ -137,7 +131,6 @@ with tempfile.TemporaryDirectory() as wt:
     check("by-session", [(label, len(gs)) for label, _, gs in
                          review_report.by_session(groups, review_report.sessions(wt))],
           [("1", 2), ("2", 2)])
-    check("reversals-of-this-feature-only", review_report.logged_reversals(log, "x"), 2)
 
     # A run left without an end in the middle — a session that never started —
     # is not counted until now; only the last run can still be going.
@@ -187,7 +180,7 @@ with tempfile.TemporaryDirectory() as wt:
     check("other-session-untouched", "costs" in runs[0], False)
 
     # --- the printed report --------------------------------------------------
-    sys.argv = ["review_report.py", wt, "7", "o/r", "feat", "x", log]
+    sys.argv = ["review_report.py", wt, "7", "o/r", "feat"]
     out = io.StringIO()
     brief_file = os.path.join(wt, "brief.txt")
     os.environ[review_report.BRIEF_ENV] = brief_file
@@ -204,17 +197,35 @@ with tempfile.TemporaryDirectory() as wt:
     check("brief-title", lines[0], "Review — PR 7, session 2")
     check("brief-before", review_report.brief(7, ("before", dict.fromkeys(
         review_report.BRIEF_ROWS, 1)), "").splitlines()[0], "Review — PR 7, before the sessions")
-    row2 = [l.split() for l in text.splitlines() if l.split()[:1] == ["2"]][0][-7:]
-    check("brief-is-the-newest-row", lines[1],
-          " · ".join("%s %s" % (m, n) for m, n in zip(review_report.BRIEF_ROWS, row2)))
-    # A session of several rounds gets a row for each under it: what each
-    # review run found, and the time to the next. One row for a session of
-    # many rounds only ever grew.
-    subrows = {l.split()[0]: l.split() for l in text.splitlines()
-               if re.match(r"^  \d+\.\d+ ", l)}
+    # A session of several rounds gets a row for each and none of its own:
+    # what each review run found, and the time to the next. Its sum, as a row
+    # of its own, read as one more round.
+    # Each row opens on its review run's number, then the session's label.
+    subrows = {l.split()[1]: l.split() for l in text.splitlines()
+               if re.match(r"^  \S+\s+\d+\.\d+ ", l)}
+
+    def session_sum(n):
+        rows = [r[-7:] for k, r in sorted(subrows.items()) if k.split(".")[0] == n]
+        return [str(sum(int(r[i]) for r in rows)) for i in range(7)]
+    check("no-row-of-a-session-of-rounds",
+          [l for l in text.splitlines() if l.split()[1:2] in (["1"], ["2"])], [])
+    check("rounds-numbered-first", [subrows[k][0] for k in ("1.1", "1.2", "2.1", "2.2")],
+          ["1", "2", "3", "4"])
+    # The topic still hears the session's sum.
+    check("brief-is-the-newest-session", lines[1],
+          " · ".join("%s %s" % (m, n) for m, n in zip(review_report.BRIEF_ROWS, session_sum("2"))))
     check("a-row-per-round", sorted(subrows), ["1.1", "1.2", "2.1", "2.2"])
     check("each-round-its-findings", [subrows[k][-6] for k in ("1.1", "1.2", "2.1", "2.2")],
           ["4", "3", "3", "0"])
+    check("a-session-with-no-run-is-blank",
+          review_report.row(("3", "", "5m", "$1.00", "", "", "", "", "", "", "")).split(), ["3", "5m", "$1.00"])
+    review_report.COLOUR = True
+    try:
+        lit = review_report.row(("6", "", "", "", 1, 5, 2, 0, 3, 0, 0), base=review_report.YELLOW)
+    finally:
+        review_report.COLOUR = False
+    check("last-round-yellow-keeps-red-open-and-green-fixed",
+          ("\033[31m   3" in lit, "\033[32m    2" in lit, "\033[33m6" in lit), (True, True, True))
     check_true = lambda name, ok: check(name, bool(ok), True)
     # Threads that could not be read give no status: its zeros would tell
     # the phone a review with open findings is clean.
@@ -234,24 +245,40 @@ with tempfile.TemporaryDirectory() as wt:
           review_report.newest([("1", dict(zeros, runs=2)), ("2", zeros)])[0], "1")
     check("brief-nothing-run", review_report.newest([("1", zeros)]), None)
     check_true("brief-verdict", "Converging slowly." in brief)
-    check("per-run", "Findings per review run, oldest first: 4 3 3 (one more still running)" in text, True)
+    # What was last shown — the open findings and the rounds — the same
+    # again: nothing printed or sent.
+    shown_file = os.path.join(wt, "shown.txt")
+    os.environ[review_report.OPEN_ENV] = shown_file
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            review_report.main()
+    finally:
+        del os.environ[review_report.OPEN_ENV]
+    with open(shown_file) as fh:
+        shown = fh.read()
+    check("shown-names-the-open-threads-and-rounds", shown.startswith("open:") and " rounds:" in shown and not shown.startswith("open: "), True)
+    for unless, printed in ((shown, False), ("open:other", True)):
+        os.environ[review_report.UNLESS_ENV] = unless
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                review_report.main()
+        finally:
+            del os.environ[review_report.UNLESS_ENV]
+        check("unless-%s" % ("same" if not printed else "other"), bool(out.getvalue()), printed)
+    check("still-running", "one review run still running" in text, True)
     check("closed-without-fix",
-          "Fixed: 5 (50%). Closed without a fix: 3 (30%), 1 of them waiting for you" in text, True)
+          "Fixed 5 of 10 (50%) · without a fix 3 (30%), 1 waiting for you to resolve on GitHub" in text, True)
     # The last round still has open findings: its decline is left out until
     # its fixes have had their chance (5 of 7, not 5 of 8).
-    check("acted-on", "Acted on, of the last 7 settled findings: 71%." in text, True)
-    check("raised-again",
-          "Raised again after a decline: 2 findings (2 declined again, 1 citing the earlier thread)."
-          in text, True)
-    check("back-and-forth",
-          "Back and forth: 4 findings on lines an earlier round fixed; 3 declined" in text, True)
-    check("hot-file", "a.py: findings in 3 of 4 rounds" in text, True)
-    check("cost", "Cost: $4.50 over 1 of 2 sessions, last launch $1.00." in text, True)
-    check("bot-runs", "Automatic review: 4 runs, 41m of runner time." in text, True)
+    check("acted-on", "acted on 71% of the last 7" in text, True)
+    # What the table shows already is not said again under it.
+    check("table-not-repeated",
+          [w for w in ("Back and forth", "Hot files", "Cost", "runner time") if w in text], [])
+    check("no-colour-off-a-terminal", "\033[" in text, False)
     # Session 1: the runs at 08:58 and 09:58 — seven findings, five fixed,
     # two declined, two on fixes, one raised again after a decline.
-    row = [l.split() for l in text.splitlines() if l.split()[:1] == ["1"]]
-    check("session-row", row and row[0][-7:], ["2", "7", "5", "2", "0", "2", "1"])
+    check("session-row", session_sum("1"), ["2", "7", "5", "2", "0", "2", "1"])
     check("trend", "Converging slowly." in text, True)
     check("fixes-feed-the-review", "the fixes are feeding the review" in text, True)
 
@@ -288,7 +315,10 @@ v = review_report.verdict
 check("climbing", v([3, 4, 6], 0.9, 0, 6, 6).startswith("Not converging: findings per round are climbing"), True)
 check("level", v([4, 4, 4], 0.9, 0, 4, 4).startswith("Not converging: findings per round hold level"), True)
 check("converging", v([8, 6, 2, 1], 0.9, 0, 1, 0),
-      "Converging: the last rounds found half or less of the first. Nothing is open.")
+      "Converging: the last 2 rounds found half or less of the last 4's average. Nothing is open.")
+# Rising again after a low: the first rounds' many findings do not hide it.
+check("rising-after-a-low", v([8, 13, 8, 5, 2, 3, 1, 2, 5, 5], 0.9, 0, 5, 5)
+      .startswith("Not converging: findings per round are climbing"), True)
 check("noise", "mostly asking for what nobody fixes" in v([2, 1, 1], 0.3, 0, 1, 1), True)
 check("early", v([5], None, 0, 5, 5), "Too few rounds for a trend.")
 
@@ -297,9 +327,12 @@ with open(os.path.join(LIB, "run.sh")) as fh:
     RUN = fh.read()
 with open(os.path.join(ROOT, "bin", "sclaude")) as fh:
     BIN = fh.read()
-# Four for the rounds of the review on GitHub, and one more where the review
-# on this machine finds something after a session (review_close_gate).
-check("printed-at-every-round-close", RUN.count('review_report "$wt" "$slug"'), 5)
+# Four for the rounds of the review on GitHub, one where the review on this
+# machine finds something after a session (review_close_gate), and one where
+# it finds something on the way into step 4, before the first session, and
+# one where the gate finds what is open with no report on this head printed
+# (review_close_gate).
+check("printed-at-every-round-close", RUN.count('review_report "$wt" "$slug"'), 7)
 check("cost-taken-at-session-end", '[[ "$step" == "review" ]] && run_cost "$wt" "$session"' in RUN, True)
 with open(os.path.join(ROOT, "sclaude", "prompts", "review.md")) as fh:
     check("prompt-cites-declines", "`as on r<id>`" in fh.read(), True)

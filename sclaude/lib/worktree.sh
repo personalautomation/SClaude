@@ -407,6 +407,31 @@ dev_address() {
   feature_url "$wt"
 }
 
+# The proxy's page that lists the feature's users, each a sign-in without a
+# password (users_page in bin/sclaude-proxy), when it can list them: through
+# the proxy, at the feature's own address, with devLogin in the project's
+# config and a local database of the feature's own (supabase in
+# sclaude/lib/dev_login.py, which reads files only). Nothing otherwise: the
+# page answered 409 or "No such feature" where the header sent the person.
+#
+#   dev_users_address <worktree>
+dev_users_address() {
+  local wt="$1" addr
+  [[ -z "$DEV_PORT_PINNED" ]] && proxy_up || return 1
+  addr="$(feature_url "$wt")"
+  [[ "$addr" != "http://localhost:$PROXY_PORT" ]] || return 1
+  python3 - "$LIB" "$wt" 2>/dev/null <<'PY' || return 1
+import sys
+sys.path.insert(0, sys.argv[1])
+import dev_login
+try:
+    sys.exit(0 if dev_login.supabase(sys.argv[2])[3] else 1)
+except Exception:
+    sys.exit(1)
+PY
+  echo "$addr/__sclaude/users"
+}
+
 # The feature's process map on the proxy (sclaude/lib/process.py): where it
 # stands in the cycle, lit, and what can be done with it now. Nothing when
 # the proxy is not up or the feature has no label yet: the map is the
@@ -511,7 +536,8 @@ ensure_dev() {
       # at start-up, and leaving it means looking into the old database through a
       # page that looks correct.
       if [[ "$switched" -eq 0 ]]; then
-        info "  dev server: already running from here ($(dev_address "$wt"))"
+        # Nothing said: a server already up is the usual case, and its
+        # address is the step's header's. Starting or restarting one is said.
         return 0
       fi
       info "  dev server: restarting — it was started on the old environment"

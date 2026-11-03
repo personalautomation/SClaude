@@ -104,9 +104,7 @@ try:
         review_report.main()
     out = buf.getvalue()
     check_true("report-says-local", "reviewed on this machine" in out)
-    check_true("report-per-round", "oldest first: 2 1 1" in out)
-    check_true("report-local-runs", "Local review: 3 runs" in out and "no Actions minutes" in out)
-    check_true("report-fates", "Fixed: 2 (50%). Closed without a fix: 1 (25%)" in out)
+    check_true("report-fates", "Fixed 2 of 4 (50%) · without a fix 1 (25%)" in out)
 
     # Switched back to the workflow: a journal left from the local rounds is
     # not read, the workflow's runs are.

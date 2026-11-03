@@ -190,26 +190,19 @@ local_review_run() {
   local verify=""
   [[ -n "$(review_enough "$wt")" ]] && verify=1
   command -v claude >/dev/null 2>&1 || { warn "  No claude on this machine: the local review did not run." >&2; return 1; }
+  # The headings are printed past info: a line of info that is not indented
+  # goes to the feature's topic, which hears of the pass by its own phase
+  # line (ask_feed below).
+  # A heading alone: the keys are on the pass's status line below it, ticked
+  # as they are pressed. Their full story was nine lines every pass, read
+  # once and then scrolled past the report the person came for; a line of
+  # them above the status line said the same twice.
+  echo "" >&2
   if [[ -n "$verify" ]]; then
-    info "  Checking the fixes on PR #${pr:-?} ($LOCAL_REVIEW_MODEL): ${base:0:7}..${head:0:7}." >&2
-    info "  You ended the search for new findings, so this only resolves the ones the commits fixed." >&2
-    if keys_usable; then
-      info "  To step in, press a key while it runs — no Enter, nothing shows; the box stays ticked until it applies:" >&2
-      info "    $(review_go_box "$wt") [g]  go on by itself: no question after this review (g goes round auto → on → off)" >&2
-    fi
+    printf '%s\n' "${BOLD}── Checking the fixes · PR #${pr:-?} · $LOCAL_REVIEW_MODEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
+    info "  You ended the search for new findings: this only resolves what the commits fixed." >&2
   else
-    info "  Reviewing PR #${pr:-?} on this machine ($LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL): ${base:0:7}..${head:0:7}." >&2
-    info "  It takes minutes; Ctrl-C leaves, and the next \`$SELF\` starts it again." >&2
-    if keys_usable; then
-      info "  It needs nothing from you. To step in, press a key while it runs — no Enter, nothing shows." >&2
-      info "  [s] ticks a box, and it stays ticked on the line below until it applies; pressed again it is taken back." >&2
-      info "  [g] goes round auto → on → off: auto follows the project's sleep_mode (by default, an /isleep night over every session)." >&2
-      info "    $(review_box "$(review_enough "$wt")") [s]    this pass is the last that looks for new findings" >&2
-      info "    $(review_go_box "$wt") [g]    go on by itself: no question after the review — a pass that failed runs again," >&2
-      info "               the fixes are checked and what is open goes back to a review session without asking" >&2
-      info "      [n n]  forward, now: stop it, dropping only what this pass found so far" >&2
-      info "  Either way what is open goes to the review session; unless [g] is ticked, sclaude asks you first." >&2
-    fi
+    printf '%s\n' "${BOLD}── Review pass · PR #${pr:-?} · $LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
   fi
 
   local earlier began new more cap pass=1 round
@@ -315,11 +308,9 @@ local_review_run() {
       && REVIEW_REPORT_QUIET=1 review_report "$wt" "${ASK_SLUG:-}" >&2
     info "  That pass found the cap ($LOCAL_REVIEW_CAP): reading ${base:0:7}..${head:0:7} again for the rest, pass $pass." >&2
   done
-  if [[ "$count" -eq 0 ]]; then
-    info "  The local review leaves nothing open on PR #$pr." >&2
-  else
-    info "  The local review leaves $count thread(s) open on PR #$pr." >&2
-  fi
+  # What it leaves open is the report's to say, printed after it; nothing
+  # open is said here, where no report may follow.
+  [[ "$count" -eq 0 ]] && info "  The local review leaves nothing open on PR #$pr." >&2
   ask_feed say "$(phase_line finished local-review "${pr:-?}" "$round" $verify) · $count open"
   history_add "$wt/.sclaude/local/feature/state.json" review.local end open="$count"
   echo "$count"
@@ -373,7 +364,7 @@ local_review_wait() {
       fi
       # Not "Human in the loop", as the waits that need the person say: this
       # one goes on by itself, and the keys are there only to step in.
-      printf '\r\033[2K  %sRunning by itself%s — local review, %s (%dm%02ds) · %s' \
+      printf '\r\033[2K\033[?7l  %sRunning by itself%s — local review, %s (%dm%02ds) · %s\033[?7h' \
         "$DIM" "$OFF" "$which" $((t / 60)) $((t % 60)) "$hint" >&2
     fi
     poll_pause 1
@@ -577,8 +568,12 @@ review_pane_keys() {
     (( REVIEW_PANE_TICK == 0 )) && printf '\033[?25l' >&2
   fi
   REVIEW_PANE_TICK=$((REVIEW_PANE_TICK + 1))
-  printf '\r\033[2K  %sThe session works in its tab%s · %s %s[s]%s last round for new findings · %s %s[g]%s go on by itself' \
-    "$DIM" "$OFF" "$(review_box "$REVIEW_PANE_SAID")" "$BOLD" "$OFF" "$REVIEW_PANE_GO" "$BOLD" "$OFF" >&2
+  # The session's own keys after the review's: [k]'s box and a key pressed
+  # once (session_keys_tail in pane.sh).
+  local tail=""
+  declare -F session_keys_tail >/dev/null && [[ -n "${SESSION_KEYS_ID:-}" ]] && tail="$(session_keys_tail)"
+  printf '\r\033[2K\033[?7l  %sIn its tab%s · %s %s[s]%s last round · %s %s[g]%s go on by itself%s\033[?7h' \
+    "$DIM" "$OFF" "$(review_box "$REVIEW_PANE_SAID")" "$BOLD" "$OFF" "$REVIEW_PANE_GO" "$BOLD" "$OFF" "$tail" >&2
 }
 
 # Which keys a step's session launch hands the tab wait (PANE_KEYS): the
@@ -604,7 +599,7 @@ review_go_on_pause() {
   local wt="$1" left="$2" box
   box="$(review_go_box "$wt")"
   while (( left > 0 )); do
-    keys_usable && printf '\r\033[2K  %sWaiting to retry%s (%ds) · %s %s[g]%s go on by itself — g takes it off' \
+    keys_usable && printf '\r\033[2K\033[?7l  %sWaiting to retry%s (%ds) · %s %s[g]%s go on by itself — g takes it off\033[?7h' \
       "$DIM" "$OFF" "$left" "$box" "$BOLD" "$OFF" >&2
     poll_pause 1
     left=$((left - 1))

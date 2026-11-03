@@ -528,7 +528,7 @@ try:
     # And the progress line only where somebody is watching: under a pipe it
     # would write raw escape codes into a log that nothing ever clears.
     check_true("rollback-progress-line-guarded",
-               re.search(r'\[\[ -t 1 \]\] && printf .\\r\\033\[2K  waiting',
+               re.search(r'\[\[ -t 1 \]\] && printf .\\r\\033\[2K(?:\\033\[\?7l)?  waiting',
                          rollback_src) is not None)
 
     # The typed command gates on having shipped, as the action list does.

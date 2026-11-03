@@ -47,7 +47,10 @@ REASON = (
     "Step 1 is planning, and writing is forbidden here even after the plan is "
     "approved: development is step 2, a separate session launched by the "
     "sclaude orchestrator. Through the terminal too — that is the same code, "
-    "just a different tool. The friction log is the exception: append to "
+    "just a different tool. The session scratchpad is not banned: a "
+    "redirection there passes when its path is written out, or set as a "
+    "plain literal in a variable earlier in the same command. The friction "
+    "log is the exception: append to "
     ".sclaude/local/feature/friction.log what this refusal cost you. If the plan is ready "
     "and approved, tell the human and stop."
 )
@@ -408,6 +411,90 @@ def edits_in_place(rest, flags):
     return False
 
 
+# A redirection target that starts with a variable: `$F`, `${F}`, `$D/x.md`.
+VARIABLE_TARGET = re.compile(r"\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})")
+# Builtins that set a variable named as a bare word: `read F`, `printf -v F`.
+RESETTERS = frozenset(("export", "declare", "local", "readonly", "typeset",
+                       "read", "readarray", "mapfile", "printf", "unset", "let"))
+ASSIGNMENT = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", re.S)
+# A double-quoted word that is only such a target, `"$F"`: the redirection scan
+# keeps its text, where it drops every other quoted span.
+QUOTED_VARIABLE = re.compile("\"(\\$\\{?[A-Za-z_][A-Za-z0-9_]*\\}?[^\"'$`\\\\\\s]*)\"")
+
+
+def assigned_target(target, tokens):
+    """The literal path a redirection target starting with `$NAME` is sure to
+    be, or None.
+
+    A live planning session named its scratchpad file once, `F=<path> && cat >
+    $F <<'EOF' … && gh api … -F body=@$F`, and was refused: `$F` is not a
+    path, and a target that cannot be read is a write. Here it can be read,
+    because the command itself gives it a literal value before the
+    redirection, and nothing can run between the two.
+
+    So, strictly: NAME is assigned exactly once in the whole command, as a
+    command of its own (`F=x cat > $F` is a prefix, and bash expands the
+    redirection before that assignment applies), at the start of a chain of
+    `&&` that reaches the redirection (a `;` only right after the assignment).
+    Any `||`, `|` or `;` elsewhere before the redirection would let it run
+    with the assignment skipped or in a subshell, and `$F` would then be
+    whatever the environment holds. Between the two, nothing sets NAME
+    again: `export F=…`, `read F`, `printf -v F`, `F+=…` (RESETTERS); a bare
+    word that only happens to be the name (`--json` for `json=…`) is not that. The value, and
+    whatever follows the variable in the target, hold no `$` or backtick: a
+    substitution is not a literal. Anything else is None, and stays a write.
+    """
+    match = VARIABLE_TARGET.match(target)
+    if not match or tokens is None:
+        return None
+    name = match.group(1) or match.group(2)
+    tail = target[match.end():]
+    if "$" in tail or "`" in tail:
+        return None
+    # Line breaks after `&&` continue the chain; tokenize() reads each as `;`.
+    kept = []
+    for token in tokens:
+        if not (token == ";" and kept and kept[-1] == "&&"):
+            kept.append(token)
+    tokens = kept
+    redirect = None
+    for i, token in enumerate(tokens):
+        if token.endswith(">" + target) or (
+                token == target and i and tokens[i - 1] in (">", ">>", "&>", "&>>")):
+            redirect = i
+            break
+    if redirect is None:
+        return None
+    separators = ("|", "||", "&&", ";", "&")
+    assignments = [i for i, t in enumerate(tokens)
+                   if t.startswith(name + "=")
+                   and (i == 0 or tokens[i - 1] in separators)]
+    if len(assignments) != 1 or assignments[0] > redirect:
+        return None
+    at = assignments[0]
+    after = tokens[at + 1] if at + 1 < len(tokens) else None
+    if after not in ("&&", ";"):
+        return None
+    for i, token in enumerate(tokens[:redirect]):
+        if token in separators and token != "&&" and i != at + 1:
+            return None
+    head = None
+    for token in tokens[at + 1:redirect]:
+        if token in separators:
+            head = None
+            continue
+        if head is None and not ASSIGNMENT.fullmatch(token):
+            # `IFS= read -r F`: a prefix assignment is not the command.
+            head = token
+        if re.match(re.escape(name) + r"(\+?=|\[)", token) or (
+                token == name and head in RESETTERS):
+            return None
+    value = ASSIGNMENT.fullmatch(tokens[at]).group(2)
+    if not value or "$" in value or "`" in value:
+        return None
+    return value + tail
+
+
 def writes(command):
     """Does it look as though the command changes files."""
     if only_writes_log(command):
@@ -430,7 +517,8 @@ def writes(command):
     # already stripped heredocs; this scan runs before it and did not. It
     # reads the line tokenize() reads: in the raw one an apostrophe in
     # `"$(echo "it's")"` paired with a later one and hid the `>` between them.
-    unquoted = re.sub(r"'[^']*'|\"[^\"]*\"", "", readable(command) or strip_heredocs(command))
+    line = QUOTED_VARIABLE.sub(r"\1", readable(command) or strip_heredocs(command))
+    unquoted = re.sub(r"'[^']*'|\"[^\"]*\"", "", line)
     for match in re.finditer(r"(?<![0-9<>])>>?(?!&)\s*([^\s;|&<>()]*)", unquoted):
         # The target decides. The bare `>` used to be enough, and it made
         # `cmd >/dev/null 2>&1` a write — the ordinary way to silence a probe,
@@ -449,7 +537,11 @@ def writes(command):
         # The scratchpad writes nothing that step 2 will see. Only the
         # redirection is let through: the rest of the chain is still parsed
         # below.
+        #
+        # A variable set to a literal earlier in the same command is read as
+        # that literal (assigned_target()).
         target = match.group(1)
+        target = assigned_target(target, tokenize(command)) or target
         if target not in NULL_TARGETS and not in_scratchpad(target):
             return True
 

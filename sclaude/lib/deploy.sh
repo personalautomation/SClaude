@@ -2364,7 +2364,11 @@ remind_prod() {
   # the protection available: the repository is private on a free plan, where
   # branch protection and rulesets are refused, so the merge itself cannot be
   # held back — only the deploy that would follow it.
-  local prod_note prod_ask
+  # The project's say in the question (project_ship_mode): `auto` ships
+  # without the plain one — the "anyway" ones below are still asked, since a
+  # gate was passed over and nobody said yes to that — and `off` never ships.
+  local prod_note prod_ask ship_mode
+  ship_mode="$(project_ship_mode "$wt")"
   if [[ "$merged_unchecked" -eq 1 ]]; then
     prod_note="Merged as a change nothing deploys, but it carried more — no regression, preview or QA ran on it."
     prod_ask="Ship to production anyway?"
@@ -2374,6 +2378,7 @@ remind_prod() {
   else
     prod_note=""
     prod_ask="Ship to production?"
+    [[ "$ship_mode" == auto ]] && prod_ask=""
   fi
   # Production red with an earlier release of this feature (a fix sent forward
   # by `return`): the question says so, so that a "no", which closes the
@@ -2417,7 +2422,7 @@ remind_prod() {
   # records and checks.
   local riders="" rider_issues="" prod_same=0
   deploy_unchanged "$wt" prod && prod_same=1
-  if [[ "$prod_same" -eq 0 ]]; then
+  if [[ "$prod_same" -eq 0 && "$ship_mode" != off ]]; then
     rollback_remember_previous "$wt"
     [[ -n "$migrations" ]] && rollback_remember_migrations "$wt"
 
@@ -2429,6 +2434,9 @@ remind_prod() {
 
     riders="$(prod_riders "$wt" "$slug")"
     prod_riders_say "$riders"
+    # ship: auto spares the question about this feature alone: what rides
+    # along with it is other features' code, which nobody said yes to.
+    [[ -z "$prod_ask" && -n "${riders//[[:space:]]/}" ]] && prod_ask="Ship to production, with what rides along?"
     rider_issues="$(awk -F'\t' '$1 == "feature" && $3 != "-" { gsub(",", " ", $3); print $3 }' \
       <<< "$riders" | tr '\n' ' ')"
     # Their migrations go to production with the code that needs them: a ship
@@ -2445,11 +2453,15 @@ remind_prod() {
   # — it may come from the phone the next morning. Taken off below whatever
   # the answer, and by the next pass when this one is cut off at the question,
   # which that pass asks again.
-  [[ "$prod_same" -eq 0 ]] \
+  [[ "$prod_same" -eq 0 && "$ship_mode" != off ]] \
     && { state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping "$(date -Iseconds)" 2>/dev/null || true; }
   if [[ "$prod_same" -eq 1 ]]; then
     echo ""
     info "Production already at $(deploy_head "$wt" prod | cut -c1-8) — unchanged, skipping."
+  elif [[ "$ship_mode" == off ]]; then
+    echo ""
+    info "Production: not deployed — ship is off in .sclaude/config.json."
+    info "  Ship it by hand when you choose: cd $REPO && vercel --prod"
   elif [[ -n "$migrations" ]]; then
     # The promote's own commands come from the project: which script applies
     # migrations to production, which paths hold them and the schema snapshot,
@@ -2703,6 +2715,8 @@ remind_prod() {
   if [[ "$prod_done" -eq 1 || "$carried" -eq 1 ]]; then
     prod_live=1
     issue_close_done "$issue" shipped
+  elif [[ "$ship_mode" == off ]]; then
+    issue_close_done "$issue" shipoff
   else
     issue_close_done "$issue" declined
   fi

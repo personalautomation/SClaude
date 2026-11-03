@@ -149,9 +149,13 @@ def watch(resets, wait=1.5, offset=1.0):
 export HOME="%s" TMPDIR="%s"
 SESSION_POLL=0.2 LIMIT_MARGIN=0
 session_watch_start "%s" "%s" "" "" review
-sleep %s
+# Until the stand-in is gone or `wait` runs out: under the whole suite in
+# parallel the watcher's first look comes late, and a fixed second and a
+# half failed a close that was only slow.
+# Gone or a zombie (this test reaps it later) counts as gone.
+for _ in $(seq %d); do ps -o stat= -p %d 2>/dev/null | grep -qv Z || break; sleep 0.1; done
 session_watch_stop
-""" % (home, tmp, wt, session, wait)
+""" % (home, tmp, wt, session, int(wait * 10), target.pid)
     subprocess.run(["bash", "-c", script], timeout=30)
     time.sleep(0.2)
     closed = target.poll() is not None
@@ -159,9 +163,10 @@ session_watch_stop
     return closed
 
 
-check("reset-limit-closes-the-session", watch(int(time.time()) - 10), True)
+check("reset-limit-closes-the-session", watch(int(time.time()) - 10, wait=10), True)
 check("reset-limit-tells-claude-launch", os.path.exists(limit_file), True)
-os.remove(limit_file)
+if os.path.exists(limit_file):
+    os.remove(limit_file)
 check("limit-not-yet-reset-leaves-it", watch(int(time.time()) + 3600), False)
 check("no-word-before-the-reset", os.path.exists(limit_file), False)
 check("limit-from-before-the-reopening-left-alone", watch(int(time.time()) - 10, offset=-60), False)

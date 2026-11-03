@@ -12,6 +12,8 @@ If something is missing — the server isn't responding, the browser won't attac
 
 **Run only the tests this feature touches**: the specs you wrote or changed and the ones covering the code you changed, picked by file or by name through the project's own runner, plus checks that take seconds, such as typecheck. Don't run the whole suite here, e2e least of all. When this session closes, `sclaude` runs the full regression itself before the step can end, and a red run opens a fixing session with its log. A full run inside the session costs minutes of waiting and finds nothing that run won't.
 
+**Smoke.** Where `.sclaude/config.json` has `commands.smoke`, that command picks the product's few vital paths out of its suite — by a tag such as `@smoke`, as the command shows — and a deployed stage may run only those. When this feature adds a path a person depends on to get their work done, tag the one spec that walks it end to end, and no more: the smoke set stays short enough to run in a minute.
+
 <block:acceptance>
 
 If there's no acceptance criteria block above, look for an `## Acceptance criteria` heading in `.sclaude/local/feature/plan.md` — step 1 writes the same list there. A feature that has neither was planned before criteria existed; work from the plan alone and don't invent them now.

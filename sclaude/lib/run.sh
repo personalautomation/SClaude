@@ -2986,8 +2986,10 @@ instruments_others() {
   echo "$found"
 }
 
-# Brings the orchestrator up to date before anything runs, and puts a
-# non-maintainer on a branch of their own.
+# Brings the orchestrator up to date before anything runs, as far as the
+# machine lets it (sclaude.update in developer.sh): `auto` takes main here,
+# `notify` only says what main has (instruments_notify) and leaves it to
+# `sclaude update`, `off` does not fetch. Unset, the person is asked once.
 #
 # Everybody installs instruments from one repository rather than keeping a fork,
 # so the only way a fix reaches a team is this: at the start of a command that
@@ -3023,21 +3025,93 @@ instruments_sync() {
   [[ -z "${SCLAUDE_NO_SYNC:-}" && -z "${SCLAUDE_SYNCED:-}" ]] || return 0
   git -C "$INSTRUMENTS" remote get-url origin >/dev/null 2>&1 || return 0
 
+  # The machine's say (sclaude.update, developer.sh): code from the public
+  # main runs here only where the person chose it.
+  local mode; mode="$(update_mode)"
+  if [[ "$mode" == ask ]]; then
+    update_mode_choose
+    mode="$UPDATE_CHOSEN"
+  fi
+  case "$mode" in
+    off)    return 0 ;;
+    notify) instruments_notify; return 0 ;;
+  esac
+  instruments_take || return 0
+  export SCLAUDE_SYNCED=1
+  exec "$0" "$@"
+}
+
+# What sclaude's main has that this checkout does not, said rather than taken
+# (sclaude.update notify): the commits in full when main moved since they were
+# last listed, a line otherwise, so that a start is not a page of the same
+# list every time.
+instruments_notify() {
+  local behind head seen mark
+  GIT_TERMINAL_PROMPT=0 timeout 20 git -C "$INSTRUMENTS" fetch -q origin main 2>/dev/null || return 0
+  behind="$(git -C "$INSTRUMENTS" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
+  [[ "$behind" =~ ^[1-9][0-9]*$ ]] || return 0
+  head="$(git -C "$INSTRUMENTS" rev-parse origin/main 2>/dev/null)"
+  mark="$(git -C "$INSTRUMENTS" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/sclaude-notified"
+  seen="$(cat "$mark" 2>/dev/null || true)"
+  if [[ "$seen" == "$head" ]]; then
+    info "  instruments: $behind commit(s) on sclaude's main not taken yet — $SELF update"
+    return 0
+  fi
+  info "  instruments: $behind new commit(s) on sclaude's main:"
+  local line
+  while IFS= read -r line; do info "    $line"; done \
+    < <(git -C "$INSTRUMENTS" log --format='%h %s' -n 10 HEAD..origin/main 2>/dev/null)
+  (( behind > 10 )) && info "    … and $((behind - 10)) more: git -C $INSTRUMENTS log HEAD..origin/main"
+  info "  Take them with: $SELF update"
+  printf '%s\n' "$head" > "$mark" 2>/dev/null || true
+}
+
+# sclaude update: takes sclaude's main now, whatever sclaude.update says.
+cmd_update() {
+  git -C "$INSTRUMENTS" remote get-url origin >/dev/null 2>&1 \
+    || die "$INSTRUMENTS has no origin to update from"
+  if ! GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$INSTRUMENTS" fetch -q origin main 2>/dev/null; then
+    warn "  Could not reach sclaude's repository: not updated."
+    return 1
+  fi
+  local behind line
+  behind="$(git -C "$INSTRUMENTS" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
+  if [[ ! "$behind" =~ ^[1-9][0-9]*$ ]]; then
+    info "  instruments: up to date with sclaude's main."
+    return 0
+  fi
+  while IFS= read -r line; do info "    $line"; done \
+    < <(git -C "$INSTRUMENTS" log --format='%h %s' -n 20 HEAD..origin/main 2>/dev/null)
+  if [[ "$(git -C "$INSTRUMENTS" rev-parse --abbrev-ref HEAD 2>/dev/null)" == HEAD ]]; then
+    warn "  instruments: not updated — $INSTRUMENTS is on no branch; switch it to main first."
+    return 1
+  fi
+  INSTRUMENTS_SAY=1 instruments_take || return 1
+  units_refresh
+  info "  The next sclaude command runs it."
+}
+
+# Brings the checkout up to sclaude's main, as far as that is safe here and
+# now; 0 when it changed and the process has to run again.
+instruments_take() {
   local branch changed="" name own behind other
   branch="$(git -C "$INSTRUMENTS" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  [[ -n "$branch" && "$branch" != "HEAD" ]] || return 0
+  [[ -n "$branch" && "$branch" != "HEAD" ]] || return 1
 
   if other="$(instruments_others)"; then
     info "  instruments: not updated — another sclaude is running from it ($other)"
-    return 0
+    return 1
   fi
 
   # Everybody's checkout stays on main and follows it. A non-maintainer used to
   # be moved to dev/<name> first, because friction reviews committed their
   # fixes to sclaude; they change the product now, and a change to sclaude
   # itself is proposed deliberately, on a branch of its own.
-  if GIT_TERMINAL_PROMPT=0 timeout 20 \
+  if ! GIT_TERMINAL_PROMPT=0 timeout 20 \
        git -C "$INSTRUMENTS" fetch -q origin main 2>/dev/null; then
+    # Silent at a start (no network is no news); said when asked for.
+    [[ -n "${INSTRUMENTS_SAY:-}" ]] && warn "  instruments: not updated — origin did not answer."
+  else
     behind="$(git -C "$INSTRUMENTS" rev-list --count HEAD..origin/main 2>/dev/null || true)"
     if [[ "$behind" =~ ^[0-9]+$ && "$behind" -gt 0 ]]; then
       if [[ -n "$(git -C "$INSTRUMENTS" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
@@ -3074,9 +3148,7 @@ instruments_sync() {
     fi
   fi
 
-  [[ -n "$changed" ]] || return 0
-  export SCLAUDE_SYNCED=1
-  exec "$0" "$@"
+  [[ -n "$changed" ]]
 }
 
 # May step 4 close? Waits out a review still running, then, if anything is

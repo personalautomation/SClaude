@@ -277,6 +277,22 @@ accepts, `m` merges) and `auto` (sclaude does it). By default QA is `github` and
 the merge `both`. An acceptance given by sclaude says so in a comment on the
 issue.
 
+Production and the suites against the deployments are set the same way.
+`ship` takes `ask` (the default: "Ship to production? [y/n]" after the merge),
+`auto` (shipped without that question; it is still asked where QA or a check
+was passed over on the way, or where other features' code not yet in
+production would go out with it) and `off` (sclaude never deploys production; the
+issue closes as merged and accepted, and you ship it by hand).
+`previewRegression` and `prodRegression` each take `full` (the stage's list in
+`regression`, the default), `smoke` and `none` (no suite there, and no gate).
+Smoke is the product's few vital paths, and the product says what they are:
+their parts in `regression.smoke`, their command in `commands` — a part called
+`smoke` runs against the deployment the way `e2e` does, so
+`"smoke": "npx playwright test --grep @smoke"` over the same suite, with the
+vital specs tagged `@smoke`, is the usual setup. Step 2's session tags the one
+spec that walks a new path people depend on. A product that chose `smoke` and
+declares no smoke list gets its full list, said in the run's heading.
+
 Before sclaude merges, or asks to, it builds what the merge would put on main
 when main has moved past the branch: the branch merged with the newer main, in
 a throwaway worktree, through the `regression.manual` parts as that merge's
@@ -387,6 +403,31 @@ By default that is sclaude alone. The machine tools that grew up next to it —
 [wsl-update](#binwsl-update) — come with `./install.sh --extras`. A machine
 that already has them keeps them on a plain re-run.
 
+It asks three questions about this machine, once (a re-run keeps the answers):
+
+- **Updates of sclaude.** `notify` (recommended): each start lists what is new
+  on this repository's `main`, and `sclaude update` takes it once you have read
+  it. `auto`: each start takes it by itself. `off`: sclaude never fetches
+  itself.
+- **Sending fixes of sclaude back.** The retrospective and the friction reviews
+  can fix sclaude itself and send the fix to this public repository (see "When
+  a session finds a bug in sclaude"). `ask`: you see the commits and the files,
+  and nothing goes out without your yes. `send`: it goes out by itself. `off`:
+  no session changes sclaude on your machine.
+
+- **When a fix may name your product.** Before a fix of sclaude is sent it is
+  searched for your product's name, numbers and paths. `ask`: the matching
+  lines are shown, and "Publish it anyway?" waits for your yes. `auto`: they
+  are shown, and it goes out without the question. `off`: a change that
+  matches never goes out until a session rewords it.
+
+`./install.sh --update=notify|auto|off --contribute=ask|send|off
+--leaks=ask|auto|off` answers them without asking. Run without a terminal, the installer leaves them unset, and
+unset means "ask": the first start asks about updates, and every send asks.
+The answers live in this checkout's git config (`sclaude.update`,
+`sclaude.contribute`, `sclaude.leaks`). Apart from these, what sclaude sends goes to your own
+services: your product's GitHub and deploys, and Telegram if you set the bot up.
+
 Then run `sclaude doctor`. It lists what the machine still lacks and the command
 that fixes each gap. Run inside a product, it also runs the checks the product
 asks for in `.sclaude/config.json`.
@@ -398,8 +439,9 @@ its own — several developers, each on their own Linux or WSL machine, with no
 server in between.
 
 **Nobody forks it.** Everybody installs from this repository, and every sclaude
-command that is about to act first pulls the latest `main`, so a fix reaches the
-whole team at their next command. What is the team's own lives elsewhere:
+command that is about to act first looks at the latest `main` — takes it, with
+updates on `auto`, or lists it for `sclaude update`, with `notify` — so a fix
+reaches the whole team at their next command, or their next update. What is the team's own lives elsewhere:
 
 | what | where |
 |---|---|
@@ -456,13 +498,17 @@ When the session ends, sclaude publishes the change itself. It looks for your
 project's details in it — the project's name, issue or pull-request numbers,
 paths of its files — and asks you before it sends anything that matches; it
 runs the tests the change touches, a line on the screen for each as it
-runs; then it pushes a maintainer's change to
+runs; with sending on `ask` (the default) it shows you the commits and the
+files and waits for your yes, and while you are away it waits for you; then it pushes a maintainer's change to
 `main` as one commit, and sends anybody else's as one pull request per
 feature. A change left uncommitted or unreviewed is not published: sclaude
 offers you the session back to finish it, at once and when you next open the
 feature, and says what is missing. A publication that stops — red tests, no network, a refused push —
 is tried again, quietly, every time you open the feature; only your own "no"
-to the project's details holds it until a session rewords the change. A list
+— to the project's details, or to sending it — holds it, until a session
+rewords the change or you run `sclaude core-send` in the feature's tree.
+With sending `off`, sessions do not open the workshop at all, and what they
+found stays in the feature's friction log. A list
 of matches too long for a phone question is asked at the terminal only. A
 workshop goes with its feature; a change in it never published
 stays on its branch in this checkout, and the clean-up names it. When the
@@ -532,6 +578,8 @@ sclaude reset <name>    # start the current step over, forgetting its conversati
 sclaude done <name>     # clean up after the merge: worktree and branches
 sclaude drop <name>     # abandon a feature and remove its traces, here and on GitHub
 sclaude propose         # send your commits to sclaude as a pull request
+sclaude update          # take sclaude's latest main (updates on notify or off)
+sclaude core-send       # in a feature's tree: send the workshop change you held back
 sclaude core-open       # run by a session: open the feature's workshop to change sclaude
 sclaude core-ready      # run by a session: its change there is reviewed; publish it at the end
 ```
@@ -1161,8 +1209,8 @@ features with what each step is doing (🟢 running, 🟡 waiting for you, ⚪ i
 ⚫ not started), a new feature — from an open issue, yours first and marked
 when something blocks it, with the branch name to correct, or from a name with
 a tick for creating its issue, as `sclaude new` offers at the terminal — and 🧩
-the project's config, every section explained, with `review`, `qa`, `merge`
-and `sleep_mode` set by a button; 💻 Code-server; 🌐 Chrome and the list of every
+the project's config, every section explained, with `review`, `qa`, `merge`,
+`ship`, `previewRegression`, `prodRegression` and `sleep_mode` set by a button; 💻 Code-server; 🌐 Chrome and the list of every
 feature; ⚙️ Settings — language, docs, restarting the bot (the screen waits
 and says when it is back), phone access. Each
 screen says under it what it is for. What you start there leaves a 📱 line in

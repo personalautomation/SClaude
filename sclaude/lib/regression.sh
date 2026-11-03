@@ -94,12 +94,16 @@ regression_command() {
   local part="$1" base="${2:-}" wt="${3:-}" stage="${4:-}" cmd dev
   cmd="$(project_command "$part" "$wt")" || return 1
   [[ -n "$cmd" ]] || return 1
-  if [[ "$part" == "e2e" && -n "$base" ]]; then
+  # `smoke` is the product's own few vital paths of the same suite
+  # (project_stage_regression): it looks at the same host the same way.
+  local browser=""
+  [[ "$part" == "e2e" || "$part" == "smoke" ]] && browser=1
+  if [[ -n "$browser" && -n "$base" ]]; then
     cmd="export E2E_BASE_URL=$base; $cmd"
   fi
   # Not on production: its e2e is a read-only look of a few seconds, and a
   # stop there would save nothing.
-  if [[ "$part" == "e2e" && ( "$stage" == "local" || "$stage" == "preview" ) ]]; then
+  if [[ -n "$browser" && ( "$stage" == "local" || "$stage" == "preview" ) ]]; then
     cmd="export E2E_MAX_FAILURES=$REGRESSION_E2E_MAX_FAILURES; $cmd"
   fi
   dev="$(developer_name 2>/dev/null || true)"
@@ -120,7 +124,7 @@ regression_command() {
   # stack, so the preview file is sourced instead, the way db.env is above; a
   # project's dotenv loading lets an already-set variable win. Only preview:
   # production is read-only by its host, and its credentials are never loaded.
-  if [[ "$part" == "e2e" && "$stage" == "preview" && -n "$wt" && -f "$wt/.env.preview" ]]; then
+  if [[ -n "$browser" && "$stage" == "preview" && -n "$wt" && -f "$wt/.env.preview" ]]; then
     cmd="set -a; . $(printf '%q' "$wt/.env.preview"); set +a; $cmd"
   fi
   # And against this feature's own dev server. E2E_LOCAL_URL is where the
@@ -815,6 +819,13 @@ regression_run_body() {
   # a suite nobody has declared.
   if [[ -z "$parts" ]]; then
     echo ""
+    local own="$stage"
+    [[ "$own" == rollback ]] && own=prod
+    if [[ ( "$own" == preview || "$own" == prod ) \
+          && "$(project_stage_regression "$own" "$wt")" == none ]]; then
+      info "  No $stage regression: ${own}Regression is none in .sclaude/config.json."
+      return 2
+    fi
     info "  No $stage regression: .sclaude/config.json describes none for this project."
     [[ -f "${REPO:-$wt}/.sclaude/config.json" ]] \
       || info "  There is no .sclaude/config.json at all — \`$SELF new\` offers to write one."
@@ -851,6 +862,12 @@ regression_run_body() {
   echo ""
   echo "${BOLD}${BLUE}── $(phase_title regression "$stage")${total_expected:+ (expected $(regression_duration "$total_expected"))} ──${OFF}"
   [[ -n "$base" ]] && info "   $base"
+  local own_stage="$stage"
+  [[ "$own_stage" == rollback ]] && own_stage=prod
+  if [[ "$own_stage" == preview || "$own_stage" == prod ]] && [[ -z "$only" ]]; then
+    local word; word="$(project_stage_regression_word "$own_stage" "$wt")"
+    [[ -n "$word" ]] && info "   ${own_stage}Regression: $word"
+  fi
 
   local one added=""
   # Said above the list, not beside a part: each part's line is rewritten as

@@ -1,0 +1,1 @@
+**sclaude itself.** Changing sclaude is off on this machine (`sclaude.contribute` is `off` in `<instruments>`): its checkout is read-only to you, and `sclaude core-open` is refused. When what you run into is a bug or a gap in sclaude itself, do not try to fix it; put it in the friction log, in sclaude's own terms, as you would anything else that got in your way.

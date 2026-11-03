@@ -51,6 +51,24 @@ CHOICES["sleep_mode"] = [
     ("off", "only where [g] is ticked by hand"),
 ]
 
+# The regression each deployed stage runs (project_stage_regression in
+# project.sh) and whether the merge goes on to production (project_ship_mode).
+for _stage, _when in (("preview", "against the preview, before QA"),
+                      ("prod", "against production, after the ship")):
+    CHOICES[_stage + "Regression"] = [
+        ("full", "the stage's whole list in `regression`, " + _when),
+        ("smoke", "only `regression.smoke`, the product's few vital paths "
+                  "(the whole list where it declares none)"),
+        ("none", "no regression at this stage, and no gate"),
+    ]
+
+CHOICES["ship"] = [
+    ("ask", "after the merge sclaude asks: Ship to production? [y/n]"),
+    ("auto", "shipped without the question; still asked when QA or a check "
+             "was passed over, or other features' code rides along"),
+    ("off", "sclaude never deploys to production; the issue closes as merged"),
+]
+
 CHOICES["metricsTeam"] = [
     ("real", "the metrics page compares the people whose work is in the records"),
     ("demo", "three generated teammates beside them, drawn from the real figures, "

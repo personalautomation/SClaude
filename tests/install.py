@@ -24,10 +24,17 @@
 #   no systemd          the installer stopping half-way without a word.
 #   code-server :8080   the forward enabled on code-server's own default port:
 #                       the server failing with EADDRINUSE every 10 s.
+#   update, contribute  a newcomer's machine taking the public main, or sending
+#                       to it, without having been asked; a re-run asking
+#                       again; a script hanging on the question.
+#
+# The checkout's git config is a temporary repository's (GIT_DIR): the
+# answers must not land in the live checkout the bench runs from.
 #
 # Run it with: python3 tests/install.py
 import os
 import pty
+import re
 import subprocess
 import sys
 import tempfile
@@ -48,7 +55,14 @@ def check(name, got, want):
         print("        got:  %r" % (got,))
 
 
-def world(tmp, systemd=True):
+def git_config(env, key):
+    done = subprocess.run(["git", "config", key], env=env, capture_output=True, text=True)
+    return done.stdout.strip()
+
+
+def world(tmp, systemd=True, settings=True):
+    """`settings` presets both machine questions, so a case about something
+    else is not asked them."""
     home = os.path.join(tmp, "home")
     stubs = os.path.join(tmp, "stubs")
     etc = os.path.join(tmp, "etc", "polkit-1", "rules.d")
@@ -68,6 +82,13 @@ def world(tmp, systemd=True):
     env.update(HOME=home, USER="someone", KEEPAWAKE_PLATFORM="linux",
                KEEPAWAKE_POLKIT_RULE=os.path.join(etc, "49-keepawake.rules"),
                PATH=stubs + ":" + os.environ["PATH"])
+    cfg = os.path.join(tmp, "checkout-config")
+    subprocess.run(["git", "init", "-q", cfg], check=True, capture_output=True)
+    env["GIT_DIR"] = os.path.join(cfg, ".git")
+    if settings:
+        subprocess.run(["git", "config", "sclaude.update", "auto"], env=env, check=True)
+        subprocess.run(["git", "config", "sclaude.contribute", "send"], env=env, check=True)
+        subprocess.run(["git", "config", "sclaude.leaks", "ask"], env=env, check=True)
     return env, os.path.join(etc, "49-keepawake.rules"), calls
 
 
@@ -98,13 +119,15 @@ def run(env, *args, answer=None, extras=True, rc=None):
         if not chunk:
             break
         out += chunk
-        if sent < len(answers) and out.count(b"Add it now?") > sent:
+        if sent < len(answers) and sum(out.count(q) for q in QUESTIONS) > sent:
             os.write(primary, (answers[sent] + "\n").encode())
             sent += 1
     proc.wait(timeout=30)
     os.close(primary)
     return out.decode(errors="replace")
 
+
+QUESTIONS = (b"Add it now?", b"notify, auto, off?", b"ask, send, off?", b"ask, auto, off?")
 
 with tempfile.TemporaryDirectory() as tmp:
     print("where it does not apply")
@@ -221,6 +244,44 @@ with tempfile.TemporaryDirectory() as tmp:
         run(env, "--no-polkit")
         check("code-server-%s-socket" % name,
               "enable --now code-server-local.socket" in open(calls).read(), want)
+
+    print("update and contribute")
+    env, rule, calls = world(os.path.join(tmp, "settings"), settings=False)
+    out = run(env, "--no-polkit", extras=False)
+    check("settings-pipe-left-unset",
+          (git_config(env, "sclaude.update"), git_config(env, "sclaude.contribute"),
+           git_config(env, "sclaude.leaks")), ("", "", ""))
+    check("settings-pipe-names-leaks-flag", "--leaks=<ask|auto|off>" in out, True)
+    check("settings-pipe-names-flags",
+          ("--update=<notify|auto|off>" in out, "--contribute=<ask|send|off>" in out), (True, True))
+    check("settings-explained", ("sclaude update" in out, "public repository" in out), (True, True))
+    out = run(env, "--no-polkit", extras=False, answer=["", "sometimes", "notify", "ask", "off"])
+    check("settings-enter-asks-again", out.count("notify, auto, off?"), 3)
+    check("settings-tty-saved",
+          (git_config(env, "sclaude.update"), git_config(env, "sclaude.contribute"),
+           git_config(env, "sclaude.leaks")), ("notify", "ask", "off"))
+    out = run(env, "--no-polkit", extras=False, answer=["auto", "send", "auto"])
+    check("settings-kept-not-asked",
+          ("notify, auto, off?" in out, "ask, send, off?" in out, "ask, auto, off?" in out,
+           "(kept;" in out), (False, False, False, True))
+    run(env, "--no-polkit", "--update=off", "--contribute=off", "--leaks=auto", extras=False)
+    check("settings-flags-set",
+          (git_config(env, "sclaude.update"), git_config(env, "sclaude.contribute"),
+           git_config(env, "sclaude.leaks")), ("off", "off", "auto"))
+    code = []
+    out = run(env, "--update=sometimes", extras=False, rc=code)
+    check("settings-bad-flag-refused", (code, "--update takes" in out), ([2], True))
+
+print("the words agree with sclaude's")
+DEV = open(os.path.join(ROOT, "sclaude", "lib", "developer.sh"), encoding="utf-8").read()
+TEXT = open(INSTALL, encoding="utf-8").read()
+for var, flag in (("UPDATE_MODES", "--update"), ("CONTRIBUTE_MODES", "--contribute"),
+                  ("LEAKS_MODES", "--leaks")):
+    words = set(re.search(r'^%s="([^"]*)"' % var, DEV, re.M).group(1).split())
+    parsed = re.search(r'%s=\*\)\s*\n.*?\[\[ " ([^"]*) " ==' % re.escape(flag), TEXT, re.S)
+    asked = re.search(r'setting_offer %s .* "([^"]*)"$' % flag[2:], TEXT, re.M)
+    check("words-%s" % flag[2:], (set(parsed.group(1).split()) if parsed else None,
+                                  set(asked.group(1).split()) if asked else None), (words, words))
 
 if failures:
     print("\n%d failed: %s" % (len(failures), ", ".join(failures)))

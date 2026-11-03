@@ -98,6 +98,38 @@ try:
 
     out, _, _ = run_bash('REPO=%s; project_command typecheck' % proj, tmp)
     check("command-read", out.strip(), "pnpm typecheck")
+
+    # --- what a deployed stage runs: previewRegression / prodRegression -----
+    modes = os.path.join(tmp, "modes")
+    def stage_parts(cfg, stage):
+        with open(_cfg(os.path.join(modes, ".sclaude/config.json")), "w") as fh:
+            json.dump(dict({"commands": {"e2e": "x", "smoke": "x --grep @smoke", "lint": "l"},
+                            "regression": {"local": ["lint", "e2e"], "preview": ["e2e"],
+                                           "prod": ["e2e"], "smoke": ["smoke"]}}, **cfg), fh)
+        out, _, _ = run_bash('REPO=%s; project_regression_parts %s; '
+                             'echo "[$(project_stage_regression_word %s)]"' % (modes, stage, stage), tmp)
+        return out.strip().splitlines()
+    check("mode-absent-full", stage_parts({}, "preview"), ["e2e", "[]"])
+    check("mode-unknown-full", stage_parts({"prodRegression": "most"}, "prod"), ["e2e", "[]"])
+    check("mode-smoke-preview", stage_parts({"previewRegression": "smoke"}, "preview"), ["smoke", "[smoke]"])
+    check("mode-smoke-prod-only", (stage_parts({"prodRegression": "smoke"}, "prod"),
+                                   stage_parts({"prodRegression": "smoke"}, "preview")),
+          (["smoke", "[smoke]"], ["e2e", "[]"]))
+    check("mode-none", stage_parts({"previewRegression": "none"}, "preview"), ["[]"])
+    stage_parts({"previewRegression": "smoke"}, "preview")
+    out, _, _ = run_bash('REPO=%s; echo "[$(project_regression_added preview)]"' % modes, tmp)
+    check("mode-smoke-adds-nothing", out.strip(), "[]")
+    check("mode-local-untouched", stage_parts({"previewRegression": "none", "prodRegression": "none"}, "local"),
+          ["lint e2e", "[]"])
+    nosmoke = {"previewRegression": "smoke",
+               "regression": {"local": ["e2e"], "preview": ["e2e"]}}
+    check("mode-smoke-undeclared-is-full", stage_parts(nosmoke, "preview"),
+          ["e2e", "[smoke — none declared, the full list]"])
+    for cfg, want in (({}, "ask"), ({"ship": "auto"}, "auto"), ({"ship": "off"}, "off"), ({"ship": "yes"}, "ask")):
+        with open(_cfg(os.path.join(modes, ".sclaude/config.json")), "w") as fh:
+            json.dump(cfg, fh)
+        out, _, _ = run_bash('REPO=%s; project_ship_mode' % modes, tmp)
+        check("ship-mode-%s" % want + ("-" + cfg.get("ship", "absent")), out.strip(), want)
     out, _, _ = run_bash('REPO=%s; project_prod_url' % proj, tmp)
     check("prod-url-read", out.strip(), "https://example.test")
     out, _, _ = run_bash('REPO=%s; project_migrations_dir' % proj, tmp)

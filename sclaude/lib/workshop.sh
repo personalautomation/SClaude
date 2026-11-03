@@ -30,7 +30,10 @@
 #     check for the product's details, the tests the change touches, and then
 #     main for a maintainer, squashed into one commit, or one pull request a
 #     tree for anybody else. A change left unfinished is not published, and
-#     its session is offered back, at once and when the feature is next opened.
+#     its session is offered back, at once and when the feature is next opened;
+#   * what goes out is the machine's to say (sclaude.contribute, developer.sh):
+#     sent, shown and asked (workshop_consent), or not made at all — core-open
+#     refuses under `off`, and `sclaude core-send` sends a change held back.
 #
 # The record of who may write and what is ready is .sclaude/local/
 # instruments.json beside it (workshop.py), which write-guard.py reads.
@@ -92,6 +95,8 @@ cmd_core_open() {
   [[ -n "$session" ]] \
     || die "core-open is for sclaude's sessions; by hand, change $INSTRUMENTS itself"
   tree="$(workshop_tree)" || die "run it inside the product's tree"
+  [[ "$(contribute_mode)" != off ]] \
+    || die "changing sclaude is off on this machine (sclaude.contribute is off in $INSTRUMENTS): log what you would fix in the friction log instead"
   ws="$(workshop_dir "$tree")"
   rec="$(workshop_record "$tree")"
   if [[ ! -d "$ws" ]]; then
@@ -320,6 +325,19 @@ workshop_leaks() {
   # too: a "yes" is kept for all of them (below).
   local line
   while IFS= read -r line; do warn "     $line"; done <<< "$hits"
+  # The machine's say in the question (sclaude.leaks, developer.sh). A
+  # change the person sends by name (core-send) is asked, whatever it says:
+  # they are at the terminal, and off would hold it again.
+  local mode; mode="$(leaks_mode)"
+  [[ -n "${WORKSHOP_SEND:-}" && "$mode" == off ]] && mode=ask
+  case "$mode" in
+    auto)
+      info "  sclaude.leaks is auto: published with them, unasked."
+      return 0 ;;
+    off)
+      info "  sclaude.leaks is off: not published; it stays in $ws, where a session of this tree can reword it."
+      return 1 ;;
+  esac
   # A list longer than a question in Telegram holds loses its middle there
   # (ASK_CONTEXT_MAX in keepawake/telegramd.py), and a "yes" from the phone
   # would cover lines never seen: such a list is asked at the terminal alone,
@@ -426,7 +444,7 @@ workshop_tests() {
 
 # How a session's change in the workshop came out, in the feature's history
 # (history_add): its state when the session ended (none, ready, blocked,
-# pending, left) and how the publication went (main, pr, held, red,
+# pending, left) and how the publication went (main, pr, held, declined, waits, red,
 # stopped). The session is the one that ended, or WORKSHOP_SESSION for a
 # publication: the process map plays the pass after that session.
 #
@@ -498,6 +516,13 @@ workshop_publish() {
   (( leaked == 0 )) || return 0
   workshop_tests "$ws" "$base" || { info "  It is tried again when the tree is next opened."
                                     workshop_history "$tree" red; return 0; }
+  local consent=0
+  workshop_consent "$tree" "$ws" "$base" || consent=$?
+  if (( consent == 1 )); then
+    workshop_history "$tree" declined
+    return 0
+  fi
+  (( consent == 0 )) || { workshop_history "$tree" waits; return 0; }
   if developer_is_maintainer; then
     if ! GIT_TERMINAL_PROMPT=0 "${G[@]}" push -q origin HEAD:main >/dev/null 2>&1; then
       warn "  The push to main was refused (main moved meanwhile?): it stays in $ws,"
@@ -527,12 +552,85 @@ workshop_publish() {
   return 0
 }
 
+# Whether the workshop's change may go to sclaude's public repository now, by
+# the machine's sclaude.contribute (developer.sh): `send` yes, `off` held,
+# `ask` the person sees the commits and the files and says. 0 to send, 1
+# held at this head (a new commit or `sclaude core-send` lifts it), 2 not
+# now — tried again when the tree is next opened. WORKSHOP_SEND, set by
+# core-send, is the person's yes already given.
+#
+#   workshop_consent <tree> <workshop> <base>
+workshop_consent() {
+  local tree="$1" ws="$2" base="$3" url where text line answer q
+  [[ -n "${WORKSHOP_SEND:-}" ]] && return 0
+  case "$(contribute_mode)" in
+    send) return 0 ;;
+    off)
+      workshop_block "$tree" "sending changes to sclaude is off on this machine (sclaude.contribute); $SELF core-send sends this one"
+      return 1 ;;
+  esac
+  # Away ([g] ticked by hand or by sleep_mode, a night): nobody is there to
+  # read what would go public, and a yes is not the away answer to that.
+  if declare -F review_go_on >/dev/null && review_go_on "$tree"; then
+    info "  You are away: sending sclaude's change to its public repository waits for you, and is asked when the tree is next opened."
+    return 2
+  fi
+  url="$(git -C "$ws" remote get-url origin 2>/dev/null)"
+  developer_is_maintainer && where="a commit on its main" || where="a pull request"
+  text="$(git -C "$ws" log --format='%h %s' "$base..HEAD" 2>/dev/null
+          git -C "$ws" diff --stat=100 "$base..HEAD" 2>/dev/null)"
+  echo ""
+  [[ -n "$url" ]] || url="the repository of sclaude"
+  info "  It goes to $url, which is public, as $where:"
+  while IFS= read -r line; do info "     $line"; done <<< "$text"
+  info "  The whole change: git -C $ws diff $base..HEAD"
+  q="  Send it? [y/n] "
+  # As with the leak question: a list the phone would show cut is answered
+  # at the terminal, and nobody there is not a no.
+  if (( ${#text} > WORKSHOP_PHONE_MAX )); then
+    warn "  Too long for a question on the phone: answer it here, at the terminal."
+    ASK_DIR="" ask "$q" answer yn \
+      || { info "  Nobody answered at the terminal: it is asked again when the tree is next opened."; return 2; }
+  else
+    ask "$q" answer yn \
+      || { info "  Nobody answered: it is asked again when the tree is next opened."; return 2; }
+  fi
+  is_yes "$answer" && return 0
+  workshop_block "$tree" "you did not send it; $SELF core-send in this tree sends it"
+  return 1
+}
+
+# sclaude core-send: by the person, in the product's tree — the workshop's
+# change they held back (or that sclaude.contribute off kept) goes out now,
+# through the same checks, their yes given.
+cmd_core_send() {
+  local tree rec
+  # The person's word, and only theirs: from a session it would be the yes
+  # sclaude.contribute and sclaude.leaks exist to ask for.
+  [[ -z "${SCLAUDE_SESSION:-}" ]] \
+    || die "core-send is the person's, not a session's: sclaude asks them when the session ends"
+  tree="$(workshop_tree)" || die "run it inside the product's tree whose workshop holds the change"
+  rec="$(workshop_record "$tree")"
+  [[ -f "$rec" ]] || { info "  This tree has no workshop: nothing to send."; return 0; }
+  case "$(workshop_state "$tree" "")" in
+    blocked) workshop_py put "$rec" blocked null ;;
+    ready)   ;;
+    none)    info "  Nothing in this tree's workshop waits to be sent."; return 0 ;;
+    *)       die "the workshop's change is not finished: $(workshop_missing "$tree")" ;;
+  esac
+  WORKSHOP_SEND=1 workshop_publish "$tree"
+}
+
 # Brings the live checkout up to what was just published, when that is safe
 # here and now — on main, clean, nobody else's sclaude running from it — so
 # the next session runs the fix. Otherwise the next sclaude start does
 # (instruments_sync).
 workshop_live_update() {
   local other
+  if [[ "$(update_mode)" != auto ]]; then
+    info "  $INSTRUMENTS takes it with: $SELF update"
+    return 0
+  fi
   if [[ "$(git -C "$INSTRUMENTS" rev-parse --abbrev-ref HEAD 2>/dev/null)" != main \
         || -n "$(git -C "$INSTRUMENTS" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
     info "  $INSTRUMENTS is not a clean main: it takes the change when you update it."
@@ -604,6 +702,11 @@ workshop_remove() {
 workshop_rules() {
   local tree="$1" maintainer="" other=1
   [[ -n "$tree" && -f "$PROMPTS/_workshop.md" ]] || return 0
+  if [[ "$(contribute_mode)" == off ]]; then
+    SCLAUDE_V_INSTRUMENTS="$INSTRUMENTS" \
+      python3 "$LIB/render_prompt.py" "$PROMPTS/_workshop-closed.md" "$PROMPTS"
+    return
+  fi
   developer_is_maintainer && { maintainer=1; other=""; }
   SCLAUDE_V_WORKSHOP="$(workshop_dir "$tree")" SCLAUDE_V_INSTRUMENTS="$INSTRUMENTS" \
     SCLAUDE_V_CORE_MAINTAINER="$maintainer" SCLAUDE_V_CORE_OTHER="$other" \

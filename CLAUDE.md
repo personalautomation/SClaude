@@ -248,7 +248,10 @@ breaks the other silently — grep before you edit:
   `tests/workshop.py` check each side.
 - `sclaude core-open` is refused a step's session and let through for the
   reviews by `core_open_refused` and `CORE_OPEN_FREE` (`--step friction`) in
-  `sclaude/hooks/forbidden-commands.py`; only the retrospective's prompt and
+  `sclaude/hooks/forbidden-commands.py`, and refused step 1 with core-ready
+  and core-send by `SUBCOMMANDS["sclaude"]` in `no-code-in-planning.py`
+  (`SCLAUDE_REASON`); `core_send_refused` refuses core-send at every other
+  step. Only the retrospective's prompt and
   the friction and deferred reviews' carry `prompts/_workshop.md`
   (`workshop_rules` in `workshop.sh`, `render_prompt` in `run.sh`), and the
   process map's W follows the prompts. `tests/hooks.py` and
@@ -332,6 +335,33 @@ breaks the other silently — grep before you edit:
   opens asks rather than decides.
 
   <!-- Added by Claude on 2026-10-31 with sleep_mode, at the user's word. -->
+
+- The machine's settings, `sclaude.update` (`auto`, `notify`, `off`),
+  `sclaude.contribute` (`send`, `ask`, `off`) and `sclaude.leaks` (`ask`,
+  `auto`, `off`) in the checkout's git config, are read by
+  `update_mode`/`contribute_mode`/`leaks_mode` in `sclaude/lib/developer.sh` and
+  written by `install.sh` (`--update=`, `--contribute=`, `--leaks=`, its questions) and
+  `update_mode_choose`; unset is `ask` on both sides. `tests/install.py`
+  checks what the installer writes, `tests/sync.py` and `tests/workshop.py`
+  what is read. A word changed on one side alone leaves a machine taking or
+  sending what its person said not to, or asking at every start.
+
+  <!-- Added by Claude on 2026-11-03 at the user's request: a newcomer's
+  machine neither takes the public main nor sends to it unasked. -->
+
+- The deploy settings `ship` (`ask`, `auto`, `off`), `previewRegression` and
+  `prodRegression` (`full`, `smoke`, `none`) are listed in `CHOICES` in
+  `sclaude/lib/config_menu.py`, explained in `sclaude/config.example.json`,
+  read by `project_ship_mode`/`project_stage_regression` in
+  `sclaude/lib/project.sh` and by `setting` in `sclaude/lib/process.py`. The
+  part name `smoke` is treated as `e2e` by `regression_command` and is what
+  `sclaude/prompts/code.md` tells step 2 to tag for. `tests/project.py`,
+  `tests/regression.py`, `tests/merge.py` and `tests/process.py` check each
+  side. A word changed on one side alone ships what was set to be asked, or
+  runs a suite the map says is gone.
+
+  <!-- Added by Claude on 2026-11-03 at the user's request, with the deploy
+  settings. -->
 
 - `sclaude new`'s options (`--issue`, `--blocked-ok`, `--create-issue`,
   `--no-issue`; `new_from_args` in `bin/sclaude`) and `sclaude config set` are

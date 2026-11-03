@@ -557,6 +557,23 @@ def core_open_refused(command, step):
     return None
 
 
+# `sclaude core-send` sends a held workshop change as the person's own yes
+# (workshop.sh cmd_core_send): no session runs it, whatever its step, or it
+# would answer the questions sclaude.contribute and sclaude.leaks ask the
+# person. Refused here rather than only by the variable cmd_core_send reads,
+# which a session can unset.
+CORE_SEND_NO = ("`sclaude core-send` is the person's word, not a session's: when this "
+                "session ends sclaude shows them the workshop's change and asks whether to send it.")
+
+
+def core_send_refused(command):
+    """Why no session may send the workshop's change by the person's word, or None."""
+    for words in segments(command) or []:
+        if words[:2] == ["sclaude", "core-send"]:
+            return CORE_SEND_NO
+    return None
+
+
 TAIL = _failsafe.TAIL
 
 # A line the hook cannot read is no ban, and nothing waits on the person: the
@@ -1246,6 +1263,8 @@ if payload.get("tool_name") == "Bash":
             type(exc).__name__, exc)
     if not reason and core_open_refused(command, step):
         deny(CORE_OPEN_NO, step, command, CORE_OPEN_TAIL)
+    if not reason and core_send_refused(command):
+        deny(CORE_SEND_NO, step, command, CORE_OPEN_TAIL)
     if reason:
         deny(reason, step, command, UNPARSED_TAIL if reason in (UNPARSED, UNJUDGED, UNNESTED) else None)
     question = shared_schema_asks(command)

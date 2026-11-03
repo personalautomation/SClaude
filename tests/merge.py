@@ -359,6 +359,25 @@ if remind:
     check_true("offer-comes-before-the-end-date", call_at < end_date_at)
     check_true("offer-comes-before-production", call_at < prod_at)
 
+    # ship (project_ship_mode): auto drops the plain question only — the
+    # "anyway" ones, where QA or a check was passed over, are still asked —
+    # and off reaches no block that ships, and closes the issue as such.
+    plain = remind.find('prod_ask="Ship to production?"')
+    auto = remind.find('[[ "$ship_mode" == auto ]] && prod_ask=""')
+    check_true("ship-auto-only-on-the-plain-question",
+               -1 < plain < auto and remind.count('&& prod_ask=""') == 1
+               and remind.rfind('prod_ask="Ship to production anyway?"') < plain)
+    check_true("ship-auto-asks-with-riders",
+               remind.find('prod_riders_say "$riders"') < remind.find('prod_ask="Ship to production, with what rides along?"'))
+    off_at = remind.find('elif [[ "$ship_mode" == off ]]; then\n    echo ""')
+    first_block = remind.find('run_block \\\n      "Production"')
+    check_true("ship-off-before-any-block", -1 < off_at < first_block)
+    check_true("ship-off-remembers-no-rollback",
+               'if [[ "$prod_same" -eq 0 && "$ship_mode" != off ]]; then\n    rollback_remember_previous' in remind)
+    check_true("ship-off-closes-as-such",
+               re.search(r'elif \[\[ "\$ship_mode" == off \]\]; then\n\s*issue_close_done "\$issue" shipoff', remind)
+               is not None)
+
     # Which is only true if a successful offer updates the variable the rest of
     # the function branches on.
     check_true("a-merge-here-counts-as-merged",

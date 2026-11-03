@@ -237,19 +237,20 @@ DETAILS = {
     "f_monthly": "sclaude deferred, offered once a month: every feature's put-off rows together. A class that keeps coming back is decided — a rule lifted, a preset changed, a CLAUDE.md line written — and its rows removed.",
     "w_find": "The retrospective, a friction review or the monthly review finds something to fix in sclaude itself. A step's session does not change sclaude: it logs what got in its way, and its friction review brings it here. sclaude's live checkout is read-only to all of them.",
     "w_ask": "The retrospective and the friction and monthly reviews start in plan mode: the plan you approve, with the change to sclaude in it, is the yes, and sclaude core-open opens without a question.",
-    "w_open": "Makes the tree's workshop, a worktree of sclaude from origin/main at .sclaude/local/instruments, shared by every session of the tree, and lets this session write there.",
+    "w_open": "Makes the tree's workshop, a worktree of sclaude from origin/main at .sclaude/local/instruments, shared by every session of the tree, and lets this session write there. Where the machine's sclaude.contribute is off it is refused, and the session's prompt says the workshop is closed: what it found goes to the friction log.",
     "w_change": "The session commits in the workshop and reviews its change: /sreview for a maintainer of sclaude, whatever review they choose for anybody else.",
     "w_ready": "Refuses uncommitted work and records the head as ready; for a maintainer it wants sreview's mark of a finished run at that head.",
     "w_exit": "Publishing starts from claude_launch once the session exits, whatever step it was in.",
     "w_ready_gate": "A change uncommitted, unreviewed at its head or never marked ready is not published.",
     "w_pending": "The change waits in the workshop: it is offered again whenever the tree is opened, and later sessions' changes wait behind it.",
-    "w_held": "A no to the product's details keeps the change unpublished at the head it was shown; it goes on once a new commit is marked ready.",
+    "w_held": "A no — to the product's details, or to sending it — keeps the change unpublished at the head it was shown; it goes on once a new commit is marked ready, or with sclaude core-send.",
+    "w_send": "By the machine's sclaude.contribute, asked at install. ask (also when unset): the commits and the files changed are shown, with where they go and that it is public, and nothing is sent without your yes; while you are away it waits for you. send: no question. off: held, as no session should have made it. sclaude core-send sends a held one.",
     "w_back": "The same conversation is offered back, told what is missing. A no records it as pending: it is offered again when the feature is next opened, and later sessions' changes wait behind it.",
     "w_leaks": "sclaude is public and the product is not: the added lines and the commit messages are searched for the product's repository and folder names, the feature's slug and branch, issue and pull-request numbers, and paths of the product's own files.",
-    "w_leak_ask": "A hit is shown to you, in the terminal and in the topic when it is short. A yes is kept for the lines it was shown; a no holds the change at its head until a new commit is marked ready.",
+    "w_leak_ask": "A hit is shown to you, in the terminal and in the topic when it is short. A yes is kept for the lines it was shown; a no holds the change at its head until a new commit is marked ready. By the machine's sclaude.leaks, asked at install: ask (also when unset) asks; auto shows the lines and goes on unasked; off holds the change unasked, though sclaude core-send still asks.",
     "w_tests": "The tests the change touches run in a clean environment, each in a session of its own with no terminal. Red tests, no network, a refused push or a conflict with main stop the publication; it is tried again whenever the tree is opened.",
     "w_who": "MAINTAINERS lists who may commit sclaude's core straight to main; with no file everybody is a maintainer.",
-    "w_main": "Rebased onto origin/main, squashed into one commit, pushed to main; the live checkout is fast-forwarded when nothing runs from it, so the next session runs the fix.",
+    "w_main": "Rebased onto origin/main, squashed into one commit, pushed to main; where sclaude.update is auto the live checkout is fast-forwarded when nothing runs from it, so the next session runs the fix, and elsewhere sclaude update takes it.",
     "w_pr": "Pushed unsquashed to the workshop's own dev/<name>-<time> branch, never named after the feature, as one pull request per tree; the maintainer's review of it is the gate.",
 }
 # The epilogue's copies beside the stops are its session.
@@ -396,12 +397,13 @@ WORKSHOP_NODES = {
     "w_back": ("person", 6, "gate", "Back to the session?", "told what is missing; no keeps it pending", ""),
     "w_pending": ("session", 7, "end", "Pending", "offered again when the tree is next opened", ""),
     "w_leaks": ("sclaude", 7, "gate", "The product's details in it?", "names, numbers, paths of the product", ""),
-    "w_leak_ask": ("person", 7, "gate", "Publish anyway?", "a no holds the change at its head", ""),
-    "w_held": ("person", 8, "end", "Held at its head", "until a new commit is marked ready", ""),
+    "w_leak_ask": ("person", 7, "gate", "Publish anyway?", "sclaude.leaks: ask asks, auto goes on, off holds", ""),
+    "w_held": ("person", 8, "end", "Held at its head", "until a new commit, or sclaude core-send", ""),
     "w_tests": ("sclaude", 8, "task", "The tests it touches", "a clean environment, no terminal; red — tried again later", ""),
-    "w_who": ("sclaude", 9, "gate", "A maintainer?", "MAINTAINERS", ""),
-    "w_main": ("github", 9, "task", "Pushed to main", "one squashed commit; the live checkout updated", ""),
-    "w_pr": ("github", 10, "task", "A pull request", "from dev/<name>-<time>, one per tree", ""),
+    "w_send": ("person", 9, "gate", "Send it?", "sclaude.contribute: ask shows it, send does not, off holds it", ""),
+    "w_who": ("sclaude", 10, "gate", "A maintainer?", "MAINTAINERS", ""),
+    "w_main": ("github", 10, "task", "Pushed to main", "one squashed commit", ""),
+    "w_pr": ("github", 11, "task", "A pull request", "from dev/<name>-<time>, one per tree", ""),
 }
 WORKSHOP_EDGES = [
     ("w_find", "w_ask", "", ""),
@@ -418,7 +420,9 @@ WORKSHOP_EDGES = [
     ("w_leak_ask", "w_tests", "yes", ""),
     ("w_leak_ask", "w_held", "no", ""),
     ("w_leaks", "w_tests", "none", ""),
-    ("w_tests", "w_who", "green", ""),
+    ("w_tests", "w_send", "green", ""),
+    ("w_send", "w_who", "yes", ""),
+    ("w_send", "w_held", "no", "back"),
     ("w_who", "w_main", "yes", "msg"),
     ("w_who", "w_pr", "no", "msg"),
 ]
@@ -624,6 +628,9 @@ NEEDS = {
     "merge": ("merge", {"both", "auto"}),
     "o_ghreview": ("review", {"github", "local"}),
     "o_qa": ("board.done", {True}),
+    # ship: off never deploys: the yes and what follows it go.
+    ("ship", "prod"): ("ship", {"ask", "auto"}),
+    "prod": ("ship", {"ask", "auto"}),
 }
 
 # Where the flow goes on when a block is taken out: an arrow into it is
@@ -668,7 +675,21 @@ VARIANTS = {
         "details": "Green: the issue goes to In QA. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there."})],
     "epilogue": [("qa", {"auto"}, {
         "details": "A short session writes a Current status comment on the issue and on every parent up the chain, and Current behaviour where the product now differs from a description. Labels deployed-preview and deployed-prod are set by how each stage ended. Nobody does QA here, so before the last one, when the product's code changed since the feature's demo, the demo is recorded again for the issue — or kept, when nothing a user meets changed — and what it found wrong in the product is printed."})],
-    "o_prod": [("regression.prod", {False}, {"kind": "task", "text": "shipped on your yes"})],
+    "o_prod": [("ship", {"off"}, {"kind": "task", "title": "Not shipped from here", "text": "ship: off — production is yours to deploy"}),
+               ("regression.prod", {False}, {"kind": "task", "text": "shipped; no suite runs there"}),
+               ("ship", {"auto"}, {"text": "shipped by sclaude; a red suite, not rolled back: held here"})],
+    "ship": [("ship", {"auto"}, {
+        "title": "Ship to production?",
+        "text": "ship: auto — asked only when a gate was passed over, or others' code rides along",
+        "details": "With ship set to auto, sclaude ships once the merge is in without asking — the deployment production runs now is recorded first, for a rollback. The question comes back where QA or a check was passed over on the way (merged before the preview went green, or merged as a change nothing deploys that carried more), and where other features' code between production and main would go out with it."}),
+             ("ship", {"off"}, {
+        "title": "Not shipped from here",
+        "text": "ship: off — the issue closes as merged and accepted",
+        "details": "With ship set to off, sclaude never deploys production: once the merge is in the issue closes as merged and accepted, and the epilogue and the clean-up follow. Shipping is cd <repo> && vercel --prod, by hand."})],
+    "r_preview": [("previewRegression", {"smoke"}, {
+        "text": "the product's smoke set, against the preview, before QA"})],
+    "r_prod": [("prodRegression", {"smoke"}, {
+        "text": "the product's smoke set, against production, after the ship"})],
     "o_preview": [("regression.preview", {False}, {"kind": "task", "text": "deployed"})],
     "o_merge": [("merge", {"auto"}, {"lane": "sclaude", "text": "by sclaude: merge auto"}),
                 ("merge", {"github"}, {"text": "yours, on GitHub"})],
@@ -685,8 +706,26 @@ def setting(cfg, name):
     if name in ("qa", "merge"):
         mode = cfg.get(name)
         return mode if mode in ("github", "both", "auto") else ("both" if name == "merge" else "github")
+    if name in ("previewRegression", "prodRegression"):
+        return cfg.get(name) if cfg.get(name) in ("smoke", "none") else "full"
+    if name == "ship":
+        return cfg.get("ship") if cfg.get("ship") in ("auto", "off") else "ask"
     if name.startswith("regression."):
-        return bool((cfg.get("regression") or {}).get(name.split(".", 1)[1]))
+        # As project_regression_parts runs them: a deployed stage set to
+        # none has no suite, and one set to smoke runs the smoke list when
+        # the product declares one.
+        stage = name.split(".", 1)[1]
+        lists = cfg.get("regression") or {}
+        # Nothing ships under ship: off, so production's suite never runs.
+        if stage == "prod" and setting(cfg, "ship") == "off":
+            return False
+        if stage in ("preview", "prod"):
+            mode = setting(cfg, stage + "Regression")
+            if mode == "none":
+                return False
+            if mode == "smoke" and lists.get("smoke"):
+                return True
+        return bool(lists.get(stage))
     if name in ("board.qa", "board.done"):
         # done is what QA is waited for by (qa_wait); qa only where the issue
         # is moved to before it (issue_qa_ready).
@@ -881,6 +920,8 @@ COMMANDS = [
     ("sclaude core-open", "", "in a session", "let the session write sclaude in its workshop", "w_open"),
     ("sclaude core-ready", "", "in a session", "mark the workshop's change ready to publish", "w_ready"),
     ("sclaude propose", "", "a developer's branch", "send dev/<name>'s commits to sclaude as a PR", "w_pr"),
+    ("sclaude core-send", "", "a workshop change held", "send the tree's held change to sclaude after all", "w_send"),
+    ("sclaude update", "", "always", "take sclaude's main now, whatever sclaude.update says", ""),
 ]
 
 def places(target):
@@ -1578,8 +1619,10 @@ WORKSHOP_START = ("w_find", "w_ask", "w_open", "w_change", "w_ready", "w_exit", 
 WORKSHOP_OUT = {
     "blocked": ("w_leaks", "w_leak_ask", "w_held"), "held": ("w_leaks", "w_leak_ask", "w_held"),
     "left": ("w_back", "w_pending"), "red": ("w_leaks", "w_tests"),
-    "stopped": ("w_leaks", "w_tests", "w_who"),
-    "main": ("w_leaks", "w_tests", "w_who", "w_main"), "pr": ("w_leaks", "w_tests", "w_who", "w_pr"),
+    "declined": ("w_leaks", "w_tests", "w_send", "w_held"), "waits": ("w_leaks", "w_tests", "w_send"),
+    "stopped": ("w_leaks", "w_tests", "w_send", "w_who"),
+    "main": ("w_leaks", "w_tests", "w_send", "w_who", "w_main"),
+    "pr": ("w_leaks", "w_tests", "w_send", "w_who", "w_pr"),
 }
 
 
@@ -2923,6 +2966,7 @@ WHEN = {
     "in a session": [nid for nid, n in all_nodes().items() if n[2] == "session"],
     "with review rounds": ["review", "round"],
     "a developer's branch": [],
+    "a workshop change held": ["w_held"],
 }
 
 KIND_WORDS = {

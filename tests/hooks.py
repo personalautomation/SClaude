@@ -88,6 +88,13 @@ def run(hook, command, step=None, tool="Bash", tool_input=None, env=None,
 # (command, expectation). Every wrapper is checked both bare and with an
 # argument: it was the wrapper's argument that threw the parsing off.
 PLANNING = [
+    # sclaude's own that change or send sclaude are not step 1's; its
+    # reports are.
+    ("sclaude core-send", DENY),
+    ("env -u SCLAUDE_SESSION sclaude core-send", DENY),
+    ("/x/bin/sclaude core-open", DENY),
+    ("sclaude core-ready", DENY),
+    ("sclaude status", ALLOW),
     # The redirection scan reads the line tokenize() reads: in the raw one the
     # body's apostrophe paired with a later one and hid the `>`.
     ("echo \"$(echo \"it's\")\" > plan.md; echo \"it's\"", DENY),
@@ -835,11 +842,32 @@ def main():
                                 ("sclaude core-open", "sync", DENY),
                                 ("sclaude core-open", "friction", ALLOW),
                                 ("sclaude core-ready", "code", ALLOW),
+                                # core-send is the person's, at every step.
+                                ("sclaude core-send", "friction", DENY),
+                                ("env -u SCLAUDE_SESSION sclaude core-send", "friction", DENY),
+                                ("SCLAUDE_SESSION= sclaude core-send", "code", DENY),
                                 ("sclaude checks 5", "review", ALLOW)):
         got = run("forbidden-commands.py", command, step=step, cwd=PRODUCT,
                   env={"CLAUDE_PROJECT_DIR": PRODUCT})
         if got != want:
             failures.append(("core-open", command, want, got))
+    # Step 1's refusal of them says why, not "writing is forbidden", and ends
+    # as the hook's own; a write in the same command keeps the write's reason.
+    for command, core in (("sclaude core-send", True),
+                          ("sclaude core-ready && echo x > src/a.ts", False),
+                          ('git commit -m "run sclaude core-ready later"', False)):
+        done = subprocess.run([sys.executable, os.path.join(HOOKS, "no-code-in-planning.py")],
+                              input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command}}),
+                              text=True, capture_output=True, timeout=20, cwd=PRODUCT,
+                              env=dict(os.environ, CLAUDE_PROJECT_DIR=PRODUCT))
+        try:
+            reason = json.loads(done.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        except (ValueError, KeyError):
+            failures.append(("plan-core-reason", command, "not refused", done.stdout))
+            continue
+        said = "person's" in reason and reason.endswith("carry on with the step's own work.")
+        if said != core:
+            failures.append(("plan-core-reason", command, core, reason))
     # Its refusal sends the step on with its work, not to the person.
     done = subprocess.run([sys.executable, os.path.join(HOOKS, "forbidden-commands.py"),
                            "--step", "code", "--root", PRODUCT],

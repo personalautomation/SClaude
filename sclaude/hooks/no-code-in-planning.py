@@ -147,6 +147,10 @@ SUBCOMMANDS = {
     "npm": PKG_WRITERS,
     "pnpm": PKG_WRITERS,
     "yarn": PKG_WRITERS,
+    # sclaude's own that change or send sclaude: the workshop is the
+    # retrospective's and the reviews', and core-send is the person's word
+    # (workshop.sh), which forbidden-commands.py refuses the other steps.
+    "sclaude": {"core-open", "core-ready", "core-send"},
 }
 
 
@@ -558,6 +562,9 @@ def writes(command):
     # — verified, all four went through, whereas a bare `rm -rf` was rejected.
     # The parsing is now shared.
     chains, current = [], []
+    # A sclaude core command is refused for a reason of its own (SCLAUDE_REASON),
+    # but only when nothing else in the chain writes: the rest is still read.
+    core = False
     for token in tokens:
         if token in ("|", "||", "&&", ";", "&"):
             if current:
@@ -605,6 +612,9 @@ def writes(command):
                     skip = arg in VALUE_FLAGS.get(name, ())
                     continue
                 if arg in SUBCOMMANDS[name]:
+                    if name == "sclaude":
+                        core = True
+                        break
                     actions = GIT_READ_ACTIONS.get(arg) if name == "git" else None
                     # The very next word, not the next non-flag: in
                     # `git stash -m list` the "list" is a message, and that
@@ -618,18 +628,32 @@ def writes(command):
             # `git log && git commit` writes, however much reading stands before
             # it.
             continue
-    return False
+    # Truthy for every caller; "sclaude" tells deny() which reason it is.
+    return "sclaude" if core else False
 
 
-def deny(subject=""):
+# Its own reason for sclaude's commands in SUBCOMMANDS, when nothing else in
+# the command writes (writes() returns "sclaude"): they write no file,
+# and the generic one would read to the friction review as a false refusal
+# to loosen. The words are forbidden-commands.py's CORE_OPEN_NO and
+# CORE_SEND_NO, said for step 1; its ending is one of collect-denials.py's
+# OWN_MARKERS, since this hook writes the log itself.
+SCLAUDE_REASON = (
+    "Step 1 does not change or send sclaude itself: its workshop is the "
+    "retrospective's and the reviews', and `sclaude core-send` is the person's "
+    "word. If something in sclaude got in your way, append it to "
+    ".sclaude/local/feature/friction.log. Then carry on with the step's own work.")
+
+
+def deny(subject="", reason=REASON):
     # Into the log, so that the review between steps sees what the step tripped
     # over.
-    note("plan", "hook", subject, REASON)
+    note("plan", "hook", subject, reason)
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": REASON,
+            "permissionDecisionReason": reason,
         }
     }, ensure_ascii=False))
     sys.exit(0)
@@ -648,7 +672,9 @@ _failsafe.CONTEXT["subject"] = str(tool_input.get("command") or tool_input.get("
 if tool in ("Write", "Edit", "NotebookEdit"):
     if not allowed_path(str(tool_input.get("file_path", ""))):
         deny(tool)
-elif tool == "Bash" and writes(str(tool_input.get("command", ""))):
-    deny(str(tool_input.get("command", "")))
+elif tool == "Bash":
+    found = writes(str(tool_input.get("command", "")))
+    if found:
+        deny(str(tool_input.get("command", "")), SCLAUDE_REASON if found == "sclaude" else REASON)
 
 sys.exit(0)

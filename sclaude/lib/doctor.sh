@@ -127,14 +127,31 @@ doctor_identity() {
   fi
   [[ -n "$branch" ]] && doctor_ok "instruments is on $branch"
 
+  # What this machine lets sclaude do with its public repository
+  # (developer.sh): asked by install.sh, unset reads as ask.
+  local upd con
+  upd="$(update_mode)"; con="$(contribute_mode)"
+  case "$upd" in
+    ask) doctor_warn "updates of sclaude: not chosen yet" \
+           "the next start asks; or ./install.sh --update=notify|auto|off" ;;
+    *)   doctor_ok "updates of sclaude: $upd (sclaude.update)" ;;
+  esac
+  doctor_ok "sending fixes of sclaude to its public repository: $con (sclaude.contribute)"
+  doctor_ok "a fix that may name the product: $(leaks_mode) (sclaude.leaks)"
+
   # Bounded: a doctor that hangs on a dead network is a worse doctor than one
   # that says it could not look.
   if GIT_TERMINAL_PROMPT=0 timeout 15 git -C "$INSTRUMENTS" fetch -q origin main 2>/dev/null; then
     local behind
     behind="$(git -C "$INSTRUMENTS" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
     if [[ "$behind" -gt 0 ]]; then
-      doctor_warn "instruments is $behind commit(s) behind main" \
-        "the next sclaude command brings them in (instruments_sync)"
+      if [[ "$upd" == auto ]]; then
+        doctor_warn "instruments is $behind commit(s) behind main" \
+          "the next sclaude command brings them in (instruments_sync)"
+      else
+        doctor_warn "instruments is $behind commit(s) behind main" \
+          "read them (git -C $INSTRUMENTS log HEAD..origin/main), then: sclaude update"
+      fi
     else
       doctor_ok "instruments is up to date with main"
     fi

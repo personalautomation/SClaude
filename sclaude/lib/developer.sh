@@ -151,3 +151,139 @@ developer_is_maintainer() {
   sed -e 's/#.*//' -e 's/[[:space:]]//g' "$file" | tr '[:upper:]' '[:lower:]' \
     | grep -qxF -- "$email"
 }
+
+# --- what this machine lets sclaude do with the network -----------------------
+#
+# Two settings of the machine, not of a product, kept in the git config of
+# sclaude's checkout beside sclaude.developer: install.sh asks them, and a
+# worktree of the checkout (a workshop) reads the same file.
+#
+#   sclaude.update      auto     every sclaude start takes sclaude's main
+#                       notify   a start says what main has; `sclaude update` takes it
+#                       off      sclaude never fetches itself
+#   sclaude.contribute  send     what a session fixed in sclaude goes out unasked
+#                       ask      it is shown, and goes out on the person's yes
+#                       off      no session changes sclaude here at all
+#   sclaude.leaks       ask      a change that may name the product is shown,
+#                                and goes out on the person's yes
+#                       auto     it is shown, and goes out without the question
+#                       off      it never goes out; a session rewords it
+#
+# Unset, or set to a word not listed: `ask`, for both. For the update that
+# means the question itself, at the next start with a terminal
+# (update_mode_choose); for the contribution, the question at each send.
+# Coupled: install.sh writes these words, tests/install.py and
+# tests/sync.py / tests/workshop.py read both sides.
+UPDATE_MODES="auto notify off"
+CONTRIBUTE_MODES="send ask off"
+LEAKS_MODES="ask auto off"
+
+# The raw value, lower-cased, or nothing.
+#
+#   sclaude_setting <update|contribute>
+sclaude_setting() {
+  local v
+  if [[ -n "${INSTRUMENTS:-}" && -d "$INSTRUMENTS" ]]; then
+    v="$(git -C "$INSTRUMENTS" config "sclaude.$1" 2>/dev/null)"
+  else
+    v="$(git config "sclaude.$1" 2>/dev/null)"
+  fi
+  printf '%s' "$v" | tr '[:upper:]' '[:lower:]'
+}
+
+# auto, notify, off, or ask when nothing valid is set.
+update_mode() {
+  local v; v="$(sclaude_setting update)"
+  [[ -n "$v" && " $UPDATE_MODES " == *" $v "* ]] && echo "$v" || echo ask
+}
+
+# send, ask or off; ask when nothing valid is set.
+contribute_mode() {
+  local v; v="$(sclaude_setting contribute)"
+  [[ -n "$v" && " $CONTRIBUTE_MODES " == *" $v "* ]] && echo "$v" || echo ask
+}
+
+# ask, auto or off; ask when nothing valid is set.
+leaks_mode() {
+  local v; v="$(sclaude_setting leaks)"
+  [[ -n "$v" && " $LEAKS_MODES " == *" $v "* ]] && echo "$v" || echo ask
+}
+
+# What each word means, for the question at install and at a start.
+update_modes_explain() {
+  cat <<'TXT'
+  How should sclaude update itself from its public repository's main?
+    notify  each start says what is new there, with the commits; you take it
+            with `sclaude update` once you have read them (recommended)
+    auto    each start takes it by itself: what the maintainers merged runs
+            here at the next start
+    off     sclaude never fetches itself; you update the checkout by hand
+TXT
+}
+
+contribute_modes_explain() {
+  cat <<'TXT'
+  sclaude's retrospective and friction reviews can fix sclaude itself, and
+  send the fix to its public repository (main for a maintainer, a pull request
+  from your fork for anybody else). Written while working in your product,
+  such a change is checked for the product's details, but only by a heuristic.
+    ask     you see the commits and the files, and nothing goes out without
+            your yes
+    send    it goes out by itself once it is reviewed and its tests are green
+    off     no session changes sclaude on this machine; what got in its way
+            stays in your product's friction log
+TXT
+}
+
+leaks_modes_explain() {
+  cat <<'TXT'
+  Before a fix of sclaude is sent, it is searched for your product's details:
+  its name, issue and pull-request numbers, paths of its files. When something
+  matches, sclaude asks "Publish it anyway?".
+    ask     the matching lines are shown, and nothing goes out without your yes
+    auto    they are shown, and it goes out without the question
+    off     a change that matches never goes out; a session rewords it first
+TXT
+}
+
+# Writes one of them into the checkout's git config.
+#
+#   sclaude_setting_set <update|contribute|leaks> <word>
+sclaude_setting_set() {
+  git -C "${INSTRUMENTS:-.}" config "sclaude.$1" "$2"
+}
+
+# Whether there is a terminal to ask at, apart from the phone.
+update_can_ask() { ( exec < /dev/tty ) 2>/dev/null; }
+
+# One answer to the update question from the terminal, or 1 after
+# UPDATE_ASK_SECONDS (60) with none.
+update_read() {
+  local __reply=""
+  read -r -t "${UPDATE_ASK_SECONDS:-60}" -p "  notify, auto or off? " __reply < /dev/tty 2>/dev/tty || return 1
+  printf -v "$1" '%s' "$__reply"
+}
+
+# The update question, asked at a start while sclaude.update is unset, and
+# saved. UPDATE_CHOSEN gets the answer; with nobody at the terminal it is
+# notify for this start, and the question comes again at the next.
+update_mode_choose() {
+  UPDATE_CHOSEN=notify
+  update_can_ask || return 0
+  local answer
+  echo "" >&2
+  update_modes_explain >&2
+  while :; do
+    # At the terminal only, and not for long: this is a question of the
+    # machine, not of a product's channel, and a start the bot or the menu
+    # made in a pane has nobody at it. Unanswered, this start is notify and
+    # the next one asks again.
+    update_read answer || { printf '\n%s\n' "  No answer: notify for now; asked again at the next start." >&2; return 0; }
+    answer="$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')"
+    [[ " $UPDATE_MODES " == *" $answer "* ]] && break
+    printf '%s\n' "  Answer notify, auto or off." >&2
+  done
+  sclaude_setting_set update "$answer"
+  UPDATE_CHOSEN="$answer"
+  printf '%s\n' "  Saved: git -C ${INSTRUMENTS:-.} config sclaude.update $answer (./install.sh --update=… changes it)" >&2
+}

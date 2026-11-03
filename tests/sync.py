@@ -56,7 +56,7 @@ def commit(repo, name, text):
 
 
 class World:
-    def __init__(self, tmp, email="me@x.test", maintainers=None):
+    def __init__(self, tmp, email="me@x.test", maintainers=None, update="auto"):
         self.origin = os.path.join(tmp, "origin.git")
         self.up = os.path.join(tmp, "upstream")   # somebody else's clone
         self.me = os.path.join(tmp, "instruments")
@@ -75,6 +75,9 @@ class World:
                        capture_output=True)
         git(self.me, "config", "user.email", email)
         git(self.me, "config", "user.name", "Me")
+        # The cases below are about how an update is taken; the machine's say
+        # in whether it is (sclaude.update) has its own, further down.
+        git(self.me, "config", "sclaude.update", update)
         self.reexec = os.path.join(tmp, "reexec")
         with open(self.reexec, "w") as fh:
             fh.write('#!/usr/bin/env bash\necho "REEXEC $SCLAUDE_SYNCED $*"\n')
@@ -201,6 +204,55 @@ with tempfile.TemporaryDirectory() as tmp:
     check("untracked-file-kept", open(os.path.join(w.me, "untracked.txt")).read(),
           "mine, untracked\n")
 
+
+# --- the machine's say: sclaude.update ---------------------------------------
+with tempfile.TemporaryDirectory() as tmp:
+    def fresh(name, update):
+        os.makedirs(os.path.join(tmp, name))
+        w = World(os.path.join(tmp, name), update=update)
+        if not update:
+            git(w.me, "config", "--unset", "sclaude.update")
+        w.upstream_commit("news.txt", "news\n")
+        return w
+
+    print("update off")
+    w = fresh("off", "off")
+    out = w.run()
+    check("off-not-fetched", os.path.exists(os.path.join(w.me, ".git", "FETCH_HEAD")), False)
+    check("off-not-taken", os.path.isfile(os.path.join(w.me, "news.txt")), False)
+
+    print("update notify")
+    w = fresh("notify", "notify")
+    out = w.run()
+    check("notify-not-taken", (os.path.isfile(os.path.join(w.me, "news.txt")), "REEXEC" in out), (False, False))
+    check("notify-lists-the-commits", ("1 new commit(s)" in out, "edit news.txt" in out), (True, True))
+    check("notify-names-the-command", "sclaude update" in out, True)
+    out = w.run()
+    check("notify-twice-is-a-line", ("edit news.txt" in out, "not taken yet" in out), (False, True))
+    out = w.run("units_refresh() { echo UNITS; }\ncmd_update")
+    check("update-command-takes-it",
+          (os.path.isfile(os.path.join(w.me, "news.txt")), "UNITS" in out, "REEXEC" in out), (True, True, False))
+    out = w.run("units_refresh() { :; }\ncmd_update")
+    check("update-command-up-to-date", "up to date" in out, True)
+
+    print("update unset")
+    w = fresh("unset-pipe", "")
+    out = w.run("update_can_ask() { return 1; }\ninstruments_sync")
+    check("unset-no-terminal-is-notify",
+          (os.path.isfile(os.path.join(w.me, "news.txt")), "sclaude update" in out,
+           git(w.me, "config", "sclaude.update")), (False, True, ""))
+    w = fresh("unset-tty", "")
+    out = w.run('update_can_ask() { return 0; }\nupdate_read() { printf -v "$1" auto; }\ninstruments_sync')
+    check("unset-asked-and-saved", git(w.me, "config", "sclaude.update"), "auto")
+    check("unset-answer-applies",
+          (os.path.isfile(os.path.join(w.me, "news.txt")), "REEXEC 1 one two" in out), (True, True))
+    w = fresh("unset-unanswered", "")
+    out = w.run('update_can_ask() { return 0; }\nupdate_read() { return 1; }\ninstruments_sync')
+    check("unset-unanswered-is-notify",
+          (os.path.isfile(os.path.join(w.me, "news.txt")), git(w.me, "config", "sclaude.update")), (False, ""))
+    w = fresh("bad", "sometimes")
+    out = w.run("update_can_ask() { return 1; }\ninstruments_sync")
+    check("unknown-word-is-unset", os.path.isfile(os.path.join(w.me, "news.txt")), False)
 
 # --- a non-maintainer's pull request (instruments_propose) -------------------
 #

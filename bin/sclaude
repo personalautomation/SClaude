@@ -59,6 +59,9 @@
 #                           sclaude for the product
 #   sclaude deferred        the monthly review of the friction put off
 #   sclaude propose         send a change to sclaude itself as a pull request
+#   sclaude update          take sclaude's main now (sclaude.update says
+#                           whether a start does it by itself)
+#   sclaude core-send       send the tree's workshop change you held back
 #   sclaude core-open       run by a session: open the tree's workshop, where
 #                           it may change sclaude (workshop.sh)
 #   sclaude core-ready [--review "<how>"]
@@ -1916,7 +1919,9 @@ main() {
     # instruments as "another sclaude" for as long as it lived.
     # core-open and core-ready are run by a session, under the sclaude that
     # started it: an update from here would move the checkout under both.
-    status|ls|dev|news|checks|doctor|"config set"|core-open|core-ready|_flow|_handoff|-h|--help|help|-*) unset ASK_DIR ;;
+    # update fetches and merges by itself: the start's own sync first would
+    # only say what update is about to take.
+    status|ls|dev|news|checks|doctor|update|"config set"|core-open|core-ready|_flow|_handoff|-h|--help|help|-*) unset ASK_DIR ;;
     *)
       # The same line decides what is recorded (terminal.sh): a conversation
       # is worth reading back, a report is not. First, so the record holds
@@ -1984,6 +1989,9 @@ main() {
     friction)      shift; cmd_friction "$(slugify "${1:-}")" ;;
     deferred)      cmd_deferred ;;
     propose)       cmd_propose ;;
+    update)        cmd_update ;;
+    # By the person: a workshop change they said no to goes out after all.
+    core-send)     cmd_core_send ;;
     # Run by a session, to change sclaude in its tree's workshop (workshop.sh).
     core-open)     cmd_core_open ;;
     core-ready)    shift; cmd_core_ready "$@" ;;

@@ -231,6 +231,8 @@ issue_close_done() {
       info "Issue #$issue closed — the feature changed nothing in the code, so it had no pull request."
     elif [[ "$outcome" == nodeploy ]]; then
       info "Issue #$issue closed — merged; the change is one nothing deploys."
+    elif [[ "$outcome" == shipoff ]]; then
+      info "Issue #$issue closed — merged and accepted; sclaude does not deploy production here (ship: off)."
     elif [[ "$outcome" == declined ]]; then
       info "Issue #$issue closed — merged and accepted; production was declined."
       info "  Ship it later from ${REPO:-the repository}: vercel --prod"

@@ -34,6 +34,8 @@
     "            code too. The dev server and database are not brought up for",
     "            it, so leave out anything that needs them. Absent or empty,",
     "            the full `local` list runs.",
+    "            `smoke` is what a deployed stage runs instead of its own",
+    "            list where previewRegression or prodRegression says smoke.",
     "manuals   — the pages describing the product as a person sees it. Step 1",
     "            gets their contents before it guesses at the scope; step 3",
     "            updates them in the same pull request as the feature.",
@@ -146,7 +148,26 @@
     "            every session is on — not an `/isleep here` one —",
     "            and asking again once they are back; the default), \"on\"",
     "            (always) or \"off\" (only where `[g]` is ticked by hand).",
-    "            A `[g]` set by hand on a feature, on or off, wins over it."
+    "            A `[g]` set by hand on a feature, on or off, wins over it.",
+    "previewRegression — what the preview's regression runs: \"full\"",
+    "            (its whole `regression.preview` list; the default), \"smoke\"",
+    "            (`regression.smoke`, the product's few vital paths — the",
+    "            whole list where the product declares none) or \"none\" (no",
+    "            regression and no gate there). Smoke is the product's own:",
+    "            name its parts in `regression.smoke` and their command in",
+    "            `commands`; a part called `smoke` is run against the",
+    "            deployment the way `e2e` is (E2E_BASE_URL exported), so",
+    "            `playwright test --grep @smoke` over the same suite, with",
+    "            the vital specs tagged @smoke, is all it takes.",
+    "prodRegression — the same, for production's regression after the",
+    "            ship: \"full\" (the default), \"smoke\" or \"none\".",
+    "ship      — whether the merge goes on to production: \"ask\" (sclaude",
+    "            asks Ship to production? after the merge; the default),",
+    "            \"auto\" (shipped without that question — still asked when QA",
+    "            or a check was passed over, or other features' code rides",
+    "            along) or \"off\" (sclaude",
+    "            never deploys production; the issue closes as merged and",
+    "            accepted, to be shipped by hand)."
   ],
 
   "qa": "github",
@@ -154,6 +175,12 @@
   "merge": "both",
 
   "sleep_mode": "auto",
+
+  "previewRegression": "full",
+
+  "prodRegression": "smoke",
+
+  "ship": "ask",
 
   "maintainers": ["lead@example.com"],
 
@@ -163,14 +190,16 @@
     "typecheck": "npm run typecheck",
     "lint": "npm run lint",
     "build": "npm run build",
-    "e2e": "npm run test:e2e"
+    "e2e": "npm run test:e2e",
+    "smoke": "npm run test:e2e -- --grep @smoke"
   },
 
   "regression": {
     "local": ["typecheck", "lint", "build", "e2e"],
     "manual": ["typecheck", "lint", "build"],
     "preview": ["e2e"],
-    "prod": ["e2e"]
+    "prod": ["e2e"],
+    "smoke": ["smoke"]
   },
 
   "manuals": [

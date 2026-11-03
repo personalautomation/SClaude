@@ -1256,6 +1256,14 @@ check("no-cap-on-prod-e2e",
       "export E2E_BASE_URL=https://x.test; npm run test:e2e")
 check("no-cap-on-other-parts",
       command_for("lint", "", "npm run lint", stage="local"), "npm run lint")
+# smoke is the same suite's vital paths (previewRegression / prodRegression):
+# it looks at the deployment as e2e does.
+check("smoke-gets-the-base-and-cap-on-preview",
+      command_for("smoke", "https://x.test", "npx playwright test --grep @smoke", stage="preview"),
+      "export E2E_MAX_FAILURES=10; export E2E_BASE_URL=https://x.test; npx playwright test --grep @smoke")
+check("smoke-gets-the-base-on-prod",
+      command_for("smoke", "https://x.test", "npx playwright test --grep @smoke", stage="prod"),
+      "export E2E_BASE_URL=https://x.test; npx playwright test --grep @smoke")
 # The reason for export over a prefix: the second half of a chain sees it too.
 chained = command_for("e2e", "", "true && echo \"seen=$SCLAUDE_DEV\"",
                       dev_env="carol")

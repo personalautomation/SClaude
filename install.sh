@@ -19,15 +19,45 @@
 #                              without asking
 #   ./install.sh --no-polkit   do not add it, and do not ask
 #
+# Three questions of this machine are asked once, and kept in this checkout's
+# git config (sclaude.update, sclaude.contribute, sclaude.leaks): whether
+# sclaude updates itself from its public main, whether what a session fixes in
+# sclaude is sent there, and what happens when such a fix may name your
+# product. A re-run keeps the answers; these set them without asking:
+#
+#   --update=notify|auto|off     notify says what is new, `sclaude update`
+#                                takes it; auto takes it at every start
+#   --contribute=ask|send|off    ask shows the change and waits for a yes;
+#                                off keeps sessions from changing sclaude
+#   --leaks=ask|auto|off         a change that may name your product: asked
+#                                about, sent unasked, or never sent
+#
+# With no terminal to ask in, they stay unset, which sclaude reads as ask.
+#
 set -euo pipefail
 
 POLKIT_CHOICE=ask
 EXTRAS=0
+SET_UPDATE=""
+SET_CONTRIBUTE=""
+SET_LEAKS=""
 for arg in "$@"; do
   case "$arg" in
     --extras)    EXTRAS=1 ;;
     --polkit)    POLKIT_CHOICE=yes; EXTRAS=1 ;;  # the rule is keepawake's
     --no-polkit) POLKIT_CHOICE=no ;;
+    --update=*)
+      SET_UPDATE="${arg#*=}"
+      [[ " auto notify off " == *" $SET_UPDATE "* ]] \
+        || { echo "install.sh: --update takes notify, auto or off" >&2; exit 2; } ;;
+    --contribute=*)
+      SET_CONTRIBUTE="${arg#*=}"
+      [[ " send ask off " == *" $SET_CONTRIBUTE "* ]] \
+        || { echo "install.sh: --contribute takes ask, send or off" >&2; exit 2; } ;;
+    --leaks=*)
+      SET_LEAKS="${arg#*=}"
+      [[ " ask auto off " == *" $SET_LEAKS "* ]] \
+        || { echo "install.sh: --leaks takes ask, auto or off" >&2; exit 2; } ;;
     # The comment at the top, however long it grows.
     -h|--help)   awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' \
                    "${BASH_SOURCE[0]}"; exit 0 ;;
@@ -161,6 +191,53 @@ echo "symlinked: $CLAUDE/statusline.py"
 # point at them, as a product's might, so we do it here.
 git -C "$REPO" config core.hooksPath githooks
 echo "hooks: $REPO/githooks"
+
+# --- what sclaude may do with the network: asked once --------------------------
+
+# The words and what they mean are sclaude's own (developer.sh), so the
+# question here and the one a start asks say the same.
+INSTRUMENTS="$REPO"
+# shellcheck source=sclaude/lib/developer.sh
+source "$REPO/sclaude/lib/developer.sh"
+
+# Asks one setting, unless a flag set it or an earlier install did. No
+# default, as everywhere in sclaude: asked again until it is one of the words.
+# End of input, or no terminal, leaves it unset, which sclaude reads as ask.
+#
+#   setting_offer <key> <flag value> <explain fn> <words, the recommended first>
+setting_offer() {
+  local key="$1" flag="$2" explain="$3" words="$4" now answer
+  if [[ -n "$flag" ]]; then
+    sclaude_setting_set "$key" "$flag"
+    echo "sclaude.$key: $flag"
+    return 0
+  fi
+  now="$(sclaude_setting "$key")"
+  if [[ -n "$now" ]]; then
+    echo "sclaude.$key: $now (kept; ./install.sh --$key=… changes it)"
+    return 0
+  fi
+  echo ""
+  "$explain"
+  if [[ ! -t 0 ]]; then
+    echo "  No terminal to ask in: left unset, which means ask. Later: ./install.sh --$key=<${words// /|}>" >&2
+    return 0
+  fi
+  while :; do
+    read -rp "  ${words// /, }? " answer || { echo; echo "  Left unset, which means ask."; return 0; }
+    answer="${answer,,}"
+    if [[ -n "$answer" && " $words " == *" $answer "* ]]; then
+      sclaude_setting_set "$key" "$answer"
+      echo "sclaude.$key: $answer"
+      return 0
+    fi
+    echo "  Please answer one of: ${words// /, }."
+  done
+}
+
+setting_offer update "$SET_UPDATE" update_modes_explain "notify auto off"
+setting_offer contribute "$SET_CONTRIBUTE" contribute_modes_explain "ask send off"
+setting_offer leaks "$SET_LEAKS" leaks_modes_explain "ask auto off"
 
 # --- keepawake: the Windows side and the secrets -----------------------------
 

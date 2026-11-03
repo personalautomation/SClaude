@@ -67,6 +67,10 @@ try:
     git(live, "commit", "-qm", "init")
     git(live, "push", "-q", "origin", "HEAD:main")
     git(live, "fetch", "-q", "origin")
+    # The machine's say, as an install that answered: sent, and taken. The
+    # cases for the other answers come near the end.
+    git(live, "config", "sclaude.contribute", "send")
+    git(live, "config", "sclaude.update", "auto")
 
     product = os.path.join(tmp, "myshop")
     subprocess.run(["git", "init", "-q", "-b", "main", product], check=True)
@@ -86,8 +90,8 @@ try:
 
     def sh(script, maintainer=True, answer="n", session="s1", cwd=None):
         body = """
-INSTRUMENTS=%(live)s; LIB=%(lib)s; PROMPTS=%(root)s/sclaude/prompts
-source "$LIB/ui.sh"; source "$LIB/pane.sh"; source "$LIB/workshop.sh"; source "$LIB/run.sh"
+INSTRUMENTS=%(live)s; LIB=%(lib)s; PROMPTS=%(root)s/sclaude/prompts; SELF=sclaude
+source "$LIB/ui.sh"; source "$LIB/pane.sh"; source "$LIB/developer.sh"; source "$LIB/workshop.sh"; source "$LIB/run.sh"
 info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; say() { echo "SAY $*"; }
 die() { echo "DIE $*"; exit 1; }
 BOLD=; OFF=; GREEN=
@@ -220,6 +224,19 @@ export SCLAUDE_SESSION=%(session)s
     check("leak-new-line-asked", "ASK" in out and "PASSED" not in out, True)
     git(ws, "reset", "-q", "--hard", "HEAD~1")
     ws_py("put", record, "leaks_ok", "null")
+    # The machine's say in that question (sclaude.leaks): auto sends with
+    # the lines shown, off holds unasked; core-send is asked even under off.
+    git(live, "config", "sclaude.leaks", "auto")
+    out = sh('workshop_leaks "%s" origin/main "%s" && echo PASSED' % (ws, tree), answer="n")
+    check("leaks-auto-shown-unasked", ("may name the product" in out, "ASK" in out, "PASSED" in out),
+          (True, False, True))
+    git(live, "config", "sclaude.leaks", "off")
+    out = sh('workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree), answer="y")
+    check("leaks-off-held-unasked", ("ASK" in out, "rc=1" in out), (False, True))
+    out = sh('WORKSHOP_SEND=1 workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree), answer="y")
+    check("leaks-off-core-send-asks", ("ASK" in out, "rc=0" in out), (True, True))
+    ws_py("put", record, "leaks_ok", "null")
+    git(live, "config", "--unset", "sclaude.leaks")
     # A list too long for a question on the phone is asked at the terminal
     # alone; nobody there is no answer, and nothing is held.
     git(ws, "commit", "-q", "--allow-empty", "-m", "fix(sclaude): long",
@@ -322,6 +339,54 @@ export SCLAUDE_SESSION=%(session)s
              'b="$(instruments_state)"; [[ "$a" == "$b" ]] && echo same || echo moved' % live)
     check("config-origin-counted", out.strip().endswith("moved"), True)
     git(live, "remote", "set-url", "origin", origin)
+
+    # --- the machine's say in sending (sclaude.contribute) --------------------
+    def ready_change(text):
+        with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
+            fh.write("# %s\n" % text)
+        git(ws, "commit", "-qam", "fix(sclaude): %s" % text)
+        ws_py("put", record, "blocked", "null")
+        ws_py("ready", record, "s1", git(ws, "rev-parse", "HEAD"), "a read")
+
+    git(live, "config", "sclaude.contribute", "ask")
+    ready_change("asked first")
+    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="n")
+    check("ask-shows-and-asks", ("Send it?" in out, "which is public" in out,
+                                 "asked first" in out, "tool.sh" in out), (True, True, True, True))
+    check("ask-no-not-sent", "PROPOSE" in out, False)
+    check("ask-no-held", sh('workshop_state "%s" ""' % tree).strip(), "blocked")
+    check("ask-no-names-core-send", "core-send" in ws_py("get", record, "blocked.why").stdout, True)
+    out = sh("cmd_core_send", maintainer=False, answer="y")
+    check("core-send-refused-to-a-session", ("DIE" in out, "PROPOSE" in out), (True, False))
+    out = sh("cmd_core_send", maintainer=False, answer="n", session="")
+    check("core-send-sends-unasked", ("PROPOSE" in out, "Send it?" in out), (True, False))
+    ready_change("asked and said yes")
+    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="y")
+    check("ask-yes-sent", ("Send it?" in out, "PROPOSE" in out), (True, True))
+    ready_change("asked while away")
+    out = sh('review_go_on() { return 0; }; workshop_publish "%s"' % tree, maintainer=False, answer="y")
+    check("away-not-asked-not-sent", ("ASK" in out, "PROPOSE" in out, "You are away" in out), (False, False, True))
+    check("away-stays-ready", sh('workshop_state "%s" ""' % tree).strip(), "ready")
+    git(live, "config", "--unset", "sclaude.contribute")
+    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="n")
+    check("unset-is-ask", ("Send it?" in out, "PROPOSE" in out), (True, False))
+    git(live, "config", "sclaude.contribute", "off")
+    ready_change("made before it was off")
+    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="y")
+    check("off-held-unasked", ("PROPOSE" in out, "ASK" in out), (False, False))
+    check("off-held", sh('workshop_state "%s" ""' % tree).strip(), "blocked")
+    out = sh("cmd_core_open", session="s9")
+    check("off-core-open-refused", ("DIE" in out, "is off" in out), (True, True))
+    closed = sh('workshop_rules "%s"' % tree)
+    check("off-rules-closed", ("is off on this machine" in closed, "core-open` first" in closed,
+                               "<instruments>" in closed), (True, False, False))
+    git(live, "config", "sclaude.contribute", "send")
+    # A maintainer's publish moves the live checkout only where updates are
+    # taken by themselves.
+    git(live, "config", "sclaude.update", "notify")
+    out = sh("workshop_live_update")
+    check("live-update-notify-said", "sclaude update" in out and "is on it now" not in out, True)
+    git(live, "config", "sclaude.update", "auto")
 
     # Removal keeps what was never published on its branch.
     head = git(ws, "rev-parse", "HEAD")

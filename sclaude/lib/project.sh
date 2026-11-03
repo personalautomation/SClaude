@@ -130,9 +130,13 @@ project_has() {
 # branch switches a check off for itself before the merge. An added part's
 # command is the worktree's, a key main lacks (project_get).
 project_regression_parts() {
-  local stage="$1" wt="${2:-}" file own p i at=0
+  local stage="$1" wt="${2:-}" file own p i at=0 list="$1"
   local -a out=() mine=()
   file="$(project_config "$wt")" || return 0
+  # A deployed stage runs what the project chose for it
+  # (project_stage_regression): none, the smoke list, or its own.
+  list="$(project_stage_list "$stage" "$wt")" || return 0
+  stage="$list"
   mapfile -t out < <(project_value "$file" "regression.$stage")
   own="${wt:+$wt/.sclaude/config.json}"
   if [[ -n "$own" && -f "$own" && "$own" != "$file" ]]; then
@@ -148,12 +152,81 @@ project_regression_parts() {
   echo "${out[*]}"
 }
 
+# What a deployed stage's regression is: `full` (its own list in
+# `regression`), `smoke` (`regression.smoke`, the product's few vital paths;
+# the full list where the product declares none, since a choice to check
+# less must not become checking nothing) or `none`. Absent or unknown is
+# full. Read like `review`, the main checkout first.
+#
+#   project_stage_regression <preview|prod> [wt]
+project_stage_regression() {
+  local mode
+  mode="$(project_get "$1Regression" "${2:-}" 2>/dev/null || true)"
+  case "$mode" in
+    smoke|none) echo "$mode" ;;
+    *) echo full ;;
+  esac
+}
+
+# Which list of `regression` a stage runs: its own, `smoke`, or nothing
+# (exit 1) for a deployed stage set to none.
+#
+#   project_stage_list <stage> [wt]
+project_stage_list() {
+  local stage="$1" wt="${2:-}"
+  # A rollback's confirmation borrows production's list (regression_parts).
+  [[ "$stage" == rollback ]] && stage=prod
+  if [[ "$stage" == preview || "$stage" == prod ]]; then
+    case "$(project_stage_regression "$stage" "$wt")" in
+      none)  return 1 ;;
+      smoke) project_smoke_declared "$wt" && stage=smoke ;;
+    esac
+  fi
+  echo "$stage"
+}
+
+# Whether the product declares a smoke list, in main's config or the tree's.
+project_smoke_declared() {
+  local wt="${1:-}" file own
+  file="$(project_config "$wt")" || return 1
+  [[ -n "$(project_value "$file" regression.smoke)" ]] && return 0
+  own="${wt:+$wt/.sclaude/config.json}"
+  [[ -n "$own" && -f "$own" && -n "$(project_value "$own" regression.smoke)" ]]
+}
+
+# How the stage's run is named where it is not the full list: "smoke", or
+# "smoke — none declared, the full list". Empty for full.
+#
+#   project_stage_regression_word <preview|prod> [wt]
+project_stage_regression_word() {
+  [[ "$(project_stage_regression "$1" "${2:-}")" == smoke ]] || return 0
+  if project_smoke_declared "${2:-}"; then
+    echo smoke
+  else
+    echo "smoke — none declared, the full list"
+  fi
+}
+
+# Whether the merge goes on to production: `ask` (the question after the
+# merge), `auto` (shipped without it, unless a gate was passed over or other
+# features' code rides along, which are still asked) or `off` (sclaude never deploys production). Absent or unknown
+# is ask. Read like `review`.
+project_ship_mode() {
+  local mode
+  mode="$(project_get ship "${1:-}" 2>/dev/null || true)"
+  case "$mode" in
+    auto|off) echo "$mode" ;;
+    *) echo ask ;;
+  esac
+}
+
 # The parts project_regression_parts runs for this branch only: the ones its
 # list adds to main's.
 project_regression_added() {
-  local stage="$1" wt="${2:-}" file main p out=""
+  local stage="$1" wt="${2:-}" file main p out="" list
   file="$(project_config "$wt")" || return 0
-  main=" $(project_value "$file" "regression.$stage" | tr '\n' ' ')"
+  list="$(project_stage_list "$stage" "$wt")" || return 0
+  main=" $(project_value "$file" "regression.$list" | tr '\n' ' ')"
   for p in $(project_regression_parts "$stage" "$wt"); do
     [[ "$main" == *" $p "* ]] || out+="${out:+ }$p"
   done

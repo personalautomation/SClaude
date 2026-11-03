@@ -80,8 +80,15 @@ running process.
 
 **Keeping the orchestrator current, and whose branch it is on.** Every command
 that is about to act (everything but `status`, `dev`, `news` and help) first
-fetches `main` and brings it in: a fast-forward on `main`, a merge on a
-developer's branch. A dirty tree or a conflict leaves the code as it was and
+asks the machine's `sclaude.update` (`update_mode` in `developer.sh`, a git
+config key of the checkout that `install.sh` asks): `off` fetches nothing;
+`notify` fetches and lists what `main` has (`instruments_notify`, the commits
+in full once per new head of main, a line after that), and `sclaude update`
+(`cmd_update`) takes it; `auto` fetches `main` and brings it in
+(`instruments_take`): a fast-forward on `main`, a merge on a
+developer's branch. Unset, or set to an unknown word, the start asks the
+install question once at the terminal and saves the answer; with no terminal
+it acts as `notify` and asks again next time. A dirty tree or a conflict leaves the code as it was and
 says so; no network is silent; afterwards the process re-executes itself so it
 does not run old code over new files. `SCLAUDE_NO_SYNC=1` turns it off.
 The same holds at the end of a step's session, which may have run for hours:
@@ -700,6 +707,25 @@ records the head as ready. For a maintainer of sclaude the review is sreview:
 it is whatever review they choose, named with `--review`, and the
 maintainer's review of the pull request is the gate.
 
+**The machine's say in the leak question.** `workshop_leaks` asks "Publish it
+anyway?" by `sclaude.leaks` (`leaks_mode` in `developer.sh`): `ask`, also what
+unset means, asks; `auto` shows the lines and goes on; `off` holds the change
+(1, as a no). Under `sclaude core-send` an `off` asks instead: the person sent
+it by name and is at the terminal.
+
+**The machine's say in sending.** Before anything is pushed, after the leak
+check and the tests, `workshop_consent` reads `sclaude.contribute`
+(`contribute_mode` in `developer.sh`): `send` sends; `ask`, which is also what
+unset means, shows the commits and `git diff --stat`, where they go and that it
+is public, and sends only on a yes (a list too long for the phone is asked at
+the terminal, as the leak question is; while the person is away, by
+`review_go_on` — `[g]` as ticked by hand or by `sleep_mode` and the night — it waits and is asked when the tree is next opened); `off`
+holds it. A no and `off` both hold the change at its head (`workshop_block`),
+and `sclaude core-send` (`cmd_core_send`) sends a held change on the person's
+word. Under `off` no session should have made one: `core-open` refuses, and
+`workshop_rules` gives the sessions `_workshop-closed.md` in place of
+`_workshop.md`. In the feature's history these are `declined` and `waits`.
+
 **Publishing**, from `claude_launch` once the session exits
 (`workshop_after_session`): with the head ready, `workshop_publish` fetches
 `origin/main`; for a maintainer it rebases onto it (a conflict leaves the
@@ -713,8 +739,8 @@ that is not a review round leads, the rest are listed, the trailers merged),
 runs the tests the change touches in a clean environment, a line on the
 terminal for each as it runs, each in a session of its own with no terminal (Ctrl-C and a closed tab are passed on to it,
 `workshop_tests`), and pushes
-`HEAD:main`. Then the live checkout is fast-forwarded to it when nothing else
-runs from it (`workshop_live_update`), so the next session runs the fix; the
+`HEAD:main`. Then, where `sclaude.update` is `auto`, the live checkout is fast-forwarded to it when nothing else
+runs from it (`workshop_live_update`), so the next session runs the fix (elsewhere it says `sclaude update`); the
 next sclaude start does it otherwise, and a checkout holding commits of its
 own that origin lacks is told to bring them on top (`pull --rebase`). Anybody else's goes through the same
 check and tests, unsquashed, to its branch and its one pull request
@@ -993,7 +1019,14 @@ Once step 4 has closed, sclaude goes on by itself (`remind_prod` in
 **The preview is not asked about.** It is what QA looks at, and nothing after it
 can happen without one, so sclaude deploys it (`preview_ship`), up to
 `PREVIEW_TRIES` (three) times on a failure, and runs the preview regression
-against it. A deploy that still fails is the stage's red in the regression
+against it. What a deployed stage's regression runs is the project's
+`previewRegression` and `prodRegression` (`project_stage_regression`):
+`project_regression_parts` gives the stage's own list for `full`, the
+`regression.smoke` list for `smoke` — the full list where the product declares
+none (`project_smoke_declared`), said in the run's heading — and nothing for
+`none`, which is the path a stage with no list already takes: no gate, and the
+map drops the suite (`setting` in `process.py` reads the same). A part named
+`smoke` gets what `e2e` gets against a deployment in `regression_command`. A deploy that still fails is the stage's red in the regression
 gate: the fixing session a red run gets, told which command failed
 (`SCLAUDE_BLOCK_AT`, since the block's output stays in the terminal), the
 migrations and the deploy again on its fix, the same two attempts and the
@@ -1013,7 +1046,15 @@ the worktree has none — a `vercel` launched from there would create a **new
 project** instead of deploying to the existing one (verified; the spare project
 had to be deleted by hand).
 
-**Production is asked about** ("Ship to production?"), after the merge, and on a
+**Production is asked about** ("Ship to production?"), after the merge, unless
+the project's `ship` says otherwise (`project_ship_mode` in `project.sh`):
+`auto` runs the block with an empty prompt, as the preview's, but only in
+place of the plain question — "Ship to production anyway?", where QA or a
+check was passed over, is still asked, and so is "Ship to production, with
+what rides along?" where `prod_riders` finds other features' code between
+production and main; `off` reaches no block, records no
+rollback, and closes the issue with `issue_close_done … shipoff` before the
+epilogue and the clean-up, as after a "no". On a
 "yes" sclaude runs it itself: `vercel --prod` from the main repository, and if
 the branch added migrations, the project's promote command first — whether one
 is needed sclaude determines by whether the branch touches the migrations

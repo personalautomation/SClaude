@@ -114,7 +114,11 @@ echo ready
 
     PROMPT = "Fix it; then say \"done\" — it's $HOME `x`\nsecond line"
 
-    def run(extra_env=None, tty=True, interrupt_after=None, keys_at=None):
+    def run(extra_env=None, tty=True, interrupt_after=None, keys_at=None, keys_after=None):
+        """`keys_after`: the keys' seconds count from when these bytes first
+        show, not from the start — under the whole suite's load a session
+        may take seconds to come up, and a key sent before it reads keys is
+        lost."""
         for f in (out, panes, focus):
             if os.path.exists(f):
                 os.remove(f)
@@ -155,7 +159,10 @@ echo "rc=$?"
             if interrupt_after and not sent and time.time() - start > interrupt_after:
                 os.write(fd, b"\x03")
                 sent = True
-            if keys and time.time() - start > keys[0][0]:
+            if keys_after and isinstance(keys_after, bytes) and keys_after in text:
+                keys_after = time.time()
+            base = keys_after if isinstance(keys_after, float) else (None if keys_after else start)
+            if keys and base is not None and time.time() - base > keys[0][0]:
                 os.write(fd, keys.pop(0)[1])
             try:
                 r, _, _ = select.select([fd], [], [], 0.2)
@@ -333,7 +340,7 @@ sleep "${PANE_TEST_SLEEP:-0}"
     with open(plain, "w") as fh:
         fh.write('source "%s/ui.sh"\n' % LIB)
     text = run({"PANE_TEST_SLEEP": "6", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": plain},
-               keys_at=[(2.0, b"r"), (2.6, b"r")])
+               keys_at=[(0.5, b"r"), (1.1, b"r")], keys_after=b"Keys here")
     got = launched()
     check("r-twice-reopens", len(got) >= 2, True)
     check("r-first-launch", got[:1], ["--session-id 0000 -n demo/code " + PROMPT.replace("\n", " ") + " "])
@@ -352,7 +359,7 @@ sleep "${PANE_TEST_SLEEP:-0}"
     # The press is said on the status line, drawn once a second: room for
     # several draws after it, under the load of the whole suite.
     text = run({"PANE_TEST_SLEEP": "7", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": plain},
-               keys_at=[(2.0, b"r")])
+               keys_at=[(0.5, b"r")], keys_after=b"Keys here")
     check("r-once-does-nothing", len(launched()), 1)
     check("r-once-asks-again", "[r] reopen — press r again to finish" in text, True)
 
@@ -364,7 +371,7 @@ sleep "${PANE_TEST_SLEEP:-0}"
         # A live watcher: its kind and a pid that runs (this script's own).
         fh.write('source "%s/ui.sh"\necho "plan $$" > "%s/sclaude-watch-0000"\n' % (LIB, tmp))
     text = run({"PANE_TEST_SLEEP": "9", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": step},
-               keys_at=[(2.0, b"k"), (2.5, b"k"), (3.0, b"n"), (3.5, b"N"), (4.0, b"R"), (4.5, b"R")])
+               keys_at=[(0.5, b"k"), (1.0, b"k"), (1.5, b"n"), (2.0, b"N"), (2.5, b"R"), (3.0, b"R")], keys_after=b"Keys here")
     check("R-ends-it-once", len(launched()), 1)
     with open(ctl) as fh:
         check("R-leaves-its-word", fh.read().strip(), "later")

@@ -60,6 +60,17 @@ REVIEW_WAIT_MAX="${REVIEW_WAIT_MAX:-1800}"
 REVIEW_CONTEXT_MAX_PCT="${REVIEW_CONTEXT_MAX_PCT:-40}"
 [[ "$REVIEW_CONTEXT_MAX_PCT" =~ ^[0-9]+$ ]] || REVIEW_CONTEXT_MAX_PCT=40
 
+# A light context is not enough on its own: a session resumed after its
+# prompt cache expired pays for its whole context again, uncached, and then
+# a fresh session is the cheaper one. Claude Code caches a conversation for
+# an hour; the next round stays in the same session only while its last
+# request is younger than that, less a margin for the time the resume takes
+# (review_keep in run.sh) — 55 minutes.
+REVIEW_CACHE_TTL="${REVIEW_CACHE_TTL:-3600}"
+[[ "$REVIEW_CACHE_TTL" =~ ^[0-9]+$ ]] || REVIEW_CACHE_TTL=3600
+REVIEW_CACHE_MARGIN="${REVIEW_CACHE_MARGIN:-300}"
+[[ "$REVIEW_CACHE_MARGIN" =~ ^[0-9]+$ ]] || REVIEW_CACHE_MARGIN=300
+
 # How many times the preview deploy is tried before the run gives up, and the
 # pause between tries in seconds.
 #

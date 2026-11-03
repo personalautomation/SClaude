@@ -477,7 +477,14 @@ run_step() {
   # parameter rather than a global, so it reaches this session or none: a
   # global left set by a run that opened nothing went to the next session
   # opened, whatever step that was.
-  local wt="$1" slug="$2" step="$3" told="${4:-}"
+  # <kept>: `kept` when review_reopen keeps a new round in the recorded
+  # session; counted only if that session is resumed here, for the same
+  # reason. A start that stops short (no terminal, the session held in
+  # another tab) counts nothing, and the `sclaude <name>` after it resumes
+  # the session without the word, so that round goes uncounted: the user's
+  # decision of 2026-11-03 — the count is statistics, and a mark kept in the
+  # state to cover it counted rounds nobody kept.
+  local wt="$1" slug="$2" step="$3" told="${4:-}" kept="${5:-}"
   local state="$wt/.sclaude/local/feature/state.json"
   local model effort mode session prompt pr
   stop_asked "step '$(step_title "$step")'" "$slug" && return 0
@@ -846,6 +853,19 @@ run_step() {
     # Where this round begins, for the account the session's end gives.
     [[ "$step" == "review" ]] && review_round_begins "$wt"
     ask_feed say "$(phase_line resumed step "$step" "$(step_session_number "$state" "$step" "$session")")${brief:+ · $brief}${qa:+ · returned by QA}"
+    # A round review_reopen kept in this session counts here, as on the round
+    # marker's path: the session's next row in review-context.log says which
+    # of its rounds it ends (segment in review_stats.py), and in Actions the
+    # issue's row how many it worked. A local review's row counts reviewed
+    # heads handed to the session instead (run_local_round below): a new
+    # thread from a person, with no pass on a new head, adds none there.
+    if [[ "$step" == "review" && "$kept" == "kept" ]]; then
+      local kept_rounds; kept_rounds="$(state_get "$state" steps.review.rounds 2>/dev/null || true)"
+      [[ "$kept_rounds" =~ ^[0-9]+$ ]] || kept_rounds=0
+      kept_rounds=$((kept_rounds + 1))
+      state_set "$state" steps.review.rounds "$kept_rounds"
+      [[ "$review_mode" == "local" ]] || run_rounds "$wt" "$session" "$((kept_rounds + 1))"
+    fi
     [[ "$step" == "review" ]] && run_comments "$wt" "$session" "$pr"
     [[ "$local_round" -eq 1 ]] && run_local_round "$wt" "$session"
     # The issue hears of it too, as on the fresh path below. A review session
@@ -988,10 +1008,11 @@ session_ended() {
   # second, just before.
   [[ "$said_key" == next* ]] && taken_at="$(stat -c %.Y "$(done_marker "$wt")" 2>/dev/null || true)"
   # The review round is over: the automatic review closed every finding this
-  # session fixed, and posted new ones. While its context is light the same
-  # session takes them; once it is heavy they go to a session of their own,
-  # with none of this one's context. That session's row in the issue says why
-  # this one ended; the next one is a row of its own. See round_marker.
+  # session fixed, and posted new ones. While its context is light and still
+  # cached the same session takes them; otherwise they go to a session of
+  # their own, with none of this one's context (review_keep). That session's
+  # row in the issue says why this one ended; the next one is a row of its
+  # own. See round_marker.
   if [[ "$step" == "review" && -s "$(round_marker "$wt")" ]]; then
     local round_note; round_note="$(head -c 300 "$(round_marker "$wt")")"
     rm -f "$(round_marker "$wt")"
@@ -1007,10 +1028,10 @@ session_ended() {
     local tally; tally="$(review_tally "$wt" "$step")"
     review_round_ends "$wt"
     ask_feed say "$(phase_line finished step "$step" "$(step_session_number "$state" "$step" "$session")" "$rounds")${tally:+ · $tally}"
-    local held pct
+    local held pct why
     held="$(review_context "$wt" "$session")"
     pct="$(awk '{print $3}' <<<"$held")"
-    if [[ "$pct" =~ ^[0-9]+$ && "$pct" -lt "$REVIEW_CONTEXT_MAX_PCT" ]]; then
+    if why="$(review_keep "$wt" "$session" "$held")"; then
       state_set "$state" "steps.$step.rounds" "$rounds"
       # The round it now starts counts too; run_step writes it to the issue.
       run_rounds "$wt" "$session" "$((rounds + 1))"
@@ -1018,7 +1039,7 @@ session_ended() {
       echo ""
       say_here "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
       [[ -n "$round_note" ]] && info "  $round_note"
-      info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%): the same session takes the new findings."
+      info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the new findings."
       review_yours_report "$wt" "$pr" || true
       review_report "$wt" "$slug"
       run_step "$wt" "$slug" "$step" "$(review_carry_on "$pct")"
@@ -1036,11 +1057,7 @@ session_ended() {
     echo ""
     say_here "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
     [[ -n "$round_note" ]] && info "  $round_note"
-    if [[ "$pct" =~ ^[0-9]+$ ]]; then
-      info "  Its context is at ${pct}% (${REVIEW_CONTEXT_MAX_PCT}% or more): the new findings go to a fresh session."
-    else
-      info "  The new findings go to a fresh session, without this one's context."
-    fi
+    info "  The new findings go to a fresh session, without this one's context: $why."
     review_yours_report "$wt" "$pr" || true
     review_report "$wt" "$slug"
     if ! run_friction "$wt" "$slug" "$round_key"; then
@@ -3461,11 +3478,12 @@ review_yours_wait() {
 #   * threads open since before the session began, or a red check — that
 #     session's own work, and it knows why it changed what it did: it is
 #     resumed, and told what is still open;
-#   * only threads opened after it began — a new round, which gets a fresh
-#     session, as a round marker would have given it.
+#   * only threads opened after it began — a new round, which goes where a
+#     round marker would send it: to the same session while review_keep says
+#     its context is light and cached, to a fresh one otherwise.
 review_reopen() {
   local wt="$1" slug="$2" pr="$3" repo="$4" waited="$5"
-  local state="$wt/.sclaude/local/feature/state.json" since split older newer
+  local state="$wt/.sclaude/local/feature/state.json" since split older newer session held pct why
   if [[ "$waited" -ge "$REVIEW_WAIT_MAX" ]]; then
     info "  Nothing to fix until it has finished. Come back with: $SELF $slug"
     return 0
@@ -3475,6 +3493,20 @@ review_reopen() {
   read -r older newer <<<"$split"
   # Which session it is, the session's heading says ("resuming" or not).
   if [[ "${older:-}" == "0" && "${newer:-0}" -gt 0 ]]; then
+    session="$(state_get "$state" steps.review.session 2>/dev/null || true)"
+    [[ "$session" == "null" ]] && session=""
+    if [[ -n "$session" ]]; then
+      held="$(review_context "$wt" "$session")"
+      pct="$(awk '{print $3}' <<<"$held")"
+      if why="$(review_keep "$wt" "$session" "$held")"; then
+        # The round it closed is counted by run_step, and only once it has
+        # resumed this session (`kept`).
+        info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the new findings."
+        run_step "$wt" "$slug" review "$(review_carry_on "$pct")" kept
+        return 0
+      fi
+      info "  The new findings go to a fresh session, without this one's context: $why."
+    fi
     review_stuck_say "$wt"
     state_set "$state" steps.review.session null
   fi
@@ -3647,6 +3679,47 @@ PY
   echo "$tokens ${pct:--} ${size:--}"
 }
 
+# Whether the next review round stays in the session that closed this one.
+#
+#   review_keep <wt> <session> <held>   → exit 0 to keep it; prints why
+#
+# <held> is review_context's line. Kept only while both hold:
+#
+#   * its context is under REVIEW_CONTEXT_MAX_PCT — a heavy one goes on
+#     dragging every file the earlier rounds read;
+#   * its prompt cache is likely alive: the last request it made is younger
+#     than REVIEW_CACHE_TTL less REVIEW_CACHE_MARGIN. Resumed after that, the
+#     whole context is sent again uncached, and a fresh session costs less.
+#
+# A share or a time that cannot be read sends the round to a fresh session,
+# as it always went.
+review_keep() {
+  local wt="$1" session="$2" held="$3" pct at idle limit
+  pct="$(awk '{print $3}' <<<"$held")"
+  if ! [[ "$pct" =~ ^[0-9]+$ ]]; then
+    echo "its share of the context window is unknown"
+    return 1
+  fi
+  if [[ "$pct" -ge "$REVIEW_CONTEXT_MAX_PCT" ]]; then
+    echo "its context is at ${pct}% (${REVIEW_CONTEXT_MAX_PCT}% or more)"
+    return 1
+  fi
+  at="$(python3 "$LIB/session_end.py" requested "$(session_transcript "$wt" "$session")" 2>/dev/null || true)"
+  if ! [[ "$at" =~ ^[0-9]+$ ]]; then
+    echo "the time of its last request could not be read"
+    return 1
+  fi
+  idle=$(( $(date +%s) - at ))
+  (( idle < 0 )) && idle=0
+  limit=$(( REVIEW_CACHE_TTL - REVIEW_CACHE_MARGIN ))
+  if [[ "$idle" -ge "$limit" ]]; then
+    echo "its last request was $((idle / 60)) min ago, and its prompt cache has likely expired (kept for $((limit / 60)) min)"
+    return 1
+  fi
+  echo "its prompt cache is likely alive (last request $((idle / 60)) min ago)"
+  return 0
+}
+
 # One line per review session's end, in the main tree's .sclaude/local/,
 # where it outlives the feature's worktree; tab-separated:
 #
@@ -3769,7 +3842,7 @@ cmd_checks() {
 #
 #   review_carry_on <pct>
 review_carry_on() {
-  printf '%s' "**The review round is closed, and this conversation takes the next one.** The automatic review confirmed every fix you made. Your context is at $1% — under the ${REVIEW_CONTEXT_MAX_PCT}% at which sclaude opens a fresh session — so the new findings are yours now: what this conversation settled stays in view while you fix them. Re-read the pull request (\`gh pr checks <pr>\`, \`gh pr view <pr> --comments\`, \`gh api repos/{owner}/{repo}/pulls/<pr>/comments\`); its open threads are your list. Work them as step 1 of the prompt says, through subagents. From here they are threads you are fixing, and the round ends by the same rules as before."
+  printf '%s' "**The review round is closed, and this conversation takes the next one.** The review confirmed every fix you made. Your context is at $1% — under the ${REVIEW_CONTEXT_MAX_PCT}% at which sclaude opens a fresh session — and still cached, so the new findings are yours now: what this conversation settled stays in view while you fix them. Re-read the pull request (\`gh pr checks <pr>\`, \`gh pr view <pr> --comments\`, \`gh api repos/{owner}/{repo}/pulls/<pr>/comments\`); its open threads are your list. Work them as step 1 of the prompt says, through subagents. From here they are threads you are fixing, and the round ends by the same rules as before."
 }
 
 # A session whose work is done, closed without anybody typing /exit.

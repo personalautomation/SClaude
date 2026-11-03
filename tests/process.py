@@ -751,8 +751,210 @@ h = process.history({}, mrows + [{"at": at("13:30"), "what": "steps.code", "op":
                     "review", dict(summaries, c2={"human": [[at("13:40"), 5, 0]], "cost": 1.0}).get)
 stays = [v.get("m") for v in h["visits"] if v.get("n") == "code"]
 check("metrics: each stay carries its own share, for the player's count",
-      stays == [{"input": 2, "wait": 90, "cost": 2.5}, {"input": 1, "wait": 5, "cost": 1.0}]
+      stays == [{"input": 2, "wait": 90, "cost": 2.5, "time": 3600}, {"input": 1, "wait": 5, "cost": 1.0, "time": 1800}]
       and h["metrics"]["input"]["detail"]["code"] == 3, str(stays))
+tw = process.history({}, [{"at": at("10:30"), "what": "steps.review", "op": "open", "session": "r"},
+                         {"at": at("11:20"), "what": "regression.local", "op": "start"},
+                         {"at": at("11:30"), "what": "regression.local", "op": "passed"},
+                         {"at": at("12:30"), "what": "steps.review", "op": "end", "session": "r"}],
+                    "review", {}.get)["metrics"]
+check("metrics: a step's time gives up what a regression ran inside it, so no minute counts twice",
+      tw["time"]["detail"]["review"] == 6600 and tw["time"]["regression"]["reg_local"] == 600, str(tw["time"]))
+# A regression in the middle splits the stay in two, as the player plays it.
+check("metrics: the times a place was entered go beside its time",
+      tw["visits"]["detail"]["review"] == 2, str(tw["visits"]))
+import datetime as _dt
+_ago = lambda h: (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=h)).isoformat(timespec="seconds")
+# What sclaude's state says is going: a run of that step begun (or taken up)
+# a moment ago, not finished.
+def going_in(step):
+    return {"step": step, "steps": {step: {"runs": [{"started": _ago(0.1)}]}}}
+_open = _ago(3)
+live = process.history(going_in("code"), [{"at": _open, "what": "steps.code", "op": "open", "session": "c"}],
+                       "code", {}.get)
+check("metrics: the step going on counts its open sitting up to now",
+      10790 <= live["metrics"]["time"]["detail"].get("code", 0) <= 10830, str(live["metrics"]["time"]))
+after = process.history(going_in("review"), [{"at": _ago(3), "what": "steps.review", "op": "open", "session": "r", "run": "A"},
+                             {"at": _ago(2), "what": "regression.local", "op": "start", "run": "A"},
+                             {"at": _ago(1), "what": "regression.local", "op": "passed", "run": "A"}],
+                        "review", {}.get)["metrics"]["time"]
+check("metrics: the step going on counts its open sitting after a pass, less the pass",
+      7190 <= after["detail"].get("review", 0) <= 7230 and after["regression"]["reg_local"] == 3600, str(after))
+gap = process.history({}, [{"at": at("10:00"), "what": "steps.review", "op": "open", "session": "r"},
+                           {"at": at("11:00"), "what": "steps.review", "op": "end", "session": "r"},
+                           {"at": at("11:10"), "what": "friction.review-1", "op": "open", "session": "f"},
+                           {"at": at("11:40"), "what": "friction.review-1", "op": "end", "session": "f"},
+                           {"at": at("12:00"), "what": "steps.review", "op": "open", "session": "r"},
+                           {"at": at("13:00"), "what": "steps.review", "op": "end", "session": "r"}],
+                      "review", {}.get)
+gt = gap["metrics"]["time"]
+check("metrics: a pass between two sittings takes nothing off them, and the wait it fell in gives it up",
+      gt["detail"]["review"] == 7200 and gt["friction"]["f_review"] == 1800
+      and sum(v for m, d in gt.items() if m != "ahead" for v in d.values()) == 3 * 3600, str(gt))
+stale = process.history({}, [{"at": _ago(50), "what": "steps.code", "op": "open", "session": "c"},
+                             {"at": _ago(49), "what": "steps.review", "op": "open", "session": "r"},
+                             {"at": _ago(48), "what": "steps.review", "op": "end", "session": "r"}],
+                        "code", {}.get)["metrics"]["time"]
+check("metrics: an older stay left open, with places after it, ends where the next began",
+      stale["detail"].get("code") == 3600, str(stale))
+back = process.history(going_in("review"), [{"at": _ago(6), "what": "steps.review", "op": "open", "session": "r", "run": "A"},
+                            {"at": _ago(5), "what": "steps.review", "op": "end", "session": "r", "run": "A"},
+                            {"at": _ago(3), "what": "steps.review", "op": "open", "session": "r", "run": "B"},
+                            {"at": _ago(2), "what": "regression.local", "op": "start", "run": "B"},
+                            {"at": _ago(1), "what": "regression.local", "op": "passed", "run": "B"}],
+                       "review", {}.get)
+going = [v for v in back["visits"] if v.get("live")]
+check("history: the sitting going on counts on its stay, less the pass, with no wait laid over it",
+      len(going) == 1 and going[0]["n"] == "review" and 3600 + 7190 <= going[0]["m"]["time"] <= 3600 + 7230
+      and not any(v.get("wait") for v in back["visits"]), str(back["visits"]))
+fr2 = process.history({}, [{"at": at("09:00"), "what": "steps.review", "op": "open", "session": "r"},
+                           {"at": at("09:30"), "what": "steps.review", "op": "end", "session": "r"},
+                           {"at": at("10:00"), "what": "friction.review-1", "op": "open", "session": "f"},
+                           {"at": at("10:30"), "what": "friction.review-1", "op": "open", "session": "g"},
+                           {"at": at("11:00"), "what": "friction.review-1", "op": "end", "session": "g"}],
+                      "review", {}.get)["metrics"]["time"]
+# Opened again after a Ctrl-C or a conversation that died: the sitting
+# before has no end that can be told, so it counts nothing, not the gap.
+check("metrics: a friction review opened again counts only the sittings that ended",
+      fr2["friction"]["f_review"] == 1800, str(fr2))
+cmd = process.history(going_in("code"), [{"at": _ago(3), "what": "steps.code", "op": "open", "session": "c", "run": "A"},
+                           {"at": _ago(1), "what": "command", "op": "status", "run": "B"}],
+                      "code", {}.get)["visits"]
+check("history: a command from another terminal leaves the step going on going",
+      any(v.get("live") and v["n"] == "code" for v in cmd), str(cmd))
+dead = process.history({}, [{"at": _ago(30), "what": "steps.code", "op": "open", "session": "c", "run": "A"},
+                            {"at": _ago(29), "what": "ask", "op": "answered", "run": "A"},
+                            {"at": _ago(10), "what": "steps.review", "op": "open", "session": "r", "run": "B"},
+                            {"at": _ago(9), "what": "steps.review", "op": "end", "session": "r", "run": "B"}],
+                       "review", {}.get)["metrics"]["time"]["detail"]
+check("history: a stay of a run cut off ends at that run's last line, not at the next place",
+      dead.get("code") == 3600, str(dead))
+loose = process.history({}, [{"at": _ago(30), "what": "steps.code", "op": "open", "session": "c"},
+                             {"at": _ago(29), "what": "ask", "op": "answered"}],
+                        "code", {}.get)["visits"]
+check("history: a stay whose rows name no run ends at the last line written after it, marked a guess",
+      not any(v.get("live") for v in loose)
+      and [v.get("s") for v in loose if v.get("n") == "code"] == [3600]
+      and all(v.get("unsure") for v in loose if v.get("n") == "code"), str(loose))
+idle = process.history({}, [{"at": _ago(1), "what": "steps.code", "op": "open", "session": "c", "run": "A"}],
+                       "code", {}.get)["visits"]
+check("history: a sitting the state does not have going counts nothing up to now, and says so",
+      not any(v.get("live") for v in idle) and any(v.get("unsure") for v in idle if v.get("n") == "code"),
+      str(idle))
+reg = process.history({"step": "review", "regression": {"local": {"status": "running", "started": _ago(0.5)}}},
+                      [{"at": _ago(0.5), "what": "regression.local", "op": "start", "run": "A"}],
+                      "review", {}.get)
+check("history: a regression the state has running counts up to now",
+      reg["metrics"]["time"].get("regression", {}).get("reg_local", 0) >= 1790, str(reg["metrics"]["time"]))
+long = process.history({"step": "code", "steps": {"code": {"runs": [{"session": "c", "started": _ago(5)}]}}},
+                       [{"at": _ago(5), "what": "steps.code", "op": "open", "session": "c", "run": "A"}],
+                       "code", {}.get)["visits"]
+check("history: a step open five hours, as the state has it, still goes on",
+      any(v.get("live") and v["n"] == "code" and v["s"] >= 5 * 3600 - 30 for v in long), str(long))
+wait = process.history({}, [{"at": _ago(4), "what": "merge", "op": "wait", "run": "A"}],
+                       "merge_wait", {}.get)["visits"]
+check("history: a wait the feature stands in counts up to now",
+      any(v.get("live") and v["n"] == "merge_wait" for v in wait), str(wait))
+sy2 = process.history({}, [{"at": _ago(5), "what": "steps.code", "op": "open", "session": "c0", "run": "A"},
+                           {"at": _ago(4), "what": "sync", "op": "open", "session": "s", "run": "A"},
+                           {"at": _ago(3), "what": "ask", "op": "answered", "run": "A"}],
+                      "code", {}.get)["passes"]["sync"][0]["steps"]
+got = [x for x in sy2 if x["n"] == "sync"][0]
+check("history: a sync ended unseen counts to its run's last line, a guess",
+      got.get("s") == 3600 and got.get("unsure"), str(got))
+moved = process.history({"step": "code", "steps": {"review": {"runs": [{"session": "r", "started": _ago(30)}]},
+                                                    "code": {"runs": [{"session": "c", "started": _ago(20), "done": True}]}}},
+                        [{"at": _ago(30), "what": "steps.review", "op": "open", "session": "r", "run": "A"},
+                         {"at": _ago(29), "what": "ask", "op": "answered", "run": "A"},
+                         {"at": _ago(20), "what": "steps.code", "op": "open", "session": "c", "run": "B"},
+                         {"at": _ago(19), "what": "steps.code", "op": "end", "session": "c", "run": "B"}],
+                        "code", {}.get)["visits"]
+check("history: a step's run left open is not going once the feature has moved to another step",
+      not any(v.get("live") for v in moved) and any(v.get("unsure") for v in moved if v.get("n") == "review"),
+      str(moved))
+sy3 = process.history({}, [{"at": _ago(5), "what": "sync", "op": "open", "session": "s", "run": "A"},
+                           {"at": _ago(4.9), "what": "steps.code", "op": "open", "session": "c", "run": "A"},
+                           {"at": _ago(2), "what": "steps.code", "op": "end", "session": "c", "run": "A"}],
+                      "code", {}.get)["passes"]["sync"][0]["steps"]
+got3 = [x for x in sy3 if x["n"] == "sync"][0]
+check("history: a sync ended unseen ends where the next place began, if before its run's last line",
+      got3.get("s") == 360 and got3.get("unsure"), str(got3))
+dep = process.history({}, [{"at": _ago(5), "what": "deploy.preview", "op": "start", "run": "A"}],
+                      "preview", {}.get)["visits"]
+check("history: a deploy cut off, where the position names the next preview, is no stay going on",
+      not any(v.get("live") for v in dep), str(dep))
+sy4 = process.history({"sync": {"runs": [{"session": "s", "started": _ago(0.5)}]}},
+                      [{"at": _ago(0.5), "what": "sync", "op": "open", "session": "s", "run": "A"}],
+                      "code", {}.get)["passes"]["sync"][0]["steps"]
+got4 = [x for x in sy4 if x["n"] == "sync"][0]
+check("history: a sync going on counts up to now and has no end yet",
+      got4.get("live") and "to" not in got4 and got4.get("s", 0) >= 1790, str(got4))
+sy5 = process.history({}, [{"at": at("11:00"), "what": "sync", "op": "open", "session": "s", "run": "r2"},
+                           {"at": at("11:10"), "what": "sync", "op": "stall", "session": "s", "run": "r2"},
+                           {"at": at("11:20"), "what": "steps.code", "op": "open", "session": "c", "run": "r3"},
+                           {"at": at("12:00"), "what": "steps.code", "op": "end", "session": "c", "run": "r3"},
+                           {"at": at("13:00"), "what": "sync", "op": "open", "session": "s", "run": "r4"},
+                           {"at": at("13:40"), "what": "ask", "op": "answered", "run": "r4"}],
+                      "code", {}.get)["passes"]["sync"]
+got5 = [x for p in sy5 for x in p["steps"] if x["n"] == "sync"]
+check("history: a sync taken up again after a later place counts its sitting to its run's last line",
+      sum(x.get("s", 0) for x in got5) == 600 + 2400, str(got5))
+mw = process.history({}, [{"at": _ago(5), "what": "merge", "op": "wait", "run": "A"},
+                          {"at": _ago(1), "what": "friction.ship-1", "op": "open", "session": "f", "run": "A"},
+                          {"at": _ago(0.5), "what": "friction.ship-1", "op": "end", "session": "f", "run": "A"}],
+                     "merge_wait", {}.get)["visits"]
+check("history: a pass during a wait is not the feature leaving it",
+      any(v.get("live") and v["n"] == "merge_wait" for v in mw), str(mw))
+rt = process.history({}, [{"at": _ago(5), "what": "retro", "op": "open", "session": "t", "run": "A"},
+                          {"at": _ago(4), "what": "workshop", "op": "pending", "session": "t", "run": "A"},
+                          {"at": _ago(3), "what": "ask", "op": "answered", "run": "A"}],
+                     "cleanup", {}.get)["visits"]
+check("history: a workshop written in the middle of a conversation does not end it",
+      [v.get("s") for v in rt if v.get("n") == "retro"] == [7200], str(rt))
+rg = process.history({}, [{"at": at("10:00"), "what": "regression.local", "op": "start", "run": "A"},
+                          {"at": at("10:10"), "what": "steps.review", "op": "open", "session": "r", "run": "A"},
+                          {"at": at("11:10"), "what": "steps.review", "op": "end", "session": "r", "run": "A"}],
+                     "review", {}.get)
+rgs = [x for p in rg["passes"]["regression"] for x in p["steps"] if x["n"] == "reg_local"]
+check("history: a regression cut off ends where the next place began",
+      rgs and rgs[-1].get("s") == 600 and rgs[-1].get("unsure")
+      and rg["metrics"]["time"]["detail"]["review"] == 3600, str(rgs))
+dp = process.history({}, [{"at": at("10:00"), "what": "deploy.preview", "op": "start", "run": "r1"},
+                          {"at": at("10:02"), "what": "ask", "op": "answered", "run": "r1"},
+                          {"at": "2026-10-28T09:00:00+00:00", "what": "steps.code", "op": "open", "session": "c", "run": "r2"}],
+                     "code", {}.get)["visits"]
+pv = [v for v in dp if v.get("n") == "preview"]
+check("history: a deploy cut off ends at its run's last line, a guess, not at the next day's place",
+      pv and pv[0].get("s") == 120 and pv[0].get("unsure"), str(pv))
+mw2 = process.history({}, [{"at": at("10:00"), "what": "merge", "op": "wait", "run": "A"},
+                           {"at": at("11:00"), "what": "friction.ship-1", "op": "open", "session": "f", "run": "A"},
+                           {"at": at("11:30"), "what": "friction.ship-1", "op": "end", "session": "f", "run": "A"},
+                           {"at": at("12:00"), "what": "merge", "op": "wait", "run": "B"},
+                           {"at": at("13:00"), "what": "merge", "op": "merged", "run": "B"}],
+                      "done", {}.get)["metrics"]["time"]["detail"]
+check("history: a wait entered again after a pass keeps the time the pass ran in it",
+      mw2.get("merge_wait", 0) >= 3 * 3600 - 1800, str(mw2))
+rb = process.history({}, [{"at": at("10:00"), "what": "regression.prod", "op": "start", "run": "A"},
+                          {"at": at("10:05"), "what": "ask", "op": "answered", "run": "A"},
+                          {"at": at("15:00"), "what": "rollback.prod", "op": "done", "run": "B"},
+                          {"at": at("15:30"), "what": "ask", "op": "answered", "run": "B"}],
+                     "prod", {}.get)["passes"]["regression"]
+rbs = [x for p in rb for x in p["steps"] if x["n"] == "prod_ok"]
+check("history: a regression cut off ends by the run that started it, not a later rollback's",
+      rbs and rbs[0].get("s") == 300, str(rbs))
+check("the page marks a time that is a guess with ⚠, on the block, the map and the feature",
+      "guess ? ' ⚠' : ''" in page and "totals('unsure', b.dataset.map)" in page
+      and "lead && lead.guess ? ' ⚠' : ''" in page)
+check("the player's clock measures the longest words it will say, once",
+      "if (w.length > longest.length) longest = w;" in page)
+check("the history sends no sittings' spans out",
+      "_spans" not in json.dumps(gap), "")
+check("the page shows a stay going on after the stays before it, and the player's clock says them",
+      "if (st.live && st.m) here[m + ':' + st.n] = st.m" in page and "clock(g, s.s, ms, mine, timeShown()" in page
+      and "upToBadges(g, box.x + 2 + 17)" in page)
+check("metrics: the time a place took is its stays' own, on every map that timed them",
+      h["metrics"]["time"]["detail"]["code"] == 5400
+      and h["metrics"]["time"].get("regression", {}).get("reg_local") == 600, str(h["metrics"]["time"]))
 h = process.history({}, [{"at": at("08:00"), "what": "steps.review", "op": "open", "session": "r0"},
                          {"at": at("09:00"), "what": "steps.review", "op": "end", "session": "r0"},
                          {"at": at("10:00"), "what": "steps.code", "op": "open", "session": "c1"},
@@ -761,16 +963,16 @@ h = process.history({}, [{"at": at("08:00"), "what": "steps.review", "op": "open
                          {"at": at("16:00"), "what": "steps.review", "op": "end", "session": "c1"}],
                     "review", {"c1": {"human": [], "cost": 2.0}}.get)
 check("metrics: a resumed conversation costs on the stay it was opened in last, where it is counted",
-      [v.get("m") for v in h["visits"] if v.get("n") == "review"] == [None, {"cost": 2.0}], str(h["visits"]))
+      [(v.get("m") or {}).get("cost") for v in h["visits"] if v.get("n") == "review"] == [None, 2.0], str(h["visits"]))
 sy = process.history({}, [{"at": at("10:00"), "what": "steps.code", "op": "open", "session": "c0"},
                           {"at": at("10:05"), "what": "sync", "op": "open", "session": "c1"},
                           {"at": at("10:10"), "what": "sync", "op": "finish", "session": "c1"},
                           {"at": at("14:00"), "what": "sync", "op": "open", "session": "c1"},
                           {"at": at("14:10"), "what": "sync", "op": "finish", "session": "c1"}],
                      "code", {"c1": {"human": [], "cost": 1.0}}.get)["passes"]["sync"]
-got = [[x.get("m") for x in p["steps"] if x["n"] == "sync"] for p in sy]
+got = [[(x.get("m") or {}).get("cost") for x in p["steps"] if x["n"] == "sync"] for p in sy]
 check("metrics: a conversation opened again by a later sync costs on that sync's stay",
-      got == [[None], [{"cost": 1.0}]], str(got))
+      got == [[None], [1.0]], str(got))
 ms = process.history({}, [{"at": at("09:00"), "what": "steps.plan", "op": "open", "session": "p"},
                           {"at": at("09:30"), "what": "steps.plan", "op": "finish", "session": "p"},
                           {"at": at("09:50"), "what": "sync", "op": "open", "session": "s1"},
@@ -1069,7 +1271,9 @@ check("a friction review open says which and that it holds the step",
 check("_flow hands the notes to the page", '"notes": notes' in read("sclaude", "lib", "actions.sh"))
 check("the page offers the metrics by checkboxes, each with the whole feature's total",
       'class="metrics"' in page and 'value="input"' in page and 'value="cost"' in page
-      and page.count('class="mt-total"') == 3)
+      and 'value="time"' in page and page.count('class="mt-total"') == 4)
+check("every map's heading carries its own whole of the metrics",
+      page.count('class="mt-map"') == 6 and "document.querySelectorAll('.mt-map')" in page)
 check("an answer to sclaude and a command go into the history",
       "history_add \"$ASK_TREE/.sclaude/local/feature/state.json\" ask answered" in read("sclaude", "lib", "io.sh")
       and "history_command \"$wt\"" in read("sclaude", "lib", "state.sh")

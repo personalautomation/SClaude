@@ -409,6 +409,29 @@ def context(path):
     return (held, start) if held else None
 
 
+def requested(path):
+    """When the session last asked the model, as a Unix time, or None.
+
+    The same requests context() counts: the conversation's own, with a usage
+    that is not zero. The prompt cache lives from that moment, so this is what
+    tells the orchestrator whether a resumed session would still find its
+    context cached (review_keep in run.sh).
+    """
+    moment = None
+    for entry in entries(path):
+        if entry.get("type") != "assistant":
+            continue
+        usage = (entry.get("message") or {}).get("usage") or {}
+        try:
+            total = sum(int(usage.get(key) or 0) for key in (
+                "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+        except (TypeError, ValueError):
+            continue
+        if total:
+            moment = when(entry) or moment
+    return moment
+
+
 def last(path):
     """The text the session wrote after the last thing it was handed.
 
@@ -555,6 +578,10 @@ def main():
         held = context(args[1])
         if held:
             sys.stdout.write("%d %d\n" % held)
+    elif len(args) == 2 and args[0] == "requested":
+        moment = requested(args[1])
+        if moment is not None:
+            sys.stdout.write("%d\n" % int(moment))
     elif len(args) == 2 and args[0] == "chain":
         sys.stdout.write("\n".join(chain(args[1])) + "\n")
     elif len(args) == 2 and args[0] in ("last", "first"):

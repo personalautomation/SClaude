@@ -101,7 +101,7 @@ NODES = {
                      "findings, comments, red checks; none — no session at all", ""),
     "review": ("session", 13, "session", "4 · review",
                "fixes the findings through subagents, pushes, one round, stops", "FRS"),
-    "round": ("sclaude", 14, "gate", "Round closed: context under 40%?",
+    "round": ("sclaude", 14, "gate", "Round closed: context under 40% and cached?",
               "yes — the same session takes the new findings; no — a fresh one", ""),
     "review_close": ("sclaude", 15, "gate", "Nothing open, local regression green?",
                      "no thread, no red or running check; then step 4 is done", "R"),
@@ -188,8 +188,8 @@ DETAILS = {
     "local_pass": "With review set to local, read-only claude -p passes review the pull request here and post their findings as threads signed by this machine. A key in the terminal or in the topic ends the search; another, in the terminal, lets the review go on by itself, past the questions after it — a box of three states going round auto → on → off: auto follows the project's sleep_mode (on, off, or by default an /isleep night over every session, not an /isleep here one).",
     "review_found": "Findings, unresolved threads, comments and red checks are gathered before any session. Nothing to answer: step 4 closes with no session at all.",
     "review": "The session fixes the findings through subagents, keeping only the coordination, pushes, and stops once the automatic review has confirmed the fixes and posted the next round. While it works in its own tab, the terminal takes the review's boxes, [s] and [g].",
-    "round": "A watcher ends the session when the round closes. Under 40% context the same conversation takes the new findings; above it a fresh one does, after the round's friction review. Rounds that stop converging are said once.",
-    "review_close": "Leaving step 4 closes it only when nothing is open — no unresolved thread, no running or red check — and the local regression is green again. Otherwise sclaude waits and what is open goes back to a session without a question; [s] or ⏭ makes the next session the last for new findings. A session you left yourself (/exit, Ctrl-C) with [g] off holds step 4 open until the next sclaude <name>. With [g] on the rounds go on even then (30 a step 4, then it asks), a pass that did not run is tried again ten times with growing pauses, and after the search ended the fixes are checked. Threads a night session left for you to confirm: sclaude asks whether to go through them now, and on your yes they go back to a fresh session that asks about each and, on your yes, replies and resolves them; the rest of your threads wait for your hand on GitHub.",
+    "round": "A watcher ends the session when the round closes. Under 40% context, with its last request under 55 minutes old so that its prompt cache is likely alive, the same conversation takes the new findings; otherwise a fresh one does, after the round's friction review. Rounds that stop converging are said once.",
+    "review_close": "Leaving step 4 closes it only when nothing is open — no unresolved thread, no running or red check — and the local regression is green again. Otherwise sclaude waits and what is open goes back to a session without a question; [s] or ⏭ makes the next session the last for new findings. A session you left yourself (/exit, Ctrl-C) with [g] off holds step 4 open until the next sclaude <name>. A session sclaude closed on its done marker — always so for a review on this machine, which writes no round marker — goes back by whose work is open: threads from before it, or a red check, to the same session; only new ones to the same session while its context is under 40% and its last request under 55 minutes old, else to a fresh one. With [g] on the rounds go on even then (30 a step 4, then it asks), a pass that did not run is tried again ten times with growing pauses, and after the search ended the fixes are checked. Threads a night session left for you to confirm: sclaude asks whether to go through them now, and on your yes they go back to a fresh session that asks about each and, on your yes, replies and resolves them; the rest of your threads wait for your hand on GitHub.",
     "hold_ways": "Production carries this feature and its regression there was not green, with nothing rolled back: the rollback failed or was refused, another release landed on top and the repeated run was red too, or the suite could not run in a broken environment (a project with no production suite or address is not held). A red run made by hand lands here as well. Every later pass of sclaude <name> checks this first and stops on it, so nothing is shipped, closed or cleaned up. The ways out: sclaude regression <name> prod runs production's suite again, and green goes on to the epilogue; sclaude rollback puts the previous release back and sends the fix to step 4; sclaude return fixes forward from step 4.",
     "merge_check": "git merge-tree tells in memory whether the branch merges cleanly with main — no session, no GitHub call. Asked before the preview, after QA's yes, and every two minutes while waiting for the merge.",
     "sync": "Merges origin/main into the branch (never a rebase), resolves each conflict keeping both sides' intent, checks the result as the project's CLAUDE.md says and pushes. sclaude then checks it settled; a pull request handed over goes back to a draft.",
@@ -917,6 +917,35 @@ def _runs(node):
     return [r for r in ((node or {}).get("runs") or []) if isinstance(r, dict)]
 
 
+# The waits with no conversation the feature stands in while its position
+# names them: the merge's and QA's look. A deploy or a local pass named by
+# the position is the next thing to do, not one going on.
+WAITS_HERE = ("merge_wait", "qa_check")
+
+
+def _unseen_end(began, run, places):
+    """Where a sitting with no end row ended: the earliest of the next place
+    begun after it (a pass run inside it is not the feature leaving it) and
+    the last line its run wrote (any line when it names no run); a bound
+    before the sitting began says nothing of it."""
+    start = _when(began)
+    later = next((p["from"] for p in places.list
+                  if "n" in p and _when(p.get("from")) and start and _when(p["from"]) > start), None)
+    ends = [x for x in (later, places.last_of.get(run) if run else places.last)
+            if _when(x) and start and _when(x) >= start]
+    return min(ends, key=_when) if ends else began
+
+
+def _session_going(state, key):
+    """Whether sclaude's state has the conversation of a step, the
+    retrospective or the epilogue (its key) open now, as the position takes
+    it however long ago it began (`_open`), or a sync going, as its badge
+    takes it (`_going`)."""
+    node = (state.get("steps") or {}).get(key) or state.get(key)
+    runs = _runs(node) if isinstance(node, dict) else []
+    return bool(runs) and (_going if key == "sync" else _open)(runs[-1])
+
+
 def _fix_open(state, stage):
     words = (((state.get("regression") or {}).get(stage) or {}).get("fix_status") or "").split()
     return bool(words) and words[-1] == "open"
@@ -1360,12 +1389,16 @@ class _Places:
                 place["sittings"].append([at, None])
                 place.setdefault("before", []).append(place["session"])
                 place["session"] = session
+                place["run"] = self.run or place.get("run")
                 return
             # Left open while the feature went elsewhere: it ended where
-            # the next place began.
+            # the next place began - not a pass, which runs inside it.
             after = self.list[self.list.index(place) + 1:]
-            self.leave(key, next((p["from"] for p in after if p.get("from")),
-                                 self.last_of.get(place.get("run")) or self.last or at))
+            # A wait is the feature's, not a run's: entered again with no
+            # place between, it lasted until now.
+            self.leave(key, next((p["from"] for p in after if "n" in p and p.get("from")),
+                                 (self.last_of.get(place.get("run")) or self.last) if place.get("session")
+                                 else None) or at)
         self.list.append({"n": node, "from": at, "to": None, "session": session, "sittings": [],
                           "run": self.run})
         self.open[key] = self.list[-1]
@@ -1395,7 +1428,7 @@ class _Places:
         self.list.append({"pass": [kind, index], "from": at, "to": at})
 
 
-def _friction_way(rows, workshop_sessions):
+def _friction_way(rows, workshop_sessions, now=None, cut=None):
     """A friction review's way through its map, from its rows."""
     ops = [r["op"] for r in rows]
     if "deferred" in ops:
@@ -1407,12 +1440,16 @@ def _friction_way(rows, workshop_sessions):
             way.append({"n": "f_away", "from": r["at"]})
         if r["op"] == "open":
             if way[-1]["n"] == "f_review":
+                # Opened again, after a Ctrl-C as often as after a
+                # conversation that died: the sitting before has no end that
+                # can be told, and counts nothing rather than the whole gap.
                 way[-1]["k"] = way[-1].get("k", 1) + 1
             else:
                 way.append({"n": "f_review", "s": 0, "from": r["at"]})
             sitting, session = r["at"], r.get("session") or session
         elif r["op"] in ("end", "stall", "finish") and sitting:
             way[-1]["s"] += _seconds(sitting, r["at"]) or 0
+            way[-1].setdefault(SPANS, []).append((sitting, r["at"]))
             way[-1]["to"] = r["at"]
             sitting = None
             if r["op"] == "stall":
@@ -1421,6 +1458,16 @@ def _friction_way(rows, workshop_sessions):
             outcome = r["outcome"]
         if r["op"] == "verdict":
             verdict = r.get("verdict", "")
+    # A sitting left open: going on by sclaude's state, up to now; else it
+    # ended unseen, where `cut` says (_unseen_end), a guess the page marks.
+    if sitting and way[-1]["n"] == "f_review":
+        end = now or cut and cut(sitting)
+        if end and _when(end) > _when(sitting):
+            way[-1]["s"] += _seconds(sitting, end) or 0
+            way[-1].setdefault(SPANS, []).append((sitting, end))
+            if not now:
+                way[-1]["to"] = end  # a stay going on has no end yet
+        way[-1]["live" if now else "unsure"] = True
     if not (outcome or verdict):
         return way
     if session in workshop_sessions:
@@ -1436,17 +1483,24 @@ def _friction_way(rows, workshop_sessions):
     return way
 
 
+# The sittings a stay's `s` adds up, (from, to) each: what the time metric
+# lays side by side, so a minute two maps both timed counts once. Taken off
+# the stays before the history goes out.
+SPANS = "_spans"
+
+
 def _timed(node, a, b):
     step = {"n": node, "from": a}
     if b:
-        step.update({"to": b, "s": _seconds(a, b) or 0})
+        step.update({"to": b, "s": _seconds(a, b) or 0, SPANS: [(a, b)]})
     return step
 
 
-def _regression_way(stage, rows, cut=None):
+def _regression_way(stage, rows, cut=None, now=None):
     """A stage's run through the regression map, each place with its time,
     so what it took is counted there and not on the step it came from. A run
-    cut off ends at cut: the last line of the sclaude run that started it."""
+    cut off ends where `cut`, a function of the moment it started, says
+    (history's `unseen`); one going now (`now`) counts up to it."""
     gate = {"local": "reg_local", "preview": "preview_ok", "prod": "prod_ok"}[stage]
     way, run, fix = [{"n": "r_" + stage}], None, None
     for r in rows:
@@ -1470,12 +1524,15 @@ def _regression_way(stage, rows, cut=None):
                     way.append({"n": gate})
         elif what == "rollback.prod":
             way.append({"n": "rollback", "from": at, "to": at})
-    if run:
-        way.append(_timed(gate, run, cut if cut and _seconds(run, cut) else None))
+    if run and now:
+        way.append(dict(_timed(gate, run, now), live=True))
+    elif run:
+        end = cut(run) if cut else None
+        way.append(dict(_timed(gate, run, end if end and _seconds(run, end) else None), unsure=True))
     return way
 
 
-def _sync_way(rows):
+def _sync_way(rows, now=None, cut=None):
     """A sync with main through its map: the check, the session's sittings,
     and the merge in once it settled."""
     way = [{"n": "y_when"}, {"n": "merge_check"}]
@@ -1487,6 +1544,7 @@ def _sync_way(rows):
                 # ended here, and this is a sitting of the same stay.
                 if sitting:
                     way[-1]["s"] += _seconds(sitting, r["at"]) or 0
+                    way[-1].setdefault(SPANS, []).append((sitting, r["at"]))
                 way[-1]["k"] = way[-1].get("k", 1) + 1
             else:
                 way.append({"n": "sync", "from": r["at"], "s": 0})
@@ -1498,10 +1556,21 @@ def _sync_way(rows):
                 way[-1]["k"] -= 1
         elif r["op"] in ("end", "finish", "stall") and sitting:
             way[-1]["s"] += _seconds(sitting, r["at"]) or 0
+            way[-1].setdefault(SPANS, []).append((sitting, r["at"]))
             way[-1]["to"] = r["at"]
             sitting = None
         if r["op"] in ("finish", "close"):
             way += [{"n": "merge_check"}, {"n": "main_in"}, {"n": "y_on"}]
+    # A sitting left open: going on by sclaude's state, up to now; else it
+    # ended unseen, where `cut` says (_unseen_end), a guess the page marks.
+    if sitting and way[-1]["n"] == "sync":
+        end = now or cut and cut(sitting)
+        if end and _when(end) > _when(sitting):
+            way[-1]["s"] += _seconds(sitting, end) or 0
+            way[-1].setdefault(SPANS, []).append((sitting, end))
+            if not now:
+                way[-1]["to"] = end  # a stay going on has no end yet
+        way[-1]["live" if now else "unsure"] = True
     return way
 
 
@@ -1657,8 +1726,41 @@ def history(state, lines, here=None, transcripts=None):
         # before it left off.
         if what != "command":
             places.last = at
-        if r.get("run"):
+        if r.get("run") and what != "command":
             places.last_of[r["run"]] = at
+
+    # A stay left with no end row is going on only when sclaude's state says
+    # so, and then counts up to now (`live`): a step's conversation while it
+    # is the state's step and its run open, the retrospective's, the
+    # epilogue's (`_session_going`); a wait the feature stands in (the
+    # merge's, QA's look: its position, `here`, with nothing after it). Any
+    # other ended unseen (a Ctrl-C, a terminal that died write no end): at
+    # the earliest of the next place begun after it (a pass run inside it is
+    # not the feature leaving it) and the last line its run wrote
+    # (`_unseen_end`), its time a guess the page marks (`unsure`) - except
+    # the merge's wait or QA's look the next place began after, which ended
+    # there as _Places.enter has it. Decided by the user on 2026-11-03, after
+    # rules guessed from the rows alone broke one case for each they fixed.
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    for key, place in list(places.open.items()):
+        name = key.split(".", 1)[-1]  # "steps.<step>" for a step
+        after = places.list[places.list.index(place) + 1:]
+        # The next place, not a pass: a pass is run inside a stay.
+        later = next((p["from"] for p in after if "n" in p and p.get("from")), None)
+        if place.get("session"):
+            going = _session_going(state, name) and (not key.startswith("steps.") or name == state.get("step"))
+        else:
+            going = place["n"] in WAITS_HERE and place["n"] == here and not later
+        if going:
+            place["going"] = True
+            continue
+        if place["n"] in WAITS_HERE and later:
+            # A wait is the feature's, not a run's: it lasts across runs and
+            # ended where the next place began.
+            places.leave(key, later)
+            continue
+        places.leave(key, _unseen_end(place["sittings"][-1][0], place.get("run"), places))
+        place["unsure"] = True
 
     # Merged into one: the same place entered again with nothing between, by
     # the same conversation — a session resumed, a deploy and its regression.
@@ -1669,12 +1771,14 @@ def history(state, lines, here=None, transcripts=None):
                 not p.get("session") or not last.get("session") or p["session"] == last["session"]):
             last["sittings"] += p["sittings"]
             last["to"] = p["to"] or last["to"]
+            for flag in ("going", "unsure"):
+                last[flag] = last.get(flag) or p.get(flag)
             continue
         visits.append(p)
     aside = here and here not in NODES
     if here and not aside and (not visits or visits[-1].get("n") != here):
         visits.append({"n": here, "from": None, "to": None, "sittings": [], "here": True})
-    elif visits and here:
+    elif visits and here and not aside:
         visits[-1]["here"] = True
 
     # The places between, along the map; the time between two places to the
@@ -1708,19 +1812,31 @@ def history(state, lines, here=None, transcripts=None):
                 way = []
             until = held[0].get("from") if held else None
             until = until or v.get("from") or (v["sittings"][0][0] if v["sittings"] else None)
-            gap = _seconds(prev.get("to"), until)
+            # A stay still going is not waited after: its sitting holds it.
+            gap = None if any(not b for a, b in prev.get("sittings", [])) else _seconds(prev.get("to"), until)
             waited = next((n for n in way if NODES[n][2] in WAITS_ON), None)
             for n in way:
                 step = {"n": n}
                 if n == waited and gap and gap >= 60:
-                    step.update({"s": gap, "from": prev.get("to"), "to": until, "wait": True})
+                    step.update({"s": gap, "from": prev.get("to"), "to": until, "wait": True,
+                                 SPANS: [(prev.get("to"), until)]})
                 out.append(step)
         out += [{"pass": h["pass"]} for h in held]
         held = []
         step = {"n": v["n"]}
-        secs = [_seconds(a, b) for a, b in v["sittings"] if b]
+        spans = [(a, b) for a, b in v["sittings"] if a and b]
+        # A sitting of the conversation going on counts up to this moment,
+        # and its stay is the one that holds the step going on (`live`).
+        going = [(a, now_iso) for a, b in v["sittings"] if a and not b] if v.get("going") else []
+        spans += going
+        secs = [n for n in (_seconds(a, b) for a, b in spans) if n is not None]
         if secs:
             step["s"] = sum(secs)
+            step[SPANS] = spans
+        if going:
+            step["live"] = True
+        if v.get("unsure"):
+            step["unsure"] = True
         if len(v["sittings"]) > 1:
             step["k"] = len(v["sittings"])
         if v.get("from"):
@@ -1743,19 +1859,31 @@ def history(state, lines, here=None, transcripts=None):
     workshop_sessions = set(workshop)
     passes = {"friction": [], "workshop": [], "regression": [], "sync": []}
     index = {}
+    def unseen(rs):
+        """For a pass's sitting left with no end: where it ended unseen. One
+        whose rows name no run has no line of its own to end at, and the
+        history's last says nothing of it: it took no time."""
+        # The run of the row that opened the sitting left open: a later
+        # process's rows (a rollback, a fix) say nothing of when it ended.
+        run = next((r.get("run") for r in reversed(rs) if r["op"] in ("open", "start")), rs[0].get("run"))
+        return (lambda began: _unseen_end(began, run, places)) if run else (lambda began: began)
+
     for key, rs in regression.items():
         index[("regression", key)] = len(passes["regression"])
         ends = [x["op"] for x in rs if x["what"].startswith("regression.") and x["op"] != "start"]
         passes["regression"].append({
             "label": "%s · %s%s" % (_short(rs[0]["at"]), key.split("-")[0], (" · " + ends[-1]) if ends else ""),
             "steps": _regression_way(key.split("-")[0], rs,
-                                     places.last_of.get(rs[0].get("run")) if rs[0].get("run") else None)})
+                                     unseen(rs),
+                                     now_iso if key == last_run.get(key.split("-")[0])
+                                     and _running(state, key.split("-")[0]) else None)})
     for key, rs in syncs.items():
         index[("sync", key)] = len(passes["sync"])
         ends = [x["op"] for x in rs if x["op"] != "open"]
         passes["sync"].append({
             "label": "%s · sync%s" % (_short(rs[0]["at"]), (" · " + ends[-1]) if ends else ""),
-            "steps": _sync_way(rs)})
+            "steps": _sync_way(rs, now_iso if key == list(syncs)[-1] and _session_going(state, "sync") else None,
+                               unseen(rs))})
     for key, rs in friction.items():
         if [r["op"] for r in rs] == ["empty"]:
             continue
@@ -1765,7 +1893,10 @@ def history(state, lines, here=None, transcripts=None):
         index[("friction", key)] = len(passes["friction"])
         passes["friction"].append({
             "label": "%s · %s%s" % (_short(rs[0]["at"]), key, (" · " + verdict) if verdict else ""),
-            "steps": _friction_way(rs, workshop_sessions)})
+            "steps": _friction_way(rs, workshop_sessions,
+                                   now_iso if _open((_runs((state.get("friction") or {}).get(key)) or [None])[-1])
+                                   else None,
+                                   unseen(rs))})
     for session, rs in workshop.items():
         ends = [r["op"] for r in rs if r["op"] in WORKSHOP_OUT or r["op"] in ("none", "ready")]
         index[("workshop", session)] = len(passes["workshop"])
@@ -1790,9 +1921,11 @@ def history(state, lines, here=None, transcripts=None):
         else:
             steps.append(s)
     deviations(steps)
-    return {"visits": steps, "passes": passes,
-            "metrics": metrics(rows, steps, passes, transcripts),
-            "now": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+    counted = metrics(rows, steps, passes, transcripts, now_iso)
+    for st in steps + [x for ps in passes.values() for p in ps for x in p["steps"]]:
+        st.pop(SPANS, None)
+    return {"visits": steps, "passes": passes, "metrics": counted,
+            "now": now_iso}
 
 
 # A map of its own is reached from a block marked with its letter: a pass
@@ -1848,7 +1981,14 @@ def deviations(steps):
 #   wait    the seconds a question waited for the person's answer, counted
 #           on the place the answer came in: Claude's, after its turn or its
 #           question (claude_usage's `human`, not capped), and sclaude's own
-#           (`ask answered waited=`, ask_once in ui.sh).
+#           (`ask answered waited=`, ask_once in ui.sh);
+#   time    the seconds the feature stood on a place, each stay's own `s`
+#           (what the player's clock shows), on the map the stay is on; a
+#           detailed stay gives up what a regression or a sync ran inside
+#           it, which counts on that pass's map, so no minute counts twice;
+#   visits  how many stays each place had (not a checkbox: it goes beside
+#           the time; the player counts its own as it plays);
+#   unsure  how many of them ended unseen, their time a guess (⚠ beside it).
 #
 # Both as {map: {node: total}}, the friction review's over every review;
 # each stay carries its own share as well ("m", {kind: n}), which the player
@@ -1880,10 +2020,11 @@ def _session_place(rows, opened=None):
     return out
 
 
-def metrics(rows, steps, passes, transcripts):
+def metrics(rows, steps, passes, transcripts, now_iso=None):
     stays = [("detail", s) for s in steps if "n" in s]
     stays += [(m, s) for m, ps in passes.items() for p in ps for s in p["steps"]]
-    timed = [(m, s["n"], _when(s["from"]), _when(s.get("to")) or _when(s["from"]), s)
+    now = _when(now_iso) or datetime.datetime.now(datetime.timezone.utc)
+    timed = [(m, s["n"], _when(s["from"]), now if s.get("live") else _when(s.get("to")) or _when(s["from"]), s)
              for m, s in stays if s.get("from")]
 
     def place(at, inside_only=False):
@@ -1911,7 +2052,7 @@ def metrics(rows, steps, passes, transcripts):
         return (min(inside, key=lambda t: t[3] - t[2]) if inside else
                 max(before, key=lambda t: t[2]) if before else mine[0])[4]
 
-    out = {"input": {}, "cost": {}, "wait": {}}
+    out = {"input": {}, "cost": {}, "wait": {}, "time": {}, "visits": {}, "unsure": {}}
     detail = [t for t in timed if t[0] == "detail"]
 
     def ahead(at):
@@ -1945,6 +2086,50 @@ def metrics(rows, steps, passes, transcripts):
                 box = out[kind].setdefault("ahead", {})
                 box[node] = round(box.get(node, 0) + n, 4)
 
+    def spans(st):
+        return [(a, b) for a, b in ((_when(x), _when(y)) for x, y in st.get(SPANS) or []) if a and b and b > a]
+
+    def union(parts):
+        out = []
+        for a, b in sorted(parts):
+            if out and a <= out[-1][1]:
+                out[-1] = (out[-1][0], max(out[-1][1], b))
+            else:
+                out.append((a, b))
+        return out
+
+    # What the passes' maps timed, laid side by side once: a regression run
+    # inside a sync is the same minutes.
+    passed = union([sp for m, st in stays if m != "detail" for sp in spans(st)])
+    for m, st in stays:
+        # A stay's time and count go on that stay, not on one stay_of would
+        # pick: the passes' stays mostly carry no moment to find them by.
+        box = out["visits"].setdefault(m, {})
+        box[st["n"]] = box.get(st["n"], 0) + 1
+        # A stay whose end could not be told: its time is a guess, on the
+        # glance too, under the block a sync ran ahead of.
+        if st.get("unsure"):
+            box = out["unsure"].setdefault(m, {})
+            box[st["n"]] = box.get(st["n"], 0) + 1
+            node = ahead(st.get("from")) if m == "sync" else None
+            if node:
+                box = out["unsure"].setdefault("ahead", {})
+                box[node] = box.get(node, 0) + 1
+        secs = st.get("s") or 0
+        if secs and m == "detail" and passed:
+            # Its own sittings, less what a pass's map timed in them.
+            inside = sum(max(0, (min(b, y) - max(a, x)).total_seconds())
+                         for a, b in union(spans(st)) for x, y in passed)
+            secs = max(0, secs - int(inside))
+        if not secs:
+            continue
+        box = out["time"].setdefault(m, {})
+        box[st["n"]] = box.get(st["n"], 0) + secs
+        st.setdefault("m", {})["time"] = secs
+        node = ahead(st.get("from")) if m == "sync" else None
+        if node:
+            box = out["time"].setdefault("ahead", {})
+            box[node] = box.get(node, 0) + secs
     for r in rows:
         if (r["what"], r["op"]) == ("ask", "answered") or r["what"] == "command":
             add("input", place(r["at"]), 1, r["at"])
@@ -2489,9 +2674,10 @@ class Diagram:
             upper = {n[0]: drawn[nid] for nid, n in self.nodes.items() if n[1] == r}
             if r + 1 < self.rows and upper and not lev[r]:
                 lower = [n[0] for n in self.nodes.values() if n[1] == r + 1]
-                # Under every block the page writes a line of its own (its
-                # metrics, the player's count, 13 px), and a block's letters
-                # stand 13 px over its top: in one lane, both fit between.
+                # Under a start or an end the page writes a line of its own
+                # (its metrics, 13 px; a block keeps them inside), and a
+                # block's letters stand 13 px over its top: in one lane, both
+                # fit between.
                 rise = [upper[lane] + UNDER + 14 for lane in lower if lane in upper]
                 if sides[r]:
                     rise.append(NODE_H / 2 + 14)
@@ -3371,7 +3557,7 @@ const player = (() => {
         last.off = last.off || s.off;
         if (s.s != null) last.s = (last.s || 0) + s.s;
         if (s.m) last.m = addUp(Object.assign({}, last.m), s.m);
-        last.to = s.to || last.to; last.here = last.here || s.here;
+        last.to = s.to || last.to; last.here = last.here || s.here; last.unsure = last.unsure || s.unsure;
         return;
       }
       out.push(Object.assign({}, s, {n: n}));
@@ -3385,7 +3571,11 @@ const player = (() => {
     const svg = document.querySelector('svg.map-' + map);
     return svg ? svg.querySelector(sel) : null;
   }
-  function clock(g, s, ms, mine) {
+  // `lead` ({k, t}): the times the place was entered with this one, and
+  // what the stays played before took, said ahead of the running time
+  // ("×3 · 40 min+5 min"), where the ⏱ of the metrics would stand and does
+  // not while the clock is there.
+  function clock(g, s, ms, mine, lead) {
     const box = g.querySelector('.shape').getBBox(), ns = 'http://www.w3.org/2000/svg';
     const c = document.createElementNS(ns, 'g');
     c.setAttribute('class', 'pl-clock');
@@ -3394,6 +3584,22 @@ const player = (() => {
       + '<line x1="0" y1="0" x2="5" y2="0"/><text x="17" y="4"></text>';
     g.append(c);
     const text = c.querySelector('text'), hand = c.querySelector('.pl-hand');
+    const say = (t) => [lead && lead.k > 1 ? '×' + lead.k : '',
+      (lead && lead.t ? dur(lead.t) + (s != null ? '+' : '') : '') + (s != null ? dur(t) : '')]
+      .filter(Boolean).join(' · ') + (lead && lead.guess ? ' ⚠' : '');
+    // Its words stop before the badges, measured once at their longest: a
+    // layout every frame would stutter on a phone. The running time is
+    // longest just under a round one ("1 h 59 min" before "2 h"), so the
+    // longest of the words it will say on the way is the one measured.
+    const room = upToBadges(g, box.x + 2 + 17), all = s || 0;
+    let longest = say(all);
+    for (let t = 0; t < all; t += Math.max(60, all / 2000)) {
+      const w = say(t);
+      if (w.length > longest.length) longest = w;
+    }
+    text.textContent = longest;
+    const wide = text.getComputedTextLength();
+    if (wide > room) text.style.fontSize = Math.max(7, 12 * room / wide) + 'px';
     let gone = 0, last = performance.now();
     (function frame(t) {
       if (mine !== token || !c.isConnected) return;
@@ -3401,23 +3607,36 @@ const player = (() => {
       last = t;
       const f = Math.min(1, gone / ms);
       hand.setAttribute('transform', 'rotate(' + (f * 720) + ')');
-      text.textContent = s != null ? dur(s * f) : '';
+      text.textContent = say(s * f);
       if (f < 1) requestAnimationFrame(frame);
     })(last);
     return c;
   }
+  // Times entered and time taken so far, inside the block at its top left;
+  // the ⏱ of the metrics says both when it is checked.
   function tag(g, n, s) {
     const seen = g.__pl || (g.__pl = {k: 0, s: 0});
     seen.k++; seen.s += s || 0;
     g.querySelectorAll('.pl-tag').forEach((t) => t.remove());
-    if (!seen.s && seen.k < 2) return;
+    if (timeShown() || (!seen.s && seen.k < 2)) return;
     const box = g.querySelector('.shape').getBBox(), ns = 'http://www.w3.org/2000/svg';
     const t = document.createElementNS(ns, 'text');
     t.setAttribute('class', 'pl-tag');
-    t.setAttribute('x', box.x + 4); t.setAttribute('y', box.y + box.height + 12);
+    t.setAttribute('x', box.x + inset(g, true)); t.setAttribute('y', box.y + 12);
     t.textContent = [seen.k > 1 ? '×' + seen.k : '', seen.s ? dur(seen.s) : ''].filter(Boolean).join(' · ');
     g.append(t);
   }
+  const timeShown = () => !!document.querySelector('.metrics input[value="time"]:checked');
+  // How far from a block's side its corners' words start: a gate's corners
+  // are cut, and a wait has its clock at the top left.
+  const kindOf = (g) => (g.getAttribute('class').match(/k-(\S+)/) || [])[1];
+  const inset = (g, top) => kindOf(g) === 'gate' ? 17 : top && kindOf(g) === 'wait' ? 24 : 7;
+  // The room from x along a block's top to the first of its badges.
+  const upToBadges = (g, x) => {
+    const box = g.querySelector('.shape').getBBox();
+    return Math.min(box.x + box.width - 7,
+                    ...[...g.querySelectorAll('.badge .dot')].map((d) => +d.getAttribute('cx') - 14)) - x;
+  };
   const TITLE = {friction: 'the friction review', workshop: 'how a session changes sclaude',
                  regression: "a stage's regression", sync: 'main and the branch'};
   // The maps a pass is played on, each a way of its own from the main one.
@@ -3447,7 +3666,7 @@ const player = (() => {
   }
   function done(s) {
     const key = s.map + ':' + s.n;
-    played[key] = addUp(played[key] || {}, s.m);
+    played[key] = addUp(played[key] || {}, Object.assign({visits: 1, unsure: s.unsure ? 1 : 0}, s.m));
   }
   async function run(steps, label, start) {
     stop();
@@ -3492,7 +3711,10 @@ const player = (() => {
       g.classList.add('pl-now');
       current = {key: s.map + ':' + s.n, m: s.m || {}};
       drawMetrics();
-      const c = clock(g, s.s, ms, mine);
+      const was = played[current.key] || {};
+      const c = clock(g, s.s, ms, mine, timeShown()
+        ? {k: s.map === 'overview' ? 1 : (was.visits || 0) + 1, t: was.time, guess: s.unsure || was.unsure}
+        : null);
       if (!await sleep(ms, mine)) return;
       c.remove();
       g.classList.remove('pl-now'); g.classList.add('pl-seen');
@@ -3675,7 +3897,12 @@ const player = (() => {
   const money = (n) => '$' + (n < 10 ? n.toFixed(2) : Math.round(n));
   const SHOW = {input: (n, more) => '✋ ' + plus(String, n, more),
                 cost: (n, more) => plus(money, n, more),
-                wait: (n, more) => '⏳ ' + plus(took, n, more)};
+                wait: (n, more) => '⏳ ' + plus(took, n, more),
+                time: (n, more) => '⏱ ' + plus(took, n, more)};
+  // A kind's whole, as the line above the maps and a map's heading say it.
+  const whole = (kind, sum) => kind === 'cost' ? '$' + sum.toFixed(2)
+    : kind === 'wait' || kind === 'time' ? (sum ? took(sum) : '0') : String(sum);
+  const ICON = {input: '✋', cost: '', wait: '⏳', time: '⏱'};
   function totals(kind, map) {
     const m = ((data || {}).metrics || {})[kind] || {};
     if (map !== 'overview') return m[map] || {};
@@ -3697,13 +3924,40 @@ const player = (() => {
       // "ahead" repeats the sync's under the glance's blocks: not twice.
       const sum = Object.keys(m).filter((map) => map !== 'ahead').reduce((t, map) =>
         t + Object.values(m[map] || {}).reduce((a, v) => a + v, 0), 0);
-      b.textContent = '· ' + (b.dataset.kind === 'cost' ? '$' + sum.toFixed(2)
-        : b.dataset.kind === 'wait' ? (sum ? took(sum) : '0') : sum);
+      const guess = b.dataset.kind === 'time' && Object.keys(((data || {}).metrics || {}).unsure || {}).length;
+      b.textContent = '· ' + whole(b.dataset.kind, sum) + (guess ? ' ⚠' : '');
     });
     document.querySelectorAll('.mt').forEach((t) => t.remove());
+    // A block's own words as drawn, before the metrics made room in it.
+    document.querySelectorAll('.mt-hid').forEach((t) => t.classList.remove('mt-hid'));
+    document.querySelectorAll('[data-mt-was]').forEach((t) => {
+      t.textContent = t.dataset.mtWas; delete t.dataset.mtWas;
+    });
+    document.querySelectorAll('[data-mt-moved]').forEach((t) => {
+      t.removeAttribute('transform'); delete t.dataset.mtMoved;
+    });
     const on = [...document.querySelectorAll('.metrics input:checked')].map((c) => c.value);
+    // Each map's own whole beside its heading, by the same checkboxes: a
+    // map nothing was counted on says its zeros rather than nothing.
+    document.querySelectorAll('.mt-map').forEach((b) => {
+      b.textContent = on.map((kind) => {
+        const sum = Object.values(totals(kind, b.dataset.map)).reduce((a, v) => a + v, 0);
+        const guess = kind === 'time' && Object.keys(totals('unsure', b.dataset.map)).length;
+        return (ICON[kind] ? ICON[kind] + ' ' : '') + whole(kind, sum) + (guess ? ' ⚠' : '');
+      }).join('  ');
+    });
     ['detail', 'overview'].concat(PASSES).forEach((map) => {
+      // per[node][kind]: the words one kind puts in it.
       const per = {};
+      const put = (n, kind, word) => { (per[n] = per[n] || {})[kind] = word; };
+      // ⏱ with the times the place was entered, where a place is one block:
+      // the glance draws several in one, entered as one.
+      // ⚠ after it: a stay there ended unseen, and its time is a guess.
+      const timed = (k, a, b, guess) => {
+        const said = [k > 1 && map !== 'overview' ? '×' + k : '',
+                      a || b ? plus(took, a, b || null).replace(/^\+/, '') : ''].filter(Boolean).join(' · ');
+        return said ? '⏱ ' + said + (guess ? ' ⚠' : '') : '';
+      };
       if (played && inPlay.has(map)) {
         // ✋3+2: three before this stay, two in it; a stay done shows 5.
         const keys = new Set(Object.keys(played).concat(current ? [current.key] : []));
@@ -3713,28 +3967,94 @@ const player = (() => {
           const now = current && current.key === key ? current.m : null;
           on.forEach((kind) => {
             const a = was[kind] || 0, b = now ? now[kind] || 0 : 0;
-            if (b) (per[n] = per[n] || []).push(SHOW[kind](a, b));
-            else if (a) (per[n] = per[n] || []).push(SHOW[kind](a));
+            // The block playing now has the clock in that corner, saying it.
+            if (kind === 'time') {
+              const k = (was.visits || 0) + (now ? 1 : 0);
+              if (!now && timed(k, a)) put(n, kind, timed(k, a, 0, was.unsure));
+            } else if (b) put(n, kind, SHOW[kind](a, b));
+            else if (a) put(n, kind, SHOW[kind](a));
           });
         });
-      } else on.forEach((kind) => Object.entries(totals(kind, map)).forEach(([n, v]) => {
-        if (v) (per[n] = per[n] || []).push(SHOW[kind](v));
-      }));
-      Object.entries(per).forEach(([n, words]) => {
+      } else {
+        // The stay the feature is on now, when the place had stays before
+        // it: what those took, then its own after a plus, as a play says it.
+        // Not on the glance, whose one stay may be several in a row here.
+        const here = {};
+        const mark = (m, st) => { if (st.live && st.m) here[m + ':' + st.n] = st.m; };
+        ((data || {}).visits || []).forEach((st) => mark('detail', st));
+        PASSES.forEach((m) => (((data || {}).passes || {})[m] || []).forEach((p) => p.steps.forEach((st) => mark(m, st))));
+        const visits = totals('visits', map), guessed = totals('unsure', map);
+        on.forEach((kind) => Object.entries(totals(kind, map)).concat(
+          kind === 'time' ? Object.keys(visits).map((n) => [n, totals('time', map)[n] || 0]) : []
+        ).forEach(([n, v]) => {
+          const b = (here[map + ':' + n] || {})[kind] || 0, a = v - b;
+          const first = !(a > 1e-9 && b);
+          if (kind === 'time') {
+            const word = first ? timed(visits[n], v, 0, guessed[n]) : timed(visits[n], a, b, guessed[n]);
+            if (word) put(n, kind, word);
+          } else if (v) put(n, kind, first ? SHOW[kind](v) : SHOW[kind](a, b));
+        }));
+      }
+      const ns = 'http://www.w3.org/2000/svg';
+      const text = (g, x, y, anchor, words) => {
+        const t = document.createElementNS(ns, 'text');
+        t.setAttribute('class', 'mt in');
+        t.setAttribute('x', x); t.setAttribute('y', y);
+        t.setAttribute('text-anchor', anchor);
+        t.textContent = words;
+        g.append(t);
+        return t;
+      };
+      const squeeze = (t, room) => {
+        if (t && t.getComputedTextLength() > room) {
+          t.setAttribute('textLength', Math.max(room, 1));
+          t.setAttribute('lengthAdjust', 'spacingAndGlyphs');
+        }
+      };
+      Object.entries(per).forEach(([n, w]) => {
         const g = svgEl(map, '[data-node="' + n + '"]');
         if (!g) return;
         const box = g.querySelector('.shape').getBBox();
-        const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        t.setAttribute('class', 'mt');
-        t.setAttribute('x', box.x + box.width - 2); t.setAttribute('y', box.y + box.height + 13);
-        t.setAttribute('text-anchor', 'end');
-        t.textContent = words.join('  ');
-        g.append(t);
-        // No wider than its block: a block in the next lane may stand
-        // beside this line (a row risen, _rows).
-        if (t.getComputedTextLength() > box.width - 4) {
-          t.setAttribute('textLength', box.width - 4);
-          t.setAttribute('lengthAdjust', 'spacingAndGlyphs');
+        const own = [...g.children].filter((t) => t.matches('text.t, text.s'));
+        // A start or an end is a small circle with its words under it: the
+        // numbers go in one line under those.
+        if (['start', 'end'].includes(kindOf(g))) {
+          const low = Math.max(box.y + box.height, ...own.map((t) => { const b = t.getBBox(); return b.y + b.height; }));
+          text(g, box.x + box.width / 2, low + 11, 'middle',
+               [w.time, w.input, w.wait, w.cost].filter(Boolean).join('  '));
+          return;
+        }
+        // Inside the block, in its corners: outside, the ways coming in and
+        // going out ran over the numbers. The badges hold the top right.
+        const pad = inset(g);
+        const top = box.y + 12, bottom = box.y + box.height - 5;
+        // Four lines of its own leave no room above and below them: the
+        // last line of the description gives way (the one before it ends in
+        // "…"), and the rest moves to the middle again.
+        const desc = own.filter((t) => t.matches('.s'));
+        if (own.length >= 4 && desc.length) {
+          const last = desc[desc.length - 1], before = desc[desc.length - 2];
+          last.classList.add('mt-hid');
+          if (before) {
+            before.dataset.mtWas = before.textContent;
+            before.textContent = before.textContent.replace(/\s*…$/, '') + ' …';
+          }
+          own.filter((t) => t !== last).forEach((t) => {
+            t.setAttribute('transform', 'translate(0 6)'); t.dataset.mtMoved = '1';
+          });
+        }
+        // What you did, side by side at the bottom left; what Claude cost
+        // pressed to the bottom right.
+        const said = [w.input, w.wait].filter(Boolean).join('  ');
+        const left = said ? text(g, box.x + pad, bottom, 'start', said) : null;
+        const right = w.cost ? text(g, box.x + box.width - pad, bottom, 'end', w.cost) : null;
+        const room = box.width - 2 * pad - (left && right ? 10 : 0);
+        const lw = left ? left.getComputedTextLength() : 0, rw = right ? right.getComputedTextLength() : 0;
+        if (lw + rw > room) { squeeze(left, room * lw / (lw + rw)); squeeze(right, room * rw / (lw + rw)); }
+        // The time the place took at the top left, up to the badges.
+        if (w.time) {
+          const x = box.x + inset(g, true);
+          squeeze(text(g, x, top, 'start', w.time), upToBadges(g, x));
         }
       });
     });
@@ -3788,6 +4108,10 @@ stroke-width:4px;stroke-linejoin:round}
 .pl-tag{font-size:11px}
 .metrics{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:10px 0 0;font-size:13.5px}
 .metrics label{display:flex;align-items:center;gap:5px;cursor:pointer}
+.mt.in{font-size:10.5px;stroke:none}
+.mt-hid{display:none}
+.mt-map{font:700 13px var(--body);color:var(--violet);margin:0 8px}
+.mt-map:empty{display:none}
 .mt{font:700 11.5px var(--body);fill:var(--violet);paint-order:stroke;stroke:var(--paper);stroke-width:4px;
 stroke-linejoin:round;pointer-events:none}
 .panel{position:sticky}
@@ -3810,6 +4134,7 @@ def play_head(map_name, label, passes=False):
     """▶ beside a map's heading; for a map of passes, the choice of one."""
     out = '<button type="button" class="play" data-play="%s" data-label="%s" title="Play how the feature went" disabled>▶</button>' \
         % (map_name, esc(label))
+    out += '<span class="mt-map" data-map="%s"></span>' % map_name
     if passes:
         out += '<select class="pass" data-pass="%s" aria-label="Which pass" disabled><option>no pass yet</option></select>' \
             % map_name
@@ -3876,7 +4201,8 @@ def _page(label, demo=None):
 <div class="metrics"><span class="muted">Show on the maps:</span>
 <label title="Each time you stepped in: a message to Claude after its turn, an answer to its question or to sclaude's, a command run on the feature"><input type="checkbox" value="input"> ✋ your input <b class="mt-total" data-kind="input"></b></label>
 <label title="What Claude Code's own account says each conversation cost"><input type="checkbox" value="cost"> $ Claude's cost <b class="mt-total" data-kind="cost"></b></label>
-<label title="How long a question waited for your answer — Claude's, after its turn or its question, and sclaude's own — the whole of it, nights included"><input type="checkbox" value="wait"> ⏳ waiting for you <b class="mt-total" data-kind="wait"></b></label></div>
+<label title="How long a question waited for your answer — Claude's, after its turn or its question, and sclaude's own — the whole of it, nights included"><input type="checkbox" value="wait"> ⏳ waiting for you <b class="mt-total" data-kind="wait"></b></label>
+<label title="How long the feature stood on each place, every stay added up — what the player's clock shows; ⚠ where a conversation ended with no end written (a Ctrl-C, a terminal that died) and its time is a guess, up to the last line it wrote"><input type="checkbox" value="time"> ⏱ time in the step <b class="mt-total" data-kind="time"></b></label></div>
 <div class="live" style="margin-top:14px">
 <div>
 <h2 class="first-map">The whole process%s</h2>

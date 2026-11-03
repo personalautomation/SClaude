@@ -628,7 +628,10 @@ feature's topic is told once, with the keys that end the search for new findings
 to a review session without a question: `s` (⏭ on the topic) is how the rounds
 end, `n` and `r` in sclaude's tab act at once. Leaving the session yourself
 (`/exit`) stops them there, unless `[g]` is ticked: the step stays open until
-the next `sclaude <feature>`. Once you end the search, one
+the next `sclaude <feature>`. A round goes back to the same session while
+its context is under 40% and its last request is under 55 minutes old, so its
+prompt cache is still warm; otherwise a fresh session takes it, which costs
+less than resending a cold context. Once you end the search, one
 question with three answers settles the rest: check the fixes, close the step,
 or leave it.
 
@@ -948,15 +951,31 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   by those two maps' headings a list chooses which pass to play. While it
   plays the History follows it, and a click on a line plays from there. The
   history starts with sessions run since sclaude keeps it. Checkboxes above
-  the maps put under each block what it took: ✋ your input — each message to
+  the maps put in each block what it took: ✋ your input — each message to
   Claude after its turn, each answer to its question or to sclaude's, each
   command run on the feature at the terminal — Claude's cost in dollars, and
   ⏳ how long a question waited for your answer, Claude's or sclaude's, nights
-  included; a block with none shows none. Each checkbox shows the whole
-  feature's total beside it. While a map plays, its blocks count up instead:
+  included, and ⏱ how long the feature stood on the block, every stay added
+  up — what sclaude has going now (a step, a sync, a friction review, a
+  regression, the wait for the merge or QA) counted up to now; ⚠ when
+  something ended with no end written (a Ctrl-C, a terminal that died) and
+  its time is a guess — with ×3
+  when it was entered three
+  times (not on the cycle at a glance, whose blocks stand for several
+  places); a block with none shows none. They sit inside the block, in its
+  corners (a start or an end, a small circle, has them in a line under its
+  words): ✋ and ⏳ together at the bottom left, the cost at the bottom
+  right, ⏱ at the top left; a block whose own text fills four lines gives up
+  its last line of description to make room, and gets it back when the
+  checkboxes are off. Each checkbox shows the whole feature's
+  total beside it, and every map's heading its own — a map nothing was
+  counted on, such as a friction review put off with no session, says its
+  zeros. While a map plays, its blocks count up instead:
   what was played there so far, and on the place playing now its own share
-  after a plus — ✋ 3+2 is three before it and two in it; the totals come back
-  when the play ends or is stopped. The player plays at ×0.5 to ×4.
+  after a plus — ✋ 3+2 is three before it and two in it, its time on the
+  player's clock; the totals come back when the play ends or is stopped. Off
+  the play, the step going on now is shown the same way on its own
+  map when it was entered before: what the earlier stays took, then its own after a plus. The player plays at ×0.5 to ×4.
 - `localhost:3000/__sclaude/dora` — the product's metrics, linked under main
   as "main — DORA metrics": DORA, delivery, development quality, Claude's work
   and token efficiency. Production deploys and builds come from Vercel, each

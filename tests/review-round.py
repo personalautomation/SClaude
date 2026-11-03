@@ -25,9 +25,12 @@
 #     finding that would undo an earlier fix can be seen as one;
 #   * the prompt names the same marker file the orchestrator watches;
 #   * a closed round stays in the same session while its context is under
-#     REVIEW_CONTEXT_MAX_PCT, and goes to a fresh one past it: the tokens
-#     come from the transcript, the share from what the status line left,
-#     and every review session's end is logged with both.
+#     REVIEW_CONTEXT_MAX_PCT and its prompt cache is likely alive (its last
+#     request younger than REVIEW_CACHE_TTL less REVIEW_CACHE_MARGIN), and
+#     goes to a fresh one otherwise — on the round marker's path and on the
+#     local review's (review_reopen) alike: the tokens come from the
+#     transcript, the share from what the status line left, and every review
+#     session's end is logged with both.
 #
 # Run it with: python3 tests/review-round.py
 import importlib.util
@@ -850,14 +853,56 @@ echo "watcher=[$SESSION_WATCHER]"
     check("context-without-statusline", out.split("\n")[0], "120003 50010 - -")
 
     # --- the round goes on in the same session under the threshold -------------
-    check("threshold-decides", '[[ "$pct" =~ ^[0-9]+$ && "$pct" -lt "$REVIEW_CONTEXT_MAX_PCT" ]]' in rot, True)
+    check("threshold-decides", 'if why="$(review_keep "$wt" "$session" "$held")"; then' in rot, True)
     check("carry-on-resumes-with-a-word", 'run_step "$wt" "$slug" "$step" "$(review_carry_on "$pct")"' in rot, True)
-    carry = rot[rot.index('-lt "$REVIEW_CONTEXT_MAX_PCT" ]]; then'):rot.index("    fi\n")]
+    carry = rot[rot.index('review_keep "$wt" "$session" "$held")"; then'):rot.index("    fi\n")]
     check("carry-on-keeps-the-session", "steps.$step.session" in carry or "end \"$session\"" in carry, False)
     check("rotation-logged", 'review_context_log "$wt" "$slug" "$session" "fresh session"' in rot, True)
     check("exit-logged", RUN.count('review_context_log "$wt" "$slug" "$session"'), 3)
     with open(os.path.join(LIB, "steps.sh")) as fh:
-        check("threshold-default", 'REVIEW_CONTEXT_MAX_PCT="${REVIEW_CONTEXT_MAX_PCT:-40}"' in fh.read(), True)
+        steps_sh = fh.read()
+    check("threshold-default", 'REVIEW_CONTEXT_MAX_PCT="${REVIEW_CONTEXT_MAX_PCT:-40}"' in steps_sh, True)
+    check("cache-default", 'REVIEW_CACHE_TTL="${REVIEW_CACHE_TTL:-3600}"' in steps_sh
+          and 'REVIEW_CACHE_MARGIN="${REVIEW_CACHE_MARGIN:-300}"' in steps_sh, True)
+
+    # --- the last request, and whether the session is kept by it -------------
+    def asked(at, tokens=1000, side=False):
+        e = used(tokens, side=side)
+        e["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(at)) + ".000Z"
+        return e
+    now = int(time.time())
+    open(transcript, "w").close()
+    say(asked(now - 3000), asked(now - 600), asked(now - 10, side=True), asked(now - 5, tokens=0))
+    check("requested-last-own-request",
+          subprocess.run([sys.executable, END, "requested", transcript],
+                         capture_output=True, text=True).stdout, "%d\n" % (now - 600))
+    open(transcript, "w").close()
+    check("requested-none-when-empty",
+          subprocess.run([sys.executable, END, "requested", transcript],
+                         capture_output=True, text=True).stdout, "")
+    keep_sh = ('source "%s/state.sh"\nLIB="%s"\nREVIEW_CONTEXT_MAX_PCT=40\n'
+               'REVIEW_CACHE_TTL=3600\nREVIEW_CACHE_MARGIN=300\nexport HOME="%s"\n' % (LIB, LIB, home))
+    keep_sh += functions(RUN, ["review_keep"])
+
+    def keep(held, ago):
+        with open(os.path.join(ctx_dir, sid + ".jsonl"), "w") as fh:
+            if ago is not None:
+                fh.write(json.dumps(asked(int(time.time()) - ago)) + "\n")
+        out = subprocess.run(["bash", "-c", keep_sh + '\nreview_keep "%s" "%s" "%s"; echo "RC=$?"' % (ctx_wt, sid, held)],
+                             capture_output=True, text=True, timeout=30).stdout
+        return out
+    out = keep("120003 50010 13 1000000", 600)
+    check("keep-light-and-cached", "RC=0" in out and "likely alive" in out, True)
+    out = keep("120003 50010 45 1000000", 60)
+    check("fresh-when-heavy", "RC=1" in out and "45% (40% or more)" in out, True)
+    out = keep("120003 50010 13 1000000", 3400)
+    check("fresh-when-cache-cold", "RC=1" in out and "56 min ago" in out and "kept for 55 min" in out, True)
+    out = keep("120003 50010 13 1000000", 3200)
+    check("keep-just-under-the-margin", "RC=0" in out, True)
+    out = keep("120003 50010 - -", 60)
+    check("fresh-when-share-unknown", "RC=1" in out and "unknown" in out, True)
+    out = keep("120003 50010 13 1000000", None)
+    check("fresh-when-time-unknown", "RC=1" in out and "could not be read" in out, True)
     check("prompt-four-passes", "Four such passes at most" in prompt, True)
     check("prompt-leaves-the-choice", "who takes them is the orchestrator's call" in prompt, True)
     check("prompt-names-the-reversals-file",
@@ -1057,6 +1102,50 @@ echo "watcher=[$SESSION_WATCHER]"
     reopen = reopen[:reopen.index("\n}\n")]
     check("new-round-gets-a-fresh-session",
           'state_set "$state" steps.review.session null' in reopen, True)
+    # The local review's new round: the same session while review_keep says
+    # so, a fresh one otherwise; threads it left open always go back to it.
+    def reopen_run(split, kept):
+        rwt = os.path.join(tmp, "reopen-wt")
+        fake = os.path.join(tmp, "reopen-lib")
+        os.makedirs(os.path.join(rwt, ".sclaude", "local", "feature"), exist_ok=True)
+        os.makedirs(fake, exist_ok=True)
+        rst = os.path.join(rwt, ".sclaude", "local", "feature", "state.json")
+        with open(rst, "w") as fh:
+            json.dump({"steps": {"review": {"session": "S1", "rounds": 1}}}, fh)
+        with open(os.path.join(fake, "pr_context.py"), "w") as fh:
+            fh.write("print(%r)\n" % split)
+        body = 'source "%s/state.sh"\n' % LIB
+        body += functions(RUN, ["review_reopen", "review_carry_on"])
+        body += ('LIB="%s"; SELF=sclaude; REVIEW_WAIT_MAX=5; REVIEW_CONTEXT_MAX_PCT=40\n'
+                 'review_session_since() { echo 0; }\nreview_stuck_say() { :; }\ninfo() { echo "$*"; }\n'
+                 'review_context() { echo "1 1 12 1000000"; }\n'
+                 'review_keep() { echo "WHY"; return %d; }\n'
+                 'run_rounds() { echo "RUN_ROUNDS $2 $3"; }\n'
+                 'run_step() { echo "RUN_STEP $3 [${4:0:40}] $5"; }\n'
+                 'review_reopen "%s" feat 7 o/r 0\n') % (fake, 0 if kept else 1, rwt)
+        out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=30).stdout
+        with open(rst) as fh:
+            review = json.load(fh)["steps"]["review"]
+        return out, review.get("session"), review.get("rounds")
+    # Kept, the round is handed to run_step to count once the session is
+    # really resumed — not counted here, and not left in the state, where a
+    # start that stops short would count it on some later resume.
+    out, left, rounds = reopen_run("0 3", True)
+    check("reopen-new-round-kept", (left, rounds, "RUN_STEP review [**The review round is closed" in out,
+                                    out.rstrip().endswith("] kept"), "RUN_ROUNDS" in out), ("S1", 1, True, True, False))
+    resumed = RUN[RUN.index('review_brief "$wt" "$step" resumed'):]
+    resumed = resumed[:resumed.index("claude_launch --resume")]
+    check("kept-round-counted-on-resume",
+          '[[ "$step" == "review" && "$kept" == "kept" ]]' in resumed
+          and 'state_set "$state" steps.review.rounds "$kept_rounds"' in resumed
+          and '[[ "$review_mode" == "local" ]] || run_rounds "$wt" "$session" "$((kept_rounds + 1))"' in resumed, True)
+    check("kept-left-in-no-state", "steps.review.kept" in RUN, False)
+    out, left, rounds = reopen_run("0 3", False)
+    # The count is cleared by run_step's fresh branch, not here.
+    check("reopen-new-round-fresh", (left, rounds, "RUN_STEP review []" in out, "fresh session" in out),
+          (None, 1, True, True))
+    out, left, rounds = reopen_run("2 3", False)
+    check("reopen-own-work-resumed", (left, rounds, "RUN_STEP review []" in out), ("S1", 1, True))
     with open(os.path.join(LIB, "regression.sh")) as fh:
         REG = fh.read()
     fix = REG[REG.index("regression_fix() {"):]

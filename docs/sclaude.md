@@ -255,22 +255,54 @@ play stops there, rings the places, draws the way it took as a ghost and
 says what happened, since there the map or the code is wrong. `sclaude _flow` sends it with the position, and the page
 plays it.
 
-What each place took goes with it (`metrics`), shown under the blocks by
-checkboxes and never in the History: the person's input — the times they
+What each place took goes with it (`metrics`), shown inside the blocks, in
+their corners, by checkboxes, and never in the History; each map's heading
+says its own whole of the checked ones, zeros included. The person's input — the times they
 stepped in during a conversation (claude_usage's `human`: a message after
 Claude's turn, an answer to its question), answers to sclaude's questions
 (`ask_log` writes `ask answered`) and commands run on the feature at a
 terminal (`history_command`, once per process) — counted on the place the
 feature stood on then; and each conversation's cost from Claude Code's own
 account, followed into the conversations it was carried on in, on the place
-it ran. A workshop's work happens in the conversation that opened it and
+it ran; the time each stay took (`s`), on its own map — a detailed stay gives up the
+minutes a regression, a sync or a friction review ran inside it, which count
+on theirs — with how many stays the place had beside it. A workshop's work happens in the conversation that opened it and
 counts there. Each stay carries its own share too (`m`): a moment goes to the
 stay it falls in, else the last one at that place begun before it, and a
 conversation's cost to the stay it was last opened in; a sync's counts on the
 glance under the block its pass began ahead of. The player adds the shares
 up as it goes, so a map playing shows what was played so far, the place
-playing now as "before+its own"; the maps outside the play, and every map
-once it has played, keep the totals. The transcripts are read through a cache beside
+playing now as "before+its own" (its time on the player's clock, after what
+the stays before took); the maps outside the play, and every map once it has
+played, keep the totals, the stay going on said the same way after the
+stays before it on its own map (not on the glance, whose one stay
+may be several here); ×k, the times a place was entered, is not shown on the
+glance either. A detailed stay's time is its sittings', less what a pass's
+map timed in them (`_spans`, kept on the stays while they are counted). A
+stay left with no end row counts up to now only when sclaude's state says
+it is going on: a step's conversation while that step is the state's step
+and its run is open however long ago it began (`_open`, as the position
+takes it), the retrospective's and the epilogue's the same, a friction
+review's while its run is open, a sync while it is going (`_going`, as its
+badge takes it), a regression while it is running (`_running`), and a wait
+with no conversation the feature stands in — the merge's, QA's look
+(`WAITS_HERE`): its position, with nothing after it. A deploy or a local pass
+the position names is the next thing to do, not one going on. A stay going on
+is `live`, has no end yet, and it — not the "here" mark, which after a pass
+stands on a stay of its own — is the one said as "before+its own". The
+merge's wait or QA's look the next place began after ended there. Anything
+else ended unseen (a Ctrl-C, a terminal that died): at the earliest of the
+next place begun after it — a pass run inside a stay (a friction review, a
+workshop) is not the feature leaving it — and the last line its run wrote
+(any line, when its rows name no run; a pass whose rows name none took no
+time; a `command` row is another process's and never counts) —
+`_unseen_end` — and its time is a guess:
+`unsure`, ⚠ beside the block's time, the map's and the feature's, and on the
+player's clock. The history alone cannot tell a sitting going on from one
+that died, which is why the state decides. The page lays the numbers out inside the block:
+input and wait at the bottom left, cost at the bottom right, time at the top
+left up to the badges; a block whose own words fill four lines hides its last
+line of description while it carries them. The transcripts are read through a cache beside
 the history (`transcripts.json`), so a poll reads only what grew, and a
 conversation still going at most once a minute.
 
@@ -293,7 +325,7 @@ Each gap between rows is as tall as what turns in it, and no taller; where
 nothing turns in it — the ways leave the upper row from its blocks' middles,
 none comes in by a channel — the lower row rises into the upper one's height,
 a block in the same lane kept 30 px under the one above, every run clear of
-the line the feature's page writes under each block. Printed (A4
+the line the feature's page writes under a start or an end. Printed (A4
 landscape), the large map is cut into sheets between lanes, never through
 one, each sheet a window on the same drawing that overlaps its neighbours, so
 they glue. The page cuts the sheets again in the browser for the paper and
@@ -1434,10 +1466,20 @@ transcript follows that chain to its last file (`chain` in `session_end.py`,
 `--resume` opens the last id, and the workshop's write guard takes the launched
 id from `SCLAUDE_SESSION` as well as the one Claude Code reports. Then
 sclaude reads how full the session's context is (`review_context`, from the
-status line's file): under `REVIEW_CONTEXT_MAX_PCT` (40%) the same
-conversation takes the new findings; at or above it the run is recorded in
-the issue as "fixes confirmed", its friction review runs, and a fresh session
-opens. Its snapshot of the pull request lists only the review threads still
+status line's file) and when it last asked the model (`requested` in
+`session_end.py`). The same conversation takes the new findings while both
+hold (`review_keep`): its context is under `REVIEW_CONTEXT_MAX_PCT` (40%),
+and its last request is younger than `REVIEW_CACHE_TTL` less
+`REVIEW_CACHE_MARGIN` (an hour less five minutes) — Claude Code caches a
+conversation for an hour, and one resumed after that sends its whole context
+again uncached, which costs more than a fresh session. Otherwise, or when
+either figure cannot be read, the run is recorded in the issue as "fixes
+confirmed", its friction review runs, and a fresh session opens. A review on
+this machine writes no round marker: its session ends on its done marker,
+which closes its run in the issue and runs its friction review as any
+session's end does, and `review_reopen` then asks `review_keep` the same
+question when the threads left open are all new ones — kept, the same
+session is resumed with the round counted; otherwise a fresh one opens. Its snapshot of the pull request lists only the review threads still
 open — the resolved ones are counted, not repeated — so the new round starts
 with the new findings and nothing else.
 

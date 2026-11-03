@@ -94,10 +94,11 @@ link_env() { :; }
 link_node_modules() { :; }
 project_regression_parts() { echo "$REPO" >> %s.config; echo "check"; }
 regression_command() { echo "$REPO" >> %s.config; echo "echo run >> %s; test ! -e broken"; }
+source "%s/worktree.sh"
 source "%s/sync.sh"
 merge_build_check "%s"
 echo "rc=$?"
-""" % (self.runs, self.runs, self.runs, LIB, self.wt)
+""" % (self.runs, self.runs, self.runs, LIB, LIB, self.wt)
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                              env=dict(ENV, TMPDIR=self.tmp)).stdout.strip()
         return out.splitlines()
@@ -137,6 +138,13 @@ with tempfile.TemporaryDirectory() as tmp:
     check("main-breaking-the-merge-is-red", w.run(), ["check", "rc=1"])
     check("a-red-pair-is-remembered", w.run(), ["check", "rc=1"])
     check("a-red-pair-is-built-once", w.built(), 1)
+    # Each check keeps its own log, entered in the folder's runs.tsv.
+    logs = os.path.join(w.wt, ".sclaude/local/feature/logs/merge-check")
+    with open(os.path.join(logs, "runs.tsv")) as fh:
+        check("a-check-is-entered-in-its-folder",
+              [l.split("\t")[1:] for l in fh.read().splitlines()], [["failed", "check"]])
+    check("the-log-name-links-the-check",
+          os.path.realpath(os.path.join(w.wt, ".sclaude/local/feature/merge-check.log")).startswith(logs), True)
     # The verdict read back for the merge wait: red for this pair only.
     def red():
         return subprocess.run(["bash", "-c", 'source "%s/sync.sh"; merge_check_red "%s"'

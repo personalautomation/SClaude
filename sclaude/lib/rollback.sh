@@ -628,10 +628,10 @@ rollback_prod() {
 
   # The log that caused this, before anything overwrites it.
   #
-  # regression_run opens with `: > "$log"`, and the confirmation run that
-  # follows a rollback is a regression_run. Without a copy taken here, the
-  # fixing session would be handed a log describing the *previous release
-  # passing* — the exact opposite of the evidence it needs, and a plausible
+  # regression_run points regression.log at a new file, and the confirmation
+  # run that follows a rollback is a regression_run. Without the failing run's
+  # file recorded here, the fixing session would be handed a log describing the
+  # *previous release passing* — the exact opposite of the evidence it needs, and a plausible
   # enough document that nobody would question it.
   rollback_keep_log "$wt" prod
 
@@ -794,22 +794,20 @@ Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
   return 1
 }
 
-# Keeps the failing run's log, which the next regression_run would truncate.
+# Records the failing run's log, which regression.log stops pointing at.
 #
-# `.sclaude/local/feature/regression.log` is rewritten at the head of every run (`: > "$log"`
-# in regression_run), and a rollback is followed immediately by the confirmation
-# run. So the evidence that caused the rollback survives only if it is copied
-# first. The path goes into the state, and regression_fix reads it from there.
+# `.sclaude/local/feature/regression.log` is a link to the latest run's own
+# file (log_new), and a rollback is followed immediately by the
+# confirmation run. So the evidence that caused the rollback is named in the
+# state before that run moves the link, and regression_fix reads it from there.
 #
-# Silent on failure: a log that could not be copied costs the fixing session its
+# Silent on failure: a log that could not be named costs the fixing session its
 # starting point, never the rollback.
 rollback_keep_log() {
-  local wt="$1" stage="$2" src dest
+  local wt="$1" src dest
   src="$wt/.sclaude/local/feature/regression.log"
   [[ -s "$src" ]] || return 0
-  dest="$wt/.sclaude/local/feature/rollback/regression-$stage-$(date +%Y%m%d-%H%M%S).log"
-  mkdir -p "$(dirname "$dest")" 2>/dev/null || return 0
-  cp "$src" "$dest" 2>/dev/null || return 0
+  dest="$(readlink -f "$src")" || return 0
   state_set "$wt/.sclaude/local/feature/state.json" rollback.prod.log "$dest" 2>/dev/null || true
 }
 

@@ -685,6 +685,7 @@ regression_serve_build() {
   log="$wt/.sclaude/local/feature/e2e-server.log"
   touch "$wt/$REGRESSION_SERVING_MARK"
   stop_own_dev "$wt" >/dev/null 2>&1
+  log_new "$wt" e2e-server.log e2e-server
   # Started the way ensure_dev starts the dev server, for the same reasons:
   # a session of its own, every stream closed, the feature's database and
   # address in its environment.
@@ -712,12 +713,19 @@ regression_serve_dev() {
   ensure_dev "$wt" >/dev/null 2>&1
 }
 
+# Every run's log is a file of its own, named by its stage (log_new), and
+# regression.log a link to the latest: the gate runs a red stage again before a
+# fixing session, and the two runs side by side are that session's best
+# evidence — a spec red in both is no flake.
+REGRESSION_LOG_DIR=".sclaude/local/feature/logs/regression"
+
+
 # One run of one stage. Returns 0 when every part passed.
 #
-# The log is .sclaude/local/feature/regression.log, beside dev.log and friction.log, and it is
-# truncated at the start of each run: what matters is why this run failed, and
-# the previous run's output under the same headings is what makes a log unusable
-# in a hurry. The worktree outlives production now — remind_prod cleans up last
+# The log is .sclaude/local/feature/regression.log, beside dev.log and friction.log: a
+# link to this run's own file (log_new), so it holds this run alone —
+# the previous run's output under the same headings is what makes a log
+# unusable in a hurry — and the runs before it are still there to compare. The worktree outlives production now — remind_prod cleans up last
 # — so this file is still there when a prod failure has to be read.
 #
 # The phase within a run is not remembered anywhere. A killed run starts again
@@ -857,7 +865,7 @@ regression_run_body() {
       "${one:+ ${DIM}(expected $(regression_duration "$one"))${OFF}}"
   done
 
-  : > "$log"
+  log_new "$wt" regression.log "$stage"
   state_set "$state" "regression.$stage.status" running
   # What the person said of the last red (`sclaude return` on a held
   # production) was for the fix it led to, which is this run's to judge.
@@ -893,6 +901,7 @@ regression_run_body() {
       state_set "$state" "regression.$stage.failed_at" "$part"
       state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
       history_add "$state" "regression.$stage" failed
+      log_end "$wt" regression.log failed "$stage: $parts"
       return 1
     fi
     part_started="$(date +%s)"
@@ -1061,6 +1070,7 @@ regression_run_body() {
     # again rather than for a rollback.
     state_set "$state" "regression.$stage.unrunnable" true
     state_set "$state" "regression.$stage.failed_at" "$failed"
+    log_end "$wt" regression.log unrunnable "$stage: $parts"
     state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
     history_add "$state" "regression.$stage" unrunnable
     echo ""
@@ -1077,6 +1087,7 @@ regression_run_body() {
     state_set "$state" "regression.$stage.status" failed
     state_set "$state" "regression.$stage.unrunnable" null
     state_set "$state" "regression.$stage.failed_at" "$failed"
+    log_end "$wt" regression.log failed "$stage: $parts"
     state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
     history_add "$state" "regression.$stage" failed
     # The terminal's line; the topic hears it from regression_notify_done,
@@ -1090,6 +1101,7 @@ regression_run_body() {
   state_set "$state" "regression.$stage.status" passed
   state_set "$state" "regression.$stage.unrunnable" null
   state_set "$state" "regression.$stage.failed_at" null
+  log_end "$wt" regression.log passed "$stage: $parts"
   state_set "$state" "regression.$stage.tree" "${tree:-null}"
   state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
   history_add "$state" "regression.$stage" passed
@@ -1725,15 +1737,19 @@ regression_fix_block() {
   # log. The tail rather than the whole file — the session can open the file
   # itself, and the prompt's job is to say where to look, not to be the log.
   # Which log to quote. After a rollback it is not the one at the usual path:
-  # regression_run opens with `: > "$log"`, and the confirmation run that
+  # regression_run points it at a new file, and the confirmation run that
   # follows a rollback is a regression_run — so by the time this session opens,
   # `.sclaude/local/feature/regression.log` describes the *previous release passing*. That is
   # the opposite of the evidence this session needs and plausible enough that
-  # nobody would question it, which is why rollback_keep_log copies the failing
-  # run aside and records where.
-  local rolled kept
-  rolled="$(state_get "$state" rollback.prod.code 2>/dev/null || true)"
-  kept="$(state_get "$state" rollback.prod.log 2>/dev/null || true)"
+  # nobody would question it, which is why rollback_keep_log records the
+  # failing run's file.
+  # Production's alone: nothing clears these keys, and a later local or preview
+  # red read through them was quoted the old production run instead of its own.
+  local rolled="" kept=""
+  if [[ "$stage" == "prod" ]]; then
+    rolled="$(state_get "$state" rollback.prod.code 2>/dev/null || true)"
+    kept="$(state_get "$state" rollback.prod.log 2>/dev/null || true)"
+  fi
   [[ "$kept" == "null" ]] && kept=""
   [[ -n "$kept" && -s "$kept" ]] || kept="$log"
 
@@ -1767,6 +1783,17 @@ regression_fix_block() {
     printf 'The full output is in `.sclaude/local/feature/regression.log`; its last lines:\n\n'
   fi
   printf '```\n%s\n```\n\n' "$(tail -30 "$kept" 2>/dev/null)"
+  # Where the earlier runs are, and which of them are this failure's.
+  local since; since="$(log_red_since "$wt" regression.log "$stage:")"
+  printf 'Every run keeps its own log under `.sclaude/local/feature/logs/`, named by when it began: '
+  printf '`regression/` (`<stage>_<date>_<time>.log`; `regression.log` is the latest), and the servers the suites ran against, '
+  printf '`e2e-server/` and `dev/`. `regression/runs.tsv` lists each run'"'"'s file, outcome and set (stage and parts). '
+  if [[ -n "$since" ]]; then
+    printf 'This set went red with `%s`: that log and the ones after it on the same set are this failure'"'"'s runs, ' "$since"
+    printf 'and the server logs of the same times beside them — compare what failed in each, since a spec red in every one is no flake. '
+    printf 'Anything older can be skipped.'
+  fi
+  printf '\n\n'
   local reason; reason="$(state_get "$state" "regression.$stage.reason" 2>/dev/null || true)"
   [[ -n "$reason" && "$reason" != "null" ]] && printf '### The reason given\n\n%s\n\n' "$reason"
   fi

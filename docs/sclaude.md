@@ -781,6 +781,28 @@ not duplicate the data — some ten seconds and almost no space. The directory i
 correct while the branch has not touched the dependencies; the script notices a
 `package-lock.json` that has diverged and offers an `npm install`.
 
+### Logs
+
+**Every run writes a log of its own, and nothing prunes them: they go with the
+worktree.** The regression, the merge build check, the server the e2e suite
+runs against and the dev server each keep a folder in
+`.sclaude/local/feature/logs/` — `regression/`, `merge-check/`, `e2e-server/`,
+`dev/` — of files named
+`<kind>_<date>_<time>.log` (the regression's kind is its stage: `local`,
+`preview`, `prod`, `rollback`), so a listing reads in the order they ran. The
+old name in `.sclaude/local/feature/` (`regression.log`, `dev.log`…) is a link
+to the latest, so whatever read or appended to it meets the current run alone
+(`log_new` in `worktree.sh`). One file rewritten by every run used to lose the
+run a fixing session needed most: the gate reruns a red stage before opening
+one, and the dev server is restarted before every local run.
+
+Where a run has an outcome — the regression and the merge build check — its
+folder also keeps `runs.tsv`, a line per run: the file, `passed` or what else
+it ended as, and the set it ran (a stage and its parts). The file a failure
+began with is read from it, not stored: the first run after the last that
+passed on the same set (`log_red_since`), so a green run on that set closes
+the failure by being entered, and a run of another set leaves it open.
+
 ## Environments
 
 **Which database a feature works against is the machine's answer, not the
@@ -1207,11 +1229,12 @@ that broke this, so the next production deploy ships it again unless the fix
 lands first.
 
 **The fixing session is told all of it.** It gets the log of the run that caused
-the rollback, which is not the one at the usual path: `regression_run` opens with
-`: > "$log"`, and the check after the rollback is a `regression_run`, so by then
-`.sclaude/local/feature/regression.log` describes the *previous release passing* — plausible
-enough that nobody would question it. The failing run is copied aside first and
-the prompt points there. It is also told that the local suite is the check that
+the rollback, which is not the one at the usual path: the check after the
+rollback is a `regression_run`, which points `.sclaude/local/feature/regression.log` at
+its own file, so by then that name describes the *previous release passing* —
+plausible enough that nobody would question it. The failing run's file is
+recorded first and the prompt points there; only production's fixing prompt
+reads that record, which nothing clears. It is also told that the local suite is the check that
 matters (production is not serving this branch, so a run against it says nothing
 about the fix), that the fix goes the whole way round again — local suite, merge,
 preview and its suite, then production — and to close the incident with a second
@@ -1763,6 +1786,12 @@ by itself before spending a session on it (a deploy that failed aside, since
 flaked on a loaded machine; one session spent half an hour to conclude just
 that. The flake stays on record as a line in `regression.notes`, so a stage
 green by itself is not taken for one that never went red.
+
+Every run keeps its own log, so the rerun leaves the red run before it in
+place (see "Logs" under the worktree). The fixing prompt names the folders and
+the file the failing set went red with (`log_red_since`), so the session
+compares the runs from then on — a spec red in every one is no flake — and
+skips the older ones.
 
 The outcomes live in `regression.<stage>.fix_status`, space-joined and aligned
 with `fixes` position for position — `state_set` writes scalars, which is what

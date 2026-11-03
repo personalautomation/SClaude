@@ -469,6 +469,54 @@ dev_cwd() {
   readlink -f "/proc/$pid/cwd" 2>/dev/null
 }
 
+# A log of its own for every run, and the usual name a link to the latest.
+#
+# `log_new <wt> <name> <prefix>` makes `.sclaude/local/feature/logs/<name
+# without .log>/<prefix>_<date>_<time>.log` and points
+# `.sclaude/local/feature/<name>` at it, so whatever reads or appends to the usual name meets this run alone,
+# and the runs before it stay beside it to compare. One file rewritten by each
+# run lost exactly the run a fixing session needed: the regression gate runs a
+# red stage again before opening one, and the server is restarted before every
+# local run. The files go with the worktree, so nothing prunes them.
+log_new() {
+  local dir="$1/.sclaude/local/feature" name="$2" file n=1 tail=""
+  file="logs/${name%.log}/${3}_$(date +%Y-%m-%d_%H-%M-%S)"
+  # A run that fails at once is rerun within the same second.
+  while [[ -e "$dir/$file$tail.log" ]]; do n=$((n + 1)); tail="_$n"; done
+  file="$file$tail.log"
+  mkdir -p "$dir/logs/${name%.log}" && : > "$dir/$file" && ln -sfn "$file" "$dir/$name"
+}
+
+# The folder's own log of its runs, where a run has an outcome: `runs.tsv`
+# beside the files, a line per run — the file, `passed` or what else it ended
+# as, and the set it ran (a stage and its parts). Appended when the run ends.
+#
+#   log_end <wt> <name> <outcome> <set>
+log_end() {
+  local dir="$1/.sclaude/local/feature" file
+  file="$(readlink "$dir/$2" 2>/dev/null)" || return 0
+  printf '%s\t%s\t%s\n' "${file##*/}" "$3" "$4" >> "$dir/${file%/*}/runs.tsv" 2>/dev/null || true
+}
+
+# The file a set went red with: its first run after the last that passed on
+# the same set. The set is the last run's, or with <prefix> the last run's
+# whose set begins with it (a stage, `prod:`), since another stage may have
+# run since. Empty when that run passed.
+#
+#   log_red_since <wt> <name> [<prefix>]   → a file name in the folder, or nothing
+log_red_since() {
+  local index
+  index="$(readlink "$1/.sclaude/local/feature/$2" 2>/dev/null)" || return 0
+  index="$1/.sclaude/local/feature/${index%/*}/runs.tsv"
+  [[ -s "$index" ]] || return 0
+  awk -F'\t' -v p="${3:-}" '{ f[NR] = $1; o[NR] = $2; s[NR] = $3 }
+    END { set = ""; since = ""
+          for (i = NR; i >= 1 && set == ""; i--) if (index(s[i], p) == 1) set = s[i]
+          if (set == "") exit
+          for (i = 1; i <= NR; i++) if (s[i] == set) since = (o[i] == "passed") ? "" : (since == "" ? f[i] : since)
+          print since }' "$index"
+}
+
 # Starts the dev server for this worktree, if one is not already up from the
 # same place.
 #
@@ -569,6 +617,7 @@ ensure_dev() {
   # through a cookie, to another feature entirely. What the app does with it is
   # the project's business; sclaude only says it.
   local url; url="$(dev_address "$wt")"
+  log_new "$wt" dev.log dev
   ( cd "$wt" && dev_env_load "$wt" && PORT="$port" SCLAUDE_DEV_URL="$url" \
       setsid --fork npm run dev > "$log" 2>&1 < /dev/null & ) >/dev/null 2>&1
 

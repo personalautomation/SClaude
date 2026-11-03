@@ -190,7 +190,7 @@ merge_build_check() {
   info "  Building the PR's ${tip:0:7} merged with main ${main:0:7}: $parts." >&2
   link_env "$tmp" >/dev/null 2>&1
   link_node_modules "$tmp" >/dev/null 2>&1
-  : > "$log"
+  log_new "$wt" merge-check.log merge-check
   for part in $parts; do
     cmd="$(REPO="$tmp" regression_command "$part" "" "$tmp")" || { rc=2; break; }
     printf '\n=== %s ===\n$ %s\n\n' "$part" "$cmd" >> "$log"
@@ -199,6 +199,8 @@ merge_build_check() {
     fi
   done
   git -C "$wt" worktree remove --force "$tmp" >/dev/null 2>&1 || rm -rf "$tmp"
+  # A check cut short is entered too: the log name now points at it.
+  log_end "$wt" merge-check.log "$(case "$rc" in 0) echo passed ;; 1) echo failed ;; *) echo unrunnable ;; esac)" "$parts"
   [[ "$rc" -eq 2 ]] || printf '%s %s %s %s\n' "$tip" "$main" "$rc" "$failed" > "$cache"
   [[ "$rc" -eq 1 ]] && printf '%s\n' "$failed"
   return "$rc"

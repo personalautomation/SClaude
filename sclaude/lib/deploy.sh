@@ -1199,7 +1199,7 @@ merge_offer() {
   if [[ "$built" -eq 1 ]]; then
     echo ""
     warn "PR #$pr merged with the newer main fails \`$failed\` — not merging it from here."
-    info "  The log: $wt/.sclaude/local/feature/merge-check.log"
+    info "  The log: $wt/.sclaude/local/feature/merge-check.log (the earlier checks and runs.tsv in logs/merge-check/)"
     info "  Merge main into the branch and fix it; then: $SELF $slug"
     return 2
   fi

@@ -1502,6 +1502,68 @@ check("preview-gate-first-red-is-rerun",
 check_true("preview-gate-green-rerun-is-noted",
            "· preview · green on a rerun, no fixing session\nRed at first on: "
            in preview_gate("head", [1, 0], notes=True)[-1])
+# Every run keeps its own log, and regression.log links the latest: the
+# gate's rerun before a fixing session no longer wipes the red run before it,
+# and the session is told the folder and since when the stage is red.
+# A production rollback's log is production's alone: a later preview red is
+# quoted its own run, not the old one.
+def run_logs():
+    with tempfile.TemporaryDirectory() as wt:
+        feat = os.path.join(wt, ".sclaude/local/feature")
+        os.makedirs(feat)
+        old = os.path.join(feat, "old-prod.log")
+        with open(old, "w") as fh:
+            fh.write("old production run\n")
+        with open(os.path.join(feat, "state.json"), "w") as fh:
+            json.dump({"rollback": {"prod": {"code": "done", "log": old}}}, fh)
+        body = "set -uo pipefail\n"
+        body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
+        for name in ("io", "ui", "steps", "state", "worktree", "regression"):
+            body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
+        body += r"""
+wt="%s"; st="$wt/.sclaude/local/feature/state.json"; log="$wt/.sclaude/local/feature/regression.log"
+run() { log_new "$wt" regression.log preview; echo "$1" >> "$log"; log_end "$wt" regression.log "$2" "$3"; }
+run "an old red run" failed "preview: e2e"
+run "green" passed "preview: e2e"
+run "first red run" failed "preview: e2e"
+first="$(readlink "$log")"; first="${first##*/}"
+run "a run of another set" passed "preview: lint"
+run "second red run" failed "preview: e2e"
+echo "FILES $(ls "$wt/$REGRESSION_LOG_DIR" | grep -c '^preview_[0-9-]*_[0-9_-]*\.log$')"
+echo "LATEST $(cat "$log")"
+[[ "$(log_red_since "$wt" regression.log)" == "$first" ]] && echo "SINCE FIRST"
+( regression_fix_block "$wt" preview ) > "$wt/block" 2>/dev/null
+grep -qF "went red with \`$first\`" "$wt/block" && grep -q "regression/runs.tsv" "$wt/block" && echo NAMED
+grep -q "^second red run" "$wt/block" && echo OWN
+grep -q "old production run" "$wt/block" && echo OLD
+( regression_fix_block "$wt" prod ) > "$wt/block" 2>/dev/null
+grep -q "^old production run" "$wt/block" && echo PROD-KEPT
+grep -q "went red with" "$wt/block" && echo "PROD-TOLD-PREVIEW"
+run "a red rollback check" failed "rollback: e2e"
+[[ "$(log_red_since "$wt" regression.log "preview:")" == "$first" ]] && echo "STAGE OWN SET"
+run "green again" passed "preview: e2e"
+[[ -z "$(log_red_since "$wt" regression.log)" ]] && echo "GREEN CLEARS"
+""" % wt
+        return subprocess.run(["bash", "-c", body], capture_output=True,
+                              text=True, timeout=60).stdout.split("\n")
+
+
+check("run-logs-kept-and-named",
+      [l for l in run_logs() if l],
+      ["FILES 5", "LATEST second red run", "SINCE FIRST", "NAMED", "OWN", "PROD-KEPT", "STAGE OWN SET", "GREEN CLEARS"])
+# The other logs a fixing session reads are kept the same way.
+for path, fn, call in (("sclaude/lib/worktree.sh", "ensure_dev", 'log_new "$wt" dev.log dev'),
+                       ("sclaude/lib/regression.sh", "regression_serve_build",
+                        'log_new "$wt" e2e-server.log e2e-server'),
+                       ("sclaude/lib/sync.sh", "merge_build_check",
+                        'log_new "$wt" merge-check.log merge-check')):
+    src = open(os.path.join(ROOT, path), encoding="utf-8").read()
+    body = re.search(r"\n%s\(\)\s*\{(.*?)\n\}" % fn, src, re.S)
+    check_true("run-log-kept %s" % fn, body is not None and call in body.group(1))
+# Every run that ends is entered in the folder's runs.tsv, with its set.
+for outcome, n in (("passed", 1), ("failed", 2), ("unrunnable", 1)):
+    check("run-entered %s" % outcome,
+          run_body.group(1).count('log_end "$wt" regression.log %s "$stage: $parts"' % outcome), n)
 # The case that went wrong: a red run (twice), a session that commits a fix,
 # and the rerun — which now runs against a deployment of the fix.
 check("preview-gate-fix-is-deployed-before-the-rerun",

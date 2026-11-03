@@ -579,7 +579,8 @@ count_dev() {
     # A server an older sclaude started logs in the old place.
     [[ -f "$log" ]] || log="$cwd/.feature/dev.log"
     if [[ -n "$cwd" && -f "$log" ]]; then
-      mtime=$(stat -c %Y "$log" 2>/dev/null || echo 0)
+      # -L: dev.log is a link to the run's own file (log_new in sclaude).
+      mtime=$(stat -L -c %Y "$log" 2>/dev/null || echo 0)
       grew "dev:$log" "$mtime" 1 prev && active=1
     elif [[ "$port" == "$DEV_PORT" ]] \
          && ! tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q sclaude-proxy; then

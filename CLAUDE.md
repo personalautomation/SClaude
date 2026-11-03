@@ -54,6 +54,18 @@ breaks the other silently — grep before you edit:
   is named by `YOURS_FILE` in `sclaude/lib/pr_context.py` and spelled out in
   `sclaude/prompts/review.md`, which tells the session its line format;
   `tests/parallel.py` checks the two agree.
+- `NIGHT_MARK` in `sclaude/lib/pr_context.py` — what a night session's
+  decision carries in `review-yours` — is spelled out in
+  `sclaude/prompts/review.md`, which writes it at night and asks the person
+  about such threads by day, and counted by `night_yours` for
+  `review_night_offer` in `sclaude/lib/run.sh`, which on the person's yes
+  moves their lines to `NIGHT_FILE` (`review-night`, `night_take`) for the
+  snapshot to mark them to be asked about; `tests/parallel.py` checks the
+  sides agree. Reworded on one side alone, the morning offer never comes and
+  the threads wait for the person's hand.
+
+  <!-- Added by Claude on 2026-11-03 at the user's request: a night decision
+  is confirmed by the person in the morning, and resolved by the session. -->
 - `findings_explained` in `pr_context.py` reads the findings check that the
   project's `claude-code-review.yml` writes: its title ("N unresolved review
   findings", "posted as a comment, not as threads") and the `#discussion_r…`
@@ -155,7 +167,17 @@ breaks the other silently — grep before you edit:
   demo's tree and is deleted by `remove_worktree` in
   `sclaude/lib/worktree.sh` once the tree is gone; `TEXT_ONLY` in demo.py is
   what `bin/sclaude-notify` says when the videos were refused and the text
-  went. `tests/dev-login.py` checks both pairs.
+  went. `tests/dev-login.py` checks both pairs. `demo_refresh` holds what
+  its session plays with `SCLAUDE_DEMO_HOLD=1` (read by `cmd_play`) and
+  publishes its last delta and last full recording (none after `keep`) with
+  `demo.py publish`, which clears their `held` mark, picked from
+  `history.json` by `sclaude/lib/demo_refresh.py`, which also reads the
+  `kept` entry `demo.py keep` writes and the session's `findings.md` there;
+  `tests/demo-refresh.py` runs both sides.
+
+  <!-- Added by Claude on 2026-11-03, with the refresh held and kept, at the
+  user's request after a retrospective: a name changed on one side alone
+  would publish every try again, or none. -->
 
   <!-- Added by Claude on 2026-10-31 with the recorded demo of /sdemo; the
   issue comment and the steps' demo on 2026-11-01. -->
@@ -305,6 +327,9 @@ breaks the other silently — grep before you edit:
   `config_menu.py`), whether a night over every session is on; `tests/isleep.py` runs it and
   `tests/config-menu.py` the setting. Renamed on one side alone, the night's
   review rounds stop going on by themselves, without an error.
+  `review_night_offer` in `sclaude/lib/run.sh` asks `night.py active` too, and
+  ends the night with `night.py off --away <why>` on the person's yes, so the session it
+  opens asks rather than decides.
 
   <!-- Added by Claude on 2026-10-31 with sleep_mode, at the user's word. -->
 
@@ -405,6 +430,19 @@ tests/run
 The benches build their own temporary worlds and share nothing, which is what
 lets them run together; a new one keeps to that — no fixed port it listens on,
 no fixed path outside its own temporary directory.
+
+**A test that is red without your change is still yours to fix when the
+session that broke it is gone.** Red alone on the base or in the live
+checkout, or red only when the suite runs in parallel, counts. First find
+whose it is: the test's `git log` (the `Claude-Session:` trailer), the
+sessions running now (`ListAgents`) and the features sclaude has in work.
+One still running gets the failure and its output with `SendMessage`, and
+you agree who fixes it. Nobody left to ask: fix it yourself, in a commit of
+its own, and say so in the report. "Not mine" without that look leaves the
+suite red for every session after you.
+
+<!-- Added by Claude on 2026-11-03 at the user's word, after two tests red
+only under the parallel run were passed over as nobody's. -->
 
 ## The README before a push
 

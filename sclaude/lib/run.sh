@@ -3232,6 +3232,15 @@ review_close_gate() {
   # they are resolved the pull request is asked again from the top — whatever
   # else is open by then takes the ordinary way.
   if [[ "$word" == yours:* ]]; then
+    if review_night_offer "$wt" "$slug" "$pr" "$repo"; then
+      # Taken back: the threads are open work again, and the round goes the
+      # way any open thread does — a fresh session (the one resumed would be
+      # the night's, told to decide), and the gate after it as after any.
+      python3 "$LIB/pr_context.py" --night-take "$wt" >/dev/null 2>&1 || true
+      state_set "$wt/.sclaude/local/feature/state.json" steps.review.session null
+      run_step "$wt" "$slug" review
+      return 1
+    fi
     review_yours_wait "$wt" "$slug" "$pr" "$repo" || return 1
     review_close_gate "$wt" "$slug" "$pr"
     return $?
@@ -3376,6 +3385,35 @@ review_yours_report() {
   done <<< "$lines"
   info "  Open each link and press \"Resolve conversation\". Until then the review counts them as open,"
   info "  and step 4 cannot close."
+  return 0
+}
+
+# Decisions a night session took for the person (NIGHT_MARK in
+# pr_context.py) are theirs to confirm: offered a session that asks about
+# each and, on their yes, replies and resolves the thread itself — rather
+# than left for their hand on GitHub. The question waits for the person, so
+# at night it waits. 0 when they took the session.
+#
+#   review_night_offer <wt> <slug> <pr> <repo>
+review_night_offer() {
+  local wt="$1" slug="$2" pr="$3" repo="$4" night answer
+  night="$(python3 "$LIB/pr_context.py" --night-yours "$wt" "$pr" "$repo" 2>/dev/null || echo 0)"
+  [[ "${night:-0}" =~ ^[0-9]+$ && "$night" -gt 0 ]] || return 1
+  echo ""
+  say "${BOLD}$night review thread(s) were left at night for you to confirm.${OFF}"
+  notify_feature "$slug" --wt "$wt" \
+    "PR #$pr: $night review thread(s) were left at night for you to confirm." \
+    >/dev/null 2>&1 || true
+  # A night still on would reach the session (sclaude's own prompt does not
+  # end it), which would then decide again instead of asking: the person
+  # answering here is back, so a yes ends it.
+  local isleep="$INSTRUMENTS/skills/isleep/night.py" ends=""
+  [[ -f "$isleep" ]] && python3 "$isleep" active >/dev/null 2>&1 && ends=" (this ends the night)"
+  ask "${BOLD}Go through them with a review session now$ends? [y/n] ${OFF}" answer yn
+  is_yes "$answer" || return 1
+  [[ -n "$ends" ]] && python3 "$isleep" off --away \
+    "The person ended the night by answering sclaude (its terminal or the phone), and they have just written." \
+    >/dev/null 2>&1
   return 0
 }
 

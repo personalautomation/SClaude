@@ -37,7 +37,10 @@ launched = subprocess.Popen(["bash", "-c", "sleep 300; :", "claude", LAUNCH])
 
 
 def run(state, *args, data=None, pid=None, env=None):
-    e = {k: v for k, v in os.environ.items() if k != "SCLAUDE_SESSION"}
+    # Neither sclaude's nor Claude Code's session of whoever runs the bench:
+    # a case that wants one names it.
+    e = {k: v for k, v in os.environ.items()
+         if k not in ("SCLAUDE_SESSION", "CLAUDE_CODE_SESSION_ID")}
     e.update(ISLEEP_STATE=state, CLAUDE_PID=str(pid or person.pid), **(env or {}))
     p = subprocess.run([sys.executable, NIGHT, *args], env=e, text=True,
                        input=json.dumps(data) if data is not None else "",
@@ -187,6 +190,24 @@ try:
               hook(state, "ask", "c") is not None)
         run(state, "off")
         check("night.py off", not on(state))
+        # Ended from outside any session, the summary waits for the next prompt.
+        hook(state, "prompt", "a", prompt="/isleep")
+        run(state, "off")
+        out = hook(state, "prompt", "q", prompt="back")
+        check("off outside a session: the next prompt gets the summary",
+              "morning summary" in context(out) and "outside any session" in context(out))
+        hook(state, "prompt", "a", prompt="/isleep")
+        run(state, "off", "--away", "Ended by the caller.",
+            env={"CLAUDE_CODE_SESSION_ID": "inherited"})
+        out = hook(state, "prompt", "q", prompt="back")
+        check("off --away: the caller's why, whatever session id it inherited",
+              "morning summary" in context(out) and "Ended by the caller." in context(out))
+        check("sclaude's offer ends the night with --away",
+              'off --away' in open(os.path.join(ROOT, "sclaude", "lib", "run.sh")).read())
+        hook(state, "prompt", "a", prompt="/isleep")
+        run(state, "off", env={"CLAUDE_CODE_SESSION_ID": "a"})
+        check("off from a session leaves nothing due",
+              not os.path.exists(os.path.join(state, "due.json")))
         check("active: 1 by day", active() == 1)
         fresh = os.path.join(state, "never-used")
         rc = subprocess.run([sys.executable, NIGHT, "active"],

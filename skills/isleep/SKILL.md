@@ -55,7 +55,8 @@ A session started before the hooks were installed does not run them; only
 these rules reach it, and only if it ran `/isleep` itself.
 
 `python3 ~/.claude/skills/isleep/night.py status` shows the night;
-`… night.py off` ends it. If `status` prints nothing right after `/isleep`,
+`… night.py off` ends it (`off --away "<why>"` for a caller that is no
+session the person writes in: the summary then waits for their next prompt). If `status` prints nothing right after `/isleep`,
 the hooks are not installed: say so in a line (re-running `install.sh` adds
 them) and go on by these rules alone.
 

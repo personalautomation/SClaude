@@ -203,6 +203,20 @@ count. `python3 $D/demo.py replay` plays the last demo's
 script again as it is, with no model — what sclaude falls back to before the
 QA when it cannot start a session to write the demo again.
 
+`python3 $D/demo.py keep "<why>"` carries the last full demo on to the code as
+it is, when the code changed since but nothing a user sees or does did: no
+recording, nothing published, and `stale` says `fresh` again; the feature's
+page says the demo is still current, and why. It is for the same question a
+delta asks first — use it instead of recording the same thing twice.
+
+With `SCLAUDE_DEMO_HOLD=1`, which sclaude sets when it records a demo again
+with nobody watching, `play` records into its own folder and sends nothing
+(`held:`); the feature's page keeps showing the demo it had — check the
+recording by its `demo.json`. Once the session is over sclaude publishes the
+last delta and the last full recording it made, each with
+`python3 $D/demo.py publish <id>`, so a try that needed fixing never reaches the
+page, the topic or the issue; after `keep` it publishes nothing.
+
 Before giving the link, read `<tree>/.sclaude/local/demo/<id>/demo.json`: a
 scenario with `error`, or a step with `error` or `ok: false` that should have
 passed, is a script to fix (a name that differs, a wait too short) — fix it

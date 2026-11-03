@@ -611,7 +611,18 @@ user and the whole demo again, starting from the last script and what changed,
 and the issue's demo comment is replaced: step 2's demo is for you accepting
 the work, this one for QA to see what the feature is and what changed. Only
 where a person does QA (`qa: github` or `both`); with `qa: auto` the whole demo
-is recorded again before the last epilogue instead, and no delta. When the
+is recorded again before the last epilogue instead, and no delta. Where
+nothing a user meets changed — tests, a refactoring, a fix nobody sees — that
+session records nothing and keeps the demo there is (`demo.py keep`), and
+sclaude says why. Nothing it records goes out while it works: the last delta
+and the last full recording it made are sent to the topic and the issue after
+it, once each — none when it ended by keeping the demo — and a try it fixed is
+sent nowhere. What it found wrong
+in the product while recording — a check that failed, a fault it had to go
+round — is printed in sclaude's terminal. At night (`/isleep`) a finding the
+session would leave as it is does not hold the step till morning: it waits for
+you, and in the morning sclaude offers a session that asks you about each such
+thread and, on your yes, replies and resolves it on GitHub itself. When the
 report says the rounds stopped converging, or that the fixes are feeding the review two rounds running, its verdict is red, and the
 feature's topic is told once, with the keys that end the search for new findings. What a round leaves open goes back
 to a review session without a question: `s` (⏭ on the topic) is how the rounds
@@ -894,7 +905,10 @@ night in each session). `/isleep 8h` sets how long the night lasts (12 hours by 
 The night ends when you type anything in any session: that session gives
 you the summary, and every other session the night reached is told at its
 next tool call that questions go to you again. A night that runs out its
-hours ends the same way, and your first message after it gets the summary.
+hours ends the same way, and your first message after it gets the summary;
+so does one ended outside any session — `night.py off` in a terminal, or your
+yes, in its terminal or on the phone, when sclaude offers to go through the review threads left at night, which
+ends the night so that the session asks you rather than deciding.
 The prompt sclaude starts a step's session with, a headless
 `claude -p` and a `/loop` wakeup do not count as you — nor does a `/loop` you
 type, which reads the same. A session closed during the night is told when

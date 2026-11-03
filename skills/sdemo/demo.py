@@ -16,6 +16,13 @@
 #   demo.py replay [--feature F]        the last full demo's script played again
 #   demo.py last [--feature F]          the last full demo: what a delta is
 #                                       measured from (its commit, its script)
+#   demo.py keep <reason> [--feature F] the last full demo carried on to the
+#                                       code as it is, nothing a user meets
+#                                       having changed: no recording, nothing
+#                                       published, `stale` fresh again
+#   demo.py publish <id> [--feature F]  a recording held back while sclaude
+#                                       recorded (SCLAUDE_DEMO_HOLD=1), sent
+#                                       to the topic and the issue now
 #   demo.py open <email> <path> [<email> <path>]... [--feature F]
 #                                       the links in chrome-debug, laptop's
 #
@@ -283,7 +290,7 @@ def cmd_play(args, label, wt, where, live):
     # The tree of a full demo that played is what `stale` measures from: a
     # ref keeps it, or git gc would prune an object nothing points to and
     # the demo would read as stale for ever. One per feature, moved on.
-    if entry["kind"] == "main" and not entry["broken"] and entry["tree"]:
+    if entry["kind"] == "main" and not entry["broken"] and not entry.get("held") and entry["tree"]:
         subprocess.run(["git", "-C", wt, "update-ref", DEMO_REF % label, entry["tree"]],
                        capture_output=True)
     write_feature_page(wt, label)
@@ -299,11 +306,28 @@ def cmd_play(args, label, wt, where, live):
         print("not published: %d scenario(s) did not play — fix the script and play it again"
               % entry["broken"])
         return
+    # Held while sclaude records a demo again with nobody watching: the
+    # session may play a script several times before it is right, and only
+    # what it ends on is worth a message. Once it is over sclaude publishes
+    # its last delta and its last full recording with `demo.py publish`, or
+    # nothing when it ended on `keep`.
+    if os.environ.get("SCLAUDE_DEMO_HOLD") == "1":
+        print("held: on no page and in no message yet — once the session ends, sclaude "
+              "publishes its last delta and last full recording (nothing after keep)")
+        return
+    publish(wt, label, demo, entry, results, phone)
+
+
+def publish(wt, label, demo, entry, results, phone):
+    """A recording that played, to the feature's topic and, a full one, to
+    its issue — in a session sclaude runs; anywhere else the links already
+    said are the whole answer."""
     # Outside a session sclaude runs, the links are the whole answer: nothing
     # goes to the feature's topic or its issue on somebody's casual /sdemo.
     if not os.environ.get("SCLAUDE_SESSION"):
         print("kept here: not a session sclaude runs, so nothing went to Telegram or GitHub")
         return
+    out = os.path.join(wt, DEMO_DIR, demo)
     # For both places: the phone's address opens only on the tailnet, which
     # the laptop's Windows side is not on. The laptop's goes on the bare
     # loopback address — Telegram makes a link of an IP, not of a *.localhost
@@ -410,10 +434,12 @@ def broken(results):
 
 
 def last_main(wt):
-    """The last full demo that played: one with a scenario that did not is
-    no record of the feature, and no demo to measure the code against."""
+    """The last full demo that played and went out: one with a scenario that
+    did not is no record of the feature, and no demo to measure the code
+    against; nor is a try still held back (`held`)."""
     mains = [e for e in history(wt)
-             if e.get("kind") == "main" and e.get("head") and not e.get("broken")]
+             if e.get("kind") == "main" and e.get("head") and not e.get("broken")
+             and not e.get("held")]
     return mains[-1] if mains else None
 
 
@@ -425,6 +451,10 @@ def remember(wt, demo, results):
              "title": results.get("title") or "",
              "change": results.get("change") or "", "scenarios": len(results.get("scenarios") or []),
              "broken": broken(results)}
+    # Held back while sclaude records with nobody watching: not on the page,
+    # in the issue, or measured from, until `demo.py publish` lets it go.
+    if os.environ.get("SCLAUDE_DEMO_HOLD") == "1":
+        entry["held"] = True
     base = last_main(wt)
     if kind == "delta":
         entry["from"] = base["stage"] if base else ""
@@ -453,7 +483,7 @@ def write_feature_page(wt, label):
     commits, with its videos."""
     import html as h
     # Only what played: a recording that did not was never published.
-    entries = [e for e in history(wt) if not e.get("broken")]
+    entries = [e for e in history(wt) if not e.get("broken") and not e.get("held")]
     main = last_main(wt)
 
     def clips(entry):
@@ -471,10 +501,16 @@ def write_feature_page(wt, label):
 
     parts = ["<h1>%s</h1>" % h.escape(main["title"] if main else label)]
     if main:
-        parts.append("<h2>The feature — the latest full demo</h2><p class=sub>%s · %s · on <code>%s</code> · "
+        # A demo carried on (`keep`) was recorded on an earlier commit and
+        # still shows the feature on this one: both are said, and why.
+        kept = ("still current on <code>%s</code> at %s, %s: %s · " % (
+            h.escape(main["head"][:7]), h.escape(main["stage"]), when(main), h.escape(main["kept"]))
+            if main.get("kept") else "")
+        shown = main["recorded"] if main.get("kept") else main["head"]
+        parts.append("<h2>The feature — the latest full demo</h2><p class=sub>%s%s · on <code>%s</code> · "
                      "<a href='%s/'>scenarios with their steps →</a></p>" % (
-                         h.escape(main["stage"]), when(main), h.escape(main["head"][:7]),
-                         h.escape(main["id"])))
+                         kept, "recorded" if kept else "%s · %s" % (h.escape(main["stage"]), when(main)),
+                         h.escape(shown[:7]), h.escape(main["id"])))
         parts.append("<div class=grid>%s</div>" % "".join(
             "<figure>%s<figcaption>%s</figcaption></figure>" % (
                 "<video controls playsinline preload=metadata src='%s'></video>" % h.escape(c)
@@ -497,7 +533,9 @@ def write_feature_page(wt, label):
         parts.append("<h2>What changed, newest first</h2><table><tr><th>Between</th>"
                      "<th>The change for the user</th><th>Commits</th><th>Video</th></tr>%s</table>"
                      % rows)
-    earlier = [e for e in entries if e.get("kind") == "main"][::-1][1:]
+    # A kept entry is the same recording again, not an earlier one.
+    earlier = [e for e in entries if e.get("kind") == "main" and not e.get("kept")
+               and not (main and e["id"] == main["id"])][::-1]
     if earlier:
         parts.append("<h2>Earlier full demos</h2><ul>%s</ul>" % "".join(
             "<li><a href='%s/'>%s · %s</a> on <code>%s</code></li>" % (
@@ -608,7 +646,7 @@ def issue_comment(wt, results, phone, here):
         return "not written — issue #%s could not be read (gh, network or permissions)" % issue
     root = os.path.join(wt, DEMO_DIR)
     # Only what played: a recording that did not was never published.
-    entries = [e for e in history(wt) if not e.get("broken")]
+    entries = [e for e in history(wt) if not e.get("broken") and not e.get("held")]
     mains = [k for k, e in enumerate(entries) if e.get("kind") == "main"]
     since = mains[-2] + 1 if len(mains) > 1 else 0
     deltas = [(e, recording(wt, e["id"]), os.path.join(root, e["id"]))
@@ -688,6 +726,62 @@ def cmd_stale(label, wt):
         sys.exit(1)
 
 
+def cmd_keep(args, label, wt):
+    """The last full demo, carried on to the code as it is now: what sclaude
+    asks for when the code changed since but nothing a user sees or does
+    did — its videos still show the feature, and a new recording would say
+    the same. Nothing is published: there is nothing new to show."""
+    reason = " ".join(args).strip()
+    if not reason:
+        die("why the demo still shows the feature: demo.py keep <reason>")
+    main = last_main(wt)
+    if not main:
+        die("no full demo of %s recorded here to keep" % label)
+    entry = {"id": main["id"], "kind": "main", "stage": stage(wt),
+             "when": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
+             "head": git_head(wt), "tree": git_tree(wt), "title": main.get("title") or "",
+             "change": "", "scenarios": main.get("scenarios") or 0, "broken": 0,
+             "kept": reason, "recorded": main.get("recorded") or main["head"]}
+    # Read before the file is opened for writing, which empties it.
+    found = history(wt) + [entry]
+    with open(os.path.join(wt, DEMO_DIR, "history.json"), "w") as fh:
+        json.dump(found, fh, indent=1)
+    if entry["tree"]:
+        subprocess.run(["git", "-C", wt, "update-ref", DEMO_REF % label, entry["tree"]],
+                       capture_output=True)
+    write_feature_page(wt, label)
+    print("kept: the demo %s still shows the feature on %s — %s"
+          % (main["id"], entry["head"][:7], reason))
+
+
+def cmd_publish(args, label, wt):
+    """A recording that was held (SCLAUDE_DEMO_HOLD), published now: what
+    sclaude does with a refresh session's last delta and last full
+    recording, unless the session ended on `keep`."""
+    if len(args) != 1:
+        die("the recording to publish: demo.py publish <id>")
+    found = [e for e in history(wt) if e.get("id") == args[0] and not e.get("kept")]
+    if not found:
+        die("no recording %s in this feature's history" % args[0])
+    entry = found[-1]
+    if entry.get("broken"):
+        die("not published: %d scenario(s) of %s did not play" % (entry["broken"], args[0]))
+    # Let go first: the issue comment and the page read only what is not held.
+    entries = history(wt)
+    for e in entries:
+        if e.get("id") == args[0]:
+            e.pop("held", None)
+    with open(os.path.join(wt, DEMO_DIR, "history.json"), "w") as fh:
+        json.dump(entries, fh, indent=1)
+    entry.pop("held", None)
+    if entry["kind"] == "main" and entry.get("tree"):
+        subprocess.run(["git", "-C", wt, "update-ref", DEMO_REF % label, entry["tree"]],
+                       capture_output=True)
+    write_feature_page(wt, label)
+    _, phone = demo_links(label)
+    publish(wt, label, args[0], entry, recording(wt, args[0]), phone)
+
+
 def cmd_users(label, wt):
     try:
         for address in dev_login.users(wt):
@@ -730,9 +824,10 @@ def main(argv):
         else:
             rest.append(arg)
     if not rest or rest[0] not in ("link", "users", "criteria", "open", "play", "stale",
-                                   "replay", "last"):
+                                   "replay", "last", "keep", "publish"):
         die("usage: demo.py link <email> [<path>] | users | criteria | "
-            "open <email> <path>... | play <demo.mjs> [--live] | stale | replay | last  "
+            "open <email> <path>... | play <demo.mjs> [--live] | stale | replay | last | "
+            "keep <reason> | publish <id>  "
             "[--feature F] [--where laptop|phone]")
     label, wt = feature(label)
     if rest[0] == "users":
@@ -747,6 +842,10 @@ def main(argv):
         cmd_stale(label, wt)
     elif rest[0] == "play":
         cmd_play(rest[1:], label, wt, where, live)
+    elif rest[0] == "keep":
+        cmd_keep(rest[1:], label, wt)
+    elif rest[0] == "publish":
+        cmd_publish(rest[1:], label, wt)
     elif rest[0] == "open":
         cmd_open(rest[1:], label, wt)
     else:

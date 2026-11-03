@@ -630,8 +630,12 @@ def check_proxy(root, wt, dport, login_file):
             if os.path.exists(asked):
                 os.remove(asked)
             os.environ["PATH"] = stub + os.pathsep + saved_path
+            # Set or not by this test alone: run from a session sclaude
+            # started, the variable is already there and would publish.
             if session:
                 os.environ["SCLAUDE_SESSION"] = "s1"
+            else:
+                os.environ.pop("SCLAUDE_SESSION", None)
             try:
                 out = io.StringIO()
                 with contextlib.redirect_stdout(out):

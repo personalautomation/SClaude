@@ -248,6 +248,20 @@ with open(os.path.join(wt, ".sclaude/local/feature", "review-yours"), "w") as fh
     fh.write("%s\tleave as it is: the fix would undo d60ca78\n" % A)
 check("yours-read", ctx.yours(wt), {A: "leave as it is: the fix would undo d60ca78"})
 
+# A decision a night session took is the person's to confirm in the morning:
+# only the open threads whose decision carries NIGHT_MARK are counted.
+C = "https://github.com/o/r/pull/1#discussion_r3"
+with open(os.path.join(wt, ".sclaude/local/feature", "review-yours"), "a") as fh:
+    fh.write("%s\tleave as it is %s; no reply posted)\n" % (B, ctx.NIGHT_MARK))
+    fh.write("%s\tleave as it is %s; no reply posted)\n" % (C, ctx.NIGHT_MARK))
+saved_open = ctx.open_threads
+ctx.open_threads = lambda cwd, pr, repo, nodes=None: ([
+    {"path": "a.tsx", "line": 1, "url": u} for u in (A, B)], [])
+check("night-yours-counts-open-night-decisions-only", ctx.night_yours(wt, "1", "o/r"), 1)
+ctx.open_threads = saved_open
+with open(os.path.join(wt, ".sclaude/local/feature", "review-yours"), "w") as fh:
+    fh.write("%s\tleave as it is: the fix would undo d60ca78\n" % A)
+
 
 def thread(url, path="a.tsx"):
     return {"path": path, "line": 1, "outdated": False, "created": "", "url": url,
@@ -296,6 +310,28 @@ check("snapshot-gives-the-decision", "the fix would undo d60ca78" in snap, True)
 check("snapshot-links-the-rest", B in snap, True)
 check("yours-not-in-the-work-list", snap.count("**A finding.**"), 1)
 check("open-since-skips-yours", ctx.open_since(wt, 1, "o/r", ""), (1, 0))
+# A night decision stays the person's until they take it back; taken back
+# (night_take), the thread is open work again with the night's proposal beside
+# it, to be asked about.
+yours_path = os.path.join(wt, ".sclaude/local/feature", "review-yours")
+with open(yours_path, "a") as fh:
+    fh.write("%s\tleave it %s; no reply posted)\n" % (B, ctx.NIGHT_MARK))
+check("night-decision-still-the-persons", B in ctx.yours(wt), True)
+snap = ctx.render(wt, 1, "o/r")
+kept_part = snap.split("**Left as they are by the person", 1)[-1]
+check("snapshot-lists-night-proposals-apart",
+      ("**Left at night for the person to confirm.**" in snap, B in kept_part, A in kept_part),
+      (True, False, True))
+check("night-take-moves-the-night-lines", ctx.night_take(wt), 1)
+check("night-take-leaves-the-persons-own", (list(ctx.yours(wt)), list(ctx.night(wt))), ([A], [B]))
+snap = ctx.render(wt, 1, "o/r")
+check("snapshot-asks-about-a-taken-back-thread",
+      ("Left at night for the person to confirm** — a night session proposed: leave it" in snap,
+       snap.count("**A finding.**")), (True, 1))
+check("night-take-again-moves-nothing", ctx.night_take(wt), 0)
+os.remove(os.path.join(wt, ctx.NIGHT_FILE))
+with open(yours_path, "w") as fh:
+    fh.write("%s\tleave as it is: the fix would undo d60ca78\n" % A)
 
 # --- the prompts ---------------------------------------------------------------
 PROMPTS = os.path.join(LIB, "..", "prompts")
@@ -305,6 +341,14 @@ review = open(os.path.join(PROMPTS, "review.md")).read()
 check("review-writes-yours", ".sclaude/local/feature/review-yours" in review, True)
 check("review-says-resolve-yourself", "Resolve on GitHub yourself" in review, True)
 check("yours-file-name-agrees", ctx.YOURS_FILE in review, True)
+# The night mark is written by the prompt and counted by review_night_offer.
+check("night-mark-agrees", ctx.NIGHT_MARK in review, True)
+check("night-file-agrees", ctx.NIGHT_FILE.rsplit("/", 1)[-1] in review, True)
+check("night-heading-agrees", "Left at night for the person to confirm" in review
+      and "Left at night for the person to confirm" in open(os.path.join(LIB, "pr_context.py")).read(), True)
+check("snapshot-names-the-prompt-paragraph", "the threads left at night" in review, True)
+check("night-offer-asks-before-the-wait",
+      "--night-yours" in open(os.path.join(LIB, "run.sh")).read(), True)
 # A thread left as it is is proposed in so many words and, on a yes, resolved
 # by the session itself; review-yours is for the person's own hand only.
 check("review-proposes-resolving", "I want to resolve this comment on GitHub" in review, True)

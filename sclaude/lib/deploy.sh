@@ -1744,13 +1744,14 @@ ship_failed() {
 #
 #   demo_refresh <wt> <preview|epilogue>
 demo_refresh() {
-  local wt="$1" stage="$2" tool="$INSTRUMENTS/skills/sdemo/demo.py" verdict head script log
+  local wt="$1" stage="$2" tool="$INSTRUMENTS/skills/sdemo/demo.py" verdict head script log findings before kept
   [[ -f "$tool" ]] || return 0
   verdict="$(cd "$wt" && python3 "$tool" stale 2>/dev/null)" || return 0
   [[ "$verdict" == stale:* ]] || return 0
   head="$(cd "$wt" && python3 "$tool" last 2>/dev/null | sed -n 's/^head: //p')"
   script="$(cd "$wt" && python3 "$tool" last 2>/dev/null | sed -n 's/^script: //p')"
   log="$wt/.sclaude/local/demo/refresh.log"
+  findings="$wt/.sclaude/local/demo/findings.md"
   echo ""
   if [[ "$stage" == preview ]]; then
     info "The code changed since the feature's demo — recording what changed, and the whole of it, for QA."
@@ -1758,35 +1759,99 @@ demo_refresh() {
     info "The code changed since the feature's demo — recording it again for the issue."
   fi
   info "  ${verdict#stale: }"
+  # What the session finds wrong in the product while it records is written
+  # there, and said below: its log goes with the tree, and a fault only the
+  # log knows is one nobody hears of.
+  : >"$findings" 2>/dev/null || true
+  before="$(demo_history_count "$wt")"
   # As a step's session would: the links and the videos go to the feature's
   # topic and the issue's demo comment is replaced (demo.py publishes only
-  # for sclaude), at this stage of the history.
+  # for sclaude), at this stage of the history. Held while the session plays
+  # (SCLAUDE_DEMO_HOLD): it may play a script several times before it is
+  # right, and without the hold each try would go out as it was recorded.
+  # Its last delta and its last full recording are published after it, or
+  # nothing when it ended on `demo.py keep` (demo_publish_held).
   if command -v claude >/dev/null 2>&1 && [[ -f "$script" && -n "$head" ]]; then
     info "  A session writes it again from the last one (sdemo skill); its log: $log"
-    ( cd "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" timeout 2400 \
-        claude -p "$(demo_refresh_prompt "$script" "$head" "$stage")" \
+    ( cd "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
+        SCLAUDE_DEMO_HOLD=1 timeout 2400 \
+        claude -p "$(demo_refresh_prompt "$wt" "$script" "$head" "$stage")" \
         --model "$(step_model code)" --permission-mode dontAsk \
         --allowedTools "Read" "Grep" "Glob" "Skill" "Edit(/$wt/.sclaude/local/demo/**)" \
           "Bash(python3 $tool:*)" "Bash(python3 ~/.claude/skills/sdemo/demo.py:*)" \
           "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" \
         --disallowedTools "NotebookEdit" "Bash(gh:*)" "Bash(git push:*)" "Bash(git commit:*)" \
         >"$log" 2>&1 </dev/null )
+    demo_publish_held "$wt" "$stage" "$tool" "$before" >>"$log" 2>&1
   else
     ( cd "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
         python3 "$tool" replay </dev/null ) >"$log" 2>&1
   fi
+  demo_findings "$wt" "$findings" "$before"
   if [[ "$(cd "$wt" && python3 "$tool" stale 2>/dev/null)" == fresh:* ]]; then
-    info "  Recorded again; the feature's demo page and the issue's demo comment show it."
+    kept="$(demo_kept "$wt" "$before")"
+    if [[ -n "$kept" ]]; then
+      info "  Not recorded again: $kept"
+    else
+      info "  Recorded again; the feature's demo page and the issue's demo comment show it."
+    fi
   else
     warn "  the demo was not recorded again ($log); the issue keeps the earlier one"
   fi
   return 0
 }
 
+# How many recordings the feature's demo history holds: what a refresh
+# tells its own from.
+#
+#   demo_history_count <wt>
+demo_history_count() {
+  python3 "$INSTRUMENTS/sclaude/lib/demo_refresh.py" count "$1"
+}
+
+# The recordings a refresh held back, published once it is over: the last
+# delta it made, then the last full demo — each once, and only one that
+# played. What the session tried before those stays held: in the history,
+# on no page and in no message. A session that ended on `demo.py keep`
+# publishes nothing.
+#
+#   demo_publish_held <wt> <stage> <tool> <count before>
+demo_publish_held() {
+  local wt="$1" stage="$2" tool="$3" before="$4" id ids
+  ids="$(python3 "$INSTRUMENTS/sclaude/lib/demo_refresh.py" held "$wt" "$before")"
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    ( cd "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
+        python3 "$tool" publish "$id" </dev/null )
+  done <<<"$ids"
+}
+
+# What a refresh found wrong in the product, said in the terminal: the
+# lines its session wrote, and the checks that did not see what they looked
+# for in its last delta and its last full recording — published, or held
+# after `demo.py keep`.
+#
+#   demo_findings <wt> <findings file> <count before>
+demo_findings() {
+  local said line
+  said="$(python3 "$INSTRUMENTS/sclaude/lib/demo_refresh.py" findings "$1" "$2" "$3")"
+  [[ -n "$said" ]] || return 0
+  warn "  The demo found something wrong in the product:"
+  while IFS= read -r line; do warn "    - $line"; done <<<"$said"
+}
+
+# Why a refresh recorded nothing, when its session kept the last demo
+# (`demo.py keep`); empty otherwise.
+#
+#   demo_kept <wt> <count before>
+demo_kept() {
+  python3 "$INSTRUMENTS/sclaude/lib/demo_refresh.py" kept "$1" "$2"
+}
+
 # What that session is told: the skill does the work; this says where to
 # start from, what to record at this stage, and that nobody is there to ask.
 demo_refresh_prompt() {
-  local script="$1" head="$2" stage="$3" what
+  local wt="$1" script="$2" head="$3" stage="$4" what
   if [[ "$stage" == preview ]]; then
     what="Record two things, in this order, for QA: first a delta (/sdemo delta) — only what changed for the user since that demo, none if nothing did — then the whole feature again (/sdemo)."
   else
@@ -1795,11 +1860,19 @@ demo_refresh_prompt() {
   cat <<EOF
 Use the sdemo skill for the feature in this tree. Nobody is at the terminal: decide by yourself, ask nothing.
 
-The last full demo was recorded on commit ${head:0:7}, from the script $script. The code has changed since — the review may have changed what the feature does, not only how. Read what changed (git diff $head, git log $head..HEAD) and start from that script: keep the scenarios that still show the feature as it is, rewrite the ones the change touched, add any the change added, and drop what no longer exists. Show the feature on a desktop and on a phone, as the skill says.
+The last full demo was recorded on commit ${head:0:7}, from the script $script. The code has changed since — the review may have changed what the feature does, not only how. Read what changed (git diff $head, git log $head..HEAD) and the old script.
+
+First decide whether any of it changes what a user sees or does, as the skill's delta step asks. If none does — every scenario of that script still shows the feature as it is, and nothing a user meets was added or taken away — record nothing: run python3 $INSTRUMENTS/skills/sdemo/demo.py keep "<why, in one line>" and stop there.
+
+Otherwise start from that script: keep the scenarios that still show the feature as it is, rewrite the ones the change touched, add any the change added, and drop what no longer exists. Show the feature on a desktop and on a phone, as the skill says.
 
 $what
 
-Call demo.py by its full path, one command at a time and nothing chained to it — python3 $INSTRUMENTS/skills/sdemo/demo.py last, … play — since only that is allowed here. Check each recording's demo.json; fix a script that failed and play it again, twice at most. End with one line: the feature's demo page, or why there is none.
+Call demo.py by its full path, one command at a time and nothing chained to it — python3 $INSTRUMENTS/skills/sdemo/demo.py last, … play — since only that is allowed here. Check each recording's demo.json; fix a script that failed and play it again, twice at most. Nothing goes out while you play: once you end, sclaude publishes your last delta and your last full recording — or nothing, if you ended on keep.
+
+Whatever you find wrong in the product itself while you record — a step that does not show what the feature promises, a scenario you had to take round a fault — write to $wt/.sclaude/local/demo/findings.md, one line each: what a user sees, and where. A fault you went round in the script and wrote down nowhere else is one nobody hears of.
+
+End with one line: the feature's demo page, or why there is none.
 EOF
 }
 

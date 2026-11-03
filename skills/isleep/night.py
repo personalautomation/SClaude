@@ -7,8 +7,9 @@ machine and outlasts a compaction, a resume and a restart:
   $ISLEEP_STATE/night.json   (default ~/.local/state/isleep)
     started, until   ISO times; past `until` the night is over by itself
     log              the night's decision log, shared by every session
-    before           logs of nights that ran out unsummarised before this
-                     one began on another date: its summary covers them too
+    before           logs of nights left unsummarised — run out, or ended by
+                     `night.py off` outside any session — before this one
+                     began on another date: its summary covers them too
     all              every session takes part (the default); false with
                      `/isleep here`, and then only `sessions` do
     sessions         ids of the sessions that ran /isleep
@@ -22,9 +23,11 @@ machine and outlasts a compaction, a resume and a restart:
                      session whose process is gone is dropped from it
     until            when the list is dropped, told or not (OVER_HOURS)
 
-  $ISLEEP_STATE/due.json     a night that ran out its hours: its log, for the
-                     person's first prompt, whenever it comes, to be answered
-                     with the summary. Only the prompt hook reads it.
+  $ISLEEP_STATE/due.json     a night that ran out its hours, or was ended by
+                     `night.py off` outside any session: its log (and why),
+                     for the person's first prompt, whenever it comes, to be
+                     answered with the summary. The prompt hook reads it; a
+                     new night begun first takes its log into `before`.
   $ISLEEP_STATE/asleep.json  session id -> until: sessions told of a night
                      whose process was gone when it ended; one resumed later
                      is told it is over at its start. Only SessionStart
@@ -383,7 +386,7 @@ def hook_locked(kind, data, sid):
         if due:
             drop(due_file())
             emit("UserPromptSubmit", additionalContext=morning(
-                due["log"], "The night ran out its hours before the "
+                due["log"], due.get("why") or "The night ran out its hours before the "
                 "person came back, and they have just written."))
         elif was_owed:
             emit("UserPromptSubmit", additionalContext=OVER)
@@ -435,7 +438,9 @@ OVER = (
     f"{OVER_MARK}: the person is back. The night's "
     "reminder earlier in this conversation no longer holds — questions "
     "go to the person again, with AskUserQuestion as usual. Give no "
-    "morning summary here; the session they wrote in gives it.")
+    "morning summary here unless it is asked for here: the session they "
+    "wrote in gives it, or, when the night ended outside any session, the "
+    "first one they write in.")
 
 
 # event: (matcher, kind, runs by day). The prompt hook runs with no night on —
@@ -496,9 +501,19 @@ def main(argv):
         with locked():
             night = load()
             sys.exit(0 if night and night.get("all") else 1)
-    elif argv == ["off"]:
+    elif argv == ["off"] or (argv[:2] == ["off", "--away"] and len(argv) == 3):
+        # `--away <why>`: the caller says it is no session the person writes
+        # in (sclaude, when they answer in its terminal), and why — not read
+        # from CLAUDE_CODE_SESSION_ID, which a shell under any session
+        # inherits. With no session to give it, the summary waits for their
+        # next prompt, as for a night that ran out, with the caller's why.
+        away = argv[2] if len(argv) == 3 else ""
+        sid = None if away else os.environ.get("CLAUDE_CODE_SESSION_ID")
         with locked():
-            end_night(os.environ.get("CLAUDE_CODE_SESSION_ID"))
+            log = end_night(sid)
+            if log and not sid:
+                save({"log": log, "why": away or "The night was ended outside any "
+                      "session (night.py off), and they have just written."}, due_file())
     elif argv[:1] == ["install"] and len(argv) == 2:
         install(argv[1])
     else:

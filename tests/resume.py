@@ -623,7 +623,9 @@ def case_h():
     w = World(os.path.join(tmp, "h"), merged=False)
     w.set_state(dict(DONE_STATE, step="review", steps=reopened_review, worktree=w.wt))
     git("checkout", "-q", "-b", "fix/elsewhere", cwd=w.wt)
-    out = w.resume(timeout=45)
+    # The default cap: sclaude ends by itself here, and 45 s was too few when
+    # the whole suite ran side by side — killed before it named the branch.
+    out = w.resume()
     check("other-branch-review-stays-open", w.state("steps.review.done"), "false")
     check_true("other-branch-is-named", "The worktree is on fix/elsewhere" in out)
 

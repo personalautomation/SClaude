@@ -611,6 +611,15 @@ def open_threads(cwd, pr, repo, nodes=None):
 # url — `…/pull/161#discussion_r4218743695` — which is what both the snapshot
 # and `gh api …/pulls/<pr>/comments` (as html_url) give.
 YOURS_FILE = ".sclaude/local/feature/review-yours"
+# What a decision a night session took for the person (/isleep) carries in
+# that file: theirs to confirm in the morning. review.md writes it; by day
+# review_night_offer in run.sh counts such threads (night_yours) and, on the
+# person's yes, moves their lines to NIGHT_FILE (night_take): the threads are
+# then open work again, so the ordinary round opens a session, which the
+# snapshot tells to ask the person about each first, with the night's
+# proposal beside it.
+NIGHT_MARK = "(isleep — to confirm"
+NIGHT_FILE = ".sclaude/local/feature/review-night"
 
 
 def yours(cwd):
@@ -627,6 +636,42 @@ def yours(cwd):
     except OSError:
         pass
     return out
+
+
+def night(cwd):
+    """{link: the night's proposal} for the threads taken back from
+    review-yours to be asked about (NIGHT_FILE); {} when none."""
+    import os
+    out = {}
+    try:
+        with open(os.path.join(cwd, NIGHT_FILE)) as fh:
+            for line in fh:
+                found = re.search(r"https://\S+#discussion_r\d+", line)
+                if found:
+                    out[found.group(0)] = line[found.end():].strip(" \t\n—-:")
+    except OSError:
+        pass
+    return out
+
+
+def night_take(cwd):
+    """Move the review-yours lines carrying NIGHT_MARK to NIGHT_FILE; how
+    many moved. Their threads are open work again from then on."""
+    import os
+    path = os.path.join(cwd, YOURS_FILE)
+    try:
+        with open(path) as fh:
+            lines = fh.readlines()
+    except OSError:
+        return 0
+    taken = [line for line in lines if NIGHT_MARK in line]
+    if not taken:
+        return 0
+    with open(os.path.join(cwd, NIGHT_FILE), "a") as fh:
+        fh.writelines(taken)
+    with open(path, "w") as fh:
+        fh.writelines(line for line in lines if NIGHT_MARK not in line)
+    return len(taken)
 
 
 def split_yours(cwd, threads):
@@ -722,6 +767,7 @@ def render(cwd, pr, repo):
     threads, resolved = open_threads(cwd, pr, repo)
     mine, threads = split_yours(cwd, threads or [])
     decided = yours(cwd)
+    proposed = night(cwd)
 
     out = []
     red = [r for r in rows if r[1] not in ("SUCCESS", "PASS", "COMPLETED",
@@ -782,6 +828,20 @@ def render(cwd, pr, repo):
         out.append("")
         out.append(body)
         out.append("")
+    # A night session's proposals are not the person's decisions: listed
+    # apart, left alone at night, asked about first by day (review.md).
+    proposals = [t for t in mine if NIGHT_MARK in (decided.get(t["url"]) or "")]
+    mine = [t for t in mine if t not in proposals]
+    if proposals:
+        out.append("**Left at night for the person to confirm.** A night session "
+                   "proposed leaving these; the person has not answered. At night leave "
+                   "them as they are; by day ask about each first, as review.md says for "
+                   "the threads left at night:")
+        out.append("")
+        for t in proposals:
+            out.append("- `%s:%s` %s — %s" % (t["path"], t["line"], t["url"],
+                                              decided.get(t["url"]) or ""))
+        out.append("")
     if mine:
         out.append("**Left as they are by the person — theirs to resolve on GitHub.** "
                    "They decided these in an earlier session. Don't fix them and "
@@ -806,6 +866,11 @@ def render(cwd, pr, repo):
             if r["body"]:
                 out.append("> **reply — %s:** %s" % (r["author"], r["body"].replace("\n", "\n> ")))
                 out.append("")
+        if t.get("url") in proposed:
+            out.append("> **Left at night for the person to confirm** — a night session "
+                       "proposed: %s. Ask them about it first, as review.md says for the "
+                       "threads left at night." % proposed[t["url"]])
+            out.append("")
 
     lost = unposted_findings(cwd, repo, view.get("headRefOid") or "",
                              view.get("statusCheckRollup") or [], issue_comments)
@@ -1540,6 +1605,13 @@ def yours_open(cwd, pr, repo):
             for t in split_yours(cwd, threads or [])[0]]
 
 
+def night_yours(cwd, pr, repo):
+    """How many of the person's open threads a night session left for them
+    to confirm (NIGHT_MARK in the decision)."""
+    return sum(1 for line in yours_open(cwd, pr, repo)
+               if NIGHT_MARK in line.split("\t", 2)[-1])
+
+
 def main():
     # `--threads <cwd> <pr> <repo> [since]`: "<open> <opened since>", or
     # nothing when it cannot be read. See thread_counts.
@@ -1600,6 +1672,18 @@ def main():
                 sys.stdout.write(line + "\n")
         except Exception:
             pass
+        return 0
+    # `--night-yours <cwd> <pr> <repo>`: a count, see night_yours; 0 when
+    # GitHub cannot be read.
+    if len(sys.argv) >= 5 and sys.argv[1] == "--night-yours":
+        try:
+            sys.stdout.write("%d\n" % night_yours(sys.argv[2], sys.argv[3], sys.argv[4]))
+        except Exception:
+            sys.stdout.write("0\n")
+        return 0
+    # `--night-take <cwd>`: how many lines moved, see night_take.
+    if len(sys.argv) >= 3 and sys.argv[1] == "--night-take":
+        sys.stdout.write("%d\n" % night_take(sys.argv[2]))
         return 0
     # `--close <cwd> <pr> <repo>`: one line, see close_state.
     if len(sys.argv) >= 5 and sys.argv[1] == "--close":

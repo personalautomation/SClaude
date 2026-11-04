@@ -12,6 +12,8 @@ If something is missing — the server isn't responding, the browser won't attac
 
 **Run only the tests this feature touches**: the specs you wrote or changed and the ones covering the code you changed, picked by file or by name through the project's own runner, plus checks that take seconds, such as typecheck. Don't run the whole suite here, e2e least of all. When this session closes, `sclaude` runs the full regression itself before the step can end, and a red run opens a fixing session with its log. A full run inside the session costs minutes of waiting and finds nothing that run won't.
 
+**Tests.** Rather than a new test, prefer extending one that already walks the path — a case, an assertion, a rename if its scope grows: every new spec, e2e above all, adds fixtures and minutes to each regression after it. See each test you wrote or changed fail once, on the code before your change: one never red may pass whatever the code does, as `toBeVisible()` did on a screen-reader-only element, which Playwright counts as visible.
+
 **Smoke.** Where `.sclaude/config.json` has `commands.smoke`, that command picks the product's few vital paths out of its suite — by a tag such as `@smoke`, as the command shows — and a deployed stage may run only those. When this feature adds a path a person depends on to get their work done, tag the one spec that walks it end to end, and no more: the smoke set stays short enough to run in a minute.
 
 <block:acceptance>

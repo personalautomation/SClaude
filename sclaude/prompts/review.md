@@ -43,6 +43,7 @@ The orchestrator captured the PR state as of the start of this step — checks a
    - the cause, where the finding points at one — a sweep that has to repeat a filter because the guard is wrong is fixed in the guard;
    - every other place in the pull request with the same pattern: search the pull request's diff (`git diff origin/main...HEAD`) and the code it touches, not only the cited line;
    - every comment, doc comment, SQL `comment on`, manual page and test label that describes the behaviour the fix changes;
+   - a test where none pins the fix yet, preferably by extending an existing one, and each test it wrote or changed seen red once on the code before the fix;
    - and nothing that is not about the finding.
 
    It reports the other places it found and what it did with each, so you can see the class is covered. Where a finding proposes a fix, the subagent weighs it and picks the one that leaves the least new code to review: a suggested cache, helper or abstraction is new surface the next round will read, and once one suggested cache took five rounds of its own.

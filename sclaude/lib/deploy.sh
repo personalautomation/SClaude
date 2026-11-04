@@ -1746,6 +1746,8 @@ ship_failed() {
 demo_refresh() {
   local wt="$1" stage="$2" tool="$INSTRUMENTS/skills/sdemo/demo.py" verdict head script log findings before kept
   [[ -f "$tool" ]] || return 0
+  # A project that makes no demo videos (`demo: off`) has none to refresh.
+  [[ "$(project_demo_mode "$wt")" == on ]] || return 0
   verdict="$(cd "$wt" && python3 "$tool" stale 2>/dev/null)" || return 0
   [[ "$verdict" == stale:* ]] || return 0
   head="$(cd "$wt" && python3 "$tool" last 2>/dev/null | sed -n 's/^head: //p')"

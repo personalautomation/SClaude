@@ -671,9 +671,18 @@ VARIANTS = {
     # The demo for QA is recorded only where a person does QA; with qa: auto
     # it is brought up to the code before the last epilogue instead
     # (demo_refresh in deploy.sh).
-    "preview_ok": [("qa", {"auto"}, {
+    "code": [("demo", {"off"}, {
+        "text": "builds it, checks it in Chrome, commits with Requirement: ACn",
+        "details": "A fresh session builds from the plan, checks the result in Chrome at the feature's own address, and commits with a Requirement: ACn footer naming the criterion each commit serves. It closes with a report criterion by criterion. demo: off — no demo video is recorded."})],
+    "works": [("demo", {"off"}, {
+        "text": "the report, then Accept in the session's dialog, or remarks to it"})],
+    "preview_ok": [("demo", {"off"}, {
+        "details": "Green: the issue goes to In QA. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there."}),
+                   ("qa", {"auto"}, {
         "details": "Green: the issue goes to In QA. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there."})],
-    "epilogue": [("qa", {"auto"}, {
+    "epilogue": [("demo", {"off"}, {
+        "details": "A short session writes a Current status comment on the issue and on every parent up the chain, and Current behaviour where the product now differs from a description. Labels deployed-preview and deployed-prod are set by how each stage ended."}),
+                 ("qa", {"auto"}, {
         "details": "A short session writes a Current status comment on the issue and on every parent up the chain, and Current behaviour where the product now differs from a description. Labels deployed-preview and deployed-prod are set by how each stage ended. Nobody does QA here, so before the last one, when the product's code changed since the feature's demo, the demo is recorded again for the issue — or kept, when nothing a user meets changed — and what it found wrong in the product is printed."})],
     "o_prod": [("ship", {"off"}, {"kind": "task", "title": "Not shipped from here", "text": "ship: off — production is yours to deploy"}),
                ("regression.prod", {False}, {"kind": "task", "text": "shipped; no suite runs there"}),
@@ -710,6 +719,8 @@ def setting(cfg, name):
         return cfg.get(name) if cfg.get(name) in ("smoke", "none") else "full"
     if name == "ship":
         return cfg.get("ship") if cfg.get("ship") in ("auto", "off") else "ask"
+    if name == "demo":
+        return "off" if cfg.get("demo") == "off" else "on"
     if name.startswith("regression."):
         # As project_regression_parts runs them: a deployed stage set to
         # none has no suite, and one set to smoke runs the smoke list when

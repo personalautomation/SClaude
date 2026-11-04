@@ -69,6 +69,13 @@ CHOICES["ship"] = [
     ("off", "sclaude never deploys to production; the issue closes as merged"),
 ]
 
+CHOICES["demo"] = [
+    ("on", "step 2 records a demo video of the feature before its question, and "
+           "it is brought up to the code before QA (with qa auto, before the "
+           "last epilogue)"),
+    ("off", "no demo videos: the report and the criteria are the check"),
+]
+
 CHOICES["metricsTeam"] = [
     ("real", "the metrics page compares the people whose work is in the records"),
     ("demo", "three generated teammates beside them, drawn from the real figures, "

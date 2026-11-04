@@ -120,6 +120,11 @@ def run(env, *args, answer=None, extras=True, rc=None):
             break
         out += chunk
         if sent < len(answers) and sum(out.count(q) for q in QUESTIONS) > sent:
+            # As a person would, a moment after the prompt shows: a key sent
+            # with it can reach the terminal before the question's read turns
+            # line mode off, and a Ctrl-D then is swallowed as the end of an
+            # empty line, under the whole suite's load.
+            time.sleep(0.3)
             os.write(primary, (answers[sent] + "\n").encode())
             sent += 1
     proc.wait(timeout=30)
@@ -127,7 +132,7 @@ def run(env, *args, answer=None, extras=True, rc=None):
     return out.decode(errors="replace")
 
 
-QUESTIONS = (b"Add it now?", b"notify, auto, off?", b"ask, send, off?", b"ask, auto, off?")
+QUESTIONS = (b"Add it now?", b"Choose 1-3:")
 
 with tempfile.TemporaryDirectory() as tmp:
     print("where it does not apply")
@@ -246,6 +251,12 @@ with tempfile.TemporaryDirectory() as tmp:
               "enable --now code-server-local.socket" in open(calls).read(), want)
 
     print("update and contribute")
+    # Ctrl-D at a question leaves that setting unset, which means ask.
+    env, rule, calls = world(os.path.join(tmp, "settings-eof"), settings=False)
+    out = run(env, "--no-polkit", extras=False, answer=["\x04", "2", "2"])
+    check("settings-ctrl-d-left-unset",
+          (git_config(env, "sclaude.update"), git_config(env, "sclaude.contribute"), "Left unset" in out),
+          ("", "send", True))
     env, rule, calls = world(os.path.join(tmp, "settings"), settings=False)
     out = run(env, "--no-polkit", extras=False)
     check("settings-pipe-left-unset",
@@ -255,15 +266,16 @@ with tempfile.TemporaryDirectory() as tmp:
     check("settings-pipe-names-flags",
           ("--update=<notify|auto|off>" in out, "--contribute=<ask|send|off>" in out), (True, True))
     check("settings-explained", ("sclaude update" in out, "public repository" in out), (True, True))
-    out = run(env, "--no-polkit", extras=False, answer=["", "sometimes", "notify", "ask", "off"])
-    check("settings-enter-asks-again", out.count("notify, auto, off?"), 3)
+    # One key a question, its line's number; a key that names no line is
+    # passed over (the newline the bench adds after each answer included).
+    out = run(env, "--no-polkit", extras=False, answer=["x91", "1", "3"])
+    check("settings-one-prompt-each", out.count("Choose 1-3:"), 3)
+    check("settings-numbered", ("1 notify" in out, "2 send" in out, "3 off" in out), (True, True, True))
     check("settings-tty-saved",
           (git_config(env, "sclaude.update"), git_config(env, "sclaude.contribute"),
            git_config(env, "sclaude.leaks")), ("notify", "ask", "off"))
-    out = run(env, "--no-polkit", extras=False, answer=["auto", "send", "auto"])
-    check("settings-kept-not-asked",
-          ("notify, auto, off?" in out, "ask, send, off?" in out, "ask, auto, off?" in out,
-           "(kept;" in out), (False, False, False, True))
+    out = run(env, "--no-polkit", extras=False, answer=["2", "2", "2"])
+    check("settings-kept-not-asked", ("Choose 1-3:" in out, "(kept;" in out), (False, True))
     run(env, "--no-polkit", "--update=off", "--contribute=off", "--leaks=auto", extras=False)
     check("settings-flags-set",
           (git_config(env, "sclaude.update"), git_config(env, "sclaude.contribute"),

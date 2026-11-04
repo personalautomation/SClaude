@@ -161,6 +161,11 @@
     "            the vital specs tagged @smoke, is all it takes.",
     "prodRegression — the same, for production's regression after the",
     "            ship: \"full\" (the default), \"smoke\" or \"none\".",
+    "demo      — whether the feature is shown as video (the sdemo skill):",
+    "            \"on\" (step 2 records a demo before its question, and it is",
+    "            recorded again when the code changed since — before QA, or",
+    "            before the last epilogue with qa auto; the default) or \"off\" (no demo videos anywhere in the cycle:",
+    "            the report and the criteria are the check).",
     "ship      — whether the merge goes on to production: \"ask\" (sclaude",
     "            asks Ship to production? after the merge; the default),",
     "            \"auto\" (shipped without that question — still asked when QA",
@@ -181,6 +186,8 @@
   "prodRegression": "smoke",
 
   "ship": "ask",
+
+  "demo": "on",
 
   "maintainers": ["lead@example.com"],
 

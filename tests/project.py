@@ -125,6 +125,21 @@ try:
                "regression": {"local": ["e2e"], "preview": ["e2e"]}}
     check("mode-smoke-undeclared-is-full", stage_parts(nosmoke, "preview"),
           ["e2e", "[smoke — none declared, the full list]"])
+    # demo: on unless it says off, and step 2's prompt asks for one only then.
+    for cfg, want in (({}, "on"), ({"demo": "off"}, "off"), ({"demo": "no"}, "on")):
+        with open(_cfg(os.path.join(modes, ".sclaude/config.json")), "w") as fh:
+            json.dump(cfg, fh)
+        out, _, _ = run_bash('REPO=%s; project_demo_mode' % modes, tmp)
+        check("demo-mode-%s" % cfg.get("demo", "absent"), out.strip(), want)
+    for demo, want in (("1", True), ("", False)):
+        text = subprocess.run([sys.executable, os.path.join(LIB, "render_prompt.py"),
+                               os.path.join(LIB, "..", "prompts", "code.md"),
+                               os.path.join(LIB, "..", "prompts")],
+                              capture_output=True, text=True,
+                              env=dict(os.environ, SCLAUDE_V_DEMO=demo, SCLAUDE_V_FEATURE="x")).stdout
+        check("code-prompt-demo-%s" % bool(demo),
+              ("/sdemo" in text, "the demo's link" in text, "the work in this session is done" in text),
+              (want, want, True))
     for cfg, want in (({}, "ask"), ({"ship": "auto"}, "auto"), ({"ship": "off"}, "off"), ({"ship": "yes"}, "ask")):
         with open(_cfg(os.path.join(modes, ".sclaude/config.json")), "w") as fh:
             json.dump(cfg, fh)

@@ -242,12 +242,12 @@ with tempfile.TemporaryDirectory() as tmp:
           (os.path.isfile(os.path.join(w.me, "news.txt")), "sclaude update" in out,
            git(w.me, "config", "sclaude.update")), (False, True, ""))
     w = fresh("unset-tty", "")
-    out = w.run('update_can_ask() { return 0; }\nupdate_read() { printf -v "$1" auto; }\ninstruments_sync')
+    out = w.run('update_can_ask() { return 0; }\nsetting_pick() { printf -v "$1" auto; }\ninstruments_sync')
     check("unset-asked-and-saved", git(w.me, "config", "sclaude.update"), "auto")
     check("unset-answer-applies",
           (os.path.isfile(os.path.join(w.me, "news.txt")), "REEXEC 1 one two" in out), (True, True))
     w = fresh("unset-unanswered", "")
-    out = w.run('update_can_ask() { return 0; }\nupdate_read() { return 1; }\ninstruments_sync')
+    out = w.run('update_can_ask() { return 0; }\nsetting_pick() { return 1; }\ninstruments_sync')
     check("unset-unanswered-is-notify",
           (os.path.isfile(os.path.join(w.me, "news.txt")), git(w.me, "config", "sclaude.update")), (False, ""))
     w = fresh("bad", "sometimes")

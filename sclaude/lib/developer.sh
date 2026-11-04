@@ -213,11 +213,11 @@ leaks_mode() {
 update_modes_explain() {
   cat <<'TXT'
   How should sclaude update itself from its public repository's main?
-    notify  each start says what is new there, with the commits; you take it
-            with `sclaude update` once you have read them (recommended)
-    auto    each start takes it by itself: what the maintainers merged runs
-            here at the next start
-    off     sclaude never fetches itself; you update the checkout by hand
+    1 notify  each start says what is new there, with the commits; you take
+              it with `sclaude update` once you have read them (recommended)
+    2 auto    each start takes it by itself: what the maintainers merged runs
+              here at the next start
+    3 off     sclaude never fetches itself; you update the checkout by hand
 TXT
 }
 
@@ -227,10 +227,10 @@ contribute_modes_explain() {
   send the fix to its public repository (main for a maintainer, a pull request
   from your fork for anybody else). Written while working in your product,
   such a change is checked for the product's details, but only by a heuristic.
-    ask     you see the commits and the files, and nothing goes out without
+    1 ask   you see the commits and the files, and nothing goes out without
             your yes
-    send    it goes out by itself once it is reviewed and its tests are green
-    off     no session changes sclaude on this machine; what got in its way
+    2 send  it goes out by itself once it is reviewed and its tests are green
+    3 off   no session changes sclaude on this machine; what got in its way
             stays in your product's friction log
 TXT
 }
@@ -240,9 +240,9 @@ leaks_modes_explain() {
   Before a fix of sclaude is sent, it is searched for your product's details:
   its name, issue and pull-request numbers, paths of its files. When something
   matches, sclaude asks "Publish it anyway?".
-    ask     the matching lines are shown, and nothing goes out without your yes
-    auto    they are shown, and it goes out without the question
-    off     a change that matches never goes out; a session rewords it first
+    1 ask   the matching lines are shown, and nothing goes out without your yes
+    2 auto  they are shown, and it goes out without the question
+    3 off   a change that matches never goes out; a session rewords it first
 TXT
 }
 
@@ -256,12 +256,26 @@ sclaude_setting_set() {
 # Whether there is a terminal to ask at, apart from the phone.
 update_can_ask() { ( exec < /dev/tty ) 2>/dev/null; }
 
-# One answer to the update question from the terminal, or 1 after
-# UPDATE_ASK_SECONDS (60) with none.
-update_read() {
-  local __reply=""
-  read -r -t "${UPDATE_ASK_SECONDS:-60}" -p "  notify, auto or off? " __reply < /dev/tty 2>/dev/tty || return 1
-  printf -v "$1" '%s' "$__reply"
+# One of <words>, by the number its line in the explanation carries: one key,
+# no Enter and no word to type. Any other key is passed over. Reads from
+# <source>, the terminal by default (install.sh gives its stdin); 1 at the
+# end of input, or after <seconds> without a key.
+#
+#   setting_pick <var> "<words in the explanation's order>" [seconds] [source]
+setting_pick() {
+  local __var="$1" __secs="${3:-}" __src="${4:-/dev/tty}" __key
+  local -a __words
+  read -ra __words <<< "$2"
+  printf '  Choose 1-%d: ' "${#__words[@]}" >&2
+  while :; do
+    IFS= read -rsn1 ${__secs:+-t "$__secs"} __key < "$__src" || { echo >&2; return 1; }
+    # Ctrl-D: with the line mode off it arrives as a character, not as the
+    # end of input, and is still the person leaving the question for later.
+    [[ "$__key" == $'\x04' ]] && { echo >&2; return 1; }
+    [[ "$__key" =~ ^[1-9]$ ]] && (( __key <= ${#__words[@]} )) && break
+  done
+  printf '%s\n' "${__words[__key - 1]}" >&2
+  printf -v "$__var" '%s' "${__words[__key - 1]}"
 }
 
 # The update question, asked at a start while sclaude.update is unset, and
@@ -273,16 +287,12 @@ update_mode_choose() {
   local answer
   echo "" >&2
   update_modes_explain >&2
-  while :; do
-    # At the terminal only, and not for long: this is a question of the
-    # machine, not of a product's channel, and a start the bot or the menu
-    # made in a pane has nobody at it. Unanswered, this start is notify and
-    # the next one asks again.
-    update_read answer || { printf '\n%s\n' "  No answer: notify for now; asked again at the next start." >&2; return 0; }
-    answer="$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')"
-    [[ " $UPDATE_MODES " == *" $answer "* ]] && break
-    printf '%s\n' "  Answer notify, auto or off." >&2
-  done
+  # At the terminal only, and not for long: this is a question of the
+  # machine, not of a product's channel, and a start the bot or the menu made
+  # in a pane has nobody at it. Unanswered, this start is notify and the next
+  # one asks again.
+  setting_pick answer "notify auto off" "${UPDATE_ASK_SECONDS:-60}" \
+    || { printf '%s\n' "  No answer: notify for now; asked again at the next start." >&2; return 0; }
   sclaude_setting_set update "$answer"
   UPDATE_CHOSEN="$answer"
   printf '%s\n' "  Saved: git -C ${INSTRUMENTS:-.} config sclaude.update $answer (./install.sh --update=… changes it)" >&2

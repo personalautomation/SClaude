@@ -67,6 +67,9 @@ render_prompt() {
   SCLAUDE_V_REVIEW_MODE="$(project_review_mode "$wt")"
   [[ "$SCLAUDE_V_REVIEW_MODE" != "github" ]] && SCLAUDE_V_NO_REVIEW=1
   [[ "$SCLAUDE_V_REVIEW_MODE" == "local" ]] && SCLAUDE_V_REVIEW_LOCAL=1
+  # Whether step 2 records a demo (project_demo_mode): <if:demo> in code.md.
+  local -x SCLAUDE_V_DEMO=""
+  [[ "$(project_demo_mode "$wt")" == on ]] && SCLAUDE_V_DEMO=1
   local -x SCLAUDE_B_ISSUE_CONTEXT=""
   local -x SCLAUDE_B_MANUAL_TOC=""
   local -x SCLAUDE_B_PR_CONTEXT=""

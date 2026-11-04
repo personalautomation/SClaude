@@ -207,6 +207,12 @@ project_stage_regression_word() {
   fi
 }
 
+# Whether the feature is shown as video (the sdemo skill): `on`, the default,
+# or `off`. Read like `review`, the main checkout first.
+project_demo_mode() {
+  [[ "$(project_get demo "${1:-}" 2>/dev/null || true)" == off ]] && echo off || echo on
+}
+
 # Whether the merge goes on to production: `ask` (the question after the
 # merge), `auto` (shipped without it, unless a gate was passed over or other
 # features' code rides along, which are still asked) or `off` (sclaude never deploys production). Absent or unknown

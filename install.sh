@@ -201,7 +201,7 @@ INSTRUMENTS="$REPO"
 source "$REPO/sclaude/lib/developer.sh"
 
 # Asks one setting, unless a flag set it or an earlier install did. No
-# default, as everywhere in sclaude: asked again until it is one of the words.
+# default, as everywhere in sclaude: a key that names no line is passed over.
 # End of input, or no terminal, leaves it unset, which sclaude reads as ask.
 #
 #   setting_offer <key> <flag value> <explain fn> <words, the recommended first>
@@ -223,16 +223,11 @@ setting_offer() {
     echo "  No terminal to ask in: left unset, which means ask. Later: ./install.sh --$key=<${words// /|}>" >&2
     return 0
   fi
-  while :; do
-    read -rp "  ${words// /, }? " answer || { echo; echo "  Left unset, which means ask."; return 0; }
-    answer="${answer,,}"
-    if [[ -n "$answer" && " $words " == *" $answer "* ]]; then
-      sclaude_setting_set "$key" "$answer"
-      echo "sclaude.$key: $answer"
-      return 0
-    fi
-    echo "  Please answer one of: ${words// /, }."
-  done
+  # A key for each line of the explanation, from this installer's stdin.
+  setting_pick answer "$words" "" /dev/stdin 2>&1 \
+    || { echo "  Left unset, which means ask."; return 0; }
+  sclaude_setting_set "$key" "$answer"
+  echo "sclaude.$key: $answer"
 }
 
 setting_offer update "$SET_UPDATE" update_modes_explain "notify auto off"

@@ -349,8 +349,10 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-11-03 at the user's request: a newcomer's
   machine neither takes the public main nor sends to it unasked. -->
 
-- The deploy settings `ship` (`ask`, `auto`, `off`), `previewRegression` and
-  `prodRegression` (`full`, `smoke`, `none`) are listed in `CHOICES` in
+- The project settings `ship` (`ask`, `auto`, `off`), `previewRegression` and
+  `prodRegression` (`full`, `smoke`, `none`) and `demo` (`on`, `off`, read by
+  `project_demo_mode`, which `<if:demo>` in `sclaude/prompts/code.md` and
+  `demo_refresh` in `deploy.sh` follow) are listed in `CHOICES` in
   `sclaude/lib/config_menu.py`, explained in `sclaude/config.example.json`,
   read by `project_ship_mode`/`project_stage_regression` in
   `sclaude/lib/project.sh` and by `setting` in `sclaude/lib/process.py`. The

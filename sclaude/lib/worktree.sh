@@ -454,6 +454,79 @@ dev_env_load() {
   db_env_load "$1"
 }
 
+# A feature's server listens on this machine alone: dev_loopback.cjs, loaded
+# into every Node process the command starts, moves a listen on every
+# interface to 127.0.0.1, where sclaude-proxy reaches it. The proxy's filter
+# — this machine and the tailnet — is then the only way in. Run in the
+# subshell that starts the server; NODE_OPTIONS the product sets is kept.
+#
+# Only for the servers sclaude starts — this dev server and the build
+# regression_serve_build serves — at the user's decision (2026-11-04): not
+# for the regression's parts or a session's own runs, where a test that
+# listens on :: and connects over ::1, or a container calling back through
+# host.docker.internal on a Linux Docker, would go red for no fault of the
+# feature. A suite's webServer reuses the server already running.
+dev_net_env() {
+  local shim="$LIB/dev_loopback.cjs"
+  [[ -f "$shim" ]] || return 0
+  export NODE_OPTIONS="--require=\"$shim\"${NODE_OPTIONS:+ $NODE_OPTIONS}"
+  # Read back by dev_exposed_warn: a server whose environment carries it was
+  # started this way, and one without it was not.
+  export SCLAUDE_DEV_LOOPBACK=1
+}
+
+# The addresses past loopback a port is listened on, one a line; none when
+# the server kept to this machine. The shim reaches only a Node server that
+# gets sclaude's NODE_OPTIONS: a product script that sets its own
+# (`NODE_OPTIONS=... next dev`) replaces it, and another runtime (bun, deno,
+# python) never reads it. This is how either is seen — at the start, and
+# again by every later ensure_dev that finds the server up.
+dev_exposed() {
+  local port="$1"
+  ss -ltnH "sport = :$port" 2>/dev/null | awk '{print $4}' \
+    | sed 's/%[^:]*:/:/' | grep -vE '^(127\.|\[::1\]:|\[::ffff:127\.)' || true
+}
+
+# Said when a server is open past loopback: where, and what fixes it. Once
+# per server process (the PID in exposed-said beside the feature's state),
+# since warn also goes to the feature's topic and ensure_dev runs at every
+# step and in the regression. SCLAUDE_DEV_LOOPBACK in the environment of
+# the listener or one of its parents tells the two causes apart: without it
+# the server was started without dev_net_env — before it existed, or by
+# hand — and a start through sclaude is the fix; with it the shim was lost
+# on the way (the parents too: a launcher that gives the server an
+# environment of its own drops the mark with the shim), and the product's
+# command is.
+dev_exposed_warn() {
+  local wt="$1" port="$2" open pid said="$1/.sclaude/local/feature/exposed-said"
+  open="$(dev_exposed "$port" | paste -sd' ' -)"
+  [[ -n "$open" ]] || return 0
+  pid="$(dev_pid "$port")"
+  [[ -n "$pid" && "$(cat "$said" 2>/dev/null)" == "$pid" ]] && return 0
+  [[ -n "$pid" ]] && printf '%s\n' "$pid" > "$said" 2>/dev/null
+  warn "  dev server: listens on $open, past the proxy's filter."
+  if [[ -n "$pid" ]] && ! dev_marked "$pid"; then
+    local name
+    name="$(state_get "$wt/.sclaude/local/feature/state.json" feature 2>/dev/null || true)"
+    warn "  It was started without sclaude's loopback; restart it: sclaude dev --stop $name && sclaude dev $name"
+  else
+    warn "  Its command names that address itself, starts the server with an environment"
+    warn "  of its own or NODE_OPTIONS without \$NODE_OPTIONS in it, or runs no Node;"
+    warn "  127.0.0.1 there, or the environment passed on, keeps it here."
+  fi
+}
+
+# Whether a process or one of its parents carries dev_net_env's mark.
+dev_marked() {
+  local pid="$1" n=0
+  while [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 && "$n" -lt 32 ]]; do
+    tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qx 'SCLAUDE_DEV_LOOPBACK=1' && return 0
+    pid="$(awk '/^PPid:/ { print $2 }' "/proc/$pid/status" 2>/dev/null)"
+    n=$((n + 1))
+  done
+  return 1
+}
+
 # The PID of the process listening on a port, or empty.
 dev_pid() {
   local port="$1"
@@ -585,11 +658,17 @@ ensure_dev() {
       # page that looks correct.
       if [[ "$switched" -eq 0 ]]; then
         # Nothing said: a server already up is the usual case, and its
-        # address is the step's header's. Starting or restarting one is said.
+        # address is the step's header's. Starting or restarting one is said,
+        # and so is one open past loopback — here too, for a server that took
+        # longer than the start's wait to listen. Not restarted for it: a
+        # server started by hand shares its launcher's process group, which
+        # stop_dev_pid would take down with it.
+        dev_exposed_warn "$wt" "$port"
         return 0
+      else
+        info "  dev server: restarting — it was started on the old environment"
+        stop_dev_pid "$pid" "$port"
       fi
-      info "  dev server: restarting — it was started on the old environment"
-      stop_dev_pid "$pid" "$port"
     elif [[ -n "$DEV_PORT_PINNED" ]]; then
       warn "  port $port is held by a server from ${cwd:-another directory}, and DEV_PORT pins it — not starting"
       return 0
@@ -618,7 +697,7 @@ ensure_dev() {
   # the project's business; sclaude only says it.
   local url; url="$(dev_address "$wt")"
   log_new "$wt" dev.log dev
-  ( cd "$wt" && dev_env_load "$wt" && PORT="$port" SCLAUDE_DEV_URL="$url" \
+  ( cd "$wt" && dev_env_load "$wt" && dev_net_env && PORT="$port" SCLAUDE_DEV_URL="$url" \
       setsid --fork npm run dev > "$log" 2>&1 < /dev/null & ) >/dev/null 2>&1
 
   if [[ -z "$DEV_PORT_PINNED" ]] && ! proxy_up; then
@@ -637,7 +716,7 @@ ensure_dev() {
   while [[ "$waited" -lt "$ticks" ]]; do
     sleep 0.5
     waited=$((waited + 1))
-    [[ -n "$(dev_pid "$port")" ]] && { info "  dev server: up on $(dev_address "$wt")"; return 0; }
+    [[ -n "$(dev_pid "$port")" ]] && { info "  dev server: up on $(dev_address "$wt")"; dev_exposed_warn "$wt" "$port"; return 0; }
   done
   # The port is not open yet — that is normal for a cold build, but not when the
   # process is already dead. The difference is visible from whether a single next

@@ -1286,8 +1286,8 @@ async def handle(reader, writer):
 # --- the gate: the phone's entry from the internet ---------------------------
 #
 # `sclaude-proxy --gate` is what `tailscale funnel` publishes for the phone's
-# Telegram Mini App (sclaude-gate.socket on 127.0.0.1:3001; the funnel stays on,
-# because Tailscale takes a minute and a half to carry a freshly enabled one). It routes nothing itself: a request it lets
+# Telegram Mini App (sclaude-gate.socket on 127.0.0.1:3001; the bot turns the
+# funnel on and off with phone access). It routes nothing itself: a request it lets
 # in goes on to the proxy on :3000 as it came, so starting, routing and idling
 # stay in one process. Its own job is who: a page opened from the bot proves
 # itself with Telegram's signed initData once (tg_webapp.py) and then carries

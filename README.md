@@ -499,11 +499,10 @@ repository.
 **What listens.** The proxy on `:3000` answers only this machine and your
 tailnet. The phone's gate is on `127.0.0.1:3001` and is reachable from the
 internet only through `tailscale funnel`, which the bot turns on when you
-turn on phone access, and off with it. Each feature's dev
-server listens on its own port as your product's dev command binds it — for
-`next dev`, every interface — and the proxy's filter does not stand in front
-of that port: on a network you do not trust, a firewall is what keeps it to
-this machine.
+turn on phone access, and off with it. Each feature's dev server, and the
+build its regression runs against, listens on `127.0.0.1`: sclaude moves a
+Node server that would take every interface (`next dev`, `next start`) there,
+so the proxy is the way in.
 
 **Where the settings are.**
 - This machine: the git config of this checkout. `./install.sh

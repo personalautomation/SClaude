@@ -116,6 +116,7 @@ publishes it (see "The workshop" below).
 | `sclaude/lib/state.sh` | the repository, `.sclaude/local/feature/state.json` and the cycle's record |
 | `sclaude/lib/branches.sh` | sorting out branches with nothing left to hold |
 | `sclaude/lib/worktree.sh` | preparing a feature's tree and the dev server |
+| `sclaude/lib/dev_loopback.cjs` | loaded into a feature's server: a listen on every interface goes to 127.0.0.1 |
 | `sclaude/lib/run.sh` | launching a step, the transitions, the friction review |
 | `sclaude/lib/github.sh` | issues and pull requests through `gh` |
 | `sclaude/lib/plan.sh` | step 1's plan from its session's transcript |
@@ -902,6 +903,34 @@ from where it stands, and an app that builds its sign-in redirects and email
 links from its own address would otherwise send them to `localhost:3000`, the
 list of features. What the project does with it is its own business — a Next.js
 app might turn it into `NEXT_PUBLIC_SITE_URL` in its dev script.
+
+**It listens on this machine alone.** The proxy answers loopback and the
+tailnet, and reaches a feature on `127.0.0.1:<port>`; a feature's own port
+open on every interface would let anybody on the same network past that
+filter. `next dev` and `next start` take every interface when nothing names
+an address, and which command a product runs is its own business, so sclaude
+sets the address under it: `dev_net_env` (`worktree.sh`) puts
+`--require=sclaude/lib/dev_loopback.cjs` into `NODE_OPTIONS` for the dev
+server and for the build the regression serves, and that file moves every
+`listen` on a wildcard address — none, `0.0.0.0`, `::` — to `127.0.0.1`. An
+address the product names on purpose, a unix socket or a handle is left
+alone, and a `NODE_OPTIONS` already in the environment is kept after it. A
+step's session is told to start the server with `sclaude dev`, which goes the
+same way. The regression's parts and a session's own test runs are left
+without it: a test listening on `::` and connecting over `::1`, or a
+container calling back through `host.docker.internal` on a Linux Docker,
+would go red for no fault of the feature, and a suite's `webServer` reuses
+the server already running. A product script that sets `NODE_OPTIONS` itself
+(`NODE_OPTIONS=… next dev`) replaces sclaude's, and another runtime never
+reads it: `dev_exposed` reads the port's listeners when `ensure_dev` sees
+the server listening, at its start or on a later call that finds it up, and
+says so once per process, in the terminal and the feature's topic. By
+`SCLAUDE_DEV_LOOPBACK` in the environment of the process or its parents it
+tells how it got there: one started without the shim — before it existed,
+or by hand — is to be started again through `sclaude dev <feature>`; for one
+that lost it on the way, the product's command names the address, gives the
+server an environment of its own or drops `$NODE_OPTIONS`, or runs no Node. Next.js still prints a `Network:` line with the
+machine's address; nothing answers there.
 
 The local regression hands the suite the same address in `E2E_LOCAL_URL`,
 with `PORT` and `SCLAUDE_DEV_URL` in case the suite has to start the server

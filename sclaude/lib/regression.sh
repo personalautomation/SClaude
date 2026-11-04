@@ -693,7 +693,7 @@ regression_serve_build() {
   # Started the way ensure_dev starts the dev server, for the same reasons:
   # a session of its own, every stream closed, the feature's database and
   # address in its environment.
-  ( cd "$wt" && dev_env_load "$wt" && export PORT="$port" SCLAUDE_DEV_URL="$url" \
+  ( cd "$wt" && dev_env_load "$wt" && dev_net_env && export PORT="$port" SCLAUDE_DEV_URL="$url" \
       && setsid --fork bash -c "$serve" > "$log" 2>&1 < /dev/null & ) >/dev/null 2>&1
   # A minute: `next start` is up in well under a second, and anything slower
   # is a server that will not come.

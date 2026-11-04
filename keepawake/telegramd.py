@@ -882,11 +882,12 @@ def phone_origin(config=None):
 
 # The phone's entry from the internet, for a phone without Tailscale: the
 # gate (`sclaude-proxy --gate`, socket-activated on 127.0.0.1:3001) behind
-# `tailscale funnel` on :8443. The funnel stays on: Tailscale's relays take
-# minutes to carry a funnel that has just been turned on — its name leaves the
-# public DNS while it is off, and comes back only after a while (five minutes
-# once) — and a phone that pressed the button met "connection closed" every time. What
-# stands at the door instead is the gate, which lets in only the bot's owner.
+# `tailscale funnel` on :8443. The person switches it in Settings
+# (`phone_toggle`), and it stays as they left it across restarts of the bot,
+# but not of the machine (`phone_off_after_boot`). A funnel just turned on is
+# not reachable for minutes, so the app is offered only once its name is
+# published (below). While it is on, what stands at the door is the gate,
+# which lets in only the bot's owner.
 GATE_PORT = 3001
 GATE_LOCAL = "http://127.0.0.1:%d" % GATE_PORT
 GATE_FUNNEL_PORT = 8443

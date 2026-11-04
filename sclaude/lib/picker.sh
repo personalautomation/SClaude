@@ -21,8 +21,10 @@ gh_repo() {
 # The repository's open issues, one line each:
 #
 #   <mine?>\t<number>\t<title>\t<labels, comma-separated>\t<open blockers>
+#   \t<board status>
 #
-# issue_list.py makes them: the bot's Mini App offers the same list.
+# issue_list.py makes them: the bot's Mini App offers the same list, without
+# the board status, which the terminal alone shows.
 fetch_issues() {
   command -v gh >/dev/null 2>&1 || return 1
   # -R rather than the current directory: the issues live in the feature's
@@ -146,11 +148,53 @@ draw_picker() {
   local top="$1" cur="$2" visible="$3" out
   out="$(PICKER_ROWS="$(printf '%s\n' "${ISSUE_ROWS[@]}")" \
     python3 - "$top" "$cur" "$visible" "${PICKER_COLS:-80}" \
-             "$BOLD" "$DIM" "$GREEN" "$OFF" <<'PYDRAW'
-import os, sys
+             "$BOLD" "$DIM" "$GREEN" "$OFF" "${YELLOW:-}" <<'PYDRAW'
+import os, sys, unicodedata
 top, cur, visible, cols = (int(a) for a in sys.argv[1:5])
-BOLD, DIM, GREEN, OFF = sys.argv[5:9]
+BOLD, DIM, GREEN, OFF, YELLOW = sys.argv[5:10]
 rows = [l.split('\t') for l in os.environ['PICKER_ROWS'].splitlines() if l]
+
+
+# Cells on the screen rather than characters: a board column may carry an emoji,
+# which takes two. A row wider than the terminal wraps, and the redraw, which
+# erases by the number of lines printed, leaves the extra screen rows behind.
+# The pictograph blocks count as wide even where Unicode calls them neutral
+# (🏗, ⚠): terminals draw them two cells wide, as vislen in statusline.py knows.
+def cells(text):
+    return sum(2 if unicodedata.east_asian_width(c) in 'WF'
+               or 0x1F300 <= ord(c) <= 0x1FAFF or 0x2600 <= ord(c) <= 0x27BF
+               else 0 if unicodedata.combining(c) else 1 for c in text)
+
+
+def clip(text, room):
+    if cells(text) <= room:
+        return text
+    if room <= 0:
+        return ''
+    while text and cells(text) > room - 1:
+        text = text[:-1]
+    return text + '…'
+
+
+# The blockers are clipped by whole numbers, never inside one: "blocked by #3…"
+# out of "#37 #40" would name an issue that blocks nothing. What is left out is
+# an ellipsis; with no room for one number, the bare word, which the caller
+# always leaves room for.
+def clip_blockers(numbers, room):
+    words = numbers.split()
+    for keep in range(len(words), 0, -1):
+        text = 'blocked by ' + ' '.join(words[:keep])
+        if keep < len(words):
+            text += ' …'
+        if cells(text) <= room:
+            return text
+    return 'blocked'
+
+
+# The title keeps this much (or all of it, when shorter) before the blockers,
+# the status and the labels take the rest of the line from it; only the bare
+# word "blocked" may take more.
+TITLE_MIN = 20
 
 out, section = [''], None
 for idx in range(top, min(top + visible, len(rows) + 1)):
@@ -159,19 +203,35 @@ for idx in range(top, min(top + visible, len(rows) + 1)):
         text = 'type a feature name'
         out.append('  %s %s' % (mark, BOLD + text + OFF if idx == cur else text))
         continue
-    mine, number, title, labels, blocked = (rows[idx - 1] + [''] * 5)[:5]
-    # The blockers go before the labels: they are the one fact here that
-    # changes whether to pick the issue at all.
-    if blocked:
-        labels = 'blocked by ' + blocked + (' · ' + labels if labels else '')
+    mine, number, title, labels, blocked, status = (rows[idx - 1] + [''] * 6)[:6]
     want = 'assigned to me' if mine == '1' else 'other open issues'
     if want != section:
         section = want
         out.append('%s  ── %s %s%s'
                    % (DIM, want, '─' * max(0, cols - len(want) - 9), OFF))
-    tail = '  ' + DIM + labels + OFF if labels else ''
-    room = cols - 12 - (len(labels) + 2 if labels else 0)
-    shown = title if len(title) <= room else title[:max(0, room - 1)] + '…'
+    # 12 cells go to the margin, the marker and the number, and the line never
+    # grows past the terminal. What does not fit is clipped in the order of
+    # what matters least: the labels first, then the board status, then the
+    # blockers — the one fact here that changes whether to pick the issue at
+    # all. They are drawn blockers first, the labels after them, and where the
+    # issue stands on its GitHub board rightmost, in yellow.
+    spare = max(0, cols - 12 - min(TITLE_MIN, cells(title)))
+    # The title gives up its minimum too, if that is what the bare word
+    # "blocked" needs: a blocked issue never reads as one free to start.
+    if blocked:
+        spare = max(spare, cells('blocked') + 2)
+    blocked = clip_blockers(blocked, spare - 2) if blocked else ''
+    spare -= cells(blocked) + 2 if blocked else 0
+    status = clip(status, spare - 2) if status else ''
+    spare -= cells(status) + 2 if status else 0
+    labels = clip(labels, spare - (5 if blocked else 2)) if labels else ''
+    dim = ' · '.join(p for p in (blocked, labels) if p)
+    tail = '  ' + DIM + dim + OFF if dim else ''
+    if status:
+        tail += '  ' + YELLOW + status + OFF
+    room = (cols - 12 - (cells(dim) + 2 if dim else 0)
+            - (cells(status) + 2 if status else 0))
+    shown = clip(title, room)
     line = '#%-4s %s' % (number, shown)
     out.append('  %s %s%s'
                % (mark, BOLD + line + OFF if idx == cur else line, tail))

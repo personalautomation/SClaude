@@ -673,7 +673,9 @@ get every action for a feature in one list instead of remembering commands.
 
 ### A feature, start to finish
 
-**Starting.** `sclaude new` offers the repository's open issues, yours first.
+**Starting.** `sclaude new` offers the repository's open issues, yours first;
+in the terminal each one shows its column on the GitHub board in yellow, last
+on its line.
 The chosen issue suggests a branch name, which you can edit. sclaude creates the
 worktree, moves the issue to `In progress` on the board and fills in its start
 date.

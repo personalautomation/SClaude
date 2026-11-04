@@ -11,12 +11,15 @@
 #     over it would teach people to answer "y" without reading;
 #   * gh failing makes every check silent, never a refusal;
 #   * the picker row gains a fifth column and keeps its first four in place
-#     (pick_start cuts the number and title by position);
+#     (pick_start cuts the number and title by position), and a sixth, the
+#     issue's board status (board_status.py), drawn rightmost — empty, never
+#     a lost list, when the board cannot be read;
 #   * the gate asks only when something is open, and "n" stops the start.
 #
 # Run it with: python3 tests/blockers.py
 import json
 import os
+import pty
 import subprocess
 import sys
 import tempfile
@@ -50,8 +53,17 @@ ISSUES = [
 ]
 
 
-def stub_dir(fail=False):
-    """A directory with a gh that prints ISSUES (list) or one of them (view)."""
+BOARD = {"data": {"repository": {
+    "i61": {"state": "OPEN", "projectItems": {"nodes": [
+        {"fieldValueByName": None},
+        {"fieldValueByName": {"name": "In  progress"}}]}},
+    "i60": {"state": "CLOSED", "projectItems": {"nodes": []}},
+    "i59": None}}}
+
+
+def stub_dir(fail=False, board=True):
+    """A directory with a gh that prints ISSUES (list), one of them (view) or
+    BOARD (graphql, unless board is false)."""
     d = tempfile.mkdtemp()
     data = os.path.join(d, "issues.json")
     with open(data, "w") as fh:
@@ -70,9 +82,11 @@ elif args[:2] == ["issue", "list"]:
     print(json.dumps(issues))
 elif args[:2] == ["issue", "view"]:
     print(json.dumps(next(i for i in issues if str(i["number"]) == args[2])))
+elif args[:2] == ["api", "graphql"] and %r:
+    print(json.dumps(%r))
 else:
     sys.exit(1)
-""" % (fail, data))
+""" % (fail, data, board, BOARD))
     os.chmod(gh, 0o755)
     return d
 
@@ -121,11 +135,101 @@ rows, _ = run(["bash", "-c",
                'gh_repo() { echo o/r; }\n'
                'fetch_issues' % LIB], d)
 rows = [r.split("\t") for r in rows.splitlines()]
-check("picker row width", sorted({len(r) for r in rows}), [5])
+check("picker row width", sorted({len(r) for r in rows}), [6])
 check("picker keeps number and title in place",
       [(r[1], r[2]) for r in rows],
       [("61", "Alpha"), ("60", "Beta"), ("59", "Gamma")])
 check("picker marks the blocked one", [r[4] for r in rows], ["#37", "", ""])
+check("picker shows the board status", [r[5] for r in rows],
+      ["In progress", "Closed", ""])
+
+no_board = stub_dir(board=False)
+rows, _ = run(["bash", "-c",
+               'BOLD=""; DIM=""; GREEN=""; OFF=""; REPO=.\n'
+               'source "%s/picker.sh"\n'
+               'gh_repo() { echo o/r; }\n'
+               'fetch_issues' % LIB], no_board)
+rows = [r.split("\t") for r in rows.splitlines()]
+check("no board: the list stays", [r[1] for r in rows], ["61", "60", "59"])
+check("no board: the column is empty", [r[5] for r in rows], ["", "", ""])
+
+# The drawing: the status stands last, after the labels, in yellow.
+# draw_picker writes to /dev/tty, so it runs under a pty of its own.
+def draw(script):
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execv("/bin/bash", ["bash", "-c", script])
+    buf = b""
+    while True:
+        try:
+            data = os.read(fd, 65536)
+        except OSError:
+            break
+        if not data:
+            break
+        buf += data
+    os.waitpid(pid, 0)
+    return buf.decode("utf-8", "replace")
+
+
+drawn = draw('BOLD=""; DIM="<d>"; GREEN=""; OFF="</>"; YELLOW="<y>"\n'
+             'source "%s/picker.sh"\n'
+             'ISSUE_ROWS=($\'1\\t61\\tAlpha\\tDev\\t\\tIn progress\')\n'
+             'PICKER_COLS=80\n'
+             'draw_picker 0 1 2 > /dev/null\n' % LIB)
+line = next((l for l in drawn.splitlines() if "#61" in l), "")
+check("status drawn rightmost in yellow",
+      line.rstrip().endswith("<d>Dev</>  <y>In progress</>"), True)
+
+# A long row in a narrow terminal stays within it: a wrapped row would leave
+# screen rows behind at every redraw. The width is counted here by hand, apart
+# from the code under test: 🏗 is two cells on screen though Unicode calls it
+# neutral. The blockers outlast the status and the labels; a short title
+# leaves its unused room to them.
+def screen_width(text):
+    return sum(2 if c == "\U0001F3D7" else 1 for c in text)
+
+
+def draw_row(row, cols):
+    drawn = draw('BOLD=""; DIM=""; GREEN=""; OFF=""; YELLOW=""\n'
+                 'source "%s/picker.sh"\n'
+                 "ISSUE_ROWS=($'%s')\n"
+                 'PICKER_COLS=%d\n'
+                 'draw_picker 0 1 2 > /dev/null\n' % (LIB, row, cols))
+    return next((l for l in drawn.splitlines() if "#62" in l), "").rstrip()
+
+
+STATUS = "\U0001F3D7" * 12 + " Waiting for review"
+line = draw_row("1\\t62\\t" + "Long title " * 6 + "\\tbug,needs-design,frontend,"
+                "backend,priority:high\\t#37 #40\\t" + STATUS, 60)
+check("a long row fits the terminal", screen_width(line) <= 60, True)
+check("a long row keeps its blockers", "blocked by #37 #40" in line, True)
+check("a long row keeps its status", "\U0001F3D7" in line, True)
+
+# Labels clipped after the blockers leave room for the " · " between them,
+# rather than taking it from the title.
+line = draw_row("1\\t62\\tFix login\\tbug,needs-design,frontend,backend"
+                "\\t#37 #40\\tDraft", 66)
+check("clipped labels after the blockers fit",
+      (screen_width(line) <= 66, "Fix login  blocked by #37 #40 · bug" in line),
+      (True, True))
+
+# The blockers lose whole numbers, never part of one.
+line = draw_row("1\\t62\\t" + "Long title " * 6 + "\\t\\t#37 #40 #41\\t", 52)
+check("blockers clipped by whole numbers", line.endswith("blocked by #37 …"), True)
+
+# The narrowest picker, a long title: the title gives way to the bare word
+# rather than hide that the issue is blocked, and the labels and the status,
+# which matter less, go.
+line = draw_row("1\\t62\\t" + "Long title " * 3 + "\\tbug\\t#37 #40\\tIn progress", 40)
+check("blocked shown at the narrowest",
+      (line.endswith("  blocked"), "In" in line, screen_width(line) <= 40),
+      (True, False, True))
+
+line = draw_row("1\\t62\\tFix login\\tbug\\t#37 #40\\tWaiting for review", 70)
+check("a short title leaves its room",
+      line.endswith("Fix login  blocked by #37 #40 · bug  Waiting for review"),
+      True)
 
 # --- the question before a start ---------------------------------------------
 

@@ -477,7 +477,8 @@ against the kernel's boot time). A restart of the bot alone leaves it as it was.
 **A new feature on the page is the terminal's picker.** Without a terminal
 `sclaude new` asks only for a name, so the chat's "✨ New feature" starts it
 at once. The page draws what `pick_start` draws instead — the open issues from
-`issue_list.py`, one's own first, the blockers before the labels — then the
+`issue_list.py`, one's own first, the blockers before the labels (the board
+status the terminal shows after them is left out) — then the
 issue with its blockers and the branch name it suggests in a field, or a name
 with a tick for its issue, and starts `sclaude new --issue <n> --blocked-ok
 <branch>` or `--create-issue`/`--no-issue <name>`: the answers go with the

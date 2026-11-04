@@ -7,6 +7,7 @@
 #   issue_list.py rows <owner/repo>
 #       one line per open issue, one's own first and the freshest first:
 #       <mine?>\t<number>\t<title>\t<labels, comma-separated>\t<open blockers>
+#       \t<board status>
 #   issue_list.py suggest <number> <title>
 #       the branch name suggested for that issue (suggest_slug in bin/sclaude)
 #
@@ -18,6 +19,10 @@
 # marked in the list rather than discovered after its worktree exists (see
 # blockers.py).
 #
+# The board status is the issue's column on its project board (board_status.py),
+# for the terminal alone: the Mini App reads `fetch`, which does not ask for it,
+# and a failed request for it leaves the column empty rather than the list.
+#
 # `rows` exits 1 with nothing printed when gh is missing, fails or finds no
 # open issue: the caller then starts the feature by name.
 import os
@@ -28,6 +33,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from blockers import gh_json, open_blockers  # noqa: E402
+from board_status import statuses  # noqa: E402
 
 LIMIT = 50
 
@@ -118,9 +124,11 @@ def main(argv):
         rows = fetch(argv[1])
         if not rows:
             return 1
+        board = statuses(argv[1], [r["number"] for r in rows])
         for r in rows:
-            print("%d\t%d\t%s\t%s\t%s" % (1 if r["mine"] else 0, r["number"], r["title"],
-                                          r["labels"], r["blocked"]))
+            print("%d\t%d\t%s\t%s\t%s\t%s" % (1 if r["mine"] else 0, r["number"], r["title"],
+                                              r["labels"], r["blocked"],
+                                              board.get(r["number"], "")))
         return 0
     if len(argv) == 3 and argv[0] == "suggest":
         print(suggest(argv[1], argv[2]))

@@ -48,9 +48,11 @@ until the merge. One key is the other way round:
 `commands["e2e:server"]`, how the local e2e serves the run's build, comes from
 the worktree's copy alone (`regression_serve_command`), because whether a
 build can stand in for the dev server depends on the branch's code. A change
-to that file left uncommitted in the main tree does not stop production
-(`prod_main_unready`): it is sclaude's settings, not the product, and the pull
-before `vercel --prod` carries it across with `--autostash`.
+to that file left uncommitted in the main tree stops production
+(`prod_main_unready`) until it is what origin's main holds: the settings
+production goes out with are the ones everybody has. The stop lists the keys
+where the two copies differ (`config_diff.py`); the person commits and pushes
+the edit, or takes origin's copy.
 
 Every section is optional and **nothing is defaulted**. A repository with no
 config still gets the cycle — seven steps, a worktree, an issue, a pull request —
@@ -1327,7 +1329,9 @@ clean-up. The hold ships, closes and rolls back nothing — what serves producti
 now, and whose it is, is not known to the pass — and names the way out that
 fits: `sclaude regression <name> prod`, which runs production's suite (only of
 a production that carries the feature) and on green clears the red and lifts
-the hold; the rollback, offered only where it is the person's to choose; or
+the hold — so does it when the project has no production suite
+(`prodRegression: none`, or no list in a config that reads;
+`project_prod_suite_declined`); the rollback, offered only where it is the person's to choose; or
 `sclaude return <name>`, the fix forward from the review where a rollback
 cannot happen, sent back as production's red sends it (`regression_rewind`), so
 the review is handed the failure. A red production GitHub cannot attribute
@@ -1335,7 +1339,8 @@ the review is handed the failure. A red production GitHub cannot attribute
 way, and `return` with it, until GitHub answers: neither ships past it nor
 takes it for a QA hand-back. Only a broken environment is recorded as one
 that could not run: a project with no production suite or address has nothing
-to hold on, and is not held. The process map draws the hold where the cycle
+to hold on, and is not held after its ship; a red held from before the
+suite was given up is lifted by `sclaude regression <name> prod`. The process map draws the hold where the cycle
 first reaches it, off `Production green?` beside the rollback, though every
 later pass checks it first; the menu names it `steps done, production held`, and a
 production regression still running `steps done, production regression running` (both

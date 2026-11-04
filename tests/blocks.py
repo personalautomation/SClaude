@@ -231,7 +231,7 @@ try:
     #
     # Production stops on that commit, and says what it is and what to do,
     # without pushing, rebasing or dropping anything.
-    stop = 'alarm() { echo "ALARM $*"; }\nprod_main_unready %s; echo "rc=$?"' % REPO
+    stop = 'LIB=%s\nalarm() { echo "ALARM $*"; }\nprod_main_unready %s; echo "rc=$?"' % (LIB, REPO)
     out, err, _ = run_bash(stop, tmp)
     check_true("stop-on-unpushed", "rc=0" in out and "local only" in out)
     check_true("stop-says-push", "push origin main" in out)
@@ -251,26 +251,50 @@ try:
         fh.write("x\n")
     out, _, _ = run_bash(stop, tmp)
     check("stop-ignores-scratch", out.strip(), "rc=1")
-    # Nor is sclaude's config, edited by hand in this tree: the settings
-    # every feature reads, carried across the pull by --autostash.
+    # sclaude's config edited here must be what origin holds: a change of
+    # whitespace alone is the same settings, and not a stop.
     config_path = os.path.join(REPO, ".sclaude", "config.json")
     kept = open(config_path).read() if os.path.exists(config_path) else None
     with open(config_path, "w") as fh:
         fh.write((kept or "{}") + "\n")
     out, _, _ = run_bash(stop, tmp)
-    check("stop-ignores-the-config", out.strip(), "rc=1")
-    # Unless what the pull brings changes it too: the autostash would not
-    # apply, and the edit would be left in a stash nobody is told of.
+    check("stop-ignores-the-same-config", out.strip(), "rc=1")
+    # A setting changed here and not on origin stops it, and the key is shown.
+    with open(config_path, "w") as fh:
+        json.dump(dict(json.loads(kept or "{}"), ship="auto"), fh)
+    out, _, _ = run_bash(stop, tmp)
+    check_true("stop-on-a-config-edit",
+               "rc=0" in out and 'ship: "auto" · (none)' in out and "checkout origin/main" in out)
+    # Compared as written: true here is not 1 on origin, and a key set to
+    # null here is not one origin lacks.
+    with open(config_path, "w") as fh:
+        json.dump(dict(json.loads(kept or "{}"), qa=True, merge=None), fh)
+    with open(config_path + ".origin", "w") as fh:
+        json.dump(dict(json.loads(kept or "{}"), qa=1), fh)
+    diff = subprocess.run(["python3", os.path.join(LIB, "config_diff.py"),
+                           config_path, config_path + ".origin"],
+                          capture_output=True, text=True).stdout
+    os.remove(config_path + ".origin")
+    check("config-diff-typed", sorted(diff.splitlines()),
+          ["merge\tnull\t(none)", "qa\ttrue\t1"])
+    with open(config_path, "w") as fh:
+        json.dump(dict(json.loads(kept or "{}"), ship="auto"), fh)
+    # Origin moving the file on while it is edited here: both sides shown.
     other_config = os.path.join(other, ".sclaude", "config.json")
     os.makedirs(os.path.dirname(other_config), exist_ok=True)
+    git("pull", "-q", "origin", "main", cwd=other)
     with open(other_config, "w") as fh:
-        fh.write('{"review": "github"}\n')
+        json.dump(dict(json.loads(kept or "{}"), ship="ask"), fh)
     git("add", "-f", ".sclaude/config.json", cwd=other)
     git("commit", "-q", "-m", "their config", cwd=other)
     git("push", "-q", "origin", "HEAD:main", cwd=other)
     out, _, _ = run_bash(stop, tmp)
-    check_true("stop-when-the-pull-changes-the-config-too",
-               "rc=0" in out and "so the pull does not bury it" in out)
+    check_true("stop-shows-both-sides", "rc=0" in out and 'ship: "auto" · "ask"' in out)
+    # Equal to origin's, though main is behind: the pull brings the rest.
+    with open(config_path, "w") as fh:
+        fh.write(open(other_config).read())
+    out, _, _ = run_bash(stop, tmp)
+    check("go-when-equal-to-origin", out.strip(), "rc=1")
     git("reset", "-q", "--hard", "HEAD~1", cwd=other)
     git("push", "-q", "-f", "origin", "HEAD:main", cwd=other)
     git("fetch", "-q", "origin", cwd=REPO)

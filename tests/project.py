@@ -99,6 +99,19 @@ try:
     out, _, _ = run_bash('REPO=%s; project_command typecheck' % proj, tmp)
     check("command-read", out.strip(), "pnpm typecheck")
 
+    # Production with no suite by the project's word — no list, or none —
+    # and not when the config cannot be read, which empties the list too.
+    declined = 'REPO=%s; project_prod_suite_declined && echo yes || echo no'
+    out, _, _ = run_bash(declined % proj, tmp)
+    check("prod-declined-no-list", out.strip(), "yes")
+    broken = os.path.join(tmp, "broken")
+    with open(_cfg(os.path.join(broken, ".sclaude/config.json")), "w") as fh:
+        fh.write("{ not json")
+    out, _, _ = run_bash(declined % broken, tmp)
+    check("prod-not-declined-unreadable", out.strip(), "no")
+    out, _, _ = run_bash(declined % os.path.join(tmp, "nowhere"), tmp)
+    check("prod-not-declined-missing", out.strip(), "no")
+
     # --- what a deployed stage runs: previewRegression / prodRegression -----
     modes = os.path.join(tmp, "modes")
     def stage_parts(cfg, stage):
@@ -121,6 +134,12 @@ try:
     check("mode-smoke-adds-nothing", out.strip(), "[]")
     check("mode-local-untouched", stage_parts({"previewRegression": "none", "prodRegression": "none"}, "local"),
           ["lint e2e", "[]"])
+    stage_parts({"prodRegression": "none"}, "prod")
+    out, _, _ = run_bash('REPO=%s; project_prod_suite_declined && echo yes || echo no' % modes, tmp)
+    check("prod-declined-none", out.strip(), "yes")
+    stage_parts({}, "prod")
+    out, _, _ = run_bash('REPO=%s; project_prod_suite_declined && echo yes || echo no' % modes, tmp)
+    check("prod-not-declined-with-a-list", out.strip(), "no")
     nosmoke = {"previewRegression": "smoke",
                "regression": {"local": ["e2e"], "preview": ["e2e"]}}
     check("mode-smoke-undeclared-is-full", stage_parts(nosmoke, "preview"),

@@ -189,7 +189,9 @@ rollback failed, you declined it, another release sits on top, or the tests
 could not run in a broken environment — sclaude holds the feature, and the menu shows it as
 `steps done, production held`: nothing is shipped, closed or cleaned up, and it says which
 way out fits. `sclaude regression <name> prod`
-runs the production tests again and, green, lifts the hold;
+runs the production tests again and, green, lifts the hold — as it does when
+the project has no production tests (`prodRegression` set to `none`, or no
+list for production);
 `sclaude rollback <name>` puts the previous release back and sends the fix to
 the review step; `sclaude return <name>` sends the fix forward from the review
 where going back is not possible. The bot's action list offers the production
@@ -271,7 +273,7 @@ QA never saw the feature.
 
 A product may hand either decision back to sclaude, in `.sclaude/config.json`
 or from `sclaude config`. The main checkout's copy is read for every feature,
-and a change to it left uncommitted there does not hold production up. `qa` and `merge` each take `github` (a person does it
+and a change to it left uncommitted there holds production up until it is what origin holds: the stop lists where the two differ, and you commit and push the change or take origin's copy. `qa` and `merge` each take `github` (a person does it
 on GitHub; sclaude waits), `both` (the same, or a key in sclaude's wait — `a`
 accepts, `m` merges) and `auto` (sclaude does it). By default QA is `github` and
 the merge `both`. An acceptance given by sclaude says so in a comment on the
@@ -650,7 +652,7 @@ sclaude sync <name>     # merge the latest main into a feature's branch
 sclaude news <name>     # what has happened on the pull request
 sclaude preview <name>  # deploy the branch to a preview
 sclaude rollback <name> # put production back to the release before this feature
-sclaude regression <name> prod  # run the production tests again; green lifts a hold
+sclaude regression <name> prod  # run the production tests again; green (or no production tests) lifts a hold
 sclaude replan <name>   # take a feature back to step 1 and plan it again
 sclaude return <name> [reason]  # send a finished feature back to step 4
 sclaude reset <name>    # start the current step over, forgetting its conversation

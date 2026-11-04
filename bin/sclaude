@@ -1005,6 +1005,19 @@ cmd_regression() {
       info "  Production is green. Carry on with: $SELF $slug"
       return 0
     fi
+    if [[ "$rc" -eq 2 ]] && project_prod_suite_declined "$wt"; then
+      # No suite for production by the project's word (`prodRegression: none`
+      # or no list; project_prod_suite_declined): the person
+      # chose to check nothing there, so the red held of an earlier run goes,
+      # as remind_prod drops it after a ship.
+      state_set "$state" regression.prod.status null 2>/dev/null || true
+      state_set "$state" regression.prod.unrunnable null 2>/dev/null || true
+      state_set "$state" regression.prod.intruded null 2>/dev/null || true
+      state_set "$state" regression.prod.attempts 0 2>/dev/null || true
+      regression_clear_mark "$wt" prod
+      info "  Nothing holds production now. Carry on with: $SELF $slug"
+      return 0
+    fi
     if [[ "$rc" -eq 2 ]]; then
       info "  It could not run; nothing changed. Run it again once it can."
     else

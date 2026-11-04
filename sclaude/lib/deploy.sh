@@ -578,22 +578,21 @@ say_lines() {
 # or dropped on the person's behalf: whether it belongs on origin is theirs to
 # say.
 #
-# sclaude's own config is no such change: it is the settings every feature
-# reads from this tree (project_config), edited here by hand — `merge: auto`
-# among them — and nothing the product runs. The block's pull carries it
-# across (--autostash) — unless what it pulls changes the file too: the stash
-# would not apply, git says so and goes on, and the person's settings sit in a
-# stash nobody mentions. Then it stops here, the one time a fetch is made.
+# sclaude's own config is held to the same: the settings every feature reads
+# from this tree (project_config), edited here by hand or through `sclaude
+# config`, must be what origin holds before production goes. An edit here and
+# not on origin is a setting nobody else has, and one the pull would bury in a
+# stash when origin changes the file too. Where the two copies differ is
+# listed key by key (config_diff.py), and making them equal is the person's:
+# commit and push the edit, or take origin's copy.
 prod_main_unready() {
-  local repo="$1" commits dirt config=".sclaude/config.json" incoming=""
+  local repo="$1" commits dirt config=".sclaude/config.json" cfgdiff=""
   commits="$(main_unpushed "$repo")"
   dirt="$(worktree_dirt "$repo" "$config")"
-  if [[ -n "$(git -C "$repo" status --porcelain -- "$config" 2>/dev/null)" ]] \
-     && GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$repo" fetch -q origin main 2>/dev/null \
-     && [[ -n "$(git -C "$repo" diff --name-only HEAD origin/main -- "$config" 2>/dev/null)" ]]; then
-    incoming=1
+  if [[ -n "$(git -C "$repo" status --porcelain -- "$config" 2>/dev/null)" ]]; then
+    cfgdiff="$(prod_config_diff "$repo")"
   fi
-  [[ -n "$commits$dirt$incoming" ]] || return 1
+  [[ -n "$commits$dirt$cfgdiff" ]] || return 1
   echo ""
   alarm "Production — main in $repo is not what origin holds:"
   if [[ -n "$commits" ]]; then
@@ -608,11 +607,31 @@ prod_main_unready() {
     say_lines "$dirt"
     info "  Commit and push them, or put them away (git -C $repo stash)."
   fi
-  if [[ -n "$incoming" ]]; then
-    info "  $config is edited here, and what the pull brings changes it too:"
-    info "  commit and push your edit, or put it away, so the pull does not bury it."
+  if [[ -n "$cfgdiff" ]]; then
+    info "  $config here is not origin's — where they differ (here · origin):"
+    local key here theirs
+    while IFS=$'\t' read -r key here theirs; do
+      [[ -n "$key" ]] && info "    $key: $here · $theirs"
+    done <<< "$cfgdiff"
+    info "  Make them equal: commit and push your edit (bring main level with"
+    info "  origin first if it is behind), or take origin's copy"
+    info "  (git -C $repo checkout origin/main -- $config)."
   fi
   return 0
+}
+
+# The keys where the main tree's config differs from origin's main, as
+# config_diff.py lists them; nothing when they are equal. One fetch, short and
+# silent: a stale origin/main is compared when it fails.
+#
+#   prod_config_diff <repo>
+prod_config_diff() {
+  local repo="$1" config=".sclaude/config.json" theirs
+  GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$repo" fetch -q origin main 2>/dev/null || true
+  theirs="$(mktemp)"
+  git -C "$repo" show "origin/main:$config" > "$theirs" 2>/dev/null || : > "$theirs"
+  python3 "$LIB/config_diff.py" "$repo/$config" "$theirs"
+  rm -f "$theirs"
 }
 
 # The branch's migrations, onto the database the previews run on.
@@ -2648,6 +2667,14 @@ remind_prod() {
       state_set "$wt/.sclaude/local/feature/state.json" regression.prod.intruded null 2>/dev/null || true
       state_set "$wt/.sclaude/local/feature/state.json" regression.prod.attempts 0 2>/dev/null || true
       regression_clear_mark "$wt" prod
+    elif [[ "$prod_rc" -eq 2 ]] && project_prod_suite_declined "$wt"; then
+      # No suite for production by the project's word — `prodRegression:
+      # none`, or no list declared — said by regression_run, and not a suite
+      # that failed to run (project_prod_suite_declined: an unreadable config
+      # empties the list too, and must not drop a red). The cycle goes on to its end, the
+      # retrospective and the clean-up; a red mark left by an earlier run
+      # comes off, since nothing will ever run to take it off.
+      regression_clear_mark "$wt" prod
     elif [[ "$prod_rc" -eq 2 ]]; then
       # The stage could not run at all — no address to aim at, nothing served.
       # A rollback is not the answer to a suite that never ran: the deployment
@@ -2702,7 +2729,7 @@ remind_prod() {
   fi
 
   # The cycle is over here: every red or unrunnable production regression
-  # returned above. So the issue closes — whether production carries the
+  # returned above (one the project declares none of is neither). So the issue closes — whether production carries the
   # feature or the human declined to ship it. A declined production used to
   # leave the issue open, and nothing ever came back to close it: one issue
   # stayed open, merged and accepted, after its production question was

@@ -168,6 +168,21 @@ project_stage_regression() {
   esac
 }
 
+# Whether production has no suite by the project's own word: prodRegression
+# none, or a config that reads and declares no list for it. Not when the
+# config is missing or is not JSON: the list is empty then too, with nobody
+# having said so, and a red must not be dropped on that (remind_prod and
+# `sclaude regression <name> prod` ask this before they do).
+#
+#   project_prod_suite_declined [wt]
+project_prod_suite_declined() {
+  local wt="${1:-}" file
+  [[ "$(project_stage_regression prod "$wt")" == none ]] && return 0
+  file="$(project_config "$wt")" || return 1
+  python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$file" 2>/dev/null || return 1
+  [[ -z "$(project_regression_parts prod "$wt" 2>/dev/null)" ]]
+}
+
 # Which list of `regression` a stage runs: its own, `smoke`, or nothing
 # (exit 1) for a deployed stage set to none.
 #

@@ -1769,6 +1769,18 @@ check_true("hold-intruded-offers-forward", "sclaude return demo" in out)
 # recorded (regression_run), and it is held as one that could not run.
 rc2 = re.search(r'elif \[\[ "\$prod_rc" -eq 2 \]\]; then\n(.*?)\n    else\n', remind_src, re.S)
 check_true("prod-2-not-recorded-as-red", rc2 is not None and "regression.prod.status" not in rc2.group(1))
+# A production with no suite declared — `prodRegression: none` — is the
+# person's choice, not a suite that could not run: the cycle goes on to the
+# retrospective and the clean-up, ahead of the stop the other 2s get.
+none2 = re.search(r'elif \[\[ "\$prod_rc" -eq 2 \]\] && project_prod_suite_declined "\$wt"; then\n(.*?)\n    elif', remind_src, re.S)
+check_true("prod-none-goes-on",
+           none2 is not None and "return" not in none2.group(1)
+           and "regression_clear_mark" in none2.group(1)
+           and remind_src.find("project_prod_suite_declined") < remind_src.find('elif [[ "$prod_rc" -eq 2 ]]; then'))
+# By hand too: with no production suite, the held red is lifted, not kept.
+check_true("regression-by-hand-none-lifts-the-hold",
+           -1 < creg.find('if [[ "$rc" -eq 2 ]] && project_prod_suite_declined "$wt"; then')
+           < creg.find('regression.prod.status null') < creg.find("It could not run"))
 out = held({"status": "failed", "unrunnable": True})
 check_true("hold-unrunnable-offers-forward", "sclaude return demo" in out)
 # The way forward from a held production hands the review the failure, as

@@ -557,8 +557,11 @@ echo "watcher=[$SESSION_WATCHER]"
     os.remove(own)
     with open(os.path.join(LIB, "github.sh")) as fh:
         GH = fh.read()
-    check("epilogue-watched", 'session_watch_start "" "$session" "$done_file" "$REPO"' in GH, True)
-    check("epilogue-reports", 'session_closed "$done_file" "$REPO" "$session"' in GH, True)
+    # In the feature's tree while there is one, as every step (the map reads
+    # its transcript there); the main checkout once the tree is gone.
+    check("epilogue-watched", 'session_watch_start "" "$session" "$done_file" "$cwd"' in GH, True)
+    check("epilogue-reports", 'session_closed "$done_file" "$cwd" "$session"' in GH, True)
+    check("epilogue-in-the-tree", '[[ -n "$wt" && -d "$wt" ]] && cwd="$wt"' in GH, True)
 
     # --- the last message is the text after the last thing handed in ----------
     open(transcript, "w").close()

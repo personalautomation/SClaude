@@ -693,17 +693,13 @@ run_step() {
   if [[ "$review_word" == "clean" || "$review_word" == "unreviewed" ]]; then
     state_set "$state" "steps.$step.started" "$(date -Iseconds)"
     if [[ "$review_word" == "clean" ]]; then
-      state_set "$state" "steps.$step.skipped" "clean review"
       say "${GREEN}✓ The automatic review of PR #$pr passed with no findings, no comments and every check green.${OFF}"
     elif [[ "$review_mode" == "local" ]]; then
-      state_set "$state" "steps.$step.skipped" "clean local review"
       say "${GREEN}✓ The review on this machine found nothing in PR #$pr; every check is green and nobody commented.${OFF}"
     elif [[ "$review_mode" == "off" ]]; then
-      state_set "$state" "steps.$step.skipped" "review off"
       warn "  PR #$pr was NOT reviewed: the project's .sclaude/config.json turns the review off."
       info "  Every check is green and nobody commented."
     else
-      state_set "$state" "steps.$step.skipped" "review skipped by its workflow"
       warn "  PR #$pr was NOT reviewed: the review workflow skipped it (marked not-reviewed)."
       info "  Every check is green and nobody commented."
     fi
@@ -4004,9 +4000,10 @@ marker_gone() {
 # take it away mid-sentence. The session writes it again when it is done
 # again. The transcript tells both apart (session_end.py watch).
 #
-# The epilogue and the friction review run outside the feature's worktree — in
-# the main repository, in instruments — so they name their own marker and the
-# directory their transcript is kept under; <wt> is then empty.
+# The epilogue and the friction review name their own marker and the
+# directory their transcript is kept under — the epilogue the feature's tree
+# (the main repository once the tree is gone), the friction review
+# instruments — and <wt> is then empty.
 #
 # Step 1 writes no marker: its kind, "plan", makes the plan's approval the
 # moment counted from instead (session_end.py approved). A person who types

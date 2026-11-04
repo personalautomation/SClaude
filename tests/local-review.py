@@ -57,6 +57,13 @@ def check_true(name, got):
         failures.append((name, "true", got))
 
 
+def recorded(journal_text):
+    """The journal's reviewed runs: a pass that ran and was not recorded is
+    journaled as spent (for its cost), and is not one."""
+    return "".join(line + "\n" for line in journal_text.splitlines()
+                   if line.strip() and not json.loads(line).get("spent"))
+
+
 def git(*args, cwd):
     return subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True,
                           text=True, check=False).stdout.strip()
@@ -405,7 +412,7 @@ try:
     _, _, rc = review("### a.txt:1 — one\nx\n\n## Something else\n\nFINDINGS: 2\n")
     check("count-mismatch-fails", rc, 1)
     with open(journal) as fh:
-        check("count-mismatch-not-recorded", fh.read(), before)
+        check("count-mismatch-not-recorded", recorded(fh.read()), recorded(before))
     prompts()
 
     # A thread a person opened, and one the person keeps to resolve by hand,
@@ -536,7 +543,7 @@ try:
     os.remove(world + ".down")
     check("nothing-posted-fails", rc, 1)
     with open(journal) as fh:
-        check("failures-not-recorded", fh.read(), before)
+        check("failures-not-recorded", recorded(fh.read()), recorded(before))
     prompts()
 
     # A head GitHub does not have yet: no run.
@@ -657,12 +664,14 @@ try:
     os.close(master)
     os.remove(os.path.join(tmp, "during"))
     check_true("stop-now-said", b"Stopped pass 1 as you said" in seen)
-    heads = {json.loads(line)["head"] for line in before.splitlines() if line.strip()}
+    heads = {json.loads(line)["head"] for line in recorded(before).splitlines()}
     check_true("status-says-round", ("local review, round %d (" % (len(heads) + 1)).encode() in seen)
     check("status-no-first-pass", b"pass 1 (" in seen, False)
     check("stop-now-nothing-posted", len(threads()) - posted_before, 0)
     with open(journal) as fh:
-        check("stop-now-not-recorded", fh.read(), before)
+        after = fh.read()
+    check("stop-now-not-recorded", recorded(after), recorded(before))
+    check_true("stop-now-spent-journaled", after.count('"spent": true') > before.count('"spent": true'))
     answer_file = os.path.join(repo, ".sclaude", "local", "feature", "local-review-answer.md")
     with open(answer_file) as fh:
         check_true("stop-now-keeps-last-answer", "never" not in fh.read())
@@ -715,7 +724,7 @@ try:
     check_true("phone-stop-said", "Stopped pass 1 as you said" in err)
     check("phone-stop-taken", os.path.exists(os.path.join(phone, review_keys.SAID_FILE)), False)
     with open(journal) as fh:
-        check("phone-stop-not-recorded", fh.read(), before)
+        check("phone-stop-not-recorded", recorded(fh.read()), recorded(before))
     with open(state) as fh:
         check("phone-stop-kept", json.load(fh)["steps"]["review"]["enough"], "now")
     prompts()

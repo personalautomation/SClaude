@@ -900,6 +900,12 @@ PY
 # less what the launches before it had already seen. Claude Code reports a
 # session's spend as a running total; whether a `--resume` starts it again
 # from zero or carries it on, the difference is what this launch added.
+# When the launch began goes beside it, in `cost_at` (the run's `resumed`, or
+# `started` for the first): the review report puts a launch on the first
+# review run after that, by time, since a launch that pushed nothing
+# (reopened, resumed after a crash) is a launch all the same. Its start, not
+# its end: a launch that waits for the workflow's review of its own push
+# ends after the run it started.
 #
 #   run_cost <wt> <session>
 run_cost() {
@@ -925,6 +931,7 @@ run = mine[-1]
 seen = run.get("cost_seen") or 0
 run["cost_seen"] = cost
 run.setdefault("costs", []).append(round(cost - seen if cost >= seen else cost, 4))
+run.setdefault("cost_at", []).append(run.get("resumed") or run.get("started") or "")
 with open(path, "w") as fh:
     json.dump(data, fh, indent=2, ensure_ascii=False)
     fh.write("\n")

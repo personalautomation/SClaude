@@ -379,9 +379,18 @@ ids, so `position`, the commands and the lighting reach them there, and the
 whole process marks where each runs with an R or an S. A run or a sync is
 played as a pass on its map (`_regression_way`, `_sync_way`), each place
 with its own time, so what it took — your input, Claude's cost, the wait for
-your answers, the minutes
+your answers, the caches written again, the minutes
 — counts on that map, summed over every pass, and the step it came from
 keeps only its own.
+
+**Where a conversation's transcript is.** The map reads each conversation's
+summary from Claude Code's transcripts (`transcripts_of`), under the
+feature's tree first, then under the main checkout and sclaude's own
+checkout, where a friction review or an epilogue of an earlier sclaude ran;
+the local review's passes come from its journal. A cache written again is a
+request, past the first of a conversation, that wrote more of its context to
+the prompt cache than it read and more than `CACHE_REBUILT_MIN` tokens
+(`expired` in `claude_usage.py`): what an expired cache costs.
 
 **F and W turn while they are at work.** A badge carries a ring that the
 feature's page turns (`busy` in `process.py`, handed over by `_flow`): F on
@@ -1615,6 +1624,22 @@ still go on, each on the last one's fixes — four fresh sessions in a row once
 rewrote comments the one before had written. Not on one round: a last finding
 that happens to sit on an earlier fix says it too.
 
+**What a round cost is in two parts.** `review` is the review run's own
+cost: each pass on this machine is a headless session sclaude names, and
+Claude Code's account in its transcript, subagents included, is read by the
+journal's `session` (`pass_cost` in `review_report.py`, `read` in
+`claude_usage.py`); a pass the person stopped, or whose answer was not
+taken, is journaled as `spent` for its cost alone (`spent` in
+`local_review.py`), never as a reviewed head. The workflow's review runs on
+GitHub and shows `—`. `fixes` is the fixing launches that run read, by when
+each began (`cost_at`, `run_cost` in `steps.sh`; `fixes_per_round` — on
+GitHub a launch waits for the run of its own push and ends after it), so a
+launch that pushed nothing adds to its run instead of shifting the rest;
+the launch no run has read yet counts in the total only. The process map
+prices the passes from the same journal, on their own block. The
+report once showed the fixes alone under `cost`, the reviews left out, and
+put a session's whole spend on its first round after every session.
+
 **A second pull request starts its own report.** A feature reopened after
 its merge — a retrospective's fixes, a rollback — goes on under a new pull
 request, in the same state and journal. The report counts only the review
@@ -1942,8 +1967,12 @@ retrospective 7). It runs before the clean-up, while the worktree is still
 there, but by then the feature is already `done`, and an epilogue that broke
 off may be finished later with `sclaude epilogue` — after `sclaude done` has
 removed the worktree and its `state.json`. So it keeps its own record outside
-every repository, in `~/.claude/sclaude/epilogue/<feature>.json`, and the
-session runs from the main repository. In its construction this is closest to
+every repository, in `~/.claude/sclaude/epilogue/<feature>.json`. The
+session runs in the feature's worktree, as every step does, so that its
+transcript is where the process map reads the feature's conversations; only
+when the tree is already gone does it run from the main repository, and then
+it starts afresh rather than resume a conversation kept under the other
+directory. In its construction this is closest to
 the friction review — a session outside `STEPS`, with a prompt of its own.
 
 **A friction review reads its own entries.** Before it starts, the fresh log is

@@ -650,7 +650,9 @@ for name in ORDER:
 # counting the feature's sessions should find them here as well. Read from
 # the journal beside the state; a pass with no model run (a head with nothing
 # open to check, `seconds` 0) is no session and has no row. A pass journaled
-# before passes were named has a dash for its id.
+# before passes were named has a dash for its id. A pass that ran and was not
+# recorded (`spent` in local_review.py: stopped, or its answer not taken) is
+# a session all the same, marked so: it reviewed nothing.
 def review_pass_rows():
     path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])),
                         "local-review-rounds.jsonl")
@@ -679,10 +681,11 @@ def review_pass_rows():
         except (ValueError, TypeError):
             pass
         found = row.get("new")
-        rows.append("| %s%s%s | done | %s | %s | %s | — |" % (
+        rows.append("| %s%s%s | %s | %s | %s | %s | — |" % (
             "local review",
             " (%d)" % number if len(passes) > 1 else "",
             " - %d %s" % (found, COMMENTS_ICON) if isinstance(found, int) else "",
+            "stopped, not recorded" if row.get("spent") else "done",
             "`%s`" % sid[:8] if sid else "—",
             when(began),
             when(ended),
@@ -2201,9 +2204,17 @@ run_status() {
             render_prompt status "$slug" "$pr" "$issue" "")" || return 0
   [[ -n "$prompt" ]] || return 0
 
+  # In the feature's worktree, as every other step: its transcript is then
+  # where the process map reads the feature's conversations. The main checkout
+  # only when the tree is already gone — a resumed epilogue after the
+  # clean-up, which then starts afresh rather than resume a conversation kept
+  # under the other directory.
+  local cwd="$REPO"
+  [[ -n "$wt" && -d "$wt" ]] && cwd="$wt"
+
   echo ""
   echo "${BOLD}${BLUE}── $slug · $(phase_title epilogue): the status into issue #$issue and its parents ──${OFF}"
-  info "   sonnet / medium / auto · $REPO"
+  info "   sonnet / medium / auto · $cwd"
   info "   chain: $(tr '\n' ' ' <<< "$numbers")${labels:+ · labels: $labels}"
   echo ""
 
@@ -2218,7 +2229,7 @@ run_status() {
   estate="$(epilogue_state "$slug")" || estate=""
   if [[ -n "$estate" ]]; then
     session="$(state_get "$estate" session || true)"
-    if [[ -n "$session" ]] && ! live_session "$REPO" "$session" >/dev/null; then
+    if [[ -n "$session" ]] && ! live_session "$cwd" "$session" >/dev/null; then
       session=""
     fi
     # An interrupted one about another preview (red, now green) is not
@@ -2249,10 +2260,10 @@ run_status() {
   [[ -n "$pr" && "$pr" != null && "$merged" != MERGED ]] && about=preview
   [[ -n "$fstate" ]] && SCLAUDE_ABOUT="$about" session_runs "$fstate" epilogue open "$session"
 
-  session_watch_start "" "$session" "$done_file" "$REPO"
+  session_watch_start "" "$session" "$done_file" "$cwd"
   if [[ -n "$estate" && "$session" == "$(state_get "$estate" session 2>/dev/null || true)" ]]; then
     info "   resuming the interrupted epilogue"
-    ( cd "$REPO" && claude_launch --resume "$session" --model sonnet --effort medium \
+    ( cd "$cwd" && claude_launch --resume "$session" --model sonnet --effort medium \
         --permission-mode auto "${extra[@]}" -n "$(session_label epilogue)/$slug" \
         "Back in the epilogue for feature '$slug'. Pick up where the conversation left off." )
   else
@@ -2271,13 +2282,13 @@ run_status() {
       state_set "$estate" preview "$preview"
       state_set "$estate" prod "$prod"
       state_set "$estate" preview_red "$preview_red"
-      ( cd "$REPO" && claude_launch --session-id "$session" --model sonnet --effort medium \
+      ( cd "$cwd" && claude_launch --session-id "$session" --model sonnet --effort medium \
           --permission-mode auto "${extra[@]}" -n "$(session_label epilogue)/$slug" "$prompt" )
     else
       # The state could not be created — we write the epilogue anyway: the
       # section in the issue matters more than the ability to return to an
       # interrupted session.
-      ( cd "$REPO" && claude_launch --session-id "$session" --model sonnet --effort medium \
+      ( cd "$cwd" && claude_launch --session-id "$session" --model sonnet --effort medium \
           --permission-mode auto "${extra[@]}" -n "$(session_label epilogue)/$slug" "$prompt" )
     fi
   fi
@@ -2285,13 +2296,13 @@ run_status() {
   # It said its comments are written, and the watcher closed it: the report is
   # printed here, since claude's screen went with it.
   local written=0
-  session_closed "$done_file" "$REPO" "$session" "" "" epilogue && written=1
+  session_closed "$done_file" "$cwd" "$session" "" "" epilogue && written=1
   # Whether it took place, by the transcript rather than the clock — the
   # witness run_step and run_friction use (session_started, state.sh). The
   # clock timed the wrapper, and the row and the epilogue's own state must not
   # give two answers.
   local ran=0
-  session_started "$REPO" "$session" && ran=1
+  session_started "$cwd" "$session" && ran=1
 
   if [[ -n "$fstate" ]]; then
     if [[ "$ran" -eq 1 ]]; then

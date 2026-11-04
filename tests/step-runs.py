@@ -262,7 +262,9 @@ with tempfile.TemporaryDirectory() as wt:
     with open(os.path.join(feature, "local-review-rounds.jsonl"), "w") as fh:
         for row in ({"at": "2026-10-01T09:00:00+00:00", "seconds": 120, "new": 3, "session": "p1111111-a"},
                     {"at": "2026-10-01T09:30:00+00:00", "seconds": 0, "new": 0},
-                    {"at": "2026-10-01T10:00:00+00:00", "seconds": 60, "new": 1}):
+                    {"at": "2026-10-01T10:00:00+00:00", "seconds": 60, "new": 1},
+                    {"at": "2026-10-01T10:30:00+00:00", "seconds": 40, "spent": True,
+                     "session": "s1111111-b"}):
             fh.write(json.dumps(row) + "\n")
     out = render_all(path, running="retro")
     lines = out.splitlines()
@@ -270,7 +272,8 @@ with tempfile.TemporaryDirectory() as wt:
     check("heading-names-nothing-of-the-feature", "42" in lines[1] or "some-thing" in lines[1], False)
     check("feature-below-the-heading", "Feature `42-some-thing`" in lines[3], True)
     passes = [r for r in lines if r.startswith("| local review")]
-    check("a-row-per-pass-a-model-ran", len(passes), 2)
+    check("a-row-per-pass-a-model-ran", len(passes), 3)
+    check("a-stopped-pass-is-not-done", passes[2].split("|")[2].strip(), "stopped, not recorded")
     check("pass-row-names-session-and-findings",
           [c.strip() for c in passes[0].split("|")[1:6]],
           ["local review (1) - 3 \U0001F4AC", "done", "`p1111111`", "2026-10-01 09:00", "2026-10-01 09:02"])

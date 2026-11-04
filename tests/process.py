@@ -985,6 +985,75 @@ ms = process.history({}, [{"at": at("09:00"), "what": "steps.plan", "op": "open"
                      "review", {"s1": {"human": [], "cost": 5.0}}.get)["metrics"]["cost"]
 check("metrics: a sync broken off and resumed counts on the glance where its pass began",
       ms.get("ahead") == {"code": 5.0}, str(ms))
+lp = process.history({}, [{"at": at("09:00"), "what": "steps.review", "op": "open", "session": "r"},
+                          {"at": at("09:30"), "what": "steps.review", "op": "end", "session": "r"},
+                          {"at": at("09:40"), "what": "review.local", "op": "start"},
+                          {"at": at("09:45"), "what": "review.local", "op": "end", "open": "2"}],
+                     "review", {"r": {"human": [], "cost": 3.0}, "p1": {"human": [], "cost": 1.25,
+                                                                         "expired": [[at("09:42"), 60000]]},
+                                "p2": {"human": [], "cost": 0.5}}.get,
+                     [{"at": at("09:41"), "head": "h", "session": "p1"},
+                      {"at": at("09:43"), "head": "h", "session": "p2", "spent": True}])["metrics"]
+check("metrics: a local review's passes cost on the pass, from the journal, the fixing session on its step",
+      lp["cost"]["detail"] == {"review": 3.0, "local_pass": 1.75}, str(lp["cost"]))
+check("metrics: a pass's cache written again counts on the pass too",
+      lp["expired"] == {"detail": {"local_pass": 1}}, str(lp["expired"]))
+ep = process.history({}, [{"at": at("09:00"), "what": "steps.review", "op": "open", "session": "r"},
+                          {"at": at("09:30"), "what": "steps.review", "op": "end", "session": "r"},
+                          {"at": at("09:40"), "what": "epilogue", "op": "open", "session": "e1", "about": "preview"},
+                          {"at": at("09:45"), "what": "epilogue", "op": "finish", "session": "e1"},
+                          {"at": at("11:00"), "what": "epilogue", "op": "open", "session": "e2"},
+                          {"at": at("11:05"), "what": "epilogue", "op": "finish", "session": "e2"}],
+                     "review", {"e1": {"human": [], "cost": 0.4}, "e2": {"human": [], "cost": 0.6}}.get
+                     )["metrics"]["cost"]["detail"]
+check("metrics: each epilogue costs on its own block, the preview's and the last",
+      ep.get("epi_preview") == 0.4 and ep.get("epilogue") == 0.6, str(ep))
+ex = process.history({}, [{"at": at("09:00"), "what": "steps.code", "op": "open", "session": "c"},
+                          {"at": at("12:00"), "what": "steps.code", "op": "end", "session": "c"}],
+                     "code", {"c": {"human": [], "cost": 1.0,
+                                    "expired": [[at("11:00"), 250000]]}}.get)["metrics"]["expired"]
+check("metrics: a cache written again counts where the feature stood", ex == {"detail": {"code": 1}}, str(ex))
+# Where the cache was written again: a request past the first that wrote
+# more than it read, and more than a short context's growth.
+import claude_usage
+with tempfile.TemporaryDirectory() as cu:
+    tpath = os.path.join(cu, "t.jsonl")
+
+    def req(i, hh, read, wrote):
+        return json.dumps({"type": "assistant", "timestamp": "2026-10-14T%s:00Z" % hh,
+                           "message": {"id": "m%d" % i, "model": "x", "usage": {
+                               "cache_read_input_tokens": read, "cache_creation_input_tokens": wrote}}},
+                          separators=(",", ":"))
+    with open(tpath, "w") as fh:
+        fh.write("\n".join([req(1, "09:00", 0, 90000), req(2, "09:01", 90000, 3000),
+                            req(3, "09:02", 93000, 25000), req(4, "11:00", 5000, 120000)]) + "\n")
+    got = claude_usage.read(tpath)["expired"]
+check("usage: only a request that wrote the cache again counts, not the first or a growing one",
+      got == [["2026-10-14T11:00:00Z", 120000]], str(got))
+# A conversation that ran in the main checkout (an epilogue or a friction
+# review of an earlier sclaude) is found there, not only under the tree.
+with tempfile.TemporaryDirectory() as tw:
+    main_repo, projects = os.path.join(tw, "repo"), os.path.join(tw, "projects")
+    subprocess.run(["git", "init", "-q", main_repo], check=True)
+    subprocess.run(["git", "-C", main_repo, "commit", "-q", "--allow-empty", "-m", "x"], check=True,
+                   env=dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                            GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
+    tree = os.path.join(tw, "repo-f")
+    subprocess.run(["git", "-C", main_repo, "worktree", "add", "-q", tree], check=True)
+    fdir = os.path.join(tree, ".sclaude/local/feature")
+    os.makedirs(fdir)
+    mfolder = os.path.join(projects, claude_usage.project_name(main_repo))
+    os.makedirs(mfolder)
+    with open(os.path.join(mfolder, "e-1.jsonl"), "w") as fh:
+        fh.write(json.dumps({"type": "cost-state", "sessionId": "e-1", "totalCostUSD": 0.3,
+                             "modelUsage": {}}, separators=(",", ":")) + "\n")
+    saved_root, claude_usage.ROOT = claude_usage.ROOT, projects
+    try:
+        found = process.transcripts_of(os.path.join(fdir, "state.json"))("e-1")
+    finally:
+        claude_usage.ROOT = saved_root
+check("transcripts: one kept under the main checkout is read too",
+      (found or {}).get("cost") == 0.3, str(found))
 check("the player keeps the totals on maps it does not play, and after it played",
       "played && inPlay.has(map)" in page and "played = null;\n    drawMetrics();\n    pick(-1);" in page)
 check("the player counts a stay after a plus, and plays at half speed",
@@ -1271,7 +1340,7 @@ check("a friction review open says which and that it holds the step",
 check("_flow hands the notes to the page", '"notes": notes' in read("sclaude", "lib", "actions.sh"))
 check("the page offers the metrics by checkboxes, each with the whole feature's total",
       'class="metrics"' in page and 'value="input"' in page and 'value="cost"' in page
-      and 'value="time"' in page and page.count('class="mt-total"') == 4)
+      and 'value="time"' in page and 'value="expired"' in page and page.count('class="mt-total"') == 5)
 check("every map's heading carries its own whole of the metrics",
       page.count('class="mt-map"') == 6 and "document.querySelectorAll('.mt-map')" in page)
 check("an answer to sclaude and a command go into the history",

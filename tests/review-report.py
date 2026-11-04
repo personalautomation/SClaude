@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # The review report (sclaude/lib/review_report.py) and what feeds it: threads
 # classified by what happened to them, rounds by the review that posted them,
-# findings on earlier fixes, reversals, cost per launch (run_cost) and the
-# trend line. gh is faked; nothing touches the network.
+# findings on earlier fixes, reversals, the cost in two parts (the review's
+# passes, the fixing launches from run_cost) and the trend line. gh is faked; nothing touches the network.
 #
 # Rounds are review runs, never the review id of a comment: the review posts
 # each inline comment as a review of its own, and grouping by that id once
@@ -177,7 +177,16 @@ with tempfile.TemporaryDirectory() as wt:
     with open(state) as fh:
         runs = json.load(fh)["steps"]["review"]["runs"]
     check("costs-per-launch", runs[1].get("costs"), [2.0, 1.5, 1.0])
+    check("each-launch-timed", len(runs[1].get("cost_at") or []), 3)
     check("other-session-untouched", "costs" in runs[0], False)
+    # The launches ran now, after this bench's review runs: the printed
+    # report below reads them as a state from before launches were timed,
+    # by position (fixes_per_round is checked by time further down).
+    with open(state) as fh:
+        data = json.load(fh)
+    data["steps"]["review"]["runs"][1].pop("cost_at", None)
+    with open(state, "w") as fh:
+        json.dump(data, fh)
 
     # --- the printed report --------------------------------------------------
     sys.argv = ["review_report.py", wt, "7", "o/r", "feat"]
@@ -218,10 +227,34 @@ with tempfile.TemporaryDirectory() as wt:
     check("each-round-its-findings", [subrows[k][-6] for k in ("1.1", "1.2", "2.1", "2.2")],
           ["4", "3", "3", "0"])
     check("a-session-with-no-run-is-blank",
-          review_report.row(("3", "", "5m", "$1.00", "", "", "", "", "", "", "")).split(), ["3", "5m", "$1.00"])
+          review_report.row(("3", "", "5m", "", "$1.00", "", "", "", "", "", "", "")).split(), ["3", "5m", "$1.00"])
+    # The cost in two parts. The review's: what could be priced, "—" when
+    # nothing could (the workflow's review here), nothing without a run.
+    check("review-cost-summed", review_report.review_cost([{"cost": 1.5}, {"cost": 0.25}]), "$1.75")
+    check("review-cost-unknown", review_report.review_cost([{"cost": None}]), "—")
+    check("review-cost-no-run", review_report.review_cost([]), "")
+    check("workflow-review-unpriced", [subrows[k][-9] for k in ("2.1", "2.2")], ["—", "—"])
+    # The fixes': each round its own launch, the one no run has read yet left
+    # to the total — not the session's whole on its first round.
+    check("fixes-per-launch-one-pending", [subrows[k][-8] for k in ("2.1", "2.2")], ["$2.00", "$1.50"])
+    # With the launches' times, a launch goes on the first run after it: one
+    # that pushed nothing (reopened) adds to that run instead of shifting the
+    # rest, and one after the last run is in the total only.
+    def t(hh):
+        return review_report.parse("2026-10-14T%s:00+00:00" % hh)
+    runs2 = [{"at": t("10:00")}, {"at": t("11:00")}]
+    check("fixes-by-time", review_report.fixes_per_round(
+        {"costs": [2.0, 0.5, 1.0, 0.25], "cost_at": [t("09:30"), t("10:20"), t("10:40"), t("11:30")]},
+        runs2), [2.0, 1.5])
+    # On GitHub a launch waits inside for the run of its own push and ends
+    # after it: by its start, it is still that run's.
+    check("fixes-by-start-on-github", review_report.fixes_per_round(
+        {"costs": [2.0, 1.0], "cost_at": [t("09:50"), t("10:30")]}, runs2), [2.0, 1.0])
+    check("fixes-by-position-without-times", review_report.fixes_per_round(
+        {"costs": [2.0, 1.0, 0.25], "cost_at": []}, runs2), [2.0, 1.0])
     review_report.COLOUR = True
     try:
-        lit = review_report.row(("6", "", "", "", 1, 5, 2, 0, 3, 0, 0), base=review_report.YELLOW)
+        lit = review_report.row(("6", "", "", "", "", 1, 5, 2, 0, 3, 0, 0), base=review_report.YELLOW)
     finally:
         review_report.COLOUR = False
     check("last-round-yellow-keeps-red-open-and-green-fixed",

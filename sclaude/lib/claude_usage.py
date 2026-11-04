@@ -17,8 +17,9 @@
 #                  Used as it is — a price worked out here would be a guess.
 #   custom-title   the name sclaude gives a step's session (`2-code 💻/<feature>`,
 #                  or `<feature>/code` before the icons) — the step it ran
-#   assistant      each tool call, and the token usage of a transcript that has
-#                  no cost-state (an older Claude Code)
+#   assistant      each tool call, the token usage of a transcript that has
+#                  no cost-state (an older Claude Code), and each request
+#                  that wrote the prompt cache again (`expired`)
 #   user           the messages a person typed (promptSource "typed", or a
 #                  plain text line from an older Claude Code) — the first of a
 #                  session sclaude started is sclaude's own prompt
@@ -51,7 +52,11 @@ STEP_WORDS = {"plan", "code", "pr", "review", "fix", "friction", "epilogue", "re
 TIMESTAMP = re.compile(rb'"timestamp":"([^"]+)"')
 
 # Bumped when a summary gains a field: every transcript is read again once.
-VERSION = 6
+VERSION = 7
+
+# Below this many tokens written, a request that writes more than it reads is
+# a short context growing, not a cache written again (`expired` in read).
+CACHE_REBUILT_MIN = 20000
 
 # A person who takes longer than this to answer was away rather than working:
 # their time counts up to here and no further.
@@ -115,6 +120,9 @@ def typed(entry):
 def read(path):
     """One transcript's summary, or None when it cannot be read."""
     usage, tools, seen_tools = {}, {}, set()
+    # When each request of the conversation itself (not a subagent's) was
+    # answered, in order: for the cache written again (`expired` below).
+    requested = {}
     runs, denials = {}, {}
     title, first, last, continued = None, None, None, None
     compactions = errors = prompts = questions = 0
@@ -144,6 +152,8 @@ def read(path):
                     errors += 1
                 if isinstance(msg.get("usage"), dict) and msg.get("id"):
                     usage[msg["id"]] = (msg.get("model"), msg["usage"])
+                    if not entry.get("isSidechain"):
+                        requested.setdefault(msg["id"], entry.get("timestamp"))
                 last_claude = entry.get("timestamp") or last_claude
                 for block in msg.get("content") or []:
                     if isinstance(block, dict) and block.get("type") == "tool_use" \
@@ -246,7 +256,18 @@ def read(path):
             tokens["cache_read"] += int(u.get("cache_read_input_tokens") or 0)
             tokens["cache_write"] += int(u.get("cache_creation_input_tokens") or 0)
             tokens["thinking"] += int((u.get("output_tokens_details") or {}).get("thinking_tokens") or 0)
+    # The prompt cache written again: a request, past the first, that wrote
+    # more of its context to the cache than it read from it — what an expired
+    # cache looks like, usually after a pause longer than the cache lives.
+    # [[when, tokens written]].
+    expired = []
+    for i, (mid, at) in enumerate(requested.items()):
+        u = usage[mid][1]
+        wrote = int(u.get("cache_creation_input_tokens") or 0)
+        if i and wrote > int(u.get("cache_read_input_tokens") or 0) and wrote > CACHE_REBUILT_MIN:
+            expired.append([at, wrote])
     return {"title": title, "start": first, "end": last, "cost": cost, "models": models,
+            "expired": expired,
             "tokens": tokens, "tools": tools, "denials": denials,
             "compactions": compactions, "api_errors": errors, "prompts": prompts,
             "questions": questions, "human": human,

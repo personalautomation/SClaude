@@ -81,6 +81,33 @@ try:
     runs = review_report.local_runs(wt)
     check("passes-one-run", ([r["start"].hour for r in runs], runs[-1]["seconds"]),
           ([10, 11, 12], 540.0))
+    # A pass's cost is Claude Code's own account in its transcript, under the
+    # worktree's directory; a run's is the sum of its passes that have one,
+    # and a pass with no session or no transcript is not priced.
+    projects = tempfile.mkdtemp()
+    tdir = os.path.join(projects, review_report.claude_usage.project_name(os.path.abspath(wt)))
+    os.makedirs(tdir)
+    for sid, usd in (("p1", 1.25), ("p2", 0.5)):
+        write(os.path.join(tdir, sid + ".jsonl"), json.dumps(
+            {"type": "cost-state", "sessionId": sid, "totalCostUSD": usd, "modelUsage": {}}) + "\n")
+    check("pass-cost", review_report.pass_cost(wt, "p1", projects), 1.25)
+    check("pass-cost-no-transcript", review_report.pass_cost(wt, "gone", projects), None)
+    check("pass-cost-no-session", review_report.pass_cost(wt, None, projects), None)
+    write(journal, "\n".join(json.dumps(r) for r in (
+        {"at": "2026-10-15T10:00:00+00:00", "seconds": 60, "base": "x", "head": "h0", "session": "p1"},
+        {"at": "2026-10-15T10:05:00+00:00", "seconds": 60, "base": "x", "head": "h0", "session": "p2"},
+        {"at": "2026-10-15T11:00:00+00:00", "seconds": 60, "base": "x", "head": "h1"})) + "\n")
+    check("run-costs", [r["cost"] for r in review_report.local_runs(wt, None, projects)], [1.75, None])
+    # A pass stopped or not recorded is journaled as spent: priced by the
+    # report, never taken for a reviewed head (cached, since, round).
+    import local_review
+    local_review.spent(journal, "x", "h2", 30, "p1")
+    check("spent-priced", [r["cost"] for r in review_report.local_runs(wt, None, projects)],
+          [1.75, None, 1.25])
+    check("spent-not-a-reviewed-head", local_review.main(["cached", journal, "h2"]), 1)
+    check("spent-in-rows-only-when-asked",
+          (len(local_review.rows(journal)), len(local_review.rows(journal, with_spent=True))), (3, 4))
+    shutil.rmtree(projects, ignore_errors=True)
     write(journal, "\n".join(json.dumps({"at": "2026-10-15T1%d:00:00+00:00" % i, "seconds": 300,
                                          "base": "x", "head": "h%d" % i, "new": 1, "resolved": 0})
                              for i in range(3)) + "\n")

@@ -14,4 +14,4 @@ That file is an ending, not a failure. It tells the orchestrator that another fi
 
 The report is one message, and the last one: what the cause was and what you changed, or why the cause is outside this tree; what is left open; and where you departed from the approved plan or from the test as written, and why — "none" if none.
 
-If you could neither fix it nor show the cause is elsewhere, leave the marker out and say so: that is for me to decide, and I close the session myself. Leave it out too when your report proposes something for me to decide — a rule, an idea, a question: a session closed by `sclaude` takes the proposal with it, and nobody is there to answer.
+If you could neither fix it nor show the cause is elsewhere, leave the marker out and say so: that is for me to decide, and I close the session myself. Anything else for me to decide — a rule, an idea, a question — you ask with AskUserQuestion before the marker; leave the marker out only when I left it unanswered: a session closed by `sclaude` takes an unasked proposal with it, and nobody is there to answer.

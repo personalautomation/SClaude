@@ -13,7 +13,7 @@ Work through the `/pr` skill — invoke it. It differs from its usual course bec
   Then use the footers the way the skill says, but as a check rather than a source. Walk `git log origin/main..HEAD --format='%(trailers:key=Requirement,valueonly)'` and compare:
 
   - a footer whose text has drifted from the criterion it names — the criterion's wording wins, and say so when you report. A criterion with a list under it is named on one line, its first line and items joined by `; `: that is its wording, not drift;
-  - a footer with no identifier — something asked for during development that isn't in the list. Add it to the section as an unnumbered item and tell me: it's either a criterion we missed or scope that grew, and I decide which.
+  - a footer with no identifier — something asked for during development that isn't in the list. Add it to the section as an unnumbered item, under a line saying it was also built during development. Do not ask me about it again: step 2 asked whether it is a criterion we missed or scope that grew, and a missed criterion was numbered then.
   - a criterion with no footer anywhere — either it wasn't built or a commit was missing its footer. **Ask me before opening the pull request**; don't tick it, and don't quietly drop it from the list.
 
   Don't tick anything, here or in the issue, whatever the footers say. A tick is QA's word that the deployment does it, and a commit is not that check.
@@ -66,7 +66,7 @@ The orchestrator runs this step with restrictions: merge, deploy and anything le
 Once the pull request is open, tell me in that one message — in your own words, but cover all of it:
 
 - the work in this session is done — the pull request is open, with its URL, and what's left open around it;
-- **your verdict on a regression test**, in a sentence: no and why, or yes and which spec it belongs in. It goes here because it is a decision I have to make and nothing else in the cycle will ask me for it again;
+- **your verdict on a regression test**, in a sentence: no and why, or yes and which spec it belongs in. A yes is a decision of mine, and nothing else in the cycle will ask me for it again: ask it before the marker, and give my answer here;
 - with the marker written, that `sclaude` closes this session itself; without it, that I should now close Claude with `/exit`;
 - after that the `sclaude` orchestrator continues — it launches step 4 itself, I do nothing for that.
 

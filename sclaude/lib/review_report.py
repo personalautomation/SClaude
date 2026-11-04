@@ -19,8 +19,10 @@
 #   * fix-induced findings — new findings on lines an earlier round's fix
 #     touched (imperfect debugging: a fix that brings the next finding with
 #     it). Growing, it means the fixes are feeding the review;
-#   * what it costs — the review sessions' spend as the status line reports it
-#     (run_cost), and their time;
+#   * what it costs, in two parts: the review itself — each pass on this
+#     machine, from Claude Code's own account in its transcript (claude_usage),
+#     unknown for the workflow's review — and the fixing sessions' spend as the
+#     status line reports it (run_cost); and their time;
 #   * findings raised again after a decline — a finding that repeats one the
 #     author closed without a fix: near it in the same file, or cited by the
 #     reply that declined it again ("as on r<id>", sclaude/prompts/review.md).
@@ -58,6 +60,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pr_context import (SKIP_SECONDS, decline_of, gh_json, is_claude_review,  # noqa: E402
                         review_mode, thread_line, yours)
 from local_review import rows as journal_rows  # noqa: E402
+import claude_usage  # noqa: E402
 
 QUERY = """
 query($owner: String!, $name: String!, $number: Int!, $after: String) {
@@ -114,12 +117,12 @@ def rule(title):
     return paint("── %s %s" % (title, "─" * max(3, 56 - len(title))), BOLD)
 
 
-def row(cells, open_col=8, fixed_col=6, base="", rnd=""):
+def row(cells, open_col=9, fixed_col=7, base="", rnd=""):
     """A table row, its open findings red and its fixes green once padded:
     the colour codes would otherwise count in the widths. <base> colours the
     rest of the row, cell by cell, so that red and green keep theirs."""
     out = [paint("%-5s" % rnd, base) if base and rnd else "%-5s" % rnd]
-    fmt = ("%-7s", "%-11s", "%6s", "%6s", "%4s", "%5s", "%5s", "%6s", "%4s", "%8s", "%7s")
+    fmt = ("%-7s", "%-11s", "%6s", "%7s", "%6s", "%4s", "%5s", "%5s", "%6s", "%4s", "%8s", "%7s")
     for i, (f, c) in enumerate(zip(fmt, cells)):
         text = f % c
         if i == open_col and isinstance(c, int) and c:
@@ -130,6 +133,44 @@ def row(cells, open_col=8, fixed_col=6, base="", rnd=""):
             text = paint(text, base)
         out.append(text)
     return ("  " + " ".join(out)).rstrip()
+
+
+def dollars(amount):
+    return "$%.2f" % amount
+
+
+def review_cost(gs):
+    """The review's part of the cost of review runs <gs>: the sum of what could
+    be priced; "—" when nothing could (the workflow's review, passes from
+    before passes were priced); nothing when there is no run."""
+    known = [g["cost"] for g in gs if g.get("cost") is not None]
+    if not gs:
+        return ""
+    return dollars(sum(known)) if known else "—"
+
+
+def fixes_per_round(s, gs):
+    """The fixing cost of each review run in <gs>, from session <s>: each
+    launch goes on the first run that started after the launch began
+    (`cost_at`, run_cost in steps.sh) — on this machine the pass follows the
+    launch, on GitHub the launch waits inside for the run of its own push —
+    so that a launch which pushed nothing (reopened, resumed after a crash)
+    adds to its run instead of shifting every later one. A launch begun after
+    the last run is the fix going on now: in the total, not on a round. A
+    state from before launches had a time is matched by position, one launch
+    a run; [] when nothing matches."""
+    costs = s["costs"] if s else []
+    ats = s.get("cost_at") or [] if s else []
+    if not gs or not costs:
+        return []
+    if len(ats) != len(costs) or not all(ats):
+        return costs[:len(gs)] if len(costs) >= len(gs) else []
+    per = [None] * len(gs)
+    for cost, at in zip(costs, ats):
+        j = next((i for i, g in enumerate(gs) if g["at"] and at <= g["at"]), None)
+        if j is not None:
+            per[j] = round((per[j] or 0) + cost, 4)
+    return per
 
 
 def verdict_colour(said):
@@ -274,11 +315,25 @@ def review_runs(cwd, branch, since=None):
 LOCAL_JOURNAL = ".sclaude/local/feature/local-review-rounds.jsonl"
 
 
-def local_runs(cwd, since=None):
+def pass_cost(cwd, session, root=None):
+    """What one pass on this machine cost, in dollars: the account Claude Code
+    keeps in the pass's transcript, its subagents included; None when there
+    is no session or no account to read. The pass runs in the worktree, so its
+    transcript is under the worktree's directory in ~/.claude/projects."""
+    if not session:
+        return None
+    path = os.path.join(root or claude_usage.ROOT,
+                        claude_usage.project_name(os.path.abspath(cwd)), session + ".jsonl")
+    summary = claude_usage.read(path) if os.path.exists(path) else None
+    return summary.get("cost") if summary else None
+
+
+def local_runs(cwd, since=None, root=None):
     """The local review's runs since <since>, oldest first, shaped as
     review_runs gives the workflow's; None when the feature has no journal.
     Read by the journal's own reader (local_review.rows), so both agree on
-    what a run is."""
+    what a run is. Each carries the cost of its passes (pass_cost), None when
+    none of them has one to read."""
     path = os.path.join(cwd, LOCAL_JOURNAL)
     if not os.path.exists(path):
         return None
@@ -286,15 +341,20 @@ def local_runs(cwd, since=None):
     # for the rest — are one review, as the workflow's run is one however
     # many findings it brings: one run, from the first pass's start.
     out, last = [], None
-    for row in journal_rows(path):
+    # A pass that ran and was not recorded (spent) is priced too: on the run
+    # of its range, or as a run of its own, with nothing found.
+    for row in journal_rows(path, with_spent=True):
         if not after(parse(row.get("at")), since):
             continue
         key = (row.get("base"), row.get("head"))
+        cost = pass_cost(cwd, row.get("session"), root)
         if out and key == last:
             out[-1]["seconds"] += float(row.get("seconds") or 0)
+            if cost is not None:
+                out[-1]["cost"] = (out[-1]["cost"] or 0) + cost
             continue
         out.append({"start": parse(row["at"]), "seconds": float(row.get("seconds") or 0),
-                    "running": False})
+                    "running": False, "cost": cost})
         last = key
     return out
 
@@ -304,7 +364,8 @@ def rounds(found, runs):
     sets each thread's "round" to its index. Without runs, threads are split
     where ROUND_GAP passes between two of them."""
     if runs:
-        out = [{"at": r["start"], "running": r["running"], "threads": []} for r in runs]
+        out = [{"at": r["start"], "running": r["running"], "cost": r.get("cost"), "threads": []}
+               for r in runs]
         for t in found:
             i = 0
             for j, r in enumerate(runs):
@@ -316,7 +377,7 @@ def rounds(found, runs):
     out, last = [], None
     for t in found:
         if not out or not (t["created"] and last and t["created"] - last <= ROUND_GAP):
-            out.append({"at": t["created"], "running": False, "threads": []})
+            out.append({"at": t["created"], "running": False, "cost": None, "threads": []})
         t["round"] = len(out) - 1
         out[-1]["threads"].append(t)
         last = t["created"] or last
@@ -371,7 +432,8 @@ def sessions(cwd, since=None):
         going = i == len(runs) - 1 and not r.get("done") and not r.get("outcome")
         b = parse(r.get("finished")) or (now if going else None)
         costs = [c for c in (r.get("costs") or []) if isinstance(c, (int, float))]
-        out.append({"start": a, "rounds": r.get("rounds"), "costs": costs,
+        ats = [parse(t) for t in (r.get("cost_at") or [])]
+        out.append({"start": a, "rounds": r.get("rounds"), "costs": costs, "cost_at": ats,
                     "seconds": (b - a).total_seconds() if a and b and b > a else None})
     return out
 
@@ -536,9 +598,9 @@ def main():
     if groups:
         table = []
         print("")
-        print(paint("  %-5s %-7s %-11s %6s %6s %4s %5s %5s %6s %4s %8s %7s" % (
-            "round", "session", "started", "time", "cost", "runs", "found", "fixed", "no fix", "open",
-            "on fixes", "repeats"), DIM))
+        print(paint("  %-5s %-7s %-11s %6s %7s %6s %4s %5s %5s %6s %4s %8s %7s" % (
+            "round", "session", "started", "time", "review", "fixes", "runs", "found", "fixed",
+            "no fix", "open", "on fixes", "repeats"), DIM))
         for label, s, gs in by_session(groups, people):
             ts = [t for g in gs for t in g["threads"]]
             values = (len(gs), len(ts), count(ts, "fixed"), count(ts, "no fix"),
@@ -547,20 +609,22 @@ def main():
             columns.append((label, dict(zip(BRIEF_ROWS, values))))
             # A session that went several rounds has a row per round and none
             # of its own: the session's row was their sum, read as a round
-            # of its own. Each round's cost is its launch's when the session
-            # was launched once a round — resumed for each, as a fix session
-            # is — and the session's whole on its first round otherwise. The
-            # first round runs from the session's start, each to the next
-            # review run, the last to the session's end: the rows add up to
-            # the session.
+            # of its own. A row's cost is in two parts: the review run it
+            # counts (review_cost), and the fixing launches that run read
+            # (fixes_per_round). Launches that cannot be matched to rounds
+            # give the session's whole on its first round. The first round
+            # runs from the session's start, each to the next review run,
+            # the last to the session's end: the rows add up to the session.
+            fixes = (s["costs"] if s else [])
+            per = fixes_per_round(s, gs)
             if s is None or len(gs) <= 1:
+                fix = per[0] if gs and per else (sum(fixes) if fixes else None)
                 table.append((
                     label,
                     s["start"].astimezone().strftime("%m-%d %H:%M") if s and s["start"] else "",
                     hours(s["seconds"]) if s and s["seconds"] else "",
-                    "$%.2f" % sum(s["costs"]) if s and s["costs"] else "") + values)
+                    review_cost(gs), dollars(fix) if fix is not None else "") + values)
                 continue
-            per = s["costs"] if len(s["costs"]) == len(gs) else []
             end = (s["start"] + datetime.timedelta(seconds=s["seconds"])
                    if s["start"] and s["seconds"] else None)
             for j, g in enumerate(gs, start=1):
@@ -568,36 +632,37 @@ def main():
                 began = (s["start"] or g["at"]) if j == 1 else g["at"]
                 until = gs[j]["at"] if j < len(gs) else end
                 took = (until - began).total_seconds() if began and until and until > began else 0
-                cost = per[j - 1] if per else (sum(s["costs"]) if j == 1 and s["costs"] else None)
+                cost = per[j - 1] if per else (sum(fixes) if j == 1 and fixes else None)
                 table.append((
                     "%s.%d" % (label, j),
                     began.astimezone().strftime("%m-%d %H:%M") if began else "",
-                    hours(took) if took else "", "$%.2f" % cost if cost is not None else "",
+                    hours(took) if took else "", review_cost([g]),
+                    dollars(cost) if cost is not None else "",
                     1, len(rt), count(rt, "fixed"), count(rt, "no fix"), count(rt, "open"),
                     sum(1 for t in rt if t["near_fix"]), sum(1 for t in rt if t["repeat"])))
         # The last round that ran is yellow while anything is open: it is
         # where the review stands, and review_close_gate says no more of it.
         # A session just opened, with no run yet, is not that round.
-        ran = [i for i, cells in enumerate(table) if cells[4]]
+        ran = [i for i, cells in enumerate(table) if cells[5]]
         last = ran[-1] if ran and opened else None
         # The review run's number, first: what the verdict and the topic
         # call a round, which a session's label (2.1, 2.2…) does not count.
         n = 0
         for i, cells in enumerate(table):
-            runs = cells[4]
+            runs = cells[5]
             rnd = "" if not runs else str(n + 1) if runs == 1 else "%d-%d" % (n + 1, n + runs)
             n += runs or 0
             # A session no review run has followed yet — the one fixing now —
             # has no findings to count: its zeros read as a round that found
             # nothing. Its time and cost stay, the total counts them.
-            if not cells[4]:
-                cells = cells[:4] + ("",) * (len(cells) - 4)
+            if not cells[5]:
+                cells = cells[:5] + ("",) * (len(cells) - 5)
             print(row(cells, base=YELLOW + ";" + BOLD, rnd=rnd) if i == last else row(cells, rnd=rnd))
         seconds = sum(s["seconds"] or 0 for s in people)
         costs = [c for s in people for c in s["costs"]]
         values = (len(groups), total, fixed, nofix, opened, near_all, len(repeats))
-        print(row(("total", "", hours(seconds) if seconds else "",
-                   "$%.2f" % sum(costs) if costs else "") + values))
+        print(row(("total", "", hours(seconds) if seconds else "", review_cost(groups),
+                   dollars(sum(costs)) if costs else "") + values))
         print("")
     else:
         print("  No review threads on the pull request.")

@@ -265,6 +265,10 @@ local_review_run() {
     trap "$between" INT TERM HUP
     if [[ "$stopped" -eq 1 ]]; then
       rm -f "$answer.part"
+      # Not a review of the head, but a conversation that cost: journaled
+      # for the report to price (spent in local_review.py).
+      python3 "$LIB/local_review.py" spent "$journal" "$base" "$head" "$((SECONDS - began))" \
+        "$pass_session" 2>/dev/null || true
       warn "  Stopped pass $pass as you said; what earlier passes and rounds posted stays open on PR #$pr" >&2
       warn "  and goes to the review session." >&2
       count="$(python3 "$LIB/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
@@ -278,6 +282,8 @@ local_review_run() {
                                     python3 "$LIB/local_review.py" record "$wt" "$pr" "$repo" "$answer" \
                                       "$base" "$head" "$((SECONDS - began))" "$journal" "$cap" ${verify:+verify} \
                                       2>>"$(local_review_file "$wt" .log)") || [[ -z "${count:-}" ]]; then
+      python3 "$LIB/local_review.py" spent "$journal" "$base" "$head" "$((SECONDS - began))" \
+        "$pass_session" 2>/dev/null || true
       # A later pass that fails leaves the earlier ones recorded: the head
       # counts as reviewed with what they posted.
       if [[ "$pass" -gt 1 ]]; then

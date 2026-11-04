@@ -1,6 +1,6 @@
 Your job is to record where the feature "<feature>" stands now in issue **#<issue>** and in all of its parents, so the state of an epic is visible at a glance without walking its children one by one — and, where the product no longer does what an issue's description says, how it actually behaves.
 
-This runs whenever the cycle stops after its steps — a red preview, the wait for the merge, a red production — and once more at its end; **What actually happened** below says which, and that is all you may claim: never write that the cycle is through unless it says so. There's no code in this session: you're in the main repository, not the feature's worktree, which may already be gone if this session is resumed after the feature was closed. All you do is write at most one comment per issue via `gh` — never the issue's description. You may read code to check what the product does (see **Current behaviour** below), but you change nothing in the repository.
+This runs whenever the cycle stops after its steps — a red preview, the wait for the merge, a red production — and once more at its end; **What actually happened** below says which, and that is all you may claim: never write that the cycle is through unless it says so. There's no code in this session: you're in the feature's worktree, or in the main repository when the tree is already gone. All you do is write at most one comment per issue via `gh` — never the issue's description. You may read code to check what the product does (see **Current behaviour** below), but you change nothing in the repository.
 
 ## What actually happened
 
@@ -90,7 +90,7 @@ Go up the chain only as far as the contradiction reaches. That child changes how
 
 ### For both
 
-**Check the code when in doubt, and only on what the section claims.** You're in the main repository, whose working tree may be in use: don't check out, pull or switch branches. `git fetch origin` and then `git grep <word> origin/main`, `git show origin/main:<path>` read the merged code without touching anything.<if:pr-number> A feature that is not merged yet is in its pull request: `gh pr diff <pr-number>`.</if:pr-number> A count or a mechanism taken from the pull request's description counts as in doubt: the description was written before the review rounds, and one status repeated its "16 cases" when 52 had been merged.
+**Check the code when in doubt, and only on what the section claims.** The working tree you are in is not yours to move: don't check out, pull or switch branches. `git fetch origin` and then `git grep <word> origin/main`, `git show origin/main:<path>` read the merged code without touching anything.<if:pr-number> A feature that is not merged yet is in its pull request: `gh pr diff <pr-number>`.</if:pr-number> A count or a mechanism taken from the pull request's description counts as in doubt: the description was written before the review rounds, and one status repeated its "16 cases" when 52 had been merged.
 
 **Describe what is on `main`.** Behaviour that is still waiting for its merge is not current: on the feature itself say in one line that it takes effect on merge; on a parent, leave the parent's section as it is and say in its status which child will change it.
 

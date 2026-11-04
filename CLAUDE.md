@@ -222,8 +222,14 @@ breaks the other silently — grep before you edit:
   `review_state` tells them from what the person wrote under the same
   account; `tests/review-skip.py` and `tests/local-review.py` check both
   sides. `local-review-rounds.jsonl` is named in `local_review.sh` and read
-  by `LOCAL_JOURNAL` in `review_report.py`; `tests/local-review-report.py`
-  reads what the other side wrote.
+  by `LOCAL_JOURNAL` in `review_report.py` and in `process.py`, which price
+  each pass by its `session`, the unrecorded ones (`spent`) included;
+  `tests/local-review-report.py` reads what the other side wrote.
+
+  <!-- Extended by Claude on 2026-11-04 at the user's request: the review
+  passes are priced in the report and on the process map from the journal. -->
+
+
 
   <!-- Added by Claude on 2026-10-15 with the `review` key, so that a change to
   one side does not silently turn the review's words into a person's. -->

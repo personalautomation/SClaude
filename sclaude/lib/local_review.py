@@ -354,10 +354,26 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     return 0
 
 
-def rows(journal):
+def spent(journal, base, head, seconds, session):
+    """A pass that ran and was not recorded — stopped by the person, or its
+    answer not taken — journaled all the same, marked `spent`, so that the
+    report prices its conversation. rows() leaves it out unless asked: the
+    head it read is not a reviewed one."""
+    began = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=int(seconds))
+    row = {"at": began.isoformat(timespec="seconds"), "seconds": int(seconds),
+           "base": base, "head": head, "spent": True}
+    if session:
+        row["session"] = session
+    with open(journal, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return 0
+
+
+def rows(journal, with_spent=False):
     """The journal's runs, oldest first: each a dict with at least `at` (the
-    run's start, ISO) and `head`. The one reader of the file; the report
-    reads it through here."""
+    run's start, ISO) and `head`; with <with_spent>, the passes journaled by
+    spent() too. The one reader of the file; the report reads it through
+    here."""
     out = []
     try:
         with open(journal, encoding="utf-8") as fh:
@@ -366,7 +382,8 @@ def rows(journal):
                     row = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(row, dict) and row.get("head") and row.get("at"):
+                if isinstance(row, dict) and row.get("head") and row.get("at") \
+                        and (with_spent or not row.get("spent")):
                     out.append(row)
     except OSError:
         pass
@@ -406,6 +423,8 @@ def main(argv):
         return prompt(*args)
     if cmd in ("record",) and len(args) in (8, 9, 10):
         return record(*args)
+    if cmd == "spent" and len(args) == 5:
+        return spent(*args)
     if cmd == "open" and len(args) == 4:
         # Waiting findings first: posted now, they are threads below.
         _, waiting = flush(args[0], args[1], args[2], args[3])

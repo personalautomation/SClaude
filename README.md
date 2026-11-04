@@ -753,7 +753,10 @@ in the product while recording — a check that failed, a fault it had to go
 round — is printed in sclaude's terminal. At night (`/isleep`) a finding the
 session would leave as it is does not hold the step till morning: it waits for
 you, and in the morning sclaude offers a session that asks you about each such
-thread and, on your yes, replies and resolves it on GitHub itself. When the
+thread and, on your yes, replies and resolves it on GitHub itself. The
+report after each round shows what each round cost in two parts: `review`, the
+pass on this machine as Claude Code accounts for it (`—` for GitHub's review,
+which sclaude cannot price), and `fixes`, the fixing session's launch. When the
 report says the rounds stopped converging, or that the fixes are feeding the review two rounds running, its verdict is red, and the
 feature's topic is told once, with the keys that end the search for new findings. What a round leaves open goes back
 to a review session without a question: `s` (⏭ on the topic) is how the rounds
@@ -1086,7 +1089,9 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   Claude after its turn, each answer to its question or to sclaude's, each
   command run on the feature at the terminal — Claude's cost in dollars, and
   ⏳ how long a question waited for your answer, Claude's or sclaude's, nights
-  included, and ⏱ how long the feature stood on the block, every stay added
+  included, ♻ how many times Claude's prompt cache had expired and a
+  conversation's context was written to it again (usually after a long
+  pause), and ⏱ how long the feature stood on the block, every stay added
   up — what sclaude has going now (a step, a sync, a friction review, a
   regression, the wait for the merge or QA) counted up to now; ⚠ when
   something ended with no end written (a Ctrl-C, a terminal that died) and

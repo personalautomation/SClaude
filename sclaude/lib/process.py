@@ -1343,6 +1343,9 @@ def _past_steps(state, pr_state, epilogue):
 # {"pass": [map, i]} is where the feature went off to one of those.
 
 HISTORY_FILE = "history.jsonl"
+# The local review's journal beside it, for the passes' conversations
+# (local_review.sh names it, review_report.py reads it too).
+LOCAL_JOURNAL = "local-review-rounds.jsonl"
 # What the transcripts said of each conversation, kept beside the history.
 TRANSCRIPT_CACHE = "transcripts.json"
 TRANSCRIPT_FRESH = 60
@@ -1671,7 +1674,7 @@ def _short(at):
     return when.strftime("%d %b %H:%M") if when else ""
 
 
-def history(state, lines, here=None, transcripts=None):
+def history(state, lines, here=None, transcripts=None, pass_rows=None):
     """The feature's way through the maps, for the page to play, and what
     each place took (`metrics`) when the sessions' transcripts are given:
     a function from a session id to claude_usage.read's summary, or None."""
@@ -1975,7 +1978,9 @@ def history(state, lines, here=None, transcripts=None):
         else:
             steps.append(s)
     deviations(steps)
-    counted = metrics(rows, steps, passes, transcripts, now_iso)
+    if pass_rows is None:
+        pass_rows = getattr(transcripts, "passes", None)
+    counted = metrics(rows, steps, passes, transcripts, now_iso, pass_rows)
     for st in steps + [x for ps in passes.values() for p in ps for x in p["steps"]]:
         st.pop(SPANS, None)
     return {"visits": steps, "passes": passes, "metrics": counted,
@@ -2036,6 +2041,9 @@ def deviations(steps):
 #           on the place the answer came in: Claude's, after its turn or its
 #           question (claude_usage's `human`, not capped), and sclaude's own
 #           (`ask answered waited=`, ask_once in ui.sh);
+#   expired how many times a conversation's prompt cache had expired and its
+#           context was written again (claude_usage's `expired`), on the
+#           place the feature stood on then;
 #   time    the seconds the feature stood on a place, each stay's own `s`
 #           (what the player's clock shows), on the map the stay is on; a
 #           detailed stay gives up what a regression or a sync ran inside
@@ -2064,7 +2072,8 @@ def _session_place(rows, opened=None):
         elif r["what"] == "sync":
             out[r["session"]] = ("sync", "sync")
         elif r["what"] in ("retro", "epilogue"):
-            out[r["session"]] = ("detail", r["what"])
+            # The preview's status has a block of its own, as its stay does.
+            out[r["session"]] = ("detail", "epi_preview" if r.get("about") == "preview" else r["what"])
         elif head == "friction":
             out[r["session"]] = ("friction", "f_review")
         else:
@@ -2074,7 +2083,7 @@ def _session_place(rows, opened=None):
     return out
 
 
-def metrics(rows, steps, passes, transcripts, now_iso=None):
+def metrics(rows, steps, passes, transcripts, now_iso=None, pass_rows=None):
     stays = [("detail", s) for s in steps if "n" in s]
     stays += [(m, s) for m, ps in passes.items() for p in ps for s in p["steps"]]
     now = _when(now_iso) or datetime.datetime.now(datetime.timezone.utc)
@@ -2106,7 +2115,7 @@ def metrics(rows, steps, passes, transcripts, now_iso=None):
         return (min(inside, key=lambda t: t[3] - t[2]) if inside else
                 max(before, key=lambda t: t[2]) if before else mine[0])[4]
 
-    out = {"input": {}, "cost": {}, "wait": {}, "time": {}, "visits": {}, "unsure": {}}
+    out = {"input": {}, "cost": {}, "wait": {}, "expired": {}, "time": {}, "visits": {}, "unsure": {}}
     detail = [t for t in timed if t[0] == "detail"]
 
     def ahead(at):
@@ -2205,19 +2214,49 @@ def metrics(rows, steps, passes, transcripts, now_iso=None):
             # night left unanswered is a night (a summary older than the
             # field gives the capped time).
             add("wait", at, turn[3] if len(turn) > 3 else turn[1], turn[0])
+        # Each time the prompt cache had to be written again, where the
+        # feature stood then (claude_usage's `expired`).
+        for when, _tokens in summary.get("expired") or []:
+            add("expired", place(when, True) or where, 1, when)
         add("cost", where, summary.get("cost") or 0, opened.get(session))
+    # A review pass on this machine is a headless conversation of its own,
+    # named by its row in the local review's journal (local_review.rows, the
+    # passes not recorded included): it costs on the pass's place, apart from
+    # the fixing session's, as the review report prices it.
+    for p in pass_rows or []:
+        session = p.get("session")
+        summary = transcripts(session) if transcripts and session else None
+        if summary and summary.get("id", session) not in counted:
+            counted.add(summary.get("id", session))
+            for when, _tokens in summary.get("expired") or []:
+                add("expired", place(when, True) or place(p.get("at")), 1, when)
+            add("cost", place(p.get("at")), summary.get("cost") or 0, p.get("at"))
     return out
 
 
 def transcripts_of(state_path):
-    """The sessions' summaries, read from Claude Code's transcripts of the
-    feature's tree and kept beside its state by size and time, so a poll
-    reads only the conversations that grew."""
+    """The sessions' summaries, read from Claude Code's transcripts and kept
+    beside the feature's state by size and time, so a poll reads only the
+    conversations that grew. A transcript is looked for under the feature's
+    tree, then under the main checkout and sclaude's own checkout, where a
+    friction review or an epilogue of an earlier sclaude ran."""
+    import subprocess
     import claude_usage
     from session_end import SESSION_ID, next_link
     feature = os.path.dirname(state_path)
     tree = os.path.dirname(os.path.dirname(os.path.dirname(feature)))
-    folder = os.path.join(claude_usage.ROOT, claude_usage.project_name(tree))
+    try:
+        common = subprocess.run(["git", "-C", tree, "rev-parse", "--path-format=absolute",
+                                 "--git-common-dir"], capture_output=True, text=True,
+                                timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        common = ""
+    own = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    folders = []
+    for where in (tree, os.path.dirname(common) if common else "", own):
+        folder = os.path.join(claude_usage.ROOT, claude_usage.project_name(where)) if where else ""
+        if folder and folder not in folders:
+            folders.append(folder)
     cache_path = os.path.join(feature, TRANSCRIPT_CACHE)
     try:
         with open(cache_path) as fh:
@@ -2235,12 +2274,15 @@ def transcripts_of(state_path):
         held = cache.get(path)
         # A conversation still going grows between two polls: read again
         # at most once a minute, not its whole transcript every poll.
-        if held and len(held) == 3 and (held[0] == stamp or time.time() - held[2] < TRANSCRIPT_FRESH):
+        # A summary from an older reader lacks a field: read again.
+        if held and len(held) == 3 and held[1].get("v") == claude_usage.VERSION \
+                and (held[0] == stamp or time.time() - held[2] < TRANSCRIPT_FRESH):
             return held[1]
         whole = claude_usage.read(path)
         if whole is None:
             return None  # not read: tried again next time, not kept as empty
-        summary = {"human": whole.get("human") or [], "cost": whole.get("cost")}
+        summary = {"human": whole.get("human") or [], "cost": whole.get("cost"),
+                   "expired": whole.get("expired") or [], "v": claude_usage.VERSION}
         cache[path] = [stamp, summary, time.time()]
         changed.append(path)
         return summary
@@ -2260,7 +2302,7 @@ def transcripts_of(state_path):
                 sid = next_link(path)
             except OSError:
                 raise  # read again next time, not kept as "no link"
-            nxt = os.path.join(folder, sid + ".jsonl") if sid else None
+            nxt = os.path.join(os.path.dirname(path), sid + ".jsonl") if sid else None
             cache[key] = [stamp, nxt, time.time()]
             changed.append(key)
         # The link is kept even before its transcript is there: a stat on
@@ -2273,7 +2315,10 @@ def transcripts_of(state_path):
         session_end.chain reads it by."""
         if not SESSION_ID.match(session or ""):
             return None
-        last = os.path.join(folder, session + ".jsonl")
+        found = [p for p in (os.path.join(f, session + ".jsonl") for f in folders) if os.path.isfile(p)]
+        if not found:
+            return None
+        last = found[0]
         seen = set()
         while last not in seen:
             seen.add(last)
@@ -2302,6 +2347,10 @@ def transcripts_of(state_path):
             except OSError:
                 pass
     read.done = done
+    # The local review's passes, each a conversation of its own, for metrics
+    # to price on their block: every caller of history gets them so.
+    from local_review import rows as journal_rows
+    read.passes = journal_rows(os.path.join(feature, LOCAL_JOURNAL), with_spent=True)
     return read
 
 
@@ -3953,11 +4002,12 @@ const player = (() => {
   const SHOW = {input: (n, more) => '✋ ' + plus(String, n, more),
                 cost: (n, more) => plus(money, n, more),
                 wait: (n, more) => '⏳ ' + plus(took, n, more),
+                expired: (n, more) => '♻ ' + plus(String, n, more),
                 time: (n, more) => '⏱ ' + plus(took, n, more)};
   // A kind's whole, as the line above the maps and a map's heading say it.
   const whole = (kind, sum) => kind === 'cost' ? '$' + sum.toFixed(2)
     : kind === 'wait' || kind === 'time' ? (sum ? took(sum) : '0') : String(sum);
-  const ICON = {input: '✋', cost: '', wait: '⏳', time: '⏱'};
+  const ICON = {input: '✋', cost: '', wait: '⏳', expired: '♻', time: '⏱'};
   function totals(kind, map) {
     const m = ((data || {}).metrics || {})[kind] || {};
     if (map !== 'overview') return m[map] || {};
@@ -4076,7 +4126,7 @@ const player = (() => {
         if (['start', 'end'].includes(kindOf(g))) {
           const low = Math.max(box.y + box.height, ...own.map((t) => { const b = t.getBBox(); return b.y + b.height; }));
           text(g, box.x + box.width / 2, low + 11, 'middle',
-               [w.time, w.input, w.wait, w.cost].filter(Boolean).join('  '));
+               [w.time, w.input, w.wait, w.expired, w.cost].filter(Boolean).join('  '));
           return;
         }
         // Inside the block, in its corners: outside, the ways coming in and
@@ -4098,11 +4148,12 @@ const player = (() => {
             t.setAttribute('transform', 'translate(0 6)'); t.dataset.mtMoved = '1';
           });
         }
-        // What you did, side by side at the bottom left; what Claude cost
-        // pressed to the bottom right.
+        // What you did, side by side at the bottom left; what Claude cost,
+        // the caches it wrote again before it, pressed to the bottom right.
         const said = [w.input, w.wait].filter(Boolean).join('  ');
+        const spent = [w.expired, w.cost].filter(Boolean).join('  ');
         const left = said ? text(g, box.x + pad, bottom, 'start', said) : null;
-        const right = w.cost ? text(g, box.x + box.width - pad, bottom, 'end', w.cost) : null;
+        const right = spent ? text(g, box.x + box.width - pad, bottom, 'end', spent) : null;
         const room = box.width - 2 * pad - (left && right ? 10 : 0);
         const lw = left ? left.getComputedTextLength() : 0, rw = right ? right.getComputedTextLength() : 0;
         if (lw + rw > room) { squeeze(left, room * lw / (lw + rw)); squeeze(right, room * rw / (lw + rw)); }
@@ -4257,6 +4308,7 @@ def _page(label, demo=None):
 <label title="Each time you stepped in: a message to Claude after its turn, an answer to its question or to sclaude's, a command run on the feature"><input type="checkbox" value="input"> ✋ your input <b class="mt-total" data-kind="input"></b></label>
 <label title="What Claude Code's own account says each conversation cost"><input type="checkbox" value="cost"> $ Claude's cost <b class="mt-total" data-kind="cost"></b></label>
 <label title="How long a question waited for your answer — Claude's, after its turn or its question, and sclaude's own — the whole of it, nights included"><input type="checkbox" value="wait"> ⏳ waiting for you <b class="mt-total" data-kind="wait"></b></label>
+<label title="How many times Claude's prompt cache had expired and a conversation's context was written to it again — usually after a pause longer than the cache lives; each costs a fresh write of the whole context"><input type="checkbox" value="expired"> ♻ cache rebuilt <b class="mt-total" data-kind="expired"></b></label>
 <label title="How long the feature stood on each place, every stay added up — what the player's clock shows; ⚠ where a conversation ended with no end written (a Ctrl-C, a terminal that died) and its time is a guess, up to the last line it wrote"><input type="checkbox" value="time"> ⏱ time in the step <b class="mt-total" data-kind="time"></b></label></div>
 <div class="live" style="margin-top:14px">
 <div>

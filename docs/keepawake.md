@@ -182,7 +182,7 @@ delete it. The daemon's state keeps the repository channels' messages, and a
 feature channel's only while it has no worktree.
 
 **Notes: what the topic is told without being asked.** After each review round
-sclaude also says where the review stands: `review_report` in `run.sh` has
+sclaude also says where the review stands: `review_report` in `review_gate.sh` has
 `review_report.py` write the numbers of the last session that ran a review to the file
 `SCLAUDE_REPORT_BRIEF` names, and `ask_notice` (`sclaude/lib/io.sh`) lays that
 text in the feature channel's `notes/`, skipping a text the same as the last one
@@ -277,7 +277,7 @@ how it ended. The commands a deploy runs stay in the terminal, and with the
 question they are what it rests on.
 "Finished" is a session
 sclaude closed on its report; "ended" one a person left, which says nothing
-of the work being done (`session_closed` in `run.sh`). A detail rides on the
+of the work being done (`session_closed` in `session_watch.sh`). A detail rides on the
 same line only where the reader needs it: how many friction entries a review
 has, the regression part a fix is for, that a fix goes back to the session of
 the last one, a retrospective that found nothing to act on.

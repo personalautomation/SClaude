@@ -41,8 +41,8 @@ def check(name, got, want):
 
 with open(os.path.join(ROOT, "sclaude", "prompts", "code.md")) as fh:
     PROMPT = fh.read()
-with open(os.path.join(LIB, "run.sh")) as fh:
-    RUN = fh.read()
+RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
+          for m in ("run.sh", "session_watch.sh"))
 
 # --- the words both sides share ----------------------------------------------
 check("code.md names the header", "header: `%s`" % session_end.ACCEPT_HEADER in PROMPT, True)

@@ -513,7 +513,7 @@ def count(ts, fate):
 
 # Where review stands, for a phone: the newest session's numbers, written to
 # the file this names when it is set. sclaude sends it to the feature's topic
-# in Telegram after every round (review_report in run.sh), each round a
+# in Telegram after every round (review_report in review_gate.sh), each round a
 # message of its own: the topic keeps the history, each message says only
 # what is new.
 BRIEF_ENV = "SCLAUDE_REPORT_BRIEF"
@@ -719,7 +719,7 @@ def main():
 
 
 # Whether the rounds have stopped converging, for sclaude to warn once and
-# name the keys that end the search (review_stuck_say in run.sh): the verdict
+# name the keys that end the search (review_stuck_say in review_round.sh): the verdict
 # says so, over enough rounds that one bad round is not it. The report wrote
 # "Not converging" eighteen rounds in a row on one feature, and each was
 # followed by a fresh session, until the person stopped it by hand.

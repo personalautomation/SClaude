@@ -3,7 +3,7 @@
 what CLAUDE.md already says, before sclaude puts them off itself.
 
 A friction log of proposals alone is put off without a session
-(friction_defer_proposals in run.sh), and each step's session names its
+(friction_defer_proposals in friction.sh), and each step's session names its
 proposal's class itself. On one feature four sessions proposed the same rule
 under four classes, one of them a rule the project's CLAUDE.md already
 stated: the monthly review, which decides by how often a class comes back,

@@ -54,7 +54,7 @@ REVIEW_WAIT_MAX="${REVIEW_WAIT_MAX:-1800}"
 
 # The share of its context window, in percent, under which a review session
 # takes the next round itself rather than handing it to a fresh one (see
-# round_marker in run.sh). A share, as the status line shows it: with a
+# round_marker in review_round.sh). A share, as the status line shows it: with a
 # window of 1M tokens 40% is 400k. .sclaude/local/review-context.log keeps
 # what every review session ended on, to judge the figure by.
 REVIEW_CONTEXT_MAX_PCT="${REVIEW_CONTEXT_MAX_PCT:-40}"
@@ -65,7 +65,7 @@ REVIEW_CONTEXT_MAX_PCT="${REVIEW_CONTEXT_MAX_PCT:-40}"
 # a fresh session is the cheaper one. Claude Code caches a conversation for
 # an hour; the next round stays in the same session only while its last
 # request is younger than that, less a margin for the time the resume takes
-# (review_keep in run.sh) — 55 minutes.
+# (review_keep in review_round.sh) — 55 minutes.
 REVIEW_CACHE_TTL="${REVIEW_CACHE_TTL:-3600}"
 [[ "$REVIEW_CACHE_TTL" =~ ^[0-9]+$ ]] || REVIEW_CACHE_TTL=3600
 REVIEW_CACHE_MARGIN="${REVIEW_CACHE_MARGIN:-300}"

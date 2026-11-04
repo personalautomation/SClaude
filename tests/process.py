@@ -118,7 +118,7 @@ check("the monthly review runs as deferred.sh launches it",
 model, effort, mode = process.SPEC["f_review"]
 check("the friction review runs as run_friction launches it",
       re.search(r"run_friction\(\) \{.*?--model %s --effort %s.*?--permission-mode %s" % (model, effort, mode),
-                read("sclaude", "lib", "run.sh"), re.S) is not None)
+                read("sclaude", "lib", "friction.sh"), re.S) is not None)
 others = set(process.OVERVIEW_NODES)
 check("every overview block borrows a detail",
       not (others - set(process.ALIAS)) and all(v in process.DETAILS for v in process.ALIAS.values()),

@@ -66,7 +66,7 @@ check("unindented-tail-is-not-context", fp.rows(
 check("empty-is-not-proposals", fp.rows(["\n"], "s", "f", "r"), None)
 
 # --- the deferral itself ----------------------------------------------------
-with open(os.path.join(LIB, "run.sh")) as fh:
+with open(os.path.join(LIB, "friction.sh")) as fh:
     RUN = fh.read()
 
 

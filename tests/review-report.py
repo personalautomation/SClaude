@@ -356,8 +356,8 @@ check("noise", "mostly asking for what nobody fixes" in v([2, 1, 1], 0.3, 0, 1, 
 check("early", v([5], None, 0, 5, 5), "Too few rounds for a trend.")
 
 # --- wiring --------------------------------------------------------------------
-with open(os.path.join(LIB, "run.sh")) as fh:
-    RUN = fh.read()
+RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
+          for m in ("run.sh", "review_round.sh", "review_gate.sh", "friction.sh", "session_watch.sh"))
 with open(os.path.join(ROOT, "bin", "sclaude")) as fh:
     BIN = fh.read()
 # Four for the rounds of the review on GitHub, one where the review on this

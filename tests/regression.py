@@ -544,7 +544,8 @@ if rewind:
 
 # The gate is wired into after_step, and before the step is recorded done —
 # otherwise it gates nothing.
-run_sh = open(os.path.join(ROOT, "sclaude", "lib", "run.sh"), encoding="utf-8").read()
+run_sh = "".join(open(os.path.join(ROOT, "sclaude", "lib", m), encoding="utf-8").read()
+                 for m in ("run.sh", "friction.sh"))
 check_true("gate-wired-into-after-step", "regression_gate" in run_sh)
 gate_at = run_sh.find("regression_gate")
 done_at = run_sh.find('state_set "$state" "steps.$step.done" true')

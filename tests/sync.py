@@ -94,7 +94,7 @@ warn() { echo "WARN $*"; }
 INSTRUMENTS=%s
 SELF=sclaude
 source %s/developer.sh
-source %s/run.sh
+source %s/instruments.sh
 # Other sclaude processes on the real machine must not decide this bench.
 [[ -n "${OTHERS:-}" ]] && instruments_others() { echo 4242; } || instruments_others() { return 1; }
 %s one two
@@ -329,7 +329,7 @@ with tempfile.TemporaryDirectory() as tmp:
 #
 # Read as text: driving run_friction for real needs a feature, a log and a
 # claude, and what matters is only that the refusal comes before the session.
-RUN = open(os.path.join(LIB, "run.sh"), encoding="utf-8").read()
+RUN = open(os.path.join(LIB, "friction.sh"), encoding="utf-8").read()
 friction = RUN[RUN.index("run_friction() {"):]
 friction = friction[:friction.index("\n}\n")]
 # The review no longer commits to sclaude, so there is no branch to guard: its
@@ -364,7 +364,7 @@ ROWS
 }
 """
 done = subprocess.run(
-    ["bash", "-c", "source %s/run.sh\n%s\ninstruments_others" % (LIB, FAKE_PS)],
+    ["bash", "-c", "source %s/instruments.sh\n%s\ninstruments_others" % (LIB, FAKE_PS)],
     capture_output=True, text=True, env=ENV)
 check("others-only-sclaude-commands", done.stdout.strip(),
       "pid 201: sclaude feat, up 02:00, pid 300: sclaude status, up 03:00")

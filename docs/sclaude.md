@@ -119,7 +119,14 @@ publishes it (see "The workshop" below).
 | `sclaude/lib/branches.sh` | sorting out branches with nothing left to hold |
 | `sclaude/lib/worktree.sh` | preparing a feature's tree and the dev server |
 | `sclaude/lib/dev_loopback.cjs` | loaded into a feature's server: a listen on every interface goes to 127.0.0.1 |
-| `sclaude/lib/run.sh` | launching a step, the transitions, the friction review |
+| `sclaude/lib/run.sh` | launching a step and the transitions: the session, its end, the checks before the feature goes on |
+| `sclaude/lib/prompt.sh` | a step's prompt with its gathered blocks, and what the product and the person add to it |
+| `sclaude/lib/session_watch.sh` | the markers a session writes when it is done, and the watcher that closes claude on them |
+| `sclaude/lib/acceptance.sh` | the issue's acceptance criteria as a step leaves them |
+| `sclaude/lib/review_round.sh` | step 4's rounds: news since the session looked, the same conversation or a fresh one |
+| `sclaude/lib/review_gate.sh` | closing step 4: the gate on the pull request, the threads the person kept, the reports |
+| `sclaude/lib/friction.sh` | the friction review between steps |
+| `sclaude/lib/instruments.sh` | sclaude's own checkout: taking main, proposing a change, refreshing the units |
 | `sclaude/lib/github.sh` | issues and pull requests through `gh` |
 | `sclaude/lib/plan.sh` | step 1's plan from its session's transcript |
 | `sclaude/lib/deploy.sh` | preview, prod and the cycle's epilogue |

@@ -156,8 +156,8 @@ try:
     check("keys-with-no-watcher", has(None), "r")
 
     # --- session_ended's ways for the person's word --------------------------
-    with open(os.path.join(LIB, "run.sh")) as fh:
-        RUN = fh.read()
+    RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
+                  for m in ("run.sh", "session_watch.sh", "review_round.sh"))
 
     def functions(names):
         out = []

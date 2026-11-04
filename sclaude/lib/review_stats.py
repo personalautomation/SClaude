@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 # What the review sessions of a product cost, read from the log
-# review_context_log writes (sclaude/lib/run.sh), for `sclaude review-stats`.
+# review_context_log writes (sclaude/hooks/no-code-in-planning.py), for `sclaude review-stats`.
 #
 # REVIEW_CONTEXT_MAX_PCT decides when a review round stays in the session that
 # closed the last one and when it goes to a fresh session. The figure was set

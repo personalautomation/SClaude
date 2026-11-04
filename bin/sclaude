@@ -135,6 +135,7 @@ INSTRUMENTS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 # without executing anything. A read error on any of them is death on the spot:
 # half an orchestrator is worse than none.
 for _module in io ui steps state project environment developer branches worktree featuredb lock pane run \
+               prompt session_watch acceptance review_round review_gate friction instruments \
                github plan deploy regression rollback watch picker abandon actions doctor deferred \
                terminal retro scratch no_change local_review config sync workshop; do
   # shellcheck source=/dev/null
@@ -1641,7 +1642,7 @@ cmd_sync() {
 
 # What has changed on the PR since the step last saw it.
 #
-# review_news (run.sh) assembles this — the same gathering that goes as a prompt
+# review_news (review_round.sh) assembles this — the same gathering that goes as a prompt
 # into a resumed step 4. Until now there was no other way to see it: without
 # opening the step, a human did not know whether there was anything new there at
 # all.

@@ -284,7 +284,7 @@ try:
         with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             json.dump(state_blob, fh)
         body = "set -uo pipefail\n"
-        for name in ("io", "ui", "steps", "state", "watch", "run"):
+        for name in ("io", "ui", "steps", "state", "watch", "run", "review_round", "review_gate"):
             body += 'source "%s/%s.sh"\n' % (LIB, name)
         body += 'review_skippable "%s" demo && echo YES || echo NO\n' % wt
         out = subprocess.run(["bash", "-c", body], capture_output=True, text=True,

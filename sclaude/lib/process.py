@@ -428,7 +428,7 @@ WORKSHOP_EDGES = [
 ]
 
 # The friction review: what the safety rules refused a session, read after it
-# by a session of its own (run_friction in sclaude/lib/run.sh). Every session
+# by a session of its own (run_friction in sclaude/lib/friction.sh). Every session
 # with F on the maps leads here.
 FRICTION_LANES = [("session", "Step session"), ("sclaude", "sclaude"), ("review", "Friction review"),
                   ("person", "You"), ("branch", "Feature's branch"), ("monthly", "Put off")]

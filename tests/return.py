@@ -131,12 +131,12 @@ try:
 
     # --- return_brief ---------------------------------------------------------
     out, _, _ = run_bash('return_brief "%s" 71 208' % wt, wt, home, inst,
-                         modules=("io", "ui", "steps", "state", "watch", "run"))
+                         modules=("io", "ui", "steps", "state", "watch", "run", "review_round"))
     check("brief-names-the-mark", "since 2026-10-01T18:46:28+00:00" in out, True)
     check("brief-reads-the-issue", "`gh issue view 71 --json comments`" in out, True)
     check("brief-reads-the-pr-lines", "pulls/208/comments" in out, True)
     out, _, _ = run_bash('return_brief "%s" null null' % wt, wt, home, inst,
-                         modules=("io", "ui", "steps", "state", "watch", "run"))
+                         modules=("io", "ui", "steps", "state", "watch", "run", "review_round"))
     check("brief-without-issue-or-pr", "gh " in out, False)
 
     # --- a silent return still briefs a fresh session -------------------------

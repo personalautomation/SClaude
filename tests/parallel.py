@@ -110,8 +110,8 @@ write(t, [ordinary()])
 check("no-limit", end.limit(t), None)
 
 # --- the watcher closes a session on a reset limit -----------------------------
-with open(os.path.join(LIB, "run.sh")) as fh:
-    RUN = fh.read()
+RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
+          for m in ("run.sh", "session_watch.sh", "review_round.sh", "friction.sh"))
 
 
 def functions(source, names):
@@ -353,7 +353,7 @@ check("night-heading-agrees", "Left at night for the person to confirm" in revie
       and "Left at night for the person to confirm" in open(os.path.join(LIB, "pr_context.py")).read(), True)
 check("snapshot-names-the-prompt-paragraph", "the threads left at night" in review, True)
 check("night-offer-asks-before-the-wait",
-      "--night-yours" in open(os.path.join(LIB, "run.sh")).read(), True)
+      "--night-yours" in open(os.path.join(LIB, "review_gate.sh")).read(), True)
 # A thread left as it is is proposed in so many words and, on a yes, resolved
 # by the session itself; review-yours is for the person's own hand only.
 check("review-proposes-resolving", "I want to resolve this comment on GitHub" in review, True)

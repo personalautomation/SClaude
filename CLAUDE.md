@@ -58,7 +58,7 @@ breaks the other silently — grep before you edit:
   decision carries in `review-yours` — is spelled out in
   `sclaude/prompts/review.md`, which writes it at night and asks the person
   about such threads by day, and counted by `night_yours` for
-  `review_night_offer` in `sclaude/lib/run.sh`, which on the person's yes
+  `review_night_offer` in `sclaude/lib/review_gate.sh`, which on the person's yes
   moves their lines to `NIGHT_FILE` (`review-night`, `night_take`) for the
   snapshot to mark them to be asked about; `tests/parallel.py` checks the
   sides agree. Reworded on one side alone, the morning offer never comes and
@@ -99,7 +99,7 @@ breaks the other silently — grep before you edit:
   prints about a feature, one tab-separated line each — written by `ask_feed`
   in `io.sh` and read by `FEED_FILE` in `notices.py`. The text itself is the file that
   `SCLAUDE_REPORT_BRIEF` names to `sclaude/lib/review_report.py`
-  (`review_report` in `run.sh`).
+  (`review_report` in `review_gate.sh`).
 
 - The record of a topic's messages, `~/.local/state/keepawake/topics/<thread>`
   (`KEEPAWAKE_TOPICS` in tests), is named once, by `topic_ledger` in
@@ -183,17 +183,17 @@ breaks the other silently — grep before you edit:
   issue comment and the steps' demo on 2026-11-01. -->
 
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
-  is read by `review_context` in `sclaude/lib/run.sh`, which decides by it
+  is read by `review_context` in `sclaude/lib/review_round.sh`, which decides by it
   whether a review round stays in the same session; `tests/review-round.py`
   runs both sides.
 - `.sclaude/local/feature/review-reversals` is named by `reversals_file` in
-  `run.sh` and spelled out in `sclaude/prompts/review.md`;
+  `review_round.sh` and spelled out in `sclaude/prompts/review.md`;
   `tests/review-round.py` checks the two agree.
 
 - Step 2's closing question — the header `Accept work`, the option `Accept`
   and the marker word `accepted` — is spelled out in `sclaude/prompts/code.md`
   and read by `ACCEPT_HEADER`/`ACCEPT_LABEL` in `sclaude/lib/session_end.py`
-  (`code_accepted` in `run.sh`) and the watcher's short grace in
+  (`code_accepted` in `session_watch.sh`) and the watcher's short grace in
   `session_watch_start`; `tests/code-accept.py` checks the sides agree.
   Reworded on one side alone, sclaude asks again in its terminal, or a
   session closes on half a report.
@@ -259,7 +259,7 @@ breaks the other silently — grep before you edit:
   (`SCLAUDE_REASON`); `core_send_refused` refuses core-send at every other
   step. Only the retrospective's prompt and
   the friction and deferred reviews' carry `prompts/_workshop.md`
-  (`workshop_rules` in `workshop.sh`, `render_prompt` in `run.sh`), and the
+  (`workshop_rules` in `workshop.sh`, `render_prompt` in `prompt.sh`), and the
   process map's W follows the prompts. `tests/hooks.py` and
   `tests/process.py` check each side.
 - sreview's mark of a finished run, `$S/branches/<branch>.reviewed` holding
@@ -271,9 +271,9 @@ breaks the other silently — grep before you edit:
   leak question longer than that is asked at the terminal alone, so that a
   "yes" from the phone never covers lines it did not show.
 - `<workshop-rules>` in `sclaude/prompts/_friction-body.md` and
-  `friction-deferred.md` is filled by `run_friction` in `sclaude/lib/run.sh`
+  `friction-deferred.md` is filled by `run_friction` in `sclaude/lib/friction.sh`
   and `cmd_deferred` in `sclaude/lib/deferred.sh`; `<block:workshop>` in the
-  step and retrospective prompts by `render_prompt` in `run.sh`.
+  step and retrospective prompts by `render_prompt` in `prompt.sh`.
 
   <!-- Added by Claude on 2026-10-26 with the workshop: a name changed on one
   side alone would leave a session unable to write where it was let, or a
@@ -324,7 +324,7 @@ breaks the other silently — grep before you edit:
   also reads the names `session_label` in `sclaude/lib/steps.sh` gives a
   session (`step_of` in `sclaude/lib/claude_usage.py`; `tests/session_names.py`
   feeds it every kind) and the columns of `review-context.log` that
-  `review_context_log` in `run.sh` writes (`review_log` in
+  `review_context_log` in `review_round.sh` writes (`review_log` in
   `sclaude/lib/dev_quality.py`; `tests/metrics-page.py`).
 
   <!-- Added by Claude on 2026-10-27 with the DORA page: a path or a heading
@@ -336,7 +336,7 @@ breaks the other silently — grep before you edit:
   `config_menu.py`), whether a night over every session is on; `tests/isleep.py` runs it and
   `tests/config-menu.py` the setting. Renamed on one side alone, the night's
   review rounds stop going on by themselves, without an error.
-  `review_night_offer` in `sclaude/lib/run.sh` asks `night.py active` too, and
+  `review_night_offer` in `sclaude/lib/review_gate.sh` asks `night.py active` too, and
   ends the night with `night.py off --away <why>` on the person's yes, so the session it
   opens asks rather than decides.
 

@@ -6,7 +6,7 @@
 #   cycles.jsonl          each regression stage's runs and fixing sessions,
 #                         each step's friction review and its verdict
 #   review-context.log    every review session's rounds and the findings it
-#                         answered (review_context_log in run.sh)
+#                         answered (review_context_log in review_round.sh)
 #   .sclaude/*/deferred/  friction put off for the monthly review (deferred.sh)
 #   the issue             the acceptance criteria and how many were ticked
 #                         (AC_OPEN … AC_CLOSE, issue_comments.py), and how

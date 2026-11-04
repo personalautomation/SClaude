@@ -281,7 +281,7 @@ named_with_icon() {
 #       run.sh); everything after runs as on that end, the friction review
 #       and the step's checks included, and the cycle goes on;
 #   [N] forward, later: the same, and sclaude stops where the next step, or
-#       production after step 4, would begin (stop_asked in run.sh);
+#       production after step 4, would begin (stop_asked in session_watch.sh);
 #   [r] again, now: the session is closed as /exit would close it, and the
 #       same conversation is opened again at once, without a message
 #       (claude_launch): a fresh claude process, nothing for it to read;

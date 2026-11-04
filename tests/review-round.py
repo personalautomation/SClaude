@@ -70,8 +70,9 @@ def functions(source, names):
     return "\n".join(out)
 
 
-with open(os.path.join(LIB, "run.sh")) as fh:
-    RUN = fh.read()
+RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
+          for m in ("run.sh", "session_watch.sh", "review_round.sh", "review_gate.sh",
+                    "friction.sh"))
 WATCH = 'source "%s/state.sh"\nsource "%s/pane.sh"\nLIB="%s"\n' % (LIB, LIB, LIB) + functions(
     RUN, ["round_marker", "done_marker", "session_watch_start", "session_watch_stop"]) + "\n" + \
     re.search(r"^stop_file\(\) \{ .*\}\n", RUN, re.M).group(0)
@@ -625,7 +626,7 @@ echo "watcher=[$SESSION_WATCHER]"
            "🔁 Step 7/7 finished: retrospective · nothing to act on — sclaude closed it."])
     # Every kind of session tells the topic it started, by the same line.
     for path, kind in (("run.sh", "started step"), ("run.sh", "resumed step"),
-                       ("run.sh", "done step"), ("run.sh", "started friction"),
+                       ("run.sh", "done step"), ("friction.sh", "started friction"),
                        ("regression.sh", "started fix"), ("github.sh", "started epilogue"),
                        ("retro.sh", "started retro"), ("deferred.sh", "started deferred")):
         with open(os.path.join(LIB, path)) as fh:
@@ -638,7 +639,8 @@ echo "watcher=[$SESSION_WATCHER]"
               or kind == "started epilogue" and 'ask_feed say "$(phase_line "$verb" epilogue)' in src
               and "&& verb=resumed" in src, True)
     # And every close goes through session_closed, with no headline of its own.
-    for path in ("run.sh", "regression.sh", "github.sh", "retro.sh", "deferred.sh"):
+    for path in ("run.sh", "friction.sh", "session_watch.sh", "review_round.sh", "review_gate.sh",
+                 "regression.sh", "github.sh", "retro.sh", "deferred.sh"):
         with open(os.path.join(LIB, path)) as fh:
             calls = re.findall(r'session_closed "[^\n]*(?:\\\n[^\n]*)?', fh.read())
         check("closes-by-phase " + path,
@@ -1096,7 +1098,7 @@ echo "watcher=[$SESSION_WATCHER]"
           'warn "  $standing"' in gate and 'ask_feed warn "  $standing"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
           and '"$(review_last_look "$wt")"' in gate, True)
     check("resumed-review-says-what-it-is-handed",
-          '${brief:+ · $brief}' in RUN[RUN.index("review_brief() {"):]
+          '${brief:+ · $brief}' in RUN
           and 'brief="$(review_brief "$wt" "$step" resumed)"' in RUN, True)
     check("gate-asks-only-at-the-go-on-ceiling",
           'if [[ "$go_on" -eq 2 ]]; then\n    ask "${BOLD}Back to a review session for it?' in gate

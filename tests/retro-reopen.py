@@ -128,8 +128,8 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
-with open(os.path.join(LIB, "run.sh")) as fh:
-    run_src = fh.read()
+run_src = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
+          for m in ("run.sh", "session_watch.sh", "prompt.sh"))
 check("step-3-refuses-the-merged-number",
       '"$number" == "$seen" ]] && number=""' in run_src, True)
 check("step-3-gets-the-block", 'SCLAUDE_B_REOPENED="$(retro_pr_block' in run_src
@@ -257,8 +257,8 @@ for name in ("retro.md", "retro-again.md"):
         text = fh.read()
     check("%s-names-the-line" % name, "`<nothing-said>`" in text, True)
     check("%s-no-marker" % name, "<done-marker>" in text, False)
-with open(os.path.join(LIB, "run.sh")) as fh:
-    run_src = fh.read()
+run_src = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
+          for m in ("run.sh", "session_watch.sh", "prompt.sh"))
 check("watcher-reads-the-line",
       'watch-said "$transcript" "$started" "$said"' in run_src, True)
 

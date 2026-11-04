@@ -1,0 +1,449 @@
+#!/usr/bin/env bash
+#
+# Closing step 4: the gate that asks the pull request whether the review
+# finished with nothing open, the threads the person kept, and the reports.
+#
+# Part of sclaude; pulled in with source from bin/sclaude.
+# It does not run on its own.
+
+# May step 4 close? Waits out a review still running, then, if anything is
+# left open, goes back to a review session unasked — held instead when the
+# person left the last one with [g] off. Returns 0 to go on closing.
+#
+#   review_close_gate <wt> <slug> <pr>
+#
+# Its answer, as `pr_context.py --close` gives it: `ok`, `pending` or
+# `open: <why>`. Anything unreadable is `ok`.
+review_close_gate() {
+  local wt="$1" slug="$2" pr="$3" word waited=0 announced=0 answer repo said="" said_read=0 failed=0 go_box=""
+  local gate_reported=0
+  [[ -n "$pr" && "$pr" != "null" ]] || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+  repo="$(gh_repo 2>/dev/null || true)"
+  [[ -n "$repo" ]] || return 0
+  # A project that reviews on this machine: the review the workflow would run
+  # after the session's push runs here, once the pull request has nothing
+  # open but review threads — it resolves the ones the push fixed and posts
+  # what it finds, and the pull request is asked again. Not before: a red
+  # check or an unpushed commit sends the work back anyway, and a review of
+  # it would be paid for nothing. A review that did not run is put to the
+  # person rather than sent back to a session, which could do nothing about
+  # it and would end the same way.
+  local local_due=0
+  [[ "$(project_review_mode "$wt")" == "local" ]] && local_due=1
+  while :; do
+    word="$(python3 "$LIB/pr_context.py" --close "$wt" "$pr" "$repo" 2>/dev/null || true)"
+    if [[ "$word" == open:*red:* ]] && review_quota_rerun "$wt" "$slug" "$pr" "$repo"; then
+      continue
+    fi
+    if [[ "$word" != "pending" ]]; then
+      if [[ "$local_due" -eq 1 ]] && [[ "$word" == "ok" || "$word" == yours:* \
+            || "$word" =~ ^open:\ [0-9]+\ review\ thread\(s\)\ open$ ]]; then
+        local_due=0
+        local count
+        # The search ended: the session's fixes are checked only when the
+        # person says so — a pass is paid for, and they stopped the review
+        # to stop paying for rounds.
+        if [[ -n "$(review_enough "$wt")" ]] && ! local_review_done "$wt"; then
+          count="$(local_review_count "$wt" "$pr")" || count="?"
+          echo ""
+          info "  You ended the search for new findings; $count thread(s) are open on PR #$pr."
+          if review_go_on "$wt"; then
+            info "  [g] go on by itself is ticked: checking the fixes with a review pass."
+            answer=1
+          else
+            # One choice of three, asked once: as two yes/no questions in a
+            # row it was answered twice, the second only after the first's "no".
+            info "    1) Check the fixes with a review pass — it resolves the threads they fixed and looks for nothing new"
+            info "    2) Close step 4 now, with the $count thread(s) as they are"
+            info "    3) Leave it open and come back later"
+            # Asked again on anything but 1-3: a stray Enter left in the
+            # terminal read as "leave it open" and ended the step. No answer
+            # at all (nobody to ask) leaves it open, as before.
+            while :; do
+              ask "${BOLD}Choose 1-3: ${OFF}" answer "pick:3" \
+                "Check the fixes" "Close step 4" "Leave it open" || { answer=3; break; }
+              [[ "$answer" == [123] ]] && break
+              printf '%s\n' "  Answer 1, 2 or 3." >&2
+            done
+          fi
+          if [[ "$answer" != 1 ]]; then
+            if [[ "$answer" != 2 ]]; then
+              info "  Left open. Come back with: $SELF $slug"
+              return 1
+            fi
+            [[ "$count" =~ ^[0-9]+$ ]] \
+              && state_set "$wt/.sclaude/local/feature/state.json" steps.review.left_open "$count" 2>/dev/null
+            say "${BOLD}Step 4 closes as you said, with the threads as they are.${OFF}"
+            return 0
+          fi
+        fi
+        count="$(local_review "$wt" "$pr")" || count="failed"
+        if [[ "$count" == "failed" ]]; then
+          failed=$((failed + 1))
+          warn ""
+          warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
+          # A "no" is not "leave": the review is what the person wants, so it
+          # runs again here, rather than at the next `sclaude` they would
+          # have to type. Only no answer at all (nobody to ask) leaves it open.
+          if review_go_on "$wt" && [[ "$failed" -le "$REVIEW_GO_ON_RETRIES" ]]; then
+            # After a pause that grows, a minute more each time: a failure
+            # that lasts — a usage limit, the network — would otherwise spend
+            # every retry in a minute.
+            info "  [g] go on by itself is ticked: reviewing it again in $((failed * REVIEW_GO_ON_PAUSE))s ($failed of $REVIEW_GO_ON_RETRIES)."
+            if review_go_on_pause "$wt" $((failed * REVIEW_GO_ON_PAUSE)); then
+              local_due=1
+              continue
+            fi
+          fi
+          if ! ask "${BOLD}Go on with this head unreviewed? n reviews it again [y/n] ${OFF}" answer yn; then
+            info "  Left open. Come back with: $SELF $slug"
+            return 1
+          fi
+          if ! is_yes "$answer"; then
+            info "  Reviewing it again; Ctrl-C leaves, and the next \`$SELF\` starts it again."
+            local_due=1
+            continue
+          fi
+        elif [[ "$count" -gt 0 ]]; then
+          # The report printed as the session ended was made before this
+          # run: once more with it, where the person decides whether to go
+          # on fixing.
+          review_report "$wt" "$slug"; gate_reported=1
+          # Open by its own count, not by asking GitHub again: a finding in
+          # the conversation, or one still waiting to be posted, is no thread
+          # for the pull request to show.
+          word="open: the review on this machine leaves $count finding(s) open"
+          break
+        fi
+        continue
+      fi
+      break
+    fi
+    if [[ "$waited" -ge "$REVIEW_WAIT_MAX" ]]; then
+      word="open: the automatic review of PR #$pr has not finished"
+      break
+    fi
+    if [[ "$announced" -eq 0 ]]; then
+      announced=1
+      info "  The automatic review of PR #$pr is still running; step 4 closes once it has finished."
+      info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug"
+    fi
+    # `s` here as in the local review, for the review in Actions: what it
+    # posts now is the last search — a session still takes what was open
+    # before, but what the reviews after it find new is left on the pull
+    # request (see below). A local review takes its keys itself.
+    # Read once a wait, and kept here after: a python per poll for a hint.
+    # [g] too: it decides the questions after this wait in Actions as well.
+    [[ "$said_read" -eq 1 ]] || { said="$(review_enough "$wt")"; go_box="$(review_go_box "$wt")"; said_read=1; }
+    if [[ -t 1 ]]; then
+      local hint="only if you want to step in: ${BOLD}[s]${OFF} last review for new findings" what="the review"
+      [[ "$local_due" -eq 1 ]] && { what="the checks"; hint=""; }
+      [[ -n "$said" && -n "$hint" ]] && hint="the last review for new findings · ${BOLD}[s]${OFF} takes it back"
+      [[ -n "$hint" ]] && hint+=" · $go_box ${BOLD}[g]${OFF} go on by itself"
+      printf '\r\033[2K\033[?7l  %sRunning by itself%s — waiting for %s of PR #%s (%s so far)%s\033[?7h' \
+        "$DIM" "$OFF" "$what" "$pr" "$(regression_duration "$waited")" "${hint:+ · $hint}"
+    fi
+    local began=$SECONDS
+    poll_pause "$MERGE_POLL"
+    waited=$((waited + SECONDS - began))
+    # Cleared before the next look: what that prints starts a line of its own.
+    [[ -t 1 ]] && printf '\r\033[2K'
+    if [[ "$POLL_KEY" == [gG] && "$local_due" -eq 0 ]]; then
+      review_go_on_toggle "$wt"; go_box="$(review_go_box "$wt")"
+    fi
+    if [[ "$POLL_KEY" == [sS] && "$local_due" -eq 0 ]]; then
+      if [[ -n "$said" ]]; then said=""; review_enough_set "$wt" ""
+      else said=pass; review_enough_set "$wt" pass
+      fi
+    fi
+  done
+  # The search ended (review_enough), with the review in Actions: it cannot
+  # be told to only check the fixes, so what it posted after the last session
+  # began is left on the pull request; what that session had and did not
+  # settle goes the ordinary way. A local review posts nothing new by then.
+  if [[ -n "$(review_enough "$wt")" && "$word" =~ ^open:\ [0-9]+\ review\ thread\(s\)\ open$ ]]; then
+    local split older newer
+    split="$(python3 "$LIB/pr_context.py" --open-since "$wt" "$pr" "$repo" \
+               "$(review_session_since "$wt")" 2>/dev/null || true)"
+    read -r older newer <<<"$split"
+    if [[ "${older:-}" == "0" && "${newer:-0}" -gt 0 ]]; then
+      review_enough_close "$wt" "$pr" "$newer"
+      return 0
+    fi
+  fi
+  # Only the threads the person kept: no session, a wait for their hand. Once
+  # they are resolved the pull request is asked again from the top — whatever
+  # else is open by then takes the ordinary way.
+  if [[ "$word" == yours:* ]]; then
+    if review_night_offer "$wt" "$slug" "$pr" "$repo"; then
+      # Taken back: the threads are open work again, and the round goes the
+      # way any open thread does — a fresh session (the one resumed would be
+      # the night's, told to decide), and the gate after it as after any.
+      python3 "$LIB/pr_context.py" --night-take "$wt" >/dev/null 2>&1 || true
+      state_set "$wt/.sclaude/local/feature/state.json" steps.review.session null
+      run_step "$wt" "$slug" review
+      return 1
+    fi
+    review_yours_wait "$wt" "$slug" "$pr" "$repo" || return 1
+    review_close_gate "$wt" "$slug" "$pr"
+    return $?
+  fi
+  [[ "$word" == open:* ]] || return 0
+
+  # Findings left open are what a report printed on this head says, its
+  # last round yellow (review_report.py): said again here, in two more lines,
+  # they were read as news. With no report on this head that showed these
+  # findings and rounds — the review in Actions posted more or finished a
+  # run while the gate waited, the person resolved some, a gate reached with
+  # no session before it — the report is printed now, and the topic hears
+  # it as it hears every report. Anything else that holds
+  # the step — a red check, a review still running — is not in the table,
+  # and is said.
+  # The feature's topic still hears both lines, as before: the report's
+  # message there carries the newest session's row only, and this is where
+  # the review stands from the fix session's last look (docs/keepawake.md).
+  # And where the last round left it, counted from the fix session's last
+  # look: what the review confirmed fixed, what the session had seen and
+  # did not fix, what the review found since (brief in pr_context.py).
+  local standing
+  standing="$(python3 "$LIB/pr_context.py" --brief "$wt" "$pr" "$repo" \
+                "$(review_last_look "$wt")" 2>/dev/null || true)"
+  if [[ "$word" =~ ^open:\ ([0-9]+\ review\ thread\(s\)\ open|the\ review\ on\ this\ machine\ leaves\ [0-9]+\ finding\(s\)\ open)$ ]]; then
+    # Printed by this gate's own pass just now; else asked again, and said
+    # only when what it shows — the open findings and the rounds — is not
+    # what was last shown on this head.
+    if [[ "$gate_reported" -eq 0 ]]; then
+      local unless=""
+      # Unset until a report in this process showed something (set -u).
+      local reported="${REVIEW_REPORTED:-}"
+      [[ -n "$reported" && "${reported%% *}" == "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" ]] \
+        && unless="${reported#* }"
+      REVIEW_REPORT_UNLESS="$unless" review_report "$wt" "$slug"
+    fi
+    # And kept for a question that may follow ([g]'s ceiling, then "Close
+    # step 4 anyway?"): the phone shows a question with the lines before it
+    # (ask_note), and this is what that question is about.
+    ask_feed warn "Step 4 is not done — ${word#open: }."
+    ask_note "Step 4 is not done — ${word#open: }."
+    [[ -n "$standing" ]] && { ask_feed warn "  $standing"; ask_note "  $standing"; }
+  else
+    warn ""
+    warn "${BOLD}Step 4 is not done — ${word#open: }.${OFF}"
+    [[ -n "$standing" ]] && warn "  $standing"
+  fi
+  # Back to a session unasked, whoever closed the last one: the person ends
+  # the rounds with the review's keys — [s] (⏭ on the topic) makes the next
+  # session the last for new findings, [n]/[r] in sclaude's tab act at once —
+  # and a question here only held the rounds until somebody came to answer
+  # it. The one question left is [g]'s ceiling: thirty rounds unattended,
+  # and the person decides whether there is a thirty-first.
+  local go_on=0
+  if review_go_on "$wt"; then
+    review_go_on_round "$wt" && go_on=1 || go_on=2
+  fi
+  # Said before the next session: the rounds stopping converging is what
+  # [s] is for.
+  review_stuck_say "$wt"
+  # Except after the person left the session (/exit, Ctrl-C) with [g] off:
+  # that is their word to stop, and going back unasked reopened the same
+  # conversation within seconds when it had committed nothing new.
+  if [[ -n "${SESSION_EXITED:-}" && "$go_on" -eq 0 ]]; then
+    info "  You left the session: step 4 stays open. Come back with: $SELF $slug"
+    return 1
+  fi
+  # Unsaid: the session's own heading follows, its status line with [s].
+  if [[ "$go_on" -eq 2 ]]; then
+    ask "${BOLD}Back to a review session for it? [y/n] ${OFF}" answer yn
+  else
+    answer=y
+  fi
+  if is_yes "$answer"; then
+    # A session sclaude closed: review_reopen picks the session, a fresh one
+    # for a new round, as it does unasked.
+    if [[ -n "${SESSION_AUTO_CLOSED:-}" ]]; then
+      review_reopen "$wt" "$slug" "$pr" "$repo" "$waited"
+      return 1
+    fi
+    run_step "$wt" "$slug" review
+    return 1
+  fi
+  ask "${BOLD}Close step 4 anyway, with that left as it is? [y/n] ${OFF}" answer yn
+  if ! is_yes "$answer"; then
+    info "  Left open. Come back with: $SELF $slug"
+    return 1
+  fi
+  return 0
+}
+
+# Step 4 closes with the findings the review in Actions posted after the
+# person ended the search (review_enough): they stay open threads on the
+# pull request, nothing is resolved or dropped for it.
+#
+#   review_enough_close <wt> <pr> <count>
+review_enough_close() {
+  local wt="$1" pr="$2" count="$3"
+  state_set "$wt/.sclaude/local/feature/state.json" steps.review.left_open "$count" 2>/dev/null
+  say "${BOLD}Step 4 closes: you ended the search for new findings.${OFF}"
+  info "  $count finding(s) the review posted after that stay open on PR #$pr as they are."
+}
+
+# The review threads the person decided to leave as they are, and that are
+# still open: theirs to resolve on GitHub (see YOURS_FILE in pr_context.py).
+#
+#   review_yours_report <wt> <pr> [<repo>]
+#
+# Printed by sclaude itself at the end of every review session rather than left
+# to the session's report: once three reports in a row said "you close the
+# thread" in their middle, with no link, and the thread came back each round.
+# Prints nothing when there is nothing to resolve. Returns 0 when it printed.
+review_yours_report() {
+  local wt="$1" pr="$2" repo="${3:-}" lines link where note
+  [[ -s "$wt/.sclaude/local/feature/review-yours" && -n "$pr" && "$pr" != "null" ]] || return 1
+  [[ -n "$repo" ]] || repo="$(gh_repo 2>/dev/null || true)"
+  [[ -n "$repo" ]] || return 1
+  lines="$(python3 "$LIB/pr_context.py" --yours "$wt" "$pr" "$repo" 2>/dev/null || true)"
+  [[ -n "$lines" ]] || return 1
+  echo ""
+  say "${BOLD}Yours to resolve on GitHub — you decided to leave these as they are:${OFF}"
+  while IFS=$'\t' read -r link where note; do
+    say "  • $where${note:+ — $note}"
+    say "    $link"
+  done <<< "$lines"
+  info "  Open each link and press \"Resolve conversation\". Until then the review counts them as open,"
+  info "  and step 4 cannot close."
+  return 0
+}
+
+# Decisions a night session took for the person (NIGHT_MARK in
+# pr_context.py) are theirs to confirm: offered a session that asks about
+# each and, on their yes, replies and resolves the thread itself — rather
+# than left for their hand on GitHub. The question waits for the person, so
+# at night it waits. 0 when they took the session.
+#
+#   review_night_offer <wt> <slug> <pr> <repo>
+review_night_offer() {
+  local wt="$1" slug="$2" pr="$3" repo="$4" night answer
+  night="$(python3 "$LIB/pr_context.py" --night-yours "$wt" "$pr" "$repo" 2>/dev/null || echo 0)"
+  [[ "${night:-0}" =~ ^[0-9]+$ && "$night" -gt 0 ]] || return 1
+  echo ""
+  say "${BOLD}$night review thread(s) were left at night for you to confirm.${OFF}"
+  notify_feature "$slug" --wt "$wt" \
+    "PR #$pr: $night review thread(s) were left at night for you to confirm." \
+    >/dev/null 2>&1 || true
+  # A night still on would reach the session (sclaude's own prompt does not
+  # end it), which would then decide again instead of asking: the person
+  # answering here is back, so a yes ends it.
+  local isleep="$INSTRUMENTS/skills/isleep/night.py" ends=""
+  [[ -f "$isleep" ]] && python3 "$isleep" active >/dev/null 2>&1 && ends=" (this ends the night)"
+  ask "${BOLD}Go through them with a review session now$ends? [y/n] ${OFF}" answer yn
+  is_yes "$answer" || return 1
+  [[ -n "$ends" ]] && python3 "$isleep" off --away \
+    "The person ended the night by answering sclaude (its terminal or the phone), and they have just written." \
+    >/dev/null 2>&1
+  return 0
+}
+
+# Step 4 has nothing open but the threads the person kept: no session for
+# them, only a wait for the person to resolve them on GitHub.
+#
+#   review_yours_wait <wt> <slug> <pr> <repo>
+#
+# Returns 0 once none of them is open, 1 when the person leaves (Ctrl-C ends
+# sclaude itself; a "no" leaves the step open). Whether anything else is open
+# is the caller's to ask again.
+review_yours_wait() {
+  local wt="$1" slug="$2" pr="$3" repo="$4" word answer
+  # Asked even when the links could not be read: answering "resolved" for the
+  # person sent the gate round again, asking GitHub the same thing for ever.
+  review_yours_report "$wt" "$pr" "$repo" \
+    || warn "  Threads you decided to leave are still open on PR #$pr — resolve them there."
+  notify_feature "$slug" --wt "$wt" \
+    "PR #$pr waits for you — resolve on GitHub the review threads you decided to leave as they are." \
+    >/dev/null 2>&1 || true
+  while :; do
+    ask "${BOLD}Resolved them? [y/n] ${OFF}" answer yn
+    if ! is_yes "$answer"; then
+      info "  Left open. Come back with: $SELF $slug"
+      return 1
+    fi
+    word="$(python3 "$LIB/pr_context.py" --close "$wt" "$pr" "$repo" 2>/dev/null || true)"
+    [[ "$word" == yours:* ]] || return 0
+    warn "  GitHub still shows ${word#yours: } of them open."
+    review_yours_report "$wt" "$pr" "$repo" || true
+  done
+}
+
+# What a product's review sessions cost, from review_context_log's log.
+cmd_review_stats() {
+  local root
+  root="$(main_repo 2>/dev/null)" || die "run it inside a product's repository"
+  python3 "$LIB/review_stats.py" "$root/.sclaude/local/review-context.log"
+}
+
+# Whether another review round is worth it: rounds, findings fixed and closed
+# without a fix, findings on earlier fixes, cost and the trend.
+# Counted from the pull request and the feature's state, without a model.
+# Printed at the close of every review round and by `sclaude review-report`.
+#
+#   review_report <wt> <slug>
+review_report() {
+  local wt="$1" slug="$2" state pr repo
+  state="$wt/.sclaude/local/feature/state.json"
+  pr="$(state_get "$state" pr 2>/dev/null || true)"
+  [[ -n "$pr" && "$pr" != "null" ]] || return 0
+  repo="$(gh_repo 2>/dev/null || true)"
+  # The last session's numbers go to the feature's topic as well, a message
+  # per round (ask_notice) — not for the report between two passes of one
+  # local review (REVIEW_REPORT_QUIET), which would send one each pass.
+  local brief stuck shown; brief="$(mktemp)"; stuck="$(mktemp)"; shown="$(mktemp)"
+  # <REVIEW_REPORT_UNLESS>: what the report last showed on this head, as it
+  # wrote it ("open:<ids> rounds:<finished>/<all>", review_report.py); the
+  # same again, it prints and sends nothing (review_close_gate).
+  SCLAUDE_REPORT_BRIEF="$brief" SCLAUDE_REPORT_STUCK="$stuck" SCLAUDE_REPORT_OPEN="$shown" \
+    SCLAUDE_REPORT_UNLESS="${REVIEW_REPORT_UNLESS:-}" \
+    python3 "$LIB/review_report.py" "$wt" "$pr" "$repo" \
+    "$(state_get "$state" branch 2>/dev/null || true)" 2>/dev/null || true
+  # The verdict, when the rounds stopped converging, for review_stuck_say;
+  # "-" when they did not, and nothing when the report could not tell, which
+  # keeps what was there.
+  local verdict; verdict="$(cat "$stuck" 2>/dev/null)"
+  if [[ "$verdict" == "-" ]]; then
+    state_set "$state" steps.review.stuck "" 2>/dev/null || true
+  elif [[ -n "$verdict" ]]; then
+    state_set "$state" steps.review.stuck "$verdict" 2>/dev/null || true
+    state_set "$state" steps.review.stuck_pr "$pr" 2>/dev/null || true
+  fi
+  local ASK_SLUG="$slug"
+  # The head the terminal last saw a report on, and what it showed: the open
+  # findings and the rounds (review_close_gate). Kept as it was when nothing was printed:
+  # the threads unreadable, or the same as last shown.
+  [[ -s "$shown" ]] && REVIEW_REPORTED="$(git -C "$wt" rev-parse HEAD 2>/dev/null) $(cat "$shown")"
+  [[ -n "${REVIEW_REPORT_QUIET:-}" ]] || ask_notice "$(cat "$brief" 2>/dev/null)"
+  rm -f "$brief" "$stuck" "$shown"
+}
+
+cmd_review_report() {
+  require_repo
+  local slug="${1:-}" wt
+  [[ -n "$slug" ]] || die "name the feature: $SELF review-report <name>"
+  wt="$(feature_worktree "$slug")" || die "no such feature: $slug"
+  review_report "$wt" "$slug"
+}
+
+# `sclaude checks [<pr>]`: step 4's wait after a push, from the feature's
+# worktree; the pull request of the current branch when none is named. Its
+# exit code is the verdict: see wait_checks in pr_context.py. Not `die`, whose
+# 1 is the verdict "red": what stops it before the wait is "could not read".
+cmd_checks() {
+  local pr="${1:-}" wt repo
+  wt="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || { echo "could not read: not a git repository: $(pwd)"; exit 4; }
+  if [[ -z "$pr" ]]; then
+    pr="$(cd "$wt" && gh pr view --json number --jq .number 2>/dev/null)" \
+      || { echo "could not read: no pull request for this branch; name it, $SELF checks <pr>"; exit 4; }
+  fi
+  [[ "$pr" =~ ^[0-9]+$ ]] || { echo "could not read: not a pull request number: $pr"; exit 4; }
+  repo="$(REPO="$wt" gh_repo)"
+  exec python3 "$LIB/pr_context.py" --wait "$wt" "$pr" "$repo" "$REVIEW_WAIT_MAX"
+}

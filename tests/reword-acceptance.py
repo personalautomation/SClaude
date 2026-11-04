@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# reword_acceptance in run.sh: as the review closes, a criterion the plan words
+# reword_acceptance in acceptance.sh: as the review closes, a criterion the plan words
 # otherwise than the issue is shown and offered to the issue. A yes writes it
 # (acceptance.py --reword), a no is remembered for that same difference, and a
 # new difference asks again.
@@ -32,7 +32,7 @@ def function(source, name):
     return m.group(0)
 
 
-with open(os.path.join(LIB, "run.sh")) as fh:
+with open(os.path.join(LIB, "acceptance.sh")) as fh:
     BODY = function(fh.read(), "reword_acceptance")
 with open(os.path.join(LIB, "ui.sh")) as fh:
     UI = fh.read()

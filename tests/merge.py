@@ -27,8 +27,8 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
 deploy = open(os.path.join(ROOT, "sclaude", "lib", "deploy.sh"),
               encoding="utf-8").read()
-run_sh = open(os.path.join(ROOT, "sclaude", "lib", "run.sh"),
-              encoding="utf-8").read()
+run_sh = "".join(open(os.path.join(ROOT, "sclaude", "lib", m), encoding="utf-8").read()
+                 for m in ("run.sh", "review_round.sh"))
 github = open(os.path.join(ROOT, "sclaude", "lib", "github.sh"),
               encoding="utf-8").read()
 

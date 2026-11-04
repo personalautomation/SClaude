@@ -25,7 +25,7 @@ def check(name, got, want):
         failures.append((name, want, got))
 
 
-RUN = open(os.path.join(LIB, "run.sh"), encoding="utf-8").read()
+RUN = open(os.path.join(LIB, "prompt.sh"), encoding="utf-8").read()
 body = re.search(r"^prompt_additions\(\) \{\n.*?^\}\n", RUN, re.S | re.M).group(0)
 
 tmp = tempfile.mkdtemp()

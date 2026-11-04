@@ -5,7 +5,7 @@
 #
 # A session that believes its work is done writes a marker file and gives its
 # report as its last message; the orchestrator then ends the claude process
-# itself, so nobody has to type /exit (see session_watch_start in run.sh). Two
+# itself, so nobody has to type /exit (see session_watch_start in session_watch.sh). Two
 # things decide when that may happen, and both are in the transcript:
 #
 #   * the turn has ended — the report is written in full, not half-streamed;
@@ -388,7 +388,7 @@ def context(path):
 
     The session itself cannot see this number, so the orchestrator reads it
     to decide whether a review round goes on in the same conversation (see
-    review_context in run.sh). The start is what a session costs before it
+    review_context in review_round.sh). The start is what a session costs before it
     has done anything — the tools, the system prompt, the step's prompt — and
     is logged beside it, so a threshold can be judged against what is spent
     on the work rather than on the door.
@@ -415,7 +415,7 @@ def requested(path):
     The same requests context() counts: the conversation's own, with a usage
     that is not zero. The prompt cache lives from that moment, so this is what
     tells the orchestrator whether a resumed session would still find its
-    context cached (review_keep in run.sh).
+    context cached (review_keep in review_round.sh).
     """
     moment = None
     for entry in entries(path):

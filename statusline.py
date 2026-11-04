@@ -553,7 +553,7 @@ def spaced(d, opts, cols):
 # Where the context in use is left for sclaude, per session. Only Claude Code
 # knows the window's size, and it tells the status line alone; the transcript
 # has the tokens but not what they are a share of. sclaude reads this file when
-# a review session ends (review_context in sclaude/lib/run.sh), to decide
+# a review session ends (review_context in sclaude/lib/review_round.sh), to decide
 # whether the next round stays in the same conversation and to log the figure.
 CONTEXT_FILE = "/tmp/claude-statusline-context-%s"
 

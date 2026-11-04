@@ -607,13 +607,13 @@ def open_threads(cwd, pr, repo, nodes=None):
 # and from then on the thread is the person's: the snapshot lists it apart and
 # tells the session not to ask, a review is not reopened for it, and sclaude
 # prints the links to resolve at the end of every review session
-# (review_yours_report in run.sh). The link is the thread's first comment's
+# (review_yours_report in review_gate.sh). The link is the thread's first comment's
 # url — `…/pull/161#discussion_r4218743695` — which is what both the snapshot
 # and `gh api …/pulls/<pr>/comments` (as html_url) give.
 YOURS_FILE = ".sclaude/local/feature/review-yours"
 # What a decision a night session took for the person (/isleep) carries in
 # that file: theirs to confirm in the morning. review.md writes it; by day
-# review_night_offer in run.sh counts such threads (night_yours) and, on the
+# review_night_offer in review_gate.sh counts such threads (night_yours) and, on the
 # person's yes, moves their lines to NIGHT_FILE (night_take): the threads are
 # then open work again, so the ordinary round opens a session, which the
 # snapshot tells to ask the person about each first, with the night's
@@ -1142,7 +1142,7 @@ def review_state(cwd, pr, repo):
 # of sessions and reviews run it out (it has happened). Nothing in the
 # diff caused that and no session can fix it — the job is to be run again once
 # the limit resets, which sclaude does by itself (review_quota_rerun in
-# run.sh). Read from the job's log, where the action leaves its result:
+# review_round.sh). Read from the job's log, where the action leaves its result:
 # `api_error_status: 429` and claude's own "You've hit your … limit ·
 # resets 4am (Europe/Lisbon)".
 QUOTA_429 = re.compile(r'api_error_status"?\s*[:=]\s*429')

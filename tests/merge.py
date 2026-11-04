@@ -514,7 +514,59 @@ check_true("qa-missed-callers-pass-the-merge",
            deploy.count('qa_missed "$issue" "${merged:-}" "$wt"') == 2)
 # Quiet on a preview QA accepted: later runs of a merged feature said "nobody
 # checked" of one QA had.
-check_true("qa-missed-quiet-when-accepted", "qa.accepted" in qa_missed)
+check_true("qa-missed-quiet-when-accepted", 'qa_accepted_now "$wt" && return 1' in qa_missed)
+check_true("qa-accepted-now-reads-the-record",
+           "qa.accepted" in (body_of(deploy, "qa_accepted_now") or ""))
+
+
+def run_fn(name, setup, *args):
+    """One function of deploy.sh, pulled out and run after `setup`."""
+    src = "%s() {%s}\n" % (name, body_of(deploy, name))
+    script = "set -uo pipefail\n%s\n%s%s" % (setup, src, " ".join([name, '"$WT"'] + list(args)))
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                         timeout=30, env=dict(os.environ, WT="/w"))
+    return out.returncode, out.stdout
+
+
+# qa_accepted_now: QA accepted the preview last sent, and nothing else.
+# A preview deployed after the yes, whose run went red, left `qa.sha` on the
+# accepted one: accepted, but not what is deployed.
+for _sent, _acc, _dep, _want in (("abc", "abc", "abc", 0), ("abc", "old", "abc", 1),
+                                 ("abc", "abc", "new", 1), ("", "", "", 1),
+                                 ("null", "null", "null", 1)):
+    _stub = ('state_get() { case "$2" in qa.sha) echo "%s" ;; qa.accepted) echo "%s" ;;'
+             ' deploy.preview.sha) echo "%s" ;; esac; }' % (_sent, _acc, _dep))
+    _rc, _ = run_fn("qa_accepted_now", _stub, "deployed")
+    check("qa-accepted-now deployed %s/%s/%s" % (_sent, _acc, _dep), _rc, _want)
+    # Without `deployed` (qa_missed): a preview deployed by hand after the yes
+    # moves deploy.preview.sha alone, and is not called unaccepted for it.
+    _rc, _ = run_fn("qa_accepted_now", _stub)
+    check("qa-accepted-now %s/%s/%s" % (_sent, _acc, _dep), _rc,
+          0 if _sent not in ("", "null") and _acc == _sent else 1)
+
+# The automatic acceptance says what the preview regression did: green only
+# where a suite is declared; with `none` it says none ran.
+for _parts, _mode, _want in (
+        ("e2e", "full", "the preview regression is green"),
+        ("", "none", "no preview regression ran (previewRegression is none)"),
+        ("", "full", "no preview regression is declared")):
+    _, _out = run_fn("preview_suite_said",
+                     'regression_parts() { echo "%s"; }\nproject_stage_regression() { echo %s; }'
+                     % (_parts, _mode))
+    check("preview-suite-said %s/%s" % (_parts or "-", _mode), _out, _want)
+check_true("auto-qa-says-what-the-suite-did",
+           'and $(preview_suite_said "$wt").${OFF}"' in deploy
+           and 'and $(preview_suite_said "$wt"). Nobody looked at the preview.' in deploy
+           and "preview regression was green" not in deploy)
+check_true("qa-accept-here-gets-the-tree",
+           'qa_accept_here "$issue" auto "$wt"' in deploy
+           and 'qa_accept_here "$issue" key "$wt"' in deploy)
+# A merged branch whose preview QA accepted, unchanged since, is no exception
+# to the flow: the alarm and the "anyway" question are for a merge before QA.
+_accepted_at = deploy.find('elif [[ "${merged:-}" == "MERGED" ]] && deploy_unchanged "$wt" preview && qa_accepted_now "$wt" deployed; then')
+check_true("merged-after-qa-is-quiet",
+           -1 < _accepted_at < deploy.find('elif [[ "${merged:-}" == "MERGED" ]]; then')
+           and "qa_skipped=1" not in deploy[_accepted_at:deploy.find('elif [[ "${merged:-}" == "MERGED" ]]; then')])
 check_true("qa-wait-records-acceptance", 'qa_accepted "$wt"' in (body_of(deploy, "qa_wait") or ""))
 # A merge while QA has it ends the wait, and says so in red.
 check_true("qa-wait-notices-a-merge",

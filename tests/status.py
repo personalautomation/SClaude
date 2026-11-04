@@ -666,7 +666,9 @@ for _name, _src, _close, _status in (
 # unchanged, and with prod_done its fingerprint missed the first pass's and a
 # second epilogue rewrote the same status.
 check_true("prod-live-set-where-the-issue-closes-shipped",
-           re.search(r'if \[\[ "\$prod_done" -eq 1 \|\| "\$carried" -eq 1 \]\]; then\n\s*prod_live=1\n\s*issue_close_done',
+           re.search(r'if \[\[ "\$prod_done" -eq 1 \|\| "\$carried" -eq 1 \]\]; then\n\s*prod_live=1\n'
+                     r'\s*if project_prod_suite_declined "\$wt"; then\n\s*issue_close_done "\$issue" nosuite\n'
+                     r'\s*else\n\s*issue_close_done "\$issue" shipped',
                      deploy_sh) is not None)
 # Nor is the issue reopened once the merge is in production — asked of GitHub
 # once a pass, and the close reads the same answer.

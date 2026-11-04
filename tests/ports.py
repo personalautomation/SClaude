@@ -251,7 +251,7 @@ def main():
         stub = os.path.join(root, "stub")
         os.makedirs(stub)
         with open(os.path.join(stub, "npm"), "w") as fh:
-            fh.write("#!/bin/sh\ntouch npm-ran\n")
+            fh.write("#!/bin/sh\ntouch npm-ran\nmkdir -p node_modules\n")
         os.chmod(os.path.join(stub, "npm"), 0o755)
         path = {"PATH": stub + os.pathsep + os.environ["PATH"]}
         for answer, gone in (("n", False), ("y", True)):
@@ -278,6 +278,20 @@ def main():
                       not os.path.isdir(os.path.join(d, ".next", "dev")), gone)
                 check("answer %s: npm ran" % answer,
                       os.path.exists(os.path.join(d, "npm-ran")), gone)
+                # A finished install marks the lockfile it installed, and the
+                # next start does not ask again while that lockfile stands —
+                # though it still differs from the main repo's.
+                check("answer %s: install marked" % answer,
+                      os.path.exists(os.path.join(d, "node_modules", ".sclaude-lock")), gone)
+                if gone:
+                    asked = bash(root, 'ask() { echo asked; printf -v "$2" n; }\n'
+                                       'check_deps "%s"' % d, path)
+                    check("installed here: not asked again", "asked" in asked, False)
+                    with open(os.path.join(d, "package-lock.json"), "w") as fh:
+                        fh.write("branch moved\n")
+                    asked = bash(root, 'ask() { echo asked; printf -v "$2" n; }\n'
+                                       'check_deps "%s"' % d, path)
+                    check("lockfile moved since: asked", "asked" in asked, True)
             finally:
                 if server.poll() is None:
                     server.kill()

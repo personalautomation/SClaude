@@ -752,6 +752,42 @@ preview_ship() {
   return 1
 }
 
+# Whether QA accepted the preview last sent to them (`qa.sha`, accepted in
+# `qa.accepted` by qa_accepted). With `deployed`, also that it is still the
+# deployed one (`deploy.preview.sha`): a preview deployed after their yes whose
+# run went red never reached qa_sent, so `qa.sha` still names the one before
+# it — accepted, but not what is there. qa_missed asks without it: a preview
+# deployed by hand after the yes, carrying the same product, moves
+# `deploy.preview.sha` alone, and calling that unaccepted raised a false
+# "never passed QA". Quiet and false without a tree or a record.
+#
+#   qa_accepted_now <wt> [deployed]
+qa_accepted_now() {
+  [[ -n "${1:-}" ]] || return 1
+  local state="$1/.sclaude/local/feature/state.json" sent accepted
+  sent="$(state_get "$state" qa.sha 2>/dev/null || true)"
+  accepted="$(state_get "$state" qa.accepted 2>/dev/null || true)"
+  [[ -n "$sent" && "$sent" != "null" && "$accepted" == "$sent" ]] || return 1
+  [[ "${2:-}" == deployed ]] || return 0
+  [[ "$(state_get "$state" deploy.preview.sha 2>/dev/null || true)" == "$sent" ]]
+}
+
+# What the preview regression said, for the words of an automatic QA: green,
+# or that none ran because the project runs none there. Only the gate's
+# green or the project's own "none" reach the automatic acceptance.
+#
+#   preview_suite_said <wt>
+preview_suite_said() {
+  local wt="${1:-}"
+  if [[ -n "$(regression_parts preview "$wt" 2>/dev/null)" ]]; then
+    printf 'the preview regression is green'
+  elif [[ "$(project_stage_regression preview "$wt")" == none ]]; then
+    printf 'no preview regression ran (previewRegression is none)'
+  else
+    printf 'no preview regression is declared'
+  fi
+}
+
 # Did the issue miss QA entirely? Says so out loud, and answers by exit code.
 #
 # It misses when the branch was merged before the preview regression went green:
@@ -773,15 +809,10 @@ preview_ship() {
 # on one feature the second and third runs said "nobody checked the deployment" of a
 # preview QA had accepted before the merge.
 qa_missed() {
-  local issue="$1" merged="${2:-}" wt="${3:-}" state sent accepted
+  local issue="$1" merged="${2:-}" wt="${3:-}"
 
   [[ -n "$issue" && "$issue" != "null" ]] || return 1
-  if [[ -n "$wt" ]]; then
-    state="$wt/.sclaude/local/feature/state.json"
-    sent="$(state_get "$state" qa.sha 2>/dev/null || true)"
-    accepted="$(state_get "$state" qa.accepted 2>/dev/null || true)"
-    [[ -n "$sent" && "$sent" != "null" && "$accepted" == "$sent" ]] && return 1
-  fi
+  qa_accepted_now "$wt" && return 1
   # Done with the pull request still open is the ordinary state now: QA comes
   # before the merge, and Done is how they say yes. Only a merge explains a
   # Done that nobody put there, so only a merged branch is asked about.
@@ -1353,12 +1384,12 @@ qa_back_column() {
 # to Done. A comment says who accepted it, since a column moved and boxes
 # ticked under the gh account would otherwise read as a person having looked.
 #
-#   qa_accept_here <issue> <key|auto>
+#   qa_accept_here <issue> <key|auto> [wt]
 #
 # Returns 0 once the issue is in Done, 1 when it is not — the board could not
 # be read or written — and the wait goes on for a person to move it.
 qa_accept_here() {
-  local issue="$1" how="$2" word who
+  local issue="$1" how="$2" wt="${3:-}" word who
   # The move first: boxes ticked and a comment saying "accepted" on an issue
   # the board kept in In QA would claim what did not happen.
   issue_move_status "$issue" "$QA_TO" "$QA_DONE"
@@ -1372,7 +1403,7 @@ qa_accept_here() {
     *) warn "  Could not tick the criteria in issue #$issue${word:+ ($word)} — tick them on GitHub." ;;
   esac
   if [[ "$how" == auto ]]; then
-    who="automatically: \`qa\` is \`auto\` in .sclaude/config.json, and the preview regression was green. Nobody looked at the preview."
+    who="automatically: \`qa\` is \`auto\` in .sclaude/config.json, and $(preview_suite_said "$wt"). Nobody looked at the preview."
   else
     declare -F developer_name >/dev/null && who="$(developer_name 2>/dev/null || true)"
     who="from sclaude${who:+ by $who}, in the wait for QA."
@@ -1505,8 +1536,8 @@ qa_wait() {
       auto_tried=1
       [[ -t 1 && "$announced" -eq 1 ]] && printf '\r\033[2K'
       echo ""
-      say "${BOLD}Accepting issue #$issue: \`qa\` is auto, and the preview regression is green.${OFF}"
-      if qa_accept_here "$issue" auto; then
+      say "${BOLD}Accepting issue #$issue: \`qa\` is auto, and $(preview_suite_said "$wt").${OFF}"
+      if qa_accept_here "$issue" auto "$wt"; then
         now="$QA_DONE"
         continue
       fi
@@ -1544,7 +1575,7 @@ qa_wait() {
     if [[ "$mode" == both && "$POLL_KEY" == [aA] ]] \
        && column_is "$(issue_status_now "$issue" 2>/dev/null || true)" "$QA_TO"; then
       [[ -t 1 ]] && printf '\r\033[2K'
-      if qa_accept_offer "$issue" && ! qa_accept_here "$issue" key; then
+      if qa_accept_offer "$issue" && ! qa_accept_here "$issue" key "$wt"; then
         warn "  Issue #$issue is not in '$QA_DONE' — nothing ticked; move it on the board."
       fi
     fi
@@ -2040,7 +2071,9 @@ remind_prod() {
   # run", the labels and the epilogue's outcome are built from it, and nothing
   # was shipped. What is already on hosting the issue learned when it went there.
   #
-  # Skipped only when this very tree is on hosting and its run was green. An
+  # Skipped only when this very tree is on hosting and its run was green, or
+  # when QA accepted this very preview before the merge: a stage that runs no
+  # suite has no green to show, and its accepted preview is no exception. An
   # unchanged tree whose last run was red is deployed again: the fix that
   # followed may have been outside the tree (an environment variable, a
   # setting on Vercel), and the only way to learn whether it worked is a fresh
@@ -2070,6 +2103,14 @@ remind_prod() {
     preview_apply_migrations "$wt" || true
     # A red status a green rewrite did not get written over is tried again.
     status_green_again "$slug" "$issue" "$pr" "${merged:-}" "$wt"
+    preview_live=1
+  elif [[ "${merged:-}" == "MERGED" ]] && deploy_unchanged "$wt" preview && qa_accepted_now "$wt" deployed; then
+    # Merged after QA accepted this very preview — sclaude's own merge, or a
+    # person's right after it. A stage that runs no suite (`none`) leaves no
+    # green status for the branch above, and without this every later pass
+    # called such a feature merged before QA and asked to ship it "anyway".
+    echo ""
+    info "Preview at $(deploy_head "$wt" preview | cut -c1-8) — QA accepted it before the merge; not deployed again."
     preview_live=1
   elif [[ "${merged:-}" == "MERGED" ]]; then
     echo ""
@@ -2743,7 +2784,11 @@ remind_prod() {
   local prod_live=0
   if [[ "$prod_done" -eq 1 || "$carried" -eq 1 ]]; then
     prod_live=1
-    issue_close_done "$issue" shipped
+    if project_prod_suite_declined "$wt"; then
+      issue_close_done "$issue" nosuite
+    else
+      issue_close_done "$issue" shipped
+    fi
   elif [[ "$ship_mode" == off ]]; then
     issue_close_done "$issue" shipoff
   else

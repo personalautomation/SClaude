@@ -808,7 +808,11 @@ hard links (`cp -al`): Turbopack refuses to work with a symlink that leads
 outside the project, and `next dev` dies at start-up. Links to the same inodes do
 not duplicate the data — some ten seconds and almost no space. The directory is
 correct while the branch has not touched the dependencies; the script notices a
-`package-lock.json` that has diverged and offers an `npm install`.
+`package-lock.json` that differs from the main repository's and offers an
+`npm install`. A finished install leaves the hash of the lockfile it installed in
+`node_modules/.sclaude-lock` (`check_deps` in `worktree.sh`), and a tree whose
+lockfile still has that hash is not asked again — the main checkout lagging behind
+origin is enough to make the two differ.
 
 ### Logs
 
@@ -1081,7 +1085,9 @@ had to be deleted by hand).
 the project's `ship` says otherwise (`project_ship_mode` in `project.sh`):
 `auto` runs the block with an empty prompt, as the preview's, but only in
 place of the plain question — "Ship to production anyway?", where QA or a
-check was passed over, is still asked, and so is "Ship to production, with
+check was passed over, is still asked (a merge after QA accepted the very
+preview still deployed is not passed over, even where the preview runs no
+suite: `qa_accepted_now` in `deploy.sh`), and so is "Ship to production, with
 what rides along?" where `prod_riders` finds other features' code between
 production and main; `off` reaches no block, records no
 rollback, and closes the issue with `issue_close_done … shipoff` before the

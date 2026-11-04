@@ -128,6 +128,23 @@ force_env() {
   return 2
 }
 
+# What a finished install in a tree leaves in its node_modules: the hash of
+# the lockfile it installed, which check_deps reads.
+DEPS_MARK=".sclaude-lock"
+
+deps_lock_hash() {
+  sha256sum "$1/package-lock.json" 2>/dev/null | cut -d' ' -f1
+}
+
+# npm install in a tree, and the mark when it finished.
+deps_install() {
+  if ( cd "$1" && npm install ); then
+    deps_lock_hash "$1" > "$1/node_modules/$DEPS_MARK" 2>/dev/null || true
+  else
+    warn "  npm install failed"
+  fi
+}
+
 # Hard links rather than a symlink to a directory: Turbopack refuses to work
 # with a symlink that leads outside the project — "Symlink
 # [project]/node_modules is invalid, it points out of the filesystem root" — and
@@ -147,7 +164,7 @@ link_node_modules() {
   else
     # Different filesystems or links refused — then an honest install.
     warn "  hard links did not work out, installing dependencies instead"
-    ( cd "$wt" && npm install ) || warn "  npm install failed"
+    deps_install "$wt"
   fi
 }
 
@@ -164,13 +181,23 @@ link_node_modules() {
 # still resolved modules into the old tree. The step spent ten calls finding
 # that out. ensure_dev starts a fresh server when the step begins, and the proxy
 # does it on the next page open.
+#
+# Once installed here, node_modules is this tree's own, and the comparison with
+# the main repo no longer says anything about it: the main checkout lagging
+# behind origin made the two lockfiles differ on a branch that never touched
+# them, and every start asked again — a yes tearing down a working install and
+# the dev server with it. So a finished install leaves the hash of the lockfile
+# it installed (DEPS_MARK), and a tree whose lockfile still has that hash is
+# not asked.
 check_deps() {
-  local wt="$1" answer
+  local wt="$1" answer hash
   [[ -d "$wt/node_modules" ]] || return 0
   cmp -s "$REPO/package-lock.json" "$wt/package-lock.json" && return 0
+  hash="$(deps_lock_hash "$wt")"
+  [[ -n "$hash" && "$(cat "$wt/node_modules/$DEPS_MARK" 2>/dev/null)" == "$hash" ]] && return 0
   warn ""
-  warn "  package-lock.json differs from the main repo in this branch,"
-  warn "  and node_modules was copied from there. This feature's dependencies are missing."
+  warn "  package-lock.json here differs from the main repo's (the branch or the main"
+  warn "  checkout moved), and node_modules was linked from there: it may not match."
   ask "  Run npm install in this worktree? [y/n] " answer yn
   if is_yes "$answer"; then
     # npm install edits the directory in place, and hard links share files with
@@ -179,7 +206,7 @@ check_deps() {
     stop_own_dev "$wt" && info "  dev server: stopped for the reinstall, it starts again fresh"
     rm -rf "$wt/.next/dev"
     rm -rf "$wt/node_modules"
-    ( cd "$wt" && npm install ) || warn "  npm install failed"
+    deps_install "$wt"
   fi
 }
 

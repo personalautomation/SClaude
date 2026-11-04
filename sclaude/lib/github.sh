@@ -214,6 +214,8 @@ issue_hold_open() {
 # The other half: the cycle is over, the issue closes. "shipped" when
 # production carries the feature and its regression is green, "declined" when
 # the human said no to production — the work is merged and accepted either way.
+# "nosuite" when production carries it and the project runs no suite there
+# (project_prod_suite_declined): nothing was checked, so nothing is called green.
 # "unchanged" when the feature changed nothing in the code, "nodeploy" when it
 # changed only what nothing deploys (both no_change.sh).
 issue_close_done() {
@@ -233,6 +235,8 @@ issue_close_done() {
       info "Issue #$issue closed — merged; the change is one nothing deploys."
     elif [[ "$outcome" == shipoff ]]; then
       info "Issue #$issue closed — merged and accepted; sclaude does not deploy production here (ship: off)."
+    elif [[ "$outcome" == nosuite ]]; then
+      info "Issue #$issue closed — the feature is in production; no production regression is declared here."
     elif [[ "$outcome" == declined ]]; then
       info "Issue #$issue closed — merged and accepted; production was declined."
       info "  Ship it later from ${REPO:-the repository}: vercel --prod"

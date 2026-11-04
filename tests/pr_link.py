@@ -146,6 +146,12 @@ calls, out = run_issue("issue_close_done", "open", args="declined")
 check("declined closes", "issue close 40 --repo o/r --reason completed" in calls, True)
 check("declined says so", "production was declined" in out, True)
 
+# In production with no production suite declared: closed, never called green.
+calls, out = run_issue("issue_close_done", "open", args="nosuite")
+check("nosuite closes", "issue close 40 --repo o/r --reason completed" in calls, True)
+check("nosuite says no regression", "no production regression is declared" in out, True)
+check("nosuite is not called green", "regression is green" in out, False)
+
 # Already closed: not closed twice.
 calls, _ = run_issue("issue_close_done", "closed")
 check("closed issue is not closed again", "issue close" in calls, False)

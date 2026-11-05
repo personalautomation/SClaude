@@ -25,7 +25,9 @@ box = tempfile.mkdtemp(prefix="notices-test-")
 os.environ["KEEPAWAKE_STATE"] = os.path.join(box, "state.json")
 os.environ["KEEPAWAKE_LOCK"] = os.path.join(box, ".lock")
 
-from keepawake import notices, telegramd  # noqa: E402
+from keepawake import notices  # noqa: E402
+from keepawake import i18n  # noqa: E402
+from keepawake import topics as feature_topics  # noqa: E402
 
 failures = []
 
@@ -300,12 +302,12 @@ check("a line that is no phase leaves them", (kbot.marks, review_keys.load(chann
 alive = lambda pid: True  # noqa: E731
 press = lambda data: review_keys.press(kbot, [channel], first["message_id"], data, alive)  # noqa: E731
 check("an unknown message is told it is over",
-      (review_keys.press(kbot, [channel], 9999, "rv:pass", alive), kbot.marks[-1]), (telegramd.t("rv.gone"), (9999, None)))
+      (review_keys.press(kbot, [channel], 9999, "rv:pass", alive), kbot.marks[-1]), (i18n.t("rv.gone"), (9999, None)))
 toast = press("rv:pass")
 said_path = os.path.join(channel, review_keys.SAID_FILE)
 check("[s] from the phone: the word for sclaude", open(said_path).read(), "pass")
 check("its button becomes the one taking it back", kbot.marks[-1], (first["message_id"], ["rv:back", "rv:stop"]))
-check("and the toast says so", toast, telegramd.t("rv.pass.ok"))
+check("and the toast says so", toast, i18n.t("rv.pass.ok"))
 press("rv:stop")
 check("stop asks once more first", kbot.marks[-1], (first["message_id"], ["rv:now", "rv:carry"]))
 check("and says nothing to sclaude yet", open(said_path).read(), "pass")
@@ -360,7 +362,7 @@ notices.check(kbot, [("shop", "feat-a", channel)], topic, log, keys=review_keys)
 check("a fix session's start has the last-round key", data_of(kbot.kb[-1]), ["rv:pass"])
 session = review_keys.load(channel)
 check("whose press says so", review_keys.press(kbot, [channel], session["message_id"], "rv:pass", alive),
-      telegramd.t("rv.round.ok"))
+      i18n.t("rv.round.ok"))
 check("a session has no stop", review_keys.press(kbot, [channel], session["message_id"], "rv:now", alive), "")
 os.remove(said_path)
 marks = len(kbot.marks)
@@ -375,11 +377,11 @@ gone = review_keys.load(channel)
 check("sclaude gone: the press says so and the buttons go",
       (review_keys.press(kbot, [channel], gone["message_id"], "rv:pass", lambda pid: False),
        kbot.marks[-1], os.path.exists(said_path)),
-      (telegramd.t("rv.gone"), (gone["message_id"], None), False))
+      (i18n.t("rv.gone"), (gone["message_id"], None), False))
 
 # A feature's channel is removed whole when it ends, its notes with it.
 notice("Review — PR #7, session 4")
-check("notes do not keep an ended feature's channel", telegramd.clear_channel(channel), True)
+check("notes do not keep an ended feature's channel", feature_topics.clear_channel(channel), True)
 
 shutil.rmtree(box, ignore_errors=True)
 if failures:

@@ -451,10 +451,10 @@ check("code-server's local entry is the socket that starts it",
 check("the gate frames the map", "path.startswith(FLOW_PREFIX)" in proxy
       and 'FLOW_PREFIX = "/__sclaude/flow?f="' in proxy)
 check("the Mini App opens it at the same path, starting the server",
-      '"/__sclaude/flow?f=%s&start=1" % dev[0]' in read("keepawake", "telegramd.py"))
+      '"/__sclaude/flow?f=%s&start=1" % dev[0]' in read("keepawake", "phone_access.py"))
 check("the proxy starts the server for start=1", 'get("start")' in proxy)
 check("the map's button starts sclaude dev without holding the bot",
-      "setsid nohup sclaude dev --no-browser >/dev/null 2>&1 &" in read("keepawake", "telegramd.py"))
+      "setsid nohup sclaude dev --no-browser >/dev/null 2>&1 &" in read("keepawake", "handling.py"))
 check("the step's header names the map", "flow_address" in read("sclaude", "lib", "run.sh"))
 
 # --- how a feature went ------------------------------------------------------

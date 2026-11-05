@@ -433,7 +433,7 @@ it is in view, every minute while it is not. Asked that often, `_flow` does
 not fetch (`FLOW_NO_FETCH`: the menu's "behind" is as fresh as the last
 fetch) and asks GitHub only past step 4, where the pull request's state is
 the place. Opened from the Mini App (`map_button` in
-`keepawake/telegramd.py`, `start=1`), the map starts the feature's dev server
+`keepawake/phone_access.py`, `start=1`), the map starts the feature's dev server
 as opening the feature would; a feature that never had one has no label yet,
 and its button runs `sclaude dev --no-browser` first.
 

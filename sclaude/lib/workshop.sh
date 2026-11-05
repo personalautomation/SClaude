@@ -339,7 +339,7 @@ workshop_leaks() {
       return 1 ;;
   esac
   # A list longer than a question in Telegram holds loses its middle there
-  # (ASK_CONTEXT_MAX in keepawake/telegramd.py), and a "yes" from the phone
+  # (ASK_CONTEXT_MAX in keepawake/asks.py), and a "yes" from the phone
   # would cover lines never seen: such a list is asked at the terminal alone,
   # and nobody there is no answer — tried again later, not held.
   if (( ${#hits} > WORKSHOP_PHONE_MAX )); then

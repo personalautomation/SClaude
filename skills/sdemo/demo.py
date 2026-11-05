@@ -38,7 +38,7 @@
 # keepawake counts remote work: a device of the tailnet with traffic now
 # (Active, the funnel's tag:ingress node aside) means they are away from the
 # laptop, and the link goes on the address a phone opens features at —
-# phone_origin in keepawake/telegramd.py, the bot's own. Otherwise the
+# phone_origin in keepawake/phone_access.py, the bot's own. Otherwise the
 # laptop's <feature>.localhost. --where overrides the guess. The other
 # place's link follows as `other:` when there is a phone address at all;
 # with none, the laptop's link is the only one, and `where:` says why.
@@ -108,8 +108,8 @@ def phone_origin():
     loopback or wildcard address (no serve, code-server bound locally) is
     not one a phone can open."""
     try:
-        from keepawake import telegramd
-        origin = telegramd.phone_origin()
+        from keepawake import phone_access
+        origin = phone_access.phone_origin()
         host = (urlsplit(origin).hostname or "").lower()
     except Exception:  # no Tailscale, no bot, an address that does not parse
         return ""

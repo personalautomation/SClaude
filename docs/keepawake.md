@@ -62,7 +62,22 @@ means exactly what it says.
 | --- | --- |
 | `bin/keepawake` | the holder detector, `status`, manual extension |
 | `keepawake/state.py` | the state under `flock`, atomic writes, the "should we hold" decision |
-| `keepawake/telegramd.py` | the bot: the menu, the half-hour warning, the commands |
+| `keepawake/telegramd.py` | the bot's process: the environment, the loop, the periodic checks |
+| `keepawake/botapi.py` | Telegram's Bot API client with its retries, and the bot's profile |
+| `keepawake/handling.py` | what the person sends: commands, typed text, button presses |
+| `keepawake/menus.py` | the menu in the chat, its keyboards and the anchor message |
+| `keepawake/holding.py` | the awake screen: extending and releasing the hold |
+| `keepawake/status_report.py` | the status screen: what holds the machine and why |
+| `keepawake/sleep_warning.py` | the warning before sleep, forgotten hard holders, the phone after a boot |
+| `keepawake/asks.py` | sclaude's questions on the phone and what becomes of their messages |
+| `keepawake/topics.py` | a topic per feature: its record, naming it, deleting it with the feature |
+| `keepawake/card_view.py` | the feature's card in its topic |
+| `keepawake/sessions.py` | the steps' sessions: which claude runs where, the list of features |
+| `keepawake/repos.py` | the repositories the bot knows and their features |
+| `keepawake/project_config.py` | the project's config on the phone |
+| `keepawake/phone_access.py` | the phone's way in: tailscale serve and funnel, the gate |
+| `keepawake/services.py` | Chrome's debugging port, code-server, the features' dev servers |
+| `keepawake/shell.py` | running commands: the PATH a unit lacks, the one wrapper |
 | `keepawake/i18n.py` | the bot's strings in Russian and English |
 | `keepawake/docs.py` | the docs the bot prints on a button |
 | `bin/code-server-start` | opens the repository chosen in the bot |
@@ -194,8 +209,8 @@ for the next turn, one older than a day is dropped, and the notes go with the
 channel when the feature ends. Notes go to the main chat only when the chat has
 no topics; with a topic not made yet, or the feature going, they wait
 (`note_topic`). A send that failed because the topic was deleted by hand makes
-the topic again, and what waits goes there. The module is separate from `telegramd.py`, which
-passes it the channels and the way to a topic.
+the topic again, and what waits goes there. The module is separate from the bot's own modules, which
+pass it the channels and the way to a topic.
 
 The topic also follows what sclaude is doing. Every line `say`, `info`, `warn`
 and `alarm` print while sclaude works on a feature is appended to the channel's

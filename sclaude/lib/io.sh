@@ -332,7 +332,7 @@ ask_retract() {
 # question that slips in after it goes to the repository's channel rather than
 # to a topic that is being deleted.
 #
-# The names are read by FEATURE_RECORD and ENDED_MARK in keepawake/telegramd.py.
+# The names are read by FEATURE_RECORD and ENDED_MARK in keepawake/topics.py.
 ask_record() {
   # The channel is touched as well: the bot counts a worktree gone without a
   # clean-up from the channel's last change, and the removal about to start

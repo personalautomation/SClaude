@@ -484,8 +484,8 @@ def check_proxy(root, wt, dport, login_file):
         check("demo: a page that is no path is said, not swapped silently",
               any("opens / instead" in l for l in out), True)
         import types
-        fake = types.ModuleType("keepawake.telegramd")
-        sys.modules["keepawake.telegramd"] = fake
+        fake = types.ModuleType("keepawake.phone_access")
+        sys.modules["keepawake.phone_access"] = fake
         import keepawake
         for origin, want in (("https://node.example.ts.net", "https://node.example.ts.net"),
                              ("http://100.64.0.1:3000", "http://100.64.0.1:3000"),
@@ -493,10 +493,10 @@ def check_proxy(root, wt, dport, login_file):
                              ("http://0.0.0.0:3000", ""), ("http://[::]:3000", ""),
                              ("http://[:3000", "")):
             fake.phone_origin = lambda origin=origin: origin
-            keepawake.telegramd = fake
+            keepawake.phone_access = fake
             check("demo: phone_origin(%s)" % origin, demo.real_phone_origin(), want)
-        del sys.modules["keepawake.telegramd"]
-        del keepawake.telegramd
+        del sys.modules["keepawake.phone_access"]
+        del keepawake.phone_access
         check("demo: an unknown user is warned of",
               any("not a user" in l for l in demo_out(demo, wt, ["nobody@example.com"])), True)
 

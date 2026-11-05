@@ -182,7 +182,7 @@ def deliver():
     none or the topic is gone; Telegram's answer."""
     if thread:
         # A topic gone — deleted by hand, or topics turned off — answers 400
-        # in the words TOPIC_GONE in keepawake/telegramd.py lists: the main
+        # in the words TOPIC_GONE in keepawake/topics.py lists: the main
         # chat then. Any other refusal — a rate limit, a server error — is
         # not a lost topic, and the message is not moved for it.
         gone = (b"thread not found", b"topic_id_invalid", b"topic_deleted", b"not a forum")

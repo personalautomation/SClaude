@@ -24,6 +24,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -36,6 +37,7 @@ tempfile.tempdir = os.environ["TMPDIR"] = _TMP_ROOT
 atexit.register(shutil.rmtree, _TMP_ROOT, True)
 
 from keepawake import state
+from keepawake import asks, botapi, card_view, handling, holding, i18n, menus, phone_access, project_config, repos, services, sessions, shell, sleep_warning, topics  # noqa: E402
 from keepawake.state import (HARD_HOLDERS, HOLD_SECONDS, REFUSAL_HOLDS,
                              SOFT_HOLDERS, STALE_AFTER, VERSION, WARN_BEFORE,
                              blank, extend, needs_warning, read, refuses,
@@ -928,19 +930,18 @@ class FakeBot(object):
 with sandbox() as box:
     os.environ["KEEPAWAKE_BOT_TOKEN"] = "test:token"
     os.environ["KEEPAWAKE_CHAT_ID"] = "12345"
-    from keepawake import telegramd
     # Public DNS is never asked: a funnel's name counts as published unless
     # a check says otherwise. The real one is kept for the check of it.
-    REAL_NAME_PUBLISHED = telegramd.name_published
-    telegramd.name_published = lambda host: True
+    REAL_NAME_PUBLISHED = phone_access.name_published
+    phone_access.name_published = lambda host: True
     # The probe answers at once here; the loop runs it in a thread.
-    telegramd.PROBE_ASYNC = False
+    phone_access.PROBE_ASYNC = False
     # Nor is the machine's funnel ever looked at for the after-boot switch:
     # it would be turned off for real. The check that tests it says so.
-    telegramd.BOOT_LOOKED[0] = True
+    sleep_warning.BOOT_LOOKED[0] = True
 
     bot = FakeBot()
-    handler = telegramd.Handler(bot)
+    handler = handling.Handler(bot)
     now = int(time.time())
 
     with state.locked() as st:
@@ -948,20 +949,20 @@ with sandbox() as box:
         touch(st, now)
     until = read()["until_ts"]
 
-    telegramd.check_warning(bot)
+    sleep_warning.check_warning(bot)
     check("the warning was sent once", len(bot.sent), 1)
     check("the deadline's stamp is recorded", read()["warned_for_ts"], until)
     check_true("the buttons carry the deadline",
                all(str(until) in b["callback_data"] for b in bot.sent[0][1][0]))
 
-    telegramd.check_warning(bot)
+    sleep_warning.check_warning(bot)
     check("we do not warn twice", len(bot.sent), 1)
 
     # A press on yesterday's message must not extend the hold today.
     answers_before = len(bot.answers)
     handler.callback({"id": "c1", "data": "extend:1", "message": {"message_id": 5}})
     check("a stale callback gives an alert", bot.answers[-1],
-          (telegramd.t("sleep.stale"), True))
+          (i18n.t("sleep.stale"), True))
     # Telegram takes one answer per press: a silent one first would swallow it.
     check("as the press's only answer", len(bot.answers) - answers_before, 1)
     check("a stale callback did not touch the deadline", read()["until_ts"], until)
@@ -971,7 +972,7 @@ with sandbox() as box:
     answers_before = len(bot.answers)
     handler.callback({"id": "rv", "data": "rv:pass", "message": {"message_id": 4242}})
     check("an old review key is answered once, as over",
-          bot.answers[answers_before:], [(telegramd.t("rv.gone"), False)])
+          bot.answers[answers_before:], [(i18n.t("rv.gone"), False)])
     check("and loses its buttons", bot.unbuttoned[-1], 4242)
 
     answers_before = len(bot.answers)
@@ -997,14 +998,14 @@ with sandbox() as box:
     with state.locked() as st:
         st["restart_notify"] = 42
         st["restart_from_pid"] = os.getpid() + 100000   # certainly somebody else's pid
-    telegramd.report_restart(bot2)
+    menus.report_restart(bot2)
     check("the restart was reported", len(bot2.edits), 1)
     check("reported into the same message", bot2.edits[0][0], 42)
     check("the errand is cleared", read()["restart_notify"], 0)
 
     # A repeat call stays quiet: otherwise every restart of the daemon (and it
     # has Restart=always) would send a message nobody asked for.
-    telegramd.report_restart(bot2)
+    menus.report_restart(bot2)
     check("with no errand it stays quiet", len(bot2.edits), 1)
 
     # The same process — the restart has not happened yet, it is too early to
@@ -1012,13 +1013,13 @@ with sandbox() as box:
     with state.locked() as st:
         st["restart_notify"] = 43
         st["restart_from_pid"] = os.getpid()
-    telegramd.report_restart(bot2)
+    menus.report_restart(bot2)
     check("our own pid does not count as a restart", len(bot2.edits), 1)
     with state.locked() as st:
         st["restart_notify"] = 0
         st["restart_from_pid"] = 0
 
-    check_true("uptime_of gives a number", isinstance(telegramd.uptime_of(1), int))
+    check_true("uptime_of gives a number", isinstance(shell.uptime_of(1), int))
 
     # --- the keyboard below the input box ----------------------------------
     #
@@ -1029,18 +1030,18 @@ with sandbox() as box:
     bot3 = FakeBot()
     with state.locked() as st:
         st["anchor_lang"] = ""
-    telegramd.ensure_anchor(bot3)
+    menus.ensure_anchor(bot3)
     check("the keyboard is set", len(bot3.anchors), 1)
-    telegramd.ensure_anchor(bot3)
+    menus.ensure_anchor(bot3)
     check("we do not set it twice", len(bot3.anchors), 1)
 
     # A change of language has to replace it: the button's caption would stay in
     # the old one.
-    was = telegramd.current()
-    telegramd.set_lang("en" if was == "ru" else "ru")
-    telegramd.ensure_anchor(bot3)
+    was = i18n.current()
+    i18n.set_lang("en" if was == "ru" else "ru")
+    menus.ensure_anchor(bot3)
     check("after a change of language we set it again", len(bot3.anchors), 2)
-    telegramd.set_lang(was)
+    i18n.set_lang(was)
 
     # Pressing the button opens the menu — in the current language and in the
     # previous one: the person's keyboard may have stayed labelled the old
@@ -1048,15 +1049,15 @@ with sandbox() as box:
     from keepawake.i18n import STRINGS
     for label in STRINGS["menu.button"]:
         check_true("the '%s' button is recognised" % label,
-                   telegramd.is_menu_button(label))
+                   menus.is_menu_button(label))
     check("unrelated text is not a button",
-          telegramd.is_menu_button("23:30"), False)
+          menus.is_menu_button("23:30"), False)
 
     # The button must not be swallowed by the time parsing: having pressed it in
     # the "until what time" dialogue, a person expects the menu rather than "I
     # did not understand the time".
     bot4 = FakeBot()
-    h4 = telegramd.Handler(bot4)
+    h4 = handling.Handler(bot4)
     with state.locked() as st:
         st["awaiting"] = "awake_until"
     h4.message({"text": STRINGS["menu.button"][0]})
@@ -1067,13 +1068,13 @@ with sandbox() as box:
     # presses buttons here and the phone's keyboard is in the way; for the
     # question about a time it is the other way round.
     bot6 = FakeBot()
-    h6 = telegramd.Handler(bot6)
+    h6 = handling.Handler(bot6)
     state.write(blank())
     h6.callback({"id": "a", "data": "menu_extend", "message": {"message_id": 1}})
     check("the menu does not raise the input box", len(bot6.asks), 0)
     h6.callback({"id": "a", "data": "awake_until", "message": {"message_id": 1}})
     check("the question about a time raises the box", len(bot6.asks), 1)
-    check("the hint names the format", bot6.asks[0][1], telegramd.t("awake.hint"))
+    check("the hint names the format", bot6.asks[0][1], i18n.t("awake.hint"))
     check("the question kept its 'back' button", len(bot6.edits), 2)
 
     # A missed format means asking again with the box ready rather than with an
@@ -1092,15 +1093,15 @@ with sandbox() as box:
     # table, and a typo in it would become a suggestion for a command that
     # answers "unknown command".
     from keepawake.i18n import STRINGS as CMDS
-    for cname, (cmethod, ckey) in telegramd.COMMANDS.items():
+    for cname, (cmethod, ckey) in handling.COMMANDS.items():
         check_true("/%s leads to a method" % cname,
-                   hasattr(telegramd.Handler, cmethod))
+                   hasattr(handling.Handler, cmethod))
         check_true("/%s is described in i18n" % cname, ckey in CMDS)
     check("/start opens the same as /menu",
-          telegramd.COMMANDS["start"], telegramd.COMMANDS["menu"])
+          handling.COMMANDS["start"], handling.COMMANDS["menu"])
 
     bot7 = FakeBot()
-    h7 = telegramd.Handler(bot7)
+    h7 = handling.Handler(bot7)
     state.write(blank())
     for cname in ("menu", "status", "awake", "chrome", "code", "sclaude",
                   "settings"):
@@ -1132,7 +1133,7 @@ with sandbox() as box:
     before = len(bot7.sent)
     h7.message({"text": "/nosuchcommand"})
     check("an unknown command answers", len(bot7.sent), before + 1)
-    check("an unknown command gives the menu", bot7.sent[-1][1], telegramd.chat_menu()[1])
+    check("an unknown command gives the menu", bot7.sent[-1][1], menus.chat_menu()[1])
 
     # A command beats an open question about a time — otherwise there would be
     # no way out of a dialogue begun by mistake except the right answer.
@@ -1144,7 +1145,7 @@ with sandbox() as box:
     # --- the sleep submenu -------------------------------------------------
     now = int(time.time())
     state.write(blank())
-    h5 = telegramd.Handler(FakeBot())
+    h5 = handling.Handler(FakeBot())
     h5.callback({"id": "a", "data": "awake:14400", "message": {"message_id": 1}})
     check_true("extending by four hours", read()["until_ts"] >= now + 14400)
     h5.callback({"id": "a", "data": "awake:3600", "message": {"message_id": 1}})
@@ -1164,13 +1165,13 @@ with sandbox() as box:
     # is instant sleep.
     base = int(datetime.datetime(2026, 9, 6, 22, 0).timestamp())
     check_true("an evening time is today",
-               telegramd.parse_hhmm("23:30", base) == int(
+               holding.parse_hhmm("23:30", base) == int(
                    datetime.datetime(2026, 9, 6, 23, 30).timestamp()))
     check_true("a morning time is tomorrow",
-               telegramd.parse_hhmm("7:00", base) == int(
+               holding.parse_hhmm("7:00", base) == int(
                    datetime.datetime(2026, 9, 7, 7, 0).timestamp()))
     for bad in ("25:00", "12:99", "nonsense", ""):
-        check("the rubbish %r is rejected" % bad, telegramd.parse_hhmm(bad, base), 0)
+        check("the rubbish %r is rejected" % bad, holding.parse_hhmm(bad, base), 0)
 
     # --- a manual extension: the mark and the return to usual behaviour ----
     #
@@ -1251,31 +1252,31 @@ with sandbox() as box:
     # arrives with every press, and without pinning the choice would live until
     # the very first button — that is, the switch would be useless.
     state.write(blank())
-    telegramd.set_lang("en")
+    i18n.set_lang("en")
     bot5 = FakeBot()
-    h6 = telegramd.Handler(bot5)
+    h6 = handling.Handler(bot5)
     en = {"from": {"language_code": "en-GB"}}
 
     h6.callback(dict(id="l1", data="lang:ru", message={"message_id": 1}, **en))
     check("the choice is recorded", read()["lang"], "ru")
     check("the choice is pinned", read()["lang_pinned"], True)
-    check("the language switched", telegramd.current(), "ru")
+    check("the language switched", i18n.current(), "ru")
 
-    telegramd.remember_lang({"language_code": "en-GB"})
-    check("the client does not override a pinned language", telegramd.current(), "ru")
+    handling.remember_lang({"language_code": "en-GB"})
+    check("the client does not override a pinned language", i18n.current(), "ru")
     check("the pin holds", read()["lang_pinned"], True)
 
     h6.callback(dict(id="l2", data="lang:auto", message={"message_id": 1}, **en))
     check("the pin is removed", read()["lang_pinned"], False)
-    check("the language is taken from the press", telegramd.current(), "en")
-    telegramd.remember_lang({"language_code": "ru-RU"})
-    check("without a pin the client leads again", telegramd.current(), "ru")
+    check("the language is taken from the press", i18n.current(), "en")
+    handling.remember_lang({"language_code": "ru-RU"})
+    check("without a pin the client leads again", i18n.current(), "ru")
 
     # The profile texts ("What can this bot do?") and the commands are picked
     # by Telegram from the language of the app. A pinned language goes into
     # both slots, or a Russian app kept showing Russian to a person who had
     # chosen English.
-    class Profile(telegramd.Bot):
+    class Profile(botapi.Bot):
         def __init__(self):
             self.token, self.calls = "1:x", []
 
@@ -1288,7 +1289,7 @@ with sandbox() as box:
     def profile(pin):
         state.write(blank())
         if pin:
-            telegramd.set_lang(pin)
+            i18n.set_lang(pin)
             with state.locked() as st:
                 st["lang"], st["lang_pinned"] = pin, True
         p = Profile()
@@ -1296,7 +1297,7 @@ with sandbox() as box:
         p.describe()
         return {(m, code): text for m, code, text in p.calls}
 
-    desc, short = telegramd.STRINGS["bot.description"], telegramd.STRINGS["bot.short"]
+    desc, short = i18n.STRINGS["bot.description"], i18n.STRINGS["bot.short"]
     got = profile(None)
     check("unpinned: a Russian app reads Russian",
           got[("setMyDescription", "ru")], desc[0])
@@ -1304,13 +1305,13 @@ with sandbox() as box:
           got[("setMyDescription", None)], desc[1])
     check("unpinned: commands in both languages",
           (got[("setMyCommands", "ru")], got[("setMyCommands", None)]),
-          telegramd.STRINGS["cmd.menu"])
+          i18n.STRINGS["cmd.menu"])
     got = profile("en")
     check("pinned en: a Russian app reads English",
           (got[("setMyDescription", "ru")], got[("setMyShortDescription", "ru")]),
           (desc[1], short[1]))
     check("pinned en: a Russian app lists the commands in English",
-          got[("setMyCommands", "ru")], telegramd.STRINGS["cmd.menu"][1])
+          got[("setMyCommands", "ru")], i18n.STRINGS["cmd.menu"][1])
     got = profile("ru")
     check("pinned ru: every other app reads Russian",
           got[("setMyDescription", None)], desc[0])
@@ -1319,7 +1320,7 @@ with sandbox() as box:
     bot_d = FakeBot()
     bot_d.describe = lambda: bot_d.sent.append("described")
     bot_d.commands = lambda: bot_d.sent.append("commands")
-    telegramd.Handler(bot_d).callback(
+    handling.Handler(bot_d).callback(
         dict(id="l3", data="lang:en", message={"message_id": 1}, **en))
     check("a language switch sets the profile again",
           {"described", "commands"} <= set(bot_d.sent), True)
@@ -1329,13 +1330,13 @@ with sandbox() as box:
     for pin, lang, want in (("ru", "ru", 1), ("en", "en", 1), (None, None, 1)):
         state.write(blank())
         if pin:
-            telegramd.set_lang(pin)
+            i18n.set_lang(pin)
             with state.locked() as st:
                 st["lang"], st["lang_pinned"] = pin, True
         marks = sum(b["text"].startswith("● ")
-                    for row in telegramd.lang_keyboard() for b in row)
+                    for row in menus.lang_keyboard() for b in row)
         check("one selection mark (%s)" % (pin or "auto"), marks, want)
-    telegramd.set_lang(was)
+    i18n.set_lang(was)
 
     # --- there is a way out of every screen --------------------------------
     #
@@ -1345,42 +1346,42 @@ with sandbox() as box:
     from keepawake.i18n import STRINGS as S
     backs = set(S["menu.back"])
     for lang in ("ru", "en"):
-        telegramd.set_lang(lang)
+        i18n.set_lang(lang)
         screens = {
-            "keepawake": telegramd.awake_keyboard(),
-            "chrome": telegramd.chrome_keyboard(),
-            "code-server": telegramd.code_keyboard(),
-            "settings": telegramd.services_keyboard(),
-            "docs": telegramd.docs_keyboard(),
-            "lang": telegramd.lang_keyboard(),
-            "repos": telegramd.repos_keyboard(),
-            "features": telegramd.features_keyboard("instruments"),
-            "features-empty": telegramd.features_keyboard("no-such-repo"),
+            "keepawake": holding.awake_keyboard(),
+            "chrome": services.chrome_keyboard(),
+            "code-server": services.code_keyboard(),
+            "settings": menus.services_keyboard(),
+            "docs": menus.docs_keyboard(),
+            "lang": menus.lang_keyboard(),
+            "repos": menus.repos_keyboard(),
+            "features": sessions.features_keyboard("instruments"),
+            "features-empty": sessions.features_keyboard("no-such-repo"),
         }
         for name, kb in screens.items():
             texts = [b["text"] for row in kb for b in row]
             check_true("%s/%s: there is a way out" % (lang, name),
                        any(x in backs for x in texts))
-    telegramd.set_lang(was)
+    i18n.set_lang(was)
 
     # Choosing a repository. sclaude works only inside a repository, and a
     # person has several — from the home directory, where systemd starts the
     # daemon, it complained "not a git repository".
     with state.locked() as st:
         st["sclaude_repo"] = ""
-    check("with no choice, empty", telegramd.repo_choice(), "")
+    check("with no choice, empty", repos.repo_choice(), "")
 
     with state.locked() as st:
         st["sclaude_repo"] = "/net/takogo/repo"
-    check("a non-existent choice is discarded", telegramd.repo_choice(), "")
+    check("a non-existent choice is discarded", repos.repo_choice(), "")
 
-    real = telegramd.known_repos()
+    real = repos.known_repos()
     if real:
         with state.locked() as st:
             st["sclaude_repo"] = real[0]
         check("a choice of an existing repository holds",
-              telegramd.repo_choice(), real[0])
-        marks = [b["text"] for row in telegramd.repos_keyboard() for b in row]
+              repos.repo_choice(), real[0])
+        marks = [b["text"] for row in menus.repos_keyboard() for b in row]
         check("the chosen one is marked exactly once",
               sum(1 for m in marks if m.startswith("● ")), 1)
         check("there is no 'all at once' item any more",
@@ -1391,15 +1392,15 @@ with sandbox() as box:
     sample = ("FEATURE                STEP           WORKTREE\n"
               "34-sample-site         2. code        /home/u/myapp-34\n"
               "password-change        4. review      /home/u/myapp-pw\n")
-    saved_run = telegramd.run
-    telegramd.run = lambda cmd, timeout=25: sample
+    saved_run = shell.run
+    shell.run = lambda cmd, timeout=25: sample
     # The buttons are built for a repository by name, and the name is looked up
     # among the git repositories in HOME. Left to the real HOME this section
     # passed only on a machine that happened to have ~/myapp checked out.
-    saved_known = telegramd.known_repos
-    telegramd.known_repos = lambda: ["/nonexistent/myapp"]
+    saved_known = repos.known_repos
+    repos.known_repos = lambda: ["/nonexistent/myapp"]
     try:
-        feats, raw = telegramd.features_of("/tmp/whatever")
+        feats, raw = repos.features_of("/tmp/whatever")
         check("features parsed", len(feats), 2)
         check("the feature's name", feats[0][0], "34-sample-site")
         check("the feature's step in full", feats[0][1], "2. code")
@@ -1411,14 +1412,14 @@ with sandbox() as box:
         closing_wt = tempfile.mkdtemp()
         os.makedirs(os.path.join(closing_wt, ".sclaude", "local", "feature"))
         open(os.path.join(closing_wt, ".sclaude", "local", "feature",
-                          telegramd.CLOSING_MARK), "w").close()
-        telegramd.run = lambda cmd, timeout=25: sample.replace("/home/u/myapp-pw", closing_wt)
+                          topics.CLOSING_MARK), "w").close()
+        shell.run = lambda cmd, timeout=25: sample.replace("/home/u/myapp-pw", closing_wt)
         check("a feature being removed is left out",
-              [f[0] for f in telegramd.features_of("/tmp/whatever")[0]], ["34-sample-site"])
+              [f[0] for f in repos.features_of("/tmp/whatever")[0]], ["34-sample-site"])
         shutil.rmtree(closing_wt)
-        telegramd.run = lambda cmd, timeout=25: sample
+        shell.run = lambda cmd, timeout=25: sample
 
-        labels = [b["text"] for row in telegramd.features_keyboard("myapp")
+        labels = [b["text"] for row in sessions.features_keyboard("myapp")
                   for b in row]
         check_true("the button has the name and the step", "34-sample-site — 2. code" in labels)
 
@@ -1427,7 +1428,7 @@ with sandbox() as box:
         # them, there is nothing on a phone to open a worktree path with, and the
         # branch breakdown is about branches without features, that is about
         # exactly what is not in this list.
-        body = telegramd.repo_text("myapp")
+        body = repos.repo_text("myapp")
         check_true("the message has the number of features", "2" in body)
         check_true("there is no table under the header", "FEATURE" not in body)
         check_true("the worktree is not shown", "/home/u" not in body)
@@ -1440,44 +1441,44 @@ with sandbox() as box:
         # would open somebody else's. A feature's row is one button now: it
         # takes the feature's card to the feature's topic, where the step and
         # the actions are.
-        datas = [b["callback_data"] for row in telegramd.features_keyboard("myapp")
+        datas = [b["callback_data"] for row in sessions.features_keyboard("myapp")
                  for b in row if b["callback_data"].startswith("topic:")]
         check("a callback for every feature", len(datas), 2)
         check_true("the callback carries the repository and the feature",
                    datas and datas[0] == "topic:myapp:34-sample-site")
         check("no actions button in the list",
-              [b for row in telegramd.features_keyboard("myapp") for b in row
+              [b for row in sessions.features_keyboard("myapp") for b in row
                if b["callback_data"].startswith("acts:")], [])
         # The project's config is one press from its features, as it is the
         # last row of sclaude's menu at the terminal.
         check_true("the config is offered with the features",
                    any(b["callback_data"] == "cfg:myapp"
-                       for row in telegramd.features_keyboard("myapp") for b in row))
+                       for row in sessions.features_keyboard("myapp") for b in row))
         long_name = "r" * 60
         check("a config button too long for Telegram does nothing",
-              telegramd.cfg_data("cfgset", long_name, "review", "github"), "noop")
+              project_config.cfg_data("cfgset", long_name, "review", "github"), "noop")
         with state.locked() as st:
             st["sclaude_repo"] = "/nonexistent/" + long_name
-        saved_choice = telegramd.repo_choice
-        telegramd.repo_choice = lambda: "/nonexistent/" + long_name
+        saved_choice = repos.repo_choice
+        repos.repo_choice = lambda: "/nonexistent/" + long_name
         check("a long remembered repository is left out of a screen's button",
-              telegramd.cfg_data("cfg", long_name, "review"), "cfg::review")
+              project_config.cfg_data("cfg", long_name, "review"), "cfg::review")
         check("but never out of a value set, which an old message would aim elsewhere",
-              telegramd.cfg_data("cfgset", long_name, "review", "github"), "noop")
-        telegramd.repo_choice = saved_choice
+              project_config.cfg_data("cfgset", long_name, "review", "github"), "noop")
+        repos.repo_choice = saved_choice
         with state.locked() as st:
             st["sclaude_repo"] = ""
     finally:
-        telegramd.known_repos = saved_known
-        telegramd.run = saved_run
+        repos.known_repos = saved_known
+        shell.run = saved_run
 
     # A repository with no features shows the main branch's state: the person
     # opened it to learn something, and an empty "no features" line does not
     # answer that.
-    real_repo = telegramd.known_repos()
+    real_repo = repos.known_repos()
     if real_repo:
         rname = os.path.basename(real_repo[0])
-        st_main = telegramd.main_branch_state(real_repo[0])
+        st_main = repos.main_branch_state(real_repo[0])
         check_true("the state is named",
                    any(m in st_main["extra"] for m in ("✅", "⚠️", "⬆️")))
         if not st_main["empty"]:
@@ -1488,18 +1489,18 @@ with sandbox() as box:
         # substitution have already fought once (%%s was eaten by the second
         # pass), and a fresh repository with no commits answers every question
         # with a fatal line. Neither is what one shows a person.
-        for repo in telegramd.known_repos():
-            body = telegramd.repo_text(os.path.basename(repo))
+        for repo in repos.known_repos():
+            body = repos.repo_text(os.path.basename(repo))
             check("no git complaints in the text of %s" % os.path.basename(repo),
                   "fatal:" in body, False)
 
     # A repository with no features: there are no feature buttons, but the way
     # out upwards remains.
-    telegramd.run = lambda cmd, timeout=25: "No features in progress."
+    shell.run = lambda cmd, timeout=25: "No features in progress."
     try:
-        feats, _ = telegramd.features_of("/tmp/whatever")
+        feats, _ = repos.features_of("/tmp/whatever")
         check("no features, no rows", feats, [])
-        rows = telegramd.features_keyboard("myapp")
+        rows = sessions.features_keyboard("myapp")
         # We count the exits rather than the rows: there are now two navigation
         # rows ("to the repositories" and "to the main menu"), and tying to their
         # number would break on any rearrangement. Only one thing matters — that
@@ -1510,7 +1511,7 @@ with sandbox() as box:
         check_true("the way out to the repositories", "svc_repos" in targets)
         check_true("the way out to the main menu", "menu_back" in targets)
     finally:
-        telegramd.run = saved_run
+        shell.run = saved_run
 
     # Routing the callbacks. A check for "has a colon" has already intercepted
     # repo: and feat: once — they appeared after the sleep buttons, and a press
@@ -1522,8 +1523,8 @@ with sandbox() as box:
         state.touch(st, int(time.time()))
     live = read()["until_ts"]
 
-    saved_run = telegramd.run
-    telegramd.run = lambda cmd, timeout=25: "No features in progress."
+    saved_run = shell.run
+    shell.run = lambda cmd, timeout=25: "No features in progress."
     try:
         # Every button is run through the real handler. Checking the keyboards
         # and the texts separately is not enough: the docs section passed the
@@ -1542,7 +1543,7 @@ with sandbox() as box:
         for data in routed:
             probe = FakeBot()
             try:
-                telegramd.Handler(probe).callback(
+                handling.Handler(probe).callback(
                     {"id": "x", "data": data, "message": {"message_id": 9}})
             except Exception as exc:
                 failures.append(("the %s button dies" % data, "no errors", exc))
@@ -1556,12 +1557,12 @@ with sandbox() as box:
         # The sleep buttons, on the other hand, have to go there.
         for data in ("extend:%d" % live, "sleep:%d" % live):
             probe = FakeBot()
-            telegramd.Handler(probe).callback(
+            handling.Handler(probe).callback(
                 {"id": "x", "data": data, "message": {"message_id": 9}})
             check_true("%s is handled as a decision" % data.split(":")[0],
                        bool(probe.edits))
     finally:
-        telegramd.run = saved_run
+        shell.run = saved_run
 
     with state.locked() as st:
         st["sclaude_repo"] = ""
@@ -1574,64 +1575,63 @@ with sandbox() as box:
 
 os.environ["KEEPAWAKE_BOT_TOKEN"] = "test:token"
 os.environ["KEEPAWAKE_CHAT_ID"] = "12345"
-from keepawake import telegramd as tg_menu
 
 # The main menu's layout: sclaude and code-server live at the top level rather
 # than hidden in the settings — they are what people reach for most often.
-top = [b["callback_data"] for row in tg_menu.menu_keyboard() for b in row]
+top = [b["callback_data"] for row in menus.menu_keyboard() for b in row]
 check_true("code-server at the top level", "menu_code" in top)
 check_true("sclaude at the top level", "svc_sclaude" in top)
 check_true("chrome at the top level", "menu_chrome" in top)
 
 # The chat's menu is the way to the Mini App. Without phone access the app
 # cannot open, and the chat keeps the hold and the way to turn access on.
-saved_origin = tg_menu.gate_origin
+saved_origin = phone_access.gate_origin
 try:
-    tg_menu.gate_origin = lambda *a: ""
-    offline = [b.get("callback_data") for row in tg_menu.chat_menu()[1] for b in row]
+    phone_access.gate_origin = lambda *a: ""
+    offline = [b.get("callback_data") for row in menus.chat_menu()[1] for b in row]
     check("access off: the chat keeps the hold and the switch", offline,
           ["menu_extend", "phone_toggle"])
-    tg_menu.gate_origin = lambda *a: "https://box.tail1.ts.net:8443"
-    online = [b for row in tg_menu.chat_menu()[1] for b in row]
+    phone_access.gate_origin = lambda *a: "https://box.tail1.ts.net:8443"
+    online = [b for row in menus.chat_menu()[1] for b in row]
     check("access on: one button, to the app", [b.get("web_app", {}).get("url") for b in online],
           ["https://box.tail1.ts.net:8443/__sclaude/menu"])
-    saved_topic = tg_menu.topic_channel
-    tg_menu.topic_channel = lambda thread: "shop/feat-a" if thread == 77 else ""
+    saved_topic = topics.topic_channel
+    topics.topic_channel = lambda thread: "shop/feat-a" if thread == 77 else ""
     try:
         check("in a feature's topic the app opens on that feature",
-              tg_menu.chat_menu(77)[1][0][0]["web_app"]["url"],
+              menus.chat_menu(77)[1][0][0]["web_app"]["url"],
               "https://box.tail1.ts.net:8443/__sclaude/menu?f=shop%2Ffeat-a")
     finally:
-        tg_menu.topic_channel = saved_topic
+        topics.topic_channel = saved_topic
     # /phone turns access on from the chat, and says so; with access on it
     # is the way to the app, as /menu.
-    tg_menu.gate_origin = lambda *a: ""
-    saved_on = tg_menu.phone_on
-    tg_menu.phone_on = lambda: (True, "")
+    phone_access.gate_origin = lambda *a: ""
+    saved_on = phone_access.phone_on
+    phone_access.phone_on = lambda: (True, "")
     try:
         bot_p = FakeBot()
-        tg_menu.Handler(bot_p).cmd_phone()
+        handling.Handler(bot_p).cmd_phone()
         check("/phone turns access on and says it is waiting", bot_p.sent[-1][0],
-              tg_menu.t("svc.phonewait"))
-        check_true("and remembers the message to change", bool(tg_menu.read().get("phone_wait")))
+              i18n.t("svc.phonewait"))
+        check_true("and remembers the message to change", bool(state.read().get("phone_wait")))
         # A second /phone while the address is not yet published waits
         # with the first rather than starting over.
-        tg_menu.gate_origin = lambda c=None, ready=True, look=False: (
+        phone_access.gate_origin = lambda c=None, ready=True, look=False: (
             "" if ready else "https://box.tail1.ts.net:8443")
         bot_p = FakeBot()
-        tg_menu.Handler(bot_p).cmd_phone()
-        check("/phone while waiting says so", bot_p.sent[-1][0], tg_menu.t("svc.phonestill"))
-        tg_menu.gate_origin = lambda *a: ""
-        tg_menu.phone_on = lambda: (False, "funnel not allowed")
+        handling.Handler(bot_p).cmd_phone()
+        check("/phone while waiting says so", bot_p.sent[-1][0], i18n.t("svc.phonestill"))
+        phone_access.gate_origin = lambda *a: ""
+        phone_access.phone_on = lambda: (False, "funnel not allowed")
         bot_p = FakeBot()
-        tg_menu.Handler(bot_p).cmd_phone()
+        handling.Handler(bot_p).cmd_phone()
         check_true("/phone says why it could not", "funnel not allowed" in bot_p.sent[-1][0])
     finally:
-        tg_menu.phone_on = saved_on
-    check_true("/phone is a command", "phone" in tg_menu.COMMANDS)
+        phone_access.phone_on = saved_on
+    check_true("/phone is a command", "phone" in handling.COMMANDS)
 
     # The list of commands is what the chat's menu offers at the moment.
-    class Listed(tg_menu.Bot):
+    class Listed(botapi.Bot):
         def call(self, method, http_timeout=15, **params):
             if method == "setMyCommands" and params.get("language_code") is None:
                 self.listed = [c["command"] for c in params["commands"]]
@@ -1643,12 +1643,12 @@ try:
     check("access on: the sections, and no /phone",
           ("chrome" in listed.listed, "phone" in listed.listed), (True, False))
 finally:
-    tg_menu.gate_origin = saved_origin
+    phone_access.gate_origin = saved_origin
 
 # Each thing in one place: the status is on the Keepawake screen, the
 # repository is chosen in Sclaude only.
 check("no separate status button", "menu_status" in top, False)
-inner = [b["callback_data"] for row in tg_menu.services_keyboard() for b in row]
+inner = [b["callback_data"] for row in menus.services_keyboard() for b in row]
 check("sclaude is not duplicated in the settings", "svc_sclaude" in inner, False)
 check("the repository is not chosen in the settings", "svc_repos" in inner, False)
 
@@ -1661,7 +1661,7 @@ if os.path.exists(cfg):
         if line.startswith("password:"):
             secret = line.split(":", 1)[1].strip()
     if secret:
-        check("the password does not reach the card", secret in tg_menu.code_text(), False)
+        check("the password does not reach the card", secret in services.code_text(), False)
     # The Chrome card is the browser and the proxy: each feature's addresses
     # are on its card, not repeated here.
     reg = tempfile.mkdtemp(prefix="keepawake-test-registry-")
@@ -1670,34 +1670,34 @@ if os.path.exists(cfg):
     with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
         json.dump({"dev": {"label": "sample-one", "port": 1}}, fh)
     os.symlink(wt, os.path.join(reg, "sample-one"))
-    saved_registry = tg_menu.DEV_REGISTRY
-    tg_menu.DEV_REGISTRY = reg
+    saved_registry = services.DEV_REGISTRY
+    services.DEV_REGISTRY = reg
     try:
-        chrome_body = tg_menu.chrome_text()
+        chrome_body = services.chrome_text()
         check("no feature is listed on the Chrome card", "sample-one" in chrome_body, False)
         check_true("the proxy's state is named", "sclaude-proxy" in chrome_body)
-        saved_run = tg_menu.run
+        saved_run = shell.run
         try:
-            tg_menu.run = lambda cmd, timeout=25: json.dumps({"Web": {
+            shell.run = lambda cmd, timeout=25: json.dumps({"Web": {
                 "box.tail1.ts.net:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:3000"}}}}}) \
                 if "serve status" in cmd else saved_run(cmd, timeout)
             check("a tailscale serve name in front of :3000 is the phone's origin",
-                  tg_menu.phone_origin(), "https://box.tail1.ts.net")
-            tg_menu.run = lambda cmd, timeout=25: "" if "serve status" in cmd else saved_run(cmd, timeout)
+                  phone_access.phone_origin(), "https://box.tail1.ts.net")
+            shell.run = lambda cmd, timeout=25: "" if "serve status" in cmd else saved_run(cmd, timeout)
             check_true("without it, the node's own address",
-                       tg_menu.phone_origin().endswith(":%d" % tg_menu.DEV_PORT))
+                       phone_access.phone_origin().endswith(":%d" % services.DEV_PORT))
         finally:
-            tg_menu.run = saved_run
+            shell.run = saved_run
 
         # Phone access is stubbed, not read: on this machine the funnel may
         # well be on.
-        saved_origin = tg_menu.gate_origin
-        tg_menu.gate_origin = lambda *a: ""
+        saved_origin = phone_access.gate_origin
+        phone_access.gate_origin = lambda *a: ""
         try:
-            rows = tg_menu.chrome_keyboard()
-            off_settings = tg_menu.services_keyboard()
+            rows = services.chrome_keyboard()
+            off_settings = menus.services_keyboard()
         finally:
-            tg_menu.gate_origin = saved_origin
+            phone_access.gate_origin = saved_origin
         datas = [b.get("callback_data") for row in rows for b in row]
         check("the first block is the list of features: a caption, then where to open it",
               (rows[0][0]["callback_data"], rows[1][0]["callback_data"]),
@@ -1713,10 +1713,10 @@ if os.path.exists(cfg):
         # turn it on.
         check("access off: no Mini App", any("web_app" in b for row in rows for b in row), False)
         check_true("access off: Settings can turn it on",
-                   [tg_menu.t("svc.phoneoff"), "phone_toggle"] in
+                   [i18n.t("svc.phoneoff"), "phone_toggle"] in
                    [[b["text"], b["callback_data"]] for row in off_settings for b in row])
 
-        saved_run = tg_menu.run
+        saved_run = shell.run
         try:
             serve = {"TCP": {"8443": {"HTTPS": True}},
                      "Web": {"box.tail1.ts.net:8443": {"Handlers": {"/": {
@@ -1727,10 +1727,10 @@ if os.path.exists(cfg):
                 if "serve status" in cmd:
                     return json.dumps(serve)
                 return saved_run(cmd, timeout)
-            tg_menu.run = funnel_on
+            shell.run = funnel_on
             check("the funnel in front of the gate gives the origin",
-                  tg_menu.gate_origin(), "https://box.tail1.ts.net:8443")
-            rows = tg_menu.chrome_keyboard()
+                  phone_access.gate_origin(), "https://box.tail1.ts.net:8443")
+            rows = services.chrome_keyboard()
             apps = [b["web_app"]["url"] for row in rows for b in row if "web_app" in b]
             check("access on: the phone button is the Mini App of every feature", apps,
                   ["https://box.tail1.ts.net:8443/__sclaude/tg?f="])
@@ -1738,227 +1738,227 @@ if os.path.exists(cfg):
                   [b.get("style") for row in rows for b in row if "web_app" in b],
                   ["success"])
             check("a refused colour is dropped, the rest kept",
-                  tg_menu.unstyled({"inline_keyboard": [[{"text": "x", "style": "success",
+                  menus.unstyled({"inline_keyboard": [[{"text": "x", "style": "success",
                                                           "callback_data": "y"}]]}),
                   {"inline_keyboard": [[{"text": "x", "callback_data": "y"}]]})
             check_true("access on: Settings can turn it off",
-                       tg_menu.t("svc.phoneon") in [b["text"] for row in
-                                                    tg_menu.services_keyboard() for b in row])
+                       i18n.t("svc.phoneon") in [b["text"] for row in
+                                                    menus.services_keyboard() for b in row])
             # Until the name is in public DNS a phone cannot find it: the app
             # is not offered, and the message about it waits.
-            saved_pub = tg_menu.name_published
+            saved_pub = phone_access.name_published
             try:
-                tg_menu.name_published = lambda host: False
-                tg_menu.PUBLISHED.update(host="", ok=False)
-                check("not yet published: no app", tg_menu.gate_origin(), "")
+                phone_access.name_published = lambda host: False
+                phone_access.PUBLISHED.update(host="", ok=False)
+                check("not yet published: no app", phone_access.gate_origin(), "")
                 check("but the funnel counts for turning it off",
-                      tg_menu.gate_origin(None, False), "https://box.tail1.ts.net:8443")
-                with tg_menu.locked() as st:
+                      phone_access.gate_origin(None, False), "https://box.tail1.ts.net:8443")
+                with state.locked() as st:
                     st["phone_wait"] = {"msg": 4321, "since": int(time.time())}
-                tg_menu.PHONE_SEEN[0] = False
+                sleep_warning.PHONE_SEEN[0] = False
                 bot_w = FakeBot()
-                tg_menu.check_phone(bot_w)
+                sleep_warning.check_phone(bot_w)
                 check("the waiting message stays while it waits", bot_w.edits, [])
-                tg_menu.name_published = lambda host: True
-                tg_menu.PUBLISHED.update(at=0)
-                tg_menu.check_phone(bot_w)
+                phone_access.name_published = lambda host: True
+                phone_access.PUBLISHED.update(at=0)
+                sleep_warning.check_phone(bot_w)
                 check_true("published: the waiting message says it is on",
-                           (4321, tg_menu.t("svc.phoneready")) in bot_w.edits)
-                check("and is forgotten", tg_menu.read().get("phone_wait"), None)
-                with tg_menu.locked() as st:
+                           (4321, i18n.t("svc.phoneready")) in bot_w.edits)
+                check("and is forgotten", state.read().get("phone_wait"), None)
+                with state.locked() as st:
                     st["phone_wait"] = {"msg": 4322, "since": int(time.time()) - 3600}
-                tg_menu.name_published = lambda host: False
-                tg_menu.PUBLISHED.update(host="", ok=False)
-                check("waited too long: the app is offered anyway", tg_menu.gate_origin(),
+                phone_access.name_published = lambda host: False
+                phone_access.PUBLISHED.update(host="", ok=False)
+                check("waited too long: the app is offered anyway", phone_access.gate_origin(),
                       "https://box.tail1.ts.net:8443")
                 # Turned on from the terminal: no wait in the chat, and the
                 # count runs from when access was turned on.
-                with tg_menu.locked() as st:
+                with state.locked() as st:
                     st["phone_wait"] = None
                     st["phone_on_at"] = int(time.time()) - 86400
-                tg_menu.PUBLISHED.update(host="", ok=False)
+                phone_access.PUBLISHED.update(host="", ok=False)
                 check("on from the terminal: an old turn-on does not count as waiting",
-                      tg_menu.gate_origin(None, True, True), "")
-                tg_menu.PUBLISHED.update(host="box.tail1.ts.net", ok=False, at=0,
+                      phone_access.gate_origin(None, True, True), "")
+                phone_access.PUBLISHED.update(host="box.tail1.ts.net", ok=False, at=0,
                                          since=time.time() - 3600)
                 check("on from the terminal, waited too long: offered too",
-                      tg_menu.gate_origin(None, True, True), "https://box.tail1.ts.net:8443")
-                with tg_menu.locked() as st:
+                      phone_access.gate_origin(None, True, True), "https://box.tail1.ts.net:8443")
+                with state.locked() as st:
                     st["phone_wait"] = {"msg": 4322, "since": int(time.time()) - 3600}
                     st.pop("published", None)
                 # A button or a menu never waits on the network: it takes the
                 # loop's last answer.
                 asked = []
-                tg_menu.name_published = lambda host: asked.append(host) or False
-                tg_menu.PUBLISHED.update(host="box.tail1.ts.net", ok=False, at=0)
-                with tg_menu.locked() as st:
+                phone_access.name_published = lambda host: asked.append(host) or False
+                phone_access.PUBLISHED.update(host="box.tail1.ts.net", ok=False, at=0)
+                with state.locked() as st:
                     st["published"] = {"host": "box.tail1.ts.net", "ok": False}
-                check("a menu asks no DNS while it waits", (tg_menu.gate_origin(), asked), ("", []))
-                tg_menu.gate_origin(None, True, True)
+                check("a menu asks no DNS while it waits", (phone_access.gate_origin(), asked), ("", []))
+                phone_access.gate_origin(None, True, True)
                 check("the loop does", asked, ["box.tail1.ts.net"])
                 # And leaves its answer where another process — the gate
                 # serving the menu page — reads it, over that one's own.
-                with tg_menu.locked() as st:
+                with state.locked() as st:
                     st["published"] = {"host": "box.tail1.ts.net", "ok": True}
-                check("another process takes the loop's answer", tg_menu.gate_origin(),
+                check("another process takes the loop's answer", phone_access.gate_origin(),
                       "https://box.tail1.ts.net:8443")
                 check("and asks nothing itself", asked, ["box.tail1.ts.net"])
             finally:
-                with tg_menu.locked() as st:
+                with state.locked() as st:
                     st.pop("published", None)
-                tg_menu.name_published = saved_pub
-                tg_menu.PUBLISHED.update(host="", ok=False)
-                tg_menu.PHONE_SEEN[0] = None
-                with tg_menu.locked() as st:
+                phone_access.name_published = saved_pub
+                phone_access.PUBLISHED.update(host="", ok=False)
+                sleep_warning.PHONE_SEEN[0] = None
+                with state.locked() as st:
                     st["phone_wait"] = None
             # Phone access is off unless asked for since the machine started.
-            saved_boot = tg_menu.boot_time
-            saved_which = tg_menu.shutil.which
+            saved_boot = sleep_warning.boot_time
+            saved_which = shutil.which
             ran = []
             try:
-                tg_menu.boot_time = lambda: int(time.time()) - 60
+                sleep_warning.boot_time = lambda: int(time.time()) - 60
                 # tailscale installed here whatever the machine running this.
-                tg_menu.shutil.which = lambda name: "/usr/bin/" + name
+                shutil.which = lambda name: "/usr/bin/" + name
                 # Recorded, never run: the funnel here is the test's, not the machine's.
-                tg_menu.run = lambda cmd, timeout=25: (
+                shell.run = lambda cmd, timeout=25: (
                     ran.append(cmd), json.dumps(serve) if "serve status" in cmd else "")[1]
-                with tg_menu.locked() as st:
+                with state.locked() as st:
                     st["phone_on_at"] = int(time.time()) - 3600
-                tg_menu.BOOT_LOOKED[0] = False
-                tg_menu.phone_off_after_boot()
-                check_true("on from before the boot: turned off", tg_menu.FUNNEL_OFF in ran)
+                sleep_warning.BOOT_LOOKED[0] = False
+                sleep_warning.phone_off_after_boot()
+                check_true("on from before the boot: turned off", phone_access.FUNNEL_OFF in ran)
                 del ran[:]
-                with tg_menu.locked() as st:
+                with state.locked() as st:
                     st["phone_on_at"] = int(time.time())
-                tg_menu.BOOT_LOOKED[0] = False
-                tg_menu.phone_off_after_boot()
-                check("asked for since the boot: left on", tg_menu.FUNNEL_OFF in ran, False)
+                sleep_warning.BOOT_LOOKED[0] = False
+                sleep_warning.phone_off_after_boot()
+                check("asked for since the boot: left on", phone_access.FUNNEL_OFF in ran, False)
                 # Tailscale not answering yet: nothing decided, asked again later.
-                tg_menu.BOOT_LOOKED[0] = False
-                tg_menu.run = lambda cmd, timeout=25: (ran.append(cmd), "")[1]
-                with tg_menu.locked() as st:
+                sleep_warning.BOOT_LOOKED[0] = False
+                shell.run = lambda cmd, timeout=25: (ran.append(cmd), "")[1]
+                with state.locked() as st:
                     st["phone_on_at"] = 0
                 del ran[:]
-                tg_menu.phone_off_after_boot()
+                sleep_warning.phone_off_after_boot()
                 check("tailscale silent: no decision yet",
-                      (tg_menu.FUNNEL_OFF in ran, tg_menu.BOOT_LOOKED[0]), (False, False))
-                tg_menu.run = lambda cmd, timeout=25: (
+                      (phone_access.FUNNEL_OFF in ran, sleep_warning.BOOT_LOOKED[0]), (False, False))
+                shell.run = lambda cmd, timeout=25: (
                     ran.append(cmd), "failed to connect to local Tailscale daemon")[1]
-                tg_menu.phone_off_after_boot()
+                sleep_warning.phone_off_after_boot()
                 check("tailscale's error is no answer either",
-                      (tg_menu.FUNNEL_OFF in ran, tg_menu.BOOT_LOOKED[0]), (False, False))
+                      (phone_access.FUNNEL_OFF in ran, sleep_warning.BOOT_LOOKED[0]), (False, False))
                 # A warning beside the answer is still the answer.
-                tg_menu.run = lambda cmd, timeout=25: (
+                shell.run = lambda cmd, timeout=25: (
                     ran.append(cmd), "Warning: client version differs\n" + json.dumps(serve)
                     if "serve status" in cmd else "")[1]
-                tg_menu.phone_off_after_boot()
+                sleep_warning.phone_off_after_boot()
                 check("a warning beside tailscale's answer still decides",
-                      (tg_menu.FUNNEL_OFF in ran, tg_menu.BOOT_LOOKED[0]), (True, True))
+                      (phone_access.FUNNEL_OFF in ran, sleep_warning.BOOT_LOOKED[0]), (True, True))
                 # Silent for good, or not installed: given up, not asked every turn.
-                tg_menu.run = lambda cmd, timeout=25: (ran.append(cmd), "")[1]
-                tg_menu.BOOT_LOOKED[:] = [False, tg_menu.BOOT_TRIES]
+                shell.run = lambda cmd, timeout=25: (ran.append(cmd), "")[1]
+                sleep_warning.BOOT_LOOKED[:] = [False, sleep_warning.BOOT_TRIES]
                 del ran[:]
-                tg_menu.phone_off_after_boot()
-                check("silent past the tries: given up", (ran, tg_menu.BOOT_LOOKED[0]), ([], True))
-                tg_menu.BOOT_LOOKED[:] = [False, 0]
-                tg_menu.shutil.which = lambda name: None
-                tg_menu.phone_off_after_boot()
-                check("no tailscale: nothing to look at", (ran, tg_menu.BOOT_LOOKED[0]), ([], True))
-                tg_menu.shutil.which = lambda name: "/usr/bin/" + name
+                sleep_warning.phone_off_after_boot()
+                check("silent past the tries: given up", (ran, sleep_warning.BOOT_LOOKED[0]), ([], True))
+                sleep_warning.BOOT_LOOKED[:] = [False, 0]
+                shutil.which = lambda name: None
+                sleep_warning.phone_off_after_boot()
+                check("no tailscale: nothing to look at", (ran, sleep_warning.BOOT_LOOKED[0]), ([], True))
+                shutil.which = lambda name: "/usr/bin/" + name
             finally:
-                tg_menu.BOOT_LOOKED[0] = True
-                tg_menu.boot_time = saved_boot
-                tg_menu.shutil.which = saved_which
-                tg_menu.BOOT_LOOKED[:] = [True, 0]
-                tg_menu.run = funnel_on
+                sleep_warning.BOOT_LOOKED[0] = True
+                sleep_warning.boot_time = saved_boot
+                shutil.which = saved_which
+                sleep_warning.BOOT_LOOKED[:] = [True, 0]
+                shell.run = funnel_on
             # The funnel on :8443 but pointing elsewhere is not the gate.
             serve["Web"]["box.tail1.ts.net:8443"]["Handlers"]["/"]["Proxy"] = "http://127.0.0.1:9999"
-            check("a funnel to something else is not phone access", tg_menu.gate_origin(), "")
+            check("a funnel to something else is not phone access", phone_access.gate_origin(), "")
             serve["Web"]["box.tail1.ts.net:8443"]["Handlers"]["/"]["Proxy"] = "http://127.0.0.1:3001"
             serve["AllowFunnel"] = {}
-            check("served on the tailnet only is not phone access", tg_menu.gate_origin(), "")
+            check("served on the tailnet only is not phone access", phone_access.gate_origin(), "")
 
             # Every DNS-over-HTTPS service blocked by name: the system's
             # resolver finds the relays, a tailnet address (MagicDNS) aside,
             # and the gate must answer through them.
             import socket as _socket
-            saved = (tg_menu.doh, _socket.getaddrinfo, tg_menu.funnel_answers)
+            saved = (phone_access.doh, _socket.getaddrinfo, phone_access.funnel_answers)
             tcp = (_socket.SOCK_STREAM, _socket.IPPROTO_TCP, "")
             try:
                 def blocked(name, rtype):
                     raise OSError("refused")
-                tg_menu.doh = blocked
+                phone_access.doh = blocked
                 _socket.getaddrinfo = lambda host, port, **kw: [
                     (_socket.AF_INET6, *tcp, ("2a00:dd80:3e::b3a", 0, 0, 0)),
                     (_socket.AF_INET, *tcp, ("100.101.102.103", 0)),
                     (_socket.AF_INET, *tcp, ("176.58.90.145", 0)),
                     (_socket.AF_INET, *tcp, ("176.58.90.145", 0))]
                 check("the system's resolver: public relays, IPv4 first, the tailnet's left out",
-                      tg_menu.system_addresses("box.tail1.ts.net"),
+                      phone_access.system_addresses("box.tail1.ts.net"),
                       ["176.58.90.145", "2a00:dd80:3e::b3a"])
                 probed = []
-                tg_menu.funnel_answers = lambda host, port, address: (
+                phone_access.funnel_answers = lambda host, port, address: (
                     probed.append((port, address)), False)[1]
                 check("DNS over HTTPS blocked: the relays are still probed, on the gate's port",
                       (REAL_NAME_PUBLISHED("box.tail1.ts.net"), sorted({p for p, _ in probed}),
                        "100.101.102.103" in [a for _, a in probed]),
-                      (False, [tg_menu.GATE_FUNNEL_PORT], False))
-                tg_menu.funnel_answers = lambda host, port, address: True
+                      (False, [phone_access.GATE_FUNNEL_PORT], False))
+                phone_access.funnel_answers = lambda host, port, address: True
                 check("and with the gate answering it is published",
                       REAL_NAME_PUBLISHED("box.tail1.ts.net"), True)
                 # DNS over HTTPS reachable and saying "no such name": the
                 # network's resolver is not asked, so it keeps no such answer
                 # for a phone on the same Wi-Fi.
                 asked = []
-                tg_menu.doh = lambda name, rtype: []
+                phone_access.doh = lambda name, rtype: []
                 _socket.getaddrinfo = lambda *a, **kw: asked.append(a) or []
                 check("DNS over HTTPS answering empty: the system's resolver is left alone",
                       (REAL_NAME_PUBLISHED("box.tail1.ts.net"), asked), (False, []))
                 def busy(name, rtype):
-                    raise tg_menu.urllib.error.HTTPError("https://dns.google", 503, "busy", {}, None)
-                tg_menu.doh = busy
+                    raise urllib.error.HTTPError("https://dns.google", 503, "busy", {}, None)
+                phone_access.doh = busy
                 check("nor when it answers with an HTTP error: it was reached",
                       (REAL_NAME_PUBLISHED("box.tail1.ts.net"), asked), (False, []))
                 def no_name(*a, **kw):
                     raise _socket.gaierror("no such name")
                 _socket.getaddrinfo = no_name
-                check("no name anywhere: nothing to probe", tg_menu.system_addresses("x.ts.net"), [])
+                check("no name anywhere: nothing to probe", phone_access.system_addresses("x.ts.net"), [])
             finally:
-                tg_menu.doh, _socket.getaddrinfo, tg_menu.funnel_answers = saved
+                phone_access.doh, _socket.getaddrinfo, phone_access.funnel_answers = saved
         finally:
-            tg_menu.run = saved_run
+            shell.run = saved_run
     finally:
-        tg_menu.DEV_REGISTRY = saved_registry
+        services.DEV_REGISTRY = saved_registry
         shutil.rmtree(reg, ignore_errors=True)
         shutil.rmtree(wt, ignore_errors=True)
 
     # nvm lies outside the service's PATH, and without it sclaude dev died with
     # "setsid: failed to execute npm". The version is read dynamically: a
     # hardcoded one would break quietly when Node was updated.
-    nvm = tg_menu.nvm_bin()
+    nvm = shell.nvm_bin()
     if os.path.isdir(os.path.expanduser("~/.nvm/versions/node")):
         check_true("nvm's directory is found", bool(nvm) and os.path.isdir(nvm))
         check_true("npm is visible to the bot's commands",
-                   tg_menu.run("command -v npm").endswith("npm"))
+                   shell.run("command -v npm").endswith("npm"))
 
     # port_open must not lie: a closed port is False, an open one True.
-    check("a closed port is not open", tg_menu.port_open(59999), False)
+    check("a closed port is not open", phone_access.port_open(59999), False)
 
     # code-server opens the same repository as the one chosen for sclaude: two
     # different "current projects" would confuse somebody who switched one and
     # expects the second to have switched too.
     saved_choice = read().get("sclaude_repo") or ""
-    repos_now = tg_menu.known_repos()
+    repos_now = repos.known_repos()
     if repos_now:
         with state.locked() as st:
             st["sclaude_repo"] = repos_now[0]
         check("the folder follows the choice",
-              tg_menu.code_folder(), os.path.basename(repos_now[0]))
+              services.code_folder(), os.path.basename(repos_now[0]))
         check_true("the folder reaches the card",
-                   os.path.basename(repos_now[0]) in tg_menu.code_text())
+                   os.path.basename(repos_now[0]) in services.code_text())
     with state.locked() as st:
         st["sclaude_repo"] = ""
-    check("with no choice the home directory opens", tg_menu.code_folder(), "~")
+    check("with no choice the home directory opens", services.code_folder(), "~")
     with state.locked() as st:
         st["sclaude_repo"] = saved_choice
 
@@ -2044,11 +2044,11 @@ if os.path.exists(cfg):
     check_true("the wrapper falls back to $HOME", '"$HOME"' in body)
 
     check_true("the link points at the address from the config",
-               tg_menu.code_url().startswith("http://"))
+               services.code_url().startswith("http://"))
     # Telegram makes a link only of what looks like a domain or an IP.
     # "localhost" does not qualify: it stays text even inside an explicit
     # <a href>, which is additionally rejected with a 400 error.
-    body = tg_menu.code_text()
+    body = services.code_text()
     check("localhost is not used as a link", "localhost:8080" in body, False)
     check_true("the local address is given as an IP", "127.0.0.1:8080" in body)
 
@@ -2062,28 +2062,27 @@ os.environ.pop("KEEPAWAKE_CHAT_ID", None)
 # tests rather than only in someone's head.
 os.environ["KEEPAWAKE_BOT_TOKEN"] = "test:token"
 os.environ["KEEPAWAKE_CHAT_ID"] = "12345"
-from keepawake import telegramd as tg_acl
 
 # A repository's name arrives in callback_data and reaches a shell command. Even
 # with shlex.quote it is unwise to rely on escaping alone: the name has to come
 # from the list of known repositories.
 for evil in ("../../etc", "..", "no-such-repo", "myapp; rm -rf /", "", "/etc"):
     check("a forged repository name is rejected: %r" % evil,
-          tg_acl.repo_path(evil), "")
+          repos.repo_path(evil), "")
 
-real_names = [os.path.basename(r) for r in tg_acl.known_repos()]
+real_names = [os.path.basename(r) for r in repos.known_repos()]
 if real_names:
-    check_true("a real name passes", bool(tg_acl.repo_path(real_names[0])))
+    check_true("a real name passes", bool(repos.repo_path(real_names[0])))
 
 # A command with a forged name must execute nothing.
-saved_run = tg_acl.run
+saved_run = shell.run
 executed = []
-tg_acl.run = lambda cmd, timeout=25: executed.append(cmd) or "No features in progress."
+shell.run = lambda cmd, timeout=25: executed.append(cmd) or "No features in progress."
 try:
-    tg_acl.features_of_name("../../etc")
+    repos.features_of_name("../../etc")
     check("no command is launched for a foreign name", executed, [])
 finally:
-    tg_acl.run = saved_run
+    shell.run = saved_run
 
 # A foreign chat must not be handled at all — that is the only thing separating
 # the machine from anyone who finds the bot by name.
@@ -2128,8 +2127,7 @@ check("an unknown section does not bring it down", docs_mod.section("nope", "ru"
 # silently returns to the menu.
 os.environ["KEEPAWAKE_BOT_TOKEN"] = "test:token"
 os.environ["KEEPAWAKE_CHAT_ID"] = "12345"
-from keepawake import telegramd as tg_docs
-doc_buttons = [b["callback_data"] for row in tg_docs.docs_keyboard() for b in row
+doc_buttons = [b["callback_data"] for row in menus.docs_keyboard() for b in row
                if b["callback_data"].startswith("doc:")]
 check("there are as many buttons as sections",
       len(doc_buttons), len(docs_mod.SECTIONS))
@@ -2157,13 +2155,12 @@ check_true("idling takes code-server's heartbeat into account",
 # are three reasons, and the decision made by button depends on them.
 os.environ["KEEPAWAKE_BOT_TOKEN"] = "test:token"
 os.environ["KEEPAWAKE_CHAT_ID"] = "12345"
-from keepawake import telegramd as tg_why
 
 now_w = int(time.time())
-reason_nobody = tg_why.sleep_reason({"holders": {}}, now_w)
-reason_soft = tg_why.sleep_reason(
+reason_nobody = sleep_warning.sleep_reason({"holders": {}}, now_w)
+reason_soft = sleep_warning.sleep_reason(
     {"holders": {"claude": {"count": 1}}}, now_w)
-reason_refused = tg_why.sleep_reason(
+reason_refused = sleep_warning.sleep_reason(
     {"holders": {"ssh": {"count": 1}}, "decision": "sleep",
      "decision_ts": now_w, "until_ts": now_w}, now_w)
 
@@ -2179,7 +2176,7 @@ with sandbox():
         touch(st, now_w)
         st["holders"]["claude"] = {"count": 1, "seen_ts": now_w}
     probe = FakeBot()
-    tg_why.check_warning(probe)
+    sleep_warning.check_warning(probe)
     check("the warning was sent", len(probe.sent), 1)
     body_w = probe.sent[0][0]
     check_true("the text has the reason", "Claude" in body_w)
@@ -2196,7 +2193,6 @@ os.environ.pop("KEEPAWAKE_CHAT_ID", None)
 # of work, otherwise the question would interrupt a long build.
 os.environ["KEEPAWAKE_BOT_TOKEN"] = "test:token"
 os.environ["KEEPAWAKE_CHAT_ID"] = "12345"
-from keepawake import telegramd as tg_idle
 
 def idle_state(**kw):
     now_i = int(time.time())
@@ -2218,15 +2214,15 @@ with sandbox():
     for name, kw, want in cases:
         idle_state(**kw)
         probe = FakeBot()
-        tg_idle.check_idle_hold(probe)
+        sleep_warning.check_idle_hold(probe)
         check(name, len(probe.sent), want)
 
     # 999999 is the placeholder for "no interactive sessions at all" rather than
     # "a very long idle". Because of that a "277 hours without input" once
     # arrived about a machine that had been working since the day before.
-    idle_state(idle_seconds=tg_idle.IDLE_UNKNOWN)
+    idle_state(idle_seconds=services.IDLE_UNKNOWN)
     probe = FakeBot()
-    tg_idle.check_idle_hold(probe)
+    sleep_warning.check_idle_hold(probe)
     check("with an unknown idle we stay quiet", len(probe.sent), 0)
 
     # hard_since=0 means "we are holding but do not know since when". "It has
@@ -2234,13 +2230,13 @@ with sandbox():
     # there will not do.
     idle_state(hard_since=0)
     probe = FakeBot()
-    tg_idle.check_idle_hold(probe)
+    sleep_warning.check_idle_hold(probe)
     check("with no start of the hold we stay quiet", len(probe.sent), 0)
 
     # Three options, and each does its own thing.
     idle_state()
     probe = FakeBot()
-    tg_idle.check_idle_hold(probe)
+    sleep_warning.check_idle_hold(probe)
     buttons = [b["callback_data"] for row in probe.sent[0][1] for b in row]
     check("three options", len(buttons), 3)
     check_true("there is a 'carry on'", "idle_keep" in buttons)
@@ -2251,7 +2247,7 @@ with sandbox():
     # would be useless with a live SSH session.
     idle_state()
     probe = FakeBot()
-    tg_idle.Handler(probe).callback(
+    handling.Handler(probe).callback(
         {"id": "x", "data": "idle_sleep", "message": {"message_id": 9}})
     after_sleep = read()
     check("sleep drops the hard hold", after_sleep["hard_hold"], False)
@@ -2270,13 +2266,13 @@ with sandbox():
     # "Carry on" changes nothing but postpones the next question by an hour.
     idle_state()
     probe = FakeBot()
-    tg_idle.Handler(probe).callback(
+    handling.Handler(probe).callback(
         {"id": "x", "data": "idle_keep", "message": {"message_id": 9}})
     kept = read()
     check("carrying on does not touch the hold", kept["hard_hold"], True)
     check_true("carrying on postpones the question", kept["idle_asked_ts"] > 0)
     probe2 = FakeBot()
-    tg_idle.check_idle_hold(probe2)
+    sleep_warning.check_idle_hold(probe2)
     check("right after 'carry on' we do not ask", len(probe2.sent), 0)
 
 os.environ.pop("KEEPAWAKE_BOT_TOKEN", None)
@@ -2522,7 +2518,6 @@ check_true("busyness is taken from the claude count rather than from is_busy",
 
 import pty
 
-from keepawake import telegramd as tg_quiet
 
 
 class Pty(object):
@@ -2569,12 +2564,12 @@ class Pty(object):
 
 
 with Pty() as term:
-    check("the process's terminal is found", tg_quiet.tty_of_pid(term.proc.pid),
+    check("the process's terminal is found", asks.tty_of_pid(term.proc.pid),
           term.name)
 
     term.age(600)
     check("a silent terminal — nobody at it",
-          tg_quiet.at_terminal({"pid": term.proc.pid}), False)
+          asks.at_terminal({"pid": term.proc.pid}), False)
 
     # The main check of the whole undertaking. ask() prints the prompt into the
     # terminal right after laying the question out — and if the sign looks at
@@ -2583,23 +2578,23 @@ with Pty() as term:
     # works inside out. The test fails on exactly that substitution.
     term.prints("Do you confirm that everything works as it should? [y/n] ")
     check("printing a prompt does not count as presence",
-          tg_quiet.at_terminal({"pid": term.proc.pid}), False)
+          asks.at_terminal({"pid": term.proc.pid}), False)
 
     term.types("y\n")
     check("what was typed counts as presence",
-          tg_quiet.at_terminal({"pid": term.proc.pid}), True)
+          asks.at_terminal({"pid": term.proc.pid}), True)
 
     term.age(600)
     check("what was typed long ago does not count",
-          tg_quiet.at_terminal({"pid": term.proc.pid}), False)
+          asks.at_terminal({"pid": term.proc.pid}), False)
 
 # A launch from the bot goes through setsid and has no terminal at all. That is
 # the main case that must not be muted: it can only be answered from a phone.
-check("a process with no terminal", tg_quiet.tty_of_pid(os.getpid()) is None
-      or tg_quiet.tty_of_pid(os.getpid()).startswith("/dev/pts"), True)
-check("a dead pid", tg_quiet.tty_of_pid(999999), None)
-check("there is no pid in the question", tg_quiet.at_terminal({}), False)
-check("the pid is not a number", tg_quiet.at_terminal({"pid": "abc"}), False)
+check("a process with no terminal", asks.tty_of_pid(os.getpid()) is None
+      or asks.tty_of_pid(os.getpid()).startswith("/dev/pts"), True)
+check("a dead pid", asks.tty_of_pid(999999), None)
+check("there is no pid in the question", asks.at_terminal({}), False)
+check("the pid is not a number", asks.at_terminal({"pid": "abc"}), False)
 
 
 # --- and the same thing whole, through check_asks --------------------------
@@ -2618,12 +2613,12 @@ def asks_quiet(pid):
     path = os.path.join(root, "state.json")
     old_env = os.environ.get("KEEPAWAKE_STATE")
     os.environ["KEEPAWAKE_STATE"] = path
-    old_repos = tg_quiet.known_repos
-    tg_quiet.known_repos = lambda: [repo]
+    old_repos = repos.known_repos
+    repos.known_repos = lambda: [repo]
     try:
-        tg_quiet.check_asks(bot)
+        asks.check_asks(bot)
     finally:
-        tg_quiet.known_repos = old_repos
+        repos.known_repos = old_repos
         if old_env is None:
             os.environ.pop("KEEPAWAKE_STATE", None)
         else:
@@ -2649,7 +2644,6 @@ check("a question with no terminal — with sound", asks_quiet(os.getpid()), Fal
 # orchestrator tells how it ended in closed/<id>.json (ask_closed in io.sh);
 # the bot's own questions are settled from the state.
 
-from keepawake import telegramd as tg_settle
 
 
 def channel_repo(root, name="repo"):
@@ -2682,25 +2676,25 @@ def close_question(repo, qid, reply=None, source="tty"):
 
 with sandbox() as box:
     repo = channel_repo(box.dir)
-    old_repos = tg_settle.known_repos
-    tg_settle.known_repos = lambda: [repo]
+    old_repos = repos.known_repos
+    repos.known_repos = lambda: [repo]
     try:
         # Answered in the terminal: the question becomes its answer.
         bot = FakeBot()
         lay_question(repo, "q1")
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         check("the question was sent", len(bot.sent), 1)
         check("its message is remembered",
               read()["ask_shown"]["repo"]["msg"], 777)
         close_question(repo, "q1", "y")
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         check("a question answered in the terminal is edited", len(bot.edits), 1)
         edited = bot.edits[0] if bot.edits else (0, "")
         check("into its answer, in the same message", edited[0], 777)
         check_true("the answer reads as the button would",
-                   telegramd.t("ask.yes") in edited[1])
+                   i18n.t("ask.yes") in edited[1])
         check_true("and says where it came from",
-                   telegramd.t("ask.by.terminal") in edited[1])
+                   i18n.t("ask.by.terminal") in edited[1])
         check("nothing was deleted", bot.deletes, [])
         check("the record is read once",
               os.listdir(os.path.join(repo, ".git", "sclaude", "closed")), [])
@@ -2709,9 +2703,9 @@ with sandbox() as box:
         # Closed without an answer: the session died, or the reply was refused.
         bot = FakeBot()
         lay_question(repo, "q2")
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         close_question(repo, "q2")
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         check("an unanswered question is deleted", bot.deletes, [777])
         check("and not edited", bot.edits, [])
 
@@ -2719,51 +2713,51 @@ with sandbox() as box:
         bot = FakeBot()
         bot.too_old = True
         lay_question(repo, "q3")
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         close_question(repo, "q3")
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         check("a message too old to delete is edited",
-              bot.edits, [(777, telegramd.t("msg.stale"))])
+              bot.edits, [(777, i18n.t("msg.stale"))])
 
         # Two questions between two turns: the first is answered above the
         # second rather than left with live buttons.
         bot = FakeBot()
         lay_question(repo, "q4", "Delete them? [y/n] ")
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         close_question(repo, "q4", "y")
         lay_question(repo, "q5", "Force-delete it? [y/n] ")
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         check("the first of a chain is answered", len(bot.edits), 1)
         check("the second is sent", len(bot.sent), 2)
         check("the second is the one remembered",
               read()["ask_shown"]["repo"]["id"], "q5")
 
         # A press on the open question: its message becomes the answer.
-        h = tg_settle.Handler(bot)
+        h = handling.Handler(bot)
         h.callback({"id": "c", "data": "answer:repo:n",
                     "message": {"message_id": 777}})
         check_true("a press replaces the question with its answer",
-                   bot.edits and telegramd.t("ask.no") in bot.edits[-1][1])
+                   bot.edits and i18n.t("ask.no") in bot.edits[-1][1])
         check("the press is answered plainly", bot.answers[-1], (None, False))
         check("the message is let go", read()["ask_shown"]["repo"]["msg"], 0)
         # The question lingers in the channel a moment: it is not sent again.
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         check("an answered question is not sent twice", len(bot.sent), 2)
         os.unlink(os.path.join(repo, ".git", "sclaude", "answer.json"))
         close_question(repo, "q5", "n", "channel")
         edits = len(bot.edits)
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         check("its record later changes nothing", len(bot.edits), edits)
 
         # A press on an old message must not answer the question open now.
         bot = FakeBot()
-        h = tg_settle.Handler(bot)
+        h = handling.Handler(bot)
         lay_question(repo, "q6")
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         h.callback({"id": "c", "data": "answer:repo:y",
                     "message": {"message_id": 555}})
         check("a press on an old message says it is closed",
-              bot.answers[-1], (telegramd.t("ask.gone"), False))
+              bot.answers[-1], (i18n.t("ask.gone"), False))
         check("and the old message goes", bot.deletes, [555])
         check("and nothing is answered",
               os.path.exists(os.path.join(repo, ".git", "sclaude", "answer.json")),
@@ -2782,21 +2776,21 @@ with sandbox() as box:
         lay_question(repo, "q7")
         with state.locked() as st:
             st["ask_shown"] = {"repo": "q7"}
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         check("an old-format stamp still counts as shown", bot.sent, [])
         close_question(repo, "q7")
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
         check("and its unknown message is left alone", bot.deletes, [])
 
         # The repository is gone: its question will never close the usual way.
         bot = FakeBot()
         lay_question(repo, "q8")
-        tg_settle.check_asks(bot)
-        tg_settle.known_repos = lambda: []
-        tg_settle.check_asks(bot)
+        asks.check_asks(bot)
+        repos.known_repos = lambda: []
+        asks.check_asks(bot)
         check("a vanished repository's question goes", bot.deletes, [777])
     finally:
-        tg_settle.known_repos = old_repos
+        repos.known_repos = old_repos
 
     # The warning before sleep, once its deadline moved without a press on it.
     # The window is stamped from the checks' own now_w: a clock read of its
@@ -2810,57 +2804,57 @@ with sandbox() as box:
     now_w = int(time.time())
     warned()
     bot = FakeBot()
-    tg_settle.settle_warning(bot, read(), now_w)
+    sleep_warning.settle_warning(bot, read(), now_w)
     check("a live warning is left alone", (bot.edits, bot.deletes), ([], []))
     warned(until_ts=now_w + 7200, until_local="21:00")
-    tg_settle.settle_warning(bot, read(), now_w)
+    sleep_warning.settle_warning(bot, read(), now_w)
     check_true("extended elsewhere — the warning says so",
                bot.edits and bot.edits[-1][0] == 31)
     check("and is let go", read()["warn_message_id"], 0)
     bot = FakeBot()
     warned(until_ts=now_w - 5, decision="sleep")
-    tg_settle.settle_warning(bot, read(), now_w)
+    sleep_warning.settle_warning(bot, read(), now_w)
     check("released elsewhere — it will sleep",
-          bot.edits, [(31, telegramd.t("sleep.accepted"))])
+          bot.edits, [(31, i18n.t("sleep.accepted"))])
     bot = FakeBot()
     warned(until_ts=now_w - 5, warned_for_ts=now_w - 5)
-    tg_settle.settle_warning(bot, read(), now_w)
+    sleep_warning.settle_warning(bot, read(), now_w)
     check("past its deadline it goes", bot.deletes, [31])
 
     # No message about sleep outlives its truth: an answer goes at its
     # deadline, and every earlier one with a new warning.
     with state.locked() as st:
         st["sleep_trail"] = []
-    tg_settle.trail(41, now_w + 600)
-    tg_settle.trail(42, now_w - 1)
+    sleep_warning.trail(41, now_w + 600)
+    sleep_warning.trail(42, now_w - 1)
     bot = FakeBot()
-    tg_settle.sweep_trail(bot, now_w)
+    sleep_warning.sweep_trail(bot, now_w)
     check("an answer past its deadline goes", (bot.deletes, read()["sleep_trail"]),
           ([42], [[41, now_w + 600]]))
     with state.locked() as st:
         st.update(dict(until_ts=now_w + 1200, warned_for_ts=0, warn_message_id=0,
                        decision="", updated_ts=now_w))
     bot = FakeBot()
-    real_needs = tg_settle.needs_warning
-    tg_settle.needs_warning = lambda data, now: True
+    real_needs = state.needs_warning
+    state.needs_warning = lambda data, now: True
     try:
-        tg_settle.check_warning(bot)
+        sleep_warning.check_warning(bot)
     finally:
-        tg_settle.needs_warning = real_needs
+        state.needs_warning = real_needs
     check("a new warning takes every earlier one away",
           (41 in bot.deletes, read()["sleep_trail"]), (True, []))
     # A press keeps its answer only while true.
     warned()
     bot = FakeBot()
-    tg_settle.Handler(bot).callback({"id": "c", "data": "sleep:%d" % (now_w + 600),
+    handling.Handler(bot).callback({"id": "c", "data": "sleep:%d" % (now_w + 600),
                                      "message": {"message_id": 31}})
     check_true("a press's answer is kept while Windows counts its idle time",
                [e[0] for e in read()["sleep_trail"]] == [31]
-               and read()["sleep_trail"][0][1] >= now_w + tg_settle.IDLE_SLEPT_KEEP)
+               and read()["sleep_trail"][0][1] >= now_w + sleep_warning.IDLE_SLEPT_KEEP)
     check("and lets the hard hold go too", read().get("hard_hold"), False)
     # A later reply about sleep takes the earlier one away.
     bot = FakeBot()
-    tg_settle.Handler(bot).cmd_extend()
+    handling.Handler(bot).cmd_extend()
     check("an /extend reply replaces the earlier answer",
           (31 in bot.deletes, [e[0] for e in read()["sleep_trail"]]), (True, [777]))
     # A reply about sleep takes the open warning away too, and an unsent one
@@ -2869,9 +2863,9 @@ with sandbox() as box:
         st["sleep_trail"] = [[61, now_w + 600]]
         st["warn_message_id"] = 62
     bot = FakeBot()
-    tg_settle.said_sleep(bot, 0, now_w + 600)
+    sleep_warning.said_sleep(bot, 0, now_w + 600)
     check("an unsent reply replaces nothing", bot.deletes, [])
-    tg_settle.said_sleep(bot, 63, now_w + 600)
+    sleep_warning.said_sleep(bot, 63, now_w + 600)
     check("a reply replaces the earlier line and the open warning",
           (sorted(bot.deletes), read()["warn_message_id"],
            [e[0] for e in read()["sleep_trail"]]), ([61, 62], 0, [63]))
@@ -2883,14 +2877,14 @@ with sandbox() as box:
     bot = FakeBot()
     bot.offline = True
     bot.delete = lambda mid: False
-    tg_settle.sweep_trail(bot, now_w)
+    sleep_warning.sweep_trail(bot, now_w)
     check("a line the network kept stays to be tried again",
           read()["sleep_trail"], [[51, now_w - 1]])
     with state.locked() as st:
         st["sleep_trail"] = []
     bot = FakeBot()
     warned()
-    tg_settle.Handler(bot).callback({"id": "c", "data": "extend:%d" % (now_w + 600),
+    handling.Handler(bot).callback({"id": "c", "data": "extend:%d" % (now_w + 600),
                                      "message": {"message_id": 31}})
     check("a press on the warning lets it go", read()["warn_message_id"], 0)
 
@@ -2898,14 +2892,14 @@ with sandbox() as box:
     with state.locked() as st:
         st.update(dict(hard_hold=False, idle_message_id=41))
     bot = FakeBot()
-    tg_settle.check_idle_hold(bot)
+    sleep_warning.check_idle_hold(bot)
     check("nothing holds — the idle question goes", bot.deletes, [41])
     check("and is forgotten", read()["idle_message_id"], 0)
 
     # The time question: answered, it becomes the answer; left, it goes.
     state.write(blank())
     bot = FakeBot()
-    h = tg_settle.Handler(bot)
+    h = handling.Handler(bot)
     h.callback({"id": "a", "data": "awake_until", "message": {"message_id": 51}})
     check("both messages of the time question are kept",
           read()["awaiting_ids"], {"menu": 51, "prompt": 778})
@@ -2917,13 +2911,13 @@ with sandbox() as box:
     check("nothing is left to sweep", read()["awaiting_ids"], {})
     h.callback({"id": "a", "data": "awake_until", "message": {"message_id": 52}})
     h.message({"text": "/status", "message_id": 62})
-    tg_settle.check_awaiting(bot)
+    holding.check_awaiting(bot)
     check("a command leaves the question, and it goes",
           bot.deletes[-2:], [52, 778])
     h.callback({"id": "a", "data": "awake_until", "message": {"message_id": 53}})
     h.callback({"id": "b", "data": "menu_back", "message": {"message_id": 53}})
     deleted = list(bot.deletes)
-    tg_settle.check_awaiting(bot)
+    holding.check_awaiting(bot)
     check("'back' keeps the message it turned into the menu",
           bot.deletes[len(deleted):], [778])
 
@@ -2935,7 +2929,6 @@ with sandbox() as box:
 # questions stay in the main chat. What the bot knows of a feature lives in the
 # feature's worktree; the topic is deleted when the clean-up is through.
 
-from keepawake import telegramd as tg_topic
 
 
 def feature_channel(repo, slug):
@@ -2981,27 +2974,27 @@ def unlay(channel):
 # The name: the slug first, since a phone shows about thirty characters of it,
 # the repository after it while there is room, and a cut slug marked.
 check("a short slug keeps the repository",
-      tg_topic.topic_name("shop", "login-fix"), "login-fix · shop")
+      topics.topic_name("shop", "login-fix"), "login-fix · shop")
 long_slug = "redirect-after-login-on-safari-when-the-cookie-is-stale"
 check_true("a long slug drops the repository",
-           "shop" not in tg_topic.topic_name("shop", long_slug))
+           "shop" not in topics.topic_name("shop", long_slug))
 check_true("and is cut to the limit",
-           len(tg_topic.topic_name("shop", long_slug)) <= tg_topic.TOPIC_NAME_MAX)
-check_true("a cut is marked", tg_topic.topic_name("shop", long_slug).endswith("…"))
+           len(topics.topic_name("shop", long_slug)) <= topics.TOPIC_NAME_MAX)
+check_true("a cut is marked", topics.topic_name("shop", long_slug).endswith("…"))
 check("a message in the main chat is in no topic",
-      tg_topic.message_thread({"message_thread_id": 5}), 0)
+      topics.message_thread({"message_thread_id": 5}), 0)
 check("a message in a topic is in it",
-      tg_topic.message_thread({"message_thread_id": 5, "is_topic_message": True}), 5)
+      topics.message_thread({"message_thread_id": 5, "is_topic_message": True}), 5)
 
 with sandbox() as box:
     root = os.path.join(box.dir, "home")
     repo = os.path.join(root, "shop")
     os.makedirs(os.path.join(repo, ".git", "sclaude"))
-    old_repos, old_path, old_run = tg_topic.known_repos, tg_topic.repo_path, tg_topic.run
-    tg_topic.known_repos = lambda: [repo]
+    old_repos, old_path, old_run = repos.known_repos, repos.repo_path, shell.run
+    repos.known_repos = lambda: [repo]
     # The card asks `sclaude status` and systemctl; neither is under test here.
-    tg_topic.run = lambda cmd, timeout=25: ""
-    tg_topic.repo_path = lambda name: repo if name == "shop" else None
+    shell.run = lambda cmd, timeout=25: ""
+    repos.repo_path = lambda name: repo if name == "shop" else None
     try:
         a, b = feature_channel(repo, "a"), feature_channel(repo, "b")
         tree_a, tree_b = feature_tree(repo, "a"), feature_tree(repo, "b")
@@ -3009,7 +3002,7 @@ with sandbox() as box:
         lay_in(a, "qa")
         lay_in(b, "qb")
         lay_in(os.path.join(repo, ".git", "sclaude"), "qr", "Feature name: ", "")
-        tg_topic.check_asks(bot)
+        asks.check_asks(bot)
         # Each new topic opens with the feature's card.
         check("three questions at once all go out, two topics with their cards",
               len(bot.sent), 5)
@@ -3026,7 +3019,7 @@ with sandbox() as box:
 
         # Typed in a feature's topic, text answers that feature — though
         # three questions are open.
-        h = tg_topic.Handler(bot)
+        h = handling.Handler(bot)
         h.message({"text": "y", "message_id": 70, "is_topic_message": True,
                    "message_thread_id": rec_b["thread"]})
         check("a typed answer in a topic reaches its feature", reply_in(b), "y")
@@ -3040,7 +3033,7 @@ with sandbox() as box:
         os.unlink(os.path.join(repo, ".git", "sclaude", "answer.json"))
         # Shown in the repository's new-feature topic, "Feature name:" is
         # answered there: that topic has no feature of its own yet.
-        with tg_topic.locked() as st:
+        with state.locked() as st:
             # Shown afresh there: the text above answered it in the main chat.
             st["ask_shown"]["shop"]["thread"] = 977
             st["ask_shown"]["shop"].pop("answered", None)
@@ -3052,7 +3045,7 @@ with sandbox() as box:
         check("a name typed in the new-feature topic answers its question",
               reply_in(os.path.join(repo, ".git", "sclaude")), "login-fix")
         os.unlink(os.path.join(repo, ".git", "sclaude", "answer.json"))
-        with tg_topic.locked() as st:
+        with state.locked() as st:
             st["ask_shown"]["shop"]["thread"] = 0
 
         # A press answers the channel its message shows.
@@ -3071,9 +3064,9 @@ with sandbox() as box:
         # The topic deleted by hand: the next question makes a new one.
         bot2 = FakeBot()
         unlay(a)
-        tg_topic.check_asks(bot2)
+        asks.check_asks(bot2)
         lay_in(a, "qa2")
-        tg_topic.check_asks(bot2)
+        asks.check_asks(bot2)
         rec_a2 = json.load(open(os.path.join(tree_a, "telegram.json")))
         check_true("a deleted topic is made again", rec_a2["thread"] != rec_a["thread"])
         check("and the question arrives in it", bot2.threads[-1], rec_a2["thread"])
@@ -3083,7 +3076,7 @@ with sandbox() as box:
         bot3.no_topics = True
         c = feature_channel(repo, "c")
         lay_in(c, "qc")
-        tg_topic.check_asks(bot3)
+        asks.check_asks(bot3)
         check("no topics — the main chat", bot3.threads, [0])
 
         with state.locked() as st:
@@ -3095,7 +3088,7 @@ with sandbox() as box:
         bot3b = FakeBot()
         d = feature_channel(repo, "d")
         lay_in(d, "qd")
-        tg_topic.check_asks(bot3b)
+        asks.check_asks(bot3b)
         check("no worktree — no topic", (bot3b.topics, bot3b.threads), ({}, [0]))
         unlay(d)
 
@@ -3105,26 +3098,26 @@ with sandbox() as box:
         unlay(a)
         bot4 = FakeBot()
         bot4.topics = dict(bot2.topics)
-        tg_topic.check_asks(bot4)
-        tg_topic.check_topics(bot4)
+        asks.check_asks(bot4)
+        topics.check_topics(bot4)
         check("a live feature keeps its topic", bot4.deleted_topics, [])
         record = open(os.path.join(tree_a, "telegram.json")).read()
         shutil.rmtree(os.path.dirname(os.path.dirname(os.path.dirname(tree_a))))
         with open(os.path.join(a, "ended"), "w") as fh:
             fh.write(record)
-        tg_topic.check_topics(bot4)
+        topics.check_topics(bot4)
         check("the end mark deletes the topic", bot4.deleted_topics, [rec_a2["thread"]])
         check("and the channel", os.path.exists(a), False)
 
         # A worktree removed by hand: the channel goes after the grace, the
         # topic cannot — its id went with the worktree.
         unlay(b)
-        tg_topic.check_asks(bot4)
+        asks.check_asks(bot4)
         shutil.rmtree(os.path.dirname(os.path.dirname(os.path.dirname(tree_b))))
-        tg_topic.check_topics(bot4)
+        topics.check_topics(bot4)
         check("a channel changed just now stays", os.path.exists(b), True)
-        os.utime(b, (time.time() - tg_topic.TOPIC_GRACE - 1,) * 2)
-        tg_topic.check_topics(bot4)
+        os.utime(b, (time.time() - topics.TOPIC_GRACE - 1,) * 2)
+        topics.check_topics(bot4)
         check("a worktree gone by hand loses its channel", os.path.exists(b), False)
         check("and nothing is deleted blind", bot4.deleted_topics, [rec_a2["thread"]])
 
@@ -3132,7 +3125,7 @@ with sandbox() as box:
         e = feature_channel(repo, "e")
         tree_e = feature_tree(repo, "e")
         bot5 = FakeBot()
-        h5 = tg_topic.Handler(bot5)
+        h5 = handling.Handler(bot5)
         # From the feature list: the card goes to the feature's topic, pinned,
         # and the list says where it went.
         h5.callback({"id": "c", "data": "topic:shop:e", "message": {"message_id": 600}})
@@ -3167,32 +3160,32 @@ with sandbox() as box:
         check("a key-less card button acts on the topic's feature",
               bot5.edits[-1][0], 620)
         check_true("and redraws the card, not 'gone'",
-                   tg_topic.t("feat.gone", slug="?") != bot5.edits[-1][1])
+                   i18n.t("feat.gone", slug="?") != bot5.edits[-1][1])
         bot5.thread = 0
         # The dev server buttons act on this feature's server.
         acted = []
-        saved_dev, saved_act = tg_topic.feature_dev, tg_topic.dev_act
+        saved_dev, saved_act = card_view.feature_dev, card_view.dev_act
         # Stopped when pressed, up on the next look: the handler waits for the
         # server to come up before redrawing, and one that never does costs
         # its whole ten-second wait.
         looks = []
-        tg_topic.feature_dev = lambda r, sl: (looks.append(1), ("e-label", 3001, len(looks) > 1))[1]
-        tg_topic.dev_act = lambda action, label, wt: acted.append((action, label))
+        card_view.feature_dev = lambda r, sl: (looks.append(1), ("e-label", 3001, len(looks) > 1))[1]
+        card_view.dev_act = lambda action, label, wt: acted.append((action, label))
         try:
             h5.callback({"id": "c", "data": "fc:start:shop/e", "message": {"message_id": 621}})
             card = bot5.edits[-1]
         finally:
-            tg_topic.feature_dev, tg_topic.dev_act = saved_dev, saved_act
+            card_view.feature_dev, card_view.dev_act = saved_dev, saved_act
         check("start starts this feature's server", acted, [("start", "e-label")])
         # A long key does not fit 64 bytes: the button names its action only.
         check("a long key is left to the topic",
-              tg_topic.card_data("go", "shop/" + "x" * 70), "fc:go")
+              card_view.card_data("go", "shop/" + "x" * 70), "fc:go")
         # Without Threaded Mode the card takes the list's place, with a way back.
         bot6 = FakeBot()
         bot6.no_topics = True
         f = feature_channel(repo, "f")
         feature_tree(repo, "f")
-        tg_topic.Handler(bot6).callback({"id": "c", "data": "topic:shop:f",
+        handling.Handler(bot6).callback({"id": "c", "data": "topic:shop:f",
                                          "message": {"message_id": 700}})
         check("no topics — the card stands in the list's place", bot6.edits[-1][0], 700)
 
@@ -3201,12 +3194,12 @@ with sandbox() as box:
 
         # --- one menu screen in the chat -------------------------------------
         # No open question: a word typed here would be taken for its answer.
-        for slug_x, ch_x in tg_topic.ask_channels(repo):
+        for slug_x, ch_x in asks.ask_channels(repo):
             unlay(ch_x)
         with state.locked() as st:
             st["screens"] = {}
         bot7 = FakeBot()
-        h7 = tg_topic.Handler(bot7)
+        h7 = handling.Handler(bot7)
         sent = iter([801, 802, 803, 804])
         bot7.send = lambda text, kb=None, quiet=False, thread=None: next(sent)
         h7.message({"text": "/menu", "message_id": 90})
@@ -3226,106 +3219,106 @@ with sandbox() as box:
         # Started from the bot, a new feature asks for its name before it has
         # one, in the repository's channel; those questions go to a topic made
         # for it, and the named feature takes that topic over.
-        saved_start = tg_topic.start_sclaude
-        tg_topic.start_sclaude = lambda repo_, args: None
+        saved_start = sessions.start_sclaude
+        sessions.start_sclaude = lambda repo_, args: None
         try:
             bot_n = FakeBot()
-            tg_topic.Handler(bot_n).callback({"id": "c", "data": "newfeat:shop",
+            handling.Handler(bot_n).callback({"id": "c", "data": "newfeat:shop",
                                               "message": {"message_id": 710}})
-            new_thread = tg_topic.new_topic_of("shop")
+            new_thread = topics.new_topic_of("shop")
             check_true("starting a new feature makes its topic", new_thread in bot_n.topics)
-            ch_repo = tg_topic.ask_dir(repo)
+            ch_repo = asks.ask_dir(repo)
             os.makedirs(ch_repo, exist_ok=True)
             # Another orchestrator's question in the repository's channel is
             # the main chat's, the topic waiting or not.
-            saved_new = tg_topic.asks_for_new
-            tg_topic.asks_for_new = lambda pid: False
+            saved_new = topics.asks_for_new
+            topics.asks_for_new = lambda pid: False
             lay_in(ch_repo, "qo", prompt="Which feature? ", form="text")
-            tg_topic.check_asks(bot_n)
+            asks.check_asks(bot_n)
             check("another orchestrator's question stays in the main chat",
                   bot_n.threads[-1], 0)
             unlay(ch_repo)
-            tg_topic.check_asks(bot_n)
-            tg_topic.asks_for_new = lambda pid: True
+            asks.check_asks(bot_n)
+            topics.asks_for_new = lambda pid: True
             lay_in(ch_repo, "qn", prompt="Name? ", form="text")
-            tg_topic.check_asks(bot_n)
+            asks.check_asks(bot_n)
             check("its unnamed questions go to that topic", bot_n.threads[-1], new_thread)
             unlay(ch_repo)
-            tg_topic.check_asks(bot_n)
-            tg_topic.asks_for_new = saved_new
+            asks.check_asks(bot_n)
+            topics.asks_for_new = saved_new
             feature_tree(repo, "n")
             feature_channel(repo, "n")
             check("the named feature takes the topic over",
-                  tg_topic.feature_topic(bot_n, "shop", "n"), new_thread)
+                  topics.feature_topic(bot_n, "shop", "n"), new_thread)
             check("renamed for it", bot_n.renames[-1],
-                  (new_thread, tg_topic.topic_name("shop", "n")))
-            check("and the repository has none waiting", tg_topic.new_topic_of("shop"), 0)
+                  (new_thread, topics.topic_name("shop", "n")))
+            check("and the repository has none waiting", topics.new_topic_of("shop"), 0)
 
             # Phone access changing redraws the cards in the topics: what a
             # card offers depends on it.
             card_n = json.load(open(os.path.join(os.path.dirname(repo), "shop-n",
                                                  ".sclaude", "local", "feature",
                                                  "telegram.json")))["card"]
-            saved_gate = tg_topic.gate_origin
+            saved_gate = phone_access.gate_origin
             try:
-                tg_topic.PHONE_SEEN[0] = None
-                tg_topic.gate_origin = lambda *a: ""
+                sleep_warning.PHONE_SEEN[0] = None
+                phone_access.gate_origin = lambda *a: ""
                 bot_c = FakeBot()
-                tg_topic.check_phone(bot_c)
+                sleep_warning.check_phone(bot_c)
                 check("the first look changes nothing", bot_c.edits, [])
-                with tg_topic.locked() as st:
+                with state.locked() as st:
                     st["screens"] = {"0": 777}
-                tg_topic.gate_origin = lambda *a: "https://box.tail1.ts.net:8443"
-                tg_topic.check_phone(bot_c)
+                phone_access.gate_origin = lambda *a: "https://box.tail1.ts.net:8443"
+                sleep_warning.check_phone(bot_c)
                 check_true("access turned on redraws the card", card_n in [e[0] for e in bot_c.edits])
                 check_true("and the main chat's menu, now the way to the app",
-                           (777, tg_topic.chat_menu(0)[0]) in bot_c.edits)
+                           (777, menus.chat_menu(0)[0]) in bot_c.edits)
                 check("and lists the commands for it", bot_c.listed, True)
                 edits = len(bot_c.edits)
-                tg_topic.check_phone(bot_c)
+                sleep_warning.check_phone(bot_c)
                 check("no change, no redraw", len(bot_c.edits), edits)
             finally:
-                tg_topic.gate_origin = saved_gate
-                tg_topic.PHONE_SEEN[0] = None
+                phone_access.gate_origin = saved_gate
+                sleep_warning.PHONE_SEEN[0] = None
 
             # A feature older than the topic is not the one it was made for.
-            tg_topic.new_feature_topic(bot_n, "shop")
-            waiting = tg_topic.new_topic_of("shop")
+            topics.new_feature_topic(bot_n, "shop")
+            waiting = topics.new_topic_of("shop")
             old_tree = feature_tree(repo, "o")
             feature_channel(repo, "o")
             git_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(old_tree))), ".git")
             os.utime(git_file, (time.time() - 3600, time.time() - 3600))
             check_true("an older feature gets a topic of its own",
-                       tg_topic.feature_topic(bot_n, "shop", "o") != waiting)
-            check("and the new one keeps waiting", tg_topic.new_topic_of("shop"), waiting)
+                       topics.feature_topic(bot_n, "shop", "o") != waiting)
+            check("and the new one keeps waiting", topics.new_topic_of("shop"), waiting)
 
             # A start that asks nothing after the name: the topic is taken
             # over as soon as the worktree is there.
             with state.locked() as st:
                 st["new_topics"]["shop"]["since"] = int(time.time()) - 5
             feature_tree(repo, "q")
-            tg_topic.check_new_topics(bot_n)
+            topics.check_new_topics(bot_n)
             check("a new worktree takes the topic without a question",
                   json.load(open(os.path.join(os.path.dirname(repo), "shop-q",
                                               ".sclaude", "local", "feature",
                                               "telegram.json")))["thread"], waiting)
             check("and it is renamed", bot_n.renames[-1],
-                  (waiting, tg_topic.topic_name("shop", "q")))
-            tg_topic.new_feature_topic(bot_n, "shop")
-            waiting = tg_topic.new_topic_of("shop")
+                  (waiting, topics.topic_name("shop", "q")))
+            topics.new_feature_topic(bot_n, "shop")
+            waiting = topics.new_topic_of("shop")
 
             # Nobody took it over: it goes after a while. (Every worktree here
             # is made older than it, or one would take it over.)
-            gone_since = int(time.time()) - tg_topic.NEW_TOPIC_KEEP - 1
+            gone_since = int(time.time()) - topics.NEW_TOPIC_KEEP - 1
             for git in glob.glob(os.path.join(os.path.dirname(repo), "shop-*", ".git")):
                 os.utime(git, (gone_since - 3600, gone_since - 3600))
             with state.locked() as st:
                 st["new_topics"]["shop"]["since"] = gone_since
-            tg_topic.check_new_topics(bot_n)
+            topics.check_new_topics(bot_n)
             check_true("an abandoned new-feature topic is deleted", waiting in bot_n.deleted_topics)
-            check("and forgotten", tg_topic.new_topic_of("shop"), 0)
+            check("and forgotten", topics.new_topic_of("shop"), 0)
         finally:
-            tg_topic.start_sclaude = saved_start
+            sessions.start_sclaude = saved_start
 
         # --- the review's corner cases ---------------------------------------
         # A send that fails as the network does keeps the topic: no second one,
@@ -3333,17 +3326,17 @@ with sandbox() as box:
         g = feature_channel(repo, "g")
         tree_g = feature_tree(repo, "g")
         bot8 = FakeBot()
-        tg_topic.feature_topic(bot8, "shop", "g")
+        topics.feature_topic(bot8, "shop", "g")
         thread_g = json.load(open(os.path.join(tree_g, "telegram.json")))["thread"]
         lay_in(g, "qg")
         bot8.offline = True
-        tg_topic.check_asks(bot8)
+        asks.check_asks(bot8)
         check("a failed send makes no second topic",
               json.load(open(os.path.join(tree_g, "telegram.json")))["thread"], thread_g)
         check("and remembers no message", "shown" in json.load(
             open(os.path.join(tree_g, "telegram.json"))), False)
         bot8.offline = False
-        tg_topic.check_asks(bot8)
+        asks.check_asks(bot8)
         check("the next turn sends it", bot8.threads[-1], thread_g)
         unlay(g)
 
@@ -3353,11 +3346,11 @@ with sandbox() as box:
         with open(os.path.join(g, "ended"), "w") as fh:
             fh.write(record)
         bot8.offline = True
-        tg_topic.check_topics(bot8)
+        topics.check_topics(bot8)
         check("a failed topic delete keeps the mark",
               os.path.exists(os.path.join(g, "ended")), True)
         bot8.offline = False
-        tg_topic.check_topics(bot8)
+        topics.check_topics(bot8)
         check("the next turn deletes the topic", bot8.deleted_topics, [thread_g])
         check("and then the channel", os.path.exists(g), False)
 
@@ -3368,7 +3361,7 @@ with sandbox() as box:
         bot9 = FakeBot()
         bot9.no_topics = True
         lay_in(h_ch, "qh", "Remove all of it? [y/n] ")
-        tg_topic.check_asks(bot9)
+        asks.check_asks(bot9)
         record = open(os.path.join(tree_h, "telegram.json")).read()
         with open(os.path.join(h_ch, "closed", "qh.json"), "w") as fh:
             json.dump({"id": "qh", "reply": "y", "from": "tty"}, fh)
@@ -3376,10 +3369,10 @@ with sandbox() as box:
         shutil.rmtree(os.path.dirname(os.path.dirname(os.path.dirname(tree_h))))
         with open(os.path.join(h_ch, "ended"), "w") as fh:
             fh.write(record)
-        tg_topic.check_asks(bot9)
-        tg_topic.check_topics(bot9)
+        asks.check_asks(bot9)
+        topics.check_topics(bot9)
         check_true("the last question becomes its answer",
-                   bot9.edits and tg_topic.t("ask.yes") in bot9.edits[-1][1])
+                   bot9.edits and i18n.t("ask.yes") in bot9.edits[-1][1])
         check("rather than being deleted", bot9.deletes, [])
 
         with state.locked() as st:
@@ -3389,21 +3382,21 @@ with sandbox() as box:
         i_ch = feature_channel(repo, "i")
         feature_tree(repo, "i")
         open(os.path.join(i_ch, "ended"), "w").close()
-        tg_topic.check_topics(FakeBot())
+        topics.check_topics(FakeBot())
         check("a stale mark under a live worktree goes, the channel stays",
               (os.path.exists(os.path.join(i_ch, "ended")), os.path.exists(i_ch)),
               (False, True))
 
         # A record is not written into a worktree that is being removed.
         tree_j = feature_tree(repo, "j")
-        path_j = tg_topic.record_path(repo, "j")
+        path_j = topics.record_path(repo, "j")
         shutil.rmtree(os.path.dirname(os.path.dirname(os.path.dirname(tree_j))))
-        saved_path = tg_topic.record_path
-        tg_topic.record_path = lambda r, sl: path_j
+        saved_path = topics.record_path
+        topics.record_path = lambda r, sl: path_j
         try:
-            tg_topic.save_record(repo, "j", {"thread": 1})
+            topics.save_record(repo, "j", {"thread": 1})
         finally:
-            tg_topic.record_path = saved_path
+            topics.record_path = saved_path
         check("a removed worktree is not made again",
               os.path.exists(os.path.dirname(path_j)), False)
 
@@ -3413,7 +3406,7 @@ with sandbox() as box:
             st["awaiting"] = "awake_until"
             st["awaiting_thread"] = 0
         bot10 = FakeBot()
-        tg_topic.Handler(bot10).message({"text": "my-branch", "message_id": 95,
+        handling.Handler(bot10).message({"text": "my-branch", "message_id": 95,
                                          "is_topic_message": True,
                                          "message_thread_id": rec_e["thread"]})
         check("text in a topic is not taken for the time", bot10.asks, [])
@@ -3426,10 +3419,10 @@ with sandbox() as box:
         with state.locked() as st:
             st["main_cards"] = {"700": "shop/f", "701": "shop/e"}
         bot11 = FakeBot()
-        tg_topic.Handler(bot11).callback({"id": "c", "data": "fc:refresh",
+        handling.Handler(bot11).callback({"id": "c", "data": "fc:refresh",
                                           "message": {"message_id": 701}})
         check_true("a key-less button on a main-chat card finds its feature",
-                   bot11.edits and bot11.edits[-1][1] != tg_topic.t("feat.gone", slug="?"))
+                   bot11.edits and bot11.edits[-1][1] != i18n.t("feat.gone", slug="?"))
 
         # --- the second review's cases ---------------------------------------
         # A worktree of "shop-admin" is not a feature of "shop".
@@ -3437,23 +3430,23 @@ with sandbox() as box:
         os.makedirs(os.path.join(other, ".git"))
         feature_tree(other, "x")
         check("a neighbour repository's worktree is not this one's feature",
-              "admin-x" in tg_topic.feature_records(repo), False)
+              "admin-x" in topics.feature_records(repo), False)
 
         # Neither yes nor no typed to a yes/no question stays a question.
         k = feature_channel(repo, "k")
         feature_tree(repo, "k")
         bot12 = FakeBot()
         lay_in(k, "qk")
-        tg_topic.check_asks(bot12)
-        thread_k = tg_topic.load_record(repo, "k")["thread"]
+        asks.check_asks(bot12)
+        thread_k = topics.load_record(repo, "k")["thread"]
         edits = len(bot12.edits)
-        tg_topic.Handler(bot12).message({"text": "maybe", "message_id": 96,
+        handling.Handler(bot12).message({"text": "maybe", "message_id": 96,
                                          "is_topic_message": True,
                                          "message_thread_id": thread_k})
         check("'maybe' to a yes/no question is not shown as its answer",
               len(bot12.edits), edits)
         check("and the question's message stays known",
-              bool((tg_topic.get_shown("shop/k") or {}).get("msg")), True)
+              bool((asks.get_shown("shop/k") or {}).get("msg")), True)
         unlay(k)
 
         # A mark set aside for a new feature of the same name still deletes the
@@ -3463,7 +3456,7 @@ with sandbox() as box:
         bot13 = FakeBot()
         bot13.topics[4242] = "old"
         # On the questions' pass: before the channel's records are read.
-        tg_topic.check_asks(bot13)
+        asks.check_asks(bot13)
         check("an old feature's topic goes by its set-aside mark",
               bot13.deleted_topics, [4242])
         check("and the channel stays", (os.path.exists(k),
@@ -3474,7 +3467,7 @@ with sandbox() as box:
             json.dump({"shown": {"id": "gone", "msg": 555}}, fh)
         shutil.rmtree(os.path.join(root, "shop-k"))
         bot14 = FakeBot()
-        tg_topic.check_topics(bot14)
+        topics.check_topics(bot14)
         check("a settled message is left alone at the end", bot14.deletes, [])
 
         # Without Threaded Mode the refusal is remembered.
@@ -3489,22 +3482,22 @@ with sandbox() as box:
             return 0
         bot15.create_topic = refuse
         feature_tree(repo, "m")
-        tg_topic.feature_topic(bot15, "shop", "m")
-        tg_topic.feature_topic(bot15, "shop", "m")
+        topics.feature_topic(bot15, "shop", "m")
+        topics.feature_topic(bot15, "shop", "m")
         check("a refused topic is not asked for again at once", len(made), 1)
         with state.locked() as st:
             st["topics_off_until"] = 0
 
         # The feature list keeps within Telegram's 64 bytes.
-        saved_feats, saved_choice = tg_topic.features_of_name, tg_topic.repo_choice
-        tg_topic.features_of_name = lambda n: ([("s" * 50, "1/6 plan", ""),
+        saved_feats, saved_choice = repos.features_of_name, repos.repo_choice
+        repos.features_of_name = lambda n: ([("s" * 50, "1/6 plan", ""),
                                                 ("t" * 70, "1/6 plan", "")], "")
-        tg_topic.repo_choice = lambda: "/home/u/" + "r" * 20
+        repos.repo_choice = lambda: "/home/u/" + "r" * 20
         try:
-            datas = [b["callback_data"] for row in tg_topic.features_keyboard("r" * 20)
+            datas = [b["callback_data"] for row in sessions.features_keyboard("r" * 20)
                      for b in row]
         finally:
-            tg_topic.features_of_name, tg_topic.repo_choice = saved_feats, saved_choice
+            repos.features_of_name, repos.repo_choice = saved_feats, saved_choice
         check("every button's data fits", all(len(d.encode()) <= 64 for d in datas), True)
         check("a long repository is left out of the data", "topic::" + "s" * 50 in datas, True)
 
@@ -3518,22 +3511,22 @@ with sandbox() as box:
         bot16.send = lambda text, kb=None, quiet=False, thread=None: (
             plain_send(text, kb, quiet, thread) and next(ids16))
         lay_in(n, "q1", "Delete them? [y/n] ")
-        tg_topic.check_asks(bot16)
-        m1 = tg_topic.get_shown("shop/n")["msg"]
+        asks.check_asks(bot16)
+        m1 = asks.get_shown("shop/n")["msg"]
         # Answered at the laptop, and the next question laid out before the
         # bot's turn: a press on the first must not answer the second.
         unlay(n)
         with open(os.path.join(n, "closed", "q1.json"), "w") as fh:
             json.dump({"id": "q1", "reply": "y", "from": "tty"}, fh)
         lay_in(n, "q2", "Force-delete it? [y/n] ")
-        h16 = tg_topic.Handler(bot16)
+        h16 = handling.Handler(bot16)
         h16.callback({"id": "c", "data": "answer:shop:y", "message": {"message_id": m1}})
         check("a press does not answer a question it was not shown", reply_in(n), None)
-        check("it says the question is closed", bot16.answers[-1], (tg_topic.t("ask.gone"), False))
+        check("it says the question is closed", bot16.answers[-1], (i18n.t("ask.gone"), False))
         check("and leaves the message for the loop to answer", bot16.deletes, [])
-        tg_topic.check_asks(bot16)
+        asks.check_asks(bot16)
         check_true("the loop turns it into the laptop's answer",
-                   any(e[0] == m1 and tg_topic.t("ask.by.terminal") in e[1] for e in bot16.edits))
+                   any(e[0] == m1 and i18n.t("ask.by.terminal") in e[1] for e in bot16.edits))
         unlay(n)
 
         # The last question with no record left: its buttons go, its text stays.
@@ -3541,13 +3534,13 @@ with sandbox() as box:
             json.dump({"shown": {"id": "lost", "msg": 556}}, fh)
         shutil.rmtree(os.path.join(root, "shop-n"))
         bot17 = FakeBot()
-        tg_topic.check_topics(bot17)
+        topics.check_topics(bot17)
         check("no record — the buttons go, the message stays",
               (bot17.unbuttoned, bot17.deletes), ([556], []))
 
         # A photo in a feature's topic is not a request for the menu.
         bot18 = FakeBot()
-        tg_topic.Handler(bot18).message({"message_id": 97, "is_topic_message": True,
+        handling.Handler(bot18).message({"message_id": 97, "is_topic_message": True,
                                          "message_thread_id": rec_e["thread"],
                                          "photo": [{}]})
         check("a photo in a topic stays, no card", (bot18.deletes, bot18.sent), ([], []))
@@ -3558,12 +3551,12 @@ with sandbox() as box:
         o = feature_channel(repo, "o")
         open(os.path.join(o, "ended"), "w").close()
         lay_in(o, "new-one")
-        tg_topic.clear_channel(o)
+        topics.clear_channel(o)
         check("clearing a channel keeps a new question",
               (os.path.exists(os.path.join(o, "ask.json")),
                os.path.exists(os.path.join(o, "ended"))), (True, False))
         unlay(o)
-        tg_topic.clear_channel(o)
+        topics.clear_channel(o)
         check("and an emptied channel goes", os.path.exists(o), False)
 
         # --- the fifth review's cases ----------------------------------------
@@ -3576,25 +3569,25 @@ with sandbox() as box:
         bot19.send = lambda text, kb=None, quiet=False, thread=None: (
             plain19(text, kb, quiet, thread) and next(ids19))
         lay_in(q, "q1", "Branch name: ", "")
-        tg_topic.check_asks(bot19)
-        thread_q = tg_topic.load_record(repo, "q")["thread"]
+        asks.check_asks(bot19)
+        thread_q = topics.load_record(repo, "q")["thread"]
         unlay(q)
         lay_in(q, "q2", "Something else: ", "")
-        tg_topic.Handler(bot19).message({"text": "main", "message_id": 98,
+        handling.Handler(bot19).message({"text": "main", "message_id": 98,
                                          "is_topic_message": True,
                                          "message_thread_id": thread_q})
         check("typed text does not answer a question not yet shown", reply_in(q), None)
         unlay(q)
 
         # The short list form is only for the remembered repository.
-        saved_feats, saved_choice = tg_topic.features_of_name, tg_topic.repo_choice
-        tg_topic.features_of_name = lambda n: ([("s" * 50, "1/6 plan", "")], "")
-        tg_topic.repo_choice = lambda: "/elsewhere/other"
+        saved_feats, saved_choice = repos.features_of_name, repos.repo_choice
+        repos.features_of_name = lambda n: ([("s" * 50, "1/6 plan", "")], "")
+        repos.repo_choice = lambda: "/elsewhere/other"
         try:
-            datas = [b["callback_data"] for row in tg_topic.features_keyboard("r" * 20)
+            datas = [b["callback_data"] for row in sessions.features_keyboard("r" * 20)
                      for b in row]
         finally:
-            tg_topic.features_of_name, tg_topic.repo_choice = saved_feats, saved_choice
+            repos.features_of_name, repos.repo_choice = saved_feats, saved_choice
         check("no short form for a repository not remembered",
               [d for d in datas if d.startswith("topic:")], [])
 
@@ -3606,7 +3599,7 @@ with sandbox() as box:
         plain20 = bot20.send
         bot20.send = lambda text, kb=None, quiet=False, thread=None: (
             plain20(text, kb, quiet, thread) and next(ids20))
-        h20 = tg_topic.Handler(bot20)
+        h20 = handling.Handler(bot20)
         h20.message({"text": "/settings", "message_id": 99})
         bot20.thread = 77
         h20.message({"text": "/settings", "message_id": 100})
@@ -3617,7 +3610,7 @@ with sandbox() as box:
         r_ch = feature_channel(repo, "r")
         feature_tree(repo, "r")
         lay_in(r_ch, "unseen")
-        tg_topic.Handler(FakeBot()).message({"text": "y", "message_id": 101})
+        handling.Handler(FakeBot()).message({"text": "y", "message_id": 101})
         check("text answers no question not yet shown", reply_in(r_ch), None)
         unlay(r_ch)
 
@@ -3628,19 +3621,19 @@ with sandbox() as box:
             fh.write("{}")
         with open(os.path.join(tree_rel, ".git"), "w") as fh:
             fh.write("gitdir: ../shop/.git/worktrees/shop-rel\n")
-        check("a relative gitdir is the worktree's", "rel" in tg_topic.feature_records(repo), True)
+        check("a relative gitdir is the worktree's", "rel" in topics.feature_records(repo), True)
 
         # A question in a feature's topic does not repeat the card above it.
-        body = tg_topic.ask_text("shop", {"prompt": "Which?", "form": "", "feature": "e"},
+        body = asks.ask_text("shop", {"prompt": "Which?", "form": "", "feature": "e"},
                                  in_topic=True)
         check("no card inside a question in a topic",
-              tg_topic.t("feat.gone", slug="e") in body, False)
+              i18n.t("feat.gone", slug="e") in body, False)
 
         # --- the control review's cases --------------------------------------
-        no = tg_topic.answered_text("shop", {"prompt": "Delete?", "form": "yn"}, "n")
-        check("a 'no' carries one mark, its own", ("✅" in no, tg_topic.t("ask.no") in no),
+        no = asks.answered_text("shop", {"prompt": "Delete?", "form": "yn"}, "n")
+        check("a 'no' carries one mark, its own", ("✅" in no, i18n.t("ask.no") in no),
               (False, True))
-        typed = tg_topic.answered_text("shop", {"prompt": "Name?", "form": ""}, "x")
+        typed = asks.answered_text("shop", {"prompt": "Name?", "form": ""}, "x")
         check_true("any other answer is marked answered", "✅ " in typed)
 
         # A warning unanswered through the night is not "extended" next morning.
@@ -3649,7 +3642,7 @@ with sandbox() as box:
             st.update(dict(until_ts=now_n + 3600, warned_for_ts=now_n - 30000,
                            warn_message_id=33, decision=""))
         bot21 = FakeBot()
-        tg_topic.settle_warning(bot21, read(), now_n)
+        sleep_warning.settle_warning(bot21, read(), now_n)
         check("a warning past its night goes rather than claim an extension",
               (bot21.edits, bot21.deletes), ([], [33]))
 
@@ -3657,14 +3650,14 @@ with sandbox() as box:
         s_ch = feature_channel(repo, "s")
         feature_tree(repo, "s")
         # Every other question in this sandbox closed: one open, one target.
-        for slug_x, ch_x in tg_topic.ask_channels(repo):
+        for slug_x, ch_x in asks.ask_channels(repo):
             unlay(ch_x)
         lay_in(s_ch, "unshown")
         bot22 = FakeBot()
-        tg_topic.Handler(bot22).message({"text": "y", "message_id": 102})
+        handling.Handler(bot22).message({"text": "y", "message_id": 102})
         # Not shown anywhere yet: no topic to point to, it may still come here.
         check("main-chat text for a feature's unshown question says it is coming",
-              bot22.sent[-1][0] if bot22.sent else "", tg_topic.t("ask.notyet"))
+              bot22.sent[-1][0] if bot22.sent else "", i18n.t("ask.notyet"))
         unlay(s_ch)
 
         # --- the ninth review's case -----------------------------------------
@@ -3677,34 +3670,34 @@ with sandbox() as box:
         lay_in(t_ch, "qt")
         bot23 = FakeBot()
         bot23.offline = True
-        tg_topic.check_asks(bot23)
+        asks.check_asks(bot23)
         check("a passing failure to make a topic sends nothing to the main chat",
               bot23.sent, [])
         bot23.offline = False
-        tg_topic.check_asks(bot23)
+        asks.check_asks(bot23)
         check_true("the next turn makes the topic and asks there",
                    bot23.threads and bot23.threads[-1] != 0)
         unlay(t_ch)
 
         # --- the tenth review's cases ----------------------------------------
-        check("'+2' is not an option", tg_topic.option_in_range({"form": "pick:3"}, "+2"), False)
-        check("'2' is", tg_topic.option_in_range({"form": "pick:3"}, " 2 "), True)
-        for slug_x, ch_x in tg_topic.ask_channels(repo):
+        check("'+2' is not an option", asks.option_in_range({"form": "pick:3"}, "+2"), False)
+        check("'2' is", asks.option_in_range({"form": "pick:3"}, " 2 "), True)
+        for slug_x, ch_x in asks.ask_channels(repo):
             unlay(ch_x)
         u = feature_channel(repo, "u")
         feature_tree(repo, "u")
         lay_in(u, "qu", "Branch name: ", "")
         bot24 = FakeBot()
-        tg_topic.check_asks(bot24)
-        tg_topic.Handler(bot24).message({"text": "a note", "message_id": 103})
+        asks.check_asks(bot24)
+        handling.Handler(bot24).message({"text": "a note", "message_id": 103})
         check("a word in the main chat does not answer a question in a topic",
-              (reply_in(u), bot24.sent[-1][0]), (None, tg_topic.t("ask.intopic")))
+              (reply_in(u), bot24.sent[-1][0]), (None, i18n.t("ask.intopic")))
         unlay(u)
 
         # --- the eleventh review's cases -------------------------------------
         # A feature's question in its topic does not keep text typed in the
         # main chat from answering the main chat's own question.
-        for slug_x, ch_x in tg_topic.ask_channels(repo):
+        for slug_x, ch_x in asks.ask_channels(repo):
             unlay(ch_x)
         v = feature_channel(repo, "v")
         feature_tree(repo, "v")
@@ -3716,32 +3709,32 @@ with sandbox() as box:
         plain25 = bot25.send
         bot25.send = lambda text, kb=None, quiet=False, thread=None: (
             plain25(text, kb, quiet, thread) and next(ids25))
-        tg_topic.check_asks(bot25)
-        tg_topic.Handler(bot25).message({"text": "new-thing", "message_id": 104})
+        asks.check_asks(bot25)
+        handling.Handler(bot25).message({"text": "new-thing", "message_id": 104})
         check("main-chat text answers the main chat's question",
               (reply_in(root_ch), reply_in(v)), ("new-thing", None))
         unlay(root_ch)
 
         # A topic renewed after being deleted by hand shows its open question
         # again.
-        rec_v = tg_topic.load_record(repo, "v")
+        rec_v = topics.load_record(repo, "v")
         check_true("the question is shown in the topic", (rec_v.get("shown") or {}).get("thread"))
-        tg_topic.feature_topic(bot25, "shop", "v", renew=True)
-        check("renewing forgets the lost message", "shown" in tg_topic.load_record(repo, "v"), False)
+        topics.feature_topic(bot25, "shop", "v", renew=True)
+        check("renewing forgets the lost message", "shown" in topics.load_record(repo, "v"), False)
         unlay(v)
 
         # --- the twelfth review's cases --------------------------------------
         # A feature's question not shown yet does not keep main-chat text from
         # answering the main chat's own question.
-        for slug_x, ch_x in tg_topic.ask_channels(repo):
+        for slug_x, ch_x in asks.ask_channels(repo):
             unlay(ch_x)
         w = feature_channel(repo, "w")
         feature_tree(repo, "w")
         lay_in(os.path.join(repo, ".git", "sclaude"), "qname2", "Feature name: ", "")
         bot26 = FakeBot()
-        tg_topic.check_asks(bot26)
+        asks.check_asks(bot26)
         lay_in(w, "unshown-w")
-        tg_topic.Handler(bot26).message({"text": "other-thing", "message_id": 105})
+        handling.Handler(bot26).message({"text": "other-thing", "message_id": 105})
         check("an unshown feature question does not block the main chat's",
               reply_in(os.path.join(repo, ".git", "sclaude")), "other-thing")
         unlay(os.path.join(repo, ".git", "sclaude"))
@@ -3751,7 +3744,7 @@ with sandbox() as box:
         x_ch = feature_channel(repo, "x")
         open(os.path.join(x_ch, "closed", ".abc.123"), "w").close()
         open(os.path.join(x_ch, "answer.json.99"), "w").close()
-        check("leftovers do not keep a finished channel", tg_topic.clear_channel(x_ch), True)
+        check("leftovers do not keep a finished channel", topics.clear_channel(x_ch), True)
 
         # --- the thirteenth review's cases -----------------------------------
         # A bad time goes with its box: the chat keeps only the new prompt.
@@ -3759,14 +3752,14 @@ with sandbox() as box:
             st["awaiting"] = "awake_until"
             st["awaiting_thread"] = 0
         bot27 = FakeBot()
-        tg_topic.Handler(bot27).message({"text": "abc", "message_id": 106})
+        handling.Handler(bot27).message({"text": "abc", "message_id": 106})
         check("a bad time typed goes", 106 in bot27.deletes, True)
         with state.locked() as st:
             st["awaiting"] = ""
         # A try for a feature gone while it waited does not stay.
-        tg_topic.TOPIC_TRIED["gone-repo/none"] = (0, 0)
-        tg_topic.check_asks(FakeBot())
-        check("gone features leave no tries", "gone-repo/none" in tg_topic.TOPIC_TRIED, False)
+        topics.TOPIC_TRIED["gone-repo/none"] = (0, 0)
+        asks.check_asks(FakeBot())
+        check("gone features leave no tries", "gone-repo/none" in topics.TOPIC_TRIED, False)
 
         # --- the fourteenth review's cases -----------------------------------
         # A photo while "until when?" waits is not a bad time.
@@ -3774,18 +3767,18 @@ with sandbox() as box:
             st["awaiting"] = "awake_until"
             st["awaiting_thread"] = 0
         bot28 = FakeBot()
-        tg_topic.Handler(bot28).message({"photo": [{}], "message_id": 107})
+        handling.Handler(bot28).message({"photo": [{}], "message_id": 107})
         check("a photo is not taken for a time", (bot28.deletes, bot28.asks), ([], []))
         with state.locked() as st:
             st["awaiting"] = ""
         # A typed reply that is no answer goes; the question is asked again.
         main_ch = os.path.join(repo, ".git", "sclaude")
-        for slug_x, ch_x in tg_topic.ask_channels(repo):
+        for slug_x, ch_x in asks.ask_channels(repo):
             unlay(ch_x)
         lay_in(main_ch, "qmaybe")
         bot29 = FakeBot()
-        tg_topic.check_asks(bot29)
-        tg_topic.Handler(bot29).message({"text": "maybe", "message_id": 108})
+        asks.check_asks(bot29)
+        handling.Handler(bot29).message({"text": "maybe", "message_id": 108})
         check("a reply that is no answer goes", 108 in bot29.deletes, True)
         unlay(main_ch)
         # Offline, a feature from the list does not get a card in the main chat.
@@ -3794,34 +3787,34 @@ with sandbox() as box:
         feature_tree(repo, "y")
         bot30 = FakeBot()
         bot30.offline = True
-        tg_topic.Handler(bot30).callback({"id": "a", "data": "topic:%s:y" % os.path.basename(repo),
+        handling.Handler(bot30).callback({"id": "a", "data": "topic:%s:y" % os.path.basename(repo),
                                           "message": {"message_id": 109}})
         check("offline, the list stays and says so",
-              [e[1].endswith(tg_topic.t("feat.topiclater")) for e in bot30.edits], [True])
+              [e[1].endswith(i18n.t("feat.topiclater")) for e in bot30.edits], [True])
         # Past the wait, a refusal that may never pass gives way to the main chat.
-        tg_topic.CARD_TRIED[tg_topic.channel_key(os.path.basename(repo), "y")] = (0, int(time.time()))
-        tg_topic.Handler(bot30).callback({"id": "a", "data": "topic:%s:y" % os.path.basename(repo),
+        topics.CARD_TRIED[asks.channel_key(os.path.basename(repo), "y")] = (0, int(time.time()))
+        handling.Handler(bot30).callback({"id": "a", "data": "topic:%s:y" % os.path.basename(repo),
                                           "message": {"message_id": 110}})
         check("past the wait, the card is drawn here",
-              bot30.edits[-1][1].endswith(tg_topic.t("feat.topiclater")), False)
+              bot30.edits[-1][1].endswith(i18n.t("feat.topiclater")), False)
         # --- the sixteenth review's cases ------------------------------------
         # A failure long ago does not spend a new blip's wait.
-        tg_topic.CARD_TRIED[tg_topic.channel_key(os.path.basename(repo), "y")] = (0, 0)
-        tg_topic.Handler(bot30).callback({"id": "a", "data": "topic:%s:y" % os.path.basename(repo),
+        topics.CARD_TRIED[asks.channel_key(os.path.basename(repo), "y")] = (0, 0)
+        handling.Handler(bot30).callback({"id": "a", "data": "topic:%s:y" % os.path.basename(repo),
                                           "message": {"message_id": 112}})
         check("an old failure starts no fallback",
-              bot30.edits[-1][1].endswith(tg_topic.t("feat.topiclater")), True)
+              bot30.edits[-1][1].endswith(i18n.t("feat.topiclater")), True)
         # A renewed topic keeps a question shown in the main chat.
-        rec_y = tg_topic.load_record(repo, "y")
+        rec_y = topics.load_record(repo, "y")
         rec_y.update(thread=0, shown={"id": "qy", "msg": 55, "thread": 0})
-        tg_topic.save_record(repo, "y", rec_y)
+        topics.save_record(repo, "y", rec_y)
         bot32 = FakeBot()
-        tg_topic.feature_topic(bot32, os.path.basename(repo), "y", renew=True)
+        topics.feature_topic(bot32, os.path.basename(repo), "y", renew=True)
         check("the main chat's copy stays known",
-              tg_topic.load_record(repo, "y").get("shown", {}).get("msg"), 55)
+              topics.load_record(repo, "y").get("shown", {}).get("msg"), 55)
         # --- the seventeenth review's cases ----------------------------------
         # Two questions in the main chat: the one replied to takes the text.
-        for slug_x, ch_x in tg_topic.ask_channels(repo):
+        for slug_x, ch_x in asks.ask_channels(repo):
             unlay(ch_x)
         z1, z2 = feature_channel(repo, "z1"), feature_channel(repo, "z2")
         lay_in(z1, "qz1", "Branch name: ", "")
@@ -3831,17 +3824,17 @@ with sandbox() as box:
         ids33 = iter(range(401, 500))
         real_send = bot33.send
         bot33.send = lambda *a, **k: real_send(*a, **k) and next(ids33)
-        tg_topic.check_asks(bot33)
-        shown_z2 = (tg_topic.get_shown(tg_topic.channel_key(os.path.basename(repo), "z2")) or {}).get("msg")
-        tg_topic.Handler(bot33).message({"text": "loose", "message_id": 113})
-        check("two open, no reply: asked which", bot33.sent[-1][0], tg_topic.t("ask.which"))
+        asks.check_asks(bot33)
+        shown_z2 = (asks.get_shown(asks.channel_key(os.path.basename(repo), "z2")) or {}).get("msg")
+        handling.Handler(bot33).message({"text": "loose", "message_id": 113})
+        check("two open, no reply: asked which", bot33.sent[-1][0], i18n.t("ask.which"))
         n33 = len(bot33.sent)
-        tg_topic.Handler(bot33).message({"text": "stray", "message_id": 117,
+        handling.Handler(bot33).message({"text": "stray", "message_id": 117,
                                          "reply_to_message": {"message_id": 99999}})
         check("a reply to neither: asked which",
               (len(bot33.sent) - n33, bot33.sent[-1][0], reply_in(z1), reply_in(z2)),
-              (1, tg_topic.t("ask.which"), None, None))
-        tg_topic.Handler(bot33).message({"text": "fix-z2", "message_id": 114,
+              (1, i18n.t("ask.which"), None, None))
+        handling.Handler(bot33).message({"text": "fix-z2", "message_id": 114,
                                          "reply_to_message": {"message_id": shown_z2}})
         check("the reply answers its question", (reply_in(z1), reply_in(z2)), (None, "fix-z2"))
         # --- the eighteenth review's cases -----------------------------------
@@ -3850,10 +3843,10 @@ with sandbox() as box:
         unlay(z1)
         unlay(z2)
         lay_in(z1, "qz1b", "Branch name: ", "")
-        tg_topic.check_asks(bot33)
+        asks.check_asks(bot33)
         main_q = os.path.join(repo, ".git", "sclaude")
         lay_in(main_q, "qmain-late", "Name: ", "")
-        tg_topic.Handler(bot33).message({"text": "only-z1", "message_id": 115})
+        handling.Handler(bot33).message({"text": "only-z1", "message_id": 115})
         check("the one on screen takes the text", (reply_in(z1), reply_in(main_q)),
               ("only-z1", None))
         unlay(z1)
@@ -3863,23 +3856,23 @@ with sandbox() as box:
         # An out-of-range number typed for a list stays unanswered here.
         lay_in(main_ch, "qpick", "Which one? [1-3] ", "pick:3")
         bot31 = FakeBot()
-        tg_topic.check_asks(bot31)
-        tg_topic.Handler(bot31).message({"text": "12", "message_id": 111})
+        asks.check_asks(bot31)
+        handling.Handler(bot31).message({"text": "12", "message_id": 111})
         check("a number off the list is not sent on",
-              (reply_in(main_ch), bot31.sent[-1][0]), (None, tg_topic.t("ask.nooption")))
+              (reply_in(main_ch), bot31.sent[-1][0]), (None, i18n.t("ask.nooption")))
         # A word goes on: a list may take one ("Enter to leave it out").
-        tg_topic.Handler(bot31).message({"text": "skip", "message_id": 116})
+        handling.Handler(bot31).message({"text": "skip", "message_id": 116})
         check("a word is passed for a list", reply_in(main_ch), "skip")
         check("and is not shown answered before the orchestrator takes it",
               (bot31.edits, 116 in bot31.deletes), ([], True))
         unlay(main_ch)
         # A feature's question in the main chat names its feature.
         check_true("the main chat's copy names the feature",
-                   tg_topic.feature_card(os.path.basename(repo), "y")
-                   in tg_topic.ask_text(os.path.basename(repo), {"prompt": "Remove? "}, slug="y"))
+                   sessions.feature_card(os.path.basename(repo), "y")
+                   in asks.ask_text(os.path.basename(repo), {"prompt": "Remove? "}, slug="y"))
     finally:
-        tg_topic.known_repos, tg_topic.repo_path = old_repos, old_path
-        tg_topic.run = old_run
+        repos.known_repos, repos.repo_path = old_repos, old_path
+        shell.run = old_run
 
 
 # ------------------------------------- idling by a tty's two stamps
@@ -3984,11 +3977,10 @@ check_true("code-server's heartbeat counts as presence",
 # options there is sometimes "drop the feature", so the cost of a blind press
 # here is not zero.
 
-from keepawake import telegramd as _tg
 
 # The labels were passed — a button per option, with its name and its own number
 # in the answer.
-_kb = _tg.ask_keyboard("myapp", {
+_kb = asks.ask_keyboard("myapp", {
     "form": "pick:3",
     "options": ["Continue", "Sync with main", "Drop the feature"],
 })
@@ -4001,14 +3993,14 @@ check("the choice buttons answer with a number",
 # No labels means the previous behaviour down to the last character: whoever
 # does not know about options noticed nothing.
 check("without labels the digits remain",
-      [b["text"] for row in _tg.ask_keyboard("myapp", {"form": "pick:3"}) for b in row],
+      [b["text"] for row in asks.ask_keyboard("myapp", {"form": "pick:3"}) for b in row],
       ["1", "2", "3"])
 
 # There are as many labels as options — otherwise they cannot be trusted: a list
 # that had drifted would label the buttons with the wrong names, and that is
 # worse than honest digits.
 check("a mismatch in the labels gives digits",
-      [b["text"] for row in _tg.ask_keyboard(
+      [b["text"] for row in asks.ask_keyboard(
           "myapp", {"form": "pick:3", "options": ["Continue"]}) for b in row],
       ["1", "2", "3"])
 
@@ -4017,7 +4009,7 @@ check("a mismatch in the labels gives digits",
 
 # A label that is too long is cut from the tail: an option's start is what
 # matters.
-_long = _tg.ask_keyboard("myapp", {"form": "pick:1", "options": ["A" * 90]})
+_long = asks.ask_keyboard("myapp", {"form": "pick:1", "options": ["A" * 90]})
 check_true("a long label is trimmed", len(_long[0][0]["text"]) <= 60)
 check_true("a long label is cut from the tail",
            _long[0][0]["text"].startswith("AAA") and _long[0][0]["text"].endswith("…"))
@@ -4025,43 +4017,43 @@ check_true("a long label is cut from the tail",
 # An empty label does not leave an empty button: better a number than something
 # with nothing for the eye to land on.
 check("an empty label is replaced by a number",
-      _tg.ask_keyboard("myapp", {"form": "pick:1", "options": [""]})[0][0]["text"],
+      asks.ask_keyboard("myapp", {"form": "pick:1", "options": [""]})[0][0]["text"],
       "1")
 
 # Labelled buttons have a ceiling of their own. Nine options is exactly how many
 # the list of actions on a feature has, and with the old shared threshold of
 # eight it got no buttons at all — which is what the whole thing was for.
 check("nine labelled buttons fit",
-      len(_tg.ask_keyboard("myapp", {"form": "pick:9",
+      len(asks.ask_keyboard("myapp", {"form": "pick:9",
                                       "options": ["a%d" % i for i in range(9)]})), 9)
 check("twenty-four — still yes",
-      len(_tg.ask_keyboard("myapp", {"form": "pick:24",
+      len(asks.ask_keyboard("myapp", {"form": "pick:24",
                                       "options": ["a%d" % i for i in range(24)]})), 24)
 check("twenty-five — as text now",
-      _tg.ask_keyboard("myapp", {"form": "pick:25",
+      asks.ask_keyboard("myapp", {"form": "pick:25",
                                   "options": ["a%d" % i for i in range(25)]}), [])
 # The unlabelled ones kept the old one: a digit is checked against the list by
 # eye, and by the ninth that costs more than typing the number by hand.
 check("nine unlabelled ones do not fit",
-      _tg.ask_keyboard("myapp", {"form": "pick:9"}), [])
+      asks.ask_keyboard("myapp", {"form": "pick:9"}), [])
 
 # The numbered list above labelled buttons is the same list a second time. We
 # remove precisely that, leaving the lines that explain the question.
 _ctx = "71-email · issue #71\n  1)  Continue  step 2/6 development\n  2)  Drop  clears all"
-_named = _tg.ask_text("myapp", {"form": "pick:2", "prompt": "Which one?",
+_named = asks.ask_text("myapp", {"form": "pick:2", "prompt": "Which one?",
                                  "context": _ctx, "options": ["Continue", "Drop"]})
 check_true("the list above labelled buttons is removed", "1)  Continue" not in _named)
 check_true("the line with the issue next to the buttons stayed", "issue #71" in _named)
 
 # Without labels the list has to stay: "3" says nothing until it is written next
 # to it what the third option is.
-_bare = _tg.ask_text("myapp", {"form": "pick:2", "prompt": "Which one?",
+_bare = asks.ask_text("myapp", {"form": "pick:2", "prompt": "Which one?",
                                 "context": _ctx})
 check_true("the list stayed with numeric buttons", "1)  Continue" in _bare)
 
 # The feature list's buttons: one per feature, taking its card to its topic,
 # where the step and the actions are.
-_feat_rows = [r for r in _tg.features_keyboard("myapp")
+_feat_rows = [r for r in sessions.features_keyboard("myapp")
               if r[0]["callback_data"].startswith("topic:")]
 for _row in _feat_rows[:1]:
     check("a feature's row is one button", len(_row), 1)
@@ -4072,7 +4064,7 @@ for _row in _feat_rows[:1]:
 # in the orchestrator to assemble it with — whether the session is alive is known
 # to the bot — so the orchestrator only names the feature in the feature field,
 # and ask_text builds the card.
-_ask_card = _tg.ask_text("myapp", {"form": "pick:2", "prompt": "Which one?",
+_ask_card = asks.ask_text("myapp", {"form": "pick:2", "prompt": "Which one?",
                                     "feature": "no-such-feature",
                                     "options": ["a", "b"]})
 check_true("a non-existent feature does not bring the question down",
@@ -4082,10 +4074,10 @@ check_true("a question with a card has its own prompt",
 
 # Without the feature field, the previous look down to the last character:
 # "myapp is asking".
-_plain = _tg.ask_text("myapp", {"form": "yn", "prompt": "Ship it? [y/n] "})
+_plain = asks.ask_text("myapp", {"form": "yn", "prompt": "Ship it? [y/n] "})
 check_true("an ordinary question is untouched", "Ship it?" in _plain)
 check_true("an ordinary question keeps its header",
-           _tg.t("ask.title", repo="myapp", prompt="Ship it? [y/n] ") in _plain)
+           i18n.t("ask.title", repo="myapp", prompt="Ship it? [y/n] ") in _plain)
 
 # The field gets through from the orchestrator: io.sh puts it there from
 # ASK_FEATURE.
@@ -4113,60 +4105,60 @@ check("without ASK_FEATURE there is no field", "feature" in _q2, False)
 # "Back" among the answers is recognised by the option's label rather than its
 # number: its number differs every time — the action list shows only what
 # applies.
-check_true("Go back is an exit", _tg.is_back_option("Go back"))
-check_true("none, go back is too", _tg.is_back_option("none, go back"))
-check_true("the Russian 'Назад' with an arrow", _tg.is_back_option("‹ Назад"))
+check_true("Go back is an exit", asks.is_back_option("Go back"))
+check_true("none, go back is too", asks.is_back_option("none, go back"))
+check_true("the Russian 'Назад' with an arrow", asks.is_back_option("‹ Назад"))
 check("a real action does not count as an exit",
-      _tg.is_back_option("Drop the feature"), False)
-check("the 'Continue' item even less so", _tg.is_back_option("Continue"), False)
-check("an empty label is not an exit", _tg.is_back_option(""), False)
+      asks.is_back_option("Drop the feature"), False)
+check("the 'Continue' item even less so", asks.is_back_option("Continue"), False)
+check("an empty label is not an exit", asks.is_back_option(""), False)
 
 # A button's caption is trimmed by bytes rather than characters: Telegram's
 # ceiling is in bytes, and 59 Cyrillic characters are 110 bytes, twice as many.
 # The non-ASCII data below is the point of the check.
 check_true("non-ASCII text fits within the ceiling",
-           len(_tg.clip_bytes("Продолжить работу над фичей и посмотреть, "
+           len(asks.clip_bytes("Продолжить работу над фичей и посмотреть, "
                               "что там происходит", 60).encode("utf-8")) <= 60)
-check("we do not touch a short one", _tg.clip_bytes("short", 60), "short")
+check("we do not touch a short one", asks.clip_bytes("short", 60), "short")
 check_true("a trimmed one ends with an ellipsis",
-           _tg.clip_bytes("A" * 90, 60).endswith("…"))
+           asks.clip_bytes("A" * 90, 60).endswith("…"))
 # The cut must go by characters: slicing bytes would tear a multi-byte character
 # in half.
-_tg.clip_bytes("я" * 90, 60).encode("utf-8")   # must not raise
+asks.clip_bytes("я" * 90, 60).encode("utf-8")   # must not raise
 
 # The features that ran out of buttons are named in the text. While the sclaude
 # status table lay under the header they were at least visible in it; without it
 # the ninth feature disappeared from the chat entirely — neither a button nor a
 # line.
-_saved_feats = _tg.features_of_name
+_saved_feats = repos.features_of_name
 try:
-    _tg.features_of_name = lambda n: (
+    repos.features_of_name = lambda n: (
         [("feat-%d" % i, "2/4 development", "/wt/%d" % i) for i in range(1, 10)], "")
-    _nine = _tg.repo_text("myapp")
+    _nine = repos.repo_text("myapp")
     check_true("the counter counts all nine", "9" in _nine)
     check_true("the ninth feature is named in the text", "feat-9" in _nine)
     check("there are still eight buttons",
-          len([r for r in _tg.features_keyboard("myapp")
+          len([r for r in sessions.features_keyboard("myapp")
                if r[0]["callback_data"].startswith("topic:")]), 8)
     # Eight features fit whole — there must then be no extra line.
-    _tg.features_of_name = lambda n: (
+    repos.features_of_name = lambda n: (
         [("feat-%d" % i, "2/4 development", "/wt/%d" % i) for i in range(1, 9)], "")
     # Both halves of the bilingual string are checked: the bot picks by the
     # client's language, and the addendum must be absent in either.
     check_true("with eight features there is no addendum",
-               "Not shown" not in _tg.repo_text("myapp")
-               and i18n.STRINGS["repo.rest"][0].split(":")[0].strip() not in _tg.repo_text("myapp"))
+               "Not shown" not in repos.repo_text("myapp")
+               and i18n.STRINGS["repo.rest"][0].split(":")[0].strip() not in repos.repo_text("myapp"))
 finally:
-    _tg.features_of_name = _saved_feats
+    repos.features_of_name = _saved_feats
 
 # The "answer with a number" hint is needed exactly when no buttons were
 # available.
 check_true("with buttons there is no hint about a number",
-           _tg.t("ask.pick") not in _tg.ask_text(
+           i18n.t("ask.pick") not in asks.ask_text(
                "myapp", {"form": "pick:2", "prompt": "Which one?",
                           "options": ["A", "B"]}))
 check_true("without buttons there is a hint about a number",
-           _tg.t("ask.pick") in _tg.ask_text(
+           i18n.t("ask.pick") in asks.ask_text(
                "myapp", {"form": "pick:12", "prompt": "Which one?"}))
 
 # --- which sclaude features the detector sees (sclaude_states) -------------
@@ -4197,9 +4189,9 @@ try:
                           capture_output=True, text=True).stdout.split()
     check("sclaude_states finds the old place too", sorted(_out), sorted([_want, _old]))
     # The bot reads the old place too, for the same trees.
-    check("telegramd reads the old place", telegramd.state_path(os.path.dirname(os.path.dirname(_old))), _old)
+    check("telegramd reads the old place", sessions.state_path(os.path.dirname(os.path.dirname(_old))), _old)
     check("telegramd prefers the new place",
-          telegramd.state_path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_want))))),
+          sessions.state_path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_want))))),
           _want)
 finally:
     shutil.rmtree(_home, ignore_errors=True)
@@ -4212,43 +4204,43 @@ check("the short description fits 120", all(len(x) <= 120 for x in _PROFILE["bot
 
 # The loop's probe runs off the loop: the first look starts it and answers
 # "not yet", a later one takes its answer.
-telegramd.PROBE_ASYNC = True
-telegramd.PROBE.clear()
-telegramd.PUBLISHED.update(host="", ok=False, at=0)
+phone_access.PROBE_ASYNC = True
+phone_access.PROBE.clear()
+phone_access.PUBLISHED.update(host="", ok=False, at=0)
 _probed = threading.Event()
-telegramd.name_published = lambda host: _probed.set() or True
-check("the first look does not wait on the probe", telegramd.published("h.ts.net", look=True), False)
+phone_access.name_published = lambda host: _probed.set() or True
+check("the first look does not wait on the probe", phone_access.published("h.ts.net", look=True), False)
 _probed.wait(5)
 for _ in range(50):
-    if telegramd.PROBE.get("h.ts.net") is not None:
+    if phone_access.PROBE.get("h.ts.net") is not None:
         break
     time.sleep(0.05)
-check("a later look takes its answer", telegramd.published("h.ts.net", look=True), True)
+check("a later look takes its answer", phone_access.published("h.ts.net", look=True), True)
 # While a probe runs the last answer stands — after a restart, the previous
 # process's — and no second probe is started.
-telegramd.PUBLISHED.update(host="", ok=False, at=0)
-with telegramd.locked() as st:
+phone_access.PUBLISHED.update(host="", ok=False, at=0)
+with state.locked() as st:
     st["published"] = {"host": "h3.ts.net", "ok": True}
 _started = []
-telegramd.name_published = lambda host: _started.append(host) or time.sleep(1) or True
+phone_access.name_published = lambda host: _started.append(host) or time.sleep(1) or True
 check("a restart reads the last answer while probing",
-      telegramd.published("h3.ts.net", look=True), True)
-telegramd.PUBLISHED.update(host="h3.ts.net", ok=False, at=0)
-check("and still while the probe runs", telegramd.published("h3.ts.net", look=True), True)
+      phone_access.published("h3.ts.net", look=True), True)
+phone_access.PUBLISHED.update(host="h3.ts.net", ok=False, at=0)
+check("and still while the probe runs", phone_access.published("h3.ts.net", look=True), True)
 time.sleep(0.2)
 check("one probe at a time", _started, ["h3.ts.net"])
 time.sleep(1.2)
-telegramd.PROBE.clear()
-telegramd.name_published = lambda host: True
+phone_access.PROBE.clear()
+phone_access.name_published = lambda host: True
 def _raises(host):
     raise RuntimeError("a truncated answer")
-telegramd.name_published = _raises
-telegramd.probe_published("h2.ts.net")
-check("a probe that raises still answers", telegramd.PROBE.pop("h2.ts.net", "none"), False)
-telegramd.name_published = lambda host: True
-telegramd.PROBE_ASYNC = False
-telegramd.PUBLISHED.update(host="", ok=False, at=0)
-with telegramd.locked() as st:
+phone_access.name_published = _raises
+phone_access.probe_published("h2.ts.net")
+check("a probe that raises still answers", phone_access.PROBE.pop("h2.ts.net", "none"), False)
+phone_access.name_published = lambda host: True
+phone_access.PROBE_ASYNC = False
+phone_access.PUBLISHED.update(host="", ok=False, at=0)
+with state.locked() as st:
     st.pop("published", None)
 
 # sclaude-notify --in finds the feature's topic in the bot's own record.
@@ -4256,10 +4248,10 @@ with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
                        "bin", "sclaude-notify")) as fh:
     _notify = fh.read()
 check("sclaude-notify reads the bot's feature record",
-      ("/.sclaude/local/feature/" + telegramd.FEATURE_RECORD in _notify, '.get("thread")' in _notify),
+      ("/.sclaude/local/feature/" + topics.FEATURE_RECORD in _notify, '.get("thread")' in _notify),
       (True, True))
 check("and knows a lost topic by the bot's own words",
-      [w for w in telegramd.TOPIC_GONE if 'b"%s"' % w not in _notify], [])
+      [w for w in topics.TOPIC_GONE if 'b"%s"' % w not in _notify], [])
 import urllib.parse
 
 # And records what it sends to a topic where the bot deletes it from: run
@@ -4286,7 +4278,7 @@ try:
         fh.write("KEEPAWAKE_BOT_TOKEN=t:k\nKEEPAWAKE_CHAT_ID=1\n")
     _wt = os.path.join(_tg_dir, "wt")
     os.makedirs(os.path.join(_wt, ".sclaude/local/feature"))
-    with open(os.path.join(_wt, ".sclaude/local/feature", telegramd.FEATURE_RECORD), "w") as fh:
+    with open(os.path.join(_wt, ".sclaude/local/feature", topics.FEATURE_RECORD), "w") as fh:
         json.dump({"thread": 77}, fh)
     _notify_src = _notify.replace("https://api.telegram.org/bot%s/sendMessage",
                                   "http://127.0.0.1:%s/bot%%s/sendMessage" % _port)
@@ -4302,7 +4294,7 @@ try:
                    env=_env, timeout=30)
     os.environ["KEEPAWAKE_TOPICS"], _saved_topics = _env["KEEPAWAKE_TOPICS"], os.environ["KEEPAWAKE_TOPICS"]
     try:
-        _ledger = telegramd.topic_ledger(77)
+        _ledger = state.topic_ledger(77)
         check("sclaude-notify records its message where the bot reads",
               open(_ledger).read() if os.path.exists(_ledger) else None, "4321\n")
         # In the topic the text stands alone: the topic is the feature.
@@ -4355,8 +4347,8 @@ with open(os.path.join(_wt, ".git"), "w") as fh:
     fh.write("gitdir: %s\n" % os.path.join(_repo, ".git", "worktrees", "app-quiet"))
 open(os.path.join(_wt, ".sclaude", "local", "feature", "state.json"), "w").close()
 check("a feature with no record of the bot's is not among the records",
-      telegramd.feature_records(_repo), [])
-check("but is found by its state", telegramd.feature_records(_repo, "state.json"), ["quiet"])
+      topics.feature_records(_repo), [])
+check("but is found by its state", topics.feature_records(_repo, "state.json"), ["quiet"])
 shutil.rmtree(_root)
 
 # An answer is given only to the question its caller checked: the one read
@@ -4366,16 +4358,16 @@ with open(os.path.join(_ch, "ask.json"), "w") as fh:
     json.dump({"prompt": "Remove all of it? ", "form": "yn", "id": "q-next",
                "pid": os.getpid()}, fh)
 check("an answer meant for another question is refused",
-      telegramd.answer_ask(_ch, "n", "q-ship"), False)
+      asks.answer_ask(_ch, "n", "q-ship"), False)
 check("and none is written", os.path.exists(os.path.join(_ch, "answer.json")), False)
-check("the checked one is answered", telegramd.answer_ask(_ch, "n", "q-next"), True)
+check("the checked one is answered", asks.answer_ask(_ch, "n", "q-next"), True)
 shutil.rmtree(_ch)
 
 # The card's cache line: the session's last request plus the TTL it wrote,
 # read from its transcript as the status line reads it.
 _projects = tempfile.mkdtemp()
-_saved_projects = telegramd.CLAUDE_PROJECTS
-telegramd.CLAUDE_PROJECTS = _projects
+_saved_projects = sessions.CLAUDE_PROJECTS
+sessions.CLAUDE_PROJECTS = _projects
 try:
     os.makedirs(os.path.join(_projects, "-home-u-app"))
     with open(os.path.join(_projects, "-home-u-app", "s1.jsonl"), "w") as fh:
@@ -4385,11 +4377,11 @@ try:
                                      "ephemeral_1h_input_tokens": 100}}}}) + "\n")
     at = calendar.timegm((2026, 10, 23, 10, 0, 0, 0, 0, 0))
     check("an hour's cache ten minutes on has fifty left",
-          telegramd.cache_left("s1", now=at + 600), 3000)
-    check("and none once the hour is out", telegramd.cache_left("s1", now=at + 4000), 0)
-    check("a session with no transcript says nothing", telegramd.cache_left("nope"), None)
+          sessions.cache_left("s1", now=at + 600), 3000)
+    check("and none once the hour is out", sessions.cache_left("s1", now=at + 4000), 0)
+    check("a session with no transcript says nothing", sessions.cache_left("nope"), None)
 finally:
-    telegramd.CLAUDE_PROJECTS = _saved_projects
+    sessions.CLAUDE_PROJECTS = _saved_projects
     shutil.rmtree(_projects)
 
 # --------------------------------------- a topic's messages go with the topic
@@ -4398,7 +4390,6 @@ finally:
 # every message sent into a topic is recorded, and deleted before the topic.
 import io
 import urllib.request
-from keepawake import telegramd as tg_ledger
 
 _calls = []
 _refuse = set()
@@ -4426,12 +4417,12 @@ def _fake_urlopen(req, timeout=None):
 _saved_urlopen = urllib.request.urlopen
 urllib.request.urlopen = _fake_urlopen
 try:
-    lbot = tg_ledger.Bot("t:k", 1)
+    lbot = botapi.Bot("t:k", 1)
     lbot.send("in the topic", thread=7)
     lbot.send("in the main chat", thread=0)
     lbot.send("another in the topic", thread=7)
-    tg_ledger.remember_in_topic(7, 5)  # the person's message, from the poll
-    with open(tg_ledger.topic_ledger(7)) as fh:
+    topics.remember_in_topic(7, 5)  # the person's message, from the poll
+    with open(state.topic_ledger(7)) as fh:
         check("a topic's messages are recorded, the main chat's are not",
               fh.read().split(), ["41", "43", "5"])
     _calls[:] = []
@@ -4439,27 +4430,27 @@ try:
     check("its messages are deleted before it",
           [(m, p.get("message_ids")) for m, p in _calls],
           [("deleteMessages", "[5, 41, 43]"), ("deleteForumTopic", None)])
-    check("and the record with them", os.path.exists(tg_ledger.topic_ledger(7)), False)
+    check("and the record with them", os.path.exists(state.topic_ledger(7)), False)
     # A message recorded while the bot deletes is not lost with the record.
-    tg_ledger.remember_in_topic(9, 1)
+    topics.remember_in_topic(9, 1)
     _late = {"done": False}
     _orig_call = lbot.call
 
     def _call_and_append(method, **params):
         if method == "deleteMessages" and not _late["done"]:
             _late["done"] = True
-            tg_ledger.remember_in_topic(9, 2)
+            topics.remember_in_topic(9, 2)
         return _orig_call(method, **params)
     lbot.call = _call_and_append
     _calls[:] = []
     check("a topic written to meanwhile is not taken yet", lbot.delete_topic(9), False)
-    check("and the late id is kept", open(tg_ledger.topic_ledger(9)).read(), "2\n")
+    check("and the late id is kept", open(state.topic_ledger(9)).read(), "2\n")
     check("the next turn deletes it", lbot.delete_topic(9), True)
     check("both were deleted",
           [p.get("message_ids") for m, p in _calls if m == "deleteMessages"], ["[1]", "[2]"])
     lbot.call = _orig_call
     # A batch Telegram refuses whole is tried id by id.
-    tg_ledger.remember_in_topic(8, 9)
+    topics.remember_in_topic(8, 9)
     _calls[:] = []
     _refuse.add("deleteMessages")
     lbot.delete_topic(8)

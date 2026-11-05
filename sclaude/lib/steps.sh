@@ -690,7 +690,7 @@ step_label() {
   # never name it differently. Production's two places carry no step number,
   # since the bot marks the step a label's number names and neither is a
   # step; they keep " done", by which the bot tells the steps are over
-  # (keepawake/telegramd.py). Unknown — the map could not say — is as without
+  # (keepawake/sessions.py, card_view.py). Unknown — the map could not say — is as without
   # GitHub.
   slug="$(state_get "$state" feature 2>/dev/null || true)"
   estate="$(epilogue_dir)/$slug.json"

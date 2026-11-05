@@ -168,7 +168,7 @@ def linux_state_dir():
 
 def topic_ledger(thread):
     # The record of the messages in one Telegram topic, which the bot deletes
-    # with the topic (keepawake/telegramd.py). Here, beside nothing else of the
+    # with the topic (keepawake/topics.py). Here, beside nothing else of the
     # bot, because bin/sclaude-notify sends past the bot and writes it too.
     base = os.environ.get("KEEPAWAKE_TOPICS") or os.path.join(linux_state_dir(), "topics")
     return os.path.join(base, "%d" % int(thread))

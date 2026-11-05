@@ -19,6 +19,7 @@
 # The language is the bot's: a choice pinned in Settings, otherwise the
 # client's language_code from initData, remembered as a message would be.
 import contextlib
+import logging
 import os
 import re
 import subprocess
@@ -27,8 +28,12 @@ import threading
 import time
 import urllib.parse
 
-from keepawake import telegramd
+from keepawake import (asks, botapi, docs, card_view, handling, holding, menus, phone_access,
+                       project_config, repos, services, sessions, shell, sleep_warning, state,
+                       status_report, topics)
 from keepawake.i18n import current, set_lang, t
+
+log = logging.getLogger("keepawake")
 
 PAGE = 0
 
@@ -67,7 +72,7 @@ def unlocked(fn, *args, **kwargs):
         _LOCK.acquire()
         _HOLDER.on = True
         set_lang(lang)
-        telegramd.ON_PAGE = True
+        menus.ON_PAGE = True
 
 
 def pause(seconds):
@@ -85,7 +90,7 @@ BOT_UNIT = os.environ.get("KEEPAWAKE_UNIT") or "keepawake-telegram.service"
 RESTART_WAIT = 60
 
 
-class PageBot(telegramd.Bot):
+class PageBot(botapi.Bot):
     def __init__(self, token, chat_id):
         super(PageBot, self).__init__(token, chat_id)
         self.screen = None
@@ -121,13 +126,13 @@ class PageBot(telegramd.Bot):
 
     def answer(self, callback_id, text=None, alert=False):
         if text:
-            self.notes.append(telegramd.escape(text))
+            self.notes.append(status_report.escape(text))
 
     def ask(self, text, placeholder):
         return PAGE
 
 
-class PageHandler(telegramd.Handler):
+class PageHandler(handling.Handler):
     def result(self, message_id, text):
         # In the chat a press that did something turns its menu into the
         # line saying what; on the page that line is the screen, and it is
@@ -183,20 +188,20 @@ def features():
     """[(key, name, slug, activity)] of every feature with a worktree, the
     latest sclaude activity first: its state's last change."""
     found = []
-    for repo in telegramd.known_repos():
+    for repo in repos.known_repos():
         name = os.path.basename(repo)
         # By sclaude's state, not the bot's record: a feature started at the
         # terminal that has asked nothing yet has no record.
-        for slug in telegramd.feature_records(repo, "state.json"):
-            if not telegramd.feature_dir(repo, slug) \
-                    or telegramd.closing(telegramd.feature_wt(repo, slug)):
+        for slug in topics.feature_records(repo, "state.json"):
+            if not topics.feature_dir(repo, slug) \
+                    or repos.closing(topics.feature_wt(repo, slug)):
                 continue
             try:
-                at = os.path.getmtime(os.path.join(telegramd.feature_wt(repo, slug),
+                at = os.path.getmtime(os.path.join(topics.feature_wt(repo, slug),
                                                    ".sclaude", "local", "feature", "state.json"))
             except OSError:
                 at = 0
-            found.append((telegramd.channel_key(name, slug), name, slug, at))
+            found.append((asks.channel_key(name, slug), name, slug, at))
     return sorted(found, key=lambda f: -f[3])
 
 
@@ -204,26 +209,26 @@ def home_feature(home):
     """(name, slug) of the feature the page was opened on — from its topic —
     or None. Sclaude, Chrome and Code-server then stand on it: in a
     feature's topic the feature is already chosen."""
-    name, slug = telegramd.split_key(home or "")
-    repo = telegramd.repo_path(name) if slug else None
-    return ((name, slug) if repo and telegramd.feature_dir(repo, slug)
-            and not telegramd.closing(telegramd.feature_wt(repo, slug)) else None)
+    name, slug = asks.split_key(home or "")
+    repo = repos.repo_path(name) if slug else None
+    return ((name, slug) if repo and topics.feature_dir(repo, slug)
+            and not repos.closing(topics.feature_wt(repo, slug)) else None)
 
 
 def feature_chrome(name, slug):
     """Chrome's screen for one feature: the laptop's browser — open the
     feature there, or close it — and the feature here. Its dev server starts
     when it is opened, and is started and stopped on its card."""
-    key = telegramd.channel_key(name, slug)
-    browser_up = telegramd.port_open(telegramd.CHROME_PORT)
-    dev = telegramd.feature_dev(telegramd.repo_path(name), slug)
+    key = asks.channel_key(name, slug)
+    browser_up = phone_access.port_open(services.CHROME_PORT)
+    dev = card_view.feature_dev(repos.repo_path(name), slug)
     rows = []
     if dev:
         label, _port, running = dev
-        rows.append([{"text": t("page.onlaptop"), "callback_data": telegramd.card_data("open", key)}])
+        rows.append([{"text": t("page.onlaptop"), "callback_data": card_view.card_data("open", key)}])
         if browser_up:
             rows.append([{"text": t("page.closechrome"), "callback_data": "chrome_stop"}])
-        here = telegramd.phone_button(telegramd.gate_origin(), label)
+        here = phone_access.phone_button(phone_access.gate_origin(), label)
         for b in here:
             b["text"] = t("page.onphone")
         if here:
@@ -234,13 +239,13 @@ def feature_chrome(name, slug):
         if browser_up:
             rows.append([{"text": t("page.closechrome"), "callback_data": "chrome_stop"}])
     return t("chrome.featpage", state=t("chrome.up") if browser_up else t("chrome.down"),
-             slug=telegramd.escape(slug), dev=state), rows
+             slug=status_report.escape(slug), dev=state), rows
 
 
 def channel_of(key):
     """The question channel of a feature, by its key; "" when it is gone."""
     # A feature's only: the repository's own channel is not a feature's.
-    return telegramd.channel_dir(key) if telegramd.split_key(key or "")[1] else ""
+    return asks.channel_dir(key) if asks.split_key(key or "")[1] else ""
 
 
 def wait_question(channel, after, seconds=6):
@@ -248,7 +253,7 @@ def wait_question(channel, after, seconds=6):
     the page is answered by its next screen, and sclaude takes a moment to
     ask. after: the id of the question just answered."""
     for _ in range(int(seconds * 2)):
-        question = telegramd.pending_ask(channel)
+        question = asks.pending_ask(channel)
         if question and (question.get("id") or "") != (after or ""):
             return question
         pause(0.5)
@@ -274,34 +279,34 @@ def is_actions(question):
 
 
 def flow_button(name, slug):
-    """The feature's process map, through the gate (telegramd.map_button):
+    """The feature's process map, through the gate (phone_access.map_button):
     opened at once when the feature has a dev server, started first when it
     has none."""
-    origin = telegramd.gate_origin()
+    origin = phone_access.gate_origin()
     if not origin:
         return []
-    dev = telegramd.feature_dev(telegramd.repo_path(name), slug)
-    return telegramd.map_button(origin, telegramd.channel_key(name, slug), dev)
+    dev = card_view.feature_dev(repos.repo_path(name), slug)
+    return phone_access.map_button(origin, asks.channel_key(name, slug), dev)
 
 
 def actions_screen(key, question):
     """The list of actions as a page screen: where the feature is, and the
     actions grouped by where each leads — back, staying, forward, after the
     merge, the end — each button saying what it does under its name."""
-    name, slug = telegramd.split_key(key)
+    name, slug = asks.split_key(key)
     qid = question.get("id") or ""
     hints = {}
     for line in (question.get("context") or "").splitlines():
-        m = ACT_LINE.match(telegramd.strip_ansi(line))
+        m = ACT_LINE.match(status_report.strip_ansi(line))
         if m:
             hints[int(m.group(1))] = m.group(3).strip()
-    feats, _ = telegramd.features_of_name(name)
+    feats, _ = repos.features_of_name(name)
     step = next((r[1] for r in feats if r[0] == slug), "")
     groups = {"back": [], "stay": [], "forward": [], "after": [], "end": []}
     first, cancel = None, None
     options = question.get("options") or []
     for i, label in enumerate(options, 1):
-        label = telegramd.strip_ansi(str(label)).strip()
+        label = status_report.strip_ansi(str(label)).strip()
         m = ACT_KEY.search(label)
         verb = m.group(1) if m else ""
         b = {"text": ACT_KEY.sub("", label).strip(), "callback_data": "pa:%s:%d" % (qid, i)}
@@ -350,16 +355,16 @@ def actions_screen(key, question):
     if at and 1 <= int(at.group(1)) <= len(names):
         i = int(at.group(1)) - 1
         names[i] = "📍<b>%s</b>" % names[i]
-    text = "%s\n%s\n%s" % (t("act.title", slug=telegramd.escape(slug)), " → ".join(names),
-                           t("act.now", step=telegramd.escape(step)) if step else "")
+    text = "%s\n%s\n%s" % (t("act.title", slug=status_report.escape(slug)), " → ".join(names),
+                           t("act.now", step=status_report.escape(step)) if step else "")
     return text.strip(), rows
 
 
 def question_screen(key, question):
     """A feature's open question as a page screen: its text and its buttons,
     each answering it from here."""
-    name, _slug = telegramd.split_key(key)
-    back = [{"text": t("page.tocard"), "callback_data": "topic:%s:%s" % telegramd.split_key(key)}]
+    name, _slug = asks.split_key(key)
+    back = [{"text": t("page.tocard"), "callback_data": "topic:%s:%s" % asks.split_key(key)}]
     if not question:
         return t("page.waiting"), [[{"text": t("page.question"), "callback_data": "page_question"}],
                                    back]
@@ -368,11 +373,11 @@ def question_screen(key, question):
         return text, rows + [back]
     qid = question.get("id") or ""
     rows = []
-    for row in telegramd.ask_keyboard(name, question):
+    for row in asks.ask_keyboard(name, question):
         rows.append([dict(b, callback_data="pa:%s:%s" % (qid, b["callback_data"].split(":", 2)[2]))
                      for b in row if (b.get("callback_data") or "").startswith("answer:")])
     rows = [r for r in rows if r]
-    text = telegramd.ask_text(name, question, in_topic=True)
+    text = asks.ask_text(name, question, in_topic=True)
     if not rows:
         text += "\n\n" + t("page.typed")
     return text, rows + [back]
@@ -382,20 +387,20 @@ def answer_page(key, qid, reply):
     """Answer the feature's open question from the page, if it is still the
     one shown, and show what sclaude asks next."""
     channel = channel_of(key)
-    question = telegramd.pending_ask(channel) if channel else None
+    question = asks.pending_ask(channel) if channel else None
     if not question or (question.get("id") or "") != qid:
         text, rows = question_screen(key, question)
         return t("page.gone") + ("\n\n" + text if question else ""), rows
-    if not telegramd.answer_ask(channel, reply, qid):
-        return question_screen(key, telegramd.pending_ask(channel))
-    shown = telegramd.option_label(question.get("options"), reply) or reply
-    telegramd.log.info("the menu page answered %s: %s", key, reply)
+    if not asks.answer_ask(channel, reply, qid):
+        return question_screen(key, asks.pending_ask(channel))
+    shown = asks.option_label(question.get("options"), reply) or reply
+    log.info("the menu page answered %s: %s", key, reply)
     following = wait_question(channel, qid)
     if following:
         text, rows = question_screen(key, following)
-        return t("page.answered", reply=telegramd.escape(shown)) + "\n\n" + text, rows
-    name, slug = telegramd.split_key(key)
-    return (t("page.answered", reply=telegramd.escape(shown)),
+        return t("page.answered", reply=status_report.escape(shown)) + "\n\n" + text, rows
+    name, slug = asks.split_key(key)
+    return (t("page.answered", reply=status_report.escape(shown)),
             [[{"text": t("page.tocard"), "callback_data": "topic:%s:%s" % (name, slug)}]])
 
 
@@ -423,7 +428,7 @@ _ISSUES = {}
 
 
 def issue_list():
-    return telegramd.sclaude_module("issue_list")
+    return project_config.sclaude_module("issue_list")
 
 
 def open_issues(name, fresh=False):
@@ -431,8 +436,8 @@ def open_issues(name, fresh=False):
     fetched just now); None for the issues when GitHub cannot say."""
     at, rows = _ISSUES.get(name, (0, None))
     if fresh or rows is None or time.time() - at > ISSUES_TTL:
-        repo = telegramd.repo_path(name)
-        slug = telegramd.gh_slug(repo) if repo else ""
+        repo = repos.repo_path(name)
+        slug = repos.gh_slug(repo) if repo else ""
         rows = unlocked(issue_list().fetch, slug) if slug else None
         if rows is None:
             # GitHub did not answer: nothing is kept, and the next press asks
@@ -446,10 +451,10 @@ def open_issues(name, fresh=False):
 
 def new_list(name, fresh=False):
     """The first screen: a name, or one of the open issues."""
-    if not telegramd.repo_path(name):
-        return t("repo.norepos"), telegramd.repos_keyboard()
+    if not repos.repo_path(name):
+        return t("repo.norepos"), menus.repos_keyboard()
     issues, _ = open_issues(name, fresh)
-    text = t("nf.title", repo=telegramd.escape(name))
+    text = t("nf.title", repo=status_report.escape(name))
     if issues is None:
         text += t("nf.noanswer")
     elif not issues:
@@ -485,9 +490,9 @@ def noconfig_note(name):
     """A repository with no .sclaude/config.json: the one question sclaude
     still asks after a start from here — whether to write it — named before
     the start, since it comes in the chat."""
-    repo = telegramd.repo_path(name)
+    repo = repos.repo_path(name)
     return ("\n\n" + t("nf.noconfig")
-            if repo and not os.path.exists(telegramd.config_path(repo)) else "")
+            if repo and not os.path.exists(project_config.config_path(repo)) else "")
 
 
 def new_issue(bot, name, number, error="", typed=""):
@@ -507,9 +512,9 @@ def new_issue(bot, name, number, error="", typed=""):
         return
     if not it:
         text, rows = new_list(name)
-        bot.screen = (t("nf.gone", n=telegramd.escape(number)) + "\n\n" + text, rows)
+        bot.screen = (t("nf.gone", n=status_report.escape(number)) + "\n\n" + text, rows)
         return
-    esc = telegramd.escape
+    esc = status_report.escape
     text = t("nf.issue", n=it["number"], title=esc(it["title"]))
     if it["labels"]:
         text += "\n<i>%s</i>" % esc(it["labels"].replace(",", ", "))
@@ -531,7 +536,7 @@ def new_issue(bot, name, number, error="", typed=""):
 def new_named(bot, name, create, error="", typed=""):
     """A feature by name, and whether GitHub gets an issue for it — the
     question sclaude asks at the terminal, answered here."""
-    text = t("nf.named", repo=telegramd.escape(name)) + noconfig_note(name)
+    text = t("nf.named", repo=status_report.escape(name)) + noconfig_note(name)
     if error:
         text = "⚠️ " + error + "\n\n" + text
     bot.screen = (text, [
@@ -551,9 +556,9 @@ def new_start(bot, rest):
     is wrong instead, when sclaude would only die on it."""
     name, issue, create, typed = (rest.split(":", 3) + ["", "", "", ""])[:4]
     typed = " ".join(typed.split())
-    repo = telegramd.repo_path(name)
+    repo = repos.repo_path(name)
     if not repo:
-        bot.screen = (t("repo.norepos"), telegramd.repos_keyboard())
+        bot.screen = (t("repo.norepos"), menus.repos_keyboard())
         return
     again = ((lambda error: new_issue(bot, name, issue, error, typed)) if issue
              else (lambda error: new_named(bot, name, create != "0", error, typed)))
@@ -564,19 +569,19 @@ def new_start(bot, rest):
     # What cmd_new refuses, said here: it dies with no one to read it.
     exists = subprocess.run(["git", "-C", repo, "show-ref", "--verify", "--quiet",
                              "refs/heads/feat/" + slug]).returncode == 0
-    if exists or os.path.exists(telegramd.feature_wt(repo, slug)):
-        again(t("nf.exists", slug=telegramd.escape(slug)))
+    if exists or os.path.exists(topics.feature_wt(repo, slug)):
+        again(t("nf.exists", slug=status_report.escape(slug)))
         return
     if issue:
         # The blockers were on the screen the start was pressed on.
         args = ["new", "--issue", issue, "--blocked-ok", "--", typed]
     else:
         args = ["new", "--create-issue" if create != "0" else "--no-issue", "--", typed]
-    thread = telegramd.new_feature_topic(bot, name)
-    telegramd.start_sclaude(repo, args)
-    telegramd.log.info("the menu page started %s in %s", " ".join(args), name)
+    thread = topics.new_feature_topic(bot, name)
+    sessions.start_sclaude(repo, args)
+    log.info("the menu page started %s in %s", " ".join(args), name)
     done = t("nf.startedtopic" if thread else "nf.started",
-             slug=telegramd.escape(slug), repo=telegramd.escape(name))
+             slug=status_report.escape(slug), repo=status_report.escape(name))
     bot.screen = (done, [])
     bot.done = done
 
@@ -584,9 +589,9 @@ def new_start(bot, rest):
 def code_screen(home):
     """code-server's screen, opening on the page's feature when it has one."""
     feature = home_feature(home)
-    folder = telegramd.feature_wt(telegramd.repo_path(feature[0]), feature[1]) if feature else ""
-    return (telegramd.code_text(feature[1] if feature else ""),
-            telegramd.code_keyboard(folder))
+    folder = topics.feature_wt(repos.repo_path(feature[0]), feature[1]) if feature else ""
+    return (services.code_text(feature[1] if feature else ""),
+            services.code_keyboard(folder))
 
 
 def press(bot, user, action, context, now, home=""):
@@ -604,10 +609,10 @@ def press(bot, user, action, context, now, home=""):
     feature = home_feature(home)
     if not action or action == "menu_back":
         # The whole menu: the chat's own is only the way here.
-        title = telegramd.menu_title()
-        rows = telegramd.menu_keyboard()
+        title = menus.menu_title()
+        rows = menus.menu_keyboard()
         if feature:
-            title += t("menu.here", slug=telegramd.escape(feature[1]))
+            title += t("menu.here", slug=status_report.escape(feature[1]))
         rows = rows + [[{"text": t("menu.otherhome") if feature else t("menu.choosehome"),
                          "callback_data": "home_pick"}]]
         bot.screen = (title, rows)
@@ -617,7 +622,7 @@ def press(bot, user, action, context, now, home=""):
         action = "topic:%s:%s" % feature
     if feature and action == "menu_chrome":
         bot.screen = feature_chrome(*feature)
-        return telegramd.channel_key(*feature)
+        return asks.channel_key(*feature)
     if action == "menu_code":
         bot.screen = code_screen(home)
         return ""
@@ -625,12 +630,12 @@ def press(bot, user, action, context, now, home=""):
         # The chat answers with a line; the page stays on the screen, which
         # once the server is up has its 📲 button.
         verb = action[5:]
-        telegramd.run("systemctl --user %s code-server.service" % verb)
+        shell.run("systemctl --user %s code-server.service" % verb)
         for _ in range(10 if verb != "stop" else 0):
-            if telegramd.code_running():
+            if services.code_running():
                 break
             pause(0.5)
-        telegramd.log.info("the menu page: code-server %s", verb)
+        log.info("the menu page: code-server %s", verb)
         bot.screen = code_screen(home)
         bot.done = bot.screen[0]
         return ""
@@ -640,16 +645,16 @@ def press(bot, user, action, context, now, home=""):
         bot.screen = (t("awake.askpage"), [])
         return ""
     if action.startswith("until:"):
-        until_ts = telegramd.parse_hhmm(action[6:], now)
+        until_ts = holding.parse_hhmm(action[6:], now)
         if not until_ts:
             bot.screen = (t("awake.badtimepage"), [])
             return ""
-        until = telegramd.hold_for(until_ts - now, now)
-        telegramd.log.info("the menu page: until %s", until)
-        bot.screen = (t("extended.plain", at=telegramd.local_for_lang(until)), [])
+        until = holding.hold_for(until_ts - now, now)
+        log.info("the menu page: until %s", until)
+        bot.screen = (t("extended.plain", at=status_report.local_for_lang(until)), [])
         bot.done = bot.screen[0]
         return ""
-    if action == "phone_toggle" and telegramd.gate_origin(None, False):
+    if action == "phone_toggle" and phone_access.gate_origin(None, False):
         # Turning phone access off from the page closes the page with it.
         bot.screen = (t("svc.phoneoffask"), [
             [{"text": t("svc.phoneoffyes"), "callback_data": "phone_off"}],
@@ -659,17 +664,17 @@ def press(bot, user, action, context, now, home=""):
         # The answer goes through the funnel being turned off: it has to
         # leave first. The funnel goes a moment later, and the page closes
         # itself; the Menu button is plain again at once.
-        subprocess.Popen(["bash", "-c", "sleep 2; " + telegramd.FUNNEL_OFF],
+        subprocess.Popen(["bash", "-c", "sleep 2; " + phone_access.FUNNEL_OFF],
                          start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for target in ({}, {"chat_id": bot.chat_id}):
             try:
-                bot.call("setChatMenuButton", menu_button=telegramd.MENU_COMMANDS, **target)
+                bot.call("setChatMenuButton", menu_button=botapi.MENU_COMMANDS, **target)
             except Exception as exc:
-                telegramd.log.warning("setChatMenuButton: %s", exc)
+                log.warning("setChatMenuButton: %s", exc)
         # The commands follow: the funnel is about to go.
         bot.commands(online=False)
-        telegramd.log.info("the menu page: phone access turned off")
+        log.info("the menu page: phone access turned off")
         bot.screen = (t("chrome.gatedown"), [])
         bot.done = bot.screen[0]
         bot.close = True
@@ -677,9 +682,9 @@ def press(bot, user, action, context, now, home=""):
     if action == "svc_restart":
         # The chat's restart edits its message into "back online" from the
         # new process; the page's line in the chat is that message.
-        said = telegramd.Bot(bot.token, bot.chat_id).send("📱 " + t("svc.restarting"),
+        said = botapi.Bot(bot.token, bot.chat_id).send("📱 " + t("svc.restarting"),
                                                          thread=0)
-        with telegramd.locked() as st:
+        with state.locked() as st:
             st["restart_notify"] = said
             st["restart_from_pid"] = 0
             st["restart_page"] = True
@@ -693,10 +698,10 @@ def press(bot, user, action, context, now, home=""):
         return ""
     if action.startswith("restart_wait:"):
         # The new process takes the mark off once it is up (report_restart).
-        if not telegramd.read().get("restart_page"):
-            bot.screen = (t("svc.restarted"), telegramd.services_keyboard())
+        if not state.read().get("restart_page"):
+            bot.screen = (t("svc.restarted"), menus.services_keyboard())
         elif now - int(action.split(":", 1)[1] or 0) > RESTART_WAIT:
-            bot.screen = (t("svc.notback", unit=BOT_UNIT), telegramd.services_keyboard())
+            bot.screen = (t("svc.notback", unit=BOT_UNIT), menus.services_keyboard())
         else:
             bot.screen = (t("svc.restarting"), [])
             bot.follow = action
@@ -719,14 +724,14 @@ def press(bot, user, action, context, now, home=""):
         return ""
     if action.startswith("cfgset:"):
         # What the chat redraws, and the line the chat keeps of it.
-        text, rows, bot.done = telegramd.config_press(
-            action, lambda cmd, timeout=25: unlocked(telegramd.run, cmd, timeout))
+        text, rows, bot.done = project_config.config_press(
+            action, lambda cmd, timeout=25: unlocked(shell.run, cmd, timeout))
         bot.screen = (text, rows)
         return ""
     if action.startswith("doc:"):
         # The chat sends a section as a message of its own; the page shows it
         # as a screen, with the way back to the list.
-        body = telegramd.docs.section(action[4:], current())
+        body = docs.section(action[4:], current())
         if body:
             bot.screen = (body, [[{"text": t("menu.back"), "callback_data": "svc_docs"}]])
             return ""
@@ -734,31 +739,31 @@ def press(bot, user, action, context, now, home=""):
         # The chat posts the card to the feature's topic; the page shows it.
         # On the feature the page stands on there is no list to go back to.
         _, name, slug = action.split(":", 2)
-        name = name or os.path.basename(telegramd.repo_choice())
-        bot.screen = telegramd.card(name, slug, in_topic=False)
-        return telegramd.channel_key(name, slug)
+        name = name or os.path.basename(repos.repo_choice())
+        bot.screen = card_view.card(name, slug, in_topic=False)
+        return asks.channel_key(name, slug)
     if action.startswith("fc:acts") or action == "page_question":
         # The actions are a question of sclaude's, and so is what follows
         # them: the page shows the feature's open question with its buttons
         # and answers it itself (answer_page), as the chat's buttons do.
         key = action.split(":", 2)[2] if action.count(":") == 2 else context
         channel = channel_of(key)
-        name, slug = telegramd.split_key(key)
-        if action.startswith("fc:acts") and channel and not telegramd.pending_ask(channel) \
-                and telegramd.feature_busy(telegramd.repo_path(name), slug):
+        name, slug = asks.split_key(key)
+        if action.startswith("fc:acts") and channel and not asks.pending_ask(channel) \
+                and sessions.feature_busy(repos.repo_path(name), slug):
             # The step is at work: a second orchestrator is not started, as
             # the chat's card does not start one.
             bot.untraced = True
-            bot.screen = telegramd.card(name, slug, note=t("feat.busy"), in_topic=False)
+            bot.screen = card_view.card(name, slug, note=t("feat.busy"), in_topic=False)
             return key
-        if action.startswith("fc:acts") and channel and not telegramd.pending_ask(channel):
-            telegramd.start_sclaude(telegramd.repo_path(telegramd.split_key(key)[0]),
-                                    ["actions", telegramd.split_key(key)[1]])
+        if action.startswith("fc:acts") and channel and not asks.pending_ask(channel):
+            sessions.start_sclaude(repos.repo_path(asks.split_key(key)[0]),
+                                    ["actions", asks.split_key(key)[1]])
             wait_question(channel, None)
         else:
             # Only shown: nothing was started, and the chat keeps no line.
             bot.untraced = True
-        bot.screen = question_screen(key, telegramd.pending_ask(channel) if channel else None)
+        bot.screen = question_screen(key, asks.pending_ask(channel) if channel else None)
         return key
     if action.startswith("pa:"):
         _, qid, reply = action.split(":", 2)
@@ -768,7 +773,7 @@ def press(bot, user, action, context, now, home=""):
         # A card button whose data had no room for the feature: the page
         # knows which card it stands on.
         action = "%s:%s" % (action, context)
-    telegramd.log.info("the menu page: %s", action)
+    log.info("the menu page: %s", action)
     PageHandler(bot).callback({"id": "", "data": action, "from": user,
                                      "message": {"message_id": PAGE}})
     if action.startswith("fc:"):
@@ -792,33 +797,33 @@ def trace(token, chat_id, action, label, done, context, now):
     a press that only showed something."""
     thread, text = 0, None
     if action.startswith("fc:") and action.split(":")[1] in CARD_ACTS:
-        name, slug = telegramd.split_key(context)
-        repo = telegramd.repo_path(name) if slug else None
+        name, slug = asks.split_key(context)
+        repo = repos.repo_path(name) if slug else None
         if repo:
-            thread = telegramd.load_record(repo, slug).get("thread") or 0
-        text = telegramd.escape(label) + ("" if thread else " — " + telegramd.escape(slug))
+            thread = topics.load_record(repo, slug).get("thread") or 0
+        text = status_report.escape(label) + ("" if thread else " — " + status_report.escape(slug))
     elif done is not None:
         text = (done if len(done) <= TRACE_MAX and not action.startswith(TRACE_LABEL)
-                else telegramd.escape(label))
+                else status_report.escape(label))
         # A new feature's line goes where its questions will.
         if action.startswith("nfgo:"):
-            thread = telegramd.new_topic_of(action.split(":", 2)[1])
+            thread = topics.new_topic_of(action.split(":", 2)[1])
     if not text:
         return
-    bot = telegramd.Bot(token, chat_id)
+    bot = botapi.Bot(token, chat_id)
     said = bot.send("📱 " + text, thread=thread)
     # A line about the hold is what holds now: the earlier ones about sleep
     # go, as they do after a press in the chat.
     if action.startswith(("awake:", "until:", "awake_forever")):
-        telegramd.said_sleep(bot, said, telegramd.read().get("until_ts") or 0)
+        sleep_warning.said_sleep(bot, said, state.read().get("until_ts") or 0)
     elif action == "awake_release":
-        telegramd.said_sleep(bot, said, now + telegramd.IDLE_SLEPT_KEEP)
+        sleep_warning.said_sleep(bot, said, now + sleep_warning.IDLE_SLEPT_KEEP)
 
 
 def answer(token, chat_id, user, action, context, now, label="", home=""):
     """The page's one call: the screen after the press, as JSON-ready data."""
     with held():
-        telegramd.remember_lang(user)
+        handling.remember_lang(user)
         bot = PageBot(token, chat_id)
         if not home and not action and features():
             # Opened by the Menu button, which is one for the whole chat:
@@ -828,11 +833,11 @@ def answer(token, chat_id, user, action, context, now, label="", home=""):
             # told; a topic's card opens the page on its feature (`?f=`).
             action = "home_pick"
         pressed_on = context
-        telegramd.ON_PAGE = True
+        menus.ON_PAGE = True
         try:
             context = press(bot, user, action, context, now, home)
         finally:
-            telegramd.ON_PAGE = False
+            menus.ON_PAGE = False
         if not bot.untraced:
             trace(token, chat_id, action, label, bot.done, context or pressed_on, now)
         # The card of the feature the page stands on — drawn by any of its

@@ -75,21 +75,21 @@ breaks the other silently — grep before you edit:
 - `closed/<id>.json` in a question channel (`.git/sclaude/` or a feature's
   `.git/sclaude/ask/<slug>/`) — how a question ended — is written by
   `ask_closed` in `sclaude/lib/io.sh` and read by `CLOSED_DIR`/`closed_asks` in
-  `keepawake/telegramd.py`, which turns the question's message into the answer
+  `keepawake/asks.py`, which turns the question's message into the answer
   by it; without the record the message is deleted as unanswered.
   `tests/io.py` checks what is written, `tests/keepawake.py` what is read.
 - The feature channel `.git/sclaude/ask/<slug>/` (`ask_channel` in `io.sh`,
-  `ask_channels` in `telegramd.py`), the bot's record of a feature
+  `ask_channels` in `asks.py`), the bot's record of a feature
   `telegram.json` and the clean-up's `ended` mark (`ask_record`,
   `ask_feature_end` in `io.sh`; `FEATURE_RECORD`, `ENDED_MARK` in
-  `telegramd.py`) are named on both sides; `tests/io.py` and
+  `topics.py`) are named on both sides; `tests/io.py` and
   `tests/keepawake.py` check each side. `bin/sclaude-notify --in` reads the
   topic from that record's `thread` too; `tests/keepawake.py` checks it
   names the same file.
 - `.sclaude/local/feature/closing` — a worktree whose removal has begun — is
   written by `stop_dev` in `sclaude/lib/worktree.sh` (and taken back off when
   git refuses the removal), and honoured by `sclaude-proxy` (no lazy start)
-  and by `CLOSING_MARK` in `keepawake/telegramd.py` (the menu offers the
+  and by `CLOSING_MARK` in `keepawake/topics.py` (the menu offers the
   feature no more); `tests/ports.py`, `tests/proxy.py` and
   `tests/keepawake.py` check each side.
 - `notes/` in a feature's channel — messages that ask nothing, such as where
@@ -104,7 +104,7 @@ breaks the other silently — grep before you edit:
 - The record of a topic's messages, `~/.local/state/keepawake/topics/<thread>`
   (`KEEPAWAKE_TOPICS` in tests), is named once, by `topic_ledger` in
   `keepawake/state.py`. It is written by `remember_in_topic` in
-  `keepawake/telegramd.py` and by `bin/sclaude-notify`, which sends past the
+  `keepawake/topics.py` and by `bin/sclaude-notify`, which sends past the
   bot and imports the function, and read by `clear_topic_messages`, which
   deletes them with the topic; `tests/keepawake.py` runs both writers.
 
@@ -131,7 +131,7 @@ breaks the other silently — grep before you edit:
   `sclaude/prompts/_dev-server.md` and served by `login_page`/`users_page` in
   `bin/sclaude-proxy` (`dev_login.py` issues the token), and built by
   `skills/sdemo/demo.py` (with `f=` on the phone's origin, `phone_origin` in
-  `keepawake/telegramd.py`); `tests/dev-login.py` runs the proxy and checks
+  `keepawake/phone_access.py`); `tests/dev-login.py` runs the proxy and checks
   the prompt and demo.py's links name the same.
 
   <!-- Added by Claude on 2026-10-31 with signing in as another user. -->
@@ -267,7 +267,7 @@ breaks the other silently — grep before you edit:
   and read by `workshop_sreview_mark` in `workshop.sh` before `core-ready`
   lets a maintainer's change go out; `tests/workshop.py` reads it.
 - `WORKSHOP_PHONE_MAX` in `workshop.sh` stays under `ASK_CONTEXT_MAX` in
-  `keepawake/telegramd.py`, which clips a question's context in the middle: a
+  `keepawake/asks.py`, which clips a question's context in the middle: a
   leak question longer than that is asked at the terminal alone, so that a
   "yes" from the phone never covers lines it did not show.
 - `<workshop-rules>` in `sclaude/prompts/_friction-body.md` and
@@ -294,7 +294,7 @@ breaks the other silently — grep before you edit:
   them, and reads `state.json`'s fields to say where a feature stands
   (`position`, called by `cmd_flow`); `bin/sclaude-proxy` serves it at
   `/__sclaude/flow`, the Mini App opens it through the gate (`FLOW_PREFIX`,
-  `map_button` in `keepawake/telegramd.py`), and
+  `map_button` in `keepawake/phone_access.py`), and
   `docs/presentations/bpmn_diagrams.html` is built from it.
   `tests/process.py` checks each side and fails on a stale built page: a
   command, a step or a way back added to the code goes on the map in the
@@ -374,7 +374,7 @@ breaks the other silently — grep before you edit:
 - `sclaude new`'s options (`--issue`, `--blocked-ok`, `--create-issue`,
   `--no-issue`; `new_from_args` in `bin/sclaude`) and `sclaude config set` are
   what the bot's menu runs (`new_start` in `keepawake/webmenu.py`, `config_set`
-  in `keepawake/telegramd.py`); `tests/new-feature.py` and
+  in `keepawake/project_config.py`); `tests/new-feature.py` and
   `tests/config-menu.py` check sclaude's side, `tests/webmenu.py` the bot's.
 
   <!-- Added by Claude on 2026-10-24 with the new-feature picker and the config

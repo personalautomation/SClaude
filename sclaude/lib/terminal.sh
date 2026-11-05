@@ -117,7 +117,7 @@ term_attach() {
 }
 
 # The tab sclaude runs in, named for the feature it is on as the feature's
-# Telegram topic is (topic_name in telegramd.py): `<slug> · <repo>`. Several
+# Telegram topic is (topic_name in topics.py): `<slug> · <repo>`. Several
 # sclaude tabs side by side are told apart by it, as the topics are; the
 # session tabs (pane.sh) carry their session's name. An OSC 0, which Windows
 # Terminal and every other takes as the title; the shell's prompt sets its own

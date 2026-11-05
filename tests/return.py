@@ -149,8 +149,8 @@ try:
           and 'return_brief' in fresh.split("elif", 1)[1], True)
 
     # --- `sclaude return` refuses an unfinished feature ----------------------
-    with open(os.path.join(ROOT, "bin", "sclaude")) as fh:
-        src = fh.read()
+    src = "".join(open(os.path.join(ROOT, _p)).read()
+        for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
     body = src[src.index("cmd_return() {"):]
     body = body[:body.index("\n}\n") + 3]
     check("only-from-done", 'if [[ "$step" != "done" ]]; then' in body, True)

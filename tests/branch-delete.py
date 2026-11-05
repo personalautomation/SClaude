@@ -136,8 +136,8 @@ try:
     # No merged pull request.
     check("no pull request: kept", delete(repo, "feat/past", ""), ("RC 1", True))
 
-    with open(os.path.join(ROOT, "bin", "sclaude")) as fh:
-        sclaude = fh.read()
+    sclaude = "".join(open(os.path.join(ROOT, _p)).read()
+        for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
     with open(os.path.join(LIB, "branches.sh")) as fh:
         branches = fh.read()
     done = sclaude[sclaude.index("cmd_done() {"):]

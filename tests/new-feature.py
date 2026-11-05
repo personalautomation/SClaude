@@ -50,10 +50,12 @@ check("slugify leaves non-ASCII out", slugify("İzmir Kelvin\u212a"), "zmir-kelv
 
 
 def function(name):
-    """One function of bin/sclaude, by its text: the file runs its main when
-    sourced."""
-    with open(SCLAUDE) as fh:
-        body = fh.read()
+    """One function of bin/sclaude or the modules its commands live in, by
+    its text: the file runs its main when sourced."""
+    body = ""
+    for path in (SCLAUDE, os.path.join(LIB, "start.sh"), os.path.join(LIB, "menu.sh")):
+        with open(path) as fh:
+            body += fh.read()
     m = re.search(r"^%s\(\) \{\n.*?^\}\n" % re.escape(name), body, re.S | re.M)
     return m.group(0) if m else ""
 

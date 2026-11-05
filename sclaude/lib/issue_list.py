@@ -9,7 +9,7 @@
 #       <mine?>\t<number>\t<title>\t<labels, comma-separated>\t<open blockers>
 #       \t<board status>
 #   issue_list.py suggest <number> <title>
-#       the branch name suggested for that issue (suggest_slug in bin/sclaude)
+#       the branch name suggested for that issue (suggest_slug in sclaude/lib/start.sh)
 #
 # "Mine?" is 1 when the issue is assigned to whoever gh is authenticated as. We
 # ask gh for the login rather than writing it as a constant: it has already
@@ -89,7 +89,7 @@ def fetch(repo):
 
 
 def slugify(name):
-    # ASCII only, as `tr` and `sed` in bin/sclaude's slugify: str.lower() would
+    # ASCII only, as `tr` and `sed` in slugify (sclaude/lib/start.sh): str.lower() would
     # turn "İ" into an "i" that the branch sclaude makes does not have.
     lowered = re.sub(r"[A-Z]", lambda m: m.group(0).lower(), name)
     return re.sub(r"[^a-z0-9]+", "-", lowered).strip("-")

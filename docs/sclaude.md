@@ -107,7 +107,12 @@ publishes it (see "The workshop" below).
 
 | File | What is in it |
 | --- | --- |
-| `bin/sclaude` | the environment, the `cmd_*` commands, argument parsing |
+| `bin/sclaude` | the environment, the modules it sources, `main` and its dispatch |
+| `sclaude/lib/start.sh` | `sclaude new` and its options, `sclaude <feature>`, `sclaude issue` |
+| `sclaude/lib/menu.sh` | `sclaude status` and the menu `sclaude` opens with no arguments |
+| `sclaude/lib/step_commands.sh` | moving a feature between steps by hand: replan, return, reset, the friction review, the regression, the epilogue |
+| `sclaude/lib/done.sh` | `sclaude done`: closing a merged feature |
+| `sclaude/lib/feature_commands.sh` | `sync`, `news`, `preview`, `rollback`, `dev` on a feature in work |
 | `sclaude/lib/ui.sh` | questions to the human, answers, colours |
 | `sclaude/lib/io.sh` | the question-answer channel: the same question in the terminal and in Telegram |
 | `sclaude/lib/steps.sh` | the table of steps and each one's permissions |

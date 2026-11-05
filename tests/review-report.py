@@ -358,8 +358,8 @@ check("early", v([5], None, 0, 5, 5), "Too few rounds for a trend.")
 # --- wiring --------------------------------------------------------------------
 RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
           for m in ("run.sh", "review_round.sh", "review_gate.sh", "friction.sh", "session_watch.sh"))
-with open(os.path.join(ROOT, "bin", "sclaude")) as fh:
-    BIN = fh.read()
+BIN = "".join(open(os.path.join(ROOT, _p)).read()
+    for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
 # Four for the rounds of the review on GitHub, one where the review on this
 # machine finds something after a session (review_close_gate), and one where
 # it finds something on the way into step 4, before the first session, and

@@ -47,7 +47,7 @@ DEPLOY_FAMILY = "".join(read("sclaude", "lib", m) for m in ("deploy.sh", "shippe
 
 # --- commands ----------------------------------------------------------------
 
-sclaude = read("bin", "sclaude")
+sclaude = "".join(read(*_p.split("/")) for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
 main = sclaude[sclaude.index("main() {"):]
 dispatch = main[main.index('case "${1:-}" in'):]
 dispatch = dispatch[:dispatch.index("\n  esac")]
@@ -658,7 +658,7 @@ check("the fingerprint does not skip red words over a green preview",
       'status.preview_red 2>/dev/null || true)" != true ]]' in run_src[:run_src.find("nothing changed, skipping")])
 check("a resumed epilogue keeps its red preview",
       'state_set "$estate" preview_red' in run_src
-      and '"$prod" "$wt" "$preview_red"' in read("bin", "sclaude"))
+      and '"$prod" "$wt" "$preview_red"' in "".join(read(*_p.split("/")) for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh")))
 check("the green rewrite is tried on every green pass",
       DEPLOY_FAMILY.count('status_green_again "$slug"') == 2)
 with tempfile.TemporaryDirectory() as wt:

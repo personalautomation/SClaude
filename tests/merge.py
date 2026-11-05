@@ -309,7 +309,7 @@ check_true("merge-wait-gets-the-offer-mode",
 # `sclaude preview` and the cycle once built the block separately and drifted:
 # the typed command deployed without the branch's migrations and recorded the
 # deploy, which the cycle then skipped as unchanged.
-sclaude_bin = open(os.path.join(ROOT, "bin", "sclaude"), encoding="utf-8").read()
+sclaude_bin = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
 cmd_preview = body_of(sclaude_bin, "cmd_preview")
 check_true("cmd-preview-exists", cmd_preview is not None)
 if cmd_preview:

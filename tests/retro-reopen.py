@@ -138,8 +138,8 @@ with open(os.path.join(ROOT, "sclaude", "prompts", "pr.md")) as fh:
     check("pr-prompt-has-the-block", "<block:reopened>" in fh.read(), True)
 
 # --- `done` reopens before it cleans up -----------------------------------------
-with open(os.path.join(ROOT, "bin", "sclaude")) as fh:
-    src = fh.read()
+src = "".join(open(os.path.join(ROOT, _p)).read()
+    for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
 m = re.search(r"^cmd_done\(\) \{\n.*?^\}\n", src, re.S | re.M)
 body = m.group(0) if m else ""
 retro_at = body.find("run_retro ")

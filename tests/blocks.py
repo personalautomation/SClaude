@@ -556,7 +556,7 @@ try:
                          rollback_src) is not None)
 
     # The typed command gates on having shipped, as the action list does.
-    sclaude_src = open(os.path.join(ROOT_BIN), encoding="utf-8").read()
+    sclaude_src = open(os.path.join(LIB, "feature_commands.sh"), encoding="utf-8").read()
     cmd_body = sclaude_src[sclaude_src.index("cmd_rollback() {"):]
     cmd_body = cmd_body[:cmd_body.index("\n}")]
     # Code only, again — and this one earned the rule a third time. The comment

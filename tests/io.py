@@ -337,7 +337,7 @@ def main():
 
         # code_reload execs into _session-ended from inside a step: the step's
         # last questions must still go to the feature's channel.
-        with open(os.path.join(os.path.dirname(LIB), "..", "bin", "sclaude"), encoding="utf-8") as fh:
+        with open(os.path.join(LIB, "step_commands.sh"), encoding="utf-8") as fh:
             sclaude_src = fh.read()
         ended_fn = sclaude_src[sclaude_src.index("cmd_session_ended() {"):]
         ended_fn = ended_fn[:ended_fn.index("\n}\n")]

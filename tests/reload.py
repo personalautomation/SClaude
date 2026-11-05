@@ -49,8 +49,8 @@ def functions(source, names):
 
 with open(os.path.join(LIB, "run.sh")) as fh:
     RUN = fh.read()
-with open(os.path.join(ROOT, "bin", "sclaude")) as fh:
-    BIN = fh.read()
+BIN = "".join(open(os.path.join(ROOT, _p)).read()
+    for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
 BODY = functions(RUN, ["code_fingerprint", "code_reload"])
 
 tmp = tempfile.mkdtemp()

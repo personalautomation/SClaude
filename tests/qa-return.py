@@ -106,7 +106,7 @@ tmp = tempfile.mkdtemp()
 try:
     # --- the ordering that was the whole bug --------------------------------
 
-    sclaude = open(os.path.join(ROOT, "bin", "sclaude"), encoding="utf-8").read()
+    sclaude = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
     code = "\n".join(code_lines(sclaude))
     verdict_at = code.find('case "$(watch_verdict "$slug")" in')
     done_at = code.find('if [[ "$step" == "done" ]]; then')
@@ -210,7 +210,7 @@ try:
     check_true("helper-exists", "step_rewind_to()" in steps_src)
     for caller, path in (("regression_rewind", os.path.join(LIB, "regression_gate.sh")),
                          ("watch_rewind", os.path.join(LIB, "watch.sh")),
-                         ("cmd_replan", os.path.join(ROOT, "bin", "sclaude"))):
+                         ("cmd_replan", os.path.join(LIB, "step_commands.sh"))):
         src = "\n".join(code_lines(open(path, encoding="utf-8").read()))
         check_true("%s-uses-the-helper" % caller, "step_rewind_to" in src)
 

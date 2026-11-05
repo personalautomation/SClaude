@@ -140,7 +140,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("unpushed-says-how-to-push", "push origin main" in out, True)
 
 # Both places a person looks from run it, after review_branches has fetched.
-sclaude_bin = open(os.path.join(ROOT, "bin", "sclaude"), encoding="utf-8").read()
+sclaude_bin = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
 for cmd in ("cmd_menu", "cmd_status"):
     start = sclaude_bin.find("\n%s() {" % cmd)
     body = sclaude_bin[start:sclaude_bin.find("\n}", start)]

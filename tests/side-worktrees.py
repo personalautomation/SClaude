@@ -80,8 +80,8 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
-with open(os.path.join(ROOT, "bin", "sclaude")) as fh:
-    SCLAUDE = fh.read()
+SCLAUDE = "".join(open(os.path.join(ROOT, _p)).read()
+    for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
 # Before the feature's own worktree goes: its questions are the feature's last,
 # and the feature's topic in the bot is deleted with the worktree.
 done = SCLAUDE[SCLAUDE.index("cmd_done() {"):]

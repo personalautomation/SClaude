@@ -374,7 +374,7 @@ breaks the other silently — grep before you edit:
   settings. -->
 
 - `sclaude new`'s options (`--issue`, `--blocked-ok`, `--create-issue`,
-  `--no-issue`; `new_from_args` in `bin/sclaude`) and `sclaude config set` are
+  `--no-issue`; `new_from_args` in `sclaude/lib/start.sh`) and `sclaude config set` are
   what the bot's menu runs (`new_start` in `keepawake/webmenu.py`, `config_set`
   in `keepawake/project_config.py`); `tests/new-feature.py` and
   `tests/config-menu.py` check sclaude's side, `tests/webmenu.py` the bot's.

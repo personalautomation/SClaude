@@ -940,7 +940,7 @@ echo "watcher=[$SESSION_WATCHER]"
     check("stats-reversals-later", "later rounds: 2 over 2 stretches (1.00 each)" in text, True)
     check("stats-window", "1% of the window is 10k" in text, True)
     check("stats-empty", rs.report([]), "No review sessions logged yet.")
-    check("stats-command", "review-stats)  cmd_review_stats ;;" in open(os.path.join(ROOT, "bin", "sclaude")).read(), True)
+    check("stats-command", "review-stats)  cmd_review_stats ;;" in "".join(open(os.path.join(ROOT, _p)).read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh")), True)
 
     # --- a fresh session sees open threads only --------------------------------
     spec = importlib.util.spec_from_file_location("pr_context", os.path.join(LIB, "pr_context.py"))

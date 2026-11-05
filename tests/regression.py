@@ -803,7 +803,7 @@ state_sh = open(os.path.join(ROOT, "sclaude", "lib", "state.sh"),
                 encoding="utf-8").read()
 actions_sh = open(os.path.join(ROOT, "sclaude", "lib", "actions.sh"),
                   encoding="utf-8").read()
-sclaude = open(os.path.join(ROOT, "bin", "sclaude"), encoding="utf-8").read()
+sclaude = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
 
 check_true("friction-pending-exists",
            re.search(r"^friction_pending\(\)", state_sh, re.M) is not None)
@@ -1738,7 +1738,7 @@ check_true("unrunnable-recorded",
 
 # The ways out: production's suite by hand records its result and on green
 # lifts the hold; a rollback by hand puts the cycle back on the review.
-sclaude_src = open(os.path.join(ROOT, "bin", "sclaude"), encoding="utf-8").read()
+sclaude_src = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
 creg = re.search(r"^cmd_regression\(\) \{\n.*?^\}\n", sclaude_src, re.S | re.M).group(0)
 check_true("regression-by-hand-runs-prod", 'regression_run "$wt" "$slug" prod' in creg
            and 'regression_clear_mark "$wt" prod' in creg and "rollback_prod" not in creg)

@@ -123,7 +123,7 @@ terminal but by dividing the roles: the orchestrator stays the orchestrator, the
 bot shows its questions and passes the answers on, and the step's own
 conversation goes to the Claude mobile app.
 
-A question lives in a file rather than in a process (`sclaude/lib/io.sh`): the
+A question lives in a file rather than in a process (`sclaude/lib/core/io.sh`): the
 orchestrator lays it out in `.git/sclaude/ask.json` and waits for an answer from
 two places at once — the terminal where the question was asked, and the channel.
 Whoever answers first has answered. Hence **hot switching**: a feature was begun
@@ -156,7 +156,7 @@ the one showing the open question and answers any other with "already closed".
 own orchestrator, and one channel per repository let only one of them reach the
 phone: the second found it busy and asked the terminal alone. A function working
 on a feature declares `local ASK_SLUG="$slug"`, and its questions go to
-`.git/sclaude/ask/<slug>/` (`ask_channel` in `sclaude/lib/io.sh`); bash's dynamic
+`.git/sclaude/ask/<slug>/` (`ask_channel` in `sclaude/lib/core/io.sh`); bash's dynamic
 scope ends the binding with the function. The binding begins only once the
 feature's worktree exists: the name and the GitHub issue `sclaude new` asks about
 go to the repository's channel. The bot reads the feature from the
@@ -199,7 +199,7 @@ feature channel's only while it has no worktree.
 **Notes: what the topic is told without being asked.** After each review round
 sclaude also says where the review stands: `review_report` in `review_gate.sh` has
 `review_report.py` write the numbers of the last session that ran a review to the file
-`SCLAUDE_REPORT_BRIEF` names, and `ask_notice` (`sclaude/lib/io.sh`) lays that
+`SCLAUDE_REPORT_BRIEF` names, and `ask_notice` (`sclaude/lib/core/io.sh`) lays that
 text in the feature channel's `notes/`, skipping a text the same as the last one
 — the report is printed at more than one point of a round. The bot sends every
 note to the feature's topic in the order they came, each a message of its own and

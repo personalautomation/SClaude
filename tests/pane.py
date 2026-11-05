@@ -126,8 +126,8 @@ echo ready
 warn() { echo "WARN $*" >&2; }
 info() { echo "INFO $*"; }
 [[ -n "${PANE_TEST_PRELOAD:-}" ]] && source "$PANE_TEST_PRELOAD"
-source "%s/steps.sh"
-source "%s/pane.sh"
+source "%s/core/steps.sh"
+source "%s/core/pane.sh"
 cd "%s"
 ( claude_launch --session-id 0000 -n "demo/code" "$PANE_TEST_PROMPT" )
 echo "rc=$?"
@@ -250,7 +250,7 @@ echo "rc=$?"
     # marked off ---
     run_log = os.path.join(tmp, "run.log")
     recorded = {"SCLAUDE_TERM": run_log,
-                "PANE_TEST_PRELOAD": os.path.join(LIB, "terminal.sh")}
+                "PANE_TEST_PRELOAD": os.path.join(LIB, "core", "terminal.sh")}
     text = run(dict(recorded, PANE_TEST_RC="4"))
     got = seen() or {}
     check("recorded-argv", got.get("argv"), ["--session-id", "0000", "-n", "demo/code", PROMPT])
@@ -308,7 +308,7 @@ echo "rc=$?"
     probe = os.path.join(tmp, "keys.sh")
     pressed = os.path.join(tmp, "pressed")
     with open(probe, "w") as fh:
-        fh.write('source "%s/ui.sh"\nPANE_KEYS=(keys_probe)\n'
+        fh.write('source "%s/core/ui.sh"\nPANE_KEYS=(keys_probe)\n'
                  'keys_probe() { echo "[$1]" >> "%s"; }\n' % (LIB, pressed))
     text = run({"PANE_TEST_SLEEP": "4", "PANE_TEST_PRELOAD": probe}, keys_at=(2.5, b"g"))
     with open(pressed) as fh:
@@ -338,7 +338,7 @@ sleep "${PANE_TEST_SLEEP:-0}"
             os.remove(f)
     plain = os.path.join(tmp, "plain.sh")
     with open(plain, "w") as fh:
-        fh.write('source "%s/ui.sh"\n' % LIB)
+        fh.write('source "%s/core/ui.sh"\n' % LIB)
     text = run({"PANE_TEST_SLEEP": "6", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": plain},
                keys_at=[(0.5, b"r"), (1.1, b"r")], keys_after=b"Keys here")
     got = launched()
@@ -369,7 +369,7 @@ sleep "${PANE_TEST_SLEEP:-0}"
     step = os.path.join(tmp, "step.sh")
     with open(step, "w") as fh:
         # A live watcher: its kind and a pid that runs (this script's own).
-        fh.write('source "%s/ui.sh"\necho "plan $$" > "%s/sclaude-watch-0000"\n' % (LIB, tmp))
+        fh.write('source "%s/core/ui.sh"\necho "plan $$" > "%s/sclaude-watch-0000"\n' % (LIB, tmp))
     text = run({"PANE_TEST_SLEEP": "9", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": step},
                keys_at=[(0.5, b"k"), (1.0, b"k"), (1.5, b"n"), (2.0, b"N"), (2.5, b"R"), (3.0, b"R")], keys_after=b"Keys here")
     check("R-ends-it-once", len(launched()), 1)
@@ -381,7 +381,7 @@ sleep "${PANE_TEST_SLEEP:-0}"
     check("case-is-another-key", "press N again to finish" in text, True)
     # A status line never wraps: a wrapped one is drawn again under itself
     # every second.
-    with open(os.path.join(LIB, "pane.sh")) as fh:
+    with open(os.path.join(LIB, "core", "pane.sh")) as fh:
         check("status-line-does-not-wrap", "\\033[?7l" in fh.read(), True)
     os.remove(ctl)
     os.remove(os.path.join(tmp, "sclaude-watch-0000"))
@@ -395,7 +395,7 @@ sleep "${PANE_TEST_SLEEP:-0}"
     with open(os.path.join(tdir, "old.jsonl"), "w") as fh:
         fh.write(json.dumps({"type": "continued-in", "continuedInSessionId": "new"}) + "\n")
     open(os.path.join(tdir, "new.jsonl"), "w").close()
-    script = ('source "%s/state.sh"; source "%s/pane.sh"; cd "%s"; HOME="%s"\n'
+    script = ('source "%s/core/state.sh"; source "%s/core/pane.sh"; cd "%s"; HOME="%s"\n'
               'resume_latest --resume old -n old "--resume"; echo "${CLAUDE_LATEST[*]}"\n'
               'resume_latest --session-id old -n x; echo "${CLAUDE_LATEST[*]}"\n'
               'resume_latest --resume other; echo "${CLAUDE_LATEST[*]}"\n') % (LIB, LIB, wt, home)
@@ -416,7 +416,7 @@ try:
     def last_exit(text):
         with open(log, "w") as fh:
             fh.write(text)
-        script = 'source "%s/pane.sh"; pane_last_exit "%s"' % (LIB, wt)
+        script = 'source "%s/core/pane.sh"; pane_last_exit "%s"' % (LIB, wt)
         return subprocess.run(["bash", "-c", script], capture_output=True,
                               text=True).stdout.splitlines()
 

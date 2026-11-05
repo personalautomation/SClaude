@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 #
 # A test bench for what the metrics page counts beyond DORA: Claude's
-# sessions from its transcripts (sclaude/lib/claude_usage.py), and the quality
-# of the work from sclaude's own records (sclaude/lib/dev_quality.py).
+# sessions from its transcripts (sclaude/lib/metrics/claude_usage.py), and the quality
+# of the work from sclaude's own records (sclaude/lib/metrics/dev_quality.py).
 #
 # The transcripts are written here in Claude Code's shape, cut down to the
 # lines that are read. What is guarded is the counting: a cumulative cost
@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "sclaude", "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import claude_usage  # noqa: E402
 import dev_quality  # noqa: E402
 import metrics_extra as mx  # noqa: E402

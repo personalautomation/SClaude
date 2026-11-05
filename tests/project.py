@@ -45,7 +45,7 @@ def check_true(name, got):
         failures.append((name, "true", got))
 
 
-def run_bash(script, cwd, modules=("io", "ui", "state", "project", "environment")):
+def run_bash(script, cwd, modules=("core/io", "core/ui", "core/state", "core/project", "core/environment")):
     body = "set -uo pipefail\n"
     body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
     for name in modules:
@@ -62,7 +62,7 @@ def run_bash(script, cwd, modules=("io", "ui", "state", "project", "environment"
 
 
 def detect(root):
-    out = subprocess.run([sys.executable, os.path.join(LIB, "project_init.py"), root],
+    out = subprocess.run([sys.executable, os.path.join(LIB, "core", "project_init.py"), root],
                          capture_output=True, text=True, timeout=30,
                          env=dict(os.environ, SCLAUDE_INIT_OFFLINE="1"))
     try:
@@ -151,7 +151,7 @@ try:
         out, _, _ = run_bash('REPO=%s; project_demo_mode' % modes, tmp)
         check("demo-mode-%s" % cfg.get("demo", "absent"), out.strip(), want)
     for demo, want in (("1", True), ("", False)):
-        text = subprocess.run([sys.executable, os.path.join(LIB, "render_prompt.py"),
+        text = subprocess.run([sys.executable, os.path.join(LIB, "cycle", "render_prompt.py"),
                                os.path.join(LIB, "..", "prompts", "code.md"),
                                os.path.join(LIB, "..", "prompts")],
                               capture_output=True, text=True,
@@ -238,11 +238,11 @@ try:
     # library. These are the exact strings that used to be written into it, and
     # a comment mentioning them is fine — a line of code is not.
     for module, needles in (
-            ("regression.sh", [".vercel.app", "REGRESSION_LOCAL_PARTS="]),
-            ("deploy.sh", ["supabase/migrations"]),
-            ("vercel.sh", ["supabase/migrations"]),
-            ("shipped.sh", ["supabase/migrations"]),
-            ("rollback.sh", ["POSTGRES_URL_NON_POOLING", ".env.prod"]),
+            ("ship/regression.sh", [".vercel.app", "REGRESSION_LOCAL_PARTS="]),
+            ("ship/deploy.sh", ["supabase/migrations"]),
+            ("ship/vercel.sh", ["supabase/migrations"]),
+            ("ship/shipped.sh", ["supabase/migrations"]),
+            ("ship/rollback.sh", ["POSTGRES_URL_NON_POOLING", ".env.prod"]),
     ):
         path = os.path.join(LIB, module)
         with open(path, encoding="utf-8") as fh:
@@ -353,6 +353,7 @@ try:
     # taken for which role, and that a board with no such option leaves the
     # role out rather than inventing it.
     sys.path.insert(0, LIB)
+    import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
     import project_init
     board_repo = os.path.join(tmp, "board")
     os.makedirs(board_repo)
@@ -395,7 +396,7 @@ finally:
 # from `manuals` in its config, and say so when it names none.
 _mtmp = tempfile.mkdtemp()
 try:
-    _mn = os.path.join(LIB, "manual_names.py")
+    _mn = os.path.join(LIB, "cycle", "manual_names.py")
     def _names():
         return subprocess.run([sys.executable, _mn, _mtmp], capture_output=True, text=True).stdout.strip()
     check("manuals-none", _names().startswith("none"), True)

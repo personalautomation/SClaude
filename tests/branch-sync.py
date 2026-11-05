@@ -73,7 +73,7 @@ try:
 
     def start(answer, call=None, **env):
         script = ('BOLD=""; OFF=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""\n'
-                  'REPO=%s\nsource %s/io.sh; source %s/ui.sh; source %s/state.sh; source %s/steps.sh; source %s/worktree.sh; source %s/deferred.sh; source %s/sync.sh\n'
+                  'REPO=%s\nsource %s/core/io.sh; source %s/core/ui.sh; source %s/core/state.sh; source %s/core/steps.sh; source %s/tree/worktree.sh; source %s/improve/deferred.sh; source %s/tree/sync.sh\n'
                   'warn(){ echo "$*"; }; info(){ echo "$*"; }; unset ASK_DIR\n'
                   'ask() { echo "ASKED $1"; printf -v "$2" %%s "$ANSWER"; }\n'
                   'sync_with_main() { echo "SYNC $2 $3"; eval "${SYNC_DOES:-}"; return "${SYNC_RC:-3}"; }\n'

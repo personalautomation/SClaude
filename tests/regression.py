@@ -3,7 +3,7 @@
 # A test bench for the regression gate: which parts a stage runs, what command
 # each part becomes, and how a run is summarised.
 #
-# These are the pure halves of sclaude/lib/regression.sh — the ones that decide
+# These are the pure halves of sclaude/lib/ship/regression.sh — the ones that decide
 # what will be run before anything is. They are worth a bench precisely because
 # a mistake in them is silent: a stage that quietly runs no parts reports itself
 # green, and a gate that reports green is a gate that is not there.
@@ -31,11 +31,12 @@ def _cfg(path):
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "sclaude", "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 
 regression = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
-                  encoding="utf-8").read() for _m in ("regression.sh", "regression_gate.sh", "regression_fix.sh"))
+                  encoding="utf-8").read() for _m in ("ship/regression.sh", "ship/regression_gate.sh", "ship/regression_fix.sh"))
 github = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
-              encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
+              encoding="utf-8").read() for _m in ("github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh"))
 # The prompt a fixing session is opened with. It is checked here rather than in
 # a bench of its own because what it sanctions and what the gate does about it
 # are one mechanism: the file tells the session it may end by writing a note,
@@ -134,7 +135,7 @@ def board(config, body):
         if config is not None:
             with open(_cfg(os.path.join(tmp, ".sclaude/config.json")), "w") as fh:
                 json.dump(config, fh)
-        script = 'REPO=%s\nsource %s/sclaude/lib/project.sh\nboard_load\n%s\n' % (
+        script = 'REPO=%s\nsource %s/sclaude/lib/core/project.sh\nboard_load\n%s\n' % (
             tmp, ROOT, body)
         return _sp.run(["bash", "-c", script], capture_output=True,
                        text=True).stdout.strip()
@@ -158,7 +159,7 @@ check("board-partial", board({"board": {"columns": {"qa": "Check"}}}, VARS),
 check("board-empty-moves-nothing", board(None, """
 info() { :; }; warn() { :; }
 gh() { echo CALLED >> "$REPO/gh-calls"; }; gh_repo() { echo o/r; }
-source %s/sclaude/lib/board.sh
+source %s/sclaude/lib/github/board.sh
 issue_qa_ready 7
 issue_start_progress 7
 cat "$REPO/gh-calls" 2>/dev/null
@@ -171,7 +172,7 @@ cat "$REPO/gh-calls" 2>/dev/null
 NOTICE = """
 info() { echo "INFO $*"; }; warn() { :; }
 gh() { :; }; gh_repo() { echo o/r; }
-source %s/sclaude/lib/board.sh
+source %s/sclaude/lib/github/board.sh
 issue_qa_ready 7
 issue_start_progress 7
 """ % ROOT
@@ -211,7 +212,7 @@ with _tf.TemporaryDirectory() as wtmp:
           verdict({"columns": {"back": "Doing", "done": "Shipped"}}), "other")
 
 # The watcher runs with no project in reach, so watch_start hands it the names.
-watch_src = open(os.path.join(ROOT, "sclaude", "lib", "watch.sh"), encoding="utf-8").read()
+watch_src = open(os.path.join(ROOT, "sclaude", "lib", "cycle", "watch.sh"), encoding="utf-8").read()
 check_true("watch-file-carries-back", 'state_set "$file" columns.back "$QA_FROM"' in watch_src)
 check_true("watch-file-carries-done", 'state_set "$file" columns.done "$QA_DONE"' in watch_src)
 watcher = open(os.path.join(ROOT, "bin", "sclaude-watch"), encoding="utf-8").read()
@@ -227,7 +228,7 @@ check_true("watcher-can-be-quiet", "SCLAUDE_WATCH_QUIET" in watcher)
 # QA_TO unconditionally, which made the watcher's first comparison a false alarm
 # whenever the QA move had not gone through — the case this whole guard exists
 # for. The literal spelling is what would reintroduce it.
-watch_sh_early = open(os.path.join(ROOT, "sclaude", "lib", "watch.sh"), encoding="utf-8").read()
+watch_sh_early = open(os.path.join(ROOT, "sclaude", "lib", "cycle", "watch.sh"), encoding="utf-8").read()
 check_true("watch-status-not-assumed",
            'state_set "$file" status "$QA_TO"' not in watch_sh_early)
 
@@ -236,7 +237,7 @@ check_true("watch-status-not-assumed",
 # offset is silently wrong by that offset — and wrong in the direction that
 # drops comments rather than repeating them, which is the direction nobody
 # notices. `date -Iseconds` is the spelling that would reintroduce it.
-watch_sh = open(os.path.join(ROOT, "sclaude", "lib", "watch.sh"), encoding="utf-8").read()
+watch_sh = open(os.path.join(ROOT, "sclaude", "lib", "cycle", "watch.sh"), encoding="utf-8").read()
 since_line = re.search(r'state_set "\$file" since "(.*)"', watch_sh)
 check_true("watch-since-exists", since_line is not None)
 if since_line:
@@ -366,8 +367,8 @@ if gate is not None:
     # stage the gate serves, or its first red would open a session with no
     # rerun. Every such reset outside the gate is found, not listed.
     found = 0
-    for lib in sorted(glob.glob(os.path.join(ROOT, "bin", "*")) + glob.glob(os.path.join(ROOT, "sclaude", "lib", "*.sh"))):
-        if lib.endswith(("regression.sh", "regression_gate.sh", "regression_fix.sh")) or not os.path.isfile(lib):
+    for lib in sorted(glob.glob(os.path.join(ROOT, "bin", "*")) + glob.glob(os.path.join(ROOT, "sclaude", "lib", "*", "*.sh"))):
+        if lib.endswith(("ship/regression.sh", "ship/regression_gate.sh", "ship/regression_fix.sh")) or not os.path.isfile(lib):
             continue
         try:
             lines = open(lib, encoding="utf-8").read().splitlines()
@@ -414,7 +415,7 @@ if gate is not None:
                          fix_body) is not None)
     check_true("resumed-feed-does-not-claim-a-fix",
                "still red after its fix" not in fix_body)
-    run_src = open(os.path.join(ROOT, "sclaude", "lib", "run.sh"), encoding="utf-8").read()
+    run_src = open(os.path.join(ROOT, "sclaude", "lib", "cycle", "run.sh"), encoding="utf-8").read()
     # The short-circuit keeps the mark, so a check left on the way comes back
     # to it, and a run_step from inside after_step's checks (step 4's open
     # threads) opens the session rather than coming round to it again.
@@ -449,7 +450,7 @@ if gate is not None:
           run_src.count('state_set "$state" "steps.$step.gate" true\n        if ! regression_gate "$wt" "$slug" local'), 2)
     check_true("after-step-drops-the-gate-mark-on-taken-over",
                re.search(r'REGRESSION_TAKEN_OVER:-\}" \]\] && state_set "\$state" "steps\.\$step\.gate" null',
-                         open(os.path.join(ROOT, "sclaude", "lib", "run.sh"),
+                         open(os.path.join(ROOT, "sclaude", "lib", "cycle", "run.sh"),
                               encoding="utf-8").read())
                is not None)
 # The note is addressed to the human, so the run must not destroy it on its way
@@ -529,7 +530,7 @@ if rewind:
     # that the helper still clears both fields, since a `finished` left from a
     # previous pass claims in the issue's summary a completeness that is gone.
     check_true("rewind-uses-the-shared-helper", "step_rewind_to" in body)
-    steps_src = open(os.path.join(ROOT, "sclaude", "lib", "steps.sh"),
+    steps_src = open(os.path.join(ROOT, "sclaude", "lib", "core", "steps.sh"),
                      encoding="utf-8").read()
     helper = re.search(r"step_rewind_to\(\)\s*\{(.*?)\n\}", steps_src, re.S)
     check_true("shared-helper-found", helper is not None)
@@ -545,7 +546,7 @@ if rewind:
 # The gate is wired into after_step, and before the step is recorded done —
 # otherwise it gates nothing.
 run_sh = "".join(open(os.path.join(ROOT, "sclaude", "lib", m), encoding="utf-8").read()
-                 for m in ("run.sh", "friction.sh"))
+                 for m in ("cycle/run.sh", "improve/friction.sh"))
 check_true("gate-wired-into-after-step", "regression_gate" in run_sh)
 gate_at = run_sh.find("regression_gate")
 done_at = run_sh.find('state_set "$state" "steps.$step.done" true')
@@ -559,7 +560,7 @@ check_true("gate-before-done", -1 < gate_at < done_at)
 # already rewound the cycle to step 4, so continuing on to the merge, the
 # clean-up and production offers to delete the worktree the next fixing
 # session needs.
-deploy = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+deploy = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
 check_true("prod-gate-not-swallowed",
            re.search(r'regression_gate "\$wt" "\$slug" prod \|\| true', deploy) is None)
 # Production does not go through the gate at all, and that is the point.
@@ -594,7 +595,7 @@ check_true("nothing-fixes-before-the-rollback",
 # The confirmation run is a stage of its own, never the gate. A red one must not
 # open a fixing session: what failed is the release *before* this feature, and no
 # session on this branch can mend it.
-rollback_sh = open(os.path.join(ROOT, "sclaude", "lib", "rollback.sh"),
+rollback_sh = open(os.path.join(ROOT, "sclaude", "lib", "ship", "rollback.sh"),
                    encoding="utf-8").read()
 check_true("confirmation-is-its-own-stage",
            re.search(r'regression_run "\$wt" "\$slug" rollback', rollback_sh) is not None)
@@ -618,7 +619,7 @@ check_true("clear-mark-skips-unknown-stages",
                      regression) is not None)
 check_true("rewind-skips-unknown-stages",
            re.search(r'\*\)\s*return 0 ;;', regression) is not None)
-github_sh = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
+github_sh = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh"))
 label_fn = github_sh[github_sh.index("regression_red_label() {"):]
 label_fn = label_fn[:label_fn.index("\n}")]
 check_true("no-red-label-for-the-rollback-stage", "rollback" not in label_fn)
@@ -681,12 +682,12 @@ check_true("notifier-uses-instruments",
            'notify_feature "$slug"' in regression
            and '"${INSTRUMENTS:-}/bin/sclaude-notify"'
            in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                                "sclaude", "lib", "io.sh")).read())
+                                "sclaude", "lib", "core", "io.sh")).read())
 
 # What the watcher found is consumed once. Left uncleared, the same QA
 # comments were prepended to every later resume — and suppressed the accurate
 # review_news message, because the QA branch is tested first.
-watch_sh_2 = open(os.path.join(ROOT, "sclaude", "lib", "watch.sh"),
+watch_sh_2 = open(os.path.join(ROOT, "sclaude", "lib", "cycle", "watch.sh"),
                   encoding="utf-8").read()
 check_true("watch-seen-exists", re.search(r"^watch_seen\(\)", watch_sh_2, re.M) is not None)
 check_true("watch-seen-clears-verdict", 'state_set "$file" verdict null' in watch_sh_2)
@@ -799,11 +800,11 @@ check_true("issue-shows-preview-url", 'out.append("Preview: %s"' in github)
 # overwrote the one after step 2, and its session id was gone. Nothing read
 # that id, so the loss stayed invisible — until the issue's summary wanted to
 # name every review.
-state_sh = open(os.path.join(ROOT, "sclaude", "lib", "state.sh"),
+state_sh = open(os.path.join(ROOT, "sclaude", "lib", "core", "state.sh"),
                 encoding="utf-8").read()
-actions_sh = open(os.path.join(ROOT, "sclaude", "lib", "actions.sh"),
+actions_sh = open(os.path.join(ROOT, "sclaude", "lib", "commands", "actions.sh"),
                   encoding="utf-8").read()
-sclaude = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+sclaude = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 
 check_true("friction-pending-exists",
            re.search(r"^friction_pending\(\)", state_sh, re.M) is not None)
@@ -1116,7 +1117,7 @@ check_true("environment-check-skips-local",
 #
 # The merge is the one part of the cycle that is a person's alone. Step 4 used
 # to exit and leave them to remember `sclaude <feature>`; it waits instead.
-steps_sh = open(os.path.join(ROOT, "sclaude", "lib", "steps.sh"),
+steps_sh = open(os.path.join(ROOT, "sclaude", "lib", "core", "steps.sh"),
                 encoding="utf-8").read()
 # Half a minute is the service value, and it is the default rather than a
 # literal: the integration bench overrides it, because a whole `sclaude
@@ -1133,7 +1134,7 @@ check_true("qa-poll-is-validated",
 # put the merge ahead of the preview and QA. remind_prod waits for QA, then for
 # the merge, and both say so.
 deploy_sh = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
-                 encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+                 encoding="utf-8").read() for _m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
 check_true("review-no-longer-waits-for-the-merge",
            re.search(r'while \[\[ "\$\(branch_pr_state "\$branch"\)" != "MERGED" \]\]', run_sh)
            is None)
@@ -1220,8 +1221,8 @@ def command_for(part, base, cmd, dev_env=None, email=None, stage=""):
         script = """
 INSTRUMENTS=%s
 project_command() { printf '%%s' %s; }
-source %s/sclaude/lib/developer.sh
-source %s/sclaude/lib/regression.sh
+source %s/sclaude/lib/core/developer.sh
+source %s/sclaude/lib/ship/regression.sh
 regression_command %s %s '' %s
 """ % (tmp, shlex.quote(cmd), ROOT, ROOT, part, shlex.quote(base), shlex.quote(stage))
         env = {k: v for k, v in os.environ.items()
@@ -1301,7 +1302,7 @@ def intruded(stage, started, finished):
         "https://late.app\\tmno\\tREADY\\t1790079200000\\t1790079300000",
     ])
     script = """
-source %s/sclaude/lib/regression.sh
+source %s/sclaude/lib/ship/regression.sh
 vercel_prod_deployments() { printf '%s\\n'; }
 regression_deploy_intruded %s %s %s && echo YES || echo NO
 """ % (ROOT, rows, stage, shlex.quote(started), shlex.quote(finished))
@@ -1327,7 +1328,7 @@ check("intruded-local-offset",
 check("intruded-preview-never", intruded("preview", START, END), "NO")
 check("intruded-no-times", intruded("prod", "", ""), "NO")
 
-deploy_src = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+deploy_src = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
 check_true("intrusion-checked-before-rollback",
            -1 < deploy_src.find("regression_deploy_intruded prod")
            < deploy_src.find("rollback_prod \"$wt\" \"$slug\" --auto"))
@@ -1371,8 +1372,8 @@ def manual_parts(config, edit, ancestor=True):
         git("commit", "-qm", "edit")
         now = git("rev-parse", "HEAD")
         script = """
-source %s/sclaude/lib/project.sh
-source %s/sclaude/lib/regression.sh
+source %s/sclaude/lib/core/project.sh
+source %s/sclaude/lib/ship/regression.sh
 regression_manual_parts %s %s %s || echo NONE
 """ % (ROOT, ROOT, tmp, was, now)
         return subprocess.run(["bash", "-c", script], capture_output=True,
@@ -1457,7 +1458,7 @@ def preview_gate(deployed, runs, fix_commits=True, ship_ok=True, verdict=None, n
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
         body += 'REGRESSION_MAX_ATTEMPTS=2; SELF=sclaude\n'
-        for name in ("io", "ui", "steps", "state", "worktree", "regression", "regression_gate", "regression_fix", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
+        for name in ("core/io", "core/ui", "core/steps", "core/state", "tree/worktree", "ship/regression", "ship/regression_gate", "ship/regression_fix", "ship/deploy", "ship/shipped", "ship/vercel", "ship/qa", "ship/merge", "ship/demo"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += """
 warn() { :; }; info() { :; }; say() { :; }; alarm() { :; }
@@ -1527,7 +1528,7 @@ def run_logs():
             json.dump({"rollback": {"prod": {"code": "done", "log": old}}}, fh)
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
-        for name in ("io", "ui", "steps", "state", "worktree", "regression", "regression_gate", "regression_fix"):
+        for name in ("core/io", "core/ui", "core/steps", "core/state", "tree/worktree", "ship/regression", "ship/regression_gate", "ship/regression_fix"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += r"""
 wt="%s"; st="$wt/.sclaude/local/feature/state.json"; log="$wt/.sclaude/local/feature/regression.log"
@@ -1561,10 +1562,10 @@ check("run-logs-kept-and-named",
       [l for l in run_logs() if l],
       ["FILES 5", "LATEST second red run", "SINCE FIRST", "NAMED", "OWN", "PROD-KEPT", "STAGE OWN SET", "GREEN CLEARS"])
 # The other logs a fixing session reads are kept the same way.
-for path, fn, call in (("sclaude/lib/worktree.sh", "ensure_dev", 'log_new "$wt" dev.log dev'),
-                       ("sclaude/lib/regression.sh", "regression_serve_build",
+for path, fn, call in (("sclaude/lib/tree/worktree.sh", "ensure_dev", 'log_new "$wt" dev.log dev'),
+                       ("sclaude/lib/ship/regression.sh", "regression_serve_build",
                         'log_new "$wt" e2e-server.log e2e-server'),
-                       ("sclaude/lib/sync.sh", "merge_build_check",
+                       ("sclaude/lib/tree/sync.sh", "merge_build_check",
                         'log_new "$wt" merge-check.log merge-check')):
     src = open(os.path.join(ROOT, path), encoding="utf-8").read()
     body = re.search(r"\n%s\(\)\s*\{(.*?)\n\}" % fn, src, re.S)
@@ -1604,7 +1605,7 @@ def ship_failed(fix_rc, commits, began=""):
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
         body += 'REGRESSION_MAX_ATTEMPTS=2; SELF=sclaude; INSTRUMENTS="%s"\n' % inst
-        for name in ("io", "ui", "steps", "state", "worktree", "regression", "regression_gate", "regression_fix", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
+        for name in ("core/io", "core/ui", "core/steps", "core/state", "tree/worktree", "ship/regression", "ship/regression_gate", "ship/regression_fix", "ship/deploy", "ship/shipped", "ship/vercel", "ship/qa", "ship/merge", "ship/demo"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += """
 warn() { :; }; info() { :; }; say() { :; }; alarm() { :; }
@@ -1662,7 +1663,7 @@ def rewound(stage):
         with open(state, "w") as fh:
             json.dump({"pr": 7, "regression": {"preview": {"status": "passed"}}}, fh)
         body = "set -uo pipefail\n"
-        for name in ("io", "ui", "steps", "state", "regression", "regression_gate", "regression_fix"):
+        for name in ("core/io", "core/ui", "core/steps", "core/state", "ship/regression", "ship/regression_gate", "ship/regression_fix"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += ('info() { :; }; issue_sync() { :; }; step_rewind_to() { :; }\n'
                  'regression_rewind "%s" demo %s\n' % (wt, stage))
@@ -1692,7 +1693,7 @@ def held(regression):
         with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             json.dump({"pr": 7, "regression": {"prod": regression}}, fh)
         body = "set -uo pipefail\nSELF=sclaude\n"
-        for name in ("io", "ui", "steps", "state", "regression", "regression_gate", "regression_fix", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
+        for name in ("core/io", "core/ui", "core/steps", "core/state", "ship/regression", "ship/regression_gate", "ship/regression_fix", "ship/deploy", "ship/shipped", "ship/vercel", "ship/qa", "ship/merge", "ship/demo"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += ('alarm() { echo "ALARM $*"; }; info() { echo "$*"; }\n'
                  'prod_red_hold "%s" demo\n' % wt)
@@ -1710,7 +1711,7 @@ out = held({"status": "failed", "intruded": "https://other.app"})
 check_true("hold-intruded-says-so", "another release on top" in out
            and "Rolling back would take that release away too" in out)
 
-deploy_src = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+deploy_src = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
 remind_src = re.search(r"^remind_prod\(\) \{\n.*?^\}\n", deploy_src, re.S | re.M).group(0)
 hold_at = remind_src.find("prod_red_hold \"$wt\" \"$slug\"")
 check_true("hold-before-everything",
@@ -1738,7 +1739,7 @@ check_true("unrunnable-recorded",
 
 # The ways out: production's suite by hand records its result and on green
 # lifts the hold; a rollback by hand puts the cycle back on the review.
-sclaude_src = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+sclaude_src = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 creg = re.search(r"^cmd_regression\(\) \{\n.*?^\}\n", sclaude_src, re.S | re.M).group(0)
 check_true("regression-by-hand-runs-prod", 'regression_run "$wt" "$slug" prod' in creg
            and 'regression_clear_mark "$wt" prod' in creg and "rollback_prod" not in creg)
@@ -1924,7 +1925,7 @@ def serve_command(main_cmds, tree_cmds):
         os.makedirs(wt, exist_ok=True)
         # `set -e` up to the call and a mark after it: an empty answer counts
         # only from a script that ran, or a broken source would pass as "".
-        script = ('set -e\nREPO=%s\nsource %s/sclaude/lib/project.sh\n%s\nset +e\n'
+        script = ('set -e\nREPO=%s\nsource %s/sclaude/lib/core/project.sh\n%s\nset +e\n'
                   'regression_serve_command %s\necho ran\n') % (repo, ROOT, serve_fn.group(0), wt)
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
         lines = out.stdout.strip().split("\n")
@@ -2010,7 +2011,7 @@ notify_fns = "\n".join(re.search(r"^%s\(\) \{.*?^\}" % n, regression, re.S | re.
 
 
 def notified(call):
-    script = ('source "%s/steps.sh"\n'
+    script = ('source "%s/core/steps.sh"\n'
               'notify_feature() { local slug="$1"; shift; printf "%%s|%%s\\n" "$slug" "$*"; }\n'
               % os.path.join(ROOT, "sclaude", "lib")) + notify_fns + "\n" + call
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True,

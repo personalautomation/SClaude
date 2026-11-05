@@ -82,7 +82,7 @@ def world(tmp, branch_file, main_file, pushed=False, pr=None):
 def run(repo, wt):
     script = ('set -uo pipefail\ninfo() { echo "INFO $*"; }\nwarn() { echo "WARN $*"; }\n'
               'LIB="%s"; REPO="%s"\n'
-              'for m in state project scratch deferred worktree; do source "$LIB/$m.sh"; done\n'
+              'for m in core/state core/project core/scratch improve/deferred tree/worktree; do source "$LIB/$m.sh"; done\n'
               'sync_unpublished "%s"; echo "rc=$?"' % (LIB, repo, wt))
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                           env=ENV, timeout=60).stdout

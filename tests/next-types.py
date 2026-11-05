@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# check_next_types (sclaude/lib/worktree.sh) warns that a fresh worktree has no
+# check_next_types (sclaude/lib/tree/worktree.sh) warns that a fresh worktree has no
 # .next/types for its typecheck, and keeps quiet where the warning is wrong:
 #
 #   * a tsconfig.json that does not include .next/types needs no build;
@@ -27,7 +27,7 @@ def check(name, got, want):
         failures.append((name, want, got))
 
 
-with open(os.path.join(LIB, "worktree.sh")) as fh:
+with open(os.path.join(LIB, "tree", "worktree.sh")) as fh:
     m = re.search(r"^check_next_types\(\) \{\n.*?^\}\n", fh.read(), re.S | re.M)
 FUNC = m.group(0) if m else ""
 check("function-present", bool(FUNC), True)

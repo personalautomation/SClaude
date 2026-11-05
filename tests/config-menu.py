@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# The `config` screen (sclaude/lib/config.sh, config_menu.py): every section of
+# The `config` screen (sclaude/lib/core/config.sh, config_menu.py): every section of
 # the project's .sclaude/config.json with its value and its explanation.
 #
 # Guarded here:
@@ -24,7 +24,7 @@ import tempfile
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
 EXAMPLE = os.path.join(ROOT, "sclaude", "config.example.json")
-MENU = os.path.join(LIB, "config_menu.py")
+MENU = os.path.join(LIB, "core", "config_menu.py")
 
 failures = []
 
@@ -109,7 +109,7 @@ try:
     wt = os.path.join(tmp, "wt")
     write(config, {"review": "local"})
     write(os.path.join(wt, ".sclaude", "config.json"), {"review": "off"})
-    script = 'source "%s/project.sh"; REPO=%s; project_review_mode %s' % (LIB, repo, wt)
+    script = 'source "%s/core/project.sh"; REPO=%s; project_review_mode %s' % (LIB, repo, wt)
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.strip()
     check("main-checkout-first", out, "local")
     write(config, {})
@@ -120,7 +120,7 @@ try:
     # drives the review where nobody chose; its README line names a row.
     check("sleep-choices", [l.split("\t")[0] for l in menu("choices", "sleep_mode")[1].splitlines()],
           ["auto", "on", "off"])
-    sleep = 'source "%s/project.sh"; REPO=%s; project_sleep_mode %s' % (LIB, repo, wt)
+    sleep = 'source "%s/core/project.sh"; REPO=%s; project_sleep_mode %s' % (LIB, repo, wt)
     for value, want in (("off", "off"), ("on", "on"), ("asleep", "auto"), (None, "auto")):
         write(config, {} if value is None else {"sleep_mode": value})
         out = subprocess.run(["bash", "-c", sleep], capture_output=True, text=True).stdout.strip()
@@ -147,14 +147,14 @@ try:
     check_true("qa-row-explained", "who accepts" in rows.get("qa", ""))
     for value, want in (("", "github"), ("auto", "auto"), ("sometimes", "github")):
         write(config, {"qa": value, "merge": value} if value else {})
-        script = 'source "%s/project.sh"; REPO=%s; project_flow_mode qa; project_flow_mode merge' % (LIB, repo)
+        script = 'source "%s/core/project.sh"; REPO=%s; project_flow_mode qa; project_flow_mode merge' % (LIB, repo)
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.split()
         check("flow-mode-%s" % (value or "absent"), out,
               [want, "both" if want == "github" else want])
     # The flow and the screen agree on what an absent key means: the defaults
     # live in two files, and this is what ties them.
     write(config, {})
-    script = 'source "%s/project.sh"; REPO=%s; project_flow_mode qa; project_flow_mode merge' % (LIB, repo)
+    script = 'source "%s/core/project.sh"; REPO=%s; project_flow_mode qa; project_flow_mode merge' % (LIB, repo)
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.split()
     check("flow-default-is-the-screen-default", out,
           [menu("default", "qa")[1].strip(), menu("default", "merge")[1].strip()])
@@ -162,7 +162,7 @@ try:
     # `sclaude config set`, which the bot's menu calls: the same write as the
     # screen's, and review's Actions follow it.
     write(config, {"review": "github"})
-    script = ('LIB=%s; source "$LIB/config.sh"; REPO=%s; GREEN=; OFF=\n'
+    script = ('LIB=%s; source "$LIB/core/config.sh"; REPO=%s; GREEN=; OFF=\n'
               'say() { echo "S:$*"; }; info() { :; }; warn() { echo "W:$*"; }\n'
               'require_repo() { :; }; die() { echo "D:$*"; exit 1; }\n'
               'review_actions_sync() { echo "SYNC:$2"; }\n'

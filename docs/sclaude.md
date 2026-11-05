@@ -70,8 +70,9 @@ written into the library; now they are `board` in `.sclaude/config.json`, the wi
 reads them off the repository's project board and shows them for confirmation,
 and a column that is not named is a move that is not made.
 
-The script itself holds the environment, the commands and the argument parsing;
-the body is spread across `sclaude/lib/*.sh` and pulled in with `source`. That
+The script itself holds the environment and `main`'s dispatch; the body — the
+commands included — is spread across `sclaude/lib/<folder>/*.sh` and pulled in
+with `source`. That
 is not only about readability: the friction review session edits `bin/sclaude`
 while it is executing, and bash reads a script lazily, by offset — an edit in
 place shifts everything the process has not read yet. A module pulled in with
@@ -105,55 +106,75 @@ orchestrator"). No session sclaude runs changes or pushes the checkout: what a
 session changes in sclaude it makes in its tree's workshop, and sclaude
 publishes it (see "The workshop" below).
 
+`sclaude/lib` keeps its modules, shell and Python side by side, in folders by
+what they do:
+
+| Folder | What lives there |
+| --- | --- |
+| `core/` | what everything else stands on: the question channel, the terminal, state, steps, the project's config, the environments, who is running it |
+| `cycle/` | launching a step and its session: the prompt, the watcher, the session's end, the plan, the acceptance criteria |
+| `commands/` | the `sclaude` commands: new, resume, the menu, status, the moves between steps, done, the action list, doctor |
+| `review/` | step 4: the rounds, the closing gate, the local review, the pull request's context, the reports |
+| `github/` | issues and pull requests: the issue's sync, the board, the outcome, the issue's context and blockers |
+| `ship/` | after step 4: the epilogue, deploys, QA, the merge, the regression and its gate, rollback, the demo's refresh |
+| `tree/` | a feature's tree: the worktree, its branch, its database, its dev server's sign-in, the sync with main |
+| `improve/` | sclaude improving itself: the friction review, deferred friction, the retrospective, the workshop, policy |
+| `metrics/` | the DORA page and the cycle's metrics |
+| `flow/` | the process map |
+
+Modules import one another by bare name: `sclaude/lib/_path.py`, imported by
+every entry point, puts every folder on `sys.path`. A name is one module's
+alone, and none takes a standard module's name; `tests/paths.py` checks both.
+
 | File | What is in it |
 | --- | --- |
 | `bin/sclaude` | the environment, the modules it sources, `main` and its dispatch |
-| `sclaude/lib/start.sh` | `sclaude new` and its options, `sclaude <feature>`, `sclaude issue` |
-| `sclaude/lib/menu.sh` | `sclaude status` and the menu `sclaude` opens with no arguments |
-| `sclaude/lib/step_commands.sh` | moving a feature between steps by hand: replan, return, reset, the friction review, the regression, the epilogue |
-| `sclaude/lib/done.sh` | `sclaude done`: closing a merged feature |
-| `sclaude/lib/feature_commands.sh` | `sync`, `news`, `preview`, `rollback`, `dev` on a feature in work |
-| `sclaude/lib/ui.sh` | questions to the human, answers, colours |
-| `sclaude/lib/io.sh` | the question-answer channel: the same question in the terminal and in Telegram |
-| `sclaude/lib/steps.sh` | the table of steps and each one's permissions |
-| `sclaude/lib/project.sh` | what the project says about itself, and the wizard that writes it |
-| `sclaude/lib/environment.sh` | which database this machine's features work against |
-| `sclaude/lib/developer.sh` | who is running it, and whether they maintain the orchestrator (`MAINTAINERS`) |
-| `sclaude/lib/doctor.sh` | `sclaude doctor`: what this machine lacks, with the fix for each gap |
-| `sclaude/lib/state.sh` | the repository, `.sclaude/local/feature/state.json` and the cycle's record |
-| `sclaude/lib/branches.sh` | sorting out branches with nothing left to hold |
-| `sclaude/lib/worktree.sh` | preparing a feature's tree and the dev server |
-| `sclaude/lib/dev_loopback.cjs` | loaded into a feature's server: a listen on every interface goes to 127.0.0.1 |
-| `sclaude/lib/run.sh` | launching a step and the transitions: the session, its end, the checks before the feature goes on |
-| `sclaude/lib/prompt.sh` | a step's prompt with its gathered blocks, and what the product and the person add to it |
-| `sclaude/lib/session_watch.sh` | the markers a session writes when it is done, and the watcher that closes claude on them |
-| `sclaude/lib/acceptance.sh` | the issue's acceptance criteria as a step leaves them |
-| `sclaude/lib/review_round.sh` | step 4's rounds: news since the session looked, the same conversation or a fresh one |
-| `sclaude/lib/review_gate.sh` | closing step 4: the gate on the pull request, the threads the person kept, the reports |
-| `sclaude/lib/friction.sh` | the friction review between steps |
-| `sclaude/lib/instruments.sh` | sclaude's own checkout: taking main, proposing a change, refreshing the units |
-| `sclaude/lib/github.sh` | issues and pull requests through `gh`: the pull request, the issue's link, close and blockers |
-| `sclaude/lib/issue_sync.sh` | the issue's summary, kept in step with the feature |
-| `sclaude/lib/board.sh` | an issue's place on the project board, its dates, the handoff to QA |
-| `sclaude/lib/outcome.sh` | a feature's outcome: its labels, its line in `sclaude status`, the epilogues offered |
-| `sclaude/lib/plan.sh` | step 1's plan from its session's transcript |
-| `sclaude/lib/deploy.sh` | the cycle's epilogue, step by step, and what is said when shipping failed |
-| `sclaude/lib/shipped.sh` | what has already been shipped: deploys per head, production's marks, what rides along |
-| `sclaude/lib/vercel.sh` | running a deploy: vercel or the project's command, a preview with its migrations |
-| `sclaude/lib/qa.sh` | QA on the preview: accepted, missed, a retest, the wait for its verdict |
-| `sclaude/lib/merge.sh` | the merge: what stands in its way, how it is made, the offer and the wait |
-| `sclaude/lib/demo.sh` | the demo recorded again once the preview is green |
-| `sclaude/lib/regression.sh` | the regression run: the suite's parts, the run, its timings and its line |
-| `sclaude/lib/regression_gate.sh` | the gate that closes a step only on a green run |
-| `sclaude/lib/regression_fix.sh` | the session that fixes a red regression |
-| `sclaude/lib/rollback.sh` | putting production back: the deployment, the down blocks, the incident |
-| `sclaude/lib/picker.sh` | choosing with arrow keys: issues, menus, actions |
-| `sclaude/lib/abandon.sh` | abandoning a feature: the traces here and on GitHub |
-| `sclaude/lib/actions.sh` | the list of actions on a single feature |
-| `sclaude/lib/terminal.sh` | recording sclaude's terminal — what it printed, what the person typed — for reading back |
-| `sclaude/lib/retro.sh` | the retrospective over a merged feature, right before `sclaude done` removes it |
-| `sclaude/lib/workshop.sh`, `workshop.py` | the tree's workshop, where a session changes sclaude, and the publishing of what it made there |
-| `sclaude/lib/*.py` | gathering an issue's context, chain and acceptance criteria, reading migrations' `-- down:` blocks, the cycle's record, and assembling prompts |
+| `sclaude/lib/commands/start.sh` | `sclaude new` and its options, `sclaude <feature>`, `sclaude issue` |
+| `sclaude/lib/commands/menu.sh` | `sclaude status` and the menu `sclaude` opens with no arguments |
+| `sclaude/lib/commands/step_commands.sh` | moving a feature between steps by hand: replan, return, reset, the friction review, the regression, the epilogue |
+| `sclaude/lib/commands/done.sh` | `sclaude done`: closing a merged feature |
+| `sclaude/lib/commands/feature_commands.sh` | `sync`, `news`, `preview`, `rollback`, `dev` on a feature in work |
+| `sclaude/lib/core/ui.sh` | questions to the human, answers, colours |
+| `sclaude/lib/core/io.sh` | the question-answer channel: the same question in the terminal and in Telegram |
+| `sclaude/lib/core/steps.sh` | the table of steps and each one's permissions |
+| `sclaude/lib/core/project.sh` | what the project says about itself, and the wizard that writes it |
+| `sclaude/lib/core/environment.sh` | which database this machine's features work against |
+| `sclaude/lib/core/developer.sh` | who is running it, and whether they maintain the orchestrator (`MAINTAINERS`) |
+| `sclaude/lib/commands/doctor.sh` | `sclaude doctor`: what this machine lacks, with the fix for each gap |
+| `sclaude/lib/core/state.sh` | the repository, `.sclaude/local/feature/state.json` and the cycle's record |
+| `sclaude/lib/tree/branches.sh` | sorting out branches with nothing left to hold |
+| `sclaude/lib/tree/worktree.sh` | preparing a feature's tree and the dev server |
+| `sclaude/lib/tree/dev_loopback.cjs` | loaded into a feature's server: a listen on every interface goes to 127.0.0.1 |
+| `sclaude/lib/cycle/run.sh` | launching a step and the transitions: the session, its end, the checks before the feature goes on |
+| `sclaude/lib/cycle/prompt.sh` | a step's prompt with its gathered blocks, and what the product and the person add to it |
+| `sclaude/lib/cycle/session_watch.sh` | the markers a session writes when it is done, and the watcher that closes claude on them |
+| `sclaude/lib/cycle/acceptance.sh` | the issue's acceptance criteria as a step leaves them |
+| `sclaude/lib/review/review_round.sh` | step 4's rounds: news since the session looked, the same conversation or a fresh one |
+| `sclaude/lib/review/review_gate.sh` | closing step 4: the gate on the pull request, the threads the person kept, the reports |
+| `sclaude/lib/improve/friction.sh` | the friction review between steps |
+| `sclaude/lib/improve/instruments.sh` | sclaude's own checkout: taking main, proposing a change, refreshing the units |
+| `sclaude/lib/github/github.sh` | issues and pull requests through `gh`: the pull request, the issue's link, close and blockers |
+| `sclaude/lib/github/issue_sync.sh` | the issue's summary, kept in step with the feature |
+| `sclaude/lib/github/board.sh` | an issue's place on the project board, its dates, the handoff to QA |
+| `sclaude/lib/github/outcome.sh` | a feature's outcome: its labels, its line in `sclaude status`, the epilogues offered |
+| `sclaude/lib/cycle/plan.sh` | step 1's plan from its session's transcript |
+| `sclaude/lib/ship/deploy.sh` | the cycle's epilogue, step by step, and what is said when shipping failed |
+| `sclaude/lib/ship/shipped.sh` | what has already been shipped: deploys per head, production's marks, what rides along |
+| `sclaude/lib/ship/vercel.sh` | running a deploy: vercel or the project's command, a preview with its migrations |
+| `sclaude/lib/ship/qa.sh` | QA on the preview: accepted, missed, a retest, the wait for its verdict |
+| `sclaude/lib/ship/merge.sh` | the merge: what stands in its way, how it is made, the offer and the wait |
+| `sclaude/lib/ship/demo.sh` | the demo recorded again once the preview is green |
+| `sclaude/lib/ship/regression.sh` | the regression run: the suite's parts, the run, its timings and its line |
+| `sclaude/lib/ship/regression_gate.sh` | the gate that closes a step only on a green run |
+| `sclaude/lib/ship/regression_fix.sh` | the session that fixes a red regression |
+| `sclaude/lib/ship/rollback.sh` | putting production back: the deployment, the down blocks, the incident |
+| `sclaude/lib/core/picker.sh` | choosing with arrow keys: issues, menus, actions |
+| `sclaude/lib/commands/abandon.sh` | abandoning a feature: the traces here and on GitHub |
+| `sclaude/lib/commands/actions.sh` | the list of actions on a single feature |
+| `sclaude/lib/core/terminal.sh` | recording sclaude's terminal — what it printed, what the person typed — for reading back |
+| `sclaude/lib/improve/retro.sh` | the retrospective over a merged feature, right before `sclaude done` removes it |
+| `sclaude/lib/improve/workshop.sh`, `workshop.py` | the tree's workshop, where a session changes sclaude, and the publishing of what it made there |
+| `sclaude/lib/*/*.py` | gathering an issue's context, chain and acceptance criteria, reading migrations' `-- down:` blocks, the cycle's record, and assembling prompts |
 | `sclaude/hooks/*.py` | the steps' bans and the friction log |
 | `sclaude/prompts/*.md` | the steps' prompts and the shared includes (`_*.md`) |
 | `tests/*.py` | benches for the hooks, the prompts, the project's config, the acceptance criteria, the down blocks, the cycle's record, QA's hand-back, the choice of database, the functions whose failures are silent, choosing with arrow keys and the question channel |
@@ -245,7 +266,7 @@ those.
 
 ## The process map
 
-**One model of the cycle draws every picture of it.** `sclaude/lib/process.py`
+**One model of the cycle draws every picture of it.** `sclaude/lib/flow/process.py`
 and its parts — `process_model.py` (the maps), `process_config.py` (what a
 project's config draws), `process_position.py` (where a feature stands),
 `process_history.py` and `process_costs.py` (how it went, what it took),
@@ -475,7 +496,7 @@ by which GitHub closes the issue on the merge. No network, no `gh`, no open
 issues — there simply will be no list, and the old question about a name
 remains.
 
-The list and the suggestion are `sclaude/lib/issue_list.py`'s, which the bot's
+The list and the suggestion are `sclaude/lib/github/issue_list.py`'s, which the bot's
 Mini App uses too: it offers the same choice on a phone and starts
 `sclaude new` with the answers as options — `--issue <n>` with the branch name,
 `--blocked-ok` once the blockers were shown, `--create-issue` or `--no-issue`
@@ -892,7 +913,7 @@ simply does not get asked, and keeps whatever its worktree had.
 **An environment is a `.env` file.** The product names each one in
 `.sclaude/config.json` — `"dev": {"env": ".env.dev"}`, `"prod": {"env":
 ".env.prod", "protected": true, "siteUrl": "https://…"}` — and that is all
-sclaude needs to know (`sclaude/lib/envs.py`). A tree is on the environment
+sclaude needs to know (`sclaude/lib/core/envs.py`). A tree is on the environment
 whose file its `.env.local` points at. sclaude switches it itself: `.env.local`
 to the file, and on Supabase the CLI linked to the project that file's URL
 names, or unlinked for a local stack, since `supabase db push` obeys the link
@@ -952,7 +973,7 @@ open on every interface would let anybody on the same network past that
 filter. `next dev` and `next start` take every interface when nothing names
 an address, and which command a product runs is its own business, so sclaude
 sets the address under it: `dev_net_env` (`worktree.sh`) puts
-`--require=sclaude/lib/dev_loopback.cjs` into `NODE_OPTIONS` for the dev
+`--require=sclaude/lib/tree/dev_loopback.cjs` into `NODE_OPTIONS` for the dev
 server and for the build the regression serves, and that file moves every
 `listen` on a wildcard address — none, `0.0.0.0`, `::` — to `127.0.0.1`. An
 address the product names on purpose, a unix socket or a handle is left
@@ -1151,7 +1172,7 @@ merge offer said "it conflicts with main — resolve them and push", and the
 merge wait asked GitHub every half minute, for hours, about a merge nobody
 could make. The conflict is known long before that, and for nothing:
 `git merge-tree --write-tree` merges in memory and names the files, with no
-session and no GitHub call (`merge_conflicts` in `sclaude/lib/sync.sh`).
+session and no GitHub call (`merge_conflicts` in `sclaude/lib/tree/sync.sh`).
 
 So `remind_prod` asks it at three points:
 
@@ -1282,7 +1303,7 @@ otherwise.** Migrations are forward-only, a product may have no point-in-time re
 and the way back is a commented `-- down:` block: comments, not a mechanism —
 nothing runs them, somebody reads them. Many migrations have no block at all.
 
-`sclaude/lib/down_blocks.py` reads those blocks and sorts them into four
+`sclaude/lib/ship/down_blocks.py` reads those blocks and sorts them into four
 verdicts, and the two interesting ones are what the file exists for:
 
 | verdict | what it means |
@@ -2052,7 +2073,7 @@ project: `.sclaude/local/feature`, `.vercelignore` itself, and `.sclaude`, where
 recordings are kept. It only appends what is missing, and a `.vercelignore`
 the project tracks itself is left to the project, with a warning for what it
 lacks; `sclaude doctor` checks the same in advance. One list in
-`sclaude/lib/scratch.sh` serves git and Vercel both, and there is nothing to
+`sclaude/lib/core/scratch.sh` serves git and Vercel both, and there is nothing to
 configure. These are the script's internal files: they do not outlive the
 feature and have no business in the repository — the script hides them through
 `.git/info/exclude`, which is machine-local and shared by every worktree, rather
@@ -2127,7 +2148,7 @@ stand in the way of cleaning up a merged feature.
 
 The page shows the four DORA metrics first, then delivery, development
 quality, Claude's work and token efficiency. Every figure is drawn from what
-already exists rather than from anything recorded for it. `sclaude/lib/dora.py`
+already exists rather than from anything recorded for it. `sclaude/lib/metrics/dora.py`
 builds it from its parts: `dora_sources.py` reads Vercel, GitHub and the cycle's
 record, `dora_numbers.py` counts, `dora_charts.py`, `dora_team.py` and
 `dora_page.py` draw, and `dora_store.py` keeps the page and its cache. DORA's:
@@ -2152,7 +2173,7 @@ record, `dora_numbers.py` counts, `dora_charts.py`, `dora_team.py` and
 
 The rest:
 
-- **Claude's sessions** (`sclaude/lib/claude_usage.py`) are Claude Code's
+- **Claude's sessions** (`sclaude/lib/metrics/claude_usage.py`) are Claude Code's
   transcripts of the product's main checkout and of every worktree,
   `<repo>-<feature>`, which names the feature. Dollars, tokens by kind and
   model, lines edited and time in the model come from the `cost-state` record
@@ -2163,7 +2184,7 @@ The rest:
   transcript has no account of its own, its cost being in its session's. Each
   transcript's summary is kept beside the page with the size and mtime it was
   read at, so a refresh reads only what grew.
-- **development quality** (`sclaude/lib/dev_quality.py`): a regression stage
+- **development quality** (`sclaude/lib/metrics/dev_quality.py`): a regression stage
   is green first time when it passed with no fixing session; review rounds and
   the threads they were handed are `review-context.log`'s rows; acceptance
   criteria are the ticks in the issue's `<!-- sclaude:ac -->` block, kept per
@@ -2172,7 +2193,7 @@ The rest:
   `Claude-Session:` or a Claude co-author).
 - **delivery**: pull requests per feature by their branch, sizes and review
   threads from GitHub, builds and their time from Vercel's every environment.
-- **past the four keys** (`sclaude/lib/metrics_extra.py`), from the same data:
+- **past the four keys** (`sclaude/lib/metrics/metrics_extra.py`), from the same data:
   rework is a deploy that only shipped fixes to what was out — a feature's
   later pull request, a fix branch, a fix committed to main — while a `fix:`
   commit inside a new feature's own pull request is that feature's work; a
@@ -2251,7 +2272,7 @@ work is summed in standard features, and its spend is divided by what it
 shipped. Both versions are drawn into the page and the switch shows one.
 
 Each figure carries a note, shown on hover over its tile or on a tap — why
-it matters, what to aim for, how it is counted — and a colour, from `sclaude/lib/metrics_guide.py`. The bands are
+it matters, what to aim for, how it is counted — and a colour, from `sclaude/lib/metrics/metrics_guide.py`. The bands are
 the published ones where a source exists (DORA's levels, the usual pull
 request and flow benchmarks) and a stated judgement where none does; a figure
 whose good direction depends on the team, such as spend or session counts, is

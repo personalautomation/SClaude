@@ -43,7 +43,7 @@ log = logging.getLogger("keepawake")
 
 FEATURE_RECORD = "telegram.json"
 ENDED_MARK = "ended"
-# Set in the worktree by stop_dev (sclaude/lib/worktree.sh) when its removal
+# Set in the worktree by stop_dev (sclaude/lib/tree/worktree.sh) when its removal
 # begins, and honoured by sclaude-proxy too.
 CLOSING_MARK = "closing"
 

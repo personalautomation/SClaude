@@ -152,6 +152,7 @@ def main():
     login_file = os.path.join(root, "dev-login")
     os.environ["SCLAUDE_DEV_LOGIN_FILE"] = login_file
     sys.path.insert(0, os.path.join(ROOT, "sclaude", "lib"))
+    import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
     import dev_login
 
     gotrue, gport = serve(GoTrue)
@@ -792,7 +793,7 @@ def check_proxy(root, wt, dport, login_file):
                         % re.escape(demo.TEXT_ONLY), notify_src) is not None, True)
         check("demo: the feature's removal deletes the ref demo.py keeps",
               'update-ref -d "%s"' % (demo.DEMO_REF % "$label")
-              in open(os.path.join(ROOT, "sclaude", "lib", "worktree.sh")).read(), True)
+              in open(os.path.join(ROOT, "sclaude", "lib", "tree", "worktree.sh")).read(), True)
         check("demo: a demo that did not play is not published, nor the last one",
               (any(l.startswith("not published: 1 scenario") for l in said),
                any(l.startswith("notify") for l in calls), demo.last_main(wt)["id"]),

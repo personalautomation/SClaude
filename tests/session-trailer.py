@@ -37,7 +37,7 @@ def check(name, got, want):
         failures.append((name, want, got))
 
 
-with open(os.path.join(LIB, "run.sh")) as fh:
+with open(os.path.join(LIB, "cycle", "run.sh")) as fh:
     RUN = fh.read()
 m = re.search(r"^session_git_env\(\) \{\n.*?^\}\n", RUN, re.S | re.M)
 ENV_FN = m.group(0) if m else ""

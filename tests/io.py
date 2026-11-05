@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# A test bench for the question-answer channel: sclaude/lib/io.sh and the
+# A test bench for the question-answer channel: sclaude/lib/core/io.sh and the
 # rewritten ask from ui.sh.
 #
 # The main thing here is the race between two sources. A question now has two
@@ -36,7 +36,7 @@ def check(name, got, want):
 def run_bash(script, cwd, stdin="", timeout=20):
     # We leave ASK_POLL as it is in service: a second is small enough that the
     # bench does not drag and large enough to exercise the real waiting loop.
-    body = 'set -uo pipefail\nsource "%s/io.sh"\nsource "%s/ui.sh"\n%s' % (LIB, LIB, script)
+    body = 'set -uo pipefail\nsource "%s/core/io.sh"\nsource "%s/core/ui.sh"\n%s' % (LIB, LIB, script)
     out = subprocess.run(["bash", "-c", body], cwd=cwd, input=stdin,
                          capture_output=True, text=True, timeout=timeout)
     return out.stdout, out.stderr, out.returncode
@@ -319,7 +319,7 @@ def main():
         # drop asks everything before it removes anything: the feature's topic
         # goes with its worktree, and a question after that would have nowhere
         # to go.
-        with open(os.path.join(LIB, "abandon.sh"), encoding="utf-8") as fh:
+        with open(os.path.join(LIB, "commands", "abandon.sh"), encoding="utf-8") as fh:
             abandon = fh.read()
         body = abandon[abandon.index("cmd_abandon() {"):]
         body = body[:body.index("\n}\n")]
@@ -337,7 +337,7 @@ def main():
 
         # code_reload execs into _session-ended from inside a step: the step's
         # last questions must still go to the feature's channel.
-        with open(os.path.join(LIB, "step_commands.sh"), encoding="utf-8") as fh:
+        with open(os.path.join(LIB, "commands", "step_commands.sh"), encoding="utf-8") as fh:
             sclaude_src = fh.read()
         ended_fn = sclaude_src[sclaude_src.index("cmd_session_ended() {"):]
         ended_fn = ended_fn[:ended_fn.index("\n}\n")]

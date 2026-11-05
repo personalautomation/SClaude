@@ -19,7 +19,7 @@
 # and holding a Claude session open for it costs tokens to learn nothing. A
 # five-minute shell poll costs one `gh` call per watched feature.
 #
-# The files it reads are written by watch_start (sclaude/lib/watch.sh):
+# The files it reads are written by watch_start (sclaude/lib/cycle/watch.sh):
 # ~/.claude/sclaude/watch/<slug>.json, one per feature being waited on.
 set -uo pipefail
 
@@ -72,7 +72,7 @@ print(value)
 PY
 }
 
-# Writes one value back. The same shape as state_set in sclaude/lib/state.sh,
+# Writes one value back. The same shape as state_set in sclaude/lib/core/state.sh,
 # and deliberately so — these are the same files, read by the same code.
 set_field() {
   python3 - "$1" "$2" "$3" <<'PY' 2>/dev/null

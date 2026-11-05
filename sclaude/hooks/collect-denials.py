@@ -127,6 +127,7 @@ def policy_denials(step=""):
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                         os.pardir, "lib"))
+        import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
         import subprocess
         import policy
         tree = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()

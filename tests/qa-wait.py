@@ -59,8 +59,8 @@ def run(tmp, columns, watch=None, unticked="", board=True, names=None,
     # A stand-in for acceptance.py: qa_wait asks it which criteria are
     # unticked, and the real one reaches GitHub.
     fake_lib = os.path.join(tmp, "lib")
-    os.makedirs(fake_lib, exist_ok=True)
-    with open(os.path.join(fake_lib, "acceptance.py"), "w") as fh:
+    os.makedirs(os.path.join(fake_lib, "cycle"), exist_ok=True)
+    with open(os.path.join(fake_lib, "cycle/acceptance.py"), "w") as fh:
         fh.write("import sys\nsys.stdout.write(%r)\n" % unticked)
 
     backlog, progress, qa, done = names or ("Backlog", "In progress", "In QA", "Done")
@@ -69,7 +69,7 @@ def run(tmp, columns, watch=None, unticked="", board=True, names=None,
                  'PROGRESS_FROM=""; QA_FROM=""; QA_TO=""; QA_DONE=""\n'
     body = "set -uo pipefail\n"
     body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
-    for name in ("io", "ui", "steps", "state", "project", "watch", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
+    for name in ("core/io", "core/ui", "core/steps", "core/state", "core/project", "cycle/watch", "ship/deploy", "ship/shipped", "ship/vercel", "ship/qa", "ship/merge", "ship/demo"):
         body += 'source "%s/%s.sh"\n' % (LIB, name)
     body += ('warn() { echo "$*"; }\n'
              'info() { echo "$*"; }\n'
@@ -203,7 +203,7 @@ try:
 
     # column_is itself: case and surrounding spaces ignored, empty never equal.
     def column_is(a, b):
-        body = 'source "%s/project.sh"\ncolumn_is "$1" "$2"\n' % LIB
+        body = 'source "%s/core/project.sh"\ncolumn_is "$1" "$2"\n' % LIB
         return subprocess.run(["bash", "-c", body, "x", a, b],
                               capture_output=True).returncode == 0
     check("column-is-case", column_is("In QA", "in qa"), True)

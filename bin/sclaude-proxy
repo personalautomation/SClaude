@@ -3,7 +3,7 @@
 # One address for every feature's dev server: http://<feature>.localhost:3000.
 #
 # Each feature's `next dev` listens on a port of its own (feature_port in
-# sclaude/lib/worktree.sh), and nobody is meant to remember those. This listens
+# sclaude/lib/tree/worktree.sh), and nobody is meant to remember those. This listens
 # on the one port everybody already knows and hands each request to the
 # server the Host header names. Chrome resolves every *.localhost name to the
 # loopback by itself, so no DNS or hosts file is involved — and a different host
@@ -82,6 +82,7 @@ from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
 # finds the repo rather than ~/.local/sclaude/lib, which does not exist.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)),
                                 "..", "sclaude", "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import feature_db  # noqa: E402 — PORT_SLOTS, the single source of truth
 import dev_login  # noqa: E402
 import process  # noqa: E402 — the process map, and a feature's place on it
@@ -1045,7 +1046,7 @@ def dora_page():
 
 # --- a feature's process map -------------------------------------------------
 #
-# /__sclaude/flow?f=<label> is the process map (sclaude/lib/process.py) with
+# /__sclaude/flow?f=<label> is the process map (sclaude/lib/flow/process.py) with
 # where the feature stands lit and the actions open to it now; the page asks
 # /__sclaude/flow/state every few seconds, which runs `sclaude _flow` in the
 # feature's tree. One run at a time per feature, and an answer kept a few
@@ -1053,7 +1054,7 @@ def dora_page():
 FLOW_PREFIX = "/__sclaude/flow?f="
 MAP_NAME = "Process map (BPMN)"
 # The product's DORA metrics, under main: a page sclaude rebuilds in the
-# background (sclaude/lib/dora.py) inside the main checkout, served from there
+# background (sclaude/lib/metrics/dora.py) inside the main checkout, served from there
 # as it stands. Only main's — the numbers are the product's, not a feature's.
 DORA_PAGE = ".sclaude/local/dora/index.html"
 DORA_NAME = "DORA metrics"
@@ -1089,7 +1090,7 @@ _PROCESS_SEEN = [None]
 
 
 def process_map():
-    """sclaude/lib/process.py as it is on disk now. The proxy runs for days,
+    """sclaude/lib/flow/process.py as it is on disk now. The proxy runs for days,
     and sclaude's update pulls a new model under it: read again whenever the
     file changed, so the map served is the one the checkout has."""
     global process

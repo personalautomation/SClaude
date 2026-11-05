@@ -23,6 +23,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.join(HERE, "..", "sclaude", "lib")
 sys.path.insert(0, LIB)
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 
 import feature_db  # noqa: E402
 
@@ -182,11 +183,11 @@ GREEN=""; OFF=""
 LIB="%s"
 REPO="%s/repo"
 docker() { return 0; }
-source "$LIB/state.sh"
-source "$LIB/project.sh"
-source "$LIB/environment.sh"
-source "$LIB/worktree.sh"
-source "$LIB/featuredb.sh"
+source "$LIB/core/state.sh"
+source "$LIB/core/project.sh"
+source "$LIB/core/environment.sh"
+source "$LIB/tree/worktree.sh"
+source "$LIB/tree/featuredb.sh"
 %s
 """ % (LIB, root, body)
     full = dict(os.environ)
@@ -380,7 +381,7 @@ def ensure_cases():
         # A limit that is not a number falls back to the default rather than
         # breaking the arithmetic and waiting for ever; checked in the source,
         # since the default is two minutes.
-        with open(os.path.join(LIB, "featuredb.sh")) as fh:
+        with open(os.path.join(LIB, "tree", "featuredb.sh")) as fh:
             src = fh.read()
         check("a bad limit falls back", '[[ "$limit" =~ ^[0-9]+$ ]] || limit=120' in src, True)
         check("the probe is bounded", "timeout 20 docker info" in src, True)
@@ -426,9 +427,9 @@ def ensure_cases():
         cfg["commands"] = {"e2e": "npm run test:e2e"}
         with open(_cfg(os.path.join(a, ".sclaude/config.json")), "w") as fh:
             json.dump(cfg, fh)
-        local = bash(root, 'source "$LIB/developer.sh"; source "$LIB/regression.sh"; '
+        local = bash(root, 'source "$LIB/core/developer.sh"; source "$LIB/ship/regression.sh"; '
                            'regression_command e2e "" "%s"' % a)
-        deployed = bash(root, 'source "$LIB/developer.sh"; source "$LIB/regression.sh"; '
+        deployed = bash(root, 'source "$LIB/core/developer.sh"; source "$LIB/ship/regression.sh"; '
                               'regression_command e2e https://x.example "%s"' % a)
         check("the local stage sources the feature's db", ". %s" % envf in local, True)
         check("a deployed stage does not", "db.env" in deployed, False)
@@ -444,11 +445,11 @@ def ensure_cases():
         pvf = os.path.join(a, ".env.preview")
         with open(pvf, "w") as fh:
             fh.write("Y=1\n")
-        preview = bash(root, 'source "$LIB/developer.sh"; source "$LIB/regression.sh"; '
+        preview = bash(root, 'source "$LIB/core/developer.sh"; source "$LIB/ship/regression.sh"; '
                              'regression_command e2e https://x.example "%s" preview' % a)
-        prod = bash(root, 'source "$LIB/developer.sh"; source "$LIB/regression.sh"; '
+        prod = bash(root, 'source "$LIB/core/developer.sh"; source "$LIB/ship/regression.sh"; '
                           'regression_command e2e https://x.example "%s" prod' % a)
-        local = bash(root, 'source "$LIB/developer.sh"; source "$LIB/regression.sh"; '
+        local = bash(root, 'source "$LIB/core/developer.sh"; source "$LIB/ship/regression.sh"; '
                            'regression_command e2e "" "%s" local' % a)
         check("the preview stage sources .env.preview", ". %s" % pvf in preview, True)
         check("production does not", ".env.preview" in prod, False)

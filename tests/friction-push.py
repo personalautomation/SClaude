@@ -39,7 +39,7 @@ def git(cwd, *args):
 
 
 def push(wt, frm, state, sent=""):
-    script = ('for m in ui branches deferred run friction; do source "%s/$m.sh" 2>/dev/null; done\n'
+    script = ('for m in core/ui tree/branches improve/deferred cycle/run improve/friction; do source "%s/$m.sh" 2>/dev/null; done\n'
               'info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }\n'
               'gh() { case "$1 $2" in "pr list") echo %s ;; "pr create") echo https://pr/9 ;; esac; }\n'
               'friction_push_project "%s" "%s" "%s"' % (LIB, state, wt, frm, sent))

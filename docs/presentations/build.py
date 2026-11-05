@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build the slide decks from src/ into self-contained HTML pages, and
-the process map from sclaude/lib/process.py.
+the process map from sclaude/lib/flow/process.py.
 
 Each deck is src/head.html + the deck's slides + src/tail.html. The decks
 link to each other: by default through their sibling file names, so the
@@ -23,6 +23,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "src"
 sys.path.insert(0, str(HERE.parent.parent / "sclaude" / "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import process  # noqa: E402
 
 # The process map: drawn from the model the code is checked against, so it is

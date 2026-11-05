@@ -18,7 +18,7 @@ import tempfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
-SHIM = os.path.join(LIB, "dev_loopback.cjs")
+SHIM = os.path.join(LIB, "tree", "dev_loopback.cjs")
 
 failures = []
 total = 0
@@ -61,7 +61,7 @@ def node_address(call, http=False, options=None):
 
 
 def bash(body, env=None):
-    script = 'LIB="%s"\ninfo() { :; }\nwarn() { :; }\nsource "%s/worktree.sh"\n%s\n' % (
+    script = 'LIB="%s"\ninfo() { :; }\nwarn() { :; }\nsource "%s/tree/worktree.sh"\n%s\n' % (
         LIB, LIB, body)
     full = dict(os.environ)
     full.pop("NODE_OPTIONS", None)
@@ -90,7 +90,7 @@ def main():
     else:
         print("node not found: the shim's own checks skipped")
 
-    shim_opt = '--require="%s/dev_loopback.cjs"' % LIB
+    shim_opt = '--require="%s/tree/dev_loopback.cjs"' % LIB
     check("dev_net_env loads the shim",
           bash('( dev_net_env; echo "$NODE_OPTIONS" )'), shim_opt)
     check("dev_net_env keeps the product's NODE_OPTIONS",
@@ -100,7 +100,7 @@ def main():
 
     # Both servers sclaude starts go through it: the dev server and the build
     # the regression serves. The suite's own parts do not (see dev_net_env).
-    for path, starts in (("worktree.sh", "setsid --fork npm run dev"), ("regression.sh", 'bash -c "$serve"')):
+    for path, starts in (("tree/worktree.sh", "setsid --fork npm run dev"), ("ship/regression.sh", 'bash -c "$serve"')):
         text = open(os.path.join(LIB, path)).read()
         lines = text.splitlines()
         # The command and the line before it: a long start is continued with \.
@@ -132,7 +132,7 @@ def main():
                 with open(os.path.join(wt, ".sclaude/local/feature/state.json"), "w") as fh:
                     fh.write('{"feature": "some-feature"}')
                 os.remove(os.path.join(wt, ".sclaude/local/feature/exposed-said"))
-                said = bash('source "%s/state.sh"; warn() { echo "$*"; }; dev_exposed_warn %s %s'
+                said = bash('source "%s/core/state.sh"; warn() { echo "$*"; }; dev_exposed_warn %s %s'
                             % (LIB, wt, port))
                 check("and names the feature, for a terminal in another tree",
                       "sclaude dev --stop some-feature && sclaude dev some-feature" in said, True)

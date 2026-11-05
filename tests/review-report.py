@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# The review report (sclaude/lib/review_report.py) and what feeds it: threads
+# The review report (sclaude/lib/review/review_report.py) and what feeds it: threads
 # classified by what happened to them, rounds by the review that posted them,
 # findings on earlier fixes, reversals, the cost in two parts (the review's
 # passes, the fixing launches from run_cost) and the trend line. gh is faked; nothing touches the network.
@@ -20,6 +20,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LIB = os.path.join(ROOT, "sclaude", "lib")
 sys.path.insert(0, LIB)
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import review_report  # noqa: E402
 
 failed = 0
@@ -167,7 +168,7 @@ with tempfile.TemporaryDirectory() as wt:
         def launch(cost):
             with open(context, "w") as fh:
                 json.dump({"used_percentage": 10, "context_window_size": 1000, "cost_usd": cost}, fh)
-            subprocess.run(["bash", "-c", 'source "$1/state.sh"; source "$1/steps.sh"; run_cost "$2" s2',
+            subprocess.run(["bash", "-c", 'source "$1/core/state.sh"; source "$1/core/steps.sh"; run_cost "$2" s2',
                             "_", LIB, wt], check=True, timeout=30)
         launch(2.0)
         launch(3.5)   # a running total carried over a resume: 1.5 added
@@ -189,7 +190,7 @@ with tempfile.TemporaryDirectory() as wt:
         json.dump(data, fh)
 
     # --- the printed report --------------------------------------------------
-    sys.argv = ["review_report.py", wt, "7", "o/r", "feat"]
+    sys.argv = ["review/review_report.py", wt, "7", "o/r", "feat"]
     out = io.StringIO()
     brief_file = os.path.join(wt, "brief.txt")
     os.environ[review_report.BRIEF_ENV] = brief_file
@@ -357,9 +358,9 @@ check("early", v([5], None, 0, 5, 5), "Too few rounds for a trend.")
 
 # --- wiring --------------------------------------------------------------------
 RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
-          for m in ("run.sh", "review_round.sh", "review_gate.sh", "friction.sh", "session_watch.sh"))
+          for m in ("cycle/run.sh", "review/review_round.sh", "review/review_gate.sh", "improve/friction.sh", "cycle/session_watch.sh"))
 BIN = "".join(open(os.path.join(ROOT, _p)).read()
-    for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+    for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 # Four for the rounds of the review on GitHub, one where the review on this
 # machine finds something after a session (review_close_gate), and one where
 # it finds something on the way into step 4, before the first session, and

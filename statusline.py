@@ -329,7 +329,7 @@ def git_branch(cwd, session_id):
 
 # A session sclaude started: `claude -n <number>-<kind>(<round>)/<slug>`, e.g.
 # `1-plan 📝/12-login` or `4-review(2) 🛠/12-login` (session_label in
-# sclaude/lib/steps.sh, the emoji from named_with_icon in sclaude/lib/pane.sh,
+# sclaude/lib/core/steps.sh, the emoji from named_with_icon in sclaude/lib/core/pane.sh,
 # for the tab title). The label says which job this session has; the emoji
 # and the slug are left out, the slug being the worktree's, which the folder
 # or branch shows already.
@@ -553,7 +553,7 @@ def spaced(d, opts, cols):
 # Where the context in use is left for sclaude, per session. Only Claude Code
 # knows the window's size, and it tells the status line alone; the transcript
 # has the tokens but not what they are a share of. sclaude reads this file when
-# a review session ends (review_context in sclaude/lib/review_round.sh), to decide
+# a review session ends (review_context in sclaude/lib/review/review_round.sh), to decide
 # whether the next round stays in the same conversation and to log the figure.
 CONTEXT_FILE = "/tmp/claude-statusline-context-%s"
 
@@ -565,7 +565,7 @@ def remember_context(d):
         return
     size = dig(d, "context_window", "context_window_size")
     # What the session has cost so far, for sclaude's review report (run_cost
-    # in sclaude/lib/steps.sh).
+    # in sclaude/lib/core/steps.sh).
     cost = dig(d, "cost", "total_cost_usd")
     try:
         with open(CONTEXT_FILE % sid, "w") as f:

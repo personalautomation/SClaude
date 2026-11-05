@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# The terminal recording (sclaude/lib/terminal.sh) and its playback
+# The terminal recording (sclaude/lib/core/terminal.sh) and its playback
 # (term_render.py).
 #
 # Guarded here:
@@ -74,7 +74,7 @@ try:
     prog = os.path.join(tmp, "prog")
     with open(prog, "w") as fh:
         fh.write(r'''#!/usr/bin/env bash
-source "%s/terminal.sh"
+source "%s/core/terminal.sh"
 term_record "$@"
 if [[ -z "${AGAIN:-}" ]]; then export AGAIN=1; exec "$0" "$@"; fi
 echo "args=[$1][$2] rec=${SCLAUDE_TERM:-none}"
@@ -141,7 +141,7 @@ exit 5
     wt = os.path.join(tmp, "wt")
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     script = r'''
-source "%s/terminal.sh"
+source "%s/core/terminal.sh"
 SCLAUDE_TERM=/r/one.log term_attach "%s"
 SCLAUDE_TERM=/r/one.log term_attach "%s"
 SCLAUDE_TERM=/r/two.log term_attach "%s"
@@ -154,7 +154,7 @@ SCLAUDE_TERM= term_attach "%s"
 
     # --- the marks around a session in place: only in a recorded run ---
     marks = r'''
-source "%s/terminal.sh"
+source "%s/core/terminal.sh"
 SCLAUDE_TERM=/r/x.log term_skip begin --model opus --session-id 0123abcd-ef "the prompt"
 echo
 SCLAUDE_TERM=/r/x.log term_skip end
@@ -193,7 +193,7 @@ SCLAUDE_TERM=off term_skip begin --session-id 0123
         fh.write(later + "\n" + run + "\n" + os.path.join(rec, "gone.log") + "\n")
     script = r'''
 LIB="%s"
-source "$LIB/terminal.sh"
+source "$LIB/core/terminal.sh"
 term_render "%s"
 ''' % (LIB, wt)
     p = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
@@ -231,8 +231,8 @@ info() { echo "INFO $*"; }
 term_render() { echo "RENDERED" > /dev/tty; }
 render_prompt() { echo "PROMPT $1 SINCE[$SCLAUDE_B_SINCE]" > /dev/tty; return 1; }
 new_session_id() { echo new-id; }
-source "%s/state.sh"
-source "%s/retro.sh"
+source "%s/core/state.sh"
+source "%s/improve/retro.sh"
 transcript_dir() { echo "%s"; }
 developer_is_maintainer() { return 1; }
 ask() { echo "ASK $1" > /dev/tty; printf -v "$2" '%%s' "${RETRO_ANSWER:-n}"; }
@@ -281,7 +281,7 @@ try:
     os.makedirs(sub)
 
     def where(cwd, home="/h"):
-        script = 'HOME=%s; source "%s/terminal.sh"; term_dir' % (home, LIB)
+        script = 'HOME=%s; source "%s/core/terminal.sh"; term_dir' % (home, LIB)
         return subprocess.run(["bash", "-c", script], cwd=cwd, capture_output=True,
                               text=True).stdout.strip()
 
@@ -291,7 +291,7 @@ try:
     check("dir-outside-a-repo", where(tempfile.gettempdir()), "/h/.claude/sclaude/terminal")
 
     rec = os.path.join(proj, ".sclaude", "local", "terminal")
-    script = ('source "%s/terminal.sh"; source "%s/scratch.sh"; scratch_hide; scratch_hide; '
+    script = ('source "%s/core/terminal.sh"; source "%s/core/scratch.sh"; scratch_hide; scratch_hide; '
               'mkdir -p "%s"; touch "%s/r.log"' % (LIB, LIB, rec, rec))
     subprocess.run(["bash", "-c", script], cwd=sub, check=True)
     with open(os.path.join(proj, ".git", "info", "exclude")) as fh:
@@ -335,7 +335,7 @@ def in_pty(script):
     return out
 
 
-TITLE = 'source "%s/terminal.sh"; REPO=/home/x/social; tab_title 12-login' % LIB
+TITLE = 'source "%s/core/terminal.sh"; REPO=/home/x/social; tab_title 12-login' % LIB
 check("tab-title-in-a-terminal", "\x1b]0;12-login · social\x07".encode() in in_pty(TITLE), True)
 quiet = subprocess.run(["bash", "-c", TITLE], capture_output=True, stdin=subprocess.DEVNULL, cwd=ROOT)
 check("tab-title-without-a-terminal", quiet.stdout + quiet.stderr, b"")

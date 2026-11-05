@@ -44,7 +44,7 @@ def git(*args, cwd):
                           text=True, check=False).stdout.strip()
 
 
-spec = importlib.util.spec_from_file_location("pr_context", os.path.join(LIB, "pr_context.py"))
+spec = importlib.util.spec_from_file_location("pr_context", os.path.join(LIB, "review", "pr_context.py"))
 ctx = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ctx)
 

@@ -42,6 +42,7 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
 PROMPTS = os.path.join(ROOT, "sclaude", "prompts")
 sys.path.insert(0, LIB)
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import pr_context  # noqa: E402
 
 failures = []
@@ -191,7 +192,7 @@ try:
     def run_bash(script, env_extra=None):
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""; SELF=sclaude\n'
-        for name in ("io", "ui", "state", "steps", "project", "picker", "local_review"):
+        for name in ("core/io", "core/ui", "core/state", "core/steps", "core/project", "core/picker", "review/local_review"):
             body += 'source "%s/%s.sh"\n' % (LIB, name)
         body += 'LIB="%s"\nwarn() { echo "$*" >&2; }\ninfo() { echo "$*"; }\n' % LIB
         body += script
@@ -393,6 +394,7 @@ try:
     # Headings as models drift from the format are read all the same; a
     # count the headings do not add up to is refused, not half recorded.
     sys.path.insert(0, LIB)
+    import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
     import local_review
     found, _, count = local_review.parse(
         "### `src/a.ts:12` — backticks\nx\n### src/b.ts:3-9 — a range\ny\n"
@@ -449,7 +451,7 @@ try:
     pending = os.path.join(repo, ".sclaude", "local", "feature", "local-review-unposted.json")
     check("partial-kept", os.path.exists(pending), True)
     # Waiting, it is not to be reported again by the next run.
-    out_prompt = subprocess.run([sys.executable, os.path.join(LIB, "local_review.py"), "prompt",
+    out_prompt = subprocess.run([sys.executable, os.path.join(LIB, "review", "local_review.py"), "prompt",
                                  repo, "7", "o/r", journal], cwd=repo, capture_output=True,
                                 text=True, env=dict(os.environ, GH_WORLD=world,
                                                     PATH=stubs + os.pathsep + os.environ["PATH"])).stdout
@@ -619,7 +621,7 @@ try:
     posted_before = len(threads())
     body = "set -uo pipefail\n"
     body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""; SELF=sclaude\n'
-    for name in ("io", "ui", "state", "steps", "project", "picker", "local_review"):
+    for name in ("core/io", "core/ui", "core/state", "core/steps", "core/project", "core/picker", "review/local_review"):
         body += 'source "%s/%s.sh"\n' % (LIB, name)
     body += 'LIB="%s"\nwarn() { echo "$*" >&2; }\ninfo() { echo "$*"; }\n' % LIB
     # No real night reaches the box: auto draws as auto ☐ here.
@@ -697,7 +699,7 @@ try:
     phone = os.path.join(ask_dir, "ask", "feat")
     body = "set -uo pipefail\n"
     body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""; SELF=sclaude\n'
-    for name in ("io", "ui", "state", "steps", "project", "picker", "local_review"):
+    for name in ("core/io", "core/ui", "core/state", "core/steps", "core/project", "core/picker", "review/local_review"):
         body += 'source "%s/%s.sh"\n' % (LIB, name)
     body += 'LIB="%s"\nwarn() { echo "$*" >&2; }\ninfo() { echo "$*"; }\n' % LIB
     body += 'ASK_DIR=%s; ASK_SLUG=feat\n' % ask_dir
@@ -735,12 +737,12 @@ try:
     write(rounds, "".join(json.dumps({"at": "t", "head": h}) + "\n" for h in ("a", "b", "b", "c")))
 
     def round_of(head):
-        return subprocess.run([sys.executable, os.path.join(LIB, "local_review.py"), "round",
+        return subprocess.run([sys.executable, os.path.join(LIB, "review", "local_review.py"), "round",
                                rounds, head], capture_output=True, text=True).stdout.strip()
     check("round-new-head", round_of("d"), "4")
     check("round-capped-head", round_of("c"), "3")
     check("round-empty-journal", subprocess.run(
-        [sys.executable, os.path.join(LIB, "local_review.py"), "round", os.path.join(tmp, "none"), "a"],
+        [sys.executable, os.path.join(LIB, "review", "local_review.py"), "round", os.path.join(tmp, "none"), "a"],
         capture_output=True, text=True).stdout.strip(), "1")
 
     # --- the prompts ------------------------------------------------------------
@@ -756,7 +758,7 @@ try:
                     "SCLAUDE_V_NO_REVIEW": "", "SCLAUDE_V_REVIEW_LOCAL": "",
                     "SCLAUDE_V_REVIEW_MODE": "github"})
         env.update(values)
-        out = subprocess.run([sys.executable, os.path.join(LIB, "render_prompt.py"),
+        out = subprocess.run([sys.executable, os.path.join(LIB, "cycle", "render_prompt.py"),
                               os.path.join(PROMPTS, step + ".md"), PROMPTS],
                              capture_output=True, text=True, env=env)
         return out.returncode, out.stdout + out.stderr

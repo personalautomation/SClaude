@@ -260,7 +260,7 @@ def wait_question(channel, after, seconds=6):
     return None
 
 
-# The actions sclaude offers on a feature (sclaude/lib/actions.sh), by the key
+# The actions sclaude offers on a feature (sclaude/lib/commands/actions.sh), by the key
 # each carries in brackets: where it leads. The rest stay on the current step.
 ACT_BACK = ("replan", "return")
 ACT_FORWARD = ("preview",)

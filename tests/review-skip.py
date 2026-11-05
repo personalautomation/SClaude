@@ -39,7 +39,7 @@ def git(*args, cwd):
 
 
 spec = importlib.util.spec_from_file_location("pr_context",
-                                              os.path.join(LIB, "pr_context.py"))
+                                              os.path.join(LIB, "review", "pr_context.py"))
 pr_context = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pr_context)
 
@@ -240,7 +240,7 @@ try:
             json.dump({"regression": {"local": {"status": "passed", "tree": tree}}}, fh)
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
-        for name in ("io", "ui", "steps", "state", "worktree", "scratch", "regression", "regression_gate", "regression_fix"):
+        for name in ("core/io", "core/ui", "core/steps", "core/state", "tree/worktree", "core/scratch", "ship/regression", "ship/regression_gate", "ship/regression_fix"):
             body += 'source "%s/%s.sh"\n' % (LIB, name)
         body += ('warn() { echo "$*"; }\ninfo() { echo "$*"; }\nsay() { echo "$*"; }\n'
                  'regression_run() { echo RAN; return 0; }\n'
@@ -284,7 +284,7 @@ try:
         with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             json.dump(state_blob, fh)
         body = "set -uo pipefail\n"
-        for name in ("io", "ui", "steps", "state", "watch", "run", "review_round", "review_gate"):
+        for name in ("core/io", "core/ui", "core/steps", "core/state", "cycle/watch", "cycle/run", "review/review_round", "review/review_gate"):
             body += 'source "%s/%s.sh"\n' % (LIB, name)
         body += 'review_skippable "%s" demo && echo YES || echo NO\n' % wt
         out = subprocess.run(["bash", "-c", body], capture_output=True, text=True,

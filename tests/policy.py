@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# The layers of what a session may run (sclaude/lib/policy.py), and the hook
+# The layers of what a session may run (sclaude/lib/improve/policy.py), and the hook
 # that enforces them.
 #
 #   * core.json's rules hold whatever a product or a person says;
@@ -23,6 +23,7 @@ import tempfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "sclaude", "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import policy  # noqa: E402
 
 HOOK = os.path.join(ROOT, "sclaude", "hooks", "forbidden-commands.py")
@@ -142,7 +143,7 @@ try:
     check("tree-lift-not-without-tree", verdict(main, "vercel --prod"), "deny")
     check("tree-ban-applies", verdict(main, "npm run wipe", tree=tree), "deny")
     check("main-ban-still-applies", verdict(main, "npm run seed", tree=tree), "deny")
-    out = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"),
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "improve", "policy.py"),
                           "flags", main, "", "code", tree], capture_output=True, text=True).stdout
     check("tree-flags", "Bash(npm run wipe:*)" in out.splitlines(), True)
     # An integration main names and the branch's older copy does not still holds.
@@ -159,7 +160,7 @@ try:
     check("tree-keeps-detected", policy.merged(found, "", "code", tree)["integrations"], ["supabase"])
 
     # --- the flags a step is launched with ---
-    out = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"),
+    out = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "improve", "policy.py"),
                           "flags", team, "ann", "code"], capture_output=True, text=True).stdout
     denied, _, allowed_rules = out.partition("\n\n")
     check("flags-deny", "Bash(npm run db:promote:*)" in denied.splitlines(), True)
@@ -170,7 +171,7 @@ try:
     # --- no product command left in sclaude itself ---
     presets = " ".join(open(os.path.join(ROOT, "sclaude", "policy", n)).read()
                        for n in os.listdir(os.path.join(ROOT, "sclaude", "policy")))
-    steps = open(os.path.join(ROOT, "sclaude", "lib", "steps.sh")).read()
+    steps = open(os.path.join(ROOT, "sclaude", "lib", "core", "steps.sh")).read()
     hook = open(HOOK).read()
     for name in ("db:promote", "env:prod", "env-guard.mjs", "environments.json"):
         check("no-%s-in-presets" % name, name in presets, False)
@@ -188,7 +189,7 @@ try:
                              {"tools": ["x"]}, {"deny": [{"command": "x", "why": 5}]})):
         write(broken, ".sclaude/team/policy.json", bad)
         check("broken-%d-merge-banned" % i, verdict(broken, "gh pr merge 1", step="code"), "deny")
-        flags = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"), "flags",
+        flags = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "improve", "policy.py"), "flags",
                                 broken, "", "code"], capture_output=True, text=True)
         check("broken-%d-flags-keep-merge" % i, "Bash(gh pr merge:*)" in flags.stdout, True)
     # Dropping the broken layer keeps what the product evidently uses.
@@ -202,7 +203,7 @@ try:
     os.makedirs(os.path.join(bad, ".sclaude", "team"), exist_ok=True)
     with open(os.path.join(bad, ".sclaude", "team", "policy.json"), "w") as fh:
         fh.write('{"deny": [{"command": "npm run seed"}],}')
-    done = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "policy.py"),
+    done = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "improve", "policy.py"),
                            "flags", bad, "", "code"], capture_output=True, text=True)
     check("bad-json-said", "not valid JSON" in done.stderr, True)
     check("bad-json-presets-hold", "Bash(gh pr merge:*)" in done.stdout, True)

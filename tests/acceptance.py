@@ -17,6 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "sclaude", "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from acceptance import (AC_CLOSE, AC_OPEN, NOTE, PLACEHOLDER, merge_section,
                         parse, plan_content, plan_section, plan_verdict,
                         render, section, status, sync, unticked, extend,

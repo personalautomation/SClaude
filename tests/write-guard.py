@@ -82,8 +82,8 @@ for command, want in (("echo x > .sclaude/team/a.md", "deny"),
 # --- read-only: sclaude's own checkout, for the review sessions ---------------
 RO = ("--readonly", "/home/u/sclaude")
 for command, cwd, want in (
-        ("echo x > sclaude/lib/run.sh", "/home/u/sclaude", "deny"),
-        ("sed -i s/a/b/ sclaude/lib/run.sh", "/home/u/sclaude", "deny"),
+        ("echo x > sclaude/lib/cycle/run.sh", "/home/u/sclaude", "deny"),
+        ("sed -i s/a/b/ sclaude/lib/cycle/run.sh", "/home/u/sclaude", "deny"),
         ("git commit -qm fix", "/home/u/sclaude", "deny"),
         ("git -C /home/u/sclaude add -A", "/home/u/myapp-1", "deny"),
         ("cd /home/u/sclaude && git reset --hard", "/home/u/myapp-1", "deny"),
@@ -121,7 +121,7 @@ for command, cwd, want in (
         # A relative `cd` from an unknown place is still unknown.
         ('cd "$X" && cd sub && echo x > f', "/home/u/myapp-1", "deny"),
         # Reading it, and writing the product, from inside it or not.
-        ("cat sclaude/lib/run.sh", "/home/u/sclaude", "allow"),
+        ("cat sclaude/lib/cycle/run.sh", "/home/u/sclaude", "allow"),
         ("git log --oneline -5", "/home/u/sclaude", "allow"),
         ("git diff HEAD~1", "/home/u/sclaude", "allow"),
         ("cd /home/u/myapp-1 && echo x > notes.md", "/home/u/sclaude", "allow"),
@@ -250,8 +250,8 @@ for command, cwd, want in (
         ("git log --format='%h>%s'", "/home/u/sclaude", "allow"),
         ('echo "a -> b" > /home/u/sclaude/f', "/tmp", "deny"),
         ('echo x > "/home/u/sclaude/a>b"', "/tmp", "deny"),
-        ("sed -n 1,5p /home/u/sclaude/lib/run.sh", "/tmp", "allow"),
-        ("grep -n foo /home/u/sclaude/lib/run.sh", "/tmp", "allow"),
+        ("sed -n 1,5p /home/u/sclaude/lib/cycle/run.sh", "/tmp", "allow"),
+        ("grep -n foo /home/u/sclaude/lib/cycle/run.sh", "/tmp", "allow"),
         ("cp /home/u/sclaude/a /tmp/b", "/tmp", "allow"),
         ("cp sclaude/policy/vercel.json /home/u/myapp-1/.sclaude/team/", "/home/u/sclaude", "allow"),
         ("echo x > /home/u/myapp-1/.sclaude/team/policy.json", "/home/u/sclaude", "allow")):
@@ -266,7 +266,7 @@ check("both team", hook("Bash", RO + ("--team",), "/home/u/sclaude",
 
 # --- who maintains, and where rules go -----------------------------------------
 def sh(script, cwd, env=None):
-    body = ('source "%s/developer.sh"; source "%s/steps.sh"; source "%s/workshop.sh"; '
+    body = ('source "%s/core/developer.sh"; source "%s/core/steps.sh"; source "%s/improve/workshop.sh"; '
             'HOOKS=/hooks; LIB="%s"\n'
             'warn() { echo "WARN $*" >&2; }\n%s' % (LIB, LIB, LIB, LIB, script))
     full = dict(os.environ, **(env or {}))
@@ -377,7 +377,7 @@ try:
         check("review-no-push-flag-%s" % name, "--no-own-push" in bans, False)
         check("review-keeps-the-bans-%s" % name, "forbidden-commands.py" in bans, True)
         check("review-names-the-workshop-%s" % name, workshop in write, True)
-        for path in (os.path.join(orchestrator, "sclaude/lib/run.sh"),
+        for path in (os.path.join(orchestrator, "sclaude/lib/cycle/run.sh"),
                      os.path.join(orchestrator, "README.md"),
                      os.path.join(orchestrator, "sclaude/hooks/write-guard.py")):
             check("review-writes-%s-%s" % (os.path.relpath(path, orchestrator), name),

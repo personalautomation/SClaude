@@ -39,7 +39,7 @@ def check(name, got, want):
 
 
 def run_bash(script, cwd, home, instruments,
-             modules=("io", "ui", "steps", "state", "watch")):
+             modules=("core/io", "core/ui", "core/steps", "core/state", "cycle/watch")):
     body = "set -uo pipefail\n"
     body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
     body += 'HOME=%s; INSTRUMENTS=%s\n' % (home, instruments)
@@ -131,16 +131,16 @@ try:
 
     # --- return_brief ---------------------------------------------------------
     out, _, _ = run_bash('return_brief "%s" 71 208' % wt, wt, home, inst,
-                         modules=("io", "ui", "steps", "state", "watch", "run", "review_round"))
+                         modules=("core/io", "core/ui", "core/steps", "core/state", "cycle/watch", "cycle/run", "review/review_round"))
     check("brief-names-the-mark", "since 2026-10-01T18:46:28+00:00" in out, True)
     check("brief-reads-the-issue", "`gh issue view 71 --json comments`" in out, True)
     check("brief-reads-the-pr-lines", "pulls/208/comments" in out, True)
     out, _, _ = run_bash('return_brief "%s" null null' % wt, wt, home, inst,
-                         modules=("io", "ui", "steps", "state", "watch", "run", "review_round"))
+                         modules=("core/io", "core/ui", "core/steps", "core/state", "cycle/watch", "cycle/run", "review/review_round"))
     check("brief-without-issue-or-pr", "gh " in out, False)
 
     # --- a silent return still briefs a fresh session -------------------------
-    with open(os.path.join(LIB, "run.sh")) as fh:
+    with open(os.path.join(LIB, "cycle", "run.sh")) as fh:
         run_src = fh.read()
     fresh = run_src[run_src.index('local qa_fresh; qa_fresh='):]
     fresh = fresh[:fresh.index('issue_sync "$wt"')]
@@ -150,7 +150,7 @@ try:
 
     # --- `sclaude return` refuses an unfinished feature ----------------------
     src = "".join(open(os.path.join(ROOT, _p)).read()
-        for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+        for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
     body = src[src.index("cmd_return() {"):]
     body = body[:body.index("\n}\n") + 3]
     check("only-from-done", 'if [[ "$step" != "done" ]]; then' in body, True)

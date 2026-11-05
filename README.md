@@ -57,7 +57,7 @@ together, and the page tells how many; every printed page names its
 section in its header and its number at the foot. The page names its paper, so the
 print dialog shows no Layout or Paper size; its Scale would only shrink each
 sheet. The same build draws it
-from `sclaude/lib/process.py`, which `tests/process.py` checks against the
+from `sclaude/lib/flow/process.py`, which `tests/process.py` checks against the
 code; a feature's own copy, with where it stands lit, is on the proxy (see
 [bin/sclaude-proxy](#binsclaude-proxy)).
 

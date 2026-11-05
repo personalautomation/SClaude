@@ -197,8 +197,8 @@ echo "hooks: $REPO/githooks"
 # The words and what they mean are sclaude's own (developer.sh), so the
 # question here and the one a start asks say the same.
 INSTRUMENTS="$REPO"
-# shellcheck source=sclaude/lib/developer.sh
-source "$REPO/sclaude/lib/developer.sh"
+# shellcheck source=sclaude/lib/core/developer.sh
+source "$REPO/sclaude/lib/core/developer.sh"
 
 # Asks one setting, unless a flag set it or an earlier install did. No
 # default, as everywhere in sclaude: a key that names no line is passed over.

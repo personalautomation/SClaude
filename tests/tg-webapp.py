@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# sclaude/lib/tg_webapp.py: the check behind `sclaude-proxy --gate`. Telegram's
+# sclaude/lib/core/tg_webapp.py: the check behind `sclaude-proxy --gate`. Telegram's
 # initData is accepted only when signed with this bot's token, fresh, and from
 # the owner; the gate's cookie only when it is its own and unexpired.
 #
@@ -14,6 +14,7 @@ import tempfile
 from urllib.parse import urlencode
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sclaude", "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import tg_webapp  # noqa: E402
 
 failures = []

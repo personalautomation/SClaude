@@ -203,7 +203,7 @@ try:
         check("off --away: the caller's why, whatever session id it inherited",
               "morning summary" in context(out) and "Ended by the caller." in context(out))
         check("sclaude's offer ends the night with --away",
-              'off --away' in open(os.path.join(ROOT, "sclaude", "lib", "review_gate.sh")).read())
+              'off --away' in open(os.path.join(ROOT, "sclaude", "lib", "review", "review_gate.sh")).read())
         hook(state, "prompt", "a", prompt="/isleep")
         run(state, "off", env={"CLAUDE_CODE_SESSION_ID": "a"})
         check("off from a session leaves nothing due",
@@ -375,8 +375,8 @@ try:
         feature = os.path.join(wt, ".sclaude/local/feature/state.json")
         lib = os.path.join(ROOT, "sclaude", "lib")
         script = (f'INSTRUMENTS="{ROOT}"; LIB="{lib}"; REPO="{repo}"; '
-                  f'source "$LIB/state.sh"; source "$LIB/project.sh"; '
-                  f'source "$LIB/local_review.sh"; review_go_on "{wt}"')
+                  f'source "$LIB/core/state.sh"; source "$LIB/core/project.sh"; '
+                  f'source "$LIB/review/local_review.sh"; review_go_on "{wt}"')
 
         def go_on(mode, box=None):
             json.dump({} if mode is None else {"sleep_mode": mode},

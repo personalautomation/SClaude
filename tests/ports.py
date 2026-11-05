@@ -36,8 +36,8 @@ info() { :; }
 warn() { echo "WARN $*" >&2; }
 GREEN=""; OFF=""
 REPO="%s/repo"
-source "%s/state.sh"
-source "%s/worktree.sh"
+source "%s/core/state.sh"
+source "%s/tree/worktree.sh"
 DEV_PORT_FIRST=%d
 DEV_PORT_LAST=%d
 %s

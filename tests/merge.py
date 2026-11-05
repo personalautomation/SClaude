@@ -26,11 +26,11 @@ import sys
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
 deploy = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
-              encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+              encoding="utf-8").read() for _m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
 run_sh = "".join(open(os.path.join(ROOT, "sclaude", "lib", m), encoding="utf-8").read()
-                 for m in ("run.sh", "review_round.sh"))
+                 for m in ("cycle/run.sh", "review/review_round.sh"))
 github = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
-              encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
+              encoding="utf-8").read() for _m in ("github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh"))
 
 failures = []
 
@@ -309,7 +309,7 @@ check_true("merge-wait-gets-the-offer-mode",
 # `sclaude preview` and the cycle once built the block separately and drifted:
 # the typed command deployed without the branch's migrations and recorded the
 # deploy, which the cycle then skipped as unchanged.
-sclaude_bin = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+sclaude_bin = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 cmd_preview = body_of(sclaude_bin, "cmd_preview")
 check_true("cmd-preview-exists", cmd_preview is not None)
 if cmd_preview:
@@ -572,7 +572,7 @@ check_true("qa-wait-records-acceptance", 'qa_accepted "$wt"' in (body_of(deploy,
 check_true("qa-wait-notices-a-merge",
            'qa_wait "$slug" "$issue" "$pr" "$branch"' in deploy
            and "was merged while QA still had issue" in deploy)
-github = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
+github = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh"))
 check_true("qa-ready-from-backlog-too",
            'issue_move_status "$1" "$QA_FROM" "$QA_TO" "$PROGRESS_FROM"' in github)
 
@@ -624,7 +624,7 @@ def pause_in_pty(keys):
     import select
     import time
     lib = os.path.join(ROOT, "sclaude", "lib")
-    script = ('source "%s/ui.sh"; s=$SECONDS; poll_pause 20; '
+    script = ('source "%s/core/ui.sh"; s=$SECONDS; poll_pause 20; '
               'echo "PAUSED $((SECONDS - s))"; '
               'read -rsn1 -t 1 left < /dev/tty && echo "LEFT" || echo "CLEAN"' % lib)
     pid, fd = pty.fork()
@@ -660,7 +660,7 @@ check_true("the-rest-of-the-key-is-swallowed", "CLEAN" in pressed)
 # Without a terminal on stdout or stderr it is a plain sleep: nothing on
 # screen says a key would do anything, and a pipe must not block on a tty.
 piped = subprocess.run(
-    ["bash", "-c", 'source "%s/sclaude/lib/ui.sh"; sleep() { echo "slept $1"; }; '
+    ["bash", "-c", 'source "%s/sclaude/lib/core/ui.sh"; sleep() { echo "slept $1"; }; '
                    'poll_pause 7' % ROOT],
     capture_output=True, text=True, stdin=subprocess.DEVNULL)
 check("no-terminal-sleeps", piped.stdout.strip(), "slept 7")

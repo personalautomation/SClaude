@@ -26,9 +26,10 @@ import tempfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
-END = os.path.join(LIB, "session_end.py")
+END = os.path.join(LIB, "cycle", "session_end.py")
 
 sys.path.insert(0, LIB)
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import session_end  # noqa: E402
 
 failures = []
@@ -42,7 +43,7 @@ def check(name, got, want):
 with open(os.path.join(ROOT, "sclaude", "prompts", "code.md")) as fh:
     PROMPT = fh.read()
 RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
-          for m in ("run.sh", "session_watch.sh"))
+          for m in ("cycle/run.sh", "cycle/session_watch.sh"))
 
 # --- the words both sides share ----------------------------------------------
 check("code.md names the header", "header: `%s`" % session_end.ACCEPT_HEADER in PROMPT, True)

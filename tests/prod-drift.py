@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# A bench for prod_drift_report (sclaude/lib/shipped.sh): the check that says
+# A bench for prod_drift_report (sclaude/lib/ship/shipped.sh): the check that says
 # when production is not serving what origin/main holds, and when main holds
 # commits that never reached origin.
 #
@@ -66,7 +66,7 @@ def report(repo, prod_line, linked=True):
     elif os.path.isdir(vercel):
         os.rmdir(vercel)
     script = 'REPO="%s"\n' % repo
-    for name in ("io", "project", "rollback", "deploy", "shipped", "vercel", "qa", "merge", "demo", "deferred"):
+    for name in ("core/io", "core/project", "ship/rollback", "ship/deploy", "ship/shipped", "ship/vercel", "ship/qa", "ship/merge", "ship/demo", "improve/deferred"):
         script += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
     script += 'warn() { echo "W $*"; }; info() { echo "I $*"; }\n'
     script += "vercel_prod_current() { printf '%%s' '%s'; }\n" % prod_line
@@ -140,7 +140,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("unpushed-says-how-to-push", "push origin main" in out, True)
 
 # Both places a person looks from run it, after review_branches has fetched.
-sclaude_bin = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+sclaude_bin = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 for cmd in ("cmd_menu", "cmd_status"):
     start = sclaude_bin.find("\n%s() {" % cmd)
     body = sclaude_bin[start:sclaude_bin.find("\n}", start)]

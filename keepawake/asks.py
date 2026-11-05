@@ -30,7 +30,7 @@ log = logging.getLogger("keepawake")
 # a question is found even before the feature is created. The repository's own
 # channel is that directory; each feature in progress has its own below it, in
 # ask/<slug>/, so that features running in parallel can all ask at once. The
-# format is in sclaude/lib/io.sh (ask_channel).
+# format is in sclaude/lib/core/io.sh (ask_channel).
 #
 # A channel is named in the state by its key: the repository's name for the
 # repository's channel, "<repository>/<slug>" for a feature's.
@@ -130,7 +130,7 @@ def is_back_option(label):
     return any(low.startswith(b) for b in BACK_OPTIONS)
 
 
-# The replies is_yes and is_no take in sclaude/lib/ui.sh, in any case.
+# The replies is_yes and is_no take in sclaude/lib/core/ui.sh, in any case.
 YES_WORDS = ("y", "yes")
 NO_WORDS = ("n", "no")
 
@@ -206,7 +206,7 @@ def answer_ask(channel, reply, want=None):
 # what is needed to write the answer once the question itself is gone.
 #
 # How the question ended is told by the orchestrator in closed/<id>.json (see
-# ask_closed in sclaude/lib/io.sh).
+# ask_closed in sclaude/lib/core/io.sh).
 
 CLOSED_DIR = "closed"
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# The sync with main (sclaude/lib/sync.sh), on real repositories: an origin,
+# The sync with main (sclaude/lib/tree/sync.sh), on real repositories: an origin,
 # its main, and a feature's branch in a clone of it.
 #
 #   * merge_conflicts says whether the branch merges with origin/main, and
@@ -80,7 +80,7 @@ run_friction() { [[ -z "${FRICTION_FAILS:-}" ]]; }
 
 def run(wt, script, **env):
     body = "set -uo pipefail\n" + "".join('source "%s/%s.sh"\n' % (LIB, m)
-                                          for m in ("io", "ui", "steps", "state", "deferred", "sync")) \
+                                          for m in ("core/io", "core/ui", "core/steps", "core/state", "improve/deferred", "tree/sync")) \
         + STUBS + script
     e = dict(os.environ, **env)
     p = subprocess.run(["bash", "-c", body], cwd=wt, capture_output=True, text=True,
@@ -286,7 +286,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # The prompt, for a reviewed feature and for one still being built.
     def prompt(**values):
         e = dict(os.environ, **{"SCLAUDE_V_" + k.upper(): v for k, v in values.items()})
-        p = subprocess.run(["python3", os.path.join(LIB, "render_prompt.py"),
+        p = subprocess.run(["python3", os.path.join(LIB, "cycle", "render_prompt.py"),
                             os.path.join(LIB, "..", "prompts", "sync.md"),
                             os.path.join(LIB, "..", "prompts")],
                            capture_output=True, text=True, env=e, timeout=30)
@@ -459,7 +459,7 @@ with tempfile.TemporaryDirectory() as tmp:
     git(seed, "push", "-q", "origin", "HEAD:main")
     commit(wt, "app.txt", "one\nfeature\nthree\n", "feature's change")
     git(wt, "push", "-q")
-    wait = ('for _m in deploy shipped vercel qa merge demo; do source "%s/$_m.sh"; done\nbranch_pr_state() { echo OPEN; }\npoll_pause() { POLL_KEY=""; sleep 1; }\n'
+    wait = ('for _m in ship/deploy ship/shipped ship/vercel ship/qa ship/merge ship/demo; do source "%s/$_m.sh"; done\nbranch_pr_state() { echo OPEN; }\npoll_pause() { POLL_KEY=""; sleep 1; }\n'
             'project_flow_mode() { echo github; }\nregression_duration() { echo 1s; }\n'
             'SYNC_POLL=1\nmerge_wait 9-x 9 7 feat/9-x "" "$PWD"' % LIB)
     rc, out = run(wt, wait, **env)

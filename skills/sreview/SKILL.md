@@ -76,17 +76,17 @@ checkout this skill is installed from, wherever that is:
   session per round and markers for the orchestrator, this skill replaces that:
   you run the rounds yourself.
 - the reviewer's model and level: `LOCAL_REVIEW_MODEL` / `LOCAL_REVIEW_LEVEL` in
-  `$I/sclaude/lib/local_review.sh` (today opus, medium).
+  `$I/sclaude/lib/review/local_review.sh` (today opus, medium).
 
 With a pull request open for the branch (`gh pr view --json number`) and
 `review` not `off`, this is **PR mode**: findings live as threads on the pull
 request, as sclaude keeps them.
 - `review: local` — the reviewer is your subagent (step 1). Before it runs, get
   what is already on the pull request:
-  `python3 $I/sclaude/lib/local_review.py prompt <cwd> <pr> <owner/repo> <journal>`
+  `python3 $I/sclaude/lib/review/local_review.py prompt <cwd> <pr> <owner/repo> <journal>`
   and add its output to the reviewer's scope verbatim. After it answers, save
   the answer and post it:
-  `python3 $I/sclaude/lib/local_review.py record <cwd> <pr> <owner/repo> <answer> <base> <head> <seconds> <journal>`
+  `python3 $I/sclaude/lib/review/local_review.py record <cwd> <pr> <owner/repo> <answer> <base> <head> <seconds> <journal>`
   — it posts new threads and resolves the ones the reviewer marked `RESOLVED`.
   The journal is `.sclaude/local/feature/local-review-rounds.jsonl` when that
   directory exists (so sclaude counts these rounds), else `$S/branches/<branch>.rounds.jsonl`.

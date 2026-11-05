@@ -134,12 +134,17 @@ INSTRUMENTS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 # The order of the sources does not matter: the files only declare functions
 # without executing anything. A read error on any of them is death on the spot:
 # half an orchestrator is worse than none.
-for _module in io ui steps state project environment developer branches worktree featuredb lock pane run \
-               prompt session_watch acceptance review_round review_gate friction instruments \
-               github issue_sync board outcome plan deploy shipped vercel qa merge demo regression regression_gate regression_fix rollback watch picker abandon \
-               actions doctor deferred \
-               terminal retro scratch no_change local_review config sync workshop \
-               start menu step_commands done feature_commands; do
+for _module in core/io core/ui core/steps core/state core/project core/environment core/developer \
+               tree/branches tree/worktree tree/featuredb core/lock core/pane cycle/run \
+               cycle/prompt cycle/session_watch cycle/acceptance review/review_round \
+               review/review_gate improve/friction improve/instruments github/github \
+               github/issue_sync github/board github/outcome cycle/plan ship/deploy ship/shipped \
+               ship/vercel ship/qa ship/merge ship/demo ship/regression ship/regression_gate \
+               ship/regression_fix ship/rollback cycle/watch core/picker commands/abandon \
+               commands/actions commands/doctor improve/deferred core/terminal improve/retro \
+               core/scratch cycle/no_change review/local_review core/config tree/sync \
+               improve/workshop commands/start commands/menu commands/step_commands commands/done \
+               commands/feature_commands; do
   # shellcheck source=/dev/null
   source "$LIB/$_module.sh" || {
     echo "sclaude: cannot load $LIB/$_module.sh" >&2

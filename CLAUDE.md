@@ -27,12 +27,12 @@ These are load-bearing. Do not "fix" them.
 
 2. **`keepawake/docs.py`** — the same, for the bot's long-form docs sections.
 
-3. **Cyrillic characters that match keystrokes**, in `sclaude/lib/picker.sh`
+3. **Cyrillic characters that match keystrokes**, in `sclaude/lib/core/picker.sh`
    (the `q` key). On a Russian keyboard layout `q` types as `й`. Removing it
    means a quit typed with that layout stops counting.
 
    Yes/no answers are deliberately *not* in this list: `is_yes`/`is_no` in
-   `sclaude/lib/ui.sh` take only `y`, `yes`, `n`, `no` in any case, and `ask`
+   `sclaude/lib/core/ui.sh` take only `y`, `yes`, `n`, `no` in any case, and `ask`
    re-asks until it gets one. Do not add Cyrillic or a default back.
 
 ### Strings that are coupled across files
@@ -47,19 +47,19 @@ breaks the other silently — grep before you edit:
 - `OWN_MARKERS` in `sclaude/hooks/collect-denials.py` must match the text the
   hooks actually emit; `tests/hooks.py` guards this.
 - The issue-comment markers (`REQUEST`, `AC_OPEN`/`AC_CLOSE`, `STATUS`) are
-  declared once, in `sclaude/lib/issue_comments.py`, and imported elsewhere;
+  declared once, in `sclaude/lib/github/issue_comments.py`, and imported elsewhere;
   `sclaude/prompts/plan.md` and `status.md` spell them out for the model.
   `tests/status.py` fails if a copy reappears in `github.sh` or the modules
   split from it (`issue_sync.sh`, `board.sh`, `outcome.sh`).
 - `.sclaude/local/feature/review-yours` — the review threads the person decided to leave —
-  is named by `YOURS_FILE` in `sclaude/lib/pr_context.py` and spelled out in
+  is named by `YOURS_FILE` in `sclaude/lib/review/pr_context.py` and spelled out in
   `sclaude/prompts/review.md`, which tells the session its line format;
   `tests/parallel.py` checks the two agree.
-- `NIGHT_MARK` in `sclaude/lib/pr_context.py` — what a night session's
+- `NIGHT_MARK` in `sclaude/lib/review/pr_context.py` — what a night session's
   decision carries in `review-yours` — is spelled out in
   `sclaude/prompts/review.md`, which writes it at night and asks the person
   about such threads by day, and counted by `night_yours` for
-  `review_night_offer` in `sclaude/lib/review_gate.sh`, which on the person's yes
+  `review_night_offer` in `sclaude/lib/review/review_gate.sh`, which on the person's yes
   moves their lines to `NIGHT_FILE` (`review-night`, `night_take`) for the
   snapshot to mark them to be asked about; `tests/parallel.py` checks the
   sides agree. Reworded on one side alone, the morning offer never comes and
@@ -75,7 +75,7 @@ breaks the other silently — grep before you edit:
 
 - `closed/<id>.json` in a question channel (`.git/sclaude/` or a feature's
   `.git/sclaude/ask/<slug>/`) — how a question ended — is written by
-  `ask_closed` in `sclaude/lib/io.sh` and read by `CLOSED_DIR`/`closed_asks` in
+  `ask_closed` in `sclaude/lib/core/io.sh` and read by `CLOSED_DIR`/`closed_asks` in
   `keepawake/asks.py`, which turns the question's message into the answer
   by it; without the record the message is deleted as unanswered.
   `tests/io.py` checks what is written, `tests/keepawake.py` what is read.
@@ -88,18 +88,18 @@ breaks the other silently — grep before you edit:
   topic from that record's `thread` too; `tests/keepawake.py` checks it
   names the same file.
 - `.sclaude/local/feature/closing` — a worktree whose removal has begun — is
-  written by `stop_dev` in `sclaude/lib/worktree.sh` (and taken back off when
+  written by `stop_dev` in `sclaude/lib/tree/worktree.sh` (and taken back off when
   git refuses the removal), and honoured by `sclaude-proxy` (no lazy start)
   and by `CLOSING_MARK` in `keepawake/topics.py` (the menu offers the
   feature no more); `tests/ports.py`, `tests/proxy.py` and
   `tests/keepawake.py` check each side.
 - `notes/` in a feature's channel — messages that ask nothing, such as where
   the review stands after each round — is written by `ask_notice` in
-  `sclaude/lib/io.sh` and read by `NOTES_DIR` in `keepawake/notices.py`;
+  `sclaude/lib/core/io.sh` and read by `NOTES_DIR` in `keepawake/notices.py`;
   `tests/notices.py` runs both sides. So does `notes/feed.tsv` — what sclaude
   prints about a feature, one tab-separated line each — written by `ask_feed`
   in `io.sh` and read by `FEED_FILE` in `notices.py`. The text itself is the file that
-  `SCLAUDE_REPORT_BRIEF` names to `sclaude/lib/review_report.py`
+  `SCLAUDE_REPORT_BRIEF` names to `sclaude/lib/review/review_report.py`
   (`review_report` in `review_gate.sh`).
 
 - The record of a topic's messages, `~/.local/state/keepawake/topics/<thread>`
@@ -109,7 +109,7 @@ breaks the other silently — grep before you edit:
   bot and imports the function, and read by `clear_topic_messages`, which
   deletes them with the topic; `tests/keepawake.py` runs both writers.
 
-- The icons `phase_icon` in `sclaude/lib/steps.sh` opens every session's
+- The icons `phase_icon` in `sclaude/lib/core/steps.sh` opens every session's
   start and end line with (and `pane_icon` gives its tab) are listed again in
   `PHASE_ICONS` in `keepawake/notices.py`, which leads the topic's message with
   such an icon in place of the laptop's 🖥; one missing there gets 🖥 before
@@ -118,10 +118,10 @@ breaks the other silently — grep before you edit:
   a step's message and the `✅` of a step's `done` closes it, so a step's lines
   are not mixed with the next one's; `tests/notices.py` runs it on those lines.
 - The cycle's numbering — the four `STEPS`, then the sync with main, the
-  epilogue and the retrospective (`cycle_number` in `sclaude/lib/steps.sh`) —
+  epilogue and the retrospective (`cycle_number` in `sclaude/lib/core/steps.sh`) —
   is named step by step by `act.steps` in `keepawake/i18n.py`, which the menu
   indexes by a feature's step number, and counted again by `TOTAL` in the
-  issue's summary (`sclaude/lib/issue_sync.sh`); `tests/session_names.py` checks
+  issue's summary (`sclaude/lib/github/issue_sync.sh`); `tests/session_names.py` checks
   that both halves of `act.steps` name as many steps as `cycle_total` counts.
 
   <!-- Added by Claude on 2026-10-24 with step 5, the sync with main: the
@@ -143,17 +143,17 @@ breaks the other silently — grep before you edit:
   named by `skills/sdemo/play.mjs`, and the page is `player.html` with its
   `/*DEMO*/` and `/*FEATURE*/` markers filled by play.mjs. `latest_demo` in
   the proxy reads the newest one's `demo.json` for the list of features and
-  for the process map's link (`demo` of `page` in `sclaude/lib/process_page.py`). The script's
+  for the process map's link (`demo` of `page` in `sclaude/lib/flow/process_page.py`). The script's
   helpers (`d.say`, `d.click`…) are spelled out for the session in
   `skills/sdemo/SKILL.md`. `tests/dev-login.py` checks the two sides of the
   directory and the address.
 - The demo's comment on the issue is headed by `DEMO`, declared in
-  `sclaude/lib/issue_comments.py` and imported by `skills/sdemo/demo.py`,
+  `sclaude/lib/github/issue_comments.py` and imported by `skills/sdemo/demo.py`,
   which writes it only for sclaude (`SCLAUDE_SESSION`, set by
-  `session_git_env` in `sclaude/lib/run.sh` and by `demo_refresh`).
+  `session_git_env` in `sclaude/lib/cycle/run.sh` and by `demo_refresh`).
   `sclaude/prompts/code.md` tells step 2 to run `/sdemo`, and again after
   remarks when `demo.py stale` says the code changed;
-  `demo_refresh` in `sclaude/lib/demo.sh` asks `demo.py stale` (exit 0 with
+  `demo_refresh` in `sclaude/lib/ship/demo.sh` asks `demo.py stale` (exit 0 with
   `stale:` — record again) once the preview's regression is green, before
   `issue_qa_ready`, where `project_flow_mode qa` is not `auto` (a delta and
   the whole demo), or before the last `run_status` where it is (the whole
@@ -166,13 +166,13 @@ breaks the other silently — grep before you edit:
   `tests/dev-login.py` runs the comment, `stale` and `replay`. The ref
   `refs/sclaude/demo/<label>` (`DEMO_REF` in demo.py) holds the last full
   demo's tree and is deleted by `remove_worktree` in
-  `sclaude/lib/worktree.sh` once the tree is gone; `TEXT_ONLY` in demo.py is
+  `sclaude/lib/tree/worktree.sh` once the tree is gone; `TEXT_ONLY` in demo.py is
   what `bin/sclaude-notify` says when the videos were refused and the text
   went. `tests/dev-login.py` checks both pairs. `demo_refresh` holds what
   its session plays with `SCLAUDE_DEMO_HOLD=1` (read by `cmd_play`) and
   publishes its last delta and last full recording (none after `keep`) with
   `demo.py publish`, which clears their `held` mark, picked from
-  `history.json` by `sclaude/lib/demo_refresh.py`, which also reads the
+  `history.json` by `sclaude/lib/ship/demo_refresh.py`, which also reads the
   `kept` entry `demo.py keep` writes and the session's `findings.md` there;
   `tests/demo-refresh.py` runs both sides.
 
@@ -184,7 +184,7 @@ breaks the other silently — grep before you edit:
   issue comment and the steps' demo on 2026-11-01. -->
 
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
-  is read by `review_context` in `sclaude/lib/review_round.sh`, which decides by it
+  is read by `review_context` in `sclaude/lib/review/review_round.sh`, which decides by it
   whether a review round stays in the same session; `tests/review-round.py`
   runs both sides.
 - `.sclaude/local/feature/review-reversals` is named by `reversals_file` in
@@ -193,7 +193,7 @@ breaks the other silently — grep before you edit:
 
 - Step 2's closing question — the header `Accept work`, the option `Accept`
   and the marker word `accepted` — is spelled out in `sclaude/prompts/code.md`
-  and read by `ACCEPT_HEADER`/`ACCEPT_LABEL` in `sclaude/lib/session_end.py`
+  and read by `ACCEPT_HEADER`/`ACCEPT_LABEL` in `sclaude/lib/cycle/session_end.py`
   (`code_accepted` in `session_watch.sh`) and the watcher's short grace in
   `session_watch_start`; `tests/code-accept.py` checks the sides agree.
   Reworded on one side alone, sclaude asks again in its terminal, or a
@@ -203,13 +203,13 @@ breaks the other silently — grep before you edit:
 
 - `as on r<id>`, the reply `sclaude/prompts/review.md` asks for when a
   declined thread repeats an earlier one, is read by `CITED` in
-  `sclaude/lib/review_report.py`; `tests/review-report.py` checks both sides.
+  `sclaude/lib/review/review_report.py`; `tests/review-report.py` checks both sides.
 
   <!-- The two entries above were added by Claude, not asked for line by line:
   they came with the parallel-features fixes of 2026-10-09, so that a later
   edit to one side does not silently break the other. -->
 
-- `CHECKS_VERDICTS` in `sclaude/lib/pr_context.py` — the exit codes and first
+- `CHECKS_VERDICTS` in `sclaude/lib/review/pr_context.py` — the exit codes and first
   words that `sclaude checks` ends on — is listed in `sclaude/prompts/review.md`,
   which tells step 4 what each one means; `tests/checks-wait.py` checks the two
   agree.
@@ -218,7 +218,7 @@ breaks the other silently — grep before you edit:
   asked: the prompt acts on the codes, so a code changed on one side alone
   would send a session the wrong way without an error. -->
 
-- `LOCAL_SIGNATURE` in `sclaude/lib/pr_context.py` ends every finding and
+- `LOCAL_SIGNATURE` in `sclaude/lib/review/pr_context.py` ends every finding and
   reply a review run on this machine posts (`local_review.py`), and is how
   `review_state` tells them from what the person wrote under the same
   account; `tests/review-skip.py` and `tests/local-review.py` check both
@@ -237,7 +237,7 @@ breaks the other silently — grep before you edit:
 
 - `review-said` in a feature's channel — the review's keys pressed in its
   topic — is written by `SAID_FILE` in `keepawake/review_keys.py` and taken by
-  `review_said_take` (`REVIEW_SAID_FILE`) in `sclaude/lib/local_review.sh`;
+  `review_said_take` (`REVIEW_SAID_FILE`) in `sclaude/lib/review/local_review.sh`;
   the buttons go on the lines `phase_words` in `steps.sh` prints for a local
   review pass and a fix session starting, which `PASS_START` and
   `SESSION_START` there match. `tests/notices.py` runs both sides on
@@ -248,8 +248,8 @@ breaks the other silently — grep before you edit:
   doing nothing, or missing. -->
 
 - The workshop's record, `.sclaude/local/instruments.json` beside the
-  workshop (`workshop_record` in `sclaude/lib/workshop.sh`), lists in
-  `approved` the sessions that may write there; `sclaude/lib/workshop.py`
+  workshop (`workshop_record` in `sclaude/lib/improve/workshop.sh`), lists in
+  `approved` the sessions that may write there; `sclaude/lib/improve/workshop.py`
   writes it and `approved` in `sclaude/hooks/write-guard.py` reads it, and
   `--workshop DIR` names the record as `DIR.json`. `tests/write-guard.py` and
   `tests/workshop.py` check each side.
@@ -272,8 +272,8 @@ breaks the other silently — grep before you edit:
   leak question longer than that is asked at the terminal alone, so that a
   "yes" from the phone never covers lines it did not show.
 - `<workshop-rules>` in `sclaude/prompts/_friction-body.md` and
-  `friction-deferred.md` is filled by `run_friction` in `sclaude/lib/friction.sh`
-  and `cmd_deferred` in `sclaude/lib/deferred.sh`; `<block:workshop>` in the
+  `friction-deferred.md` is filled by `run_friction` in `sclaude/lib/improve/friction.sh`
+  and `cmd_deferred` in `sclaude/lib/improve/deferred.sh`; `<block:workshop>` in the
   step and retrospective prompts by `render_prompt` in `prompt.sh`.
 
   <!-- Added by Claude on 2026-10-26 with the workshop: a name changed on one
@@ -289,10 +289,10 @@ breaks the other silently — grep before you edit:
   friction commits' footer exception there: renamed on one side alone, the
   endings would point at nothing. -->
 
-- The process map, `sclaude/lib/process.py` and its parts
+- The process map, `sclaude/lib/flow/process.py` and its parts
   (`process_*.py`, listed in `PARTS`), names every command
   `bin/sclaude` dispatches (`COMMANDS`), every verb of the action list in
-  `sclaude/lib/actions.sh`, the steps as `STEPS` and `cycle_number` number
+  `sclaude/lib/commands/actions.sh`, the steps as `STEPS` and `cycle_number` number
   them, and reads `state.json`'s fields to say where a feature stands
   (`position`, called by `cmd_flow`); `bin/sclaude-proxy` serves it at
   `/__sclaude/flow`, the Mini App opens it through the gate (`FLOW_PREFIX`,
@@ -307,8 +307,8 @@ breaks the other silently — grep before you edit:
 
 - A feature's history, `.sclaude/local/feature/history.jsonl` beside its
   state, is written by `session_runs` and `history_add` in
-  `sclaude/lib/state.sh` and read by `HISTORY_FILE`/`history` in
-  `sclaude/lib/process_history.py`, which knows the `what` and `op` words the
+  `sclaude/lib/core/state.sh` and read by `HISTORY_FILE`/`history` in
+  `sclaude/lib/flow/process_history.py`, which knows the `what` and `op` words the
   writers use (`regression.<stage>`, `fix.<stage>`, `qa in`, `workshop
   main`, `ask answered` from `ask_log` in `io.sh`, `command` from
   `history_command`…); a word changed on one side alone drops that place
@@ -318,27 +318,27 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-10-28 with the played history of a feature. -->
 
 - The DORA page, `.sclaude/local/dora/index.html` in the product's main
-  checkout, is written by `DIR`/`PAGE` in `sclaude/lib/dora_store.py` and served by
+  checkout, is written by `DIR`/`PAGE` in `sclaude/lib/metrics/dora_store.py` and served by
   `DORA_PAGE` in `bin/sclaude-proxy`; `tests/dora.py` and `tests/proxy.py`
   check each side. dora.py finds rollbacks by the heading and the marker
-  `rollback_incident` in `sclaude/lib/rollback.sh` writes (`ROLLBACK_HEADING`
+  `rollback_incident` in `sclaude/lib/ship/rollback.sh` writes (`ROLLBACK_HEADING`
   in dora_sources.py, `ROLLBACK` in `issue_comments.py`); reword that comment and failures stop being counted. The page
-  also reads the names `session_label` in `sclaude/lib/steps.sh` gives a
-  session (`step_of` in `sclaude/lib/claude_usage.py`; `tests/session_names.py`
+  also reads the names `session_label` in `sclaude/lib/core/steps.sh` gives a
+  session (`step_of` in `sclaude/lib/metrics/claude_usage.py`; `tests/session_names.py`
   feeds it every kind) and the columns of `review-context.log` that
   `review_context_log` in `review_round.sh` writes (`review_log` in
-  `sclaude/lib/dev_quality.py`; `tests/metrics-page.py`).
+  `sclaude/lib/metrics/dev_quality.py`; `tests/metrics-page.py`).
 
   <!-- Added by Claude on 2026-10-27 with the DORA page: a path or a heading
   changed on one side alone leaves the page missing or every failure unseen. -->
 
 - `night.py active` (`skills/isleep/night.py`) is what `review_go_on` in
-  `sclaude/lib/local_review.sh` asks, under `sleep_mode: auto`
-  (`project_sleep_mode` in `sclaude/lib/project.sh`, `CHOICES` in
+  `sclaude/lib/review/local_review.sh` asks, under `sleep_mode: auto`
+  (`project_sleep_mode` in `sclaude/lib/core/project.sh`, `CHOICES` in
   `config_menu.py`), whether a night over every session is on; `tests/isleep.py` runs it and
   `tests/config-menu.py` the setting. Renamed on one side alone, the night's
   review rounds stop going on by themselves, without an error.
-  `review_night_offer` in `sclaude/lib/review_gate.sh` asks `night.py active` too, and
+  `review_night_offer` in `sclaude/lib/review/review_gate.sh` asks `night.py active` too, and
   ends the night with `night.py off --away <why>` on the person's yes, so the session it
   opens asks rather than decides.
 
@@ -347,7 +347,7 @@ breaks the other silently — grep before you edit:
 - The machine's settings, `sclaude.update` (`auto`, `notify`, `off`),
   `sclaude.contribute` (`send`, `ask`, `off`) and `sclaude.leaks` (`ask`,
   `auto`, `off`) in the checkout's git config, are read by
-  `update_mode`/`contribute_mode`/`leaks_mode` in `sclaude/lib/developer.sh` and
+  `update_mode`/`contribute_mode`/`leaks_mode` in `sclaude/lib/core/developer.sh` and
   written by `install.sh` (`--update=`, `--contribute=`, `--leaks=`, its questions) and
   `update_mode_choose`; unset is `ask` on both sides. `tests/install.py`
   checks what the installer writes, `tests/sync.py` and `tests/workshop.py`
@@ -361,9 +361,9 @@ breaks the other silently — grep before you edit:
   `prodRegression` (`full`, `smoke`, `none`) and `demo` (`on`, `off`, read by
   `project_demo_mode`, which `<if:demo>` in `sclaude/prompts/code.md` and
   `demo_refresh` in `demo.sh` follow) are listed in `CHOICES` in
-  `sclaude/lib/config_menu.py`, explained in `sclaude/config.example.json`,
+  `sclaude/lib/core/config_menu.py`, explained in `sclaude/config.example.json`,
   read by `project_ship_mode`/`project_stage_regression` in
-  `sclaude/lib/project.sh` and by `setting` in `sclaude/lib/process_config.py`. The
+  `sclaude/lib/core/project.sh` and by `setting` in `sclaude/lib/flow/process_config.py`. The
   part name `smoke` is treated as `e2e` by `regression_command` and is what
   `sclaude/prompts/code.md` tells step 2 to tag for. `tests/project.py`,
   `tests/regression.py`, `tests/merge.py` and `tests/process.py` check each
@@ -374,7 +374,7 @@ breaks the other silently — grep before you edit:
   settings. -->
 
 - `sclaude new`'s options (`--issue`, `--blocked-ok`, `--create-issue`,
-  `--no-issue`; `new_from_args` in `sclaude/lib/start.sh`) and `sclaude config set` are
+  `--no-issue`; `new_from_args` in `sclaude/lib/commands/start.sh`) and `sclaude config set` are
   what the bot's menu runs (`new_start` in `keepawake/webmenu.py`, `config_set`
   in `keepawake/project_config.py`); `tests/new-feature.py` and
   `tests/config-menu.py` check sclaude's side, `tests/webmenu.py` the bot's.
@@ -388,13 +388,13 @@ breaks the other silently — grep before you edit:
 This repository is public (personalautomation/SClaude). The projects sclaude
 drives are not. So no session sclaude runs changes this checkout, and none
 pushes it: the live checkout is read-only to every one of them
-(`sclaude_guard_args` in `sclaude/lib/steps.sh`, `sclaude/hooks/write-guard.py
+(`sclaude_guard_args` in `sclaude/lib/core/steps.sh`, `sclaude/hooks/write-guard.py
 --readonly`), and a push from it or from a worktree of it is refused
 (`OWN_CHECKOUT` in `sclaude/hooks/forbidden-commands.py`). A step's
 session that runs into something to fix in sclaude logs it in the friction
 log; the retrospective and the friction and deferred reviews fix sclaude, in
 the tree's workshop, a worktree of this checkout at
-`.sclaude/local/instruments` (`sclaude/lib/workshop.sh`):
+`.sclaude/local/instruments` (`sclaude/lib/improve/workshop.sh`):
 
 - `sclaude core-open` lets such a session write there, without a question:
   they start in plan mode, so the approved plan is the yes; a step's session
@@ -408,7 +408,7 @@ the tree's workshop, a worktree of this checkout at
   sclaude (`MAINTAINERS`), whatever review they choose for anybody else — and
   runs `sclaude core-ready`;
 - when the session ends, sclaude publishes it: a check for the product's
-  details (`leaks` in `sclaude/lib/workshop.py`), which asks the person on a
+  details (`leaks` in `sclaude/lib/improve/workshop.py`), which asks the person on a
   hit, the tests the change touches, then `main` for a maintainer, squashed
   into one commit, or one pull request per tree for anybody else. A change
   left unfinished is not published, and its session is offered back.
@@ -422,15 +422,15 @@ project.
 
 Data about projects that sclaude collects stays with the project: the
 deferred friction and the session rules in the product's `.sclaude/`
-(`sclaude/lib/deferred.sh`, `sclaude/lib/policy.py`), and terminal recordings
+(`sclaude/lib/improve/deferred.sh`, `sclaude/lib/improve/policy.py`), and terminal recordings
 in its `.sclaude/local/`, which git and every Vercel upload are kept out of
-(`sclaude/lib/scratch.sh`).
+(`sclaude/lib/core/scratch.sh`).
 
 ## Who commits the orchestrator to main
 
 `MAINTAINERS` lists the git addresses allowed to commit sclaude's core straight
 to `main`. Everybody else proposes a change on `dev/<name>` (the name comes
-from `developer_name` in `sclaude/lib/developer.sh`), which reaches `main`
+from `developer_name` in `sclaude/lib/core/developer.sh`), which reaches `main`
 through a pull request. The same holds for what a session made in a workshop:
 sclaude sends a maintainer's to `main` and anybody else's as a pull request
 from the workshop's own `dev/<name>-<time>` branch.
@@ -444,6 +444,23 @@ English, like everything else in this repository — the rule above has no
 exception for commit messages. Conventional Commits subject, a body explaining
 *why*, and an unbroken trailer block at the end. `githooks/commit-msg` refuses
 a message whose trailer block is broken.
+
+## Where things live in sclaude/lib
+
+`sclaude/lib` keeps its modules in folders by what they do — `core`,
+`cycle`, `commands`, `review`, `github`, `ship`, `tree`, `improve`,
+`metrics`, `flow` (`docs/sclaude.md` says what each holds). Shell and Python
+for one job sit side by side. A new module goes into the folder of its job;
+bin/sclaude sources a shell module by `<folder>/<name>`, and a Python module
+that imports another starts with the two lines every entry point has:
+
+```python
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import _path  # every folder of sclaude/lib on the path
+```
+
+Names stay unique across the folders and clear of the standard library's;
+`tests/paths.py` checks it.
 
 ## Tests
 
@@ -501,7 +518,7 @@ something they describe.
 The process map is read the same way. A change to the cycle's path — a way
 back, a hold, a gate's outcomes, a question asked, where a feature stands and
 what the menu calls it, what happens to the issue — is checked against the
-whole model in `sclaude/lib/process.py` and its parts: every map's nodes, edges and
+whole model in `sclaude/lib/flow/process.py` and its parts: every map's nodes, edges and
 details, `POSITIONS`, the commands' places and `WHEN`, and `position`; the
 map is corrected in the same push. A block, an arrow or a word that only
 some configs run goes in `NEEDS`, `PASS` and `VARIANTS`, not into every
@@ -530,7 +547,7 @@ their bodies in `{ … }` so bash must parse to the closing brace before executi
 anything, and end the block with `exit` so bash never reads past it — after
 `}` it would resume at the old offset, now mid-line in a grown file. Keep both.
 
-The same hazard is why `sclaude`'s body lives in `sclaude/lib/*.sh`: a module is
+The same hazard is why `sclaude`'s body lives in `sclaude/lib/*/*.sh`: a module is
 read whole at `source` time and is safe to edit afterwards.
 
 ## A trap when writing Python inside shell

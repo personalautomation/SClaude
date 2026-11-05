@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# The workshop (sclaude/lib/workshop.sh, workshop.py): where a session changes
+# The workshop (sclaude/lib/improve/workshop.sh, workshop.py): where a session changes
 # sclaude, and how what it made there is published.
 #
 # A sandbox stands for everything: a bare repository for sclaude's origin, a
@@ -15,7 +15,7 @@ import tempfile
 
 ROOT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 LIB = os.path.join(ROOT, "sclaude", "lib")
-PY = os.path.join(LIB, "workshop.py")
+PY = os.path.join(LIB, "improve", "workshop.py")
 
 failures = []
 
@@ -91,7 +91,7 @@ try:
     def sh(script, maintainer=True, answer="n", session="s1", cwd=None):
         body = """
 INSTRUMENTS=%(live)s; LIB=%(lib)s; PROMPTS=%(root)s/sclaude/prompts; SELF=sclaude
-source "$LIB/ui.sh"; source "$LIB/pane.sh"; source "$LIB/developer.sh"; source "$LIB/workshop.sh"; source "$LIB/run.sh"
+source "$LIB/core/ui.sh"; source "$LIB/core/pane.sh"; source "$LIB/core/developer.sh"; source "$LIB/improve/workshop.sh"; source "$LIB/cycle/run.sh"
 info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; say() { echo "SAY $*"; }
 die() { echo "DIE $*"; exit 1; }
 BOLD=; OFF=; GREEN=
@@ -329,12 +329,12 @@ export SCLAUDE_SESSION=%(session)s
 
     # A remote or a branch recorded in the shared config is not a change of the
     # checkout's config.
-    out = sh('source "$LIB/steps.sh"; a="$(instruments_state)"; '
+    out = sh('source "$LIB/core/steps.sh"; a="$(instruments_state)"; '
              'git -C "%s" config branch.dev/ann-1.remote origin; git -C "%s" remote add fork /tmp/f; '
              'b="$(instruments_state)"; [[ "$a" == "$b" ]] && echo same' % (ws, ws))
     check("config-workshop-records-ignored", out.strip().endswith("same"), True)
     # Where origin points is still sclaude's own business.
-    out = sh('source "$LIB/steps.sh"; a="$(instruments_state)"; '
+    out = sh('source "$LIB/core/steps.sh"; a="$(instruments_state)"; '
              'git -C "%s" remote set-url origin /tmp/elsewhere; '
              'b="$(instruments_state)"; [[ "$a" == "$b" ]] && echo same || echo moved' % live)
     check("config-origin-counted", out.strip().endswith("moved"), True)

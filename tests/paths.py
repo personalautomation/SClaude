@@ -55,7 +55,7 @@ def check_true(name, got):
         failures.append((name, "true", got))
 
 
-def run_bash(script, cwd, modules=("ui", "state"), env=None):
+def run_bash(script, cwd, modules=("core/ui", "core/state"), env=None):
     """The real functions, in a real shell — the idiom tests/io.py uses.
 
     `gh` is shadowed by a function that answers nothing: these tests are about
@@ -151,7 +151,7 @@ try:
 
     out, _, _ = run_bash(
         'REPO=%s; abandon_traces %s' % (REPO, WT), tmp,
-        modules=("ui", "state", "worktree", "actions", "abandon"))
+        modules=("core/ui", "core/state", "tree/worktree", "commands/actions", "commands/abandon"))
     rows = {line.split("\t")[0]: line for line in out.splitlines() if "\t" in line}
 
     check_true("traces-has-worktree", "worktree" in rows)
@@ -176,7 +176,7 @@ try:
     # two declarations back into one reintroduces the bug, and this is the line
     # that says so.
     check_true("abandon-declares-state-separately",
-               not code_has(os.path.join(LIB, "abandon.sh"),
+               not code_has(os.path.join(LIB, "commands", "abandon.sh"),
                             'local wt="$1" state='))
 
     # --- write_vercelignore --------------------------------------------------
@@ -196,7 +196,7 @@ try:
     subprocess.run(["git", "-C", WT, "-c", "user.name=t", "-c", "user.email=t@t",
                     "commit", "-qm", "env"], check=True)
     run_bash('write_vercelignore %s' % WT, tmp,
-             modules=("ui", "state", "worktree", "scratch"))
+             modules=("core/ui", "core/state", "tree/worktree", "core/scratch"))
     check_true("vercelignore-written-in-the-worktree", os.path.exists(ignore))
     if os.path.exists(ignore):
         body = open(ignore, encoding="utf-8").read()
@@ -219,7 +219,7 @@ try:
     with open(ignore, "w") as fh:
         fh.write("node_modules")
     run_bash('write_vercelignore %s' % WT, tmp,
-             modules=("ui", "state", "worktree", "scratch"))
+             modules=("core/ui", "core/state", "tree/worktree", "core/scratch"))
     lines = open(ignore, encoding="utf-8").read().splitlines()
     check_true("vercelignore-keeps-the-last-line-whole", "node_modules" in lines and "/.env.dev" in lines)
 
@@ -229,9 +229,9 @@ try:
     with open(ignore, "w") as fh:
         fh.write("# edited by hand\n.env\n")
     run_bash('write_vercelignore %s' % WT, tmp,
-             modules=("ui", "state", "worktree", "scratch"))
+             modules=("core/ui", "core/state", "tree/worktree", "core/scratch"))
     run_bash('write_vercelignore %s' % WT, tmp,
-             modules=("ui", "state", "worktree", "scratch"))
+             modules=("core/ui", "core/state", "tree/worktree", "core/scratch"))
     lines = open(ignore, encoding="utf-8").read().splitlines()
     check("vercelignore-hand-edit-kept", lines[:2], ["# edited by hand", ".env"])
     check("vercelignore-brought-up-to-date", sorted(lines[2:]),
@@ -241,7 +241,7 @@ try:
     with open(ignore, "w") as fh:
         fh.write("/.env.dev\n/.sclaude/local/\n/.vercelignore\n")
     run_bash('write_vercelignore %s' % WT, tmp,
-             modules=("ui", "state", "worktree", "scratch"))
+             modules=("core/ui", "core/state", "tree/worktree", "core/scratch"))
     check("vercelignore-slash-counts", open(ignore, encoding="utf-8").read().count(".sclaude/local"), 1)
     # One the config names in a folder of its own, linked in as link_env does.
     os.makedirs(os.path.join(WT, ".sclaude"), exist_ok=True)
@@ -256,7 +256,7 @@ try:
     os.symlink("/nonexistent/.env.staging", os.path.join(WT, "envs", "staging", ".env"))
     os.remove(ignore)
     run_bash('write_vercelignore %s' % WT, tmp,
-             modules=("ui", "state", "worktree", "scratch", "environment"))
+             modules=("core/ui", "core/state", "tree/worktree", "core/scratch", "core/environment"))
     lines = open(ignore, encoding="utf-8").read().splitlines()
     check_true("vercelignore-excludes-a-nested-env", "/envs/staging/.env" in lines)
     check("vercelignore-names-each-once", lines.count("/.env.dev"), 1)
@@ -274,12 +274,12 @@ try:
     # The leak this guards: .sclaude/local/feature was hidden from git and still went up
     # with every preview, because the two exclusions had two lists. Every
     # path sclaude writes into a project must reach both.
-    scratch = open(os.path.join(LIB, "scratch.sh"), encoding="utf-8").read()
+    scratch = open(os.path.join(LIB, "core", "scratch.sh"), encoding="utf-8").read()
     listed = re.search(r"^SCRATCH_PATHS=\(([^)]*)\)", scratch, re.M).group(1).split()
     check_true("scratch-lists-sclaude-local", ".sclaude/local" in listed)
     os.remove(ignore)
     run_bash('scratch_hide %s; write_vercelignore %s' % (WT, WT), tmp,
-             modules=("ui", "state", "worktree", "scratch"))
+             modules=("core/ui", "core/state", "tree/worktree", "core/scratch"))
     exclude = open(os.path.join(REPO, ".git", "info", "exclude"), encoding="utf-8").read().splitlines()
     vercel = open(ignore, encoding="utf-8").read().splitlines()
     check("scratch-every-path-hidden-from-git", [p for p in listed if p not in exclude], [])
@@ -290,13 +290,13 @@ try:
         fh.write(".env\n")
     git("add", "-f", ".vercelignore", cwd=WT)
     out = run_bash('warn() { echo "WARN $*"; }; write_vercelignore %s' % WT, tmp,
-                   modules=("ui", "state", "worktree", "scratch"))
+                   modules=("core/ui", "core/state", "tree/worktree", "core/scratch"))
     check("vercelignore-tracked-untouched", open(ignore, encoding="utf-8").read(), ".env\n")
     check_true("vercelignore-tracked-warned", "/.sclaude/local" in str(out))
     git("rm", "-q", "--cached", ".vercelignore", cwd=WT)
 
     check_true("worktree-declares-the-path-separately",
-               not code_has(os.path.join(LIB, "worktree.sh"), 'local wt="$1" f='))
+               not code_has(os.path.join(LIB, "tree", "worktree.sh"), 'local wt="$1" f='))
 
     # And nowhere else in the library either. The trap is cheap to reintroduce
     # and silent when it happens, so the sweep is over every module rather than
@@ -331,7 +331,7 @@ try:
     def unchanged(stage):
         _, _, rc = run_bash(
             'REPO=%s; deploy_unchanged %s %s' % (REPO, WT, stage), tmp,
-            modules=("ui", "state", "worktree", "rollback", "deferred", "deploy", "shipped", "vercel", "qa", "merge", "demo"))
+            modules=("core/ui", "core/state", "tree/worktree", "ship/rollback", "improve/deferred", "ship/deploy", "ship/shipped", "ship/vercel", "ship/qa", "ship/merge", "ship/demo"))
         return rc == 0
 
     # Nothing recorded: not knowing is not a yes.
@@ -430,6 +430,34 @@ finally:
                     os.path.join(tmp, "repo-demo")],
                    cwd=os.path.join(tmp, "repo"), capture_output=True, check=False)
     shutil.rmtree(tmp, ignore_errors=True)
+
+
+# --- sclaude/lib's folders ---------------------------------------------------
+#
+# The modules lie in folders by what they do and import one another by bare
+# name (sclaude/lib/_path.py puts every folder on sys.path, ahead of the rest).
+# That holds only while a name is one module's alone, and no module takes a
+# standard module's name, which it would then shadow for everything after.
+names = {}
+for folder in sorted(os.listdir(LIB)):
+    where = os.path.join(LIB, folder)
+    if not os.path.isdir(where) or folder.startswith(("_", ".")):
+        continue
+    for entry in os.listdir(where):
+        stem, ext = os.path.splitext(entry)
+        if ext in (".py", ".sh"):
+            names.setdefault(stem, set()).add("%s/%s" % (folder, entry))
+check("lib: every module name is one module's",
+      sorted(n for n, w in names.items() if len({os.path.splitext(x)[1] for x in w}) < len(w)), [])
+check("lib: no Python module shadows a standard one",
+      sorted(n for n, w in names.items() if n in sys.stdlib_module_names
+             and any(x.endswith(".py") for x in w)), [])
+check("lib: nothing lies loose beside the folders",
+      sorted(e for e in os.listdir(LIB) if os.path.isfile(os.path.join(LIB, e)) and e != "_path.py"), [])
+probe = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import _path; "
+                        "import pr_context, process, feature_db, session_end; print('ok')", LIB],
+                       capture_output=True, text=True, cwd=tempfile.gettempdir())
+check("lib: _path finds a module in any folder", probe.stdout.strip(), "ok")
 
 
 if failures:

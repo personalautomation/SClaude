@@ -94,8 +94,8 @@ link_env() { :; }
 link_node_modules() { :; }
 project_regression_parts() { echo "$REPO" >> %s.config; echo "check"; }
 regression_command() { echo "$REPO" >> %s.config; echo "echo run >> %s; test ! -e broken"; }
-source "%s/worktree.sh"
-source "%s/sync.sh"
+source "%s/tree/worktree.sh"
+source "%s/tree/sync.sh"
 merge_build_check "%s"
 echo "rc=$?"
 """ % (self.runs, self.runs, self.runs, LIB, LIB, self.wt)
@@ -147,7 +147,7 @@ with tempfile.TemporaryDirectory() as tmp:
           os.path.realpath(os.path.join(w.wt, ".sclaude/local/feature/merge-check.log")).startswith(logs), True)
     # The verdict read back for the merge wait: red for this pair only.
     def red():
-        return subprocess.run(["bash", "-c", 'source "%s/sync.sh"; merge_check_red "%s"'
+        return subprocess.run(["bash", "-c", 'source "%s/tree/sync.sh"; merge_check_red "%s"'
                                % (LIB, w.wt)], capture_output=True, text=True,
                               env=ENV).stdout.strip()
     check("the-red-part-is-read-back", red(), "check")

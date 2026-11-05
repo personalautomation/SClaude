@@ -92,7 +92,7 @@ ENV = dict(os.environ, PATH=bindir + ":" + os.environ["PATH"],
 
 
 def py(*args):
-    return subprocess.run([sys.executable, os.path.join(LIB, "pr_handoff.py")] + list(args),
+    return subprocess.run([sys.executable, os.path.join(LIB, "github", "pr_handoff.py")] + list(args),
                           capture_output=True, text=True, env=ENV, timeout=60).stdout
 
 
@@ -125,10 +125,10 @@ HARNESS = "\n".join([
     'say() { echo "SAY $*"; }; info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }',
     'ask() { echo "ASK $1"; printf -v "$2" "%s" "${FAKE_ANSWER:-}"; }',
     "gh_repo() { echo o/r; }",
-    functions(os.path.join(LIB, "state.sh"), ["state_get", "state_set"]),
-    functions(os.path.join(LIB, "project.sh"), ["column_is"]),
-    functions(os.path.join(LIB, "github.sh"), ["pr_milestone", "pr_setup"]),
-    functions(os.path.join(LIB, "board.sh"),
+    functions(os.path.join(LIB, "core", "state.sh"), ["state_get", "state_set"]),
+    functions(os.path.join(LIB, "core", "project.sh"), ["column_is"]),
+    functions(os.path.join(LIB, "github", "github.sh"), ["pr_milestone", "pr_setup"]),
+    functions(os.path.join(LIB, "github", "board.sh"),
               ["issue_status_items", "issue_status_now",
                "pr_board_set", "pr_qa_handoff", "pr_qa_handoff_now"]),
     'QA_DONE=Done PROGRESS_FROM=Backlog PROGRESS_TO="In progress"',
@@ -338,16 +338,16 @@ ran, told, w = sweep("Done", old_watch)
 check("timer-no-root-no-handoff", ran, "")
 
 # --- the wiring --------------------------------------------------------------
-deploy = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+deploy = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
 check("remind-hands-over", 'pr_qa_handoff "$wt" "$pr" "$issue" || handed=$?' in deploy, True)
 check("remind-merged-done", 'pr_board_set "$pr" "$QA_DONE" "$issue"' in deploy, True)
-github = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
+github = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh"))
 check("capture-sets-up", 'pr_setup "$wt" "$number"' in github, True)
-watch = open(os.path.join(LIB, "watch.sh"), encoding="utf-8").read()
+watch = open(os.path.join(LIB, "cycle", "watch.sh"), encoding="utf-8").read()
 check("rewind-counts-returns", "qa_returns" in watch, True)
 check("watch-records-root", 'state_set "$file" root "$REPO"' in watch, True)
 check("watch-rearm-clears-handoff", 'state_set "$file" handoff null' in watch, True)
-sclaude = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+sclaude = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 check("handoff-command", '_handoff)      shift; cmd_handoff' in sclaude, True)
 check("handoff-no-sync", "_handoff|-h|--help" in sclaude, True)
 prompt = open(os.path.join(ROOT, "sclaude", "prompts", "pr.md"), encoding="utf-8").read()

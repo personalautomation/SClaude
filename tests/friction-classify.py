@@ -17,7 +17,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(HERE, "..", "sclaude", "lib", "friction_classify.py")
+SCRIPT = os.path.join(HERE, "..", "sclaude", "lib", "improve", "friction_classify.py")
 
 failures = []
 total = 0

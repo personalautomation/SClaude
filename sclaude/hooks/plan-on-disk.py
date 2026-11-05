@@ -46,6 +46,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)),
                                 os.pardir, "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from acceptance import plan_verdict  # noqa: E402
 from presented_plan import plan_text  # noqa: E402
 

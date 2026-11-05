@@ -48,7 +48,7 @@ def write(path, text, mode="w"):
 
 
 def send(wt, frm, state):
-    script = ('for m in ui developer branches deferred; do source "%s/$m.sh"; done\n'
+    script = ('for m in core/ui core/developer tree/branches improve/deferred; do source "%s/$m.sh"; done\n'
               'info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }\n'
               'gh() { echo %s; }\n'
               'deferred_to_main "%s" "%s"; echo "RC $?"' % (LIB, state, wt, frm))
@@ -134,7 +134,7 @@ try:
     check("pushed: left alone", "RC 1" in send(wt, frm, "MERGED"), True)
 
     # The counts skip commits that only add entries.
-    script = ('for m in ui developer branches deferred; do source "%s/$m.sh"; done\n'
+    script = ('for m in core/ui core/developer tree/branches improve/deferred; do source "%s/$m.sh"; done\n'
               'deferred_rev_count "%s" main..origin/main'
               % (LIB, os.path.join(tmp, "merged")))
     git(os.path.join(tmp, "merged"), "fetch", "-q", "origin")

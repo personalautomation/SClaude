@@ -7,7 +7,7 @@
 # whose [s] means that no new search follows it, only a check of its fixes.
 #
 # A press writes its word into the feature's channel (SAID_FILE), where
-# review_said_take in sclaude/lib/local_review.sh takes it. The buttons go
+# review_said_take in sclaude/lib/review/local_review.sh takes it. The buttons go
 # once the topic hears the next phase line — the pass or session ended, or
 # another began — so they do not pile up on old messages.
 #
@@ -20,13 +20,13 @@ import re
 from keepawake.i18n import t
 from keepawake.notices import OWN_ICON
 
-# Named on sclaude's side too: REVIEW_SAID_FILE in sclaude/lib/local_review.sh.
+# Named on sclaude's side too: REVIEW_SAID_FILE in sclaude/lib/review/local_review.sh.
 SAID_FILE = "review-said"
 # Which message carries the buttons now, in the channel's notes/: one at a
 # time, since a feature runs one review phase at a time.
 BUTTONS_FILE = "review-buttons.json"
 
-# The start lines phase_words in sclaude/lib/steps.sh prints, as notices.py
+# The start lines phase_words in sclaude/lib/core/steps.sh prints, as notices.py
 # reads them: a pass that searches (not one that checks the fixes only, which
 # takes no keys) and a fix session of the review step.
 PASS_START = re.compile(r"^🔍 Local review (?:started|resumed): PR #\S+, round \d+$")

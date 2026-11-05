@@ -47,19 +47,19 @@ def functions(source, names):
     return "\n".join(out)
 
 
-with open(os.path.join(LIB, "run.sh")) as fh:
+with open(os.path.join(LIB, "cycle", "run.sh")) as fh:
     RUN = fh.read()
 BIN = "".join(open(os.path.join(ROOT, _p)).read()
-    for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+    for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 BODY = functions(RUN, ["code_fingerprint", "code_reload"])
 
 tmp = tempfile.mkdtemp()
 try:
     inst = os.path.join(tmp, "inst")
     lib = os.path.join(inst, "sclaude", "lib")
-    os.makedirs(lib)
+    os.makedirs(os.path.join(lib, "cycle"))
     os.makedirs(os.path.join(inst, "bin"))
-    with open(os.path.join(lib, "run.sh"), "w") as fh:
+    with open(os.path.join(lib, "cycle", "run.sh"), "w") as fh:
         fh.write("old() { :; }\n")
     with open(os.path.join(inst, "bin", "sclaude"), "w") as fh:
         fh.write('#!/usr/bin/env bash\necho "NEW SCLAUDE $*"\n')
@@ -76,11 +76,11 @@ try:
     out = run("")
     check("unchanged-carries-on", "OLD CARRIES ON" in out and "NEW SCLAUDE" not in out, True)
 
-    out = run('echo "new() { :; }" >> %s/run.sh' % lib)
+    out = run('echo "new() { :; }" >> %s/cycle/run.sh' % lib)
     check("changed-hands-over", "NEW SCLAUDE _session-ended demo review S1" in out, True)
     check("changed-does-not-return", "OLD CARRIES ON" in out, False)
 
-    out = run('echo "newer() { :; }" >> %s/run.sh' % lib, "SCLAUDE_NO_RELOAD=1\n")
+    out = run('echo "newer() { :; }" >> %s/cycle/run.sh' % lib, "SCLAUDE_NO_RELOAD=1\n")
     check("opt-out-carries-on", "OLD CARRIES ON" in out and "NEW SCLAUDE" not in out, True)
 
     # --- wiring -----------------------------------------------------------------

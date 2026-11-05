@@ -285,7 +285,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("settings-bad-flag-refused", (code, "--update takes" in out), ([2], True))
 
 print("the words agree with sclaude's")
-DEV = open(os.path.join(ROOT, "sclaude", "lib", "developer.sh"), encoding="utf-8").read()
+DEV = open(os.path.join(ROOT, "sclaude", "lib", "core", "developer.sh"), encoding="utf-8").read()
 TEXT = open(INSTALL, encoding="utf-8").read()
 for var, flag in (("UPDATE_MODES", "--update"), ("CONTRIBUTE_MODES", "--contribute"),
                   ("LEAKS_MODES", "--leaks")):

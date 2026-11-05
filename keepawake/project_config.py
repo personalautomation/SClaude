@@ -39,6 +39,7 @@ def sclaude_module(name):
     config and the issues with sclaude's own code."""
     if SCLAUDE_LIB not in sys.path:
         sys.path.insert(0, SCLAUDE_LIB)
+    import _path  # noqa: F401 — every folder of sclaude/lib on the path
     return __import__(name)
 
 

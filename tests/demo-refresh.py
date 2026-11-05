@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 # The demo recorded again with nobody watching (demo_refresh in
-# sclaude/lib/demo.sh): what goes out, what is kept, what is said.
+# sclaude/lib/ship/demo.sh): what goes out, what is kept, what is said.
 #
 #   * A session that plays a script several times before it is right must
 #     not send each try to the feature's topic and issue: with
@@ -14,7 +14,7 @@
 #
 #   * What the session found wrong in the product, and the checks of its
 #     last recording that failed, reach sclaude's terminal
-#     (sclaude/lib/demo_refresh.py findings), not only its log.
+#     (sclaude/lib/ship/demo_refresh.py findings), not only its log.
 #
 # Run it with: python3 tests/demo-refresh.py
 import contextlib
@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory() as root:
     os.environ["HOME"] = root
     os.environ["SCLAUDE_DEV_REGISTRY"] = os.path.join(root, "registry")
     demo = load("demo", os.path.join(ROOT, "skills", "sdemo", "demo.py"))
-    refresh = load("demo_refresh", os.path.join(LIB, "demo_refresh.py"))
+    refresh = load("demo_refresh", os.path.join(LIB, "ship", "demo_refresh.py"))
     # No tailnet here: the laptop's link alone.
     demo.demo_links = lambda label, d="": ("http://f1.localhost/", "")
 
@@ -207,7 +207,7 @@ with tempfile.TemporaryDirectory() as root:
           os.path.isfile(os.path.join(wt, demo.DEMO_DIR, demo.last_main(wt)["id"], "demo.mjs")), True)
 
     # demo.sh: the session plays held, sclaude publishes and says what was found.
-    with open(os.path.join(LIB, "demo.sh")) as fh:
+    with open(os.path.join(LIB, "ship", "demo.sh")) as fh:
         body = fh.read()
     check("deploy: the refresh session plays with the hold on",
           "SCLAUDE_DEMO_HOLD=1" in body, True)

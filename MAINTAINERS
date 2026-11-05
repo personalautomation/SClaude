@@ -2,6 +2,6 @@
 #
 # One git user.email per line. Everybody else proposes a change by hand with
 # `sclaude propose`, on dev/<name>, and it reaches main through a pull request.
-# Read by developer_is_maintainer in sclaude/lib/developer.sh; with this file
+# Read by developer_is_maintainer in sclaude/lib/core/developer.sh; with this file
 # absent, everybody is a maintainer.
 33526551+personalautomation@users.noreply.github.com

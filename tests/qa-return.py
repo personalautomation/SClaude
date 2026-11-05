@@ -54,7 +54,7 @@ def code_lines(text):
     return [ln for ln in text.splitlines() if not ln.strip().startswith("#")]
 
 
-def run_bash(script, cwd, modules=("io", "ui", "steps", "state", "watch")):
+def run_bash(script, cwd, modules=("core/io", "core/ui", "core/steps", "core/state", "cycle/watch")):
     body = "set -uo pipefail\n"
     body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
     for name in modules:
@@ -106,7 +106,7 @@ tmp = tempfile.mkdtemp()
 try:
     # --- the ordering that was the whole bug --------------------------------
 
-    sclaude = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+    sclaude = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
     code = "\n".join(code_lines(sclaude))
     verdict_at = code.find('case "$(watch_verdict "$slug")" in')
     done_at = code.find('if [[ "$step" == "done" ]]; then')
@@ -173,7 +173,7 @@ try:
     check_true("rewind-called-from-the-verdict-block", returned_at > verdict_at)
     branch = code[code.find("    returned)"):code.find("  esac", verdict_at)]
     check_true("rewind-is-in-the-returned-branch", "qa_take_back" in branch)
-    watch_code = "\n".join(code_lines(open(os.path.join(LIB, "watch.sh"),
+    watch_code = "\n".join(code_lines(open(os.path.join(LIB, "cycle", "watch.sh"),
                                             encoding="utf-8").read()))
     take_back = watch_code[watch_code.find("qa_take_back() {"):]
     take_back = take_back[:take_back.find("\n}")]
@@ -206,11 +206,11 @@ try:
     # --- the shared helper ---------------------------------------------------
     #
     # Three callers wanted the same four lines; they now share one.
-    steps_src = open(os.path.join(LIB, "steps.sh"), encoding="utf-8").read()
+    steps_src = open(os.path.join(LIB, "core", "steps.sh"), encoding="utf-8").read()
     check_true("helper-exists", "step_rewind_to()" in steps_src)
-    for caller, path in (("regression_rewind", os.path.join(LIB, "regression_gate.sh")),
-                         ("watch_rewind", os.path.join(LIB, "watch.sh")),
-                         ("cmd_replan", os.path.join(LIB, "step_commands.sh"))):
+    for caller, path in (("regression_rewind", os.path.join(LIB, "ship", "regression_gate.sh")),
+                         ("watch_rewind", os.path.join(LIB, "cycle", "watch.sh")),
+                         ("cmd_replan", os.path.join(LIB, "commands", "step_commands.sh"))):
         src = "\n".join(code_lines(open(path, encoding="utf-8").read()))
         check_true("%s-uses-the-helper" % caller, "step_rewind_to" in src)
 
@@ -252,7 +252,7 @@ try:
     # bench still said `ok`. So they run the guard instead. The condition is
     # lifted out of run_step verbatim and evaluated against a real state file,
     # which a disabling edit cannot survive.
-    run_sh = open(os.path.join(LIB, "run.sh"), encoding="utf-8").read()
+    run_sh = open(os.path.join(LIB, "cycle", "run.sh"), encoding="utf-8").read()
     run_code = "\n".join(code_lines(run_sh))
 
     wt2 = feature(os.path.join(tmp, "marked"))

@@ -19,6 +19,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "sclaude", "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import issue_chain
 import issue_comments
 import issue_context
@@ -373,13 +374,13 @@ check("progress-some",
 # longer seeded, and a shell copy coming back would be a copy nothing checks.
 shell = "".join(io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                      "..", "sclaude", "lib", m), encoding="utf-8").read()
-                for m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
+                for m in ("github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh"))
 
 
 github = shell
 deploy_sh = "".join(io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                          "..", "sclaude", "lib", m), encoding="utf-8").read()
-                    for m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+                    for m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
 
 
 def shell_const(name):
@@ -395,7 +396,7 @@ check("markers-one-home-chain", issue_chain.STATUS, issue_comments.STATUS)
 # The rollback marker lives in the shell that writes it and here, where the
 # epilogue tells it from our other comments; a drift loses the incident.
 rollback_sh = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                   "..", "sclaude", "lib", "rollback.sh"),
+                                   "..", "sclaude", "lib", "ship", "rollback.sh"),
                       encoding="utf-8").read()
 check("markers-rollback-agree",
       re.search(r'^ROLLBACK_MARKER="([^"]*)"', rollback_sh, re.M).group(1),
@@ -418,6 +419,7 @@ check_true("status-create-is-optional", "If it needs one" in "\n".join(none_yet)
 # Without a pull request the paragraphs about it drop: <pr> is never empty
 # (render_prompt fills it with a dash), so they hang on a number of their own.
 sys.path.insert(0, lib)
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import render_prompt
 no_pr = render_prompt.render(status_md, prompts,
                              {"pr": "\u2014", "pr-number": "", "feature": "f",
@@ -504,7 +506,7 @@ for empty in ("", "null"):
     nc = outcome(empty, "", "0", "0")
     check_true("no-change-outcome-has-no-pr-%s" % (empty or "empty"),
                "Pull request #" not in nc and "no pull request" in nc)
-no_change_sh = io.open(os.path.join(lib, "no_change.sh"), encoding="utf-8").read()
+no_change_sh = io.open(os.path.join(lib, "cycle", "no_change.sh"), encoding="utf-8").read()
 finish = re.search(r'^no_change_finish\(\) \{.*?^\}', no_change_sh, re.M | re.S).group(0)
 check_true("no-change-finish-writes-the-status",
            'run_status "$slug" "$issue" "" "" 0 0 "$wt"' in finish)
@@ -591,7 +593,7 @@ check_true("a-green-prod-outranks-the-red-flag",
 # means the exception has started to spread.
 regression_sh = "".join(io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                              "..", "sclaude", "lib", m), encoding="utf-8").read()
-                        for m in ("regression.sh", "regression_gate.sh", "regression_fix.sh"))
+                        for m in ("ship/regression.sh", "ship/regression_gate.sh", "ship/regression_fix.sh"))
 
 check("remove-label-used-once", github.count("--remove-label"), 1)
 check_true("clear-helper-exists",
@@ -712,7 +714,7 @@ for _name, _state, _merge, _want in (
     os.makedirs(os.path.join(_wt, ".sclaude/local/feature"))
     with open(os.path.join(_wt, ".sclaude/local/feature/state.json"), "w") as _fh:
         json.dump(_state, _fh)
-    _out = subprocess.run(["bash", "-c", 'source "%s/state.sh"\nREPO="%s"\n%s\nprod_carries_feature "%s" && echo yes || echo no'
+    _out = subprocess.run(["bash", "-c", 'source "%s/core/state.sh"\nREPO="%s"\n%s\nprod_carries_feature "%s" && echo yes || echo no'
                            % (_lib, _repo, _fn, _wt)], capture_output=True, text=True,
                           env=dict(os.environ, PATH=_bin + ":" + os.environ["PATH"])).stdout.strip()
     check_true("prod-carries-feature-" + _name.replace(" ", "-").replace("'", ""), _out == _want)

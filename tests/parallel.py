@@ -53,7 +53,7 @@ def check(name, got, want):
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(LIB, name + ".py"))
+    spec = importlib.util.spec_from_file_location(name, os.path.join(LIB, "review" if name == "pr_context" else "cycle", name + ".py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -111,7 +111,7 @@ check("no-limit", end.limit(t), None)
 
 # --- the watcher closes a session on a reset limit -----------------------------
 RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
-          for m in ("run.sh", "session_watch.sh", "review_round.sh", "friction.sh"))
+          for m in ("cycle/run.sh", "cycle/session_watch.sh", "review/review_round.sh", "improve/friction.sh"))
 
 
 def functions(source, names):
@@ -124,7 +124,7 @@ def functions(source, names):
     return "\n".join(out)
 
 
-WATCH = 'source "%s/state.sh"\nLIB="%s"\n' % (LIB, LIB) + functions(
+WATCH = 'source "%s/core/state.sh"\nLIB="%s"\n' % (LIB, LIB) + functions(
     RUN, ["round_marker", "done_marker", "session_watch_start", "session_watch_stop"])
 
 wt = os.path.join(tmp, "wt")
@@ -174,8 +174,8 @@ check("no-word-for-an-old-limit", os.path.exists(limit_file), False)
 
 # --- claude_launch opens it again ----------------------------------------------
 script = """
-source "%s/steps.sh"
-source "%s/pane.sh"
+source "%s/core/steps.sh"
+source "%s/core/pane.sh"
 export TMPDIR="%s"
 info() { :; }
 pane_available() { return 1; }
@@ -203,7 +203,7 @@ check("limit-file-consumed", os.path.exists(os.path.join(tmp, "sclaude-limit-" +
 # --- the queue -----------------------------------------------------------------
 lock = os.path.join(tmp, "q.lock")
 holder = """
-source "%s/lock.sh"
+source "%s/core/lock.sh"
 warn() { echo "WARN $*"; }; info() { echo "INFO $*"; }
 lock_take fd "%s" "%s" "a regression"
 echo "took $(date +%%s.%%N)"
@@ -225,7 +225,7 @@ check("holder-note-gone", os.path.exists(lock + ".holder"), False)
 # The same shell takes the queue again right after giving it up, as a stage
 # run again after a red run does: nobody else holds it, so nobody is named.
 again = subprocess.run(["bash", "-c", """
-source "%s/lock.sh"
+source "%s/core/lock.sh"
 warn() { echo "WARN $*"; }; info() { echo "INFO $*"; }
 lock_take fd "%s" "feature-a, local" "a regression"
 echo "took ${fd:-nothing}"
@@ -350,17 +350,17 @@ check("yours-file-name-agrees", ctx.YOURS_FILE in review, True)
 check("night-mark-agrees", ctx.NIGHT_MARK in review, True)
 check("night-file-agrees", ctx.NIGHT_FILE.rsplit("/", 1)[-1] in review, True)
 check("night-heading-agrees", "Left at night for the person to confirm" in review
-      and "Left at night for the person to confirm" in open(os.path.join(LIB, "pr_context.py")).read(), True)
+      and "Left at night for the person to confirm" in open(os.path.join(LIB, "review", "pr_context.py")).read(), True)
 check("snapshot-names-the-prompt-paragraph", "the threads left at night" in review, True)
 check("night-offer-asks-before-the-wait",
-      "--night-yours" in open(os.path.join(LIB, "review_gate.sh")).read(), True)
+      "--night-yours" in open(os.path.join(LIB, "review", "review_gate.sh")).read(), True)
 # A thread left as it is is proposed in so many words and, on a yes, resolved
 # by the session itself; review-yours is for the person's own hand only.
 check("review-proposes-resolving", "I want to resolve this comment on GitHub" in review, True)
 check("review-resolves-on-yes", "resolveReviewThread" in review, True)
 # A finding on a deferred file goes to review-yours, never to a fix: the prompt
 # names the folders deferred.sh treats as entries, and only those.
-deferred_sh = open(os.path.join(LIB, "deferred.sh")).read()
+deferred_sh = open(os.path.join(LIB, "improve", "deferred.sh")).read()
 for folder in (".sclaude/team/deferred/", ".sclaude/people/*/deferred/"):
     check("review-names-" + folder, folder in review and "(glob)%s**" % folder in deferred_sh, True)
 body = open(os.path.join(PROMPTS, "_friction-body.md")).read()
@@ -403,7 +403,7 @@ g("add", "-A")
 g("commit", "-qm", "fix: a hotfix straight on main")
 g("commit", "-q", "--allow-empty", "-m", "chore(db): promote migrations for 40-alpha")
 merge_feature("feat/41-beta", 902, "0085_b.sql")
-out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo, prod, "main",
+out = subprocess.run([sys.executable, os.path.join(LIB, "ship", "prod_riders.py"), repo, prod, "main",
                       "41-beta", "supabase/migrations"],
                      capture_output=True, text=True, env=dict(os.environ, PATH="/usr/bin:/bin")).stdout
 lines = out.strip().splitlines()
@@ -434,7 +434,7 @@ g("add", "-A")
 g("commit", "-qm", "chore(sclaude): put off 1 proposal")
 skip_file = os.path.join(tmp, "riders-skip")
 open(skip_file, "w").write(g("rev-parse", "HEAD") + "\n")
-out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo, prod, "main",
+out = subprocess.run([sys.executable, os.path.join(LIB, "ship", "prod_riders.py"), repo, prod, "main",
                       "41-beta", "supabase/migrations", "903", skip_file],
                      capture_output=True, text=True,
                      env=dict(os.environ, PATH=gh_bin + ":/usr/bin:/bin")).stdout
@@ -448,7 +448,7 @@ g("commit", "-qm", "fix: typo in the footer (#77)")
 git_only = os.path.join(tmp, "git-only")
 os.makedirs(git_only, exist_ok=True)
 os.symlink(shutil.which("git"), os.path.join(git_only, "git"))
-out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo, prod, "main",
+out = subprocess.run([sys.executable, os.path.join(LIB, "ship", "prod_riders.py"), repo, prod, "main",
                       "41-beta", "supabase/migrations", "903"],
                      capture_output=True, text=True, env=dict(os.environ, PATH=git_only)).stdout
 check("riders-unconfirmed-squash-is-a-commit",
@@ -459,12 +459,12 @@ check("riders-no-empty-field", all("\t\t" not in l for l in out.splitlines()), T
 open(os.path.join(repo, "follow-up"), "w").write("f\n")
 g("add", "-A")
 g("commit", "-qm", "fix: a follow-up to the feature (#903)")
-out = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo, prod, "main",
+out = subprocess.run([sys.executable, os.path.join(LIB, "ship", "prod_riders.py"), repo, prod, "main",
                       "41-beta", "supabase/migrations", "903"],
                      capture_output=True, text=True,
                      env=dict(os.environ, PATH=gh_bin + ":/usr/bin:/bin")).stdout
 # gh unable to say: the shipped one's squash is still left out by its number.
-out_no_gh = subprocess.run([sys.executable, os.path.join(LIB, "prod_riders.py"), repo, prod, "main",
+out_no_gh = subprocess.run([sys.executable, os.path.join(LIB, "ship", "prod_riders.py"), repo, prod, "main",
                             "41-beta", "supabase/migrations", "903"],
                            capture_output=True, text=True, env=dict(os.environ, PATH=git_only)).stdout
 check("riders-own-squash-left-out-without-gh",
@@ -482,7 +482,7 @@ subprocess.run(["git", "-C", product, "config", "user.email", "ann@x.test"], che
 
 
 def deferred_sh(script, dev="ann"):
-    body = ('INSTRUMENTS="%s"; for m in developer deferred; do source "%s/$m.sh"; done\n%s'
+    body = ('INSTRUMENTS="%s"; for m in core/developer improve/deferred; do source "%s/$m.sh"; done\n%s'
             % (ROOT, LIB, script))
     return subprocess.run(["bash", "-c", body], capture_output=True, text=True,
                           env=dict(os.environ, SCLAUDE_DEV=dev))
@@ -532,7 +532,7 @@ check("steps-log-proposals", "proposal (<class>):" in friction_note, True)
 check("review-logs-its-rule", "into `.sclaude/local/feature/friction.log` as a proposal" in review, True)
 check("friction-may-defer", "<deferred>" in body, True)
 check("steps-told-the-deferred-path", "<deferred>" in friction_note, True)
-check("verdict-knows-deferred", '"deferred"' in open(os.path.join(LIB, "state.sh")).read(), True)
+check("verdict-knows-deferred", '"deferred"' in open(os.path.join(LIB, "core", "state.sh")).read(), True)
 
 if failures:
     for name, want, got in failures:

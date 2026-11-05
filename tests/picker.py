@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 # A test bench for choosing with arrow keys: pick_list from
-# sclaude/lib/picker.sh.
+# sclaude/lib/core/picker.sh.
 #
 # One thing is checked — the cursor's movement — and not because the rest does
 # not matter but because this is where things have already broken. The list of
@@ -49,7 +49,7 @@ def drive(rows, keys, height=24):
     """
     script = (
         'BOLD=""; DIM=""; GREEN=""; OFF=""\n'
-        'source "%s/picker.sh"\n'
+        'source "%s/core/picker.sh"\n'
         'out="$(pick_list "Title" %s)"; rc=$?\n'
         'printf "RESULT=%%s rc=%%s\\n" "$out" "$rc"\n'
     ) % (LIB, " ".join("'%s'" % r for r in rows))
@@ -167,7 +167,7 @@ def main():
     import subprocess
     out = subprocess.run(
         ["bash", "-c",
-         'BOLD=""; DIM=""; GREEN=""; OFF=""; source "%s/picker.sh"; '
+         'BOLD=""; DIM=""; GREEN=""; OFF=""; source "%s/core/picker.sh"; '
          'out="$(pick_list "T" "a\tb" < /dev/null)"; echo "[$out] rc=$?"' % LIB],
         capture_output=True, text=True, start_new_session=True).stdout.strip()
     check("no terminal gives code 2 and silence", out, "[] rc=2")

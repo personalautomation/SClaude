@@ -37,7 +37,7 @@ def check(name, got, want):
 
 
 spec = importlib.util.spec_from_file_location(
-    "friction_proposals", os.path.join(LIB, "friction_proposals.py"))
+    "friction_proposals", os.path.join(LIB, "improve", "friction_proposals.py"))
 fp = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fp)
 
@@ -66,7 +66,7 @@ check("unindented-tail-is-not-context", fp.rows(
 check("empty-is-not-proposals", fp.rows(["\n"], "s", "f", "r"), None)
 
 # --- the deferral itself ----------------------------------------------------
-with open(os.path.join(LIB, "friction.sh")) as fh:
+with open(os.path.join(LIB, "improve", "friction.sh")) as fh:
     RUN = fh.read()
 
 
@@ -102,7 +102,7 @@ try:
             with open(state, "w") as fh:
                 fh.write(start)
         ask = ask or 'ask() { printf -v "$2" %%s "%s"; }' % answer
-        script = ('for m in state ui developer deferred; do source "%s/$m.sh"; done\n'
+        script = ('for m in core/state core/ui core/developer improve/deferred; do source "%s/$m.sh"; done\n'
                   'LIB="%s"; REPO="%s/myapp"\ninfo() { :; }\nsay() { :; }\n'
                   '%s\n%s\n'
                   'export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t '
@@ -229,7 +229,7 @@ try:
     check("refused-tracked-restored", open(deferred).read(), before)
     # A feature with no file of its own yet: the file made for the rows goes.
     fresh = os.path.join(wt, ".sclaude", "team", "deferred", "146-y.tsv")
-    script = ('for m in state developer deferred; do source "%s/$m.sh"; done\n'
+    script = ('for m in core/state core/developer improve/deferred; do source "%s/$m.sh"; done\n'
               'LIB="%s"; REPO="%s/myapp"\ninfo() { :; }\n%s\n'
               'friction_defer_proposals "%s" 146-y review-3 review; echo "rc=$?"'
               % (LIB, LIB, tmp, DEFER, wt))
@@ -274,10 +274,10 @@ check("now-told-to-the-review",
       rf.index('FRICTION_APPLY_NOW=""') < asked and "I asked for this log's proposals" in rf, True)
 
 # A put-off has no session: the issue's column shows no id for it.
-with open(os.path.join(LIB, "issue_sync.sh")) as fh:
+with open(os.path.join(LIB, "github", "issue_sync.sh")) as fh:
     check("put-off-shown-without-an-id",
           '.startswith("deferred-"):\n            earlier.append("put off")' in fh.read(), True)
-with open(os.path.join(LIB, "issue_sync.sh")) as fh:
+with open(os.path.join(LIB, "github", "issue_sync.sh")) as fh:
     check("latest-put-off-says-so",
           'if node.get("verdict") == "deferred":\n            # Put off by sclaude with no session (friction_defer_proposals).\n            return "put off"' in fh.read(), True)
 check("new-session-clears-the-verdict", "for flag in empty fixed unread verdict verdict_note; do" in rf, True)

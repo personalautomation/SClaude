@@ -24,7 +24,7 @@ def check(name, got, want):
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(LIB, name + ".py"))
+    spec = importlib.util.spec_from_file_location(name, os.path.join(LIB, "review" if name == "pr_context" else "cycle", name + ".py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

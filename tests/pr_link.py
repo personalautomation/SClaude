@@ -33,7 +33,7 @@ def run(pr_state, linked, mutation_ok=True, issue="40", body="Closes #40"):
     script = f"""
 set -uo pipefail
 BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""
-source "{LIB}/ui.sh"; source "{LIB}/state.sh"; source "{LIB}/github.sh"
+source "{LIB}/core/ui.sh"; source "{LIB}/core/state.sh"; source "{LIB}/github/github.sh"
 info() {{ echo "$*"; }}; warn() {{ echo "$*" >&2; }}
 gh_repo() {{ echo o/r; }}
 gh() {{
@@ -102,7 +102,7 @@ def run_issue(func, state, reason="completed", ok=True, args=""):
     script = f"""
 set -uo pipefail
 BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""
-source "{LIB}/ui.sh"; source "{LIB}/state.sh"; source "{LIB}/github.sh"
+source "{LIB}/core/ui.sh"; source "{LIB}/core/state.sh"; source "{LIB}/github/github.sh"
 info() {{ echo "$*"; }}; warn() {{ echo "$*" >&2; }}
 gh_repo() {{ echo o/r; }}
 gh() {{

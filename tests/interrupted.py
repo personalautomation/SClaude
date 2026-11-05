@@ -44,7 +44,7 @@ def check(name, got, want):
 
 def sh(script, **env):
     """Runs a piece of the orchestrator with state.sh sourced."""
-    full = 'set -uo pipefail\nsource "%s/state.sh"\n%s' % (LIB, script)
+    full = 'set -uo pipefail\nsource "%s/core/state.sh"\n%s' % (LIB, script)
     e = dict(os.environ)
     e.update(env)
     return subprocess.run(["bash", "-c", full],

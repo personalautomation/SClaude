@@ -57,15 +57,15 @@ def run(body, env=None, home=None, cwd=None, with_worktree=False):
     # worktree.sh is sourced only where a case needs force_env: it pulls in
     # DEV_PORT and other module-level state that the environment-only cases
     # have no business carrying.
-    extra = 'source "%s/worktree.sh"\n' % LIB if with_worktree else ""
+    extra = 'source "%s/tree/worktree.sh"\n' % LIB if with_worktree else ""
     script = """
 set -uo pipefail
 info() { :; }
 warn() { :; }
 ask() { return 1; }
 REPO="%s"
-source "%s/project.sh"
-source "%s/environment.sh"
+source "%s/core/project.sh"
+source "%s/core/environment.sh"
 %s%s
 """ % (os.path.dirname(LIB), LIB, LIB, extra, body)
     full = dict(os.environ)
@@ -511,7 +511,7 @@ def main():
         subprocess.run(["git", "-C", guarded, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
         with open(cfg, "w") as fh:
             json.dump({"environments": {"prod": {"env": ".env.prod"}}}, fh)
-        envs_py = os.path.join(LIB, "envs.py")
+        envs_py = os.path.join(LIB, "core", "envs.py")
         check("protected: read from main, not the tree",
               subprocess.run([sys.executable, envs_py, "protected", guarded, "prod"]).returncode, 0)
         # Nor does a tree that maps a name to production's file get it linked.
@@ -560,7 +560,7 @@ def main():
         check("value: none without a terminal",
               run('environment_value "%s" dev NOT_THERE || echo none' % sw), "none")
 
-        wd = open(os.path.join(os.path.dirname(LIB), "lib", "worktree.sh")).read()
+        wd = open(os.path.join(os.path.dirname(LIB), "lib", "tree/worktree.sh")).read()
         ensure = wd[wd.index("\nensure_dev() {"):]
         check("ensure_dev starts nothing on rc 2",
               ensure.index("env_rc == 2") < ensure.index("feature_port"), True)

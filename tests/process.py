@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# The process map (sclaude/lib/process.py) against the code it describes:
+# The process map (sclaude/lib/flow/process.py) against the code it describes:
 #
 #   * every command sclaude dispatches is in COMMANDS, and every one there is
 #     dispatched; every verb of the action list (actions.sh) has its command;
@@ -24,6 +24,7 @@ import tempfile
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
 sys.path.insert(0, LIB)
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import process  # noqa: E402
 
 failed = 0
@@ -42,12 +43,12 @@ def read(*path):
 
 
 # The epilogue and the parts split from it.
-DEPLOY_FAMILY = "".join(read("sclaude", "lib", m) for m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+DEPLOY_FAMILY = "".join(read("sclaude", "lib", m) for m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
 
 
 # --- commands ----------------------------------------------------------------
 
-sclaude = "".join(read(*_p.split("/")) for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+sclaude = "".join(read(*_p.split("/")) for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 main = sclaude[sclaude.index("main() {"):]
 dispatch = main[main.index('case "${1:-}" in'):]
 dispatch = dispatch[:dispatch.index("\n  esac")]
@@ -62,11 +63,11 @@ PARTS = ["process_model", "process_config", "process_position", "process_history
          "process_costs", "process_diagram", "process_doc", "process_page"]
 check("the model's parts are these", [p.__name__ for p in process.PARTS], PARTS)
 check("every part on disk is one of them",
-      sorted(n[:-3] for n in os.listdir(LIB) if re.match(r"process_\w+\.py$", n)), sorted(PARTS))
+      sorted(n[:-3] for n in os.listdir(os.path.join(LIB, "flow")) if re.match(r"process_\w+\.py$", n)), sorted(PARTS))
 check("every dispatched command is on the map", not (words - model), str(sorted(words - model)))
 check("every command on the map is dispatched", not (model - words), str(sorted(model - words)))
 
-actions = read("sclaude", "lib", "actions.sh")
+actions = read("sclaude", "lib", "commands", "actions.sh")
 verbs = set(re.findall(r"verbs\+=\(([a-z-]+)\)", actions))
 mapped = {verb for _c, verb, *_ in process.COMMANDS if verb} | process.ACTION_ONLY
 check("every action has its command", not (verbs - mapped), str(sorted(verbs - mapped)))
@@ -75,10 +76,10 @@ check("every command's verb is an action", not (mapped - verbs - process.ACTION_
 
 # --- steps -------------------------------------------------------------------
 
-steps_sh = read("sclaude", "lib", "steps.sh")
+steps_sh = read("sclaude", "lib", "core", "steps.sh")
 steps = re.search(r"^STEPS=\(([^)]*)\)", steps_sh, re.M).group(1).split()
 numbered = dict(enumerate(steps, start=1))
-script = 'source "%s/steps.sh"; for k in sync epilogue retro; do echo "$k $(cycle_number $k)"; done' % LIB
+script = 'source "%s/core/steps.sh"; for k in sync epilogue retro; do echo "$k $(cycle_number $k)"; done' % LIB
 out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30).stdout
 for line in out.split("\n"):
     if line:
@@ -102,15 +103,15 @@ for step in steps:
 check("a local fix runs as step 2", process.SPEC["fix_local"] == process.SPEC["code"])
 for fix in ("fix_preview", "fix_prod"):
     check("%s runs as step 4" % fix, process.SPEC[fix] == process.SPEC["review"])
-sync_sh = read("sclaude", "lib", "sync.sh")
+sync_sh = read("sclaude", "lib", "tree", "sync.sh")
 sync = (re.search(r'^SYNC_MODEL="(\w+)"', sync_sh, re.M).group(1),
         re.search(r'^SYNC_EFFORT="(\w+)"', sync_sh, re.M).group(1), process.SPEC["review"][2])
 check("the sync runs as SYNC_MODEL says", process.SPEC["sync"] == sync, str(sync))
 model, effort, mode = process.SPEC["epilogue"]
 check("the epilogue runs as outcome.sh launches it",
-      "--model %s --effort %s" % (model, effort) in read("sclaude", "lib", "outcome.sh"))
+      "--model %s --effort %s" % (model, effort) in read("sclaude", "lib", "github", "outcome.sh"))
 model, effort, mode = process.SPEC["retro"]
-retro_sh = read("sclaude", "lib", "retro.sh")
+retro_sh = read("sclaude", "lib", "improve", "retro.sh")
 check("the retro runs as retro.sh launches it",
       "--model %s --effort %s" % (model, effort) in retro_sh and "--permission-mode %s" % mode in retro_sh)
 check("every block says what it does", not (set(process.NODES) - set(process.DETAILS)),
@@ -119,17 +120,17 @@ check("every detail is a block's", not (set(process.DETAILS) - set(process.all_n
 for name, nodes in (("workshop", process.WORKSHOP_NODES), ("friction", process.FRICTION_NODES)):
     check("every %s block says what it does" % name, not (set(nodes) - set(process.DETAILS)),
           str(sorted(set(nodes) - set(process.DETAILS))))
-classify = read("sclaude", "lib", "friction_classify.py")
+classify = read("sclaude", "lib", "improve", "friction_classify.py")
 check("the matching runs as friction_classify.py says",
       '"SCLAUDE_CLASSIFY_MODEL", "%s"' % process.SPEC["f_classify"][0] in classify)
-deferred = read("sclaude", "lib", "deferred.sh")
+deferred = read("sclaude", "lib", "improve", "deferred.sh")
 model, effort, mode = process.SPEC["f_monthly"]
 check("the monthly review runs as deferred.sh launches it",
       "--model %s --effort %s" % (model, effort) in deferred and "--permission-mode %s" % mode in deferred)
 model, effort, mode = process.SPEC["f_review"]
 check("the friction review runs as run_friction launches it",
       re.search(r"run_friction\(\) \{.*?--model %s --effort %s.*?--permission-mode %s" % (model, effort, mode),
-                read("sclaude", "lib", "friction.sh"), re.S) is not None)
+                read("sclaude", "lib", "improve", "friction.sh"), re.S) is not None)
 others = set(process.OVERVIEW_NODES)
 check("every overview block borrows a detail",
       not (others - set(process.ALIAS)) and all(v in process.DETAILS for v in process.ALIAS.values()),
@@ -359,7 +360,7 @@ check("busy: not once that run ended",
       process.busy({"retro": {"runs": [{"session": "r", "started": now, "finished": now, "done": True}]}},
                    {"approved": ["r"]}) == {})
 check("the badges carry a ring to turn", 'class="ring"' in process.doc() and "ring-turn" in process.doc())
-check("_flow hands the busy badges to the page", '"busy": busy' in read("sclaude", "lib", "actions.sh"))
+check("_flow hands the busy badges to the page", '"busy": busy' in read("sclaude", "lib", "commands", "actions.sh"))
 got, _ = process.position({"step": "done"}, "MERGED", {"session": "e", "done": False})
 check("position: an epilogue broken off", got == "epilogue", got)
 
@@ -373,7 +374,7 @@ def label(state, epilogue=None):
         if epilogue is not None:
             with open(os.path.join(tmp, "f.json"), "w") as fh:
                 json.dump(epilogue, fh)
-        script = ('LIB="$1"; source "$LIB/state.sh"; source "$LIB/steps.sh"; '
+        script = ('LIB="$1"; source "$LIB/core/state.sh"; source "$LIB/core/steps.sh"; '
                   'D="$2"; branch_pr_state() { echo MERGED; }; epilogue_dir() { echo "$D"; }; step_label done "$D"')
         return subprocess.run(["bash", "-c", script, "bash", LIB, tmp],
                               capture_output=True, text=True, timeout=60).stdout.strip()
@@ -395,7 +396,7 @@ with tempfile.TemporaryDirectory() as tmp:
     path = os.path.join(tmp, "state.json")
     with open(path, "w") as fh:
         json.dump({"step": "done"}, fh)
-    out = subprocess.run([sys.executable, os.path.join(LIB, "process.py"), "position", path, "OPEN"],
+    out = subprocess.run([sys.executable, os.path.join(LIB, "flow", "process.py"), "position", path, "OPEN"],
                          capture_output=True, text=True, timeout=30).stdout
 check("position from the command line", out.split("\t")[0] == "preview", out)
 
@@ -439,11 +440,11 @@ check("the doc lists the commands", "sclaude return &lt;name&gt; [reason]" in do
 page = process.page("x<y")
 check("page escapes the label", "x&lt;y" in page and "x<y</h1>" not in page)
 check("page asks for its state", "/__sclaude/flow/state?f=" in page)
-known = subprocess.run(["bash", "-c", 'source "%s/branches.sh"; gh() { echo ASKED; }; '
+known = subprocess.run(["bash", "-c", 'source "%s/tree/branches.sh"; gh() { echo ASKED; }; '
                         'PR_STATE_KNOWN=1 PR_STATE=MERGED branch_pr_state feat/x' % LIB],
                        capture_output=True, text=True, timeout=30).stdout.strip()
 check("a pull request's state cmd_flow knows is not asked again", known == "MERGED", known)
-check("cmd_flow hands it down", "local PR_STATE_KNOWN=1 PR_STATE=\"$pr_state\"" in read("sclaude", "lib", "actions.sh"))
+check("cmd_flow hands it down", "local PR_STATE_KNOWN=1 PR_STATE=\"$pr_state\"" in read("sclaude", "lib", "commands", "actions.sh"))
 check("_flow is a report", re.search(r"status\|ls\|dev\|[^\n]*\|_flow\|", sclaude) is not None)
 check("_flow is dispatched", "_flow)" in dispatch and "cmd_flow" in dispatch)
 proxy = read("bin", "sclaude-proxy")
@@ -466,7 +467,7 @@ check("the Mini App opens it at the same path, starting the server",
 check("the proxy starts the server for start=1", 'get("start")' in proxy)
 check("the map's button starts sclaude dev without holding the bot",
       "setsid nohup sclaude dev --no-browser >/dev/null 2>&1 &" in read("keepawake", "handling.py"))
-check("the step's header names the map", "flow_address" in read("sclaude", "lib", "run.sh"))
+check("the step's header names the map", "flow_address" in read("sclaude", "lib", "cycle", "run.sh"))
 
 # --- how a feature went ------------------------------------------------------
 
@@ -477,7 +478,7 @@ with tempfile.TemporaryDirectory() as tmp:
     st = os.path.join(feat, "state.json")
     with open(st, "w") as fh:
         json.dump({"step": "plan"}, fh)
-    subprocess.run(["bash", "-c", 'source "%s/state.sh"; f="$1"; '
+    subprocess.run(["bash", "-c", 'source "%s/core/state.sh"; f="$1"; '
                     'session_runs "$f" steps.plan open s1; session_runs "$f" steps.plan end s1; '
                     'session_runs "$f" steps.plan open s1; session_runs "$f" steps.plan finish s1 finished; '
                     'history_add "$f" regression.local failed note=\'say "x"\'; '
@@ -630,7 +631,7 @@ vs = process.history({}, [
 check("history: a red status the second time round is on the copy",
       [v.get("n") for v in vs if "n" in v][-1] == "epi_preview", str(vs))
 # The mark is written by run_status, before the merge only, into the row.
-gh_src = read("sclaude", "lib", "outcome.sh")
+gh_src = read("sclaude", "lib", "github", "outcome.sh")
 run_src = re.search(r"^run_status\(\) \{\n.*?^\}\n", gh_src, re.S | re.M).group(0)
 check("run_status marks a status before the merge as the preview's",
       '[[ -n "$pr" && "$pr" != null && "$merged" != MERGED ]] && about=preview' in run_src
@@ -638,7 +639,7 @@ check("run_status marks a status before the merge as the preview's",
 with tempfile.TemporaryDirectory() as wt:
     with open(os.path.join(wt, "state.json"), "w") as fh:
         json.dump({}, fh)
-    subprocess.run(["bash", "-c", 'source "%s/state.sh"; SCLAUDE_ABOUT=preview session_runs "%s/state.json" epilogue open e1; '
+    subprocess.run(["bash", "-c", 'source "%s/core/state.sh"; SCLAUDE_ABOUT=preview session_runs "%s/state.json" epilogue open e1; '
                     'session_runs "%s/state.json" epilogue open e2' % (LIB, wt, wt)], check=True)
     with open(os.path.join(wt, "history.jsonl")) as fh:
         hist = [json.loads(line) for line in fh]
@@ -658,7 +659,7 @@ check("the fingerprint does not skip red words over a green preview",
       'status.preview_red 2>/dev/null || true)" != true ]]' in run_src[:run_src.find("nothing changed, skipping")])
 check("a resumed epilogue keeps its red preview",
       'state_set "$estate" preview_red' in run_src
-      and '"$prod" "$wt" "$preview_red"' in "".join(read(*_p.split("/")) for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh")))
+      and '"$prod" "$wt" "$preview_red"' in "".join(read(*_p.split("/")) for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh")))
 check("the green rewrite is tried on every green pass",
       DEPLOY_FAMILY.count('status_green_again "$slug"') == 2)
 with tempfile.TemporaryDirectory() as wt:
@@ -667,7 +668,7 @@ with tempfile.TemporaryDirectory() as wt:
     for flag in ("true", "null"):
         with open(os.path.join(wt, ".sclaude", "local", "feature", "state.json"), "w") as fh:
             json.dump({"status": {"preview_red": json.loads(flag)}}, fh)
-        out.append(subprocess.run(["bash", "-c", 'source "%s/state.sh"; for _m in github issue_sync board outcome; do source "%s/$_m.sh"; done; '
+        out.append(subprocess.run(["bash", "-c", 'source "%s/core/state.sh"; for _m in github/github github/issue_sync github/board github/outcome; do source "%s/$_m.sh"; done; '
                                    'run_status() { echo "RAN $5 $6"; }; status_green_again s 7 9 OPEN "%s"'
                                    % (LIB, LIB, wt)], capture_output=True, text=True).stdout.strip())
     check("a green preview rewrites a red status, and only a red one", out, ["RAN 1 0", ""])
@@ -1076,8 +1077,8 @@ check("metrics: the wait for the person, the whole of it, where it was answered"
       w == {"detail": {"code": 7200}, "regression": {"reg_local": 600}}, str(w))
 check("the page offers the wait, and shows no zero", 'value="wait"' in page and "if (v)" in page)
 check("a question of sclaude's says how long it waited",
-      'ask_log "$__prompt" "$__from" "$__reply" "$__in" "$((SECONDS - __asked))"' in read("sclaude", "lib", "ui.sh")
-      and 'waited="$5"' in read("sclaude", "lib", "io.sh"))
+      'ask_log "$__prompt" "$__from" "$__reply" "$__in" "$((SECONDS - __asked))"' in read("sclaude", "lib", "core", "ui.sh")
+      and 'waited="$5"' in read("sclaude", "lib", "core", "io.sh"))
 # A sync, which the glance does not draw, counts there under the block it ran
 # ahead of (P-11), and once only in the feature's total.
 ms = process.history({}, [{"at": at("09:00"), "what": "steps.code", "op": "open", "session": "c1"},
@@ -1348,15 +1349,15 @@ for name, gate in (("detail", "ship"), ("regression", "prod_ok"), ("friction", "
 check("a friction review open says which and that it holds the step",
       "code-1" in process.busy_notes({"friction": {"code-1": {"runs": [{"session": "f", "started": now}]}}})
       ["code"]["F"])
-check("_flow hands the notes to the page", '"notes": notes' in read("sclaude", "lib", "actions.sh"))
+check("_flow hands the notes to the page", '"notes": notes' in read("sclaude", "lib", "commands", "actions.sh"))
 check("the page offers the metrics by checkboxes, each with the whole feature's total",
       'class="metrics"' in page and 'value="input"' in page and 'value="cost"' in page
       and 'value="time"' in page and 'value="expired"' in page and page.count('class="mt-total"') == 5)
 check("every map's heading carries its own whole of the metrics",
       page.count('class="mt-map"') == 6 and "document.querySelectorAll('.mt-map')" in page)
 check("an answer to sclaude and a command go into the history",
-      "history_add \"$ASK_TREE/.sclaude/local/feature/state.json\" ask answered" in read("sclaude", "lib", "io.sh")
-      and "history_command \"$wt\"" in read("sclaude", "lib", "state.sh")
+      "history_add \"$ASK_TREE/.sclaude/local/feature/state.json\" ask answered" in read("sclaude", "lib", "core", "io.sh")
+      and "history_command \"$wt\"" in read("sclaude", "lib", "core", "state.sh")
       and 'SCLAUDE_COMMAND="${1:-menu}"' in sclaude
       and 'export SCLAUDE_RUN="${SCLAUDE_RUN:-' in sclaude and "SCLAUDE_REEXEC" not in sclaude)
 check("the player pauses the arrow too", "animation-play-state:paused" in process.PLAY_STYLE)
@@ -1366,10 +1367,10 @@ for m in ("detail", "overview", "workshop", "friction"):
     check("page plays the %s map" % m, 'data-play="%s"' % m in page)
 check("page chooses the friction and the workshop passes",
       'data-pass="friction"' in page and 'data-pass="workshop"' in page)
-check("cmd_flow sends the history", "process.history(data, process.read_history(state)" in read("sclaude", "lib", "actions.sh")
-      and '"history": history' in read("sclaude", "lib", "actions.sh"))
+check("cmd_flow sends the history", "process.history(data, process.read_history(state)" in read("sclaude", "lib", "commands", "actions.sh")
+      and '"history": history' in read("sclaude", "lib", "commands", "actions.sh"))
 check("the state's writers name the same file",
-      '"history.jsonl"' in read("sclaude", "lib", "state.sh") and "history.jsonl" in read("sclaude", "lib", "state.sh"))
+      '"history.jsonl"' in read("sclaude", "lib", "core", "state.sh") and "history.jsonl" in read("sclaude", "lib", "core", "state.sh"))
 check("the map is not centred across on open (it hid the first lanes)",
       "inline: 'nearest'" in process.LIVE_SCRIPT and "inline: 'center'" not in process.LIVE_SCRIPT)
 
@@ -1391,16 +1392,20 @@ with tempfile.TemporaryDirectory() as tmp2:
     import shutil  # noqa: E402
     # The model is process.py and its parts; the parts are read from the copy
     # too, so the ones already imported from the checkout step aside.
-    for name in os.listdir(LIB):
+    # The copy keeps the checkout's shape: _path.py beside a flow/ folder.
+    flow = os.path.join(tmp2, "flow")
+    os.makedirs(flow)
+    shutil.copy(os.path.join(LIB, "_path.py"), tmp2)
+    for name in os.listdir(os.path.join(LIB, "flow")):
         if re.match(r"process(_\w+)?\.py$", name):
-            shutil.copy(os.path.join(LIB, name), tmp2)
-    copy = os.path.join(tmp2, "process.py")
-    part = os.path.join(tmp2, "process_doc.py")
+            shutil.copy(os.path.join(LIB, "flow", name), flow)
+    copy = os.path.join(flow, "process.py")
+    part = os.path.join(flow, "process_doc.py")
     saved = proxy_mod.process
     saved_parts = {n: m for n, m in sys.modules.items() if n.startswith("process_")}
     for n in saved_parts:
         del sys.modules[n]
-    sys.path.insert(0, tmp2)  # where reload finds "process" by name
+    sys.path.insert(0, flow)  # where reload finds "process" by name
     try:
         spec = __import__("importlib.util").util.spec_from_file_location("process", copy)
         mod = __import__("importlib.util").util.module_from_spec(spec)
@@ -1418,7 +1423,7 @@ with tempfile.TemporaryDirectory() as tmp2:
         check("the proxy draws the map from the model on disk now",
               "1. The cycle, reloaded" in second and "1. The cycle, reloaded" not in first)
     finally:
-        sys.path.remove(tmp2)
+        sys.path.remove(flow)
         proxy_mod.process = saved
         sys.modules["process"] = process
         sys.modules.update(saved_parts)

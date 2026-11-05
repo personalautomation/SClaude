@@ -2,7 +2,7 @@
   "README": [
     "The rules sclaude's cycle stands on, for every product and every person.",
     "Nothing in a product's .sclaude/team/ or a person's .sclaude/people/ lifts",
-    "them; see sclaude/lib/policy.py for the layers. Pushing to main, --force",
+    "them; see sclaude/lib/improve/policy.py for the layers. Pushing to main, --force",
     "and --no-verify are refused by forbidden-commands.py itself: they need the",
     "push's arguments read, which a prefix cannot do. Main is the product's: a",
     "push to main of sclaude's own checkout passes (OWN_CHECKOUT there)."

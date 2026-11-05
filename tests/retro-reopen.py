@@ -45,7 +45,7 @@ def check(name, got, want):
 def run_bash(script, cwd, bin_dir):
     body = "set -uo pipefail\n"
     body += 'BOLD=""; OFF=""; REPO=%s\n' % cwd
-    for name in ("io", "ui", "steps", "state", "branches", "retro"):
+    for name in ("core/io", "core/ui", "core/steps", "core/state", "tree/branches", "improve/retro"):
         body += 'source "%s/%s.sh"\n' % (LIB, name)
     body += ('info() { :; }; warn() { :; }\n'
              'issue_sync() { echo SYNC; }\n'
@@ -129,7 +129,7 @@ finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
 run_src = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
-          for m in ("run.sh", "session_watch.sh", "prompt.sh"))
+          for m in ("cycle/run.sh", "cycle/session_watch.sh", "cycle/prompt.sh"))
 check("step-3-refuses-the-merged-number",
       '"$number" == "$seen" ]] && number=""' in run_src, True)
 check("step-3-gets-the-block", 'SCLAUDE_B_REOPENED="$(retro_pr_block' in run_src
@@ -139,7 +139,7 @@ with open(os.path.join(ROOT, "sclaude", "prompts", "pr.md")) as fh:
 
 # --- `done` reopens before it cleans up -----------------------------------------
 src = "".join(open(os.path.join(ROOT, _p)).read()
-    for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+    for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 m = re.search(r"^cmd_done\(\) \{\n.*?^\}\n", src, re.S | re.M)
 body = m.group(0) if m else ""
 retro_at = body.find("run_retro ")
@@ -179,7 +179,7 @@ check("resume-done-not-over-a-red-production",
                 r'\s*&& \[\[ "\$\(regression_status "\$wt" prod\)" != failed \]\] && prod_carries_feature "\$wt"; \}',
                 resume) is not None, True)
 deploy_src = "".join(open(os.path.join(LIB, _m)).read()
-    for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+    for _m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
 m = re.search(r"^remind_prod\(\) \{\n.*?^\}\n", deploy_src, re.S | re.M)
 remind = m.group(0) if m else ""
 mark_at = remind.rfind("prod_pass.ended")
@@ -192,7 +192,7 @@ check("pass-marked-after-the-epilogue",
       remind.rfind("run_status ") < mark_at < remind.rfind("db_main_up"), True)
 
 # --- the retrospective records that it changed the code ------------------------------
-with open(os.path.join(LIB, "retro.sh")) as fh:
+with open(os.path.join(LIB, "improve", "retro.sh")) as fh:
     retro_src = fh.read()
 check("run-retro-records-the-change",
       'state_set "$fstate" retro.project_to "$project_after"' in retro_src, True)
@@ -228,7 +228,7 @@ try:
                   entry("user", "fix it", human=True),
                   entry("assistant", "Committed on the branch.")):
             fh.write(json.dumps(e) + "\n")
-    end = os.path.join(LIB, "session_end.py")
+    end = os.path.join(LIB, "cycle", "session_end.py")
     first = subprocess.run(["python3", end, "first", transcript], capture_output=True,
                            text=True).stdout.strip()
     last = subprocess.run(["python3", end, "last", transcript], capture_output=True,
@@ -258,7 +258,7 @@ for name in ("retro.md", "retro-again.md"):
     check("%s-names-the-line" % name, "`<nothing-said>`" in text, True)
     check("%s-no-marker" % name, "<done-marker>" in text, False)
 run_src = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
-          for m in ("run.sh", "session_watch.sh", "prompt.sh"))
+          for m in ("cycle/run.sh", "cycle/session_watch.sh", "cycle/prompt.sh"))
 check("watcher-reads-the-line",
       'watch-said "$transcript" "$started" "$said"' in run_src, True)
 
@@ -276,7 +276,7 @@ def watch_said(es, after=0, line="Nothing to act on: sclaude closes this session
     with open(path, "w") as fh:
         for e in es:
             fh.write(json.dumps(e) + "\n")
-    return subprocess.run(["python3", os.path.join(LIB, "session_end.py"), "watch-said",
+    return subprocess.run(["python3", os.path.join(LIB, "cycle", "session_end.py"), "watch-said",
                            path, str(after), line],
                           capture_output=True, text=True).stdout.strip()
 
@@ -324,7 +324,7 @@ try:
     path = os.path.join(tmp, "p.jsonl")
     with open(path, "w") as fh:
         fh.write(json.dumps(plan) + "\n")
-    shown = subprocess.run(["python3", os.path.join(LIB, "session_end.py"), "last", path],
+    shown = subprocess.run(["python3", os.path.join(LIB, "cycle", "session_end.py"), "last", path],
                            capture_output=True, text=True).stdout
     check("a-waiting-plan-is-the-report", LINE in shown, True)
     # The report in the person's language: a line after it in Cyrillic is a
@@ -350,7 +350,7 @@ try:
         with open(path, "w") as fh:
             for e in es:
                 fh.write(json.dumps(e) + "\n")
-        return subprocess.run(["python3", os.path.join(LIB, "session_end.py"), kind, path],
+        return subprocess.run(["python3", os.path.join(LIB, "cycle", "session_end.py"), kind, path],
                               capture_output=True, text=True).stdout.strip()
 
     # Said as a message and as a plan: printed once.
@@ -393,7 +393,7 @@ with open(os.path.join(ROOT, "sclaude", "prompts", "_retro-rules.md")) as fh:
     rules = fh.read()
 check("prompt-names-the-branch", "own branch, `<branch>`" in rules
       and "<include:retro-rules>" in prompt, True)
-with open(os.path.join(LIB, "retro.sh")) as fh:
+with open(os.path.join(LIB, "improve", "retro.sh")) as fh:
     check("branch-passed-to-prompt", 'SCLAUDE_V_BRANCH=' in fh.read(), True)
 
 # --- a feature with no change of its own has a retrospective too -------------------
@@ -409,6 +409,7 @@ check("done-reopens-no-change-with-own-work",
       'state_set "$state" no_change null' in body
       and "step_rewind_to \"$wt\" pr pr review" in body, True)
 sys.path.insert(0, LIB)
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import render_prompt
 values = {"feature": "f", "pr": "\u2014", "pr-number": "", "no-change": "1",
           "issue": "9", "branch": "feat/f", "worktree": "/w", "instruments": "/i",

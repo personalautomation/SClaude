@@ -23,7 +23,7 @@ def check(name, got, want):
 
 
 def refresh(inst, cfg):
-    script = ('source "%s/ui.sh" 2>/dev/null; source "%s/instruments.sh"; INSTRUMENTS="%s"; '
+    script = ('source "%s/core/ui.sh" 2>/dev/null; source "%s/improve/instruments.sh"; INSTRUMENTS="%s"; '
               'systemctl() { echo "$*" >> "%s/reloads"; case "$2" in '
               'is-failed) [ -e "%s/failed-$4" ] ;; is-active) [ -e "%s/active-$4" ] ;; '
               'is-enabled) cat "%s/enabled-$3" 2>/dev/null || echo static ;; esac; }; '

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# A test bench for the DORA page (sclaude/lib/dora.py).
+# A test bench for the DORA page (sclaude/lib/metrics/dora.py).
 #
 # The sources — Vercel, GitHub — are stood in for by their parsed answers: what
 # is guarded here is the arithmetic on them, where a mistake does not look
@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "sclaude", "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import dora  # noqa: E402
 import dora_charts, dora_numbers, dora_page, dora_sources, dora_store, dora_team  # noqa: E402
 
@@ -85,7 +86,7 @@ def run_checks(root):
 
     # The incident comment is found by what rollback_incident writes.
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                           "sclaude", "lib", "rollback.sh")) as fh:
+                           "sclaude", "lib", "ship", "rollback.sh")) as fh:
         rollback = fh.read()
     check("rollback.sh writes the marker searched for",
           'ROLLBACK_MARKER="%s"' % dora_sources.ROLLBACK_MARKER in rollback, True)

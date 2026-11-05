@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 # How a feature starts when its answers come with it: the branch name an issue
-# suggests (sclaude/lib/issue_list.py, which bin/sclaude's suggest_slug and the
+# suggests (sclaude/lib/github/issue_list.py, which bin/sclaude's suggest_slug and the
 # bot's Mini App both use) and `sclaude new`'s options (new_from_args).
 #
 # Guarded here:
@@ -23,6 +23,7 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
 SCLAUDE = os.path.join(ROOT, "bin", "sclaude")
 sys.path.insert(0, LIB)
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from issue_list import slugify, suggest  # noqa: E402
 
 failures = []
@@ -53,7 +54,7 @@ def function(name):
     """One function of bin/sclaude or the modules its commands live in, by
     its text: the file runs its main when sourced."""
     body = ""
-    for path in (SCLAUDE, os.path.join(LIB, "start.sh"), os.path.join(LIB, "menu.sh")):
+    for path in (SCLAUDE, os.path.join(LIB, "commands", "start.sh"), os.path.join(LIB, "commands", "menu.sh")):
         with open(path) as fh:
             body += fh.read()
     m = re.search(r"^%s\(\) \{\n.*?^\}\n" % re.escape(name), body, re.S | re.M)

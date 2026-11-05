@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# A test bench for the "blocked by" checks: sclaude/lib/blockers.py, the issue
+# A test bench for the "blocked by" checks: sclaude/lib/github/blockers.py, the issue
 # picker's rows (fetch_issues in picker.sh) and the question before a feature
 # starts (issue_blockers_gate in github.sh).
 #
@@ -27,6 +27,7 @@ import tempfile
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
 sys.path.insert(0, LIB)
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from blockers import open_blockers  # noqa: E402
 
 failures = []
@@ -110,7 +111,7 @@ check("a plain list from gh", open_blockers(
 # --- the command line --------------------------------------------------------
 
 d = stub_dir()
-script = os.path.join(LIB, "blockers.py")
+script = os.path.join(LIB, "github", "blockers.py")
 check("issue mode", run([sys.executable, script, "issue", "o/r", "61"], d),
       ("37\tt37\n", 0))
 check("issue mode, nothing open",
@@ -131,7 +132,7 @@ check("gh failing is silent in a list",
 
 rows, _ = run(["bash", "-c",
                'BOLD=""; DIM=""; GREEN=""; OFF=""; REPO=.\n'
-               'source "%s/picker.sh"\n'
+               'source "%s/core/picker.sh"\n'
                'gh_repo() { echo o/r; }\n'
                'fetch_issues' % LIB], d)
 rows = [r.split("\t") for r in rows.splitlines()]
@@ -146,7 +147,7 @@ check("picker shows the board status", [r[5] for r in rows],
 no_board = stub_dir(board=False)
 rows, _ = run(["bash", "-c",
                'BOLD=""; DIM=""; GREEN=""; OFF=""; REPO=.\n'
-               'source "%s/picker.sh"\n'
+               'source "%s/core/picker.sh"\n'
                'gh_repo() { echo o/r; }\n'
                'fetch_issues' % LIB], no_board)
 rows = [r.split("\t") for r in rows.splitlines()]
@@ -173,7 +174,7 @@ def draw(script):
 
 
 drawn = draw('BOLD=""; DIM="<d>"; GREEN=""; OFF="</>"; YELLOW="<y>"\n'
-             'source "%s/picker.sh"\n'
+             'source "%s/core/picker.sh"\n'
              'ISSUE_ROWS=($\'1\\t61\\tAlpha\\tDev\\t\\tIn progress\')\n'
              'PICKER_COLS=80\n'
              'draw_picker 0 1 2 > /dev/null\n' % LIB)
@@ -192,7 +193,7 @@ def screen_width(text):
 
 def draw_row(row, cols):
     drawn = draw('BOLD=""; DIM=""; GREEN=""; OFF=""; YELLOW=""\n'
-                 'source "%s/picker.sh"\n'
+                 'source "%s/core/picker.sh"\n'
                  "ISSUE_ROWS=($'%s')\n"
                  'PICKER_COLS=%d\n'
                  'draw_picker 0 1 2 > /dev/null\n' % (LIB, row, cols))
@@ -236,10 +237,10 @@ check("a short title leaves its room",
 # ui.sh gives is_yes; warn and ask are replaced after it with plain stdout and
 # stdin, since the real ones talk to /dev/tty and the question channel.
 GATE = ('BOLD=""; DIM=""; GREEN=""; OFF=""; LIB="%s"\n'
-        'source "%s/ui.sh" 2>/dev/null\n'
+        'source "%s/core/ui.sh" 2>/dev/null\n'
         'warn() { echo "W:$*"; }\n'
         'ask() { local __r; read -r __r; printf -v "$2" %%s "$__r"; }\n'
-        'for _m in github issue_sync board outcome; do source "%s/$_m.sh"; done\n'
+        'for _m in github/github github/issue_sync github/board github/outcome; do source "%s/$_m.sh"; done\n'
         'gh_repo() { echo o/r; }\n'
         'issue_blockers_gate NUMBER && echo START || echo STOP\n') % (LIB, LIB, LIB)
 

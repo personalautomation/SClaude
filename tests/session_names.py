@@ -31,7 +31,7 @@ def check(name, got, want):
 
 
 def label(*args):
-    script = 'source "%s/steps.sh"; for _m in regression regression_gate regression_fix; do source "%s/$_m.sh"; done; session_label "$@"' % (LIB, LIB)
+    script = 'source "%s/core/steps.sh"; for _m in ship/regression ship/regression_gate ship/regression_fix; do source "%s/$_m.sh"; done; session_label "$@"' % (LIB, LIB)
     p = subprocess.run(["bash", "-c", script, "bash"] + list(args),
                        capture_output=True, text=True, timeout=30)
     return p.stdout.strip()
@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("review-first", label("step", state, "review", "r1"), "4-review")
     check("review-second", label("step", state, "review", "r2"), "4-review(2)")
     number = lambda *a: subprocess.run(
-        ["bash", "-c", 'source "%s/steps.sh"; step_session_number "$@"' % LIB, "bash"] + list(a),
+        ["bash", "-c", 'source "%s/core/steps.sh"; step_session_number "$@"' % LIB, "bash"] + list(a),
         capture_output=True, text=True, timeout=30).stdout.strip()
     check("session-number-second", number(state, "code", "c2"), "2")
     check("session-number-none", number(state, "pr", "x"), "")
@@ -69,7 +69,7 @@ check("retro", label("retro"), "7-retro")
 
 
 def icon(title):
-    p = subprocess.run(["bash", "-uc", 'source "%s/steps.sh"; source "%s/pane.sh"; pane_icon "$1"' % (LIB, LIB), "bash", title],
+    p = subprocess.run(["bash", "-uc", 'source "%s/core/steps.sh"; source "%s/core/pane.sh"; pane_icon "$1"' % (LIB, LIB), "bash", title],
                        capture_output=True, text=True, timeout=30)
     return p.stdout
 
@@ -85,7 +85,7 @@ for title, want in (("1-plan/x", "📝"), ("2-code(2)/x", "💻"), ("3-pr/x", "�
 
 
 def named(name):
-    p = subprocess.run(["bash", "-uc", 'source "%s/steps.sh"; source "%s/pane.sh"; named_with_icon "$1"' % (LIB, LIB), "bash", name],
+    p = subprocess.run(["bash", "-uc", 'source "%s/core/steps.sh"; source "%s/core/pane.sh"; named_with_icon "$1"' % (LIB, LIB), "bash", name],
                        capture_output=True, text=True, timeout=30)
     return p.stdout
 
@@ -102,6 +102,7 @@ for name, want in (("4-review(2)/x", "4-review(2) 🛠/x"), ("1-plan/x", "1-plan
 # every name session_label gives, as Claude Code stores it with its icon,
 # must come back as the step it was given for.
 sys.path.insert(0, LIB)
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import claude_usage  # noqa: E402
 
 for args, want in ((("friction", "review-2"), "friction"), (("friction", "fix-prod-3"), "friction"),
@@ -120,7 +121,7 @@ for step in ("plan", "code", "pr", "review"):
 # The line that tells a session started or ended: one shape for every kind,
 # numbered over the seven of the cycle as the menu numbers it.
 def phase(*args):
-    script = 'source "%s/steps.sh"; for _m in regression regression_gate regression_fix; do source "%s/$_m.sh"; done; phase_line "$@"' % (LIB, LIB)
+    script = 'source "%s/core/steps.sh"; for _m in ship/regression ship/regression_gate ship/regression_fix; do source "%s/$_m.sh"; done; phase_line "$@"' % (LIB, LIB)
     return subprocess.run(["bash", "-c", script, "bash"] + list(args),
                           capture_output=True, text=True, timeout=30).stdout.strip()
 
@@ -147,8 +148,9 @@ for args, want in (
 # The bot leads a message with exactly these icons (OWN_ICON): every one
 # phase_icon gives, and no other.
 sys.path.insert(0, os.path.join(LIB, "..", ".."))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from keepawake import notices  # noqa: E402
-icons = subprocess.run(["bash", "-c", 'source "%s/steps.sh"; for a in "step plan" "step code" '
+icons = subprocess.run(["bash", "-c", 'source "%s/core/steps.sh"; for a in "step plan" "step code" '
                         '"step pr" "step review" "step other" "step review done" friction deferred '
                         'fix local-review regression deploy sync epilogue retro; do '
                         'set -- $a; phase_icon "$1" "${2:-}" "${3:-}"; echo; done' % LIB],
@@ -158,14 +160,14 @@ check("the bot knows every phase icon", sorted(set(icons)), sorted(notices.PHASE
 # The menu names the cycle's steps by their number (webmenu's act.steps):
 # one name for each, in both languages.
 from keepawake import i18n  # noqa: E402
-total = subprocess.run(["bash", "-c", 'source "%s/steps.sh"; cycle_total' % LIB],
+total = subprocess.run(["bash", "-c", 'source "%s/core/steps.sh"; cycle_total' % LIB],
                        capture_output=True, text=True, timeout=30).stdout.strip()
 for half in i18n.STRINGS["act.steps"]:
     check("act.steps names every step", str(len(half.split(" · "))), total)
 
 # The banner a session opens with in the terminal names it as the topic does.
 def title(*args):
-    script = 'source "%s/steps.sh"; for _m in regression regression_gate regression_fix; do source "%s/$_m.sh"; done; phase_title "$@"' % (LIB, LIB)
+    script = 'source "%s/core/steps.sh"; for _m in ship/regression ship/regression_gate ship/regression_fix; do source "%s/$_m.sh"; done; phase_title "$@"' % (LIB, LIB)
     return subprocess.run(["bash", "-c", script, "bash"] + list(args),
                           capture_output=True, text=True, timeout=30).stdout.strip()
 

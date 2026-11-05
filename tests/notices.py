@@ -2,7 +2,7 @@
 #
 # Notes: messages from sclaude that ask nothing, such as where a feature's
 # review stands after each round. Both sides of the channel are checked here
-# — ask_notice in sclaude/lib/io.sh lays them in notes/ (NOTES_DIR), and
+# — ask_notice in sclaude/lib/core/io.sh lays them in notes/ (NOTES_DIR), and
 # keepawake/notices.py sends them to the feature's topic and deletes them —
 # so that a name changed on one side alone fails here.
 #
@@ -39,7 +39,7 @@ def check(name, got, want):
 
 def notice(text, slug="feat-a", ended=""):
     """ask_notice as sclaude calls it, in a real bash."""
-    script = ('source "%s/io.sh"\nASK_DIR="%s"\nASK_SLUG="%s"\nASK_ENDED="%s"\n'
+    script = ('source "%s/core/io.sh"\nASK_DIR="%s"\nASK_SLUG="%s"\nASK_ENDED="%s"\n'
               'ask_notice "$1"' % (LIB, os.path.join(box, "sclaude"), slug, ended))
     subprocess.run(["bash", "-c", script, "_", text], check=True, timeout=20)
 
@@ -118,7 +118,7 @@ check("a note older than a day is dropped, not sent", (bot.sent, laid()), ([], [
 
 # --- the feed: what sclaude prints, shorter, a message a turn ------------------------
 def feed(level, text, slug="feat-a"):
-    script = ('source "%s/io.sh"\nASK_DIR="%s"\nASK_SLUG="%s"\nASK_ENDED=""\n'
+    script = ('source "%s/core/io.sh"\nASK_DIR="%s"\nASK_SLUG="%s"\nASK_ENDED=""\n'
               'ask_feed "$1" "$2"' % (LIB, os.path.join(box, "sclaude"), slug))
     subprocess.run(["bash", "-c", script, "_", level, text], check=True, timeout=20)
 
@@ -247,7 +247,7 @@ from keepawake import review_keys  # noqa: E402
 
 def phase(*args):
     """A phase line as sclaude prints it (phase_line in steps.sh)."""
-    script = 'source "%s/steps.sh"; for _m in regression regression_gate regression_fix; do source "%s/$_m.sh"; done; phase_line "$@"' % (LIB, LIB)
+    script = 'source "%s/core/steps.sh"; for _m in ship/regression ship/regression_gate ship/regression_fix; do source "%s/$_m.sh"; done; phase_line "$@"' % (LIB, LIB)
     return subprocess.run(["bash", "-c", script, "_"] + list(args), capture_output=True,
                           text=True, timeout=20).stdout.strip()
 
@@ -322,7 +322,7 @@ with open(os.path.join(wt, ".sclaude", "local", "feature", "state.json"), "w") a
 
 
 def take(*extra):
-    script = ('source "%s/io.sh"; source "%s/state.sh"; source "%s/local_review.sh"\n'
+    script = ('source "%s/core/io.sh"; source "%s/core/state.sh"; source "%s/review/local_review.sh"\n'
               'LIB="%s"; ASK_DIR="%s"; ASK_SLUG=feat-a\nreview_said_take "$@"; echo "|$(review_enough "$1")"'
               % (LIB, LIB, LIB, LIB, os.path.join(box, "sclaude")))
     return subprocess.run(["bash", "-c", script, "_", wt] + list(extra), capture_output=True,
@@ -344,7 +344,7 @@ check("a word it does not know is dropped", (take(), os.path.exists(said_path)),
 # A press nobody took goes when step 4 closes, with the enough it would set:
 # the next review must not start on a word said about this one.
 def drop(ended=""):
-    script = ('source "%s/io.sh"; source "%s/state.sh"; source "%s/local_review.sh"\n'
+    script = ('source "%s/core/io.sh"; source "%s/core/state.sh"; source "%s/review/local_review.sh"\n'
               'ASK_DIR="%s"; ASK_SLUG=feat-a; ASK_ENDED="%s"\nreview_said_drop'
               % (LIB, LIB, LIB, os.path.join(box, "sclaude"), ended))
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=20).returncode

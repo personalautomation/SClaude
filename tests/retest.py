@@ -44,7 +44,7 @@ def check(name, got, want):
 
 
 # The epilogue (deploy.sh) and the QA functions it calls (qa.sh).
-deploy = "".join(open(os.path.join(LIB, m), encoding="utf-8").read() for m in ("deploy.sh", "qa.sh"))
+deploy = "".join(open(os.path.join(LIB, m), encoding="utf-8").read() for m in ("ship/deploy.sh", "ship/qa.sh"))
 FUNC = ""
 for name in ("qa_retest", "qa_sent", "pr_unhandoff"):
     match = re.search(r'^%s\(\) \{\n.*?^\}\n' % name, deploy, re.M | re.S)
@@ -68,8 +68,8 @@ def run(column, pr_state, draft, sent="aaa111", now="bbb222", fresh=""):
         body = "set -uo pipefail\n"
         body += 'BOLD=""; OFF=""\n'
         body += 'QA_TO="In QA"; QA_FROM="In progress"; PROGRESS_FROM="Backlog"; QA_DONE="Done"\n'
-        body += 'source "%s/sclaude/lib/state.sh"\n' % ROOT
-        body += 'source "%s/sclaude/lib/project.sh"\n' % ROOT
+        body += 'source "%s/sclaude/lib/core/state.sh"\n' % ROOT
+        body += 'source "%s/sclaude/lib/core/project.sh"\n' % ROOT
         body += ('warn() { echo "$*" >&2; }\n'
                  'info() { echo "$*"; }\n'
                  'say()  { echo "$*"; }\n'
@@ -217,7 +217,7 @@ with tempfile.TemporaryDirectory() as tmp:
     raw2 = git("rev-parse", "HEAD")
 
     def same(a, b):
-        body = ('source "%s/sclaude/lib/no_change.sh"\n' % ROOT) + same_fn \
+        body = ('source "%s/sclaude/lib/cycle/no_change.sh"\n' % ROOT) + same_fn \
             + 'qa_product_same "%s" %s %s; echo "rc=$?"' % (wt, a, b)
         return subprocess.run(["bash", "-c", body], capture_output=True, text=True).stdout.strip()
 

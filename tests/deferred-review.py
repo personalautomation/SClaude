@@ -41,7 +41,7 @@ def review(repo, prompt_out, dirty=False):
     script = r'''
 set -uo pipefail
 BOLD=""; BLUE=""; OFF=""; DIM=""; GREEN=""; YELLOW=""; RED=""
-for m in state project developer scratch deferred; do source "%(lib)s/$m.sh"; done
+for m in core/state core/project core/developer core/scratch improve/deferred; do source "%(lib)s/$m.sh"; done
 LIB="%(lib)s"; PROMPTS="%(prompts)s"; INSTRUMENTS="%(root)s"
 info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; die() { echo "DIE $*"; exit 1; }
 new_session_id() { echo 00000000-0000-0000-0000-000000000000; }
@@ -173,7 +173,7 @@ try:
     git(repo, "fetch", "-q", "origin")
     os.remove(os.path.join(stamp_dir, "last-reviewed"))
     offer = subprocess.run(["bash", "-c",
-                            'for m in state project developer scratch deferred; do source "%s/$m.sh"; done; '
+                            'for m in core/state core/project core/developer core/scratch improve/deferred; do source "%s/$m.sh"; done; '
                             'DEFERRED_DAYS=30; info() { echo "$*"; }; say() { echo "$*"; }; '
                             'ask() { echo ASKED; }; is_yes() { return 1; }; gh() { :; }; '
                             'cd "%s" && deferred_offer' % (LIB, repo)],
@@ -191,14 +191,14 @@ try:
         fh.write("# header\n2026-09-01\tmyapp\t12-a\treview\tclass-a\tOld.\n"
                  "2026-09-02\tother\t3-b\treview\tclass-b\tNot ours.\n")
     said = subprocess.run(["bash", "-c",
-                           'for m in state project developer scratch deferred; do source "%s/$m.sh"; done; '
+                           'for m in core/state core/project core/developer core/scratch improve/deferred; do source "%s/$m.sh"; done; '
                            'warn() { echo "$*"; }; deferred_legacy "%s"' % (LIB, repo)],
                           capture_output=True, text=True,
                           env=dict(os.environ, XDG_STATE_HOME=os.path.join(tmp, "state"))).stdout
     check("legacy-entries-named", "1 deferred entry for myapp" in said, True)
 
     # An open pull request of an earlier review is named rather than offered over.
-    pending = subprocess.run(["bash", "-c", 'for m in state project developer scratch deferred; do source "%s/$m.sh"; done; '
+    pending = subprocess.run(["bash", "-c", 'for m in core/state core/project core/developer core/scratch improve/deferred; do source "%s/$m.sh"; done; '
                               'gh() { echo https://pr/7; }; deferred_pending "%s"' % (LIB, repo)],
                              capture_output=True, text=True).stdout.strip()
     check("pending-named", pending, "https://pr/7")

@@ -320,6 +320,7 @@ def check_gate(proxy_port, root):
     the bot's owner, by Telegram's signed initData, and passes them on to the
     proxy one request per connection."""
     sys.path.insert(0, os.path.join(os.path.dirname(PROXY), "..", "sclaude", "lib"))
+    import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
     import tg_webapp
     token, owner = "123:TEST-TOKEN", 4242
     envfile = os.path.join(root, "gate.env")
@@ -629,7 +630,7 @@ def main():
 
         # The product's DORA page goes under main, and only main: the numbers
         # are the product's. Before dora.py has built it, the route says so;
-        # after, it serves the file as it stands (sclaude/lib/dora.py writes
+        # after, it serves the file as it stands (sclaude/lib/metrics/dora.py writes
         # it at the same path).
         check("the DORA page is offered under main",
               "<a href='/__sclaude/dora'>main — DORA metrics</a>" in body, True)

@@ -1,0 +1,596 @@
+#!/usr/bin/env python3
+#
+# What a session's transcript says about its end, for the orchestrator that
+# closes it.
+#
+# A session that believes its work is done writes a marker file and gives its
+# report as its last message; the orchestrator then ends the claude process
+# itself, so nobody has to type /exit (see session_watch_start in session_watch.sh). Two
+# things decide when that may happen, and both are in the transcript:
+#
+#   * the turn has ended — the report is written in full, not half-streamed;
+#   * nobody has typed anything since the marker appeared. A person who answers
+#     the report, or runs a command, is still working with the session, and
+#     closing it under them would take the conversation away.
+#
+# And once it is closed, the report itself: the claude screen goes with the
+# process, so the orchestrator prints the last message in its own terminal —
+# without its advice to type /exit, which by then is already done.
+#
+#   session_end.py watch <transcript> <since>   → human | ended | working
+#   session_end.py watch-plan <transcript> <after> → none | human | ended | working
+#   session_end.py watch-said <transcript> <after> <line>
+#                                               → none | human | ended | working
+#   session_end.py approved <transcript>        → when the plan was approved
+#   session_end.py accepted <transcript> <after> → yes | no: step 2's work
+#                                                 accepted in its own dialog
+#   session_end.py last <transcript>            → the last message's text
+#   session_end.py first <transcript>           → the text that ended the first
+#                                                 turn, before anybody answered
+#   session_end.py limit <transcript> [<after>] → the usage limit it stopped on
+#   session_end.py context <transcript>         → tokens held now and at the start
+#   session_end.py chain <transcript>           → the transcripts the conversation
+#                                                 went on in, one per line, its
+#                                                 own first and the live one last
+#
+# `since` is seconds since the epoch: the marker's mtime. Silent on any
+# trouble — an unreadable transcript is "working" and an empty message.
+import datetime
+import json
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
+from presented_plan import plan_text  # noqa: E402
+
+COMMAND = re.compile(r"<command-name>\s*(/[^<\s]+)")
+SESSION_ID = re.compile(r"^[A-Za-z0-9-]{1,128}$")
+
+
+# Claude Code may carry a conversation on under a new session id while the
+# same process runs: it copies the conversation whole into a new transcript
+# beside the old one, ends the old one on a `continued-in` entry naming the new
+# id, and writes there from then on. The process keeps the id it was launched
+# with in its arguments, and `/resume` hides the old one as superseded. One
+# review session went on so, wrote its marker into the new transcript, and the
+# watcher, still reading the old one, saw a turn that never ended and left it
+# open.
+#
+# So every reader of a session's transcript reads the last one in this chain:
+# it holds the whole conversation, and reading the others as well would count
+# it twice. The chain stops at a transcript that is missing, and at a loop.
+def next_link(path):
+    """The session id one transcript says its conversation went on under:
+    the last well-formed one, or None. One link of `chain`, for a reader that
+    keeps the links it has read (process.py). A file that cannot be read
+    raises OSError: "no link" is an answer, a failed read is not."""
+    nxt = None
+    with open(path, "rb") as fh:
+        for line in fh:
+            if b'"continued-in"' not in line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            sid = entry.get("continuedInSessionId") \
+                if isinstance(entry, dict) and entry.get("type") == "continued-in" else None
+            if isinstance(sid, str) and SESSION_ID.match(sid):
+                nxt = sid
+    return nxt
+
+
+def chain(path):
+    out = [path]
+    while True:
+        try:
+            nxt = next_link(path)
+        except OSError:
+            break
+        if not nxt:
+            break
+        path = os.path.join(os.path.dirname(path), nxt + ".jsonl")
+        if path in out or not os.path.isfile(path):
+            break
+        out.append(path)
+    return out
+
+
+def entries(path):
+    try:
+        with open(path) as fh:
+            for line in fh:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(entry, dict) and not entry.get("isSidechain"):
+                    yield entry
+    except OSError:
+        return
+
+
+def when(entry):
+    try:
+        moment = datetime.datetime.fromisoformat(
+            (entry.get("timestamp") or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=datetime.timezone.utc)
+    return moment.timestamp()
+
+
+def typed_by_a_person(entry):
+    """A prompt a person sent, or a slash command other than /exit.
+
+    Notifications, subagent hand-backs and tool results are user entries too,
+    and none of them is somebody at the keyboard: the harness marks a typed
+    prompt with origin kind "human". Local commands are system entries whose
+    text names the command; /exit is the one that means "close it", which is
+    what the orchestrator is about to do anyway.
+    """
+    if entry.get("type") == "user":
+        origin = entry.get("origin") or {}
+        return isinstance(origin, dict) and origin.get("kind") == "human"
+    if entry.get("type") == "system" and entry.get("subtype") == "local_command":
+        found = COMMAND.search(str(entry.get("content") or ""))
+        return bool(found) and found.group(1) != "/exit"
+    return False
+
+
+def watch(path, since):
+    state = "working"
+    for entry in entries(path):
+        moment = when(entry)
+        if moment is None or moment < since:
+            continue
+        if typed_by_a_person(entry):
+            return "human"
+        if entry.get("type") == "assistant":
+            reason = (entry.get("message") or {}).get("stop_reason")
+            state = "ended" if reason == "end_turn" else "working"
+    return state
+
+
+def watch_plan(path, after):
+    """`watch`, counted from the plan's last approval at or after `after`.
+
+    One read of the file for both questions — when the plan was approved, and
+    what has happened since — where two processes read it twice. "none" while
+    no approval has been given since `after`.
+    """
+    pending, since, state = False, None, "none"
+    for entry in entries(path):
+        moment = when(entry)
+        for block in (entry.get("message") or {}).get("content") or []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and block.get("name") == "ExitPlanMode":
+                pending = True
+            elif block.get("type") == "tool_result" and pending:
+                if "has approved" in str(block.get("content")) \
+                        and moment is not None and moment >= after:
+                    since, state = moment, "working"
+                pending = False
+        if since is None or moment is None or moment < since:
+            continue
+        if typed_by_a_person(entry):
+            state = "human"
+        elif state != "human" and entry.get("type") == "assistant":
+            reason = (entry.get("message") or {}).get("stop_reason")
+            state = "ended" if reason == "end_turn" else "working"
+    return state
+
+
+def words(text):
+    """A line as the watcher compares it with the one it waits for: its words,
+    in lower case — a list marker, a heading, emphasis or the last stop around
+    it do not make it another line. In any script: a line in the person's
+    language after it is a line too."""
+    return " ".join(re.findall(r"[^\W_]+", text.lower()))
+
+
+def plan_of(block):
+    """The plan an ExitPlanMode call puts up, or None for any other block:
+    its text, or the file it names (presented_plan.plan_text). Empty when
+    neither is a text to be had."""
+    if not isinstance(block, dict) or block.get("type") != "tool_use" \
+            or block.get("name") != "ExitPlanMode":
+        return None
+    given = block.get("input")
+    if isinstance(given, dict) and not isinstance(given.get("plan"), str):
+        given = {k: v for k, v in given.items() if k != "plan"}
+    try:
+        plan = plan_text(given)
+    except (TypeError, ValueError):
+        return ""
+    return plan.strip() if isinstance(plan, str) else ""
+
+
+def watch_said(path, after, line):
+    """`watch`, counted from the last message at or after `after` that ends
+    on `line`, a line of its own.
+
+    The retrospective runs in plan mode, which forbids it to write a marker
+    before a plan is approved, and with nothing to act on it has no plan to
+    put up: it ends its report on the line it was given instead (retro.sh),
+    and the watcher reads that as its marker. A message that names the line
+    among others does not count, nor one before `after`, a pass resumed
+    earlier; and anything the session says or runs after it — a correction, a
+    command — takes it back. Plan mode bids every turn end on a plan, so a
+    plan that ends on the line counts too, and its dialog, waiting on the
+    person, is the turn's end. "none" while no such message stands.
+    """
+    want = words(line)
+    since, state = None, "none"
+    for entry in entries(path):
+        moment = when(entry)
+        waiting = False
+        if entry.get("type") == "assistant" and moment is not None and moment >= after:
+            for block in (entry.get("message") or {}).get("content") or []:
+                if not isinstance(block, dict) or block.get("type") not in ("text", "tool_use"):
+                    continue
+                plan = block.get("type") == "tool_use"
+                text = (plan_of(block) or "") if plan else block.get("text") or ""
+                lines = [l for l in map(words, str(text).split("\n")) if l]
+                if want and lines and lines[-1] == want:
+                    since, state, waiting = moment, "working", plan
+                elif plan or lines:
+                    since, state = None, "none"
+        if since is None or moment is None or moment < since:
+            continue
+        if typed_by_a_person(entry):
+            state = "human"
+        elif state == "human":
+            continue
+        elif entry.get("type") == "assistant":
+            reason = (entry.get("message") or {}).get("stop_reason")
+            state = "ended" if waiting or reason == "end_turn" else "working"
+        elif entry.get("type") == "user":
+            # A result handed back — the plan's dialog answered — goes on
+            # with the turn.
+            state = "working"
+    return state
+
+
+def approved(path):
+    """When the plan was last approved: seconds since the epoch, or None.
+
+    Step 1 cannot write a marker — it runs in plan mode, and its hook refuses
+    every write, through the shell too. The approval is its marker: the person
+    has decided, and what is left is the report. Read the way capture_plan
+    reads it (plan.sh): an ExitPlanMode call, and a result after it that says
+    the plan was approved.
+    """
+    pending, moment = False, None
+    for entry in entries(path):
+        for block in (entry.get("message") or {}).get("content") or []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and block.get("name") == "ExitPlanMode":
+                pending = True
+            elif block.get("type") == "tool_result" and pending:
+                if "has approved" in str(block.get("content")):
+                    moment = when(entry)
+                pending = False
+    return moment
+
+
+# Step 2 ends on a question in the session's own dialog (prompts/code.md):
+# its header and the label of the answer that accepts the work, spelled out
+# there in English whatever language the session speaks. The person's
+# "Accept" there is the yes sclaude used to ask for after the session closed.
+ACCEPT_HEADER = "Accept work"
+ACCEPT_LABEL = "Accept"
+
+
+def acceptance(result):
+    """True or False when an AskUserQuestion result answers step 2's
+    question, None when it is about anything else. Notes added to "Accept"
+    are remarks: the work is not accepted with something still to say."""
+    if not isinstance(result, dict):
+        return None
+    answers = result.get("answers") or {}
+    notes = result.get("annotations") or {}
+    for question in result.get("questions") or []:
+        if not isinstance(question, dict) or question.get("header") != ACCEPT_HEADER:
+            continue
+        text = question.get("question")
+        said = (notes.get(text) or {}) if isinstance(notes, dict) else {}
+        label = str(answers.get(text) or "") if isinstance(answers, dict) else ""
+        # The questions' rule marks a recommendation "(Recommended)" (code.md
+        # asks for the bare label, and a session may follow the other rule).
+        # Nothing else: "Accept (but …)" typed as an answer is a remark.
+        return label in (ACCEPT_LABEL, ACCEPT_LABEL + " (Recommended)") \
+            and not (isinstance(said, dict) and str(said.get("notes") or "").strip())
+    return None
+
+
+def accepted(path, after):
+    """Whether the person accepted step 2's work in the session, after
+    `after` (seconds since the epoch: this launch of the session).
+
+    The last answer to step 2's question counts, and only while nobody has
+    typed since: a person who goes on talking after "Accept" has taken it
+    back, and the session asks again when it is done again.
+    """
+    asked, state = set(), False
+    for entry in entries(path):
+        moment = when(entry)
+        if state and typed_by_a_person(entry):
+            state = False
+        for block in (entry.get("message") or {}).get("content") or []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and block.get("name") == "AskUserQuestion":
+                asked.add(block.get("id"))
+            elif block.get("type") == "tool_result" and block.get("tool_use_id") in asked:
+                verdict = acceptance(entry.get("toolUseResult"))
+                if verdict is not None:
+                    state = bool(verdict) and moment is not None and moment >= after
+    return state
+
+
+def limit(path, after=0):
+    """The usage limit the session is standing on, as (entry, resets, kind).
+
+    When the subscription runs out, claude ends the turn with a synthetic
+    message — "You've hit your session limit · resets 6:50pm" — and waits for
+    somebody to type. Nobody does: on 2026-10-06 two features both stopped on
+    one at 18:05, the limit reset at 18:50, and both stood until 23:01, when a
+    person came back and typed `go` in each.
+
+    The entry carries what is needed as data rather than prose: `error` is
+    "rate_limit" and `quotaLimits.resetsAt` the reset in seconds since the
+    epoch, with `rateLimitType` saying which limit it was. Anything after it
+    that is a turn going on — a person typing, an ordinary assistant message —
+    means the session is no longer standing on it. A subagent's own hand-back
+    is neither, and does not count.
+
+    `entry` is the message's uuid, so a watcher acts on one limit once;
+    `resets` is 0 when the entry did not say. With `after` (seconds since
+    the epoch), a limit met before it does not count: a session reopened by
+    hand while one still stands at its end is somebody's to carry on, and
+    closing it under them because an old reset has passed would take it away.
+    """
+    hit = None
+    for entry in entries(path):
+        if typed_by_a_person(entry):
+            hit = None
+        elif entry.get("type") == "assistant":
+            if entry.get("error") == "rate_limit" or entry.get("apiErrorStatus") == 429:
+                moment = when(entry)
+                if after and moment is not None and moment < after:
+                    hit = None
+                    continue
+                quota = entry.get("quotaLimits") or {}
+                try:
+                    resets = int(quota.get("resetsAt") or 0)
+                except (TypeError, ValueError):
+                    resets = 0
+                hit = (entry.get("uuid") or "?", resets,
+                       quota.get("rateLimitType") or "usage")
+            else:
+                hit = None
+    return hit
+
+
+def context(path):
+    """How many tokens the conversation holds, as (now, at the start), or None.
+
+    The input of the last request the session made: what claude sent the
+    model, cached or not, which is the figure the status line shows as the
+    context in use. A subagent's requests are its own context and are left
+    out, and so is a message that cost nothing — the synthetic one a usage
+    limit ends a turn with carries zeros, and would read as an empty context.
+
+    The session itself cannot see this number, so the orchestrator reads it
+    to decide whether a review round goes on in the same conversation (see
+    review_context in review_round.sh). The start is what a session costs before it
+    has done anything — the tools, the system prompt, the step's prompt — and
+    is logged beside it, so a threshold can be judged against what is spent
+    on the work rather than on the door.
+    """
+    held = start = None
+    for entry in entries(path):
+        if entry.get("type") != "assistant" or entry.get("isSidechain"):
+            continue
+        usage = (entry.get("message") or {}).get("usage") or {}
+        try:
+            total = sum(int(usage.get(key) or 0) for key in (
+                "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+        except (TypeError, ValueError):
+            continue
+        if total:
+            held = total
+            start = start or total
+    return (held, start) if held else None
+
+
+def requested(path):
+    """When the session last asked the model, as a Unix time, or None.
+
+    The same requests context() counts: the conversation's own, with a usage
+    that is not zero. The prompt cache lives from that moment, so this is what
+    tells the orchestrator whether a resumed session would still find its
+    context cached (review_keep in review_round.sh).
+    """
+    moment = None
+    for entry in entries(path):
+        if entry.get("type") != "assistant":
+            continue
+        usage = (entry.get("message") or {}).get("usage") or {}
+        try:
+            total = sum(int(usage.get(key) or 0) for key in (
+                "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+        except (TypeError, ValueError):
+            continue
+        if total:
+            moment = when(entry) or moment
+    return moment
+
+
+def last(path):
+    """The text the session wrote after the last thing it was handed.
+
+    A turn interleaves text with tool calls; what the person reads at the end
+    is the text after the last tool result or prompt, which is where the
+    prompts ask for the report. A plan still waiting on its dialog is the
+    report — the retrospective may be closed there (watch_said), and its
+    prompts say a plan carries every section — in place of the text before it.
+
+    Step 2 gives its report before its question (ACCEPT_HEADER), with no
+    tool call between them, and after "Accept" writes its marker and one
+    line: the report is the text before the question, kept ahead of that
+    line until somebody types again.
+    """
+    texts, carried, asked = [], [], {}
+    for entry in entries(path):
+        kind = entry.get("type")
+        if kind == "user":
+            # Somebody typing ends what an accept carried: the person, or
+            # sclaude's message a launch opens on, which is marked as typed.
+            # A notification or a reminder in the seconds before the close
+            # does not.
+            if typed_by_a_person(entry):
+                carried = []
+            for block in (entry.get("message") or {}).get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "tool_result" \
+                        and block.get("tool_use_id") in asked:
+                    verdict = acceptance(entry.get("toolUseResult"))
+                    if verdict is not None:
+                        carried = asked[block.get("tool_use_id")] if verdict else []
+            texts = []
+        elif kind == "assistant":
+            for block in (entry.get("message") or {}).get("content") or []:
+                plan = plan_of(block)
+                if plan:
+                    texts = [plan]
+                elif isinstance(block, dict) and block.get("type") == "text" \
+                        and (block.get("text") or "").strip():
+                    texts.append(block["text"].strip())
+                elif isinstance(block, dict) and block.get("type") == "tool_use" \
+                        and block.get("name") == "AskUserQuestion":
+                    asked[block.get("id")] = list(texts)
+    return without_exit("\n\n".join(carried + texts))
+
+
+def first(path):
+    """The text the session wrote at the end of its first turn.
+
+    The retrospective gives its report there and then talks it through with the
+    person, so by the time they leave, the last message is about whatever they
+    discussed last and the report is further up. The turn ends where somebody
+    types the first prompt after the session has said anything, or at its
+    first plan, which waits on the person too and is then the report — what
+    follows the dialog's answer is the conversation.
+    """
+    texts, spoke = [], False
+    for entry in entries(path):
+        if spoke and typed_by_a_person(entry):
+            break
+        kind = entry.get("type")
+        if kind == "user":
+            texts = []
+        elif kind == "assistant":
+            for block in (entry.get("message") or {}).get("content") or []:
+                plan = plan_of(block)
+                if plan:
+                    return without_exit(plan)
+                if isinstance(block, dict) and block.get("type") == "text" \
+                        and (block.get("text") or "").strip():
+                    texts.append(block["text"].strip())
+                    spoke = True
+    return without_exit("\n\n".join(texts))
+
+
+# A list item: "- ", "* ", "1. " and the like, after any indentation.
+ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
+
+
+def without_exit(text):
+    """The report with its advice to type /exit taken out.
+
+    Every step's report ends by telling the person to close the session with
+    /exit, and by the time sclaude prints it the session is already closed:
+    left in, the line asks for something that cannot be done any more. A list
+    item that mentions /exit goes whole; in running text only the sentence
+    that does. The report is in whatever language the session wrote it, so
+    the command itself is what is looked for, not the words around it.
+    """
+    out = []
+    for line in text.split("\n"):
+        if "/exit" not in line:
+            out.append(line)
+            continue
+        if ITEM.match(line):
+            continue
+        kept = " ".join(part for part in SENTENCE_END.split(line.strip())
+                        if "/exit" not in part)
+        if kept:
+            indent = line[:len(line) - len(line.lstrip())]
+            out.append(indent + kept)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+def main():
+    args = sys.argv[1:]
+    if len(args) == 3 and args[0] == "watch":
+        try:
+            since = float(args[2])
+        except ValueError:
+            since = 0.0
+        sys.stdout.write(watch(args[1], since) + "\n")
+    elif len(args) == 3 and args[0] == "watch-plan":
+        try:
+            after = float(args[2])
+        except ValueError:
+            after = 0.0
+        sys.stdout.write(watch_plan(args[1], after) + "\n")
+    elif len(args) == 4 and args[0] == "watch-said":
+        try:
+            after = float(args[2])
+        except ValueError:
+            after = 0.0
+        sys.stdout.write(watch_said(args[1], after, args[3]) + "\n")
+    elif len(args) == 2 and args[0] == "approved":
+        moment = approved(args[1])
+        if moment is not None:
+            sys.stdout.write("%d\n" % int(moment))
+    elif len(args) == 3 and args[0] == "accepted":
+        try:
+            after = float(args[2])
+        except ValueError:
+            after = 0.0
+        sys.stdout.write(("yes" if accepted(args[1], after) else "no") + "\n")
+    elif len(args) in (2, 3) and args[0] == "limit":
+        try:
+            after = float(args[2]) if len(args) == 3 else 0.0
+        except ValueError:
+            after = 0.0
+        hit = limit(args[1], after)
+        if hit:
+            sys.stdout.write("%s %d %s\n" % hit)
+    elif len(args) == 2 and args[0] == "context":
+        held = context(args[1])
+        if held:
+            sys.stdout.write("%d %d\n" % held)
+    elif len(args) == 2 and args[0] == "requested":
+        moment = requested(args[1])
+        if moment is not None:
+            sys.stdout.write("%d\n" % int(moment))
+    elif len(args) == 2 and args[0] == "chain":
+        sys.stdout.write("\n".join(chain(args[1])) + "\n")
+    elif len(args) == 2 and args[0] in ("last", "first"):
+        text = (last if args[0] == "last" else first)(args[1])
+        if text:
+            sys.stdout.write(text + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

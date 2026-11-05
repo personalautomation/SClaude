@@ -53,6 +53,7 @@ import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 # First, so that a module failing to load, or anything raising later, refuses
 # the call rather than letting it run (_failsafe.py). And that one failing to
 # load refuses too, by hand: nothing else is there to.
@@ -70,14 +71,14 @@ from _shell import (GIT_VALUED, SEPARATORS, call_form, closing_at, inner_command
                     redirect_targets, strip_heads, strip_keywords, strip_redirections, strip_runners,
                     readable, strip_wrappers,
                     substitutions, tokenize, ungroup)
-import policy as policy_lib  # noqa: E402 — sclaude/lib/policy.py
-import envs as envs_lib  # noqa: E402 — sclaude/lib/envs.py
+import policy as policy_lib  # noqa: E402 — sclaude/lib/improve/policy.py
+import envs as envs_lib  # noqa: E402 — sclaude/lib/core/envs.py
 
 # The branch that must not be pushed to: it moves only by merging a PR.
 PROTECTED = "main"
 
 # The commands banned by prefix come from the session's policy: sclaude's
-# presets, the product's team rules and the person's own (sclaude/lib/policy.py).
+# presets, the product's team rules and the person's own (sclaude/lib/improve/policy.py).
 # The flag catches their direct form; this hook catches the form with a path or
 # behind a wrapper. The rules below that need more than a prefix are code, and
 # the policy says which of them are on.
@@ -437,7 +438,7 @@ def db_push_refuses(words, raw=None):
     return DB_PUSH_REASON
 
 
-# A feature with a local Supabase of its own (sclaude/lib/featuredb.sh) runs
+# A feature with a local Supabase of its own (sclaude/lib/tree/featuredb.sh) runs
 # with SUPABASE_WORKDIR pointing at it, so a bare `supabase db reset` rebuilds
 # this feature's database and nobody else's. `--workdir` is the one way to point
 # the CLI past that — at the main repository's stack, which is every other
@@ -484,7 +485,7 @@ def workdir_refuses(command):
 # database. Not a ban — the cloud dev project is a legitimate place, and a
 # person may mean it — but a question: work that touches the database belongs on
 # the project's local environment, where every feature has a database of its
-# own (sclaude/lib/featuredb.sh), and a migration pushed to the shared project
+# own (sclaude/lib/tree/featuredb.sh), and a migration pushed to the shared project
 # lands under everybody else's features. The protected environments stay with
 # db_push_refuses, which refuses them outright.
 #

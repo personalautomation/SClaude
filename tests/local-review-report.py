@@ -27,6 +27,7 @@ from contextlib import redirect_stdout
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
 sys.path.insert(0, LIB)
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 
 failures = []
 
@@ -56,7 +57,7 @@ try:
     # --- the issue row ------------------------------------------------------------
     write(os.path.join(feature, "state.json"), json.dumps(
         {"steps": {"review": {"runs": [{"session": "s1", "rounds": 1}]}}}))
-    body = 'source "%s/local_review.sh"\n' % LIB
+    body = 'source "%s/review/local_review.sh"\n' % LIB
     for _ in range(2):
         subprocess.run(["bash", "-c", body + 'run_local_round %s s1' % wt], check=True)
     with open(os.path.join(feature, "state.json")) as fh:
@@ -125,7 +126,7 @@ try:
     real_pr_created = review_report.pr_created
     review_report.pr_created = lambda cwd, pr: None
     review_report.review_mode = lambda cwd: "local"
-    sys.argv = ["review_report.py", wt, "7", "o/r", "feature"]
+    sys.argv = ["review/review_report.py", wt, "7", "o/r", "feature"]
     buf = io.StringIO()
     with redirect_stdout(buf):
         review_report.main()
@@ -187,7 +188,7 @@ try:
         subprocess.run(["git", "-C", wt, "symbolic-ref", "HEAD", "refs/heads/" + on], check=True)
         state = dict({"branch": "feat"}, **state)
         write(os.path.join(feature, "state.json"), json.dumps(state))
-        subprocess.run(["bash", "-c", 'source "%s/state.sh"; for _m in github issue_sync board outcome; do source "%s/$_m.sh"; done; '
+        subprocess.run(["bash", "-c", 'source "%s/core/state.sh"; for _m in github/github github/issue_sync github/board github/outcome; do source "%s/$_m.sh"; done; '
                         'gh() { [[ "$3" == --json || "$3" == feat ]] && echo %s; }; info() { :; }; '
                         'pr_link_issue() { :; }; pr_setup() { :; }; issue_hold_open() { :; }; '
                         'capture_reopened_pr "%s"' % (LIB, LIB, number, wt)], check=True)
@@ -199,7 +200,7 @@ try:
     check("reopened-already-recorded", captured({"pr": 9, "reopened_pr": 7}, 11), 9)
     check("reopened-tree-elsewhere", captured({"pr": 7, "reopened_pr": 7}, 9, on="other"), 7)
     # Step 4's close records it before its gate, which would read the merged one.
-    run_sh = open(os.path.join(LIB, "run.sh"), encoding="utf-8").read()
+    run_sh = open(os.path.join(LIB, "cycle", "run.sh"), encoding="utf-8").read()
     close = run_sh[run_sh.index("    review)\n      # A reopened feature"):]
     check_true("close-captures-before-gate",
                close.index("capture_reopened_pr") < close.index("review_close_gate"))

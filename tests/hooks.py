@@ -1189,8 +1189,8 @@ def main():
     # module it loads, broken in turn, and an empty core.json, which used to
     # read as a layer with no rules.
     for hook, modules in (("forbidden-commands.py", ("hooks/_failsafe.py", "hooks/_shell.py",
-                                                     "hooks/_friction.py", "lib/policy.py",
-                                                     "lib/envs.py", "policy/core.json")),
+                                                     "hooks/_friction.py", "lib/improve/policy.py",
+                                                     "lib/core/envs.py", "policy/core.json")),
                           ("no-code-in-planning.py", ("hooks/_failsafe.py", "hooks/_shell.py",
                                                       "hooks/_friction.py")),
                           ("write-guard.py", ("hooks/_failsafe.py", "hooks/_shell.py"))):

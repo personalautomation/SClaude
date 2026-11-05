@@ -48,7 +48,7 @@ LOG_FILE="$LOG_DIR/keepawake.log"
 LOCK_FILE="$LOG_DIR/.run.lock"
 LOG_MAX_BYTES=$((512 * 1024))
 
-# The dev servers' ports, as sclaude hands them out (sclaude/lib/worktree.sh):
+# The dev servers' ports, as sclaude hands them out (sclaude/lib/tree/worktree.sh):
 # 3000 is sclaude-proxy, or a server started by hand, and every feature's own
 # server sits in the range.
 DEV_PORT=3000

@@ -57,7 +57,7 @@ def commit(wt, path, text, message):
 
 
 def run(wt, call, answer="n", repo=""):
-    script = ('for m in io ui state scratch worktree no_change; do source "%s/$m.sh"; done\n'
+    script = ('for m in core/io core/ui core/state core/scratch tree/worktree cycle/no_change; do source "%s/$m.sh"; done\n'
               'info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }\n'
               'ask() { printf -v "$2" %%s "%s"; }\n'
               'REPO="%s"\n'

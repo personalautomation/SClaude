@@ -34,7 +34,7 @@
 # WINDOWS.
 #
 # The sign-in is sclaude-proxy's /__sclaude/login (as=, next=; see
-# sclaude/lib/dev_login.py). Where the person is, is guessed the way
+# sclaude/lib/tree/dev_login.py). Where the person is, is guessed the way
 # keepawake counts remote work: a device of the tailnet with traffic now
 # (Active, the funnel's tag:ingress node aside) means they are away from the
 # laptop, and the link goes on the address a phone opens features at —
@@ -53,6 +53,7 @@ from urllib.parse import urlencode, urlsplit
 INSTRUMENTS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 sys.path.insert(0, INSTRUMENTS)
 sys.path.insert(0, os.path.join(INSTRUMENTS, "sclaude", "lib"))
+import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import dev_login  # noqa: E402
 
 REGISTRY = os.environ.get("SCLAUDE_DEV_REGISTRY") or os.path.expanduser("~/.claude/sclaude/dev")
@@ -372,7 +373,7 @@ CODE = [".", ":!.sclaude", ":!*.md"]
 TEXT_ONLY = "the text did"
 
 # One ref per feature holds the tree its last full demo played, which `stale`
-# compares with; remove_worktree in sclaude/lib/worktree.sh deletes it once
+# compares with; remove_worktree in sclaude/lib/tree/worktree.sh deletes it once
 # the tree is gone.
 DEMO_REF = "refs/sclaude/demo/%s"
 
@@ -800,7 +801,7 @@ def cmd_criteria(label, wt):
     if not issue:
         die("%s has no issue, so no acceptance criteria" % label)
     done = subprocess.run([sys.executable, os.path.join(INSTRUMENTS, "sclaude", "lib",
-                                                        "acceptance.py"), str(issue), wt],
+                                                        "cycle", "acceptance.py"), str(issue), wt],
                           capture_output=True, text=True)
     if not done.stdout.strip():
         die("issue #%s has no acceptance criteria (or GitHub did not answer)" % issue)

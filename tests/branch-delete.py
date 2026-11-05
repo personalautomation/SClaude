@@ -41,7 +41,7 @@ def git(cwd, *args):
 
 
 def delete(repo, branch, head):
-    script = ('REPO=%s; source "%s/branches.sh"\n'
+    script = ('REPO=%s; source "%s/tree/branches.sh"\n'
               'merged_pr_head() { echo %s; }\n'
               'branch_delete_merged %s; echo "RC $?"' % (repo, LIB, head, branch))
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=ENV).stdout
@@ -137,8 +137,8 @@ try:
     check("no pull request: kept", delete(repo, "feat/past", ""), ("RC 1", True))
 
     sclaude = "".join(open(os.path.join(ROOT, _p)).read()
-        for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
-    with open(os.path.join(LIB, "branches.sh")) as fh:
+        for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
+    with open(os.path.join(LIB, "tree", "branches.sh")) as fh:
         branches = fh.read()
     done = sclaude[sclaude.index("cmd_done() {"):]
     done = done[:done.index("\n}\n")]

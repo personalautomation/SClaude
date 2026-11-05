@@ -71,12 +71,12 @@ def functions(source, names):
 
 
 RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
-          for m in ("run.sh", "session_watch.sh", "review_round.sh", "review_gate.sh",
-                    "friction.sh"))
-WATCH = 'source "%s/state.sh"\nsource "%s/pane.sh"\nLIB="%s"\n' % (LIB, LIB, LIB) + functions(
+          for m in ("cycle/run.sh", "cycle/session_watch.sh", "review/review_round.sh", "review/review_gate.sh",
+                    "improve/friction.sh"))
+WATCH = 'source "%s/core/state.sh"\nsource "%s/core/pane.sh"\nLIB="%s"\n' % (LIB, LIB, LIB) + functions(
     RUN, ["round_marker", "done_marker", "session_watch_start", "session_watch_stop"]) + "\n" + \
     re.search(r"^stop_file\(\) \{ .*\}\n", RUN, re.M).group(0)
-END = os.path.join(LIB, "session_end.py")
+END = os.path.join(LIB, "cycle", "session_end.py")
 
 tmp = tempfile.mkdtemp()
 try:
@@ -511,7 +511,7 @@ echo "watcher=[$SESSION_WATCHER]"
     with open(c, "w") as fh:
         fh.write(json.dumps({"type": "continued-in", "continuedInSessionId": "../x"}) + "\n")
     check("chain-odd-id-ignored", chained(a), [a, b, c])
-    script = 'source "%s/state.sh"; HOME="%s"; session_latest "%s" chain-a; session_transcript "%s" none' % (
+    script = 'source "%s/core/state.sh"; HOME="%s"; session_latest "%s" chain-a; session_transcript "%s" none' % (
         LIB, home, wt, wt)
     check("session-latest", subprocess.run(["bash", "-c", script], capture_output=True,
                                            text=True).stdout.split(),
@@ -523,7 +523,7 @@ echo "watcher=[$SESSION_WATCHER]"
     with open(os.path.join(fake_bin, "claude"), "w") as fh:
         fh.write('#!/bin/sh\necho \'[{"sessionId": "chain-c", "pid": 42}]\'\n')
     os.chmod(os.path.join(fake_bin, "claude"), 0o755)
-    holder = 'source "%s/state.sh"\nLIB="%s"\n%s\nHOME="%s"; PATH="%s:$PATH"\n' % (
+    holder = 'source "%s/core/state.sh"\nLIB="%s"\n%s\nHOME="%s"; PATH="%s:$PATH"\n' % (
         LIB, LIB, functions(RUN, ["session_holder"]), home, fake_bin)
     for sid, want in (("chain-a", "pid 42"), ("chain-c", "pid 42"), ("other", "")):
         check("holder-%s" % sid, subprocess.run(
@@ -540,7 +540,7 @@ echo "watcher=[$SESSION_WATCHER]"
     git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "a")
     git("update-ref", "refs/remotes/origin/b", "HEAD")
     git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "b")
-    spec = importlib.util.spec_from_file_location("pr_context_u", os.path.join(LIB, "pr_context.py"))
+    spec = importlib.util.spec_from_file_location("pr_context_u", os.path.join(LIB, "review", "pr_context.py"))
     pcu = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(pcu)
     check("unpushed-counted", pcu.unpushed(repo, {"state": "OPEN"}), 1)
@@ -557,7 +557,7 @@ echo "watcher=[$SESSION_WATCHER]"
     target.kill()
     os.remove(own)
     GH = "".join(open(os.path.join(LIB, _m)).read()
-        for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
+        for _m in ("github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh"))
     # In the feature's tree while there is one, as every step (the map reads
     # its transcript there); the main checkout once the tree is gone.
     check("epilogue-watched", 'session_watch_start "" "$session" "$done_file" "$cwd"' in GH, True)
@@ -594,7 +594,7 @@ echo "watcher=[$SESSION_WATCHER]"
     # The topic reads which session ended, and how: "finished" when sclaude
     # closed it on its report, "ended" when a person left it — the work may
     # not be done. The terminal gets the same line, said to be sclaude's close.
-    closer = ('source "%s/steps.sh"\nfor _m in regression regression_gate regression_fix; do source "%s/$_m.sh"; done\n'
+    closer = ('source "%s/core/steps.sh"\nfor _m in ship/regression ship/regression_gate ship/regression_fix; do source "%s/$_m.sh"; done\n'
               'ask_feed() { printf "FEED %%s\\n" "$2"; }\nask_note() { :; }\n'
               'session_report() { echo REPORT; }\nsay_here() { echo "$*"; }\nBOLD=; OFF=\n' % (LIB, LIB)
               + functions(RUN, ["session_closed"]))
@@ -625,10 +625,10 @@ echo "watcher=[$SESSION_WATCHER]"
           ["FEED 🔁 Step 7/7 finished: retrospective · nothing to act on",
            "🔁 Step 7/7 finished: retrospective · nothing to act on — sclaude closed it."])
     # Every kind of session tells the topic it started, by the same line.
-    for path, kind in (("run.sh", "started step"), ("run.sh", "resumed step"),
-                       ("run.sh", "done step"), ("friction.sh", "started friction"),
-                       ("regression_fix.sh", "started fix"), ("outcome.sh", "started epilogue"),
-                       ("retro.sh", "started retro"), ("deferred.sh", "started deferred")):
+    for path, kind in (("cycle/run.sh", "started step"), ("cycle/run.sh", "resumed step"),
+                       ("cycle/run.sh", "done step"), ("improve/friction.sh", "started friction"),
+                       ("ship/regression_fix.sh", "started fix"), ("github/outcome.sh", "started epilogue"),
+                       ("improve/retro.sh", "started retro"), ("improve/deferred.sh", "started deferred")):
         with open(os.path.join(LIB, path)) as fh:
             src = fh.read()
         # The friction review's and the epilogue's verb is chosen: a return
@@ -639,8 +639,8 @@ echo "watcher=[$SESSION_WATCHER]"
               or kind == "started epilogue" and 'ask_feed say "$(phase_line "$verb" epilogue)' in src
               and "&& verb=resumed" in src, True)
     # And every close goes through session_closed, with no headline of its own.
-    for path in ("run.sh", "friction.sh", "session_watch.sh", "review_round.sh", "review_gate.sh",
-                 "regression.sh", "regression_gate.sh", "regression_fix.sh", "github.sh", "issue_sync.sh", "board.sh", "outcome.sh", "retro.sh", "deferred.sh"):
+    for path in ("cycle/run.sh", "improve/friction.sh", "cycle/session_watch.sh", "review/review_round.sh", "review/review_gate.sh",
+                 "ship/regression.sh", "ship/regression_gate.sh", "ship/regression_fix.sh", "github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh", "improve/retro.sh", "improve/deferred.sh"):
         with open(os.path.join(LIB, path)) as fh:
             calls = re.findall(r'session_closed "[^\n]*(?:\\\n[^\n]*)?', fh.read())
         check("closes-by-phase " + path,
@@ -650,7 +650,7 @@ echo "watcher=[$SESSION_WATCHER]"
     state = os.path.join(wt, ".sclaude/local/feature", "state.json")
     with open(state, "w") as fh:
         json.dump({"steps": {"review": {}}}, fh)
-    body = 'source "%s/state.sh"\n' % LIB
+    body = 'source "%s/core/state.sh"\n' % LIB
     body += 'session_runs "%s" steps.review open S1\n' % state
     body += 'session_runs "%s" steps.review end S1 "fixes confirmed"\n' % state
     body += 'session_runs "%s" steps.review open S2\n' % state
@@ -661,7 +661,7 @@ echo "watcher=[$SESSION_WATCHER]"
     check("reason-recorded", runs[0].get("outcome"), "fixes confirmed")
     check("second-row-open", runs[1].get("finished"), None)
     # Through step_run, as run_step records it: it used to drop the reason.
-    body = 'source "%s/state.sh"\nsource "%s/steps.sh"\n' % (LIB, LIB)
+    body = 'source "%s/core/state.sh"\nsource "%s/core/steps.sh"\n' % (LIB, LIB)
     body += 'step_run "%s" review open S3\n' % wt
     body += 'step_run "%s" review end S3 "fixes confirmed"\n' % wt
     subprocess.run(["bash", "-c", body], timeout=30)
@@ -669,7 +669,7 @@ echo "watcher=[$SESSION_WATCHER]"
         runs = json.load(fh)["steps"]["review"]["runs"]
     check("step-run-passes-the-reason", runs[-1].get("outcome"), "fixes confirmed")
     gh_src = "".join(open(os.path.join(LIB, _m)).read()
-        for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
+        for _m in ("github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh"))
     check("issue-shows-the-reason",
           'run_status = run.get("outcome") or ("done" if run.get("done") else "interrupted")' in gh_src,
           True)
@@ -677,7 +677,7 @@ echo "watcher=[$SESSION_WATCHER]"
     check("marker-close-records-finished",
           'step_run "$wt" "$step" end "$session" "${SESSION_AUTO_CLOSED:+finished}"' in RUN,
           True)
-    body = 'source "%s/state.sh"\nsource "%s/steps.sh"\n' % (LIB, LIB)
+    body = 'source "%s/core/state.sh"\nsource "%s/core/steps.sh"\n' % (LIB, LIB)
     body += 'step_run "%s" review open S4\n' % wt
     body += 'step_run "%s" review end S4 ""\n' % wt
     subprocess.run(["bash", "-c", body], timeout=30)
@@ -685,7 +685,7 @@ echo "watcher=[$SESSION_WATCHER]"
         runs = json.load(fh)["steps"]["review"]["runs"]
     check("exit-without-marker-has-no-reason", runs[-1].get("outcome"), None)
     # Closed on its marker, resumed, then left by the person: interrupted again.
-    body = 'source "%s/state.sh"\nsource "%s/steps.sh"\n' % (LIB, LIB)
+    body = 'source "%s/core/state.sh"\nsource "%s/core/steps.sh"\n' % (LIB, LIB)
     body += 'step_run "%s" review open S5\n' % wt
     body += 'step_run "%s" review end S5 finished\n' % wt
     body += 'step_run "%s" review open S5\n' % wt
@@ -693,14 +693,14 @@ echo "watcher=[$SESSION_WATCHER]"
     with open(state) as fh:
         runs = json.load(fh)["steps"]["review"]["runs"]
     check("resumed-is-going-again", runs[-1].get("outcome"), None)
-    body = 'source "%s/state.sh"\nsource "%s/steps.sh"\n' % (LIB, LIB)
+    body = 'source "%s/core/state.sh"\nsource "%s/core/steps.sh"\n' % (LIB, LIB)
     body += 'step_run "%s" review end S5 ""\n' % wt
     subprocess.run(["bash", "-c", body], timeout=30)
     with open(state) as fh:
         runs = json.load(fh)["steps"]["review"]["runs"]
     check("resumed-then-left-loses-finished", runs[-1].get("outcome"), None)
     # Closed, rewound, resumed: the run is going again. Not without a rewind.
-    body = 'source "%s/state.sh"\nsource "%s/steps.sh"\n' % (LIB, LIB)
+    body = 'source "%s/core/state.sh"\nsource "%s/core/steps.sh"\n' % (LIB, LIB)
     body += 'step_run "%s" review open S6\n' % wt
     body += 'step_run "%s" review end S6 finished\n' % wt
     body += 'step_run "%s" review close\n' % wt
@@ -710,7 +710,7 @@ echo "watcher=[$SESSION_WATCHER]"
     with open(state) as fh:
         runs = json.load(fh)["steps"]["review"]["runs"]
     check("resumed-unrewound-stays-done", runs[-1].get("done"), True)
-    body = 'source "%s/state.sh"\nsource "%s/steps.sh"\n' % (LIB, LIB)
+    body = 'source "%s/core/state.sh"\nsource "%s/core/steps.sh"\n' % (LIB, LIB)
     body += 'step_rewind_to "%s" review review\n' % wt
     body += 'step_run "%s" review open S6\n' % wt
     subprocess.run(["bash", "-c", body], timeout=30)
@@ -718,6 +718,7 @@ echo "watcher=[$SESSION_WATCHER]"
         runs = json.load(fh)["steps"]["review"]["runs"]
     check("resumed-after-rewind-is-going", runs[-1].get("done"), None)
     sys.path.insert(0, LIB)
+    import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
     import issue_context
     lines = "\n".join(issue_context.request_lines(5, []))
     check("new-request-names-its-marker", issue_context.REQUEST in lines, True)
@@ -835,7 +836,7 @@ echo "watcher=[$SESSION_WATCHER]"
     os.makedirs(ctx_dir)
     with open(os.path.join(ctx_dir, sid + ".jsonl"), "w") as fh:
         fh.write(json.dumps(used(10, 50000)) + "\n" + json.dumps(used(3, 120000)) + "\n")
-    script = 'source "%s/state.sh"\nsource "%s/scratch.sh"\nLIB="%s"\nREVIEW_CONTEXT_MAX_PCT=40\n' % (LIB, LIB, LIB)
+    script = 'source "%s/core/state.sh"\nsource "%s/core/scratch.sh"\nLIB="%s"\nREVIEW_CONTEXT_MAX_PCT=40\n' % (LIB, LIB, LIB)
     script += functions(RUN, ["review_context", "review_context_log", "review_carry_on", "reversals_file"])
     script += '\nexport HOME="%s"\nheld="$(review_context "%s" "%s")"\necho "$held"\n' % (home, ctx_wt, sid)
     script += 'review_context_log "%s" feat "%s" "carried on" "$held" 2\n' % (ctx_wt, sid)
@@ -864,7 +865,7 @@ echo "watcher=[$SESSION_WATCHER]"
     check("carry-on-keeps-the-session", "steps.$step.session" in carry or "end \"$session\"" in carry, False)
     check("rotation-logged", 'review_context_log "$wt" "$slug" "$session" "fresh session"' in rot, True)
     check("exit-logged", RUN.count('review_context_log "$wt" "$slug" "$session"'), 3)
-    with open(os.path.join(LIB, "steps.sh")) as fh:
+    with open(os.path.join(LIB, "core", "steps.sh")) as fh:
         steps_sh = fh.read()
     check("threshold-default", 'REVIEW_CONTEXT_MAX_PCT="${REVIEW_CONTEXT_MAX_PCT:-40}"' in steps_sh, True)
     check("cache-default", 'REVIEW_CACHE_TTL="${REVIEW_CACHE_TTL:-3600}"' in steps_sh
@@ -885,7 +886,7 @@ echo "watcher=[$SESSION_WATCHER]"
     check("requested-none-when-empty",
           subprocess.run([sys.executable, END, "requested", transcript],
                          capture_output=True, text=True).stdout, "")
-    keep_sh = ('source "%s/state.sh"\nLIB="%s"\nREVIEW_CONTEXT_MAX_PCT=40\n'
+    keep_sh = ('source "%s/core/state.sh"\nLIB="%s"\nREVIEW_CONTEXT_MAX_PCT=40\n'
                'REVIEW_CACHE_TTL=3600\nREVIEW_CACHE_MARGIN=300\nexport HOME="%s"\n' % (LIB, LIB, home))
     keep_sh += functions(RUN, ["review_keep"])
 
@@ -915,7 +916,7 @@ echo "watcher=[$SESSION_WATCHER]"
           and 'echo "$1/.sclaude/local/feature/review-reversals"' in RUN, True)
 
     # --- review-stats reads the log back --------------------------------------
-    spec = importlib.util.spec_from_file_location("review_stats", os.path.join(LIB, "review_stats.py"))
+    spec = importlib.util.spec_from_file_location("review_stats", os.path.join(LIB, "review", "review_stats.py"))
     rs = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(rs)
     log = os.path.join(tmp, "review-context.log")
@@ -940,10 +941,10 @@ echo "watcher=[$SESSION_WATCHER]"
     check("stats-reversals-later", "later rounds: 2 over 2 stretches (1.00 each)" in text, True)
     check("stats-window", "1% of the window is 10k" in text, True)
     check("stats-empty", rs.report([]), "No review sessions logged yet.")
-    check("stats-command", "review-stats)  cmd_review_stats ;;" in "".join(open(os.path.join(ROOT, _p)).read() for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh")), True)
+    check("stats-command", "review-stats)  cmd_review_stats ;;" in "".join(open(os.path.join(ROOT, _p)).read() for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh")), True)
 
     # --- a fresh session sees open threads only --------------------------------
-    spec = importlib.util.spec_from_file_location("pr_context", os.path.join(LIB, "pr_context.py"))
+    spec = importlib.util.spec_from_file_location("pr_context", os.path.join(LIB, "review", "pr_context.py"))
     pc = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(pc)
     REVIEW_JOB = "Review — delta, whole PR once all fixed (Opus)"
@@ -1071,7 +1072,7 @@ echo "watcher=[$SESSION_WATCHER]"
     rstate = os.path.join(wt, ".sclaude/local/feature", "state.json")
     with open(rstate, "w") as fh:
         json.dump({"steps": {"review": {}}}, fh)
-    rounds_sh = ('source "%s/state.sh"\n' % LIB) + functions(RUN, ["review_round_begins", "review_round_ends"])
+    rounds_sh = ('source "%s/core/state.sh"\n' % LIB) + functions(RUN, ["review_round_begins", "review_round_ends"])
 
     def round_since(script):
         subprocess.run(["bash", "-c", rounds_sh + "\n" + script], timeout=30)
@@ -1084,7 +1085,7 @@ echo "watcher=[$SESSION_WATCHER]"
           round_since('review_round_ends "%s"; sleep 1; review_round_begins "%s"' % (wt, wt)) != first, True)
     # The pass's headings are not info: an unindented info line goes to the
     # feature's topic (ask_feed), which hears of the pass by its phase line.
-    with open(os.path.join(LIB, "local_review.sh")) as fh:
+    with open(os.path.join(LIB, "review", "local_review.sh")) as fh:
         LR = fh.read()
     check("pass-headings-stay-off-the-topic",
           LR.count("printf '%s\\n' \"${BOLD}── ") == 2 and 'info "${BOLD}── ' not in LR, True)
@@ -1113,13 +1114,13 @@ echo "watcher=[$SESSION_WATCHER]"
         rwt = os.path.join(tmp, "reopen-wt")
         fake = os.path.join(tmp, "reopen-lib")
         os.makedirs(os.path.join(rwt, ".sclaude", "local", "feature"), exist_ok=True)
-        os.makedirs(fake, exist_ok=True)
+        os.makedirs(os.path.join(fake, "review"), exist_ok=True)
         rst = os.path.join(rwt, ".sclaude", "local", "feature", "state.json")
         with open(rst, "w") as fh:
             json.dump({"steps": {"review": {"session": "S1", "rounds": 1}}}, fh)
-        with open(os.path.join(fake, "pr_context.py"), "w") as fh:
+        with open(os.path.join(fake, "review/pr_context.py"), "w") as fh:
             fh.write("print(%r)\n" % split)
-        body = 'source "%s/state.sh"\n' % LIB
+        body = 'source "%s/core/state.sh"\n' % LIB
         body += functions(RUN, ["review_reopen", "review_carry_on"])
         body += ('LIB="%s"; SELF=sclaude; REVIEW_WAIT_MAX=5; REVIEW_CONTEXT_MAX_PCT=40\n'
                  'review_session_since() { echo 0; }\nreview_stuck_say() { :; }\ninfo() { echo "$*"; }\n'
@@ -1152,7 +1153,7 @@ echo "watcher=[$SESSION_WATCHER]"
     out, left, rounds = reopen_run("2 3", False)
     check("reopen-own-work-resumed", (left, rounds, "RUN_STEP review []" in out), ("S1", 1, True))
     REG = "".join(open(os.path.join(LIB, _m)).read()
-        for _m in ("regression.sh", "regression_gate.sh", "regression_fix.sh"))
+        for _m in ("ship/regression.sh", "ship/regression_gate.sh", "ship/regression_fix.sh"))
     fix = REG[REG.index("regression_fix() {"):]
     fix = fix[:fix.index("\n}\n")]
     check("fix-session-watched", 'session_watch_start "$wt" "$session"' in fix, True)
@@ -1171,16 +1172,16 @@ echo "watcher=[$SESSION_WATCHER]"
         wt = os.path.join(tmp, "enough-wt")
         fake = os.path.join(tmp, "enough-lib")
         os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"), exist_ok=True)
-        os.makedirs(fake, exist_ok=True)
+        os.makedirs(os.path.join(fake, "review"), exist_ok=True)
         state = os.path.join(wt, ".sclaude", "local", "feature", "state.json")
         with open(state, "w") as fh:
             review = dict({"enough": said} if said else {}, **({"go_on": True} if go_on else {}))
             if go_on is not True and go_on:
                 review["go_on_rounds"] = go_on
             json.dump({"steps": {"review": review}} if review else {}, fh)
-        with open(os.path.join(fake, "pr_context.py"), "w") as fh:
+        with open(os.path.join(fake, "review/pr_context.py"), "w") as fh:
             fh.write("import sys\nprint(%r if '--open-since' in sys.argv else %r)\n" % (split, word))
-        body = 'source "%s/state.sh"\nsource "%s/local_review.sh"\n' % (LIB, LIB)
+        body = 'source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
         body += functions(RUN, ["review_close_gate", "review_enough_close", "review_session_since",
                                 "review_stuck_say"])
         body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5; REVIEW_GO_ON_PAUSE=0\n'
@@ -1303,7 +1304,7 @@ echo "watcher=[$SESSION_WATCHER]"
             with open(os.path.join(feat, "friction.log"), "w") as fh:
                 fh.write("2026-10-31T01:00:00 code hook a refusal\n  its reason\n"
                      "2026-10-31T01:05:00 code hook another\n")
-        body = 'source "%s/state.sh"\nsource "%s/local_review.sh"\n' % (LIB, LIB)
+        body = 'source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
         body += functions(RUN, ["friction_hold", "friction_before_retro"])
         body += ('info() { echo "$*"; }\nwarn() { echo "$*"; }\nask_feed() { echo "FEED $2"; }\n'
                  # As the real one: the review closed, and the log read and
@@ -1360,7 +1361,7 @@ echo "watcher=[$SESSION_WATCHER]"
         json.dump({"friction_owed": "unread-1", "friction_owed_told": "unread-1",
                    "steps": {"review": {"friction_held": "review-3"}},
                    "friction": {"review-2": {"held": True}, "review-3": {"held": True}}}, fh)
-    subprocess.run(["bash", "-c", 'source "%s/state.sh"\n%s\nfriction_log_read "%s" review-4'
+    subprocess.run(["bash", "-c", 'source "%s/core/state.sh"\n%s\nfriction_log_read "%s" review-4'
                     % (LIB, functions(RUN, ["friction_log_read"]), st)], timeout=30)
     with open(st) as fh:
         got = json.load(fh)
@@ -1372,7 +1373,7 @@ echo "watcher=[$SESSION_WATCHER]"
         with open(st, "w") as fh:
             json.dump({"friction_owed": owed, "steps": {"review": {"friction_held": held} if held else {}},
                        "friction": {held: {"held": True}} if held else {}}, fh)
-        subprocess.run(["bash", "-c", 'source "%s/state.sh"\n%s\nfriction_log_read "%s" %s'
+        subprocess.run(["bash", "-c", 'source "%s/core/state.sh"\n%s\nfriction_log_read "%s" %s'
                         % (LIB, functions(RUN, ["friction_log_read"]), st, key)], timeout=30)
         with open(st) as fh:
             return json.load(fh).get("friction_owed")
@@ -1388,7 +1389,7 @@ echo "watcher=[$SESSION_WATCHER]"
         st = os.path.join(wt, ".sclaude", "local", "feature", "state.json")
         with open(st, "w") as fh:
             json.dump({"steps": {"review": {} if said is None else {"go_on": said}}}, fh)
-        body = ('source "%s/state.sh"\nsource "%s/local_review.sh"\nINSTRUMENTS=/nonexistent\n'
+        body = ('source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\nINSTRUMENTS=/nonexistent\n'
                 'project_sleep_mode() { echo %s; }\n%s\n') % (LIB, LIB, mode, call.replace("WT", wt))
         out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=30).stdout
         with open(st) as fh:
@@ -1442,7 +1443,7 @@ echo "watcher=[$SESSION_WATCHER]"
         review = dict({"stuck_pr": 7}, **review)
         with open(st, "w") as fh:
             json.dump({"pr": pr, "steps": {"review": review}}, fh)
-        body = 'source "%s/state.sh"\nsource "%s/local_review.sh"\n' % (LIB, LIB)
+        body = 'source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
         body += functions(RUN, ["review_stuck_say"])
         body += ('\nLIB="%s"\nwarn() { echo "WARN $*"; }\nask_feed() { echo "FEED $2"; }\nask_note() { :; }\n'
                  'ask() { echo "ASKED"; }\n'
@@ -1551,7 +1552,7 @@ echo "watcher=[$SESSION_WATCHER]"
     origin = os.path.join(tmp, "push-origin.git")
     clone = os.path.join(tmp, "push-clone")
     fakelib = os.path.join(tmp, "push-lib")
-    os.makedirs(fakelib)
+    os.makedirs(os.path.join(fakelib, "review"))
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", origin], check=True)
     subprocess.run(["git", "clone", "-q", origin, clone], check=True,
@@ -1561,7 +1562,7 @@ echo "watcher=[$SESSION_WATCHER]"
                    check=True)
 
     def push_fix(ahead, pr="160"):
-        with open(os.path.join(fakelib, "pr_context.py"), "w") as fh:
+        with open(os.path.join(fakelib, "review/pr_context.py"), "w") as fh:
             fh.write("print(%d)\n" % ahead)
         script = ('LIB="%s"; info() { :; }; warn() { :; }\n%s\n'
                   'regression_push_fix "%s" "%s"; echo "rc=$?"'

@@ -29,7 +29,7 @@ def phone_button(origin, label):
 
 
 def map_button(origin, key, dev):
-    """The feature's process map in the Mini App (sclaude/lib/process.py,
+    """The feature's process map in the Mini App (sclaude/lib/flow/process.py,
     served by the proxy at /__sclaude/flow), through the gate; the map asks
     the proxy to start the dev server it is reached by (start=1). A feature
     that never had a dev server has no address yet: the button then starts

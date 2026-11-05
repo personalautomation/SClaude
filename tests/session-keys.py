@@ -74,7 +74,7 @@ try:
             json.dump({"steps": steps}, fh)
         if os.path.exists(plan_md):
             os.remove(plan_md)
-        script = 'source "%s/state.sh"; source "%s/plan.sh"; LIB="%s"; capture_plan "%s"' % (
+        script = 'source "%s/core/state.sh"; source "%s/cycle/plan.sh"; LIB="%s"; capture_plan "%s"' % (
             LIB, LIB, LIB, wt)
         rc = subprocess.run(["bash", "-c", script], env=dict(os.environ, HOME=home),
                             capture_output=True, text=True).returncode
@@ -121,7 +121,7 @@ try:
         if word is not None:
             with open(ctl, "w") as fh:
                 fh.write(word + "\n")
-        script = 'source "%s/pane.sh"; session_ctl_take "%s"; echo "|"; session_ctl_take "%s"' % (
+        script = 'source "%s/core/pane.sh"; session_ctl_take "%s"; echo "|"; session_ctl_take "%s"' % (
             LIB, session, session)
         out = subprocess.run(["bash", "-c", script], env=dict(os.environ, TMPDIR=tmp),
                              capture_output=True, text=True).stdout
@@ -142,7 +142,7 @@ try:
         else:
             with open(path, "w") as fh:
                 fh.write(mark + "\n")
-        script = ('source "%s/pane.sh"; SESSION_KEYS_ID="%s"\n'
+        script = ('source "%s/core/pane.sh"; SESSION_KEYS_ID="%s"\n'
                   'for k in n N r R k; do session_key_has $k && printf %%s $k; done') % (LIB, session)
         p = subprocess.run(["bash", "-c", script], env=dict(os.environ, TMPDIR=tmp),
                            capture_output=True, text=True)
@@ -157,7 +157,7 @@ try:
 
     # --- session_ended's ways for the person's word --------------------------
     RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
-                  for m in ("run.sh", "session_watch.sh", "review_round.sh"))
+                  for m in ("cycle/run.sh", "cycle/session_watch.sh", "review/review_round.sh"))
 
     def functions(names):
         out = []
@@ -188,7 +188,7 @@ try:
         with open(os.path.join(tmp, "sclaude-ctl-" + session), "w") as fh:
             fh.write(said + "\n")
         # Everything else is recorded: a command not found writes its words.
-        script = ('source "%s/pane.sh"\n'
+        script = ('source "%s/core/pane.sh"\n'
                   'command_not_found_handle() { echo "$*" >> "%s"; return 0; }\n'
                   'capture_plan() { echo "capture_plan" >> "%s"; return %d; }\n'
                   'SELF=sclaude\n%s\n'
@@ -236,7 +236,7 @@ try:
     run_step = re.search(r"^run_step\(\) \{\n(.*?)^\}\n", RUN, re.S | re.M).group(1)
     check("stop-at-run-step-top", "stop_asked" in run_step.split("\n  model=")[0], True)
     deploy = "".join(open(os.path.join(LIB, _m)).read()
-        for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+        for _m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
     remind = re.search(r"^remind_prod\(\) \{\n(.*?)\n\n", deploy, re.S | re.M)
     check("stop-at-remind-prod", bool(remind) and "stop_asked" in remind.group(1), True)
 finally:

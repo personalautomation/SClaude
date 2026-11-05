@@ -2,7 +2,7 @@
 #
 # Messages from sclaude that ask nothing: where a feature's review stands
 # after each round. sclaude lays each in notes/ of the feature's channel
-# (ask_notice in sclaude/lib/io.sh); the bot sends them to the feature's
+# (ask_notice in sclaude/lib/core/io.sh); the bot sends them to the feature's
 # topic in the order they came, each as a message of its own — the topic
 # keeps them all, nothing is edited — and deletes the file once sent.
 #
@@ -54,7 +54,7 @@ def text_of(path):
     return "<b>%s</b>%s" % (title, "\n" + clip(rest, NOTE_MAX - len(title)) if rest else "")
 
 
-# What sclaude printed about the feature (ask_feed in sclaude/lib/io.sh):
+# What sclaude printed about the feature (ask_feed in sclaude/lib/core/io.sh):
 # a line each, "<time>\t<level>\t<pid>\t<text>". The bot takes the file
 # whole by renaming it — the next line printed starts a new one — and sends
 # what gathered as one message a turn, shorter than the terminal: headlines,
@@ -69,7 +69,7 @@ FEED_LOUD = ("warn", "alarm")
 FEED_KEEP = 3600
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # The icons sclaude's phase_line opens every session's start and end with
-# (phase_icon in sclaude/lib/steps.sh): a line that opens with one names its
+# (phase_icon in sclaude/lib/core/steps.sh): a line that opens with one names its
 # kind, and the message then opens with that icon rather than the laptop's.
 # These and no others — a "✓ passed" or a "⚠ careful" of sclaude's own is
 # still the laptop's.

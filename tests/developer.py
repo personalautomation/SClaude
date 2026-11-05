@@ -51,7 +51,7 @@ def run(body, instruments, env=None):
     HOME and the git config globals are pointed away so the machine's own
     identity cannot leak into a case that expects none.
     """
-    script = 'set -uo pipefail\nINSTRUMENTS="%s"\nsource "%s/developer.sh"\n%s\n' % (
+    script = 'set -uo pipefail\nINSTRUMENTS="%s"\nsource "%s/core/developer.sh"\n%s\n' % (
         instruments, LIB, body)
     full = {k: v for k, v in os.environ.items()
             if not k.startswith("GIT_") and k != "SCLAUDE_DEV"}

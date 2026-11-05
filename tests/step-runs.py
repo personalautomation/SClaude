@@ -20,7 +20,7 @@ import tempfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
-github = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
+github = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh"))
 
 failures = []
 
@@ -32,7 +32,7 @@ def check(name, got, want):
 
 def shell(wt, script):
     subprocess.run(
-        ["bash", "-c", 'source "$1/state.sh"; source "$1/steps.sh"; wt="$2"; ' + script,
+        ["bash", "-c", 'source "$1/core/state.sh"; source "$1/core/steps.sh"; wt="$2"; ' + script,
          "_", LIB, wt],
         check=True)
 
@@ -91,15 +91,15 @@ with tempfile.TemporaryDirectory() as wt:
     # it began, plus every thread opened while it ran — a session can carry on
     # through several rounds. The fake answers "<open> <opened since>".
     fake = os.path.join(wt, "fakelib")
-    os.makedirs(fake)
-    with open(os.path.join(fake, "pr_context.py"), "w") as fh:
+    os.makedirs(os.path.join(fake, "review"))
+    with open(os.path.join(fake, "review/pr_context.py"), "w") as fh:
         fh.write("import os, sys\n"
                  "assert sys.argv[1] == '--threads' and sys.argv[5]\n"
                  "print(os.environ.get('THREADS', ''))\n")
 
     def comments(session, answer):
         subprocess.run(["bash", "-c",
-                        'source "$1/state.sh"; source "$1/steps.sh"; LIB="$3"; '
+                        'source "$1/core/state.sh"; source "$1/core/steps.sh"; LIB="$3"; '
                         'gh_repo() { echo o/r; }; THREADS="$5" run_comments "$2" "$4" 143',
                         "_", LIB, wt, fake, session, answer], check=True)
 
@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory() as wt:
     # more for every round it carried on into.
     def rounds(session, n):
         subprocess.run(["bash", "-c",
-                        'source "$1/state.sh"; source "$1/steps.sh"; run_rounds "$2" "$3" "$4"',
+                        'source "$1/core/state.sh"; source "$1/core/steps.sh"; run_rounds "$2" "$3" "$4"',
                         "_", LIB, wt, session, str(n)], check=True)
 
     rounds("r1111111", 1)
@@ -191,7 +191,7 @@ with tempfile.TemporaryDirectory() as wt:
 # still running — that is how one live seventh round read `nothing`.
 def sh_out(wt, script):
     return subprocess.run(
-        ["bash", "-c", 'source "$1/state.sh"; source "$1/steps.sh"; wt="$2"; ' + script,
+        ["bash", "-c", 'source "$1/core/state.sh"; source "$1/core/steps.sh"; wt="$2"; ' + script,
          "_", LIB, wt], check=True, capture_output=True, text=True).stdout.strip()
 
 

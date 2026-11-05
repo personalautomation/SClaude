@@ -32,16 +32,16 @@ def function(source, name):
     return m.group(0)
 
 
-with open(os.path.join(LIB, "acceptance.sh")) as fh:
+with open(os.path.join(LIB, "cycle", "acceptance.sh")) as fh:
     BODY = function(fh.read(), "reword_acceptance")
-with open(os.path.join(LIB, "ui.sh")) as fh:
+with open(os.path.join(LIB, "core", "ui.sh")) as fh:
     UI = fh.read()
 IS_YES = function(UI, "is_yes") + function(UI, "is_no")
 
 # Answers --reworded with the difference in `differs`, and records --reword.
 FAKE = r'''#!/usr/bin/env python3
 import os, sys
-here = os.path.dirname(os.path.abspath(__file__))
+here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the fake lib, above cycle/
 mode = sys.argv[1]
 if mode == "--reworded":
     with open(os.path.join(here, "differs")) as fh:
@@ -55,8 +55,8 @@ elif mode == "--reword":
 tmp = tempfile.mkdtemp(prefix="sclaude-reword-")
 try:
     lib = os.path.join(tmp, "lib")
-    os.makedirs(lib)
-    with open(os.path.join(lib, "acceptance.py"), "w") as fh:
+    os.makedirs(os.path.join(lib, "cycle"))
+    with open(os.path.join(lib, "cycle", "acceptance.py"), "w") as fh:
         fh.write(FAKE)
     wt = os.path.join(tmp, "wt")
     feature = os.path.join(wt, ".sclaude", "local", "feature")
@@ -69,7 +69,7 @@ try:
     def run(differs, answer):
         with open(os.path.join(lib, "differs"), "w") as fh:
             fh.write(differs)
-        script = ('source "%s/state.sh"\nLIB="%s"\nBOLD=""; OFF=""\n'
+        script = ('source "%s/core/state.sh"\nLIB="%s"\nBOLD=""; OFF=""\n'
                   'info() { printf "%%s\\n" "$*"; }\nwarn() { printf "%%s\\n" "$*"; }\n'
                   'ask() { echo ASKED; printf -v "$2" "%%s" "%s"; }\n%s\n%s\n'
                   'reword_acceptance "%s"\n') % (os.path.abspath(LIB), lib, answer,

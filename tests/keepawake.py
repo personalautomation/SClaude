@@ -4084,7 +4084,7 @@ check_true("an ordinary question keeps its header",
 import subprocess as _sp, tempfile as _tf, json as _js, os as _os
 _d = _tf.mkdtemp()
 _sp.run(["bash", "-c",
-         'source %s/sclaude/lib/io.sh; ASK_DIR=%s ASK_FEATURE=my-feat '
+         'source %s/sclaude/lib/core/io.sh; ASK_DIR=%s ASK_FEATURE=my-feat '
          'ask_publish "Which one? [1-2] " "pick:2" "A" "B" >/dev/null'
          % (_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), _d)],
         capture_output=True)
@@ -4094,7 +4094,7 @@ check("ASK_FEATURE reaches the channel", _q.get("feature"), "my-feat")
 # Without the variable there is no field at all: an empty one would mean "a
 # feature with no name".
 _sp.run(["bash", "-c",
-         'source %s/sclaude/lib/io.sh; ASK_DIR=%s '
+         'source %s/sclaude/lib/core/io.sh; ASK_DIR=%s '
          'ask_publish "Done? [y/n] " "yn" >/dev/null'
          % (_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), _d)],
         capture_output=True)

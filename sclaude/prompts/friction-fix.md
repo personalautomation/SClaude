@@ -1,6 +1,6 @@
 A fixing session for the feature "<feature>" has ended — the one the orchestrator opened after the "<step>" regression came back red. Something got in *its* way. Work out what exactly, and fix the tooling.
 
-This is not a step of the cycle. A fixing session runs with the settings of the step it repairs, inside the feature's worktree, and it is opened by `regression_fix` (`sclaude/lib/regression_fix.sh`) rather than by `run_step`. What it was doing when it hit the obstacle was reading a regression log and repairing whatever the run had found — so the friction here is usually about that: a check it could not run, a file it could not reach, a command the bans refused while it was trying to reproduce a failure.
+This is not a step of the cycle. A fixing session runs with the settings of the step it repairs, inside the feature's worktree, and it is opened by `regression_fix` (`sclaude/lib/ship/regression_fix.sh`) rather than by `run_step`. What it was doing when it hit the obstacle was reading a regression log and repairing whatever the run had found — so the friction here is usually about that: a check it could not run, a file it could not reach, a command the bans refused while it was trying to reproduce a failure.
 
 <body>
 

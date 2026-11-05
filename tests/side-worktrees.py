@@ -31,7 +31,7 @@ def check(name, got, want):
         failures.append((name, want, got))
 
 
-with open(os.path.join(LIB, "worktree.sh")) as fh:
+with open(os.path.join(LIB, "tree", "worktree.sh")) as fh:
     m = re.search(r"^side_worktrees_offer\(\) \{\n.*?^\}\n", fh.read(), re.S | re.M)
 OFFER = m.group(0) if m else ""
 check("function-present", bool(OFFER), True)
@@ -81,7 +81,7 @@ finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
 SCLAUDE = "".join(open(os.path.join(ROOT, _p)).read()
-    for _p in ("bin/sclaude", "sclaude/lib/start.sh", "sclaude/lib/menu.sh", "sclaude/lib/step_commands.sh", "sclaude/lib/done.sh", "sclaude/lib/feature_commands.sh"))
+    for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 # Before the feature's own worktree goes: its questions are the feature's last,
 # and the feature's topic in the bot is deleted with the worktree.
 done = SCLAUDE[SCLAUDE.index("cmd_done() {"):]

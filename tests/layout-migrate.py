@@ -27,7 +27,7 @@ def check(name, got, want):
 
 def migrate(repo, others=""):
     stub = ('instruments_others() { echo "%s"; [[ -n "%s" ]]; }' % (others, others))
-    script = ('for m in ui state scratch; do source "%s/$m.sh"; done\n'
+    script = ('for m in core/ui core/state core/scratch; do source "%s/$m.sh"; done\n'
               'info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }\n%s\n'
               'REPO="%s"; layout_migrate' % (LIB, stub, repo))
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True,

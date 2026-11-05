@@ -59,7 +59,7 @@ def check_true(name, got):
         failures.append((name, "true", got))
 
 
-def run_bash(script, cwd, modules=("io", "ui", "state", "steps", "project", "worktree", "deploy", "shipped", "vercel", "qa", "merge", "demo", "scratch"),
+def run_bash(script, cwd, modules=("core/io", "core/ui", "core/state", "core/steps", "core/project", "tree/worktree", "ship/deploy", "ship/shipped", "ship/vercel", "ship/qa", "ship/merge", "ship/demo", "core/scratch"),
              stdin="", env=None):
     """The real functions in a real shell, with the network shadowed out."""
     body = "set -uo pipefail\n"
@@ -271,7 +271,7 @@ try:
         json.dump(dict(json.loads(kept or "{}"), qa=True, merge=None), fh)
     with open(config_path + ".origin", "w") as fh:
         json.dump(dict(json.loads(kept or "{}"), qa=1), fh)
-    diff = subprocess.run(["python3", os.path.join(LIB, "config_diff.py"),
+    diff = subprocess.run(["python3", os.path.join(LIB, "ship", "config_diff.py"),
                            config_path, config_path + ".origin"],
                           capture_output=True, text=True).stdout
     os.remove(config_path + ".origin")
@@ -306,7 +306,7 @@ try:
 
     # The pulls in the production blocks never merge: with pull.rebase=false
     # set somewhere a plain pull would make a merge commit and ship it.
-    deploy_src = "".join(open(os.path.join(LIB, _m)).read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+    deploy_src = "".join(open(os.path.join(LIB, _m)).read() for _m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
     check("prod-pulls-are-ff-only",
           re.findall(r'"git pull[^"]*"', deploy_src),
           ['"git pull --ff-only --autostash"', '"git pull --ff-only --autostash"'])
@@ -382,7 +382,7 @@ try:
     git("add", "-A", cwd=REPO)
     git("commit", "-qm", "a migration", cwd=REPO)
     _, _, rc = run_bash('REPO=%s; branch_has_migrations %s' % (REPO, REPO), tmp,
-                        modules=("ui", "state", "project", "worktree", "deploy", "shipped", "vercel", "qa", "merge", "demo", "scratch"))
+                        modules=("core/ui", "core/state", "core/project", "tree/worktree", "ship/deploy", "ship/shipped", "ship/vercel", "ship/qa", "ship/merge", "ship/demo", "core/scratch"))
     check("migrations-true-when-the-branch-adds-one", rc, 0)
 
     # --- preview_apply_migrations -------------------------------------------
@@ -428,7 +428,7 @@ try:
     os.rename(os.path.join(REPO, ".sclaude/config.json"),
               os.path.join(REPO, ".sclaude/config.json.off"))
     _, _, rc = run_bash('REPO=%s; branch_has_migrations %s' % (REPO, REPO), tmp,
-                        modules=("ui", "state", "project", "worktree", "deploy", "shipped", "vercel", "qa", "merge", "demo", "scratch"))
+                        modules=("core/ui", "core/state", "core/project", "tree/worktree", "ship/deploy", "ship/shipped", "ship/vercel", "ship/qa", "ship/merge", "ship/demo", "core/scratch"))
     check("migrations-false-without-a-config", rc != 0, True)
     os.rename(os.path.join(REPO, ".sclaude/config.json.off"),
               os.path.join(REPO, ".sclaude/config.json"))
@@ -498,7 +498,7 @@ try:
     # the bench above exists for: nothing failed, and the wrong thing was
     # reported.
 
-    rollback_src = open(os.path.join(LIB, "rollback.sh"), encoding="utf-8").read()
+    rollback_src = open(os.path.join(LIB, "ship", "rollback.sh"), encoding="utf-8").read()
 
     # A failed psql was reported as a successful schema revert. `rc=1` is itself
     # a command, so it resets PIPESTATUS to (0), and `${PIPESTATUS[0]:-$rc}`
@@ -556,7 +556,7 @@ try:
                          rollback_src) is not None)
 
     # The typed command gates on having shipped, as the action list does.
-    sclaude_src = open(os.path.join(LIB, "feature_commands.sh"), encoding="utf-8").read()
+    sclaude_src = open(os.path.join(LIB, "commands", "feature_commands.sh"), encoding="utf-8").read()
     cmd_body = sclaude_src[sclaude_src.index("cmd_rollback() {"):]
     cmd_body = cmd_body[:cmd_body.index("\n}")]
     # Code only, again — and this one earned the rule a third time. The comment

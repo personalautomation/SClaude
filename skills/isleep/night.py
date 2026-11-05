@@ -67,7 +67,7 @@ Commands, for the skill:
   night.py active        exits 0 while a night over every session is on — not
                          a `here` one: sclaude's [g] follows it under
                          `sleep_mode: auto` (review_go_on in
-                         sclaude/lib/local_review.sh)
+                         sclaude/lib/review/local_review.sh)
   night.py off           end the night
   night.py install FILE  register the hooks in a Claude settings file (install.sh)
 """

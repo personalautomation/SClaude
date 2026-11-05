@@ -43,7 +43,7 @@ def check(name, got, want):
 
 
 def verdict(raw):
-    script = ('source "%s/ui.sh"; r="$(clean_reply "$1")"; '
+    script = ('source "%s/core/ui.sh"; r="$(clean_reply "$1")"; '
               'is_yes "$r" && echo yes || { is_no "$r" && echo no || echo neither; }' % LIB)
     return subprocess.run(["bash", "-c", script, "_", raw], capture_output=True,
                           text=True, env=dict(os.environ, LANG="C.UTF-8")).stdout.strip()
@@ -60,7 +60,7 @@ for raw, want in [("\udcd1n", "no"), ("\udcd0n", "no"), ("\udcd0y", "yes"),
 
 # --- a yes/no question has no default ----------------------------------------
 def asked(stdin):
-    script = ('BOLD=""; OFF=""; source "%s/io.sh"; source "%s/ui.sh"; unset ASK_DIR; '
+    script = ('BOLD=""; OFF=""; source "%s/core/io.sh"; source "%s/core/ui.sh"; unset ASK_DIR; '
               'ask "Ship? [y/n] " answer yn; rc=$?; echo "[$answer] rc=$rc"' % (LIB, LIB))
     p = subprocess.run(["bash", "-c", script], input=stdin, capture_output=True,
                        text=True, timeout=10, start_new_session=True,
@@ -74,7 +74,7 @@ check("empty-then-eof", asked("\n"), ("[] rc=1", 1))
 check("eof-at-once", asked(""), ("[] rc=1", 0))
 
 # --- typed into a terminal ---------------------------------------------------
-script = ('BOLD=""; OFF=""; source "%s/io.sh"; source "%s/ui.sh"; unset ASK_DIR; '
+script = ('BOLD=""; OFF=""; source "%s/core/io.sh"; source "%s/core/ui.sh"; unset ASK_DIR; '
           'stty -iutf8; ask "Merge? [y/n] " answer yn; '
           'is_yes "$answer" && echo VERDICT=yes || echo VERDICT=no' % (LIB, LIB))
 pid, fd = pty.fork()
@@ -112,7 +112,7 @@ def typed(keys, channel=None, prompt="What is wrong? ", cols=None, end_feature=F
     import termios
     d = tempfile.mkdtemp(prefix="sclaude-answers-")
     try:
-        script = ('BOLD=$\'\\e[1m\'; OFF=$\'\\e[0m\'; source "%s/io.sh"; source "%s/ui.sh"; '
+        script = ('BOLD=$\'\\e[1m\'; OFF=$\'\\e[0m\'; source "%s/core/io.sh"; source "%s/core/ui.sh"; '
                   'ASK_DIR=%s; ASK_SLUG=demo; ASK_POLL=0.3; ask "${BOLD}%s${OFF}" said; '
                   'echo "SAID[$said]"' % (LIB, LIB, d, prompt))
         pid, fd = pty.fork()

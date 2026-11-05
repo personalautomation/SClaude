@@ -51,7 +51,7 @@ def guard(worktree, session, transcript_exists):
 
     script = r'''
       set -euo pipefail
-      source "%s/state.sh"
+      source "%s/core/state.sh"
       info() { :; }
       wt="%s"; state="$wt/.sclaude/local/feature/state.json"; step=code
       session="$(state_get "$state" "steps.$step.session" || true)"
@@ -63,7 +63,7 @@ def guard(worktree, session, transcript_exists):
 
     if transcript_exists:
         d = subprocess.run(["bash", "-c",
-                            'source "%s/state.sh"; transcript_dir "%s"'
+                            'source "%s/core/state.sh"; transcript_dir "%s"'
                             % (LIB, worktree)],
                            capture_output=True, text=True).stdout.strip()
         os.makedirs(d, exist_ok=True)

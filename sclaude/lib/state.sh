@@ -245,7 +245,7 @@ history_command() {
 # the order it happened, beside its state — `.sclaude/local/feature/history.jsonl`.
 # state.json keeps where each thing stands now, and loses the earlier times a
 # stage was entered; this keeps them all. The process map plays a feature's
-# way through the cycle from it (`history` in sclaude/lib/process.py, which
+# way through the cycle from it (`history` in sclaude/lib/process_history.py, which
 # names the file again as HISTORY_FILE). session_runs writes the sessions'
 # lines itself; everything else calls this.
 #

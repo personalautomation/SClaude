@@ -67,7 +67,7 @@ deploy_remember() {
   [[ -n "$sha" ]] || return 0
   state_set "$wt/.sclaude/local/feature/state.json" "deploy.$stage.sha" "$sha" 2>/dev/null || true
   # The pull request it was shipped for: the process map tells by it whether
-  # production carries the feature (prod_held in process.py), with no GitHub.
+  # production carries the feature (prod_held in process_position.py), with no GitHub.
   local pr
   pr="$(state_get "$wt/.sclaude/local/feature/state.json" pr 2>/dev/null || true)"
   [[ "$stage" == "prod" && "$pr" =~ ^[0-9]+$ ]] \
@@ -2511,7 +2511,7 @@ remind_prod() {
   fi
 
   # The question and the ship it leads to: the process map stands the feature
-  # on them meanwhile (position in process.py), however long the answer takes
+  # on them meanwhile (position in process_position.py), however long the answer takes
   # — it may come from the phone the next morning. Taken off below whatever
   # the answer, and by the next pass when this one is cut off at the question,
   # which that pass asks again.

@@ -1094,11 +1094,14 @@ def process_map():
     file changed, so the map served is the one the checkout has."""
     global process
     try:
-        stamp = os.stat(process.__file__).st_mtime_ns
-    except OSError:
+        # The model is process.py and its parts (process_*.py): a change to
+        # any of them is a new model.
+        stamp = max(os.stat(path).st_mtime_ns for path in process.files())
+    except (OSError, AttributeError):
         return process
     if _PROCESS_SEEN[0] is not None and stamp != _PROCESS_SEEN[0]:
         try:
+            process.reload_parts()
             process = importlib.reload(process)
         except Exception as exc:  # a broken edit: keep serving the last good one
             sys.stderr.write("process map not reloaded: %s\n" % exc)

@@ -142,7 +142,7 @@ breaks the other silently — grep before you edit:
   named by `skills/sdemo/play.mjs`, and the page is `player.html` with its
   `/*DEMO*/` and `/*FEATURE*/` markers filled by play.mjs. `latest_demo` in
   the proxy reads the newest one's `demo.json` for the list of features and
-  for the process map's link (`demo` of `page` in `sclaude/lib/process.py`). The script's
+  for the process map's link (`demo` of `page` in `sclaude/lib/process_page.py`). The script's
   helpers (`d.say`, `d.click`…) are spelled out for the session in
   `skills/sdemo/SKILL.md`. `tests/dev-login.py` checks the two sides of the
   directory and the address.
@@ -288,7 +288,8 @@ breaks the other silently — grep before you edit:
   friction commits' footer exception there: renamed on one side alone, the
   endings would point at nothing. -->
 
-- The process map, `sclaude/lib/process.py`, names every command
+- The process map, `sclaude/lib/process.py` and its parts
+  (`process_*.py`, listed in `PARTS`), names every command
   `bin/sclaude` dispatches (`COMMANDS`), every verb of the action list in
   `sclaude/lib/actions.sh`, the steps as `STEPS` and `cycle_number` number
   them, and reads `state.json`'s fields to say where a feature stands
@@ -306,7 +307,7 @@ breaks the other silently — grep before you edit:
 - A feature's history, `.sclaude/local/feature/history.jsonl` beside its
   state, is written by `session_runs` and `history_add` in
   `sclaude/lib/state.sh` and read by `HISTORY_FILE`/`history` in
-  `sclaude/lib/process.py`, which knows the `what` and `op` words the
+  `sclaude/lib/process_history.py`, which knows the `what` and `op` words the
   writers use (`regression.<stage>`, `fix.<stage>`, `qa in`, `workshop
   main`, `ask answered` from `ask_log` in `io.sh`, `command` from
   `history_command`…); a word changed on one side alone drops that place
@@ -361,7 +362,7 @@ breaks the other silently — grep before you edit:
   `demo_refresh` in `deploy.sh` follow) are listed in `CHOICES` in
   `sclaude/lib/config_menu.py`, explained in `sclaude/config.example.json`,
   read by `project_ship_mode`/`project_stage_regression` in
-  `sclaude/lib/project.sh` and by `setting` in `sclaude/lib/process.py`. The
+  `sclaude/lib/project.sh` and by `setting` in `sclaude/lib/process_config.py`. The
   part name `smoke` is treated as `e2e` by `regression_command` and is what
   `sclaude/prompts/code.md` tells step 2 to tag for. `tests/project.py`,
   `tests/regression.py`, `tests/merge.py` and `tests/process.py` check each
@@ -499,7 +500,7 @@ something they describe.
 The process map is read the same way. A change to the cycle's path — a way
 back, a hold, a gate's outcomes, a question asked, where a feature stands and
 what the menu calls it, what happens to the issue — is checked against the
-whole model in `sclaude/lib/process.py`: every map's nodes, edges and
+whole model in `sclaude/lib/process.py` and its parts: every map's nodes, edges and
 details, `POSITIONS`, the commands' places and `WHEN`, and `position`; the
 map is corrected in the same push. A block, an arrow or a word that only
 some configs run goes in `NEEDS`, `PASS` and `VARIANTS`, not into every

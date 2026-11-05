@@ -52,6 +52,13 @@ words |= {w for alt in re.findall(r"^\s{4}([a-z|-]+)\)", dispatch, re.M) for w i
 words = {w for w in words if not w.startswith("-")} - {"help", "ls"}
 model = {cmd.split()[1] for cmd, *_ in process.COMMANDS if len(cmd.split()) > 1
          and not cmd.split()[1].startswith("<")}
+# The model is process.py and its parts; each is named here, so that a change
+# to any of them runs this bench (tests/run --changed matches by name).
+PARTS = ["process_model", "process_config", "process_position", "process_history",
+         "process_costs", "process_diagram", "process_doc", "process_page"]
+check("the model's parts are these", [p.__name__ for p in process.PARTS], PARTS)
+check("every part on disk is one of them",
+      sorted(n[:-3] for n in os.listdir(LIB) if re.match(r"process_\w+\.py$", n)), sorted(PARTS))
 check("every dispatched command is on the map", not (words - model), str(sorted(words - model)))
 check("every command on the map is dispatched", not (model - words), str(sorted(model - words)))
 
@@ -1378,9 +1385,17 @@ loader.exec_module(proxy_mod)
 # A model changed on disk is what the next page is drawn from.
 with tempfile.TemporaryDirectory() as tmp2:
     import shutil  # noqa: E402
+    # The model is process.py and its parts; the parts are read from the copy
+    # too, so the ones already imported from the checkout step aside.
+    for name in os.listdir(LIB):
+        if re.match(r"process(_\w+)?\.py$", name):
+            shutil.copy(os.path.join(LIB, name), tmp2)
     copy = os.path.join(tmp2, "process.py")
-    shutil.copy(os.path.join(LIB, "process.py"), copy)
+    part = os.path.join(tmp2, "process_doc.py")
     saved = proxy_mod.process
+    saved_parts = {n: m for n, m in sys.modules.items() if n.startswith("process_")}
+    for n in saved_parts:
+        del sys.modules[n]
     sys.path.insert(0, tmp2)  # where reload finds "process" by name
     try:
         spec = __import__("importlib.util").util.spec_from_file_location("process", copy)
@@ -1390,11 +1405,11 @@ with tempfile.TemporaryDirectory() as tmp2:
         proxy_mod.process = mod
         proxy_mod._PROCESS_SEEN[0] = None
         first = proxy_mod.process_map().doc()
-        with open(copy) as fh:
+        with open(part) as fh:
             text = fh.read()
-        with open(copy, "w") as fh:
+        with open(part, "w") as fh:
             fh.write(text.replace('"1. The cycle at a glance"', '"1. The cycle, reloaded"'))
-        os.utime(copy, ns=(time.time_ns() + 10**9, time.time_ns() + 10**9))
+        os.utime(part, ns=(time.time_ns() + 10**9, time.time_ns() + 10**9))
         second = proxy_mod.process_map().doc()
         check("the proxy draws the map from the model on disk now",
               "1. The cycle, reloaded" in second and "1. The cycle, reloaded" not in first)
@@ -1402,6 +1417,7 @@ with tempfile.TemporaryDirectory() as tmp2:
         sys.path.remove(tmp2)
         proxy_mod.process = saved
         sys.modules["process"] = process
+        sys.modules.update(saved_parts)
 with tempfile.TemporaryDirectory() as tmp:
     hung = os.path.join(tmp, "sclaude")
     with open(hung, "w") as fh:

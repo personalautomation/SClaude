@@ -63,7 +63,7 @@ SESSION_ID = re.compile(r"^[A-Za-z0-9-]{1,128}$")
 def next_link(path):
     """The session id one transcript says its conversation went on under:
     the last well-formed one, or None. One link of `chain`, for a reader that
-    keeps the links it has read (process.py). A file that cannot be read
+    keeps the links it has read (claude_usage.py). A file that cannot be read
     raises OSError: "no link" is an answer, a failed read is not."""
     nxt = None
     with open(path, "rb") as fh:

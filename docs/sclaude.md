@@ -230,14 +230,18 @@ those.
 ## The process map
 
 **One model of the cycle draws every picture of it.** `sclaude/lib/process.py`
-holds the lanes, the nodes, the edges forward and back, and the commands with
+and its parts — `process_model.py` (the maps), `process_config.py` (what a
+project's config draws), `process_position.py` (where a feature stands),
+`process_history.py` and `process_costs.py` (how it went, what it took),
+`process_diagram.py`, `process_doc.py` and `process_page.py` (the drawing and
+the pages); `process.X` reads any of them — hold the lanes, the nodes, the edges forward and back, and the commands with
 the node each leads to. From it come the printed map,
 `docs/presentations/bpmn_diagrams.html` (rebuilt by
 `docs/presentations/build.py`), and a feature's own map on the proxy,
 `/__sclaude/flow?f=<label>`; the proxy also serves the printed page itself,
 drawn from the model on each request, at `/__sclaude/bpmn` — main's line in
 its list of features. The proxy runs for days while sclaude's update pulls
-new code under it, so it reads `process.py` again whenever the file changed
+new code under it, so it reads the model again whenever one of its files changed
 (`process_map`): the map it serves is the checkout's, with no restart. A drawing kept by hand beside the code would go
 stale the first time a step moved; `tests/process.py` instead fails when the
 model and the code part: a command dispatched in `bin/sclaude` and missing
@@ -253,7 +257,7 @@ and how a workshop change was published (`history_add`) — is a line of JSON
 in `.sclaude/local/feature/history.jsonl`, in the tree and out of git, gone
 with the tree at the clean-up. state.json keeps where each stands now and a
 conversation's first start and last end; the history keeps every time a
-place was entered. `history` in `process.py` turns it into the places in
+place was entered. `history` in `process_history.py` turns it into the places in
 order: the ones named, those between filled in along the map's shortest way
 when it is short (a long way round would be a guess; none between a plan's
 or a pr's session and the next of its own, which took up one broken off),
@@ -364,7 +368,7 @@ it does at more length than fits on it (`DETAILS`), and which commands lead
 to it; an arrow's two ends and why it is taken.
 
 **A project's map is the cycle its config runs.** The model holds every way
-sclaude can run a cycle; `for_config` in `process.py` draws one config's:
+sclaude can run a cycle; `for_config` in `process_config.py` draws one config's:
 `NEEDS` names the blocks and arrows a setting decides (the review on CI or on
 this machine, the gates of the regression parts a project has, QA where the
 board has its columns, the merge offer), `PASS` carries an arrow past a block
@@ -400,7 +404,7 @@ the prompt cache than it read and more than `CACHE_REBUILT_MIN` tokens
 (`expired` in `claude_usage.py`): what an expired cache costs.
 
 **F and W turn while they are at work.** A badge carries a ring that the
-feature's page turns (`busy` in `process.py`, handed over by `_flow`): F on
+feature's page turns (`busy` in `process_position.py`, handed over by `_flow`): F on
 the block of the session a friction review left open follows — its key is
 the step and a number, `review-3`, `fix-local-1` — R on the block a suite
 runs from while it runs or a fixing session is open, S where a sync with main
@@ -410,7 +414,7 @@ sclaude, while that session's run is open. With reduced motion the ring
 stands still, thick.
 
 **Where a feature stands is the state's, not the map's.** `position` in
-`process.py` reads `state.json` — the step, an open fixing session, a running
+`process_position.py` reads `state.json` — the step, an open fixing session, a running
 regression, a sync left open (during a step, only one going — a sync left
 unfinished has an end, and the step opens past it), the local review's
 passes running
@@ -1076,7 +1080,7 @@ against it. What a deployed stage's regression runs is the project's
 `regression.smoke` list for `smoke` — the full list where the product declares
 none (`project_smoke_declared`), said in the run's heading — and nothing for
 `none`, which is the path a stage with no list already takes: no gate, and the
-map drops the suite (`setting` in `process.py` reads the same). A part named
+map drops the suite (`setting` in `process_config.py` reads the same). A part named
 `smoke` gets what `e2e` gets against a deployment in `regression_command`. A deploy that still fails is the stage's red in the regression
 gate: the fixing session a red run gets, told which command failed
 (`SCLAUDE_BLOCK_AT`, since the block's output stays in the terminal), the
@@ -1175,7 +1179,7 @@ read: in doubt, QA looks again. A session
 that ends otherwise stops the run, and the feature shows `5/7 sync` in the menu
 until `sclaude <feature>` finishes it; its conversation is resumed then. On
 the maps such a sync stands still on the block it ran ahead of: its S drawn
-in the colour of a wait on you (`stalled` in `process.py`), the command in its
+in the colour of a wait on you (`stalled` in `process_position.py`), the command in its
 note — while the pull request is open; merged or closed, there is nothing left
 to sync.
 

@@ -149,7 +149,7 @@ local_review() {
   return "$rc"
 }
 
-# When the passes began, for the process map (position in process.py), which
+# When the passes began, for the process map (position in process_position.py), which
 # stands the feature on them meanwhile; null once they end, however they end.
 # One left by a kill is believed for three hours at most.
 #

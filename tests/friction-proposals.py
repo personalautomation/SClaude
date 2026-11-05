@@ -274,10 +274,10 @@ check("now-told-to-the-review",
       rf.index('FRICTION_APPLY_NOW=""') < asked and "I asked for this log's proposals" in rf, True)
 
 # A put-off has no session: the issue's column shows no id for it.
-with open(os.path.join(LIB, "github.sh")) as fh:
+with open(os.path.join(LIB, "issue_sync.sh")) as fh:
     check("put-off-shown-without-an-id",
           '.startswith("deferred-"):\n            earlier.append("put off")' in fh.read(), True)
-with open(os.path.join(LIB, "github.sh")) as fh:
+with open(os.path.join(LIB, "issue_sync.sh")) as fh:
     check("latest-put-off-says-so",
           'if node.get("verdict") == "deferred":\n            # Put off by sclaude with no session (friction_defer_proposals).\n            return "put off"' in fh.read(), True)
 check("new-session-clears-the-verdict", "for flag in empty fixed unread verdict verdict_note; do" in rf, True)

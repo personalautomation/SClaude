@@ -8,7 +8,7 @@
 #       one line "<number>\t<status>" per issue that has one
 #
 # The status is the issue's "Status" column on its project board — the first
-# board that gives one, as issue_status_now in github.sh reads it. An issue on
+# board that gives one, as issue_status_now in board.sh reads it. An issue on
 # no board, or with an empty column there, shows "Closed" when it is closed and
 # nothing otherwise.
 #

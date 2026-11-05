@@ -282,7 +282,7 @@ remind_prod() {
   # This is the one place where "it works" can be said about a deployment rather
   # than about a tree: the branch is on real hosting, and the suite runs against
   # that hosting. A green run here is what makes "In QA" a statement of fact
-  # rather than a request — see QA_TO in github.sh.
+  # rather than a request — see QA_TO in board.sh.
   #
   # A red one opens a fixing session in step 4, where the pull request is still
   # open and pushes still reach the branch — and when two of those have not

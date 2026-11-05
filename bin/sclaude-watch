@@ -9,7 +9,7 @@
 # thing here: it reads, it compares, it sends a message. Acting on what it found
 # is sclaude's job, when the human comes back to the feature — with one
 # exception. When QA accepts the work, the pull request is handed over to the
-# merger (`sclaude _handoff`, pr_qa_handoff in github.sh): marked ready, moved
+# merger (`sclaude _handoff`, pr_qa_handoff in board.sh): marked ready, moved
 # to the backlog, unassigned, summarised. Nobody needs to be at a terminal for
 # that, and a merger should not wait for the author to come back before the PR
 # says it is ready. It is sclaude's own code doing it, run in the project; this
@@ -218,7 +218,7 @@ notes_since() {
 # Prints what to tell, as a word on the first line and sclaude's own words
 # after it — `handed`, `partial` or `waiting` — or nothing when there is
 # nothing new to say. What happened is read from the exit code
-# (pr_qa_handoff in github.sh), never from the words, so rewording a message
+# (pr_qa_handoff in board.sh), never from the words, so rewording a message
 # there cannot change what happens here.
 #
 # Called on every sweep that finds the issue in Done until the outcome is

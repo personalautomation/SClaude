@@ -49,7 +49,8 @@ breaks the other silently — grep before you edit:
 - The issue-comment markers (`REQUEST`, `AC_OPEN`/`AC_CLOSE`, `STATUS`) are
   declared once, in `sclaude/lib/issue_comments.py`, and imported elsewhere;
   `sclaude/prompts/plan.md` and `status.md` spell them out for the model.
-  `tests/status.py` fails if a copy reappears in `github.sh`.
+  `tests/status.py` fails if a copy reappears in `github.sh` or the modules
+  split from it (`issue_sync.sh`, `board.sh`, `outcome.sh`).
 - `.sclaude/local/feature/review-yours` — the review threads the person decided to leave —
   is named by `YOURS_FILE` in `sclaude/lib/pr_context.py` and spelled out in
   `sclaude/prompts/review.md`, which tells the session its line format;
@@ -120,7 +121,7 @@ breaks the other silently — grep before you edit:
   epilogue and the retrospective (`cycle_number` in `sclaude/lib/steps.sh`) —
   is named step by step by `act.steps` in `keepawake/i18n.py`, which the menu
   indexes by a feature's step number, and counted again by `TOTAL` in the
-  issue's summary (`sclaude/lib/github.sh`); `tests/session_names.py` checks
+  issue's summary (`sclaude/lib/issue_sync.sh`); `tests/session_names.py` checks
   that both halves of `act.steps` name as many steps as `cycle_total` counts.
 
   <!-- Added by Claude on 2026-10-24 with step 5, the sync with main: the

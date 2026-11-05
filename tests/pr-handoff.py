@@ -127,8 +127,9 @@ HARNESS = "\n".join([
     "gh_repo() { echo o/r; }",
     functions(os.path.join(LIB, "state.sh"), ["state_get", "state_set"]),
     functions(os.path.join(LIB, "project.sh"), ["column_is"]),
-    functions(os.path.join(LIB, "github.sh"),
-              ["pr_milestone", "pr_setup", "issue_status_items", "issue_status_now",
+    functions(os.path.join(LIB, "github.sh"), ["pr_milestone", "pr_setup"]),
+    functions(os.path.join(LIB, "board.sh"),
+              ["issue_status_items", "issue_status_now",
                "pr_board_set", "pr_qa_handoff", "pr_qa_handoff_now"]),
     'QA_DONE=Done PROGRESS_FROM=Backlog PROGRESS_TO="In progress"',
 ])
@@ -340,7 +341,7 @@ check("timer-no-root-no-handoff", ran, "")
 deploy = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
 check("remind-hands-over", 'pr_qa_handoff "$wt" "$pr" "$issue" || handed=$?' in deploy, True)
 check("remind-merged-done", 'pr_board_set "$pr" "$QA_DONE" "$issue"' in deploy, True)
-github = open(os.path.join(LIB, "github.sh"), encoding="utf-8").read()
+github = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
 check("capture-sets-up", 'pr_setup "$wt" "$number"' in github, True)
 watch = open(os.path.join(LIB, "watch.sh"), encoding="utf-8").read()
 check("rewind-counts-returns", "qa_returns" in watch, True)

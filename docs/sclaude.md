@@ -127,7 +127,10 @@ publishes it (see "The workshop" below).
 | `sclaude/lib/review_gate.sh` | closing step 4: the gate on the pull request, the threads the person kept, the reports |
 | `sclaude/lib/friction.sh` | the friction review between steps |
 | `sclaude/lib/instruments.sh` | sclaude's own checkout: taking main, proposing a change, refreshing the units |
-| `sclaude/lib/github.sh` | issues and pull requests through `gh` |
+| `sclaude/lib/github.sh` | issues and pull requests through `gh`: the pull request, the issue's link, close and blockers |
+| `sclaude/lib/issue_sync.sh` | the issue's summary, kept in step with the feature |
+| `sclaude/lib/board.sh` | an issue's place on the project board, its dates, the handoff to QA |
+| `sclaude/lib/outcome.sh` | a feature's outcome: its labels, its line in `sclaude status`, the epilogues offered |
 | `sclaude/lib/plan.sh` | step 1's plan from its session's transcript |
 | `sclaude/lib/deploy.sh` | the cycle's epilogue, step by step, and what is said when shipping failed |
 | `sclaude/lib/shipped.sh` | what has already been shipped: deploys per head, production's marks, what rides along |

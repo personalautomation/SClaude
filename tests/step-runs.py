@@ -20,7 +20,7 @@ import tempfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
-github = open(os.path.join(LIB, "github.sh"), encoding="utf-8").read()
+github = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
 
 failures = []
 

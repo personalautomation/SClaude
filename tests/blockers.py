@@ -239,7 +239,7 @@ GATE = ('BOLD=""; DIM=""; GREEN=""; OFF=""; LIB="%s"\n'
         'source "%s/ui.sh" 2>/dev/null\n'
         'warn() { echo "W:$*"; }\n'
         'ask() { local __r; read -r __r; printf -v "$2" %%s "$__r"; }\n'
-        'source "%s/github.sh"\n'
+        'for _m in github issue_sync board outcome; do source "%s/$_m.sh"; done\n'
         'gh_repo() { echo o/r; }\n'
         'issue_blockers_gate NUMBER && echo START || echo STOP\n') % (LIB, LIB, LIB)
 

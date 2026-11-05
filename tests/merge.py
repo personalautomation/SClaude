@@ -29,8 +29,8 @@ deploy = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
               encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
 run_sh = "".join(open(os.path.join(ROOT, "sclaude", "lib", m), encoding="utf-8").read()
                  for m in ("run.sh", "review_round.sh"))
-github = open(os.path.join(ROOT, "sclaude", "lib", "github.sh"),
-              encoding="utf-8").read()
+github = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
+              encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
 
 failures = []
 
@@ -572,7 +572,7 @@ check_true("qa-wait-records-acceptance", 'qa_accepted "$wt"' in (body_of(deploy,
 check_true("qa-wait-notices-a-merge",
            'qa_wait "$slug" "$issue" "$pr" "$branch"' in deploy
            and "was merged while QA still had issue" in deploy)
-github = open(os.path.join(ROOT, "sclaude", "lib", "github.sh"), encoding="utf-8").read()
+github = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
 check_true("qa-ready-from-backlog-too",
            'issue_move_status "$1" "$QA_FROM" "$QA_TO" "$PROGRESS_FROM"' in github)
 

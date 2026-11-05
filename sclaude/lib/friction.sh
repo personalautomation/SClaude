@@ -314,12 +314,12 @@ for stage, node in (saved.get("regression") or {}).items():
     for short in ((node or {}).get("fixes") or "").split():
         found = sorted(glob.glob(os.path.join(base, short + "*.jsonl")))
         if found:
-            # Named as its row in the issue (fix_name in github.sh).
+            # Named as its row in the issue (fix_name in issue_sync.sh).
             name = "fix after regression" if stage == "local" else "fix after %s regression" % stage
             out.append("%s — %s" % (name, chain(found[0])[-1]))
 
 # The syncs with main, which are not steps either and have their own friction
-# reviews (sync-N): named as their rows in the issue (run_rows in github.sh).
+# reviews (sync-N): named as their rows in the issue (run_rows in issue_sync.sh).
 syncs = [r for r in ((saved.get("sync") or {}).get("runs") or []) if isinstance(r, dict)]
 for number, run in enumerate(syncs, start=1):
     if run.get("session"):

@@ -187,7 +187,7 @@ try:
         subprocess.run(["git", "-C", wt, "symbolic-ref", "HEAD", "refs/heads/" + on], check=True)
         state = dict({"branch": "feat"}, **state)
         write(os.path.join(feature, "state.json"), json.dumps(state))
-        subprocess.run(["bash", "-c", 'source "%s/state.sh"; source "%s/github.sh"; '
+        subprocess.run(["bash", "-c", 'source "%s/state.sh"; for _m in github issue_sync board outcome; do source "%s/$_m.sh"; done; '
                         'gh() { [[ "$3" == --json || "$3" == feat ]] && echo %s; }; info() { :; }; '
                         'pr_link_issue() { :; }; pr_setup() { :; }; issue_hold_open() { :; }; '
                         'capture_reopened_pr "%s"' % (LIB, LIB, number, wt)], check=True)

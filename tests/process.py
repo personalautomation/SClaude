@@ -107,8 +107,8 @@ sync = (re.search(r'^SYNC_MODEL="(\w+)"', sync_sh, re.M).group(1),
         re.search(r'^SYNC_EFFORT="(\w+)"', sync_sh, re.M).group(1), process.SPEC["review"][2])
 check("the sync runs as SYNC_MODEL says", process.SPEC["sync"] == sync, str(sync))
 model, effort, mode = process.SPEC["epilogue"]
-check("the epilogue runs as github.sh launches it",
-      "--model %s --effort %s" % (model, effort) in read("sclaude", "lib", "github.sh"))
+check("the epilogue runs as outcome.sh launches it",
+      "--model %s --effort %s" % (model, effort) in read("sclaude", "lib", "outcome.sh"))
 model, effort, mode = process.SPEC["retro"]
 retro_sh = read("sclaude", "lib", "retro.sh")
 check("the retro runs as retro.sh launches it",
@@ -630,7 +630,7 @@ vs = process.history({}, [
 check("history: a red status the second time round is on the copy",
       [v.get("n") for v in vs if "n" in v][-1] == "epi_preview", str(vs))
 # The mark is written by run_status, before the merge only, into the row.
-gh_src = read("sclaude", "lib", "github.sh")
+gh_src = read("sclaude", "lib", "outcome.sh")
 run_src = re.search(r"^run_status\(\) \{\n.*?^\}\n", gh_src, re.S | re.M).group(0)
 check("run_status marks a status before the merge as the preview's",
       '[[ -n "$pr" && "$pr" != null && "$merged" != MERGED ]] && about=preview' in run_src
@@ -667,7 +667,7 @@ with tempfile.TemporaryDirectory() as wt:
     for flag in ("true", "null"):
         with open(os.path.join(wt, ".sclaude", "local", "feature", "state.json"), "w") as fh:
             json.dump({"status": {"preview_red": json.loads(flag)}}, fh)
-        out.append(subprocess.run(["bash", "-c", 'source "%s/state.sh"; source "%s/github.sh"; '
+        out.append(subprocess.run(["bash", "-c", 'source "%s/state.sh"; for _m in github issue_sync board outcome; do source "%s/$_m.sh"; done; '
                                    'run_status() { echo "RAN $5 $6"; }; status_green_again s 7 9 OPEN "%s"'
                                    % (LIB, LIB, wt)], capture_output=True, text=True).stdout.strip())
     check("a green preview rewrites a red status, and only a red one", out, ["RAN 1 0", ""])

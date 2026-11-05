@@ -60,7 +60,7 @@ friction_count() {
   # the parameter yet. This worked only by accident: all three callers happened
   # to have a local of their own with the same name, and dynamic scoping
   # substituted it. A call from any other would give "/.sclaude/local/feature/friction.log" and
-  # a silent "no entries". The same trap is described in github.sh at
+  # a silent "no entries". The same trap is described in issue_sync.sh at
   # issue_sync.
   local wt="$1"
   local log="$wt/.sclaude/local/feature/friction.log"

@@ -556,8 +556,8 @@ echo "watcher=[$SESSION_WATCHER]"
     check("epilogue-marker-ends-the-session", gone(target), True)
     target.kill()
     os.remove(own)
-    with open(os.path.join(LIB, "github.sh")) as fh:
-        GH = fh.read()
+    GH = "".join(open(os.path.join(LIB, _m)).read()
+        for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
     # In the feature's tree while there is one, as every step (the map reads
     # its transcript there); the main checkout once the tree is gone.
     check("epilogue-watched", 'session_watch_start "" "$session" "$done_file" "$cwd"' in GH, True)
@@ -627,7 +627,7 @@ echo "watcher=[$SESSION_WATCHER]"
     # Every kind of session tells the topic it started, by the same line.
     for path, kind in (("run.sh", "started step"), ("run.sh", "resumed step"),
                        ("run.sh", "done step"), ("friction.sh", "started friction"),
-                       ("regression.sh", "started fix"), ("github.sh", "started epilogue"),
+                       ("regression.sh", "started fix"), ("outcome.sh", "started epilogue"),
                        ("retro.sh", "started retro"), ("deferred.sh", "started deferred")):
         with open(os.path.join(LIB, path)) as fh:
             src = fh.read()
@@ -640,7 +640,7 @@ echo "watcher=[$SESSION_WATCHER]"
               and "&& verb=resumed" in src, True)
     # And every close goes through session_closed, with no headline of its own.
     for path in ("run.sh", "friction.sh", "session_watch.sh", "review_round.sh", "review_gate.sh",
-                 "regression.sh", "github.sh", "retro.sh", "deferred.sh"):
+                 "regression.sh", "github.sh", "issue_sync.sh", "board.sh", "outcome.sh", "retro.sh", "deferred.sh"):
         with open(os.path.join(LIB, path)) as fh:
             calls = re.findall(r'session_closed "[^\n]*(?:\\\n[^\n]*)?', fh.read())
         check("closes-by-phase " + path,
@@ -668,8 +668,8 @@ echo "watcher=[$SESSION_WATCHER]"
     with open(state) as fh:
         runs = json.load(fh)["steps"]["review"]["runs"]
     check("step-run-passes-the-reason", runs[-1].get("outcome"), "fixes confirmed")
-    with open(os.path.join(LIB, "github.sh")) as fh:
-        gh_src = fh.read()
+    gh_src = "".join(open(os.path.join(LIB, _m)).read()
+        for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
     check("issue-shows-the-reason",
           'run_status = run.get("outcome") or ("done" if run.get("done") else "interrupted")' in gh_src,
           True)

@@ -34,8 +34,8 @@ sys.path.insert(0, os.path.join(ROOT, "sclaude", "lib"))
 
 regression = open(os.path.join(ROOT, "sclaude", "lib", "regression.sh"),
                   encoding="utf-8").read()
-github = open(os.path.join(ROOT, "sclaude", "lib", "github.sh"),
-              encoding="utf-8").read()
+github = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
+              encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
 # The prompt a fixing session is opened with. It is checked here rather than in
 # a bench of its own because what it sanctions and what the gate does about it
 # are one mechanism: the file tells the session it may end by writing a note,
@@ -115,7 +115,7 @@ check_true("missing-command-is-fatal", "no command for this part" in regression)
 # team's board applied to every other team's. They are now `board` in the
 # project's .sclaude/config.json, loaded by board_load (project.sh), and the literal
 # spellings must not come back.
-for name, text in (("github.sh", github),
+for name, text in (("github.sh, issue_sync.sh, board.sh, outcome.sh", github),
                    ("sclaude-watch", open(os.path.join(ROOT, "bin", "sclaude-watch"),
                                           encoding="utf-8").read())):
     for const in ("PROGRESS_FROM", "PROGRESS_TO", "QA_FROM", "QA_TO", "QA_BACK",
@@ -158,7 +158,7 @@ check("board-partial", board({"board": {"columns": {"qa": "Check"}}}, VARS),
 check("board-empty-moves-nothing", board(None, """
 info() { :; }; warn() { :; }
 gh() { echo CALLED >> "$REPO/gh-calls"; }; gh_repo() { echo o/r; }
-source %s/sclaude/lib/github.sh
+source %s/sclaude/lib/board.sh
 issue_qa_ready 7
 issue_start_progress 7
 cat "$REPO/gh-calls" 2>/dev/null
@@ -171,7 +171,7 @@ cat "$REPO/gh-calls" 2>/dev/null
 NOTICE = """
 info() { echo "INFO $*"; }; warn() { :; }
 gh() { :; }; gh_repo() { echo o/r; }
-source %s/sclaude/lib/github.sh
+source %s/sclaude/lib/board.sh
 issue_qa_ready 7
 issue_start_progress 7
 """ % ROOT
@@ -618,7 +618,7 @@ check_true("clear-mark-skips-unknown-stages",
                      regression) is not None)
 check_true("rewind-skips-unknown-stages",
            re.search(r'\*\)\s*return 0 ;;', regression) is not None)
-github_sh = open(os.path.join(ROOT, "sclaude", "lib", "github.sh"), encoding="utf-8").read()
+github_sh = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
 label_fn = github_sh[github_sh.index("regression_red_label() {"):]
 label_fn = label_fn[:label_fn.index("\n}")]
 check_true("no-red-label-for-the-rollback-stage", "rollback" not in label_fn)

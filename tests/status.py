@@ -371,9 +371,9 @@ check("progress-some",
 # Declared once, in issue_comments.py, and imported everywhere else. They used
 # to live in github.sh too, which seeded them into a new body; the body is no
 # longer seeded, and a shell copy coming back would be a copy nothing checks.
-shell = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                             "..", "sclaude", "lib", "github.sh"),
-                encoding="utf-8").read()
+shell = "".join(io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     "..", "sclaude", "lib", m), encoding="utf-8").read()
+                for m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
 
 
 github = shell

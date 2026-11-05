@@ -104,7 +104,7 @@ PY
     fi
   done
 
-  body="$(SCLAUDE_STEPS="$spec" SCLAUDE_FIXES="$fixes" python3 - "$state" <<'PY' 2>/dev/null
+  body="$(SCLAUDE_STEPS="$spec" SCLAUDE_FIXES="$fixes" SCLAUDE_TOTAL="$(cycle_total)" python3 - "$state" <<'PY' 2>/dev/null
 import datetime, json, os, sys
 
 ORDER, TITLES = [], {}
@@ -484,7 +484,7 @@ retro_runs = run_rows("retro", "retrospective")
 # follows is read from the runs above. Unlike the menu this asks GitHub
 # nothing, so a merge it cannot see leaves the feature at "4/7 done" until
 # the retrospective.
-TOTAL = len(ORDER) + 3
+TOTAL = int(os.environ.get("SCLAUDE_TOTAL") or len(ORDER) + 3)
 if current == "done":
     # A running retrospective first: resumed, its run is marked done already.
     if retro_runs and os.environ.get("SCLAUDE_SUMMARY_RUNNING") == "retro":

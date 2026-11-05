@@ -175,7 +175,7 @@ ask_once() {
   # bash reports the open error before the redirection takes effect. Around a
   # subshell the suppression covers that too. The same device stands in
   # pick_start.
-  local __in="" __from="" __key="" __asked=$SECONDS
+  local __in="" __from="" __key="" __part="" __asked=$SECONDS
   if ( exec < /dev/tty ) 2>/dev/null; then __in=/dev/tty; fi
   # So that Backspace erases a whole Cyrillic letter rather than its last
   # byte (see clean_reply).
@@ -200,6 +200,17 @@ ask_once() {
       # IFS emptied: read would otherwise strip a space or a tab and hand
       # back "", the same as Enter — an empty answer for a line just begun.
       IFS= read -rsn1 -t "$ASK_POLL" __key < "$__in" || __rc=$?
+      # A letter of several bytes cut by the wait's end: read keeps what it
+      # had of it in the variable and reports the timeout, and the next read
+      # returns the rest. Dropped, the letter was lost — the first one of an
+      # answer in Cyrillic, on a busy machine. Kept, and the rest joins it.
+      if [[ "$__rc" -gt 128 && -n "$__key" ]]; then
+        __part+="$__key"
+        __key=""
+      elif [[ "$__rc" -eq 0 && -n "$__part" ]]; then
+        __key="$__part$__key"
+        __part=""
+      fi
       if [[ "$__rc" -eq 0 ]]; then
         case "$__key" in
           "")    printf "\n" >&2; __reply=""; __from=tty; break ;;

@@ -322,14 +322,30 @@ session_watch_stop() {
     kind="${SESSION_WATCHED_KIND:-}"
     ctl="$(session_ctl_file "$SESSION_WATCHED_ID")"
     word="$(cat "$ctl" 2>/dev/null || true)"
-    rm -f "$SESSION_WATCHED" "$(session_keep_file "$SESSION_WATCHED_ID")"
   fi
-  SESSION_WATCHED=""
   if [[ -n "${SESSION_WATCHER:-}" ]]; then
+    # The watcher goes before its files do: with [k]'s file taken away while
+    # it still polled, its next pass found an ended turn and nothing keeping
+    # the session, and closed it. Held still first, so that it neither makes
+    # that pass nor starts another `sleep` meanwhile; then it dies at once,
+    # mid-iteration or not, as it always has. The `sleep` of its poll, which
+    # would outlive it holding whatever output it was given until the poll
+    # ends, goes after it — only the sleep, anything else it had running is
+    # left as before; killed after the watcher, so no bash is left to report
+    # it "Terminated" in the person's terminal.
+    local poll
+    kill -STOP "$SESSION_WATCHER" 2>/dev/null || true
+    poll="$(pgrep -P "$SESSION_WATCHER" -x sleep 2>/dev/null || true)"
     kill "$SESSION_WATCHER" 2>/dev/null || true
+    kill -CONT "$SESSION_WATCHER" 2>/dev/null || true
+    [[ -z "$poll" ]] || kill $poll 2>/dev/null || true
     wait "$SESSION_WATCHER" 2>/dev/null || true
     SESSION_WATCHER=""
   fi
+  if [[ -n "${SESSION_WATCHED:-}" ]]; then
+    rm -f "$SESSION_WATCHED" "$(session_keep_file "$SESSION_WATCHED_ID")"
+  fi
+  SESSION_WATCHED=""
   # The person's word from sclaude's tab about when to go on (session_keys
   # in pane.sh). [N]: everything after this session runs as on its own end,
   # and sclaude stops where the next step would begin (stop_asked).

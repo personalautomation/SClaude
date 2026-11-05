@@ -27,6 +27,8 @@ SELF="$(basename "$0")"
 WATCH_DIR="$HOME/.claude/sclaude/watch"
 NOTIFY="$(dirname "$(readlink -f "$0")")/sclaude-notify"
 SCLAUDE="$(dirname "$(readlink -f "$0")")/sclaude"
+# state_file.py: the record is changed under a lock and written whole.
+CORE="$(dirname "$(readlink -f "$0")")/../sclaude/lib/core"
 
 # The columns are the project's (`board` in its .sclaude/config.json), and this runs
 # from a timer with no project in reach — so watch_start writes the two it
@@ -75,9 +77,11 @@ PY
 # Writes one value back. The same shape as state_set in sclaude/lib/core/state.sh,
 # and deliberately so — these are the same files, read by the same code.
 set_field() {
-  python3 - "$1" "$2" "$3" <<'PY' 2>/dev/null
+  PYTHONPATH="$CORE" python3 - "$1" "$2" "$3" <<'PY' 2>/dev/null
 import json, sys
 path, key, raw = sys.argv[1], sys.argv[2], sys.argv[3]
+import state_file
+state_file.lock(path)
 try:
     with open(path) as fh:
         data = json.load(fh)
@@ -96,9 +100,7 @@ parts = key.split(".")
 for part in parts[:-1]:
     node = node.setdefault(part, {})
 node[parts[-1]] = value
-with open(path, "w") as fh:
-    json.dump(data, fh, indent=2, ensure_ascii=False)
-    fh.write("\n")
+state_file.write(path, data)
 PY
 }
 

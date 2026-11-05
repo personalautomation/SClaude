@@ -34,6 +34,8 @@ import sys
 import tempfile
 import time
 import uuid
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib  # noqa: E402 — shell functions found by name
 
 
 def _cfg(path):
@@ -114,18 +116,14 @@ RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
           for m in ("cycle/run.sh", "cycle/session_watch.sh", "review/review_round.sh", "improve/friction.sh"))
 
 
-def functions(source, names):
-    out = []
-    for name in names:
-        m = re.search(r"^%s\(\) \{\n.*?^\}\n" % re.escape(name), source, re.S | re.M)
-        check("function-present-" + name, bool(m), True)
-        if m:
-            out.append(m.group(0))
-    return "\n".join(out)
+def functions(names):
+    """The named shell functions, found by name in the whole library."""
+    return benchlib.functions(names, missing=lambda name: check("function-present-" + name, False, True))
+
 
 
 WATCH = 'source "%s/core/state.sh"\nLIB="%s"\n' % (LIB, LIB) + functions(
-    RUN, ["round_marker", "done_marker", "session_watch_start", "session_watch_stop"])
+    ["round_marker", "done_marker", "session_watch_start", "session_watch_stop"])
 
 wt = os.path.join(tmp, "wt")
 os.makedirs(os.path.join(wt, ".sclaude/local/feature"))

@@ -29,6 +29,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib  # noqa: E402 — shell functions found by name
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
@@ -160,15 +162,9 @@ try:
                   for m in ("cycle/run.sh", "cycle/session_watch.sh", "review/review_round.sh"))
 
     def functions(names):
-        out = []
-        for name in names:
-            m = re.search(r"^%s\(\) \{\n.*?^\}\n" % re.escape(name), RUN, re.S | re.M) \
-                or re.search(r"^%s\(\) \{ .*\}\n" % re.escape(name), RUN, re.M)
-            if not m:
-                failures.append(("function-present-" + name, True, False))
-                continue
-            out.append(m.group(0))
-        return "\n".join(out)
+        """The named shell functions, found by name in the whole library."""
+        return benchlib.functions(names, missing=lambda name: failures.append(("function-present-" + name, True, False)))
+
 
     BODY = functions(["session_ended", "session_take_as_done", "session_closed",
                       "done_marker", "round_marker", "stop_file", "stop_asked"])

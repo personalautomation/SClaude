@@ -286,14 +286,16 @@ dev_claim() {
     # An argument rather than a pipe: the script itself arrives on stdin.
     local listening
     listening="$(ss -ltnH 2>/dev/null | awk '{print $4}' | sed 's/.*://' | tr '\n' ' ')"
-    python3 - "$wt" "$state" "$DEV_REGISTRY" "$main" "$avoid" \
+    PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$wt" "$state" "$DEV_REGISTRY" "$main" "$avoid" \
       "$DEV_PORT_FIRST" "$DEV_PORT_LAST" "$listening" <<'PY'
 import json, os, re, sys
+import state_file
 
 wt, state, registry, main, avoid, first, last, listening = sys.argv[1:9]
 first, last = int(first), int(last)
 listening = {int(p) for p in listening.split() if p.isdigit()}
 
+state_file.lock(state)
 with open(state) as fh:
     data = json.load(fh)
 dev = data.setdefault("dev", {})
@@ -355,9 +357,7 @@ if not isinstance(port, int) or avoid:
         sys.exit(1)
 
 dev["label"], dev["port"] = label, port
-with open(state, "w") as fh:
-    json.dump(data, fh, indent=2, ensure_ascii=False)
-    fh.write("\n")
+state_file.write(state, data)
 
 link = os.path.join(registry, label)
 if os.path.islink(link) or os.path.exists(link):

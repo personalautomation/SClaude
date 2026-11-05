@@ -85,6 +85,31 @@ def changed_benches():
     return sorted(picked)
 
 
+def collect(proc):
+    """The bench's output, once the bench itself has exited.
+
+    Not communicate(): that waits for the end of the output, and a child the
+    bench killed only half — a `bash -c "sleep 300"` whose sleep lives on —
+    keeps the pipe open and the bench "running" for minutes after it ended.
+    Once the bench exits, what is left in its group is stopped, and the rest
+    of the output is read for a moment at most."""
+    chunks = []
+
+    def read():
+        for chunk in iter(lambda: proc.stdout.read1(65536), b""):
+            chunks.append(chunk)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    proc.wait()
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    reader.join(5)
+    return b"".join(chunks).decode(errors="replace")
+
+
 def main():
     ap = argparse.ArgumentParser(prog="tests/run")
     ap.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 4)
@@ -138,7 +163,7 @@ def main():
                     stderr=subprocess.STDOUT, start_new_session=True,
                     env=dict(os.environ, TMPDIR=tmp))
                 running[bench] = proc
-            out = proc.communicate()[0].decode(errors="replace")
+            out = collect(proc)
             took = time.time() - t0
             shutil.rmtree(tmp, ignore_errors=True)
             with lock:
@@ -151,7 +176,16 @@ def main():
                     failed.append(bench)
                     lines = out.rstrip("\n").splitlines()
                     print("FAIL %s (%.0fs, exit %d)" % (bench, took, proc.returncode))
-                    for line in lines[-40:]:
+                    # The bench's own FAIL lines first, wherever they are: a
+                    # bench that prints a lot after them would push them out of
+                    # the tail, leaving only "FAILED: 1" to go on.
+                    tail = lines[-40:]
+                    early = [l for l in lines[:-40] if "FAIL" in l][:20]
+                    for line in early:
+                        print("  | " + line)
+                    if early:
+                        print("  | …")
+                    for line in tail:
                         print("  | " + line)
                     sys.stdout.flush()
 

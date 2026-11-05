@@ -41,7 +41,7 @@ from keepawake import asks, botapi, card_view, handling, holding, i18n, menus, p
 from keepawake.state import (HARD_HOLDERS, HOLD_SECONDS, REFUSAL_HOLDS,
                              SOFT_HOLDERS, STALE_AFTER, VERSION, WARN_BEFORE,
                              blank, extend, needs_warning, read, refuses,
-                             should_hold, touch, write)
+                             should_hold, touch)
 
 failures = []
 
@@ -1521,7 +1521,6 @@ with sandbox() as box:
     with state.locked() as st:
         state.extend(st, int(time.time()))
         state.touch(st, int(time.time()))
-    live = read()["until_ts"]
 
     saved_run = shell.run
     shell.run = lambda cmd, timeout=25: "No features in progress."
@@ -1554,8 +1553,12 @@ with sandbox() as box:
                 check_true("%s answered something" % data,
                            bool(probe.edits or probe.sent))
 
-        # The sleep buttons, on the other hand, have to go there.
-        for data in ("extend:%d" % live, "sleep:%d" % live):
+        # The sleep buttons, on the other hand, have to go there. Each with the
+        # deadline as it stands at its press: extend moves it to a second from
+        # now, and a sleep pressed with the one before was rightly stale
+        # whenever a second passed between the two.
+        for action in ("extend", "sleep"):
+            data = "%s:%d" % (action, read()["until_ts"])
             probe = FakeBot()
             handling.Handler(probe).callback(
                 {"id": "x", "data": data, "message": {"message_id": 9}})
@@ -1938,8 +1941,11 @@ if os.path.exists(cfg):
     nvm = shell.nvm_bin()
     if os.path.isdir(os.path.expanduser("~/.nvm/versions/node")):
         check_true("nvm's directory is found", bool(nvm) and os.path.isdir(nvm))
-        check_true("npm is visible to the bot's commands",
-                   shell.run("command -v npm").endswith("npm"))
+        # What the command said, when it is not npm's path: a failure that
+        # came once under the suite's load and never alone.
+        found = shell.run("command -v npm")
+        check("npm is visible to the bot's commands",
+              True if found.endswith("npm") else (found, shell.run, nvm), True)
 
     # port_open must not lie: a closed port is False, an open one True.
     check("a closed port is not open", phone_access.port_open(59999), False)

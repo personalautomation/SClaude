@@ -201,8 +201,10 @@ source "$LIB/tree/featuredb.sh"
                  # the real wait for one that is still coming up.
                  "SCLAUDE_DB_WAIT": "0"})
     full.update(env or {})
+    # stdin closed: the stub docker's exec reads its input to the end, and run
+    # outside tests/run (which closes it) the bench's own stdin never ends.
     done = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
-                          env=full, timeout=60)
+                          env=full, timeout=60, stdin=subprocess.DEVNULL)
     return done.stdout
 
 
@@ -375,8 +377,11 @@ def ensure_cases():
         # And the failure is remembered: the next call does not wait again.
         out = bash(root, 'docker() { return 1; }; s=$SECONDS; docker_ensure; echo "TOOK $((SECONDS - s))"',
                    {"SCLAUDE_DOCKER_DESKTOP": idle, "SCLAUDE_DOCKER_WAIT": "6"})
+        # Not waited for: well under the six seconds asked, though the call
+        # itself may take a second or two under the suite's load.
+        took = re.search(r"TOOK (\d+)", out)
         check("a recent failure is not waited for again",
-              "not waiting for it again" in out and "TOOK 0" in out, True)
+              "not waiting for it again" in out and took is not None and int(took.group(1)) < 4, True)
         os.remove(os.path.join(root, "registry", ".docker-failed"))
         # A limit that is not a number falls back to the default rather than
         # breaking the arithmetic and waiting for ever; checked in the source,

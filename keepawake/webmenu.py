@@ -23,10 +23,8 @@ import logging
 import os
 import re
 import subprocess
-import sys
 import threading
 import time
-import urllib.parse
 
 from keepawake import (asks, botapi, docs, card_view, handling, holding, menus, phone_access,
                        project_config, repos, services, sessions, shell, sleep_warning, state,

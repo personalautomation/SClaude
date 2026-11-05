@@ -817,7 +817,6 @@ class Handler(object):
         # sendMessage has time to go out over the network. Otherwise systemd
         # kills the whole process group along with the answer not yet sent.
         pid = os.getpid()
-        started = shell.uptime_of(pid)
         self.bot.edit(message_id,
                       t("svc.restarting"), None)
         # We put the mark in the state: after the restart it is a different

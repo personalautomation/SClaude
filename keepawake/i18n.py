@@ -17,6 +17,8 @@
 #   t("holders.ssh", n=2)           with substitution
 #   set_lang("en") / current()      switching and querying
 
+from keepawake import cycle_table
+
 DEFAULT = "en"
 
 # Key → (Russian, English). The order within a pair is the same everywhere, so
@@ -412,8 +414,16 @@ STRINGS = {
     "page.refresh":      ("🔄 Обновить карточку", "🔄 Refresh the card"),
     # The feature's actions on the menu page, grouped by where each leads.
     "act.title":         ("⚙️ <b>Действия с фичей</b> %(slug)s", "⚙️ <b>Feature actions</b> %(slug)s"),
-    "act.steps":         ("план · код · PR · ревью · с main · после merge · ретро",
-                          "plan · code · PR · review · with main · after the merge · retro"),
+    # The cycle's places, by their names in sclaude's table of the steps
+    # (cycle_table); act.steps, which the menu indexes by a feature's step
+    # number, is put together from them in their order, below.
+    "cycle.plan":        ("план", "plan"),
+    "cycle.code":        ("код", "code"),
+    "cycle.pr":          ("PR", "PR"),
+    "cycle.review":      ("ревью", "review"),
+    "cycle.sync":        ("с main", "with main"),
+    "cycle.epilogue":    ("после merge", "after the merge"),
+    "cycle.retro":       ("ретро", "retro"),
     "act.now":           ("Сейчас: <b>%(step)s</b>", "Now: <b>%(step)s</b>"),
     "act.back":          ("⏪ Назад, к шагу %(n)s", "⏪ Back to step %(n)s"),
     "act.reopen":        ("⏪ Заново открыть шаг %(n)s", "⏪ Reopen step %(n)s"),
@@ -851,6 +861,10 @@ STRINGS = {
     "option.back":       ("назад", "go back"),
     "option.none":       ("ничего", "none, go back"),
 }
+
+# The cycle's places in order, as one line a language: "plan · code · …".
+STRINGS["act.steps"] = tuple(" · ".join(STRINGS["cycle." + p][lang] for p in cycle_table.steps.places())
+                             for lang in (0, 1))
 
 _lang = DEFAULT
 

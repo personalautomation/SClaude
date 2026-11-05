@@ -75,9 +75,10 @@ db_base() {
   (
     flock -w 10 9 || exit 1
     listening="$(ss -ltnH 2>/dev/null | awk '{print $4}' | sed 's/.*://' | tr '\n' ' ')"
-    python3 - "$wt" "$state" "$DEV_REGISTRY" "$DB_BLOCK_FIRST" "$DB_BLOCK_LAST" \
+    PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$wt" "$state" "$DEV_REGISTRY" "$DB_BLOCK_FIRST" "$DB_BLOCK_LAST" \
       "$listening" <<'PY'
 import json, os, sys
+import state_file
 
 wt, state, registry, first, last, listening = sys.argv[1:7]
 first, last = int(first), int(last)
@@ -100,12 +101,8 @@ for name in os.listdir(registry):
 for base in range(first, last + 1, 10):
     if base in taken or any(p in listening for p in range(base, base + 10)):
         continue
-    with open(state) as fh:
-        data = json.load(fh)
-    data.setdefault("db", {})["base"] = base
-    with open(state, "w") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+    with state_file.update(state) as data:
+        data.setdefault("db", {})["base"] = base
     print(base)
     sys.exit(0)
 sys.stderr.write("no free block of ports in %d-%d\n" % (first, last))

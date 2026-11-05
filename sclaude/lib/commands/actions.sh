@@ -79,16 +79,19 @@ feature_action_items() {
   local slug="$1" wt="${2:-}" state step pr issue branch behind fcount
   [[ -n "$wt" ]] || wt="$(feature_worktree "$slug")" || return 1
   state="$wt/.sclaude/local/feature/state.json"
-  step="$(state_get "$state" step || echo "?")"
-  pr="$(state_get "$state" pr || true)";       [[ "$pr" == "null" ]] && pr=""
-  issue="$(state_get "$state" issue || true)"; [[ "$issue" == "null" ]] && issue=""
-  branch="$(state_get "$state" branch || true)"
+  # Read once: the menu lists every feature, and a python start per field
+  # was a quarter of a second each (state_snapshot).
+  local -A snap; state_snapshot "$state" snap
+  step="${snap[step]:-?}"
+  pr="${snap[pr]:-}";       [[ "$pr" == "null" ]] && pr=""
+  issue="${snap[issue]:-}"; [[ "$issue" == "null" ]] && issue=""
+  branch="${snap[branch]:-}"
 
   # Continue comes first, so that Enter all the way through matches what the
   # same menu does with the checkbox cleared. A closed feature has nothing to
   # continue: only the epilogue is left there, and cmd_resume calls that one
   # too.
-  if [[ "$step" == "done" && "$(state_get "$state" no_change 2>/dev/null || true)" == "true" ]]; then
+  if [[ "$step" == "done" && "${snap[no_change]:-}" == "true" ]]; then
     labels+=("Finish up"$'\t'"no change to the code — cleanup")
   elif [[ "$step" == "done" ]]; then
     labels+=("Finish up"$'\t'"$(step_label "$step" "$wt") — preview, production, cleanup")
@@ -172,9 +175,9 @@ feature_action_items() {
   # that there is nothing to go back from, and an item offering to undo
   # something that never happened is the "puzzle" this list exists not to be.
   local dsha rbcode rbnote
-  dsha="$(state_get "$state" deploy.prod.sha 2>/dev/null || true)"
+  dsha="${snap[deploy.prod.sha]:-}"
   if [[ -n "$dsha" && "$dsha" != "null" ]]; then
-    rbcode="$(state_get "$state" rollback.prod.code 2>/dev/null || true)"
+    rbcode="${snap[rollback.prod.code]:-}"
     if [[ "$rbcode" == "done" ]]; then
       rbnote="already rolled back — production runs the release before this"
     elif [[ "$(regression_status "$wt" prod 2>/dev/null || true)" == "failed" ]]; then
@@ -191,7 +194,7 @@ feature_action_items() {
   # should not hand a feature a port it has never used.
   local pid cwd port
   port="$DEV_PORT_PINNED"
-  [[ -n "$port" ]] || port="$(state_get "$wt/.sclaude/local/feature/state.json" dev.port 2>/dev/null || true)"
+  [[ -n "$port" ]] || port="${snap[dev.port]:-}"
   pid="$(dev_pid "$port")"
   if [[ -n "$pid" ]]; then
     cwd="$(dev_cwd "$pid")"
@@ -202,7 +205,7 @@ feature_action_items() {
     fi
   else
     local where=""
-    [[ -n "$DEV_PORT_PINNED" ]] || where="$(state_get "$wt/.sclaude/local/feature/state.json" dev.label 2>/dev/null || true)"
+    [[ -n "$DEV_PORT_PINNED" ]] || where="${snap[dev.label]:-}"
     labels+=("Dev server (dev)"$'\t'"not running${where:+ — opens at http://$where.localhost:$PROXY_PORT}")
   fi
   verbs+=(dev)
@@ -224,7 +227,7 @@ feature_action_items() {
   rstatus="$(regression_status "$wt" local)"
   case "$rstatus" in
     passed) rnote_r="green — it will not run again until something changes" ;;
-    failed) rnote_r="red on $(state_get "$wt/.sclaude/local/feature/state.json" regression.local.failed_at 2>/dev/null || echo "a part")" ;;
+    failed) rnote_r="red on ${snap[regression.local.failed_at]:-a part}" ;;
     *)      rnote_r="not run yet for this feature" ;;
   esac
   labels+=("Run the regression (regression)"$'\t'"$rnote_r")
@@ -237,7 +240,7 @@ feature_action_items() {
   if [[ "$step" == "done" && "$(regression_status "$wt" prod)" == "failed" \
         && -n "${dsha:-}" && "$dsha" != "null" && "${rbcode:-}" != "done" ]]; then
     local pnote="red on production; green lifts the hold"
-    [[ "$(state_get "$state" regression.prod.unrunnable 2>/dev/null || true)" == "true" ]] \
+    [[ "${snap[regression.prod.unrunnable]:-}" == "true" ]] \
       && pnote="could not run on production last time; green lifts the hold"
     labels+=("Check production again (regression-prod)"$'\t'"$pnote")
     verbs+=(regression-prod)
@@ -267,12 +270,12 @@ feature_action_items() {
     rtitle="Start this step over (reset)"
     local rkey; rkey="$(friction_pending "$state" || true)"
     rsession=""
-    [[ -n "$rkey" ]] && rsession="$(state_get "$state" "friction.$rkey.session" || true)"
+    [[ -n "$rkey" ]] && rsession="${snap[friction.$rkey.session]:-}"
     if [[ -n "$rsession" && "$rsession" != "null" ]]; then
       rtitle="Unblock this feature (reset)"
       rnote="an unfinished friction review is holding the step"
     else
-      rsession="$(state_get "$state" "steps.$step.session" || true)"
+      rsession="${snap[steps.$step.session]:-}"
       if [[ -z "$rsession" || "$rsession" == "null" ]]; then
         rnote="this step has no conversation yet"
       elif ! live_session "$wt" "$rsession" >/dev/null; then

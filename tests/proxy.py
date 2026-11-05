@@ -315,6 +315,103 @@ def raw_request(port, text):
     return head.split("\r\n")[0], head, body.decode("utf-8", "replace")
 
 
+GATE_SOCKET = r"""
+import os, socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[2])))
+s.listen(16)
+os.dup2(s.fileno(), 3)
+os.set_inheritable(3, True)
+os.environ["LISTEN_PID"] = str(os.getpid())
+os.environ["LISTEN_FDS"] = "1"
+os.execv(sys.executable, [sys.executable, sys.argv[1], "--gate"])
+"""
+
+
+def http_answers(port):
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=2) as conn:
+            conn.sendall(b"GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            return conn.recv(16).startswith(b"HTTP/")
+    except OSError:
+        return False
+
+
+def check_gate_new_code(root):
+    """A gate started by its socket closes once the code under it changed and
+    imports, so that the socket starts it again on the new code; on code that
+    does not import it stays, and one run by hand never closes for it. Run
+    from a copy of the tree: touching the real one would restart the real bot."""
+    tree = os.path.join(root, "gate-tree")
+    os.makedirs(os.path.join(tree, "bin"))
+    shutil.copy(PROXY, os.path.join(tree, "bin", "sclaude-proxy"))
+    ignore = shutil.ignore_patterns("__pycache__")
+    for part in ("keepawake", os.path.join("sclaude", "lib")):
+        shutil.copytree(os.path.join(os.path.dirname(PROXY), "..", part), os.path.join(tree, part),
+                        ignore=ignore)
+    envfile = os.path.join(root, "gate-new.env")
+    with open(envfile, "w") as fh:
+        fh.write("KEEPAWAKE_BOT_TOKEN=123:TEST\nKEEPAWAKE_CHAT_ID=4242\n")
+    touched = os.path.join(tree, "keepawake", "i18n.py")
+
+    def start(socketed):
+        port = free_port()
+        env = dict(os.environ, SCLAUDE_GATE_ENV=envfile, SCLAUDE_GATE_IDLE="300",
+                   SCLAUDE_GATE_CODE_EVERY="0.3", SCLAUDE_PROXY_TICK="0.2",
+                   SCLAUDE_GATE_PORT=str(port))
+        argv = ([sys.executable, "-c", GATE_SOCKET, os.path.join(tree, "bin", "sclaude-proxy"), str(port)]
+                if socketed else [sys.executable, os.path.join(tree, "bin", "sclaude-proxy"), "--gate"])
+        proc = subprocess.Popen(argv, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        # An HTTP answer, not a connection: started by the socket, the port
+        # takes connections before the gate has read its code's stamp.
+        wait_for(lambda: http_answers(port), 15)
+        return proc
+
+    def touch():
+        later = time.time() + 5
+        os.utime(touched, (later, later))
+
+    proc = start(True)
+    try:
+        time.sleep(0.6)
+        check("gate: unchanged code, it stays", proc.poll(), None)
+        touch()
+        wait_for(lambda: proc.poll() is not None, 15)
+        check("gate: new code that imports, it closes for the socket to start it again",
+              proc.poll(), 0)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+    with open(touched) as fh:
+        good = fh.read()
+    proc = start(True)
+    try:
+        with open(touched, "a") as fh:
+            fh.write("\nthis is not python(\n")
+        touch()
+        time.sleep(2)
+        check("gate: new code that does not import, it stays on the old", proc.poll(), None)
+    finally:
+        with open(touched, "w") as fh:
+            fh.write(good)
+        if proc.poll() is None:
+            proc.kill()
+        err = proc.communicate()[1].decode(errors="replace")
+    check("gate: and says so", "does not import" in err, True)
+
+    proc = start(False)
+    try:
+        touch()
+        time.sleep(1.5)
+        check("gate: run by hand, nothing would start it again: it stays", proc.poll(), None)
+    finally:
+        proc.kill()
+        proc.wait()
+
+
 def check_gate(proxy_port, root):
     """`sclaude-proxy --gate`: the phone's entry from the internet lets in only
     the bot's owner, by Telegram's signed initData, and passes them on to the
@@ -575,6 +672,7 @@ def main():
               "Connection: close" in head, True)
 
         check_gate(port, root)
+        check_gate_new_code(root)
 
         # A feature with a database block of its own is offered its Studio —
         # enabled in the stub config and actually listening, at base + 3 — but
@@ -782,7 +880,7 @@ def main():
         broken_proxy, broken_port = start_proxy(registry, "/nonexistent/sclaude", log,
                                                 idle=100000, tick=100)
         procs.append(broken_proxy)
-        g = register(registry, root, "g", free_port())
+        register(registry, root, "g", free_port())
         request(broken_port, "g.localhost:%d" % broken_port)
         status, _, body = request(broken_port, "g.localhost:%d" % broken_port)
         check("an unlaunchable start is a 502 that says why",

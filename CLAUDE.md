@@ -109,20 +109,26 @@ breaks the other silently — grep before you edit:
   bot and imports the function, and read by `clear_topic_messages`, which
   deletes them with the topic; `tests/keepawake.py` runs both writers.
 
-- The icons `phase_icon` in `sclaude/lib/core/steps.sh` opens every session's
-  start and end line with (and `pane_icon` gives its tab) are listed again in
-  `PHASE_ICONS` in `keepawake/notices.py`, which leads the topic's message with
-  such an icon in place of the laptop's 🖥; one missing there gets 🖥 before
-  it. `tests/session_names.py` checks the two lists agree. `feed_groups` there
-  also reads `phase_words`' verbs: a line saying `started` or `resumed` opens
-  a step's message and the `✅` of a step's `done` closes it, so a step's lines
-  are not mixed with the next one's; `tests/notices.py` runs it on those lines.
-- The cycle's numbering — the four `STEPS`, then the sync with main, the
-  epilogue and the retrospective (`cycle_number` in `sclaude/lib/core/steps.sh`) —
-  is named step by step by `act.steps` in `keepawake/i18n.py`, which the menu
-  indexes by a feature's step number, and counted again by `TOTAL` in the
-  issue's summary (`sclaude/lib/github/issue_sync.sh`); `tests/session_names.py` checks
-  that both halves of `act.steps` name as many steps as `cycle_total` counts.
+- The cycle's steps are one table, `sclaude/lib/core/cycle_steps.py`: their
+  order, each one's launch and the icons sclaude's lines open with (the bot's
+  words for the cycle's places stay in `i18n.py`, as `cycle.<name>`). The
+  shell reads
+  `cycle_steps.sh`, written from it (`python3 cycle_steps.py sh >
+  cycle_steps.sh`) and committed — `STEPS`, `AFTER_STEPS`, `STEP_SPEC` and
+  `PHASE_ICON` for `phase_icon` and `cycle_number` in `steps.sh`; the bot reads
+  the table itself (`keepawake/cycle_table.py`) for `PHASE_ICONS` in
+  `notices.py` and the order of `act.steps` in `i18n.py`; the process map for
+  the steps' `SPEC`; the issue's summary gets `cycle_total` as
+  `SCLAUDE_TOTAL`. `tests/session_names.py` fails when `cycle_steps.sh` is not
+  what the table writes, or a place has no `cycle.<name>` in `i18n.py`. A step added there goes into `cycle_steps.sh` in the same change.
+  `pane_icon` still maps a session's name to its kind by pattern.
+  `feed_groups` in `notices.py` also reads `phase_words`' verbs: a line saying
+  `started` or `resumed` opens a step's message and the `✅` of a step's
+  `done` closes it, so a step's lines are not mixed with the next one's;
+  `tests/notices.py` runs it on those lines.
+
+  <!-- Changed by Claude on 2026-11-05 with the steps' table: the icons and
+  the names were copies kept in step by a test; now there is one list. -->
 
   <!-- Added by Claude on 2026-10-24 with step 5, the sync with main: the
   steps after it moved up by one, and a list one short marks the wrong one. -->
@@ -182,6 +188,21 @@ breaks the other silently — grep before you edit:
 
   <!-- Added by Claude on 2026-10-31 with the recorded demo of /sdemo; the
   issue comment and the steps' demo on 2026-11-01. -->
+
+- Every state field the shell names — `state_get`, `state_set`, a
+  `state_snapshot`'s `${snap[...]}` — is listed in
+  `sclaude/lib/core/state_schema.py`, with its meaning; `tests/state-file.py`
+  fails on one missing there and on an entry nothing names. A field added to
+  the code goes into the schema in the same change.
+
+  <!-- Added by Claude on 2026-11-05 with the state's schema: a mistyped
+  field reads as "not set", without an error. -->
+
+- Every file kept in a feature's `.sclaude/local/feature/` is listed in
+  `sclaude/lib/core/feature_files.py` with what it is for;
+  `tests/feature-files.py` fails on a name the code writes out in full
+  (`.sclaude/local/feature/<name>`) that is not there, and on an entry
+  nothing names. A file added goes there in the same change.
 
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/review/review_round.sh`, which decides by it

@@ -434,6 +434,18 @@ to the site around it. What Lax did against a forged request the gate does
 itself: a request another site made the browser send (`Sec-Fetch-Site`, or
 `Origin` from an older browser) is refused, a plain link followed is not.
 
+**The gate on new code.** The gate imports keepawake's menu and sclaude's
+modules on first use, and the phone may keep the Mini App open for hours, so a
+gate that lived through sclaude's update served the old menu beside modules
+imported new. Started by its socket (`sclaude-gate.socket`), it looks every
+`SCLAUDE_GATE_CODE_EVERY` seconds (30) at its own file, keepawake and
+sclaude's library; once one changed, the new code compiles and imports in a
+child, and no connection is open, it closes, and the socket starts it again on
+the next connection, on the new code. The phone stays signed in: the cookie is
+signed with the bot's token. On code that does not import it stays on the old
+and says so; run by hand, with nothing to start it again, it never closes for
+this. The main proxy, which loads neither, does not do it.
+
 **Phone access waits for the address.** A funnel just turned on is not reachable
 at once: while it was off its name left public DNS, and it comes back only after
 minutes (five, once). A phone that asks too early is told the name does not

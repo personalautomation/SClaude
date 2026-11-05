@@ -43,26 +43,36 @@ let one screen be read alone.
 
 | Lines | File | What holds it back |
 | ---: | --- | --- |
-| 1979 | `bin/sclaude-proxy` | one asyncio server; its parts (routing, the gate, the demo, the DORA page, sign-in) could become a package like keepawake's |
-| 1737 | `review/pr_context.py` | the tests replace `gh_json`, `review_mode`, `recent` in it: a split needs a GitHub client module they patch instead; CLAUDE.md couples eight of its names |
-| 1284 | `sclaude/hooks/forbidden-commands.py` | the rules, the parsing and the friction log in one hook |
+| 1980 | `bin/sclaude-proxy` | one asyncio server sharing its state (`GATE`, `FLOW`, the map's reload) across what would be its parts; a package means passing that state, not just moving functions |
+| 1737 | `review/pr_context.py` | see "pr_context: how to split it" below |
+| 1284 | `sclaude/hooks/forbidden-commands.py` | its rules share `POLICY`/`rule_on` and `segments`, and `environments_data` and `project_dir` call each other: a split rebuilds the hook's frame, in the hook that enforces the bans — a session of its own, with the hooks bench as the judge |
 | 1259 | `tree/worktree.sh` | the tree, its dev server and its ports |
-| 1254 | `core/steps.sh` | the steps' table, names and icons, which several readers mirror |
 | 1091 | `bin/keepawake` | the detector and `status` |
-| 1057 | `metrics/metrics_guide.py` | mostly prose: a data file it reads |
 | 1047 | `bin/wsl-update` | |
-| 4471 | `tests/keepawake.py` | one bench for the whole bot; per-module benches would follow the split modules |
+| 4512 | `tests/keepawake.py` | one bench for the whole bot; split per module it would also run in parallel, though `hooks` is the suite's longest now |
 | 2072 | `tests/regression.py`, 1595 `tests/review-round.py` | the same |
 
-## Web assets inside Python
+Decided against, 2026-11-05: `metrics/metrics_guide.py` as a data file. It is
+data already — a dict of tuples and three small band helpers — and JSON would
+put each paragraph on one line and `7 * DAY` as `604800`.
 
-The pages carry their scripts and styles as Python strings: `PLAY_SCRIPT`
-(some 590 lines of JavaScript), `INTERACT_SCRIPT`, `LIVE_SCRIPT`,
-`PRINT_SCRIPT` and the styles in `flow/process_page.py` and
-`flow/process_doc.py`, `STYLE`, `TIP_JS` and `TEAM_JS` in
-`metrics/dora_page.py` and `metrics/dora_team.py`. As `.js` and `.css` files
-beside the module, read when the page is drawn, an editor would check them
-and a diff would show them as code.
+### pr_context: how to split it
+
+The benches replace ten of its names on the module (`gh_json` in 22 places,
+`recent`, `open_threads`, `review_mode`, `review_threads`…). Split as it is,
+a function in one part would keep its own reference to another part's
+function, the replacement would no longer reach it, and the bench would call
+the real `gh` — which is signed in on this machine. In order:
+
+1. a client module (`gh`, `gh_json`, `pr_view`) that every part calls through
+   its module attribute (`gh_client.gh_json(...)`), and the benches replace
+   there;
+2. the parts call one another through module attributes too, never by a name
+   imported from another part;
+3. the names CLAUDE.md couples (`YOURS_FILE`, `NIGHT_MARK`, `NIGHT_FILE`,
+   `CHECKS_VERDICTS`, `LOCAL_SIGNATURE`, `findings_explained`, `night_yours`,
+   `night_take`) stay in `pr_context.py`, or CLAUDE.md and their benches move
+   with them.
 
 ## Settings in code
 
@@ -74,43 +84,54 @@ Numbers that are policy rather than logic, each in its own module:
 `IDLE_*`. Candidates for `sclaude/config.example.json` where a project could
 want its own value, or for one module of defaults where nobody should.
 
-## Tests coupled to the file layout
+## The waits whose purpose is not written down
 
-Many benches read a module's text and cut a function out by regex
-(`functions(RUN, [...])`), or source modules by path, or count a string in a
-named file. Every function moved tonight meant editing such benches. A helper
-outside the benches (a `tests/lib/` folder is not a bench to `tests/run`)
-that finds a function in `sclaude/lib` by name and sources modules by bare
-name would let a module move without touching its tests — while keeping each
-bench naming the modules it guards, which `tests/run --changed` matches on.
+Some pauses are deliberate and their reason is not obvious from the code.
+Removing one is a guess; a local log of what happened during it would turn
+the guess into a decision. One helper (`wait_note <name> <how it ended>
+<seconds> [what arrived]`, a line of JSON in `~/.local/state/sclaude/waits.jsonl`,
+never in git), called only where the meaning is unclear:
 
-`tests/pane.py` is timing-sensitive: under the parallel suite's load its
-`[r]` checks fail about one run in three; alone it passes.
+- `poll_pause` swallowing the keys behind the first (`core/ui.sh`): were they
+  an arrow's bytes, a stray word, or presses that meant something?
+- the tab's two-second wait for `tee` (`core/pane.sh`): did it finish in time,
+  and how long does it really take?
+- `SESSION_GRACE` after a turn ends with a marker (`cycle/session_watch.sh`):
+  what does the person do in those thirty seconds?
+- `SESSION_ACCEPT_GRACE` after step 2's `accepted`.
 
-## Long-running processes and new code
-
-The bot runs itself again in place when its code or sclaude's library
-changes and the new code imports. The gate (`sclaude-proxy --gate`), which
-serves the Mini App and imports keepawake's `webmenu` and sclaude's modules on
-first use, does not: while the phone keeps the Mini App open it can serve old
-`webmenu` code beside sclaude modules imported new. It idles out otherwise,
-and this predates the refactoring. A re-exec like the bot's, tried on code
-that loads, would close it; the main proxy, which loads neither, should not
-take it on (a re-exec there drops its idle bookkeeping and live connections,
-and leaves its spawned children unreaped).
+Not a general log of everything: the project has its journals already
+(history.jsonl, review-context.log, the rounds' journal, DORA), and a log
+with no question behind it goes unread.
 
 ## Smaller cleanups
 
 - Python heredocs inside shell (some 80 `python3 -`/`python3 -c` sites):
   each is code without a bench of its own; the larger ones belong in modules.
-- pyflakes warnings that predate the refactoring: unused `errno` in
-  `keepawake/state.py`, `sys` and `urllib.parse` in `keepawake/webmenu.py`,
-  `HARD_HOLDERS` in `keepawake/status_report.py`, the unused locals
-  `started` in `keepawake/handling.py` and `_la` in `flow/process_diagram.py`.
 - A CLI module that siblings also import (`pr_context.py` run as a script and
   imported by `review_report.py`) exists twice in that process, as
   `__main__` and by name. Harmless while neither keeps state the other reads.
 - `_path.py` keeps bare-name imports working across the folders. Absolute
-  imports (`from sclaude.lib.review import pr_context`, the way keepawake
-  imports its modules) would make it unnecessary, at the price of rewriting
-  every import once.
+  imports would make it unnecessary, at the price of rewriting every import
+  once — decided against: no gain for the person using the tools.
+- The benches' 641 folder-qualified module paths (`"%s/core/state.sh" % LIB`)
+  break only when a folder moves; left as they are.
+
+## Done on 2026-11-05
+
+- The suite: 317 s to about two minutes (orphaned sleeps held the runner's
+  pipe; three cases ran into product waits their stubs never satisfy).
+- `state_set` and every other writer of `state.json` under a lock, written
+  whole (`core/state_file.py`); a lost update reproduced on the old code.
+- The flaky benches (pane, keepawake, review-round, answers, feature_db),
+  with two product bugs found on the way: a Cyrillic letter cut by `ask`'s
+  wait, and `session_watch_stop` removing [k]'s file before the watcher.
+- `tests/lib/benchlib.py`: shell functions found by name.
+- `core/state_schema.py` and its check; `state_snapshot` for the menu.
+  The key reshuffle (`stages.*`, `cycle.*`, `feature.*`) was decided
+  against: some 400 edits for a cosmetic gain.
+- `core/cycle_steps.py`: the steps in one table.
+- `core/feature_files.py` and its check, rather than path constants every
+  reader would use.
+- The gate closes on new code for its socket to start it again.
+- The pages' scripts and styles as `.js` and `.css` files.

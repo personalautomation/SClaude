@@ -135,7 +135,10 @@ def typed(keys, channel=None, prompt="What is wrong? ", cols=None, end_feature=F
         if end_feature:
             open(os.path.join(channel_dir, "ended"), "w").close()
         out = b""
-        end = time.time() + 6
+        # Until the process ends, which every case but a stuck read does: the
+        # deadline is for that one, and long enough for a question whose
+        # channel takes several python starts under the suite's load.
+        end = time.time() + 20
         while time.time() < end:
             r, _, _ = select.select([fd], [], [], 0.3)
             if r:
@@ -164,6 +167,10 @@ check("free-text-edited-with-the-arrows",
 check("free-text-arrow-before-typing-leaves-nothing",
       typed([b"\x1b[D", b"ok", b"\r"])[0], "ok")
 check("free-text-cyrillic", typed(["ж".encode(), "ук".encode(), b"\r"])[0], "жук")
+# The same letter with its two bytes on either side of the wait's end: read
+# reports the timeout with the first byte in hand, and the letter used to go.
+check("free-text-cyrillic-letter-cut-by-the-wait",
+      typed(["ж".encode()[:1], "ж".encode()[1:], "ук".encode(), b"\r"])[0], "жук")
 check("free-text-empty-enter", typed([b"\r"])[0], "")
 check("free-text-space-first-is-not-enter", typed([b" ", b"ok", b"\r"])[0], "ok")
 check("free-text-from-the-channel", typed([], channel="from the phone")[0], "from the phone")

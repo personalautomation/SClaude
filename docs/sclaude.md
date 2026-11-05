@@ -141,7 +141,12 @@ alone, and none takes a standard module's name; `tests/paths.py` checks both.
 | `sclaude/lib/core/environment.sh` | which database this machine's features work against |
 | `sclaude/lib/core/developer.sh` | who is running it, and whether they maintain the orchestrator (`MAINTAINERS`) |
 | `sclaude/lib/commands/doctor.sh` | `sclaude doctor`: what this machine lacks, with the fix for each gap |
+| `sclaude/lib/core/page_asset.py` | reads a page's script or style kept as a file beside the module that draws it (`process_*.js`, `dora_*.css`…) |
+| `sclaude/lib/core/cycle_steps.py` | the cycle's steps once: their order, each one's launch (model, effort, mode, title), the icons the lines open with, the sessions numbered after them; `cycle_steps.sh` is written from it for the shell (`python3 cycle_steps.py sh > cycle_steps.sh`), and the bot and the process map read it directly |
 | `sclaude/lib/core/state.sh` | the repository, `.sclaude/local/feature/state.json` and the cycle's record |
+| `sclaude/lib/core/feature_files.py` | every file kept beside a feature's state in `.sclaude/local/feature/`, with what it is for; `python3 feature_files.py [name]` lists them or explains one. `tests/feature-files.py` fails on a name the code writes out in full that is not listed, and on a listed one nothing names |
+| `sclaude/lib/core/state_schema.py` | every field of the feature's state, the epilogue's record and the QA watch, with what it means; `python3 state_schema.py` lists them, `python3 state_schema.py <path>` explains one. `tests/state-file.py` fails on a path the shell reads or writes that is not listed, and on a listed one nothing names |
+| `sclaude/lib/core/state_file.py` | how every writer changes `state.json`: under a lock (`state.json.lock`), written whole through a rename, so two writers never lose each other's change and a reader never finds it half written |
 | `sclaude/lib/tree/branches.sh` | sorting out branches with nothing left to hold |
 | `sclaude/lib/tree/worktree.sh` | preparing a feature's tree and the dev server |
 | `sclaude/lib/tree/dev_loopback.cjs` | loaded into a feature's server: a listen on every interface goes to 127.0.0.1 |
@@ -390,6 +395,12 @@ they glue. The page cuts the sheets again in the browser for the paper and
 scale chosen above the map (`PRINT_SCRIPT`), and sets `@page` to that paper:
 a browser's own Scale shrinks each sheet without making fewer, and its
 dialog hides Layout and Paper size once a page names its paper.
+
+The pages' scripts and styles are files of their own beside the modules that
+draw them — `flow/process_*.js` and `.css`, `metrics/dora_*.js` and `.css` —
+read into the constants named here as the modules are imported; a value the
+page fills in is a marker such as `/*MODEL*/`. The proxy reads the map again
+when one of them changes (`process.files()`).
 
 **Every block, arrow and command can be pointed at** (`INTERACT_SCRIPT`,
 shared by both pages). Each carries a `data-key` — `n:<node>`, `e:<map>:<n>`,

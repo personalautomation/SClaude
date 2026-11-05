@@ -656,7 +656,6 @@ def check_proxy(root, wt, dport, login_file):
                os.path.dirname(os.path.dirname(made)) == os.path.join(wt, demo.DEMO_DIR),
                os.path.isfile(made), ran[ran.index("--base") + 1], ran[ran.index("--feature") + 1]),
               (True, True, True, "http://f1.localhost:%d" % port, "f1"))
-        demo_id = os.path.basename(os.path.dirname(made))
         check("demo play: outside sclaude, the links are said here and go nowhere else",
               ("link: " + demo.demo_links("f1")[0] in said, len(calls),
                any(l.startswith("kept here:") for l in said)), (True, 1, True))
@@ -671,7 +670,6 @@ def check_proxy(root, wt, dport, login_file):
             json.dump(dict(json.loads(state_before), issue=7), fh)
         try:
             said, calls = play(True)
-            this = os.path.basename(os.path.dirname(calls[0].split()[1]))
             check("demo play: in sclaude, the topic gets both links",
                   (calls[1] == "notify --quiet --in %s 🎬 T" % wt,
                    calls[2] == "💻 http://127.0.0.1:%d/__sclaude/demo/f1/" % port),

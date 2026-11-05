@@ -751,9 +751,11 @@ TEXT
 run_local_round() {
   local wt="$1" session="$2"
   [[ -n "$session" ]] || return 0
-  python3 - "$wt/.sclaude/local/feature/state.json" "$session" <<'PY' 2>/dev/null || true
+  PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$wt/.sclaude/local/feature/state.json" "$session" <<'PY' 2>/dev/null || true
 import json, sys
 path, session = sys.argv[1:3]
+import state_file
+state_file.lock(path)
 with open(path) as fh:
     data = json.load(fh)
 runs = ((data.get("steps") or {}).get("review") or {}).get("runs") or []
@@ -762,9 +764,7 @@ if not mine:
     sys.exit(0)
 run = mine[-1]
 run["rounds"] = (run.get("rounds") if isinstance(run.get("rounds"), int) else 0) + 1
-with open(path, "w") as fh:
-    json.dump(data, fh, indent=2, ensure_ascii=False)
-    fh.write("\n")
+state_file.write(path, data)
 PY
 }
 

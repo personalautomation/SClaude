@@ -46,6 +46,8 @@ import sys
 import tempfile
 import time
 import uuid
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib  # noqa: E402 — shell functions found by name
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
@@ -59,23 +61,17 @@ def check(name, got, want):
         failures.append((name, want, got))
 
 
-def functions(source, names):
-    out = []
-    for name in names:
-        m = re.search(r"^%s\(\) \{\n.*?^\}\n" % re.escape(name), source, re.S | re.M)
-        if not m:
-            failures.append(("function-present-" + name, True, False))
-            continue
-        out.append(m.group(0))
-    return "\n".join(out)
+def functions(names):
+    """The named shell functions, found by name in the whole library."""
+    return benchlib.functions(names, missing=lambda name: failures.append(("function-present-" + name, True, False)))
+
 
 
 RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
           for m in ("cycle/run.sh", "cycle/session_watch.sh", "review/review_round.sh", "review/review_gate.sh",
                     "improve/friction.sh"))
 WATCH = 'source "%s/core/state.sh"\nsource "%s/core/pane.sh"\nLIB="%s"\n' % (LIB, LIB, LIB) + functions(
-    RUN, ["round_marker", "done_marker", "session_watch_start", "session_watch_stop"]) + "\n" + \
-    re.search(r"^stop_file\(\) \{ .*\}\n", RUN, re.M).group(0)
+    ["round_marker", "done_marker", "session_watch_start", "session_watch_stop", "stop_file"])
 END = os.path.join(LIB, "cycle", "session_end.py")
 
 tmp = tempfile.mkdtemp()
@@ -168,7 +164,7 @@ try:
     feature = os.path.join(wt, ".sclaude/local/feature")
     done_file = os.path.join(feature, "session-done")
 
-    def watched(marker, after, until=None, args=None):
+    def watched(marker, after, until=None, args=None, before=None):
         """Start the watcher, write the marker, add `after()` to the transcript,
         and wait for `until` — a session ended, a marker removed — up to 15s.
 
@@ -181,7 +177,9 @@ try:
         case has no signal to wait for.
 
         marker: a path, or None; args: session_watch_start's, the feature's
-        by default."""
+        by default; before: run once the watcher has started and before the
+        marker is written — for a state the watcher must find with the marker
+        (it clears such states as it starts, so earlier is too early)."""
         open(transcript, "w").close()
         started, stop = os.path.join(tmp, "watching"), os.path.join(tmp, "stop-watching")
         for f in (started, stop):
@@ -205,6 +203,8 @@ session_watch_stop
                     failures.append(("watcher-started", True, False))
                     return
                 time.sleep(0.05)
+            if before:
+                before()
             if marker:
                 with open(marker, "w") as fh:
                     fh.write("x\n")
@@ -308,7 +308,9 @@ rm -f "$(stop_file)"
         return []
 
     target = fake("--resume %s" % session)
-    watched(done_file, lambda: kept() + [turn_end()])
+    # Kept before the marker: written after it, a watcher polling fast under
+    # load took the marker alone for the end and closed the session.
+    watched(done_file, lambda: [turn_end()], before=kept)
     check("k-keeps-it-open", target.poll(), None)
     check("k-keeps-the-marker", os.path.exists(done_file), True)
     check("k-off-with-the-watcher", os.path.exists(keep), False)
@@ -342,7 +344,6 @@ rm -f "$(stop_file)"
         reopened = []
 
         def restart_after_ended():
-            kept()
             for e in before():
                 say(e)
             time.sleep(2.0)          # several polls: the watcher holds "ended"
@@ -359,7 +360,8 @@ rm -f "$(stop_file)"
             time.sleep(1.5)          # several polls more, past a grace of 0
             return []
 
-        watched(marker, restart_after_ended, args=kind_args)
+        # Kept before the marker, for the same reason as [k] above.
+        watched(marker, restart_after_ended, args=kind_args, before=kept)
         check("r-%s-ends-the-old-process" % name, gone(target), True)
         check("r-%s-reopened-not-closed" % name,
               bool(reopened) and reopened[0].poll() is None, True)
@@ -524,7 +526,7 @@ echo "watcher=[$SESSION_WATCHER]"
         fh.write('#!/bin/sh\necho \'[{"sessionId": "chain-c", "pid": 42}]\'\n')
     os.chmod(os.path.join(fake_bin, "claude"), 0o755)
     holder = 'source "%s/core/state.sh"\nLIB="%s"\n%s\nHOME="%s"; PATH="%s:$PATH"\n' % (
-        LIB, LIB, functions(RUN, ["session_holder"]), home, fake_bin)
+        LIB, LIB, functions(["session_holder"]), home, fake_bin)
     for sid, want in (("chain-a", "pid 42"), ("chain-c", "pid 42"), ("other", "")):
         check("holder-%s" % sid, subprocess.run(
             ["bash", "-c", holder + 'session_holder %s "%s"' % (sid, wt)],
@@ -597,7 +599,7 @@ echo "watcher=[$SESSION_WATCHER]"
     closer = ('source "%s/core/steps.sh"\nfor _m in ship/regression ship/regression_gate ship/regression_fix; do source "%s/$_m.sh"; done\n'
               'ask_feed() { printf "FEED %%s\\n" "$2"; }\nask_note() { :; }\n'
               'session_report() { echo REPORT; }\nsay_here() { echo "$*"; }\nBOLD=; OFF=\n' % (LIB, LIB)
-              + functions(RUN, ["session_closed"]))
+              + functions(["session_closed"]))
 
     def closed(marked, *args):
         marker = os.path.join(tmp, "closed.done")
@@ -837,7 +839,7 @@ echo "watcher=[$SESSION_WATCHER]"
     with open(os.path.join(ctx_dir, sid + ".jsonl"), "w") as fh:
         fh.write(json.dumps(used(10, 50000)) + "\n" + json.dumps(used(3, 120000)) + "\n")
     script = 'source "%s/core/state.sh"\nsource "%s/core/scratch.sh"\nLIB="%s"\nREVIEW_CONTEXT_MAX_PCT=40\n' % (LIB, LIB, LIB)
-    script += functions(RUN, ["review_context", "review_context_log", "review_carry_on", "reversals_file"])
+    script += functions(["review_context", "review_context_log", "review_carry_on", "reversals_file"])
     script += '\nexport HOME="%s"\nheld="$(review_context "%s" "%s")"\necho "$held"\n' % (home, ctx_wt, sid)
     script += 'review_context_log "%s" feat "%s" "carried on" "$held" 2\n' % (ctx_wt, sid)
     script += 'review_carry_on 12\n'
@@ -888,7 +890,7 @@ echo "watcher=[$SESSION_WATCHER]"
                          capture_output=True, text=True).stdout, "")
     keep_sh = ('source "%s/core/state.sh"\nLIB="%s"\nREVIEW_CONTEXT_MAX_PCT=40\n'
                'REVIEW_CACHE_TTL=3600\nREVIEW_CACHE_MARGIN=300\nexport HOME="%s"\n' % (LIB, LIB, home))
-    keep_sh += functions(RUN, ["review_keep"])
+    keep_sh += functions(["review_keep"])
 
     def keep(held, ago):
         with open(os.path.join(ctx_dir, sid + ".jsonl"), "w") as fh:
@@ -1072,7 +1074,7 @@ echo "watcher=[$SESSION_WATCHER]"
     rstate = os.path.join(wt, ".sclaude/local/feature", "state.json")
     with open(rstate, "w") as fh:
         json.dump({"steps": {"review": {}}}, fh)
-    rounds_sh = ('source "%s/core/state.sh"\n' % LIB) + functions(RUN, ["review_round_begins", "review_round_ends"])
+    rounds_sh = ('source "%s/core/state.sh"\n' % LIB) + functions(["review_round_begins", "review_round_ends"])
 
     def round_since(script):
         subprocess.run(["bash", "-c", rounds_sh + "\n" + script], timeout=30)
@@ -1121,7 +1123,7 @@ echo "watcher=[$SESSION_WATCHER]"
         with open(os.path.join(fake, "review/pr_context.py"), "w") as fh:
             fh.write("print(%r)\n" % split)
         body = 'source "%s/core/state.sh"\n' % LIB
-        body += functions(RUN, ["review_reopen", "review_carry_on"])
+        body += functions(["review_reopen", "review_carry_on"])
         body += ('LIB="%s"; SELF=sclaude; REVIEW_WAIT_MAX=5; REVIEW_CONTEXT_MAX_PCT=40\n'
                  'review_session_since() { echo 0; }\nreview_stuck_say() { :; }\ninfo() { echo "$*"; }\n'
                  'review_context() { echo "1 1 12 1000000"; }\n'
@@ -1182,7 +1184,7 @@ echo "watcher=[$SESSION_WATCHER]"
         with open(os.path.join(fake, "review/pr_context.py"), "w") as fh:
             fh.write("import sys\nprint(%r if '--open-since' in sys.argv else %r)\n" % (split, word))
         body = 'source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
-        body += functions(RUN, ["review_close_gate", "review_enough_close", "review_session_since",
+        body += functions(["review_close_gate", "review_enough_close", "review_session_since",
                                 "review_stuck_say"])
         body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5; REVIEW_GO_ON_PAUSE=0\n'
                  'gh_repo() { echo o/r; }\nproject_review_mode() { echo %s; }\n'
@@ -1305,7 +1307,7 @@ echo "watcher=[$SESSION_WATCHER]"
                 fh.write("2026-10-31T01:00:00 code hook a refusal\n  its reason\n"
                      "2026-10-31T01:05:00 code hook another\n")
         body = 'source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
-        body += functions(RUN, ["friction_hold", "friction_before_retro"])
+        body += functions(["friction_hold", "friction_before_retro"])
         body += ('info() { echo "$*"; }\nwarn() { echo "$*"; }\nask_feed() { echo "FEED $2"; }\n'
                  # As the real one: the review closed, and the log read and
                  # moved unless it resumes an open review (its own batch).
@@ -1318,7 +1320,7 @@ echo "watcher=[$SESSION_WATCHER]"
                  '%s; echo "RC=$?"\n') % (1 if fails else 0, call.replace("WT", wt))
         # A terminal of its own: the review before the retro needs one.
         master, slave = pty.openpty()
-        out = subprocess.run(["bash", "-c", body], stdin=slave, stdout=slave, stderr=slave, timeout=30)
+        subprocess.run(["bash", "-c", body], stdin=slave, stdout=slave, stderr=slave, timeout=30)
         os.close(slave)
         seen = b""
         while True:
@@ -1362,7 +1364,7 @@ echo "watcher=[$SESSION_WATCHER]"
                    "steps": {"review": {"friction_held": "review-3"}},
                    "friction": {"review-2": {"held": True}, "review-3": {"held": True}}}, fh)
     subprocess.run(["bash", "-c", 'source "%s/core/state.sh"\n%s\nfriction_log_read "%s" review-4'
-                    % (LIB, functions(RUN, ["friction_log_read"]), st)], timeout=30)
+                    % (LIB, functions(["friction_log_read"]), st)], timeout=30)
     with open(st) as fh:
         got = json.load(fh)
     check("friction-read-settles-held", (got["steps"]["review"].get("friction_held"),
@@ -1374,7 +1376,7 @@ echo "watcher=[$SESSION_WATCHER]"
             json.dump({"friction_owed": owed, "steps": {"review": {"friction_held": held} if held else {}},
                        "friction": {held: {"held": True}} if held else {}}, fh)
         subprocess.run(["bash", "-c", 'source "%s/core/state.sh"\n%s\nfriction_log_read "%s" %s'
-                        % (LIB, functions(RUN, ["friction_log_read"]), st, key)], timeout=30)
+                        % (LIB, functions(["friction_log_read"]), st, key)], timeout=30)
         with open(st) as fh:
             return json.load(fh).get("friction_owed")
     # The key running now stays owed until its own end; a held one read
@@ -1444,7 +1446,7 @@ echo "watcher=[$SESSION_WATCHER]"
         with open(st, "w") as fh:
             json.dump({"pr": pr, "steps": {"review": review}}, fh)
         body = 'source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
-        body += functions(RUN, ["review_stuck_say"])
+        body += functions(["review_stuck_say"])
         body += ('\nLIB="%s"\nwarn() { echo "WARN $*"; }\nask_feed() { echo "FEED $2"; }\nask_note() { :; }\n'
                  'ask() { echo "ASKED"; }\n'
                  'review_stuck_say "%s"; review_stuck_say "%s"\n') % (LIB, wt, wt)
@@ -1548,7 +1550,7 @@ echo "watcher=[$SESSION_WATCHER]"
     r = RUN[RUN.index("\nrun_step() {"):]
     check("regression-fix-pushed-before-local-review",
           r.index('regression_push_fix "$wt"') < r.index('local_review "$wt" "$pr"'), True)
-    push = functions(RUN, ["regression_push_fix"])
+    push = functions(["regression_push_fix"])
     origin = os.path.join(tmp, "push-origin.git")
     clone = os.path.join(tmp, "push-clone")
     fakelib = os.path.join(tmp, "push-lib")

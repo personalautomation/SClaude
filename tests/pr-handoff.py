@@ -24,6 +24,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib  # noqa: E402 — shell functions found by name
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
@@ -36,16 +38,10 @@ def check(name, got, want):
         failures.append((name, want, got))
 
 
-def functions(path, names):
-    source = open(path, encoding="utf-8").read()
-    out = []
-    for name in names:
-        m = re.search(r"^%s\(\) \{\n.*?^\}\n" % re.escape(name), source, re.S | re.M)
-        if not m:
-            failures.append(("function-present-" + name, True, False))
-            continue
-        out.append(m.group(0))
-    return "\n".join(out)
+def functions(names):
+    """The named shell functions, found by name in the whole library."""
+    return benchlib.functions(names, missing=lambda name: failures.append(("function-present-" + name, True, False)))
+
 
 
 # The fake gh: the first pattern matching the joined arguments answers.
@@ -125,11 +121,10 @@ HARNESS = "\n".join([
     'say() { echo "SAY $*"; }; info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }',
     'ask() { echo "ASK $1"; printf -v "$2" "%s" "${FAKE_ANSWER:-}"; }',
     "gh_repo() { echo o/r; }",
-    functions(os.path.join(LIB, "core", "state.sh"), ["state_get", "state_set"]),
-    functions(os.path.join(LIB, "core", "project.sh"), ["column_is"]),
-    functions(os.path.join(LIB, "github", "github.sh"), ["pr_milestone", "pr_setup"]),
-    functions(os.path.join(LIB, "github", "board.sh"),
-              ["issue_status_items", "issue_status_now",
+    functions(["state_get", "state_set"]),
+    functions(["column_is"]),
+    functions(["pr_milestone", "pr_setup"]),
+    functions(["issue_status_items", "issue_status_now",
                "pr_board_set", "pr_qa_handoff", "pr_qa_handoff_now"]),
     'QA_DONE=Done PROGRESS_FROM=Backlog PROGRESS_TO="In progress"',
 ])
@@ -266,6 +261,10 @@ check("summary-regression", "local ✓ passed · preview ✓ passed" in text, Tr
 wbin = os.path.join(tmp, "watchbin")
 os.makedirs(wbin)
 shutil.copy(os.path.join(ROOT, "bin", "sclaude-watch"), wbin)
+# And the library where it looks for it, beside its bin: it writes its records
+# through sclaude/lib/core/state_file.py.
+os.makedirs(os.path.join(tmp, "sclaude", "lib"))
+os.symlink(os.path.join(ROOT, "sclaude", "lib", "core"), os.path.join(tmp, "sclaude", "lib", "core"))
 with open(os.path.join(wbin, "sclaude"), "w") as fh:
     fh.write('#!/usr/bin/env bash\necho "$PWD $*" >> "$FAKE_SCLAUDE_LOG"\n'
              'echo "${FAKE_SCLAUDE_SAYS:-}"\nexit "${FAKE_SCLAUDE_RC:-0}"\n')

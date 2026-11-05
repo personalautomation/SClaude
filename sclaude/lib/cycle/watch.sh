@@ -29,10 +29,10 @@ watch_dir() {
 
 # The watch file for a feature, created empty if missing or unreadable.
 #
-# Self-healing for the reason epilogue_state is: writing is not atomic — python
-# truncates and rewrites — so an interruption at that instant leaves a file that
-# is empty or half-written. Left alone it stays dead, and a dead watch file is
-# indistinguishable from a feature nobody is waiting on.
+# Self-healing for the reason epilogue_state is: its writes are whole now
+# (state_file.py), but a file left empty or cut short by the old writes, a full
+# disk or a hand would stay dead, and a dead watch file is indistinguishable
+# from a feature nobody is waiting on.
 watch_state() {
   local slug="$1" dir; dir="$(watch_dir)"
   mkdir -p "$dir" 2>/dev/null || return 1
@@ -219,7 +219,8 @@ watch_seen() {
 # Stop watching: the feature moved on, or was abandoned.
 watch_stop() {
   local slug="$1" dir; dir="$(watch_dir)"
-  rm -f "$dir/$slug.json" "$dir/$slug.qa.md" "$dir/$slug.qa.md.seen" 2>/dev/null || true
+  # With the record's lock, which state_file.py makes beside it.
+  rm -f "$dir/$slug.json" "$dir/$slug.json.lock" "$dir/$slug.qa.md" "$dir/$slug.qa.md.seen" 2>/dev/null || true
   return 0
 }
 

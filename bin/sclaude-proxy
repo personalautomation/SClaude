@@ -1877,6 +1877,55 @@ def without_prefix(head, prefix):
     return b" ".join((method, target, version)) + sep + rest
 
 
+# The gate on new code. It imports keepawake's menu and sclaude's modules on
+# first use, and the phone may keep the Mini App open for hours: a gate that
+# lived through sclaude's update served the old menu beside modules imported
+# new. Started by its socket, it closes once the code under it changed, the
+# new code imports and no connection is open; the socket starts it again on
+# the next one, on the new code. The cookie is signed with the bot's token,
+# so the phone stays signed in. Run by hand, with no socket to start it
+# again, it stays as it is.
+GATE_CODE_EVERY = float(os.environ.get("SCLAUDE_GATE_CODE_EVERY") or 30)
+
+
+def gate_root():
+    return os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+
+
+def gate_code_stamp():
+    """The newest of the gate's own file, keepawake's and sclaude's library."""
+    newest = 0.0
+    try:
+        newest = os.stat(os.path.realpath(__file__)).st_mtime
+    except OSError:
+        pass
+    for top in ("keepawake", os.path.join("sclaude", "lib")):
+        for folder, _dirs, files in os.walk(os.path.join(gate_root(), top)):
+            for name in files:
+                if name.endswith(".py"):
+                    try:
+                        newest = max(newest, os.stat(os.path.join(folder, name)).st_mtime)
+                    except OSError:
+                        pass
+    return newest
+
+
+def gate_code_runs():
+    """Whether the code on disk now compiles and imports, tried in a child: a
+    file caught half-written keeps this gate up rather than leaving the
+    socket to start one that dies."""
+    root = gate_root()
+    probe = ("import sys; me, root = sys.argv[1], sys.argv[2]; "
+             "compile(open(me).read(), me, 'exec'); "
+             "sys.path.insert(0, root); sys.path.insert(0, root + '/sclaude/lib'); "
+             "import _path, tg_webapp; import keepawake.webmenu")
+    try:
+        return subprocess.run([sys.executable, "-c", probe, os.path.realpath(__file__), root],
+                              capture_output=True, timeout=60).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 async def gate_main():
     env = tg_webapp.read_env(GATE_ENV)
     token = env.get("KEEPAWAKE_BOT_TOKEN", "")
@@ -1886,8 +1935,9 @@ async def gate_main():
                          "KEEPAWAKE_CHAT_ID in %s\n" % GATE_ENV)
         sys.exit(1)
     GATE.update(token=token, owner=int(owner), last=time.time())
-    if os.environ.get("LISTEN_PID") == str(os.getpid()) \
-            and int(os.environ.get("LISTEN_FDS") or 0) >= 1:
+    socketed = os.environ.get("LISTEN_PID") == str(os.getpid()) \
+        and int(os.environ.get("LISTEN_FDS") or 0) >= 1
+    if socketed:
         # sclaude-gate.socket holds the port; exiting when idle gives it back
         # to systemd, which starts the gate again on the next connection.
         sock = socket.socket(fileno=3)
@@ -1899,10 +1949,29 @@ async def gate_main():
         sock.listen(128)
     sock.setblocking(False)
     server = await asyncio.start_server(gate_handle, sock=sock, limit=HEAD_LIMIT)
-    tick = min(TICK, max(GATE_IDLE / 4, 0.1))
+    tick = min(TICK, max(GATE_IDLE / 4, 0.1), GATE_CODE_EVERY)
+    started = gate_code_stamp() if socketed else 0.0
+    looked = time.time()
     async with server:
         while GATE["open"] or time.time() - GATE["last"] < GATE_IDLE:
             await asyncio.sleep(tick)
+            if not socketed or GATE["open"] or time.time() - looked < GATE_CODE_EVERY:
+                continue
+            looked = time.time()
+            stamp = await asyncio.to_thread(gate_code_stamp)
+            if stamp == started:
+                continue
+            if not await asyncio.to_thread(gate_code_runs):
+                sys.stderr.write("sclaude-proxy --gate: the code changed but does not import; "
+                                 "staying on the old one\n")
+                started = stamp
+                continue
+            # Asked again after the waits above: a connection that came
+            # meanwhile is served by this gate, and the next turn tries again.
+            if not GATE["open"]:
+                sys.stderr.write("sclaude-proxy --gate: the code changed; closing, "
+                                 "so that the socket starts the new one\n")
+                return
     sys.stderr.write("sclaude-proxy --gate: nobody looked for %ds; closing\n" % GATE_IDLE)
 
 

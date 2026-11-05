@@ -9,7 +9,10 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
+import page_asset  # noqa: E402
 import process_config, process_diagram, process_model
+
+
 
 
 # Where each command is open, by the words of its "When": the detailed nodes
@@ -192,200 +195,15 @@ def commands_table():
 # node the commands open there or leading to it. While anything is lit, the
 # rest fades. A click selects; Ctrl (or Cmd) adds to the selection or takes
 # away; a click on the one thing selected, Esc or the floating button clears.
-INTERACT_SCRIPT = r"""
-const M = %(model)s;
-const byNode = {};
-Object.entries(M.edges).forEach(([k, e]) => {
-  (byNode[e.f] = byNode[e.f] || []).push(k);
-  (byNode[e.t] = byNode[e.t] || []).push(k);
-});
-const sel = new Set();
-let hover = null;
-const scope = (el) => !el.closest('svg.defs') && !el.closest('#sheets');
-function parts(k) { const i = k.indexOf(':'); return [k.slice(0, i), k.slice(i + 1)]; }
-function light(k, focus, lit) {
-  const [t, id] = parts(k);
-  focus.add(k);
-  if (t === 'n') {
-    (byNode[id] || []).forEach((e) => { focus.add('e:' + e); lit.add('n:' + M.edges[e].f); lit.add('n:' + M.edges[e].t); });
-    const b = M.base[id] || id;
-    M.cmds.forEach((c, i) => { if (c.to.includes(b) || c.at.includes(b)) lit.add('c:' + i); });
-  } else if (t === 'e') {
-    const e = M.edges[id];
-    if (e) { focus.add('n:' + e.f); focus.add('n:' + e.t); }
-  } else if (t === 'c') {
-    const c = M.cmds[+id];
-    (c ? c.to : []).filter((to) => to !== '@here').forEach((to) => {
-      // The place on every map that has it.
-      [to].concat(M.alias[to] || []).forEach((n) => {
-        focus.add('n:' + n);
-        (byNode[n] || []).forEach((e) => { if (M.edges[e].t === n) lit.add('e:' + e); });
-      });
-    });
-  }
-}
-function paint() {
-  const focus = new Set(), lit = new Set();
-  sel.forEach((k) => light(k, focus, lit));
-  if (hover) light(hover, focus, lit);
-  document.body.classList.toggle('dimming', focus.size > 0);
-  document.querySelectorAll('[data-key]').forEach((el) => {
-    if (!scope(el)) return;
-    const k = el.dataset.key;
-    el.classList.toggle('is-focus', focus.has(k));
-    el.classList.toggle('is-lit', !focus.has(k) && lit.has(k));
-    el.classList.toggle('is-picked', sel.has(k));
-  });
-  const b = document.getElementById('clear');
-  if (b) { b.hidden = sel.size === 0; b.textContent = 'Clear the selection (' + sel.size + ')'; }
-}
-function name(id) { const n = M.nodes[id]; return n ? n.t : id; }
-function tipFor(k) {
-  const [t, id] = parts(k);
-  const h = (s) => s.replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
-  if (t === 'n') {
-    const n = M.nodes[id]; if (!n) return '';
-    const cmds = M.cmds.filter((c) => c.to.includes(M.base[id] || id)).map((c) => c.c);
-    return '<b>' + h(n.t) + '</b><div class="tk">' + h(n.lane) + ' · ' + h(n.kind) + '</div>'
-      + (n.spec ? '<div class="spec">' + h(n.spec) + '</div>' : '')
-      + '<p>' + h(n.d || n.x) + '</p>'
-      + n.flags.map((f) => '<div class="tk">• ' + h(f) + '</div>').join('')
-      + (cmds.length ? '<div><i>commands that lead here</i> ' + h(cmds.join(', ')) + '</div>' : '');
-  }
-  if (t === 'e') {
-    const e = M.edges[id]; if (!e) return '';
-    return '<b>' + h(name(e.f)) + ' → ' + h(name(e.t)) + '</b>'
-      + (e.l ? '<p>' + h(e.l) + '</p>' : '') + '<div class="tk">' + h(e.w) + '</div>'
-      + '<div><i>to</i> ' + h((M.nodes[e.t] || {}).x || '') + '</div>';
-  }
-  if (t === 'c') {
-    const c = M.cmds[+id]; if (!c) return '';
-    return '<b>' + h(c.c) + '</b><p>' + h(c.x) + '</p><div class="tk">when: ' + h(c.w) + '</div>'
-      + (c.to.length ? '<div><i>leads to</i> ' + h(c.to.map((to) => to === '@here'
-          ? 'where the feature stands' : name(to)).join(', ')) + '</div>' : '');
-  }
-  return '';
-}
-const tip = document.createElement('div');
-tip.id = 'tip'; tip.hidden = true; document.body.append(tip);
-document.addEventListener('mouseover', (ev) => {
-  const el = ev.target.closest('[data-key]');
-  const k = el && scope(el) ? el.dataset.key : null;
-  if (k === hover) return;
-  hover = k; paint();
-  tip.innerHTML = k ? tipFor(k) : ''; tip.hidden = !tip.innerHTML;
-});
-document.addEventListener('mousemove', (ev) => {
-  if (tip.hidden) return;
-  const pad = 16, w = tip.offsetWidth, hh = tip.offsetHeight;
-  let x = ev.clientX + pad, y = ev.clientY + pad;
-  if (x + w > innerWidth - 8) x = ev.clientX - w - pad;
-  if (y + hh > innerHeight - 8) y = ev.clientY - hh - pad;
-  tip.style.left = Math.max(4, x) + 'px'; tip.style.top = Math.max(4, y) + 'px';
-});
-document.addEventListener('click', (ev) => {
-  if (ev.target.closest('#clear')) { sel.clear(); paint(); return; }
-  const el = ev.target.closest('[data-key]');
-  if (!el || !scope(el)) return;
-  const k = el.dataset.key;
-  if (ev.ctrlKey || ev.metaKey) { if (sel.has(k)) sel.delete(k); else sel.add(k); }
-  else if (sel.size === 1 && sel.has(k)) sel.clear();
-  else { sel.clear(); sel.add(k); }
-  paint();
-  // A command clicked brings the place it leads to into view, if it is not.
-  const [t, id] = parts(k);
-  const to = t === 'c' && M.cmds[+id] ? M.cmds[+id].to.filter((x) => x !== '@here')[0] : '';
-  const n = to && document.querySelector('svg.map [data-key="n:' + to + '"]');
-  if (n && sel.has(k)) {
-    const r = n.getBoundingClientRect();
-    if (r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth)
-      n.scrollIntoView({behavior: 'smooth', block: 'center', inline: 'center'});
-  }
-});
-document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { sel.clear(); paint(); } });
-window.processMap = {paint: paint, model: M};
-"""
+INTERACT_SCRIPT = page_asset.read(__file__, "process_interact.js")
 
 # The pinned commands: shown unless unpinned, a choice the browser keeps.
-DOCK_SCRIPT = r"""
-function dockWidth() {
-  const d = document.getElementById('dock');
-  if (!d.hidden) document.body.style.setProperty('--dockw', d.offsetWidth + 'px');
-}
-addEventListener('resize', dockWidth);
-function pin(on) {
-  document.getElementById('dock').hidden = !on;
-  document.body.classList.toggle('pinned', on);
-  dockWidth();
-  document.querySelectorAll('.pin-head').forEach((b) => { b.textContent = on ? '📌 Unpin' : '📌 Pin'; });
-  try { localStorage.setItem('process-pinned', on ? '1' : '0'); } catch (e) {}
-}
-let pinned = true;
-try { pinned = localStorage.getItem('process-pinned') !== '0'; } catch (e) {}
-document.querySelectorAll('.pin').forEach((b) => b.addEventListener('click', () =>
-  pin(document.getElementById('dock').hidden)));
-pin(pinned);
-"""
+DOCK_SCRIPT = page_asset.read(__file__, "process_dock.js")
 
 # The printed page's own choice of paper and scale: the sheets are cut again
 # for it, and @page is set to match. The page names the paper itself, so a
 # browser's print dialog hides Layout and Paper size: they are chosen here.
-PRINT_SCRIPT = r"""
-const PAPER = {'a4-landscape': [297, 210, 'A4 landscape'], 'a4-portrait': [210, 297, 'A4 portrait'],
-  'a3-landscape': [420, 297, 'A3 landscape'], 'a3-portrait': [297, 420, 'A3 portrait']};
-const MARGIN = 9, TOP = 12, MARK = 6, OVERLAP = 36, PX = 96 / 25.4;
-function cutSheets(paper, scale) {
-  const [pw, ph] = PAPER[paper];
-  const S = M.sheets;
-  // "fit": the whole width on one sheet, the map going on down only.
-  if (scale === 'fit') scale = Math.min(1, (pw - 2 * MARGIN) * PX / S.w);
-  const w = Math.floor((pw - 2 * MARGIN) * PX / scale), h = Math.floor((ph - TOP - MARGIN - MARK) * PX / scale);
-  const starts = []; let start = 0;
-  for (;;) {
-    starts.push(start);
-    const fits = S.cuts.filter((e) => e > start && e <= start + w);
-    const end = fits.length ? fits[fits.length - 1] : start + w;
-    if (end >= S.w) break;
-    start = Math.max(end - OVERLAP, start + 1);
-  }
-  const cols = starts.length, rows = Math.max(1, Math.ceil((S.h - OVERLAP) / (h - OVERLAP)));
-  let out = '';
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-    const x = starts[c], y = r * (h - OVERLAP), n = r * cols + c + 1;
-    let cuts = '';
-    const glue = [];
-    if (c < cols - 1) { const cx = starts[c + 1] + OVERLAP;
-      cuts += '<line x1="' + cx + '" y1="' + y + '" x2="' + cx + '" y2="' + (y + h) + '"/>';
-      glue.push('right edge under sheet ' + (n + 1)); }
-    if (r < rows - 1) { cuts += '<line x1="' + x + '" y1="' + (y + h - OVERLAP) + '" x2="' + (x + w) + '" y2="' + (y + h - OVERLAP) + '"/>';
-      glue.push('bottom edge under sheet ' + (n + cols)); }
-    out += '<div class="sheet"><div class="mark"><span>Detailed process — sheet ' + n + ' of ' + rows * cols
-      + ' (row ' + (r + 1) + ', column ' + (c + 1) + ')</span><span>'
-      + (glue.length ? 'glue the ' + glue.join(', the ') + '; the dashed line is the edge of the overlap' : 'the last sheet')
-      + '</span></div><svg viewBox="' + x + ' ' + y + ' ' + w + ' ' + h + '"><use href="#sym-detail" width="'
-      + S.w + '" height="' + S.h + '"/><g class="cut">' + cuts + '</g></svg></div>';
-  }
-  document.getElementById('sheets').innerHTML = out;
-  // A deeper top margin: the running header names the section there.
-  document.getElementById('pagesize').textContent = '@page{size:' + PAPER[paper][2] + ';margin:' + TOP + 'mm '
-    + MARGIN + 'mm ' + MARGIN + 'mm}';
-  return rows * cols;
-}
-function choosePrint() {
-  const paper = document.getElementById('paper').value, chosen = document.getElementById('scale').value;
-  const scale = chosen === 'fit' ? 'fit' : +chosen;
-  const n = cutSheets(paper, scale);
-  document.getElementById('count').textContent = n + (n === 1 ? ' sheet' : ' sheets') + ' for the whole process, plus '
-    + 'a page for the overview, and the commands';
-  try { localStorage.setItem('process-print', JSON.stringify([paper, scale])); } catch (e) {}
-}
-try { const saved = JSON.parse(localStorage.getItem('process-print') || 'null');
-  if (saved) { document.getElementById('paper').value = saved[0]; document.getElementById('scale').value = saved[1]; } } catch (e) {}
-document.getElementById('paper').onchange = choosePrint;
-document.getElementById('scale').onchange = choosePrint;
-document.getElementById('print').onclick = () => window.print();
-choosePrint();
-"""
+PRINT_SCRIPT = page_asset.read(__file__, "process_print.js")
 
 PRINT_BAR = """<div class="printbar screen-only">
 <label>Paper <select id="paper"><option value="a4-landscape">A4 landscape</option>
@@ -491,4 +309,4 @@ leads to; a block lights the commands open there.</p>
        process_diagram.esc(SECTIONS[2]), process_diagram.Diagram(*process_config.node_sets()[2]).svg(), process_diagram.esc(SECTIONS[3]), process_diagram.Diagram(*process_config.node_sets()[3]).svg(),
        process_diagram.esc(SECTIONS[4]), process_diagram.Diagram(*process_config.node_sets()[4]).svg(), process_diagram.esc(SECTIONS[5]), process_diagram.Diagram(*process_config.node_sets()[5]).svg(),
        process_diagram.esc(SECTIONS[6]), commands_table(),
-       commands_dock(), INTERACT_SCRIPT % {"model": json.dumps(client_model())}, PRINT_SCRIPT, DOCK_SCRIPT)
+       commands_dock(), INTERACT_SCRIPT.replace("/*MODEL*/", json.dumps(client_model())), PRINT_SCRIPT, DOCK_SCRIPT)

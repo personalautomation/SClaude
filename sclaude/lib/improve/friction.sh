@@ -744,9 +744,11 @@ friction_hold() {
 #
 #   friction_log_read <state> <key>
 friction_log_read() {
-  python3 - "$1" "$2" <<'PY' 2>/dev/null || true
+  PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$1" "$2" <<'PY' 2>/dev/null || true
 import json, sys
 path, key = sys.argv[1:3]
+import state_file
+state_file.lock(path)
 with open(path) as fh:
     data = json.load(fh)
 review = (data.get("steps") or {}).get("review") or {}
@@ -763,9 +765,7 @@ owed = str(data.get("friction_owed") or "")
 if owed and owed != key and (owed.startswith("unread-") or owed in held):
     data["friction_owed"] = None
     data["friction_owed_told"] = None
-with open(path, "w") as fh:
-    json.dump(data, fh, indent=2, ensure_ascii=False)
-    fh.write("\n")
+state_file.write(path, data)
 PY
 }
 

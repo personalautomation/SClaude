@@ -114,6 +114,16 @@ echo ready
 
     PROMPT = "Fix it; then say \"done\" — it's $HOME `x`\nsecond line"
 
+    # What the tab wait draws once a second and after every key it takes
+    # (session_keys_line in pane.sh).
+    STATUS_LINE = b"The session works in its tab"
+    # Said once the tab is up and its wait about to begin (claude_launch).
+    TAB_UP = b"claude is running in a new tab"
+    # When run() last sent its Ctrl-C, and when the script went on after the
+    # session (its `rc=` line).
+    interrupted_at = [None]
+    went_on_at = [None]
+
     def run(extra_env=None, tty=True, interrupt_after=None, keys_at=None, keys_after=None):
         """`keys_after`: the keys' seconds count from when these bytes first
         show, not from the start — under the whole suite's load a session
@@ -149,21 +159,40 @@ echo "rc=$?"
             return p.stdout
         pid, fd = pty.fork()
         if pid == 0:
+            # Ctrl-C as at a person's terminal: a bench started as a background
+            # job (`python3 tests/pane.py &`) inherits SIGINT ignored, and bash
+            # cannot trap a signal ignored when it starts.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
             os.execvpe("bash", ["bash", "-c", script], env)
         text = b""
         start = time.time()
         sent = False
         # One (seconds, bytes) pair, or a list of them, sent in order.
         keys = list(keys_at) if keys_at and isinstance(keys_at, list) else ([keys_at] if keys_at else [])
+        # A key is sent only once the one before it has been taken: the wait
+        # reads a key and then swallows whatever else is waiting (poll_pause,
+        # so that an arrow or a stray word answers nothing), and a second key
+        # sent while the loop lagged under the suite's load went with it. Two
+        # status lines drawn since the last key mean it was read: the first
+        # may be the draw that was under way, the second follows the read.
+        drawn_at_send = None
         while True:
-            if interrupt_after and not sent and time.time() - start > interrupt_after:
+            # interrupt_after: seconds from the start, or (bytes, seconds) — from
+            # when those bytes show, as for keys_after.
+            if isinstance(interrupt_after, tuple) and interrupt_after[0] in text:
+                interrupt_after = time.time() - start + interrupt_after[1]
+            if (isinstance(interrupt_after, (int, float)) and not sent
+                    and time.time() - start > interrupt_after):
                 os.write(fd, b"\x03")
                 sent = True
+                interrupted_at[0] = time.time()
             if keys_after and isinstance(keys_after, bytes) and keys_after in text:
                 keys_after = time.time()
             base = keys_after if isinstance(keys_after, float) else (None if keys_after else start)
-            if keys and base is not None and time.time() - base > keys[0][0]:
+            taken = drawn_at_send is None or text.count(STATUS_LINE) >= drawn_at_send + 2
+            if keys and base is not None and taken and time.time() - base > keys[0][0]:
                 os.write(fd, keys.pop(0)[1])
+                drawn_at_send = text.count(STATUS_LINE)
             try:
                 r, _, _ = select.select([fd], [], [], 0.2)
                 if r:
@@ -171,6 +200,8 @@ echo "rc=$?"
                     if not chunk:
                         break
                     text += chunk
+                    if went_on_at[0] is None and b"rc=" in text:
+                        went_on_at[0] = time.time()
             except OSError:
                 break
             if time.time() - start > 60:
@@ -233,12 +264,21 @@ echo "rc=$?"
     check("logged-status", "rc=7" in text, True)
     deadline = time.time() + 5
     tab_log = os.path.join(feature, "claude-tab.log")
-    while not os.path.exists(tab_log) and time.time() < deadline:
+
+    def tab_lines():
+        return open(tab_log).read().splitlines() if os.path.exists(tab_log) else []
+
+    while len(tab_lines()) < 3 and time.time() < deadline:
         time.sleep(0.1)
-    logged = open(tab_log).read().splitlines() if os.path.exists(tab_log) else []
+    logged = tab_lines()
+    # What claude said comes before the exit line when the tee keeps up: the
+    # tab waits for it two seconds and no longer (a child claude left may hold
+    # its stderr for good), so under a heavy load it can land after, and the
+    # order is not what is checked here.
+    exit_line = [l for l in logged if l.endswith(" exit 7")]
     check("tab-log-shape", (len(logged), logged[0].endswith(" demo/code started") if logged else None,
-                            logged[1:2], logged[-1].endswith(" exit 7") if logged else None),
-          (3, True, ["Error: session in use"], True))
+                            "Error: session in use" in logged, len(exit_line)),
+          (3, True, True, 1))
     # A child holding claude's stderr does not hold the launch: the tee is
     # waited for a moment, not until the child is gone.
     began = time.time()
@@ -298,9 +338,14 @@ echo "rc=$?"
     check("late-pane-runs-nothing", seen(), None)
 
     # --- Ctrl-C in sclaude ends the session in the pane, sclaude goes on ---
-    t0 = time.time()
-    text = run({"PANE_TEST_SLEEP": "30"}, interrupt_after=3)
-    check("ctrl-c-ends-the-session", time.time() - t0 < 15, True)
+    # Sent once the wait has begun, and timed from the Ctrl-C to the script
+    # going on (its rc= line): the tab's own start, slow under the suite's
+    # load, is not what is measured.
+    went_on_at[0] = None
+    text = run({"PANE_TEST_SLEEP": "30"}, interrupt_after=(TAB_UP, 1))
+    check("ctrl-c-ends-the-session",
+          None not in (interrupted_at[0], went_on_at[0])
+          and went_on_at[0] - interrupted_at[0] < 15, True)
     check("ctrl-c-sclaude-goes-on", "rc=" in text, True)
 
     # --- the caller's keys while the session runs in its tab (PANE_KEYS): this
@@ -308,9 +353,12 @@ echo "rc=$?"
     probe = os.path.join(tmp, "keys.sh")
     pressed = os.path.join(tmp, "pressed")
     with open(probe, "w") as fh:
+        # It says on the screen that it was called, so the key goes once the
+        # wait takes keys rather than at a guess.
         fh.write('source "%s/core/ui.sh"\nPANE_KEYS=(keys_probe)\n'
-                 'keys_probe() { echo "[$1]" >> "%s"; }\n' % (LIB, pressed))
-    text = run({"PANE_TEST_SLEEP": "4", "PANE_TEST_PRELOAD": probe}, keys_at=(2.5, b"g"))
+                 'keys_probe() { echo "[$1]" >> "%s"; printf "probed " >&2; }\n' % (LIB, pressed))
+    text = run({"PANE_TEST_SLEEP": "10", "PANE_TEST_PRELOAD": probe}, keys_at=(0.3, b"g"),
+               keys_after=b"probed")
     with open(pressed) as fh:
         took = fh.read().split()
     check("pane-keys-handed-on", "[g]" in took, True)
@@ -339,7 +387,9 @@ sleep "${PANE_TEST_SLEEP:-0}"
     plain = os.path.join(tmp, "plain.sh")
     with open(plain, "w") as fh:
         fh.write('source "%s/core/ui.sh"\n' % LIB)
-    text = run({"PANE_TEST_SLEEP": "6", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": plain},
+    # Room for both presses: each key waits for the one before to be taken,
+    # which under the suite's load can take a few seconds.
+    text = run({"PANE_TEST_SLEEP": "12", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": plain},
                keys_at=[(0.5, b"r"), (1.1, b"r")], keys_after=b"Keys here")
     got = launched()
     check("r-twice-reopens", len(got) >= 2, True)
@@ -370,7 +420,9 @@ sleep "${PANE_TEST_SLEEP:-0}"
     with open(step, "w") as fh:
         # A live watcher: its kind and a pid that runs (this script's own).
         fh.write('source "%s/core/ui.sh"\necho "plan $$" > "%s/sclaude-watch-0000"\n' % (LIB, tmp))
-    text = run({"PANE_TEST_SLEEP": "9", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": step},
+    # Six keys, each sent once the one before was taken: room for all of them
+    # before the stand-in ends on its own. [R] twice ends it sooner.
+    text = run({"PANE_TEST_SLEEP": "20", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": step},
                keys_at=[(0.5, b"k"), (1.0, b"k"), (1.5, b"n"), (2.0, b"N"), (2.5, b"R"), (3.0, b"R")], keys_after=b"Keys here")
     check("R-ends-it-once", len(launched()), 1)
     with open(ctl) as fh:

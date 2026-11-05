@@ -1191,6 +1191,9 @@ It works through `tailscale funnel`, which publishes
 `https://<node>.<tailnet>.ts.net:8443`. A gate in front lets in only your
 Telegram account (the one in `KEEPAWAKE_CHAT_ID`), checked by Telegram's own
 signature, and sends everyone else away with `403`.
+After sclaude updates itself, the app picks up the new code on its own: the
+gate closes once nothing is loading and starts again on the next request,
+and you stay signed in.
 
 Phone access is off until you turn it on, and off again after the machine
 restarts. Turning it on takes a few minutes — sometimes five — before Tailscale

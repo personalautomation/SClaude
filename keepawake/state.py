@@ -29,7 +29,6 @@
 #   python3 -m keepawake.state holders k=1 s=2 record the holders
 #   python3 -m keepawake.state decide sleep    the human's decision
 import datetime
-import errno
 import fcntl
 import json
 import os

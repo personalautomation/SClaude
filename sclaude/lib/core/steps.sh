@@ -8,10 +8,12 @@
 
 # --- the steps ---------------------------------------------------------------
 #
-# The order here is the cycle's definition: STEPS sets the sequence, STEP_SPEC
-# the launch parameters. Adding a step means adding a line to both.
-
-STEPS=(plan code pr review)
+# The steps, their launch parameters and their icons are one table,
+# cycle_steps.py, which the bot reads too; cycle_steps.sh is written from it
+# and gives STEPS (the sequence), AFTER_STEPS (the sessions numbered on after
+# them), STEP_SPEC (each step's launch) and PHASE_ICON. Adding a step means a
+# line there and `python3 cycle_steps.py sh > cycle_steps.sh`.
+source "$(dirname "${BASH_SOURCE[0]}")/cycle_steps.sh"
 
 # How often to ask GitHub whether the pull request has been merged, in seconds.
 #
@@ -87,16 +89,6 @@ PREVIEW_TRIES="${PREVIEW_TRIES:-3}"
 [[ "$PREVIEW_TRIES" =~ ^[1-9][0-9]*$ ]] || PREVIEW_TRIES=3
 PREVIEW_RETRY_PAUSE="${PREVIEW_RETRY_PAUSE:-15}"
 [[ "$PREVIEW_RETRY_PAUSE" =~ ^[0-9]+$ ]] || PREVIEW_RETRY_PAUSE=15
-
-# A step's parameters on one line: model, effort, permission mode, name. As
-# four separate case tables this drifted apart, and the name additionally lived
-# as a fifth copy inside issue_sync's python block.
-declare -A STEP_SPEC=(
-  [plan]="opus high plan planning"
-  [code]="opus medium auto development"
-  [pr]="sonnet medium auto|pull request"
-  [review]="opus medium auto review"
-)
 
 # A step's parameter field by number: 1 model, 2 effort, 3 mode, 4 name. The
 # name is sometimes two words, so a `|` rather than a space separates it from
@@ -621,14 +613,13 @@ step_title() { step_field "$1" 4; }
 #   cycle_number sync|epilogue|retro
 #   cycle_total
 cycle_number() {
-  case "$1" in
-    sync) echo $((${#STEPS[@]} + 1)) ;;
-    epilogue) echo $((${#STEPS[@]} + 2)) ;;
-    retro) echo $((${#STEPS[@]} + 3)) ;;
-  esac
+  local i
+  for i in "${!AFTER_STEPS[@]}"; do
+    [[ "${AFTER_STEPS[$i]}" == "$1" ]] && { echo $((${#STEPS[@]} + i + 1)); return; }
+  done
 }
 
-cycle_total() { cycle_number retro; }
+cycle_total() { echo $((${#STEPS[@]} + ${#AFTER_STEPS[@]})); }
 
 # Where a feature is in its cycle, for the menu and `sclaude status`: "2/7
 # development". The cycle shown has seven steps, the four of STEPS and the
@@ -847,27 +838,36 @@ run_comments() {
   [[ -n "$pr" && "$pr" != "null" && -n "$session" ]] || return 0
   repo="$(gh_repo 2>/dev/null || true)"
   [[ -n "$repo" ]] || return 0
-  python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$LIB/review/pr_context.py" "$wt" "$pr" "$repo" <<'PY' 2>/dev/null || true
+  PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$LIB/review/pr_context.py" "$wt" "$pr" "$repo" <<'PY' 2>/dev/null || true
 import json, subprocess, sys
+import state_file
 path, session, ctx, wt, pr, repo = sys.argv[1:7]
+
+
+def this_run(data):
+    runs = ((data.get("steps") or {}).get("review") or {}).get("runs") or []
+    mine = [r for r in runs if r.get("session") == session]
+    return mine[-1] if mine else None
+
+
 with open(path) as fh:
-    data = json.load(fh)
-runs = ((data.get("steps") or {}).get("review") or {}).get("runs") or []
-mine = [r for r in runs if r.get("session") == session]
-if not mine:
+    run = this_run(json.load(fh))
+if not run:
     sys.exit(0)
-run = mine[-1]
+# GitHub is asked before the lock is taken: the call may take minutes, and
+# every other writer of the state would wait on it.
 out = subprocess.run([sys.executable, ctx, "--threads", wt, pr, repo, run.get("started") or ""],
                      capture_output=True, text=True, timeout=120).stdout.split()
 if len(out) != 2 or not all(x.isdigit() for x in out):
     sys.exit(0)
 opened, new = int(out[0]), int(out[1])
-if "comments_start" not in run:
-    run["comments_start"] = max(opened - new, 0)
-run["comments"] = run["comments_start"] + new
-with open(path, "w") as fh:
-    json.dump(data, fh, indent=2, ensure_ascii=False)
-    fh.write("\n")
+with state_file.update(path) as data:
+    run = this_run(data)
+    if not run:
+        sys.exit(0)
+    if "comments_start" not in run:
+        run["comments_start"] = max(opened - new, 0)
+    run["comments"] = run["comments_start"] + new
 PY
 }
 
@@ -879,9 +879,11 @@ PY
 run_rounds() {
   local wt="$1" session="$2" rounds="$3"
   [[ -n "$session" && "$rounds" =~ ^[0-9]+$ ]] || return 0
-  python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$rounds" <<'PY' 2>/dev/null || true
+  PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$rounds" <<'PY' 2>/dev/null || true
 import json, sys
 path, session, rounds = sys.argv[1:4]
+import state_file
+state_file.lock(path)
 with open(path) as fh:
     data = json.load(fh)
 runs = ((data.get("steps") or {}).get("review") or {}).get("runs") or []
@@ -889,9 +891,7 @@ mine = [r for r in runs if isinstance(r, dict) and r.get("session") == session]
 if not mine:
     sys.exit(0)
 mine[-1]["rounds"] = int(rounds)
-with open(path, "w") as fh:
-    json.dump(data, fh, indent=2, ensure_ascii=False)
-    fh.write("\n")
+state_file.write(path, data)
 PY
 }
 
@@ -914,13 +914,15 @@ run_cost() {
   # Named by the id Claude Code has now (session_latest in state.sh).
   file="/tmp/claude-statusline-context-$(session_latest "$wt" "$session")"
   [[ -s "$file" ]] || return 0
-  python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$file" <<'PY' 2>/dev/null || true
+  PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$wt/.sclaude/local/feature/state.json" "$session" "$file" <<'PY' 2>/dev/null || true
 import json, sys
 path, session, context = sys.argv[1:4]
 with open(context) as fh:
     cost = json.load(fh).get("cost_usd")
 if not isinstance(cost, (int, float)):
     sys.exit(0)
+import state_file
+state_file.lock(path)
 with open(path) as fh:
     data = json.load(fh)
 runs = ((data.get("steps") or {}).get("review") or {}).get("runs") or []
@@ -932,9 +934,7 @@ seen = run.get("cost_seen") or 0
 run["cost_seen"] = cost
 run.setdefault("costs", []).append(round(cost - seen if cost >= seen else cost, 4))
 run.setdefault("cost_at", []).append(run.get("resumed") or run.get("started") or "")
-with open(path, "w") as fh:
-    json.dump(data, fh, indent=2, ensure_ascii=False)
-    fh.write("\n")
+state_file.write(path, data)
 PY
 }
 
@@ -1068,22 +1068,12 @@ phase_line() {
 #
 #   phase_icon <kind> <step or stage> <verb>
 phase_icon() {
-  case "$1" in
-    step)
-      if [[ "${3:-}" == done ]]; then printf '✅'; return; fi
-      case "${2:-}" in
-        plan) printf '📝' ;; code) printf '💻' ;; pr) printf '📤' ;; review) printf '🛠' ;;
-        *) printf '▶️' ;;
-      esac ;;
-    friction|deferred) printf '🧱' ;;
-    fix) printf '🔧' ;;
-    local-review) printf '🔍' ;;
-    regression) printf '🧪' ;;
-    deploy) printf '🚀' ;;
-    sync) printf '🔀' ;;
-    epilogue) printf '🏁' ;;
-    retro) printf '🔁' ;;
-  esac
+  if [[ "$1" == step ]]; then
+    if [[ "${3:-}" == done ]]; then printf '%s' "${PHASE_ICON[done]}"; return; fi
+    printf '%s' "${PHASE_ICON[step-${2:-}]:-${PHASE_ICON[step]}}"
+    return
+  fi
+  printf '%s' "${PHASE_ICON[$1]:-}"
 }
 
 phase_words() {

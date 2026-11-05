@@ -49,12 +49,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import process_config, process_costs, process_diagram, process_doc, process_history, \
     process_model, process_page, process_position
+import cycle_steps
 
 # The model's parts, in the order they are read again. Each lives in its own
 # file; process.X reads X from the part that defines it at the moment it is
 # asked for, so a table `configured` swaps in is the one every caller sees.
 PARTS = (process_model, process_config, process_position, process_history, process_costs,
          process_diagram, process_doc, process_page)
+# What the parts read from outside the map: the steps' table. Watched and read
+# again with them, first, though process.X does not look names up there.
+SOURCES = (cycle_steps,)
 
 
 def __getattr__(name):
@@ -65,8 +69,13 @@ def __getattr__(name):
 
 
 def files():
-    """Every file the model is read from: what a long-running reader watches."""
-    return [os.path.abspath(__file__)] + [part.__file__ for part in PARTS]
+    """Every file the model is read from: what a long-running reader watches.
+    The page's scripts and styles too (process_*.js, process_*.css), which the
+    parts read as they are imported."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    assets = sorted(os.path.join(here, n) for n in os.listdir(here)
+                    if n.startswith("process_") and n.endswith((".js", ".css")))
+    return [os.path.abspath(__file__)] + [part.__file__ for part in SOURCES + PARTS] + assets
 
 
 def reload_parts():
@@ -75,9 +84,9 @@ def reload_parts():
     A part that fails — a syntax error, or a name another part does not
     define yet — puts every part back as it was before raising, so that the
     model served stays the last good one whole rather than half new."""
-    saved = [(part, dict(vars(part))) for part in PARTS]
+    saved = [(part, dict(vars(part))) for part in SOURCES + PARTS]
     try:
-        for part in PARTS:
+        for part in SOURCES + PARTS:
             importlib.reload(part)
     except BaseException:
         for part, names in saved:

@@ -57,7 +57,8 @@ try:
     # --- the issue row ------------------------------------------------------------
     write(os.path.join(feature, "state.json"), json.dumps(
         {"steps": {"review": {"runs": [{"session": "s1", "rounds": 1}]}}}))
-    body = 'source "%s/review/local_review.sh"\n' % LIB
+    # LIB, as sclaude sets it: the round is written through core/state_file.py.
+    body = 'LIB="%s"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
     for _ in range(2):
         subprocess.run(["bash", "-c", body + 'run_local_round %s s1' % wt], check=True)
     with open(os.path.join(feature, "state.json")) as fh:

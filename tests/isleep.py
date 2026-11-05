@@ -13,6 +13,7 @@
 # Run it with: python3 tests/isleep.py
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -30,10 +31,16 @@ def check(name, cond):
 
 
 # Stand-ins for claude processes: the hook reads their command line.
-person = subprocess.Popen(["sleep", "300"])
-headless = subprocess.Popen(["bash", "-c", "sleep 300; :", "-p"])
+# Each in a group of its own, killed whole at the end: killing the bash alone
+# would leave its sleep holding the bench's stdout for five minutes.
+def stand_in(*argv):
+    return subprocess.Popen(list(argv), start_new_session=True)
+
+
+person = stand_in("sleep", "300")
+headless = stand_in("bash", "-c", "sleep 300; :", "-p")
 LAUNCH = "Step 2: write the code"
-launched = subprocess.Popen(["bash", "-c", "sleep 300; :", "claude", LAUNCH])
+launched = stand_in("bash", "-c", "sleep 300; :", "claude", LAUNCH)
 
 
 def run(state, *args, data=None, pid=None, env=None):
@@ -396,7 +403,10 @@ try:
 
 finally:
     for proc in (person, headless, launched):
-        proc.kill()
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
 
 if failures:
     print(f"{len(failures)} failed")

@@ -10,6 +10,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import process_config
+import cycle_steps
 
 
 # --- the model ---------------------------------------------------------------
@@ -112,13 +113,11 @@ NODES = {
 }
 
 # How each session runs: model · effort · permission mode. Shown in the note
-# under the pointer rather than on the block; tests/process.py reads them
-# against STEP_SPEC, SYNC_MODEL and the epilogue's and the retro's launches.
+# under the pointer rather than on the block. The four steps' come from their
+# table (cycle_steps.py); tests/process.py reads the rest against SYNC_MODEL
+# and the epilogue's and the retro's launches.
 SPEC = {
-    "plan": ("opus", "high", "plan"),
-    "code": ("opus", "medium", "auto"),
-    "pr": ("sonnet", "medium", "auto"),
-    "review": ("opus", "medium", "auto"),
+    **{s["name"]: (s["model"], s["effort"], s["mode"]) for s in cycle_steps.STEPS},
     "fix_local": ("opus", "medium", "auto"),      # step 2's
     "fix_preview": ("opus", "medium", "auto"),    # step 4's
     "fix_prod": ("opus", "medium", "auto"),       # step 4's

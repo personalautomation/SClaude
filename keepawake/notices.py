@@ -14,6 +14,8 @@ import os
 import re
 import time
 
+from keepawake import cycle_table
+
 NOTES_DIR = "notes"
 # A note the bot could not send for this long is dropped: a status from a
 # day ago says nothing true.
@@ -73,7 +75,7 @@ ANSI = re.compile(r"\x1b\[[0-9;]*m")
 # kind, and the message then opens with that icon rather than the laptop's.
 # These and no others — a "✓ passed" or a "⚠ careful" of sclaude's own is
 # still the laptop's.
-PHASE_ICONS = ("📝", "💻", "📤", "🛠", "▶️", "✅", "🧱", "🔧", "🔍", "🧪", "🚀", "🔀", "🏁", "🔁")
+PHASE_ICONS = cycle_table.steps.icons()
 OWN_ICON = re.compile("^(?:%s) " % "|".join(re.escape(i) for i in PHASE_ICONS))
 # The first five are the steps' own sessions, whose step's ✅ belongs with them.
 STEP_ICONS = PHASE_ICONS[:5]

@@ -39,6 +39,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 
 def _cfg(path):
@@ -259,7 +260,7 @@ exec %s "$@"
             return ""
         return "" if value is None else str(value)
 
-    def resume(self, answers="n\n" * 20, timeout=120, stillborn=False):
+    def resume(self, answers="n\n" * 20, timeout=120, stillborn=False, until=None):
         """`sclaude demo` on a real pseudo-terminal, questions answered `n`.
 
         A pty rather than a pipe, and not for cosmetics: a step refuses to start
@@ -327,6 +328,12 @@ exec %s "$@"
         # Answers go in as the questions arrive; the reader drains in parallel so
         # a full pipe buffer cannot deadlock the child.
         chunks = []
+        # `until`: (text, times) — the text of a wait the case does not test, which sclaude
+        # would hold for good under the stubs — the merge that never comes, a
+        # question asked once more. Once it is on the screen the run has
+        # shown what the case asserts on and is stopped, rather than left to
+        # its timeout.
+        reached = threading.Event()
 
         def drain():
             while True:
@@ -337,6 +344,8 @@ exec %s "$@"
                 if not data:
                     break
                 chunks.append(data)
+                if until and b"".join(chunks).count(until[0].encode()) >= until[1]:
+                    reached.set()
 
         reader = threading.Thread(target=drain, daemon=True)
         reader.start()
@@ -346,7 +355,13 @@ exec %s "$@"
             except OSError:
                 pass
             try:
-                proc.wait(timeout=timeout)
+                deadline = time.time() + timeout
+                while proc.poll() is None and not reached.is_set():
+                    if time.time() > deadline:
+                        raise subprocess.TimeoutExpired(proc.args, timeout)
+                    reached.wait(0.1)
+                if proc.poll() is None:
+                    raise subprocess.TimeoutExpired(proc.args, timeout)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 # A second timeout here would escape and leave `primary` open —
@@ -529,7 +544,7 @@ def case_d():
     w.set_state(dict(DONE_STATE, worktree=w.wt, step="review",
                      steps=dict(DONE_STATE["steps"],
                                 review={"done": False, "finished": None})))
-    out = w.resume()
+    w.resume()
     check("merged-shortcut-still-closes", w.state("step"), "done")
     check("merged-shortcut-marks-review", w.state("steps.review.done"), "true")
 
@@ -579,7 +594,7 @@ def case_f():
     w = World(os.path.join(tmp, "f"), merged=True)
     w.set_state(dict(DONE_STATE, step="review", steps=reopened_review, worktree=w.wt,
                      reopened="review", reopened_pr=208, reopened_by="preview"))
-    out = w.resume()
+    w.resume()
     check("preview-reopen-closes-on-merge", w.state("step"), "done")
     check("preview-reopen-no-review-session", w.prompts.strip(), "")
     check("preview-reopen-mark-cleared", w.state("reopened_by"), "")
@@ -649,7 +664,7 @@ def case_i():
     os.makedirs(tdir, exist_ok=True)
     with open(os.path.join(tdir, "code-session.jsonl"), "w") as fh:
         fh.write('{"type":"assistant","message":{"content":[]}}\n')
-    out = w.resume(timeout=60)
+    out = w.resume(timeout=60, until=(MERGE_WAIT, 1))
     check_true("gate-mark-goes-to-the-gate",
                "waits only for its closing checks" in out)
     check("gate-mark-does-not-resume-the-session",
@@ -674,7 +689,7 @@ def case_j():
     os.makedirs(tdir, exist_ok=True)
     with open(os.path.join(tdir, "review-session.jsonl"), "w") as fh:
         fh.write('{"type":"assistant","message":{"content":[]}}\n')
-    out = w.resume(timeout=60)
+    out = w.resume(timeout=60, until=(MERGE_WAIT, 1))
     check_true("review-gate-mark-goes-to-the-gate",
                "waits only for its closing checks" in out)
     check("review-gate-mark-does-not-resume-the-session",
@@ -699,7 +714,10 @@ def case_k():
     os.makedirs(tdir, exist_ok=True)
     with open(os.path.join(tdir, "code-session.jsonl"), "w") as fh:
         fh.write('{"type":"assistant","message":{"content":[]}}\n')
-    w.resume(answers="n\nthe form does not load\nn\n\n", timeout=60)
+    # Stopped at the question asked again after the session: the answers
+    # given run out there, and ask() asks until it hears y or n.
+    w.resume(answers="n\nthe form does not load\nn\n\n", timeout=60,
+             until=(CONFIRM, 2))
     check_true("not-working-reaches-the-session", "the form does not load" in w.prompts)
     check("not-working-resumes-the-same-session", w.sessions.count("code-session") >= 2, True)
     check_true("not-working-told-the-marker-is-gone",
@@ -721,12 +739,18 @@ def case_l():
     os.makedirs(tdir, exist_ok=True)
     with open(os.path.join(tdir, "old-session.jsonl"), "w") as fh:
         fh.write('{"type":"assistant","message":{"content":[]}}\n')
-    w.resume(stillborn=True)
+    w.resume(stillborn=True, until=(MERGE_WAIT, 1))
     check_true("qa-return-resumes-the-review-session", "old-session" in w.sessions)
     check_true("qa-return-notes-reach-it", "avatar does not load" in w.prompts)
     check_true("qa-return-told-the-marker-is-gone",
                "No marker closes this session now** (`.sclaude/local/feature/session-done` or "
                "`.sclaude/local/feature/review-round`)" in w.prompts)
+
+
+# What a run is stopped at (`until` of World.resume): the merge wait, which
+# under the stubs never ends, and step 2's closing question.
+MERGE_WAIT = "waiting for the merge"
+CONFIRM = "Do you confirm that everything works"
 
 
 CASES = [case_a, case_a2, case_b, case_c, case_d, case_e, case_f, case_g, case_h,

@@ -459,6 +459,21 @@ probe = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sy
                        capture_output=True, text=True, cwd=tempfile.gettempdir())
 check("lib: _path finds a module in any folder", probe.stdout.strip(), "ok")
 
+# The benches find a shell function by its name alone (tests/lib/benchlib.py),
+# wherever it lives, so that moving one between modules touches no bench.
+# That holds while a name is defined once in the whole library.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib  # noqa: E402
+check("lib: every shell function name is defined once", benchlib.duplicates(), [])
+# Cut out whole: a `}` at the start of a line inside a heredoc is the text's.
+cut_short = [n for n, defs in benchlib.index().items()
+             if subprocess.run(["bash", "-n"], input=defs[0][1], capture_output=True,
+                               text=True).returncode]
+check("lib: benchlib cuts every function out whole (bash -n)", cut_short, [])
+check("lib: benchlib finds functions in any folder and in bin/sclaude",
+      all(benchlib.where(n) for n in ("state_set", "session_watch_start", "regression_gate")),
+      True)
+
 
 if failures:
     for name, want, got in failures:

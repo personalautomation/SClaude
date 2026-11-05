@@ -67,7 +67,7 @@ except Exception as _exc:  # noqa: BLE001
     sys.exit(0)
 _failsafe.install("ban check (forbidden-commands.py)")
 from _friction import note  # noqa: E402
-from _shell import (GIT_VALUED, SEPARATORS, call_form, closing_at, inner_command, script_call,  # noqa: E402
+from _shell import (GIT_VALUED, SEPARATORS, call_form, closing_at, inner_command,  # noqa: E402
                     redirect_targets, strip_heads, strip_keywords, strip_redirections, strip_runners,
                     readable, strip_wrappers,
                     substitutions, tokenize, ungroup)

@@ -6,6 +6,12 @@
 # Part of sclaude; pulled in with source from bin/sclaude.
 # It does not run on its own.
 
+# This folder, for the writers of a feature's state: they change it through
+# state_file.py (a lock and a whole-file write), and find it here — taken
+# once, as the file is sourced, since a function cut out and run elsewhere
+# (as the benches do) has no file of its own to look beside.
+STATE_CORE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # --- the repository ----------------------------------------------------------
 
 # The repository's main worktree — the one all the others branch off. We look for
@@ -92,11 +98,53 @@ print(node if not isinstance(node, bool) else str(node).lower())
 PY
 }
 
+# Every scalar field of a record at once, into an associative array the
+# caller names, keyed by its dotted path: one python start where a function
+# reading a dozen fields paid a dozen, some 25 ms each — the menu does it for
+# every feature it lists. A missing or null field is absent, as state_get
+# fails on it; true and false read as state_get prints them. Only for code
+# that writes nothing to the record meanwhile: the copy does not follow the
+# file. tests/state-file.py checks the paths read from `snap` as it checks
+# state_get's.
+#
+#   local -A snap; state_snapshot "$state" snap
+#   step="${snap[step]:-?}"
+state_snapshot() {
+  local __file="$1" __k __v
+  local -n __into="$2"
+  __into=()
+  while IFS= read -r -d '' __k && IFS= read -r -d '' __v; do
+    __into["$__k"]="$__v"
+  done < <(python3 - "$__file" <<'SNAP' 2>/dev/null
+import json, sys
+try:
+    with open(sys.argv[1]) as fh:
+        data = json.load(fh)
+except (OSError, ValueError):
+    sys.exit(0)
+
+
+def walk(node, path):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            walk(value, path + [str(key)])
+    elif node is not None and not isinstance(node, list) and path:
+        text = str(node).lower() if isinstance(node, bool) else str(node)
+        sys.stdout.write(".".join(path) + "\0" + text + "\0")
+
+
+walk(data, [])
+SNAP
+  )
+}
+
 state_set() {
   local file="$1" path="$2" value="$3"
-  python3 - "$file" "$path" "$value" <<'PY'
+  PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$file" "$path" "$value" <<'PY'
 import json, sys
 path, keys, value = sys.argv[1], sys.argv[2].split('.'), sys.argv[3]
+import state_file
+state_file.lock(path)
 with open(path) as fh:
     data = json.load(fh)
 node = data
@@ -109,9 +157,7 @@ if value.isdigit():
     node[keys[-1]] = int(value)
 else:
     node[keys[-1]] = {'true': True, 'false': False, 'null': None}.get(value, value)
-with open(path, 'w') as fh:
-    json.dump(data, fh, indent=2, ensure_ascii=False)
-    fh.write('\n')
+state_file.write(path, data)
 PY
 }
 
@@ -143,9 +189,11 @@ new_session_id() {
 session_runs() {
   local file="$1" node="$2" op="$3" session="${4:-}" outcome="${5:-}"
   SCLAUDE_RUN="${SCLAUDE_RUN:-}" SCLAUDE_ABOUT="${SCLAUDE_ABOUT:-}" \
-    python3 - "$file" "$node" "$op" "$session" "$(date -Iseconds)" "$outcome" <<'PYRUN' 2>/dev/null || true
+    PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$file" "$node" "$op" "$session" "$(date -Iseconds)" "$outcome" <<'PYRUN' 2>/dev/null || true
 import json, sys
 path, dotted, op, session, now, outcome = sys.argv[1:7]
+import state_file
+state_file.lock(path)
 with open(path) as fh:
     data = json.load(fh)
 node = data
@@ -204,9 +252,7 @@ if op in ("close", "finish"):
         if outcome:
             runs[-1]["outcome"] = outcome
 node["runs"] = runs
-with open(path, "w") as fh:
-    json.dump(data, fh, indent=2, ensure_ascii=False)
-    fh.write("\n")
+state_file.write(path, data)
 # The same moment in the feature's history (history_add): runs keep one
 # entry per conversation, and a conversation entered three times leaves its
 # first start and its last end there — the history keeps every sitting.
@@ -515,11 +561,11 @@ epilogue_state() {
   local slug="$1" dir; dir="$(epilogue_dir)"
   mkdir -p "$dir" 2>/dev/null || return 1
   local file="$dir/$slug.json"
-  # We create not only a missing file but an unreadable one too. Writing the
-  # state is not atomic — python truncates the file and writes it afresh — so an
-  # interruption at exactly that instant leaves an empty or truncated file. From
-  # then on it is dead: state_get says nothing, state_set dies parsing the JSON,
-  # and the session id is not written at all — that is, the epilogue becomes
+  # We create not only a missing file but an unreadable one too. Its writes
+  # are whole now (state_file.py renames a finished file over it), but a file
+  # left empty or cut short by the old writes, a full disk or a hand would be
+  # dead: state_get says nothing, state_set dies parsing the JSON, and the
+  # session id is not written at all — that is, the epilogue becomes
   # unrecoverable again, from the very trouble this file was created for.
   if [[ ! -s "$file" ]] || ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \
        "$file" 2>/dev/null; then
@@ -545,7 +591,8 @@ epilogue_state() {
 epilogue_forget() {
   local slug="$1"
   [[ -n "$slug" ]] || return 0
-  rm -f "$(epilogue_dir)/$slug.json" 2>/dev/null || true
+  # With the record's lock, which state_file.py makes beside it.
+  rm -f "$(epilogue_dir)/$slug.json" "$(epilogue_dir)/$slug.json.lock" 2>/dev/null || true
 }
 
 # An unclosed epilogue's age as a human string: "2h ago", "3d ago". Needed in

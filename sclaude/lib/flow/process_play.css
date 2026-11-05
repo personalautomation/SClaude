@@ -1,0 +1,58 @@
+
+.pl-wrong .shape{stroke:var(--human)!important;stroke-width:3.5!important}
+.pl-ghost{fill:none;stroke:var(--human);stroke-width:2.5;stroke-dasharray:5 4;pointer-events:none}
+#pl-off{position:fixed;left:50%;top:18%;transform:translateX(-50%);z-index:30;max-width:min(460px,92vw);
+background:var(--surface);border:2px solid var(--human);border-radius:12px;padding:14px 16px;
+box-shadow:0 10px 30px rgba(0,0,0,.25)}
+#pl-off h3{margin:0 0 6px;color:var(--human)}#pl-off p{margin:6px 0}
+#pl-off button{font:600 13px var(--body);padding:5px 12px;border-radius:7px;border:1px solid var(--line);
+background:var(--surface);color:var(--ink);cursor:pointer}
+#hist li.h-wrong{border-left:3px solid var(--human)}#hist li.h-wrong .h-t::before{content:"⚠ "}
+#hist li.h-offs{color:var(--human);font-weight:600}
+.play{font:600 13px var(--body);width:30px;height:26px;margin-left:10px;border-radius:7px;border:1px solid var(--line);
+background:var(--surface);color:var(--auto);cursor:pointer;vertical-align:middle}
+.play:hover:not(:disabled){border-color:var(--auto)}.play.on{background:var(--auto);color:var(--surface)}
+.play:disabled{opacity:.4;cursor:default}
+select.pass{font:13px var(--body);margin-left:8px;padding:3px 6px;border-radius:7px;border:1px solid var(--line);
+background:var(--surface);color:var(--ink);vertical-align:middle;max-width:min(380px,60vw)}
+#player{position:fixed;left:16px;bottom:16px;z-index:25;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 32px);
+padding:8px 10px;border-radius:12px;background:var(--surface);border:1px solid var(--line);
+box-shadow:0 6px 20px rgba(0,0,0,.18);font-size:13.5px}
+#player[hidden]{display:none}
+#player button,#player select{font:inherit;padding:3px 8px;border-radius:7px;border:1px solid var(--line);
+background:var(--surface);color:var(--ink);cursor:pointer}
+.pl-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.playing svg.map .node:not(.pl-now):not(.pl-seen){opacity:.4}
+body.playing svg.map .edge:not(.pl-go):not(.pl-went){opacity:.3}
+.node.pl-now .shape{stroke:var(--auto);stroke-width:5;filter:drop-shadow(0 0 10px var(--auto))}
+.node.pl-seen .shape{stroke-width:2.8}
+.edge.pl-go path.line{stroke:var(--auto);stroke-width:4;stroke-dasharray:10 6;animation:pl-flow .5s linear infinite}
+.edge.pl-went path.line{stroke:var(--auto);stroke-width:2.4}
+@keyframes pl-flow{to{stroke-dashoffset:-16}}
+body.pl-paused .edge.pl-go path.line{animation-play-state:paused}
+.pl-clock circle{fill:var(--surface);stroke:var(--auto);stroke-width:2}
+.pl-clock line{stroke:var(--ink);stroke-width:2;stroke-linecap:round}
+.pl-clock text,.pl-tag{font:700 12px var(--body);fill:var(--auto);paint-order:stroke;stroke:var(--paper);
+stroke-width:4px;stroke-linejoin:round}
+.pl-tag{font-size:11px}
+.metrics{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:10px 0 0;font-size:13.5px}
+.metrics label{display:flex;align-items:center;gap:5px;cursor:pointer}
+.mt.in{font-size:10.5px;stroke:none}
+.mt-hid{display:none}
+.mt-map{font:700 13px var(--body);color:var(--violet);margin:0 8px}
+.mt-map:empty{display:none}
+.mt{font:700 11.5px var(--body);fill:var(--violet);paint-order:stroke;stroke:var(--paper);stroke-width:4px;
+stroke-linejoin:round;pointer-events:none}
+.panel{position:sticky}
+.tabs{display:flex;gap:4px;margin:-4px 0 10px;padding:3px;border-radius:10px;background:var(--lane-b)}
+.tabs button{flex:1;font:600 13px var(--body);padding:6px 8px;border:0;border-radius:8px;background:none;
+color:var(--muted);cursor:pointer}
+.tabs button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+#hist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+#hist li{padding:5px 8px;border-radius:8px;cursor:pointer;border-left:3px solid transparent}
+#hist li:hover{background:var(--lane-b)}
+#hist li.on{background:var(--auto-soft);border-left-color:var(--auto)}
+#hist li.h-pass .h-t{font-weight:500;color:var(--muted)}
+.h-t{font-weight:600;font-size:14px}.h-m{color:var(--muted);font-size:12.5px}
+.h-via{color:var(--muted);font-size:12px}.h-via.back{color:var(--human)}
+.h-off{font:600 12px var(--body);color:var(--cloud);margin:6px 0 2px}

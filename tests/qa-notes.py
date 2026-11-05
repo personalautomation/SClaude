@@ -25,6 +25,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib  # noqa: E402 — shell functions found by name
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 WATCH = os.path.join(ROOT, "bin", "sclaude-watch")
@@ -37,16 +39,11 @@ def check(name, got, want):
         failures.append((name, want, got))
 
 
-def functions(source, names):
-    """The named shell functions, cut out of the script whole."""
-    out = []
-    for name in names:
-        m = re.search(r"^%s\(\) \{\n.*?^\}\n" % re.escape(name), source, re.S | re.M)
-        if not m:
-            failures.append(("function-present-" + name, True, False))
-            continue
-        out.append(m.group(0))
-    return "\n".join(out)
+def functions(names):
+    """The named shell functions, cut out of the watcher (bin/sclaude-watch)."""
+    return benchlib.functions(names, script=WATCH,
+                              missing=lambda name: failures.append(("function-present-" + name, True, False)))
+
 
 
 def row(login, when, body, **extra):
@@ -99,8 +96,7 @@ print(json.dumps(answers[path]))
 """ % os.path.join(tmp, "answers.json"))
     os.chmod(os.path.join(bindir, "gh"), 0o755)
 
-    with open(WATCH) as fh:
-        body = functions(fh.read(), ["comments_since", "notes_since"])
+    body = functions(["comments_since", "notes_since"])
 
     def notes(issue, pr):
         script = body + '\nnotes_since o/r %s "%s" %s\n' % (issue, pr, SINCE)

@@ -98,7 +98,7 @@ def hold_reasons(data, now):
     # is for sorting only: for a manual deadline it is the remainder, for holders
     # there is nowhere to learn it from, and they follow in the order they
     # appeared.
-    from keepawake.state import HARD_HOLDERS, manual_until
+    from keepawake.state import manual_until
     reasons = []
     left = manual_until(data, now)
     if left:

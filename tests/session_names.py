@@ -157,6 +157,13 @@ icons = subprocess.run(["bash", "-c", 'source "%s/core/steps.sh"; for a in "step
                        capture_output=True, text=True, timeout=30).stdout.split()
 check("the bot knows every phase icon", sorted(set(icons)), sorted(notices.PHASE_ICONS))
 
+# The table both read (cycle_steps.py) and the shell's copy of it.
+sys.path.insert(0, os.path.join(LIB, "core"))
+import cycle_steps  # noqa: E402
+with open(os.path.join(LIB, "core", "cycle_steps.sh"), encoding="utf-8") as fh:
+    check("cycle_steps.sh is what cycle_steps.py writes (python3 cycle_steps.py sh > cycle_steps.sh)",
+          fh.read() == cycle_steps.shell(), True)
+
 # The menu names the cycle's steps by their number (webmenu's act.steps):
 # one name for each, in both languages.
 from keepawake import i18n  # noqa: E402
@@ -164,6 +171,8 @@ total = subprocess.run(["bash", "-c", 'source "%s/core/steps.sh"; cycle_total' %
                        capture_output=True, text=True, timeout=30).stdout.strip()
 for half in i18n.STRINGS["act.steps"]:
     check("act.steps names every step", str(len(half.split(" · "))), total)
+check("i18n has the words for every place of the cycle",
+      [p for p in cycle_steps.places() if "cycle." + p not in i18n.STRINGS], [])
 
 # The banner a session opens with in the terminal names it as the topic does.
 def title(*args):

@@ -76,7 +76,9 @@ check("every command's verb is an action", not (mapped - verbs - process.ACTION_
 
 # --- steps -------------------------------------------------------------------
 
-steps_sh = read("sclaude", "lib", "core", "steps.sh")
+# The steps' table, as the shell reads it (cycle_steps.sh, written from
+# cycle_steps.py).
+steps_sh = read("sclaude", "lib", "core", "cycle_steps.sh")
 steps = re.search(r"^STEPS=\(([^)]*)\)", steps_sh, re.M).group(1).split()
 numbered = dict(enumerate(steps, start=1))
 script = 'source "%s/core/steps.sh"; for k in sync epilogue retro; do echo "$k $(cycle_number $k)"; done' % LIB
@@ -95,7 +97,7 @@ check("seven steps", len(numbered) == 7, str(numbered))
 
 # --- how each session runs ---------------------------------------------------
 
-spec = dict(re.findall(r'^\s+\[(\w+)\]="([^"|]*)', steps_sh, re.M))
+spec = dict(re.findall(r"^\s+\[(\w+)\]='([^'|]*)", steps_sh, re.M))
 for step in steps:
     words = tuple(spec.get(step, "").split()[:3])
     check("%s runs as STEP_SPEC says" % step, process.SPEC.get(step) == words,
@@ -1397,7 +1399,8 @@ with tempfile.TemporaryDirectory() as tmp2:
     os.makedirs(flow)
     shutil.copy(os.path.join(LIB, "_path.py"), tmp2)
     for name in os.listdir(os.path.join(LIB, "flow")):
-        if re.match(r"process(_\w+)?\.py$", name):
+        # With the page's scripts and styles, which the parts read beside them.
+        if re.match(r"process(_\w+)?\.(py|js|css)$", name):
             shutil.copy(os.path.join(LIB, "flow", name), flow)
     copy = os.path.join(flow, "process.py")
     part = os.path.join(flow, "process_doc.py")

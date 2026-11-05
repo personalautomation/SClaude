@@ -24,6 +24,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib  # noqa: E402 — shell functions found by name
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
@@ -36,22 +38,17 @@ def check(name, got, want):
         failures.append((name, want, got))
 
 
-def functions(source, names):
-    out = []
-    for name in names:
-        m = re.search(r"^%s\(\) \{\n.*?^\}\n" % re.escape(name), source, re.S | re.M)
-        if not m:
-            failures.append(("function-present-" + name, True, False))
-            continue
-        out.append(m.group(0))
-    return "\n".join(out)
+def functions(names):
+    """The named shell functions, found by name in the whole library."""
+    return benchlib.functions(names, missing=lambda name: failures.append(("function-present-" + name, True, False)))
+
 
 
 with open(os.path.join(LIB, "cycle", "run.sh")) as fh:
     RUN = fh.read()
 BIN = "".join(open(os.path.join(ROOT, _p)).read()
     for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
-BODY = functions(RUN, ["code_fingerprint", "code_reload"])
+BODY = functions(["code_fingerprint", "code_reload"])
 
 tmp = tempfile.mkdtemp()
 try:

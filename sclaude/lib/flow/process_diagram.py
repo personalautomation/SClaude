@@ -81,7 +81,7 @@ class Diagram:
         """Whether a node stands in an edge's way down: a way leaves its block
         right under it and goes down in the target's lane, so a node there
         between the two rows is in its way."""
-        (_la, ra), (lb, rb) = self.nodes[edge[0]][:2], self.nodes[edge[1]][:2]
+        (_, ra), (lb, rb) = self.nodes[edge[0]][:2], self.nodes[edge[1]][:2]
         return any(n[0] == lb and ra < n[1] < rb for nid, n in self.nodes.items() if nid not in edge[:2])
 
     def shape(self, nid):

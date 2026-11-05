@@ -1089,7 +1089,10 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   and under main the same line opens the whole cycle with no feature on it
   (`/__sclaude/bpmn`). The panel beside it switches between **Actions** and
   **History**: every place the feature stood on, when and for how long, and
-  the arrow it left by. ▶ by a map's heading plays how the feature went on
+  the arrow it came in by — with who took it (you, a setting, sclaude's own
+  check, the session, QA, GitHub, or nobody answering), how (the terminal or
+  the phone, a key of sclaude's tab, the setting's value) and what was known
+  then (findings, the tests that were red). ▶ by a map's heading plays how the feature went on
   that map — a clock on each place counting its time, then the arrow it took,
   a friction review or a change to sclaude jumping to its own map and back;
   by those two maps' headings a list chooses which pass to play. While it

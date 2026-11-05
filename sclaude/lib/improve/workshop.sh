@@ -106,6 +106,11 @@ cmd_core_open() {
   if [[ ! -d "$ws" ]]; then
     workshop_make "$tree" || die "could not make the workshop at $ws"
   fi
+  # Opened the first time by this session: the plan approved, the way in.
+  if ! workshop_py approved "$rec" "$session" 2>/dev/null; then
+    WORKSHOP_SESSION="$session" workshop_edge "$tree" w_ask w_open person "the plan approved in the session"
+    WORKSHOP_SESSION="$session" workshop_edge "$tree" w_open w_change sclaude "sclaude core-open"
+  fi
   workshop_py approve "$rec" "$session"
   echo "sclaude's workshop for this tree: $ws ($(git -C "$ws" rev-parse --abbrev-ref HEAD))"
   echo "Change sclaude there and nowhere else; commit there by its CLAUDE.md, never push."
@@ -145,6 +150,8 @@ cmd_core_ready() {
     [[ -n "$how" ]] || die "say how the change was reviewed: sclaude core-ready --review \"<how>\""
   fi
   workshop_py ready "$rec" "$session" "$head" "$how"
+  WORKSHOP_SESSION="$session" workshop_edge "$tree" w_change w_ready session "sclaude core-ready" \
+    note="reviewed: $how; head ${head:0:8}"
   echo "Ready: sclaude publishes it when this session ends."
 }
 
@@ -218,7 +225,9 @@ workshop_block() {
 #
 #   workshop_after_session <session> <the launch's arguments…>
 workshop_after_session() {
-  local session="$1" tree ws rec state answer red_back=0 red_head=""
+  local session="$1" tree ws rec state answer red_back=0 red_head="" by
+  # The session whose pass the edges below belong to (workshop_edge).
+  local WORKSHOP_SESSION="$session"
   shift
   tree="$(workshop_tree)" || return 0
   rec="$(workshop_record "$tree")"
@@ -227,6 +236,11 @@ workshop_after_session() {
   while :; do
     state="$(workshop_state "$tree" "$session")"
     workshop_history "$tree" "$state" "$session"
+    case "$state" in
+      ready) workshop_edge "$tree" w_ready w_exit sclaude "the session ended" ;;
+      unready) workshop_edge "$tree" w_change w_exit sclaude "the session ended" ;;
+    esac
+    [[ "$state" == none ]] || workshop_edge "$tree" w_exit w_ready_gate sclaude ""
     case "$state" in
       none) workshop_py put "$rec" pending null; return 0 ;;
       ready)
@@ -237,11 +251,14 @@ workshop_after_session() {
         # a session that thinks it should not go out says so to the person.
         if [[ -n "$red_head" && "$(git -C "$ws" rev-parse HEAD)" == "$red_head" ]]; then
           info "  The session left it as it was: checked again when the tree is next opened."
+          workshop_edge "$tree" w_ready_gate w_wait sclaude "the head as it was when sent back"
           workshop_history "$tree" unchanged "$session"
           return 0
         fi
         WORKSHOP_RED=()
-        WORKSHOP_SESSION="$session" workshop_publish "$tree"
+        # Red now goes back into the session twice at most (below): the
+        # publication writes its way out of the tests by that.
+        WORKSHOP_FROM=w_ready_gate WORKSHOP_BACK=$(( red_back < 2 )) workshop_publish "$tree"
         (( ${#WORKSHOP_RED[@]} )) || return 0
         # Red before it went out: the session that made the change is the one
         # to look, while it still has the change in mind, rather than the
@@ -263,23 +280,29 @@ workshop_after_session() {
         continue ;;
       blocked)
         workshop_py put "$rec" pending null
+        workshop_edge "$tree" w_ready_gate w_held sclaude "held at this head before" \
+          note="$(workshop_py get "$rec" blocked.why)"
         info "  sclaude's change in $ws waits: $(workshop_py get "$rec" blocked.why)"
         return 0 ;;
       pending)
+        workshop_edge "$tree" w_ready_gate w_pending sclaude "an earlier session's change is unfinished"
         warn "  This session's change to sclaude waits in $ws: an earlier session's there is unfinished."
         return 0 ;;
     esac
     echo ""
     local missing; missing="$(workshop_missing "$tree")"
+    workshop_edge "$tree" w_ready_gate w_back sclaude "" note="$missing"
     warn "  This session changed sclaude in its workshop ($ws), and did not finish. Missing:"
     warn "  $missing"
-    ask "  Back into the session to finish it? [y/n] " answer yn
+    ask "  Back into the session to finish it? [y/n] " answer yn && by=person || by=none
     if is_yes "$answer"; then
+      workshop_edge "$tree" w_back w_change person "$ASKED_HOW"
       claude_again_args "$@"
       claude_launch_once "${CLAUDE_AGAIN[@]}" "$WORKSHOP_RESUME $missing"
       continue
     fi
     workshop_py pending "$rec" "$session" "$PWD" "$@"
+    workshop_edge "$tree" w_back w_pending "$by" "$ASKED_HOW"
     workshop_history "$tree" left "$session"
     info "  Left in the workshop and not published; sclaude offers the session back when the feature is next opened."
     return 0
@@ -297,7 +320,7 @@ workshop_pending() {
   # A change finished and reviewed whose publishing stopped short is tried
   # again, whatever stopped it; one the person held back is only said.
   case "$(workshop_state "$tree" "")" in
-    ready) workshop_publish "$tree"; return 0 ;;
+    ready) WORKSHOP_FROM=w_wait workshop_publish "$tree"; return 0 ;;
     blocked) info "  sclaude's change in $(workshop_dir "$tree") waits: $(workshop_py get "$rec" blocked.why)"
              return 0 ;;
   esac
@@ -332,6 +355,7 @@ workshop_pending() {
     info "  Left as it is: nothing of it is published until it is finished."
     return 0
   fi
+  WORKSHOP_SESSION="$session" workshop_edge "$tree" w_pending w_change person "$ASKED_HOW"
   # The record stays until the session has finished it (workshop_after_session
   # clears it then): a run cut off after the session would lose it otherwise.
   claude_again_args "${saved[@]:1}"
@@ -356,10 +380,18 @@ workshop_pending() {
 workshop_leaks() {
   local ws="$1" base="$2" tree="$3" hits answer rec id
   rec="$(workshop_record "$tree")"
-  hits="$(workshop_py leaks "$ws" "$base" "$tree")" && return 0
+  if hits="$(workshop_py leaks "$ws" "$base" "$tree")"; then
+    workshop_edge "$tree" w_leaks w_tests sclaude "workshop.py leaks" note="nothing found"
+    return 0
+  fi
+  local found; found="$(grep -c . <<< "$hits") line(s)"
   # Named without the commit, which a rebase or the squash renames.
   id="$(sed -E 's/^commit [0-9a-f]+: /commit: /' <<< "$hits" | sort | sha1sum | cut -c1-40)"
-  [[ -n "$id" && "$(workshop_py get "$rec" leaks_ok 2>/dev/null)" == "$id" ]] && return 0
+  if [[ -n "$id" && "$(workshop_py get "$rec" leaks_ok 2>/dev/null)" == "$id" ]]; then
+    workshop_edge "$tree" w_leaks w_leak_ask sclaude "workshop.py leaks" note="$found"
+    workshop_edge "$tree" w_leak_ask w_tests person "the same lines, yes given before"
+    return 0
+  fi
   warn "  sclaude's repository is public, and the change may name the product:"
   # Every line, and through warn, so that the question in Telegram carries them
   # too: a "yes" is kept for all of them (below).
@@ -373,11 +405,14 @@ workshop_leaks() {
   case "$mode" in
     auto)
       info "  sclaude.leaks is auto: published with them, unasked."
+      workshop_edge "$tree" w_leaks w_tests setting "sclaude.leaks=auto" note="$found"
       return 0 ;;
     off)
       info "  sclaude.leaks is off: not published; it stays in $ws, where a session of this tree can reword it."
+      workshop_edge "$tree" w_leaks w_held setting "sclaude.leaks=off" note="$found"
       return 3 ;;
   esac
+  workshop_edge "$tree" w_leaks w_leak_ask sclaude "workshop.py leaks" note="$found"
   # A list longer than a question in Telegram holds loses its middle there
   # (ASK_CONTEXT_MAX in keepawake/asks.py), and a "yes" from the phone
   # would cover lines never seen: such a list is asked at the terminal alone,
@@ -386,17 +421,21 @@ workshop_leaks() {
     warn "  Too many lines for a question on the phone: answer it here, at the terminal."
     if ! ASK_DIR="" ask "  Publish it anyway? [y/n] " answer yn; then
       info "  Nobody answered at the terminal: it is tried again when the tree is next opened."
+      workshop_edge "$tree" w_leak_ask w_wait none "terminal" note="too long for the phone"
       return 2
     fi
   elif ! ask "  Publish it anyway? [y/n] " answer yn; then
     info "  Nobody answered: it is tried again when the tree is next opened."
+    workshop_edge "$tree" w_leak_ask w_wait none ""
     return 2
   fi
   if is_yes "$answer"; then
     [[ -n "$id" ]] && workshop_py put "$rec" leaks_ok "\"$id\""
+    workshop_edge "$tree" w_leak_ask w_tests person "$ASKED_HOW"
     return 0
   fi
   info "  Not published: it stays in $ws, where a session of this tree can reword it."
+  workshop_edge "$tree" w_leak_ask w_held person "$ASKED_HOW"
   return 1
 }
 
@@ -479,6 +518,8 @@ workshop_tests() {
   # "1 of 1 green" right above "Red: bash -n …" read as a pass.
   if (( ${#failed[@]} == 0 )); then
     (( n == 0 )) || info "  Tests: all $n green, $((SECONDS - began))s."
+    # For the history's way out of the tests (workshop_consent).
+    WORKSHOP_GREEN="$n test file(s) green, $((SECONDS - began))s"
     return 0
   fi
   warn "  Red: ${failed[*]} — not published; it stays in $ws. The output: $log"
@@ -501,13 +542,23 @@ workshop_history() {
     session="${3:-${WORKSHOP_SESSION:-}}"
 }
 
+# A way taken on the workshop's map (history_edge), in the pass of the
+# session WORKSHOP_SESSION names, as workshop_history's rows are.
+#
+#   workshop_edge <tree> <from> <to> <by> <how> [<key>=<value>…]
+workshop_edge() {
+  local tree="$1"
+  shift
+  history_edge "$tree/.sclaude/local/feature/state.json" "$@" session="${WORKSHOP_SESSION:-}"
+}
+
 # Publishes what the tree's workshop holds, ready and reviewed: for a
 # maintainer to main, rebased on origin's and squashed into one commit; for
 # anybody else to the workshop's own branch and its one pull request.
 #
 #   workshop_publish <tree>
 workshop_publish() {
-  local tree="$1" ws rec start base how msg branch
+  local tree="$1" ws rec start base how msg branch from="${WORKSHOP_FROM:-w_ready_gate}"
   ws="$(workshop_dir "$tree")"
   rec="$(workshop_record "$tree")"
   start="$(workshop_py get "$rec" start)"
@@ -515,6 +566,7 @@ workshop_publish() {
   # How the last try stopped, for whoever asks whether one more is worth it
   # (cmd_done): set again below when it stops on the way.
   workshop_py put "$rec" stopped null
+  WORKSHOP_GREEN=""
   echo ""
   info "${BOLD}sclaude's change from this tree's workshop${OFF}"
   # Not what main has already: a try that stopped after its rebase leaves
@@ -528,6 +580,7 @@ workshop_publish() {
   if ! GIT_TERMINAL_PROMPT=0 timeout 30 "${G[@]}" fetch -q origin main 2>/dev/null; then
     warn "  Could not reach sclaude's repository: not published; it stays in $ws, and is tried again when the tree is next opened."
     workshop_py put "$rec" stopped '"on the way"'
+    [[ "$from" == w_ready_gate ]] && workshop_edge "$tree" w_ready_gate w_wait sclaude "git fetch" note="sclaude's repository out of reach"
     workshop_history "$tree" stopped
     return 0
   fi
@@ -536,6 +589,7 @@ workshop_publish() {
       "${G[@]}" rebase --abort >/dev/null 2>&1
       warn "  It conflicts with sclaude's main: not published; it stays in $ws, and is tried again when"
       warn "  the tree is next opened. A session of this tree can rebase it there and mark it ready again."
+      [[ "$from" == w_ready_gate ]] && workshop_edge "$tree" w_ready_gate w_wait sclaude "git rebase" note="conflicts with sclaude's main"
       workshop_history "$tree" stopped
       return 0
     fi
@@ -553,6 +607,17 @@ workshop_publish() {
   # tried again from there (workshop_pending), not taken for an unfinished
   # change of the next session's.
   workshop_py put "$rec" ready.head "\"$("${G[@]}" rev-parse HEAD)\""
+  # The way into the checks: the session's end, the tree opened again after
+  # a wait, or the person's core-send.
+  if [[ -n "${WORKSHOP_SEND:-}" && "$from" == w_held ]]; then
+    workshop_edge "$tree" w_held w_leaks person "sclaude core-send"
+  elif [[ -n "${WORKSHOP_SEND:-}" ]]; then
+    workshop_edge "$tree" w_wait w_leaks person "sclaude core-send"
+  elif [[ "$from" == w_wait ]]; then
+    workshop_edge "$tree" w_wait w_leaks sclaude "the tree opened again"
+  else
+    workshop_edge "$tree" w_ready_gate w_leaks sclaude "marked ready at the head" note="reviewed: ${how:-not named}"
+  fi
   local leaked=0
   workshop_leaks "$ws" "$base" "$tree" || leaked=$?
   if (( leaked == 1 )); then
@@ -566,8 +631,16 @@ workshop_publish() {
     return 0
   fi
   (( leaked == 0 )) || { workshop_history "$tree" leaks-waits; return 0; }
-  workshop_tests "$ws" "$base" || { info "  It is tried again when the tree is next opened."
-                                    workshop_history "$tree" red; return 0; }
+  if ! workshop_tests "$ws" "$base"; then
+    if [[ "${WORKSHOP_BACK:-0}" == 1 ]]; then
+      workshop_edge "$tree" w_tests w_change sclaude "sent back unasked" note="red: ${WORKSHOP_RED[*]}"
+    else
+      info "  It is tried again when the tree is next opened."
+      workshop_edge "$tree" w_tests w_wait sclaude "" note="red: ${WORKSHOP_RED[*]}"
+    fi
+    workshop_history "$tree" red
+    return 0
+  fi
   local consent=0
   workshop_consent "$tree" "$ws" "$base" || consent=$?
   if (( consent == 1 || consent == 3 )); then
@@ -580,6 +653,7 @@ workshop_publish() {
       warn "  The push to main was refused (main moved meanwhile?): it stays in $ws,"
       warn "  and is tried again when the tree is next opened."
       workshop_py put "$rec" stopped '"on the way"'
+      workshop_edge "$tree" w_who w_wait sclaude "git push" note="the push to main was refused"
       workshop_history "$tree" stopped
       return 0
     fi
@@ -593,12 +667,18 @@ workshop_publish() {
       instruments_propose "$branch" "$("${G[@]}" rev-list --count origin/main..HEAD)" \
       || { warn "  Not sent (no gh, no login, or the push failed): it stays in $ws, and is tried again when the tree is next opened."
            workshop_py put "$rec" stopped '"on the way"'
+           workshop_edge "$tree" w_who w_wait sclaude "gh" note="the pull request was not sent"
            workshop_history "$tree" stopped
            return 0; }
   fi
   workshop_py put "$rec" start "\"$("${G[@]}" rev-parse HEAD)\""
   workshop_py put "$rec" ready null
   workshop_py put "$rec" blocked null
+  if developer_is_maintainer; then
+    workshop_edge "$tree" w_who w_main sclaude "MAINTAINERS" note="$("${G[@]}" log -1 --format='%h')"
+  else
+    workshop_edge "$tree" w_who w_pr sclaude "MAINTAINERS" note="$branch"
+  fi
   workshop_history "$tree" "$(developer_is_maintainer && echo main || echo pr)"
   developer_is_maintainer && workshop_live_update
   return 0
@@ -614,10 +694,22 @@ workshop_publish() {
 #
 #   workshop_consent <tree> <workshop> <base>
 workshop_consent() {
-  local tree="$1" ws="$2" base="$3" url where text line answer q
-  [[ -n "${WORKSHOP_SEND:-}" ]] && return 0
-  case "$(contribute_mode)" in
-    send) return 0 ;;
+  local tree="$1" ws="$2" base="$3" url where text line answer q mode
+  mode="$(contribute_mode)"
+  [[ -n "${WORKSHOP_SEND:-}" ]] && mode=core-send
+  # Green, the way out of the tests: held unasked by off, else on to the question.
+  if [[ "$mode" == off ]]; then
+    workshop_edge "$tree" w_tests w_held setting "sclaude.contribute=off" note="${WORKSHOP_GREEN:-}"
+  else
+    workshop_edge "$tree" w_tests w_send sclaude "" note="${WORKSHOP_GREEN:-}"
+  fi
+  case "$mode" in
+    core-send)
+      workshop_edge "$tree" w_send w_who person "sclaude core-send"
+      return 0 ;;
+    send)
+      workshop_edge "$tree" w_send w_who setting "sclaude.contribute=send"
+      return 0 ;;
     off)
       workshop_block "$tree" "sending changes to sclaude is off on this machine (sclaude.contribute); $SELF core-send sends this one"
       return 3 ;;
@@ -626,6 +718,7 @@ workshop_consent() {
   # read what would go public, and a yes is not the away answer to that.
   if declare -F review_go_on >/dev/null && review_go_on "$tree"; then
     info "  You are away: sending sclaude's change to its public repository waits for you, and is asked when the tree is next opened."
+    workshop_edge "$tree" w_send w_wait setting "[g] — you are away"
     return 2
   fi
   url="$(git -C "$ws" remote get-url origin 2>/dev/null)"
@@ -643,13 +736,19 @@ workshop_consent() {
   if (( ${#text} > WORKSHOP_PHONE_MAX )); then
     warn "  Too long for a question on the phone: answer it here, at the terminal."
     ASK_DIR="" ask "$q" answer yn \
-      || { info "  Nobody answered at the terminal: it is asked again when the tree is next opened."; return 2; }
+      || { info "  Nobody answered at the terminal: it is asked again when the tree is next opened."
+           workshop_edge "$tree" w_send w_wait none "terminal" note="too long for the phone"; return 2; }
   else
     ask "$q" answer yn \
-      || { info "  Nobody answered: it is asked again when the tree is next opened."; return 2; }
+      || { info "  Nobody answered: it is asked again when the tree is next opened."
+           workshop_edge "$tree" w_send w_wait none ""; return 2; }
   fi
-  is_yes "$answer" && return 0
+  if is_yes "$answer"; then
+    workshop_edge "$tree" w_send w_who person "$ASKED_HOW"
+    return 0
+  fi
   workshop_block "$tree" "you did not send it; $SELF core-send in this tree sends it"
+  workshop_edge "$tree" w_send w_held person "$ASKED_HOW"
   return 1
 }
 
@@ -665,13 +764,14 @@ cmd_core_send() {
   tree="$(workshop_tree)" || die "run it inside the product's tree whose workshop holds the change"
   rec="$(workshop_record "$tree")"
   [[ -f "$rec" ]] || { info "  This tree has no workshop: nothing to send."; return 0; }
+  local from=w_wait
   case "$(workshop_state "$tree" "")" in
-    blocked) workshop_py put "$rec" blocked null ;;
+    blocked) workshop_py put "$rec" blocked null; from=w_held ;;
     ready)   ;;
     none)    info "  Nothing in this tree's workshop waits to be sent."; return 0 ;;
     *)       die "the workshop's change is not finished: $(workshop_missing "$tree")" ;;
   esac
-  WORKSHOP_SEND=1 workshop_publish "$tree"
+  WORKSHOP_SEND=1 WORKSHOP_FROM="$from" workshop_publish "$tree"
 }
 
 # Brings the live checkout up to what was just published, when that is safe

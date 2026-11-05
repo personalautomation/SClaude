@@ -287,6 +287,11 @@ regression_fix() {
   # off only now that a session is opening: one that never starts (its rules
   # unreadable, its prompt missing) leaves it for the next start's question.
   history_add "$state" "fix.$stage" start session="$session"
+  case "$stage" in
+    local)   history_edge "$state" reg_local fix_local sclaude "red" stage=local note="at: ${failed:-?}" ;;
+    preview) history_edge "$state" preview_ok fix_preview sclaude "red" stage=preview note="at: ${failed:-?}" ;;
+    prod)    history_edge "$state" rollback fix_prod sclaude "rolled back" stage=prod note="at: ${failed:-?}" ;;
+  esac
   blocked_note_keep "$wt" "$stage" "a fixing session opened"
   session_watch_start "$wt" "$session"
   if [[ -n "$resume" ]]; then
@@ -308,6 +313,11 @@ regression_fix() {
   session_watch_stop
   fix_word_set "$state" "$stage" fix_finished "$(date -Iseconds)"
   history_add "$state" "fix.$stage" end session="$session"
+  case "$stage" in
+    local)   history_edge "$state" fix_local reg_local session "the session ended" stage=local ;;
+    preview) history_edge "$state" fix_preview r_step4 session "the session ended" stage=preview ;;
+    prod)    history_edge "$state" fix_prod r_step4 session "the session ended" stage=prod ;;
+  esac
 
   # The session said its fix is in and the watcher closed it; the gate's next
   # run is the judge. Its report is printed here, since claude's screen went

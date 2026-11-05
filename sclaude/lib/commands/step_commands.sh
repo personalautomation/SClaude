@@ -89,6 +89,7 @@ cmd_return() {
     if [[ "$carries" -eq 0 ]]; then
       state_set "$state" regression.prod.reason "${*:-null}"
       regression_rewind "$wt" "$slug" prod
+      cycle_edge "$wt" hold_ways r_step4 person "$SELF return" stage=prod note="${*:-}"
       info "  Back on the review to fix production forward, in this same tree."
       cmd_resume "$slug"
       return

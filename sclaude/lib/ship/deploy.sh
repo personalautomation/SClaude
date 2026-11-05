@@ -310,6 +310,8 @@ remind_prod() {
       [[ "$(project_flow_mode qa "$wt")" != auto ]] && demo_refresh "$wt" preview
       qa_retest "$wt" "$issue" "$pr" fresh || true
       [[ -n "$issue" ]] && issue_qa_ready "$issue"
+      cycle_edge "$wt" preview in_qa sclaude "preview regression green"
+      cycle_edge "$wt" in_qa qa_check sclaude "the issue moved to ${QA_TO:-QA}"
       qa_sent "$wt"
       qa_missed "$issue" "${merged:-}" "$wt" && qa_skipped=1
       watch_start "$wt" "$slug" "$issue" "$pr"
@@ -322,6 +324,7 @@ remind_prod() {
       # the label would be about is already on its way out. The section still
       # gets written, and it is where the deploy is named: prose can say "on
       # preview, regression red", a label cannot.
+      cycle_edge "$wt" preview review sclaude "preview regression red"
       run_status "$slug" "$issue" "$pr" "${merged:-}" 0 0 "$wt" 1 0
       echo ""
       warn "The preview regression is red — the feature is not ready to merge."
@@ -381,6 +384,8 @@ remind_prod() {
       alarm "  This is an exception to the flow: QA comes before the merge."
     fi
     if [[ "$qa_verdict" -eq 2 ]]; then
+      cycle_edge "$wt" qa_check qa_verdict "${QA_BY:-qa}" "${QA_HOW:-the board}"
+      cycle_edge "$wt" qa_verdict review qa "the board" note="issue #$issue left $QA_TO"
       echo ""
       say "${BOLD}Issue #$issue left '$QA_TO': the feature returns to development.${OFF}"
       info "  What was said since — on the issue and on the pull request — goes into"
@@ -403,6 +408,12 @@ remind_prod() {
       sync_gate "$wt" "$slug" "$pr" || resynced=$?
       [[ "$resynced" -eq 1 ]] && return 0
       if [[ "$resynced" -eq 3 || "$resynced" -eq 5 ]]; then
+        # Back to the preview on the synced code, from wherever the history
+        # last left the feature: the merge's wait, the hand-off (or the merge
+        # question after it), or QA's yes before any hand-off.
+        local moved="main merged in"
+        [[ "$resynced" -eq 5 ]] && moved="commits reached the branch from elsewhere"
+        qa_way_back "$wt" "the branch moved" "$moved"
         remind_prod "$wt" "$slug"
         return $?
       fi
@@ -412,7 +423,14 @@ remind_prod() {
     # is what holds the merge offer below back (see pr_qa_handoff).
     if [[ "$qa_verdict" -eq 0 ]]; then
       local handed=0
+      # QA's yes, once in this pass of QA: a run while the merge waits takes
+      # no way again, one after a way back does. The way into the hand-off
+      # is written where it is made (pr_qa_handoff_now), here or by the QA
+      # timer; the way on from it once it is made.
+      qa_yes_edge "$wt"
       pr_qa_handoff "$wt" "$pr" "$issue" || handed=$?
+      [[ "$handed" -eq 0 || "$handed" -eq 3 ]] \
+        && once_edge "$wt" handoff merge sclaude "pr_qa_handoff" note="PR #$pr ready"
       # Done before — by an earlier run, or by the QA timer while this one
       # waited, whose words went to Telegram rather than here.
       [[ "$handed" -eq 3 ]] \
@@ -438,6 +456,7 @@ remind_prod() {
     # Main moved under the wait and the branch no longer merges: the sync,
     # and the run again on what it pushes.
     if [[ "$wait_rc" -eq 3 ]]; then
+      cycle_edge "$wt" merge_wait preview sclaude "the branch moved" note="main no longer merges cleanly"
       # The pull request goes back to a draft now: it was handed over, and
       # the sync in the run below pushes code nobody has checked.
       sync_withdraw "$wt" "$pr"
@@ -563,6 +582,8 @@ remind_prod() {
     return 0
   fi
 
+  once_edge "$wt" merged ship sclaude "PR #$pr merged"
+
   # The production question, sharpened when nobody passed the branch through QA.
   #
   # One question, not two: the human is already being asked whether to ship, and
@@ -632,13 +653,14 @@ remind_prod() {
   # Asked once: main on origin may move between two askings, and a second
   # answer of "changed" would ship past what only the first one's branch
   # records and checks.
-  local riders="" rider_issues="" prod_same=0
+  local riders="" rider_issues="" prod_same=0 ship_rc=0
   deploy_unchanged "$wt" prod && prod_same=1
   if [[ "$prod_same" -eq 0 && "$ship_mode" != off ]]; then
     rollback_remember_previous "$wt"
     [[ -n "$migrations" ]] && rollback_remember_migrations "$wt"
 
     if prod_main_unready "$REPO"; then
+      cycle_edge "$wt" ship epilogue sclaude "main in the main tree" note="not ready to ship from"
       info "  Then run: $SELF $slug"
       run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" 0 "$wt"
       return 0
@@ -723,7 +745,8 @@ remind_prod() {
       prod_done=1
       deploy_remember "$wt" prod
     else
-      case $? in 2) prod_tried=1 ;; 3) prod_unanswered=1 ;; esac
+      ship_rc=$?
+      case $ship_rc in 2) prod_tried=1 ;; 3) prod_unanswered=1 ;; esac
     fi
     if [[ -n "$snapshot" ]]; then
       environment_restore "$REPO" "$snapshot" \
@@ -741,8 +764,23 @@ remind_prod() {
       prod_done=1
       deploy_remember "$wt" prod
     else
-      case $? in 2) prod_tried=1 ;; 3) prod_unanswered=1 ;; esac
+      ship_rc=$?
+      case $ship_rc in 2) prod_tried=1 ;; 3) prod_unanswered=1 ;; esac
     fi
+  fi
+
+  # The way out of the question, for the history: the person's answer, the
+  # project's ship setting, or nobody's.
+  if [[ "$prod_same" -eq 0 && "$ship_mode" == off ]]; then
+    cycle_edge "$wt" ship epilogue setting "ship=off"
+  elif [[ "$prod_same" -eq 0 ]]; then
+    local ship_by=person ship_how="$ASKED_HOW"
+    [[ -z "$prod_ask" ]] && ship_by=setting ship_how="ship=auto"
+    case "$ship_rc" in
+      0|2) cycle_edge "$wt" ship prod "$ship_by" "$ship_how" ;;
+      1)   cycle_edge "$wt" ship epilogue person "$ASKED_HOW" ;;
+      3)   cycle_edge "$wt" ship epilogue none "" ;;
+    esac
   fi
 
   # Unanswered, the question still stands: the map keeps the feature on it.
@@ -776,6 +814,7 @@ remind_prod() {
     rm -f "$wt/.sclaude/local/feature/deploy.at"
     local began=""
     [[ -n "${promote_cmd:-}" && -n "$failed" && "$failed" != "cd $REPO" && "$failed" != git\ pull* ]] && began=1
+    cycle_edge "$wt" prod review sclaude "the ship failed" note="at: ${failed:-?}"
     ship_failed "$wt" "$slug" "$failed" "$began"
     return $?
   fi
@@ -861,6 +900,8 @@ remind_prod() {
         run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_done" "$wt" 0 1
         echo ""
         warn "Production is still red, and another release now sits on top of this one."
+        cycle_edge "$wt" prod_ok hold_ways sclaude "red again" stage=prod note="another release on top: not rolled back"
+        cycle_edge "$wt" prod epilogue sclaude "production regression" note="red, another release on top: not rolled back"
         info "  Nothing was rolled back: going back to the release before this"
         info "  feature would remove that one too. Look at the log, talk to whoever"
         info "  deployed it, and roll back by hand if it is this feature's:"
@@ -890,6 +931,7 @@ remind_prod() {
       # we would go back to may be the one that is not answering.
       run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_done" "$wt" 0 1
       echo ""
+      cycle_edge "$wt" prod epilogue sclaude "production regression" note="the suite could not run"
       warn "The production regression could not run — see above."
       info "  Nothing was rolled back: a suite that did not run says nothing"
       info "  about what is serving production."
@@ -898,8 +940,10 @@ remind_prod() {
       return 0
     else
       # Red. Production goes back before anything else happens.
+      cycle_edge "$wt" prod_ok rollback sclaude "red" stage=prod
       rollback_prod "$wt" "$slug" --auto
       local rb_rc=$?
+      [[ "$rb_rc" -ne 0 ]] && cycle_edge "$wt" rollback hold_ways sclaude "the rollback failed" stage=prod
 
       # prod_done stays 1 and `deployed-prod` goes on: the code did reach
       # production, which is the whole of what that label says, and it is true
@@ -912,6 +956,7 @@ remind_prod() {
       run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" "$prod_done" "$wt" 0 1
 
       if [[ "$rb_rc" -ne 0 ]]; then
+        cycle_edge "$wt" prod epilogue sclaude "production regression" note="red, not rolled back"
         echo ""
         warn "Production is broken and could not be rolled back."
         info "  Read what it said above and put it back by hand; the worktree and"
@@ -932,6 +977,7 @@ remind_prod() {
       info "  its suite, then production."
       info "  The worktree stays: $wt"
       info "  Carry on with: $SELF $slug"
+      cycle_edge "$wt" prod review sclaude "production regression" note="red: rolled back"
       regression_rewind "$wt" "$slug" prod
       return 0
     fi
@@ -950,6 +996,10 @@ remind_prod() {
   # feature about to close — and the closed, deployed-prod case status.md
   # answers with no comment at all could never come up.
   local prod_live=0
+  if [[ "$prod_done" -eq 1 ]]; then
+    cycle_edge "$wt" prod epilogue sclaude "production regression" \
+      note="$(project_prod_suite_declined "$wt" && echo "no suite for production" || echo green)"
+  fi
   if [[ "$prod_done" -eq 1 || "$carried" -eq 1 ]]; then
     prod_live=1
     if project_prod_suite_declined "$wt"; then

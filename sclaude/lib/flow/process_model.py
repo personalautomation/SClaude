@@ -266,6 +266,7 @@ EDGES = [
     ("qa_verdict", "review", "hand-back: their words open step 4", "back"),
     ("qa_verdict", "handoff", "Done (main checked again)", ""),
     ("handoff", "merge", "", ""),
+    ("qa_verdict", "preview", "Done, but the code moved: QA again", "back"),
     ("merge", "merged", "yes", ""),
     ("merge", "merge_wait", "not now", ""),
     ("merge_wait", "merged", "merged on GitHub", ""),
@@ -280,10 +281,11 @@ EDGES = [
     ("preview", "epi_preview", "red; green after red", "msg"),
     ("ship", "prod", "yes", ""),
     # One way each into the epilogue: the status is written there for the
-    # production block's stops too — main not ready (asked after the yes),
-    # production red (whose fix goes back to step 4 by its own way).
-    ("ship", "epilogue", "no; no answer — the status, then asked again", ""),
-    ("prod", "epilogue", "green, red, or main not ready", ""),
+    # production block's stops too — main not ready, found before the
+    # question; production red and not rolled back, or its suite not run (a
+    # red rolled back goes back to step 4 by its own way).
+    ("ship", "epilogue", "no; no answer; main not ready — the status, then asked again", ""),
+    ("prod", "epilogue", "green; red, not rolled back; no suite run", ""),
     ("prod", "review", "red: rolled back, or held; the ship failed", "back"),
     ("epilogue", "done_cmd", "", ""),
     ("done_cmd", "friction_left", "", ""),
@@ -377,27 +379,35 @@ WORKSHOP_EDGES = [
     ("w_ask", "w_open", "approved", ""),
     ("w_open", "w_change", "", ""),
     ("w_change", "w_ready", "", ""),
+    ("w_change", "w_exit", "ended before core-ready", ""),
     ("w_ready", "w_exit", "", ""),
     ("w_exit", "w_ready_gate", "", ""),
     ("w_ready_gate", "w_back", "no", ""),
+    ("w_ready_gate", "w_held", "held before at this head — not asked again", ""),
+    ("w_ready_gate", "w_pending", "an earlier session's change unfinished", ""),
     ("w_back", "w_change", "yes — same conversation", "back"),
     ("w_back", "w_pending", "no", ""),
+    ("w_pending", "w_change", "offered at the next opening — yes", "back"),
     ("w_ready_gate", "w_leaks", "yes", ""),
     ("w_leaks", "w_leak_ask", "a hit", ""),
     ("w_leak_ask", "w_tests", "yes", ""),
     ("w_leak_ask", "w_held", "no", ""),
     ("w_leak_ask", "w_wait", "no answer — asked at the next opening", ""),
     ("w_leaks", "w_held", "a hit, sclaude.leaks off — unasked", ""),
-    ("w_leaks", "w_tests", "none", ""),
+    ("w_leaks", "w_tests", "none, or a hit with sclaude.leaks auto — unasked", ""),
     ("w_tests", "w_send", "green", ""),
     ("w_tests", "w_change", "red — same conversation, twice at most", "back"),
     ("w_tests", "w_wait", "red — at a later opening, or a third time", ""),
-    ("w_ready_gate", "w_wait", "sent back, the head left as it was", ""),
+    ("w_ready_gate", "w_wait", "sent back, the head left as it was; main unreachable or in conflict", ""),
     ("w_send", "w_who", "yes", ""),
     ("w_send", "w_held", "no", "back"),
+    ("w_send", "w_wait", "away, or no answer — asked at the next opening", ""),
     ("w_tests", "w_held", "green, sclaude.contribute off — unasked", ""),
     ("w_who", "w_main", "yes", "msg"),
     ("w_who", "w_pr", "no", "msg"),
+    ("w_who", "w_wait", "the push or the pull request failed — at the next opening", ""),
+    ("w_wait", "w_leaks", "the tree opened again", "back"),
+    ("w_held", "w_leaks", "sclaude core-send — your yes", "back"),
 ]
 
 # The friction review: what the safety rules refused a session, read after it
@@ -449,6 +459,7 @@ FRICTION_EDGES = [
     ("f_lift", "f_verdict", "", ""),
     ("f_verdict", "f_push", "", ""),
     ("f_push", "f_next", "", ""),
+    ("f_verdict", "f_next", "nothing to push", ""),
     ("f_defer", "f_monthly", "once a month", ""),
 ]
 

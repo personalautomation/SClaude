@@ -4,7 +4,7 @@
 # Part of sclaude/lib/flow/process.py, which re-exports it.
 
 import datetime
-
+import json
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -38,6 +38,8 @@ TRANSCRIPT_FRESH = 60
 # A step closed: the check it closes on.
 STEP_CLOSE = {"plan": "plan_check", "pr": "pr_check", "review": "review_close"}
 STAGE_NODE = {"local": "reg_local", "preview": "preview", "prod": "prod"}
+# The friction map's places a log found empty goes through: no pass.
+FRICTION_QUIET = ("f_log", "f_empty", "f_none")
 # Who the gap before the next place is spent on: a check, a person, a wait.
 WAITS_ON = ("user", "gate", "wait", "hold")
 # The most places filled in between two the history names.
@@ -98,6 +100,114 @@ def _way(graph, a, b):
         seen.add(way[-1])
         queue += [way + [x] for x in graph.get(way[-1], []) if x not in seen or x == b]
     return [a, b]
+
+
+# --- the edges the code wrote ----------------------------------------------
+#
+# A row {"what": "edge", "op": "<from> <to>"} is a way taken on one of the
+# maps, written where the code took it (history_edge, state.sh), with who
+# took it (`by`: person, setting, sclaude, session, qa, github, none — nobody
+# answered), how (`how`: where the answer came from, the setting and its
+# value, what was checked) and what else was known then (`note`). Where they
+# are, the played way follows them; between two that do not meet, and for a
+# feature older than them, it is filled in along the map as before.
+
+EDGE = "edge"
+
+# The arrows no code of sclaude's writes, each with why: taken where sclaude
+# does not see it happen. The rest of a map recorded here (RECORDED) is
+# written where it is taken; tests/process.py holds the two to the code.
+RECORDED = ("workshop", "detail", "friction", "regression", "sync")
+UNWRITTEN = {
+    ("w_find", "w_ask"): "the session finds the fix and asks for its plan inside its conversation",
+    ("approve", "plan"): "the person's corrections go to the session inside its conversation",
+    ("preview", "epi_preview"): "a step aside: the status session's own row (about=preview) plays it",
+    ("f_trip", "f_log"): "a hook writes the log inside the step's session",
+    ("f_decide", "f_defer"): "an entry the review is unsure of becomes a deferred row inside its conversation",
+    ("f_defer", "f_monthly"): "the monthly review runs over the project, not over a feature",
+    ("hold_ways", "r_on"): "the run the person starts on a held production is a pass of its own, from its start",
+}
+
+
+def _edge(row):
+    a, _, b = str(row.get("op") or "").partition(" ")
+    return a, b
+
+
+def _labels():
+    """Every map's arrows on the configured model: (from, to) → its words."""
+    return {(a, b): label for _name, _lanes, _nodes, edges in process_config.node_sets()
+            for a, b, label, _kind in edges}
+
+
+def _via(row, labels):
+    """What the page says of the way into a place: the arrow's words, who
+    took it, how, what was known, and when."""
+    via = {k: row[k] for k in ("by", "how", "note", "at") if row.get(k)}
+    label = labels.get(_edge(row))
+    if label:
+        via["label"] = label
+    return via
+
+
+def _chain(start, edges, graph, end=None, limit=FILL_MAX):
+    """The places along recorded edges from `start`, as (node, row) pairs:
+    the row None for a place filled in along the map where an edge does not
+    begin where the last one ended (one written nowhere yet, a jump the map
+    does not draw). With `end`, the way goes on to it the same way, and `end`
+    itself is left out: the second value is the row of the edge into it.
+    Edges after the one that reaches `end` are left for the places after it
+    (written in the same second): the third value counts the ones taken."""
+    cur, out, before, used = start, [], None, 0
+    for e in edges:
+        if end is not None and cur == end and out:
+            break
+        used += 1
+        a, b = _edge(e)
+        # The way into the place it stands on, written after the row that
+        # entered it: already taken.
+        if b == cur and a != cur:
+            continue
+        # Back from a side place no arrow leaves (the issue taken, its
+        # criteria) to the one it hangs off: no way to play.
+        if a == before and not graph.get(cur):
+            cur = a
+        before = cur
+        if a != cur:
+            hop = _way(graph, cur, a)
+            out += [(n, None) for n in (hop[1:] if limit is None or len(hop) - 2 <= limit else [a])]
+        out.append((b, e))
+        cur = b
+    if end is None:
+        return out, None, used
+    if cur == end and out:
+        return out[:-1], out[-1][1], used
+    hop = _way(graph, cur, end)[1:-1]
+    return out + [(n, None) for n in (hop if limit is None or len(hop) <= limit else [])], None, used
+
+
+def _along(inferred, edges, start, graph, labels):
+    """A pass's way along its recorded edges, each place keeping what the
+    rows say it took (the inferred way's step of the same place, matched in
+    order); a stay the edges have not reached yet — one going on, or cut
+    off — stays at the end."""
+    chain, _, _ = _chain(start, edges, graph, limit=None)
+    out, i = [], 0
+    for n, e in [(start, None)] + chain:
+        j = next((k for k in range(i, len(inferred)) if inferred[k].get("n") == n), None)
+        step = dict(inferred[j]) if j is not None else {"n": n}
+        if j is not None:
+            i = j + 1
+        if e:
+            step["via"] = _via(e, labels)
+        out.append(step)
+    return out + [dict(s) for s in inferred[i:] if s.get("live") or s.get("unsure")]
+
+
+def _map_of(node):
+    """Which map a place is on: detail (the cycle) or a pass's."""
+    return next((name for name, nodes in process_config.node_sets_named().items()
+                 if name != "overview" and node in nodes), None)
 
 
 def _seconds(a, b):
@@ -356,6 +466,17 @@ def _workshop_way(rows):
     return [{"n": n} for n in way]
 
 
+def _edged(inferred, rows, start, map_edges, labels, timed=True):
+    """A pass's way: along the edges its rows recorded, where there are any,
+    keeping what the rows say each place took; else as the rows tell it.
+    The workshop's way takes no time of its own, and its edges are the
+    whole of it."""
+    written = [r for r in rows if r["what"] == EDGE]
+    if not written:
+        return inferred
+    return _along(inferred if timed else [], written, start, _graph(map_edges), labels)
+
+
 def _session_names(state):
     """What each conversation was: "2 · code", "friction code-1", "retro"."""
     names = {}
@@ -384,6 +505,8 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
     rows = history_rows(lines)
     places = _Places()
     friction, workshop, regression, syncs = {}, {}, {}, {}
+    # The cycle's recorded edges, and the friction reviews whose pass began.
+    edges, quiet = [], {}
     last_run = {}
     merged = qa_open = False
     first = rows[0]["at"] if rows else None
@@ -393,7 +516,39 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         what, op, at = r["what"], r["op"], r["at"]
         head, _, rest = what.partition(".")
         places.run = r.get("run")
-        if head == "steps" and rest in process_model.NODES:
+        if what == EDGE:
+            on = _map_of(_edge(r)[0])
+            if on == "detail":
+                edges.append(r)
+            elif on == "workshop":
+                session = r.get("session") or (list(workshop)[-1] if workshop else "")
+                if session not in workshop:
+                    workshop[session] = []
+                    places.detour("workshop", session, at)
+                workshop[session].append(r)
+            elif on == "friction" and r.get("key"):
+                if r["key"] not in friction:
+                    friction[r["key"]] = []
+                if not quiet.get(r["key"]) and _edge(r)[1] not in FRICTION_QUIET:
+                    quiet[r["key"]] = True
+                    places.detour("friction", r["key"], at)
+                friction[r["key"]].append(r)
+            elif on == "regression" and r.get("stage") in STAGE_NODE:
+                key = last_run.get(r["stage"])
+                if key is None:
+                    key = last_run[r["stage"]] = "%s-%d" % (r["stage"], len(regression))
+                    regression[key] = []
+                    places.detour("regression", key, at)
+                regression[key].append(r)
+            elif on == "sync":
+                # Main found moved with a conflict, or only the deferred
+                # logs: a sync of its own begins; its other ways go on in it.
+                if _edge(r)[0] == "y_when" or last_run.get("sync") is None:
+                    key = last_run["sync"] = str(len(syncs))
+                    syncs[key] = []
+                    places.detour("sync", key, at)
+                syncs[last_run["sync"]].append(r)
+        elif head == "steps" and rest in process_model.NODES:
             if op == "open":
                 places.enter(rest, at, "steps." + rest, r.get("session"))
             elif op == "drop":
@@ -409,7 +564,7 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
             # left unfinished and taken up again goes on in its own.
             if op == "open" and (key is None or any(x["op"] in ("finish", "close")
                                                     for x in syncs[key])
-                                 or [x["op"] for x in syncs[key]][-1:] == ["drop"]):
+                                 or [x["op"] for x in syncs[key] if x["what"] != EDGE][-1:] == ["drop"]):
                 key = last_run["sync"] = str(len(syncs))
                 syncs[key] = []
                 places.detour("sync", key, at)
@@ -428,8 +583,11 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         elif head == "friction" and rest:
             if rest not in friction:
                 friction[rest] = []
-                if op != "empty":
-                    places.detour("friction", rest, at)
+            # Its pass begins at the first row that is more than a log
+            # found empty (an empty log is no review, and no pass).
+            if op != "empty" and not quiet.get(rest):
+                quiet[rest] = True
+                places.detour("friction", rest, at)
             friction[rest].append(r)
         elif head in ("regression", "fix") and rest in STAGE_NODE \
                 or what == "rollback.prod":
@@ -544,8 +702,21 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
     # The places between, along the map; the time between two places to the
     # first check or person on the way, who is what it waited on.
     graph = _graph(process_model.EDGES)
+    labels = _labels()
     out, prev, held, stray, after_copy = [], None, [], False, False
-    for v in visits:
+    taken = 0  # the recorded edges played so far
+    def recorded(until):
+        """The cycle's edges written up to `until` (all that are left when
+        it is None) not played yet."""
+        nonlocal taken
+        upto = taken
+        while upto < len(edges) and (until is None or _when(edges[upto]["at"]) <= _when(until)):
+            upto += 1
+        got, taken = edges[taken:upto], upto
+        return got
+    def started(x):
+        return x.get("from") or (x["sittings"][0][0] if x.get("sittings") else None)
+    for vi, v in enumerate(visits):
         if "pass" in v:
             # A regression run or a sync stands between two places of the
             # cycle (an R, an S on the way): it is played after the way that
@@ -557,26 +728,44 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
             continue
         copy = v["n"] in COPIES
         stop = prev
+        entered = None
         if prev is not None and not copy:
-            # Back where it was before a status copy: no way round.
-            reopened = prev["n"] == v["n"] and (v["n"] in REOPENED or after_copy)
-            full = [] if reopened else _way(graph, prev["n"], v["n"])
-            way = full[1:-1]
-            # The map has no way at all from the one to the other: the
-            # feature went where the map does not go (deviations).
-            stray = full == [prev["n"], v["n"]] and v["n"] not in graph.get(prev["n"], [])
-            # A long way round is a guess, not a fill: a local review pass
-            # after a round has no arrow of its own, and the shortest way
-            # there runs through the merge and the retrospective.
-            if len(way) > FILL_MAX:
-                way = []
             until = held[0].get("from") if held else None
             until = until or v.get("from") or (v["sittings"][0][0] if v["sittings"] else None)
+            # A place with no time of its own takes the edges up to the next
+            # place that has one (all that are left where none has); the
+            # chain stops at it and leaves the rest to the places after.
+            upto = until or next((started(x) for x in visits[vi + 1:] if "n" in x and started(x)), None)
+            written = recorded(upto)
+            if written:
+                # The edges the code wrote lead the way; the map fills in
+                # only where two of them do not meet.
+                chain, entered, used = _chain(prev["n"], written, graph, v["n"])
+                taken -= len(written) - used
+                way = [n for n, _e in chain]
+                vias = {i: _via(e, labels) for i, (_n, e) in enumerate(chain) if e}
+                stray = False
+            else:
+                vias = {}
+                # Back where it was before a status copy: no way round.
+                reopened = prev["n"] == v["n"] and (v["n"] in REOPENED or after_copy)
+                full = [] if reopened else _way(graph, prev["n"], v["n"])
+                way = full[1:-1]
+                # The map has no way at all from the one to the other: the
+                # feature went where the map does not go (deviations).
+                stray = full == [prev["n"], v["n"]] and v["n"] not in graph.get(prev["n"], [])
+                # A long way round is a guess, not a fill: a local review pass
+                # after a round has no arrow of its own, and the shortest way
+                # there runs through the merge and the retrospective.
+                if len(way) > FILL_MAX:
+                    way = []
             # A stay still going is not waited after: its sitting holds it.
             gap = None if any(not b for a, b in prev.get("sittings", [])) else _seconds(prev.get("to"), until)
             waited = next((n for n in way if process_model.NODES[n][2] in WAITS_ON), None)
-            for n in way:
+            for i, n in enumerate(way):
                 step = {"n": n}
+                if i in vias:
+                    step["via"] = vias[i]
                 if n == waited and gap and gap >= 60:
                     step.update({"s": gap, "from": prev.get("to"), "to": until, "wait": True,
                                  SPANS: [(prev.get("to"), until)]})
@@ -584,6 +773,8 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         out += [{"pass": h["pass"]} for h in held]
         held = []
         step = {"n": v["n"]}
+        if entered:
+            step["via"] = _via(entered, labels)
         spans = [(a, b) for a, b in v["sittings"] if a and b]
         # A sitting of the conversation going on counts up to this moment,
         # and its stay is the one that holds the step going on (`live`).
@@ -612,8 +803,13 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         out.append(step)
         prev = dict(stop, to=v.get("to") or stop.get("to")) if copy else v
         after_copy = copy
-    # The last passes, with no place after them yet.
+    # The last passes, with no place after them yet, and the edges written
+    # after the last place: the gates past it that no row enters (the
+    # retrospective's, the clean-up's).
     out += [{"pass": h["pass"]} for h in held]
+    if prev is not None:
+        chain, _, _ = _chain(prev["n"], recorded(None), graph)
+        out += [dict({"n": n}, **({"via": _via(e, labels)} if e else {})) for n, e in chain]
 
     names = _session_names(state)
     workshop_sessions = set(workshop)
@@ -633,19 +829,22 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         ends = [x["op"] for x in rs if x["what"].startswith("regression.") and x["op"] != "start"]
         passes["regression"].append({
             "label": "%s · %s%s" % (_short(rs[0]["at"]), key.split("-")[0], (" · " + ends[-1]) if ends else ""),
-            "steps": _regression_way(key.split("-")[0], rs,
-                                     unseen(rs),
-                                     now_iso if key == last_run.get(key.split("-")[0])
-                                     and process_position._running(state, key.split("-")[0]) else None)})
+            "steps": _edged(_regression_way(key.split("-")[0], [x for x in rs if x["what"] != EDGE],
+                                            unseen(rs),
+                                            now_iso if key == last_run.get(key.split("-")[0])
+                                            and process_position._running(state, key.split("-")[0]) else None),
+                            rs, "r_" + key.split("-")[0], process_model.REGRESSION_EDGES, labels)})
     for key, rs in syncs.items():
         index[("sync", key)] = len(passes["sync"])
-        ends = [x["op"] for x in rs if x["op"] != "open"]
+        ends = [x["op"] for x in rs if x["op"] != "open" and x["what"] != EDGE]
         passes["sync"].append({
             "label": "%s · sync%s" % (_short(rs[0]["at"]), (" · " + ends[-1]) if ends else ""),
-            "steps": _sync_way(rs, now_iso if key == list(syncs)[-1] and process_position._session_going(state, "sync") else None,
-                               unseen(rs))})
+            "steps": _edged(_sync_way([x for x in rs if x["what"] != EDGE],
+                                      now_iso if key == list(syncs)[-1] and process_position._session_going(state, "sync") else None,
+                                      unseen(rs)),
+                            rs, "y_when", process_model.SYNC_EDGES, labels)})
     for key, rs in friction.items():
-        if [r["op"] for r in rs] == ["empty"]:
+        if not quiet.get(key):
             continue
         verdict = next((r.get("verdict") for r in rs if r["op"] == "verdict"), "")
         if any(r["op"] == "deferred" for r in rs):
@@ -653,17 +852,22 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         index[("friction", key)] = len(passes["friction"])
         passes["friction"].append({
             "label": "%s · %s%s" % (_short(rs[0]["at"]), key, (" · " + verdict) if verdict else ""),
-            "steps": _friction_way(rs, workshop_sessions,
-                                   now_iso if process_position._open((process_position._runs((state.get("friction") or {}).get(key)) or [None])[-1])
-                                   else None,
-                                   unseen(rs))})
+            "steps": _edged(_friction_way([x for x in rs if x["what"] != EDGE], workshop_sessions,
+                                          now_iso if process_position._open((process_position._runs((state.get("friction") or {}).get(key)) or [None])[-1])
+                                          else None,
+                                          unseen(rs)),
+                            rs, "f_trip", process_model.FRICTION_EDGES, labels)})
     for session, rs in workshop.items():
+        # Opened (core-open writes its ways) and left with nothing made: no pass.
+        if [r["op"] for r in rs if r["what"] != EDGE] == ["none"]:
+            continue
         ends = [r["op"] for r in rs if r["op"] in WORKSHOP_OUT or r["op"] in ("none", "ready", "sent-back")]
         index[("workshop", session)] = len(passes["workshop"])
         passes["workshop"].append({
             "label": "%s · after %s%s" % (_short(rs[0]["at"]), names.get(session, "a session"),
                                        (" · " + ends[-1]) if ends else ""),
-            "steps": _workshop_way(rs)})
+            "steps": _edged(_workshop_way([x for x in rs if x["what"] != EDGE]), rs, "w_find",
+                            process_model.WORKSHOP_EDGES, labels, timed=False)})
     if aside:
         # On a map of its own (a run, a sync): the last pass there that
         # reaches it stands there now.
@@ -688,6 +892,31 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         st.pop(SPANS, None)
     return {"visits": steps, "passes": passes, "metrics": counted,
             "now": now_iso}
+
+
+def played(state_path, here=None):
+    """The feature's history as both its readers take it — the feature's
+    page (actions.sh) and `process.py history`: played on the map its
+    project draws, so the ways filled in run through blocks it has, and a
+    place that map does not draw (a merge awaited with no QA board) stands
+    where the flow goes on from it. Gives the place on that map (None when
+    it draws none), its title, and the history."""
+    try:
+        with open(state_path) as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        state = {}
+    read = process_costs.transcripts_of(state_path)
+    tree = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(state_path)))))
+    try:
+        with process_model.configured(process_config.config_of(tree)):
+            drawn = process_config.all_nodes()
+            node = (process_config.on_map(here) or here) if here else None
+            node = node if node in drawn else None
+            return node, drawn[node][3] if node else None, \
+                history(state, process_costs.read_history(state_path), node, read)
+    finally:
+        read.done()
 
 
 # A map of its own is reached from a block marked with its letter: a pass

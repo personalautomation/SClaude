@@ -62,10 +62,18 @@ cmd_done() {
   # may hold the retrospective's own entries. A retrospective that ran in this
   # process and published nothing is cleaned up after with its own entries
   # unread, as it was before this check.
+  # The way here, once: `sclaude done` typed, or the cycle's end calling it.
+  if [[ "${SCLAUDE_COMMAND:-}" == done ]]; then
+    once_edge "$wt" epilogue done_cmd person "$SELF done"
+  else
+    once_edge "$wt" epilogue done_cmd sclaude "the epilogue ended"
+  fi
+  once_edge "$wt" done_cmd friction_left sclaude ""
   if ! friction_before_retro "$wt" "$slug"; then
     info "  The retrospective and the clean-up wait for it: $SELF done $slug"
     return 1
   fi
+  once_edge "$wt" friction_left retro sclaude "no friction left unread"
   workshop_pending "$wt"
   # What it published moved sclaude's code: the retrospective, like the
   # clean-up below, runs in a fresh process, on the code it reads.
@@ -74,7 +82,10 @@ cmd_done() {
     return
   fi
 
-  [[ -n "$retro_ran_here" ]] || run_retro "$wt" "$slug" "$pr" "$issue"
+  if [[ -z "$retro_ran_here" ]]; then
+    run_retro "$wt" "$slug" "$pr" "$issue"
+    cycle_edge "$wt" retro retro_fix sclaude "the retrospective ended"
+  fi
   # Said to a fresh run below, which then does not ask about it again: only a
   # retrospective that ran to its end, here or in the run before.
   local retro_flag=""
@@ -101,7 +112,7 @@ cmd_done() {
   if [[ "$(workshop_state "$wt" "")" == ready \
         && "$(workshop_py get "$(workshop_record "$wt")" stopped 2>/dev/null)" == "on the way" ]]; then
     live_before="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)"
-    workshop_publish "$wt"
+    WORKSHOP_FROM=w_wait workshop_publish "$wt"
     if [[ "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)" != "$live_before" ]]; then
       done_fresh "$slug" "$retro_flag"
       return
@@ -117,6 +128,7 @@ cmd_done() {
   if [[ "$no_change" == "true" && -n "$retro_to" && "$retro_to" != "null" ]] \
      && [[ -z "$(worktree_dirt "$wt")" ]] && ! no_change_feature "$wt" >/dev/null; then
     state_set "$state" no_change null
+    cycle_edge "$wt" retro_fix pr sclaude "git" note="the feature now carries work of its own"
     step_rewind_to "$wt" pr pr review
     state_set "$state" steps.pr.session null 2>/dev/null || true
     # The watch on QA's earlier answer is spent, as in retro_reopen.
@@ -147,6 +159,7 @@ cmd_done() {
   local again=""
   [[ "$no_change" == "true" ]] || again="$(retro_changed_code "$wt" "$branch")"
   if [[ -n "$again" ]]; then
+    cycle_edge "$wt" retro_fix pr sclaude "git" note="$again change(s) PR #$pr does not carry"
     retro_reopen "$wt" "$pr" "$slug" || die "could not reopen '$slug': see $wt/.sclaude/local/feature/state.json"
     echo ""
     say "${BOLD}The retrospective committed $again change(s) PR #$pr does not carry — '$slug' goes back to step '$(step_title pr)' for them.${OFF}"
@@ -154,6 +167,8 @@ cmd_done() {
     cmd_resume "$slug"
     return 0
   fi
+
+  cycle_edge "$wt" retro_fix cleanup sclaude "git" note="no code changed by the retrospective"
 
   # The feature is closed, so it is cleared away whole, with one question.
   # Splitting it into three would mean asking about parts of what the human has
@@ -209,8 +224,15 @@ cmd_done() {
   # Returning 1 on a refusal is not an error but an answer: the epilogue decides
   # by it whether to mention `sclaude done`. For a direct call from the terminal
   # the exit code means nothing, everything there is said in words.
-  ask "${BOLD}Remove all of it? [y/n] ${OFF}" answer yn
-  is_yes "$answer" || { info "Cancelled."; return 1; }
+  local clean_by=person
+  ask "${BOLD}Remove all of it? [y/n] ${OFF}" answer yn || clean_by=none
+  if ! is_yes "$answer"; then
+    cycle_edge "$wt" cleanup kept "$clean_by" "$ASKED_HOW"
+    info "Cancelled."
+    return 1
+  fi
+  # Written for its run's own record: the tree, and its history with it, goes below.
+  cycle_edge "$wt" cleanup end person "$ASKED_HOW"
 
   # The side worktrees' questions, right after the agreement and before
   # anything is done: they are the feature's last (its topic in the bot goes

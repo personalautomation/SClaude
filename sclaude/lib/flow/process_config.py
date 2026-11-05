@@ -32,7 +32,8 @@ NEEDS = {
     "f_away": ("review", {"local"}),
     ("f_rules", "f_away"): ("review", {"local"}),
     ("f_away", "f_review"): ("review", {"local"}),
-    ("draft_pr", "review_found"): ("review", {"off"}),
+    # Off, or local with the search ended (no pass runs on the first entry).
+    ("draft_pr", "review_found"): ("review", {"off", "local"}),
     # A review on this machine writes no round marker: no round gate, the
     # session goes straight to step 4's close.
     "round": ("review", {"github", "off"}),

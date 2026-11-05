@@ -178,8 +178,11 @@ PY
   # The issue learns of the work at once rather than after the first closed
   # step: until now it stayed silent through the whole planning, and from the
   # outside the feature looked untouched.
+  cycle_edge "$wt" new prepare person "$SELF new" note="${issue:+issue #$issue}"
+  [[ -n "$issue" ]] && cycle_edge "$wt" prepare board_start sclaude "issue #$issue to in progress"
   issue_sync "$wt"
   prepare_worktree "$wt"
+  cycle_edge "$wt" prepare plan sclaude "the tree prepared"
 
   run_step "$wt" "$slug" "plan"
 }

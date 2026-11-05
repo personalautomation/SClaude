@@ -350,20 +350,10 @@ sys.path.insert(0, lib)
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 try:
     import process
-    read = process.transcripts_of(state)
-    # Played on the map the project draws (the page does the same), so the
-    # ways filled in between two places run through blocks it has.
-    tree = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(state))))
-    with open(state) as fh, process.configured(process.config_of(tree)):
-        data = json.load(fh)
-        # A place the map of this project does not draw is lit where the flow goes
-        # on from it (a merge awaited on a project with no QA board).
-        node = process.on_map(node) or node
-        drawn = process.all_nodes()
-        title = drawn[node][3] if node in drawn else title
-        history = process.history(data, process.read_history(state),
-                                  node if node in drawn else None, read)
-    read.done()
+    # Played as `process.py history` plays it, on the map the project draws;
+    # a place that map does not draw is lit where the flow goes on from it.
+    drawn, drawn_title, history = process.played(state, node)
+    node, title = (drawn, drawn_title) if drawn else (node, title)
 except Exception:
     history = None
 # The F and W rings that turn: a friction review open, a session writing

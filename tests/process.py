@@ -14,6 +14,7 @@
 #
 # Run it with: python3 tests/process.py
 import datetime
+import glob
 import json
 import os
 import re
@@ -560,6 +561,160 @@ check("history: a hold by the machine's setting goes past the person's questions
        ["w_leaks", "w_leak_ask", "w_held"], ["w_leaks", "w_tests", "w_send", "w_held"],
        ["w_leaks", "w_leak_ask", "w_wait"],
        ["w_leaks", "w_leak_ask", "w_leaks", "w_tests", "w_send", "w_who", "w_main"]))
+# The edges the code writes (history_edge) lead the played way.
+def edge(hhmm, a, b, by, how="", **kw):
+    return dict({"at": at(hhmm), "what": "edge", "op": "%s %s" % (a, b), "by": by, "how": how}, **kw)
+def ws_pass(rows):
+    return process.history({}, rows)["passes"]["workshop"][0]["steps"]
+eg = ws_pass([{"at": at("09:00"), "what": "workshop", "op": "blocked", "session": "s"},
+               edge("09:00", "w_exit", "w_ready_gate", "sclaude", session="s"),
+               edge("09:00", "w_ready_gate", "w_held", "sclaude", "held at this head before", session="s")])
+check("history: a change held before ends held, past no gate it did not meet",
+      [x["n"] for x in eg][-3:] == ["w_exit", "w_ready_gate", "w_held"]
+      and not {"w_leaks", "w_leak_ask", "w_send"} & {x["n"] for x in eg}, str(eg))
+eg = ws_pass([edge("09:00", "w_ready_gate", "w_leaks", "sclaude", session="s"),
+               edge("09:00", "w_leaks", "w_tests", "setting", "sclaude.leaks=auto", note="2 line(s)", session="s"),
+               edge("09:01", "w_tests", "w_wait", "sclaude", note="red: tests/a.py", session="s"),
+               edge("10:00", "w_wait", "w_leaks", "sclaude", "the tree opened again"),
+               edge("10:00", "w_leaks", "w_tests", "sclaude"),
+               edge("10:01", "w_tests", "w_send", "sclaude"),
+               edge("10:02", "w_send", "w_who", "person", "phone"),
+               edge("10:02", "w_who", "w_main", "sclaude")])
+tests_via = next(x for x in eg if x["n"] == "w_tests").get("via", {})
+check("history: a way the setting took says so, and a retry plays from the wait",
+      [x["n"] for x in eg][[x["n"] for x in eg].index("w_ready_gate") + 1:] ==
+      ["w_leaks", "w_tests", "w_wait", "w_leaks", "w_tests", "w_send", "w_who", "w_main"]
+      and tests_via.get("by") == "setting" and tests_via.get("how") == "sclaude.leaks=auto"
+      and tests_via.get("note") == "2 line(s)" and tests_via.get("label", "").startswith("none")
+      and next(x for x in eg if x["n"] == "w_who")["via"]["how"] == "phone", str(eg))
+eg = process.history({}, [
+    {"at": at("09:00"), "what": "steps.code", "op": "open", "session": "c"},
+    {"at": at("09:30"), "what": "steps.code", "op": "end", "session": "c"},
+    edge("09:30", "code", "works", "sclaude", "the session ended"),
+    edge("09:40", "works", "code", "person", "terminal", note="the button is grey"),
+    {"at": at("09:41"), "what": "steps.code", "op": "open", "session": "c"},
+    {"at": at("10:00"), "what": "steps.code", "op": "end", "session": "c"},
+    edge("10:00", "code", "works", "sclaude", "the session ended"),
+    edge("10:05", "works", "pr", "person", "tab [n]"),
+    {"at": at("10:06"), "what": "steps.pr", "op": "open", "session": "p"},
+    {"at": at("10:20"), "what": "steps.pr", "op": "finish", "session": "p"},
+    {"at": at("11:00"), "what": "retro", "op": "open", "session": "r"},
+    {"at": at("11:20"), "what": "retro", "op": "finish", "session": "r"},
+    edge("11:20", "retro", "retro_fix", "sclaude"),
+    edge("11:20", "retro_fix", "cleanup", "sclaude", "git", note="no code changed"),
+    edge("11:21", "cleanup", "kept", "person", "terminal")])["visits"]
+eseq = [v.get("n") for v in eg]
+vias = [v for v in eg if v.get("via")]
+check("history: the cycle follows its edges, with who took each",
+      eseq[eseq.index("code"):eseq.index("pr") + 1] == ["code", "works", "code", "works", "pr"]
+      and [v["via"]["by"] for v in vias][:4] == ["sclaude", "person", "sclaude", "person"]
+      and vias[1]["via"]["note"] == "the button is grey" and vias[3]["via"]["how"] == "tab [n]", str(eg))
+check("history: edges past the last place play the gates no row enters",
+      eseq[-3:] == ["retro_fix", "cleanup", "kept"] and eg[-1]["via"]["by"] == "person", str(eseq))
+
+sy = process.history({}, [
+    edge("09:00", "y_when", "merge_check", "sclaude"),
+    edge("09:00", "merge_check", "sync", "sclaude", "git merge-tree", note="2 file(s)"),
+    {"at": at("09:00"), "what": "sync", "op": "open", "session": "y"},
+    {"at": at("09:20"), "what": "sync", "op": "finish", "session": "y"},
+    edge("09:20", "sync", "merge_check", "session", "settled"),
+    edge("09:20", "merge_check", "main_in", "sclaude"),
+    edge("09:20", "main_in", "y_on", "sclaude")])["passes"]["sync"]
+check("history: a sync plays along its edges and keeps its session's time",
+      len(sy) == 1 and [x["n"] for x in sy[0]["steps"]] == ["y_when", "merge_check", "sync", "merge_check", "main_in", "y_on"]
+      and next(x for x in sy[0]["steps"] if x["n"] == "sync").get("s") == 20 * 60, str(sy))
+fr = process.history({}, [
+    edge("09:00", "f_log", "f_empty", "sclaude", key="code-1"),
+    edge("09:00", "f_empty", "f_rules", "sclaude", key="code-1"),
+    edge("09:00", "f_rules", "f_review", "sclaude", key="code-1"),
+    {"at": at("09:00"), "what": "friction.code-1", "op": "open", "session": "f"},
+    {"at": at("09:10"), "what": "friction.code-1", "op": "finish", "session": "f", "outcome": "reviewed"},
+    edge("09:10", "f_review", "f_plan", "session", key="code-1"),
+    edge("09:10", "f_plan", "f_decide", "person", key="code-1"),
+    edge("09:10", "f_decide", "f_deliberate", "session", key="code-1"),
+    edge("09:10", "f_deliberate", "f_verdict", "session", key="code-1"),
+    edge("09:10", "f_verdict", "f_next", "sclaude", "nothing to push", key="code-1")])["passes"]["friction"]
+check("history: a friction review plays along its edges, its time on the review",
+      len(fr) == 1 and [x["n"] for x in fr[0]["steps"]] ==
+      ["f_trip", "f_log", "f_empty", "f_rules", "f_review", "f_plan", "f_decide", "f_deliberate", "f_verdict", "f_next"]
+      and next(x for x in fr[0]["steps"] if x["n"] == "f_review").get("s") == 10 * 60, str(fr))
+empty = process.history({}, [{"at": at("09:00"), "what": "friction.pr-1", "op": "empty"},
+                             edge("09:00", "f_log", "f_empty", "sclaude", key="pr-1"),
+                             edge("09:00", "f_empty", "f_none", "sclaude", key="pr-1")])
+check("history: an empty log written as edges is still no pass",
+      not empty["passes"]["friction"] and not [v for v in empty["visits"] if "pass" in v], str(empty))
+
+side = [v.get("n") for v in process.history({}, [
+    edge("09:00", "new", "prepare", "person"),
+    edge("09:00", "prepare", "board_start", "sclaude"),
+    edge("09:00", "prepare", "plan", "sclaude"),
+    {"at": at("09:01"), "what": "steps.plan", "open": "x", "op": "open", "session": "p"}])["visits"]]
+check("history: a side place no arrow leaves is not played back to its parent",
+      side == ["new", "prepare", "board_start", "plan"], str(side))
+late = [v.get("n") for v in process.history({}, [
+    {"at": at("09:00"), "what": "steps.pr", "op": "open", "session": "p"},
+    {"at": at("09:10"), "what": "steps.pr", "op": "finish", "session": "p"},
+    edge("09:10", "pr", "pr_check", "session"),
+    edge("09:10", "pr_check", "draft_pr", "sclaude"),
+    {"at": at("09:11"), "what": "review.local", "op": "start"},
+    edge("09:11", "draft_pr", "local_pass", "sclaude"),
+    {"at": at("09:15"), "what": "review.local", "op": "end"},
+    edge("09:15", "local_pass", "review_found", "sclaude"),
+    edge("09:15", "review_found", "review", "sclaude"),
+    {"at": at("09:16"), "what": "steps.review", "op": "open", "session": "r"}])["visits"]]
+check("history: an edge into a place written after the row that entered it is not played twice",
+      late[late.index("pr"):] == ["pr", "pr_check", "draft_pr", "local_pass", "review_found", "review"], str(late))
+none = process.history({}, [edge("09:00", "w_ask", "w_open", "person", session="f"),
+                            edge("09:00", "w_open", "w_change", "sclaude", session="f"),
+                            {"at": at("09:10"), "what": "workshop", "op": "none", "session": "f"}])
+check("history: a workshop opened and left with nothing made is still no pass",
+      not none["passes"]["workshop"] and not [v for v in none["visits"] if "pass" in v], str(none))
+check("history: a sync's label ends on how it went, not on an edge",
+      sy[0]["label"].endswith("· finish"), sy[0]["label"])
+
+# once_edge: once in a pass, again after a way back into review, pr or preview.
+with tempfile.TemporaryDirectory() as tree:
+    os.makedirs(os.path.join(tree, ".sclaude", "local", "feature"))
+    open(os.path.join(tree, ".sclaude", "local", "feature", "state.json"), "w").write("{}")
+    subprocess.run(["bash", "-c", 'source "$1/sclaude/lib/core/state.sh"; t="$2"; '
+                    'once_edge "$t" qa_check qa_verdict qa ""; once_edge "$t" qa_check qa_verdict qa ""; '
+                    'edge_taken "$t" qa_check qa_verdict && echo taken >&2; '
+                    'cycle_edge "$t" merge_wait preview sclaude ""; edge_taken "$t" qa_check qa_verdict || echo reset >&2; '
+                    'once_edge "$t" qa_check qa_verdict qa ""', "-", ROOT, tree],
+                   check=True, capture_output=True)
+    ops = [json.loads(line)["op"] for line in open(os.path.join(tree, ".sclaude", "local", "feature", "history.jsonl"))]
+    check("history: once_edge writes once in a pass, and again after a way back into the preview",
+          ops == ["qa_check qa_verdict", "merge_wait preview", "qa_check qa_verdict"], str(ops))
+
+with tempfile.TemporaryDirectory() as tree:
+    os.makedirs(os.path.join(tree, ".sclaude", "local", "feature"))
+    open(os.path.join(tree, ".sclaude", "local", "feature", "state.json"), "w").write("{}")
+    lp = subprocess.run(["bash", "-c", 'source "$1/sclaude/lib/core/state.sh"; t="$2"; '
+                          'cycle_edge "$t" merge merge_wait person ""; '
+                          'cycle_edge "$t" f_verdict f_next sclaude ""; cycle_edge "$t" fix_prod r_step4 session ""; '
+                          'last_place "$t" qa_check qa_verdict handoff merge merge_wait', "-", ROOT, tree],
+                         check=True, capture_output=True, text=True).stdout.strip()
+    check("history: last_place reads the cycle's places past other maps' edges", lp == "merge_wait", lp)
+
+# Every edge the code writes is drawn on its map; every arrow of a map the
+# history records is written somewhere, or said to be seen only by others.
+drawn_edges = {(a, b) for _n, _l, _nd, es in process.node_sets() for a, b, _x, _k in es}
+with process.configured(process.example_config()):
+    drawn_edges |= {(a, b) for _n, _l, _nd, es in process.node_sets() for a, b, _x, _k in es}
+written = {}
+for path in sorted(glob.glob(os.path.join(ROOT, "sclaude", "lib", "*", "*.sh"))):
+    for m in re.finditer(r'\b\w*_edge\s+\S+\s+([a-z][a-z0-9_]*)\s+([a-z][a-z0-9_]*)\s+'
+                         r'"?(person|setting|sclaude|session|qa|github|none|\$)', open(path).read()):
+        written.setdefault((m.group(1), m.group(2)), os.path.relpath(path, ROOT))
+check("history: every edge the code writes is drawn on a map",
+      not [k for k in written if k not in drawn_edges], str([(k, v) for k, v in written.items() if k not in drawn_edges]))
+check("history: every arrow of a recorded map is written, or said why not",
+      not [k for k in drawn_edges if process_history._map_of(k[0]) in process_history.RECORDED
+           and k not in written and k not in process_history.UNWRITTEN],
+      str([k for k in drawn_edges if process_history._map_of(k[0]) in process_history.RECORDED
+           and k not in written and k not in process_history.UNWRITTEN]))
+check("history: what is said to be written by none is not written",
+      not set(written) & set(process_history.UNWRITTEN), str(set(written) & set(process_history.UNWRITTEN)))
 rg = got["passes"]["regression"]
 check("history: a regression run is a pass on its own map, with its time",
       len(rg) == 1 and [x["n"] for x in rg[0]["steps"]] == ["r_local", "reg_local", "r_on"]
@@ -1433,7 +1588,9 @@ for m in ("detail", "overview", "workshop", "friction"):
     check("page plays the %s map" % m, 'data-play="%s"' % m in page)
 check("page chooses the friction and the workshop passes",
       'data-pass="friction"' in page and 'data-pass="workshop"' in page)
-check("cmd_flow sends the history", "process.history(data, process.read_history(state)" in read("sclaude", "lib", "commands", "actions.sh")
+check("cmd_flow sends the history, played as process.py history plays it",
+      "process.played(state, node)" in read("sclaude", "lib", "commands", "actions.sh")
+      and "process_history.played(argv[1]" in read("sclaude", "lib", "flow", "process.py")
       and '"history": history' in read("sclaude", "lib", "commands", "actions.sh"))
 check("the state's writers name the same file",
       '"history.jsonl"' in read("sclaude", "lib", "core", "state.sh") and "history.jsonl" in read("sclaude", "lib", "core", "state.sh"))

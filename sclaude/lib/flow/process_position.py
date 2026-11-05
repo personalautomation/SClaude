@@ -196,7 +196,7 @@ BADGE_WHY = {
     ("pr", "S"): "S — main is merged in before step 3, so the pull request carries what will merge.",
     ("review", "S"): "S — main is merged in before each review round.",
     ("preview", "S"): "S — the branch must merge with main before its preview is deployed.",
-    ("merge_wait", "S"): "S — every 2 min the wait checks whether main moved into a conflict; one goes to the sync, the PR back to a draft, and the run to the preview again.",
+    ("merge_wait", "S"): "S — every 2 min the wait checks whether main moved into a conflict, and a later run checks main before the hand-over; a conflict goes to the sync, commits from elsewhere take the hand-off back, and the run goes to the preview again.",
     ("handoff", "S"): "S — before the hand-over main is checked; a conflict goes to the sync, and the run to the preview and QA again, as do commits that reached the branch from elsewhere.",
     # The glance's QA and merge, which carry their own S (OVERVIEW_NODES).
     ("qa_check", "S"): "S — once QA accepted, main is checked before the hand-over; a conflict goes to the sync, and the run to the preview and QA again, as do commits that reached the branch from elsewhere.",

@@ -245,6 +245,8 @@ cmd_rollback() {
     return 1
   fi
 
+  [[ "$(regression_status "$wt" prod)" == failed ]] \
+    && cycle_edge "$wt" hold_ways rollback person "$SELF rollback" stage=prod
   rollback_prod "$wt" "$slug" || return 1
   rollback_confirm "$wt" "$slug" || true
   rollback_incident "$wt" "$slug" \

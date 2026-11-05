@@ -638,7 +638,7 @@ for stage in ("preview",):
         # how much prose sits above the `return`, which is not what it is for.
         window = [ln for ln in tail[1].splitlines()
                   if ln.strip() and not ln.strip().startswith("#")]
-        check_true("%s-red-path-returns" % stage, "return 0" in "\n".join(window[:16]))
+        check_true("%s-red-path-returns" % stage, "return 0" in "\n".join(window[:20]))
 
 # The prod path returns too, by each of its three exits.
 prod_tail = deploy[run_at:]

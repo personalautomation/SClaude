@@ -156,7 +156,7 @@ check("done-goes-on-fresh", body.count('done_fresh "$slug"'), 3)
 # it, it holds it.
 check("fresh-run-after-the-retro", body.count('done_fresh "$slug" "$retro_flag"'), 2)
 check("fresh-run-keeps-the-word", 'done_fresh "$slug" "${retro_ran_here:+retro}"' in body, True)
-check("fresh-run-skips-it-once", '[[ -n "$retro_ran_here" ]] || run_retro' in body
+check("fresh-run-skips-it-once", 'if [[ -z "$retro_ran_here" ]]; then\n    run_retro' in body
       and "unset SCLAUDE_DONE_RETRO_RAN" in body, True)
 check("done-does-not-stop-for-the-code", "goes on in a fresh one: $SELF done" in body, False)
 m = re.search(r"^done_fresh\(\) \{\n.*?^\}\n", src, re.S | re.M)

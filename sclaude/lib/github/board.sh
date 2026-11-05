@@ -525,6 +525,31 @@ pr_qa_handoff() {
   ( flock -w 120 9 || exit 1; pr_qa_handoff_now "$@" ) 9>"$1/.sclaude/local/feature/handoff.lock"
 }
 
+# QA's yes in the history, once in the pass, under the hand-off's lock: the
+# QA timer's hand-off writes it too (pr_qa_handoff_now), and two runs that
+# see Done at once would both find it unwritten.
+#
+#   qa_yes_edge <wt>
+qa_yes_edge() {
+  ( flock -w 120 9 || exit 0
+    once_edge "$1" qa_check qa_verdict "${QA_BY:-qa}" "${QA_HOW:-the board}" ) \
+    9>"$1/.sclaude/local/feature/handoff.lock"
+}
+
+# Back to the preview after QA's Done — main moved, or the preview changed
+# since QA looked — from wherever the history last left the feature: the
+# merge's wait, the hand-off (or the merge question after it), or QA's yes.
+#
+#   qa_way_back <wt> <how> [<note>]
+qa_way_back() {
+  qa_yes_edge "$1"
+  case "$(last_place "$1" qa_check qa_verdict handoff merge merge_wait)" in
+    merge_wait)    cycle_edge "$1" merge_wait preview sclaude "$2" note="${3:-}" ;;
+    handoff|merge) cycle_edge "$1" handoff preview sclaude "$2" note="${3:-}" ;;
+    *)             cycle_edge "$1" qa_verdict preview sclaude "$2" note="${3:-}" ;;
+  esac
+}
+
 pr_qa_handoff_now() {
   local wt="$1" pr="$2" issue="${3:-}"
   local state="$wt/.sclaude/local/feature/state.json" repo view head draft
@@ -595,6 +620,10 @@ pr_qa_handoff_now() {
     return 4
   fi
   state_set "$state" handoff "$head" 2>/dev/null || true
+  # QA's yes and the way into the hand-off, before its row: in remind_prod's
+  # run, or in the QA timer's, which may come first.
+  once_edge "$wt" qa_check qa_verdict "${QA_BY:-qa}" "${QA_HOW:-the board}"
+  once_edge "$wt" qa_verdict handoff "${QA_BY:-qa}" "${QA_HOW:-the board}"
   history_add "$state" handoff done
   return 0
 }

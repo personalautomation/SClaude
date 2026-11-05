@@ -586,6 +586,9 @@ sync_with_main() {
     local drc=0
     sync_deferred "$wt" "${files[@]}" || drc=$?
     if [[ "$drc" -eq 0 ]]; then
+      history_edge "$state" y_when merge_check sclaude "main moved"
+      history_edge "$state" merge_check main_in sclaude "only the deferred logs" note="${#files[@]} file(s)"
+      history_edge "$state" main_in y_on sclaude ""
       sync_close_open "$state"
       info "  Only the deferred logs: main is merged in with both sides' rows."
       ask_feed say "$(phase_line finished sync) · only the deferred logs, merged by sclaude"
@@ -616,6 +619,10 @@ sync_with_main() {
     resume=1
   else
     session="$(new_session_id)"
+  fi
+  if [[ -z "$resume" ]]; then
+    history_edge "$state" y_when merge_check sclaude "main moved"
+    history_edge "$state" merge_check sync sclaude "git merge-tree" note="${#files[@]} file(s): $what"
   fi
   session_runs "$state" sync open "$session"
   n="$(sync_runs_info "$state" | cut -f1)"
@@ -660,8 +667,12 @@ sync_with_main() {
   sync_settled "$wt" && settled=1
   if [[ -n "$settled" ]]; then
     session_runs "$state" sync finish "$session"
+    history_edge "$state" sync merge_check session "settled"
+    history_edge "$state" merge_check main_in sclaude "merges cleanly, pushed"
+    history_edge "$state" main_in y_on sclaude ""
   else
     session_runs "$state" sync end "$session"
+    history_edge "$state" sync y_stop sclaude "still conflicts, or not pushed"
   fi
   # What got in its way, as after a step's session, once its end is recorded:
   # its friction review reads the log, and changes sclaude where sclaude was in

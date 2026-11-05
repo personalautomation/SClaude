@@ -334,7 +334,10 @@ breaks the other silently — grep before you edit:
   main`, `ask answered` from `ask_log` in `io.sh`, `command` from
   `history_command`…); a word changed on one side alone drops that place
   from the played history, or an input from its count, without an error.
-  `tests/process.py` runs both sides.
+  `tests/process.py` runs both sides. An `edge` row (`history_edge`) names
+  two places of a map by their ids in `process_model.py`: the test fails on
+  a pair no map draws, and on an arrow of a map in `RECORDED` that no code
+  writes and `UNWRITTEN` does not explain.
 
   <!-- Added by Claude on 2026-10-28 with the played history of a feature. -->
 

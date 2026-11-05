@@ -17,6 +17,9 @@
 review_close_gate() {
   local wt="$1" slug="$2" pr="$3" word waited=0 announced=0 answer repo said="" said_read=0 failed=0 go_box=""
   local gate_reported=0
+  # Who let the step close, for the history's way out of the gate, written
+  # as the step closes (after_step); the way back is written here.
+  REVIEW_CLOSE_BY=sclaude REVIEW_CLOSE_HOW="nothing open on the PR" REVIEW_CLOSE_NOTE=""
   [[ -n "$pr" && "$pr" != "null" ]] || return 0
   command -v gh >/dev/null 2>&1 || return 0
   repo="$(gh_repo 2>/dev/null || true)"
@@ -62,7 +65,7 @@ review_close_gate() {
             # at all (nobody to ask) leaves it open, as before.
             while :; do
               ask "${BOLD}Choose 1-3: ${OFF}" answer "pick:3" \
-                "Check the fixes" "Close step 4" "Leave it open" || { answer=3; break; }
+                "Check the fixes" "Close step 4" "Leave it open" || { answer=3; ASKED_HOW=""; break; }
               [[ "$answer" == [123] ]] && break
               printf '%s\n' "  Answer 1, 2 or 3." >&2
             done
@@ -70,11 +73,14 @@ review_close_gate() {
           if [[ "$answer" != 1 ]]; then
             if [[ "$answer" != 2 ]]; then
               info "  Left open. Come back with: $SELF $slug"
+              cycle_edge "$wt" review_close review "$( [[ -n "$ASKED_HOW" ]] && echo person || echo none)" \
+                "$ASKED_HOW" note="left open, $count thread(s)"
               return 1
             fi
             [[ "$count" =~ ^[0-9]+$ ]] \
               && state_set "$wt/.sclaude/local/feature/state.json" steps.review.left_open "$count" 2>/dev/null
             say "${BOLD}Step 4 closes as you said, with the threads as they are.${OFF}"
+            REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="$ASKED_HOW" REVIEW_CLOSE_NOTE="$count thread(s) left as they are"
             return 0
           fi
         fi
@@ -98,8 +104,11 @@ review_close_gate() {
           fi
           if ! ask "${BOLD}Go on with this head unreviewed? n reviews it again [y/n] ${OFF}" answer yn; then
             info "  Left open. Come back with: $SELF $slug"
+            cycle_edge "$wt" review_close review none "" note="the review on this machine did not run"
             return 1
           fi
+          is_yes "$answer" && REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="$ASKED_HOW" \
+            REVIEW_CLOSE_NOTE="the head unreviewed: the review on this machine did not run"
           if ! is_yes "$answer"; then
             info "  Reviewing it again; Ctrl-C leaves, and the next \`$SELF\` starts it again."
             local_due=1
@@ -169,6 +178,7 @@ review_close_gate() {
     read -r older newer <<<"$split"
     if [[ "${older:-}" == "0" && "${newer:-0}" -gt 0 ]]; then
       review_enough_close "$wt" "$pr" "$newer"
+      REVIEW_CLOSE_HOW="you ended the search" REVIEW_CLOSE_NOTE="$newer finding(s) left on the PR"
       return 0
     fi
   fi
@@ -177,6 +187,7 @@ review_close_gate() {
   # else is open by then takes the ordinary way.
   if [[ "$word" == yours:* ]]; then
     if review_night_offer "$wt" "$slug" "$pr" "$repo"; then
+      cycle_edge "$wt" review_close review person "$ASKED_HOW" note="threads left at night"
       # Taken back: the threads are open work again, and the round goes the
       # way any open thread does — a fresh session (the one resumed would be
       # the night's, told to decide), and the gate after it as after any.
@@ -250,15 +261,20 @@ review_close_gate() {
   # conversation within seconds when it had committed nothing new.
   if [[ -n "${SESSION_EXITED:-}" && "$go_on" -eq 0 ]]; then
     info "  You left the session: step 4 stays open. Come back with: $SELF $slug"
+    cycle_edge "$wt" review_close review person "${SESSION_HOW:-/exit or Ctrl-C}" note="held: ${word#open: }"
     return 1
   fi
   # Unsaid: the session's own heading follows, its status line with [s].
+  local back_by=sclaude back_how="back unasked"
+  [[ "$go_on" -eq 1 ]] && back_how="[g] — you are away"
   if [[ "$go_on" -eq 2 ]]; then
-    ask "${BOLD}Back to a review session for it? [y/n] ${OFF}" answer yn
+    ask "${BOLD}Back to a review session for it? [y/n] ${OFF}" answer yn && back_by=person || back_by=none
+    back_how="$ASKED_HOW ([g]'s ceiling)"
   else
     answer=y
   fi
   if is_yes "$answer"; then
+    cycle_edge "$wt" review_close review "$back_by" "$back_how" note="${word#open: }"
     # A session sclaude closed: review_reopen picks the session, a fresh one
     # for a new round, as it does unasked.
     if [[ -n "${SESSION_AUTO_CLOSED:-}" ]]; then
@@ -268,11 +284,13 @@ review_close_gate() {
     run_step "$wt" "$slug" review
     return 1
   fi
-  ask "${BOLD}Close step 4 anyway, with that left as it is? [y/n] ${OFF}" answer yn
+  ask "${BOLD}Close step 4 anyway, with that left as it is? [y/n] ${OFF}" answer yn && back_by=person || back_by=none
   if ! is_yes "$answer"; then
     info "  Left open. Come back with: $SELF $slug"
+    cycle_edge "$wt" review_close review "$back_by" "$ASKED_HOW" note="held: ${word#open: }"
     return 1
   fi
+  REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="$ASKED_HOW" REVIEW_CLOSE_NOTE="closed anyway: ${word#open: }"
   return 0
 }
 

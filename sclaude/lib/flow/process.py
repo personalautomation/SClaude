@@ -120,21 +120,8 @@ def main(argv):
         print("%s\t%s\t%s" % (node, process_config.all_nodes()[node][3], why))
         return 0
     if len(argv) >= 2 and argv[0] == "history":
-        try:
-            with open(argv[1]) as fh:
-                state = json.load(fh)
-        except (OSError, ValueError):
-            state = {}
-        read = process_costs.transcripts_of(argv[1])
-        # On the map its project draws, as the feature's page plays it
-        # (actions.sh): the ways filled in run through blocks it has, and a
-        # place it does not draw stands where the flow goes on from it.
-        tree = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(argv[1])))))
-        with process_model.configured(process_config.config_of(tree)):
-            here = process_config.on_map(argv[2]) or argv[2] if len(argv) >= 3 else None
-            here = here if here in process_config.all_nodes() else None
-            print(json.dumps(process_history.history(state, process_costs.read_history(argv[1]), here, read), ensure_ascii=False))
-        read.done()
+        print(json.dumps(process_history.played(argv[1], argv[2] if len(argv) >= 3 else None)[2],
+                         ensure_ascii=False))
         return 0
     if len(argv) >= 2 and argv[0] == "page":
         sys.stdout.write(process_page.page(argv[1]))

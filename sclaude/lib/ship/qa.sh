@@ -327,6 +327,8 @@ qa_accept_offer() {
     while IFS= read -r line; do say "  $line"; done <<<"$criteria"
   fi
   ask "${BOLD}Accept issue #$issue: tick every criterion and move it to '$QA_DONE'? [y/n] ${OFF}" answer yn
+  # Who accepted it, for the history's way out of QA (remind_prod).
+  is_yes "$answer" && QA_BY=person QA_HOW="$ASKED_HOW, for QA"
   is_yes "$answer"
 }
 
@@ -365,6 +367,7 @@ qa_accept_offer() {
 # from here; with `auto`, an issue in In QA is accepted at once, once — if the
 # board refuses the move, the wait goes on as with `github`.
 qa_wait() {
+  QA_BY=qa QA_HOW="the board"
   local slug="$1" issue="$2" pr="$3" branch="${4:-}" wt="${5:-}"
   local now prev said="" waited=0 logged=0 announced=0 unticked start=$SECONDS
   local mode auto_tried=0 keys=""
@@ -390,6 +393,11 @@ qa_wait() {
   while :; do
     if [[ -n "$now" ]]; then
       if column_is "$now" "$QA_DONE" && qa_retest "$wt" "$issue" "$pr"; then
+        # QA's Done was for a preview since changed: QA looks again, a new
+        # pass of it for the history.
+        qa_way_back "$wt" "the preview changed since QA looked"
+        cycle_edge "$wt" preview in_qa sclaude "QA sent again"
+        cycle_edge "$wt" in_qa qa_check sclaude "the issue moved back to ${QA_TO:-QA}"
         # Accepted, but on code that is no longer on preview: back in QA, and
         # the wait announces itself again.
         now="$QA_TO"

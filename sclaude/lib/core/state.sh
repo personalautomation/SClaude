@@ -299,6 +299,7 @@ history_command() {
 #
 # <what> is a dotted name — regression.preview, fix.local, deploy.prod, qa,
 # workshop — and <op> what happened to it: start, passed, failed, in, …
+# A way taken on a map is an `edge` row (history_edge, below).
 history_add() {
   local state="$1" what="$2" op="$3" extra="" kv value
   shift 3
@@ -308,12 +309,80 @@ history_add() {
   [[ -n "${SCLAUDE_RUN:-}" ]] && set -- "$@" run="$SCLAUDE_RUN"
   for kv in "$@"; do
     value="${kv#*=}"
-    value="${value//\\/\\\\}"; value="${value//\"/\\\"}"; value="${value//$'\n'/ }"
+    value="${value//\\/\\\\}"; value="${value//\"/\\\"}"; value="${value//[[:cntrl:]]/ }"
     extra+=", \"${kv%%=*}\": \"$value\""
   done
   printf '{"at": "%s", "what": "%s", "op": "%s"%s}\n' "$(date -Iseconds)" "$what" "$op" "$extra" \
     >> "${state%/*}/history.jsonl" 2>/dev/null
   return 0
+}
+
+# A way taken on one of the process maps, the moment the code takes it: the
+# map's two places (their ids in sclaude/lib/flow/process_model.py), who took
+# it and how, and what else is known then. The page plays the feature along
+# these where they are, and says by each place who took the way into it;
+# `tests/process.py` fails on a pair the maps do not draw, and on an arrow
+# the maps draw that nothing writes and is not listed as seen only by others.
+#
+#   history_edge <state> <from> <to> <by> <how> [<key>=<value>…]
+#
+# <by>: person, setting (a machine's or a project's), sclaude (a check of its
+# own), session (what a Claude session's report said), qa, github, none
+# (nobody answered). <how>: where it came from — "terminal", "phone", "tab
+# [n]", "dialog", "sclaude.leaks=off", "git merge-tree"… A note= says what was
+# known (counts, context, the tests that were red); a pass's edge names its
+# pass: session= (the workshop), key= (a friction review), stage= (a run).
+history_edge() {
+  local state="$1" from="$2" to="$3" by="$4" how="${5:-}"
+  shift 5 2>/dev/null || shift $#
+  [[ -n "$how" ]] && set -- how="$how" "$@"
+  history_add "$state" edge "$from $to" by="$by" "$@"
+}
+
+# Once in a pass of the cycle's end: a way a later run would only take again
+# on paper (the merge before the ship question, asked at every pass). A
+# feature sent back since — to the review or the pull request (a rollback, the
+# retrospective's code), or to the preview (main moved under QA or the merge
+# wait) — takes it anew. The pattern names those places by their ids in
+# process_model.py: a way back to another one goes in it too.
+#
+#   once_edge <tree> <from> <to> <by> <how> [<key>=<value>…]
+once_edge() {
+  edge_taken "$1" "$2" "$3" && return 0
+  cycle_edge "$@"
+}
+
+# Where the newest written way into one of <place>s led: the place a
+# feature stands on as its history has it, for a way back taken from wherever
+# that is. Only those places count — the passes' maps (friction, the sync, a
+# run) write into the same file meanwhile.
+#
+#   last_place <tree> <place>…
+last_place() {
+  local h="$1/.sclaude/local/feature/history.jsonl" to
+  shift
+  tac "$h" 2>/dev/null | sed -n 's/.*"what": "edge", "op": "[a-z0-9_]* \([a-z0-9_]*\)".*/\1/p' \
+    | while read -r to; do
+        [[ " $* " == *" $to "* ]] && { echo "$to"; break; }
+      done
+}
+
+# Whether that way was taken in this pass, as once_edge counts it.
+#
+#   edge_taken <tree> <from> <to>
+edge_taken() {
+  local h="$1/.sclaude/local/feature/history.jsonl"
+  [[ -f "$h" ]] && tac "$h" | sed -n '/"op": "[a-z_]* \(review\|pr\|preview\)"/q;p' \
+    | grep -qF "\"op\": \"$2 $3\""
+}
+
+# The same in a feature's tree.
+#
+#   cycle_edge <tree> <from> <to> <by> <how> [<key>=<value>…]
+cycle_edge() {
+  local wt="$1"
+  shift
+  history_edge "$wt/.sclaude/local/feature/state.json" "$@"
 }
 
 # The sessions directory in ~/.claude/projects: the worktree's path with

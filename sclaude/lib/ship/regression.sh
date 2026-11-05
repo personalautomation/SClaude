@@ -888,6 +888,11 @@ regression_run_body() {
   state_set "$state" "regression.$stage.reason" null
   state_set "$state" "regression.$stage.started" "$(date -Iseconds)"
   history_add "$state" "regression.$stage" start
+  case "$stage" in
+    local)   history_edge "$state" r_local reg_local sclaude "" stage=local ;;
+    preview) history_edge "$state" r_preview preview_ok sclaude "" stage=preview ;;
+    prod)    history_edge "$state" r_prod prod_ok sclaude "" stage=prod ;;
+  esac
   state_set "$state" "regression.$stage.failed_at" null
   # And the previous run's finishing time, or the state reads as a run that
   # ended before it began: started 13:56, finished 09:21.
@@ -1121,6 +1126,11 @@ regression_run_body() {
   state_set "$state" "regression.$stage.tree" "${tree:-null}"
   state_set "$state" "regression.$stage.finished" "$(date -Iseconds)"
   history_add "$state" "regression.$stage" passed
+  case "$stage" in
+    local)   history_edge "$state" reg_local r_on sclaude "the suite" stage=local note="$passed/$count green" ;;
+    preview) history_edge "$state" preview_ok r_on sclaude "the suite" stage=preview note="$passed/$count green" ;;
+    prod)    history_edge "$state" prod_ok r_on sclaude "the suite" stage=prod note="$passed/$count green" ;;
+  esac
   echo "  ${GREEN}── $passed/$count, $(regression_duration "$elapsed") — green.${OFF}"
   regression_notify_done "$slug" "$stage" "" "$passed" "$count" "$elapsed"
   return 0

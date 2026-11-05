@@ -249,8 +249,11 @@ run_step() {
   # request labelled so the workflow skips itself; one that reviews on this
   # machine is reviewed here, on the head the session would open on. Findings
   # keep the session; none leave the step to the checks and the comments.
-  local review_word="" review_mode="" local_count=""
+  local review_word="" review_mode="" local_count="" review_first="" local_ran=""
   if [[ "$step" == "review" ]]; then
+    # The step's first entry, for the history's way into it: a return to the
+    # review comes by an arrow of its own (a round, a gate, QA, a stage).
+    [[ "$(state_get "$state" steps.review.started 2>/dev/null || true)" =~ ^(null)?$ ]] && review_first=1
     # What a regression's fixing session committed, which it is not told to
     # push, goes to the pull request first: the review reads only what the
     # pull request carries, and with four such commits behind it the review
@@ -272,6 +275,8 @@ run_step() {
       # gate reviewed already was reported there.
       local fresh_pass=1
       local_review_done "$wt" && fresh_pass=0
+      # Before the pass's own row, which enters the place this way leads to.
+      [[ -n "$review_first" ]] && { cycle_edge "$wt" draft_pr local_pass sclaude "review: local"; local_ran=1; }
       local_count="$(local_review "$wt" "$pr")" || local_count="failed"
       [[ "$fresh_pass" -eq 1 && "$local_count" =~ ^[1-9][0-9]*$ ]] && review_report "$wt" "$slug"
     fi
@@ -279,6 +284,23 @@ run_step() {
   [[ "$step" == "review" ]] && [[ -z "$local_count" || "$local_count" == "0" ]] \
     && review_skippable "$wt" "$slug" \
     && review_word="$(review_wait_state "$wt" "$slug" "$pr")"
+  if [[ -n "$review_first" ]]; then
+    case "$review_mode" in
+      local) if [[ -z "$local_ran" ]]; then
+               cycle_edge "$wt" draft_pr review_found person "you ended the search" note="${local_count:-?} finding(s) open"
+             else
+               cycle_edge "$wt" local_pass review_found sclaude "the review on this machine" note="${local_count:-?} finding(s)"
+             fi ;;
+      off)   cycle_edge "$wt" draft_pr review_found setting "review: off" ;;
+      *)     cycle_edge "$wt" draft_pr ci_review github "the review workflow"
+             cycle_edge "$wt" ci_review review_found github "the review workflow" note="${review_word:-not waited for}" ;;
+    esac
+    if [[ "$review_word" == "clean" || "$review_word" == "unreviewed" ]]; then
+      cycle_edge "$wt" review_found review_close sclaude "nothing open on the PR" note="$review_word"
+    else
+      cycle_edge "$wt" review_found review sclaude "something open on the PR" note="${review_word:-$local_count}"
+    fi
+  fi
   if [[ "$review_word" == "clean" || "$review_word" == "unreviewed" ]]; then
     state_set "$state" "steps.$step.started" "$(date -Iseconds)"
     if [[ "$review_word" == "clean" ]]; then
@@ -620,7 +642,9 @@ session_ended() {
     local held pct why
     held="$(review_context "$wt" "$session")"
     pct="$(awk '{print $3}' <<<"$held")"
+    cycle_edge "$wt" review round session "its round marker" note="round $rounds${tally:+ · $tally}"
     if why="$(review_keep "$wt" "$session" "$held")"; then
+      cycle_edge "$wt" round review sclaude "the same session" note="context ${pct:-?}%, $why"
       state_set "$state" "steps.$step.rounds" "$rounds"
       # The round it now starts counts too; run_step writes it to the issue.
       run_rounds "$wt" "$session" "$((rounds + 1))"
@@ -635,6 +659,7 @@ session_ended() {
       return 0
     fi
     review_context_log "$wt" "$slug" "$session" "fresh session" "$held" "$rounds"
+    cycle_edge "$wt" round review sclaude "a fresh session" note="context ${pct:-?}%, $why"
     state_set "$state" "steps.$step.rounds" null
     # Every round it worked was closed, the last one included.
     run_rounds "$wt" "$session" "$rounds"
@@ -670,6 +695,17 @@ session_ended() {
   # sclaude's tab said: step 4's gate holds the rounds there (review_close_gate).
   SESSION_EXITED=""
   [[ -z "$SESSION_AUTO_CLOSED" && -z "$said_key" ]] && SESSION_EXITED=1
+  # Who ended it, for the history's way out of the session and the gates
+  # after it: the session on its marker, the person by a key of sclaude's
+  # tab, or by /exit or Ctrl-C.
+  SESSION_BY=person
+  case "$said_key" in
+    next)       SESSION_HOW="tab [n]" ;;
+    next-later) SESSION_HOW="tab [N]" ;;
+    later)      SESSION_HOW="tab [R]" ;;
+    *) if [[ -n "$SESSION_AUTO_CLOSED" ]]; then SESSION_BY=session SESSION_HOW="its done marker"
+       else SESSION_HOW="/exit or Ctrl-C"; fi ;;
+  esac
   [[ "$step" == "review" && -n "$SESSION_AUTO_CLOSED" ]] && review_round_ends "$wt"
   # Step 2 asks its question in its own dialog (code_accepted). A yes there
   # finishes the session as the terminal's yes does: the step waits for the
@@ -705,6 +741,26 @@ session_ended() {
   # issue says so: without a reason an earlier row reads "interrupted", as it
   # did for every review session the review on this machine sent back to.
   step_run "$wt" "$step" end "$session" "${SESSION_AUTO_CLOSED:+finished}"
+
+  # The way out of the session to the step's check — not after [R], which
+  # leaves the step where it is. Before the friction review: one cut off
+  # leaves the check to the next start's gate, which does not write it.
+  if [[ "$said_key" != later ]]; then
+    case "$step" in
+      plan)   cycle_edge "$wt" plan approve "$SESSION_BY" "$SESSION_HOW" ;;
+      code)   cycle_edge "$wt" code works "$SESSION_BY" "$SESSION_HOW" ;;
+      pr)     cycle_edge "$wt" pr pr_check "$SESSION_BY" "$SESSION_HOW" ;;
+      review)
+        # Where the map asks for a round marker (a review on GitHub, or none),
+        # through that check; a review on this machine has no rounds of its own.
+        if [[ "$(project_review_mode "$wt")" == local ]]; then
+          cycle_edge "$wt" review review_close "$SESSION_BY" "$SESSION_HOW"
+        else
+          cycle_edge "$wt" review round "$SESSION_BY" "$SESSION_HOW"
+          cycle_edge "$wt" round review_close sclaude "no round marker"
+        fi ;;
+    esac
+  fi
 
   # The friction review follows every session, not every step.
   #
@@ -823,6 +879,9 @@ after_step() {
   case "$step" in
     plan)
       if ! capture_plan "$wt"; then
+        # Whoever ended the session moved on to the check, which found nothing.
+        cycle_edge "$wt" approve plan_check "${SESSION_BY:-person}" "${SESSION_HOW:-}"
+        cycle_edge "$wt" plan_check plan sclaude "capture_plan" note="no approved plan text"
         # Back to the session next time, not to this check: a gate marked by
         # [n] or [N] (session_take_as_done) found nothing to close on.
         state_set "$state" "steps.$step.gate" null
@@ -834,8 +893,14 @@ after_step() {
         info "  Come back with: $SELF $slug"
         return 0
       fi
+      # The approval: in the session's dialog, or [n] in sclaude's tab.
+      if [[ "${SESSION_HOW:-}" == "tab ["* ]]; then
+        cycle_edge "$wt" approve plan_check person "$SESSION_HOW"
+      else
+        cycle_edge "$wt" approve plan_check person "the plan approved in the session"
+      fi
       info "  Plan saved to .sclaude/local/feature/plan.md — it is what step 2 starts from."
-      sync_acceptance "$wt" "$slug"
+      sync_acceptance "$wt" "$slug" && cycle_edge "$wt" plan_check ac sclaude "the issue's criteria"
       ;;
     pr)
       # capture_pr asks gh for the number and puts it into the state — and it
@@ -850,6 +915,7 @@ after_step() {
       local seen; seen="$(state_get "$state" reopened_pr 2>/dev/null || true)"
       [[ -n "$seen" && "$seen" != "null" && "$number" == "$seen" ]] && number=""
       if [[ -z "$number" || "$number" == "null" ]]; then
+        cycle_edge "$wt" pr_check pr sclaude "gh" note="no pull request for the branch"
         warn "  No pull request for this branch yet — the step is not finished."
         auto_return "$wt" "$slug" "$step" \
           "**sclaude found no pull request for this branch**, so step 3 is not finished. Open it, then finish as the prompt says." \
@@ -863,6 +929,7 @@ after_step() {
       local unpushed
       unpushed="$(python3 "$LIB/review/pr_context.py" --unpushed "$wt" "$number" 2>/dev/null || true)"
       if [[ "$unpushed" =~ ^[1-9][0-9]*$ ]]; then
+        cycle_edge "$wt" pr_check pr sclaude "gh" note="$unpushed commit(s) not pushed"
         warn "  $unpushed commit(s) here are not on GitHub — PR #$number does not carry them."
         auto_return "$wt" "$slug" "$step" \
           "**$unpushed commit(s) on this branch are not pushed**, so PR #$number does not carry them. Push the branch, then finish as the prompt says." \
@@ -1041,14 +1108,20 @@ after_step() {
       # sets the same gate). Without it — the session left with /exit, a
       # proposal still open — the question is asked here, as before.
       [[ "$gate_only" == "gate" ]] || extend_acceptance "$wt"
+      local accept_by=person accept_how=""
       if [[ "$gate_only" == "gate" ]]; then
         answer=y
       elif [[ "$(state_get "$state" "steps.$step.gate" 2>/dev/null || true)" == "true" ]]; then
         answer=y
         info "  You accepted the work: in the session, or with [n] in this terminal."
+        [[ "${SESSION_HOW:-}" == "tab ["* ]] && accept_how="$SESSION_HOW" || accept_how="Accept in the session's dialog"
       else
-        ask "${BOLD}Please check everything yourself after AI. Do you confirm that everything works as it should? [y/n] ${OFF}" answer yn
+        ask "${BOLD}Please check everything yourself after AI. Do you confirm that everything works as it should? [y/n] ${OFF}" answer yn \
+          || accept_by=none
+        accept_how="$ASKED_HOW"
       fi
+      # Accepted at the gate before (`steps.code.gate`): written then.
+      [[ "$gate_only" != "gate" ]] && is_yes "$answer" && cycle_edge "$wt" works pr "$accept_by" "$accept_how"
       if ! is_yes "$answer"; then
         # Back to the same session, which knows what it built: a person is in
         # the loop, so there is no limit on how often. What they say is wrong
@@ -1060,6 +1133,7 @@ after_step() {
           return 0
         fi
         info "  Back to the development session."
+        cycle_edge "$wt" works code person "$ASKED_HOW" note="${wrong:0:200}"
         run_step "$wt" "$slug" "$step" "**The person checked the work and it does not work yet:** $wrong"
         return 0
       fi
@@ -1108,6 +1182,12 @@ after_step() {
   esac
 
   step_run "$wt" "$step" close
+  case "$step" in
+    plan)   cycle_edge "$wt" plan_check code sclaude "the plan kept in plan.md" ;;
+    pr)     cycle_edge "$wt" pr_check draft_pr sclaude "gh" note="PR #${number:-?}, all pushed" ;;
+    review) cycle_edge "$wt" review_close preview "${REVIEW_CLOSE_BY:-sclaude}" "${REVIEW_CLOSE_HOW:-}" \
+              note="${REVIEW_CLOSE_NOTE:-}" ;;
+  esac
   ask_feed say "$(phase_line done step "$step")"
   # The automatic returns are counted per closing of a step: a step that
   # closed has used none of them on its next run.

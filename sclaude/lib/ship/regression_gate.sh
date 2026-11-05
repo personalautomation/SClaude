@@ -312,8 +312,10 @@ Log: .sclaude/local/feature/regression.log" 2>/dev/null || true
       # y or n, so a reflex Enter at the end of a long run settles nothing.
       echo ""
       local again=""
+      [[ "$stage" == local ]] && history_edge "$state" reg_local r_stop sclaude "red after $attempts fixing session(s)" stage=local
       ask "${BOLD}  Open another fixing session? [y/n] ${OFF}" again yn || true
       if is_yes "$again"; then
+        [[ "$stage" == local ]] && history_edge "$state" r_stop reg_local person "$ASKED_HOW" stage=local note="another fixing session"
         # Clearing the count and falling through to the fix below, rather than
         # going round to the top of the loop. The top is regression_run, and a
         # re-run is the one thing known to be pointless here: the same suite

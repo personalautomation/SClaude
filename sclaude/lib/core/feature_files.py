@@ -22,7 +22,7 @@ FILES = [
     # --- the cycle -------------------------------------------------------------
     ("state.json", "where the feature stands; its fields are in state_schema.py"),
     ("state.json.lock", "the state's lock: every writer changes it under it (state_file.py)"),
-    ("history.jsonl", "one line per thing that began or ended (history_add); the process map plays it"),
+    ("history.jsonl", "one line per thing that began or ended (history_add) and per way taken on a map (history_edge); the process map plays it"),
     ("plan.md", "the plan step 1 wrote and the person approved"),
     ("plan.printed", "the plan as last printed, so a later session prints it only when it changed"),
     ("session-done", "a session's marker: its work is done (the session writes it, the watcher reads it)"),

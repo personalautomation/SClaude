@@ -183,6 +183,18 @@ PYMETHOD
 merge_offer() {
   local slug="$1" pr="$2" issue="$3" mode="${4:-}" wt="${5:-}"
   local column ready obstacle method answer who built=0 failed
+  # The history's way out of the question: merged, or on to the wait. From
+  # inside the wait (MERGE_IN_WAIT, merge_wait) only a merge is a way taken.
+  merge_way() {
+    [[ -n "$wt" ]] || return 0
+    if [[ "$1" == merged && -n "${MERGE_IN_WAIT:-}" ]]; then
+      cycle_edge "$wt" merge_wait merged "${@:2}"
+    elif [[ "$1" == merged ]]; then
+      cycle_edge "$wt" merge merged "${@:2}"
+    elif [[ -z "${MERGE_IN_WAIT:-}" ]]; then
+      cycle_edge "$wt" merge merge_wait "${@:2}"
+    fi
+  }
 
   [[ -n "$pr" && "$pr" != "null" ]] || return 1
   command -v gh >/dev/null 2>&1 || return 1
@@ -248,11 +260,12 @@ merge_offer() {
       warn "PR #$pr cannot be merged yet:"
     fi
     info "  $obstacle."
+    merge_way wait github "merge readiness" note="$obstacle"
     return 1
   fi
   # What is in the way is worth saying in every mode; the question is not
   # sclaude's to ask when the merge is clicked on GitHub.
-  [[ "$who" != github ]] || return 1
+  [[ "$who" != github ]] || { merge_way wait setting "merge=github"; return 1; }
 
   failed="$(merge_build_check "$wt")" || built=$?
   if [[ "$built" -eq 1 ]]; then
@@ -260,6 +273,7 @@ merge_offer() {
     warn "PR #$pr merged with the newer main fails \`$failed\` — not merging it from here."
     info "  The log: $wt/.sclaude/local/feature/merge-check.log (the earlier checks and runs.tsv in logs/merge-check/)"
     info "  Merge main into the branch and fix it; then: $SELF $slug"
+    merge_way wait sclaude "the merge with the newer main built" note="fails: $failed"
     return 2
   fi
 
@@ -330,6 +344,7 @@ merge_offer() {
   # the review is the whole check). Without it — no issue, no board, gh
   # silent about the column — the question is put to a person as before:
   # an empty answer about the board is not a pass.
+  local merge_by=setting merge_how="merge=auto"
   if [[ "$who" == auto && "$built" -eq 0 ]] && [[ "$qa_checked" -eq 1 || "$mode" == nodeploy ]]; then
     say "${BOLD}Merging: \`merge\` is auto in .sclaude/config.json.${OFF}"
   else
@@ -338,9 +353,11 @@ merge_offer() {
     elif [[ "$who" == auto ]]; then
       info "  \`merge\` is auto, but nothing says QA passed it — so it is asked."
     fi
-    ask "${BOLD}$prompt [y/n] ${OFF}" answer yn
+    ask "${BOLD}$prompt [y/n] ${OFF}" answer yn && merge_by=person || merge_by=none
+    merge_how="$ASKED_HOW"
     if ! is_yes "$answer"; then
       info "→ Merge: skipped. It stays yours to do."
+      merge_way wait "$merge_by" "$merge_how"
       return 2
     fi
   fi
@@ -349,11 +366,13 @@ merge_offer() {
     echo ""
     warn "  ✗ The merge did not go through — GitHub refused it."
     info "  Nothing here changed; merge it on GitHub and carry on with: $SELF $slug"
+    merge_way wait github "gh pr merge" note="GitHub refused the merge"
     return 2
   fi
 
   echo ""
   echo "${GREEN}✓ PR #$pr merged.${OFF}"
+  merge_way merged "$merge_by" "$merge_how"
   [[ -n "$wt" ]] && history_add "$wt/.sclaude/local/feature/state.json" merge merged
   return 0
 }
@@ -446,7 +465,7 @@ merge_wait() {
     if [[ "$mode" == both && "$POLL_KEY" == [mM] ]]; then
       [[ -t 1 ]] && printf '\r\033[2K'
       offered=0
-      merge_offer "$slug" "$pr" "$issue" "$offer_mode" "$wt" || offered=$?
+      MERGE_IN_WAIT=1 merge_offer "$slug" "$pr" "$issue" "$offer_mode" "$wt" || offered=$?
       [[ "$offered" -eq 0 ]] && return 0
       [[ "$offered" -eq 1 ]] \
         && info "  Nothing to merge from here yet: QA has not passed it, or GitHub has not called it ready."
@@ -454,7 +473,7 @@ merge_wait() {
             && "$(merge_readiness "$pr")" == ready ]]; then
       [[ -t 1 ]] && printf '\r\033[2K'
       offered=0
-      merge_offer "$slug" "$pr" "$issue" "$offer_mode" "$wt" || offered=$?
+      MERGE_IN_WAIT=1 merge_offer "$slug" "$pr" "$issue" "$offer_mode" "$wt" || offered=$?
       [[ "$offered" -eq 0 ]] && return 0
       if [[ "$offered" -eq 2 ]]; then
         if [[ -n "$(merge_check_red "$wt")" ]]; then
@@ -467,6 +486,7 @@ merge_wait() {
   done
   [[ -t 1 ]] && printf '\r\033[2K'
   echo "${GREEN}✓ PR #$pr merged.${OFF}"
+  [[ -n "$wt" ]] && cycle_edge "$wt" merge_wait merged github "merged on GitHub"
   [[ -n "$wt" ]] && history_add "$wt/.sclaude/local/feature/state.json" merge merged
   return 0
 }

@@ -266,7 +266,7 @@ if offer:
     check_true("offer-reads-the-merge-mode", 'project_flow_mode merge' in offer)
     # github still says what is in the way; only the question is left out.
     check_true("github-mode-never-asks",
-               offer.find('"$ready" != "ready"') < offer.find('!= github ]] || return 1')
+               offer.find('"$ready" != "ready"') < offer.find('!= github ]] ||')
                < offer.find('ask "${BOLD}$prompt'))
     check_true("auto-merges-after-readiness",
                offer.find('"$ready" != "ready"') < offer.find('"$who" == auto'))
@@ -281,7 +281,7 @@ if offer:
     check_true("merge-build-before-the-question",
                -1 < offer.find('merge_build_check') < offer.find('ask "${BOLD}$prompt'))
     check_true("a-declined-merge-is-an-answer",
-               re.search(r'Merge: skipped[^\n]*\n\s*return 2', offer) is not None)
+               re.search(r'Merge: skipped[^\n]*\n(?:\s*merge_way[^\n]*\n)?\s*return 2', offer) is not None)
 
 mwait = body_of(deploy, "merge_wait") or ""
 check_true("merge-wait-offers-with-the-tree",

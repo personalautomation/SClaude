@@ -333,6 +333,28 @@ play stops there, rings the places, draws the way it took as a ghost and
 says what happened, since there the map or the code is wrong. `sclaude _flow` sends it with the position, and the page
 plays it.
 
+**The ways taken are written too, where the code takes them.** A row
+`{"what": "edge", "op": "<from> <to>"}` (`history_edge` in `state.sh`) is one
+arrow of a map, with who took it — `by`: the person, a setting (a machine's
+or a project's), sclaude's own check, the session's report, QA, GitHub, or
+nobody (no answer) — how (`how`: the terminal or the phone, as `ask` leaves
+it in `ASKED_HOW`; the setting and its value; what was checked) and what was
+known then (`note`: the lines found, the tests that were red…). Where they
+are, the played way follows them and fills in along the map only where two
+do not meet; the History says by each place who took the way into it. A
+feature older than them plays as before. Every map is written whole
+(`RECORDED` in `process_history.py`); a gate a later pass only passes again on
+paper (the merge before the ship question, QA's yes and the hand-off while
+the merge waits, the way into `sclaude done`) is written once per pass
+(`once_edge`): again only after an edge back into `review`, `pr` or
+`preview` (a hand-back, a rollback, the retrospective's code, main moving
+under QA or the merge wait) — a way back to another place goes into its
+pattern in `state.sh`: `tests/process.py` fails on a pair
+the code writes that no map draws, and on an arrow of such a map that no code
+writes and `UNWRITTEN` does not explain. `process.py history` and the
+feature's page take the history from one function, `played`, on the map the
+project draws.
+
 What each place took goes with it (`metrics`), shown inside the blocks, in
 their corners, by checkboxes, and never in the History; each map's heading
 says its own whole of the checked ones, zeros included. The person's input — the times they

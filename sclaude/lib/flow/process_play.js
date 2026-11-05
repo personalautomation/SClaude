@@ -158,6 +158,9 @@ const player = (() => {
   const TITLE = {friction: 'the friction review', workshop: 'how a session changes sclaude',
                  regression: "a stage's regression", sync: 'main and the branch'};
   // The maps a pass is played on, each a way of its own from the main one.
+  // Who took a way, as history_edge (state.sh) names them.
+  const BY = {person: 'you', setting: 'by the setting', sclaude: 'sclaude', session: 'the session',
+    qa: 'QA', github: 'GitHub', none: 'nobody answered'};
   const PASSES = Object.keys(TITLE);
   // What is being played, kept for the history list: a click there plays
   // from that place on.
@@ -311,11 +314,15 @@ const player = (() => {
           ? '↪ ' + TITLE[s.map] + (s.pass ? ': ' + s.pass : '') : '↩ back to the cycle';
         li.append(off);
       }
-      const e = arrow(prev, s);
-      if (e && e.l) {
+      const e = arrow(prev, s), took = s.via || {};
+      // Who took the way in, how and what was known, where the code wrote
+      // it (history's `via`); the arrow's words alone where it did not.
+      const said = [took.label || (e && e.l), BY[took.by] || took.by, took.how, took.note,
+        took.at && !s.from ? when(took.at) : ''].filter(Boolean);
+      if (said.length) {
         const via = document.createElement('div');
-        via.className = 'h-via' + (e.k === 'back' ? ' back' : '');
-        via.textContent = '→ ' + e.l;
+        via.className = 'h-via' + (e && e.k === 'back' ? ' back' : '');
+        via.textContent = '→ ' + said.join(' · ');
         li.append(via);
       }
       const head = document.createElement('div');

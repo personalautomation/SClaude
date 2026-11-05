@@ -6,6 +6,10 @@
 # Part of sclaude; pulled in with source from bin/sclaude.
 # It does not run on its own.
 
+# Where the last answer came from (ask, below), for the history's edges:
+# empty until something is answered, so that a reader under `set -u` finds it.
+ASKED_HOW=""
+
 # A question to the human. We read straight from the terminal: between questions
 # gh, vercel and claude get their turn, and what they do with an inherited stdin
 # is not our business.
@@ -26,6 +30,7 @@
 # stale Enter, left in the terminal during a long wait, looks like. Only the end
 # of input stops the asking, with nobody left to answer: the reply is then empty
 # and the exit code non-zero, and every caller reads that as "no".
+# ASKED_HOW says afterwards where the answer came from.
 ask() {
   local __ask_form="${3:-}" __ask_rc=0 __ask_ctx="${ASK_CONTEXT:-}"
   if [[ "$__ask_form" != yn* ]]; then
@@ -131,12 +136,15 @@ ask_once() {
   fi
   if [[ -z "$__published" ]]; then
     ask_forget
+    ASKED_HOW=""
     if person_at_terminal; then
       read -erp "$(rl_prompt "$__prompt")" __reply < /dev/tty || __rc=$?
+      (( __rc )) || ASKED_HOW=terminal
     elif [[ -n "${SCLAUDE_FROM_PHONE:-}" ]]; then
       __rc=1
     else
       read -rp "$__prompt" __reply || __rc=$?
+      (( __rc )) || ASKED_HOW=stdin
     fi
     printf -v "$__var" '%s' "$(pick_norm "$__form" "$(clean_reply "$__reply")")"
     return "$__rc"
@@ -280,6 +288,11 @@ ask_once() {
   done
 
   ask_log "$__prompt" "$__from" "$__reply" "$__in" "$((SECONDS - __asked))"
+  # Where the last answer came from, for the history's edges (history_edge,
+  # state.sh): the terminal, the phone (the question's channel), a pipe.
+  case "$__from" in
+    tty) ASKED_HOW=terminal ;; channel) ASKED_HOW=phone ;; stdin) ASKED_HOW=stdin ;; *) ASKED_HOW="" ;;
+  esac
   # A yes/no reply that is neither is not an answer: ask lays the same question
   # out again, and the chat must lose the old message rather than show it
   # answered with "maybe".

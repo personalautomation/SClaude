@@ -91,7 +91,7 @@ try:
     def sh(script, maintainer=True, answer="n", session="s1", cwd=None):
         body = """
 INSTRUMENTS=%(live)s; LIB=%(lib)s; PROMPTS=%(root)s/sclaude/prompts; SELF=sclaude
-source "$LIB/core/ui.sh"; source "$LIB/core/pane.sh"; source "$LIB/core/developer.sh"; source "$LIB/improve/workshop.sh"; source "$LIB/cycle/run.sh"
+source "$LIB/core/ui.sh"; source "$LIB/core/pane.sh"; source "$LIB/core/developer.sh"; source "$LIB/core/state.sh"; source "$LIB/improve/workshop.sh"; source "$LIB/cycle/run.sh"
 info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; say() { echo "SAY $*"; }
 die() { echo "DIE $*"; exit 1; }
 BOLD=; OFF=; GREEN=
@@ -227,22 +227,27 @@ export SCLAUDE_SESSION=%(session)s
     # The machine's say in that question (sclaude.leaks): auto sends with
     # the lines shown, off holds unasked; core-send is asked even under off.
     git(live, "config", "sclaude.leaks", "auto")
-    out = sh('workshop_leaks "%s" origin/main "%s" && echo PASSED' % (ws, tree), answer="n")
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_leaks "%s" origin/main "%s" && echo PASSED' % (ws, tree), answer="n")
     check("leaks-auto-shown-unasked", ("may name the product" in out, "ASK" in out, "PASSED" in out),
           (True, False, True))
+    # Its way on the map is the setting's, past the question nobody asked.
+    check("leaks-auto-edge", ("HISTORY w_leaks w_tests by=setting" in out, "w_leak_ask" in out), (True, False))
     git(live, "config", "sclaude.leaks", "off")
     out = sh('workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree), answer="y")
     check("leaks-off-held-unasked", ("ASK" in out, "rc=3" in out), (False, True))
     # Not the person's no: written apart in the history, and said apart.
-    out = sh('history_add() { echo "HISTORY $3"; }; workshop_publish "%s"' % tree, answer="y")
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_publish "%s"' % tree, answer="y")
     check("leaks-off-history", ("HISTORY leaks-off" in out, "sclaude.leaks is off)" in out), (True, True))
+    check("leaks-off-edge", ("HISTORY w_leaks w_held by=setting" in out, "w_leak_ask" in out), (True, False))
     out = sh('WORKSHOP_SEND=1 workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree), answer="y")
     check("leaks-off-core-send-asks", ("ASK" in out, "rc=0" in out), (True, True))
     ws_py("put", record, "leaks_ok", "null")
     git(live, "config", "--unset", "sclaude.leaks")
     # No answer to a short list is not a no either: tried again, not held.
-    out = sh('ask() { echo ASK; return 1; }; workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree))
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; ask() { echo ASK; return 1; }; workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree))
     check("short-list-unanswered-not-held", ("ASK" in out, "rc=2" in out), (True, True))
+    check("short-list-unanswered-edge", ("HISTORY w_leaks w_leak_ask by=sclaude" in out,
+                                         "HISTORY w_leak_ask w_wait by=none" in out), (True, True))
     # A list too long for a question on the phone is asked at the terminal
     # alone; nobody there is no answer, and nothing is held.
     git(ws, "commit", "-q", "--allow-empty", "-m", "fix(sclaude): long",
@@ -386,21 +391,25 @@ export SCLAUDE_SESSION=%(session)s
     out = sh("cmd_core_send", maintainer=False, answer="n", session="")
     check("core-send-sends-unasked", ("PROPOSE" in out, "Send it?" in out), (True, False))
     ready_change("asked and said yes")
-    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="y")
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_publish "%s"' % tree, maintainer=False, answer="y")
     check("ask-yes-sent", ("Send it?" in out, "PROPOSE" in out), (True, True))
+    check("ask-yes-edges", ("HISTORY w_tests w_send by=sclaude" in out, "HISTORY w_send w_who by=person" in out,
+                            "HISTORY w_who w_pr by=sclaude" in out), (True, True, True))
     ready_change("asked while away")
-    out = sh('review_go_on() { return 0; }; workshop_publish "%s"' % tree, maintainer=False, answer="y")
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; review_go_on() { return 0; }; workshop_publish "%s"' % tree, maintainer=False, answer="y")
     check("away-not-asked-not-sent", ("ASK" in out, "PROPOSE" in out, "You are away" in out), (False, False, True))
+    check("away-edge", "HISTORY w_send w_wait by=setting" in out, True)
     check("away-stays-ready", sh('workshop_state "%s" ""' % tree).strip(), "ready")
     git(live, "config", "--unset", "sclaude.contribute")
     out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="n")
     check("unset-is-ask", ("Send it?" in out, "PROPOSE" in out), (True, False))
     git(live, "config", "sclaude.contribute", "off")
     ready_change("made before it was off")
-    out = sh('history_add() { echo "HISTORY $3"; }; workshop_publish "%s"' % tree, maintainer=False, answer="y")
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_publish "%s"' % tree, maintainer=False, answer="y")
     check("off-held-unasked", ("PROPOSE" in out, "ASK" in out), (False, False))
     # Not the person's no: the map plays it past the question.
-    check("off-held-history", "HISTORY contribute-off" in out, True)
+    check("off-held-history", ("HISTORY contribute-off" in out, "HISTORY w_tests w_held by=setting" in out,
+                               "w_send" in out), (True, True, False))
     check("off-held", sh('workshop_state "%s" ""' % tree).strip(), "blocked")
     out = sh("cmd_core_open", session="s9")
     check("off-core-open-refused", ("DIE" in out, "is off" in out), (True, True))

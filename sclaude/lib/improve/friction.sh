@@ -152,8 +152,13 @@ run_friction() {
     [[ -s "$log" ]] || {
       state_set "$state" "friction.$key.empty" true
       history_add "$state" "friction.$key" empty
+      history_edge "$state" f_log f_empty sclaude "the session ended" key="$key"
+      history_edge "$state" f_empty f_none sclaude "nothing logged" key="$key"
       return 0
     }
+    history_edge "$state" f_log f_empty sclaude "the session ended" key="$key"
+    history_edge "$state" f_empty f_rules sclaude "" key="$key" \
+      note="$(grep -cE '^20[0-9]{2}-' "$log" 2>/dev/null || echo "?") entr(ies)"
   fi
 
   # No queue between reviews: each commits into its own feature's worktree, on
@@ -183,6 +188,8 @@ run_friction() {
       state_set "$state" friction_owed_told null 2>/dev/null || true
     fi
     history_add "$state" "friction.$key" deferred
+    history_edge "$state" f_rules f_classify sclaude "rules only, matched" key="$key"
+    history_edge "$state" f_classify f_defer sclaude "its rows" key="$key"
     # Entries alone skip the pull request (deferred_to_main).
     deferred_to_main "$wt" "$deferred_from" || friction_push_project "$wt" "$deferred_from"
     return 0
@@ -465,6 +472,17 @@ sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSH
   # happens. How much there is to review is the one detail it gets.
   ask_feed say "$(phase_line "$([[ -n "$session" ]] && echo resumed || echo started)" friction "$key") · $count $([[ "$count" == 1 ]] && echo entry || echo entries)"
   local before_instruments; before_instruments="$(instruments_state)"
+  # The way into the review: from the log at once, or back from a hold —
+  # [g]'s, or a session that did not start.
+  local by_hand=sclaude
+  [[ "${SCLAUDE_COMMAND:-}" == friction ]] && by_hand=person
+  if [[ "$(state_get "$state" "friction.$key.stalled" 2>/dev/null || true)" == true ]]; then
+    history_edge "$state" f_hold f_review "$by_hand" "${SCLAUDE_COMMAND:-}" key="$key"
+  elif [[ -n "$pending" && "$(state_get "$state" "friction.$key.held" 2>/dev/null || true)" == true ]]; then
+    history_edge "$state" f_away f_review "$by_hand" "${SCLAUDE_COMMAND:-}" key="$key"
+  elif [[ -z "$session" ]]; then
+    history_edge "$state" f_rules f_review sclaude "more than rules" key="$key" note="$count entr(ies)"
+  fi
   if [[ -n "$session" ]]; then
     # Returning to an interrupted review. The log does not need moving — it is
     # already in .reviewed, and that is what the session was reading; the prompt
@@ -534,6 +552,7 @@ sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSH
     # Kept rather than dropped: a stalled review is a row the Friction column
     # already names, and the next attempt opens a new conversation beside it.
     session_runs "$state" "friction.$key" stall "$session"
+    history_edge "$state" f_review f_hold sclaude "the session did not start" key="$key"
     warn ""
     warn "  The friction review did not start — it stays open."
     warn "  Come back to it with: $SELF friction $slug"
@@ -593,6 +612,29 @@ sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSH
     local note="${verdict#*$'\t'}"
     [[ -n "$note" && "$note" != "$verdict" ]] \
       && state_set "$state" "friction.$key.verdict_note" "$note"
+  fi
+  # Its way out, by what it reported: the kind as the map's player inferred
+  # it before these were written (a change to sclaude, a rule the product
+  # took, or left as it is), then the push if it changed anything.
+  history_edge "$state" f_review f_plan session "the session ended" key="$key"
+  history_edge "$state" f_plan f_decide person "the plan approved in the session" key="$key"
+  local kind=f_deliberate said="${verdict%%$'\t'*}"
+  if workshop_py approved "$(workshop_record "$wt")" "$session" 2>/dev/null; then kind=f_bug
+  elif [[ -n "$changed" || "$said" == lifted || "$said" == mixed ]]; then kind=f_lift
+  fi
+  case "$kind" in
+    f_bug)  history_edge "$state" f_decide f_bug session "it opened sclaude's workshop" key="$key"
+            history_edge "$state" f_bug f_verdict session "" key="$key" note="$said" ;;
+    f_lift) history_edge "$state" f_decide f_lift session "its verdict" key="$key"
+            history_edge "$state" f_lift f_verdict session "" key="$key" note="$said" ;;
+    *)      history_edge "$state" f_decide f_deliberate session "its verdict" key="$key"
+            history_edge "$state" f_deliberate f_verdict session "" key="$key" note="$said" ;;
+  esac
+  if [[ -n "$changed" ]]; then
+    history_edge "$state" f_verdict f_push sclaude "the project's commits" key="$key"
+    history_edge "$state" f_push f_next sclaude "" key="$key"
+  else
+    history_edge "$state" f_verdict f_next sclaude "nothing to push" key="$key"
   fi
   state_set "$state" "friction.$key.session" null
   return 0
@@ -730,6 +772,7 @@ friction_hold() {
   state_set "$state" "friction.$key.held" true 2>/dev/null || true
   state_set "$state" "friction.$key.read_in" null 2>/dev/null || true
   history_add "$state" "friction.$key" held
+  history_edge "$state" f_rules f_away setting "[g] in step 4" key="$key"
   n="$(grep -cE '^20[0-9]{2}-' "$wt/.sclaude/local/feature/friction.log" 2>/dev/null)" || n="${n:-0}"
   info "  [g] go on by itself is ticked: the friction review waits for you, $n entr$([[ "$n" == 1 ]] && echo y || echo ies) kept;"
   info "  the next friction review reads them, and whatever later sessions add — at the latest, before the retrospective."

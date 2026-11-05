@@ -4,7 +4,7 @@
 # how it is counted — shown under its tile — and the bands that colour it
 # good, watch or poor.
 #
-# Keyed by the tile's label in dora.py's render; a label not here gets no
+# Keyed by the tile's label in dora_page.py's render; a label not here gets no
 # note and no colour. The bands are the published ones where a source exists
 # (DORA's State of DevOps report, LinearB's engineering benchmarks, the usual
 # review and flow guidance) and a stated judgement where none does. A figure

@@ -2122,8 +2122,10 @@ stand in the way of cleaning up a merged feature.
 
 The page shows the four DORA metrics first, then delivery, development
 quality, Claude's work and token efficiency. Every figure is drawn from what
-already exists rather than from anything recorded for it. DORA's
-(`sclaude/lib/dora.py`):
+already exists rather than from anything recorded for it. `sclaude/lib/dora.py`
+builds it from its parts: `dora_sources.py` reads Vercel, GitHub and the cycle's
+record, `dora_numbers.py` counts, `dora_charts.py`, `dora_team.py` and
+`dora_page.py` draw, and `dora_store.py` keeps the page and its cache. DORA's:
 
 - **deploys** are Vercel's READY production deployments, with their commit —
   the one list of what actually reached production, a rollback's redeploys
@@ -2177,7 +2179,7 @@ The rest:
   their type, parent and reopenings; autonomy is tool calls over what a person
   put in — what they typed, less the prompt sclaude opens its own sessions
   with, plus the questions Claude asked and the actions they turned down.
-- **the review per feature** (`gh_review_rounds` in `dora.py`) reuses
+- **the review per feature** (`gh_review_rounds` in `dora_sources.py`) reuses
   `review_report.py`, the report printed at the close of every round: a round
   is a run of the automatic review on the feature's branch — not a session,
   which can carry several — and a thread's fate is fixed, closed without a fix
@@ -2212,7 +2214,7 @@ The rest:
   hit rate and the last week's spend per standard feature against the weeks
   before.
 
-- **the team** (`team_section` in `dora.py`, its script `TEAM_JS`) is drawn
+- **the team** (`team_section` in `dora_team.py`, its script `TEAM_JS`) is drawn
   only for `metricsTeam: demo` in the product's config. The real developer's
   figures are the product's; three generated teammates are drawn from them in
   the browser by `PROFILES` — a multiplier, or a value of its own, per figure

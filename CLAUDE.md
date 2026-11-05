@@ -318,11 +318,11 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-10-28 with the played history of a feature. -->
 
 - The DORA page, `.sclaude/local/dora/index.html` in the product's main
-  checkout, is written by `DIR`/`PAGE` in `sclaude/lib/dora.py` and served by
+  checkout, is written by `DIR`/`PAGE` in `sclaude/lib/dora_store.py` and served by
   `DORA_PAGE` in `bin/sclaude-proxy`; `tests/dora.py` and `tests/proxy.py`
   check each side. dora.py finds rollbacks by the heading and the marker
   `rollback_incident` in `sclaude/lib/rollback.sh` writes (`ROLLBACK_HEADING`
-  in dora.py, `ROLLBACK` in `issue_comments.py`); reword that comment and failures stop being counted. The page
+  in dora_sources.py, `ROLLBACK` in `issue_comments.py`); reword that comment and failures stop being counted. The page
   also reads the names `session_label` in `sclaude/lib/steps.sh` gives a
   session (`step_of` in `sclaude/lib/claude_usage.py`; `tests/session_names.py`
   feeds it every kind) and the columns of `review-context.log` that

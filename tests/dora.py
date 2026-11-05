@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "sclaude", "lib"))
 import dora  # noqa: E402
+import dora_charts, dora_numbers, dora_page, dora_sources, dora_store, dora_team  # noqa: E402
 
 failures = []
 
@@ -73,23 +74,23 @@ def main():
 
 def run_checks(root):
     # --- levels ---------------------------------------------------------------
-    check("frequency: daily is elite", dora.level("frequency", 1.0), "Elite")
-    check("frequency: twice a week is high", dora.level("frequency", 2 / 7), "High")
-    check("frequency: twice a month is medium", dora.level("frequency", 2 / 30), "Medium")
-    check("lead: 16 hours is elite", dora.level("lead", 16 * 3600), "Elite")
-    check("lead: three days is high", dora.level("lead", 3 * dora.DAY), "High")
-    check("failure: none is elite", dora.level("failure", 0.0), "Elite")
-    check("failure: a fifth is low", dora.level("failure", 0.2), "Low")
-    check("restore: unknown has no level", dora.level("restore", None), None)
+    check("frequency: daily is elite", dora_numbers.level("frequency", 1.0), "Elite")
+    check("frequency: twice a week is high", dora_numbers.level("frequency", 2 / 7), "High")
+    check("frequency: twice a month is medium", dora_numbers.level("frequency", 2 / 30), "Medium")
+    check("lead: 16 hours is elite", dora_numbers.level("lead", 16 * 3600), "Elite")
+    check("lead: three days is high", dora_numbers.level("lead", 3 * dora_numbers.DAY), "High")
+    check("failure: none is elite", dora_numbers.level("failure", 0.0), "Elite")
+    check("failure: a fifth is low", dora_numbers.level("failure", 0.2), "Low")
+    check("restore: unknown has no level", dora_numbers.level("restore", None), None)
 
     # The incident comment is found by what rollback_incident writes.
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                            "sclaude", "lib", "rollback.sh")) as fh:
         rollback = fh.read()
     check("rollback.sh writes the marker searched for",
-          'ROLLBACK_MARKER="%s"' % dora.ROLLBACK_MARKER in rollback, True)
+          'ROLLBACK_MARKER="%s"' % dora_sources.ROLLBACK_MARKER in rollback, True)
     check("rollback.sh writes the heading searched for",
-          "printf '## %s\\n" % dora.ROLLBACK_HEADING in rollback, True)
+          "printf '## %s\\n" % dora_sources.ROLLBACK_HEADING in rollback, True)
 
     # --- which commits each deploy shipped -------------------------------------
     repo = os.path.join(root, "repo")
@@ -111,7 +112,7 @@ def run_checks(root):
         # deploy and ships no changes we can name.
         deploy("d5", "f" * 40, t0 + timedelta(days=3)),
     ]
-    shipped = dora.commits_first_shipped(repo, deploys)
+    shipped = dora_sources.commits_first_shipped(repo, deploys)
     check("the oldest deploy has no baseline", "d1" in shipped, False)
     check("a deploy ships what no earlier one had",
           sorted(s for s, _, _ in shipped["d2"]), sorted([b, c]))
@@ -123,7 +124,7 @@ def run_checks(root):
     # main at its own author date.
     pulls = {"7": {"branch": "feat/7-thing", "merge": c,
                    "first": (t0 - timedelta(days=1)).isoformat(), "created": None, "merged": None}}
-    changes = {(x["deploy"], x["sha"]): x for x in dora.changes(repo, deploys, pulls)}
+    changes = {(x["deploy"], x["sha"]): x for x in dora_numbers.changes(repo, deploys, pulls)}
     check("a pull request counts from its first commit",
           changes[("d2", c)]["seconds"], (timedelta(days=1, hours=5)).total_seconds())
     check("the pull request is named", changes[("d2", c)]["pr"], "7")
@@ -139,24 +140,24 @@ def run_checks(root):
         {"rollback": {"at": (t0 + timedelta(days=2, hours=4)).isoformat()}},
         {"feature": "plain"},
     ]
-    rollbacks = dora.incidents(gh_found, records)
+    rollbacks = dora_numbers.incidents(gh_found, records)
     check("one rollback seen twice is one incident", len(rollbacks), 2)
-    failed = dora.failures(deploys, rollbacks)
+    failed = dora_numbers.failures(deploys, rollbacks)
     check("an incident falls on the deploy serving before it",
           [dep["uid"] for dep, _ in failed], ["d2", "d4"])
 
-    m = dora.window_metrics(deploys, dora.changes(repo, deploys, pulls), failed,
+    m = dora_numbers.window_metrics(deploys, dora_numbers.changes(repo, deploys, pulls), failed,
                             NOW - timedelta(days=30), NOW)
     check("deploys in the window", m["deploys"], 5)
     check("failure rate is failed deploys over deploys", m["failure"], 2 / 5)
     check("restore is the median from deploy to rollback", m["restore"], (40 + 60) / 2 * 60)
 
     # Weeks before the first deploy are not weeks with no deploys.
-    weeks = dora.weekly(deploys, [], NOW)
-    check("the weeks start at the first deploy's", weeks[0][0], dora.week_start(dora.deploy_time(deploys[0])))
+    weeks = dora_numbers.weekly(deploys, [], NOW)
+    check("the weeks start at the first deploy's", weeks[0][0], dora_numbers.week_start(dora_numbers.deploy_time(deploys[0])))
     check("every deploy lands in a week", sum(w[1] for w in weeks), 5)
     old = [deploy("x", a, NOW - timedelta(days=200))]
-    check("a long history is cut to the last weeks", len(dora.weekly(old, [], NOW)), dora.WEEKS)
+    check("a long history is cut to the last weeks", len(dora_numbers.weekly(old, [], NOW)), dora_numbers.WEEKS)
 
     # --- cycle records ----------------------------------------------------------
     log = os.path.join(root, "cycles.jsonl")
@@ -168,16 +169,16 @@ def run_checks(root):
     ]
     with open(log, "w") as fh:
         fh.write("".join(json.dumps(x) + "\n" for x in lines) + "not json\n")
-    saved = dora.log_path
-    dora.log_path = lambda: log
+    saved = dora_sources.log_path
+    dora_sources.log_path = lambda: log
     try:
-        got = [r["feature"] for r in dora.cycles(repo, pulls)]
+        got = [r["feature"] for r in dora_sources.cycles(repo, pulls)]
     finally:
-        dora.log_path = saved
+        dora_sources.log_path = saved
     check("a record is ours by its repo, or by a PR opened from its branch",
           got, ["7-thing", "10-ours"])
 
-    parts = dora.cycle_parts({"steps": {"plan": {"seconds": 60}, "review": {"seconds": None}},
+    parts = dora_numbers.cycle_parts({"steps": {"plan": {"seconds": 60}, "review": {"seconds": None}},
                               "regression": {"local": {"seconds": 5}, "prod": {"seconds": 7}}})
     check("a cycle is cut by step, the regression's stages together",
           parts, {"plan": 60, "code": 0, "pr": 0, "review": 0, "regression": 12})
@@ -185,7 +186,7 @@ def run_checks(root):
     # --- the page ---------------------------------------------------------------
     data = {"deploys": deploys, "pulls": pulls, "incidents": gh_found,
             "records": [], "notes": ["Vercel could not be asked."], "github": "o/r"}
-    page = dora.render(repo, data, dora.compute(repo, data, NOW))
+    page = dora_page.render(repo, data, dora_numbers.compute(repo, data, NOW))
     for label in ("Deployment frequency", "Lead time for changes",
                   "Change failure rate", "Time to restore"):
         check("the page shows " + label, label in page, True)
@@ -233,15 +234,15 @@ def run_checks(root):
         cache = os.path.join(root, "review-rounds.json")
         pulls_rr = {"1": {"branch": "feat/7-x"}, "2": {"branch": "feat/7-x"},
                     "3": {"branch": "feat/8-y"}}
-        got = dora.gh_review_rounds(repo, "o/r", pulls_rr, {"7-x"}, cache)
+        got = dora_sources.gh_review_rounds(repo, "o/r", pulls_rr, {"7-x"}, cache)
         check("a feature's review over all its pull requests", got["7-x"],
               {"prs": ["1", "2"], "rounds": 3, "threads": 4, "fixed": 2, "declined": 1, "open": 1})
         check("an unfinished feature is not read", "8-y" in got, False)
         calls.clear()
-        dora.gh_review_rounds(repo, "o/r", pulls_rr, {"7-x"}, cache)
+        dora_sources.gh_review_rounds(repo, "o/r", pulls_rr, {"7-x"}, cache)
         check("a feature already read is kept", calls, [])
         pulls_rr["4"] = {"branch": "feat/7-x"}
-        dora.gh_review_rounds(repo, "o/r", pulls_rr, {"7-x"}, cache)
+        dora_sources.gh_review_rounds(repo, "o/r", pulls_rr, {"7-x"}, cache)
         check("a new pull request reads the feature again", sorted(calls), ["1", "2", "4"])
     finally:
         del sys.modules["review_report"]
@@ -251,12 +252,12 @@ def run_checks(root):
     os.makedirs(os.path.join(repo, ".sclaude"), exist_ok=True)
     with open(os.path.join(repo, ".sclaude", "config.json"), "w") as fh:
         json.dump({"metricsTeam": "demo"}, fh)
-    demo = dora.render(repo, data, dora.compute(repo, data, NOW))
+    demo = dora_page.render(repo, data, dora_numbers.compute(repo, data, NOW))
     check("metricsTeam demo adds the team part", "<div id=team></div>" in demo, True)
     team = json.loads(_re.search(r"<script type=application/json id=team-data>(.*?)</script>",
                                  demo, _re.S).group(1))
     check("the teammates and their profiles", (team["others"], sorted(team["metrics"][0]["profiles"])),
-          (list(dora.SIMULATED), sorted(dora.SIMULATED)))
+          (list(dora_team.SIMULATED), sorted(dora_team.SIMULATED)))
     check("the team is in the contents", "<a href='#team'>Team</a>" in demo, True)
     check("every figure of the table has its note",
           [m["key"] for m in team["metrics"] if not m.get("mix") and not m.get("note")], [])
@@ -267,11 +268,11 @@ def run_checks(root):
     os.makedirs(os.path.join(repo, ".sclaude", "local"), exist_ok=True)
     with open(os.path.join(repo, ".sclaude", "local", "config.json"), "w") as fh:
         json.dump({"metricsTeam": "real"}, fh)
-    check("a machine's own metricsTeam wins", dora.team_mode(repo), "real")
+    check("a machine's own metricsTeam wins", dora_team.team_mode(repo), "real")
     os.remove(os.path.join(repo, ".sclaude", "config.json"))
     with open(os.path.join(repo, ".sclaude", "local", "config.json"), "w") as fh:
         json.dump({"metricsTeam": "demo"}, fh)
-    check("and works without the product's", dora.team_mode(repo), "demo")
+    check("and works without the product's", dora_team.team_mode(repo), "demo")
     os.remove(os.path.join(repo, ".sclaude", "local", "config.json"))
 
     # The page has a table of contents, one entry per part, each linking to it.
@@ -282,18 +283,18 @@ def run_checks(root):
 
     # The health of the whole: each direction the mean of its figures' scores
     # in the mode, the index their mean, the imbalance best less worst.
-    speed = dora.axis("Speed", [("Hotfix rate", 0.05, 0.05), ("Hotfix rate", 0.15, 0.30),
+    speed = dora_charts.axis("Speed", [("Hotfix rate", 0.05, 0.05), ("Hotfix rate", 0.15, 0.30),
                                 ("Sessions", 1, 1), ("Hotfix rate", None, None)], "abs")
     check("a direction averages its scored figures", (speed[1], len(speed[2])), (87.5, 2))
     check("per complexity takes the normalised value",
-          dora.axis("Speed", [("Hotfix rate", 0.05, 0.30)], "norm")[1], 0.0)
-    index, spread, best, worst = dora.health_of([("A", 90.0, []), ("B", 30.0, []), ("C", None, [])])
+          dora_charts.axis("Speed", [("Hotfix rate", 0.05, 0.30)], "norm")[1], 0.0)
+    index, spread, best, worst = dora_charts.health_of([("A", 90.0, []), ("B", 30.0, []), ("C", None, [])])
     check("the index is the mean of the directions with a score", index, 60.0)
     check("the imbalance is best less worst", (spread, best[0], worst[0]), (60.0, "A", "B"))
 
     # Unclear requirements are relative to size: a question per criterion.
     sized = {"a": {"points": 10.0, "unit": 1.0}, "b": {"points": 4.0, "unit": 0.4}}
-    figures = dora.requirement_figures(
+    figures = dora_numbers.requirement_figures(
         [{"feature": "a", "issue": 1}, {"feature": "b", "issue": 2}],
         {"1": {"significant": True, "changed": True, "added": 2, "change": 0.3,
                "request_words": 200, "description_words": 50},
@@ -307,16 +308,16 @@ def run_checks(root):
     check("request growth over the description", figures["growth"], 2.5)
 
     empty = {"deploys": [], "pulls": {}, "incidents": [], "records": [], "notes": [], "github": None}
-    page = dora.render(repo, empty, dora.compute(repo, empty, NOW))
+    page = dora_page.render(repo, empty, dora_numbers.compute(repo, empty, NOW))
     check("an empty history still draws", "No production deploy found." in page, True)
 
     # --- refreshing ---------------------------------------------------------------
     # The sources stood in for: no network in a bench.
-    dora.vercel_deployments = lambda r: None
-    dora.gh_name = lambda r: None
-    dora.log_path = lambda: log
+    dora_sources.vercel_deployments = lambda r: None
+    dora_sources.gh_name = lambda r: None
+    dora_sources.log_path = lambda: log
     os.environ.pop("SCLAUDE_DORA_EVERY", None)
-    target = os.path.join(repo, dora.DIR, dora.PAGE)
+    target = os.path.join(repo, dora_store.DIR, dora_store.PAGE)
     check("a missing page is built", dora.refresh(repo), True)
     check("it is where the proxy serves it from",
           os.path.isfile(os.path.join(repo, ".sclaude/local/dora/index.html")), True)
@@ -330,7 +331,7 @@ def run_checks(root):
 
     # A second refresh while the first holds the lock leaves at once.
     import fcntl
-    held = open(os.path.join(repo, dora.DIR, ".lock"), "w")
+    held = open(os.path.join(repo, dora_store.DIR, ".lock"), "w")
     fcntl.flock(held, fcntl.LOCK_EX)
     try:
         before = os.path.getmtime(target)

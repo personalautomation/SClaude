@@ -284,7 +284,9 @@ Production and the suites against the deployments are set the same way.
 `auto` (shipped without that question; it is still asked where QA or a check
 was passed over on the way, or where other features' code not yet in
 production would go out with it) and `off` (sclaude never deploys production; the
-issue closes as merged and accepted, and you ship it by hand).
+issue closes as merged and accepted, and you ship it by hand). Nobody
+answering the question — the terminal closed, the phone silent — is not a
+no: nothing is closed or cleaned up, and the next `sclaude <name>` asks again.
 `previewRegression` and `prodRegression` each take `full` (the stage's list in
 `regression`, the default), `smoke` and `none` (no suite there, and no gate).
 Smoke is the product's few vital paths, and the product says what they are:
@@ -468,7 +470,8 @@ numbers, and paths of its files. The search is a heuristic and will not
 catch everything: a table name or business logic described in a commit
 message can still get through. `ask` shows the matches and waits for your
 yes, `auto` sends with them, and `off` holds the fix until a session
-rewords it.
+rewords it. A question about them that nobody answers holds nothing: it is
+asked again when the tree is next opened.
 
 **To your own services**, as part of the cycle:
 - Anthropic: everything a Claude Code session reads, as with any Claude Code

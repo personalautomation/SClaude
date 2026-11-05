@@ -33,6 +33,10 @@ NEEDS = {
     ("f_rules", "f_away"): ("review", {"local"}),
     ("f_away", "f_review"): ("review", {"local"}),
     ("draft_pr", "review_found"): ("review", {"off"}),
+    # A review on this machine writes no round marker: no round gate, the
+    # session goes straight to step 4's close.
+    "round": ("review", {"github", "off"}),
+    ("review", "review_close"): ("review", {"local"}),
     "r_local": ("regression.local", {True}),
     "r_stop": ("regression.local", {True}),
     "r_preview": ("regression.preview", {True}),
@@ -129,6 +133,10 @@ VARIANTS = {
     "r_prod": [("prodRegression", {"smoke"}, {
         "text": "the product's smoke set, against production, after the ship"})],
     "o_preview": [("regression.preview", {False}, {"kind": "task", "text": "deployed"})],
+    # No local suite: step 4 closes on the pull request alone.
+    "review_close": [("regression.local", {False}, {
+        "title": "All closed?",
+        "details": 'Leaving step 4 closes it only when nothing is open — no unresolved thread, no running or red check. Otherwise sclaude waits and what is open goes back to a session without a question; [s] or ⏭ makes the next session the last for new findings. A session you left yourself (/exit, Ctrl-C) with [g] off holds step 4 open until the next sclaude <name>. A session sclaude closed on its done marker — always so for a review on this machine, which writes no round marker — goes back by whose work is open: threads from before it, or a red check, to the same session; only new ones to the same session while its context is under 40% and its last request under 55 minutes old, else to a fresh one. With [g] on the rounds go on even then (30 a step 4, then it asks), a pass that did not run is tried again ten times with growing pauses, and after the search ended the fixes are checked. Threads a night session left for you to confirm: sclaude asks whether to go through them now, and on your yes they go back to a fresh session that asks about each and, on your yes, replies and resolves them; the rest of your threads wait for your hand on GitHub.'})],
     "o_merge": [("merge", {"auto"}, {"lane": "sclaude", "text": "by sclaude: merge auto"}),
                 ("merge", {"github"}, {"text": "yours, on GitHub"})],
 }
@@ -319,8 +327,8 @@ COMMANDS = [
     ("sclaude drop <name>", "drop", "always", "abandon the feature, each trace asked about", ("cleanup", "end")),
     ("sclaude epilogue [name]", "", "an epilogue broken off", "write the status into the issue", "epilogue"),
     ("sclaude deferred", "", "monthly, offered", "the review of the friction put off", "f_monthly"),
-    ("sclaude review-stats", "", "always", "what review sessions cost in context", "round"),
-    ("sclaude review-report <name>", "", "with review rounds", "is the review still worth it", "round"),
+    ("sclaude review-stats", "", "always", "what review sessions cost in context", "review"),
+    ("sclaude review-report <name>", "", "with review rounds", "is the review still worth it", "review"),
     ("sclaude checks [pr]", "", "in a session", "wait for the checks of the pushed head", "review_close"),
     ("sclaude core-open", "", "in a session", "let the session write sclaude in its workshop", "w_open"),
     ("sclaude core-ready", "", "in a session", "mark the workshop's change ready to publish", "w_ready"),

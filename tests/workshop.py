@@ -232,11 +232,17 @@ export SCLAUDE_SESSION=%(session)s
           (True, False, True))
     git(live, "config", "sclaude.leaks", "off")
     out = sh('workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree), answer="y")
-    check("leaks-off-held-unasked", ("ASK" in out, "rc=1" in out), (False, True))
+    check("leaks-off-held-unasked", ("ASK" in out, "rc=3" in out), (False, True))
+    # Not the person's no: written apart in the history, and said apart.
+    out = sh('history_add() { echo "HISTORY $3"; }; workshop_publish "%s"' % tree, answer="y")
+    check("leaks-off-history", ("HISTORY leaks-off" in out, "sclaude.leaks is off)" in out), (True, True))
     out = sh('WORKSHOP_SEND=1 workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree), answer="y")
     check("leaks-off-core-send-asks", ("ASK" in out, "rc=0" in out), (True, True))
     ws_py("put", record, "leaks_ok", "null")
     git(live, "config", "--unset", "sclaude.leaks")
+    # No answer to a short list is not a no either: tried again, not held.
+    out = sh('ask() { echo ASK; return 1; }; workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree))
+    check("short-list-unanswered-not-held", ("ASK" in out, "rc=2" in out), (True, True))
     # A list too long for a question on the phone is asked at the terminal
     # alone; nobody there is no answer, and nothing is held.
     git(ws, "commit", "-q", "--allow-empty", "-m", "fix(sclaude): long",
@@ -391,8 +397,10 @@ export SCLAUDE_SESSION=%(session)s
     check("unset-is-ask", ("Send it?" in out, "PROPOSE" in out), (True, False))
     git(live, "config", "sclaude.contribute", "off")
     ready_change("made before it was off")
-    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="y")
+    out = sh('history_add() { echo "HISTORY $3"; }; workshop_publish "%s"' % tree, maintainer=False, answer="y")
     check("off-held-unasked", ("PROPOSE" in out, "ASK" in out), (False, False))
+    # Not the person's no: the map plays it past the question.
+    check("off-held-history", "HISTORY contribute-off" in out, True)
     check("off-held", sh('workshop_state "%s" ""' % tree).strip(), "blocked")
     out = sh("cmd_core_open", session="s9")
     check("off-core-open-refused", ("DIE" in out, "is off" in out), (True, True))

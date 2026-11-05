@@ -292,7 +292,7 @@ run_step() {
       warn "  PR #$pr was NOT reviewed: the review workflow skipped it (marked not-reviewed)."
       info "  Every check is green and nobody commented."
     fi
-    info "  Nothing to answer, so no review session is opened."
+    info "  Nothing open on the pull request, so no review session is opened."
     after_step "$wt" "$slug" "$step"
     return 0
   fi

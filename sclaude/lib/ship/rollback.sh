@@ -495,9 +495,11 @@ rollback_migrations() {
   [[ "$rc" -eq 1 ]] && warn "  It deletes rows. They do not come back."
 
   ask "${BOLD}Run it against production? [y/n] ${OFF}" answer yn
+  # Only a no is recorded as declined: no answer settles nothing, and the
+  # status says where the schema stands, not what an earlier rollback did.
   if ! is_yes "$answer"; then
     info "  Left alone — the schema stays ahead of the code."
-    state_set "$state" rollback.db.status declined 2>/dev/null || true
+    state_set "$state" rollback.db.status "$(is_no "$answer" && echo declined || echo ahead)" 2>/dev/null || true
     return 0
   fi
 
@@ -680,7 +682,8 @@ rollback_prod() {
     if ! is_yes "$answer"; then
       info "  Left as it is. Production runs this feature, and its regression is red."
       info "  Rolling forward instead — fixing and shipping again — may be the way."
-      state_set "$state" rollback.prod.code refused 2>/dev/null || true
+      # Only a no is the person's refusal: no answer settles nothing.
+      is_no "$answer" && state_set "$state" rollback.prod.code refused 2>/dev/null || true
       return 1
     fi
   elif [[ "$auto" != "--auto" ]]; then

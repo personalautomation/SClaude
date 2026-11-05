@@ -125,9 +125,15 @@ def main(argv):
                 state = json.load(fh)
         except (OSError, ValueError):
             state = {}
-        here = argv[2] if len(argv) >= 3 and argv[2] in process_model.NODES else None
         read = process_costs.transcripts_of(argv[1])
-        print(json.dumps(process_history.history(state, process_costs.read_history(argv[1]), here, read), ensure_ascii=False))
+        # On the map its project draws, as the feature's page plays it
+        # (actions.sh): the ways filled in run through blocks it has, and a
+        # place it does not draw stands where the flow goes on from it.
+        tree = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(argv[1])))))
+        with process_model.configured(process_config.config_of(tree)):
+            here = process_config.on_map(argv[2]) or argv[2] if len(argv) >= 3 else None
+            here = here if here in process_config.all_nodes() else None
+            print(json.dumps(process_history.history(state, process_costs.read_history(argv[1]), here, read), ensure_ascii=False))
         read.done()
         return 0
     if len(argv) >= 2 and argv[0] == "page":

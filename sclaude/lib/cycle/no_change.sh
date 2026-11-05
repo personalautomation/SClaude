@@ -141,8 +141,8 @@ no_change_send() {
 # Puts what sclaude left on the branch where it belongs: `.sclaude/` to main,
 # the rest to main or nowhere, as the person says. The answer is kept in the
 # state, so a second pass after a failed push does not ask again. Returns 1
-# when something could not be sent: the branch then still holds it, and must
-# not be deleted.
+# when something could not be sent, 2 when nobody answered: the branch then
+# still holds it, and must not be deleted.
 #
 #   no_change_settle <wt>
 no_change_settle() {
@@ -172,7 +172,16 @@ no_change_settle() {
       while IFS= read -r line; do info "    $line"; done \
         < <(git -C "$wt" log --no-merges --format='%h %s' "$base..HEAD" -- "${NO_CHANGE_PRODUCT[@]}" 2>/dev/null)
       ask "${BOLD}Send them to main? n drops them with the branch. [y/n] ${OFF}" answer yn
-      if is_yes "$answer"; then choice=send; else choice=drop; fi
+      # Only a no drops them: no answer (the terminal gone, the phone silent)
+      # settles nothing, and they stay on the branch to be asked about again.
+      if is_yes "$answer"; then choice=send
+      elif is_no "$answer"; then choice=drop
+      else
+        warn "  No answer: the product changes on $branch stay on it, and this is asked again."
+        # A failed send above is still the one to say.
+        (( failed )) && return 1
+        return 2
+      fi
       state_set "$state" no_change_product "$choice"
     fi
     if [[ "$choice" == send ]]; then

@@ -186,10 +186,16 @@ check("drop ends at the clean-up and done", process.places(drop[4]) == ["cleanup
 model = process.client_model()
 check("a place is lit on every map that has it",
       set(model["alias"].get("cleanup", [])) == {"o_end"})
+# Without a local suite step 4's close names none, in its title or details.
+import process_config  # noqa: E402
+_rc = process_config.VARIANTS["review_close"][0]
+check("no local suite: step 4 closes on the pull request alone",
+      _rc[:2] == ("regression.local", {False}) and "local" not in _rc[2]["title"]
+      and "local regression" not in _rc[2]["details"])
 # Merged and not shipped is a way the cycle takes (ship → epilogue): the
 # glance draws it.
 check("the glance: merged, not shipped",
-      ("ship", "epilogue", "no", "") in process.EDGES
+      any(e[:2] == ("ship", "epilogue") and e[2].startswith("no") for e in process.EDGES)
       and any(a == "o_prod" and b == "o_epilogue" and "not shipped" in l for a, b, l, _k in process.OVERVIEW_EDGES))
 
 # --- the map a project's config draws ----------------------------------------
@@ -546,6 +552,14 @@ check("history: red ends in the wait; a session sent back plays the return",
        ["w_leaks", "w_tests", "w_leaks", "w_tests", "w_send", "w_who", "w_main"],
        ["w_leaks", "w_tests"] + RETURN + ["w_wait"],
        ["w_wait", "w_leaks", "w_tests", "w_send", "w_who", "w_main"]))
+check("history: a hold by the machine's setting goes past the person's questions; an unanswered one waits",
+      (ws_way(["ready", "leaks-off"]), ws_way(["ready", "contribute-off"]),
+       ws_way(["ready", "held"]), ws_way(["ready", "declined"]), ws_way(["ready", "leaks-waits"]),
+       ws_way(["ready", "leaks-waits", "main"])) ==
+      (["w_leaks", "w_held"], ["w_leaks", "w_tests", "w_held"],
+       ["w_leaks", "w_leak_ask", "w_held"], ["w_leaks", "w_tests", "w_send", "w_held"],
+       ["w_leaks", "w_leak_ask", "w_wait"],
+       ["w_leaks", "w_leak_ask", "w_leaks", "w_tests", "w_send", "w_who", "w_main"]))
 rg = got["passes"]["regression"]
 check("history: a regression run is a pass on its own map, with its time",
       len(rg) == 1 and [x["n"] for x in rg[0]["steps"]] == ["r_local", "reg_local", "r_on"]
@@ -570,6 +584,40 @@ check("history: every detailed place a feature stands on is on the overview",
 # for, a map of its own reached from no block with its letter; a history
 # along the map has none.
 check("deviations: none along the map", not any(v.get("off") for v in got["visits"]), str(got["visits"]))
+# Two review sessions in a row: the round gate on a map that has it, the
+# close on one with a review on this machine, which has none.
+_two = [{"at": at("09:00"), "what": "steps.review", "op": "open", "session": "r"},
+        {"at": at("09:10"), "what": "steps.review", "op": "end", "session": "r"},
+        {"at": at("09:20"), "what": "steps.review", "op": "open", "session": "s"}]
+_ways = []
+for _r in ("github", "local"):
+    with process.configured(dict(process.example_config(), review=_r)):
+        _ways.append([v["n"] for v in process.history({}, _two, "review")["visits"]])
+check("history: played on the map the project draws",
+      _ways == [["new", "review", "round", "review"], ["new", "review", "review_close", "review"]], str(_ways))
+# And by `process.py history`, which reads the project's config beside the
+# state: a local review's tree plays through the close.
+with tempfile.TemporaryDirectory() as _t:
+    _fd = os.path.join(_t, ".sclaude", "local", "feature")
+    os.makedirs(_fd)
+    with open(os.path.join(_t, ".sclaude", "config.json"), "w") as _fh:
+        json.dump({"review": "local"}, _fh)
+    with open(os.path.join(_fd, "state.json"), "w") as _fh:
+        _fh.write("{}")
+    with open(os.path.join(_fd, process.process_history.HISTORY_FILE), "w") as _fh:
+        _fh.write("".join(json.dumps(r) + "\n" for r in _two))
+    _cli = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "flow", "process.py"), "history",
+                           os.path.join(_fd, "state.json"), "review"], capture_output=True, text=True, timeout=60)
+    _vs = json.loads(_cli.stdout or "{}").get("visits", [])
+    check("process.py history plays on the project's map",
+          ([v["n"] for v in _vs], _vs[-1].get("here") if _vs else None)
+          == (["new", "review", "review_close", "review"], True), _cli.stdout[-300:] + _cli.stderr[-300:])
+    # A place that map does not draw (no QA board) stands where it goes on.
+    _cli = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "flow", "process.py"), "history",
+                           os.path.join(_fd, "state.json"), "in_qa"], capture_output=True, text=True, timeout=60)
+    _vs = json.loads(_cli.stdout or "{}").get("visits", [])
+    check("process.py history stands where the project's map goes on",
+          [v["n"] for v in _vs if v.get("here")] == ["handoff"], _cli.stdout[-300:] + _cli.stderr[-300:])
 odd = process.history({}, [{"at": at("09:00"), "what": "steps.code", "op": "open", "session": "c"},
                            {"at": at("09:30"), "what": "steps.code", "op": "end", "session": "c"},
                            {"at": at("10:00"), "what": "steps.plan", "op": "open", "session": "p"}], "plan")["visits"]
@@ -1306,7 +1354,7 @@ check("the status is written where the map says",
       and not any(a == "epi_preview" for a, *_ in process.EDGES)
       and "Waiting for the merge of PR" in DEPLOY_FAMILY
       and DEPLOY_FAMILY.count('run_status "$slug"')
-      - DEPLOY_FAMILY.count('STATUS_LABELS_ONLY=1 run_status') == 7
+      - DEPLOY_FAMILY.count('STATUS_LABELS_ONLY=1 run_status') == 8
       and 'status_green_again "$slug"' in DEPLOY_FAMILY)
 status_md = read("sclaude", "prompts", "status.md")
 check("the status prompt claims no end of the cycle",

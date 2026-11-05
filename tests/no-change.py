@@ -113,6 +113,13 @@ with tempfile.TemporaryDirectory() as tmp:
     commit(side, "other.txt", "x\n", "someone else")
     git(side, "push", "-q", "origin", "HEAD:main")
 
+    # No answer is not a no: nothing is dropped or kept as an answer, and the
+    # branch, still holding the doc, must not be deleted.
+    out = run(wt, 'no_change_settle "%s"' % wt, answer="")
+    check("no answer keeps the branch", ("RC 2" in out, "No answer" in out), (True, True))
+    check("no answer is not kept",
+          json.load(open(os.path.join(wt, STATE))).get("no_change_product"), None)
+
     # Dropped: .sclaude goes, the doc does not.
     out = run(wt, 'no_change_settle "%s"' % wt, answer="n")
     check("settle with drop succeeds", "RC 0" in out, True)

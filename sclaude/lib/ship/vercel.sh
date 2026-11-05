@@ -160,7 +160,9 @@ run_block() {
   # terminal, we read as before.
   if [[ -n "$prompt" ]]; then
     echo ""
-    ask "${BOLD}$prompt [y/n] ${OFF}" answer yn
+    # 1 for a no, 3 for no answer at all (the terminal gone, the phone
+    # silent), which settles nothing: the caller asks again later.
+    ask "${BOLD}$prompt [y/n] ${OFF}" answer yn || { info "→ $title: nobody answered."; return 3; }
     is_yes "$answer" || { info "→ $title: skipped."; return 1; }
   fi
 

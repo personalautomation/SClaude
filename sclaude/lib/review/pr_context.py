@@ -1018,7 +1018,7 @@ def recent(created, cwd):
 
 
 def review_state(cwd, pr, repo):
-    """Whether step 4 has anything to answer, as one word.
+    """Whether step 4 has anything open on the pull request, as one word.
 
     clean    the review ran on the pushed head, left nothing open, every check
              is green, and no person has said anything: no session is needed.

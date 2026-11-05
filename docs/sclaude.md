@@ -810,7 +810,10 @@ holds it. A no and `off` both hold the change at its head (`workshop_block`),
 and `sclaude core-send` (`cmd_core_send`) sends a held change on the person's
 word. Under `off` no session should have made one: `core-open` refuses, and
 `workshop_rules` gives the sessions `_workshop-closed.md` in place of
-`_workshop.md`. In the feature's history these are `declined` and `waits`.
+`_workshop.md`. In the feature's history these are `declined`, `waits` and
+`contribute-off`; the leak check's are `held` (the person's no), `leaks-off`
+and `leaks-waits` (nobody answered: asked again at the next opening). A hold by the setting is written apart from a no, so the process
+map plays it past the question nobody was asked.
 
 **Publishing**, from `claude_launch` once the session exits
 (`workshop_after_session`): with the head ready, `workshop_publish` fetches
@@ -1218,7 +1221,10 @@ suite: `qa_accepted_now` in `qa.sh`), and so is "Ship to production, with
 what rides along?" where `prod_riders` finds other features' code between
 production and main; `off` reaches no block, records no
 rollback, and closes the issue with `issue_close_done … shipoff` before the
-epilogue and the clean-up, as after a "no". On a
+epilogue and the clean-up, as after a "no". No answer at all is not a "no":
+nothing is closed or cleaned up, the issue hears of the merge, the feature
+stays on the question (`prod_pass.shipping`), and the next run asks it again.
+On a
 "yes" sclaude runs it itself: `vercel --prod` from the main repository, and if
 the branch added migrations, the project's promote command first — whether one
 is needed sclaude determines by whether the branch touches the migrations
@@ -1474,7 +1480,7 @@ takes it for a QA hand-back. Only a broken environment is recorded as one
 that could not run: a project with no production suite or address has nothing
 to hold on, and is not held after its ship; a red held from before the
 suite was given up is lifted by `sclaude regression <name> prod`. The process map draws the hold where the cycle
-first reaches it, off `Production green?` beside the rollback, though every
+first reaches it, off `Production tests passed?` beside the rollback, though every
 later pass checks it first; the menu names it `steps done, production held`, and a
 production regression still running `steps done, production regression running` (both
 read through `position`). Sessions cannot do it:

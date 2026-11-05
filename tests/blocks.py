@@ -131,6 +131,12 @@ try:
         # under test is what reaches the person in front of the terminal.
         return out + err, rc
 
+    # No answer at all is not a no: 3, so the caller asks again later.
+    if os.path.exists(marks):
+        os.remove(marks)
+    out, err, rc = run_bash('ask() { return 1; }\nrun_block "T" "note" "Go?" "echo one >> %s"' % marks, tmp, stdin="")
+    check("block-unanswered-is-3", (rc, os.path.exists(marks)), (3, False))
+
     # Every command is shown, and shown before the question. The human agrees to
     # what they can see.
     out, rc = block(['echo one >> %s' % marks, 'echo two >> %s' % marks])

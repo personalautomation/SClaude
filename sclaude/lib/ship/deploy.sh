@@ -89,7 +89,7 @@ remind_prod() {
   # is over, or the ship is asked about again below.
   state_set "$wt/.sclaude/local/feature/state.json" regression.prod.deploy_failed null 2>/dev/null || true
   state_set "$wt/.sclaude/local/feature/state.json" regression.prod.after_failure null 2>/dev/null || true
-  local issue preview_done=0 prod_done=0 prod_tried=0 qa_skipped=0
+  local issue preview_done=0 prod_done=0 prod_tried=0 prod_unanswered=0 qa_skipped=0
   # What `deployed-preview` is actually about, which is not preview_done.
   #
   # preview_done means "we shipped one in this run", and it is right for what it
@@ -662,9 +662,10 @@ remind_prod() {
 
   # The question and the ship it leads to: the process map stands the feature
   # on them meanwhile (position in process_position.py), however long the answer takes
-  # — it may come from the phone the next morning. Taken off below whatever
-  # the answer, and by the next pass when this one is cut off at the question,
-  # which that pass asks again.
+  # — it may come from the phone the next morning. Taken off below once
+  # answered, yes or no; kept when nobody answered, since the question still
+  # stands, and taken off by the next pass, which asks it again (as when this
+  # one is cut off at the question).
   [[ "$prod_same" -eq 0 && "$ship_mode" != off ]] \
     && { state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping "$(date -Iseconds)" 2>/dev/null || true; }
   if [[ "$prod_same" -eq 1 ]]; then
@@ -722,7 +723,7 @@ remind_prod() {
       prod_done=1
       deploy_remember "$wt" prod
     else
-      [[ $? -eq 2 ]] && prod_tried=1
+      case $? in 2) prod_tried=1 ;; 3) prod_unanswered=1 ;; esac
     fi
     if [[ -n "$snapshot" ]]; then
       environment_restore "$REPO" "$snapshot" \
@@ -740,11 +741,13 @@ remind_prod() {
       prod_done=1
       deploy_remember "$wt" prod
     else
-      [[ $? -eq 2 ]] && prod_tried=1
+      case $? in 2) prod_tried=1 ;; 3) prod_unanswered=1 ;; esac
     fi
   fi
 
-  state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping null 2>/dev/null || true
+  # Unanswered, the question still stands: the map keeps the feature on it.
+  [[ "$prod_unanswered" -eq 1 ]] \
+    || state_set "$wt/.sclaude/local/feature/state.json" prod_pass.shipping null 2>/dev/null || true
 
   # Production starts with a question, which reaches the phone by itself:
   # the topic hears only how it ended.
@@ -775,6 +778,21 @@ remind_prod() {
     [[ -n "${promote_cmd:-}" && -n "$failed" && "$failed" != "cd $REPO" && "$failed" != git\ pull* ]] && began=1
     ship_failed "$wt" "$slug" "$failed" "$began"
     return $?
+  fi
+
+  # Nobody answered the question (the terminal gone, the phone silent): not
+  # a no, which closes the issue as declined and cleans up. The issue stays
+  # open and the next `sclaude <feature>` asks again (remind_prod, after
+  # every step).
+  if [[ "$prod_unanswered" -eq 1 ]]; then
+    echo ""
+    warn "Nobody answered whether to ship to production. Nothing is closed or cleaned up."
+    info "  Asked again with: $SELF $slug"
+    ask_feed say "$(phase_line ended deploy production) · nobody answered: asked again at the next $SELF $slug"
+    # The issue hears of the merge this pass made, as at the other stop
+    # before production (prod_main_unready).
+    run_status "$slug" "$issue" "$pr" "${merged:-}" "$preview_live" 0 "$wt"
+    return 0
   fi
 
   # The features that went out with this one are in production too, and their

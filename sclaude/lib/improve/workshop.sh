@@ -44,7 +44,7 @@ WORKSHOP_RESUME="You changed sclaude in this feature's workshop, and the change 
 
 # Said to a session reopened because the tests before publishing were red,
 # with the red files and where their output is after it.
-WORKSHOP_RED_WORD="sclaude ran the tests your change to sclaude touches before publishing it, and some were red, so nothing was published. sclaude reopened this session for them. Read their output and find whose the failure is: run each red test again on your head, and on origin/main in the workshop. A test that passes on a second run is flaky, and a flaky test is still yours to make steady; one red on origin/main too is still yours to fix, as the repository's rules say. Fix it in the workshop, commit, review it as your instructions say, and run \`sclaude core-ready\`. When you end the session sclaude tests it again and publishes it. If the change should not go out at all, say so in your report: the person decides, and a head you leave as it was is tested again when the tree is next opened. Red:"
+WORKSHOP_RED_WORD="sclaude ran the tests your change to sclaude touches before publishing it, and some were red, so nothing was published. sclaude reopened this session for them. Read their output and find whose the failure is: run each red test again on your head, and on origin/main in the workshop. A test that passes on a second run is flaky, and a flaky test is still yours to make steady; one red on origin/main too is still yours to fix, as the repository's rules say. Fix it in the workshop, commit, review it as your instructions say, and run \`sclaude core-ready\`. When you end the session sclaude tests it again and publishes it. If the change should not go out at all, say so in your report: the person decides, and a head you leave as it was is checked again when the tree is next opened. Red:"
 
 workshop_dir() { printf '%s/.sclaude/local/instruments\n' "$1"; }
 workshop_record() { printf '%s/.sclaude/local/instruments.json\n' "$1"; }
@@ -236,7 +236,7 @@ workshop_after_session() {
         # new. It waits, ready, for the next opening, as any red run does;
         # a session that thinks it should not go out says so to the person.
         if [[ -n "$red_head" && "$(git -C "$ws" rev-parse HEAD)" == "$red_head" ]]; then
-          info "  The session left it as it was: tested again when the tree is next opened."
+          info "  The session left it as it was: checked again when the tree is next opened."
           workshop_history "$tree" unchanged "$session"
           return 0
         fi
@@ -249,7 +249,7 @@ workshop_after_session() {
         # person said so — and twice at most, so that a test the session
         # cannot turn green does not hold the cycle in a loop.
         if (( red_back >= 2 )); then
-          info "  Sent back twice and still red: left ready, tested again when the tree is next opened."
+          info "  Sent back twice and still red: left ready, checked again when the tree is next opened."
           return 0
         fi
         red_back=$((red_back + 1))
@@ -343,7 +343,9 @@ workshop_pending() {
   return 0
 }
 
-# What in the change may name the product: the person decides.
+# What in the change may name the product: the person decides. 0 to go on,
+# 1 held at the person's no, 2 not now, 3 held unasked by sclaude.leaks off
+# (told apart for the history: the map does not play it as the person's no).
 #
 #   workshop_leaks <workshop> <base> <tree>
 #
@@ -374,7 +376,7 @@ workshop_leaks() {
       return 0 ;;
     off)
       info "  sclaude.leaks is off: not published; it stays in $ws, where a session of this tree can reword it."
-      return 1 ;;
+      return 3 ;;
   esac
   # A list longer than a question in Telegram holds loses its middle there
   # (ASK_CONTEXT_MAX in keepawake/asks.py), and a "yes" from the phone
@@ -386,8 +388,9 @@ workshop_leaks() {
       info "  Nobody answered at the terminal: it is tried again when the tree is next opened."
       return 2
     fi
-  else
-    ask "  Publish it anyway? [y/n] " answer yn
+  elif ! ask "  Publish it anyway? [y/n] " answer yn; then
+    info "  Nobody answered: it is tried again when the tree is next opened."
+    return 2
   fi
   if is_yes "$answer"; then
     [[ -n "$id" ]] && workshop_py put "$rec" leaks_ok "\"$id\""
@@ -487,7 +490,8 @@ workshop_tests() {
 # How a session's change in the workshop came out, in the feature's history
 # (history_add): its state when the session ended (none, ready, blocked,
 # pending, left) and how the publication went (main, pr, held, declined, waits, red,
-# stopped), and sent-back when red tests reopen the session, unchanged when it
+# stopped; leaks-off and contribute-off for a hold the person was not asked about,
+# leaks-waits for a leak question nobody answered), and sent-back when red tests reopen the session, unchanged when it
 # leaves the head as it was. The session is the one that ended, or WORKSHOP_SESSION for a
 # publication: the process map plays the pass after that session.
 #
@@ -556,13 +560,18 @@ workshop_publish() {
     workshop_history "$tree" held
     return 0
   fi
-  (( leaked == 0 )) || return 0
+  if (( leaked == 3 )); then
+    workshop_block "$tree" "held back for the product's details, unasked (sclaude.leaks is off); a session of this tree rewords it, or $SELF core-send asks"
+    workshop_history "$tree" leaks-off
+    return 0
+  fi
+  (( leaked == 0 )) || { workshop_history "$tree" leaks-waits; return 0; }
   workshop_tests "$ws" "$base" || { info "  It is tried again when the tree is next opened."
                                     workshop_history "$tree" red; return 0; }
   local consent=0
   workshop_consent "$tree" "$ws" "$base" || consent=$?
-  if (( consent == 1 )); then
-    workshop_history "$tree" declined
+  if (( consent == 1 || consent == 3 )); then
+    workshop_history "$tree" "$( (( consent == 1 )) && echo declined || echo contribute-off)"
     return 0
   fi
   (( consent == 0 )) || { workshop_history "$tree" waits; return 0; }
@@ -598,8 +607,9 @@ workshop_publish() {
 # Whether the workshop's change may go to sclaude's public repository now, by
 # the machine's sclaude.contribute (developer.sh): `send` yes, `off` held,
 # `ask` the person sees the commits and the files and says. 0 to send, 1
-# held at this head (a new commit or `sclaude core-send` lifts it), 2 not
-# now — tried again when the tree is next opened. WORKSHOP_SEND, set by
+# held at this head by the person's no (a new commit or `sclaude core-send`
+# lifts it), 3 held the same way, unasked, by `off`, 2 not now — tried
+# again when the tree is next opened. WORKSHOP_SEND, set by
 # core-send, is the person's yes already given.
 #
 #   workshop_consent <tree> <workshop> <base>
@@ -610,7 +620,7 @@ workshop_consent() {
     send) return 0 ;;
     off)
       workshop_block "$tree" "sending changes to sclaude is off on this machine (sclaude.contribute); $SELF core-send sends this one"
-      return 1 ;;
+      return 3 ;;
   esac
   # Away ([g] ticked by hand or by sleep_mode, a night): nobody is there to
   # read what would go public, and a yes is not the away answer to that.

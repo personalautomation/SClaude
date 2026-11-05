@@ -323,6 +323,14 @@ remind = body_of(deploy, "remind_prod")
 check_true("remind-prod-exists", remind is not None)
 
 if remind:
+    # No answer to the ship question is not a no: both blocks mark it, and
+    # the stop comes before the issue is closed as declined.
+    check_true("remind-prod-unanswered-both-blocks", remind.count("3) prod_unanswered=1") == 2)
+    check_true("remind-prod-unanswered-keeps-the-mark",
+               re.search(r'\[\[ "\$prod_unanswered" -eq 1 \]\] \\\n\s*\|\| state_set "[^"]*" prod_pass\.shipping null', remind) is not None)
+    stop_at = remind.find('if [[ "$prod_unanswered" -eq 1 ]]')
+    check_true("remind-prod-unanswered-stops-before-closing",
+               -1 < stop_at < remind.find('issue_close_done "$issue" declined'))
     call_at = remind.find("merge_offer ")
     check_true("remind-prod-offers-the-merge", call_at > -1)
 

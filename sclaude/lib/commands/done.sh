@@ -133,7 +133,11 @@ cmd_done() {
   # (no_change.sh). What sclaude committed on its branch goes where it belongs
   # first: the branch is deleted below, and anything left on it with it.
   if [[ "$no_change" == "true" ]]; then
-    no_change_settle "$wt" \
+    local settled=0
+    no_change_settle "$wt" || settled=$?
+    (( settled == 2 )) \
+      && die "nobody answered where the product changes on $branch go — the clean-up waits for it: $SELF done $slug"
+    (( settled == 0 )) \
       || die "something sclaude committed on $branch did not reach main — the clean-up waits for it: $SELF done $slug"
   fi
 

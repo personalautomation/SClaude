@@ -320,6 +320,10 @@ WORKSHOP_OUT = {
     "left": ("w_back", "w_pending"), "red": ("w_leaks", "w_tests", "w_wait"),
     "unchanged": ("w_wait",),
     "declined": ("w_leaks", "w_tests", "w_send", "w_held"), "waits": ("w_leaks", "w_tests", "w_send"),
+    # Held unasked, by the machine's setting: past the person's gates.
+    "leaks-off": ("w_leaks", "w_held"), "contribute-off": ("w_leaks", "w_tests", "w_held"),
+    # The leak question unanswered: it waits, asked again at the next opening.
+    "leaks-waits": ("w_leaks", "w_leak_ask", "w_wait"),
     "stopped": ("w_leaks", "w_tests", "w_send", "w_who"),
     "main": ("w_leaks", "w_tests", "w_send", "w_who", "w_main"),
     "pr": ("w_leaks", "w_tests", "w_send", "w_who", "w_pr"),
@@ -333,13 +337,14 @@ def _workshop_way(rows):
     for r in rows:
         if way[-1] == "w_pending" and r["op"] != "left":
             way += ["w_change", "w_ready", "w_exit", "w_ready_gate"]
-        # Red ends in the wait, unless the session was sent back for it
-        # (sent-back, written as it reopens): then the return is the way.
-        # A publication after a red wait with no return between is a retry
-        # at a later opening, which starts again from the tests' red; after
-        # the wait of a session that left the head as it was (unchanged),
-        # the wait stays, as the stop between the two openings.
-        if way[-1] == "w_wait" and way[-2] == "w_tests":
+        # Red and an unanswered leak question end in the wait, unless the
+        # session was sent back for red (sent-back, written as it reopens):
+        # then the return is the way. A publication after such a wait with
+        # no return between is a retry at a later opening, played from the
+        # gate that stopped it, as a jump the map does not draw; after the
+        # wait of a session that left the head as it was (unchanged), the
+        # wait stays, as the stop between the two openings.
+        if way[-1] == "w_wait" and way[-2] in ("w_tests", "w_leak_ask"):
             if r["op"] == "sent-back":
                 way = way[:-1] + ["w_change", "w_ready", "w_exit", "w_ready_gate"]
                 continue
@@ -700,7 +705,7 @@ def deviations(steps):
             continue
         letter = PASS_LETTER.get(s["pass"][0])
         # Its block may stand a gate or two back: a run after your yes on
-        # step 2's work is played after "Does it work?" (history's fill).
+        # step 2's work is played after "Accept the work?" (history's fill).
         before = []
         for x in steps[:i][::-1]:
             if "n" in x:

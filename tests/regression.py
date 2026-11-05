@@ -32,8 +32,8 @@ def _cfg(path):
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ROOT, "sclaude", "lib"))
 
-regression = open(os.path.join(ROOT, "sclaude", "lib", "regression.sh"),
-                  encoding="utf-8").read()
+regression = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
+                  encoding="utf-8").read() for _m in ("regression.sh", "regression_gate.sh", "regression_fix.sh"))
 github = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
               encoding="utf-8").read() for _m in ("github.sh", "issue_sync.sh", "board.sh", "outcome.sh"))
 # The prompt a fixing session is opened with. It is checked here rather than in
@@ -367,7 +367,7 @@ if gate is not None:
     # rerun. Every such reset outside the gate is found, not listed.
     found = 0
     for lib in sorted(glob.glob(os.path.join(ROOT, "bin", "*")) + glob.glob(os.path.join(ROOT, "sclaude", "lib", "*.sh"))):
-        if lib.endswith("regression.sh") or not os.path.isfile(lib):
+        if lib.endswith(("regression.sh", "regression_gate.sh", "regression_fix.sh")) or not os.path.isfile(lib):
             continue
         try:
             lines = open(lib, encoding="utf-8").read().splitlines()
@@ -1457,7 +1457,7 @@ def preview_gate(deployed, runs, fix_commits=True, ship_ok=True, verdict=None, n
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
         body += 'REGRESSION_MAX_ATTEMPTS=2; SELF=sclaude\n'
-        for name in ("io", "ui", "steps", "state", "worktree", "regression", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
+        for name in ("io", "ui", "steps", "state", "worktree", "regression", "regression_gate", "regression_fix", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += """
 warn() { :; }; info() { :; }; say() { :; }; alarm() { :; }
@@ -1527,7 +1527,7 @@ def run_logs():
             json.dump({"rollback": {"prod": {"code": "done", "log": old}}}, fh)
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
-        for name in ("io", "ui", "steps", "state", "worktree", "regression"):
+        for name in ("io", "ui", "steps", "state", "worktree", "regression", "regression_gate", "regression_fix"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += r"""
 wt="%s"; st="$wt/.sclaude/local/feature/state.json"; log="$wt/.sclaude/local/feature/regression.log"
@@ -1604,7 +1604,7 @@ def ship_failed(fix_rc, commits, began=""):
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
         body += 'REGRESSION_MAX_ATTEMPTS=2; SELF=sclaude; INSTRUMENTS="%s"\n' % inst
-        for name in ("io", "ui", "steps", "state", "worktree", "regression", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
+        for name in ("io", "ui", "steps", "state", "worktree", "regression", "regression_gate", "regression_fix", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += """
 warn() { :; }; info() { :; }; say() { :; }; alarm() { :; }
@@ -1662,7 +1662,7 @@ def rewound(stage):
         with open(state, "w") as fh:
             json.dump({"pr": 7, "regression": {"preview": {"status": "passed"}}}, fh)
         body = "set -uo pipefail\n"
-        for name in ("io", "ui", "steps", "state", "regression"):
+        for name in ("io", "ui", "steps", "state", "regression", "regression_gate", "regression_fix"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += ('info() { :; }; issue_sync() { :; }; step_rewind_to() { :; }\n'
                  'regression_rewind "%s" demo %s\n' % (wt, stage))
@@ -1692,7 +1692,7 @@ def held(regression):
         with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             json.dump({"pr": 7, "regression": {"prod": regression}}, fh)
         body = "set -uo pipefail\nSELF=sclaude\n"
-        for name in ("io", "ui", "steps", "state", "regression", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
+        for name in ("io", "ui", "steps", "state", "regression", "regression_gate", "regression_fix", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += ('alarm() { echo "ALARM $*"; }; info() { echo "$*"; }\n'
                  'prod_red_hold "%s" demo\n' % wt)

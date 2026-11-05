@@ -240,7 +240,7 @@ try:
             json.dump({"regression": {"local": {"status": "passed", "tree": tree}}}, fh)
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
-        for name in ("io", "ui", "steps", "state", "worktree", "scratch", "regression"):
+        for name in ("io", "ui", "steps", "state", "worktree", "scratch", "regression", "regression_gate", "regression_fix"):
             body += 'source "%s/%s.sh"\n' % (LIB, name)
         body += ('warn() { echo "$*"; }\ninfo() { echo "$*"; }\nsay() { echo "$*"; }\n'
                  'regression_run() { echo RAN; return 0; }\n'

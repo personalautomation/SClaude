@@ -208,7 +208,7 @@ try:
     # Three callers wanted the same four lines; they now share one.
     steps_src = open(os.path.join(LIB, "steps.sh"), encoding="utf-8").read()
     check_true("helper-exists", "step_rewind_to()" in steps_src)
-    for caller, path in (("regression_rewind", os.path.join(LIB, "regression.sh")),
+    for caller, path in (("regression_rewind", os.path.join(LIB, "regression_gate.sh")),
                          ("watch_rewind", os.path.join(LIB, "watch.sh")),
                          ("cmd_replan", os.path.join(ROOT, "bin", "sclaude"))):
         src = "\n".join(code_lines(open(path, encoding="utf-8").read()))

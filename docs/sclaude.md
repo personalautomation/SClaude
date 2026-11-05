@@ -138,6 +138,9 @@ publishes it (see "The workshop" below).
 | `sclaude/lib/qa.sh` | QA on the preview: accepted, missed, a retest, the wait for its verdict |
 | `sclaude/lib/merge.sh` | the merge: what stands in its way, how it is made, the offer and the wait |
 | `sclaude/lib/demo.sh` | the demo recorded again once the preview is green |
+| `sclaude/lib/regression.sh` | the regression run: the suite's parts, the run, its timings and its line |
+| `sclaude/lib/regression_gate.sh` | the gate that closes a step only on a green run |
+| `sclaude/lib/regression_fix.sh` | the session that fixes a red regression |
 | `sclaude/lib/rollback.sh` | putting production back: the deployment, the down blocks, the incident |
 | `sclaude/lib/picker.sh` | choosing with arrow keys: issues, menus, actions |
 | `sclaude/lib/abandon.sh` | abandoning a feature: the traces here and on GitHub |

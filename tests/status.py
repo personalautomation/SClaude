@@ -589,9 +589,9 @@ check_true("a-green-prod-outranks-the-red-flag",
 # result and clears it from the same. `deployed-*` stay add-only, and the count
 # below is what keeps that narrow — a second `--remove-label` appearing anywhere
 # means the exception has started to spread.
-regression_sh = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                     "..", "sclaude", "lib", "regression.sh"),
-                        encoding="utf-8").read()
+regression_sh = "".join(io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                             "..", "sclaude", "lib", m), encoding="utf-8").read()
+                        for m in ("regression.sh", "regression_gate.sh", "regression_fix.sh"))
 
 check("remove-label-used-once", github.count("--remove-label"), 1)
 check_true("clear-helper-exists",

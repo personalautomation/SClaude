@@ -594,7 +594,7 @@ echo "watcher=[$SESSION_WATCHER]"
     # The topic reads which session ended, and how: "finished" when sclaude
     # closed it on its report, "ended" when a person left it — the work may
     # not be done. The terminal gets the same line, said to be sclaude's close.
-    closer = ('source "%s/steps.sh"\nsource "%s/regression.sh"\n'
+    closer = ('source "%s/steps.sh"\nfor _m in regression regression_gate regression_fix; do source "%s/$_m.sh"; done\n'
               'ask_feed() { printf "FEED %%s\\n" "$2"; }\nask_note() { :; }\n'
               'session_report() { echo REPORT; }\nsay_here() { echo "$*"; }\nBOLD=; OFF=\n' % (LIB, LIB)
               + functions(RUN, ["session_closed"]))
@@ -627,7 +627,7 @@ echo "watcher=[$SESSION_WATCHER]"
     # Every kind of session tells the topic it started, by the same line.
     for path, kind in (("run.sh", "started step"), ("run.sh", "resumed step"),
                        ("run.sh", "done step"), ("friction.sh", "started friction"),
-                       ("regression.sh", "started fix"), ("outcome.sh", "started epilogue"),
+                       ("regression_fix.sh", "started fix"), ("outcome.sh", "started epilogue"),
                        ("retro.sh", "started retro"), ("deferred.sh", "started deferred")):
         with open(os.path.join(LIB, path)) as fh:
             src = fh.read()
@@ -640,7 +640,7 @@ echo "watcher=[$SESSION_WATCHER]"
               and "&& verb=resumed" in src, True)
     # And every close goes through session_closed, with no headline of its own.
     for path in ("run.sh", "friction.sh", "session_watch.sh", "review_round.sh", "review_gate.sh",
-                 "regression.sh", "github.sh", "issue_sync.sh", "board.sh", "outcome.sh", "retro.sh", "deferred.sh"):
+                 "regression.sh", "regression_gate.sh", "regression_fix.sh", "github.sh", "issue_sync.sh", "board.sh", "outcome.sh", "retro.sh", "deferred.sh"):
         with open(os.path.join(LIB, path)) as fh:
             calls = re.findall(r'session_closed "[^\n]*(?:\\\n[^\n]*)?', fh.read())
         check("closes-by-phase " + path,
@@ -1151,8 +1151,8 @@ echo "watcher=[$SESSION_WATCHER]"
           (None, 1, True, True))
     out, left, rounds = reopen_run("2 3", False)
     check("reopen-own-work-resumed", (left, rounds, "RUN_STEP review []" in out), ("S1", 1, True))
-    with open(os.path.join(LIB, "regression.sh")) as fh:
-        REG = fh.read()
+    REG = "".join(open(os.path.join(LIB, _m)).read()
+        for _m in ("regression.sh", "regression_gate.sh", "regression_fix.sh"))
     fix = REG[REG.index("regression_fix() {"):]
     fix = fix[:fix.index("\n}\n")]
     check("fix-session-watched", 'session_watch_start "$wt" "$session"' in fix, True)

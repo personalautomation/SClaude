@@ -247,7 +247,7 @@ from keepawake import review_keys  # noqa: E402
 
 def phase(*args):
     """A phase line as sclaude prints it (phase_line in steps.sh)."""
-    script = 'source "%s/steps.sh"; source "%s/regression.sh"; phase_line "$@"' % (LIB, LIB)
+    script = 'source "%s/steps.sh"; for _m in regression regression_gate regression_fix; do source "%s/$_m.sh"; done; phase_line "$@"' % (LIB, LIB)
     return subprocess.run(["bash", "-c", script, "_"] + list(args), capture_output=True,
                           text=True, timeout=20).stdout.strip()
 

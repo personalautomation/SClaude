@@ -31,7 +31,7 @@ def check(name, got, want):
 
 
 def label(*args):
-    script = 'source "%s/steps.sh"; source "%s/regression.sh"; session_label "$@"' % (LIB, LIB)
+    script = 'source "%s/steps.sh"; for _m in regression regression_gate regression_fix; do source "%s/$_m.sh"; done; session_label "$@"' % (LIB, LIB)
     p = subprocess.run(["bash", "-c", script, "bash"] + list(args),
                        capture_output=True, text=True, timeout=30)
     return p.stdout.strip()
@@ -120,7 +120,7 @@ for step in ("plan", "code", "pr", "review"):
 # The line that tells a session started or ended: one shape for every kind,
 # numbered over the seven of the cycle as the menu numbers it.
 def phase(*args):
-    script = 'source "%s/steps.sh"; source "%s/regression.sh"; phase_line "$@"' % (LIB, LIB)
+    script = 'source "%s/steps.sh"; for _m in regression regression_gate regression_fix; do source "%s/$_m.sh"; done; phase_line "$@"' % (LIB, LIB)
     return subprocess.run(["bash", "-c", script, "bash"] + list(args),
                           capture_output=True, text=True, timeout=30).stdout.strip()
 
@@ -165,7 +165,7 @@ for half in i18n.STRINGS["act.steps"]:
 
 # The banner a session opens with in the terminal names it as the topic does.
 def title(*args):
-    script = 'source "%s/steps.sh"; source "%s/regression.sh"; phase_title "$@"' % (LIB, LIB)
+    script = 'source "%s/steps.sh"; for _m in regression regression_gate regression_fix; do source "%s/$_m.sh"; done; phase_title "$@"' % (LIB, LIB)
     return subprocess.run(["bash", "-c", script, "bash"] + list(args),
                           capture_output=True, text=True, timeout=30).stdout.strip()
 

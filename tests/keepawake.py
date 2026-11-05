@@ -4488,6 +4488,8 @@ try:
 finally:
     telegramd.CODE_DIRS = _saved_dirs
     shutil.rmtree(_code, ignore_errors=True)
+# The bot runs itself again only on code that imports, tried in a child.
+check_true("the checkout's own code imports", telegramd.new_code_runs())
 
 if failures:
     print("FAILED: %d" % len(failures))

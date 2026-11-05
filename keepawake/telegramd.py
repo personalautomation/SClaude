@@ -25,6 +25,7 @@ import logging
 import os
 import signal
 import stat
+import subprocess
 import sys
 import time
 import urllib.error
@@ -72,8 +73,8 @@ def code_stamp():
     The bot runs for days while sclaude's update pulls new code under it, and
     imports some of sclaude's modules only on first use (project_config): an
     old process would look for them where the new layout no longer has them.
-    So a change to any of them ends the loop, and systemd starts the bot again
-    on the new code (Restart=always in keepawake-telegram.service)."""
+    So a change to any of them makes the bot run itself again on the new code
+    (main), once a child has shown that the new code imports."""
     newest = 0.0
     for top in CODE_DIRS:
         for folder, _dirs, files in os.walk(top):
@@ -84,6 +85,21 @@ def code_stamp():
                     except OSError:
                         pass
     return newest
+
+
+def new_code_runs():
+    """Whether the code on disk now imports, tried in a child: a file caught
+    half-written mid-edit keeps this process going instead of crash-looping
+    the next. The sclaude modules the bot loads on first use are tried too."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        return subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.path.insert(0, sys.argv[1]); import keepawake.telegramd, keepawake.webmenu; "
+             "from keepawake import project_config as p; p.config_menu(); p.sclaude_module('issue_list')",
+             root], capture_output=True, timeout=60).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def main():
@@ -136,15 +152,26 @@ def main():
     started = code_stamp()
 
     while not bot.stopped:
-        if code_stamp() != started:
+        stamp = code_stamp()
+        if stamp != started:
+            if not new_code_runs():
+                log.warning("the bot's code changed but does not import; staying on the old one")
+                started = stamp
+                continue
             # Confirmed first, so that the new process is not handed the
-            # updates this one has already handled.
+            # updates this one has already handled; tried again next turn
+            # when it fails.
             try:
                 bot.call("getUpdates", offset=bot.offset, timeout=0)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("confirming before the restart: %s", exc)
+                time.sleep(backoff)
+                continue
             log.info("the bot's code changed; restarting on the new one")
-            return
+            # In place, not by exiting: systemd would kill everything left in
+            # the unit's cgroup — the sclaude runs and dev servers started
+            # from the phone with it.
+            os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
         try:
             out = bot.call("getUpdates", http_timeout=botapi.POLL_TIMEOUT + 10,
                            offset=bot.offset, timeout=botapi.POLL_TIMEOUT)

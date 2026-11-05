@@ -72,14 +72,18 @@ def files():
 def reload_parts():
     """Read every part again, in order; the caller reloads this module after.
 
-    Every file is compiled before any part is reloaded: an edit that leaves
-    one part broken raises here with all of them still the old model, rather
-    than leaving the earlier parts new and the rest old."""
-    for path in files():
-        with open(path, encoding="utf-8") as fh:
-            compile(fh.read(), path, "exec")
-    for part in PARTS:
-        importlib.reload(part)
+    A part that fails — a syntax error, or a name another part does not
+    define yet — puts every part back as it was before raising, so that the
+    model served stays the last good one whole rather than half new."""
+    saved = [(part, dict(vars(part))) for part in PARTS]
+    try:
+        for part in PARTS:
+            importlib.reload(part)
+    except BaseException:
+        for part, names in saved:
+            vars(part).clear()
+            vars(part).update(names)
+        raise
 
 
 # --- the command line --------------------------------------------------------

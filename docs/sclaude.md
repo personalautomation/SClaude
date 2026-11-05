@@ -992,7 +992,14 @@ and protected environments are excluded from the choices, refused from
 environment we cannot identify is still treated as protected: the hook that
 governs `supabase db push` allows it only on an environment the project does
 not protect, and only when `.env.local` and the CLI's link agree — silence is
-not permission. A session may not point `.env.local` at production's file
+not permission. A push that names its own target is judged by it instead:
+a database URL (`--db-url`, or CLI 3's `--remote <url>`, with or without `=`)
+passes only when it is local, a project named by ref or branch (`--remote
+<ref>`) is refused, and
+`--local` passes; `migration up`, `migration down` and `db reset` that name a target are held
+to the same rules, and without one they work on the local stack. A push that names nothing is read as CLI 2 reads it, aimed
+at the link: CLI 3 would aim it at the local stack, but the command does not
+say which CLI runs. A session may not point `.env.local` at production's file
 either; a product's own switch script is banned in its policy.
 
 ## A dev server and a database per feature
@@ -1114,7 +1121,8 @@ feature's and main's after a sync, are applied on every start.
 there sources it — the dev server, the local regression, the claude session.
 It carries `SUPABASE_WORKDIR`, so a bare `npx supabase db reset` typed in the
 session rebuilds this feature's database and no other; a hook refuses
-`--workdir` pointing anywhere else. The project decides the rest in
+`--workdir` pointing anywhere else — in a call, or a heredoc a shell may run,
+not in one that `cat` or `tee` only writes to a file. The project decides the rest in
 `.sclaude/config.json` under `database.local` (see `sclaude/config.example.json`), and
 its own dotenv loading must let an exported value win over `.env.local`.
 

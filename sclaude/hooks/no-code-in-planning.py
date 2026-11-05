@@ -49,7 +49,8 @@ REASON = (
     "sclaude orchestrator. Through the terminal too — that is the same code, "
     "just a different tool. The session scratchpad is not banned: a "
     "redirection there passes when its path is written out, or set as a "
-    "plain literal in a variable earlier in the same command. The friction "
+    "plain literal in a variable earlier in the same command, and so does "
+    "mkdir or touch of a path written out there. The friction "
     "log is the exception: append to "
     ".sclaude/local/feature/friction.log what this refusal cost you. If the plan is ready "
     "and approved, tell the human and stop."
@@ -183,6 +184,79 @@ def in_scratchpad(path):
         return False
     normalized = os.path.abspath(os.path.expanduser(path))
     return normalized.startswith(SCRATCH + os.sep)
+
+
+def is_log(path):
+    """Is this redirection target this tree's friction log, written out
+    literally: relative to the tree, or under CLAUDE_PROJECT_DIR?"""
+    return in_tree_as(path, LOG)
+
+
+# Commands that only make a directory or an empty file, with the flags that
+# change nothing about where. A live planning session needed a throwaway
+# folder in its scratchpad to try a CLI against a config file, and `mkdir -p`
+# there was refused although a redirection there passes; two earlier features
+# lost a log entry to `mkdir -p` of the log's own folder chained before the
+# append. Any other flag (`-m MODE`, `touch -r FILE`) keeps it a write: its
+# value would read as a path here.
+PATH_MAKERS = {
+    "mkdir": ("-p", "--parents", "-v", "--verbose"),
+    "touch": ("-c", "--no-create", "-a", "-m"),
+}
+LOG_DIR = ".sclaude/local/feature"
+
+
+def in_tree_as(path, relative):
+    """Is the path, written out literally, exactly `relative` in this tree?
+
+    A suffix is not enough: `src/x/.sclaude/local/feature` ends the same way
+    and makes folders in the product's source, and `../other/…` reaches
+    another tree.
+    """
+    if not path or re.search(r"[$`*?\[{]", path) or ".." in path.split("/"):
+        return False
+    normal = os.path.normpath(os.path.expanduser(path))
+    if normal == relative:
+        return True
+    root = os.environ.get("CLAUDE_PROJECT_DIR")
+    return bool(root) and normal == os.path.join(os.path.normpath(root), relative)
+
+
+def makes_only_allowed(name, words):
+    """Does this mkdir or touch reach only the scratchpad or the log's folder?
+
+    The words are the ones as written, paths kept. Every operand must be a
+    literal path: one with a variable, a substitution, a glob or a brace in
+    it is expanded by bash after this check (`<scratch>/{a,../../etc}`
+    normalises inside the scratchpad and expands outside it). A scratchpad
+    path is absolute, so a `cd` earlier in the chain cannot move it; the
+    log's folder, which mkdir alone may make, is relative to the tree.
+    """
+    flags = PATH_MAKERS[name]
+    operands, skip = [], False
+    for word in words:
+        if skip:
+            skip = False
+            continue
+        if re.match(r"\d*>|&>|<", word):
+            skip = re.fullmatch(r"\d*>>?|&>>?|<<?<?", word) is not None
+            continue
+        if word.startswith("-"):
+            if word not in flags:
+                return False
+            continue
+        operands.append(word)
+    if not operands:
+        return False
+    for word in operands:
+        if re.search(r"[$`*?\[{]", word):
+            return False
+        if word.startswith(("/", "~")) and in_scratchpad(word):
+            continue
+        if name == "mkdir" and in_tree_as(word, LOG_DIR):
+            continue
+        return False
+    return True
 
 
 def allowed_path(path):
@@ -544,9 +618,14 @@ def writes(command):
         #
         # A variable set to a literal earlier in the same command is read as
         # that literal (assigned_target()).
+        #
+        # The friction log passes here too, so an append to it may stand in a
+        # chain: the other links are still judged below. only_writes_log()
+        # alone required the append to be the whole command, and a live
+        # planning session lost an entry chained with its next reads to that.
         target = match.group(1)
         target = assigned_target(target, tokenize(command)) or target
-        if target not in NULL_TARGETS and not in_scratchpad(target):
+        if target not in NULL_TARGETS and not in_scratchpad(target) and not is_log(target):
             return True
 
     tokens = tokenize(command)
@@ -587,6 +666,13 @@ def writes(command):
             continue
         if name in INTERPRETERS and program_in_command(raw[len(raw) - len(rest):]):
             # Likewise this command alone.
+            continue
+        # Not behind xargs: the words it reads from stdin become operands
+        # this check never saw (`… | xargs mkdir -p <scratch>/x`).
+        behind_xargs = "xargs" in (w.rsplit("/", 1)[-1] for w in raw[:len(raw) - len(rest)])
+        if name in PATH_MAKERS and not behind_xargs \
+                and makes_only_allowed(name, raw[len(raw) - len(rest):]):
+            # This command alone, like the reading flags above.
             continue
         if name in WRITERS:
             return True

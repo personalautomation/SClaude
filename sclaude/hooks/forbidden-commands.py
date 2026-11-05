@@ -69,7 +69,7 @@ _failsafe.install("ban check (forbidden-commands.py)")
 from _friction import note  # noqa: E402
 from _shell import (GIT_VALUED, SEPARATORS, call_form, closing_at, inner_command,  # noqa: E402
                     redirect_targets, strip_heads, strip_keywords, strip_redirections, strip_runners,
-                    readable, strip_wrappers,
+                    readable, scan, strip_wrappers,
                     substitutions, tokenize, ungroup)
 import policy as policy_lib  # noqa: E402 — sclaude/lib/improve/policy.py
 import envs as envs_lib  # noqa: E402 — sclaude/lib/core/envs.py
@@ -111,7 +111,8 @@ def rule_on(name, words=None):
 DB_PUSH = (("npx", "supabase", "db", "push"), ("supabase", "db", "push"))
 
 DB_PUSH_REASON = ("this environment is protected (or could not be identified) — "
-                  "applying a migration here bypasses the project's own way of doing it")
+                  "applying or undoing a migration here bypasses the project's own way "
+                  "of doing it; a push meant for the local stack says so with --local")
 
 # `vercel` is the one ban that depends on the subcommand, which is why it is a
 # function below rather than a line in the table above.
@@ -344,10 +345,15 @@ def env_pipeline_refuses(command, inner_parts):
     return None
 
 
-DB_URL_REASON = ("--db-url points the push at a database named on the command "
+DB_URL_REASON = ("a database URL (--db-url or --remote <url>) points this at a database named on the command "
                  "line rather than the one this tree is on, so the tree's environment "
                  "says nothing about where it lands; only a local database may be "
                  "named that way")
+REMOTE_REF_REASON = ("--remote <ref|branch> names a project on the command line "
+                     "rather than the one this tree is on, so the tree's environment "
+                     "says nothing about where it lands; use --remote with no value "
+                     "on a tree switched to that environment, or a local database "
+                     "named by its URL")
 LOCAL_DB = re.compile(r"^[a-z]+://[^@/]*@?(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(/|$)")
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1", "[::1]")
 
@@ -367,9 +373,51 @@ def local_db_url(url):
                for v in value.split(","))
 
 
-# The supabase CLI's options that take a value of their own.
+# The supabase CLI's options that take a value of their own. A value left
+# out of this list reads as a positional word, and `supabase --log-level
+# debug db push` then no longer starts with `db push`: the push slipped past
+# its check. `--remote` is not here: its value is optional, and
+# remote_target() reads it.
 SUPABASE_VALUED = ("--workdir", "--profile", "--network-id", "-o", "--output",
-                   "--db-url", "--password", "-p", "--schema", "-s", "--include-roles")
+                   "--db-url", "--password", "-p", "--schema", "-s", "--include-roles",
+                   "--log-level", "--output-format", "--dns-resolver", "--agent",
+                   "--completions")
+
+
+def remote_target(words):
+    """How a supabase call names its target: (kind, value).
+
+    Supabase CLI 2 pushed to the linked project by default and took
+    --db-url <url> and --linked; CLI 3 works on the local stack by default and
+    takes --remote (the linked project) or --remote[= ]<ref|branch|url>, with
+    the old two kept as deprecated aliases. Which CLI runs cannot be told from
+    the command, so a call that names nothing keeps CLI 2's reading, the one
+    that reaches the linked project. Kinds: "url" (value the URL), "ref" (a
+    project ref or branch), "linked" (--remote or --linked), "local"
+    (--local), None (nothing named).
+    """
+    def target(value):
+        return ("url", value) if "://" in value or "$" in value or "`" in value \
+            else ("ref", value)
+
+    found = None
+    for i, word in enumerate(words):
+        if word == "--db-url" or word.startswith("--db-url="):
+            return "url", word.split("=", 1)[1] if "=" in word else (
+                words[i + 1] if i + 1 < len(words) else "")
+        if word.startswith("--remote="):
+            return target(word.split("=", 1)[1])
+        # CLI 3 takes the next word as the value too (`--remote <url>`): a
+        # word after it that is not a flag is read as the target. Placed
+        # before the subcommand, --remote is refused by the CLI itself
+        # ("Unrecognized flag"), so supabase_positionals() need not skip it.
+        if word == "--remote" and i + 1 < len(words) and not words[i + 1].startswith("-"):
+            return target(words[i + 1])
+        if word in ("--remote", "--linked"):
+            found = ("linked", None)
+        elif word == "--local" and found is None:
+            found = ("local", None)
+    return found or (None, None)
 
 
 def supabase_positionals(words):
@@ -386,15 +434,24 @@ def supabase_positionals(words):
     return out
 
 
+# What applies or undoes migrations. `db push` reaches the link when it names nothing
+# (CLI 2's reading, see remote_target()); `migration up`, `migration down` and `db reset` work
+# on the local stack unless they name a target, and a named one is judged
+# like a push's: `db reset --remote=<production url>` wipes production.
+SCHEMA_CALLS = (["db", "push"], ["migration", "up"], ["migration", "down"], ["db", "reset"])
+
+
 def db_push_refuses(words, raw=None):
-    """The reason this `supabase db push` is banned, or None.
+    """The reason this `supabase db push` (or a targeted call of the others
+    in SCHEMA_CALLS) is banned, or None.
 
     `raw` is the same call with its words unstripped: a URL is a path to the
     stripping, which would leave only its last part.
     """
     # The CLI takes its flags anywhere: `supabase --debug db push` and
     # `supabase db --debug push` are the push, which a prefix match missed.
-    if not words or words[0] != "supabase" or supabase_positionals(words)[:2] != ["db", "push"]:
+    call = supabase_positionals(words)[:2] if words and words[0] == "supabase" else None
+    if call not in SCHEMA_CALLS:
         return None
     if not rule_on("supabase-db-push", words):
         return None
@@ -402,13 +459,22 @@ def db_push_refuses(words, raw=None):
     # `supabase db push --db-url <production>` allowed on a tree that was on
     # dev. Only a local database passes, and an address that cannot be read
     # (a variable, a substitution) is not one.
-    full = raw or words
-    for i, word in enumerate(full):
-        if word == "--db-url" or word.startswith("--db-url="):
-            url = word.split("=", 1)[1] if "=" in word else (full[i + 1] if i + 1 < len(full) else "")
-            # A local database named outright is the one place the push goes,
-            # whatever the tree is on.
-            return None if local_db_url(url) else DB_URL_REASON
+    #
+    # CLI 3 names the same target with --remote=<url>, and a project with
+    # --remote=<ref|branch>: neither is the tree's environment, so a URL is
+    # held to the same rule and a ref is refused. --local is the local stack
+    # in either CLI (remote_target()).
+    kind, value = remote_target(raw or words)
+    if call != ["db", "push"] and kind in (None, "local"):
+        return None
+    if kind == "url":
+        # A local database named outright is the one place the push goes,
+        # whatever the tree is on.
+        return None if local_db_url(value) else DB_URL_REASON
+    if kind == "ref":
+        return REMOTE_REF_REASON
+    if kind == "local":
+        return None
     # Any environment the project does not protect, rather than the literal
     # "dev" this used to name.
     #
@@ -450,18 +516,68 @@ WORKDIR_REASON = ("this feature has its own local Supabase, and SUPABASE_WORKDIR
                   "flag")
 
 
-def workdir_refuses(command):
+# The programs a heredoc's body is only data to: what they do with it is copy
+# it into a file or onto their output. Nothing else is on the list — sed,
+# awk and every interpreter can run what they read.
+DATA_SINKS = ("cat", "tee")
+
+
+def without_data_heredocs(command, depth):
+    """The command with the bodies of the heredocs that only feed a file cut
+    out, their delimiter lines kept; the command itself when unsure.
+
+    A session appending a note to a log — `cat >> log <<'EOF'` — about a
+    `supabase … --workdir` call it had been refused was refused again: the
+    body was read as a command. A body is data here when, on the top level,
+    `cat` or `tee` opens it and nothing on its line pipes onward. Inside a
+    substitution its output can be run (`bash -c "$(cat <<EOF …)"`), so
+    there every body counts, and a line read any other way than plainly
+    counts too."""
+    spans = []
+    if depth or scan(command, 0, False, spans) is None:
+        return command
+    docs = sorted((start, stop) for start, stop, kind in spans if kind == "doc")
+    by_line, line, last = {}, 0, None
+    for start, stop in docs:
+        # A body straight after another's delimiter line was opened on the
+        # same line as that one (`cat <<A <<B`).
+        if last is None or start != last + 1:
+            line = command.rfind("\n", 0, start - 1) + 1
+        by_line.setdefault(line, []).append((start, stop))
+        last = stop
+    cut = []
+    for line, bodies in by_line.items():
+        text = command[line:bodies[0][0] - 1]
+        opens = [m.start() for m in re.finditer(r"<<(?!<)", text)]
+        if len(opens) != len(bodies):
+            return command
+        for at, body in zip(opens, bodies):
+            parts = segments(text[:at])
+            if not parts or os.path.basename(parts[-1][0]) not in DATA_SINKS \
+                    or re.search(r"(?<!\|)\|(?!\|)", text[at:]):
+                continue
+            cut.append(body)
+    for start, stop in sorted(cut, reverse=True):
+        # An empty body is its delimiter line alone.
+        delimiter = command[command.rfind("\n", start, stop) + 1 or start:stop]
+        command = command[:start] + delimiter + command[stop:]
+    return command
+
+
+def workdir_refuses(command, depth=0):
     """The reason this `supabase --workdir` is banned, or None.
 
     Read from the raw command rather than from segments(): the shared tokenizer
     keeps only the last component of a path — it exists to name programs — and
     here the path is the whole question. Heredocs included: a shell can run
-    one. Its quoted substitutions are masked as tokenize() masks them
-    (readable): once a raw line that shlex could not read was refused anyway,
-    and an apostrophe in such a body switched this ban off."""
+    one — all but the ones without_data_heredocs() cuts. Its quoted
+    substitutions are masked as tokenize() masks them (readable): once a raw
+    line that shlex could not read was refused anyway, and an apostrophe in
+    such a body switched this ban off."""
     own = os.environ.get("SUPABASE_WORKDIR")
     if not own or not rule_on("supabase-workdir"):
         return None
+    command = without_data_heredocs(command, depth)
     try:
         words = shlex.split(readable(command, heredocs=True) or command)
     except ValueError:
@@ -489,9 +605,11 @@ def workdir_refuses(command):
 # lands under everybody else's features. The protected environments stay with
 # db_push_refuses, which refuses them outright.
 #
-# Only what reaches the linked project: `db push` always does; `migration up`
-# and `db reset` do only with --linked, and without it they touch the local
-# stack, which is the point.
+# Only what reaches the linked project: `db push` does unless it names the
+# local stack (--local; CLI 3's default, but CLI 2's was the link, see
+# remote_target()); `migration up`, `migration down` and `db reset` do only with --linked or
+# CLI 3's --remote, and without them they touch the local stack, which is
+# the point. A target named by URL or ref is db_push_refuses' (SCHEMA_CALLS).
 SHARED_SCHEMA_ASK = ("this changes the schema of \"{name}\", a database the whole team "
                      "shares — their features see your migration at once. Work that "
                      "touches the database belongs on \"{local}\", where this feature "
@@ -508,17 +626,21 @@ def local_environment(cwd):
 
 def shared_schema_asks(command):
     """The question to put before a schema change on a shared project, or None."""
-    parts = segments(command)
+    parts = segments(command, raw=True)
     if not parts or not rule_on("supabase-shared"):
         return None
-    for words in parts:
+    for raw in parts:
+        words = strip_runners(strip_wrappers(raw))
         if words[:1] != ["supabase"]:
             continue
-        rest = words[1:]
-        linked = "--linked" in rest
-        if not (rest[:2] == ["db", "push"]
-                or (rest[:2] == ["migration", "up"] and linked)
-                or (rest[:2] == ["db", "reset"] and linked)):
+        call = supabase_positionals(words)[:2]
+        # The target from the words as written: stripping cuts a URL in
+        # --remote=<url> down to its last part. A URL or a ref is not the
+        # tree's environment, so the question would name the wrong database:
+        # db_push_refuses() judges those (a local URL passes, others refuse).
+        kind = remote_target(raw[len(raw) - len(words):])[0]
+        if call not in SCHEMA_CALLS or kind in ("url", "ref", "local") \
+                or (kind is None and call != ["db", "push"]):
             continue
         cwd = project_dir()
         local = local_environment(cwd)
@@ -1091,7 +1213,7 @@ def refuses(command, step, cwd=None, depth=0):
     if parts is None:
         return UNPARSED
 
-    reason = workdir_refuses(command)
+    reason = workdir_refuses(command, depth)
     if reason:
         return reason
 

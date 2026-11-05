@@ -167,6 +167,27 @@ PLANNING = [
     ("echo \"$(date) $(rm -rf x)\" >> .sclaude/local/feature/friction.log", DENY),
     ("echo \"$(echo $(rm x))\" >> .sclaude/local/feature/friction.log", DENY),
     ("echo \"`date` `rm x`\" >> .sclaude/local/feature/friction.log", DENY),
+    # mkdir and touch pass only for literal paths in the scratchpad (and
+    # mkdir for the log's folder); anything bash would expand, or a flag
+    # with a value, stays a write, as does the rest of the chain.
+    ("mkdir -p " + SCRATCH + "/x && rm -rf src", DENY),
+    ("mkdir src", DENY),
+    ("mkdir " + SCRATCH + "/../../home/x", DENY),
+    ("mkdir " + SCRATCH + "/{a,../../etc}", DENY),
+    ("mkdir " + SCRATCH + "/$D", DENY),
+    ("mkdir -m 777 " + SCRATCH + "/x", DENY),
+    ("touch -r /etc/hosts " + SCRATCH + "/x", DENY),
+    ("mkdir -p x.sclaude/local/feature", DENY),
+    ("mkdir -p ../.sclaude/local/feature", DENY),
+    ("touch .sclaude/local/feature/notes", DENY),
+    ("mkdir -p src/x/.sclaude/local/feature", DENY),
+    ("echo src/new | xargs mkdir -p " + SCRATCH + "/x", DENY),
+    ("git ls-files | xargs touch " + SCRATCH + "/a", DENY),
+    ("echo x >> src/a.sclaude/local/feature/friction.log; ls", DENY),
+    ("echo x >> ../other/.sclaude/local/feature/friction.log; ls", DENY),
+    # The log in a chain: the other links are still judged.
+    ("echo x >> .sclaude/local/feature/friction.log; rm f", DENY),
+    ("echo x >> $L/friction.log; ls", DENY),
     # `npx` reads only when it asks for help or a version.
     ("npx supabase db push", DENY),
     ("npx prettier --write .", DENY),
@@ -225,6 +246,16 @@ PLANNING = [
      "\\`supabase migration list\\` JSON carries versions only.\" "
      ">> .sclaude/local/feature/friction.log", ALLOW),
     ("cat >> .sclaude/local/feature/friction.log <<EOF\n$(date) refused\nEOF", ALLOW),
+    # A throwaway folder in the scratchpad, as a live planning session needed
+    # one to try a CLI against a config file and was refused.
+    ("mkdir -p " + SCRATCH + "/p/s/scratchpad/cfgtest/supabase && echo ok", ALLOW),
+    ("cd " + SCRATCH + "/p 2>/dev/null || mkdir -p " + SCRATCH + "/p && cd "
+     + SCRATCH + "/p; echo ==; timeout 20 $b gen types 2>&1 | head -5", ALLOW),
+    ("touch " + SCRATCH + "/p/a.txt", ALLOW),
+    # An append to the log in a chain, and mkdir of its folder before it:
+    # live sessions lost entries to both.
+    ("echo 'a; b' >> .sclaude/local/feature/friction.log; ls -la ~/.npm", ALLOW),
+    ("mkdir -p .sclaude/local/feature && echo x >> .sclaude/local/feature/friction.log", ALLOW),
     # `npx` asking for help or a version only prints. The same session lost
     # both of these to the ban on the name.
     ("npx supabase db --help", ALLOW),
@@ -355,6 +386,16 @@ FORBIDDEN = [
     ("supabase db push --db-url 'postgresql://u:p@localhost:5432/postgres?host=db.prod.example.com'", DENY),
     ("supabase db push --db-url 'postgresql://u:p@127.0.0.1/postgres?sslmode=disable&hostaddr=10.0.0.5'", DENY),
     ("supabase db push --db-url 'postgresql://u:p@localhost/postgres?host=/var/run/postgresql'", ALLOW),
+    # Supabase CLI 3 names the target with --remote=<url|ref|branch>; a URL
+    # is held to --db-url's rule, a project named outright is refused.
+    ("supabase db push --remote=postgresql://u:p@db.prod.example.com:5432/postgres", DENY),
+    ("npx supabase db push --remote=\"$(grep URL .env.prod | cut -d= -f2-)\"", DENY),
+    ("supabase db push --remote=postgresql://postgres:postgres@127.0.0.1:54322/postgres", ALLOW),
+    ("supabase db push --remote=abcdefghijklmnopqrst", DENY),
+    ("supabase db push --remote=main --dry-run", DENY),
+    # A valued global flag is not the subcommand.
+    ("supabase --log-level debug db push --remote=postgresql://u@db.example.com/p", DENY),
+    ("supabase --output-format json db push --db-url postgres://u@db.example.com/p", DENY),
     # Auto-merge is the merge, only later.
     ("gh api graphql -f query='mutation{enablePullRequestAutoMerge(input:{pullRequestId:\"x\"}){clientMutationId}}'", DENY),
     # Shell keywords, exec, and a command substitution run the command too.
@@ -905,6 +946,23 @@ def main():
         ("supabase --workdir ../other db reset; echo \"$(echo \"it's\")\"", {"SUPABASE_WORKDIR": own}, DENY),
         ("bash <<EOF\nsupabase --workdir ../other db reset\nEOF", {"SUPABASE_WORKDIR": own}, DENY),
         ("bash -c \"$(cat <<EOF\nsupabase --workdir ../other db reset\nEOF\n)\"", {"SUPABASE_WORKDIR": own}, DENY),
+        # A heredoc that only feeds a file is a note, not a call: a session
+        # writing down a refusal it had met was refused again for the text.
+        ("cat >> notes.log <<'EOF'\nrefused: npx supabase status --workdir /tmp/x\nEOF\n"
+         "python3 - <<'EOF'\nprint(1)\nEOF\necho ok", {"SUPABASE_WORKDIR": own}, ALLOW),
+        ("tee -a notes.log <<EOF >/dev/null\nsupabase db reset --workdir /tmp/x\nEOF",
+         {"SUPABASE_WORKDIR": own}, ALLOW),
+        ("cat >> log <<'A' || echo failed\nrefused: supabase db reset --workdir /x\nA",
+         {"SUPABASE_WORKDIR": own}, ALLOW),
+        ("cat - - >> log <<A <<B\nx\nA\nnote supabase db reset --workdir /x\nB",
+         {"SUPABASE_WORKDIR": own}, ALLOW),
+        ("cat >> log <<'A'\nrefused: supabase db reset --workdir /x\nA\n: > b\ncat > b <<'B'\nB",
+         {"SUPABASE_WORKDIR": own}, ALLOW),
+        # …but one piped on, or opened by anything that can run it, still counts.
+        ("cat <<EOF | bash\nsupabase --workdir ../other db reset\nEOF", {"SUPABASE_WORKDIR": own}, DENY),
+        ("sh -s <<'EOF'\nsupabase --workdir ../other db reset\nEOF", {"SUPABASE_WORKDIR": own}, DENY),
+        ("cat >> notes.log <<'EOF'\nfine\nEOF\nsupabase --workdir ../other db reset",
+         {"SUPABASE_WORKDIR": own}, DENY),
         # No stack of its own — the flag is nobody's business here.
         ("supabase db reset --workdir /elsewhere", {}, ALLOW),
     ]
@@ -966,6 +1024,26 @@ def main():
             ("npx supabase db push", "ask"),
             ("supabase migration up --linked", "ask"),
             ("supabase db reset --linked", "ask"),
+            ("supabase migration up --remote", "ask"),
+            ("supabase db reset --remote", "ask"),
+            ("supabase migration up --remote=postgresql://u@db.example.com/p", "deny"),
+            ("supabase db push --local", "allow"),  # the local stack, named
+            ("supabase --log-level debug db push", "ask"),
+            ("supabase --debug db push", "ask"),
+            # A local URL is the local database: no question about "dev".
+            ("supabase migration up --db-url postgresql://postgres:postgres@127.0.0.1:54322/postgres", "allow"),
+            ("supabase db reset --remote=postgresql://postgres:postgres@127.0.0.1:54322/postgres", "allow"),
+            ("supabase db push --remote=postgresql://postgres:postgres@127.0.0.1:54322/postgres", "allow"),
+            # Another database named outright is refused, not asked about.
+            ("supabase db reset --db-url postgres://u@db.prod.example.com/postgres", "deny"),
+            ("supabase migration up --remote=prodprodprodprodprod", "deny"),
+            ("supabase migration down --linked --last 2", "ask"),
+            ("supabase migration down --db-url postgres://u@db.prod.example.com/postgres", "deny"),
+            ("supabase migration down --last 1", "allow"),  # the local stack
+            # CLI 3 takes --remote's value after a space too.
+            ("supabase migration down --remote postgresql://u@db.prod.example.com/postgres --last 5", "deny"),
+            ("supabase db push --remote prodprodprodprodprod", "deny"),
+            ("supabase db push --remote postgresql://postgres:postgres@127.0.0.1:54322/postgres", "allow"),
             ("supabase migration up", "allow"),     # the local stack
             ("supabase db reset", "allow"),
             ("supabase migration list", "allow"),
@@ -975,6 +1053,14 @@ def main():
             if got != want:
                 failures.append(("shared", command, want, got))
         guard("localdb")
+        # On the local environment, a reset aimed at production by URL is
+        # still refused: the question is skipped there.
+        if verdict("supabase migration down --remote postgresql://u@db.prod.example.com/postgres") != "deny":
+            failures.append(("shared", "migration down --remote <prod url> on localdb", "deny",
+                             verdict("supabase migration down --remote postgresql://u@db.prod.example.com/postgres")))
+        if verdict("supabase db reset --remote=postgresql://u@db.prod.example.com/postgres") != "deny":
+            failures.append(("shared", "db reset --remote=<prod url> on localdb", "deny",
+                             verdict("supabase db reset --remote=postgresql://u@db.prod.example.com/postgres")))
         if verdict("npx supabase db push") != "allow":
             failures.append(("shared", "db push on localdb", "allow", verdict("npx supabase db push")))
         # .env.local on localdb while the CLI is still linked to a hosted
@@ -1005,9 +1091,16 @@ def main():
         with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:
             json.dump(edited, fh)
         guard("prod")
-        for command in ("supabase --debug db push", "supabase db --debug push"):
+        for command in ("supabase --debug db push", "supabase db --debug push",
+                        "supabase --log-level debug db push", "supabase db push --remote",
+                        "supabase db push --linked", "supabase db reset --remote",
+                        "supabase migration up --linked", "supabase migration down --linked"):
             if verdict(command) != "deny":
                 failures.append(("shared", command, "deny", verdict(command)))
+        # --local is the local stack in either CLI, whatever the tree is on.
+        if verdict("supabase db push --local") != "allow":
+            failures.append(("shared", "db push --local on prod", "allow",
+                             verdict("supabase db push --local")))
         if verdict("npx supabase db push") != "deny":
             failures.append(("shared", "db push to prod unprotected in the tree only", "deny",
                              verdict("npx supabase db push")))

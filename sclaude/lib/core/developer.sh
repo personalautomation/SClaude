@@ -23,7 +23,14 @@
 #                        `sclaude _handoff`) named somebody else — with a
 #                        noreply address, a number and a login.
 #   git user.email       its local part. Already set on every machine that
-#                        commits, so nothing new has to be configured.
+#                        commits, so nothing new has to be configured. The
+#                        global (then system) address, the one a product's
+#                        repository sees: an address set in sclaude's own
+#                        checkout is how commits to sclaude are signed — often
+#                        a forge's no-reply address — and named the person
+#                        after it in every product, where their buckets, test
+#                        accounts and folders carry the other name. The
+#                        checkout's own address only when nothing else is set.
 #   nothing              an empty name, which is not an error.
 #
 # An empty name is today's behaviour exactly: no prefixes, no author field, the
@@ -52,6 +59,25 @@ developer_sanitize() {
     | sed -e 's/[^a-z0-9-]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
 }
 
+# The address a person is named by: the one their products see (global, then
+# system), and sclaude's checkout's own only when neither is set. Not
+# developer_email, which is how commits to sclaude are signed and stays the one
+# MAINTAINERS is checked against.
+# --includes: a scoped read skips [include] and includeIf unless asked, and an
+# identity kept in an included file is common. Read from sclaude's checkout,
+# so an includeIf "gitdir:" is judged against one place: from the caller's
+# directory, a session in a product and the bot at home named one person twice.
+# An empty value counts as unset.
+developer_person_email() {
+  local scope email dir="${INSTRUMENTS:-}"
+  [[ -n "$dir" && -d "$dir" ]] || dir=.
+  for scope in --global --system; do
+    email="$(git -C "$dir" config --includes "$scope" user.email 2>/dev/null)"
+    [[ -n "$email" ]] && { printf '%s\n' "$email"; return 0; }
+  done
+  developer_email
+}
+
 # The configured name, from the orchestrator's repository first, like the
 # address: `git config --global sclaude.developer <name>` is the usual way.
 developer_configured() {
@@ -67,7 +93,7 @@ developer_name() {
   local raw="${SCLAUDE_DEV:-}"
   [[ -n "$raw" ]] || raw="$(developer_configured)"
   if [[ -z "$raw" ]]; then
-    raw="$(developer_email)"
+    raw="$(developer_person_email)"
     raw="${raw%%@*}"
   fi
   developer_sanitize "$raw"

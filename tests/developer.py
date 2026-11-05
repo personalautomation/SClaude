@@ -12,6 +12,8 @@
 #
 #   $SCLAUDE_DEV wins           a bench or a profile cannot pick a name.
 #   git user.email              everybody is anonymous on a machine that commits.
+#   global before checkout's    sclaude's own no-reply commit address renames
+#                               the person in every product.
 #   git sclaude.developer       a name set in ~/.profile only, and the bot and
 #                               the systemd units naming somebody else.
 #   nothing set                 an error where today's behaviour was wanted.
@@ -77,6 +79,39 @@ with tempfile.TemporaryDirectory() as tmp:
     git(repo, "config", "user.email", "Ilia.Poliakov+work@Example.com")
     check("from-git-email-sanitised", run("developer_name", repo),
           "ilia-poliakov-work")
+
+    # The checkout's own address signs commits to sclaude, often a forge's
+    # no-reply one; the person is named by the address their products see.
+    home_cfg = os.path.join(tmp, "global.gitconfig")
+    with open(home_cfg, "w") as fh:
+        fh.write("[user]\n\temail = alice@example.com\n")
+    git(repo, "config", "user.email", "12345+alice@users.noreply.example.com")
+    check("global-email-beats-checkout-own",
+          run("developer_name", repo, {"GIT_CONFIG_GLOBAL": home_cfg}), "alice")
+    check("checkout-own-still-signs-for-maintainers",
+          run("developer_email", repo, {"GIT_CONFIG_GLOBAL": home_cfg}),
+          "12345+alice@users.noreply.example.com")
+    ident = os.path.join(tmp, "identity.gitconfig")
+    with open(ident, "w") as fh:
+        fh.write("[user]\n\temail = bob@example.com\n")
+    with open(home_cfg, "w") as fh:
+        fh.write("[include]\n\tpath = %s\n" % ident)
+    check("global-email-through-include",
+          run("developer_name", repo, {"GIT_CONFIG_GLOBAL": home_cfg}), "bob")
+    # A conditional identity is judged against sclaude's checkout, whatever
+    # the caller's directory: one answer for a session and for the bot.
+    other = os.path.join(tmp, "elsewhere")
+    os.makedirs(other)
+    with open(home_cfg, "w") as fh:
+        fh.write('[includeIf "gitdir:%s/"]\n\tpath = %s\n' % (repo, ident))
+    check("conditional-include-judged-at-checkout",
+          run("cd %s && developer_name" % other, repo, {"GIT_CONFIG_GLOBAL": home_cfg}), "bob")
+    with open(home_cfg, "w") as fh:
+        fh.write("[user]\n\temail =\n")
+    check("empty-global-email-is-unset",
+          run("developer_name", repo, {"GIT_CONFIG_GLOBAL": home_cfg}),
+          "12345-alice")
+    git(repo, "config", "user.email", "Ilia.Poliakov+work@Example.com")
 
     check("env-beats-git",
           run("developer_name", repo, {"SCLAUDE_DEV": "alice"}), "alice")

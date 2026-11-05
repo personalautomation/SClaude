@@ -19,8 +19,10 @@
 #                 Absent, nothing is offered. Read from main, like every
 #                 protection (envs.guarded).
 #   the person    who to sign in as: the first line of ~/.claude/sclaude/dev-login
-#                 (SCLAUDE_DEV_LOGIN_FILE moves it), else git user.email of
-#                 the orchestrator's checkout, as developer.sh names people.
+#                 (SCLAUDE_DEV_LOGIN_FILE moves it), else the global git
+#                 user.email, as developer.sh names people: an address set in
+#                 the orchestrator's checkout signs commits to it, and is no
+#                 account of the product's. That one only when nothing else is.
 #                 Per machine, never committed: each developer is their own
 #                 user.
 #
@@ -106,8 +108,12 @@ def email():
                     return line.strip()
     except OSError:
         pass
-    for args in (["git", "-C", INSTRUMENTS, "config", "user.email"],
-                 ["git", "config", "user.email"]):
+    # The order, --includes and directory of developer_person_email in
+    # developer.sh.
+    here = INSTRUMENTS if os.path.isdir(INSTRUMENTS) else "."
+    for args in (["git", "-C", here, "config", "--includes", "--global", "user.email"],
+                 ["git", "-C", here, "config", "--includes", "--system", "user.email"],
+                 ["git", "-C", INSTRUMENTS, "config", "user.email"]):
         try:
             done = subprocess.run(args, capture_output=True, text=True, timeout=5)
         except (OSError, subprocess.SubprocessError):

@@ -621,7 +621,9 @@ A step may also get extra instructions from the product or from you:
 `.sclaude/team/prompts/<step>.md` and `.sclaude/people/<name>/prompts/<step>.md`
 are appended after sclaude's own prompt for that step.
 
-**Who you are.** The part of your `git config user.email` before the `@`, or
+**Who you are.** The part of your global `git config user.email` before the
+`@` (an address set in sclaude's own checkout signs your commits to sclaude and
+does not rename you; it counts only when no global one is set), or
 the name you set with `git config --global sclaude.developer <name>` (and
 `SCLAUDE_DEV` overrides both for one shell). Prefer the git setting to an
 environment variable: the Telegram bot and the background units see it too. It names your branch, marks your records, and is

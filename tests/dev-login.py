@@ -163,6 +163,34 @@ def main():
         write(login_file, "\n  dev@example.com \n")
         check("the address comes from the file", dev_login.email(), "dev@example.com")
 
+        # No file: the global address, not the one sclaude's checkout signs
+        # its own commits with.
+        os.remove(login_file)
+        ckout = os.path.join(root, "checkout")
+        subprocess.run(["git", "init", "-q", ckout], check=True)
+        subprocess.run(["git", "-C", ckout, "config", "user.email",
+                        "1+dev@users.noreply.example.com"], check=True)
+        gcfg = os.path.join(root, "global.gitconfig")
+        write(gcfg, "[user]\n\temail = person@example.com\n")
+        saved = (dev_login.INSTRUMENTS, os.environ.get("GIT_CONFIG_GLOBAL"),
+                 os.environ.get("GIT_CONFIG_NOSYSTEM"))
+        dev_login.INSTRUMENTS = ckout
+        os.environ["GIT_CONFIG_GLOBAL"] = gcfg
+        os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
+        try:
+            check("no file: the global address", dev_login.email(), "person@example.com")
+            os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
+            check("nothing global: the checkout's own", dev_login.email(),
+                  "1+dev@users.noreply.example.com")
+        finally:
+            dev_login.INSTRUMENTS = saved[0]
+            for k, v in (("GIT_CONFIG_GLOBAL", saved[1]), ("GIT_CONFIG_NOSYSTEM", saved[2])):
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        write(login_file, "\n  dev@example.com \n")
+
         for value, want in (("/a?b=1", "/a?b=1"), ("//evil.com", "/"), ("http://x", "/"),
                             ("/\\evil", "/"), (None, "/"),
                             ("/\r\nSet-Cookie: a=1", "/"), ("/\t/evil.com", "/"),

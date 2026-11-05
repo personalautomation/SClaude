@@ -108,8 +108,12 @@ doctor_identity() {
   local email name branch
   email="$(developer_email)"
   name="$(developer_name)"
+  local person; person="$(developer_person_email)"
   if [[ -n "$email" ]]; then
     doctor_ok "git user.email $email"
+    [[ -z "${SCLAUDE_DEV:-}" && -z "$(developer_configured)" \
+       && -n "$person" && "$person" != "$email" ]] \
+      && doctor_ok "your name comes from $person; $email signs commits to sclaude"
   else
     doctor_bad "no git user.email" "git config --global user.email you@example.com"
   fi

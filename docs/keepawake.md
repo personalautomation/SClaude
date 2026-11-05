@@ -348,8 +348,11 @@ terminal, that is by what was really typed, and idle turns of `read -t` do not
 touch it. The threshold is five minutes: reading a long question or thinking over
 an answer, a person stays silent for a minute or two without going anywhere. Any
 uncertainty is resolved in favour of sound: no `pid`, no terminal (a launch from
-the bot goes through `setsid`), `/proc` will not read — the message arrives as
-usual.
+the bot off WSL goes through `setsid`), `/proc` will not read — the message
+arrives as usual. A launch from the bot on WSL has a terminal, its tab, and is
+never taken for the person at it: the asker's environment carries
+`SCLAUDE_FROM_PHONE` (`from_phone`), since a new tab's `atime` is its first
+moment and would read as five minutes of presence.
 
 The question declares the answer's form itself — as `ask`'s third argument
 rather than by parsing the prompt: guessing from `[y/N]` would diverge from the
@@ -365,8 +368,8 @@ A step with no terminal is refused. It used to go into the background instead
 Control), and that was written for an entrance nobody uses: ssh through Termius
 gives a real tty, so does the terminal inside code-server, and nothing
 automated starts a step at all — `sclaude-watch` only polls GitHub and prints
-`sclaude <slug>` for a human to run, while the Telegram bot is read-only by its
-own documentation. So no terminal means `sclaude` was invoked by something that
+`sclaude <slug>` for a human to run, and the Telegram bot's buttons open
+`sclaude` in a tab of Windows Terminal on the laptop (below). So no terminal means `sclaude` was invoked by something that
 was never meant to invoke it: `ssh host sclaude <feature>` without `-t`, a
 systemd unit, a cron line, a pipe. Carrying on there is worse than stopping —
 the step runs where nobody is watching, `after_step` is never reached, and the
@@ -378,7 +381,8 @@ opened a second time — the check asks `claude agents --json` rather than looki
 for a process in `ps`: a session started without arguments does not show its UUID
 in the command line, and the old `pgrep` did not see it at all. The channel is
 also occupied by one orchestrator: whoever comes second gives way and asks the
-terminal, otherwise it would overwrite the first's question and that one would
+terminal (in a tab a press on the phone opened, nobody is there: the question
+goes unanswered), otherwise it would overwrite the first's question and that one would
 hang, waiting for an answer that would no longer go to it. A question that
 outlived its owner (killed with Ctrl-C, an ssh session dropped) is not shown by
 the bot — it checks the `pid` and removes it.
@@ -500,6 +504,24 @@ ends its sclaude: an open question would keep the bot from deleting the topic.
 the internet nobody remembers opening is one to close: at start the bot turns
 phone access off if it was turned on before the machine started (`phone_on_at`
 against the kernel's boot time). A restart of the bot alone leaves it as it was.
+
+**A press starts `sclaude` in a tab on the laptop.** ✨ New feature, ▶️ and
+⚙️ on a feature's card, and 🛠 Workshop in the menu (`sclaude workshop`, run
+from sclaude's checkout: a session that changes sclaude) run `sclaude` as if
+it were typed into the laptop's terminal: `start_sclaude` opens a tab of Windows Terminal that runs it and
+stays on a shell when it ends. The service has no Windows directories on its
+PATH and no WSL variables, so `wt.exe` is the signed-in user's, from the
+`%LOCALAPPDATA%` that `cmd.exe` reports, and the distribution is named by
+`wslpath -w /`; found once, that is kept for the bot's run. The tab counts as
+opened when it has taken its script (the script's first line removes it),
+within ten seconds, on a thread of its own so the chat's loop never waits for
+it; the page waits for the question that follows (the actions list) that much
+longer. The step has its terminal there, its
+Claude session reaches the phone over Remote Control, and its questions come
+to the chat as ever; `SCLAUDE_FROM_PHONE` turns the arrow-key lists into those
+questions. Off WSL, with no Windows Terminal, or a tab that never took its
+script, it starts in the background as before, where a step is refused for
+want of a terminal.
 
 **A new feature on the page is the terminal's picker.** Without a terminal
 `sclaude new` asks only for a name, so the chat's "✨ New feature" starts it

@@ -106,42 +106,38 @@ ask_once() {
   local -a __options=("$@")
 
   # Waiting for an answer is only possible when there is somebody to answer,
-  # and that is not established by inspection. Neither a launch from the bot nor
-  # `sclaude status`, which that same bot calls with a 25-second timeout, has a
-  # terminal; /dev/tty does not open in either case, and a question that waits
-  # for ever would hang the whole Sclaude section.
+  # and that is not established by inspection. `sclaude status`, which the bot
+  # calls with a 25-second timeout, has no terminal (nor has a launch from the
+  # bot off WSL); /dev/tty does not open, and a question that waits for ever
+  # would hang the whole Sclaude section.
   #
   # So whether to wait is decided not by a guess but by whoever launched us: the
   # channel is opened by ASK_DIR. The orchestrator sets it when it knows somebody
   # is holding the conversation; status and other "just find out" calls do not
   # have it, and the previous behaviour remains there — an empty answer and exit
   # code 1.
-  if [[ -z "${ASK_DIR:-}" ]]; then
-    ask_forget
-    if ( exec < /dev/tty ) 2>/dev/null; then
-      read -erp "$(rl_prompt "$__prompt")" __reply < /dev/tty || __rc=$?
-    else
-      read -rp "$__prompt" __reply || __rc=$?
-    fi
-    printf -v "$__var" '%s' "$(pick_norm "$__form" "$(clean_reply "$__reply")")"
-    return "$__rc"
-  fi
-
-  __published="$(ask_publish "$__prompt" "$__form" "${__options[@]}")" || __published=""
-
-  # The id of the question we have just laid out. Every answer read below is
-  # checked against it: an answer to the previous question must not be taken for
-  # an answer to this one — see ask_answer in io.sh for what that cost.
+  #
+  # Not published either (another sclaude holds the channel): the terminal
+  # alone. In a tab a press on the phone opened that is nobody — the person is
+  # on the phone — and it is answered as with no terminal: empty, exit code 1.
   local __id=""
-  [[ -n "$__published" ]] && __id="$(ask_id)"
-
+  if [[ -n "${ASK_DIR:-}" ]]; then
+    __published="$(ask_publish "$__prompt" "$__form" "${__options[@]}")" || __published=""
+    # The id of the question we have just laid out. Every answer read below
+    # is checked against it: an answer to the previous question must not be
+    # taken for an answer to this one — see ask_answer in io.sh for what that
+    # cost.
+    [[ -n "$__published" ]] && __id="$(ask_id)"
+  fi
   if [[ -z "$__published" ]]; then
-    if ( exec < /dev/tty ) 2>/dev/null; then
+    ask_forget
+    if person_at_terminal; then
       read -erp "$(rl_prompt "$__prompt")" __reply < /dev/tty || __rc=$?
+    elif [[ -n "${SCLAUDE_FROM_PHONE:-}" ]]; then
+      __rc=1
     else
       read -rp "$__prompt" __reply || __rc=$?
     fi
-    ask_forget
     printf -v "$__var" '%s' "$(pick_norm "$__form" "$(clean_reply "$__reply")")"
     return "$__rc"
   fi
@@ -384,6 +380,19 @@ wait_note() {
     printf '{"at":"%(%FT%T%z)T","wait":"%s","ended":"%s","seconds":"%s","arrived":"%s","dir":"%s"}\n' \
       -1 "${esc[@]}" >> "$log"
   } 2>/dev/null || true
+}
+
+# Whether the person is at a terminal sclaude can draw on and read from — the
+# one rule for whatever only a terminal shows: the arrow-key lists, an edited
+# line, a secret typed unseen, the machine's update question. Started by a
+# press on the phone (SCLAUDE_FROM_PHONE, `start_sclaude` in
+# keepawake/sessions.py), sclaude has a tab on the laptop, but the person is
+# on the phone, where only the numbered `ask` comes — so these give way to it,
+# as they do with no terminal. Checked in a subshell: a bare
+# `: < /dev/tty 2>/dev/null` prints "No such device or address" past the
+# suppression when there is no controlling terminal at all.
+person_at_terminal() {
+  [[ -z "${SCLAUDE_FROM_PHONE:-}" ]] && ( exec < /dev/tty ) 2>/dev/null
 }
 
 # Whether a wait can take keys: a status line on screen (stdout or stderr a

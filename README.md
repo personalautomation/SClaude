@@ -561,7 +561,9 @@ the pull request travels. Without `MAINTAINERS` everybody is a maintainer, which
 is what a copy used by one person wants.
 
 **When a session finds a bug in sclaude.** No session sclaude runs changes
-this checkout, which every other session runs from, and none pushes it: the
+this checkout, which every other session runs from, and none pushes it on its
+own — the one exception is the 🛠 workshop you open yourself (`sclaude
+workshop`), which works in a worktree of its own and publishes on your word: the
 repository is public and the session has read your project. It fixes sclaude
 in the feature's workshop instead, a copy of the checkout at
 `.sclaude/local/instruments` that every session of the feature shares:
@@ -659,6 +661,7 @@ sclaude reset <name>    # start the current step over, forgetting its conversati
 sclaude done <name>     # clean up after the merge: worktree and branches
 sclaude drop <name>     # abandon a feature and remove its traces, here and on GitHub
 sclaude propose         # send your commits to sclaude as a pull request
+sclaude workshop        # a session that changes sclaude with you, in a worktree of its own
 sclaude update          # take sclaude's latest main (updates on notify or off)
 sclaude core-send       # in a feature's tree: send the workshop change you held back
 sclaude core-open       # run by a session: open the feature's workshop to change sclaude
@@ -850,6 +853,7 @@ issue's summary table shows it:
 | local review pass | opus, `claude -p` | read-only | With the project's review set to `local`: finds problems in the pull request before step 4's session | a row per pass the journal recorded, with the findings it posted; the findings land on the pull request, the report in the feature's Telegram topic |
 | friction matching | haiku, `claude -p` | no tools | One call that matches proposed rules to the ones already put off | not in the table: it is not a session |
 | monthly friction review | opus / medium | `plan` | `sclaude deferred`: the rules put off across features | not on a feature's issue: it belongs to none |
+| sclaude's workshop | opus / medium | `plan` | `sclaude workshop` (the bot's 🛠): changes sclaude with you in a worktree of its own, reviews it and publishes it on your word | not on an issue: it belongs to no product |
 
 ### Environments and databases
 
@@ -1302,7 +1306,8 @@ when something blocks it, with the branch name to correct, or from a name with
 a tick for creating its issue, as `sclaude new` offers at the terminal — and 🧩
 the project's config, every section explained, with `review`, `qa`, `merge`,
 `ship`, `previewRegression`, `prodRegression`, `demo` and `sleep_mode` set by a button; 💻 Code-server; 🌐 Chrome and the list of every
-feature; ⚙️ Settings — language, docs, restarting the bot (the screen waits
+feature; 🛠 Workshop — `sclaude workshop` in a tab on the laptop, a session that
+changes sclaude, picked up over Remote Control in the Claude app; ⚙️ Settings — language, docs, restarting the bot (the screen waits
 and says when it is back), phone access. Each
 screen says under it what it is for. What you start there leaves a 📱 line in
 the chat — in the feature's topic when it is about a feature — and what only
@@ -1331,7 +1336,9 @@ not ask over one another. The topic starts with the feature's card — its step,
 issue and pull request, ▶️ continue the step, ⚙️ actions, its dev server (open on
 the laptop or the phone, start, stop) and 💻 code-server on its worktree; with
 phone access on these are in the app, and the card has one button to it — and
-"Menu" in the topic brings a fresh card. The card follows its session — within a
+"Menu" in the topic brings a fresh card. ✨ New feature, ▶️ and ⚙️ open sclaude
+in a tab of Windows Terminal on the laptop, as if you had typed it there; its
+questions still come to the topic. The card follows its session — within a
 minute of it starting, waiting for you or going idle. A new feature gets its topic as soon as
 it is started, and the topic takes the feature's name once it has one. After each review round the topic also
 gets where the review stands: the last review session's runs, findings, fixed,

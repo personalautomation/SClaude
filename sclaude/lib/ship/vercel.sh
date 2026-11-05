@@ -329,7 +329,11 @@ preview_apply_migrations() {
   echo ""
   say "${BOLD}Preview database — the branch's migrations${OFF}"
   echo "${BLUE}\$ cd $(printf '%q' "$wt") && $cmd${OFF}"
-  if ( if : < /dev/tty 2>/dev/null; then exec < /dev/tty; fi
+  # The terminal, for a CLI that asks before it applies; in a tab a press on
+  # the phone opened nobody is at it, and the command gets no input, as with
+  # no terminal (person_at_terminal in ui.sh).
+  if ( if person_at_terminal; then exec < /dev/tty
+       elif [[ -n "${SCLAUDE_FROM_PHONE:-}" ]]; then exec < /dev/null; fi
        cd "$wt" && eval "$cmd" ); then
     return 0
   fi

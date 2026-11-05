@@ -368,7 +368,8 @@ run_step() {
   # gives a terminal — Termius over ssh is a real tty, and so is the terminal
   # inside code-server. Nothing automated starts a step at all: sclaude-watch
   # only polls GitHub and prints `sclaude <slug>` for a human to run, and the
-  # Telegram bot is read-only by its own documentation.
+  # Telegram bot's buttons open sclaude in a tab of Windows Terminal on the
+  # laptop (`start_sclaude` in keepawake/sessions.py), a terminal like any.
   #
   # So a step with no terminal is not a phone, it is a mistake — sclaude invoked
   # by something that was never meant to invoke it: `ssh host sclaude <feature>`

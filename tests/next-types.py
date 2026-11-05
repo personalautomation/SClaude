@@ -5,7 +5,8 @@
 #
 #   * a tsconfig.json that does not include .next/types needs no build;
 #   * a .next/types already there is what the typecheck wants;
-#   * a typecheck script that runs `next typegen` writes the types itself.
+#   * a typecheck script that runs `next typegen` writes the types itself,
+#     in package.json or in a file of the worktree it runs.
 #
 # Run it with: python3 tests/next-types.py
 import json
@@ -53,7 +54,13 @@ try:
             ("typegen-after-cleanup", {"include": [".next/types/**/*.ts"]},
              "rm -rf .next/types && next typegen && tsc --noEmit", False, False),
             ("typegen-in-another-script", {"include": [".next/types/**/*.ts"]},
-             "tsc --noEmit", False, True)):
+             "tsc --noEmit", False, True),
+            ("typegen-in-a-script-file", {"include": [".next/types/**/*.ts"]},
+             "bash scripts/typecheck.sh", False, False),
+            ("script-file-without-typegen", {"include": [".next/types/**/*.ts"]},
+             "bash scripts/typecheck.sh", False, True),
+            ("typegen-in-a-script-file-joined", {"include": [".next/types/**/*.ts"]},
+             "bash scripts/typecheck.sh&&tsc", False, False)):
         wt = os.path.join(tmp, name)
         os.makedirs(wt)
         if tsconfig is not None:
@@ -67,6 +74,11 @@ try:
                 json.dump({"scripts": scripts}, fh, indent=2)
         if types_dir:
             os.makedirs(os.path.join(wt, ".next", "types"))
+        if name.startswith(("typegen-in-a-script", "script-file")):
+            os.makedirs(os.path.join(wt, "scripts"))
+            with open(os.path.join(wt, "scripts", "typecheck.sh"), "w") as fh:
+                fh.write("set -e\n" + ("next typegen\n" if name.startswith("typegen-in-a-script-file") else "")
+                         + "tsc --noEmit\n")
         check(name, warns(wt), want)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)

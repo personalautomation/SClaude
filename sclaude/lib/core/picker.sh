@@ -68,7 +68,7 @@ pick_start() {
   # to read keys from. We look at /dev/tty rather than the descriptors:
   # pick_start is called from $( ), where stdout is a pipe whatever the terminal
   # may be.
-  if ! ( exec < /dev/tty ) 2>/dev/null; then
+  if ! person_at_terminal; then
     echo "manual"
     return 0
   fi
@@ -288,7 +288,7 @@ pick_list() {
   local title="$1"; shift
   local rows_n visible top=0 cur="${PICK_LIST_START:-0}" drawn=0 key cols lines
 
-  if ! ( exec < /dev/tty ) 2>/dev/null; then
+  if ! person_at_terminal; then
     return 2
   fi
 

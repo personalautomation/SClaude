@@ -105,7 +105,8 @@ environment_value() {
     printf '%s' "$found"
     return 0
   fi
-  [[ -t 0 && -t 2 ]] || return 1
+  # Asked at the terminal alone (person_at_terminal in ui.sh).
+  [[ -t 0 && -t 2 ]] && person_at_terminal || return 1
   warn "  $key for \"$name\" is not in a file sclaude knows of." >&2
   warn "  Name the file once — \"environments\": {\"$name\": {\"env\": \".env.$name\"}} in" >&2
   warn "  .sclaude/config.json — and this question goes away." >&2

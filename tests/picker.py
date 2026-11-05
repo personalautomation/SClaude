@@ -49,10 +49,10 @@ def drive(rows, keys, height=24):
     """
     script = (
         'BOLD=""; DIM=""; GREEN=""; OFF=""\n'
-        'source "%s/core/picker.sh"\n'
+        'source "%s/core/ui.sh"; source "%s/core/picker.sh"\n'
         'out="$(pick_list "Title" %s)"; rc=$?\n'
         'printf "RESULT=%%s rc=%%s\\n" "$out" "$rc"\n'
-    ) % (LIB, " ".join("'%s'" % r for r in rows))
+    ) % (LIB, LIB, " ".join("'%s'" % r for r in rows))
 
     pid, fd = pty.fork()
     if pid == 0:
@@ -167,8 +167,8 @@ def main():
     import subprocess
     out = subprocess.run(
         ["bash", "-c",
-         'BOLD=""; DIM=""; GREEN=""; OFF=""; source "%s/core/picker.sh"; '
-         'out="$(pick_list "T" "a\tb" < /dev/null)"; echo "[$out] rc=$?"' % LIB],
+         'BOLD=""; DIM=""; GREEN=""; OFF=""; source "%s/core/ui.sh"; source "%s/core/picker.sh"; '
+         'out="$(pick_list "T" "a\tb" < /dev/null)"; echo "[$out] rc=$?"' % (LIB, LIB)],
         capture_output=True, text=True, start_new_session=True).stdout.strip()
     check("no terminal gives code 2 and silence", out, "[] rc=2")
 

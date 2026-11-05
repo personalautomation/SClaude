@@ -757,7 +757,9 @@ def press(bot, user, action, context, now, home=""):
         if action.startswith("fc:acts") and channel and not asks.pending_ask(channel):
             sessions.start_sclaude(repos.repo_path(asks.split_key(key)[0]),
                                     ["actions", asks.split_key(key)[1]])
-            wait_question(channel, None)
+            # The start goes on behind the press (a tab opening, or the
+            # background start after TAB_WAIT): its time and sclaude's both.
+            wait_question(channel, None, seconds=sessions.TAB_WAIT + 6)
         else:
             # Only shown: nothing was started, and the chat keeps no line.
             bot.untraced = True

@@ -57,8 +57,9 @@ run_retro() {
   RETRO_INSTRUMENTS_CHANGED=""
   local fstate="$wt/.sclaude/local/feature/state.json"
   [[ "${SCLAUDE_RETRO:-on}" != "off" ]] || return 0
-  # A conversation needs somebody at the terminal; the epilogue run from a
-  # timer or a phone has nobody to hold it open for.
+  # A conversation needs somebody at the terminal; the epilogue run with none
+  # (a timer, the bot off WSL) has nobody to hold it open for. From the phone
+  # on WSL it has its tab, and its session reaches the phone.
   [[ -t 0 && -t 1 ]] || return 0
   [[ -f "$PROMPTS/retro.md" ]] || return 0
   # Every clean-up holds one, and a second is the first conversation resumed,

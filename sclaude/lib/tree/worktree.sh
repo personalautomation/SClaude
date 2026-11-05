@@ -18,9 +18,9 @@ link_env() {
   for src in "$REPO"/.env "$REPO"/.env.*; do
     [[ -e "$src" ]] || continue
     name="$(basename "$src")"
-    # .env.example is versioned — it is already in the worktree as its own
-    # file.
-    [[ "$name" == ".env.example" ]] && continue
+    # A versioned one (.env.example and its like) is already in the worktree
+    # as its own file, checked out with the rest.
+    git -C "$wt" ls-files --error-unmatch -- "$name" >/dev/null 2>&1 && continue
     if [[ -e "$wt/$name" && ! -L "$wt/$name" ]]; then
       warn "  $name already exists here as a real file — leaving it alone"
       continue
@@ -994,12 +994,21 @@ side_worktrees_offer() {
 # `npm run dev`, so this can be run into exactly here. A symlink to a shared
 # .next will not do: a `next dev` in the worktree would overwrite the main repo's
 # build. A typecheck script that runs `next typegen` writes the types itself,
-# and there is nothing to warn about.
+# and there is nothing to warn about — whether it says so in package.json or in
+# a file of the worktree that the script runs (`bash scripts/typecheck.sh`).
 check_next_types() {
-  local wt="$1"
+  local wt="$1" cmd word words=()
   [[ -f "$wt/tsconfig.json" ]] || return 0
   grep -q '\.next/types' "$wt/tsconfig.json" || return 0
-  grep -q '"typecheck": *"[^"]*next typegen' "$wt/package.json" 2>/dev/null && return 0
+  cmd="$(grep -o '"typecheck": *"[^"]*"' "$wt/package.json" 2>/dev/null)"
+  [[ "$cmd" == *"next typegen"* ]] && return 0
+  cmd="${cmd#*: *\"}"
+  # Words split at the shell's separators too: `bash scripts/a.sh&&tsc`.
+  cmd="${cmd%\"}"
+  read -ra words <<< "${cmd//[&;|]/ }"
+  for word in "${words[@]}"; do
+    [[ "$word" == */* && -f "$wt/$word" ]] && grep -q 'next typegen' "$wt/$word" && return 0
+  done
   [[ -d "$wt/.next/types" ]] && return 0
   warn ""
   warn "  this worktree has no .next/types yet — npm run typecheck will fail on"

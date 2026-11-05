@@ -552,6 +552,19 @@ def main():
         check("link_env: files in folders are linked",
               [os.path.realpath(os.path.join(linked, "envs", n, ".env")) for n in ("dev", "prod")],
               [os.path.realpath(os.path.join(same, "envs", n, ".env")) for n in ("dev", "prod")])
+        # A versioned .env.* is the worktree's own file, checked out with the
+        # rest: left alone without a word. An untracked real file is still said.
+        tracked = os.path.join(tmp, "tracked-wt")
+        os.makedirs(tracked)
+        subprocess.run(["git", "init", "-q", tracked], check=True)
+        for n in (".env.localdb.example", ".env.mine"):
+            open(os.path.join(same, n), "w").close()
+            open(os.path.join(tracked, n), "w").close()
+        subprocess.run(["git", "-C", tracked, "add", ".env.localdb.example"], check=True)
+        said = run('REPO="%s"; warn() { echo "$*"; }; link_env "%s"' % (same, tracked),
+                   with_worktree=True)
+        check("link_env: a versioned file is not warned about",
+              (".env.localdb.example" in said, ".env.mine" in said), (False, True))
 
         check("value: read from the environment's file",
               run('environment_value "%s" dev POSTGRES_URL_NON_POOLING' % sw),

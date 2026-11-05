@@ -32,6 +32,13 @@ STRINGS = {
     "menu.sclaude":      ("📋 Sclaude", "📋 Sclaude"),
     "menu.code":         ("💻 Code-server", "💻 Code-server"),
     "menu.settings":     ("⚙️ Настройки", "⚙️ Settings"),
+    "menu.workshop":     ("🛠 Мастерская", "🛠 Workshop"),
+    # The workshop's button: a session that changes sclaude, in a tab on the
+    # laptop, picked up over Remote Control.
+    "workshop.started":  ("🛠 Мастерская sclaude открывается во вкладке на ноутбуке — "
+                          "подключайтесь к её сессии через Remote Control в приложении Claude.",
+                          "🛠 sclaude's workshop is opening in a tab on the laptop — pick its "
+                          "session up over Remote Control in the Claude app."),
     # The menu in the chat: the way to the Mini App, or, while phone access
     # is off, what has to work without it.
     "menu.inapp":        ("<b>%(host)s</b>\nМеню — в приложении.",

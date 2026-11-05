@@ -253,8 +253,9 @@ sclaude_setting_set() {
   git -C "${INSTRUMENTS:-.}" config "sclaude.$1" "$2"
 }
 
-# Whether there is a terminal to ask at, apart from the phone.
-update_can_ask() { ( exec < /dev/tty ) 2>/dev/null; }
+# Whether there is a terminal to ask at, apart from the phone, with the person
+# at it (person_at_terminal in ui.sh); a name of its own for the benches.
+update_can_ask() { person_at_terminal; }
 
 # One of <words>, by the number its line in the explanation carries: one key,
 # no Enter and no word to type. Any other key is passed over. Reads from

@@ -102,9 +102,11 @@ is handled by the new code. `SCLAUDE_NO_RELOAD=1` turns that off.
 update leaves everybody on `main`; a branch of one's own, `dev/<name>` (the
 name comes from `developer.sh`), is for proposing a change to sclaude, and a
 non-maintainer's commits there go out as a pull request (see "Who changes the
-orchestrator"). No session sclaude runs changes or pushes the checkout: what a
+orchestrator"). No session sclaude runs changes the live checkout: what a
 session changes in sclaude it makes in its tree's workshop, and sclaude
-publishes it (see "The workshop" below).
+publishes it (see "The workshop" below) — save the workshop the person opens
+by hand (`sclaude workshop`), whose session publishes from a worktree of its
+own on their word.
 
 `sclaude/lib` keeps its modules, shell and Python side by side, in folders by
 what they do:
@@ -179,6 +181,7 @@ alone, and none takes a standard module's name; `tests/paths.py` checks both.
 | `sclaude/lib/core/terminal.sh` | recording sclaude's terminal — what it printed, what the person typed — for reading back |
 | `sclaude/lib/improve/retro.sh` | the retrospective over a merged feature, right before `sclaude done` removes it |
 | `sclaude/lib/improve/workshop.sh`, `workshop.py` | the tree's workshop, where a session changes sclaude, and the publishing of what it made there |
+| `sclaude/lib/improve/workbench.sh` | `sclaude workshop`: sclaude's workshop opened by hand, a worktree and a session that does the rest |
 | `sclaude/lib/*/*.py` | gathering an issue's context, chain and acceptance criteria, reading migrations' `-- down:` blocks, the cycle's record, and assembling prompts |
 | `sclaude/hooks/*.py` | the steps' bans and the friction log |
 | `sclaude/prompts/*.md` | the steps' prompts and the shared includes (`_*.md`) |
@@ -212,6 +215,18 @@ digits "1 2 3": among the items there is sometimes "drop the feature", and there
 is nothing to press blindly there. The numbered list above labelled buttons is
 removed in doing so — it would repeat them — while the lines that explain the
 question stay.
+
+Started by a press on the phone, `sclaude` runs in a tab on the laptop (the
+bot's `start_sclaude`) with `SCLAUDE_FROM_PHONE=1`: the tab is a terminal, but
+the person is on the phone, so the lists and the branch name's edited line give
+way to the numbered `ask` as they do with no terminal (`person_at_terminal`); a
+question meant for the terminal alone (`ask` with no channel: a workshop list
+too long for the phone) is unanswered there, as with no terminal, and the
+machine's update question waits for a start typed at one. The tab does not
+make the person present to the bot: a question from it always rings
+(`from_phone` in keepawake/asks.py reads `SCLAUDE_FROM_PHONE` in the asker's
+environment — a new tab's `atime` would read as typing), and `sclaude new`'s
+questions go to the feature's new topic as from no terminal.
 
 A question answered in words — "What is not working?" — waits on the channel
 and the terminal at once, by turns of `ASK_POLL`, and a read with a time limit
@@ -864,6 +879,35 @@ The reviews' own refusals no longer reach the step's friction log
 (`_friction.py` skips `--step friction`): a retrospective's refused push sat
 there until the next step's review read it as that step's friction.
 
+**The workshop opened by hand.** `sclaude workshop` (`improve/workbench.sh`),
+which the bot's 🛠 button runs in a tab on the laptop, belongs to no tree and
+no product: the person wants something of sclaude and a session does it with
+them, answered over Remote Control. The script only makes the place — a
+worktree of the checkout from origin's `main`, beside it as
+`sclaude-workshop-<time>` (not under a name that begins with the checkout's
+path, which write-guard would read as naming the checkout), on
+`workshop/<time>` — and starts the session in plan mode, with the live
+checkout read-only and sreview's folder allowed (`sclaude_guard_args`),
+leniently, as a step's guard. A machine with `sclaude.contribute` off gets
+none.
+Everything else is the session's, by its prompt (`prompts/workbench.md`):
+asking what to change, following `CLAUDE.md`, the tests, `/sreview` for a
+maintainer, and publishing on the person's word — squashed onto `main`, or a
+pull request from `dev/<name>-…` for anybody else. None of the tree
+workshop's machinery (`core-open`, `core-ready`, the publication when the
+session ends) is involved. When the session ends the worktree goes if what it
+holds is proven on `main`: nothing uncommitted, and both its head and the
+branch it was made on either there themselves or such that a merge into main
+would change nothing (after a rebase or squash merge, committed and reverted,
+a merge's own edits counted). Otherwise — or while git cannot tell — it
+stays, with `claude --resume` on the conversation the session went on in
+(`session_latest`; `workbench_published`, `workbench_close`). Never by
+patch-id, which once took a change differing only in indentation for the
+workshop's: a pull request whose lines main has edited since no longer
+merges cleanly, and is kept for the person to remove. Each press also removes the
+earlier workshops that are on `main` by now and that no session still works
+in (`workbench_busy`).
+
 ## The worktree
 
 **The script creates the worktree, not `claude --worktree`.** The built-in flag
@@ -1505,9 +1549,11 @@ sync's with main, a regression fix's — would stop them all the same
 held (`friction_hold`, `steps.review.friction_held`): the log stays, each
 later session's refusals added to it, and step 4 goes on to its next steps. A friction review asked
 for by a command typed at a terminal — `sclaude friction`, `sclaude sync` —
-is never held: the person is there; from the phone's menu, with no terminal,
-it may be, and a review it cannot hold — a re-read, one cut off and resumed —
-waits for the terminal.
+is never held: the person is there — and so is one from the phone's menu,
+which opens it in a tab on the laptop and answers its session over Remote
+Control. Started with no terminal (a timer, the bot off WSL), it may be, and
+a review it cannot hold — a re-read, one cut off and resumed — waits for the
+terminal.
 The first friction review after the box comes off reads all of it — the next
 session's — and at the latest `friction_before_retro`, which `sclaude done`
 runs before the retrospective, whatever `g` was: every review still owed, one

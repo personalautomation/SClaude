@@ -408,7 +408,8 @@ breaks the other silently — grep before you edit:
 
 This repository is public (personalautomation/SClaude). The projects sclaude
 drives are not. So no session sclaude runs changes this checkout, and none
-pushes it: the live checkout is read-only to every one of them
+pushes it on its own (the workshop opened by hand, below, publishes on the
+person's word): the live checkout is read-only to every one of them
 (`sclaude_guard_args` in `sclaude/lib/core/steps.sh`, `sclaude/hooks/write-guard.py
 --readonly`), and a push from it or from a worktree of it is refused
 (`OWN_CHECKOUT` in `sclaude/hooks/forbidden-commands.py`). A step's
@@ -433,6 +434,18 @@ the tree's workshop, a worktree of this checkout at
   hit, the tests the change touches, then `main` for a maintainer, squashed
   into one commit, or one pull request per tree for anybody else. A change
   left unfinished is not published, and its session is offered back.
+
+The one session that publishes sclaude itself is the workshop the person
+opens by hand — `sclaude workshop`, the bot's 🛠 button
+(`sclaude/lib/improve/workbench.sh`): it works in a worktree of this checkout
+beside it, with the live checkout read-only and without the hook that
+refuses a push from a worktree of it (`OWN_CHECKOUT`), and its prompt
+(`sclaude/prompts/workbench.md`) has it review the change and push it — or
+open its pull request — only on the person's word. It is about no product,
+so nothing a product's session saw is in it unless the person puts it there.
+
+<!-- Added by Claude on 2026-11-05 at the user's request: a button that
+opens a session to change sclaude, picked up over Remote Control. -->
 
 Whoever commits here, by hand or from a workshop, still works from what they
 saw in a product, so nothing committed here names a project's details: no

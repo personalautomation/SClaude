@@ -9,6 +9,9 @@ import json
 import logging
 import os
 import shlex
+import subprocess
+import tempfile
+import threading
 import time
 
 import statusline
@@ -180,20 +183,107 @@ def feature_links(repo, slug):
     return links
 
 
+# Windows' own launchers: the service's PATH has no Windows directories in
+# it. wt.exe is given wsl.exe by its Windows name: what runs in the tab is
+# resolved by Windows, which knows no /mnt/c.
+CMD_EXE = "/mnt/c/Windows/System32/cmd.exe"
+WSL_EXE = "/mnt/c/Windows/System32/wsl.exe"
+# How long a tab has to take its script before it counts as not opened.
+TAB_WAIT = 10
+
+
+_TERMINAL = []
+
+
+def windows_terminal():
+    """(wt.exe, the distribution's name) on a WSL laptop with Windows
+    Terminal; None elsewhere. Kept once found — neither changes under the
+    bot — and asked again while not: at the bot's start interop may not
+    answer yet.
+
+    wt.exe is the signed-in user's, from their %LOCALAPPDATA% — with two
+    Windows profiles a glob over C:\\Users could take the other's. The
+    distribution's name from the root's Windows path (\\\\wsl.localhost\\<name>\\):
+    the service has no WSL_DISTRO_NAME."""
+    if _TERMINAL:
+        return _TERMINAL[0]
+    if not os.path.exists(WSL_EXE) or not os.path.exists(CMD_EXE):
+        return None
+
+    def out(argv):
+        try:
+            return subprocess.run(argv, capture_output=True, text=True, cwd="/mnt/c",
+                                  timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    local = out([CMD_EXE, "/c", "echo %LOCALAPPDATA%"])
+    wt = os.path.join(out(["wslpath", "-u", local]) if local[1:2] == ":" else "",
+                      "Microsoft", "WindowsApps", "wt.exe")
+    root = out(["wslpath", "-w", "/"])
+    distro = root.rstrip("\\").rsplit("\\", 1)[-1]
+    if not (os.path.isabs(wt) and os.path.lexists(wt) and root.startswith("\\\\") and distro):
+        return None
+    _TERMINAL.append((wt, distro))
+    return _TERMINAL[0]
+
+
 def start_sclaude(repo, args):
-    # Starting the orchestrator in the background.
+    # A press on the phone does what the laptop's terminal does: sclaude runs
+    # in a tab of its own in Windows Terminal, as if typed there. A step's
+    # conversation needs a terminal (run_step refuses one without), and the
+    # tab is it; its questions still come to the chat (`ask` reads the
+    # channel beside the terminal), and SCLAUDE_FROM_PHONE makes what only
+    # the tab would show give way to them (`person_at_terminal` in ui.sh).
+    # The tab stays open on a shell when sclaude ends, like a terminal it was
+    # typed into.
     #
-    # We detach through setsid and do not wait: sclaude lives as long as the
-    # conversation does — minutes and hours — while the bot has to be back at
-    # getUpdates within seconds. Waiting for it here would mean hanging the
-    # whole chat for the duration of the step.
+    # The command goes through a script rather than wt.exe's command line:
+    # wt.exe splits its own arguments at `;`, and a feature's name typed on
+    # the phone may hold one (the tab's title loses it). From a Windows
+    # directory: wt.exe and wsl.exe complain about a cwd inside WSL.
     #
-    # The conversation goes on through the channel: the bot will pick the
-    # questions up on the loop's turns.
-    cmd = "cd %s && setsid sclaude %s < /dev/null > /dev/null 2>&1 &" % (
-        shlex.quote(repo), " ".join(shlex.quote(a) for a in args))
-    shell.run(cmd, timeout=15)
-    log.info("started sclaude %s in %s", " ".join(args), repo)
+    # wt.exe returns at once whatever becomes of the tab, so the tab counts
+    # as opened when its script is gone — its first line removes it, in a
+    # second or two, TAB_WAIT at most. A script nobody took is taken back,
+    # and sclaude starts in the background as it does without Windows
+    # Terminal, where a step stops for want of a terminal, saying so. All of
+    # it on a thread of its own: the bot has to be back at getUpdates within
+    # seconds, and the menu page's lock is held around the press.
+    threading.Thread(target=_start, args=(repo, args), daemon=True).start()
+
+
+def _start(repo, args):
+    line = "sclaude " + " ".join(shlex.quote(a) for a in args)
+    term = windows_terminal()
+    if term:
+        fd, script = tempfile.mkstemp(prefix="sclaude-tab-", suffix=".sh")
+        with os.fdopen(fd, "w") as fh:
+            fh.write('rm -f "$0"\nPATH=%s:$PATH\ncd %s || exit\nprintf \'📱 %%s\\n\' %s\n'
+                     'SCLAUDE_FROM_PHONE=1 %s\nexec bash -i\n'
+                     % (shlex.quote(shell.LOCAL_BIN), shlex.quote(repo), shlex.quote(line), line))
+        title = (args[-1] if args else "sclaude").replace(";", ",")
+        try:
+            subprocess.Popen([term[0], "-w", "0", "new-tab", "--title", "📱 " + title,
+                              "wsl.exe", "-d", term[1], "--", "bash", "-i", script],
+                             cwd="/mnt/c", stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError as exc:
+            log.warning("no tab for %s: %s", line, exc)
+            deadline = 0
+        else:
+            deadline = time.time() + TAB_WAIT
+        while os.path.exists(script) and time.time() < deadline:
+            time.sleep(0.2)
+        try:
+            os.unlink(script)
+            log.warning("the tab for %s did not open", line)
+        except FileNotFoundError:
+            log.info("started %s in %s, in a tab", line, repo)
+            return
+    shell.run("cd %s && setsid %s < /dev/null > /dev/null 2>&1 &" % (shlex.quote(repo), line),
+              timeout=15)
+    log.info("started %s in %s", line, repo)
 
 
 def feature_card(name, slug, feats=None):

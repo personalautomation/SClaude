@@ -685,6 +685,12 @@ class Handler(object):
             sessions.start_sclaude(repo, ["new"])
             self.result(message_id, t("feat.newtopicat" if thread else "feat.newstarted",
                                       repo=status_report.escape(name)))
+        elif data_raw == "workshop":
+            # sclaude's own workshop: `sclaude workshop` in a tab on the
+            # laptop, run from sclaude's checkout, the one this bot is in.
+            sessions.start_sclaude(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                   ["workshop"])
+            self.result(message_id, t("workshop.started"))
         elif data_raw == "svc_restart":
             self.restart(message_id)
         else:

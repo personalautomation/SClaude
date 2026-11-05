@@ -59,6 +59,8 @@
 #                           sclaude for the product
 #   sclaude deferred        the monthly review of the friction put off
 #   sclaude propose         send a change to sclaude itself as a pull request
+#   sclaude workshop        a session that changes sclaude with you, in a
+#                           worktree of its own (the bot's 🛠 button)
 #   sclaude update          take sclaude's main now (sclaude.update says
 #                           whether a start does it by itself)
 #   sclaude core-send       send the tree's workshop change you held back
@@ -143,7 +145,7 @@ for _module in core/io core/ui core/steps core/state core/project core/environme
                ship/regression_fix ship/rollback cycle/watch core/picker commands/abandon \
                commands/actions commands/doctor improve/deferred core/terminal improve/retro \
                core/scratch cycle/no_change review/local_review core/config tree/sync \
-               improve/workshop commands/start commands/menu commands/step_commands commands/done \
+               improve/workshop improve/workbench commands/start commands/menu commands/step_commands commands/done \
                commands/feature_commands; do
   # shellcheck source=/dev/null
   source "$LIB/$_module.sh" || {
@@ -375,6 +377,7 @@ main() {
     friction)      shift; cmd_friction "$(slugify "${1:-}")" ;;
     deferred)      cmd_deferred ;;
     propose)       cmd_propose ;;
+    workshop)      cmd_workshop ;;
     update)        cmd_update ;;
     # By the person: a workshop change they said no to goes out after all.
     core-send)     cmd_core_send ;;

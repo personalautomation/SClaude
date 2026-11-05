@@ -48,7 +48,8 @@ def menu_keyboard():
          {"text": t("menu.sclaude"), "callback_data": "svc_sclaude"}],
         [{"text": t("menu.code"), "callback_data": "menu_code"},
          {"text": t("menu.chrome"), "callback_data": "menu_chrome"}],
-        [{"text": t("menu.settings"), "callback_data": "menu_services"}],
+        [{"text": t("menu.workshop"), "callback_data": "workshop"},
+         {"text": t("menu.settings"), "callback_data": "menu_services"}],
     ]
 
 

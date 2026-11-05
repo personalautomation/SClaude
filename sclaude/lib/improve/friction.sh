@@ -191,9 +191,9 @@ run_friction() {
     return 0
   fi
   # A review that cannot be held — one cut off and resumed, a re-read —
-  # waits for the terminal while [g] runs step 4: opened without one (the
-  # phone's menu, its go button), it is a plan-mode review nobody is there to
-  # answer. Owed still, as a review that did not take place is.
+  # waits for the terminal while [g] runs step 4: opened without one (a
+  # timer, the bot off WSL; on WSL the bot opens a tab), it is a plan-mode
+  # review nobody is there to answer. Owed still, as a review that did not take place is.
   if [[ -n "$reread" || -n "$pending" ]] && [[ -z "${FRICTION_NO_HOLD:-}" ]] \
      && ! [[ -t 0 && -t 1 ]] && declare -F review_go_on >/dev/null && review_go_on "$wt" \
      && [[ "$(state_get "$state" step 2>/dev/null || true)" == review ]]; then
@@ -815,8 +815,8 @@ print(1 + sum(1 for k in (json.load(open(sys.argv[1])).get("friction") or {}) if
     state_set "$state" friction_owed "$key" 2>/dev/null || true
     echo ""
     info "  Friction no review has read yet ($key): it comes before the retrospective and the clean-up."
-    # A friction review is a conversation; the clean-up from a timer or a phone
-    # has nobody to hold it, and must not remove the log unread. The topic is
+    # A friction review is a conversation; the clean-up with no terminal (a
+    # timer, the bot off WSL) has nobody to hold it, and must not remove the log unread. The topic is
     # told once a key, not on every call that finds it still owed.
     # Kept apart from friction_owed, which an attempt at the terminal sets
     # too: the topic must hear of it on the first wait without one.

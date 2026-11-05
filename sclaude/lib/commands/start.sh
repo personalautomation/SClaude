@@ -97,7 +97,7 @@ cmd_new() {
     # The name is suggested rather than imposed: the line can be edited right
     # there.
     local suggested; suggested="$(suggest_slug "$issue" "${3:-}")"
-    if [[ -t 0 ]]; then
+    if [[ -t 0 ]] && person_at_terminal; then
       read -e -i "$suggested" -rp "Branch name: " name < /dev/tty || name=""
       name="$(clean_reply "$name")"
     else

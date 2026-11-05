@@ -602,6 +602,15 @@ def tty_of_pid(pid):
     return None
 
 
+def from_phone(pid):
+    """Whether the process was started by a press on the phone."""
+    try:
+        with open("/proc/%d/environ" % int(pid), "rb") as fh:
+            return b"\0SCLAUDE_FROM_PHONE=1\0" in b"\0" + fh.read()
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def at_terminal(question):
     # Whether the person is sitting right now at the terminal that asked the
     # question.
@@ -627,7 +636,15 @@ def at_terminal(question):
     # all (tty_nr == 0 — started from the bot through setsid), the device is
     # already closed — in every case we do not see the person at a terminal,
     # which means they can only answer from the phone.
-    tty = tty_of_pid(question.get("pid") or 0)
+    #
+    # A tab a press on the phone opened (SCLAUDE_FROM_PHONE in the asker's
+    # environment, start_sclaude in sessions.py) is never the person's
+    # terminal: they are on the phone. Its age would not tell — a new pty's
+    # atime is the moment it was made, five minutes of silence from the start.
+    pid = question.get("pid") or 0
+    if from_phone(pid):
+        return False
+    tty = tty_of_pid(pid)
     if not tty:
         return False
     try:
@@ -749,11 +766,13 @@ def check_channel(bot, key, name, slug, channel, repo):
     # The repository's own questions while a feature is being started from the
     # bot are that feature's first ones: they go to its new topic.
     # Only a start from the bot: one at a terminal asks there, and its
-    # repository's questions stay in the main chat. And only `sclaude new`'s:
+    # repository's questions stay in the main chat — a bot start's tab on the
+    # laptop is not such a terminal (from_phone). And only `sclaude new`'s:
     # the topic outlives a start given up, and another orchestrator's
     # question ("Which feature?") is the main chat's.
     thread = (topics.feature_topic(bot, name, slug) if slug
-              else 0 if tty_of_pid(question.get("pid")) or not topics.asks_for_new(question.get("pid"))
+              else 0 if (tty_of_pid(question.get("pid")) and not from_phone(question.get("pid")))
+              or not topics.asks_for_new(question.get("pid"))
               else topics.new_topic_of(name))
     # No topic though the feature has a worktree and topics are on: the
     # network or a rate limit. The next turn tries again — sent to the main

@@ -148,7 +148,6 @@ for args, want in (
 # The bot leads a message with exactly these icons (OWN_ICON): every one
 # phase_icon gives, and no other.
 sys.path.insert(0, os.path.join(LIB, "..", ".."))
-import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from keepawake import notices  # noqa: E402
 icons = subprocess.run(["bash", "-c", 'source "%s/core/steps.sh"; for a in "step plan" "step code" '
                         '"step pr" "step review" "step other" "step review done" friction deferred '

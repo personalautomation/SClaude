@@ -196,7 +196,7 @@ def said(data):
 
 def users(wt):
     """The addresses a feature's own local database can sign in as, sorted."""
-    _path, url, secret, local = supabase(wt)
+    _, url, secret, local = supabase(wt)
     if not local:
         raise Refused("this feature has no local database of its own, so it signs in "
                       "only as %s" % (email() or "the developer"))

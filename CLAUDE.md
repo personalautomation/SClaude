@@ -558,6 +558,12 @@ it"): the map drew the production hold between the review and the merge
 check, with no way out, and no test or review could see it. -->
 
 Shell files have no test runner of their own; check them with `bash -n`.
+`tests/lint.py` runs ruff's pyflakes rules over the Python and shellcheck's
+errors over the shell (both through `uvx`, skipped when it has not fetched
+them); `tests/run --changed` takes it on any change.
+`tests/coverage` runs benches with every bash traced and says how much of
+each long shell function they ran (`--show <function>` for the lines that
+never did) — the first look before rewriting one.
 
 ## Editing shell scripts while they run
 

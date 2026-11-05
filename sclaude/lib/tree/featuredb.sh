@@ -746,15 +746,15 @@ db_touches_schema() {
 # place to work, only not for a change to the schema, which lands under every
 # other feature pointed at it. The session's hook asks the same before a push.
 db_shared_warning() {
-  local wt="$1" name local
+  local wt="$1" name own
   name="$(db_shared_env "$wt")" || return 0
   db_touches_schema "$wt" || return 0
-  local="$(project_get database.local.environment "$wt" 2>/dev/null)"
+  own="$(project_get database.local.environment "$wt" 2>/dev/null)"
   warn ""
   warn "  database: this feature changes the schema ($(project_migrations_dir "$wt")),"
   warn "  but works against \"$name\", which the whole team shares — every feature"
-  warn "  pointed there sees these migrations. Database work belongs on \"$local\","
-  warn "  where the feature gets a database of its own: SCLAUDE_ENV=$local for one run,"
+  warn "  pointed there sees these migrations. Database work belongs on \"$own\","
+  warn "  where the feature gets a database of its own: SCLAUDE_ENV=$own for one run,"
   warn "  or rm $(environment_file) to be asked again"
 }
 

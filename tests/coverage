@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+# Which lines of sclaude's shell functions the benches run.
+#
+# Runs benches (all of them, or those named) with every bash tracing what it
+# executes (tests/lib/cover.bash, through BASH_ENV), then maps the traces onto
+# the functions of the library (bin/sclaude, sclaude/lib/*/*.sh) and prints
+# how much of each long one ran. For rewriting a long function: the lines no
+# bench reaches are the ones a rewrite could break unseen.
+#
+#   tests/coverage                     the suite; functions of 150+ lines
+#   tests/coverage --min 50 return     one bench; functions of 50+ lines
+#   tests/coverage --show remind_prod  …and the lines of one that never ran
+#   tests/coverage --traces DIR        read traces kept from a run before
+#
+# Most benches cut a function out of its module and run it from a script of
+# their own, so a trace's line is mapped back through the function's name:
+# its first command is the first one the function runs, and the rest keep
+# their distance from it. A bench's stand-in under a library function's name
+# is counted as that function where its lines fall inside it; a bench that
+# edits the text before running it shifts what follows the edit. Benches that
+# give bash an environment of their own (no BASH_ENV) are not seen. Read the
+# numbers as a map of where to look, not as a measure.
+#
+# Not a bench: tests/run runs tests/*.py, and this file has no suffix.
+import argparse
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(HERE, "lib"))
+import benchlib  # noqa: E402
+
+RECORD = re.compile(rb"\x01+([^|\n\x01]*)\|([A-Za-z_][A-Za-z_0-9]*)\|([0-9]+)\|")
+# Lines that are syntax around commands, never a command of their own.
+SYNTAX = re.compile(r"^(\}|fi|done|esac|;;|then|do|else|\{|\)|in|;;&|;&)[\s;]*(#.*)?$")
+
+
+class Function:
+    def __init__(self, name, path, start, text):
+        self.name, self.path, self.start = name, path, start
+        self.lines = text.rstrip("\n").split("\n")
+        self.end = start + len(self.lines) - 1
+        self.code = self._code_lines()
+        self.first = min(self.code) if self.code else start
+
+    def _code_lines(self):
+        """The file's line numbers in the body where a command can start."""
+        out, waiting, cont, backslash = set(), [], False, False
+        for k, line in enumerate(self.lines[1:-1], self.start + 1):
+            s = line.strip()
+            if waiting:
+                if s == waiting[0]:
+                    waiting.pop(0)
+                continue
+            if not s or s.startswith("#"):
+                # After `|`, `&&` or `||` bash reads on past blank lines and
+                # comments; after a backslash, such a line ends the command.
+                if backslash:
+                    cont = backslash = False
+                continue
+            was_cont, cont = cont, s.endswith(("\\", "|", "&&", "||"))
+            backslash = s.endswith("\\")
+            if was_cont:
+                waiting += [h[1] for h in benchlib._HEREDOC.findall(line)]
+                continue
+            if SYNTAX.match(s):
+                continue
+            if re.match(r"^[a-zA-Z0-9_*|\"'$.\[\]-]+\)$", s):  # a case pattern alone
+                continue
+            out.add(k)
+            waiting = [h[1] for h in benchlib._HEREDOC.findall(line)]
+        return out
+
+
+def library():
+    found = {}
+    for path in benchlib.sources():
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        lines = text.split("\n")
+        heads = {}
+        for k, line in enumerate(lines, 1):
+            m = benchlib._START.match(line)
+            if m:
+                heads.setdefault(m.group(1), k)
+        for name, body in benchlib.definitions(text):
+            if name in heads and name not in found:
+                found[name] = Function(name, os.path.realpath(path), heads[name], body)
+    return found
+
+
+def read_traces(folder, funcs):
+    """{function name: set of its file's lines that ran}."""
+    hit = {}
+    for entry in os.scandir(folder):
+        try:
+            with open(entry.path, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            continue
+        records = [(src.decode(errors="replace"), name.decode(), int(line))
+                   for src, name, line in RECORD.findall(data)]
+        # Per function, the lowest line it ran from a copy: its first command.
+        low = {}
+        for src, name, line in records:
+            f = funcs.get(name)
+            if f and os.path.realpath(src) != f.path if src else f:
+                low[name] = min(low.get(name, line), line)
+        for src, name, line in records:
+            f = funcs.get(name)
+            if not f:
+                continue
+            if src and os.path.realpath(src) == f.path:
+                mapped = line
+            else:
+                mapped = f.first + line - low[name]
+            if f.start < mapped < f.end:
+                hit.setdefault(name, set()).add(mapped)
+    return hit
+
+
+def ranges(numbers):
+    out, run = [], []
+    for n in sorted(numbers):
+        if run and n == run[-1] + 1:
+            run.append(n)
+        else:
+            if run:
+                out.append(run)
+            run = [n]
+    if run:
+        out.append(run)
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="tests/coverage")
+    ap.add_argument("--min", type=int, default=150, help="list functions of at least this many lines")
+    ap.add_argument("--show", action="append", default=[], help="print the lines of this function that never ran")
+    ap.add_argument("--traces", help="read traces kept from an earlier run instead of running")
+    ap.add_argument("--keep", action="store_true", help="keep the traces and say where")
+    ap.add_argument("benches", nargs="*")
+    args = ap.parse_args()
+
+    funcs = library()
+    folder = args.traces
+    if not folder:
+        folder = tempfile.mkdtemp(prefix="sclaude-cover.")
+        env = dict(os.environ, SCLAUDE_COVER=folder, BASH_ENV=os.path.join(HERE, "lib", "cover.bash"))
+        subprocess.run([os.path.join(HERE, "run")] + args.benches, env=env)
+    try:
+        hit = read_traces(folder, funcs)
+    finally:
+        if not args.traces and not args.keep:
+            shutil.rmtree(folder, ignore_errors=True)
+        elif args.keep:
+            print("traces kept in %s" % folder)
+
+    rows = [f for f in funcs.values() if len(f.lines) >= args.min or f.name in args.show]
+    rows.sort(key=lambda f: -len(f.lines))
+    print("\n%6s %6s %5s  %-28s %s" % ("lines", "code", "ran", "function", "where"))
+    for f in rows:
+        ran = len(hit.get(f.name, set()) & f.code)
+        pct = 100 * ran // len(f.code) if f.code else 100
+        print("%6d %6d %4d%%  %-28s %s:%d" % (len(f.lines), len(f.code), pct, f.name,
+                                              os.path.relpath(f.path, ROOT), f.start))
+    for name in args.show:
+        f = funcs.get(name)
+        if not f:
+            print("\nno function %s" % name)
+            continue
+        missed = f.code - hit.get(name, set())
+        print("\n%s — %d of %d command lines never ran:" % (name, len(missed), len(f.code)))
+        for run in ranges(missed):
+            print("  %d%s" % (run[0], "-%d" % run[-1] if len(run) > 1 else ""))
+            for k in run[:3]:
+                print("      " + f.lines[k - f.start].strip()[:100])
+            if len(run) > 3:
+                print("      …")
+
+
+if __name__ == "__main__":
+    main()

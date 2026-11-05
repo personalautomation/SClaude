@@ -19,7 +19,6 @@
 #
 # Run it with: python3 tests/reload.py
 import os
-import re
 import shutil
 import subprocess
 import sys

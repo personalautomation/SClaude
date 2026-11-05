@@ -13,31 +13,39 @@ Bash functions too long to read whole. Their phases share locals, so cutting
 them is a rewrite rather than a move: phases as functions over an explicit
 state (a state file or named globals), each with a bench.
 
-| Lines | Function | Where |
-| ---: | --- | --- |
-| 906 | `remind_prod` — the epilogue: preview, QA, merge, production | `ship/deploy.sh` |
-| 682 | `issue_sync` — the issue's summary | `github/issue_sync.sh` |
-| 528 | `run_friction` | `improve/friction.sh` |
-| 466 | `run_step` | `cycle/run.sh` |
-| 360 | `regression_gate` | `ship/regression_gate.sh` |
-| 345 | `after_step` | `cycle/run.sh` |
-| 336 | `run_status` | `github/outcome.sh` |
-| 328 | `regression_run_body` | `ship/regression.sh` |
-| 261 | `review_close_gate` | `review/review_gate.sh` |
-| 257 | `cmd_done` | `commands/done.sh` |
-| 240 | `cmd_abandon` | `commands/abandon.sh` |
-| 226 | `feature_action_items` | `commands/actions.sh` |
-| 218 | `session_ended` | `cycle/run.sh` |
+| Lines | Ran | Function | Where |
+| ---: | ---: | --- | --- |
+| 906 | 29% | `remind_prod` — the epilogue: preview, QA, merge, production | `ship/deploy.sh` |
+| 682 | 11% | `issue_sync` — the issue's summary (mostly a Python heredoc) | `github/issue_sync.sh` |
+| 528 | 12% | `run_friction` | `improve/friction.sh` |
+| 466 | 70% | `run_step` | `cycle/run.sh` |
+| 360 | 49% | `regression_gate` | `ship/regression_gate.sh` |
+| 345 | 53% | `after_step` | `cycle/run.sh` |
+| 336 | 4% | `run_status` | `github/outcome.sh` |
+| 328 | 0% | `regression_run_body` | `ship/regression.sh` |
+| 261 | 71% | `review_close_gate` | `review/review_gate.sh` |
+| 257 | 44% | `cmd_done` | `commands/done.sh` |
+| 240 | 0% | `cmd_abandon` | `commands/abandon.sh` |
+| 229 | 0% | `feature_action_items` | `commands/actions.sh` |
+| 218 | 44% | `session_ended` | `cycle/run.sh` |
+
+"Ran" is the share of a function's command lines the suite runs, from
+`tests/coverage` (2026-11-05). A rewrite starts by raising it: the lines no
+bench reaches are what a rewrite breaks unseen. `tests/coverage --show
+<function>` lists them. The 0% ones are only searched as text by the benches,
+never run.
 
 `remind_prod`, `issue_sync` and `run_status` are mostly decisions over JSON
 and GitHub's answers; they would read better in Python, called from the
 shell as the other helpers are. Not done: a rewrite, not a move, and the
 benches do not cover every branch.
 
-`Handler` in `keepawake/handling.py` is one class of some 800 lines: every
-command, every typed text and every button press. A dispatch table over
-smaller handler modules (per screen: hold, phone, config, asks, cards) would
-let one screen be read alone.
+`Handler` in `keepawake/handling.py` (some 800 lines) was looked at for a
+dispatch table over per-screen modules and decided against, 2026-11-05:
+`callback` is one flat chain of some 35 short branches, each found by its
+button's data (`"svc_lang"`, `"cfg:"`), and `message` reads its typed text in
+order. A table would move the branches without removing a line, and modules
+would pass `self`, the press, its message and `now` across every boundary.
 
 ## Large files not split yet
 
@@ -49,7 +57,7 @@ let one screen be read alone.
 | 1259 | `tree/worktree.sh` | the tree, its dev server and its ports |
 | 1091 | `bin/keepawake` | the detector and `status` |
 | 1047 | `bin/wsl-update` | |
-| 4512 | `tests/keepawake.py` | one bench for the whole bot; split per module it would also run in parallel, though `hooks` is the suite's longest now |
+| 4512 | `tests/keepawake.py` | one bench for the whole bot. Decided against splitting it (and `hooks`) for speed, 2026-11-05: the suite's benches take some 1210 s of CPU, about 150 s on eight cores, so the run is bound by the sum, not by its longest bench (105 s), and a split would gain no time |
 | 2072 | `tests/regression.py`, 1595 `tests/review-round.py` | the same |
 
 Decided against, 2026-11-05: `metrics/metrics_guide.py` as a data file. It is
@@ -87,18 +95,24 @@ want its own value, or for one module of defaults where nobody should.
 ## The waits whose purpose is not written down
 
 Some pauses are deliberate and their reason is not obvious from the code.
-Removing one is a guess; a local log of what happened during it would turn
-the guess into a decision. One helper (`wait_note <name> <how it ended>
-<seconds> [what arrived]`, a line of JSON in `~/.local/state/sclaude/waits.jsonl`,
-never in git), called only where the meaning is unclear:
+Removing one is a guess; a local log of what happened during it turns the
+guess into a decision. Since 2026-11-05 `wait_note` (`core/ui.sh`) writes a
+line of JSON per such wait to `SCLAUDE_WAITS_LOG`, which `bin/sclaude` sets to
+`~/.local/state/sclaude/waits.jsonl` (never in git; past a megabyte it starts
+again, the last one kept as `.1`). Unset — a bench running a function on its
+own — nothing is written:
 
-- `poll_pause` swallowing the keys behind the first (`core/ui.sh`): were they
-  an arrow's bytes, a stray word, or presses that meant something?
-- the tab's two-second wait for `tee` (`core/pane.sh`): did it finish in time,
-  and how long does it really take?
-- `SESSION_GRACE` after a turn ends with a marker (`cycle/session_watch.sh`):
-  what does the person do in those thirty seconds?
-- `SESSION_ACCEPT_GRACE` after step 2's `accepted`.
+| `wait` | Where | `ended` / `arrived` |
+| --- | --- | --- |
+| `poll-swallow` | `poll_pause` swallowing the keys behind the first (`core/ui.sh`) | `escape` (an arrow's bytes), `text` or `other`; how many characters came after the first key. Written only when something was swallowed. |
+| `tab-tee` | the tab waiting up to two seconds for `tee` (`core/pane.sh`) | `done` or `outlived`; `seconds` as `0.6`, claude's exit code |
+| `session-grace` | `SESSION_GRACE` (30 s) and `SESSION_ACCEPT_GRACE` (3 s) after a turn ends with its marker (`cycle/session_watch.sh`) | `human` — the person spoke within it (not under [k]), after `seconds` — or `closed`; the session's kind and the grace it had |
+
+To read it: `jq -s 'group_by(.wait,.ended) | map({wait:.[0].wait, ended:.[0].ended, n:length})'
+~/.local/state/sclaude/waits.jsonl`. The suite writes its own in its
+temporary directory. A wait is a candidate to shorten
+when weeks of lines show nothing ever arriving in it: `poll-swallow` never
+`text`, `tab-tee` always `done` within a fifth, no `session-grace` `human`.
 
 Not a general log of everything: the project has its journals already
 (history.jsonl, review-context.log, the rounds' journal, DORA), and a log

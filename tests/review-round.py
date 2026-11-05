@@ -71,10 +71,12 @@ RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
           for m in ("cycle/run.sh", "cycle/session_watch.sh", "review/review_round.sh", "review/review_gate.sh",
                     "improve/friction.sh"))
 WATCH = 'source "%s/core/state.sh"\nsource "%s/core/pane.sh"\nLIB="%s"\n' % (LIB, LIB, LIB) + functions(
-    ["round_marker", "done_marker", "session_watch_start", "session_watch_stop", "stop_file"])
+    ["round_marker", "done_marker", "wait_note", "session_watch_start", "session_watch_stop", "stop_file"])
 END = os.path.join(LIB, "cycle", "session_end.py")
 
 tmp = tempfile.mkdtemp()
+# wait_note writes here, run by tests/run or alone.
+os.environ["SCLAUDE_WAITS_LOG"] = os.path.join(tmp, "waits.jsonl")
 try:
     wt = os.path.join(tmp, "wt")
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
@@ -444,6 +446,10 @@ echo "watcher=[$SESSION_WATCHER]"
         target.kill()
         if os.path.exists(done_file):
             os.remove(done_file)
+    # The grace's end is noted for deciding later what it is for (wait_note).
+    waits = os.environ["SCLAUDE_WAITS_LOG"]
+    noted = open(waits).read() if os.path.exists(waits) else ""
+    check("grace-close-noted", '"wait":"session-grace","ended":"closed"' in noted, True)
 
     # --- an approval from before this launch does not count -------------------
     target = fake("--resume %s" % session)

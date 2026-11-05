@@ -539,9 +539,18 @@ claude_launch_once() {
       # in the log before the line saying how it exited — and no longer,
       # since a child claude left running (an MCP server, a dev server) may
       # hold its stderr open, and the tee with it, for good.
-      printf 'rc=$?; for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 $! 2>/dev/null || break; sleep 0.2; done\n'
+      printf 'rc=$?; n=0; for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 $! 2>/dev/null || break; sleep 0.2; n=$((n+1)); done\n'
       printf 'echo "=== $(date -Iseconds) exit $rc" >> %q\n' "$log"
       printf 'echo $rc > %q\n' "$dir/status"
+      # How long the tee took, and whether it outlived the wait. Decided with
+      # builtins, then written by a child of its own: sclaude waits for this
+      # tab's process to end, not for its status, and the note holds it up
+      # by nothing.
+      if [[ -n "${SCLAUDE_WAITS_LOG:-}" ]]; then
+        printf 'alive=done; ((n >= 10)) && kill -0 $! 2>/dev/null && alive=outlived\n'
+        printf '( trap "" HUP; source %q && SCLAUDE_WAITS_LOG=%q wait_note tab-tee "$alive" "$((n / 5)).$((n %% 5 * 2))" "exit $rc" ) </dev/null >/dev/null 2>&1 &\n' \
+          "$LIB/core/ui.sh" "$SCLAUDE_WAITS_LOG"
+      fi
     else
       printf 'claude'
       printf ' %q' "$@"

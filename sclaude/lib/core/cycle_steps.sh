@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Written by cycle_steps.py (`python3 cycle_steps.py sh > cycle_steps.sh`):
 # change that file, not this one. tests/session_names.py checks the two agree.
 # Sourced by steps.sh.

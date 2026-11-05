@@ -288,6 +288,9 @@ main() {
   # a command the person typed.
   SCLAUDE_COMMAND="${1:-menu}"
   export SCLAUDE_RUN="${SCLAUDE_RUN:-$$.${EPOCHSECONDS:-0}}"
+  # Where wait_note (core/ui.sh) writes; unset, nothing is noted — a bench
+  # running a function on its own writes into nobody's log.
+  export SCLAUDE_WAITS_LOG="${SCLAUDE_WAITS_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/sclaude/waits.jsonl}"
   local kind="${1:-}"
   [[ "$kind" == config && "${2:-}" == set ]] && kind="config set"
   case "$kind" in

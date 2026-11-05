@@ -279,7 +279,13 @@ session_watch_start() {
         fi
       fi
       case "$verdict" in
-        human) [[ -n "$marker" ]] && rm -f "$marker"; ended="" ;;
+        human)
+          # The person spoke within the grace: what the grace is for, perhaps.
+          # Not a session [k] kept, nor one past its grace: that was no grace.
+          if [[ -n "$ended" && ! -e "$keep" ]] && (( $(date +%s) - ended < ${grace:-30} )); then
+            wait_note session-grace human "$(( $(date +%s) - ended ))" "${kind:--} grace ${grace:-30}"
+          fi
+          [[ -n "$marker" ]] && rm -f "$marker"; ended="" ;;
         ended)
           [[ -n "$ended" ]] || ended="$(date +%s)"
           # The grace is for reading the report. Step 2's marker says
@@ -296,6 +302,7 @@ session_watch_start() {
             case "$(cat "$ctl" 2>/dev/null || true)" in
               next|next-later|restart) continue ;;
             esac
+            wait_note session-grace closed "$(( $(date +%s) - ended ))" "${kind:--} grace $grace"
             # What session_ended looks for to know it was not a person's /exit.
             [[ -n "$marker" ]] || echo "${said:-plan approved}" > "$done"
             # No watcher from here: the keys that need one are not offered

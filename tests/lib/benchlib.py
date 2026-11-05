@@ -24,7 +24,7 @@ LIB = os.path.join(ROOT, "sclaude", "lib")
 # A function starts at `name() {` at the start of a line and ends at the first
 # `}` at the start of a line outside a heredoc — a `}` in a heredoc's text is
 # the text's — or is a whole function on its own line.
-_START = re.compile(r"^([a-z_][a-z_0-9]*)\(\) \{(.*)$")
+_START = re.compile(r"^([a-z_][a-z_0-9]*)\(\)\s*\{(.*)$")
 # `<<word`, `<<-word`, `<<'word'`, never a here-string's `<<<`.
 _HEREDOC = re.compile(r"(?<!<)<<-?(?!<)\s*(['\"]?)([A-Za-z_][A-Za-z_0-9]*)\1")
 _index = None

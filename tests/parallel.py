@@ -123,7 +123,8 @@ def functions(names):
 
 
 WATCH = 'source "%s/core/state.sh"\nLIB="%s"\n' % (LIB, LIB) + functions(
-    ["round_marker", "done_marker", "session_watch_start", "session_watch_stop"])
+    ["round_marker", "done_marker", "session_ctl_file", "session_keep_file", "session_watched_file",
+     "wait_note", "session_watch_start", "session_watch_stop"])
 
 wt = os.path.join(tmp, "wt")
 os.makedirs(os.path.join(wt, ".sclaude/local/feature"))

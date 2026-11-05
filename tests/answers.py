@@ -122,7 +122,20 @@ def typed(keys, channel=None, prompt="What is wrong? ", cols=None, end_feature=F
         if cols:
             fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, cols, 0, 0))
         channel_dir = os.path.join(d, "ask", "demo")
-        time.sleep(1)
+        # Typed once the question is on the screen, not after a fixed second:
+        # under the suite's load its channel's python starts can take longer,
+        # and keys sent before the wait reads them were the case's failure.
+        seen = b""
+        last = prompt.split()[-1].encode()
+        ready = time.time() + 20
+        while last not in seen and time.time() < ready:
+            r, _, _ = select.select([fd], [], [], 0.1)
+            if r:
+                try:
+                    seen += os.read(fd, 4000)
+                except OSError:
+                    break
+        time.sleep(0.3)
         if channel is not None:
             with open(os.path.join(channel_dir, "answer.json.tmp"), "w") as fh:
                 json.dump({"reply": channel}, fh)
@@ -134,7 +147,7 @@ def typed(keys, channel=None, prompt="What is wrong? ", cols=None, end_feature=F
             time.sleep(0.5)
         if end_feature:
             open(os.path.join(channel_dir, "ended"), "w").close()
-        out = b""
+        out = seen
         # Until the process ends, which every case but a stuck read does: the
         # deadline is for that one, and long enough for a question whose
         # channel takes several python starts under the suite's load.

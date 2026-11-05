@@ -419,7 +419,6 @@ check_true("status-create-is-optional", "If it needs one" in "\n".join(none_yet)
 # Without a pull request the paragraphs about it drop: <pr> is never empty
 # (render_prompt fills it with a dash), so they hang on a number of their own.
 sys.path.insert(0, lib)
-import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import render_prompt
 no_pr = render_prompt.render(status_md, prompts,
                              {"pr": "\u2014", "pr-number": "", "feature": "f",

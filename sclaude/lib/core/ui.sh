@@ -338,12 +338,52 @@ poll_pause() {
     read -rsn1 -t "$secs" key < /dev/tty || rc=$?
     if [[ "$rc" -eq 0 ]]; then
       POLL_KEY="$key"
-      while read -rsn1 -t 0.05 rest < /dev/tty; do :; done
+      # What the swallowing takes, by kind and count, not the text: an
+      # arrow's bytes, or presses that may have meant something.
+      local took="" kind
+      # IFS= and -d '': the same one character per read as before, but a space,
+      # a tab or an Enter comes back as itself rather than as nothing.
+      while IFS= read -rsn1 -d '' -t 0.05 rest < /dev/tty; do took+="$rest"; done
+      if [[ -n "$took" ]]; then
+        case "$key$took" in
+          $'\e'*) kind=escape ;;
+          *[[:alnum:]]*) kind=text ;;
+          *) kind=other ;;
+        esac
+        wait_note poll-swallow "$kind" 0.05 "${#took} after 1"
+      fi
       return 0
     fi
     [[ "$rc" -gt 128 ]] && return 0
   fi
   sleep "$secs"
+}
+
+# A line about a deliberate wait whose purpose the code does not say, for
+# deciding later whether it is needed: what it was, how it ended, how long it
+# took and what arrived meanwhile. One JSON line in SCLAUDE_WAITS_LOG, which
+# bin/sclaude sets to waits.jsonl under the machine's state, never in git;
+# unset, nothing is written. The places that call it are listed in
+# docs/refactoring-candidates.md. Builtins only, except a directory made the
+# first time and the size looked at about once in sixty notes (past a
+# megabyte the log starts again, the last one beside it): the note adds next
+# to nothing to the wait it describes. A failed write is no error.
+#
+#   wait_note <wait> <how it ended> <seconds> [what arrived]
+wait_note() {
+  local log="${SCLAUDE_WAITS_LOG:-}" esc=() a
+  [[ -n "$log" ]] || return 0
+  for a in "${1:-}" "${2:-}" "${3:-}" "${4:-}" "$PWD"; do
+    a="${a//[$'\001'-$'\037']/}"; a="${a//\\/\\\\}"; esc+=("${a//\"/\\\"}")
+  done
+  {
+    [[ -d "${log%/*}" ]] || mkdir -p "${log%/*}"
+    if (( RANDOM % 60 == 0 )) && [[ "$(stat -c %s "$log" 2>/dev/null || echo 0)" -ge 1048576 ]]; then
+      mv -f "$log" "$log.1"
+    fi
+    printf '{"at":"%(%FT%T%z)T","wait":"%s","ended":"%s","seconds":"%s","arrived":"%s","dir":"%s"}\n' \
+      -1 "${esc[@]}" >> "$log"
+  } 2>/dev/null || true
 }
 
 # Whether a wait can take keys: a status line on screen (stdout or stderr a

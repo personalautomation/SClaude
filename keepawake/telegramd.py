@@ -27,6 +27,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -159,31 +160,31 @@ def main():
     started = code_stamp()
 
     while not bot.stopped:
+        # A press still working in a thread of its own (a setting being
+        # written, a probe) is waited for: the restart is tried again next turn.
         stamp = code_stamp()
-        if stamp != started:
+        if stamp != started and threading.active_count() == 1:
             if not new_code_runs():
                 log.warning("the bot's code changed but does not import; staying on the old one")
                 started = stamp
-                continue
-            # Confirmed first, so that the new process is not handed the
-            # updates this one has already handled; tried again, backing off,
-            # when it fails.
-            try:
-                bot.call("getUpdates", offset=bot.offset, timeout=0)
-            except Exception as exc:
-                log.warning("confirming before the restart: %s, pausing %d s", exc, backoff)
-                time.sleep(backoff)
-                backoff = min(backoff * 2, botapi.BACKOFF_MAX)
-                continue
-            # A stop that came meanwhile is a stop; files still landing are
-            # checked again on the next turn.
-            if bot.stopped or code_stamp() != stamp:
-                continue
-            log.info("the bot's code changed; restarting on the new one")
-            # In place, not by exiting: systemd would kill everything left in
-            # the unit's cgroup — the sclaude runs and dev servers started
-            # from the phone with it.
-            os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
+            else:
+                # The handled updates are confirmed first, so that the new
+                # process is not handed them again; a failure is tried again
+                # next turn, after the poll below has backed off.
+                try:
+                    bot.call("getUpdates", offset=bot.offset, timeout=0)
+                    confirmed = True
+                except Exception as exc:
+                    log.warning("confirming before the restart: %s", exc)
+                    confirmed = False
+                # A stop that came meanwhile is a stop; files still landing
+                # wait for the next turn.
+                if confirmed and not bot.stopped and code_stamp() == stamp:
+                    log.info("the bot's code changed; restarting on the new one")
+                    # In place, not by exiting: systemd would kill everything
+                    # left in the unit's cgroup — the sclaude runs and dev
+                    # servers started from the phone with it.
+                    os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
         try:
             out = bot.call("getUpdates", http_timeout=botapi.POLL_TIMEOUT + 10,
                            offset=bot.offset, timeout=botapi.POLL_TIMEOUT)

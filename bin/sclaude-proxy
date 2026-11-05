@@ -126,7 +126,7 @@ LAST_SEEN = {}
 def feature_dir(wt):
     """A tree's feature folder. A tree an older sclaude still runs keeps its
     state in .feature/ until that sclaude is done (layout_migrate waits for
-    it); decided by the state file, as telegramd.state_path does."""
+    it); decided by the state file, as state_path in keepawake/sessions.py does."""
     new = os.path.join(wt, ".sclaude/local/feature")
     old = os.path.join(wt, ".feature")
     if not os.path.isfile(os.path.join(new, "state.json")) \

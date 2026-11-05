@@ -295,7 +295,7 @@ def blank():
         # change.
         "described": "",
         # Messages about sleep that became answers, kept while true:
-        # [[message id, expiry]] (telegramd.trail).
+        # [[message id, expiry]] (trail in keepawake/sleep_warning.py).
         "sleep_trail": [],
         # Which language the keyboard below the input box is set in. Empty
         # means it is not set at all. It cannot be set at every start: it only

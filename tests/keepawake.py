@@ -2835,12 +2835,13 @@ with sandbox() as box:
         st.update(dict(until_ts=now_w + 1200, warned_for_ts=0, warn_message_id=0,
                        decision="", updated_ts=now_w))
     bot = FakeBot()
-    real_needs = state.needs_warning
-    state.needs_warning = lambda data, now: True
+    # Replaced where check_warning looks it up: sleep_warning imports it by name.
+    real_needs = sleep_warning.needs_warning
+    sleep_warning.needs_warning = lambda data, now: True
     try:
         sleep_warning.check_warning(bot)
     finally:
-        state.needs_warning = real_needs
+        sleep_warning.needs_warning = real_needs
     check("a new warning takes every earlier one away",
           (41 in bot.deletes, read()["sleep_trail"]), (True, []))
     # A press keeps its answer only while true.
@@ -4461,6 +4462,32 @@ finally:
     _refuse.clear()
 
 # ------------------------------------------------------------- the outcome
+
+
+# --- the bot restarts on new code ---------------------------------------------
+# A module it imports on first use would be looked for where the new layout no
+# longer has it: a change under its folders is what ends the loop.
+from keepawake import telegramd  # noqa: E402
+_code = tempfile.mkdtemp()
+try:
+    _saved_dirs = telegramd.CODE_DIRS
+    telegramd.CODE_DIRS = (_code,)
+    with open(os.path.join(_code, "a.py"), "w") as fh:
+        fh.write("x = 1\n")
+    os.utime(os.path.join(_code, "a.py"), (1000, 1000))
+    _before = telegramd.code_stamp()
+    os.makedirs(os.path.join(_code, "sub"))
+    with open(os.path.join(_code, "sub", "b.py"), "w") as fh:
+        fh.write("y = 1\n")
+    check_true("a module added in a subfolder changes the stamp", telegramd.code_stamp() != _before)
+    with open(os.path.join(_code, "notes.md"), "w") as fh:
+        fh.write("not code\n")
+    os.utime(os.path.join(_code, "notes.md"), (10 ** 10, 10 ** 10))
+    _after = telegramd.code_stamp()
+    check_true("a file that is not code does not", _after < 10 ** 10)
+finally:
+    telegramd.CODE_DIRS = _saved_dirs
+    shutil.rmtree(_code, ignore_errors=True)
 
 if failures:
     print("FAILED: %d" % len(failures))

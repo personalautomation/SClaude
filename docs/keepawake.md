@@ -62,7 +62,7 @@ means exactly what it says.
 | --- | --- |
 | `bin/keepawake` | the holder detector, `status`, manual extension |
 | `keepawake/state.py` | the state under `flock`, atomic writes, the "should we hold" decision |
-| `keepawake/telegramd.py` | the bot's process: the environment, the loop, the periodic checks |
+| `keepawake/telegramd.py` | the bot's process: the environment, the loop, the periodic checks; it ends the loop when its own code or sclaude's library changes, and systemd starts it again on the new code |
 | `keepawake/botapi.py` | Telegram's Bot API client with its retries, and the bot's profile |
 | `keepawake/handling.py` | what the person sends: commands, typed text, button presses |
 | `keepawake/menus.py` | the menu in the chat, its keyboards and the anchor message |

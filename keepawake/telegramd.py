@@ -62,6 +62,30 @@ def load_env():
     return token, chat
 
 
+CODE_DIRS = (os.path.dirname(os.path.abspath(__file__)),
+             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sclaude", "lib"))
+
+
+def code_stamp():
+    """The newest of the bot's own modules and sclaude's library.
+
+    The bot runs for days while sclaude's update pulls new code under it, and
+    imports some of sclaude's modules only on first use (project_config): an
+    old process would look for them where the new layout no longer has them.
+    So a change to any of them ends the loop, and systemd starts the bot again
+    on the new code (Restart=always in keepawake-telegram.service)."""
+    newest = 0.0
+    for top in CODE_DIRS:
+        for folder, _dirs, files in os.walk(top):
+            for name in files:
+                if name.endswith(".py"):
+                    try:
+                        newest = max(newest, os.stat(os.path.join(folder, name)).st_mtime)
+                    except OSError:
+                        pass
+    return newest
+
+
 def main():
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s  %(message)s",
@@ -109,8 +133,18 @@ def main():
         log.warning("the restart report: %s", exc)
 
     backoff = 1
+    started = code_stamp()
 
     while not bot.stopped:
+        if code_stamp() != started:
+            # Confirmed first, so that the new process is not handed the
+            # updates this one has already handled.
+            try:
+                bot.call("getUpdates", offset=bot.offset, timeout=0)
+            except Exception:
+                pass
+            log.info("the bot's code changed; restarting on the new one")
+            return
         try:
             out = bot.call("getUpdates", http_timeout=botapi.POLL_TIMEOUT + 10,
                            offset=bot.offset, timeout=botapi.POLL_TIMEOUT)

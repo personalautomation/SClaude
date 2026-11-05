@@ -70,7 +70,14 @@ def files():
 
 
 def reload_parts():
-    """Read every part again, in order; the caller reloads this module after."""
+    """Read every part again, in order; the caller reloads this module after.
+
+    Every file is compiled before any part is reloaded: an edit that leaves
+    one part broken raises here with all of them still the old model, rather
+    than leaving the earlier parts new and the rest old."""
+    for path in files():
+        with open(path, encoding="utf-8") as fh:
+            compile(fh.read(), path, "exec")
     for part in PARTS:
         importlib.reload(part)
 

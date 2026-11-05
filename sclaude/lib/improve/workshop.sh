@@ -360,7 +360,7 @@ workshop_leaks() {
 }
 
 # How long the flagged lines may run and still reach a question in Telegram
-# whole, with room for the lines around them: under telegramd's ASK_CONTEXT_MAX.
+# whole, with room for the lines around them: under ASK_CONTEXT_MAX in keepawake/asks.py.
 WORKSHOP_PHONE_MAX=1200
 
 # The tests the change touches, as CLAUDE.md picks them for a commit: every

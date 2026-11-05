@@ -1422,6 +1422,15 @@ with tempfile.TemporaryDirectory() as tmp2:
         second = proxy_mod.process_map().doc()
         check("the proxy draws the map from the model on disk now",
               "1. The cycle, reloaded" in second and "1. The cycle, reloaded" not in first)
+        # A part left broken: no part is read again, the last good model stays whole.
+        with open(os.path.join(flow, "process_model.py"), "a") as fh:
+            fh.write("\nRELOAD_MARK = 1\n")
+        with open(os.path.join(flow, "process_page.py"), "a") as fh:
+            fh.write("\ndef broken(:\n")
+        os.utime(os.path.join(flow, "process_page.py"), ns=(time.time_ns() + 2 * 10**9, time.time_ns() + 2 * 10**9))
+        third = proxy_mod.process_map().doc()
+        check("a broken part leaves every part as it was",
+              "1. The cycle, reloaded" in third and not hasattr(sys.modules["process_model"], "RELOAD_MARK"))
     finally:
         sys.path.remove(flow)
         proxy_mod.process = saved

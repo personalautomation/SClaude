@@ -824,7 +824,8 @@ through), squashes it into one commit (`squash-message`: the first commit
 that is not a review round leads, the rest are listed, the trailers merged),
 runs the tests the change touches in a clean environment, a line on the
 terminal for each as it runs, each in a session of its own with no terminal (Ctrl-C and a closed tab are passed on to it,
-`workshop_tests`), and pushes
+`workshop_tests`; the output goes to `.sclaude/local/instruments-tests.log`
+beside the workshop, one file per tree), and pushes
 `HEAD:main`. Then, where `sclaude.update` is `auto`, the live checkout is fast-forwarded to it when nothing else
 runs from it (`workshop_live_update`), so the next session runs the fix (elsewhere it says `sclaude update`); the
 next sclaude start does it otherwise, and a checkout holding commits of its
@@ -840,6 +841,12 @@ product's details is the one stop that holds the change at its head
 (`workshop_block`): asking again would not help, and a session's new commit,
 marked ready, lifts it. A "yes" to the same question is kept for the lines it
 was shown, so a retry does not ask it again, and a line not shown then does.
+Red tests right after the session that made the change reopen that session,
+unasked (`WORKSHOP_RED_WORD`, with the red files and the log): it still has
+the change in mind, and a flaky test or one red on the base is as much its to
+fix. Twice at most; still red after that, the change waits, ready, for the
+next opening, as it does at once when the session sent back leaves the head
+as it was.
 In `sclaude done` the retry comes before the retrospective; when it moves
 sclaude's code, the clean-up goes on in a fresh run, retrospective and all,
 which sclaude starts itself (`done_fresh`); moved by the retrospective or

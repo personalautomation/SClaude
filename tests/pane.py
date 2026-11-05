@@ -371,7 +371,9 @@ echo "rc=$?"
     launches = os.path.join(tmp, "launches")
     write("claude", r'''
 echo "$*" | tr '\n' ' ' >> "$PANE_TEST_LAUNCHES"; echo >> "$PANE_TEST_LAUNCHES"
-sleep "${PANE_TEST_SLEEP:-0}"
+# Only the first launch waits: it is the window the keys must land in, and a
+# reopened one that waited as long left that window short of the run's limit.
+[[ "$1" == --resume ]] || sleep "${PANE_TEST_SLEEP:-0}"
 ''')
     ctl = os.path.join(tmp, "sclaude-ctl-0000")
 
@@ -388,8 +390,8 @@ sleep "${PANE_TEST_SLEEP:-0}"
     with open(plain, "w") as fh:
         fh.write('source "%s/core/ui.sh"\n' % LIB)
     # Room for both presses: each key waits for the one before to be taken,
-    # which under the suite's load can take a few seconds.
-    text = run({"PANE_TEST_SLEEP": "12", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": plain},
+    # which under a busy machine's load took more than twelve seconds.
+    text = run({"PANE_TEST_SLEEP": "25", "PANE_TEST_LAUNCHES": launches, "PANE_TEST_PRELOAD": plain},
                keys_at=[(0.5, b"r"), (1.1, b"r")], keys_after=b"Keys here")
     got = launched()
     check("r-twice-reopens", len(got) >= 2, True)
@@ -487,6 +489,14 @@ try:
     check("tab-exit-no-log", last_exit(""), [])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
+
+# SCLAUDE_FROM_PHONE is sclaude's: a session it starts in place does not see
+# it, and sclaude has it back after.
+got = subprocess.run(["bash", "-c", 'source "%s/core/pane.sh"; claude() { echo "[${SCLAUDE_FROM_PHONE-}]"; }; '
+                      'claude_here x; echo "[$SCLAUDE_FROM_PHONE]"' % LIB],
+                     env=dict(os.environ, SCLAUDE_FROM_PHONE="1"),
+                     capture_output=True, text=True).stdout.split()
+check("phone-flag-not-in-the-session", got, ["[]", "[1]"])
 
 for name, want, got in failures:
     print("FAIL %s: want %r, got %r" % (name, want, got))

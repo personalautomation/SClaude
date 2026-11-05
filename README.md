@@ -586,7 +586,8 @@ files and waits for your yes, and while you are away it waits for you; then it p
 `main` as one commit, and sends anybody else's as one pull request per
 feature. A change left uncommitted or unreviewed is not published: sclaude
 offers you the session back to finish it, at once and when you next open the
-feature, and says what is missing. A publication that stops — red tests, no network, a refused push —
+feature, and says what is missing. Red tests right after the session send
+that session back by themselves, told which tests failed, twice at most. A publication that stops — red tests, no network, a refused push —
 is tried again, quietly, every time you open the feature; only your own "no"
 — to the project's details, or to sending it — holds it, until a session
 rewords the change or you run `sclaude core-send` in the feature's tree.

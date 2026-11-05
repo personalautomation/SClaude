@@ -222,11 +222,20 @@ CLAUDE_LIMIT_RESUME="The usage limit that stopped you has reset; sclaude reopene
 # claude in this very terminal. When the run is recorded (terminal.sh), the
 # session's screen is marked off on both sides: it is in the session's
 # transcript already, and the playback leaves only a line naming it.
+#
+# SCLAUDE_FROM_PHONE stays with sclaude: it tells sclaude's own questions the
+# person is on the phone. In the session it told nothing — its commands have
+# no terminal anyway — and reached every test the session ran, whose
+# terminal cases then failed.
 claude_here() {
-  local status
+  local status phone="${SCLAUDE_FROM_PHONE-}" had="${SCLAUDE_FROM_PHONE+1}"
   declare -F term_skip >/dev/null && term_skip begin "$@"
+  # Not in a subshell: claude stands in as a function in the benches, and
+  # what it counts must outlive the call.
+  unset SCLAUDE_FROM_PHONE
   claude "$@"
   status=$?
+  [[ -n "$had" ]] && export SCLAUDE_FROM_PHONE="$phone"
   declare -F term_skip >/dev/null && term_skip end
   return "$status"
 }
@@ -508,10 +517,11 @@ claude_launch_once() {
   {
     echo "#!/usr/bin/env bash"
     # Not carried over: what belongs to the tab sclaude runs in. WSL_INTEROP
-    # names this login's interop socket, and the new tab has its own.
+    # names this login's interop socket, and the new tab has its own;
+    # SCLAUDE_FROM_PHONE is sclaude's, not the session's (claude_here).
     for name in $(compgen -e); do
       case "$name" in
-        WSL_INTEROP|WT_SESSION|WT_PROFILE_ID|SHLVL|PWD|OLDPWD|_) continue ;;
+        WSL_INTEROP|WT_SESSION|WT_PROFILE_ID|SHLVL|PWD|OLDPWD|_|SCLAUDE_FROM_PHONE) continue ;;
       esac
       printf 'export %s=%q\n' "$name" "${!name}"
     done

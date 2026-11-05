@@ -312,6 +312,25 @@ export SCLAUDE_SESSION=%(session)s
     check("red-not-on-the-way", ws_py("get", record, "stopped").returncode, 1)
     out = sh('workshop_pending "%s"' % tree)
     check("red-retried-on-entry", "Testing sclaude itself" in out, True)
+    # Red right after the session that made it: that session is reopened
+    # unasked, told which tests and where their output is — twice, and then
+    # the change waits, ready.
+    # The reopened session commits and marks the head ready, and the test
+    # stays red.
+    fix = ('claude_launch_once() { echo "RELAUNCH $*"; git -C "%s" commit -q --allow-empty -m "fix: try"; '
+           'workshop_py ready "%s" s1 "$(git -C "%s" rev-parse HEAD)" sreview; }; ' % (ws, record, ws))
+    out = sh(fix + 'workshop_after_session s1 --session-id s1 -n x p')
+    check("red-reopens-the-session", "RELAUNCH --resume s1 -n x" in out, True)
+    check("red-not-asked", "ASK" in out, False)
+    check("red-word-names-the-test", "Red: tests/tool.py. Their output: %s-tests.log" % ws in out, True)
+    check("red-log-beside-the-workshop", os.path.exists(ws + "-tests.log"), True)
+    check("red-twice-at-most", (out.count("RELAUNCH"), "Sent back twice" in out), (2, True))
+    check("red-then-stays-ready", sh('workshop_state "%s" s1' % tree).strip(), "ready")
+    # A session sent back that leaves the head as it was ends the returns:
+    # the change waits, ready, for the next opening.
+    out = sh('workshop_after_session s1 --session-id s1 -n x p')
+    check("red-left-as-it-was-stops", (out.count("RELAUNCH"), "left it as it was" in out), (1, True))
+    check("red-left-as-it-was-ready", sh('workshop_state "%s" s1' % tree).strip(), "ready")
     git(ws, "reset", "-q", "--hard", "origin/main")
     ws_py("put", record, "ready", "null")
     with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:

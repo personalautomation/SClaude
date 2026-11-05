@@ -317,7 +317,8 @@ def _sync_way(rows, now=None, cut=None):
 WORKSHOP_START = ("w_find", "w_ask", "w_open", "w_change", "w_ready", "w_exit", "w_ready_gate")
 WORKSHOP_OUT = {
     "blocked": ("w_leaks", "w_leak_ask", "w_held"), "held": ("w_leaks", "w_leak_ask", "w_held"),
-    "left": ("w_back", "w_pending"), "red": ("w_leaks", "w_tests"),
+    "left": ("w_back", "w_pending"), "red": ("w_leaks", "w_tests", "w_wait"),
+    "unchanged": ("w_wait",),
     "declined": ("w_leaks", "w_tests", "w_send", "w_held"), "waits": ("w_leaks", "w_tests", "w_send"),
     "stopped": ("w_leaks", "w_tests", "w_send", "w_who"),
     "main": ("w_leaks", "w_tests", "w_send", "w_who", "w_main"),
@@ -332,6 +333,18 @@ def _workshop_way(rows):
     for r in rows:
         if way[-1] == "w_pending" and r["op"] != "left":
             way += ["w_change", "w_ready", "w_exit", "w_ready_gate"]
+        # Red ends in the wait, unless the session was sent back for it
+        # (sent-back, written as it reopens): then the return is the way.
+        # A publication after a red wait with no return between is a retry
+        # at a later opening, which starts again from the tests' red; after
+        # the wait of a session that left the head as it was (unchanged),
+        # the wait stays, as the stop between the two openings.
+        if way[-1] == "w_wait" and way[-2] == "w_tests":
+            if r["op"] == "sent-back":
+                way = way[:-1] + ["w_change", "w_ready", "w_exit", "w_ready_gate"]
+                continue
+            if r["op"] in WORKSHOP_OUT:
+                way.pop()
         for n in WORKSHOP_OUT.get(r["op"], ()):
             if n != way[-1]:
                 way.append(n)
@@ -640,7 +653,7 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
                                    else None,
                                    unseen(rs))})
     for session, rs in workshop.items():
-        ends = [r["op"] for r in rs if r["op"] in WORKSHOP_OUT or r["op"] in ("none", "ready")]
+        ends = [r["op"] for r in rs if r["op"] in WORKSHOP_OUT or r["op"] in ("none", "ready", "sent-back")]
         index[("workshop", session)] = len(passes["workshop"])
         passes["workshop"].append({
             "label": "%s · after %s%s" % (_short(rs[0]["at"]), names.get(session, "a session"),

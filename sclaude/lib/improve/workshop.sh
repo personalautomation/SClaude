@@ -42,6 +42,10 @@
 # missing (workshop_missing) follows it.
 WORKSHOP_RESUME="You changed sclaude in this feature's workshop, and the change is not finished. sclaude reopened this session for it. Finish the change, commit it in the workshop, review it as your instructions say, and run \`sclaude core-ready\`; sclaude publishes it when you end the session. If the change should not go out at all, say so and leave it: nothing unfinished is published. What is missing:"
 
+# Said to a session reopened because the tests before publishing were red,
+# with the red files and where their output is after it.
+WORKSHOP_RED_WORD="sclaude ran the tests your change to sclaude touches before publishing it, and some were red, so nothing was published. sclaude reopened this session for them. Read their output and find whose the failure is: run each red test again on your head, and on origin/main in the workshop. A test that passes on a second run is flaky, and a flaky test is still yours to make steady; one red on origin/main too is still yours to fix, as the repository's rules say. Fix it in the workshop, commit, review it as your instructions say, and run \`sclaude core-ready\`. When you end the session sclaude tests it again and publishes it. If the change should not go out at all, say so in your report: the person decides, and a head you leave as it was is tested again when the tree is next opened. Red:"
+
 workshop_dir() { printf '%s/.sclaude/local/instruments\n' "$1"; }
 workshop_record() { printf '%s/.sclaude/local/instruments.json\n' "$1"; }
 workshop_py() { python3 "$LIB/improve/workshop.py" "$@"; }
@@ -168,10 +172,12 @@ workshop_missing() {
 }
 
 # Where the tree's workshop stands for <session>: none (nothing unpublished),
-# ready, blocked (ready, but held back at this head by the person, for the
-# product's details: only a new commit lifts it), unready (uncommitted, or not marked ready at
-# its head), or pending (an earlier session's change is unfinished there,
-# which holds back everything made after it).
+# ready, blocked (ready, but held back at this head: the person's no to the
+# product's details or to sending it, sclaude.leaks off on a hit, or
+# sclaude.contribute off; a new commit made ready, or core-send, lifts it),
+# unready (uncommitted, or not marked ready at its head), or pending (an
+# earlier session's change is unfinished there, which holds back everything
+# made after it).
 workshop_state() {
   local tree="$1" session="$2" ws rec start head ready pending
   ws="$(workshop_dir "$tree")"
@@ -192,9 +198,10 @@ workshop_state() {
 }
 
 # Holds the workshop's ready change back at its head: the person said no to
-# it, and trying again would only ask again. A new commit there, marked
-# ready, lifts it. Every other stop is tried again when the tree is next
-# opened, whatever it was.
+# it, sclaude.leaks is off and the check hit, or sclaude.contribute is off,
+# and trying again would only ask again. A new commit there, marked ready, or core-send lifts it.
+# Every other stop is tried again when the tree is next opened, whatever it
+# was.
 #
 #   workshop_block <tree> <why>
 workshop_block() {
@@ -211,7 +218,7 @@ workshop_block() {
 #
 #   workshop_after_session <session> <the launch's arguments…>
 workshop_after_session() {
-  local session="$1" tree ws rec state answer
+  local session="$1" tree ws rec state answer red_back=0 red_head=""
   shift
   tree="$(workshop_tree)" || return 0
   rec="$(workshop_record "$tree")"
@@ -222,7 +229,38 @@ workshop_after_session() {
     workshop_history "$tree" "$state" "$session"
     case "$state" in
       none) workshop_py put "$rec" pending null; return 0 ;;
-      ready) workshop_py put "$rec" pending null; WORKSHOP_SESSION="$session" workshop_publish "$tree"; return 0 ;;
+      ready)
+        workshop_py put "$rec" pending null
+        # Sent back for red tests and left at the same head — whatever
+        # ended the session: testing the same head again now tells nothing
+        # new. It waits, ready, for the next opening, as any red run does;
+        # a session that thinks it should not go out says so to the person.
+        if [[ -n "$red_head" && "$(git -C "$ws" rev-parse HEAD)" == "$red_head" ]]; then
+          info "  The session left it as it was: tested again when the tree is next opened."
+          workshop_history "$tree" unchanged "$session"
+          return 0
+        fi
+        WORKSHOP_RED=()
+        WORKSHOP_SESSION="$session" workshop_publish "$tree"
+        (( ${#WORKSHOP_RED[@]} )) || return 0
+        # Red before it went out: the session that made the change is the one
+        # to look, while it still has the change in mind, rather than the
+        # next opening of the tree trying the same tests again. Unasked — the
+        # person said so — and twice at most, so that a test the session
+        # cannot turn green does not hold the cycle in a loop.
+        if (( red_back >= 2 )); then
+          info "  Sent back twice and still red: left ready, tested again when the tree is next opened."
+          return 0
+        fi
+        red_back=$((red_back + 1))
+        red_head="$(git -C "$ws" rev-parse HEAD)"
+        info "  Back into the session that made it, told what is red."
+        workshop_history "$tree" sent-back "$session"
+        claude_again_args "$@"
+        # Where the conversation went on, if Claude Code moved it to a new id.
+        resume_latest "${CLAUDE_AGAIN[@]}"
+        claude_launch_once "${CLAUDE_LATEST[@]}" "$WORKSHOP_RED_WORD ${WORKSHOP_RED[*]}. Their output: $WORKSHOP_RED_LOG"
+        continue ;;
       blocked)
         workshop_py put "$rec" pending null
         info "  sclaude's change in $ws waits: $(workshop_py get "$rec" blocked.why)"
@@ -392,7 +430,9 @@ workshop_tests() {
   local n=${#tests[@]} i=0 began=$SECONDS started tty="" line
   [[ -t 1 ]] && tty=1
   info "  Testing sclaude itself before it goes out: $n test file(s) the change touches."
-  log="${TMPDIR:-/tmp}/sclaude-workshop-tests.log"
+  # Beside the workshop, not one file in /tmp for every tree: another
+  # tree's run overwrote the output before anybody read it.
+  log="$ws-tests.log"
   : > "$log"
   saved="$(trap -p INT TERM HUP)"
   trap 'sig=INT' INT; trap 'sig=TERM' TERM; trap 'sig=HUP' HUP
@@ -439,13 +479,16 @@ workshop_tests() {
     return 0
   fi
   warn "  Red: ${failed[*]} — not published; it stays in $ws. The output: $log"
+  # For the question that sends the session back (workshop_after_session).
+  WORKSHOP_RED=("${failed[@]}") WORKSHOP_RED_LOG="$log"
   return 1
 }
 
 # How a session's change in the workshop came out, in the feature's history
 # (history_add): its state when the session ended (none, ready, blocked,
 # pending, left) and how the publication went (main, pr, held, declined, waits, red,
-# stopped). The session is the one that ended, or WORKSHOP_SESSION for a
+# stopped), and sent-back when red tests reopen the session, unchanged when it
+# leaves the head as it was. The session is the one that ended, or WORKSHOP_SESSION for a
 # publication: the process map plays the pass after that session.
 #
 #   workshop_history <tree> <op> [<session>]

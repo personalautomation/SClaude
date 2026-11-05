@@ -31,6 +31,11 @@ import subprocess
 import sys
 import time
 
+# A tab opened by a press on the phone exports SCLAUDE_FROM_PHONE to every
+# session in it, and a test run there inherits it: questions then skip the
+# terminal, and the cases about the terminal fail. The bench is not that tab.
+os.environ.pop("SCLAUDE_FROM_PHONE", None)
+
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
 

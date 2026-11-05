@@ -530,6 +530,22 @@ check("history: a conversation resumed is one stay, its sittings summed",
 check("history: the places between are filled in along the map",
       seq[seq.index("code"):seq.index("pr") + 1] == ["code", ("friction", 0), ("workshop", 0), "works", ("regression", 0), "pr"],
       str(seq))
+import process_history  # noqa: E402
+ws_way = lambda ops: [x["n"] for x in process_history._workshop_way([{"op": o} for o in ops])][len(process_history.WORKSHOP_START):]
+RETURN = ["w_change", "w_ready", "w_exit", "w_ready_gate"]
+check("history: red ends in the wait; a session sent back plays the return",
+      (ws_way(["ready", "red", "ready"]),
+       ws_way(["ready", "red", "sent-back", "ready", "main"]),
+       ws_way(["ready", "red", "sent-back", "unready", "left"]),
+       ws_way(["ready", "red", "ready", "main"]),
+       ws_way(["ready", "red", "sent-back", "ready", "unchanged"]),
+       ws_way(["ready", "red", "sent-back", "ready", "unchanged", "main"])[-6:]) ==
+      (["w_leaks", "w_tests", "w_wait"],
+       ["w_leaks", "w_tests"] + RETURN + ["w_leaks", "w_tests", "w_send", "w_who", "w_main"],
+       ["w_leaks", "w_tests"] + RETURN + ["w_back", "w_pending"],
+       ["w_leaks", "w_tests", "w_leaks", "w_tests", "w_send", "w_who", "w_main"],
+       ["w_leaks", "w_tests"] + RETURN + ["w_wait"],
+       ["w_wait", "w_leaks", "w_tests", "w_send", "w_who", "w_main"]))
 rg = got["passes"]["regression"]
 check("history: a regression run is a pass on its own map, with its time",
       len(rg) == 1 and [x["n"] for x in rg[0]["steps"]] == ["r_local", "reg_local", "r_on"]

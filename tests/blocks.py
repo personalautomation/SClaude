@@ -59,7 +59,7 @@ def check_true(name, got):
         failures.append((name, "true", got))
 
 
-def run_bash(script, cwd, modules=("io", "ui", "state", "steps", "project", "worktree", "deploy", "scratch"),
+def run_bash(script, cwd, modules=("io", "ui", "state", "steps", "project", "worktree", "deploy", "shipped", "vercel", "qa", "merge", "demo", "scratch"),
              stdin="", env=None):
     """The real functions in a real shell, with the network shadowed out."""
     body = "set -uo pipefail\n"
@@ -306,7 +306,7 @@ try:
 
     # The pulls in the production blocks never merge: with pull.rebase=false
     # set somewhere a plain pull would make a merge commit and ship it.
-    deploy_src = open(os.path.join(LIB, "deploy.sh")).read()
+    deploy_src = "".join(open(os.path.join(LIB, _m)).read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
     check("prod-pulls-are-ff-only",
           re.findall(r'"git pull[^"]*"', deploy_src),
           ['"git pull --ff-only --autostash"', '"git pull --ff-only --autostash"'])
@@ -382,7 +382,7 @@ try:
     git("add", "-A", cwd=REPO)
     git("commit", "-qm", "a migration", cwd=REPO)
     _, _, rc = run_bash('REPO=%s; branch_has_migrations %s' % (REPO, REPO), tmp,
-                        modules=("ui", "state", "project", "worktree", "deploy", "scratch"))
+                        modules=("ui", "state", "project", "worktree", "deploy", "shipped", "vercel", "qa", "merge", "demo", "scratch"))
     check("migrations-true-when-the-branch-adds-one", rc, 0)
 
     # --- preview_apply_migrations -------------------------------------------
@@ -428,7 +428,7 @@ try:
     os.rename(os.path.join(REPO, ".sclaude/config.json"),
               os.path.join(REPO, ".sclaude/config.json.off"))
     _, _, rc = run_bash('REPO=%s; branch_has_migrations %s' % (REPO, REPO), tmp,
-                        modules=("ui", "state", "project", "worktree", "deploy", "scratch"))
+                        modules=("ui", "state", "project", "worktree", "deploy", "shipped", "vercel", "qa", "merge", "demo", "scratch"))
     check("migrations-false-without-a-config", rc != 0, True)
     os.rename(os.path.join(REPO, ".sclaude/config.json.off"),
               os.path.join(REPO, ".sclaude/config.json"))

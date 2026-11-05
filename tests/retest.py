@@ -33,7 +33,7 @@ import sys
 import tempfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-DEPLOY = os.path.join(ROOT, "sclaude", "lib", "deploy.sh")
+LIB = os.path.join(ROOT, "sclaude", "lib")
 
 failures = []
 
@@ -43,12 +43,13 @@ def check(name, got, want):
         failures.append((name, want, got))
 
 
-deploy = open(DEPLOY, encoding="utf-8").read()
+# The epilogue (deploy.sh) and the QA functions it calls (qa.sh).
+deploy = "".join(open(os.path.join(LIB, m), encoding="utf-8").read() for m in ("deploy.sh", "qa.sh"))
 FUNC = ""
 for name in ("qa_retest", "qa_sent", "pr_unhandoff"):
     match = re.search(r'^%s\(\) \{\n.*?^\}\n' % name, deploy, re.M | re.S)
     if not match:
-        print("FAIL %s not found in deploy.sh" % name)
+        print("FAIL %s not found in deploy.sh or qa.sh" % name)
         sys.exit(1)
     FUNC += match.group(0)
 

@@ -129,7 +129,12 @@ publishes it (see "The workshop" below).
 | `sclaude/lib/instruments.sh` | sclaude's own checkout: taking main, proposing a change, refreshing the units |
 | `sclaude/lib/github.sh` | issues and pull requests through `gh` |
 | `sclaude/lib/plan.sh` | step 1's plan from its session's transcript |
-| `sclaude/lib/deploy.sh` | preview, prod and the cycle's epilogue |
+| `sclaude/lib/deploy.sh` | the cycle's epilogue, step by step, and what is said when shipping failed |
+| `sclaude/lib/shipped.sh` | what has already been shipped: deploys per head, production's marks, what rides along |
+| `sclaude/lib/vercel.sh` | running a deploy: vercel or the project's command, a preview with its migrations |
+| `sclaude/lib/qa.sh` | QA on the preview: accepted, missed, a retest, the wait for its verdict |
+| `sclaude/lib/merge.sh` | the merge: what stands in its way, how it is made, the offer and the wait |
+| `sclaude/lib/demo.sh` | the demo recorded again once the preview is green |
 | `sclaude/lib/rollback.sh` | putting production back: the deployment, the down blocks, the incident |
 | `sclaude/lib/picker.sh` | choosing with arrow keys: issues, menus, actions |
 | `sclaude/lib/abandon.sh` | abandoning a feature: the traces here and on GitHub |
@@ -1107,7 +1112,7 @@ the project's `ship` says otherwise (`project_ship_mode` in `project.sh`):
 place of the plain question — "Ship to production anyway?", where QA or a
 check was passed over, is still asked (a merge after QA accepted the very
 preview still deployed is not passed over, even where the preview runs no
-suite: `qa_accepted_now` in `deploy.sh`), and so is "Ship to production, with
+suite: `qa_accepted_now` in `qa.sh`), and so is "Ship to production, with
 what rides along?" where `prod_riders` finds other features' code between
 production and main; `off` reaches no block, records no
 rollback, and closes the issue with `issue_close_done … shipoff` before the
@@ -1192,7 +1197,7 @@ A pull request already handed over for the merge goes back to a draft
 whenever origin's branch moved during a sync (`sync_gate`), even one that
 stopped short after its push: origin then has code no preview and no QA has
 seen. The hand-off is taken back the same way `qa_retest` takes it back
-(`pr_unhandoff` in `deploy.sh`), from the run, from the menu's sync and from a
+(`pr_unhandoff` in `qa.sh`), from the run, from the menu's sync and from a
 step's start.
 
 One kind of conflict needs no session. The deferred logs

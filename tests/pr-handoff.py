@@ -337,7 +337,7 @@ ran, told, w = sweep("Done", old_watch)
 check("timer-no-root-no-handoff", ran, "")
 
 # --- the wiring --------------------------------------------------------------
-deploy = open(os.path.join(LIB, "deploy.sh"), encoding="utf-8").read()
+deploy = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
 check("remind-hands-over", 'pr_qa_handoff "$wt" "$pr" "$issue" || handed=$?' in deploy, True)
 check("remind-merged-done", 'pr_board_set "$pr" "$QA_DONE" "$issue"' in deploy, True)
 github = open(os.path.join(LIB, "github.sh"), encoding="utf-8").read()

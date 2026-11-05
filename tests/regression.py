@@ -559,7 +559,7 @@ check_true("gate-before-done", -1 < gate_at < done_at)
 # already rewound the cycle to step 4, so continuing on to the merge, the
 # clean-up and production offers to delete the worktree the next fixing
 # session needs.
-deploy = open(os.path.join(ROOT, "sclaude", "lib", "deploy.sh"), encoding="utf-8").read()
+deploy = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
 check_true("prod-gate-not-swallowed",
            re.search(r'regression_gate "\$wt" "\$slug" prod \|\| true', deploy) is None)
 # Production does not go through the gate at all, and that is the point.
@@ -1132,8 +1132,8 @@ check_true("qa-poll-is-validated",
 # The wait is no longer in step 4: it closed the review only on a merge, which
 # put the merge ahead of the preview and QA. remind_prod waits for QA, then for
 # the merge, and both say so.
-deploy_sh = open(os.path.join(ROOT, "sclaude", "lib", "deploy.sh"),
-                 encoding="utf-8").read()
+deploy_sh = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
+                 encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
 check_true("review-no-longer-waits-for-the-merge",
            re.search(r'while \[\[ "\$\(branch_pr_state "\$branch"\)" != "MERGED" \]\]', run_sh)
            is None)
@@ -1327,7 +1327,7 @@ check("intruded-local-offset",
 check("intruded-preview-never", intruded("preview", START, END), "NO")
 check("intruded-no-times", intruded("prod", "", ""), "NO")
 
-deploy_src = open(os.path.join(ROOT, "sclaude", "lib", "deploy.sh"), encoding="utf-8").read()
+deploy_src = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
 check_true("intrusion-checked-before-rollback",
            -1 < deploy_src.find("regression_deploy_intruded prod")
            < deploy_src.find("rollback_prod \"$wt\" \"$slug\" --auto"))
@@ -1457,7 +1457,7 @@ def preview_gate(deployed, runs, fix_commits=True, ship_ok=True, verdict=None, n
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
         body += 'REGRESSION_MAX_ATTEMPTS=2; SELF=sclaude\n'
-        for name in ("io", "ui", "steps", "state", "worktree", "regression", "deploy"):
+        for name in ("io", "ui", "steps", "state", "worktree", "regression", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += """
 warn() { :; }; info() { :; }; say() { :; }; alarm() { :; }
@@ -1604,7 +1604,7 @@ def ship_failed(fix_rc, commits, began=""):
         body = "set -uo pipefail\n"
         body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
         body += 'REGRESSION_MAX_ATTEMPTS=2; SELF=sclaude; INSTRUMENTS="%s"\n' % inst
-        for name in ("io", "ui", "steps", "state", "worktree", "regression", "deploy"):
+        for name in ("io", "ui", "steps", "state", "worktree", "regression", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += """
 warn() { :; }; info() { :; }; say() { :; }; alarm() { :; }
@@ -1692,7 +1692,7 @@ def held(regression):
         with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             json.dump({"pr": 7, "regression": {"prod": regression}}, fh)
         body = "set -uo pipefail\nSELF=sclaude\n"
-        for name in ("io", "ui", "steps", "state", "regression", "deploy"):
+        for name in ("io", "ui", "steps", "state", "regression", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
             body += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
         body += ('alarm() { echo "ALARM $*"; }; info() { echo "$*"; }\n'
                  'prod_red_hold "%s" demo\n' % wt)
@@ -1710,7 +1710,7 @@ out = held({"status": "failed", "intruded": "https://other.app"})
 check_true("hold-intruded-says-so", "another release on top" in out
            and "Rolling back would take that release away too" in out)
 
-deploy_src = open(os.path.join(ROOT, "sclaude", "lib", "deploy.sh"), encoding="utf-8").read()
+deploy_src = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m), encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
 remind_src = re.search(r"^remind_prod\(\) \{\n.*?^\}\n", deploy_src, re.S | re.M).group(0)
 hold_at = remind_src.find("prod_red_hold \"$wt\" \"$slug\"")
 check_true("hold-before-everything",

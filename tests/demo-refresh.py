@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 # The demo recorded again with nobody watching (demo_refresh in
-# sclaude/lib/deploy.sh): what goes out, what is kept, what is said.
+# sclaude/lib/demo.sh): what goes out, what is kept, what is said.
 #
 #   * A session that plays a script several times before it is right must
 #     not send each try to the feature's topic and issue: with
@@ -206,10 +206,9 @@ with tempfile.TemporaryDirectory() as root:
     check("replay: still plays the kept demo's own script",
           os.path.isfile(os.path.join(wt, demo.DEMO_DIR, demo.last_main(wt)["id"], "demo.mjs")), True)
 
-    # deploy.sh: the session plays held, sclaude publishes and says what was found.
-    with open(os.path.join(LIB, "deploy.sh")) as fh:
-        deploy = fh.read()
-    body = deploy[deploy.index("demo_refresh() {"):deploy.index("remind_prod() {")]
+    # demo.sh: the session plays held, sclaude publishes and says what was found.
+    with open(os.path.join(LIB, "demo.sh")) as fh:
+        body = fh.read()
     check("deploy: the refresh session plays with the hold on",
           "SCLAUDE_DEMO_HOLD=1" in body, True)
     check("deploy: what was held is published by demo.py publish, picked by demo_refresh.py held",

@@ -10,7 +10,7 @@ key, anything else whole. Nothing printed means the two are equal.
 Exit 0 when both are JSON (an empty file reads as {}); 1 otherwise, after
 one line saying the files differ as text.
 
-Part of sclaude: called by prod_main_unready in deploy.sh.
+Part of sclaude: called by prod_main_unready in vercel.sh.
 """
 
 import json

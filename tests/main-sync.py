@@ -459,7 +459,7 @@ with tempfile.TemporaryDirectory() as tmp:
     git(seed, "push", "-q", "origin", "HEAD:main")
     commit(wt, "app.txt", "one\nfeature\nthree\n", "feature's change")
     git(wt, "push", "-q")
-    wait = ('source "%s/deploy.sh"\nbranch_pr_state() { echo OPEN; }\npoll_pause() { POLL_KEY=""; sleep 1; }\n'
+    wait = ('for _m in deploy shipped vercel qa merge demo; do source "%s/$_m.sh"; done\nbranch_pr_state() { echo OPEN; }\npoll_pause() { POLL_KEY=""; sleep 1; }\n'
             'project_flow_mode() { echo github; }\nregression_duration() { echo 1s; }\n'
             'SYNC_POLL=1\nmerge_wait 9-x 9 7 feat/9-x "" "$PWD"' % LIB)
     rc, out = run(wt, wait, **env)

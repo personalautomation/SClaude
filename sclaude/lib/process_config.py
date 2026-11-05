@@ -96,7 +96,7 @@ VARIANTS = {
     "o_qa": [("qa", {"auto"}, {"lane": "sclaude", "title": "QA: auto", "text": "accepted when the preview is green"})],
     # The demo for QA is recorded only where a person does QA; with qa: auto
     # it is brought up to the code before the last epilogue instead
-    # (demo_refresh in deploy.sh).
+    # (demo_refresh in demo.sh).
     "code": [("demo", {"off"}, {
         "text": "builds it, checks it in Chrome, commits with Requirement: ACn",
         "details": "A fresh session builds from the plan, checks the result in Chrome at the feature's own address, and commits with a Requirement: ACn footer naming the criterion each commit serves. It closes with a report criterion by criterion. demo: off — no demo video is recorded."})],

@@ -1156,7 +1156,7 @@ features_blockers() {
 #
 # It is still only from the column before it (QA_FROM, which is
 # `columns.progress` again): a human who has moved the issue somewhere
-# themselves keeps it there. The one exception is qa_retest (deploy.sh): an
+# themselves keeps it there. The one exception is qa_retest (qa.sh): an
 # issue QA accepted is taken back from Done when a new preview replaces the
 # code they accepted, for the same checkable reason.
 #

@@ -331,7 +331,7 @@ try:
     def unchanged(stage):
         _, _, rc = run_bash(
             'REPO=%s; deploy_unchanged %s %s' % (REPO, WT, stage), tmp,
-            modules=("ui", "state", "worktree", "rollback", "deferred", "deploy"))
+            modules=("ui", "state", "worktree", "rollback", "deferred", "deploy", "shipped", "vercel", "qa", "merge", "demo"))
         return rc == 0
 
     # Nothing recorded: not knowing is not a yes.

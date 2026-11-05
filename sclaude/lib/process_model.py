@@ -492,7 +492,7 @@ REGRESSION_EDGES = [
 ]
 
 # Main and the branch, out of the detailed map: there an S marks where main
-# is checked (worktree.sh before each step, deploy.sh before the preview and
+# is checked (worktree.sh before each step, _failsafe.py before the preview and
 # during the merge wait, sync.sh).
 SYNC_LANES = [("sclaude", "sclaude"), ("session", "Claude session")]
 SYNC_NODES = {

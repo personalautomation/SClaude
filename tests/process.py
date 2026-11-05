@@ -41,6 +41,10 @@ def read(*path):
         return fh.read()
 
 
+# The epilogue and the parts split from it.
+DEPLOY_FAMILY = "".join(read("sclaude", "lib", m) for m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
+
+
 # --- commands ----------------------------------------------------------------
 
 sclaude = read("bin", "sclaude")
@@ -656,7 +660,7 @@ check("a resumed epilogue keeps its red preview",
       'state_set "$estate" preview_red' in run_src
       and '"$prod" "$wt" "$preview_red"' in read("bin", "sclaude"))
 check("the green rewrite is tried on every green pass",
-      read("sclaude", "lib", "deploy.sh").count('status_green_again "$slug"') == 2)
+      DEPLOY_FAMILY.count('status_green_again "$slug"') == 2)
 with tempfile.TemporaryDirectory() as wt:
     os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"))
     out = []
@@ -1281,10 +1285,10 @@ check("the status is written where the map says",
       and len([e for e in process.EDGES if e[1] == "epilogue"]) == 2
       # The copies beside the stops lead nowhere: the run stops there.
       and not any(a == "epi_preview" for a, *_ in process.EDGES)
-      and "Waiting for the merge of PR" in read("sclaude", "lib", "deploy.sh")
-      and read("sclaude", "lib", "deploy.sh").count('run_status "$slug"')
-      - read("sclaude", "lib", "deploy.sh").count('STATUS_LABELS_ONLY=1 run_status') == 7
-      and 'status_green_again "$slug"' in read("sclaude", "lib", "deploy.sh"))
+      and "Waiting for the merge of PR" in DEPLOY_FAMILY
+      and DEPLOY_FAMILY.count('run_status "$slug"')
+      - DEPLOY_FAMILY.count('STATUS_LABELS_ONLY=1 run_status') == 7
+      and 'status_green_again "$slug"' in DEPLOY_FAMILY)
 status_md = read("sclaude", "prompts", "status.md")
 check("the status prompt claims no end of the cycle",
       "through the whole cycle" not in status_md and "closed feature" not in status_md

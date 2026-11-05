@@ -152,7 +152,7 @@ breaks the other silently — grep before you edit:
   `session_git_env` in `sclaude/lib/run.sh` and by `demo_refresh`).
   `sclaude/prompts/code.md` tells step 2 to run `/sdemo`, and again after
   remarks when `demo.py stale` says the code changed;
-  `demo_refresh` in `sclaude/lib/deploy.sh` asks `demo.py stale` (exit 0 with
+  `demo_refresh` in `sclaude/lib/demo.sh` asks `demo.py stale` (exit 0 with
   `stale:` — record again) once the preview's regression is green, before
   `issue_qa_ready`, where `project_flow_mode qa` is not `auto` (a delta and
   the whole demo), or before the last `run_status` where it is (the whole
@@ -359,7 +359,7 @@ breaks the other silently — grep before you edit:
 - The project settings `ship` (`ask`, `auto`, `off`), `previewRegression` and
   `prodRegression` (`full`, `smoke`, `none`) and `demo` (`on`, `off`, read by
   `project_demo_mode`, which `<if:demo>` in `sclaude/prompts/code.md` and
-  `demo_refresh` in `deploy.sh` follow) are listed in `CHOICES` in
+  `demo_refresh` in `demo.sh` follow) are listed in `CHOICES` in
   `sclaude/lib/config_menu.py`, explained in `sclaude/config.example.json`,
   read by `project_ship_mode`/`project_stage_regression` in
   `sclaude/lib/project.sh` and by `setting` in `sclaude/lib/process_config.py`. The

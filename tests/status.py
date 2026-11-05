@@ -377,9 +377,9 @@ shell = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 
 github = shell
-deploy_sh = io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 "..", "sclaude", "lib", "deploy.sh"),
-                    encoding="utf-8").read()
+deploy_sh = "".join(io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                         "..", "sclaude", "lib", m), encoding="utf-8").read()
+                    for m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
 
 
 def shell_const(name):

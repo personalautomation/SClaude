@@ -235,8 +235,8 @@ try:
     check("stop-once", ("first" in out, "second-no" in out), (True, True))
     run_step = re.search(r"^run_step\(\) \{\n(.*?)^\}\n", RUN, re.S | re.M).group(1)
     check("stop-at-run-step-top", "stop_asked" in run_step.split("\n  model=")[0], True)
-    with open(os.path.join(LIB, "deploy.sh")) as fh:
-        deploy = fh.read()
+    deploy = "".join(open(os.path.join(LIB, _m)).read()
+        for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
     remind = re.search(r"^remind_prod\(\) \{\n(.*?)\n\n", deploy, re.S | re.M)
     check("stop-at-remind-prod", bool(remind) and "stop_asked" in remind.group(1), True)
 finally:

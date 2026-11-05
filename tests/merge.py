@@ -25,8 +25,8 @@ import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
-deploy = open(os.path.join(ROOT, "sclaude", "lib", "deploy.sh"),
-              encoding="utf-8").read()
+deploy = "".join(open(os.path.join(ROOT, "sclaude", "lib", _m),
+              encoding="utf-8").read() for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
 run_sh = "".join(open(os.path.join(ROOT, "sclaude", "lib", m), encoding="utf-8").read()
                  for m in ("run.sh", "review_round.sh"))
 github = open(os.path.join(ROOT, "sclaude", "lib", "github.sh"),

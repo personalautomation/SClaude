@@ -178,8 +178,8 @@ check("resume-done-not-over-a-red-production",
       re.search(r'\[\[ "\$ended" == "\$\(prod_pass_mark "\$wt"\)" \]\] \\\n'
                 r'\s*&& \[\[ "\$\(regression_status "\$wt" prod\)" != failed \]\] && prod_carries_feature "\$wt"; \}',
                 resume) is not None, True)
-with open(os.path.join(LIB, "deploy.sh")) as fh:
-    deploy_src = fh.read()
+deploy_src = "".join(open(os.path.join(LIB, _m)).read()
+    for _m in ("deploy.sh", "shipped.sh", "vercel.sh", "qa.sh", "merge.sh", "demo.sh"))
 m = re.search(r"^remind_prod\(\) \{\n.*?^\}\n", deploy_src, re.S | re.M)
 remind = m.group(0) if m else ""
 mark_at = remind.rfind("prod_pass.ended")

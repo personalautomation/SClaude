@@ -394,7 +394,7 @@ rollback_migrations_sql() {
 
   # The classification goes in through the environment and the script through a
   # heredoc, which is this library's shape wherever both are needed (see
-  # merge_readiness in deploy.sh). `python3 - <<PY` reads the *script* from
+  # merge_readiness in merge.sh). `python3 - <<PY` reads the *script* from
   # stdin, so a pipeline into it never reaches the code — and an apostrophe in
   # a `python3 -c '...'` argument would close the literal, which CLAUDE.md
   # records as its own trap. This form has neither problem.

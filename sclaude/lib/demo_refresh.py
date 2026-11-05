@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What `demo_refresh` in deploy.sh reads from a feature's demo history
+"""What `demo_refresh` in demo.sh reads from a feature's demo history
 after the session that records the demo again: the recordings it made are
 the ones past the count taken before it.
 

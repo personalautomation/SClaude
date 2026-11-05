@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# A bench for prod_drift_report (sclaude/lib/deploy.sh): the check that says
+# A bench for prod_drift_report (sclaude/lib/shipped.sh): the check that says
 # when production is not serving what origin/main holds, and when main holds
 # commits that never reached origin.
 #
@@ -66,7 +66,7 @@ def report(repo, prod_line, linked=True):
     elif os.path.isdir(vercel):
         os.rmdir(vercel)
     script = 'REPO="%s"\n' % repo
-    for name in ("io", "project", "rollback", "deploy", "deferred"):
+    for name in ("io", "project", "rollback", "deploy", "shipped", "vercel", "qa", "merge", "demo", "deferred"):
         script += 'source "%s/sclaude/lib/%s.sh"\n' % (ROOT, name)
     script += 'warn() { echo "W $*"; }; info() { echo "I $*"; }\n'
     script += "vercel_prod_current() { printf '%%s' '%s'; }\n" % prod_line

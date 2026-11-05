@@ -69,7 +69,7 @@ def run(tmp, columns, watch=None, unticked="", board=True, names=None,
                  'PROGRESS_FROM=""; QA_FROM=""; QA_TO=""; QA_DONE=""\n'
     body = "set -uo pipefail\n"
     body += 'BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; OFF=""\n'
-    for name in ("io", "ui", "steps", "state", "project", "watch", "deploy"):
+    for name in ("io", "ui", "steps", "state", "project", "watch", "deploy", "shipped", "vercel", "qa", "merge", "demo"):
         body += 'source "%s/%s.sh"\n' % (LIB, name)
     body += ('warn() { echo "$*"; }\n'
              'info() { echo "$*"; }\n'

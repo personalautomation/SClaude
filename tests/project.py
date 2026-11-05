@@ -240,6 +240,8 @@ try:
     for module, needles in (
             ("regression.sh", [".vercel.app", "REGRESSION_LOCAL_PARTS="]),
             ("deploy.sh", ["supabase/migrations"]),
+            ("vercel.sh", ["supabase/migrations"]),
+            ("shipped.sh", ["supabase/migrations"]),
             ("rollback.sh", ["POSTGRES_URL_NON_POOLING", ".env.prod"]),
     ):
         path = os.path.join(LIB, module)

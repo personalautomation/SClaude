@@ -4470,8 +4470,8 @@ finally:
 from keepawake import telegramd  # noqa: E402
 _code = tempfile.mkdtemp()
 try:
-    _saved_dirs = telegramd.CODE_DIRS
-    telegramd.CODE_DIRS = (_code,)
+    _saved_dirs, _saved_files = telegramd.CODE_DIRS, telegramd.CODE_FILES
+    telegramd.CODE_DIRS, telegramd.CODE_FILES = (_code,), ()
     with open(os.path.join(_code, "a.py"), "w") as fh:
         fh.write("x = 1\n")
     os.utime(os.path.join(_code, "a.py"), (1000, 1000))
@@ -4486,10 +4486,22 @@ try:
     _after = telegramd.code_stamp()
     check_true("a file that is not code does not", _after < 10 ** 10)
 finally:
-    telegramd.CODE_DIRS = _saved_dirs
+    telegramd.CODE_DIRS, telegramd.CODE_FILES = _saved_dirs, _saved_files
     shutil.rmtree(_code, ignore_errors=True)
-# The bot runs itself again only on code that imports, tried in a child.
-check_true("the checkout's own code imports", telegramd.new_code_runs())
+# The bot runs itself again only on code that imports, tried in a child: a
+# copy of the checkout imports, and stops importing with one module broken.
+_copy = tempfile.mkdtemp()
+try:
+    for _part in ("keepawake", os.path.join("sclaude", "lib")):
+        shutil.copytree(os.path.join(telegramd.ROOT, _part), os.path.join(_copy, _part),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy(os.path.join(telegramd.ROOT, "statusline.py"), _copy)
+    check_true("a checkout's code that imports is run", telegramd.new_code_runs(_copy))
+    with open(os.path.join(_copy, "sclaude", "lib", "core", "config_menu.py"), "a") as fh:
+        fh.write("\ndef broken(:\n")
+    check("a module broken mid-edit is not", telegramd.new_code_runs(_copy), False)
+finally:
+    shutil.rmtree(_copy, ignore_errors=True)
 
 if failures:
     print("FAILED: %d" % len(failures))

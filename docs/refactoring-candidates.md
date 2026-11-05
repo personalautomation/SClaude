@@ -87,6 +87,18 @@ bench naming the modules it guards, which `tests/run --changed` matches on.
 `tests/pane.py` is timing-sensitive: under the parallel suite's load its
 `[r]` checks fail about one run in three; alone it passes.
 
+## Long-running processes and new code
+
+The bot runs itself again in place when its code or sclaude's library
+changes and the new code imports. The gate (`sclaude-proxy --gate`), which
+serves the Mini App and imports keepawake's `webmenu` and sclaude's modules on
+first use, does not: while the phone keeps the Mini App open it can serve old
+`webmenu` code beside sclaude modules imported new. It idles out otherwise,
+and this predates the refactoring. A re-exec like the bot's, tried on code
+that loads, would close it; the main proxy, which loads neither, should not
+take it on (a re-exec there drops its idle bookkeeping and live connections,
+and leaves its spawned children unreaped).
+
 ## Smaller cleanups
 
 - Python heredocs inside shell (some 80 `python3 -`/`python3 -c` sites):

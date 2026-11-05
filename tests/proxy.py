@@ -842,10 +842,6 @@ def main():
         os.makedirs(os.path.join(watched, "bin"))
         shutil.copytree(os.path.join(os.path.dirname(PROXY), "..", "sclaude", "lib"),
                         os.path.join(watched, "sclaude", "lib"))
-        # And keepawake, which the Mini App's code is and the check loads.
-        shutil.copytree(os.path.join(os.path.dirname(PROXY), "..", "keepawake"),
-                        os.path.join(watched, "keepawake"))
-        shutil.copy(os.path.join(os.path.dirname(PROXY), "..", "statusline.py"), watched)
         copy = os.path.join(watched, "bin", "sclaude-proxy")
         shutil.copy(PROXY, copy)
         port = free_port()
@@ -861,24 +857,10 @@ def main():
             time.sleep(1.5)
             wait_for(lambda: answers_on(port), 5)
             check("a code change is picked up, and it answers again", answers_on(port), True)
-            # A library module left broken: it goes on serving the old code.
-            broken = os.path.join(watched, "sclaude", "lib", "tree", "dev_login.py")
-            with open(broken) as fh:
-                good = fh.read()
-            with open(broken, "a") as fh:
-                fh.write("\ndef broken(:\n")
-            os.utime(broken, (time.time() + 10, time.time() + 10))
-            time.sleep(1.5)
-            check("a broken change keeps it serving", answers_on(port), True)
-            with open(broken, "w") as fh:
-                fh.write(good)
-            os.utime(broken, (time.time() + 15, time.time() + 15))
         finally:
             proc.terminate()
             _, err = proc.communicate(timeout=5)
-        check("it says it restarted", b"restarting on the new one" in err, True)
-        check("and that it stayed on the old code when the new did not load",
-              b"does not load; staying on the old one" in err, True)
+        check("it says it restarted", b"its code changed" in err, True)
         # Started by the socket, as systemd does it: the same process goes on,
         # on the socket it was handed, since an exit takes the unit's dev
         # servers down with it.
@@ -897,7 +879,7 @@ def main():
             # The socket listens before the proxy is up on it: give it time
             # to read its own file first.
             time.sleep(1)
-            os.utime(copy, (time.time() + 30, time.time() + 30))
+            os.utime(copy, (time.time() + 10, time.time() + 10))
             time.sleep(1.5)
             check("socket-started: still the same process", proc.poll(), None)
             check("socket-started: answers on the new code", answers_on(port), True)

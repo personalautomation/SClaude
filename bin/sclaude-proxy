@@ -1106,6 +1106,7 @@ def process_map():
             process = importlib.reload(process)
         except Exception as exc:  # a broken edit: keep serving the last good one
             sys.stderr.write("process map not reloaded: %s\n" % exc)
+            _PROCESS_SEEN[0] = stamp   # tried again on the next change, not every request
             return process
     _PROCESS_SEEN[0] = stamp
     return process
@@ -1931,34 +1932,15 @@ OWN_FILE = os.path.realpath(__file__)
 
 
 def own_mtime():
-    """The newest of its own file, sclaude's library and keepawake — the Mini
-    App's code, which the gate imports on first use and would otherwise keep
-    old beside library modules imported new."""
-    root = os.path.dirname(os.path.dirname(OWN_FILE))
+    """The newest of its own file and the library modules it imports."""
     times = []
-    try:
-        times.append(os.stat(OWN_FILE).st_mtime)
-    except OSError:
-        pass
-    for top in (os.path.join(root, "sclaude", "lib"), os.path.join(root, "keepawake")):
-        for folder, _dirs, names in os.walk(top):
-            for name in names:
-                if name.endswith(".py"):
-                    try:
-                        times.append(os.stat(os.path.join(folder, name)).st_mtime)
-                    except OSError:
-                        pass
+    for path in (OWN_FILE,) + tuple(os.path.realpath(getattr(m, "__file__", OWN_FILE))
+                                    for m in (feature_db, dev_login, dev_login.envs)):
+        try:
+            times.append(os.stat(path).st_mtime)
+        except OSError:
+            pass
     return max(times) if times else None
-
-
-def new_code_runs():
-    """Whether the code on disk now loads, tried in a child (--check): a file
-    caught half-written keeps this process serving instead of crash-looping."""
-    try:
-        return subprocess.run([sys.executable, OWN_FILE, "--check"], capture_output=True,
-                              timeout=60).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
 
 
 async def watch_own_code(server, started):
@@ -1966,10 +1948,6 @@ async def watch_own_code(server, started):
         await asyncio.sleep(float(os.environ.get("SCLAUDE_PROXY_WATCH") or 10))
         now = own_mtime()
         if now is not None and now != started:
-            if not new_code_runs():
-                sys.stderr.write("sclaude-proxy: its code changed but does not load; staying on the old one\n")
-                started = now
-                continue
             sys.stderr.write("sclaude-proxy: its code changed; restarting on the new one\n")
             sys.stderr.flush()
             if os.environ.get("LISTEN_PID") == str(os.getpid()):
@@ -1993,9 +1971,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    if sys.argv[1:2] == ["--check"]:
-        webmenu()   # the module level above has loaded the rest
-        sys.exit(0)
     try:
         asyncio.run(gate_main() if sys.argv[1:2] == ["--gate"] else main())
     except KeyboardInterrupt:

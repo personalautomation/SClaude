@@ -63,8 +63,11 @@ def load_env():
     return token, chat
 
 
-CODE_DIRS = (os.path.dirname(os.path.abspath(__file__)),
-             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sclaude", "lib"))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# keepawake, sclaude's library, and statusline.py at the root, which
+# sessions.py imports.
+CODE_DIRS = (os.path.join(ROOT, "keepawake"), os.path.join(ROOT, "sclaude", "lib"))
+CODE_FILES = (os.path.join(ROOT, "statusline.py"),)
 
 
 def code_stamp():
@@ -76,6 +79,11 @@ def code_stamp():
     So a change to any of them makes the bot run itself again on the new code
     (main), once a child has shown that the new code imports."""
     newest = 0.0
+    for path in CODE_FILES:
+        try:
+            newest = max(newest, os.stat(path).st_mtime)
+        except OSError:
+            pass
     for top in CODE_DIRS:
         for folder, _dirs, files in os.walk(top):
             for name in files:
@@ -87,11 +95,10 @@ def code_stamp():
     return newest
 
 
-def new_code_runs():
+def new_code_runs(root=ROOT):
     """Whether the code on disk now imports, tried in a child: a file caught
     half-written mid-edit keeps this process going instead of crash-looping
     the next. The sclaude modules the bot loads on first use are tried too."""
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     try:
         return subprocess.run(
             [sys.executable, "-c",
@@ -159,13 +166,18 @@ def main():
                 started = stamp
                 continue
             # Confirmed first, so that the new process is not handed the
-            # updates this one has already handled; tried again next turn
+            # updates this one has already handled; tried again, backing off,
             # when it fails.
             try:
                 bot.call("getUpdates", offset=bot.offset, timeout=0)
             except Exception as exc:
-                log.warning("confirming before the restart: %s", exc)
+                log.warning("confirming before the restart: %s, pausing %d s", exc, backoff)
                 time.sleep(backoff)
+                backoff = min(backoff * 2, botapi.BACKOFF_MAX)
+                continue
+            # A stop that came meanwhile is a stop; files still landing are
+            # checked again on the next turn.
+            if bot.stopped or code_stamp() != stamp:
                 continue
             log.info("the bot's code changed; restarting on the new one")
             # In place, not by exiting: systemd would kill everything left in

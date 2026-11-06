@@ -308,7 +308,7 @@ run_step() {
     elif [[ "$review_mode" == "local" ]]; then
       say "${GREEN}✓ The review on this machine found nothing in PR #$pr; every check is green and nobody commented.${OFF}"
     elif [[ "$review_mode" == "off" ]]; then
-      warn "  PR #$pr was NOT reviewed: the project's .sclaude/config.json turns the review off."
+      warn "  PR #$pr was NOT reviewed: the project config turns the review off ($SELF config)."
       info "  Every check is green and nobody commented."
     else
       warn "  PR #$pr was NOT reviewed: the review workflow skipped it (marked not-reviewed)."

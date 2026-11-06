@@ -12,11 +12,26 @@
 #   config_menu.py choices <key>                   value<TAB>meaning, for a key
 #                                                  the screen can set itself
 #   config_menu.py default <key>                   what an absent key means
-#   config_menu.py set <config> <key> <value>      write one such value
+#   config_menu.py set <config> <key> <value>      write one such value, for
+#                                                  this machine (below)
+#   config_menu.py mine <config> <key>             this machine's choice, or 1
+#   config_menu.py recommended <config> <key>      the committed file's choice
+#   config_menu.py effective <config>              the whole, with this machine's
+#                                                  choices over it, as JSON
 #
 # Only a section with fixed choices is set from the screen; the rest are
 # structures (commands, environments, a database) that the screen shows and the
 # person edits in the file. A setter for those would be a second, worse editor.
+#
+# The committed .sclaude/config.json holds what the project recommends. A
+# choice set from the screen (or the bot, through `sclaude config set`) is this
+# machine's and goes to .sclaude/local/config.json beside it, which git and
+# every upload are kept out of (scratch.sh), and wins over the committed one
+# key by key (project_get in project.sh). Written into the committed file, such
+# an edit was a change in main's working tree that origin lacked, and
+# production stopped on it (prod_main_unready in vercel.sh) until somebody
+# pushed the person's taste to the whole team or threw it away. A choice set
+# back to what the project recommends leaves the local file.
 import json
 import os
 import re
@@ -150,11 +165,51 @@ def first_sentence(text):
     return text if end < 0 else text[:end + 1]
 
 
+def local_path(config):
+    """This machine's choices: .sclaude/local/config.json beside the
+    committed .sclaude/config.json."""
+    return os.path.join(os.path.dirname(config), "local", "config.json")
+
+
+def overrides(config):
+    """{key: value} of the choices set for this machine alone — only keys
+    with choices, and only values the key can take: a stray structure or a
+    word nobody offers there is not read."""
+    found = load(local_path(config)) or {}
+    return {k: v for k, v in found.items()
+            if k in CHOICES and v in [c for c, _ in CHOICES[k]]}
+
+
+def unreadable(config):
+    """True when the committed file is there and does not read as a config."""
+    return load(config) is None and os.path.exists(config)
+
+
+def effective(config):
+    """The committed config with this machine's choices over it — over
+    nothing when the committed file does not read, as project_get still
+    reads them then."""
+    data = dict(load(config) or {})
+    data.update(overrides(config))
+    return data
+
+
+def recommended(config, key):
+    """What the committed config says for a key, or what its absence means."""
+    value = (load(config) or {}).get(key)
+    return value if isinstance(value, str) else default(key)
+
+
+MINE = " (this machine)"
+
+
 def rows(config, example):
-    data = load(config) or {}
+    data = effective(config)
+    mine = overrides(config)
     known = explanations(example)
     for key, text in known.items():
-        print("%s\t%s — %s" % (key, summary(key, data.get(key)), first_sentence(text)))
+        print("%s\t%s%s — %s" % (key, summary(key, data.get(key)), MINE if key in mine else "",
+                                 first_sentence(text)))
     # A section sclaude does not describe: shown, so the screen is the whole
     # file, but nothing reads it.
     for key in data:
@@ -163,7 +218,7 @@ def rows(config, example):
 
 
 def show(config, example, key):
-    data = load(config) or {}
+    data = effective(config)
     print(explanations(example).get(key, "No explanation for %s." % key))
     print()
     if key in data:
@@ -171,6 +226,9 @@ def show(config, example, key):
         print(json.dumps(data[key], indent=2, ensure_ascii=False))
     else:
         print("Not set in %s." % config)
+    if key in overrides(config):
+        print("Set on this machine, in %s; the project recommends %s."
+              % (local_path(config), recommended(config, key)))
 
 
 def choices(key):
@@ -179,18 +237,29 @@ def choices(key):
 
 
 def set_value(config, key, value):
+    """The choice for this machine, in local_path(config); the key leaves it
+    when the value is what the project recommends."""
     if value not in [v for v, _ in CHOICES.get(key, [])]:
         sys.stderr.write("%s cannot be %r\n" % (key, value))
         return 1
-    data = load(config)
+    if unreadable(config):
+        # What the project recommends cannot be told, so neither can whether
+        # this choice is the person's own: nothing changes until it is fixed.
+        sys.stderr.write("cannot read %s as JSON; not changed\n" % config)
+        return 1
+    mine = local_path(config)
+    data = load(mine)
     if data is None:
-        if os.path.exists(config):
-            sys.stderr.write("cannot read %s as JSON; not changed\n" % config)
+        if os.path.exists(mine):
+            sys.stderr.write("cannot read %s as JSON; not changed\n" % mine)
             return 1
         data = {}
-    data[key] = value
-    os.makedirs(os.path.dirname(config) or ".", exist_ok=True)
-    with open(config, "w", encoding="utf-8") as fh:
+    if value == recommended(config, key):
+        data.pop(key, None)
+    else:
+        data[key] = value
+    os.makedirs(os.path.dirname(mine) or ".", exist_ok=True)
+    with open(mine, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
     return 0
@@ -205,6 +274,21 @@ def main(argv):
         choices(argv[1])
     elif len(argv) >= 2 and argv[0] == "default":
         print(default(argv[1]))
+    elif len(argv) >= 3 and argv[0] == "mine":
+        # This machine's choice for a key, for project_get; 1 when none.
+        mine = overrides(argv[1])
+        if argv[2] not in mine:
+            return 1
+        print(mine[argv[2]])
+    elif len(argv) >= 2 and argv[0] == "effective":
+        # The config as sclaude reads it on this machine, for a session's copy.
+        # 1 when the committed file does not read: the caller hands the
+        # session that file as it is, so that it sees what is wrong.
+        if unreadable(argv[1]):
+            return 1
+        print(json.dumps(effective(argv[1]), indent=2, ensure_ascii=False))
+    elif len(argv) >= 3 and argv[0] == "recommended":
+        print(recommended(argv[1], argv[2]))
     elif len(argv) >= 4 and argv[0] == "set":
         return set_value(argv[1], argv[2], argv[3])
     else:

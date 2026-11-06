@@ -442,15 +442,17 @@ cmd_deferred() {
   done < <(deferred_dirs "$wt")
 
   done_file="${TMPDIR:-/tmp}/sclaude-deferred.done"
-  # The config as the main checkout holds it, set and maybe not committed,
-  # copied into the tree's own scratch: the session cannot read the main
+  # The config as sclaude reads it on this machine — the main checkout's,
+  # with the choices `sclaude config` keeps outside git over it — copied
+  # into the tree's own scratch: the session cannot read the main
   # checkout, and opening it there would open it for writing too. Hidden
   # from git first, so that no `git add -A` of the session takes it along;
   # `{}` when there is none, which reads as every setting at its default.
   local config="$wt/.sclaude/local/main-config.json"
   scratch_hide "$wt"
   mkdir -p "${config%/*}"
-  cp "$root/.sclaude/config.json" "$config" 2>/dev/null || echo '{}' > "$config"
+  python3 "$LIB/core/config_menu.py" effective "$root/.sclaude/config.json" > "$config" 2>/dev/null \
+    || cp "$root/.sclaude/config.json" "$config" 2>/dev/null || echo '{}' > "$config"
   prompt="$(D_FILES="${list%$'\n'}" D_STAMPS="${stamps%$'\n'}" D_WT="$wt" D_BRANCH="$branch" \
     D_RULES="$(product_rules_dir "$wt")" D_INSTRUMENTS="$INSTRUMENTS" \
     D_DONE="$done_file" D_TODAY="$(date +%F)" D_WORKSHOP="$(workshop_rules "$wt")" \

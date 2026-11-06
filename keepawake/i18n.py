@@ -517,16 +517,20 @@ STRINGS = {
     "cfg.unknown":       ("Эту секцию sclaude не читает.", "sclaude does not read this section."),
     "cfg.now":           ("Сейчас:", "Now:"),
     "cfg.notset":        ("<i>Не задано.</i>", "<i>Not set.</i>"),
-    "cfg.commit":        ("<i>Файл — проекта: изменение остаётся в рабочем дереве основного "
-                          "checkout, закоммитьте его там.</i>",
-                          "<i>The file is the project's: a change stays in the main "
-                          "checkout's working tree — commit it there.</i>"),
+    "cfg.commit":        ("<i>Выбор — только для этого компьютера: он ложится в "
+                          "<code>.sclaude/local/config.json</code>, вне git, поверх того, "
+                          "что проект рекомендует в <code>.sclaude/config.json</code>.</i>",
+                          "<i>A choice is for this machine alone: it goes to "
+                          "<code>.sclaude/local/config.json</code>, outside git, over what "
+                          "the project recommends in <code>.sclaude/config.json</code>.</i>"),
+    "cfg.mine":          ("📌 Задано на этом компьютере; проект рекомендует <b>%(value)s</b>.",
+                          "📌 Set on this machine; the project recommends <b>%(value)s</b>."),
     "cfg.infile":        ("<i>Правится в файле — в терминале <code>sclaude config</code> открывает его "
                           "последней строкой.</i>",
                           "<i>Edited in the file — at the terminal the last row of "
                           "<code>sclaude config</code> opens it.</i>"),
-    "cfg.set":           ("✅ %(section)s: <b>%(value)s</b> — в конфиге проекта.",
-                          "✅ %(section)s: <b>%(value)s</b> — in the project's config."),
+    "cfg.set":           ("✅ %(section)s: <b>%(value)s</b> — на этом компьютере.",
+                          "✅ %(section)s: <b>%(value)s</b> — on this machine."),
     "cfg.same":          ("%(section)s уже <b>%(value)s</b>.", "%(section)s is <b>%(value)s</b> already."),
     "cfg.notchanged":    ("⚠️ %(section)s не изменён — подробности в журнале бота.",
                           "⚠️ %(section)s not changed — the bot's log says why."),

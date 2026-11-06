@@ -267,7 +267,8 @@ is stopped, database included (data kept), and starts again on the next visit.
 
 | what | for | where | in git | uploaded by a deploy |
 |---|---|---|---|---|
-| `.sclaude/config.json` | what the product is | the product | yes | no harm if it is |
+| `.sclaude/config.json` | what the product is, and the settings it recommends | the product | yes | no harm if it is |
+| `.sclaude/local/config.json` | the settings you chose in `sclaude config` or the bot, over the recommended ones | the product's main checkout | never | never |
 | `.sclaude/team/`, `.sclaude/people/<name>/` | rules, prompt additions, deferred findings | the product | yes | no harm if it is |
 | `.sclaude/local/feature/` | one feature's working state: the plan, logs, its database settings | the feature's worktree | never | never |
 | `.sclaude/local/demo/` | the feature's recorded demos: videos, steps, the page | the feature's worktree | never | never |

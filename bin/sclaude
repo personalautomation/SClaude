@@ -216,7 +216,7 @@ ${BOLD}$SELF${OFF} — an orchestrator for the feature development cycle
   $SELF <name>          continue a feature from its current step
   $SELF status          a table of every feature and its step
   $SELF doctor          what this machine has and lacks, with the fix for each gap
-  $SELF config          the project's .sclaude/config.json, each section explained; sets the review mode
+  $SELF config          the project's settings, each explained; a choice set here stays on this machine
   $SELF dev [name]      start the dev server (no name — for the current directory)
   $SELF dev --stop [name]  stop the dev server of a feature (or of this directory)
   $SELF actions [name]  every action for one feature, in one list

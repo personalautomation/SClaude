@@ -542,7 +542,10 @@ sections of `.sclaude/config.json` with their summary and the explanation from
 `config.example.json` (both through `config_menu.py`, as the terminal reads
 them). The ones with choices are set through `sclaude config set`, so that what
 a choice implies — `review_actions_sync` — happens as at the terminal; the rest
-are shown. It is in the chat's handler, so the chat and the page have it alike.
+are shown. A choice is this machine's (`.sclaude/local/config.json`, outside
+git, over the committed file — `effective` and `overrides` in
+`config_menu.py`): 📌 marks one on the list, and its screen says what the
+project recommends. It is in the chat's handler, so the chat and the page have it alike.
 
 **A new feature has its topic from the start.** "✨ New feature" opens a topic
 at once, so the questions about the name already go there (`new_feature_topic`);

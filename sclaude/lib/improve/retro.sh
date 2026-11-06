@@ -123,10 +123,12 @@ PY
 
   local terminal session done_file prompt
   terminal="$(term_render "$wt" 2>/dev/null || true)"
-  # The project's config as the main checkout holds it — `sclaude config`
-  # writes there and leaves it uncommitted — copied where the session reads.
+  # The project's config as sclaude reads it on this machine — the main
+  # checkout's, with the choices `sclaude config` keeps outside git over it —
+  # copied where the session reads.
   local config="$wt/.sclaude/local/feature/main-config.json"
-  cp "$REPO/.sclaude/config.json" "$config" 2>/dev/null || echo '{}' > "$config"
+  python3 "$LIB/core/config_menu.py" effective "$REPO/.sclaude/config.json" > "$config" 2>/dev/null \
+    || cp "$REPO/.sclaude/config.json" "$config" 2>/dev/null || echo '{}' > "$config"
   session="${last:-$(new_session_id)}"
   done_file="${TMPDIR:-/tmp}/sclaude-retro-$slug.done"
   rm -f "$done_file"

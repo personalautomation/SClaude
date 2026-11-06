@@ -393,6 +393,13 @@ breaks the other silently — grep before you edit:
   `tests/regression.py`, `tests/merge.py` and `tests/process.py` check each
   side. A word changed on one side alone ships what was set to be asked, or
   runs a suite the map says is gone.
+  A choice set from `sclaude config` or the bot is this machine's, in
+  `.sclaude/local/config.json` beside the committed file (`local_path`,
+  `overrides` in `config_menu.py`), and is read first by `project_get`,
+  `review_mode` in `pr_context.py`, `config_of` in `process_config.py` and
+  `team_mode` in `dora_team.py`; `tests/config-menu.py` checks the writer
+  and `project_get`. A reader that skips it acts on the project's
+  recommendation while the screen shows the person's choice.
 
   <!-- Added by Claude on 2026-11-03 at the user's request, with the deploy
   settings. -->

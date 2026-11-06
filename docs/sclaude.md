@@ -2365,7 +2365,9 @@ The rest:
   (`sclaude-team-factors-v1`), so the page does not change on every load.
   Clearing that key draws them again. `metricsTeam` in the product's
   `.sclaude/local/config.json` — outside git — wins over the committed one,
-  so one machine can show the demo while the team's page stays real.
+  as it does for every setting with choices (`overrides` in
+  `config_menu.py`, `project_get`), so one machine can show the demo while
+  the team's page stays real.
   Each person also gets a card of their strong sides with Claude and what to
   work on: the adoption and effectiveness figures scored by their bands, the
   best three and the weakest three, each weak one with a habit to try

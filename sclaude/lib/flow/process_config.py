@@ -241,8 +241,8 @@ def _variant_details(cfg):
 
 def config_of(tree):
     """The project's config as sclaude reads it for a tree (project_config,
-    project_get): the main checkout's, with a key it lacks taken from the
-    tree's own copy. {} when neither can be read."""
+    project_get): the main checkout's, this machine's choices over it, with a
+    key it lacks taken from the tree's own copy. {} when neither can be read."""
     main = tree
     try:
         with open(os.path.join(tree, ".git")) as fh:
@@ -273,6 +273,9 @@ def config_of(tree):
                 out[key] = value
         return out
     first, second = read(main), (read(tree) if main != tree else {})
+    # This machine's choices, outside git, over the main checkout's.
+    import config_menu
+    first.update(config_menu.overrides(os.path.join(main, ".sclaude", "config.json")))
     cfg = fill(first, second)
     # A section read whole (project_config_with): the board's, from the file
     # that has it.

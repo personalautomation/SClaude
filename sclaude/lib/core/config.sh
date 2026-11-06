@@ -12,8 +12,12 @@
 # `metricsTeam` — is set here; the rest are structures the screen shows and
 # the person edits in the file, which the last row opens.
 #
-# The file is the project's, committed in the product: a change made here is
-# a change in the main checkout's working tree, to commit like any other.
+# The committed file is what the project recommends. A choice made here is
+# this machine's: it goes to .sclaude/local/config.json beside it, outside
+# git, and wins over the committed one (set_value in config_menu.py,
+# project_get in project.sh) — so main's tree stays what origin holds and
+# production is not stopped by a person's taste (prod_main_unready). The
+# structures are still edited in the committed file, the last row's.
 
 # The config's path in the main checkout: a value set here is the project's,
 # not one feature's.
@@ -117,9 +121,18 @@ config_section() {
 #   config_set <file> <key> <value>
 config_set() {
   local file="$1" key="$2" value="$3"
+  # Hidden from git before the local file is made: on a product no feature
+  # has started in yet, nothing else has, and a `git add -A` in main would
+  # publish this machine's choice to the team.
+  scratch_hide "$REPO"
   if python3 "$LIB/core/config_menu.py" set "$file" "$key" "$value"; then
-    say "${GREEN}✓ $key: $value${OFF} — in $file"
-    info "  Commit it in the project: the file is the project's."
+    say "${GREEN}✓ $key: $value${OFF} — on this machine"
+    if [[ "$value" == "$(python3 "$LIB/core/config_menu.py" mine "$file" "$key" 2>/dev/null)" ]]; then
+      info "  In ${file%/config.json}/local/config.json, outside git; the project"
+      info "  recommends $(python3 "$LIB/core/config_menu.py" recommended "$file" "$key") (${file#"$REPO"/})."
+    else
+      info "  That is what the project recommends (${file#"$REPO"/}): nothing of this machine's own is left."
+    fi
     if [[ "$key" == "review" ]]; then review_actions_sync "$REPO" "$value"; fi
   else
     warn "  Not changed."

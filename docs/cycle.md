@@ -177,8 +177,14 @@ default: it waits for a yes or a no, and reads "Merge it **unchecked**?" when
 QA never saw the feature.
 
 A product may hand either decision back to sclaude, in `.sclaude/config.json`
-or from `sclaude config`. The main checkout's copy is read for every feature,
-and a change to it left uncommitted there holds production up until it is what origin holds: the stop lists where the two differ, and you commit and push the change or take origin's copy. `qa` and `merge` each take `github` (a person does it
+or from `sclaude config`. The committed file is what the project recommends; a
+choice made in `sclaude config` (or the bot's 🧩) is your machine's and goes to
+`.sclaude/local/config.json` beside it, outside git, where it wins key by key.
+Setting a choice back to the recommended value removes it from there. The main
+checkout's copy is read for every feature. A hand edit of the committed file
+left uncommitted there holds production up until it is what origin holds: the
+stop lists where the two differ, and you commit and push the change, or take
+origin's copy and set your own choice with `sclaude config`. `qa` and `merge` each take `github` (a person does it
 on GitHub; sclaude waits), `both` (the same, or a key in sclaude's wait — `a`
 accepts, `m` merges) and `auto` (sclaude does it). By default QA is `github` and
 the merge `both`. An acceptance given by sclaude says so in a comment on the

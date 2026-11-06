@@ -30,7 +30,7 @@ FILES = [
     ("closing", "the worktree's removal has begun: no lazy start, the menu offers it no more"),
     ("terminal", "the terminal recordings that touched the feature, one path a line"),
     ("terminal.txt", "those recordings played back into text"),
-    ("main-config.json", "the main checkout's project config, copied where the retrospective reads it"),
+    ("main-config.json", "the project config as this machine reads it (the main checkout's, its local choices over it), copied where the retrospective reads it"),
 
     # --- friction --------------------------------------------------------------
     ("friction.log", "what got in a session's way, for its friction review"),

@@ -240,9 +240,11 @@ say_lines() {
 # or dropped on the person's behalf: whether it belongs on origin is theirs to
 # say.
 #
-# sclaude's own config is held to the same: the settings every feature reads
-# from this tree (project_config), edited here by hand or through `sclaude
-# config`, must be what origin holds before production goes. An edit here and
+# sclaude's own config is held to the same: the committed settings every
+# feature reads from this tree (project_config), edited here by hand, must be
+# what origin holds before production goes. `sclaude config` writes a
+# person's own choice to .sclaude/local/config.json instead, outside git, so
+# it never stops this check (set_value in config_menu.py). An edit here and
 # not on origin is a setting nobody else has, and one the pull would bury in a
 # stash when origin changes the file too. Where the two copies differ is
 # listed key by key (config_diff.py), and making them equal is the person's:
@@ -278,6 +280,8 @@ prod_main_unready() {
     info "  Make them equal: commit and push your edit (bring main level with"
     info "  origin first if it is behind), or take origin's copy"
     info "  (git -C $repo checkout origin/main -- $config)."
+    info "  A choice for this machine alone goes to .sclaude/local/config.json,"
+    info "  outside git: set it with \`${SELF:-sclaude} config\` after taking origin's copy."
   fi
   return 0
 }

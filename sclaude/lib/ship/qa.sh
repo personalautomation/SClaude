@@ -305,7 +305,7 @@ qa_accept_here() {
     *) warn "  Could not tick the criteria in issue #$issue${word:+ ($word)} — tick them on GitHub." ;;
   esac
   if [[ "$how" == auto ]]; then
-    who="automatically: \`qa\` is \`auto\` in .sclaude/config.json, and $(preview_suite_said "$wt"). Nobody looked at the preview."
+    who="automatically: \`qa\` is \`auto\` in the project config, and $(preview_suite_said "$wt"). Nobody looked at the preview."
   else
     declare -F developer_name >/dev/null && who="$(developer_name 2>/dev/null || true)"
     who="from sclaude${who:+ by $who}, in the wait for QA."

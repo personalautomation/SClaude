@@ -69,8 +69,18 @@ project_config_with() {
 # The same shape as state_get, and for the same reason: reading JSON with grep
 # means a field that moves is read wrongly and silently. A list comes back one
 # item per line, which is what every caller here wants.
+#
+# A setting with choices (CHOICES in config_menu.py) set for this machine
+# alone, in .sclaude/local/config.json beside the main checkout's config,
+# comes first: the committed file is what the project recommends, and
+# `sclaude config` writes a person's own choice there, outside git.
 project_get() {
   local path="$1" wt="${2:-}" file
+  if [[ "$path" != *.* && -n "${REPO:-}" ]] \
+     && grep -qF "\"$path\"" "$REPO/.sclaude/local/config.json" 2>/dev/null \
+     && python3 "$(dirname "${BASH_SOURCE[0]}")/config_menu.py" mine "$REPO/.sclaude/config.json" "$path" 2>/dev/null; then
+    return 0
+  fi
   file="$(project_config "$wt")" || return 1
   # Key by key: one the main checkout lacks is taken from the worktree's copy.
   project_value "$file" "$path" && return 0

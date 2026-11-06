@@ -119,8 +119,10 @@ _MODES = {}
 
 def review_mode(cwd):
     """`github`, `local` or `off`: `review` in .sclaude/config.json, read the
-    way project_review_mode in project.sh reads it — the main checkout first,
-    the tree only where the main checkout has no such key."""
+    way project_review_mode in project.sh reads it — this machine's choice in
+    the main checkout's .sclaude/local/config.json first (overrides in
+    config_menu.py), then the main checkout, the tree only where the main
+    checkout has no such key."""
     key = cwd or os.getcwd()
     if key in _MODES:
         return _MODES[key]
@@ -135,11 +137,17 @@ def review_mode(cwd):
         pass
     roots.append(key)
     mode = "github"
+    mine = os.path.join(roots[0], ".sclaude", "local", "config.json")
+    files = [mine]
     for root in roots:
+        files.append(os.path.join(root, ".sclaude", "config.json"))
+    for path in files:
         try:
-            with open(os.path.join(root, ".sclaude", "config.json")) as fh:
+            with open(path) as fh:
                 value = json.load(fh).get("review")
         except (OSError, ValueError, AttributeError):
+            continue
+        if path == mine and value not in ("github", "local", "off"):
             continue
         if value is not None:
             mode = value if value in ("local", "off") else "github"

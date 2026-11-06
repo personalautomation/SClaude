@@ -346,7 +346,7 @@ merge_offer() {
   # an empty answer about the board is not a pass.
   local merge_by=setting merge_how="merge=auto"
   if [[ "$who" == auto && "$built" -eq 0 ]] && [[ "$qa_checked" -eq 1 || "$mode" == nodeploy ]]; then
-    say "${BOLD}Merging: \`merge\` is auto in .sclaude/config.json.${OFF}"
+    say "${BOLD}Merging: \`merge\` is auto in the project config (\`$SELF config\`).${OFF}"
   else
     if [[ "$who" == auto && "$built" -ne 0 ]]; then
       info "  \`merge\` is auto, but its merge with the newer main could not be built here — so it is asked."

@@ -48,8 +48,9 @@ def config_menu():
 
 
 def config_path(repo):
-    # The main checkout's: a value set here is the project's (config_file in
-    # config.sh).
+    # The main checkout's committed one, what the project recommends; a choice
+    # set here goes beside it, to this machine's .sclaude/local/config.json
+    # (config_file in config.sh, set_value in config_menu.py).
     return os.path.join(repo, ".sclaude", "config.json")
 
 
@@ -74,19 +75,21 @@ def config_text_rows(name):
         return t("repo.norepos"), menus.repos_keyboard()
     menu = config_menu()
     path = config_path(repo)
-    data = menu.load(path)
+    data = menu.effective(path)
+    broken = menu.unreadable(path)
+    mine = menu.overrides(path)
     known = menu.explanations(CONFIG_EXAMPLE)
     text = t("cfg.title", repo=status_report.escape(name))
-    if data is None:
-        text += t("cfg.broken") if os.path.exists(path) else t("cfg.nofile")
-    data = data or {}
+    if broken or not os.path.exists(path):
+        text += t("cfg.broken") if broken else t("cfg.nofile")
     rows = []
     # The sections with choices first: they are what can be done here.
     keys = sorted(known, key=lambda k: k not in menu.CHOICES) + [k for k in data if k not in known]
     for key in keys:
         summary = menu.summary(key, data.get(key))
         mark = "⚙️ " if key in menu.CHOICES else ""
-        label = "%s%s · %s" % (mark, key, summary)
+        # 📌: set on this machine, over what the project recommends.
+        label = "%s%s · %s%s" % (mark, key, summary, " 📌" if key in mine else "")
         rows.append([{"text": label[:60], "callback_data": cfg_data("cfg", name, key)}])
     rows.append([{"text": t("cfg.torepo"), "callback_data": "repo:" + name},
                  {"text": t("menu.back"), "callback_data": "menu_back"}])
@@ -100,7 +103,7 @@ def config_section(name, key, note=""):
     if not repo:
         return t("repo.norepos"), menus.repos_keyboard()
     menu = config_menu()
-    data = menu.load(config_path(repo)) or {}
+    data = menu.effective(config_path(repo))
     known = menu.explanations(CONFIG_EXAMPLE)
     text = (note + "\n\n" if note else "") + "<b>%s</b>\n" % status_report.escape(key)
     text += status_report.escape(known.get(key) or t("cfg.unknown"))
@@ -109,6 +112,8 @@ def config_section(name, key, note=""):
         text += "\n\n" + t("cfg.now") + "\n<pre>%s</pre>" % status_report.escape(value[:1500])
     else:
         text += "\n\n" + t("cfg.notset")
+    if key in menu.overrides(config_path(repo)):
+        text += "\n" + t("cfg.mine", value=status_report.escape(menu.recommended(config_path(repo), key)))
     rows = []
     choices = menu.CHOICES.get(key) or []
     if choices and not os.path.exists(config_path(repo)):
@@ -142,13 +147,13 @@ def config_set(name, key, value, runner=None):
             or value not in [v for v, _ in menu.CHOICES.get(key) or []]:
         log.warning("config of %r: %r cannot be set to %r here", name, key, value)
         return False, t("cfg.notchanged", section=status_report.escape(key))
-    data = menu.load(config_path(repo)) or {}
+    data = menu.effective(config_path(repo))
     if (data.get(key) if key in data else menu.default(key)) == value:
         # Nothing to write, and nothing to switch on or off again.
         return False, t("cfg.same", section=status_report.escape(key), value=status_report.escape(value))
     out = (runner or shell.run)("cd %s && sclaude config set %s %s 2>&1; echo \"rc=$?\""
                           % (shlex.quote(repo), shlex.quote(key), shlex.quote(value)), timeout=90)
-    if not out.rstrip().endswith("rc=0") and (menu.load(config_path(repo)) or {}).get(key) == value:
+    if not out.rstrip().endswith("rc=0") and menu.effective(config_path(repo)).get(key) == value:
         # Written, and what follows it (review's Actions) did not finish in
         # time: the value is set, and the line says what may be left.
         log.warning("sclaude config set %s %s in %s did not finish: %s",

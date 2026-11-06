@@ -695,7 +695,7 @@ remind_prod() {
     info "Production already at $(deploy_head "$wt" prod | cut -c1-8) — unchanged, skipping."
   elif [[ "$ship_mode" == off ]]; then
     echo ""
-    info "Production: not deployed — ship is off in .sclaude/config.json."
+    info "Production: not deployed — ship is off in the project config ($SELF config)."
     info "  Ship it by hand when you choose: cd $REPO && vercel --prod"
   elif [[ -n "$migrations" ]]; then
     # The promote's own commands come from the project: which script applies

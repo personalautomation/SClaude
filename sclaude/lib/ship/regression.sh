@@ -822,7 +822,7 @@ regression_run_body() {
     [[ "$own" == rollback ]] && own=prod
     if [[ ( "$own" == preview || "$own" == prod ) \
           && "$(project_stage_regression "$own" "$wt")" == none ]]; then
-      info "  No $stage regression: ${own}Regression is none in .sclaude/config.json."
+      info "  No $stage regression: ${own}Regression is none in the project config ($SELF config)."
       return 2
     fi
     info "  No $stage regression: .sclaude/config.json describes none for this project."

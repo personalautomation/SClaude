@@ -12,7 +12,7 @@ import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import page_asset  # noqa: E402
 import metrics_guide  # noqa: E402
 
-import dora_numbers, dora_page, dora_store
+import dora_numbers, dora_page
 
 
 
@@ -79,13 +79,13 @@ PROFILES = {
 def team_mode(repo):
     """`metricsTeam` for this machine: its own .sclaude/local/config.json
     first — outside git, so turning the demo on for one laptop does not turn
-    it on for the team — then the product's committed config."""
-    for path in (os.path.join(repo, ".sclaude", "local", "config.json"),
-                 os.path.join(repo, ".sclaude", "config.json")):
-        found = dora_store.load(path, {})
-        if isinstance(found, dict) and found.get("metricsTeam"):
-            return found["metricsTeam"]
-    return "real"
+    it on for the team — then the product's committed config, read as
+    `sclaude config` reads them (overrides in config_menu.py)."""
+    import config_menu
+    config = os.path.join(repo, ".sclaude", "config.json")
+    found = config_menu.overrides(config).get("metricsTeam") \
+        or (config_menu.load(config) or {}).get("metricsTeam")
+    return found if found in ("real", "demo") else "real"
 
 
 def team_section(x, cur, dv, sw, hm, ai, first_time, hist):

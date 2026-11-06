@@ -128,8 +128,9 @@ it would have recommended, and wherever it would stop to ask whether to go on
 its turn while work is left, and waits for CI and the like in the background.
 
 It still does not do what it would need your word for by day — push, merge,
-deploy, delete what is not its own, write to other people, spend money; such a
-step is left ready, with the command that does it. Every decision is logged as
+deploy, delete what is not its own, write to other people, spend money (one
+exception: sclaude's review step answers and resolves a minor thread its own
+review posted); such a step is left ready, with the command that does it. Every decision is logged as
 it is taken, with what it was instead of and how to undo it, in
 `~/.local/state/isleep/<date>.md` — one log for every session of the night.
 Your first message in the morning gets the summary: the result, the decisions

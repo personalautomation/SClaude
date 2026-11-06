@@ -344,6 +344,21 @@ check("declined-reopened-fixed", fate(LEFT, AUTO), "fixed")
 check("decline-from-a-bot", fate(("Left as it is, says a bot.", "Bot")), "fixed")
 check("decline-indented", fate(("  Left as it is: no.", "User")), "no fix")
 
+# A minor thread a night session resolves itself (review.md, "At night"): the
+# reply the prompt spells out counts as a decline, and its reason is the
+# decision, so the next review is told not to raise it again.
+NIGHT_MINOR = "Left as it is, minor \u2014 resolved at night without the author:"
+PROMPT = open(os.path.join(ROOT, "sclaude", "prompts", "review.md"), encoding="utf-8").read()
+check("night-minor-reply-in-prompt", ("`%s`" % NIGHT_MINOR) in PROMPT, True)
+check("night-minor-declined", fate((NIGHT_MINOR + " style only.", "User")), "no fix")
+import pr_context  # noqa: E402
+check("night-minor-decision", pr_context.decline_of(
+    [{"body": NIGHT_MINOR + " style only.", "author": {"__typename": "User"}}]), "style only.")
+
+# The night check reads the thread fresh and takes it only when its one comment
+# is a bot's or ends with the local review's signature: the prompt spells it.
+check("night-check-names-local-signature", ("`%s`" % pr_context.LOCAL_SIGNATURE) in PROMPT, True)
+
 # --- the verdict alone ---------------------------------------------------------
 v = review_report.verdict
 check("climbing", v([3, 4, 6], 0.9, 0, 6, 6).startswith("Not converging: findings per round are climbing"), True)

@@ -243,13 +243,19 @@ breaks the other silently — grep before you edit:
   reply a review run on this machine posts (`local_review.py`), and is how
   `review_state` tells them from what the person wrote under the same
   account; `tests/review-skip.py` and `tests/local-review.py` check both
-  sides. `local-review-rounds.jsonl` is named in `local_review.sh` and read
+  sides. `sclaude/prompts/review.md` spells it out for the night check of a
+  minor thread, which takes only a bot's finding or one ending with it;
+  `tests/review-report.py` checks the prompt names it. `local-review-rounds.jsonl` is named in `local_review.sh` and read
   by `LOCAL_JOURNAL` in `review_report.py` and in `process.py`, which price
   each pass by its `session`, the unrecorded ones (`spent`) included;
   `tests/local-review-report.py` reads what the other side wrote.
 
   <!-- Extended by Claude on 2026-11-04 at the user's request: the review
   passes are priced in the report and on the process map from the journal. -->
+
+  <!-- Extended by Claude on 2026-11-06 at the user's request, in a
+  retrospective: a night session resolves a minor finding of the review's own
+  after reading the thread fresh, and the prompt names the signature. -->
 
 
 

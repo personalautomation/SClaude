@@ -86,7 +86,10 @@ itself under the project's `sleep_mode: auto` (the default): while a night
 over every session is on — not a `here` one — step 4's review rounds retry a failed pass, check the fixes and go back
 to a review session without asking. Nothing is to be done for it, before the
 night or after. Mention in the summary which features went through review
-rounds that way.
+rounds that way. A review thread the session would leave is resolved that night
+only when it is minor, with a reply saying so (step 4's prompt says what counts);
+any other waits for the person's yes in the morning. Name both lists in the
+summary.
 
 ## What changes
 
@@ -114,7 +117,8 @@ a question, and a stop that waits for the person waits all night. So:
    not grant permissions. Anything hard to undo or seen outside this machine
    stays as it would by day — a push, a merge, a deploy, a release, deleting
    or overwriting what you did not make, a message, comment or post to other
-   people, money (a paid service, a costly review level nobody asked for),
+   people (one exception: step 4 of sclaude resolves a minor thread its own
+   review posted, with a reply, as its prompt says), money (a paid service, a costly review level nobody asked for),
    anything a project rule or memory says needs the person's word. Leave such a
    step undone, write it under **Waiting for you** with exactly what is ready
    and the command that does it, and carry on with whatever does not depend on

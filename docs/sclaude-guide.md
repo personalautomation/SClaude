@@ -122,9 +122,13 @@ it, once each — none when it ended by keeping the demo — and a try it fixed 
 sent nowhere. What it found wrong
 in the product while recording — a check that failed, a fault it had to go
 round — is printed in sclaude's terminal. At night (`/isleep`) a finding the
-session would leave as it is does not hold the step till morning: it waits for
-you, and in the morning sclaude offers a session that asks you about each such
-thread and, on your yes, replies and resolves it on GitHub itself. The
+session would leave as it is does not hold the step till morning. A minor one the
+review posted, with no reply under it yet — nothing at risk for users, data or security, nothing promised changed, no check
+weakened — the session resolves itself, with a reply saying it was resolved at
+night without you, and lists it in its report; unresolve it on GitHub to make it
+open work again. Any other waits for you, and in the morning sclaude offers a
+session that asks you about each such thread and, on your yes, replies and
+resolves it on GitHub itself. The
 report after each round shows what each round cost in two parts: `review`, the
 pass on this machine as Claude Code accounts for it (`—` for GitHub's review,
 which sclaude cannot price), and `fixes`, the fixing session's launch. When the

@@ -1,5 +1,9 @@
+<!doctype html>
+<html lang="en">
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>sclaude in Depth</title>
+<meta name="description" content="SClaude in depth: the fixed path, gates on evidence, rules in hooks, feedback loops and AI review.">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -42,8 +46,10 @@
 html, body { height: 100%; }
 body { background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 14px; }
 
-.viewport { position: fixed; inset: 0 0 56px 0; display: grid; place-items: center; overflow: hidden; }
-.stage { width: 1280px; height: 720px; transform-origin: center center; flex: none; }
+.viewport { position: fixed; inset: 0 0 56px 0; overflow: hidden; }
+/* Centred by position, not by the grid: a grid puts a slide wider than the
+   window at its left edge, and the scale then moves it off to the right. */
+.stage { position: absolute; left: 50%; top: 50%; width: 1280px; height: 720px; transform: translate(-50%, -50%); transform-origin: center center; flex: none; }
 .slide {
   display: none; position: relative; width: 1280px; height: 720px; box-sizing: border-box;
   padding: 52px 72px 44px; background: var(--surface); border: 1px solid var(--line);
@@ -177,7 +183,7 @@ table.t td:first-child { font-weight: 600; }
 @media (max-width: 820px) {
   html, body { height: auto; }
   .viewport { position: static; display: block; overflow: visible; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 16px 24px; }
-  .stage { width: auto; height: auto; transform: none !important; display: flex; flex-direction: column; gap: 16px; }
+  .stage { position: static; width: auto; height: auto; transform: none !important; display: flex; flex-direction: column; gap: 16px; }
   .slide, .slide.on { display: flex; width: auto; height: auto; padding: 28px 20px 48px; font-size: 16px; gap: 18px; }
   h1 { font-size: 44px; } h2 { font-size: 29px; } h3 { font-size: 19px; }
   .lede { font-size: 17px; } .punch { font-size: 22px; } .big { font-size: 44px; }
@@ -811,7 +817,7 @@ table.t td:first-child { font-weight: 600; }
     if (narrow()) { stage.style.transform = ''; return; }
     var w = viewport.clientWidth, h = viewport.clientHeight;
     var s = Math.min((w - 32) / 1280, (h - 24) / 720);
-    stage.style.transform = 'scale(' + Math.max(s, 0.2) + ')';
+    stage.style.transform = 'translate(-50%, -50%) scale(' + Math.max(s, 0.2) + ')';
   }
 
   function show(n) {

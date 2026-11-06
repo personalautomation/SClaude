@@ -8,7 +8,8 @@ pages work from a checkout; --stack-url and --sclaude-url replace those
 links when the pages are published somewhere else. A screenshot a deck
 shows is src/img/<name>, written {{IMG:<name>}} and inlined as a data URI.
 The full story, one deck picked from all three, is put together by
-full_story.py.
+full_story.py. It is a build product, linked from nowhere and not shared:
+the three decks are the sources.
 
     python3 docs/presentations/build.py
     python3 docs/presentations/build.py --out ~/decks --stack-url URL --sclaude-url URL
@@ -32,12 +33,15 @@ PROCESS = "bpmn_diagrams.html"
 
 DECKS = [
     # file, title, the mark at the foot of each slide, the link to another deck
-    # (empty for a deck that stands on its own)
+    # (empty for a deck that stands on its own), what search results show
     ("sclaude_in_details.html", "sclaude in Depth", "sclaude · in depth",
-     '<a href="{{STACK}}" target="_blank" rel="noopener">&larr; stack deck</a>'),
+     '<a href="{{STACK}}" target="_blank" rel="noopener">&larr; stack deck</a>',
+     "SClaude in depth: the fixed path, gates on evidence, rules in hooks, feedback loops and AI review."),
     ("sclaude_instruments.html", "Laptop-to-Phone AI Stack", "AI stack for PoC & MVP",
-     '<a href="{{SCLAUDE}}" target="_blank" rel="noopener">sclaude deck &rarr;</a>'),
-    ("vibe_coding_story.html", "Why sclaude Exists", "why sclaude exists", ""),
+     '<a href="{{SCLAUDE}}" target="_blank" rel="noopener">sclaude deck &rarr;</a>',
+     "The stack for a PoC or an MVP — Next.js, Supabase, Vercel, GitHub — and running AI development from a phone."),
+    ("vibe_coding_story.html", "Why sclaude Exists", "why sclaude exists", "",
+     "Why a team needs a harness for AI coding: from a zoo of homemade tools to one shared tool in the company's git."),
 ]
 
 
@@ -59,8 +63,8 @@ def main():
     tail = (SRC / "tail.html").read_text()
     links = {"{{STACK}}": args.stack_url, "{{SCLAUDE}}": args.sclaude_url}
     args.out.mkdir(parents=True, exist_ok=True)
-    for name, title, mark, other in DECKS:
-        page = (head.replace("{{TITLE}}", title)
+    for name, title, mark, other, desc in DECKS:
+        page = (head.replace("{{TITLE}}", title).replace("{{DESC}}", desc)
                 + (SRC / name).read_text()
                 + tail.replace("{{MARK}}", mark).replace("{{OTHER}}", other))
         for key, url in links.items():

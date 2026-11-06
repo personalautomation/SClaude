@@ -1,9 +1,13 @@
 # The decks and the process map, in detail
 
 The decks listed under [See it](../../README.md#see-it) are for whoever decides whether a
-team should adopt all this, rather than for the developer installing it;
-`sclaude_full_story.html` is put together from the other three by
-`full_story.py`.
+team should adopt all this, rather than for the developer installing it.
+
+`sclaude_full_story.html` is not one of them: `full_story.py` (run by
+`build.py`) assembles it from the other three, and the file says so at its
+top. It is a build product — nothing links to it, it is not shared or
+attached, and it is never edited by hand; change the three decks in `src/`
+and rebuild.
 
 Each is one self-contained page: open it in a browser and page through with
 the arrow keys; on a phone the slides stack into one column. They are published

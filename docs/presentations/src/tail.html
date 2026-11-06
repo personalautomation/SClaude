@@ -40,7 +40,7 @@
     if (narrow()) { stage.style.transform = ''; return; }
     var w = viewport.clientWidth, h = viewport.clientHeight;
     var s = Math.min((w - 32) / 1280, (h - 24) / 720);
-    stage.style.transform = 'scale(' + Math.max(s, 0.2) + ')';
+    stage.style.transform = 'translate(-50%, -50%) scale(' + Math.max(s, 0.2) + ')';
   }
 
   function show(n) {

@@ -21,6 +21,7 @@ box-shadow:0 6px 20px rgba(0,0,0,.18);font-size:13.5px}
 #player[hidden]{display:none}
 #player button,#player select{font:inherit;padding:3px 8px;border-radius:7px;border:1px solid var(--line);
 background:var(--surface);color:var(--ink);cursor:pointer}
+.pl-stay{display:flex;align-items:center;gap:4px;white-space:nowrap;cursor:pointer;color:var(--muted)}
 .pl-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 body.playing svg.map .node:not(.pl-now):not(.pl-seen){opacity:.4}
 body.playing svg.map .edge:not(.pl-go):not(.pl-went){opacity:.3}

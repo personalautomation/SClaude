@@ -248,12 +248,26 @@ deck = [
 
 NAME = "sclaude_full_story.html"
 
+# Said at the top of the page it writes: a reader of the file, or a
+# session about to edit it, learns it is a build product, and search
+# engines leave it out — the three decks are what is linked and shared.
+GENERATED = """<!--
+  GENERATED — do not edit, link or attach this file.
+  It is assembled by docs/presentations/full_story.py (run by build.py)
+  from the three decks in docs/presentations/src/: vibe_coding_story,
+  sclaude_in_details and sclaude_instruments. Edit those, then run
+  python3 docs/presentations/build.py. Share the three decks instead.
+-->
+"""
+
 
 def write(out):
-    head = (SRC / "head.html").read_text().replace("{{TITLE}}", "sclaude: The Full Story")
+    head = ((SRC / "head.html").read_text().replace("{{TITLE}}", "sclaude: The Full Story")
+            .replace("{{DESC}}", "SClaude's three decks in one: the problem, the orchestrator, the tools around it.")
+            .replace('<meta charset="utf-8">', '<meta charset="utf-8">\n<meta name="robots" content="noindex">', 1))
     tail = ((SRC / "tail.html").read_text()
             .replace("{{MARK}}", "sclaude · the full story").replace("{{OTHER}}", ""))
-    page = (head + "\n\n".join(deck) + "\n"
+    page = (GENERATED + head + "\n\n".join(deck) + "\n"
             + animations() + "\n" + tail)
     assert "{{" not in page.replace("{{IMG:", "")
     Path(out).write_text(inline_images(page))

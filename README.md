@@ -28,9 +28,12 @@ mentor — and each of them spends about half their time, and their tokens,
 building the same private tooling, falling into holes a neighbour climbed out
 of long ago. A zoo of bicycles, each just about coping with its owner's tasks.
 
-And prompts are not guarantees. Even with every IMPORTANT in capitals, a model
-invents a status, switches language, skips a predefined option, and over time
-the process drifts.
+Those who do build a harness usually build it out of the agent itself: a crew
+of AI agents, a set of skills, a hierarchy of markdown instructions. What they
+rarely know is that such a construction does not repeat and does not scale.
+Instructions are advice, not guarantees: even with every IMPORTANT in capitals
+a model invents a status, skips a predefined option, and over time the process
+drifts. And it spends tokens on work a script would do for free.
 
 sclaude is what came out of fixing both: the process moved into code, the
 tools moved into the company's git, and the model was left with what a model
@@ -170,7 +173,6 @@ all this — a CTO, a lead:
 | [`vibe_coding_story.html`](https://personalautomation.github.io/SClaude/presentations/vibe_coding_story.html) | why sclaude exists: a team fragmented by uneven AI skills, everyone building the same tools, putting them in the company's git, metrics with no extra work |
 | [`sclaude_in_details.html`](https://personalautomation.github.io/SClaude/presentations/sclaude_in_details.html) | sclaude in depth: the fixed path, gates on evidence, rules in hooks, the feedback loops, AI review done deliberately, the team setup |
 | [`sclaude_instruments.html`](https://personalautomation.github.io/SClaude/presentations/sclaude_instruments.html) | the stack for a PoC or an MVP and why each tool is in it; the whole cycle from a phone |
-| [`sclaude_full_story.html`](https://personalautomation.github.io/SClaude/presentations/sclaude_full_story.html) | all three in one: the problem, the orchestrator, the tools around it |
 
 Each opens in the browser — page through with the arrow keys. Everything
 here, the decks and this page together, is also one designed
@@ -192,8 +194,8 @@ beside it and a link to take over from any of them by hand
 
 ## What this is, in the industry's words
 
-`sclaude` is **spec-driven development** with an agent doing the typing, and
-**the 3Cs** — contain, curate, control — as the safety model.
+`sclaude` is **spec-driven development** ([Augment Code's guide](https://www.augmentcode.com/guides/vibe-coding-vs-spec-driven-development)) with an agent doing the typing, and
+**the 3Cs** ([Docker's framework](https://www.docker.com/blog/the-3cs-a-framework-for-ai-agent-security/)) — contain, curate, control — as the safety model.
 
 Neither label was chosen to sound current. SDD is the shape the industry
 converged on during 2026, after vibe coding ran into multi-file drift and
@@ -279,7 +281,7 @@ The whole list of what closes each step is in
 ### Review is an agent's, the merge is a person's
 
 This is Anthropic's own
-division of labour for Claude Code Review — *"It won't approve PRs — that's
+division of labour for [Claude Code Review](https://claude.com/blog/code-review) — *"It won't approve PRs — that's
 still a human call"* — and their reported effect is the argument for it:
 before, 16% of pull requests got substantive review comments; after, 54%.
 sclaude prepares the decision: the acceptance criteria as QA left them, the

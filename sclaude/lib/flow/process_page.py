@@ -43,7 +43,8 @@ def play_head(map_name, label, passes=False):
 
 PLAYER_BAR = """<div id="player" hidden><button type="button" class="pl-pause" title="Pause">⏸</button>
 <select class="pl-speed" aria-label="Speed"><option value="0.5">×0.5</option><option value="1" selected>×1</option><option value="2">×2</option>
-<option value="4">×4</option></select><span class="pl-text"></span>
+<option value="4">×4</option><option value="8">×8</option><option value="16">×16</option></select>
+<label class="pl-stay" title="Play the feature on this map alone: the friction reviews, regressions and syncs it went through are left out, not opened on their own maps"><input type="checkbox"> this map only</label><span class="pl-text"></span>
 <button type="button" class="pl-stop" title="Stop (Esc)">✕</button></div>
 <div id="pl-off" role="dialog" aria-labelledby="pl-off-h" hidden><h3 id="pl-off-h">⚠ The feature left the map here</h3>
 <p class="pl-off-what"></p><p class="pl-off-when muted"></p>

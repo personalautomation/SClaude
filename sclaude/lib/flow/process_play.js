@@ -364,8 +364,10 @@ const player = (() => {
       return p ? p.steps.map((s) => Object.assign({map: map}, s)) : [];
     }
     const out = [];
+    const stay = stayHere();
     (map === 'detail' ? h.visits : onMap(h.visits, map)).forEach((s) => {
       if (!s.pass) { out.push(Object.assign({map: map}, s)); return; }
+      if (stay) return;
       const p = (h.passes[s.pass[0]] || [])[s.pass[1]];
       if (p) p.steps.forEach((x, j) => out.push(Object.assign({map: s.pass[0], pass: p.label},
         x, j || !s.off ? {} : {off: s.off})));
@@ -382,6 +384,20 @@ const player = (() => {
     document.body.classList.toggle('pl-paused', paused);
   });
   bar.querySelector('.pl-speed').addEventListener('change', (ev) => { speed = +ev.target.value; });
+  // "This map only": the play stays on the map it was started from, the
+  // passes it went through left out rather than opened on their own maps
+  // (a steady view to watch, or to record). Kept for the next visit; a
+  // change while a play runs starts that play again with it.
+  const stay = bar.querySelector('.pl-stay input');
+  function stayHere() { return stay.checked; }
+  try { stay.checked = localStorage.getItem('process-stay') === '1'; } catch (e) {}
+  stay.addEventListener('change', () => {
+    try { localStorage.setItem('process-stay', stay.checked ? '1' : '0'); } catch (e) {}
+    const b = document.querySelector('.play.on');
+    if (!b || PASSES.includes(b.dataset.play)) return;
+    run(expand(b.dataset.play), b.dataset.label);
+    b.textContent = '■'; b.classList.add('on');
+  });
   bar.querySelector('.pl-stop').addEventListener('click', stop);
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !bar.hidden) stop(); });
   function update(h) {

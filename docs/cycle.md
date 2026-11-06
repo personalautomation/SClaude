@@ -165,7 +165,7 @@ and why.
 ## Two deliberate choices
 
 **Review is an agent's, the merge is a person's.** This is Anthropic's own
-division of labour for Claude Code Review — *"It won't approve PRs — that's
+division of labour for [Claude Code Review](https://claude.com/blog/code-review) — *"It won't approve PRs — that's
 still a human call"* — and their reported effect is the argument for it: before,
 16% of pull requests got substantive review comments; after, 54%.
 

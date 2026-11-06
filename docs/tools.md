@@ -226,7 +226,10 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   after a plus — ✋ 3+2 is three before it and two in it, its time on the
   player's clock; the totals come back when the play ends or is stopped. Off
   the play, the step going on now is shown the same way on its own
-  map when it was entered before: what the earlier stays took, then its own after a plus. The player plays at ×0.5 to ×4.
+  map when it was entered before: what the earlier stays took, then its own after a plus. The player plays at ×0.5 to ×16;
+  its "this map only" box keeps a play on the map it started from, the friction reviews,
+  regressions and syncs left out rather than opened on their maps — a steady view to watch or
+  record. The box is remembered, and ticking it during a play starts that play again.
 - `localhost:3000/__sclaude/dora` — the product's metrics, linked under main
   as "main — DORA metrics": DORA, delivery, development quality, Claude's work
   and token efficiency. Production deploys and builds come from Vercel, each

@@ -1,6 +1,7 @@
 # How keepawake works, and why
 
-The README covers what keepawake does, its commands and its set-up. This is
+[docs/tools.md](tools.md#binkeepawake) covers what keepawake does, its commands
+and its set-up. This is
 how it decides, and the traps it was built around.
 
 ## Who holds the machine awake

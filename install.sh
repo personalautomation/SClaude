@@ -391,7 +391,7 @@ else
 fi
 if [[ $EXTRAS -eq 1 && -n "${NO_SSHD:-}" ]]; then
   echo "note: openssh-server is not installed — mobile SSH sessions are impossible;" >&2
-  echo "      see the \"keepawake\" section in the README" >&2
+  echo "      see the \"keepawake\" section in docs/tools.md" >&2
 fi
 
 # --- keepawake's polkit rule: optional, plain Linux only ---------------------

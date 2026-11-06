@@ -7,7 +7,7 @@ This page is the short way into both.
 
 ## Connecting a product
 
-1. Install sclaude ([README, Installation](README.md#installation)) and run
+1. Install sclaude ([README, Installation](docs/setup.md#installation)) and run
    `sclaude doctor`.
 2. In the product's repository, run `sclaude new`. Without a
    `.sclaude/config.json` it offers to write one: it reads the tests from
@@ -20,7 +20,7 @@ This page is the short way into both.
 
 Every section is optional, and nothing is guessed at run time: a product with
 no test suite simply has no test gate, and sclaude says so where it would have
-acted. [The environment it is built for](README.md#the-environment-it-is-built-for)
+acted. [The environment it is built for](docs/setup.md#the-environment-it-is-built-for)
 lists what each part of the cycle needs.
 
 ## What lives in a product's `.sclaude/`
@@ -51,8 +51,8 @@ Your name is the part of your git email before the `@`, or
 sclaude's sessions never change your checkout of this repository: a session
 that finds a bug in sclaude fixes it in its feature's workshop, and sclaude
 sends that the same way — a pull request for you, after checking it for your
-product's details ([README, "When a session finds a bug in
-sclaude"](README.md#who-changes-the-orchestrator)). A change you make by hand
+product's details (["When a session finds a bug in
+sclaude"](docs/team.md#for-a-team)). A change you make by hand
 is what `sclaude propose` is for.
 
 ## The rules of this repository
@@ -95,7 +95,9 @@ tests/run
 Shell files have no runner of their own: check them with `bash -n`.
 
 When a change adds or changes something a user meets — a command, a key, a
-switch, a behaviour — update [README.md](README.md) in the same pull request.
+switch, a behaviour — update the user documentation in the same pull request: [README.md](README.md)
+for what sclaude offers, the guides under `docs/` (see the README's
+"Documentation") for how to use it.
 How a part works inside goes to [docs/sclaude.md](docs/sclaude.md) or
 [docs/keepawake.md](docs/keepawake.md).
 

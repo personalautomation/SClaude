@@ -1,6 +1,7 @@
 # How sclaude works, and why
 
-The README says what sclaude does and how to use it. This is the other half:
+The README says what sclaude does, and the guides it lists under
+"Documentation" how to use it. This is the other half:
 how each part works, the decisions behind it, and what went wrong before them.
 It is written for whoever changes sclaude, or wants to know why it behaves the
 way it does.
@@ -1066,7 +1067,7 @@ session.
 and its address between runs; a lock keeps two features started together from
 claiming the same one. Nobody needs to know the ports: `sclaude-proxy` holds
 :3000 and hands each request to the server its host names (see
-[bin/sclaude-proxy](../README.md#binsclaude-proxy)). The host rather than only the port is
+[bin/sclaude-proxy](tools.md#binsclaude-proxy)). The host rather than only the port is
 what keeps two features apart in one browser — cookies ignore the port, so on
 bare ports a sign-in on one feature would sign the other one out.
 

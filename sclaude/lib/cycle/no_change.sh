@@ -252,7 +252,7 @@ no_change_branch_delete() {
 # --- a change nothing deploys --------------------------------------------------
 #
 # A branch whose change is all in files that neither the suite nor a deployment
-# reads (NO_DEPLOY, the README's "Quality gates" names them for people). It still
+# reads (NO_DEPLOY, "Quality gates" in docs/cycle.md names them for people). It still
 # goes through a pull request and a review, since that is where somebody reads
 # the change and where a workflow first runs. It skips the rest. One such
 # branch changed a single workflow file, and the local regression spent ten

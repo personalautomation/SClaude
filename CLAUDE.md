@@ -538,19 +538,32 @@ suite red for every session after you.
 <!-- Added by Claude on 2026-11-03 at the user's word, after two tests red
 only under the parallel run were passed over as nobody's. -->
 
-## The README before a push
+## The README and the guides before a push
 
-Before every push, bring `README.md` up to date with what the push carries: a
-new command, key, switch or behaviour a user meets goes in, and one that
-changed or went away is corrected there. Read the commits being pushed
-(`git log origin/main..HEAD`) against the README, and commit the update in the
-same push. A push with nothing a user would notice needs no edit, but the check
-is still made.
+Before every push, bring the user documentation up to date with what the push
+carries: a new command, key, switch or behaviour a user meets goes in, and one
+that changed or went away is corrected there. Read the commits being pushed
+(`git log origin/main..HEAD`) against it, and commit the update in the same
+push. A push with nothing a user would notice needs no edit, but the check is
+still made.
 
-The README is for people using the tools: what each does, and what they do
-with it. How a part works inside and why goes to `docs/sclaude.md` or
-`docs/keepawake.md`, which are updated the same way when the push changes
-something they describe.
+The user documentation is in two layers. `README.md` is the front page: what
+sclaude solves and why a team would adopt it, the decks, the process map and
+the video, who it fits, a four-line start, and the table of the guides. It
+names nothing technical beyond that — no command reference, no settings, no
+paths. How to use the tools is in the guides it lists: `docs/setup.md`
+(environment, installation), `docs/sclaude-guide.md` (the commands, a feature
+start to finish), `docs/cycle.md` (gates, refusals, rollback, metrics, the
+decisions a product hands to sclaude), `docs/team.md`, `docs/privacy.md`,
+`docs/tools.md` (the skills and the other tools) and
+`docs/presentations/README.md`. A change a user meets goes into the guide that
+describes it; the README changes only when what sclaude offers changes. How a
+part works inside and why goes to `docs/sclaude.md` or `docs/keepawake.md`,
+which are updated the same way when the push changes something they describe.
+
+<!-- Changed by Claude on 2026-11-06 at the user's request: the README became
+a front page that draws people in, and everything technical moved to the
+guides under docs/. -->
 
 The process map is read the same way. A change to the cycle's path — a way
 back, a hold, a gate's outcomes, a question asked, where a feature stands and
@@ -565,7 +578,7 @@ agrees with the code's names — commands, steps, the places `position` answers
 the wrong place, or a way out never drawn, passes it.
 
 A review of a change here — `/sreview`, or whatever review is used — reads
-the README, the docs and the process map against the change as part of it: a
+the README, the guides, the docs and the process map against the change as part of it: a
 place they no longer describe the code is a finding.
 
 <!-- Both paragraphs above were added by Claude on 2026-10-29 at the user's

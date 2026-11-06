@@ -1,68 +1,192 @@
-# instruments
+# SClaude
 
-Machine-level Claude Code helper scripts and skills. Not tied to any project —
-they live here, symlinked into `~/.local/bin` and `~/.claude/skills`.
+**Manageable, scalable AI coding for a team.** An orchestrator for Claude Code
+that takes a feature from issue to production on one fixed path: the agent
+does the typing, the harness keeps the process, and a person makes every
+decision that matters.
 
-| tool | what it is for |
-|---|---|
-| [`sclaude`](#binsclaude) | runs a feature from issue to production with Claude doing the work and a person making the decisions |
-| [`skills/pr`](#skillspr) | a `/pr` skill: opens a pull request the way the team does it |
-| [`skills/sreview`](#skillssreview) | a `/sreview` skill: review and fix in iterations until the review finds nothing substantive |
-| [`skills/sdemo`](#skillssdemo) | a `/sdemo` skill: a recorded demo of a feature — clicked through as its users, with captions on what to look at, a step to take over from — or `live` in chrome-debug, or plain signed-in links; `/sdemo ac` by its acceptance criteria |
-| [`skills/isleep`](#skillsisleep) | an `/isleep` skill: night mode — Claude carries on alone, decides instead of asking, and reports in the morning |
-| [`sclaude-proxy`](#binsclaude-proxy) | one address per feature: `http://<feature>.localhost:3000` |
-| [`chrome-debug`](#binchrome-debug) | the Chrome that Claude drives to check its work |
-| [`wsl-update`](#binwsl-update) | the daily update of the tooling in WSL |
-| [`keepawake`](#binkeepawake) | keeps the laptop awake while work goes on, and a Telegram bot to drive it all from a phone |
-| [`statusline.py`](#statuslinepy) | Claude Code's status line |
-| [`githooks/commit-msg`](#githookscommit-msg) | refuses a commit whose requirement footers would be lost |
+> AI speed is easy to buy. Control is what has to be designed.
 
-How the parts work inside, and why they were built that way, is in
-[`docs/sclaude.md`](docs/sclaude.md) and [`docs/keepawake.md`](docs/keepawake.md).
-sclaude's cycle drawn as BPMN — every lane, every way back, every command and
-where it leads, interactive and printable — is
-[`docs/presentations/bpmn_diagrams.html`](docs/presentations/bpmn_diagrams.html),
-one page that opens in a browser from a checkout.
+[What it solves](#what-it-solves) ·
+[See it](#see-it) ·
+[In the industry's words](#what-this-is-in-the-industrys-words) ·
+[Get started](#get-started) ·
+[Documentation](#documentation)
 
-## Presentations
+**Watch a real feature go through it** — a 7-minute walkthrough, and the story
+of why sclaude exists:
 
-Slide decks for whoever decides whether a team should adopt all this —
-a CTO, a lead — rather than for the developer installing it:
+https://github.com/user-attachments/assets/74c2ccd0-c63f-4860-b814-7b8d606e01f9
+
+## Why it exists
+
+Give a team an AI coding agent and within a few months it is no longer one
+team. A few people are ahead of the whole planet; others barely keep up. The
+leaders have no time to teach — a developer's job is to develop, not to
+mentor — and each of them spends about half their time, and their tokens,
+building the same private tooling, falling into holes a neighbour climbed out
+of long ago. A zoo of bicycles, each just about coping with its owner's tasks.
+
+And prompts are not guarantees. Even with every IMPORTANT in capitals, a model
+invents a status, switches language, skips a predefined option, and over time
+the process drifts.
+
+sclaude is what came out of fixing both: the process moved into code, the
+tools moved into the company's git, and the model was left with what a model
+is actually better at — planning, writing and reviewing code.
+
+## What it solves
+
+### 1. Security — every stage of the AI gets exactly the tools it is allowed
+
+- **A session per stage, each with its own permissions.** Planning cannot
+  write code at all. Coding cannot merge. Nothing can push to `main`,
+  force-push, skip a hook, promote a migration or switch to production.
+- **Rules are executable, not advisory.** Hooks refuse a forbidden command at
+  the moment the agent tries it. Merge and production stay a person's call,
+  asked with no default answer.
+- **A mistake stays inside one feature.** Each one runs in a sandbox of its
+  own — a copy of the repository, its own dev server and address, its own
+  database, its own preview. A failed release is rolled back without touching
+  anybody else's.
+- **Rules come in layers** — sclaude's core that nobody lifts, presets for the
+  stack (Vercel, Supabase), the team's, the developer's. Tight by default,
+  loosened by evidence: every refusal is logged and reviewed.
+
+### 2. Scale and repeatability — one core process, with room to bend it
+
+- **One fixed path for every feature**: plan → code → pull request → review →
+  QA → merge → production → epilogue → retrospective. A step closes on
+  evidence — an approved plan, green tests, a real pull request — never on a
+  model saying "done".
+- **One copy for everybody.** Nobody forks. Every command looks at the latest
+  version first, so a fix reaches the whole team at their next command.
+- **Room for personal add-ons.** The product describes itself in one file;
+  the team and each developer add their own rules and prompts on top, and
+  hand decisions — QA, merge, shipping — to the machine when they trust it.
+- **The core itself is open to change.** A lesson climbs as far as it proves
+  itself: one developer's rule → the team's → sclaude's default for every
+  product. A session that runs into a flaw in sclaude fixes it and sends the
+  fix back, reviewed, on the person's word.
+
+### 3. Shared knowledge instead of reinvented bicycles
+
+- **One set of tools in the company's git**, used and improved by everyone,
+  instead of each developer building their own phone access, laptop
+  keep-alive and AI review.
+- **The process, the prompts, the rules and the lessons live in git**, where
+  they compound instead of walking out of the door with the person who knew.
+- **Knowledge flows without making anybody a mentor.** Time spent on tools
+  turns into conversations — *why does your tool do it differently?* — and a
+  new hire starts with everything the team has learned; `sclaude doctor` sets
+  up their machine.
+
+### 4. Fewer tokens — everything repeatable moved out of the agent
+
+- **If a script can do it, the model should not.** Remembering where each
+  feature stands, gathering context, sandboxes, tests, deploys, rollbacks,
+  the issue and the board: all of it runs in the harness, at zero tokens.
+- **A fresh session per step.** Only the approved plan and its criteria are
+  carried forward; nothing stale is paid for on every message.
+- **The right model per step** — the strongest with high effort for
+  planning, a cheaper one for the pull request, none at all for deploys and
+  gates.
+- **Context managed for you.** A review round stays in the same session while
+  its prompt cache is warm and moves to a fresh one when that is cheaper;
+  noisy work goes to sub-agents; the review does not chase every finding.
+  What each feature, step and review pass cost is counted.
+
+The token know-how that used to live in one person's head, as six habits —
+most of them built into the flow, the rest shared as team practice:
+
+| habit | why it saves | |
+|---|---|---|
+| **The cache lives an hour** | a subscription keeps the prompt cache for an hour (five minutes on credits or an API key); warm, the context is re-read at a tenth of the price or less, cold, it is paid in full. Take on no more parallel features than you can answer within the hour | team habit |
+| **A fresh session per step** | stale context is paid for on every message; starting clean costs nothing, while compacting a long conversation is itself a large request | built in |
+| **The right model per step** | the strongest model where judgement matters, a cheaper one for the pull request and the write-up, none for deploys and gates | built in |
+| **Scripts before tokens** | deterministic work runs as scripts; a hook can cut a ten-thousand-line log to its failures before the model reads it | built in |
+| **Lean always-on context** | CLI tools rather than MCP servers, workflow instructions as skills that load on demand, CLAUDE.md under 200 lines | team habit |
+| **Delegate the noisy parts** | sub-agents keep long outputs out of the main context; agent teams cost about seven times a single session | built in |
+
+### 5. Retrospectives that coach you one-to-one, and metrics nobody fills in
+
+- **A personal retrospective after every feature.** It reads the recording of
+  the whole run and tells *you*, from *your* run: what you may have missed,
+  how you could work better, what went well, what sclaude could do better.
+  Every point quotes a line or names a file. Facts, not opinions.
+- **Not a lecture from above.** A senior's verdict from on high makes people
+  defend themselves and hide from oversight. A token leaderboard makes them
+  burn tokens to climb it. Here you replay your own feature and think about
+  yourself — nobody else is judging.
+- **Gamified, by accident.** Every finished feature plays back as an
+  animation on the process map: each step in turn, its minutes, its prompts,
+  its cost. People watch it again and again, and start asking why it went
+  the way it did.
+- **Metrics with no overhead.** Not a single field to fill in. DORA's four
+  keys, the pull request's way, quality, flow, how autonomous Claude was and
+  what it cost — collected as a by-product of a process that helps the
+  developer, not one that watches them.
+
+### Step away from the desk — the work keeps going
+
+The phone is a channel to the orchestrator. Every question goes to the
+terminal and to your own Telegram bot at once, and whichever you answer first
+counts; the feature running on the laptop opens full screen inside Telegram;
+the laptop stays awake only while there is work. Most phone moments are look,
+tap, done:
+
+| the moment | the classic way: VPN + SSH | with sclaude's bot |
+|---|---|---|
+| see the feature | turn on the VPN, recall the IP and port, open the browser | tap **Open on phone** |
+| restart the dev server | SSH in, find the terminal, stop it, start it again | tap **Stop**, then **Open**: it starts on the visit |
+| "is the step done?" | SSH in, attach to the session, type the answer | tap **Yes**; the terminal at home carries on |
+| the laptop is about to sleep | walk back to it, or lose the session | the bot asks 30 minutes ahead; tap **Extend** |
+| where is everything? | check each terminal tab in turn | one card per feature: running, waiting, idle |
+| something odd | the classic way | still the classic way — it is kept as the spare key |
+
+### And more
+
+- **Demo videos, recorded by the agent.** Each feature is clicked through as
+  its users, with captions on what to look at, and the video lands on the
+  issue for QA.
+- **Night mode.** Go to sleep; Claude carries on, decides instead of asking,
+  and gives you a summary of its decisions in the morning.
+- **Built for the bad days.** Red tests get a fixing session, twice, then a
+  person. Red production is rolled back first — unless somebody else shipped
+  since. A closed laptop or a usage limit loses nothing.
+
+## See it
+
+![A finished feature played back on sclaude's process map: each step lit in turn, with its minutes and its cost](docs/presentations/src/img/flow.webp)
+
+![sclaude's metrics page: sessions, tokens, cost, the share of commits written by Claude, deploys, features finished, review threads answered](docs/presentations/src/img/dora.webp)
+
+**Presentations.** Slide decks for whoever decides whether a team should adopt
+all this — a CTO, a lead:
 
 | deck | what it covers |
 |---|---|
-| [`sclaude_in_details.html`](docs/presentations/sclaude_in_details.html) | sclaude in depth: the fixed path of a feature, gates on evidence, rules in hooks, the friction review, the retrospective and the monthly review, AI review, the team setup |
-| [`sclaude_instruments.html`](docs/presentations/sclaude_instruments.html) | the stack for a PoC or an MVP and why each tool is in it; the whole development cycle from a phone: the Claude app, the Telegram bot, Tailscale and Termius as the spare key, keepawake |
-| [`vibe_coding_story.html`](docs/presentations/vibe_coding_story.html) | why sclaude exists: a team fragmented by uneven AI skills, everyone building the same tools, putting them in the company's git, metrics with no extra work, and why this stack |
-| [`sclaude_full_story.html`](docs/presentations/sclaude_full_story.html) | all three in one: the problem, the orchestrator, the tools around it (put together from the other decks by `full_story.py`) |
+| [`vibe_coding_story.html`](docs/presentations/vibe_coding_story.html) | why sclaude exists: a team fragmented by uneven AI skills, everyone building the same tools, putting them in the company's git, metrics with no extra work |
+| [`sclaude_in_details.html`](docs/presentations/sclaude_in_details.html) | sclaude in depth: the fixed path, gates on evidence, rules in hooks, the feedback loops, AI review done deliberately, the team setup |
+| [`sclaude_instruments.html`](docs/presentations/sclaude_instruments.html) | the stack for a PoC or an MVP and why each tool is in it; the whole cycle from a phone |
+| [`sclaude_full_story.html`](docs/presentations/sclaude_full_story.html) | all three in one: the problem, the orchestrator, the tools around it |
 
-Each is one self-contained page: open it in a browser and page through with
-the arrow keys; on a phone the slides stack into one column. GitHub shows the
-file's source, so open it from a checkout. The decks are built from
-`docs/presentations/src/` by `python3 docs/presentations/build.py`; edit the
-sources and rebuild rather than editing the built pages.
+Each is one self-contained page: open it in a browser from a checkout (GitHub
+shows the file's source) and page through with the arrow keys.
 
-Beside them, [`bpmn_diagrams.html`](docs/presentations/bpmn_diagrams.html)
-is the process map: the cycle at a glance, the whole
-process as BPMN with every lane and every way back, how a session changes
-sclaude itself (the blocks marked W), the friction review that follows the
-sessions marked F, and every command with the place it leads to. It is drawn
-for `sclaude/config.example.json`; a project's own map, on its proxy, shows the
-cycle its `.sclaude/config.json` runs — the review on CI or on this machine, QA
-on a board or none, who merges — and nothing it does not. To print it, choose the paper and the scale on the
-page itself, above the whole process (A4 landscape at 100% is recommended;
-"Fit the width" puts the whole width on one sheet, the map going on down):
-the large map is cut between lanes into overlapping sheets that glue
-together, and the page tells how many; every printed page names its
-section in its header and its number at the foot. The page names its paper, so the
-print dialog shows no Layout or Paper size; its Scale would only shrink each
-sheet. The same build draws it
-from `sclaude/lib/flow/process.py`, which `tests/process.py` checks against the
-code; a feature's own copy, with where it stands lit, is on the proxy (see
-[bin/sclaude-proxy](#binsclaude-proxy)).
+**The process map.** [`bpmn_diagrams.html`](docs/presentations/bpmn_diagrams.html)
+draws sclaude's cycle as BPMN — every lane, every way back, every command and
+where it leads — built from the same model the tests check against the code,
+so the map never drifts from what actually runs. Interactive, and printable on
+A4. Each feature gets its own copy with where it stands lit, and its whole
+history can be played back on it.
 
-Everything written in this repository is in English; see `CLAUDE.md` for the
-rule and its three deliberate exceptions.
+**Video.** The 7-minute walkthrough of a real feature is
+[at the top](#sclaude) and in the [v1.0 release](https://github.com/personalautomation/SClaude/releases/tag/v1.0).
+And every feature comes with videos of its own: step 2 records a demo of what
+was built — a video per scenario, on a desktop and a phone, with the steps
+beside it and a link to take over from any of them by hand
+([skills/sdemo](docs/tools.md#skillssdemo)).
 
 ## What this is, in the industry's words
 
@@ -101,24 +225,6 @@ the approved plan has them. They are written into the issue, every later step
 works against them, and QA ticks them off there. Testable criteria before any
 code exists is what shift-left asks for.
 
-### A step closes on a result, never on a model saying "done"
-
-| step | what actually closes it |
-|---|---|
-| plan | a plan you approved, with criteria |
-| code | your yes **and** the product's tests passing |
-| pr | a pull request that exists on GitHub |
-| review | the automatic review has nothing left open — no thread unresolved, no check running or red — **and** the product's local tests passing; the pull request stays open for QA. No session at all when the review found nothing. The preview and its tests come after the step: a red preview puts the feature back on it |
-| fix after a regression | the same tests run again and pass. Two sessions that do not get them green stop the cycle for you. A session that finds the cause outside the branch changes nothing and leaves a note; the tests then run once more by themselves (a flaky test goes green), and a second such note stops the cycle with it for you. A note is kept in the feature's `regression.notes` once it is answered, for whatever it says would have to change |
-| sync | sclaude's own check after the session: no merge left under way, nothing uncommitted, the branch merging cleanly with main, and pushed. Otherwise the session is offered again. Then the preview, its tests and QA run on what it pushed |
-| epilogue | the session actually ran; one that never started is offered again from the menu |
-| retro | its session finished. A later `sclaude done` goes back into the same conversation, told what ran since — a rollback, another round — and asked to check its report against it; with nothing run since, it asks first |
-
-Ctrl-C, a usage limit or a closed laptop closes nothing: sclaude remembers where
-each feature is, and the conversation resumes. An interrupted run is never
-mistaken for a finished one. A step whose session has finished and which waits
-only on its tests goes back to the tests, not into the finished conversation.
-
 ### Contain — the blast radius of a mistake
 
 Every feature gets its own copy of the repository (a git worktree), its own dev
@@ -131,7 +237,7 @@ database reset wipes nobody else's data.
 The agent's world is set up before it runs. Each step has its own model and
 permissions; in step 1 Claude cannot write code at all. What the product is —
 its tests, its manuals, its environments, its board — the product describes in
-`.sclaude/config.json`, so sclaude assumes nothing about anybody's repository.
+one config file, so sclaude assumes nothing about anybody's repository.
 
 ### Control — the rules apply as the action happens
 
@@ -154,162 +260,28 @@ no direct pushes.
 
 ### Quality gates, in the Definition-of-Done sense
 
-The product's tests run at up to four points: locally, on the preview, on
-production, and once more after a production rollback. Each point runs what the
-product declares. A failed run is run once more by itself, since the commonest
-red is a flaky test; if it fails again, a fixing session opens, at most twice,
-and then a person is asked rather than looping for ever.
+- **A step closes on evidence**, never on a model saying "done": an approved
+  plan with criteria, your yes and green tests, a pull request that exists,
+  a review with nothing left open.
+- **The product's tests run at up to four points**: locally, on the preview,
+  on production, and once more after a production rollback.
+- **No endless loops.** A red run is run once more by itself, since the
+  commonest red is a flaky test; then a fixing session, at most twice; then a
+  person is asked.
+- **Red production is rolled back first**, and the old release checked —
+  unless somebody else shipped since: that release is not ours to remove.
 
-A branch that changes only files no test and no deployment reads skips the local
-tests, the preview, QA and production: it goes through its pull request and
-review, then the merge. These paths count as such in every product:
+The whole list of what closes each step is in
+[How the cycle is kept in line](docs/cycle.md).
 
-| path | why |
-|---|---|
-| `.github/` | CI workflows and bot settings; they first run on the pull request |
-| `.sclaude/` | the orchestrator's own files |
-| `.githooks/` | local git hooks |
-| `docs/` | prose nothing builds |
-| `*.md` in the root | `README.md`, `CLAUDE.md` and the like; Markdown deeper in the tree may be content, so it counts |
+### Review is an agent's, the merge is a person's
 
-One file anywhere else and the branch goes the whole way. A product whose
-`docs/` is built into its site is the case this assumption gets wrong.
-
-### Production rollback that refuses to trample somebody else
-
-If the tests fail on production, sclaude rolls production back to the release
-before the feature and runs the tests again to confirm the old release works —
-before anybody starts fixing. If somebody else deployed in the meantime, nothing
-is rolled back: that release is not ours to remove. Migrations are undone only
-where their undo instructions can actually be run, and sclaude shows the SQL and
-asks first.
-
-While production carries a feature whose last production tests were red — the
-rollback failed, you declined it, another release sits on top, or the tests
-could not run in a broken environment — sclaude holds the feature, and the menu shows it as
-`steps done, production held`: nothing is shipped, closed or cleaned up, and it says which
-way out fits. `sclaude regression <name> prod`
-runs the production tests again and, green, lifts the hold — as it does when
-the project has no production tests (`prodRegression` set to `none`, or no
-list for production);
-`sclaude rollback <name>` puts the previous release back and sends the fix to
-the review step; `sclaude return <name>` sends the fix forward from the review
-where going back is not possible. The bot's action list offers the production
-tests again too.
-
-### The tool repairs itself, and says what a machine lacks
-
-The friction review fixes the rules that got in the way. When a session's log
-holds only proposed CLAUDE.md rules, sclaude puts them off to the monthly
-review itself, with no session and no question; `SCLAUDE_FRICTION_ASK=on`
-asks first, and `n` then has a review session write them in now. A small model
-first matches each to a class already put off, or to a rule CLAUDE.md already
-states, and sclaude says how many times its class has come back this month. `sclaude doctor` lists
-what a machine is missing and the command that fixes each gap, so onboarding is a
-checklist. The retrospective at the end reads a recording of the whole run — what
-sclaude printed and what you typed — and says what could go better and, when
-the run points at one, a setting that would suit how you work. The monthly review
-can add the same, and also finds lines in CLAUDE.md, other instructions and
-Claude Code's memory that the tool's changes made untrue, and proposes tools to
-install or remove — each only on evidence, with how sure it is.
-
-### What is measured
-
-One record per finished feature: time per step, test attempts, what failed, how
-far it shipped, who ran it. Enough for the four DORA metrics from real cycles
-rather than guesses — and sclaude draws them, with the rest of what it counts,
-on a page under `main` at `http://localhost:3000/` ("main — DORA metrics"):
-the four DORA keys with rework and hotfix rates and lead time by stage; a pull
-request's way — coding, pickup, review, merge and deploy time, maturity;
-features shipped, cycle time, time to market, flow efficiency; software
-quality — escaped defects, reopened issues, work by commit type, regression
-green first time, review threads, acceptance criteria; code health and
-project hygiene; and Claude's own work — sessions, autonomy (tool calls per
-human input), what of Claude Code is used, when the work happens, the share
-of commits it wrote, and what a feature, a deploy or a pull request cost,
-week by week. The review is counted per feature, over all its pull requests:
-rounds (runs of the review, not sessions), threads, and the share closed
-without a fix or still open. The requirements are read from each issue's
-history: how many features had theirs change significantly after the plan was
-approved, and how many started unclear — as many clarifying questions in
-planning as the feature has acceptance criteria. How much a person had to
-work for what Claude did is counted from every time they stepped in: Claude's
-run between interventions, the sessions nobody stepped into, the person's
-minutes per hour of Claude, week by week. One radar puts it together — eight
-directions (speed, stability, quality, requirements, flow, autonomy, cost,
-discipline), each its figures scored by their own bands — with a health index
-and the imbalance between the best and the worst direction. A table of
-contents on the left, which folds away, leads through the parts. With
-`metricsTeam` set to `demo` (`sclaude config`, or `.sclaude/local/config.json`
-for one machine only), a team part lays developers
-side by side — output, speed, quality, AI adoption and effectiveness (Claude's
-share of their commits, subagents, skills, plan mode, the prompt cache, how
-often they step in or turn Claude down), cost, who holds what and who works on
-what, and for each person their strong sides with Claude and what to work on,
-with a habit to try — with three generated teammates drawn from the real figures, to
-show the page with a team. Each figure is coloured good, watch or poor where
-a standard band exists, and shows on hover (a tap on a phone) why it matters, what to aim for
-and how it is counted. A switch at the top compares features of different
-size: the figures marked ◆ — cycle time, time to market, review rounds and
-threads, questions and spend per feature, and the weekly charts of what was
-shipped, in work and spent — are divided by each feature's size, in standard
-features (its acceptance criteria; the median finished feature is one). A
-closing list names what such scorecards ask for and the page cannot measure,
-and why.
-
-### Two deliberate choices
-
-**Review is an agent's, the merge is a person's.** This is Anthropic's own
+This is Anthropic's own
 division of labour for Claude Code Review — *"It won't approve PRs — that's
-still a human call"* — and their reported effect is the argument for it: before,
-16% of pull requests got substantive review comments; after, 54%.
-
-What is left to you is the decision, and sclaude prepares it. Before asking
-whether to merge, it shows the acceptance criteria as QA left them, the checks,
-and the review's findings with what was done about each — including the case
-where the review check is green but reviewed nothing. The question has no
-default: it waits for a yes or a no, and reads "Merge it **unchecked**?" when
-QA never saw the feature.
-
-A product may hand either decision back to sclaude, in `.sclaude/config.json`
-or from `sclaude config`. The main checkout's copy is read for every feature,
-and a change to it left uncommitted there holds production up until it is what origin holds: the stop lists where the two differ, and you commit and push the change or take origin's copy. `qa` and `merge` each take `github` (a person does it
-on GitHub; sclaude waits), `both` (the same, or a key in sclaude's wait — `a`
-accepts, `m` merges) and `auto` (sclaude does it). By default QA is `github` and
-the merge `both`. An acceptance given by sclaude says so in a comment on the
-issue.
-
-Production and the suites against the deployments are set the same way.
-`ship` takes `ask` (the default: "Ship to production? [y/n]" after the merge),
-`auto` (shipped without that question; it is still asked where QA or a check
-was passed over on the way, or where other features' code not yet in
-production would go out with it) and `off` (sclaude never deploys production; the
-issue closes as merged and accepted, and you ship it by hand). Nobody
-answering the question — the terminal closed, the phone silent — is not a
-no: nothing is closed or cleaned up, and the next `sclaude <name>` asks again.
-`previewRegression` and `prodRegression` each take `full` (the stage's list in
-`regression`, the default), `smoke` and `none` (no suite there, and no gate).
-Smoke is the product's few vital paths, and the product says what they are:
-their parts in `regression.smoke`, their command in `commands` — a part called
-`smoke` runs against the deployment the way `e2e` does, so
-`"smoke": "npx playwright test --grep @smoke"` over the same suite, with the
-vital specs tagged `@smoke`, is the usual setup. Step 2's session tags the one
-spec that walks a new path people depend on. A product that chose `smoke` and
-declares no smoke list gets its full list, said in the run's heading.
-`demo` takes `on` (the default: step 2 records a demo video of the feature
-before its question, and it is recorded again when the code changed since —
-before QA, or before the last epilogue with `qa: auto`) and `off` (no demo videos anywhere in the cycle; the report and the
-criteria are the check).
-
-Before sclaude merges, or asks to, it builds what the merge would put on main
-when main has moved past the branch: the branch merged with the newer main, in
-a throwaway worktree, through the `regression.manual` parts as that merge's
-own config names them. Red is not merged from sclaude at all: `auto` says it is
-held, and tries again once the branch or main moves. When it cannot be built
-`auto` asks instead. GitHub calls a merge without conflicts clean, and nothing else would
-notice a rename on main that the branch still calls.
-
-**No staging between preview and production.** Preview is the last stop.
+still a human call"* — and their reported effect is the argument for it:
+before, 16% of pull requests got substantive review comments; after, 54%.
+sclaude prepares the decision: the acceptance criteria as QA left them, the
+checks, the review's findings with what was done about each, in one place.
 
 ### Where the claims come from
 
@@ -322,1180 +294,89 @@ notice a rename on main that the branch still calls.
 - [DORA benchmarks](https://www.gitrecap.com/blog/dora-metrics-benchmarks) — what the records written here are meant to feed.
 - [Coherence through orchestration](https://mikemason.ca/writing/ai-coding-agents-jan-2026/) — the warning worth reading first: alongside AI adoption, Google's DORA research found bug rates up 9%, review time up 91%, pull requests 154% larger. Gates on results and refused commands are the answer to exactly that.
 
-## The environment it is built for
+## Private by design
 
-sclaude was built and is used every day on one stack: a Next.js app on Supabase,
-shipped through Vercel, developed on Windows under WSL2. Nothing in it names a
-particular product, but this is the stack where every part of it works, and the
-further a product is from it, the more of sclaude it simply goes without.
+- **No telemetry.** sclaude sends nothing to its authors: no usage
+  statistics, no crash reports, no analytics.
+- **Your services, your logins.** What it sends goes only where your work
+  already goes: Anthropic (as with any Claude Code use), your product's
+  GitHub, your deploy target, and your own Telegram bot if you set one up.
+- **Your data stays on your machine.** Session transcripts, terminal
+  recordings, each feature's history and its metrics stay local (unless
+  you name a team repository to gather the metrics in); the working files
+  are kept out of git and out of every deployment.
+- **Nothing is exchanged with this public repository unless you choose
+  it.** Taking updates and sending fixes back are each a setting you pick at
+  install; a
+  fix is checked for your product's details first, and by default nothing
+  leaves without your yes.
+- **Nothing listens on the internet.** The per-feature addresses answer only
+  your machine and your private network; the phone's gate opens only while
+  you have phone access turned on.
 
-**Required.** sclaude does not run without these:
+The full account is in [Privacy](docs/privacy.md).
 
-| what | why |
+## Who it is for, and what it costs
+
+| | |
 |---|---|
-| Linux or WSL2, with systemd | the commands are bash; the QA watch and the per-feature proxy are systemd user units. On WSL, systemd has to be switched on (`systemd=true` in `/etc/wsl.conf`); `install.sh` says how if it is not. macOS is not supported |
-| git, python3 | everything sclaude does goes through them |
-| the `claude` CLI, with auto mode and Bash allowed | every step is a Claude Code session; without those settings steps 2–4 stop on permission prompts |
-| a GitHub repository and `gh`, logged in with the `project` scope | issues, pull requests, the board and QA's verdicts all live on GitHub |
+| **Fits** | small teams with a product of their own — Next.js on Supabase and Vercel, developers on Linux or Windows with WSL2 ([the environment](docs/setup.md#the-environment-it-is-built-for)) |
+| **Infrastructure** | ≈ 0: free tiers carry a PoC, and the laptops are already paid for. No server in between |
+| **Main line item** | the Claude subscription per developer — which lean context per step keeps in check |
+| **Onboarding** | one script, then `sclaude doctor` lists what a machine still lacks and the command that fixes each gap |
+| **Privacy** | no telemetry; what it sends goes to your own services ([details](docs/privacy.md#privacy-what-leaves-your-machine)) |
+| **Licence** | MIT — free for any use ([what that means](#free-and-open-mit)) |
 
-**Recommended.** Each one turns on part of the cycle; without it that part is
-skipped, and sclaude says so where it would have acted:
+Observed in the team that runs it: a 10–20% productivity improvement and
+about 5% fewer tokens in the first weeks — project observations, not
+universal benchmarks. macOS is not supported yet.
 
-| what | what it gives you | without it |
-|---|---|---|
-| a Node app with `npm run dev` that listens on `PORT` (Next.js is what it is built on); on WSL, Node through nvm, which `wsl-update` keeps current | a dev server per feature at its own address, Claude checking its work in a browser | no dev server or browser check; the cycle still runs |
-| a test suite the product names in `.sclaude/config.json` | the local, preview and production test gates | no test gates |
-| an automatic Claude review on the product's pull requests (a `claude-code-review.yml` workflow) | the findings step 4 works through | step 4 has no findings to work from |
-| a GitHub project board | the issue moving through `In progress`, `In QA`, `Done`; QA's hand-back | QA's verdict cannot be read from the board |
-| Vercel (`vercel` CLI, logged in) | previews and production from sclaude, production rollback | no preview, QA on a deployment or production step |
-| Supabase | per-environment databases, migrations promoted and rolled back with care | no database handling |
-| Docker (on WSL, Docker Desktop: sclaude starts it itself when it is not running) | a Supabase database of its own for every feature | features share the local database |
-| Chrome from Playwright (`chrome-debug`); on WSL its window comes up on the Windows desktop through WSLg | Claude sees the feature in a real browser | Claude cannot look at what it built |
-| the chrome-devtools MCP server, attached to `chrome-debug` (below) | the tools Claude drives that Chrome with; sclaude allows them in every step, and step 2 checks its work through them | Claude cannot look at what it built |
-| `script` and `tmux` | the terminal recording the retrospective reads | the retrospective works without it |
-
-The MCP server is connected once, for every project, and attaches to the
-browser `chrome-debug` opens rather than starting one of its own:
-
-```bash
-claude mcp add --scope user chrome-devtools -- npx -y chrome-devtools-mcp@latest --browserUrl http://127.0.0.1:9222
-```
-
-**Optional.** For working away from the laptop:
-
-| where | what | what it gives you |
-|---|---|---|
-| the machine | [Tailscale](https://tailscale.com); on WSL, installed inside WSL, not on Windows | features, SSH and code-server reachable from the phone over your tailnet |
-| the machine | a Telegram bot of your own | sclaude's questions and keepawake on the phone |
-| the machine | code-server | an editor in the phone's browser |
-| the phone | the Tailscale app, signed in to the same account | the phone in the tailnet: features at their addresses, SSH, code-server |
-| the phone | [Termius](https://termius.com) | SSH into the machine, to run sclaude and Claude from the phone |
-| the phone | Telegram | the bot: questions, status, the feature cards |
-
-With Tailscale Funnel the bot's menu, a feature and code-server open as a
-Telegram Mini App on a phone without Tailscale (see
-[below](#the-bot-as-an-app-in-telegram-with-no-tailscale-on-the-phone)). On WSL,
-keepawake keeps Windows from sleeping while you work from the phone.
-`./install.sh --extras` sets up the machine's side of the bot, keepawake and
-code-server; Tailscale, code-server itself and the phone's apps you install
-yourself ([keepawake, Configuration](#configuration)).
-
-Claude Code plugins are your own choice; sclaude needs none of them. The
-Vercel plugin is handy in sessions, while sclaude itself deploys and rolls back
-through the `vercel` CLI. The Supabase plugin may be installed too: sclaude's
-Supabase rules (`sclaude/policy/supabase.json`) deny its tools that apply
-migrations, deploy edge functions or create, pause, restore and delete
-projects and branches: a schema change goes as a migration file, through the
-cycle.
-
-`sclaude doctor` checks the required part, and inside a product the parts that
-product uses.
-
-## Installation
+## Get started
 
 ```bash
 git clone git@github.com:personalautomation/SClaude.git ~/sclaude
 cd ~/sclaude && ./install.sh
+sclaude doctor          # what this machine still lacks, and how to fix it
+cd <your product> && sclaude new
 ```
 
-The checkout may live under any name. `install.sh` can be run as often as you
-like: it links sclaude's commands into `~/.local/bin`, the skills into
-`~/.claude/skills` and the status line into `~/.claude`, installs and enables
-sclaude's systemd units, and wires up this repository's git hooks. Re-run it
-after pulling a change to a systemd unit. `~/.local/bin` has to be in `PATH`
-(it usually is). Without a working systemd it lays out the links, enables
-nothing, says what to do, and exits with an error.
+The first `sclaude new` in a product offers to write its config, read from
+what is already there. The details are in [Installation](docs/setup.md#installation).
 
-By default that is sclaude alone. The machine tools that grew up next to it —
-[keepawake](#binkeepawake) and its Telegram bot, code-server,
-[wsl-update](#binwsl-update) — come with `./install.sh --extras`. A machine
-that already has them keeps them on a plain re-run.
+## Documentation
 
-It asks three questions about this machine, once (a re-run keeps the answers):
-
-- **Updates of sclaude.** `notify` (recommended): each start lists what is new
-  on this repository's `main`, and `sclaude update` takes it once you have read
-  it. `auto`: each start takes it by itself. `off`: sclaude never fetches
-  itself.
-- **Sending fixes of sclaude back.** The retrospective and the friction reviews
-  can fix sclaude itself and send the fix to this public repository (see "When
-  a session finds a bug in sclaude"). `ask`: you see the commits and the files,
-  and nothing goes out without your yes. `send`: it goes out by itself. `off`:
-  no session changes sclaude on your machine.
-
-- **When a fix may name your product.** Before a fix of sclaude is sent it is
-  searched for your product's name, numbers and paths. `ask`: the matching
-  lines are shown, and "Publish it anyway?" waits for your yes. `auto`: they
-  are shown, and it goes out without the question. `off`: a change that
-  matches never goes out until a session rewords it.
-
-`./install.sh --update=notify|auto|off --contribute=ask|send|off
---leaks=ask|auto|off` answers them without asking. Run without a terminal, the installer leaves them unset, and
-unset means "ask": the first start asks about updates, and every send asks.
-The answers live in this checkout's git config (`sclaude.update`,
-`sclaude.contribute`, `sclaude.leaks`). Apart from these, what sclaude sends goes to your own
-services: your product's GitHub and deploys, and Telegram if you set the bot up.
-
-Then run `sclaude doctor`. It lists what the machine still lacks and the command
-that fixes each gap. Run inside a product, it also runs the checks the product
-asks for in `.sclaude/config.json`.
-
-## Privacy: what leaves your machine
-
-sclaude has no telemetry. It sends nothing to its authors: no usage
-statistics, no crash reports, no analytics. What it sends goes to services you
-already use, under your own logins, with three exceptions that touch this
-public repository, each a setting you choose when you install. Phone access,
-which you turn on from the bot, adds the DNS lookups and the funnel that puts
-the phone's gate on the internet, both described below.
-
-**From this repository to you: updates** (`sclaude.update`). Code merged into
-`main` here runs on your machine only as you choose: `notify` lists the new
-commits at each start and waits for `sclaude update`, `auto` takes them at
-each start, `off` never fetches.
-
-**From you to this repository: fixes of sclaude** (`sclaude.contribute`).
-The retrospective and the friction reviews may fix sclaude itself. Such a
-fix is sent here as a commit on `main` (maintainers) or as a pull request from
-a fork `gh` makes in your account. It carries the diff and its commit
-messages, your git name and email, your developer name in the branch, and a
-link to the Claude session that made it. All of it is public. `ask` shows
-you the commits and the files and waits for your yes, `send` sends without
-asking, and `off` keeps sessions from changing sclaude at all. `sclaude
-propose` sends your own commits, only when you run it.
-
-**Your product's details in such a fix** (`sclaude.leaks`). Before a fix is
-sent, sclaude searches it for your product's name, issue and pull-request
-numbers, and paths of its files. The search is a heuristic and will not
-catch everything: a table name or business logic described in a commit
-message can still get through. `ask` shows the matches and waits for your
-yes, `auto` sends with them, and `off` holds the fix until a session
-rewords it. A question about them that nobody answers holds nothing: it is
-asked again when the tree is next opened.
-
-**To your own services**, as part of the cycle:
-- Anthropic: everything a Claude Code session reads, as with any Claude Code
-  use.
-- Your product's GitHub: issues, comments, pull requests, and demo videos
-  attached to issues (`demo` in the product's config).
-- Your deploy target: preview and production deploys (`ship`,
-  `previewRegression` and `prodRegression`).
-- Your team's metrics repository, if the product's config names one under
-  `metrics`: your cycle records for that product.
-- Telegram, only with `--extras` and a bot token you created: questions,
-  their context, progress lines and demo videos go to your own bot's chat.
-  With phone access turned on, the bot checks whether your machine's
-  `ts.net` name is published yet: it asks Google's public DNS (`dns.google`)
-  for the zone's nameserver and then that nameserver, which is Tailscale's,
-  for your machine's name. When that one gives no answer it asks
-  `dns.google` for the name itself, and when `dns.google` cannot be reached
-  it asks the resolver of the network you are on. So the name reaches
-  Tailscale, often Google, and sometimes your local network's resolver.
-
-**What stays on your machine.** Session transcripts, terminal recordings,
-each feature's history and its DORA page, and your cycle records
-(`~/.claude/sclaude/`) when no `metrics` repository is set. The product's
-`.sclaude/local/` is kept out of git and out of every Vercel upload; a
-feature's friction log lives there and goes with its tree. What the reviews
-keep from it — the deferred friction and the rules sclaude learns — goes to
-the product's `.sclaude/` and is committed to the product, never to this
-repository.
-
-**What listens.** The proxy on `:3000` answers only this machine and your
-tailnet. The phone's gate is on `127.0.0.1:3001` and is reachable from the
-internet only through `tailscale funnel`, which the bot turns on when you
-turn on phone access, and off with it. Each feature's dev server, and the
-build its regression runs against, listens on `127.0.0.1`: sclaude moves a
-Node server that would take every interface (`next dev`, `next start`) there,
-so the proxy is the way in.
-
-**Where the settings are.**
-- This machine: the git config of this checkout. `./install.sh
-  --update=… --contribute=… --leaks=…` changes them; `sclaude doctor` shows
-  them.
-- A product: its `.sclaude/config.json`, and `sclaude config`.
-- The Telegram bot: `~/.config/keepawake/env`.
-
-## For a team
-
-instruments is meant to be installed as it is by a small team with a product of
-its own — several developers, each on their own Linux or WSL machine, with no
-server in between.
-
-**Nobody forks it.** Everybody installs from this repository, and every sclaude
-command that is about to act first looks at the latest `main` — takes it, with
-updates on `auto`, or lists it for `sclaude update`, with `notify` — so a fix
-reaches the whole team at their next command, or their next update. What is the team's own lives elsewhere:
-
-| what | where |
+| read | for |
 |---|---|
-| the orchestrator, its prompts, `MAINTAINERS` | here, one copy for everybody |
-| the product and the team's process: tests, manuals, production, migrations, the GitHub board, its maintainers, where its records are gathered | `.sclaude/config.json` in the product's repository, committed |
-| the team's sclaude rules for the product | `.sclaude/team/` in the product, committed, written by its maintainers |
-| one developer's sclaude rules for the product | `.sclaude/people/<name>/` in the product, committed |
-| what one machine keeps about the product: a feature's working files, terminal recordings | `.sclaude/local/` in the product, never committed, never deployed |
-| the person: name, database choice, the Telegram bot, their cycle records | `git config sclaude.developer`, `~/.config/sclaude/`, `~/.config/keepawake/env`, `~/.claude/sclaude/` |
-
-In the product everything lives in one folder, `.sclaude/`. The one file at the
-root is `.vercelignore`, because Vercel reads it nowhere else; sclaude keeps it
-out of git.
-
-**Joining a product that already uses it.** Clone the product; its
-`.sclaude/config.json` is already there. The first feature asks once which of the
-product's environments this machine works against. Your `.env*` files are yours
-to fill; production credentials only for whoever ships. `sclaude doctor` inside
-the product checks its part too.
-
-**Setting a product up.** `sclaude new` in a repository without
-`.sclaude/config.json` offers to write one. It reads the tests from
-`package.json`, the manuals and migrations from the layout, and the board's
-columns and date fields from the repository's GitHub project, and shows it all
-for confirmation before anything is written. `sclaude/config.example.json`
-explains every key, and `sclaude config` shows the same explanations beside your
-values. Every section is optional and nothing is assumed: without a test suite
-there is simply no test gate, and sclaude says so where it would have acted.
-
-**Who changes the orchestrator.** `MAINTAINERS` lists the git addresses allowed
-to commit sclaude straight to `main`. Everybody else commits by hand and runs
-`sclaude propose`: the commits move to a branch of their own, `dev/<name>`, and
-go out as a pull request — pushed here if you may push, otherwise through a fork
-`gh` makes for you once. You keep using this repository; the fork is only how
-the pull request travels. Without `MAINTAINERS` everybody is a maintainer, which
-is what a copy used by one person wants.
-
-**When a session finds a bug in sclaude.** No session sclaude runs changes
-this checkout, which every other session runs from, and none pushes it on its
-own — the one exception is the 🛠 workshop you open yourself (`sclaude
-workshop`), which works in a worktree of its own and publishes on your word: the
-repository is public and the session has read your project. It fixes sclaude
-in the feature's workshop instead, a copy of the checkout at
-`.sclaude/local/instruments` that every session of the feature shares:
-
-- a step's session does not change sclaude: it writes what got in its way in
-  the feature's friction log, and the friction review after it fixes sclaude;
-- the retrospective and the friction and monthly reviews start in plan mode,
-  so the plan you approve is your yes: they run `sclaude core-open` and open
-  the workshop without a question;
-- the session commits there, reviews its change — `/sreview` if you are a
-  maintainer, any review you like otherwise — and runs `sclaude core-ready`.
-  Answering "stop" to sreview's "go on?" counts as a finished review.
-
-When the session ends, sclaude publishes the change itself. It looks for your
-project's details in it — the project's name, issue or pull-request numbers,
-paths of its files — and asks you before it sends anything that matches; it
-runs the tests the change touches, a line on the screen for each as it
-runs; with sending on `ask` (the default) it shows you the commits and the
-files and waits for your yes, and while you are away it waits for you; then it pushes a maintainer's change to
-`main` as one commit, and sends anybody else's as one pull request per
-feature. A change left uncommitted or unreviewed is not published: sclaude
-offers you the session back to finish it, at once and when you next open the
-feature, and says what is missing. Red tests right after the session send
-that session back by themselves, told which tests failed, twice at most. A publication that stops — red tests, no network, a refused push —
-is tried again, quietly, every time you open the feature; only your own "no"
-— to the project's details, or to sending it — holds it, until a session
-rewords the change or you run `sclaude core-send` in the feature's tree.
-With sending `off`, sessions do not open the workshop at all, and what they
-found stays in the feature's friction log. A list
-of matches too long for a phone question is asked at the terminal only. A
-workshop goes with its feature; a change in it never published
-stays on its branch in this checkout, and the clean-up names it. When the
-retrospective's change reaches this checkout, `sclaude done` carries on with
-the clean-up in a fresh run of the new code by itself.
-
-**Who keeps a product's rules.** `maintainers` in the product's
-`.sclaude/config.json` lists who curates the shared rules in `.sclaude/team/`.
-Anybody else's sessions write to `.sclaude/people/<name>/` instead. Both reach
-`main` with the feature's pull request, where a maintainer can lift a personal
-rule into `team/` once it proves itself. `sclaude doctor` says which folder is
-yours.
-
-**What a session may run.** Rules come in layers:
-
-| layer | where | what it can do |
-|---|---|---|
-| sclaude's own rules | `sclaude/policy/core.json` | merging, pushing to the product's `main`, `--force`, `--no-verify`. Nobody lifts them |
-| an integration's preset | `sclaude/policy/vercel.json`, `supabase.json` | the usual dangers of a stack: a deploy, a migration into a protected database. On when the product uses the integration |
-| the product's team | `.sclaude/team/policy.json` | its own bans (say, `npm run db:promote`); an `allow` lifts an integration's ban |
-| one developer | `.sclaude/people/<name>/policy.json` | bans and permissions of their own; lifts nothing the team or an integration bans |
-
-Each file has `deny` and `allow` lists of commands with a reason, and the same
-per step under `steps`.
-
-A step may also get extra instructions from the product or from you:
-`.sclaude/team/prompts/<step>.md` and `.sclaude/people/<name>/prompts/<step>.md`
-are appended after sclaude's own prompt for that step.
-
-**Who you are.** The part of your global `git config user.email` before the
-`@` (an address set in sclaude's own checkout signs your commits to sclaude and
-does not rename you; it counts only when no global one is set), or
-the name you set with `git config --global sclaude.developer <name>` (and
-`SCLAUDE_DEV` overrides both for one shell). Prefer the git setting to an
-environment variable: the Telegram bot and the background units see it too. It names your branch, marks your records, and is
-passed to the product's tests as `SCLAUDE_DEV`, so tests that create data on a
-shared database can mark it as yours and clean up only their own.
-
-**Everybody's own Telegram bot.** A bot token can be used by one machine only,
-so each person makes their own with @BotFather. See [keepawake](#binkeepawake).
-
-**Gathering the team's records.** Optional: name a git repository of the team's
-under `metrics` in the product's `.sclaude/config.json`, and each person's cycle
-records of that product are published there as `<name>.jsonl`. Only that
-product's: somebody working on two products publishes each to its own team.
-
-## bin/sclaude
-
-One command that knows every feature in progress, remembers which step each is
-on, and launches `claude` with the right model, permissions and prompt for it.
-
-```bash
-sclaude                 # the menu: features in progress, chosen with arrow keys
-                        # (none in progress: the issue list, with config last)
-sclaude new [name]      # start a feature at step 1 (--issue <n>, --create-issue, --no-issue)
-sclaude <name>          # continue a feature from its current step
-sclaude status          # every feature and its step
-sclaude actions [name]  # everything you can do with one feature, in one list
-sclaude doctor          # what this machine lacks, and how to fix it
-sclaude config          # the product's settings, each one explained; set <key> <value>
-sclaude dev [name]      # start a feature's dev server; --stop to stop it
-sclaude sync <name>     # merge the latest main into a feature's branch
-sclaude news <name>     # what has happened on the pull request
-sclaude preview <name>  # deploy the branch to a preview
-sclaude rollback <name> # put production back to the release before this feature
-sclaude regression <name> prod  # run the production tests again; green (or no production tests) lifts a hold
-sclaude replan <name>   # take a feature back to step 1 and plan it again
-sclaude return <name> [reason]  # send a finished feature back to step 4
-sclaude reset <name>    # start the current step over, forgetting its conversation
-sclaude done <name>     # clean up after the merge: worktree and branches
-sclaude drop <name>     # abandon a feature and remove its traces, here and on GitHub
-sclaude propose         # send your commits to sclaude as a pull request
-sclaude workshop        # a session that changes sclaude with you, in a worktree of its own
-sclaude update          # take sclaude's latest main (updates on notify or off)
-sclaude core-send       # in a feature's tree: send the workshop change you held back
-sclaude core-open       # run by a session: open the feature's workshop to change sclaude
-sclaude core-ready      # run by a session: its change there is reviewed; publish it at the end
-```
-
-The tab sclaude runs in is named for the feature it is on, as its Telegram
-topic is: `<slug> · <repo>`.
-
-`sclaude --help` has the rest. In the menu, tick "show actions after choosing" to
-get every action for a feature in one list instead of remembering commands.
-
-### A feature, start to finish
-
-**Starting.** `sclaude new` offers the repository's open issues, yours first;
-in the terminal each one shows its column on the GitHub board in yellow, last
-on its line.
-The chosen issue suggests a branch name, which you can edit. sclaude moves the
-issue to `In progress` on the board and fills in its start date. Before it
-creates the worktree, it brings the main checkout up to `origin/main` (a
-fast-forward, and only when it is on `main`) and, if its lockfile moved, runs
-`npm ci` there: the new worktree links the main checkout's `node_modules`.
-An edit in the way of the fast-forward, or a Node process working in the main
-checkout (a dev server, a typecheck, a test run), leaves it as it is, with a
-warning that says what to run once it is out of the way.
-
-**Closing a session from sclaude's terminal.** Under Windows Terminal in WSL a
-session runs in a tab of its own, and while it works the tab sclaude waits in
-takes keys of its own; they are listed, a word each, on one line under the
-line that says the session started, and `k` is a box on the status line. Every session sclaude starts closes by itself once its work is done;
-these give you the word instead, and change nothing else: going forward is
-the session's own end, going again is your `/exit`. The letter says which, the
-case says when — lower case goes on now, upper case stops sclaude until the
-next `sclaude <feature>`. Every key is pressed twice in a row, so a stray one
-does nothing: the first press shows the key and what it does in yellow on the
-status line, and the second press or any other key clears it:
-
-| key | what happens |
-|---|---|
-| `n` | forward, now: closed as if it had ended itself — its marker written, the plan on screen counted as approved, step 2's work as accepted, so you skip the turn Claude would spend reading your approval; its friction review and the step's checks run, then the next step |
-| `N` | forward, later: the same, and sclaude stops before the next step's session (after step 4, before the preview) |
-| `r` | again, now: closed as `/exit` closes it, and the same conversation opens again at once, with no message to it |
-| `R` | again, later: closed as `/exit` closes it, and sclaude stops; the next `sclaude <feature>` opens this conversation again. A step's session has its friction review first |
-| `k` | keep it open: it does not close by itself when its work is done, and you leave it with `/exit`; twice again, and it closes as usual |
-
-The retrospective has no marker written for it by `n`: its own marker means
-"nothing to act on", so `n` closes it as its `/exit` would. With no tab (over
-ssh, or inside code-server), claude has the terminal to itself and there are
-no keys.
-
-**Step 1, plan.** Claude gets the issue, its parent issues and the manuals'
-contents up front. It tells you what it understood and waits; you correct it,
-and only then does it plan. The plan ends with **acceptance criteria**: a
-numbered list (`AC1`, `AC2`, …) of things a person can check on a deployment
-without reading the code. When you approve, the criteria go into the issue as a
-comment of their own. sclaude never edits an issue's description: the original
-request, the criteria and the status are separate comments, so the task as it
-was given stays readable.
-
-**Step 2, code.** A fresh session builds it, with the approved plan as its
-brief. Each commit names the criterion it serves in a `Requirement:` footer.
-Claude checks its work in Chrome at the feature's address. Before it asks, it
-records a demo of the feature, on a desktop and on a phone
-([skills/sdemo](#skillssdemo)) — after your remarks that changed the code, a
-short delta of only what changed for a user, then the whole demo again — and
-gives the link first in its report; the link
-and the videos go to the feature's topic and to a demo comment on the issue,
-where QA finds them. It ends on one question in its own dialog: **Accept**, and the session closes and sclaude goes
-on with no question of its own; **Remarks**, and you say what is wrong and the
-session carries on. The step closes when you accept the work **and** the
-product's local tests pass. A branch not
-pushed yet is put on top of main before those tests, without a question, when
-it rebases cleanly.
-
-**Step 3, pr.** The pull request, opened as a draft by the `pr` skill, with the
-criteria copied in as a plain list for QA, who ticks them in the issue, and the
-manuals updated in the same pull request.
-
-**Step 4, review.** The project's automatic review reads the pull request, and
-a session fixes what it found, one round at a time. The step closes when the
-review has nothing left open, the preview is deployed and its tests pass.
-Once the preview's tests pass, before the issue goes to QA, when the
-product's code changed since the last demo — the review may have changed what
-the feature does — a headless session records a delta of what changed for the
-user and the whole demo again, starting from the last script and what changed,
-and the issue's demo comment is replaced: step 2's demo is for you accepting
-the work, this one for QA to see what the feature is and what changed. Only
-where a person does QA (`qa: github` or `both`); with `qa: auto` the whole demo
-is recorded again before the last epilogue instead, and no delta. Where
-nothing a user meets changed — tests, a refactoring, a fix nobody sees — that
-session records nothing and keeps the demo there is (`demo.py keep`), and
-sclaude says why. Nothing it records goes out while it works: the last delta
-and the last full recording it made are sent to the topic and the issue after
-it, once each — none when it ended by keeping the demo — and a try it fixed is
-sent nowhere. What it found wrong
-in the product while recording — a check that failed, a fault it had to go
-round — is printed in sclaude's terminal. At night (`/isleep`) a finding the
-session would leave as it is does not hold the step till morning: it waits for
-you, and in the morning sclaude offers a session that asks you about each such
-thread and, on your yes, replies and resolves it on GitHub itself. The
-report after each round shows what each round cost in two parts: `review`, the
-pass on this machine as Claude Code accounts for it (`—` for GitHub's review,
-which sclaude cannot price), and `fixes`, the fixing session's launch. When the
-report says the rounds stopped converging, or that the fixes are feeding the review two rounds running, its verdict is red, and the
-feature's topic is told once, with the keys that end the search for new findings. What a round leaves open goes back
-to a review session without a question: `s` (⏭ on the topic) is how the rounds
-end, `n` and `r` in sclaude's tab act at once. Leaving the session yourself
-(`/exit`) stops them there, unless `[g]` is ticked: the step stays open until
-the next `sclaude <feature>`. A round goes back to the same session while
-its context is under 40% and its last request is under 55 minutes old, so its
-prompt cache is still warm; otherwise a fresh session takes it, which costs
-less than resending a cold context. Once you end the search, one
-question with three answers settles the rest: check the fixes, close the step,
-or leave it.
-
-With the review on this machine, its status line shows two boxes while a pass
-runs, ticked until they apply: `[s]` makes the pass the last that looks for
-new findings, and `[g]` lets the review go on by itself — no question after
-it: a pass that failed runs again after a pause that grows by a minute each
-time (ten times in a row, then you are asked), the fixes are
-checked and what is open goes back to a review session, for 30 rounds at
-most, then it is off for that step 4 and you are asked (a press of `[g]` then
-turns it on). In a project whose review runs in Actions, the wait for it shows
-`[g]` too. The friction review, which
-waits for you to approve its plan, is not opened after step 4's sessions (a
-review round's, a sync's, a regression fix's) — unless you typed `sclaude
-friction` or `sclaude sync` at the terminal yourself: their
-log is kept for the next friction review after the box comes off, and at the
-latest for the one before the retrospective; step 4 itself goes on. Each key pressed again
-takes its box back. `[g]` has three values, in turn on each press: `auto`
-(the default — the project's `sleep_mode` decides: by default, an /isleep night
-over every session, not an `/isleep here` one —
-and the box shows `auto ☑ (night)` or `auto ☐`), `on` (☑) and `off` (☐); on
-and off are yours and stay for the whole review, step 4 reopened included. `[n n]` (forward, now — the letter of the session keys below) stops the pass at once. A pass that did not run
-asks whether to go on with the head unreviewed, and `n` reviews it again
-rather than leaving sclaude. While a review session works in its own tab, the
-terminal sclaude waits in shows the same two boxes and takes `[s]` and `[g]`
-too; `[s]` said then ends the search, so after that session sclaude asks
-whether to check its fixes — or checks them, with `[g]` ticked.
-
-**QA, merge, production.** The issue moves to `In QA`, and sclaude waits — you
-can close the terminal; a background timer keeps watching the board. QA checks
-the criteria on the preview and ticks them in the issue.
-
-- QA moves the issue to `Done`: the pull request is marked ready and gets a
-  summary for whoever merges, and sclaude goes on to the merge.
-- QA moves it back to `In progress`: their comments are collected word for word
-  and a review session opens with them.
-
-You can also send a finished feature back yourself with `sclaude return`.
-
-**A branch that does not merge with main is synced first.** Before the
-preview, again after QA's yes, and every two minutes while it
-waits for the merge, sclaude asks git whether the branch still merges with
-main — no session and no tokens for that. When it does not, step 5 merges
-main in, resolves the conflicts, checks the result and pushes; the preview,
-its tests and QA then run again on that code — QA only when the branch's own
-product changed: what main brought in and files that are not the product
-(`.sclaude`, `docs`, `.github`, `.githooks`, `*.md`) leave QA's yes
-standing. A conflict only in the deferred logs sclaude merges itself, with
-both sides' rows. A pull request already
-handed over for the merge goes back to a draft when a sync changes its code.
-Every step starts on a branch carrying the latest main, too: sclaude merges
-it in without asking, and a merge that would conflict goes to the same sync
-first. With uncommitted work in the tree it merges nothing and says so; the
-merge is then `sclaude sync <name>`, which goes the same way — the menu's
-line says beforehand whether a session will be needed. A merge left half-done in the tree holds the step until it is
-finished (`sclaude sync <name>`) or backed out (`git merge --abort`).
-
-The merge is yours (unless the product set it otherwise). After it sclaude
-offers production, runs the tests there, and rolls back if they fail.
-
-**Epilogue and retro.** A short session writes the outcome into the issue and
-every parent issue, so an epic shows where it stands without opening each child.
-The issue gets `deployed-preview` / `deployed-prod` labels, and its end date is
-filled in. Then `sclaude done` first runs every friction review still owed — one
-held under `[g]`, one cut off, a log no review read — then the retrospective,
-and asks before removing the worktree and branches.
-
-Every Claude session sclaude starts, its model and permissions, and where the
-issue's summary table shows it:
-
-| Session | Model | Permissions | What it does | In the issue |
-| --- | --- | --- | --- | --- |
-| 1. plan | opus / high | `plan` | Discussion; the only file it may write is the plan | a row |
-| 2. code | opus / medium | `auto` | Implementation, checking in Chrome, commits | a row |
-| 3. pr | sonnet / medium | `auto` | The manuals and the pull request — calls the `pr` skill | a row |
-| 4. review | opus / medium | `auto` | Fixing review findings, one round at a time; a QA hand-back or a production rollback reopens it | a row per session, with its rounds |
-| fix after a regression | as step 2 for the local tests, as step 4 for the preview's and production's | `auto` | Makes red tests green; after a rollback it is told what failed on production | a row per session, with how it ended |
-| 5. sync | sonnet / medium | `auto` | Only on a conflict with main: the merge of main into the branch, its conflicts resolved, checked and pushed | a row per session |
-| 6. epilogue | sonnet / medium | `auto` | The outcome as one comment per issue, on the feature's issue and every parent; changes nothing in the repository | a row |
-| 7. retro | opus / medium | `plan` | What you missed, how to work better, what sclaude could do better. What it fixes goes on the feature's branch and sends the feature back to step 3 | a row |
-| friction review | opus / medium | `plan` | After each step and fix session: reads what the safety rules refused, and loosens a rule that was in the way | the Friction column of that row |
-| local review pass | opus, `claude -p` | read-only | With the project's review set to `local`: finds problems in the pull request before step 4's session | a row per pass the journal recorded, with the findings it posted; the findings land on the pull request, the report in the feature's Telegram topic |
-| friction matching | haiku, `claude -p` | no tools | One call that matches proposed rules to the ones already put off | not in the table: it is not a session |
-| monthly friction review | opus / medium | `plan` | `sclaude deferred`: the rules put off across features | not on a feature's issue: it belongs to none |
-| sclaude's workshop | opus / medium | `plan` | `sclaude workshop` (the bot's 🛠): changes sclaude with you in a worktree of its own, reviews it and publishes it on your word | not on an issue: it belongs to no product |
-
-### Environments and databases
-
-**Which database a feature uses is your machine's choice.** The product names
-its environments in `.sclaude/config.json`, each as a `.env` file
-(`"dev": {"env": ".env.dev"}`). sclaude asks once which one this machine works
-against and remembers the answer; `SCLAUDE_ENV` overrides it. There is no
-default, because a wrong guess is a quiet mistake. A feature is never pointed at
-production.
-
-**On a local database, every feature gets its own.** When the chosen
-environment is the product's local Supabase, each feature gets a Supabase stack
-of its own in Docker, filled from the main local database or the product's
-seed. It is removed with the feature. If Docker is not running sclaude starts
-it, and falls back to the shared local database, saying so, only when it cannot.
-The main local database is kept on main's migrations: sclaude applies what a
-merge brought at the end of the cycle and before each copy, and says so.
-
-**Every feature has its own address**, `http://<feature>.localhost:3000`,
-printed at the start of each step. A feature nobody has opened for half an hour
-is stopped, database included (data kept), and starts again on the next visit.
-
-### Switches
-
-| variable | effect |
-|---|---|
-| `SCLAUDE_ENV` | the environment to use, instead of the remembered answer |
-| `SCLAUDE_DEV` | your name, instead of `sclaude.developer` or the one from your git email |
-| `SCLAUDE_NO_SYNC=1` | do not pull the latest sclaude before a command |
-| `SCLAUDE_NO_RELOAD=1` | do not switch to newer sclaude code after a long session |
-| `SCLAUDE_PANE_FOCUS=follow` | let a session's new tab take the focus; by default it stays on the tab you were in |
-| `SCLAUDE_TERM=off` | do not record the terminal (recordings are kept 60 days) |
-| `SCLAUDE_RETRO=off` | skip the retrospective |
-| `SCLAUDE_FRICTION_ASK=on` | ask before putting proposed CLAUDE.md rules off to the monthly review |
-| `SCLAUDE_FRICTION_CLASSIFY=off` | put proposed rules off as they come, without matching them to the classes already there and to CLAUDE.md |
-| `SCLAUDE_DEV_IDLE` | how long an unused feature keeps running |
-| `SCLAUDE_DOCKER_START=off` | never start Docker |
-| `SCLAUDE_DOCKER_WAIT` | how long to wait for Docker to come up, in seconds (120) |
-| `SCLAUDE_DOCKER_DESKTOP` | where Docker Desktop is, when it is somewhere unusual |
-| `SCLAUDE_DB_WAIT` | how long a feature's own database may take to answer after its start reported a failure, in seconds (120) |
-
-### What sclaude writes, and where
-
-| what | for | where | in git | uploaded by a deploy |
-|---|---|---|---|---|
-| `.sclaude/config.json` | what the product is | the product | yes | no harm if it is |
-| `.sclaude/team/`, `.sclaude/people/<name>/` | rules, prompt additions, deferred findings | the product | yes | no harm if it is |
-| `.sclaude/local/feature/` | one feature's working state: the plan, logs, its database settings | the feature's worktree | never | never |
-| `.sclaude/local/demo/` | the feature's recorded demos: videos, steps, the page | the feature's worktree | never | never |
-| `.sclaude/local/terminal/` | terminal recordings the retrospective reads | the product's main checkout | never | never |
-| `.sclaude/local/dora/` | the product's DORA page and what it was built from | the product's main checkout | never | never |
-| `.vercelignore` | keeps `.env*` and sclaude's files out of a deploy | each tree sclaude deploys | no, unless the product tracks its own | — |
-| `~/.claude/sclaude/` | your cycle records, remembered choices, running dev servers | your home | never | — |
-| `~/.config/sclaude/` | this machine's settings | your home | never | — |
-| comments, labels, board moves, `Sclaude-Session` commit trailers | the feature's story where the team reads it | the product's GitHub and history | the trailers | — |
-
-The cycle records are one JSON line per feature in `~/.claude/sclaude/cycles.jsonl`,
-readable with `jq`:
-
-```bash
-jq -s '[.[] | select(.outcome == "done") | .steps.code.seconds] | add / length' \
-  ~/.claude/sclaude/cycles.jsonl
-```
-
-## skills/pr
-
-A Claude Code skill that finishes work through a pull request instead of a push
-to `main`. Call it with `/pr`; sclaude's step 3 calls it too. Claude does not
-run it on its own.
-
-It works on a `feat/…` branch, checks that commits follow Conventional Commits,
-runs the project's checks and opens the pull request. The description has
-**Summary** — what changed; **Requested by the customer (for QA)** — what was
-asked for, as observable behaviour, for QA to check; then **How to verify** and
-any **Notes**. It also updates the product's manuals. It never merges or
-deploys.
-
-## skills/sreview
-
-`/sreview [N]` runs iterations of review and fixing on the current branch, in
-any repository, and asks whether to go on every N iterations (5 by default). It
-stops by itself once a review finds nothing substantive.
-
-Each review is a fresh subagent that has not seen the fixes, told what was
-already decided so it does not raise it again. Fixes go to subagents where they
-are more than a line or two. Questions are asked once per iteration, about a
-class of findings rather than one line, and each answer is kept where it
-applies: one that holds across the repository as a policy in
-`<git common dir>/sreview/policies.md` — outside git, shared by every worktree —
-which settles similar findings in this run and later ones; one about a single
-part of the code as a comment beside that code, or in its doc. In a project run by
-sclaude it takes the check commands, the review mode and the review rules from
-there, and with a pull request open keeps the findings as its threads. It
-commits once per iteration; pushing is left to the project's own rules.
-
-## skills/sdemo
-
-`/sdemo [feature] [what to show]` shows you a feature working. Claude reads
-what the feature changed, picks a few scenarios — each seen as the user it
-should be seen as, from the feature's own database — and writes them as a
-Playwright script; the player signs in as each user (see *Signed in without a
-password* under [bin/sclaude-proxy](#binsclaude-proxy)), clicks and types
-through the steps, and puts captions on the page as it goes: what each step
-does, where to look, why it matters. You get one link to a page — run by
-sclaude's steps, also sent with the videos to the feature's Telegram topic, as
-📱 for the phone (the tailnet's address) and 💻 for the laptop, and kept with
-the videos in a demo comment on the feature's issue; run by hand, given in the
-terminal only — with:
-
-- a video per scenario — on a desktop, and on a phone where the layout differs
-  there — and what it shows, what to look at and why this case;
-- its steps beside it, the one under way written out large under the video
-  (and as the video's captions in full screen); tap a step to jump there;
-- checks marked ✓ or ✗;
-- **take over** on every step: that page, signed in as that user, to go on by
-  hand.
-
-Each feature has one demo page, `/__sclaude/demo/<feature>/`: the latest full
-demo, and below it every delta — a short recording of only what changed for a
-user, kept each time the demo is recorded again after a change — newest first:
-between which stages (`2-code → 2-code`, `2-code → preview`), when, by which
-commits, the change in a sentence, and its videos. `/sdemo delta` records one
-by hand; when nothing changed for a user, it records nothing. The page is
-linked from the proxy's list of features, under the feature, and from its
-process map.
-
-`/sdemo ac` walks through the acceptance criteria in the issue instead, a
-scenario per criterion (or a few together), and names the ones no page can
-show. `/sdemo live` plays the same in the laptop's chrome-debug, a window per
-user with cookies of its own: ⏸ on the page hands it to you, ▶ goes on, ⏭
-goes to the next scenario, ⏹ ends the script and leaves the windows signed
-in. `/sdemo links` gives plain
-links instead — one per scenario, signed in, with what to check under it —
-and `/sdemo links open` opens them in chrome-debug, a window per user, closing
-the previous demo's windows.
-
-The links are for where you are: on the laptop `http://<feature>.localhost:3000/…`;
-when a device of your tailnet has traffic now — you are on the phone — the
-address the bot opens features at on a phone (the `tailscale serve` name, or
-the tailnet address). Say "I'm on the laptop" or "on the phone" and it follows
-that instead; the other place's link is given at the end, when there is a
-phone address at all (`tailscale serve` or the tailnet's).
-
-The videos are H.264 when `ffmpeg` is installed (`sudo apt install ffmpeg`),
-which every browser and Telegram play; without it, the recording's own WebM,
-four times the size, which Safari before 17.4 does not play. A demo is kept in the feature's `.sclaude/local/demo/`.
-
-`skills/sdemo/demo.py` does each part by hand: `play <script.mjs> [--live]`
-plays a script, `replay` plays the last one again, `stale` says whether the
-code changed since the last demo,
-`link <email> <path>` makes one link, `open <email> <path>…`
-opens links in chrome-debug, `users` lists who can sign in and `criteria`
-prints the criteria.
-
-## skills/isleep
-
-`/isleep [task]` when you go to sleep and the session has to carry on. First
-it runs `/fewer-permission-prompts` for the project, into
-`.claude/settings.local.json`, so that a read-only command it asked about
-before does not hold the session at a permission prompt all night. Then Claude
-stops asking: each question it would have put to you it settles by the option
-it would have recommended, and wherever it would stop to ask whether to go on
-— another review round, the next item, a retry — it goes on. It does not end
-its turn while work is left, and waits for CI and the like in the background.
-
-It still does not do what it would need your word for by day — push, merge,
-deploy, delete what is not its own, write to other people, spend money; such a
-step is left ready, with the command that does it. Every decision is logged as
-it is taken, with what it was instead of and how to undo it, in
-`~/.local/state/isleep/<date>.md` — one log for every session of the night.
-Your first message in the morning gets the summary: the result, the decisions
-taken for you, what waits for you, what was set aside. `/isleep report` writes
-the summary without ending the night, `/isleep off` ends it.
-
-In a project sclaude runs, its `[g]` "go on by itself" is on while a night
-over every session is (not an `/isleep here` one), under `sleep_mode: auto`
-(the default): step 4's review rounds go on without asking, and in the
-morning they ask again. `on` keeps `[g]` on all the
-time, `off` leaves it to the box alone; a box you set yourself wins either way.
-
-The night is kept in `~/.local/state/isleep/night.json`, not only in the
-conversation, and covers every Claude session on the machine — already
-running or started during it, such as sclaude's next step; `/isleep here`
-keeps a night it starts to one. Hooks that `install.sh` adds to `~/.claude/settings.json`
-bring the rules into a new, compacted or resumed session and into a running
-one at its next tool call, refuse `AskUserQuestion` with "decide and log", and
-ask a turn that ends whether work is left (once per turn, at most 40 times a
-night in each session). `/isleep 8h` sets how long the night lasts (12 hours by default).
-
-The night ends when you type anything in any session: that session gives
-you the summary, and every other session the night reached is told at its
-next tool call that questions go to you again. A night that runs out its
-hours ends the same way, and your first message after it gets the summary;
-so does one ended outside any session — `night.py off` in a terminal, or your
-yes, in its terminal or on the phone, when sclaude offers to go through the review threads left at night, which
-ends the night so that the session asks you rather than deciding.
-The prompt sclaude starts a step's session with, a headless
-`claude -p` and a `/loop` wakeup do not count as you — nor does a `/loop` you
-type, which reads the same. A session closed during the night is told when
-you resume it. By day the hooks do
-nothing; sessions started before the hooks were installed do not run them.
-
-## bin/sclaude-proxy
-
-One address per feature: `http://<feature>.localhost:3000` reaches that
-feature's dev server, whatever port it really uses. Chrome resolves every
-`*.localhost` name by itself, so there is nothing to configure.
-
-```bash
-systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
-```
-
-- `<feature>.localhost:3000` — that feature. One that is not running is started,
-  with a page that waits for it.
-- `localhost:3000`, or the machine's Tailscale address — the list of features.
-  From another device, choosing a feature makes the bare address serve it from
-  then on.
-- Under each feature and main, a line for each web tool of its own: its
-  Supabase Studio and Inbucket while its database stack runs, Code Server
-  opened on its tree (started on the way when it is down; from this machine
-  — the phone has its own through the gate), and its process map.
-- `localhost:3000/__sclaude/flow?f=<feature>` — the feature's process map: the
-  whole cycle as BPMN, with where the feature stands lit and, beside it, the
-  actions open to it now, each with its command and the place on the map it
-  leads to. It follows the feature as it moves (every few seconds). The list of
-  features links it on a line of its own, "<feature> — Process map (BPMN)",
-  and under main the same line opens the whole cycle with no feature on it
-  (`/__sclaude/bpmn`). The panel beside it switches between **Actions** and
-  **History**: every place the feature stood on, when and for how long, and
-  the arrow it came in by — with who took it (you, a setting, sclaude's own
-  check, the session, QA, GitHub, or nobody answering), how (the terminal or
-  the phone, a key of sclaude's tab, the setting's value) and what was known
-  then (findings, the tests that were red). ▶ by a map's heading plays how the feature went on
-  that map — a clock on each place counting its time, then the arrow it took,
-  a friction review or a change to sclaude jumping to its own map and back;
-  by those two maps' headings a list chooses which pass to play. While it
-  plays the History follows it, and a click on a line plays from there. The
-  history starts with sessions run since sclaude keeps it. Checkboxes above
-  the maps put in each block what it took: ✋ your input — each message to
-  Claude after its turn, each answer to its question or to sclaude's, each
-  command run on the feature at the terminal — Claude's cost in dollars, and
-  ⏳ how long a question waited for your answer, Claude's or sclaude's, nights
-  included, ♻ how many times Claude's prompt cache had expired and a
-  conversation's context was written to it again (usually after a long
-  pause), and ⏱ how long the feature stood on the block, every stay added
-  up — what sclaude has going now (a step, a sync, a friction review, a
-  regression, the wait for the merge or QA) counted up to now; ⚠ when
-  something ended with no end written (a Ctrl-C, a terminal that died) and
-  its time is a guess — with ×3
-  when it was entered three
-  times (not on the cycle at a glance, whose blocks stand for several
-  places); a block with none shows none. They sit inside the block, in its
-  corners (a start or an end, a small circle, has them in a line under its
-  words): ✋ and ⏳ together at the bottom left, the cost at the bottom
-  right, ⏱ at the top left; a block whose own text fills four lines gives up
-  its last line of description to make room, and gets it back when the
-  checkboxes are off. Each checkbox shows the whole feature's
-  total beside it, and every map's heading its own — a map nothing was
-  counted on, such as a friction review put off with no session, says its
-  zeros. While a map plays, its blocks count up instead:
-  what was played there so far, and on the place playing now its own share
-  after a plus — ✋ 3+2 is three before it and two in it, its time on the
-  player's clock; the totals come back when the play ends or is stopped. Off
-  the play, the step going on now is shown the same way on its own
-  map when it was entered before: what the earlier stays took, then its own after a plus. The player plays at ×0.5 to ×4.
-- `localhost:3000/__sclaude/dora` — the product's metrics, linked under main
-  as "main — DORA metrics": DORA, delivery, development quality, Claude's work
-  and token efficiency. Production deploys and builds come from Vercel, each
-  change's first commit from git and GitHub, failures from the rollback
-  comments sclaude writes on an issue, sessions, tokens and dollars from
-  Claude Code's transcripts (its own cost record), and the rest from the cycle
-  records, the review log and the issues' acceptance criteria. It is rebuilt in the background whenever `sclaude` starts in
-  the product and the page is over six hours old (`SCLAUDE_DORA_EVERY`, in
-  seconds), and at once when a feature is finished; an open tab reloads
-  itself hourly. Every step's header prints it under the feature's address,
-  and in the Telegram Mini App it is "🗺 Process map" in a feature's actions and
-  on its card, which starts the feature's dev server too (and gives it one
-  first when it has never had one).
-
-On either map, pointing at a block, an arrow or a command lights it and what
-it touches — a block its arrows and their other ends, an arrow its two ends, a
-command the place it leads to, a block the commands open there — and fades the
-rest, with a note on what it is and does. A click keeps it lit, Ctrl-click adds
-more (the lit things add up), and Esc or the floating button clears. On the
-printed page the commands' names are also pinned beside the maps, so both are
-read together; unpin them from the list itself or from the heading of the
-commands' section.
-
-Different addresses rather than different ports keep features apart in one
-browser: cookies ignore the port, so on ports alone signing in to one feature
-would sign you out of another.
-
-**Signed in without a password.** When the product's `.sclaude/config.json`
-names its route for email links (`"devLogin": {"path": "/auth/confirm"}`, the
-route that verifies `token_hash`), a feature in the list opens signed in as
-you: the first line of `~/.claude/sclaude/dev-login`, else your
-`git user.email`. "without signing in" beside it opens it as it is.
-On a feature with a local database of its own you can sign in as anybody in
-it:
-
-- "as another user" beside the feature (`/__sclaude/users?f=<feature>`) lists
-  that database's users, a sign-in link each;
-- `http://<feature>.localhost:3000/__sclaude/login?as=<email>&next=<path>`
-  signs in as that user and opens `<path>`, dropping the session the browser
-  had there. Both are URL-encoded: `qa%2Badmin%40example.com`, not
-  `qa+admin@…`, whose `+` reads as a space. Ask a step's session for links to test a feature as some user
-  and it gives you these.
-
-Only users that exist are signed in, never created. On a shared environment
-only your own address signs in, and on a protected one nothing does.
-
-Only this machine and your Tailscale network are let in; anybody else on the
-same Wi-Fi gets `403`. `SCLAUDE_PROXY_ALLOW` replaces the list with networks of
-your own, comma-separated.
-
-`sclaude dev` in the main checkout serves it at `main.localhost:3000`.
-
-### The bot as an app in Telegram, with no Tailscale on the phone
-
-While phone access is on, the bot's menu is a Telegram Mini App: "☰ Menu" by
-the input box opens it, and "📲 Open in the app" on a feature's card opens it on
-that feature. Inside it, a feature's "📲 Phone" opens the feature itself full
-screen, with an address bar of its own, and code-server opens on the worktree
-the same way. The phone needs nothing but Telegram; Telegram Web on a computer
-works too.
-
-Telegram does not tell the app which topic "☰ Menu" was pressed in, so that
-button first asks which feature, or the whole machine. "📲 Open in the app" on
-a feature's card opens the app on that feature: 📋 Sclaude is its
-card, 🌐 Chrome and 💻 Code-server open it and its worktree (code-server's screen
-shows its password), and "📍 Choose a feature" moves to another or to the whole
-machine. The card in the app has a button to a row: ▶️ continue the step, named
-by where the feature is; ⚙️ other feature actions, chosen right there and grouped
-by the step each leads back or on to, with the current step marked; 🌐 open the
-browser on the laptop; 📲 show the app here; and starting or stopping its dev
-server. Under the session's state it says how many minutes its prompt cache has
-left — going on with the session past them pays to write the whole conversation
-into the cache again. Continue and the actions start nothing beside a step at
-work or a question waiting for you.
-
-It works through `tailscale funnel`, which publishes
-`https://<node>.<tailnet>.ts.net:8443`. A gate in front lets in only your
-Telegram account (the one in `KEEPAWAKE_CHAT_ID`), checked by Telegram's own
-signature, and sends everyone else away with `403`.
-After sclaude updates itself, the app picks up the new code on its own: the
-gate closes once nothing is loading and starts again on the next request,
-and you stay signed in.
-
-Phone access is off until you turn it on, and off again after the machine
-restarts. Turning it on takes a few minutes — sometimes five — before Tailscale
-publishes the address; the bot says it is waiting, offers the app nowhere until
-then, and changes that message when the app can open. Turning it off from the
-app asks first and closes the app.
-
-Turn it on with `/phone` or the chat's "Phone access" button, off in the app's
-Settings. The first time needs, once:
-
-```bash
-sudo tailscale set --operator=$USER    # lets the bot run `tailscale funnel`
-```
-
-Funnel also has to be allowed for the machine in your Tailscale policy; if it is
-not, the bot shows Tailscale's answer with the link that turns it on. A product
-that signs people in through a provider with a list of allowed redirect
-addresses (Supabase Auth, OAuth apps) needs the funnel address in that list.
-
-## bin/chrome-debug
-
-Starts Chrome (Playwright's build) with the debugging port Claude Code's
-chrome-devtools tools connect to. Under WSLg it also puts the window back on
-the right monitor.
-
-```bash
-chrome-debug                     # bring the window forward, opening it if needed
-chrome-debug http://localhost:3000/some/page   # the same, and go to that page
-chrome-debug --stop              # close it
-chrome-debug --keep              # skip the restart a misplaced window would need
-chrome-debug --tab http://a.localhost:3000/   # open a background tab, leave the window alone
-chrome-debug --window URL...     # a new window with cookies of its own, the URLs as its tabs; prints its id
-chrome-debug --close-window ID   # close such a window, its cookies with it
-```
-
-`CHROME_DEBUG_PORT` (9222) and `CHROME_DEBUG_PROFILE` change the port and the
-profile. The log is at `~/.cache/chrome-devtools-mcp/chrome.log`.
-
-You rarely need it by hand: sclaude opens the feature in a background tab before
-each step, without pulling the window in front of whatever you are looking at.
-
-## bin/wsl-update
-
-Installed with `./install.sh --extras`, under WSL only.
-
-The daily update of the tooling in WSL2: apt, nvm and Node, global npm packages,
-Claude Code and its plugins, Playwright's Chromium, code-server. It also reports
-outdated dependencies for the projects listed in `~/.config/sclaude/projects`
-(one path per line) without touching them.
-
-Local Supabase images are kept at the versions the Supabase CLI and production
-use, and unused old ones are cleaned up. On the Windows side it only reports — a
-newer WSL, applications `winget upgrade` lists — because updating those from
-inside WSL would shut WSL down or need elevation.
-
-A Node that does not start — a major that needs a system library WSL leaves
-out, as Node 26 needs `libatomic1` — is named with the `sudo apt install` that
-fixes it. When it is the node the run uses — the default follows `lts/*`,
-which nvm moves to a new LTS as soon as it unpacks it — the steps that need
-node are skipped rather than failing one by one. The fix is that package, not
-the older version.
-`sclaude doctor` names the same gap.
-
-It runs every day at 10:00 (and catches up after a missed day). Logs are in
-`~/.local/state/wsl-update/`.
-
-```bash
-wsl-update                                  # run it now, in the terminal
-systemctl --user status wsl-update.timer
-journalctl --user -u wsl-update.service
-```
-
-## bin/keepawake
-
-Installed with `./install.sh --extras`.
-
-Keeps the machine awake while there is work going on, so it can continue from a
-phone while the laptop stands closed. Under WSL it holds Windows awake; on plain
-Linux it holds the machine itself (see [below](#keepawake-on-plain-linux)).
-
-**What holds it.** A person at the machine — an SSH session, an open
-code-server tab, traffic over Tailscale — holds it for as long as they are
-there. Work that may be going on with nobody around — a busy `claude`, a dev
-server — holds it for an hour at a time, and half an hour before the end the bot
-asks whether to extend. With nothing holding it, the machine sleeps by its own
-settings. If something holds it for an hour with no sign of anybody, the bot
-asks whether a session was forgotten.
-
-When in doubt it lets go: a laptop that sleeps too early costs a button press,
-one that never sleeps costs a flat battery.
-
-```bash
-keepawake status          # why the laptop is (or is not) sleeping
-keepawake extend 3600     # hold for another hour
-keepawake release         # let go now
-```
-
-`keepawake status` prints two sections, `HOLD` and `HEALTH`.
-
-**The Telegram bot.** With phone access on, the menu is an app inside Telegram
-("☰ Menu" by the input box): 💤 Keepawake — extend, until a time, release, and
-why the machine is or is not sleeping; 📋 Sclaude — the repositories, their
-features with what each step is doing (🟢 running, 🟡 waiting for you, ⚪ idle,
-⚫ not started), a new feature — from an open issue, yours first and marked
-when something blocks it, with the branch name to correct, or from a name with
-a tick for creating its issue, as `sclaude new` offers at the terminal — and 🧩
-the project's config, every section explained, with `review`, `qa`, `merge`,
-`ship`, `previewRegression`, `prodRegression`, `demo` and `sleep_mode` set by a button; 💻 Code-server; 🌐 Chrome and the list of every
-feature; 🛠 Workshop — `sclaude workshop` in a tab on the laptop, a session that
-changes sclaude, picked up over Remote Control in the Claude app; ⚙️ Settings — language, docs, restarting the bot (the screen waits
-and says when it is back), phone access. Each
-screen says under it what it is for. What you start there leaves a 📱 line in
-the chat — in the feature's topic when it is about a feature — and what only
-shows something leaves nothing. sclaude's questions stay in the chat as buttons,
-and an answered one becomes its answer. Without phone access `/menu` in the chat
-keeps what works without it: the hold, and turning access on; the command list
-follows. It answers in Russian to a Russian Telegram client and in English to
-everyone else.
-
-**Answering sclaude from the phone.** Every question sclaude asks goes to the
-terminal and to the bot at once, and whichever you answer first counts. Start a
-feature at the laptop, walk away, answer from the phone: the terminal carries on
-by itself. While you are sitting at the terminal the question arrives silently,
-so the phone does not buzz for something already on your screen. Claude's own
-conversation in a step continues in the Claude mobile app.
-
-Once a question is answered — by a button, by text or in the terminal — its
-message becomes the question with the answer; one that closed unanswered is
-deleted.
-
-**A topic per feature.** With Threaded Mode on for your bot (the @BotFather mini
-app: Bot Settings → Threads Settings; also turn on "Disallow users to create new
-threads"), each feature has a topic of its own: pressing a feature in the sclaude
-section opens it, and its questions go there, so features running in parallel do
-not ask over one another. The topic starts with the feature's card — its step,
-issue and pull request, ▶️ continue the step, ⚙️ actions, its dev server (open on
-the laptop or the phone, start, stop) and 💻 code-server on its worktree; with
-phone access on these are in the app, and the card has one button to it — and
-"Menu" in the topic brings a fresh card. ✨ New feature, ▶️ and ⚙️ open sclaude
-in a tab of Windows Terminal on the laptop, as if you had typed it there; its
-questions still come to the topic. The card follows its session — within a
-minute of it starting, waiting for you or going idle. A new feature gets its topic as soon as
-it is started, and the topic takes the feature's name once it has one. After each review round the topic also
-gets where the review stands: the last review session's runs, findings, fixed,
-closed without a fix, still open, on earlier fixes and raised again, with the
-report's verdict — a message of its own each round, so the topic keeps the
-history. And it follows what sclaude is doing there — each session that
-starts and ends, and each step once it is done; a review fix session with
-what it is handed and what it leaves (findings not fixed yet, new, fixed,
-declined, commits), and the review on this machine as it runs — its start
-carries the keys its terminal takes, ⏭ the last pass for new findings and ⏹
-stop now, and a fix session's start the first of them, so a review can be
-ended from the phone; the buttons go once that pass or session ends; regressions
-(a red one names the specs that failed, by their titles), deploys and QA's
-moves on the board — in short messages, one step's lines apart from the next one's, silent unless something went wrong while you are
-away from the laptop. Typing an answer inside a topic answers
-that feature; in the main chat, with several questions open there, answer one
-with Telegram's Reply on its message. The menu, the sleep warning and questions not about a feature stay
-in the main chat. When `sclaude done` or `drop` cleans a feature up, it leaves the menus
-as soon as its worktree starts going, and its topic is deleted, everything in it
-included, so the chat's "All" view is cleared of it too (Telegram lets the bot
-delete only messages under 48 hours old); `drop` therefore asks all its questions before it removes anything. A
-question still open about it elsewhere — the action list opened from the phone —
-is withdrawn, and its sclaude ends. Without Threaded Mode everything stays in one
-chat, as before. If `getMe` still says `has_topics_enabled: false` after the
-switch, change any classic setting (`/setjoingroups`) to refresh it.
-
-**code-server starts on demand** — from a button in the bot, by following its
-local link, or with `systemctl --user start code-server` — and stops itself
-after an hour idle.
-
-### keepawake on plain Linux
-
-There is no Windows side, so `keepawake-linux.service` holds the machine itself
-with `systemd-inhibit`. By default a background service may only stop the
-machine sleeping *when idle*: a closed lid or an explicit suspend still sleeps
-it, and the hold log says so once.
-
-`install.sh --extras` offers to change that on plain Linux, and only there. It explains
-when the rule is worth having (a laptop you close while working from a phone),
-shows the command that removes it, and asks for a yes or a no.
-`./install.sh --polkit` adds it without asking, `--no-polkit` skips the
-question. To remove it later:
-
-```bash
-sudo rm /etc/polkit-1/rules.d/49-keepawake.rules && systemctl --user restart keepawake-linux.service
-```
-
-By hand, the polkit rule is this:
-
-```bash
-sudo tee /etc/polkit-1/rules.d/49-keepawake.rules <<RULE
-polkit.addRule(function(action, subject) {
-  if ((action.id == "org.freedesktop.login1.inhibit-block-sleep" ||
-       action.id == "org.freedesktop.login1.inhibit-handle-lid-switch") &&
-      subject.user == "$USER") {
-    return polkit.Result.YES;
-  }
-});
-RULE
-systemctl --user restart keepawake-linux.service
-```
-
-### Configuration
-
-**Telegram.** Create a bot with `@BotFather`, find your `chat_id` (message the
-bot and open `https://api.telegram.org/bot<TOKEN>/getUpdates`), and fill in
-`~/.config/keepawake/env` from `keepawake/env.example`. The file must be mode
-`600`, or the bot refuses to start.
-
-```bash
-cp keepawake/env.example ~/.config/keepawake/env
-chmod 600 ~/.config/keepawake/env
-$EDITOR ~/.config/keepawake/env
-systemctl --user enable --now keepawake-telegram.service
-```
-
-**SSH for Termius** is the one part that needs `sudo`, which is why `install.sh`
-does not do it:
-
-```bash
-sudo apt-get install -y openssh-server
-sudo tee /etc/ssh/sshd_config.d/10-keepawake.conf <<'EOF'
-ListenAddress <tailscale-ip>
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-PubkeyAuthentication yes
-PermitRootLogin no
-EOF
-sudo systemctl enable --now ssh
-sudo loginctl enable-linger $USER
-```
-
-`ListenAddress` is your Tailscale address (`tailscale ip -4`), so SSH is not
-reachable from a café's network. `enable-linger` is required: without it the bot
-stops as soon as you close your last terminal — exactly when you need it.
-
-Generate the key **on the phone** (Termius → Keychain → Generate) and copy only
-the public half into `~/.ssh/authorized_keys`. In Termius: host
-`<node>.<tailnet>.ts.net` (the name `tailscale status` shows), port 22, your
-user name. No port forwarding or firewall rule is needed: Tailscale runs inside
-WSL, so the phone reaches it directly.
-
-code-server opens in the phone's browser at `http://<tailscale-ip>:8080`; the
-password is in `~/.config/code-server/config.yaml`. Put its `bind-addr` on the
-Tailscale address: `install.sh` then also opens `localhost:8080` for the
-laptop's browser. A code-server left on its default `127.0.0.1:8080` gets no
-such forward — it already answers there.
-
-```bash
-journalctl --user -u keepawake-telegram.service -f   # the bot's log
-```
-
-## statusline.py
-
-Claude Code's status line. On the left, the sclaude session (`1-plan`,
-`4-review(2)`, `4-fix-preview`, `5-sync`, `6-epilogue`, …) and the path; in the middle the
-branch, the feature's pull request, the session's name and the worktree; on the
-right the model, the effort, how full the context is, the prompt cache, and the
-usage limits. On a narrow terminal the least important fields drop out first.
-
-`💾 37m` is how long the prompt cache has left: past it, the next message pays
-to write the whole context into the cache again. Once it has expired the field
-says what that costs — `off ~4%` of the five-hour limit, or `off ~$0.80` until
-the status line has seen enough spend to know what a percent is worth. That
-rate is learnt across all sessions on the machine, and use outside Claude Code
-moves the limit too, so the share is an estimate on the high side.
-
-`install.sh` links it to `~/.claude/statusline.py`, which `settings.json` points
-at.
-
-## githooks/commit-msg
-
-Refuses a commit whose `Requirement:` footers would not survive as git
-trailers. Git only treats the last paragraph of a message as trailers, and only
-if every line in it is one; a stray blank line, or a missing one, silently drops
-them — and with them the QA section of the pull request the `pr` skill builds.
-The hook asks git itself what it will see, and compares.
-
-`install.sh` points this repository at it through `core.hooksPath`.
-
-## Contributing, and the licence
-
-[CONTRIBUTING.md](CONTRIBUTING.md) is the short way in: connecting a product,
-what lives in its `.sclaude/`, proposing a change to sclaude and running the
-tests. sclaude is under the [MIT licence](LICENSE).
+| [Setting up](docs/setup.md) | the environment sclaude is built for, what is required and what is optional, and the installation |
+| [Using sclaude](docs/sclaude-guide.md) | every command, and a feature from start to finish |
+| [How the cycle is kept in line](docs/cycle.md) | what closes each step, what is refused, the gates, the rollback, what is measured, the decisions a product may hand to sclaude |
+| [For a team](docs/team.md) | one copy for everybody, the product's config, layered rules, who changes the orchestrator |
+| [Privacy](docs/privacy.md) | what leaves your machine, what stays, what listens |
+| [The tools](docs/tools.md) | the skills (`/pr`, `/sreview`, `/sdemo`, `/isleep`), the per-feature proxy, chrome-debug, keepawake and its Telegram bot, the rest |
+| [The decks and the process map](docs/presentations/README.md) | building the decks, printing the map |
+| [docs/sclaude.md](docs/sclaude.md), [docs/keepawake.md](docs/keepawake.md) | how the parts work inside, and why they were built that way |
+
+Everything written in this repository is in English; see `CLAUDE.md` for the
+rule and its three deliberate exceptions.
+
+## Free and open: MIT
+
+sclaude is under the [MIT licence](LICENSE). In plain words:
+
+- **Use it for anything** — your company, your clients, a commercial product.
+- **Change it however you like** — fork it, rewrite it, strip it down, build
+  your own process on top of it.
+- **Keep your changes to yourself** if you want: nothing obliges you to send
+  them back, publish them or open your code.
+- **Ship it, sell it, bundle it** — in proprietary products too.
+- **Owe nobody anything** — no fees, no royalties, no sign-up, no permission
+  to ask.
+
+The one condition: keep the copyright and licence notice in copies of it. It
+comes as it is, with no warranty.
+
+## Contributing
+
+Contributions are welcome all the same. [CONTRIBUTING.md](CONTRIBUTING.md) is
+the short way in: connecting a product, what lives in its `.sclaude/`,
+proposing a change to sclaude and running the tests.

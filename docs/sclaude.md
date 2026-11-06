@@ -369,7 +369,10 @@ minutes a regression, a sync or a friction review ran inside it, which count
 on theirs — with how many stays the place had beside it. A workshop's work happens in the conversation that opened it and
 counts there. Each stay carries its own share too (`m`): a moment goes to the
 stay it falls in, else the last one at that place begun before it, and a
-conversation's cost to the stay it was last opened in; a sync's counts on the
+conversation's cost to the stays of its launches by each one's share where
+sclaude recorded them (`costs` and `cost_at` beside a run, `run_cost` in
+`steps.sh`; Claude Code keeps one running total for a resumed conversation),
+else to the stay it was last opened in; a sync's counts on the
 glance under the block its pass began ahead of. The player adds the shares
 up as it goes, so a map playing shows what was played so far, the place
 playing now as "before+its own" (its time on the player's clock, after what
@@ -957,6 +960,16 @@ correct while the branch has not touched the dependencies; the script notices a
 `node_modules/.sclaude-lock` (`check_deps` in `worktree.sh`), and a tree whose
 lockfile still has that hash is not asked again — the main checkout lagging behind
 origin is enough to make the two differ.
+
+The main checkout is the source of those links, so it is brought up to date first
+(`refresh_main` in `worktree.sh`, called before the worktree is added): on `main`
+it is fast-forwarded to `origin/main` (never over an edit, never with a stash),
+and a lockfile that moved since its last install gets `npm ci` there — `ci`,
+which removes `node_modules` first, so the files other trees link stay as they
+were — unless a Node process works in the checkout. Both run under a lock that
+linking a tree from that `node_modules` takes too. A lockfile comparison alone could not see a main
+checkout whose lockfile had moved without an install: the tree's lockfile and
+the main one agreed, and every new feature started on the old packages.
 
 ### Logs
 

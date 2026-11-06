@@ -300,13 +300,31 @@ def plan_section(text):
 
 
 def plan_criteria(section_text):
-    """The criteria in the plan's section, as a list of (id, text)."""
+    """The criteria in the plan's section, as a list of (id, text).
+
+    An identifier is defined once, by its first item. A later item that starts
+    with the same identifier is a note about it — step 2 keeps what it found
+    under a sub-heading of the section, "- AC3 could not be run here…" — and
+    read as a definition it replaced the criterion: the note was offered to the
+    issue as the criterion's new wording, and then ticked. Sub-headings do not
+    end the section, since a plan may group its criteria under them.
+
+    A note about a criterion the plan never defines (one added in GitHub) is
+    still read as that criterion: left so at the author's decision, since the
+    close of the review shows both wordings and asks before writing, and a
+    criterion written without a full stop ("AC1 Text") must keep reading.
+    """
     out = []
+    seen = set()
     for found, cases, _ in with_cases((section_text or "").splitlines(),
                                       PLAN_CRITERION):
+        cid = found.group("id")
         text = found.group("text").strip()
+        if cid in seen:
+            continue
         if (text or cases) and text != PLACEHOLDER:
-            out.append((found.group("id"), text + cases))
+            seen.add(cid)
+            out.append((cid, text + cases))
     return out
 
 

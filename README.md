@@ -685,9 +685,14 @@ get every action for a feature in one list instead of remembering commands.
 **Starting.** `sclaude new` offers the repository's open issues, yours first;
 in the terminal each one shows its column on the GitHub board in yellow, last
 on its line.
-The chosen issue suggests a branch name, which you can edit. sclaude creates the
-worktree, moves the issue to `In progress` on the board and fills in its start
-date.
+The chosen issue suggests a branch name, which you can edit. sclaude moves the
+issue to `In progress` on the board and fills in its start date. Before it
+creates the worktree, it brings the main checkout up to `origin/main` (a
+fast-forward, and only when it is on `main`) and, if its lockfile moved, runs
+`npm ci` there: the new worktree links the main checkout's `node_modules`.
+An edit in the way of the fast-forward, or a Node process working in the main
+checkout (a dev server, a typecheck, a test run), leaves it as it is, with a
+warning that says what to run once it is out of the way.
 
 **Closing a session from sclaude's terminal.** Under Windows Terminal in WSL a
 session runs in a tab of its own, and while it works the tab sclaude waits in

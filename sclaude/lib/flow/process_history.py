@@ -887,7 +887,8 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
     deviations(steps)
     if pass_rows is None:
         pass_rows = getattr(transcripts, "passes", None)
-    counted = process_costs.metrics(rows, steps, passes, transcripts, now_iso, pass_rows)
+    counted = process_costs.metrics(rows, steps, passes, transcripts, now_iso, pass_rows,
+                                    process_costs.launches(state))
     for st in steps + [x for ps in passes.values() for p in ps for x in p["steps"]]:
         st.pop(SPANS, None)
     return {"visits": steps, "passes": passes, "metrics": counted,

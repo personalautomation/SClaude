@@ -148,6 +148,7 @@ cmd_new() {
   echo ""
   info "Branching from a fresh origin/main…"
   git -C "$REPO" fetch origin || die "git fetch failed"
+  refresh_main
   git -C "$REPO" worktree add "$wt" -b "$branch" origin/main || die "could not create the worktree"
 
   mkdir -p "$wt/.sclaude/local/feature"

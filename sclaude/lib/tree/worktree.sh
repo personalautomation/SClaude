@@ -145,6 +145,152 @@ deps_install() {
   fi
 }
 
+# A Node process working in the main checkout, if there is one: its pid. A
+# server, a typecheck, a linter, a test runner or an install started there
+# reads its node_modules, and `npm ci` would delete it under them. By the
+# process's working directory and its executable: npm, npx, next and the
+# rest all run as node, whatever title they give themselves (a plain node
+# names its thread node-MainThread, npm shows "npm run dev").
+#
+# Two kinds do not count, or a Claude session sitting in the checkout would
+# hold the refresh off for as long as it is open: Claude Code run by node,
+# and the session's MCP servers — `npm exec <server>` started by the session
+# itself in its directory, which runs from npx's cache and reads none of the
+# checkout's packages (main_node_mcp). An `npx` the session runs through its
+# shell is a tool like any other and counts: `npx tsx script.ts` imports the
+# checkout's packages.
+main_node_pid() {
+  local proc repo
+  repo="$(readlink -f "$REPO")"
+  for proc in /proc/[0-9]*; do
+    [[ "$(readlink -f "$proc/cwd" 2>/dev/null)" == "$repo" ]] || continue
+    [[ "$(readlink -f "$proc/exe" 2>/dev/null)" == */node ]] || continue
+    main_node_claude "${proc#/proc/}" && continue
+    main_node_mcp "${proc#/proc/}" && continue
+    echo "${proc#/proc/}"
+    return 0
+  done
+  return 0
+}
+
+# Whether a process is Claude Code's own: the native binary, named claude,
+# Claude Code's package run by node, or a plugin's hook or server run from
+# ~/.claude/plugins. Not any command line that mentions claude: the shell of
+# a session's Bash tool sources a snapshot under ~/.claude, and a path in a
+# workshop holds "sclaude".
+main_node_claude() {
+  [[ "$(cat "/proc/$1/comm" 2>/dev/null)" == claude ]] && return 0
+  local cmd
+  cmd="$(tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null)"
+  [[ "$cmd" == */claude-code/* || "$cmd" == */.claude/plugins/* ]]
+}
+
+# A process's parent pid. The field after the title, which may hold spaces
+# and parentheses itself ("npm run dev", "next-server (v16…)"): read from the
+# last ")" on.
+proc_parent() {
+  local stat rest
+  stat="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
+  rest="${stat##*) }"
+  set -- $rest
+  echo "${2:-}"
+}
+
+# Whether a process is one of a Claude session's MCP servers: it, or one of
+# the few processes above it (node under its title, under sh), is
+# `npm exec`/npx started directly by Claude Code.
+main_node_mcp() {
+  local pid="$1" hop name parent
+  for hop in 1 2 3 4 5; do
+    [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 ]] || return 1
+    name="$(cat "/proc/$pid/comm" 2>/dev/null)"
+    parent="$(proc_parent "$pid")"
+    if [[ "$name" == "npm exec"* || "$name" == npx* ]]; then
+      main_node_claude "$parent"
+      return
+    fi
+    pid="$parent"
+  done
+  return 1
+}
+
+# The lock around the main checkout's node_modules: refresh_main holds it
+# while `npm ci` rebuilds the directory, and link_node_modules while it links
+# from it, so a feature started meanwhile neither links a half-installed
+# directory nor runs a second install into the same one. In the git directory,
+# shared by every worktree and outside the working tree.
+deps_lock_file() {
+  local dir
+  dir="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || dir="${TMPDIR:-/tmp}/sclaude-$(printf %s "$REPO" | sha1sum | cut -c1-12)"
+  mkdir -p "$dir" 2>/dev/null
+  echo "$dir/sclaude-node-modules.lock"
+}
+
+# Before a feature is branched off, the main checkout is brought to
+# origin/main and its node_modules to the lockfile it then has. A new tree
+# links the main checkout's node_modules (link_node_modules), and check_deps
+# compares the lockfiles only: a main checkout whose lockfile had moved on
+# without an install handed every new feature the old packages, and nothing
+# asked, since the tree's lockfile and the main one agreed.
+#
+# Only on main, and only a plain fast-forward: another session may have
+# switched the shared checkout to a branch of its own, or be editing it, and
+# both are left alone — git refuses a fast-forward that would overwrite an
+# edit, where --autostash would have put the edit in the shared stash and
+# could leave conflict markers behind. The tree is branched from origin/main
+# either way.
+#
+# `npm ci`, never `npm install`: ci removes node_modules before it installs,
+# so the files the other trees hard-link stay as they were, while install
+# edits them in place and the edit reaches every tree through the links. Not
+# while a Node process works in the checkout (main_node_pid), and its
+# Turbopack cache goes with the old packages, as check_deps drops a tree's. A
+# finished install leaves DEPS_MARK as a tree's does; with no mark yet, npm's
+# own hidden lockfile newer than the lockfile says the install is current.
+refresh_main() {
+  local branch
+  branch="$(git -C "$REPO" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+  if [[ "$branch" != main ]]; then
+    warn "  the main checkout is on ${branch:-a detached HEAD}, not main: left as it is,"
+    warn "  and the node_modules a new feature links from it may be behind origin/main."
+    return 0
+  fi
+  # The fast-forward and the install under one lock: a second start moving
+  # the lockfile while the first installs would leave the first marking
+  # packages it never installed.
+  (
+    flock 9
+    local hash mark pid
+    if ! git -C "$REPO" merge -q --ff-only origin/main >/dev/null 2>&1; then
+      warn "  the main checkout could not be fast-forwarded to origin/main (an edit in"
+      warn "  the way, or commits of its own): left as it is. Once it is not:"
+      warn "  git -C $REPO merge --ff-only origin/main"
+    fi
+    [[ -f "$REPO/package-lock.json" && -d "$REPO/node_modules" ]] || exit 0
+    hash="$(deps_lock_hash "$REPO")"
+    mark="$(cat "$REPO/node_modules/$DEPS_MARK" 2>/dev/null || true)"
+    [[ -n "$hash" && "$mark" == "$hash" ]] && exit 0
+    if [[ -z "$mark" && "$REPO/node_modules/.package-lock.json" -nt "$REPO/package-lock.json" ]]; then
+      printf '%s\n' "$hash" > "$REPO/node_modules/$DEPS_MARK" 2>/dev/null || true
+      exit 0
+    fi
+    pid="$(main_node_pid)"
+    if [[ -n "$pid" ]]; then
+      warn "  the main checkout's lockfile changed, but a Node process works in it (pid $pid):"
+      warn "  its node_modules was not reinstalled. Once it ends: (cd $REPO && npm ci)"
+      exit 0
+    fi
+    info "  node_modules: the main checkout's lockfile changed — npm ci there…"
+    if ( cd "$REPO" && npm ci ); then
+      rm -rf "$REPO/.next/dev"
+      printf '%s\n' "$hash" > "$REPO/node_modules/$DEPS_MARK" 2>/dev/null || true
+    else
+      warn "  npm ci failed in the main checkout: run it there by hand — (cd $REPO && npm ci)"
+    fi
+  ) 9>"$(deps_lock_file)"
+}
+
 # Hard links rather than a symlink to a directory: Turbopack refuses to work
 # with a symlink that leads outside the project — "Symlink
 # [project]/node_modules is invalid, it points out of the filesystem root" — and
@@ -159,7 +305,8 @@ link_node_modules() {
   # links.
   [[ -L "$wt/node_modules" ]] && rm -f "$wt/node_modules"
   info "  node_modules: hard-linking from the main repo…"
-  if cp -al "$REPO/node_modules" "$wt/node_modules" 2>/dev/null; then
+  # Under refresh_main's lock: never from a directory npm ci is rebuilding.
+  if ( flock -s 9; cp -al "$REPO/node_modules" "$wt/node_modules" ) 9>"$(deps_lock_file)" 2>/dev/null; then
     info "  node_modules: done"
   else
     # Different filesystems or links refused — then an honest install.

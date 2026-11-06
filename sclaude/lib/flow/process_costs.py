@@ -71,7 +71,29 @@ def _session_place(rows, opened=None):
     return out
 
 
-def metrics(rows, steps, passes, transcripts, now_iso=None, pass_rows=None):
+def launches(state):
+    """What each launch of a resumed session added, by session: [(when, $)].
+
+    Claude Code keeps one running total for a conversation carried on with
+    --resume, so a transcript prices the whole of it at once. sclaude writes
+    each launch's share beside its run (`costs` and `cost_at`, run_cost in
+    steps.sh), and that is what spreads it over the stays it was launched in.
+    """
+    out = {}
+    for step in ((state or {}).get("steps") or {}).values():
+        if not isinstance(step, dict):
+            continue
+        for run in step.get("runs") or []:
+            if not isinstance(run, dict) or not run.get("session"):
+                continue
+            pairs = [(at, c) for at, c in zip(run.get("cost_at") or [], run.get("costs") or [])
+                     if at and isinstance(c, (int, float)) and c >= 0]
+            if pairs:
+                out.setdefault(run["session"], []).extend(pairs)
+    return out
+
+
+def metrics(rows, steps, passes, transcripts, now_iso=None, pass_rows=None, shares=None):
     stays = [("detail", s) for s in steps if "n" in s]
     stays += [(m, s) for m, ps in passes.items() for p in ps for s in p["steps"]]
     now = process_history._when(now_iso) or datetime.datetime.now(datetime.timezone.utc)
@@ -187,6 +209,10 @@ def metrics(rows, steps, passes, transcripts, now_iso=None, pass_rows=None):
         if (r["what"], r["op"]) == ("ask", "answered") and str(r.get("waited", "")).isdigit():
             add("wait", place(r["at"]), int(r["waited"]), r["at"])
     counted, opened = set(), {}
+    opens = {}
+    for r in rows:
+        if r["op"] in ("open", "start") and r.get("session"):
+            opens[r["session"]] = opens.get(r["session"], 0) + 1
     for session, where in _session_place(rows, opened).items():
         summary = transcripts(session) if transcripts else None
         # Two ids of one conversation carried on: its last transcript once.
@@ -206,7 +232,20 @@ def metrics(rows, steps, passes, transcripts, now_iso=None, pass_rows=None):
         # feature stood then (claude_usage's `expired`).
         for when, _tokens in summary.get("expired") or []:
             add("expired", place(when, True) or where, 1, when)
-        add("cost", where, summary.get("cost") or 0, opened.get(session))
+        # On the stay of each launch, by its share, where sclaude saw the
+        # launches (launches()); else all of it where it was last opened.
+        # Only when every opening of the conversation has its share: with
+        # one missed (no status line to read), the shares around it are
+        # wrong too — a launch's share is the running total less the last
+        # one seen — so the whole goes where it was opened last, as before.
+        cost = summary.get("cost") or 0
+        parts = (shares or {}).get(session) or []
+        seen = sum(c for _, c in parts)
+        if cost and seen and len(parts) == opens.get(session, 0):
+            for at, c in parts:
+                add("cost", where, cost * c / seen, at)
+        else:
+            add("cost", where, cost, opened.get(session))
     # A review pass on this machine is a headless conversation of its own,
     # named by its row in the local review's journal (local_review.rows, the
     # passes not recorded included): it costs on the pass's place, apart from

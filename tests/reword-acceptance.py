@@ -33,7 +33,9 @@ def function(source, name):
 
 
 with open(os.path.join(LIB, "cycle", "acceptance.sh")) as fh:
-    BODY = function(fh.read(), "reword_acceptance")
+    SOURCE = fh.read()
+BODY = function(SOURCE, "reword_acceptance")
+EXTEND = function(SOURCE, "extend_acceptance")
 with open(os.path.join(LIB, "core", "ui.sh")) as fh:
     UI = fh.read()
 IS_YES = function(UI, "is_yes") + function(UI, "is_no")
@@ -45,6 +47,9 @@ here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the fake l
 mode = sys.argv[1]
 if mode == "--reworded":
     with open(os.path.join(here, "differs")) as fh:
+        sys.stdout.write(fh.read())
+elif mode == "--extend":
+    with open(os.path.join(here, "extended")) as fh:
         sys.stdout.write(fh.read())
 elif mode == "--reword":
     with open(os.path.join(here, "written"), "a") as fh:
@@ -114,6 +119,30 @@ try:
     check("a new difference asks again", "ASKED" in out, True)
     check("a yes writes the issue", written(), 1)
     check("and says so", "now reads as the plan" in out, True)
+
+    # extend_acceptance lists what it wrote under "updated", and a criterion
+    # the plan words otherwise apart from it: listed among the additions, it
+    # read as if the issue had taken the new wording.
+    def extend(out_text):
+        with open(os.path.join(lib, "extended"), "w") as fh:
+            fh.write(out_text)
+        script = ('source "%s/core/state.sh"\nLIB="%s"\n'
+                  'info() { printf "I %%s\\n" "$*"; }\nwarn() { printf "W %%s\\n" "$*"; }\n'
+                  '%s\nextend_acceptance "%s"\n') % (os.path.abspath(LIB), lib, EXTEND, wt)
+        return subprocess.run(["bash", "-c", script], capture_output=True,
+                              text=True).stdout
+
+    out = extend("extended\nAC3 added\nAC2 reads differently\n")
+    lines = out.splitlines()
+    updated = next(i for i, l in enumerate(lines) if "updated from the plan" in l)
+    differ = next((i for i, l in enumerate(lines) if "differ from issue" in l), None)
+    check("extend: the addition is listed as updated",
+          lines[updated + 1].strip(), "I     AC3 added".strip())
+    check("extend: a reworded criterion gets its own warning", differ is not None, True)
+    check("extend: ...below the additions, not among them",
+          differ is not None and lines.index("I     AC2 reads differently") > differ, True)
+    out = extend("extended\nAC3 added\n")
+    check("extend: nothing reworded, no warning", "differ from issue" in out, False)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

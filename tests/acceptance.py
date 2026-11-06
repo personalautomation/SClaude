@@ -21,7 +21,7 @@ import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from acceptance import (AC_CLOSE, AC_OPEN, NOTE, PLACEHOLDER, merge_section,
                         parse, plan_content, plan_section, plan_verdict,
                         render, section, status, sync, unticked, extend,
-                        tick_all, reword)
+                        tick_all, reword, plan_criteria)
 import issue_comments  # noqa: E402
 
 failures = []
@@ -599,6 +599,25 @@ check_true("reword-github-only-kept", "AC7. Added in GitHub." in edited[-1][1])
 stub(issue(human, (6, before)))
 check("reword-same-unchanged", reword("71", PLAN.replace(
     "- [ ] AC2. A draft 404s for anyone but its author.\n", "")), ("unchanged", []))
+# A note about a criterion, kept under a sub-heading of the section, starts
+# with the criterion's identifier too. It is no new wording: read as one, it
+# was offered to the issue in the criterion's place and then ticked.
+NOTED = PLAN.replace(
+    "- [ ] AC2. A draft 404s for anyone but its author.\n",
+    "- [ ] AC2. A draft 404s for anyone but its author.\n\n"
+    "### Found during development\n\n"
+    "- AC2 could not be run here; the next deploy checks it.\n")
+check("plan-note-is-no-criterion", plan_criteria(plan_section(NOTED)),
+      [("AC1", "A guest sees only published events."),
+       ("AC2", "A draft 404s for anyone but its author.")])
+stub(issue(human, (6, before)))
+check("reword-note-unchanged", reword("71", NOTED), ("unchanged", []))
+stub(issue(human, (6, before)))
+check("extend-note-unchanged", extend("71", NOTED), ("unchanged", []))
+# A criterion with no text yet does not claim its identifier: the item that
+# fills it in still counts.
+check("plan-empty-item-claims-nothing",
+      plan_criteria("- [ ] AC1.\n- [ ] AC1. Filled in.\n"), [("AC1", "Filled in.")])
 stub(issue(body("- [ ] AC2. A draft 404s for anyone but its author.")))
 check("reword-never-writes-a-body", reword("71", REWORDED, write=True)[0], "body")
 check("reword-lists-a-body-as-body", reword("71", REWORDED)[0], "body")

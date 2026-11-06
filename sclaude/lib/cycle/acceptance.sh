@@ -74,8 +74,18 @@ extend_acceptance() {
   [[ "$asked" == reworded ]] && details="$(grep -v ' reads differently$' <<<"$details" || true)"
   case "$word" in
     written|extended)
+                # What was written, then what was not: a reworded criterion
+                # listed under "updated" read as if the issue had taken it.
+                local differ
+                differ="$(grep ' reads differently$' <<<"$details" || true)"
+                details="$(grep -v ' reads differently$' <<<"$details" || true)"
                 info "  Acceptance criteria on issue #$ac_issue updated from the plan:"
-                while IFS= read -r line; do [[ -n "$line" ]] && info "    $line"; done <<<"$details" ;;
+                while IFS= read -r line; do [[ -n "$line" ]] && info "    $line"; done <<<"$details"
+                if [[ -n "$differ" ]]; then
+                  warn "  The plan's acceptance criteria differ from issue #$ac_issue — only new ones are added:"
+                  while IFS= read -r line; do info "    $line"; done <<<"$differ"
+                  info "  The issue is where corrections land. If the plan is right, edit the criteria in GitHub."
+                fi ;;
     unchanged|nothing) ;;
     differs)    [[ -n "$details" ]] || return 0
                 warn "  The plan's acceptance criteria differ from issue #$ac_issue — only new ones are added:"

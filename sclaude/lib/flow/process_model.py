@@ -134,7 +134,7 @@ SPEC = {
 # pointer. The overview's blocks borrow these (ALIAS).
 DETAILS = {
     "new": "Lists the repository's open issues, yours first, and suggests a branch name from the chosen one; or takes a name typed by hand. From the phone the Mini App asks the same and starts it with the answers.",
-    "prepare": "Branches feat/<slug> from a fresh origin/main into a worktree of its own, links the environment and hard-links node_modules, claims a port and a <feature>.localhost address, and on a local database starts a Supabase stack for this feature alone.",
+    "prepare": "Brings the main checkout up to origin/main when it is on main (a fast-forward, with npm ci there if its lockfile moved, not while a Node process works in it), branches feat/<slug> from a fresh origin/main into a worktree of its own, links the environment and hard-links the main checkout's node_modules, claims a port and a <feature>.localhost address, and on a local database starts a Supabase stack for this feature alone.",
     "board_start": "Moves the issue out of Backlog to In progress on every board it is on, and fills an empty Start date with today. Once, at the start; a column moved by hand is left alone.",
     "main_in": "Before each step sclaude merges origin/main into the branch without asking, so every session works on what will merge. A merge that would conflict goes to the sync session (5); only the deferred logs it merges itself.",
     "plan": "The session reads the issue with its parents and comments and the manuals' tables of contents, says what it understood the scope to be and waits for corrections, then plans. The plan ends with numbered acceptance criteria, each checkable on a deployment without reading code.",

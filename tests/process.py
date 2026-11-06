@@ -1197,6 +1197,31 @@ h = process.history({}, [{"at": at("08:00"), "what": "steps.review", "op": "open
                     "review", {"c1": {"human": [], "cost": 2.0}}.get)
 check("metrics: a resumed conversation costs on the stay it was opened in last, where it is counted",
       [(v.get("m") or {}).get("cost") for v in h["visits"] if v.get("n") == "review"] == [None, 2.0], str(h["visits"]))
+# One review session resumed for every round: the transcript has one running
+# total, and sclaude's own record of each launch (run_cost's `costs` and
+# `cost_at`) spreads it over the stays it was launched in, its sum kept.
+resumed = [{"at": at(a), "what": "steps." + step, "op": op, "session": sid}
+           for a, step, op, sid in (("08:00", "review", "open", "r1"), ("09:00", "review", "end", "r1"),
+                                    ("09:10", "code", "open", "c9"), ("09:20", "code", "end", "c9"),
+                                    ("10:00", "review", "open", "r1"), ("11:00", "review", "end", "r1"),
+                                    ("11:10", "code", "open", "c9"), ("11:20", "code", "end", "c9"),
+                                    ("12:00", "review", "open", "r1"), ("13:00", "review", "end", "r1"))]
+launched = {"steps": {"review": {"runs": [{"session": "r1", "costs": [1.0, 0.5, 0.5],
+                                           "cost_at": [at("08:00"), at("10:00"), at("12:00")]}]}}}
+h = process.history(launched, resumed, "review", {"r1": {"human": [], "cost": 4.0}}.get)
+check("metrics: a resumed session costs on each stay by its launch's share, the sum kept",
+      [(v.get("m") or {}).get("cost") for v in h["visits"] if v.get("n") == "review"] == [2.0, 1.0, 1.0]
+      and h["metrics"]["cost"]["detail"]["review"] == 4.0, str(h["visits"]))
+partial = {"steps": {"review": {"runs": [{"session": "r1", "costs": [0.5],
+                                          "cost_at": [at("10:00")]}]}}}
+h = process.history(partial, resumed, "review", {"r1": {"human": [], "cost": 4.0}}.get)
+check("metrics: a launch with no share recorded, the whole cost on the stay opened last",
+      [(v.get("m") or {}).get("cost") for v in h["visits"] if v.get("n") == "review"] == [None, None, 4.0],
+      str(h["visits"]))
+h = process.history({}, resumed, "review", {"r1": {"human": [], "cost": 4.0}}.get)
+check("metrics: no launches recorded, the whole cost on the stay opened last",
+      [(v.get("m") or {}).get("cost") for v in h["visits"] if v.get("n") == "review"] == [None, None, 4.0],
+      str(h["visits"]))
 sy = process.history({}, [{"at": at("10:00"), "what": "steps.code", "op": "open", "session": "c0"},
                           {"at": at("10:05"), "what": "sync", "op": "open", "session": "c1"},
                           {"at": at("10:10"), "what": "sync", "op": "finish", "session": "c1"},

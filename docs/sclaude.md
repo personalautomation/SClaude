@@ -545,7 +545,10 @@ gets the issue itself — the body, the comments, the parent and the links — i
 prompt already, and step 3 ends the pull request's body with a `Closes #N` line,
 by which GitHub closes the issue on the merge. No network, no `gh`, no open
 issues — there simply will be no list, and the old question about a name
-remains.
+remains; a failed fetch says so first ("Could not fetch the issue list"), an
+empty repository does not. With no feature in progress the list opens
+anyway, with the name and `config`, the project's settings, which the menu
+would otherwise offer: there they are a key away rather than a command.
 
 The list and the suggestion are `sclaude/lib/github/issue_list.py`'s, which the bot's
 Mini App uses too: it offers the same choice on a phone and starts

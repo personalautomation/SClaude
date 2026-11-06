@@ -18,7 +18,8 @@ gh_repo() {
     | sed -E -e 's|\.git$||' -e 's|^.*[:/]([^/]+/[^/]+)$|\1|'
 }
 
-# The repository's open issues, one line each:
+# The repository's open issues, one line each; nothing, with exit code 0,
+# when there are none, and exit code 1 when gh cannot say:
 #
 #   <mine?>\t<number>\t<title>\t<labels, comma-separated>\t<open blockers>
 #   \t<board status>
@@ -57,12 +58,23 @@ read_key() {
   esac
 }
 
-# Draws the list and returns the choice on one line:
+# Draws the list of the issues given — fetch_issues' lines — and returns the
+# choice on one line:
 #   manual                  — type a name by hand
 #   issue<TAB><N><TAB><title>
+#   config                  — the project's settings (with PICK_START_CONFIG=1)
 # Empty output and exit code 1 mean the human declined.
+#
+# PICK_START_CONFIG=1 adds the project's settings as the last row. The menu
+# sets it when no feature is in progress: it then opens this list straight
+# away, and its own `config` row is never shown. With no issue to list the
+# choice is the name alone and the list is skipped — unless the settings are
+# asked for: then it stays, with the name and the settings, so that they are
+# still a key away.
+PICK_START_CONFIG=""
+
 pick_start() {
-  local issues rows_n visible top=0 cur=0 drawn=0 key cols lines
+  local issues="${1:-}" rows_n visible top=0 cur=0 drawn=0 key cols lines
 
   # The terminal is needed whole: with none there is nowhere to draw and nowhere
   # to read keys from. We look at /dev/tty rather than the descriptors:
@@ -73,22 +85,16 @@ pick_start() {
     return 0
   fi
 
-  issues="$(fetch_issues)" || issues=""
-  if [[ -z "$issues" ]]; then
-    # To stderr rather than through info: this function's return value is read
-    # by $( ), and everything printed to stdout becomes part of it. Through info
-    # the message went straight into choice — "Could not fetch…\nmanual" instead
-    # of "manual" — case recognised no branch, and sclaude ended silently instead
-    # of asking for the feature's name. A repository with no reachable gh issues
-    # could not start a feature at all that way.
-    command -v gh >/dev/null 2>&1 \
-      && echo "${DIM}Could not fetch the issue list — starting the feature by name.${OFF}" >&2
+  if [[ -z "$issues" && -z "${PICK_START_CONFIG:-}" ]]; then
     echo "manual"
     return 0
   fi
 
-  mapfile -t ISSUE_ROWS <<< "$issues"
+  ISSUE_ROWS=()
+  [[ -n "$issues" ]] && mapfile -t ISSUE_ROWS <<< "$issues"
   rows_n=$(( ${#ISSUE_ROWS[@]} + 1 ))          # +1 for the "type a name" item
+  local config="${PICK_START_CONFIG:-}"
+  [[ -n "$config" ]] && rows_n=$((rows_n + 1))  # and the settings, last
 
   # We ask the terminal itself for the size: COLUMNS and LINES are set only by
   # an interactive bash, and here we are already inside a command
@@ -106,6 +112,8 @@ pick_start() {
   # for the block headings: they take up rows inside the window but are not
   # items.
   visible=$(( ${lines:-24} - 10 ))
+  # The settings have a heading of their own.
+  [[ -n "$config" ]] && visible=$((visible - 1))
   [[ "$visible" -lt 5 ]] && visible=5
   [[ "$visible" -gt "$rows_n" ]] && visible="$rows_n"
 
@@ -122,6 +130,8 @@ pick_start() {
         printf '\033[%dA\033[J' "$drawn" > /dev/tty
         if [[ "$cur" -eq 0 ]]; then
           echo "manual"
+        elif [[ -n "$config" && "$cur" -eq $((rows_n - 1)) ]]; then
+          echo "config"
         else
           local row="${ISSUE_ROWS[$((cur - 1))]}"
           printf 'issue\t%s\t%s\n' \
@@ -148,10 +158,11 @@ draw_picker() {
   local top="$1" cur="$2" visible="$3" out
   out="$(PICKER_ROWS="$(printf '%s\n' "${ISSUE_ROWS[@]}")" \
     python3 - "$top" "$cur" "$visible" "${PICKER_COLS:-80}" \
-             "$BOLD" "$DIM" "$GREEN" "$OFF" "${YELLOW:-}" <<'PYDRAW'
+             "$BOLD" "$DIM" "$GREEN" "$OFF" "${YELLOW:-}" "${PICK_START_CONFIG:-}" <<'PYDRAW'
 import os, sys, unicodedata
 top, cur, visible, cols = (int(a) for a in sys.argv[1:5])
 BOLD, DIM, GREEN, OFF, YELLOW = sys.argv[5:10]
+config = bool(sys.argv[10])
 rows = [l.split('\t') for l in os.environ['PICKER_ROWS'].splitlines() if l]
 
 
@@ -197,11 +208,18 @@ def clip_blockers(numbers, room):
 TITLE_MIN = 20
 
 out, section = [''], None
-for idx in range(top, min(top + visible, len(rows) + 1)):
+for idx in range(top, min(top + visible, len(rows) + 1 + config)):
     mark = GREEN + '▸' + OFF if idx == cur else ' '
     if idx == 0:
         text = 'type a feature name'
         out.append('  %s %s' % (mark, BOLD + text + OFF if idx == cur else text))
+        continue
+    if idx == len(rows) + 1:
+        out.append('%s  ── project %s%s' % (DIM, '─' * max(0, cols - 16), OFF))
+        hint = "the project's .sclaude/config.json, explained"
+        text = 'config'
+        out.append('  %s %s  %s%s%s' % (mark, BOLD + text + OFF if idx == cur else text,
+                                       DIM, clip(hint, cols - 14), OFF))
         continue
     mine, number, title, labels, blocked, status = (rows[idx - 1] + [''] * 6)[:6]
     want = 'assigned to me' if mine == '1' else 'other open issues'

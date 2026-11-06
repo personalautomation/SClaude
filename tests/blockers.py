@@ -20,9 +20,12 @@
 import json
 import os
 import pty
+import re
+import select
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
@@ -62,13 +65,13 @@ BOARD = {"data": {"repository": {
     "i59": None}}}
 
 
-def stub_dir(fail=False, board=True):
-    """A directory with a gh that prints ISSUES (list), one of them (view) or
+def stub_dir(fail=False, board=True, issues=ISSUES):
+    """A directory with a gh that prints issues (list), one of them (view) or
     BOARD (graphql, unless board is false)."""
     d = tempfile.mkdtemp()
     data = os.path.join(d, "issues.json")
     with open(data, "w") as fh:
-        json.dump(ISSUES, fh)
+        json.dump(issues, fh)
     gh = os.path.join(d, "gh")
     with open(gh, "w") as fh:
         fh.write("""#!/usr/bin/env python3
@@ -154,6 +157,16 @@ rows = [r.split("\t") for r in rows.splitlines()]
 check("no board: the list stays", [r[1] for r in rows], ["61", "60", "59"])
 check("no board: the column is empty", [r[5] for r in rows], ["", "", ""])
 
+# No open issue is an answer, told apart from gh failing: the picker says the
+# list could not be fetched only for the second.
+FETCH = ('BOLD=""; DIM=""; GREEN=""; OFF=""; REPO=.\n'
+         'source "%s/core/picker.sh"\n'
+         'gh_repo() { echo o/r; }\n'
+         'fetch_issues' % LIB)
+check("no open issue: nothing, and success", run(["bash", "-c", FETCH], stub_dir(issues=[])),
+      ("", 0))
+check("gh failing: a failure", run(["bash", "-c", FETCH], broken)[1], 1)
+
 # The drawing: the status stands last, after the labels, in yellow.
 # draw_picker writes to /dev/tty, so it runs under a pty of its own.
 def draw(script):
@@ -181,6 +194,75 @@ drawn = draw('BOLD=""; DIM="<d>"; GREEN=""; OFF="</>"; YELLOW="<y>"\n'
 line = next((l for l in drawn.splitlines() if "#61" in l), "")
 check("status drawn rightmost in yellow",
       line.rstrip().endswith("<d>Dev</>  <y>In progress</>"), True)
+
+# With PICK_START_CONFIG the settings are the last row, under a heading of
+# their own; without it they are not drawn at all.
+def draw_config(flag, cur):
+    return draw('BOLD="<b>"; DIM=""; GREEN=""; OFF="</>"; YELLOW=""\n'
+                'source "%s/core/picker.sh"\n'
+                'ISSUE_ROWS=($\'1\\t61\\tAlpha\\tDev\\t\\t\')\n'
+                'PICKER_COLS=80; PICK_START_CONFIG=%s\n'
+                'draw_picker 0 %d 3 > /dev/null\n' % (LIB, flag, cur))
+
+
+drawn = draw_config("1", 2).splitlines()
+config = [i for i, l in enumerate(drawn) if "config.json, explained" in l]
+check("the settings row is drawn", len(config), 1)
+check("under its heading", bool(config) and "── project" in drawn[config[0] - 1], True)
+check("the cursor stands on it", bool(config) and "<b>config</>" in drawn[config[0]], True)
+check("no settings row unasked", "config.json" in draw_config("", 1), False)
+
+# With no issue list to show, the picker still offers the name and the
+# settings when asked for them; unasked, it goes straight to the name.
+# The child may end without drawing — the regression this guards — so the
+# reads stop at its end (EIO on Linux) and at a deadline, never hang.
+def pick(flag, keys):
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execv("/bin/bash", ["bash", "-c",
+                 'BOLD=""; DIM=""; GREEN=""; OFF=""; YELLOW=""\n'
+                 'source "%s/core/picker.sh"\n'
+                 'person_at_terminal() { true; }\n'
+                 'r="$(PICK_START_CONFIG=%s pick_start "")"; echo "RESULT=$r"\n' % (LIB, flag)])
+    deadline = time.time() + 10
+    out = [b""]           # everything read, and where the last mark was found
+
+    def read_until(mark):
+        """Reads until mark appears in what is new since the last one; False
+        when the output ended, or the deadline passed, first."""
+        start = len(out[0])
+        while mark not in out[0][start:] and time.time() < deadline:
+            ready, _, _ = select.select([fd], [], [], 0.2)
+            if not ready:
+                continue
+            try:
+                data = os.read(fd, 65536)
+            except OSError:
+                return False
+            if not data:
+                return False
+            out[0] += data
+        return mark in out[0][start:]
+
+    for key in keys:
+        # Each key goes once the picture asking for it is on the screen.
+        if not read_until(b"q cancel"):
+            break
+        os.write(fd, key)
+    # To the end of the output: the mark never comes.
+    read_until(b"\0")
+    if time.time() >= deadline:
+        os.kill(pid, 9)
+    os.waitpid(pid, 0)
+    os.close(fd)
+    buf = out[0]
+    m = re.search(r"RESULT=(\S*)", buf.decode("utf-8", "replace"))
+    return m.group(1) if m else None
+
+
+check("no issues: the settings are still reachable", pick("1", [b"\x1b[B", b"\r"]), "config")
+check("no issues: the name is the first row", pick("1", [b"\r"]), "manual")
+check("no issues, no settings asked: the name at once", pick("", []), "manual")
 
 # A long row in a narrow terminal stays within it: a wrapped row would leave
 # screen rows behind at every redraw. The width is counted here by hand, apart

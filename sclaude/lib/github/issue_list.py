@@ -23,8 +23,9 @@
 # for the terminal alone: the Mini App reads `fetch`, which does not ask for it,
 # and a failed request for it leaves the column empty rather than the list.
 #
-# `rows` exits 1 with nothing printed when gh is missing, fails or finds no
-# open issue: the caller then starts the feature by name.
+# `rows` exits 1 with nothing printed when gh fails, and 0 with nothing
+# printed when there is no open issue: start_feature (start.sh) says the list
+# could not be fetched for the first alone.
 import os
 import re
 import subprocess
@@ -123,7 +124,8 @@ def suggest(number, title):
 def main(argv):
     if len(argv) == 2 and argv[0] == "rows":
         rows = fetch(argv[1])
-        if not rows:
+        # No open issue is an answer; only gh failing to give one is not.
+        if rows is None:
             return 1
         board = statuses(argv[1], [r["number"] for r in rows])
         for r in rows:

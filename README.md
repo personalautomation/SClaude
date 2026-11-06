@@ -649,6 +649,7 @@ on, and launches `claude` with the right model, permissions and prompt for it.
 
 ```bash
 sclaude                 # the menu: features in progress, chosen with arrow keys
+                        # (none in progress: the issue list, with config last)
 sclaude new [name]      # start a feature at step 1 (--issue <n>, --create-issue, --no-issue)
 sclaude <name>          # continue a feature from its current step
 sclaude status          # every feature and its step

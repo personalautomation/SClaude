@@ -95,6 +95,10 @@ cmd_menu() {
   if [[ -z "$rows" ]]; then
     echo ""
     info "No features in progress."
+    # The menu with its `config` row is skipped, so the picker carries it.
+    # Local rather than a prefix, which would export it to every process the
+    # feature's start launches.
+    local PICK_START_CONFIG=1
     start_feature
     return 0
   fi

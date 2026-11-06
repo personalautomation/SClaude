@@ -22,12 +22,32 @@ suggest_slug() {
 }
 
 # The cycle's start: a choice between a name thought up and an open issue.
+# The issues are fetched once: the settings, when the picker offers them, come
+# back to it (q leaves them, as it leaves them in the menu), and a fetch for
+# each return would wait on gh again and could lose the list it had shown.
 start_feature() {
-  local choice; choice="$(pick_start)" || { info "Cancelled."; return 0; }
-  case "$choice" in
-    manual) cmd_new ;;
-    issue*) cmd_new "" "$(cut -f2 <<< "$choice")" "$(cut -f3 <<< "$choice")" ;;
-  esac
+  local choice issues=""
+  # Only for a person at the terminal: without one the picker asks no one.
+  if person_at_terminal && ! issues="$(fetch_issues)"; then
+    # Without gh at all there is nothing to report.
+    if command -v gh >/dev/null 2>&1; then
+      if [[ -n "${PICK_START_CONFIG:-}" ]]; then
+        echo "${DIM}Could not fetch the issue list.${OFF}" >&2
+      else
+        echo "${DIM}Could not fetch the issue list — starting the feature by name.${OFF}" >&2
+      fi
+    fi
+    issues=""
+  fi
+  while :; do
+    choice="$(pick_start "$issues")" || { info "Cancelled."; return 0; }
+    case "$choice" in
+      config) cmd_config; continue ;;
+      manual) cmd_new ;;
+      issue*) cmd_new "" "$(cut -f2 <<< "$choice")" "$(cut -f3 <<< "$choice")" ;;
+    esac
+    return 0
+  done
 }
 
 # `sclaude new [options] [name]`: with no name, the picker. The options answer

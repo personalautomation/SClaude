@@ -11,13 +11,16 @@
 #     no Latin word;
 #   * suggest_slug in bin/sclaude prints the same as the module;
 #   * each option reaches cmd_new as the answer it stands for, a name alone
-#     still goes to cmd_new, and nothing at all to the picker.
+#     still goes to cmd_new, and nothing at all to the picker;
+#   * the picker's `config` opens the settings and comes back to the picker,
+#     and the menu with no feature in progress asks the picker for that row.
 #
 # Run it with: python3 tests/new-feature.py
 import os
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
@@ -104,6 +107,63 @@ check("a name after -- may start with a dash", new("--no-issue", "--", "-x"),
       "NEW name=-x issue= create=no ok=")
 check("--issue takes a number", new("--issue", "abc"), "DIE:--issue takes a number")
 check("an unknown option stops", new("--yes", "x"), "DIE:sclaude new: unknown option --yes")
+
+# start_feature: the settings come back to the picker, which then decides;
+# the issues are fetched once for all of it, and a failed fetch is said once.
+# pick_start runs in $( ), so which answer it gives next is counted in a file.
+START = ('%s\ninfo() { echo "INFO:$*"; }\n'
+         'DIM=""; OFF=""\n'
+         'person_at_terminal() { true; }\n'
+         'gh() { :; }\n'
+         'fetch_issues() { echo FETCH >&2; [[ -z "$FAIL" ]] && printf "1\\t61\\tAlpha\\n"; }\n'
+         'cmd_config() { echo CONFIG; }\n'
+         'cmd_new() { echo "NEW $*"; }\n'
+         'answers=("$@")\n'
+         'pick_start() {\n'
+         '  local n; n="$(cat "$COUNT")"; echo $((n + 1)) > "$COUNT"\n'
+         '  echo "GIVEN:${1%%%%$\'\\t\'*}" >&2\n'
+         '  [[ "${answers[$n]}" == q ]] && return 1\n'
+         '  printf "%%b\\n" "${answers[$n]}"\n'
+         '}\n'
+         'PICK_START_CONFIG=$CONFIG start_feature') % function("start_feature")
+
+
+def start(*answers, fail="", config="1"):
+    with tempfile.NamedTemporaryFile("w+") as count:
+        count.write("0")
+        count.flush()
+        done = subprocess.run(["bash", "-c", START, "bash"] + list(answers),
+                              capture_output=True, text=True,
+                              env=dict(os.environ, COUNT=count.name, FAIL=fail, CONFIG=config))
+        return done.stdout.split(), done.stderr.splitlines()
+
+
+out, err = start("config", "issue\\t61\\tAlpha")
+check("config, then an issue", out, ["CONFIG", "NEW", "61", "Alpha"])
+check("the issues fetched once, given to every picker", err, ["FETCH", "GIVEN:1", "GIVEN:1"])
+check("config, then cancelled", start("config", "q")[0], ["CONFIG", "INFO:Cancelled."])
+check("a name by hand", start("manual")[0], ["NEW"])
+check("a failed fetch is said once, the picker given nothing",
+      start("config", "manual", fail="1")[1],
+      ["FETCH", "Could not fetch the issue list.", "GIVEN:", "GIVEN:"])
+# Without the settings (`sclaude new`, the menu's "new feature"), the same
+# fetch, and the failure says the name is asked next.
+out, err = start("manual", fail="1", config="")
+check("no settings: a failed fetch, then the name", (out, err),
+      (["NEW"], ["FETCH", "Could not fetch the issue list — starting the feature by name.",
+                 "GIVEN:"]))
+check("no settings: the issues fetched and given", start("manual", config="")[1],
+      ["FETCH", "GIVEN:1"])
+
+# The menu with no feature in progress hands start_feature the settings row.
+MENU = ('%s\nrequire_repo() { :; }\nlist_features() { :; }\n'
+        'review_branches() { :; }\nprod_drift_report() { :; }\n'
+        'offer_epilogues() { :; }\ninfo() { :; }\n'
+        'start_feature() { echo "START config=${PICK_START_CONFIG:-} env=$(printenv PICK_START_CONFIG)"; }\n'
+        'cmd_menu\necho "AFTER config=${PICK_START_CONFIG:-}"') % function("cmd_menu")
+check("the empty menu asks the picker for its config row",
+      subprocess.run(["bash", "-c", MENU], capture_output=True, text=True).stdout.split(),
+      ["START", "config=1", "env=", "AFTER", "config="])
 
 for name, want, got in failures:
     print("FAIL %s: want %r, got %r" % (name, want, got))

@@ -557,7 +557,9 @@ start to finish), `docs/cycle.md` (gates, refusals, rollback, metrics, the
 decisions a product hands to sclaude), `docs/team.md`, `docs/privacy.md`,
 `docs/tools.md` (the skills and the other tools) and
 `docs/presentations/README.md`. A change a user meets goes into the guide that
-describes it; the README changes only when what sclaude offers changes. How a
+describes it; the README changes only when what sclaude offers changes, and
+then so does `docs/index.html` — the landing page GitHub Pages serves from
+`docs/` on `main`, which tells the same story with the decks' material. How a
 part works inside and why goes to `docs/sclaude.md` or `docs/keepawake.md`,
 which are updated the same way when the push changes something they describe.
 

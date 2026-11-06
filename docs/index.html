@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SClaude — manageable, scalable AI coding for a team</title>
+<meta name="description" content="An orchestrator for Claude Code that takes a feature from issue to production on one fixed path: the agent does the typing, the harness keeps the process, a person makes every decision that matters. Open source, MIT.">
+<meta property="og:title" content="SClaude — manageable, scalable AI coding for a team">
+<meta property="og:description" content="AI speed is easy to buy. Control is what has to be designed. One fixed path from issue to production, rules that hold, metrics nobody fills in. Open source, MIT.">
+<meta property="og:image" content="presentations/src/img/flow.webp">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F7F5F0; --surface:#FFFFFF; --surface-2:#F0EDE6; --ink:#121826; --ink-2:#3A4356; --muted:#6B7385;
+  --line:#E2DED5; --accent:#0F766E; --accent-2:#0B5C56; --accent-soft:#DDF0EC; --warm:#B4531F; --warm-soft:#F8E6DA;
+  --hero:#0B1120; --hero-ink:#EEF1F6; --hero-muted:#9AA4B8; --hero-line:#1F2A40; --glow:#2DD4BF;
+  --serif:"Instrument Serif",Georgia,serif; --sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+  --radius:14px; --shadow:0 1px 2px rgba(18,24,38,.04),0 8px 28px rgba(18,24,38,.06);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E131E; --surface:#151C2B; --surface-2:#1A2233; --ink:#E8ECF3; --ink-2:#C2C9D6; --muted:#8E98AC;
+  --line:#26314A; --accent:#3CC4B2; --accent-2:#5ED6C6; --accent-soft:#12302D; --warm:#F08A55; --warm-soft:#3A2418;
+  --hero:#070B14; --hero-line:#1A2335; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.35); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E131E; --surface:#151C2B; --surface-2:#1A2233; --ink:#E8ECF3; --ink-2:#C2C9D6; --muted:#8E98AC;
+  --line:#26314A; --accent:#3CC4B2; --accent-2:#5ED6C6; --accent-soft:#12302D; --warm:#F08A55; --warm-soft:#3A2418;
+  --hero:#070B14; --hero-line:#1A2335; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.35); color-scheme:dark}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}*{animation:none!important;transition:none!important}}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+img,video{max-width:100%;display:block}
+code{font-family:var(--mono);font-size:.9em;background:var(--surface-2);padding:.1em .35em;border-radius:5px}
+.wrap{max-width:1160px;margin:0 auto;padding:0 24px}
+@media (max-width:600px){.wrap{padding:0 16px}}
+
+/* nav */
+.nav{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--hero) 88%,transparent);backdrop-filter:saturate(1.4) blur(12px);-webkit-backdrop-filter:saturate(1.4) blur(12px);border-bottom:1px solid var(--hero-line)}
+.nav .wrap{display:flex;align-items:center;gap:28px;height:60px}
+.brand{font-family:var(--serif);font-size:26px;color:var(--hero-ink);letter-spacing:.2px;white-space:nowrap}
+.brand b{font-weight:400;color:var(--glow)}
+.nav ul{display:flex;gap:22px;list-style:none;margin:0;padding:0;flex:1}
+.nav ul a{color:var(--hero-muted);font-size:14px;font-weight:500}
+.nav ul a:hover{color:var(--hero-ink);text-decoration:none}
+.nav .gh{margin-left:auto}
+@media (max-width:900px){.nav ul{display:none}}
+
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:999px;font-weight:600;font-size:15px;border:1px solid transparent;transition:transform .15s,background .15s}
+.btn:hover{text-decoration:none;transform:translateY(-1px)}
+.btn-primary{background:var(--glow);color:#04201C}
+.btn-primary:hover{background:#5EEAD4}
+.btn-ghost{color:var(--hero-ink);border-color:#33405C}
+.btn-ghost:hover{background:#141D30}
+.btn-sm{padding:8px 14px;font-size:13px}
+
+/* hero */
+.hero{background:var(--hero);color:var(--hero-ink);position:relative;overflow:hidden;padding:96px 0 96px}
+.hero::before{content:"";position:absolute;inset:0;background:
+  radial-gradient(800px 420px at 78% 8%,rgba(45,212,191,.16),transparent 60%),
+  radial-gradient(700px 400px at 8% 90%,rgba(99,102,241,.12),transparent 60%);pointer-events:none}
+.hero::after{content:"";position:absolute;inset:0;background-image:linear-gradient(var(--hero-line) 1px,transparent 1px),linear-gradient(90deg,var(--hero-line) 1px,transparent 1px);background-size:56px 56px;mask-image:linear-gradient(to bottom,rgba(0,0,0,.5),transparent 75%);-webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,.5),transparent 75%);opacity:.5;pointer-events:none}
+.hero .wrap{position:relative;z-index:1}
+.eyebrow{display:inline-flex;align-items:center;gap:10px;font:500 13px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--glow);padding:8px 14px;border:1px solid rgba(45,212,191,.3);border-radius:999px;background:rgba(45,212,191,.06)}
+.eyebrow i{width:7px;height:7px;border-radius:50%;background:var(--glow);box-shadow:0 0 12px var(--glow)}
+.hero h1{font-family:var(--serif);font-weight:400;font-size:clamp(44px,7.4vw,96px);line-height:.98;letter-spacing:-.02em;margin:28px 0 24px;max-width:15ch}
+.hero h1 em{font-style:italic;color:var(--glow)}
+.hero .lede{font-size:clamp(17px,1.6vw,20px);color:var(--hero-muted);max-width:640px;margin:0 0 36px}
+.hero .lede strong{color:var(--hero-ink);font-weight:600}
+.cta{display:flex;gap:12px;flex-wrap:wrap}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--hero-line);border:1px solid var(--hero-line);border-radius:var(--radius);overflow:hidden;margin:72px 0 0}
+.stat{background:var(--hero);padding:24px 22px}
+.stat b{display:block;font-family:var(--serif);font-weight:400;font-size:44px;line-height:1;color:var(--hero-ink)}
+.stat span{display:block;margin-top:8px;color:var(--hero-muted);font-size:14px}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:600px){.hero{padding:56px 0 64px}.stat{padding:18px 16px}.stat b{font-size:34px}.stats{margin-top:48px}.video-frame{margin-top:48px}section{padding:72px 0}}
+.video-frame{margin:72px auto 0;max-width:980px;border-radius:18px;overflow:hidden;border:1px solid var(--hero-line);box-shadow:0 30px 80px rgba(0,0,0,.5);background:#000;position:relative}
+.video-frame video{width:100%;aspect-ratio:16/9;object-fit:contain;background:#000}
+.video-cap{position:absolute;left:16px;top:16px;font:500 12px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:#fff;background:rgba(0,0,0,.55);padding:6px 10px;border-radius:6px;pointer-events:none}
+
+/* sections */
+section{padding:104px 0}
+section.alt{background:var(--surface-2)}
+.kicker{font:600 13px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+h2{font-family:var(--serif);font-weight:400;font-size:clamp(34px,4.6vw,58px);line-height:1.04;letter-spacing:-.015em;margin:0 0 20px;max-width:20ch}
+h2 em{font-style:italic;color:var(--accent)}
+.sub{font-size:19px;color:var(--ink-2);max-width:720px;margin:0 0 56px}
+h3{font-size:19px;line-height:1.3;margin:0 0 10px;font-weight:600;letter-spacing:-.005em}
+p{margin:0 0 14px}
+.muted{color:var(--muted)}
+.small{font-size:14px}
+
+/* story */
+.story{display:grid;grid-template-columns:1.1fr 1fr;gap:56px;align-items:start}
+@media (max-width:900px){.story{grid-template-columns:1fr}}
+.story p{font-size:18px;color:var(--ink-2)}
+.story p strong{color:var(--ink)}
+.facts{display:grid;gap:16px}
+.fact{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px 24px;box-shadow:var(--shadow);display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center}
+.fact b{font-family:var(--serif);font-weight:400;font-size:46px;line-height:1;color:var(--warm);min-width:2.6ch}
+.fact span{color:var(--ink-2);font-size:15px}
+.dora{margin-top:56px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.dora div{border-top:2px solid var(--warm);padding-top:14px}
+.dora b{font-family:var(--serif);font-weight:400;font-size:52px;line-height:1}
+.dora span{display:block;color:var(--muted);font-size:14px;margin-top:6px}
+@media (max-width:640px){.dora{grid-template-columns:1fr}}
+
+/* problems */
+.solves{display:grid;grid-template-columns:repeat(6,1fr);gap:18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:30px 28px;box-shadow:var(--shadow);position:relative}
+.card .num{font-family:var(--serif);font-size:20px;color:var(--accent);display:inline-grid;place-items:center;width:40px;height:40px;border-radius:50%;background:var(--accent-soft);margin-bottom:18px}
+.card ul{margin:14px 0 0;padding:0;list-style:none}
+.card li{position:relative;padding-left:22px;margin:0 0 10px;color:var(--ink-2);font-size:15px}
+.card li::before{content:"";position:absolute;left:2px;top:.62em;width:10px;height:2px;background:var(--accent);border-radius:2px}
+.card li strong{color:var(--ink)}
+.solves .card:nth-child(1),.solves .card:nth-child(2),.solves .card:nth-child(3){grid-column:span 2}
+.solves .card:nth-child(4),.solves .card:nth-child(5){grid-column:span 3}
+@media (max-width:980px){.solves{grid-template-columns:1fr}.solves .card{grid-column:auto!important}}
+
+/* path */
+.path{display:grid;grid-template-columns:repeat(9,1fr);gap:0;position:relative;margin:8px 0 40px}
+.path::before{content:"";position:absolute;left:5%;right:5%;top:27px;height:2px;background:linear-gradient(90deg,var(--accent),var(--warm))}
+.node{text-align:center;position:relative;padding:0 6px}
+.node .dot{width:56px;height:56px;margin:0 auto 14px;border-radius:50%;display:grid;place-items:center;font-size:22px;background:var(--surface);border:2px solid var(--accent);position:relative;z-index:1;box-shadow:var(--shadow)}
+.node.person .dot{border-color:var(--warm)}
+.node b{display:block;font-size:14px}
+.node span{display:block;font-size:12px;color:var(--muted);line-height:1.4;margin-top:4px}
+@media (max-width:900px){.path{grid-template-columns:1fr;gap:14px}.path::before{left:27px;right:auto;top:0;bottom:0;width:2px;height:auto;background:linear-gradient(var(--accent),var(--warm))}
+  .node{display:grid;grid-template-columns:56px 1fr;gap:16px;text-align:left;align-items:center}.node .dot{margin:0}}
+.legend{display:flex;gap:22px;flex-wrap:wrap;font-size:14px;color:var(--muted);margin-bottom:40px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid var(--accent);margin-right:8px;vertical-align:-1px}
+.legend i.p{border-color:var(--warm)}
+
+table{width:100%;border-collapse:collapse;font-size:15px}
+.table{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
+.table-scroll{overflow-x:auto}
+th,td{text-align:left;padding:14px 18px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--surface-2)}
+tr:last-child td{border-bottom:0}
+td b{font-weight:600}
+.tag{display:inline-block;font:500 12px var(--mono);padding:3px 8px;border-radius:6px;background:var(--accent-soft);color:var(--accent-2);white-space:nowrap}
+.tag.w{background:var(--warm-soft);color:var(--warm)}
+
+/* 3Cs */
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+@media (max-width:900px){.three{grid-template-columns:1fr}}
+.c-letter{font-family:var(--serif);font-size:64px;line-height:.9;color:var(--accent);margin-bottom:10px}
+.refused{margin-top:28px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.refused div{display:flex;gap:12px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:15px;color:var(--ink-2)}
+.refused div::before{content:"✕";color:var(--warm);font-weight:700;flex:none}
+.note{margin-top:20px;font-size:14px;color:var(--muted);max-width:820px}
+
+/* split w/ image */
+.split{display:grid;grid-template-columns:1fr 1.15fr;gap:56px;align-items:center}
+.split.rev{grid-template-columns:1.15fr 1fr}
+@media (max-width:900px){.split,.split.rev{grid-template-columns:1fr}}
+.shot{border-radius:var(--radius);border:1px solid var(--line);box-shadow:0 20px 60px rgba(18,24,38,.14);overflow:hidden;background:var(--surface)}
+.checks{list-style:none;padding:0;margin:20px 0 0}
+.checks li{padding-left:30px;position:relative;margin-bottom:14px;color:var(--ink-2)}
+.checks li::before{content:"";position:absolute;left:0;top:.35em;width:18px;height:18px;border-radius:50%;background:var(--accent-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5 10.5l3.2 3L15 7' fill='none' stroke='%230F766E' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/14px no-repeat}
+.checks li strong{color:var(--ink)}
+
+.versus{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:40px}
+@media (max-width:760px){.versus{grid-template-columns:1fr}}
+.versus .card h3{display:flex;align-items:center;gap:10px}
+.versus .them{background:transparent;box-shadow:none;border-style:dashed}
+.versus .them li::before{background:var(--muted)}
+
+/* ladder */
+.ladder{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:14px;align-items:stretch}
+.ladder .arrow{align-self:center;font-size:26px;color:var(--accent)}
+@media (max-width:900px){.ladder{grid-template-columns:1fr}.ladder .arrow{transform:rotate(90deg);justify-self:center}}
+.who{font:600 12px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:14px}
+
+/* bad days */
+.flows{display:grid;gap:12px}
+.flow{display:grid;grid-template-columns:1.1fr auto 1fr auto 1fr;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 20px}
+.flow span{font-size:15px;color:var(--ink-2)}
+.flow span:first-child{color:var(--ink);font-weight:600}
+.flow i{color:var(--accent);font-style:normal}
+@media (max-width:760px){.flow{grid-template-columns:1fr}.flow i{display:none}}
+.rule{margin-top:28px;font-family:var(--serif);font-size:28px;line-height:1.25;max-width:24ch}
+
+/* privacy */
+.priv{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
+.priv .card h3::before{content:"";display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--accent);margin-right:10px;vertical-align:1px}
+
+/* quotes */
+.quotes{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+@media (max-width:760px){.quotes{grid-template-columns:1fr}}
+blockquote{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:28px;box-shadow:var(--shadow)}
+blockquote p{font-family:var(--serif);font-size:24px;line-height:1.3;margin:0 0 14px}
+blockquote cite{font-style:normal;color:var(--muted);font-size:14px}
+.sources{margin-top:36px;columns:2;column-gap:36px;font-size:14px;color:var(--muted)}
+.sources a{color:var(--ink-2);text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
+@media (max-width:760px){.sources{columns:1}}
+.sources p{break-inside:avoid}
+
+/* decks */
+.decks{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px}
+.deck{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:26px;box-shadow:var(--shadow);color:var(--ink);transition:transform .15s,border-color .15s}
+.deck:hover{transform:translateY(-3px);border-color:var(--accent);text-decoration:none}
+.deck .k{font:500 12px var(--mono);color:var(--accent);margin-bottom:12px}
+.deck p{color:var(--ink-2);font-size:15px;flex:1}
+.deck .go{font-weight:600;color:var(--accent);font-size:14px}
+
+/* fit */
+.fit{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+@media (max-width:900px){.fit{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:520px){.fit{grid-template-columns:1fr}}
+.fit .card b{display:block;font-family:var(--serif);font-weight:400;font-size:40px;line-height:1;margin-bottom:10px}
+
+/* get started */
+.start{background:var(--hero);color:var(--hero-ink);border-radius:24px;padding:56px;position:relative;overflow:hidden}
+.start::before{content:"";position:absolute;inset:0;background:radial-gradient(600px 300px at 90% 0,rgba(45,212,191,.18),transparent 60%);pointer-events:none}
+.start > *{position:relative}
+.start h2{color:var(--hero-ink)}
+.start h2 em{color:var(--glow)}
+.start p{color:var(--hero-muted)}
+pre{margin:24px 0;background:#050811;border:1px solid var(--hero-line);border-radius:12px;padding:22px 24px;overflow-x:auto;font:14px/1.75 var(--mono);color:#D6DEEA}
+pre .c{color:#6B7891}
+pre .p{color:var(--glow);user-select:none}
+@media (max-width:600px){.start{padding:32px 20px}}
+.mit{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:36px}
+@media (max-width:1000px){.mit{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:520px){.mit{grid-template-columns:1fr}}
+.mit div{border:1px solid var(--hero-line);border-radius:12px;padding:16px 18px;background:rgba(255,255,255,.02)}
+.mit b{display:block;color:var(--hero-ink);margin-bottom:4px}
+.mit span{color:var(--hero-muted);font-size:14px}
+
+footer{padding:56px 0;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
+footer .wrap{display:flex;gap:24px;flex-wrap:wrap;justify-content:space-between}
+footer a{color:var(--ink-2)}
+
+.reveal{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s ease}
+.reveal.in{opacity:1;transform:none}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top">S<b>Claude</b></a>
+    <ul>
+      <li><a href="#problem">Why</a></li>
+      <li><a href="#solves">What it solves</a></li>
+      <li><a href="#path">How it works</a></li>
+      <li><a href="#safety">Safety</a></li>
+      <li><a href="#learning">Metrics</a></li>
+      <li><a href="#fit">Fit &amp; cost</a></li>
+      <li><a href="#decks">Decks</a></li>
+    </ul>
+    <a class="btn btn-ghost btn-sm gh" href="https://github.com/personalautomation/SClaude">GitHub ↗</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <span class="eyebrow"><i></i>Open source · MIT · built on Claude Code</span>
+    <h1>AI speed is easy to buy. <em>Control</em> has to be designed.</h1>
+    <p class="lede"><strong>SClaude is manageable, scalable AI coding for a team.</strong> An orchestrator that takes every feature from issue to production on one fixed path: the agent does the typing, the harness keeps the process, and a person makes every decision that matters.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#watch">▶&nbsp; Watch the 7-minute walkthrough</a>
+      <a class="btn btn-ghost" href="https://github.com/personalautomation/SClaude">Get it on GitHub</a>
+    </div>
+    <div class="stats">
+      <div class="stat"><b>10–20%</b><span>productivity improvement observed in the team</span></div>
+      <div class="stat"><b>≈ 0</b><span>infrastructure cost — free tiers and the laptops you have</span></div>
+      <div class="stat"><b>1</b><span>script to onboard a developer's machine</span></div>
+      <div class="stat"><b>0</b><span>fields to fill in for the metrics</span></div>
+    </div>
+    <div class="video-frame" id="watch">
+      <span class="video-cap">A real feature, start to finish · 7 min</span>
+      <video controls preload="none" playsinline poster="presentations/src/img/flow.webp">
+        <source src="https://github.com/user-attachments/assets/74c2ccd0-c63f-4860-b814-7b8d606e01f9" type="video/mp4">
+        <a href="https://github.com/personalautomation/SClaude/releases/tag/v1.0">Watch the walkthrough in the v1.0 release</a>
+      </video>
+    </div>
+  </div>
+</header>
+
+<section id="problem">
+  <div class="wrap">
+    <p class="kicker">Why it exists</p>
+    <h2>Give a team an AI agent, and in a few months it is <em>no longer one team</em>.</h2>
+    <div class="story">
+      <div class="reveal">
+        <p>A few people are ahead of the whole planet; others barely keep up. The leaders have no time to teach — <strong>a developer's job is to develop, not to mentor</strong> — and each of them spends about half their time, and their tokens, building the same private tooling, falling into holes a neighbour climbed out of long ago.</p>
+        <p>A zoo of bicycles, each just about coping with its owner's tasks.</p>
+        <p>And <strong>prompts are not guarantees</strong>. Even with every IMPORTANT in capitals, a model invents a status, switches language, skips a predefined option — and over time the process drifts.</p>
+        <p>SClaude is what came out of fixing both: <strong>the process moved into code, the tools moved into the company's git</strong>, and the model was left with what a model is actually better at — planning, writing and reviewing code.</p>
+      </div>
+      <div class="facts reveal">
+        <div class="fact"><b>€200</b><span>a month on AI subscriptions for some developers — while others used a quarter of a €100 plan. Being ahead did not take a bigger plan; it took knowing how the model thinks.</span></div>
+        <div class="fact"><b>~50%</b><span>of the AI champions' time and tokens went into tooling — each building the same set, independently.</span></div>
+        <div class="fact"><b>×N</b><span>the same holes fallen into, once per developer, because nothing they learned was shared.</span></div>
+      </div>
+    </div>
+    <div class="dora reveal">
+      <div><b>+91%</b><span>time spent in code review</span></div>
+      <div><b>+154%</b><span>larger pull requests</span></div>
+      <div><b>+9%</b><span>bug rate</span></div>
+    </div>
+    <p class="note">Alongside AI adoption, per Google's 2025 DORA research as summarised by Mike Mason. The agent writes faster than people can check — gates on results and refused commands are the answer to exactly that.</p>
+  </div>
+</section>
+
+<section id="solves" class="alt">
+  <div class="wrap">
+    <p class="kicker">What it solves</p>
+    <h2>Five problems every team meets once AI writes the code.</h2>
+    <p class="sub">Not a chat of agents watching each other. A harness that owns the process — so the work is safe, repeatable, shared, cheap and measured without anyone policing it.</p>
+    <div class="solves">
+      <div class="card reveal">
+        <div class="num">1</div>
+        <h3>Security — every stage gets exactly the tools it is allowed</h3>
+        <ul>
+          <li><strong>A session per stage</strong>, each with its own permissions. Planning cannot write code; nothing can merge or push to main.</li>
+          <li><strong>Rules are executable</strong>: hooks refuse a forbidden command the moment it is tried.</li>
+          <li><strong>A mistake stays in one feature</strong> — its own copy, server, database and preview.</li>
+          <li><strong>Tight by default</strong>, loosened by evidence: every refusal is logged and reviewed.</li>
+        </ul>
+      </div>
+      <div class="card reveal">
+        <div class="num">2</div>
+        <h3>Scale and repeatability — one core, with room to bend it</h3>
+        <ul>
+          <li><strong>One fixed path</strong> for every feature; a step closes on evidence, never on a model saying "done".</li>
+          <li><strong>One copy for everybody.</strong> Nobody forks; a fix reaches the team at their next command.</li>
+          <li><strong>Personal add-ons</strong>: the team and each developer layer their own rules and prompts.</li>
+          <li><strong>The core is open to change</strong>: a lesson climbs from one developer to every product.</li>
+        </ul>
+      </div>
+      <div class="card reveal">
+        <div class="num">3</div>
+        <h3>Shared knowledge instead of reinvented bicycles</h3>
+        <ul>
+          <li><strong>One set of tools in the company's git</strong>, used and improved by everyone.</li>
+          <li><strong>Process, prompts, rules and lessons compound</strong> instead of walking out of the door.</li>
+          <li><strong>Knowledge flows without making anyone a mentor</strong> — and a new hire starts with everything the team has learned.</li>
+        </ul>
+      </div>
+      <div class="card reveal">
+        <div class="num">4</div>
+        <h3>Fewer tokens — everything repeatable moved out of the agent</h3>
+        <ul>
+          <li><strong>If a script can do it, the model should not.</strong> State, context, sandboxes, tests, deploys, rollbacks, the board — zero tokens.</li>
+          <li><strong>A fresh session per step</strong>; only the approved plan is carried forward.</li>
+          <li><strong>The right model per step</strong> — the strongest for planning, a cheaper one for the pull request, none for gates.</li>
+          <li><strong>Context managed for you</strong>: warm prompt cache reused, noisy work sent to sub-agents, every pass priced.</li>
+        </ul>
+      </div>
+      <div class="card reveal">
+        <div class="num">5</div>
+        <h3>Retrospectives that coach one-to-one, and metrics nobody fills in</h3>
+        <ul>
+          <li><strong>A personal retrospective after every feature</strong>, from your own run: what you missed, how to work better, what went well. Facts, not opinions.</li>
+          <li><strong>Not a lecture from above</strong>, not a leaderboard — a private mirror.</li>
+          <li><strong>Gamified by accident</strong>: every feature plays back as an animation of its own path.</li>
+          <li><strong>Metrics as a by-product</strong>: DORA, flow, quality, autonomy and cost — not one field in Jira.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="path">
+  <div class="wrap">
+    <p class="kicker">How it works</p>
+    <h2>One feature. <em>One fixed path.</em> Every time.</h2>
+    <p class="sub">Spec-driven development with an agent doing the typing. Each step is a fresh Claude session with its own model, permissions and exit — so nothing gets lost in an overgrown conversation, and nothing stale is paid for.</p>
+    <div class="path reveal">
+      <div class="node"><div class="dot">📝</div><div><b>Plan</b><span>scope confirmed, criteria approved</span></div></div>
+      <div class="node"><div class="dot">💻</div><div><b>Code</b><span>own sandbox, checked in a real browser</span></div></div>
+      <div class="node"><div class="dot">📤</div><div><b>Pull request</b><span>manuals updated with it</span></div></div>
+      <div class="node"><div class="dot">🛠</div><div><b>Review</b><span>AI review, fixed round by round</span></div></div>
+      <div class="node person"><div class="dot">✔</div><div><b>QA</b><span>a person ticks the criteria</span></div></div>
+      <div class="node person"><div class="dot">⇢</div><div><b>Merge</b><span>a person's call, one summary</span></div></div>
+      <div class="node"><div class="dot">🚀</div><div><b>Production</b><span>tests, rollback if red</span></div></div>
+      <div class="node"><div class="dot">🏁</div><div><b>Epilogue</b><span>outcome written into the issues</span></div></div>
+      <div class="node"><div class="dot">🔁</div><div><b>Retro</b><span>what to do better</span></div></div>
+    </div>
+    <div class="legend"><span><i></i>run by the orchestrator and the agent</span><span><i class="p"></i>a person's decision</span></div>
+    <div class="table table-scroll reveal">
+      <table>
+        <thead><tr><th>Step</th><th>Model</th><th>May do</th><th>Closes only on</th></tr></thead>
+        <tbody>
+          <tr><td><b>1 · Plan</b></td><td><span class="tag">Opus · high</span></td><td>Discuss and write the plan — no code at all</td><td>A plan a person approved, with acceptance criteria</td></tr>
+          <tr><td><b>2 · Code</b></td><td><span class="tag">Opus · medium</span></td><td>Implement, check in Chrome, record a demo, commit</td><td>A person's yes <em>and</em> green tests</td></tr>
+          <tr><td><b>3 · Pull request</b></td><td><span class="tag">Sonnet · medium</span></td><td>Manuals and the pull request</td><td>A pull request that exists on GitHub</td></tr>
+          <tr><td><b>4 · Review</b></td><td><span class="tag">Opus · medium</span></td><td>Fix findings, deploy the preview</td><td>Nothing left open, preview tests green</td></tr>
+          <tr><td><b>QA · Merge · Ship</b></td><td><span class="tag w">a person</span></td><td>Check the preview, decide on the merge and production</td><td>An explicit yes — no default answer</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note"><b>Acceptance criteria are a gate, not a request.</b> Step 1 does not close until the plan has them; they go into the issue, every later step works against them, and QA ticks them off there. Ctrl-C, a usage limit or a closed laptop closes nothing — the conversation resumes where it stopped.</p>
+  </div>
+</section>
+
+<section id="safety" class="alt">
+  <div class="wrap">
+    <p class="kicker">The safety model</p>
+    <h2>Contain. Curate. <em>Control.</em></h2>
+    <p class="sub">Docker's three layers for agent security, applied to a whole development workflow. Each is a separate answer to "what if the agent gets it wrong?"</p>
+    <div class="three">
+      <div class="card reveal">
+        <div class="c-letter">C</div>
+        <h3>Contain — the blast radius of a mistake</h3>
+        <p class="muted">Every feature gets its own copy of the repository, its own dev server at its own address, and a database of its own. A migration written for one feature cannot reach another, and a database reset wipes nobody else's data.</p>
+      </div>
+      <div class="card reveal">
+        <div class="c-letter">C</div>
+        <h3>Curate — what the agent can see and reach</h3>
+        <p class="muted">The agent's world is built before it runs: the context for this stage and nothing stale, the tools and permissions it needs, the model it is worth. The product describes itself in one config file, so nothing is assumed about anybody's repository.</p>
+      </div>
+      <div class="card reveal">
+        <div class="c-letter">C</div>
+        <h3>Control — rules apply as the action happens</h3>
+        <p class="muted">Hooks refuse forbidden commands at the moment a session tries them. Rules come in layers — sclaude's core that nobody lifts, presets for the stack, the team's, the developer's — and every refusal is reviewed.</p>
+      </div>
+    </div>
+    <div class="refused reveal">
+      <div>Merging a pull request — a person's decision</div>
+      <div>Pushing to main, force-pushing, skipping hooks</div>
+      <div>Promoting migrations, switching to production</div>
+      <div>Writing code during planning</div>
+      <div>Deploying to production without asking — and "anyway" when QA never saw it</div>
+    </div>
+    <p class="note">These rules catch mistakes, not a session determined to get round them. Turn on branch protection for <code>main</code> as well, where your GitHub plan offers it.</p>
+  </div>
+</section>
+
+<section id="gates">
+  <div class="wrap split">
+    <div class="reveal">
+      <p class="kicker">Quality gates</p>
+      <h2>Done means <em>proven</em>, not said.</h2>
+      <ul class="checks">
+        <li><strong>A step closes on evidence</strong> — an approved plan, your yes and green tests, a real pull request, a review with nothing left open.</li>
+        <li><strong>Tests run at up to four points</strong>: locally, on the preview, on production, and again after a rollback.</li>
+        <li><strong>No endless loops.</strong> A red run is retried once, then a fixing session at most twice, then a person is asked.</li>
+        <li><strong>Red production is rolled back first</strong>, and the old release checked — unless somebody else shipped since.</li>
+        <li><strong>Review is an agent's, the merge is a person's.</strong> The decision arrives prepared: criteria as QA left them, checks, every finding and what was done about it.</li>
+      </ul>
+    </div>
+    <div class="reveal">
+      <p class="kicker">Built for the bad days</p>
+      <div class="flows">
+        <div class="flow"><span>Tests are red</span><i>→</i><span>a fixing session, twice</span><i>→</i><span>still red? ask a person</span></div>
+        <div class="flow"><span>Production is red</span><i>→</i><span>roll back first</span><i>→</i><span>confirm with a clean check</span></div>
+        <div class="flow"><span>QA sends it back</span><i>→</i><span>rewind to the step that must change</span><i>→</i><span>back through QA</span></div>
+        <div class="flow"><span>The laptop closed</span><i>→</i><span>pick up where it stopped</span><i>→</i><span>nothing lost or redone</span></div>
+      </div>
+      <p class="rule">Every branch ends in something you can check, or a question to a person. Never in a loop, never in silence.</p>
+    </div>
+  </div>
+</section>
+
+<section id="tokens" class="alt">
+  <div class="wrap">
+    <p class="kicker">Fewer tokens</p>
+    <h2>Six habits that cut the token bill — <em>most of them built in</em>.</h2>
+    <p class="sub">The know-how that used to live in one person's head. The more work moves into the orchestrator, the cheaper each feature gets.</p>
+    <div class="table table-scroll reveal">
+      <table>
+        <thead><tr><th>Habit</th><th>Why it saves</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><b>The cache lives an hour</b></td><td>Warm, the context is re-read at a tenth of the price or less; cold, it is paid in full. Take on no more parallel features than you can answer within the hour.</td><td><span class="tag w">team habit</span></td></tr>
+          <tr><td><b>A fresh session per step</b></td><td>Stale context is paid for on every message; starting clean costs nothing, while compacting is itself a large request.</td><td><span class="tag">built in</span></td></tr>
+          <tr><td><b>The right model per step</b></td><td>The strongest model where judgement matters, a cheaper one for the write-up, none for deploys and gates.</td><td><span class="tag">built in</span></td></tr>
+          <tr><td><b>Scripts before tokens</b></td><td>Deterministic work runs as scripts; a hook can cut a ten-thousand-line log to its failures before the model reads it.</td><td><span class="tag">built in</span></td></tr>
+          <tr><td><b>Lean always-on context</b></td><td>CLI tools rather than MCP servers, instructions as skills that load on demand, CLAUDE.md under 200 lines.</td><td><span class="tag w">team habit</span></td></tr>
+          <tr><td><b>Delegate the noisy parts</b></td><td>Sub-agents keep long outputs out of the main context; agent teams cost about seven times a single session.</td><td><span class="tag">built in</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="learning">
+  <div class="wrap">
+    <div class="split">
+      <div class="reveal">
+        <p class="kicker">Retrospectives &amp; gamification</p>
+        <h2>Raw metrics bore people. <em>Watching their own feature</em> doesn't.</h2>
+        <p class="muted">Every finished feature plays back on the process map — each step lit in turn, with its minutes, its prompts and its cost. People watch it again and again, and start asking why it went the way it did.</p>
+        <ul class="checks">
+          <li><strong>What you may have missed</strong> — a warning that scrolled past, a promise a session did not keep.</li>
+          <li><strong>How you could work better</strong> — where you waited, where you went round the same loop.</li>
+          <li><strong>What went well</strong> — best practices surfacing from real features, with evidence, without a meeting.</li>
+          <li><strong>What sclaude could do better</strong> — named down to the file, and fixed.</li>
+        </ul>
+        <p class="small muted">The rule: every point quotes a line from the recording or names a file. An empty section is a fine answer.</p>
+      </div>
+      <div class="shot reveal"><img src="presentations/src/img/flow.webp" alt="A finished feature played back on sclaude's process map: each step lit in turn, with its minutes and its cost" loading="lazy"></div>
+    </div>
+
+    <div class="versus">
+      <div class="card them reveal">
+        <h3>How others do it</h3>
+        <ul>
+          <li><strong>Token leaderboards</strong> — Meta took its board down, Amazon closed its own after people burned tokens to climb it, Shopify renamed its board a usage dashboard.</li>
+          <li><strong>AI champions made to mentor</strong> — somebody else's duty, which rarely takes root.</li>
+          <li><strong>Analytics for management</strong> — data collected about developers, for someone above them.</li>
+          <li><strong>A senior's verdict from on high</strong> — people defend themselves and hide from oversight.</li>
+        </ul>
+      </div>
+      <div class="card reveal">
+        <h3>How SClaude does it</h3>
+        <ul>
+          <li><strong>You replay your own feature</strong> — not compared with others, not judged by another person.</li>
+          <li><strong>Knowledge is shared without anyone noticing</strong> — through the tools everyone uses and improves.</li>
+          <li><strong>Data is a by-product</strong> of a process that helps the developer move work forward.</li>
+          <li><strong>Coaching one-to-one, from facts</strong> — from your own run, privately.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="split rev" style="margin-top:96px">
+      <div class="shot reveal"><img src="presentations/src/img/dora.webp" alt="sclaude's metrics page: sessions, tokens, cost, the share of commits written by Claude, deploys, features finished, review threads answered" loading="lazy"></div>
+      <div class="reveal">
+        <p class="kicker">Metrics without overhead</p>
+        <h2>Evidence, <em>not status meetings</em>.</h2>
+        <p class="muted">Not one field to fill in. Every feature leaves a record, and the metrics page draws it:</p>
+        <ul class="checks">
+          <li><strong>DORA's four keys</strong> from real cycles, with rework, hotfix rate and lead time by stage.</li>
+          <li><strong>The pull request's way</strong> — coding, pickup, review, merge and deploy time.</li>
+          <li><strong>Quality</strong> — escaped defects, reopened issues, review threads, regressions green first time.</li>
+          <li><strong>Claude's own work</strong> — autonomy, the share of commits it wrote, and what a feature cost.</li>
+          <li><strong>One radar</strong> — speed, stability, quality, requirements, flow, autonomy, cost, discipline.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="ladder" class="alt">
+  <div class="wrap">
+    <p class="kicker">Scale without rigidity</p>
+    <h2>A lesson climbs only as far as it <em>proves itself</em>.</h2>
+    <p class="sub">Follow the core process, with freedom inside it. Nothing changes the process by accident; everything that should change it, can.</p>
+    <div class="ladder reveal">
+      <div class="card"><h3>A personal rule</h3><p class="muted">A friction review or a retrospective writes it into the developer's own rules in the product. It travels with their pull request.</p><p class="who">decided by the developer</p></div>
+      <div class="arrow">→</div>
+      <div class="card"><h3>A team rule</h3><p class="muted">Once it proves itself, a product maintainer lifts it into the team's rules. Now everyone on the product works that way.</p><p class="who">decided by a maintainer</p></div>
+      <div class="arrow">→</div>
+      <div class="card"><h3>A default for every product</h3><p class="muted">A lesson that holds everywhere becomes a change to SClaude itself — reviewed, sent on the person's word, on every machine at its next command.</p><p class="who">decided by SClaude's maintainers</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="phone">
+  <div class="wrap">
+    <p class="kicker">Away from the desk</p>
+    <h2>Step away. <em>The work keeps going.</em></h2>
+    <p class="sub">The phone is a channel to the orchestrator. Every question goes to the terminal and to your own Telegram bot at once — whichever you answer first counts. Most phone moments are look, tap, done.</p>
+    <div class="table table-scroll reveal">
+      <table>
+        <thead><tr><th>The moment</th><th>The classic way: VPN + SSH</th><th>With SClaude's bot</th></tr></thead>
+        <tbody>
+          <tr><td><b>See the feature</b></td><td class="muted">Turn on the VPN, recall the IP and port, open the browser</td><td>Tap <b>Open on phone</b></td></tr>
+          <tr><td><b>Restart the dev server</b></td><td class="muted">SSH in, find the terminal, stop it, start it again</td><td>Tap <b>Stop</b>, then <b>Open</b> — it starts on the visit</td></tr>
+          <tr><td><b>"Is the step done?"</b></td><td class="muted">SSH in, attach to the session, type the answer</td><td>Tap <b>Yes</b> — the terminal at home carries on</td></tr>
+          <tr><td><b>Laptop about to sleep</b></td><td class="muted">Walk back to it, or lose the session</td><td>The bot asks 30 minutes ahead — tap <b>Extend</b></td></tr>
+          <tr><td><b>Where is everything?</b></td><td class="muted">Check each terminal tab in turn</td><td>One card per feature: running, waiting, idle</td></tr>
+          <tr><td><b>Something odd</b></td><td class="muted">The classic way</td><td>Still the classic way — kept as the spare key</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="three" style="margin-top:24px">
+      <div class="card reveal"><h3>🎬 Demo videos, by the agent</h3><p class="muted">Each feature is clicked through as its users, with captions on what to look at; the video lands on the issue for QA.</p></div>
+      <div class="card reveal"><h3>🌙 Night mode</h3><p class="muted">Go to sleep; Claude carries on, decides instead of asking, and gives you a summary of its decisions in the morning.</p></div>
+      <div class="card reveal"><h3>🔀 Parallel features</h3><p class="muted">Three features at once on one laptop, each with its own address and database — none of them can break another.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="privacy" class="alt">
+  <div class="wrap">
+    <p class="kicker">Private by design</p>
+    <h2>Your code, your services, <em>your machine</em>.</h2>
+    <div class="priv">
+      <div class="card reveal"><h3>No telemetry</h3><p class="muted">Nothing goes to SClaude's authors: no usage statistics, no crash reports, no analytics.</p></div>
+      <div class="card reveal"><h3>Your services, your logins</h3><p class="muted">What it sends goes only where your work already goes: Anthropic, your GitHub, your deploy target, your own Telegram bot.</p></div>
+      <div class="card reveal"><h3>Data stays local</h3><p class="muted">Transcripts, recordings, history and metrics stay on the machine, kept out of git and every deployment — unless you name a team repository for the metrics.</p></div>
+      <div class="card reveal"><h3>Nothing unasked</h3><p class="muted">Updates and fixes sent back are each a setting you choose. A fix is checked for your product's details, and by default nothing leaves without your yes.</p></div>
+      <div class="card reveal"><h3>Nothing listens on the internet</h3><p class="muted">Feature addresses answer only your machine and your private network; the phone's gate opens only while you turn it on.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="fit">
+  <div class="wrap">
+    <p class="kicker">Who it is for, and what it costs</p>
+    <h2>Built for small teams that ship <em>their own product</em>.</h2>
+    <p class="sub">Developers on Linux or Windows with WSL2, a Next.js app on Supabase, shipped through Vercel, run from GitHub. The further a product is from that stack, the more of SClaude it simply goes without — and says so.</p>
+    <div class="fit">
+      <div class="card reveal"><b>≈ 0</b><h3>Infrastructure</h3><p class="muted small">Free tiers carry a PoC, and the laptops are already paid for. No server in between.</p></div>
+      <div class="card reveal"><b>AI</b><h3>Main line item</h3><p class="muted small">The Claude subscription per developer — kept in check by lean context per step.</p></div>
+      <div class="card reveal"><b>1 script</b><h3>Onboarding</h3><p class="muted small">Then <code>sclaude doctor</code> lists what a machine lacks and the command that fixes each gap.</p></div>
+      <div class="card reveal"><b>MIT</b><h3>Licence</h3><p class="muted small">Use it, change it, sell it. You owe nobody anything.</p></div>
+    </div>
+    <p class="note">Observed in the team that runs it: a 10–20% productivity improvement and about 5% fewer tokens in the first weeks — project observations, not universal benchmarks. macOS is not supported yet.</p>
+  </div>
+</section>
+
+<section id="industry" class="alt">
+  <div class="wrap">
+    <p class="kicker">In the industry's words</p>
+    <h2>Spec-driven development, with <em>the 3Cs</em> as the safety model.</h2>
+    <p class="sub">Neither label was chosen to sound current. SDD is the shape the industry converged on in 2026, after vibe coding ran into multi-file drift. The 3Cs are Docker's framing of agent security. SClaude was built to both shapes before either had a name.</p>
+    <div class="quotes">
+      <blockquote class="reveal"><p>"It won't approve PRs — that's still a human call." Substantive review comments went from 16% of pull requests to 54%.</p><cite>Anthropic, Code Review for Claude Code</cite></blockquote>
+      <blockquote class="reveal"><p>"Curation isn't approval. It is construction."</p><cite>Docker, The 3Cs framework</cite></blockquote>
+      <blockquote class="reveal"><p>"AI doesn't fix a team; it amplifies what's already there."</p><cite>Google, 2025 DORA report</cite></blockquote>
+      <blockquote class="reveal"><p>"A good harness should not aim to fully eliminate human input, but to direct it to where our input is most important."</p><cite>Birgitta Böckeler, Harness engineering</cite></blockquote>
+    </div>
+    <div class="sources">
+      <p><a href="https://www.augmentcode.com/guides/vibe-coding-vs-spec-driven-development">Vibe coding vs spec-driven development</a> — what SDD is, and the 3–10× first-pass rate its adopters report.</p>
+      <p><a href="https://devtoollab.com/blog/spec-driven-development-ai-agents">Spec-driven development in 2026</a> — the five-part loop.</p>
+      <p><a href="https://www.docker.com/blog/the-3cs-a-framework-for-ai-agent-security/">The 3Cs: a framework for AI agent security</a> — contain, curate, control.</p>
+      <p><a href="https://claude.com/blog/code-review">Code Review for Claude Code</a> — the same division of labour.</p>
+      <p><a href="https://martinfowler.com/articles/harness-engineering.html">Harness engineering</a> — feedforward and feedback controls around a coding agent.</p>
+      <p><a href="https://mikemason.ca/writing/ai-coding-agents-jan-2026/">Coherence through orchestration</a> — review time, PR size and bug rates alongside AI adoption.</p>
+      <p><a href="https://www.developersdigest.tech/blog/git-worktrees-claude-code-parallel-agents-guide">Git worktrees + Claude Code</a> — parallel worktrees per developer as the working norm.</p>
+      <p><a href="https://www.gitrecap.com/blog/dora-metrics-benchmarks">DORA benchmarks</a> — what the records written here feed.</p>
+    </div>
+  </div>
+</section>
+
+<section id="decks">
+  <div class="wrap">
+    <p class="kicker">Go deeper</p>
+    <h2>The decks and <em>the process map</em>.</h2>
+    <p class="sub">For whoever decides whether a team should adopt this. Each opens right here in the browser — page through with the arrow keys.</p>
+    <div class="decks">
+      <a class="deck reveal" href="presentations/sclaude_full_story.html"><span class="k">the full story</span><h3>Problem → orchestrator → tools</h3><p>All three decks in one: why a team needs a harness, how SClaude works, the stack and the phone around it.</p><span class="go">Open the deck →</span></a>
+      <a class="deck reveal" href="presentations/vibe_coding_story.html"><span class="k">why it exists</span><h3>From bicycles to Ferraris</h3><p>A team fragmented by uneven AI skills, everyone building the same tools, and what changed once they went into the company's git.</p><span class="go">Open the deck →</span></a>
+      <a class="deck reveal" href="presentations/sclaude_in_details.html"><span class="k">in depth</span><h3>Manageable, scalable AI coding</h3><p>The fixed path, gates on evidence, rules in hooks, the feedback loops, AI review done deliberately, the team setup.</p><span class="go">Open the deck →</span></a>
+      <a class="deck reveal" href="presentations/sclaude_instruments.html"><span class="k">the stack</span><h3>Build on a laptop. Run it from a phone.</h3><p>The stack for a PoC or an MVP and why each tool is in it, and the whole development cycle from a phone.</p><span class="go">Open the deck →</span></a>
+      <a class="deck reveal" href="presentations/bpmn_diagrams.html"><span class="k">BPMN</span><h3>The process map</h3><p>Every lane, every way back, every command and where it leads — built from the same model the tests check against the code. Printable.</p><span class="go">Open the map →</span></a>
+    </div>
+  </div>
+</section>
+
+<section id="start" style="padding-top:0">
+  <div class="wrap">
+    <div class="start">
+      <p class="kicker" style="color:var(--glow)">Get started</p>
+      <h2>Four lines to <em>your first feature</em>.</h2>
+      <pre><span class="p">$ </span>git clone git@github.com:personalautomation/SClaude.git ~/sclaude
+<span class="p">$ </span>cd ~/sclaude &amp;&amp; ./install.sh
+<span class="p">$ </span>sclaude doctor          <span class="c"># what this machine still lacks, and how to fix it</span>
+<span class="p">$ </span>cd &lt;your product&gt; &amp;&amp; sclaude new</pre>
+      <p>The first <code style="background:#141D30;color:#D6DEEA">sclaude new</code> in a product offers to write its config, read from what is already there. The guides — <a href="https://github.com/personalautomation/SClaude/blob/main/docs/setup.md" style="color:var(--glow)">setting up</a>, <a href="https://github.com/personalautomation/SClaude/blob/main/docs/sclaude-guide.md" style="color:var(--glow)">using it</a>, <a href="https://github.com/personalautomation/SClaude/blob/main/docs/team.md" style="color:var(--glow)">for a team</a> — are in the repository.</p>
+      <div class="mit">
+        <div><b>Use it for anything</b><span>Your company, your clients, a commercial product.</span></div>
+        <div><b>Change it however you like</b><span>Fork it, rewrite it, build your own process on top.</span></div>
+        <div><b>Keep your changes</b><span>Nothing obliges you to send them back or open your code.</span></div>
+        <div><b>Ship it, sell it, bundle it</b><span>In proprietary products too.</span></div>
+        <div><b>Owe nobody anything</b><span>No fees, no royalties, no sign-up. Keep the licence notice; it comes as it is.</span></div>
+      </div>
+      <div class="cta" style="margin-top:36px">
+        <a class="btn btn-primary" href="https://github.com/personalautomation/SClaude">Get it on GitHub</a>
+        <a class="btn btn-ghost" href="#watch">▶&nbsp; Watch the walkthrough</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>SClaude · open source under the <a href="https://github.com/personalautomation/SClaude/blob/main/LICENSE">MIT licence</a></span>
+    <span><a href="https://github.com/personalautomation/SClaude">GitHub</a> · <a href="https://github.com/personalautomation/SClaude/releases/tag/v1.0">v1.0 release</a> · <a href="https://github.com/personalautomation/SClaude/blob/main/CONTRIBUTING.md">Contributing</a></span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var els=document.querySelectorAll('.reveal');
+  if(!('IntersectionObserver' in window)||window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+    els.forEach(function(e){e.classList.add('in')});return;
+  }
+  var io=new IntersectionObserver(function(entries){
+    entries.forEach(function(en){if(en.isIntersecting){en.target.classList.add('in');io.unobserve(en.target)}});
+  },{rootMargin:'0px 0px -8% 0px',threshold:.08});
+  els.forEach(function(e){io.observe(e)});
+})();
+</script>
+</body>
+</html>

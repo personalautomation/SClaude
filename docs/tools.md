@@ -24,7 +24,7 @@ How the parts work inside, and why they were built that way, is in
 sclaude's cycle drawn as BPMN — every lane, every way back, every command and
 where it leads, interactive and printable — is
 [`docs/presentations/bpmn_diagrams.html`](presentations/bpmn_diagrams.html),
-one page that opens in a browser from a checkout.
+one page, [on GitHub Pages](https://personalautomation.github.io/SClaude/presentations/bpmn_diagrams.html) or from a checkout.
 
 ## skills/pr
 

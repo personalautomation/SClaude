@@ -6,8 +6,10 @@ team should adopt all this, rather than for the developer installing it;
 `full_story.py`.
 
 Each is one self-contained page: open it in a browser and page through with
-the arrow keys; on a phone the slides stack into one column. GitHub shows the
-file's source, so open it from a checkout. The decks are built from
+the arrow keys; on a phone the slides stack into one column. They are published
+on GitHub Pages, served from `docs/` on `main` (https://personalautomation.github.io/SClaude/presentations/),
+next to the landing page `docs/index.html`; GitHub's own file view shows only
+the source. The decks are built from
 `docs/presentations/src/` by `python3 docs/presentations/build.py`; edit the
 sources and rebuild rather than editing the built pages.
 

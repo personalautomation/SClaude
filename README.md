@@ -7,6 +7,7 @@ decision that matters.
 
 > AI speed is easy to buy. Control is what has to be designed.
 
+**[The landing page →](https://personalautomation.github.io/SClaude/)** ·
 [What it solves](#what-it-solves) ·
 [See it](#see-it) ·
 [In the industry's words](#what-this-is-in-the-industrys-words) ·
@@ -166,15 +167,16 @@ all this — a CTO, a lead:
 
 | deck | what it covers |
 |---|---|
-| [`vibe_coding_story.html`](docs/presentations/vibe_coding_story.html) | why sclaude exists: a team fragmented by uneven AI skills, everyone building the same tools, putting them in the company's git, metrics with no extra work |
-| [`sclaude_in_details.html`](docs/presentations/sclaude_in_details.html) | sclaude in depth: the fixed path, gates on evidence, rules in hooks, the feedback loops, AI review done deliberately, the team setup |
-| [`sclaude_instruments.html`](docs/presentations/sclaude_instruments.html) | the stack for a PoC or an MVP and why each tool is in it; the whole cycle from a phone |
-| [`sclaude_full_story.html`](docs/presentations/sclaude_full_story.html) | all three in one: the problem, the orchestrator, the tools around it |
+| [`vibe_coding_story.html`](https://personalautomation.github.io/SClaude/presentations/vibe_coding_story.html) | why sclaude exists: a team fragmented by uneven AI skills, everyone building the same tools, putting them in the company's git, metrics with no extra work |
+| [`sclaude_in_details.html`](https://personalautomation.github.io/SClaude/presentations/sclaude_in_details.html) | sclaude in depth: the fixed path, gates on evidence, rules in hooks, the feedback loops, AI review done deliberately, the team setup |
+| [`sclaude_instruments.html`](https://personalautomation.github.io/SClaude/presentations/sclaude_instruments.html) | the stack for a PoC or an MVP and why each tool is in it; the whole cycle from a phone |
+| [`sclaude_full_story.html`](https://personalautomation.github.io/SClaude/presentations/sclaude_full_story.html) | all three in one: the problem, the orchestrator, the tools around it |
 
-Each is one self-contained page: open it in a browser from a checkout (GitHub
-shows the file's source) and page through with the arrow keys.
+Each opens in the browser — page through with the arrow keys. Everything
+here, the decks and this page together, is also one designed
+[landing page](https://personalautomation.github.io/SClaude/).
 
-**The process map.** [`bpmn_diagrams.html`](docs/presentations/bpmn_diagrams.html)
+**The process map.** [`bpmn_diagrams.html`](https://personalautomation.github.io/SClaude/presentations/bpmn_diagrams.html)
 draws sclaude's cycle as BPMN — every lane, every way back, every command and
 where it leads — built from the same model the tests check against the code,
 so the map never drifts from what actually runs. Interactive, and printable on

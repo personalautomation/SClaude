@@ -184,7 +184,12 @@ breaks the other silently — grep before you edit:
   demo's tree and is deleted by `remove_worktree` in
   `sclaude/lib/tree/worktree.sh` once the tree is gone; `TEXT_ONLY` in demo.py is
   what `bin/sclaude-notify` says when the videos were refused and the text
-  went. `tests/dev-login.py` checks both pairs. `demo_refresh` holds what
+  went, `SENT` the line `--ids` starts with: the message ids demo.py
+  keeps in the history (`messages`), which a later full demo hands to
+  `sclaude-notify --delete` (`withdraw_old`), and `STAYED` the line
+  `--delete` names what stayed with, which `withdraw_old` keeps to try
+  again, and `LEFT` what Telegram will never delete. `tests/dev-login.py`
+  checks all five. `demo_refresh` holds what
   its session plays with `SCLAUDE_DEMO_HOLD=1` (read by `cmd_play`) and
   publishes its last delta and last full recording (none after `keep`) with
   `demo.py publish`, which clears their `held` mark, picked from

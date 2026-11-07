@@ -10,6 +10,13 @@
 #   sclaude-notify --video a.mp4 [--video b.mp4]… "..."   the videos, the text
 #                                                 as their caption (an album
 #                                                 when there are several)
+#   sclaude-notify --ids "..."                    also prints `sent: <id>…`, the
+#                                                 ids of what went, on stdout
+#   sclaude-notify --delete <id> [--delete <id>]… those messages deleted from
+#                                                 the chat (no text); exit 1,
+#                                                 `not deleted: <id>…` on
+#                                                 stderr, when any stayed or no
+#                                                 bot is set up
 #
 # With --in the message goes to the feature's topic (the thread in its
 # worktree's .sclaude/local/feature/telegram.json, which the bot keeps), so a
@@ -30,13 +37,14 @@
 # where nobody has loaded that file.
 #
 # A missing or empty token is not an error. A notification must never be the
-# reason a regression fails, so this stays silent and exits zero — the run's
+# reason a regression fails, so a message stays silent and exits zero (--delete
+# does not: its caller keeps what stayed, to try again) — the run's
 # own summary is already on the terminal, and the message is the extra.
 set -uo pipefail
 
 ENV_FILE="$HOME/.config/keepawake/env"
 
-quiet="" feature="" name="" videos=""
+quiet="" feature="" name="" videos="" ids="" deletes=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --quiet) quiet=1; shift ;;
@@ -44,21 +52,30 @@ while [[ $# -gt 0 ]]; do
     --in) feature="${2:-}"; shift; [[ $# -gt 0 ]] && shift ;;
     --as) name="${2:-}"; shift; [[ $# -gt 0 ]] && shift ;;
     --video) [[ -f "${2:-}" ]] && videos+="${2}"$'\n'; shift; [[ $# -gt 0 ]] && shift ;;
+    --ids) ids=1; shift ;;
+    --delete) [[ "${2:-}" =~ ^[0-9]+$ ]] && deletes+="${2} "; shift; [[ $# -gt 0 ]] && shift ;;
     *) break ;;
   esac
 done
 
+# Deleting takes no text: stdin is not read for one.
+if [[ -n "$deletes" ]]; then
+  text="-"
 # The text: arguments if there are any, otherwise stdin. The pipe form is what
 # a regression summary uses — it is already several lines by the time it gets
 # here, and passing it as one argument would mean quoting it twice.
-if [[ $# -gt 0 ]]; then
+elif [[ $# -gt 0 ]]; then
   text="$*"
 else
   text="$(cat)"
 fi
 [[ -n "${text//[[:space:]]/}" ]] || exit 0
 
-[[ -f "$ENV_FILE" ]] || exit 0
+# A delete that cannot be made is said with exit 1: its caller keeps the ids
+# to try again, where a notification that cannot go is only the extra.
+nothing() { [[ -n "$deletes" ]] && exit 1; exit 0; }
+
+[[ -f "$ENV_FILE" ]] || nothing
 
 # Only the two names we need, and only the value after the first `=`: the token
 # contains a colon and the chat id may be negative, so nothing here may split on
@@ -68,7 +85,7 @@ token="$(sed -n 's/^KEEPAWAKE_BOT_TOKEN=//p' "$ENV_FILE" 2>/dev/null | head -1)"
 chat="$(sed -n 's/^KEEPAWAKE_CHAT_ID=//p' "$ENV_FILE" 2>/dev/null | head -1)"
 token="${token%\"}"; token="${token#\"}"
 chat="${chat%\"}"; chat="${chat#\"}"
-[[ -n "$token" && -n "$chat" ]] || exit 0
+[[ -n "$token" && -n "$chat" ]] || nothing
 
 # A heredoc rather than python3 -c: an apostrophe inside a single-quoted -c
 # block closes the string and breaks the script, and the comments below have
@@ -83,7 +100,7 @@ chat="${chat%\"}"; chat="${chat#\"}"
 # The checkout this script lives in, through the link in ~/.local/bin: the
 # bot's record of a topic is named by its code, which is imported from there.
 root="$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")"
-python3 - "$token" "$chat" "$text" "${quiet:-}" "$feature" "$root" "$name" "$videos" <<'PY' || exit 0
+python3 - "$token" "$chat" "$text" "${quiet:-}" "$feature" "$root" "$name" "$videos" "$ids" "$deletes" <<'PY' || nothing
 import html
 import json
 import os
@@ -94,6 +111,8 @@ import urllib.request
 
 token, chat, text, quiet, feature, root, name = sys.argv[1:8]
 videos = [v for v in sys.argv[8].split("\n") if v] if len(sys.argv) > 8 else []
+print_ids = len(sys.argv) > 9 and sys.argv[9] == "1"
+deletes = [int(d) for d in sys.argv[10].split()] if len(sys.argv) > 10 else []
 
 # The feature's topic, when it has one: the bot keeps its id in the worktree.
 thread = 0
@@ -177,6 +196,88 @@ def send(params, raw):
         return json.load(resp)
 
 
+def message_ids(out):
+    """The ids of the messages Telegram's answer says went: one, or an
+    album's every video."""
+    sent = (out or {}).get("result")
+    return [int(m["message_id"]) for m in (sent if isinstance(sent, list) else [sent or {}])
+            if isinstance(m, dict) and str(m.get("message_id", "")).isdigit()]
+
+
+def call(method, **fields):
+    req = urllib.request.Request(url.rsplit("/", 1)[0] + "/" + method,
+                                 data=urllib.parse.urlencode(fields).encode())
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.load(resp)
+
+
+# deleteMessage's refusals that no later try changes: the message is gone
+# already, or Telegram will not delete it (older than 48 hours for a bot that
+# is no admin, or an id that names no message) — left in the chat, said, and
+# not kept to try again.
+GONE = b"message to delete not found"
+FINAL = (b"message can't be deleted", b"message_id_invalid")
+
+
+def delete():
+    """--delete: the messages taken out of the chat — deleteMessages a
+    hundred at a time, and a batch it refuses (a 400) one by one, so that
+    one message too old to delete keeps none of the others. Another 400
+    about one message keeps that one to try again and goes on. A failure
+    that is not about the message — the network, a rate limit, a server
+    error, a 400 about the chat (not found, no rights in it) — stops every
+    call after it: what is left stays, to be tried with the next demo, since
+    more calls would fail the same way and only lengthen a rate limit.
+    Exit 1 when any stayed, their ids on stderr after `not deleted:`
+    (demo.py's STAYED)."""
+    stayed, left = [], []
+    for i in range(0, len(deletes), 100):
+        batch = deletes[i:i + 100]
+        try:
+            call("deleteMessages", chat_id=chat, message_ids=json.dumps(batch))
+            continue
+        except urllib.error.HTTPError as exc:
+            if exc.code != 400:
+                stayed += deletes[i:]
+                break
+        except Exception:
+            stayed += deletes[i:]
+            break
+        stop = False
+        for k, one in enumerate(batch):
+            try:
+                call("deleteMessage", chat_id=chat, message_id=one)
+                continue
+            except urllib.error.HTTPError as exc:
+                why = exc.read().lower() if exc.code == 400 else b""
+            except Exception:
+                why = b""
+            if any(w in why for w in FINAL):
+                left.append(one)
+            elif GONE in why:
+                pass
+            elif why and b"chat" not in why:
+                stayed.append(one)
+            else:
+                stayed += deletes[i + k:]
+                stop = True
+                break
+        if stop:
+            break
+    if left:
+        # Its last words are what demo.py reads (LEFT in skills/sdemo).
+        sys.stderr.write("sclaude-notify: left in the chat, Telegram will not delete them: %s\n"
+                         % " ".join(map(str, left)))
+    if stayed:
+        sys.stderr.write("sclaude-notify: not deleted: %s\n" % " ".join(map(str, stayed)))
+        sys.exit(1)
+
+
+if deletes:
+    delete()
+    sys.exit(0)
+
+
 def deliver():
     """The message to the feature's topic, or to the main chat when it has
     none or the topic is gone; Telegram's answer."""
@@ -196,10 +297,9 @@ def deliver():
                 from keepawake.state import topic_ledger
                 ledger = topic_ledger(thread)
                 os.makedirs(os.path.dirname(ledger), exist_ok=True)
-                sent_ids = out.get("result")
                 with open(ledger, "a") as fh:
-                    for m in sent_ids if isinstance(sent_ids, list) else [sent_ids or {}]:
-                        fh.write("%d\n" % int(m.get("message_id")))
+                    for one in message_ids(out):
+                        fh.write("%d\n" % one)
             except Exception:
                 pass
             return out
@@ -244,6 +344,9 @@ try:
         sys.stderr.write("sclaude-notify: telegram refused: %s\n"
                          % out.get("description", "no reason given"))
         sys.exit(1)
+    # What a caller that takes the message back later keeps (demo.py's SENT).
+    if print_ids:
+        print("sent: " + " ".join(map(str, message_ids(out))))
 except Exception as exc:
     detail = ""
     if hasattr(exc, "read"):

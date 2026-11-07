@@ -177,7 +177,10 @@ demo's length and more. Recorded, it prints a line per scenario (`done`, or what
 `where:`, `link:` and `other:` for the demo's page, the way section 6 reads
 them. In a session sclaude runs (`SCLAUDE_SESSION` is set) it then sends
 the links and the scenarios' videos to the feature's Telegram topic (`sent:`)
-and posts them, with how each scenario went and the commit shown, as the
+— a full demo also deletes the topic's messages of the full demo before it
+and of everything older (`telegram: N earlier message(s) deleted`), so the
+topic holds the current demo and the deltas leading to it; Telegram lets a bot
+delete nothing older than 48 hours, which stays — and posts them, with how each scenario went and the commit shown, as the
 issue's demo comment, the earlier one deleted (`issue: posted on #N with K
 video(s)`, or why not); anywhere else it says
 `kept here:` and sends nothing — give the links in the answer, as always.
@@ -188,9 +191,11 @@ that one. Fix the script and play it again; never report such a run's links as
 sent.
 
 Every recording goes into the feature's history, and the feature's demo page
-— `/__sclaude/demo/<feature>/`, the address `link:` gives — shows the latest
-full demo and every delta before it, newest first: between which stages, when,
-by which commits, what changed, its videos. The stage is the step's in a
+— `/__sclaude/demo/<feature>/`, the address `link:` gives — keeps them all,
+as versions: a full demo with the deltas recorded before it. On top the
+current version, marked CURRENT, with since when, what changed in it and its
+videos; below, every earlier version, newest first, marked OUTDATED with the
+time it was the current one (from — to), its deltas and its videos folded. The stage is the step's in a
 session sclaude runs (`2-code`), or the one sclaude names (`preview`,
 `epilogue`).
 

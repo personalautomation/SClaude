@@ -79,11 +79,18 @@ terminal only — with:
 - **take over** on every step: that page, signed in as that user, to go on by
   hand.
 
-Each feature has one demo page, `/__sclaude/demo/<feature>/`: the latest full
-demo, and below it every delta — a short recording of only what changed for a
-user, kept each time the demo is recorded again after a change — newest first:
-between which stages (`2-code → 2-code`, `2-code → preview`), when, by which
-commits, the change in a sentence, and its videos. `/sdemo delta` records one
+Each feature has one demo page, `/__sclaude/demo/<feature>/`, with every demo
+it ever had, as versions: a full demo and the deltas recorded before it — a
+delta is a short recording of only what changed for a user, kept each time the
+demo is recorded again after a change. On top the current version, marked
+**CURRENT**: since when, what changed in it — between which stages
+(`2-code → 2-code`, `2-code → preview`), by which commits, the change in a
+sentence, its videos — and the whole feature. Below it the history, newest
+first: each earlier version marked **OUTDATED**, with the time it was the
+current one (from — to, and how long), its videos folded. The feature's
+Telegram topic keeps only the current version: a new full demo deletes the
+earlier ones there — all but a message older than 48 hours, which Telegram
+does not let a bot delete. `/sdemo delta` records one
 by hand; when nothing changed for a user, it records nothing. The page is
 linked from the proxy's list of features, under the feature, and from its
 process map.

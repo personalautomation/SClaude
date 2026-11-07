@@ -99,7 +99,8 @@ records a demo of the feature, on a desktop and on a phone
 short delta of only what changed for a user, then the whole demo again — and
 gives the link first in its report; the link
 and the videos go to the feature's topic and to a demo comment on the issue,
-where QA finds them. It ends on one question in its own dialog: **Accept**, and the session closes and sclaude goes
+where QA finds them; a new full demo takes the earlier one out of both, and
+the feature's demo page keeps every version as its history. It ends on one question in its own dialog: **Accept**, and the session closes and sclaude goes
 on with no question of its own; **Remarks**, and you say what is wrong and the
 session carries on. The step closes when you accept the work **and** the
 product's local tests pass. A branch not

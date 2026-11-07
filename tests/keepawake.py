@@ -4342,6 +4342,77 @@ try:
                 check("topic gone, main chat gets the message %s" % _args, _last.get("text"), _want)
             finally:
                 _gsrv.kill()
+
+        # --ids says what went (demo.py keeps it); --delete takes messages
+        # back out of the chat, in one deleteMessages.
+        _ids_code = _srv_code.replace(
+            "sys.stderr.write(self.rfile",
+            "sys.stderr.write(self.path + ' ' + self.rfile"
+        ).replace("s.handle_request()\n", "s.handle_request()\ns.handle_request()\n")
+        _isrv = subprocess.Popen([sys.executable, "-c", _ids_code], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True)
+        try:
+            _iport = _isrv.stdout.readline().strip()
+            with open(os.path.join(_bin, "sclaude-notify"), "w") as fh:
+                fh.write(_notify.replace("https://api.telegram.org/bot%s/sendMessage",
+                                         "http://127.0.0.1:%s/bot%%s/sendMessage" % _iport))
+            _said = subprocess.run(["bash", os.path.join(_bin, "sclaude-notify"), "--ids", "--in", _wt,
+                                    "hello"], env=_env, timeout=30, capture_output=True, text=True)
+            _gone = subprocess.run(["bash", os.path.join(_bin, "sclaude-notify"), "--delete", "5",
+                                    "--delete", "6"], env=_env, timeout=30, capture_output=True,
+                                   text=True, stdin=subprocess.DEVNULL)
+            _isrv.wait(timeout=10)
+            _asked = _isrv.stderr.read().strip().splitlines()
+            _path, _, _form = _asked[-1].partition(" ")
+            check("sclaude-notify --ids prints what it sent", _said.stdout, "sent: 4321\n")
+            check("sclaude-notify --delete deletes those messages, in the chat, at once",
+                  (_gone.returncode, _path.endswith("/deleteMessages"),
+                   urllib.parse.parse_qs(_form).get("chat_id"),
+                   urllib.parse.parse_qs(_form).get("message_ids")),
+                  (0, True, ["1"], ["[5, 6]"]))
+        finally:
+            _isrv.kill()
+
+        # One gone already is not said; one Telegram will never delete is
+        # said apart, as left, not to be tried again; another refusal of one
+        # message keeps it and goes on; one about the chat (not found) stops
+        # the calls; what stayed is said by its ids, with exit 1.
+        _fail_code = (
+            "import http.server, sys\n"
+            "class H(http.server.BaseHTTPRequestHandler):\n"
+            "    def do_POST(self):\n"
+            "        form = self.rfile.read(int(self.headers['Content-Length'])).decode()\n"
+            "        why = (b'message to delete not found' if 'message_id=6' in form\n"
+            "               else b\"message can't be deleted\" if 'message_id=7' in form\n"
+            "               else b'message is weird' if 'message_id=8' in form\n"
+            "               else b'chat not found')\n"
+            "        self.send_response(400); self.end_headers()\n"
+            "        self.wfile.write(b'{\"ok\":false,\"description\":\"Bad Request: ' + why + b'\"}')\n"
+            "    def log_message(self, *a): pass\n"
+            "s = http.server.HTTPServer(('127.0.0.1', 0), H)\n"
+            "print(s.server_address[1], flush=True)\n"
+            "for _ in range(5): s.handle_request()\n")
+        _fsrv = subprocess.Popen([sys.executable, "-c", _fail_code], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True)
+        try:
+            _fport = _fsrv.stdout.readline().strip()
+            with open(os.path.join(_bin, "sclaude-notify"), "w") as fh:
+                fh.write(_notify.replace("https://api.telegram.org/bot%s/sendMessage",
+                                         "http://127.0.0.1:%s/bot%%s/sendMessage" % _fport))
+            _gone = subprocess.run(["bash", os.path.join(_bin, "sclaude-notify"), "--delete", "6",
+                                    "--delete", "8", "--delete", "7", "--delete", "5"], env=_env, timeout=30,
+                                   capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            check("sclaude-notify --delete names what stayed, not what was gone already",
+                  (_gone.returncode, _gone.stderr.splitlines()),
+                  (1, ["sclaude-notify: left in the chat, Telegram will not delete them: 7",
+                       "sclaude-notify: not deleted: 8 5"]))
+        finally:
+            _fsrv.kill()
+        _nohome = subprocess.run(["bash", os.path.join(_bin, "sclaude-notify"), "--delete", "5"],
+                                 env=dict(_env, HOME=os.path.join(_tg_dir, "nobody")), timeout=30,
+                                 capture_output=True, stdin=subprocess.DEVNULL)
+        check("sclaude-notify --delete with no bot set up deleted nothing, and says so",
+              _nohome.returncode, 1)
     finally:
         os.environ["KEEPAWAKE_TOPICS"] = _saved_topics
 finally:

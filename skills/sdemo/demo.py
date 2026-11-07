@@ -23,6 +23,11 @@
 #   demo.py publish <id> [--feature F]  a recording held back while sclaude
 #                                       recorded (SCLAUDE_DEMO_HOLD=1), sent
 #                                       to the topic and the issue now
+#
+# A full demo that goes to the topic deletes the messages of the full demo
+# before it and of everything older (withdraw_old): the topic keeps the
+# current demo and the deltas leading to it. The feature's page keeps every
+# recording, as its history of versions.
 #   demo.py open <email> <path> [<email> <path>]... [--feature F]
 #                                       the links in chrome-debug, laptop's
 #
@@ -342,7 +347,7 @@ def publish(wt, label, demo, entry, results, phone):
     # The videos themselves too, an album of them under the links: watched in
     # the chat without opening anything.
     clips = videos(out, results)
-    sent = subprocess.run(["sclaude-notify", "--quiet", "--in", wt]
+    sent = subprocess.run(["sclaude-notify", "--quiet", "--ids", "--in", wt]
                           + [a for c in clips[:10] for a in ("--video", c)]
                           + ["\n".join(lines)], capture_output=True, text=True)
     if sent.returncode == 0 and TEXT_ONLY in sent.stderr:
@@ -353,6 +358,15 @@ def publish(wt, label, demo, entry, results, phone):
               % (" and %d video(s)" % len(clips[:10]) if clips else ""))
     else:
         print("not sent to Telegram: " + (sent.stderr.strip() or "sclaude-notify failed"))
+    ids = [int(w) for line in sent.stdout.splitlines() if line.startswith(SENT)
+           for w in line[len(SENT):].split() if w.isdigit()] if sent.returncode == 0 else []
+    if ids:
+        keep_messages(wt, demo, ids)
+        # A full demo that went out makes the one before it, and what came
+        # before that, old news in the chat: they leave it (the page keeps
+        # them, as its history).
+        if entry["kind"] == "main":
+            print("telegram: " + withdraw_old(wt, demo))
     # The issue keeps one demo comment, written with a full demo: a delta goes
     # into it with the full demo that follows it (a delta is recorded first).
     if entry["kind"] == "main":
@@ -371,6 +385,12 @@ CODE = [".", ":!.sclaude", ":!*.md"]
 
 # What sclaude-notify says when the videos were refused and the text went.
 TEXT_ONLY = "the text did"
+# How sclaude-notify --ids starts the line of the ids it sent, and --delete
+# the ids it could not delete.
+SENT = "sent: "
+STAYED = "not deleted: "
+# And the ids Telegram will never delete (older than 48 hours).
+LEFT = "will not delete them: "
 
 # One ref per feature holds the tree its last full demo played, which `stale`
 # compares with; remove_worktree in sclaude/lib/tree/worktree.sh deletes it once
@@ -470,6 +490,65 @@ def remember(wt, demo, results):
     return entry
 
 
+def keep_messages(wt, demo, ids):
+    """The Telegram messages a recording went out as, into its entry, so a
+    later full demo can take them back out of the chat."""
+    entries = history(wt)
+    for e in entries:
+        if e.get("id") == demo and not e.get("kept"):
+            e["messages"] = ids
+    with open(os.path.join(wt, DEMO_DIR, "history.json"), "w") as fh:
+        json.dump(entries, fh, indent=1)
+
+
+def withdraw_old(wt, demo):
+    """The chat's messages of every recording up to the full demo before
+    `demo` (that one included) deleted: what stays in the topic is the new
+    full demo and the deltas that lead to it — what the issue's comment
+    shows too. The history keeps the entries; a deleted one loses its
+    `messages`. What happened, in a few words."""
+    entries = [e for e in history(wt) if not e.get("broken") and not e.get("held")
+               and not e.get("kept")]
+    pos = next((k for k, e in enumerate(entries) if e.get("id") == demo), None)
+    if pos is None:
+        return "nothing earlier to delete"
+    mains = [k for k, e in enumerate(entries[:pos]) if e.get("kind") == "main"]
+    if not mains:
+        return "nothing earlier to delete"
+    old = {e["id"]: e["messages"] for e in entries[:mains[-1] + 1] if e.get("messages")}
+    ids = [m for ms in old.values() for m in ms]
+    if not ids:
+        return "nothing earlier to delete"
+    done = subprocess.run(["sclaude-notify"] + [a for m in ids for a in ("--delete", str(m))],
+                          capture_output=True, text=True)
+    def named(marker):
+        return {int(w) for line in done.stderr.splitlines() if marker in line
+                for w in line.split(marker, 1)[1].split() if w.isdigit()}
+
+    # What did not go stays in its entry, for the next full demo to try
+    # again; a failure that names no id kept them all. What Telegram will
+    # never delete (too old) is said, and not tried again.
+    stayed = set() if done.returncode == 0 else named(STAYED) or set(ids)
+    too_old = named(LEFT)
+    old_note = "; %d too old for Telegram to delete, left in the chat" % len(too_old) if too_old else ""
+    found = history(wt)
+    for e in found:
+        if e.get("id") in old and not e.get("kept"):
+            kept = [m for m in e.get("messages") or [] if m in stayed]
+            if kept:
+                e["messages"] = kept
+            else:
+                e.pop("messages", None)
+    with open(os.path.join(wt, DEMO_DIR, "history.json"), "w") as fh:
+        json.dump(found, fh, indent=1)
+    if stayed:
+        why = [line for line in done.stderr.splitlines() if STAYED not in line and LEFT not in line]
+        return "%d of %d earlier message(s) not deleted, kept to try again%s%s" % (
+            len(stayed), len(ids), " (%s)" % "; ".join(why) if why else "", old_note)
+    return "%d earlier message(s) deleted, from %d recording(s)%s" % (
+        len(ids) - len(too_old), len(old), old_note)
+
+
 def recording(wt, demo):
     try:
         with open(os.path.join(wt, DEMO_DIR, demo, "demo.json")) as fh:
@@ -478,14 +557,64 @@ def recording(wt, demo):
         return {}
 
 
+def versions(entries):
+    """The feature's recordings as versions, oldest first: each full demo
+    with the deltas recorded before it (a delta is recorded first, its full
+    demo next) and the `keep`s that carried it on; plus the deltas after the
+    last full one, which no full demo covers yet."""
+    out, pending = [], []
+    for e in entries:
+        if e.get("kind") == "delta":
+            pending.append(e)
+        elif e.get("kept"):
+            mine = [v for v in out if v["main"]["id"] == e["id"]] or out[-1:]
+            if mine:
+                mine[-1]["confirms"].append(e)
+        else:
+            out.append({"main": e, "deltas": pending, "confirms": []})
+            pending = []
+    return out, pending
+
+
+def moment(entry):
+    """When a recording was made, as a datetime in this machine's zone;
+    None when its entry does not say."""
+    import datetime
+    try:
+        return datetime.datetime.fromisoformat(entry.get("when") or "").astimezone()
+    except ValueError:
+        return None
+
+
+def at(entry):
+    found = moment(entry)
+    return found.strftime("%a %-d %b, %H:%M") if found else "an unknown time"
+
+
+def lasted(start, end):
+    """How long a version was the current one, roughly: "3 h 20 min"."""
+    a, b = moment(start), moment(end)
+    if not a or not b or b < a:
+        return ""
+    mins = int((b - a).total_seconds() // 60)
+    if mins < 60:
+        return "%d min" % max(mins, 1)
+    if mins < 48 * 60:
+        return "%d h %d min" % (mins // 60, mins % 60) if mins % 60 else "%d h" % (mins // 60)
+    return "%d days" % round(mins / 1440)
+
+
 def write_feature_page(wt, label):
-    """DEMO_DIR/index.html: the latest full demo, and every delta before it,
-    newest first — what changed, between which stages, when, by which
-    commits, with its videos."""
+    """DEMO_DIR/index.html: the feature's demos as versions. On top the
+    current one — the latest full demo, since when it is current, what
+    changed in it, its videos; below, every earlier version, newest first,
+    marked outdated, with the time it was the current one. Nothing is left
+    out: the topic keeps only the current demo, the page keeps them all."""
     import html as h
-    # Only what played: a recording that did not was never published.
+    # Only what played and went out: a recording that did not, or one still
+    # held, was never published.
     entries = [e for e in history(wt) if not e.get("broken") and not e.get("held")]
-    main = last_main(wt)
+    found, newer = versions(entries)
 
     def clips(entry):
         """(video or "", scenario) for each scenario, in order — the page
@@ -497,67 +626,106 @@ def write_feature_page(wt, label):
             out.append((os.path.relpath(path, os.path.join(wt, DEMO_DIR)) if path else "", sc))
         return out
 
-    def when(entry):
-        return h.escape((entry.get("when") or "")[:16].replace("T", " "))
-
-    parts = ["<h1>%s</h1>" % h.escape(main["title"] if main else label)]
-    if main:
-        # A demo carried on (`keep`) was recorded on an earlier commit and
-        # still shows the feature on this one: both are said, and why.
-        kept = ("still current on <code>%s</code> at %s, %s: %s · " % (
-            h.escape(main["head"][:7]), h.escape(main["stage"]), when(main), h.escape(main["kept"]))
-            if main.get("kept") else "")
-        shown = main["recorded"] if main.get("kept") else main["head"]
-        parts.append("<h2>The feature — the latest full demo</h2><p class=sub>%s%s · on <code>%s</code> · "
-                     "<a href='%s/'>scenarios with their steps →</a></p>" % (
-                         kept, "recorded" if kept else "%s · %s" % (h.escape(main["stage"]), when(main)),
-                         h.escape(shown[:7]), h.escape(main["id"])))
-        parts.append("<div class=grid>%s</div>" % "".join(
+    def grid(entry, preload):
+        return "<div class=grid>%s</div>" % "".join(
             "<figure>%s<figcaption>%s</figcaption></figure>" % (
-                "<video controls playsinline preload=metadata src='%s'></video>" % h.escape(c)
+                "<video controls playsinline preload=%s src='%s'></video>" % (preload, h.escape(c))
                 if c else "<p class=sub>⚠ no video: %s</p>" % h.escape(sc.get("error") or "not recorded"),
                 h.escape(sc.get("title", "")))
-            for c, sc in clips(main)))
-    deltas = [e for e in entries if e.get("kind") == "delta"][::-1]
-    if deltas:
-        rows = "".join(
-            "<tr><td><b>%s → %s</b><br><span class=sub>%s</span></td><td>%s</td>"
-            "<td><details><summary>%d commit(s)</summary>%s</details></td>"
-            "<td>%s<br><a href='%s/'>its page →</a></td></tr>" % (
-                h.escape(e.get("from") or "?"), h.escape(e["stage"]), when(e),
-                h.escape(e.get("change") or ""),
+            for c, sc in clips(entry))
+
+    def facts(e):
+        return "%s · on <code>%s</code> · %d scenario(s)" % (
+            h.escape(e.get("stage") or "?"), h.escape((e.get("head") or "")[:7]),
+            e.get("scenarios") or 0)
+
+    def changes(deltas, preload):
+        """The deltas of a version, newest first: the change for the user,
+        between which stages, the commits, the videos."""
+        return "".join(
+            "<div class=delta><div><b>Δ %s</b></div><div class=sub>%s → %s · %s · "
+            "<a href='%s/'>its page →</a></div>"
+            "<details><summary>%d commit(s)</summary>%s</details>%s</div>" % (
+                h.escape(e.get("change") or e.get("title") or "a change"),
+                h.escape(e.get("from") or "?"), h.escape(e.get("stage") or "?"), at(e), h.escape(e["id"]),
                 len(e.get("commits") or []),
                 "".join("<div><code>%s</code></div>" % h.escape(c) for c in e.get("commits") or []),
-                "".join("<video controls playsinline preload=none src='%s'></video>" % h.escape(c)
-                        for c, _ in clips(e) if c), h.escape(e["id"]))
-            for e in deltas)
-        parts.append("<h2>What changed, newest first</h2><table><tr><th>Between</th>"
-                     "<th>The change for the user</th><th>Commits</th><th>Video</th></tr>%s</table>"
-                     % rows)
-    # A kept entry is the same recording again, not an earlier one.
-    earlier = [e for e in entries if e.get("kind") == "main" and not e.get("kept")
-               and not (main and e["id"] == main["id"])][::-1]
-    if earlier:
-        parts.append("<h2>Earlier full demos</h2><ul>%s</ul>" % "".join(
-            "<li><a href='%s/'>%s · %s</a> on <code>%s</code></li>" % (
-                h.escape(e["id"]), h.escape(e["stage"]), when(e), h.escape(e["head"][:7]))
-            for e in earlier))
+                "<details><summary>video</summary>%s</details>" % grid(e, "none") if preload == "none"
+                else grid(e, preload))
+            for e in deltas[::-1])
+
+    def confirms(v):
+        # A demo carried on (`keep`) was recorded on an earlier commit and
+        # still showed the feature on a later one: said, with why.
+        return "".join(
+            "<p class=ok>✓ still current on <code>%s</code> at %s, %s: %s</p>" % (
+                h.escape((k.get("head") or "")[:7]), h.escape(k.get("stage") or "?"), at(k),
+                h.escape(k.get("kept") or ""))
+            for k in v["confirms"])
+
+    title = found[-1]["main"].get("title") if found else ""
+    parts = ["<header><h1>%s</h1><p class=sub>%s · %d version(s) of the demo</p></header>" % (
+        h.escape(title or label), h.escape(label), len(found))]
+    if newer:
+        parts.append("<section class='card newer'><span class='badge amber'>NEWER CHANGE</span>"
+                     "<h2>Not in a full demo yet</h2><p class=sub>Recorded after the current "
+                     "version; the next full demo will take it in.</p>%s</section>"
+                     % changes(newer, "metadata"))
+    if found:
+        cur = found[-1]
+        m = cur["main"]
+        parts.append(
+            "<section class='card current'><span class='badge green'>CURRENT</span> "
+            "<span class=ver>v%d</span><h2>Current since %s</h2><p class=sub>%s · "
+            "<a href='%s/'>scenarios with their steps →</a></p>%s%s%s</section>" % (
+                len(found), at(m), facts(m), h.escape(m["id"]), confirms(cur),
+                ("<h3>What changed in this version</h3>" + changes(cur["deltas"], "metadata"))
+                if cur["deltas"] else "",
+                "<h3>The whole feature</h3>" + grid(m, "metadata")))
+    if len(found) > 1:
+        cards = []
+        for n in range(len(found) - 2, -1, -1):
+            v, nxt = found[n], found[n + 1]
+            m = v["main"]
+            took = lasted(m, nxt["main"])
+            cards.append(
+                "<li class='card old'><span class='badge grey'>OUTDATED</span> "
+                "<span class=ver>v%d</span><h3>Current from %s to %s%s</h3>"
+                "<p class=sub>%s · replaced by v%d · <a href='%s/'>scenarios with their steps →</a></p>"
+                "%s%s<details><summary>the whole feature as it was (%d video(s))</summary>%s</details></li>" % (
+                    n + 1, at(m), at(nxt["main"]), " <span class=sub>(%s)</span>" % took if took else "",
+                    facts(m), n + 2, h.escape(m["id"]), confirms(v),
+                    changes(v["deltas"], "none"), len([c for c, _ in clips(m) if c]), grid(m, "none")))
+        parts.append("<h2 class=hist>History — earlier versions, newest first</h2>"
+                     "<ol class=timeline>%s</ol>" % "".join(cards))
     if not entries:
         parts.append("<p>No demo recorded yet.</p>")
     page = """<!doctype html><html lang=en><head><meta charset=utf-8>
 <meta name=viewport content='width=device-width,initial-scale=1'><title>%s — demos</title><style>
-:root{--bg:#f7f7f5;--card:#fff;--ink:#1c1917;--mute:#78716c;--line:#e7e5e4}
-@media (prefers-color-scheme:dark){:root{--bg:#18181b;--card:#232326;--ink:#f4f4f5;--mute:#a1a1aa;--line:#3f3f46}}
+:root{--bg:#f7f7f5;--card:#fff;--ink:#1c1917;--mute:#78716c;--line:#e7e5e4;--green:#15803d;
+--greenbg:#dcfce7;--amber:#b45309;--amberbg:#fef3c7;--grey:#57534e;--greybg:#e7e5e4}
+@media (prefers-color-scheme:dark){:root{--bg:#18181b;--card:#232326;--ink:#f4f4f5;--mute:#a1a1aa;
+--line:#3f3f46;--green:#4ade80;--greenbg:#14532d;--amber:#fbbf24;--amberbg:#451a03;--grey:#d4d4d8;--greybg:#3f3f46}}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,sans-serif}
-main{max-width:1180px;margin:0 auto;padding:20px 16px 60px}h1{font-size:22px;margin:0 0 8px}
-h2{font-size:17px;margin:24px 0 6px}.sub{color:var(--mute);font-size:13px}a{color:#2563eb}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;align-items:start}
-figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px}
+main{max-width:1180px;margin:0 auto;padding:20px 16px 60px}h1{font-size:22px;margin:0}
+h2{font-size:18px;margin:6px 0 2px}h3{font-size:15px;margin:14px 0 6px}
+.sub{color:var(--mute);font-size:13px;margin:2px 0}a{color:#2563eb}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:16px 0}
+.current{border-left:6px solid var(--green)}.newer{border-left:6px solid var(--amber)}
+.old{border-left:6px solid var(--line);opacity:.85}.old:hover{opacity:1}
+.badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;padding:2px 8px;border-radius:999px}
+.green{color:var(--green);background:var(--greenbg)}.amber{color:var(--amber);background:var(--amberbg)}
+.grey{color:var(--grey);background:var(--greybg)}.ver{color:var(--mute);font-size:13px;font-weight:600}
+.ok{color:var(--green);font-size:13px;margin:4px 0}
+.delta{border-top:1px dashed var(--line);padding:8px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;align-items:start;margin-top:6px}
+figure{margin:0;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px}
 figcaption{font-size:13px;margin-top:4px}video{width:100%%;max-height:60vh;border-radius:8px;background:#000}
-table{width:100%%;border-collapse:collapse;background:var(--card)}td,th{border:1px solid var(--line);
-padding:8px;vertical-align:top;text-align:left}th{font-size:13px;color:var(--mute)}
-td video{max-width:320px;display:block;margin-bottom:6px}
-@media (max-width:760px){table,tr,td,th{display:block}th{display:none}td video{max-width:100%%}}
+details{margin:4px 0}summary{cursor:pointer;color:var(--mute);font-size:13px}
+.hist{margin-top:32px}.timeline{list-style:none;margin:0;padding:0 0 0 18px;border-left:2px solid var(--line)}
+.timeline>li{position:relative}.timeline>li::before{content:"";position:absolute;left:-26px;top:20px;
+width:10px;height:10px;border-radius:50%%;background:var(--line);border:2px solid var(--bg)}
+code{font-size:13px}
 </style></head><body><main>%s</main></body></html>""" % (h.escape(label), "".join(parts))
     with open(os.path.join(wt, DEMO_DIR, "index.html"), "w") as fh:
         fh.write(page)
@@ -646,8 +814,11 @@ def issue_comment(wt, results, phone, here):
     if found is None:
         return "not written — issue #%s could not be read (gh, network or permissions)" % issue
     root = os.path.join(wt, DEMO_DIR)
-    # Only what played: a recording that did not was never published.
-    entries = [e for e in history(wt) if not e.get("broken") and not e.get("held")]
+    # Only what played: a recording that did not was never published. A
+    # keep is no recording, and no new version: the deltas since the full
+    # demo before it still lead to this one, as on the page and in the topic.
+    entries = [e for e in history(wt) if not e.get("broken") and not e.get("held")
+               and not e.get("kept")]
     mains = [k for k, e in enumerate(entries) if e.get("kind") == "main"]
     since = mains[-2] + 1 if len(mains) > 1 else 0
     deltas = [(e, recording(wt, e["id"]), os.path.join(root, e["id"]))

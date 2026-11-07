@@ -640,8 +640,12 @@ def check_proxy(root, wt, dport, login_file):
                      '[ "$1" = --out ] && echo "<h1>x</h1>" > "$2/index.html" && '
                      '{ [ -n "$DEMO_JSON" ] && echo "$DEMO_JSON" || echo \'{"title": "T"}\'; } '
                      '> "$2/demo.json"; shift; done\n' % asked)
+        # It answers --ids as the real one does, with a message id of its
+        # own each time, and deletes nothing but what it is asked to.
         with open(os.path.join(stub, "sclaude-notify"), "w") as fh:
-            fh.write('#!/bin/sh\necho "notify $*" >> %s\n' % asked)
+            fh.write('#!/bin/sh\necho "notify $*" >> %s\n[ "$1" = --delete ] && exit 0\n'
+                     'n=$(cat %s 2>/dev/null || echo 100); n=$((n + 1)); echo $n > %s\n'
+                     'echo "sent: $n"\n' % (asked, asked + ".n", asked + ".n"))
         for name in ("node", "sclaude-notify"):
             os.chmod(os.path.join(stub, name), 0o755)
         os.remove(asked)
@@ -699,7 +703,7 @@ def check_proxy(root, wt, dport, login_file):
         try:
             said, calls = play(True)
             check("demo play: in sclaude, the topic gets both links",
-                  (calls[1] == "notify --quiet --in %s 🎬 T" % wt,
+                  (calls[1] == "notify --quiet --ids --in %s 🎬 T" % wt,
                    calls[2] == "💻 http://127.0.0.1:%d/__sclaude/demo/f1/" % port),
                   (True, True))
             with open(issue_file) as fh:
@@ -715,6 +719,11 @@ def check_proxy(root, wt, dport, login_file):
                   (said[-1], len(posted), posted[0]["url"].endswith("-2"),
                    any(l.startswith("gh delete 1") for l in calls)),
                   ("issue: posted on #7 with 0 video(s), the earlier one deleted", 1, True, True))
+            check("demo play: the new full demo takes the old one out of the topic",
+                  ("notify --delete 101" in calls,
+                   "telegram: 1 earlier message(s) deleted, from 1 recording(s)" in said,
+                   [e.get("messages") for e in demo.history(wt)]),
+                  (True, True, [None, None, [102]]))
         finally:
             with open(state_path, "w") as fh:
                 fh.write(state_before)
@@ -759,6 +768,8 @@ def check_proxy(root, wt, dport, login_file):
         check("demo delta: told in the topic, not posted on the issue alone",
               (any("Δ by hand → preview: The button is now green" in l for l in calls),
                any(l.startswith("issue:") for l in said)), (True, False))
+        check("demo delta: takes nothing out of the topic",
+              any(l.startswith("notify --delete") for l in calls), False)
         try:
             said, calls = play(True)
         finally:
@@ -771,8 +782,16 @@ def check_proxy(root, wt, dport, login_file):
               ("#### Δ What changed, by hand → preview" in posted[-1]["body"],
                "The button is now green" in posted[-1]["body"]), (True, True))
         _, _, body = request(port, host, "/__sclaude/demo/f1/")
-        check("demo: the feature's page shows the full demo and the change",
-              ("The button is now green" in body, "What changed, newest first" in body), (True, True))
+        check("demo delta: the next full demo keeps it in the topic, takes the full one before out",
+              ([l for l in calls if l.startswith("notify --delete")],
+               [e.get("messages") for e in demo.history(wt)]),
+              (["notify --delete 102"], [None, None, None, [103], [104]]))
+        check("demo: the feature's page shows the current version with its change",
+              ("The button is now green" in body, "What changed in this version" in body,
+               body.count(">CURRENT<"), "v4" in body), (True, True, 1, True))
+        check("demo: the earlier versions stay on the page, outdated, with when they were current",
+              (body.count(">OUTDATED<"), len(re.findall(r"Current from [^<]+ to ", body)),
+               "replaced by v4" in body, "replaced by v2" in body), (3, 3, True, True))
 
         # stale: the code against the last demo's commit.
         def stale():
@@ -817,6 +836,47 @@ def check_proxy(root, wt, dport, login_file):
         check("demo: sclaude-notify says the text went in the words demo.py reads",
               re.search(r'sys\.stderr\.write\("sclaude-notify: the videos did not go \(%%s\); %s\\n"'
                         % re.escape(demo.TEXT_ONLY), notify_src) is not None, True)
+        check("demo: sclaude-notify --ids starts its line as demo.py reads it",
+              'print("%s" + " ".join(' % demo.SENT in notify_src, True)
+        check("demo: sclaude-notify --delete names what stayed as demo.py reads it",
+              ('"sclaude-notify: %s%%s\\n"' % demo.STAYED in notify_src,
+               '%s%%s\\n"' % demo.LEFT in notify_src), (True, True))
+        # A delete that half failed: what stayed stays in its entry, for the
+        # next full demo; what went leaves it.
+        hist = demo.history(wt)
+        mains = [k for k, e in enumerate(hist) if e.get("kind") == "main" and not e.get("broken")]
+        hist[mains[-2]]["messages"] = [7, 8]
+        with open(os.path.join(wt, demo.DEMO_DIR, "history.json"), "w") as fh:
+            json.dump(hist, fh)
+        with open(os.path.join(stub, "sclaude-notify")) as fh:
+            notify_stub = fh.read()
+        with open(os.path.join(stub, "sclaude-notify"), "w") as fh:
+            fh.write('#!/bin/sh\necho "sclaude-notify: not deleted: 8" >&2\nexit 1\n')
+        os.environ["PATH"] = stub + os.pathsep + saved_path
+        try:
+            half = demo.withdraw_old(wt, hist[mains[-1]]["id"])
+        finally:
+            os.environ["PATH"] = saved_path
+            with open(os.path.join(stub, "sclaude-notify"), "w") as fh:
+                fh.write(notify_stub)
+        check("demo: a delete that half failed keeps only what stayed",
+              (half.startswith("1 of 2 earlier message(s) not deleted"),
+               demo.history(wt)[mains[-2]].get("messages")), (True, [8]))
+        # One Telegram will never delete is not counted as deleted, nor kept.
+        with open(os.path.join(stub, "sclaude-notify"), "w") as fh:
+            fh.write('#!/bin/sh\necho "sclaude-notify: left in the chat, Telegram will not '
+                     'delete them: 8" >&2\n')
+        os.environ["PATH"] = stub + os.pathsep + saved_path
+        try:
+            old_left = demo.withdraw_old(wt, hist[mains[-1]]["id"])
+        finally:
+            os.environ["PATH"] = saved_path
+            with open(os.path.join(stub, "sclaude-notify"), "w") as fh:
+                fh.write(notify_stub)
+        check("demo: a message too old to delete is said, not counted, not kept",
+              (old_left, demo.history(wt)[mains[-2]].get("messages")),
+              ("0 earlier message(s) deleted, from 1 recording(s); 1 too old for Telegram "
+               "to delete, left in the chat", None))
         check("demo: the feature's removal deletes the ref demo.py keeps",
               'update-ref -d "%s"' % (demo.DEMO_REF % "$label")
               in open(os.path.join(ROOT, "sclaude", "lib", "tree", "worktree.sh")).read(), True)

@@ -40,6 +40,16 @@ These are load-bearing. Do not "fix" them.
 Some text is compared, grepped for or quoted elsewhere. Changing one side alone
 breaks the other silently — grep before you edit:
 
+- A feature split into several pull requests: `sclaude/prompts/plan.md`
+  ("If I choose to split") tells step 1 to keep the first part and file the
+  rest as sub-issues, and `sclaude/prompts/code.md` ("This feature is one pull
+  request.") tells step 2 to do the same with a plan that still holds several;
+  `tests/plan-split.py` checks both.
+
+  <!-- Added by Claude on 2026-11-07 during a friction review: step 1 was told
+  to propose a split and nothing after it, and the orchestrator runs one pull
+  request per feature. -->
+
 - `KeepAwake.ps1` writes hold-log lines that `bin/keepawake` greps for
   (`hold set|hold released|holding`).
 - `keepawake status` prints the section headings `HOLD` and `HEALTH`; both

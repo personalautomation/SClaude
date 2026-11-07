@@ -84,6 +84,13 @@ comment of their own. sclaude never edits an issue's description: the original
 request, the criteria and the status are separate comments, so the task as it
 was given stays readable.
 
+A feature too large for one review (about 10,000 changed lines) is offered as
+a split. If you take it, the feature becomes the first part only — one feature
+is one pull request — and each later part is filed as an issue of its own,
+a sub-issue of the feature's issue when it has one, to go through a cycle of
+its own. The feature's issue closes when the first part ships, as any
+feature's does; the later parts stay open under it.
+
 **Step 2, code.** A fresh session builds it, with the approved plan as its
 brief. Each commit names the criterion it serves in a `Requirement:` footer.
 Claude checks its work in Chrome at the feature's address. Before it asks, it

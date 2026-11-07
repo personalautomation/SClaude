@@ -2,6 +2,8 @@ Implement the feature "<feature>" following the plan in `.sclaude/local/feature/
 
 The plan is not binding. If it turns out to be wrong or incomplete, tell me before you deviate, and update `.sclaude/local/feature/plan.md` once we agree.
 
+**This feature is one pull request.** A plan that still divides it into several — written before step 1 learnt to file the later parts as issues of their own — is built for its first part alone. Before building, say so and ask; with my yes, file each later part that has no issue yet (none named in the plan<if:issue>, none among #<issue>'s sub-issues</if:issue>), as step 1 now does: an issue with its scope, where the line with the first part runs and what it builds on (`gh issue create --title … --body-file -`)<if:issue>, with the labels and milestone of #<issue> and made a sub-issue of it (`gh api repos/{owner}/{repo}/issues/<issue>/sub_issues -F sub_issue_id=<id>`, the `id` from `gh api repos/{owner}/{repo}/issues/<new number> --jq .id`)</if:issue>, and name it in the plan. Then strike the later parts' criteria through in the plan with the identifier inside the strike, `- [ ] ~~AC7. …~~` — struck after the identifier, the line still reads as a live criterion and the orchestrator adds it back to the issue — never renumbering, and tell me which to remove from the issue's list, where QA would otherwise test this pull request against them.
+
 Ask me business-level questions, not technical ones: I care about what the user gets and how it behaves, not which files you touch.
 
 Verify your work with the tools you have — primarily chrome-devtools MCP against the local dev server.

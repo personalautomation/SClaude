@@ -117,7 +117,11 @@ EDGE = "edge"
 # The arrows no code of sclaude's writes, each with why: taken where sclaude
 # does not see it happen. The rest of a map recorded here (RECORDED) is
 # written where it is taken; tests/process.py holds the two to the code.
-RECORDED = ("workshop", "detail", "friction", "regression", "sync")
+RECORDED = ("workshop", "detail", "friction", "regression", "sync", "parts")
+# The parts map is played from the rows parts.sh and the steps write (`parts
+# capture/merged/stop`, the steps' sessions, each with its `part`), not from
+# edges: its arrows are what those rows mean, and none is written as one.
+_PARTS_INFERRED = "inferred from the parts' rows (parts.sh, the steps' sessions), not written as an edge"
 UNWRITTEN = {
     ("w_find", "w_ask"): "the session finds the fix and asks for its plan inside its conversation",
     ("approve", "plan"): "the person's corrections go to the session inside its conversation",
@@ -127,6 +131,7 @@ UNWRITTEN = {
     ("f_defer", "f_monthly"): "the monthly review runs over the project, not over a feature",
     ("hold_ways", "r_on"): "the run the person starts on a held production is a pass of its own, from its start",
 }
+UNWRITTEN.update({(a, b): _PARTS_INFERRED for a, b, _label, _kind in process_model.PARTS_EDGES})
 
 
 def _edge(row):
@@ -424,6 +429,140 @@ def _sync_way(rows, now=None, cut=None):
     return way
 
 
+# --- a feature built in parts ------------------------------------------------
+#
+# While a split feature's parts are built (parts.sh), its steps 2-4 run once a
+# part, on the parts map rather than the detailed one: each part a pass of
+# its own, from its first row to its merge into the common branch, and the
+# last one on through step 2 over the whole (p_whole). A row says its part
+# (`part`, history_add and session_runs: the part's number, or `whole` once
+# every part is in); a row older than that is taken to belong to the part
+# after the last one merged. The cycle's edges written inside a part (code
+# works, works pr, pr pr_check…) are the part's way, not the feature's, and
+# are not played on the detailed map.
+
+PARTS_STEP = {"code": "p_code", "pr": "p_pr", "review": "p_review"}
+# A row's place on another map than its own, set by history for the costs
+# (process_costs._session_place): a part's sessions cost on the parts map.
+ON = "_on"
+# A row of step 2's session over the whole feature, after the last part.
+WHOLE = "_whole"
+
+
+def _parts_way(rows, first, on=False, now=None, cut=None):
+    """A part's way through the parts map: its sessions' sittings, its local
+    review with its review, its merge; for the last part, step 2 over the
+    whole after it. `on`: the detailed map went on past that whole."""
+    way = ([{"n": "p_split"}] if first else []) + [{"n": "p_enter"}]
+    sitting, by = None, None
+
+    def close(at):
+        nonlocal sitting, by
+        if sitting:
+            way[-1]["s"] += _seconds(sitting, at) or 0
+            way[-1].setdefault(SPANS, []).append((sitting, at))
+            way[-1]["to"] = at
+        sitting, by = None, None
+
+    for r in rows:
+        what, op, at = r["what"], r["op"], r["at"]
+        head, _, rest = what.partition(".")
+        if (head == "steps" and rest in PARTS_STEP) or what == "review.local":
+            node = "p_whole" if r.get(WHOLE) else PARTS_STEP.get(rest, "p_review")
+            if op in ("open", "start"):
+                # The local review's pass inside the review's conversation:
+                # the same minutes.
+                if sitting and what == "review.local":
+                    continue
+                if sitting:
+                    # One opened in place of a conversation that died.
+                    close(at)
+                if way[-1]["n"] == node:
+                    way[-1]["k"] = way[-1].get("k", 1) + 1
+                else:
+                    if node == "p_whole" and way[-1]["n"] != "p_more":
+                        way.append({"n": "p_more"})
+                    way.append({"n": node, "from": at, "s": 0})
+                sitting, by = at, what
+            elif op == "drop" and sitting and by == what:
+                # A conversation that never took place: no time, no sitting.
+                sitting, by = None, None
+                if way[-1].get("k", 1) > 1:
+                    way[-1]["k"] -= 1
+            elif sitting and by == what and (op in ("end", "stall", "finish")
+                                             or what == "review.local"):
+                close(at)
+            if node == "p_whole" and op in ("close", "finish") and way[-1]["n"] != "p_on":
+                close(at)
+                way.append({"n": "p_on"})
+        elif what == "parts" and op == "merged":
+            close(at)
+            way += [{"n": "p_check"}, {"n": "p_merge", "from": at, "to": at}, {"n": "p_sync"}, {"n": "p_more"}]
+        elif what == "parts" and op == "stop":
+            close(at)
+            if way[-1]["n"] != "p_more":
+                way.append({"n": "p_more"})
+    # A sitting left open: going on by sclaude's state, up to now; else it
+    # ended unseen, where `cut` says (_unseen_end), a guess the page marks.
+    if sitting:
+        end = now or cut and cut(sitting)
+        if end and _when(end) > _when(sitting):
+            way[-1]["s"] += _seconds(sitting, end) or 0
+            way[-1].setdefault(SPANS, []).append((sitting, end))
+            if not now:
+                way[-1]["to"] = end
+        way[-1]["live" if now else "unsure"] = True
+    if on and way[-1]["n"] == "p_whole":
+        way.append({"n": "p_on"})
+    return way
+
+
+def _part_of(r, pmode, current, total, last):
+    """Which part's pass a row goes to — its key, "drop" for the cycle's
+    edge a part wrote, None for the detailed map and the other passes —
+    and where the parts stand after it: (into, mode, current, total)."""
+    what, op = r["what"], r["op"]
+    head, _, rest = what.partition(".")
+    part = str(r.get("part") or "")
+    # A replan that undid the split before part 1 had a pull request: the
+    # feature is one pull request again, and its steps go back to the
+    # detailed map.
+    if (what, op) == ("parts", "uncapture"):
+        return "drop", None, "1", 0
+    if what == "parts" and op == "capture" and str(r.get("total") or "").isdigit():
+        total = total if pmode not in (None, "build") else int(r["total"])
+    if pmode is None and ((what, op) == ("parts", "capture") or part.isdigit()):
+        pmode = "build"
+    if pmode == "build" and part == "whole":
+        pmode = "whole"
+    if pmode == "build":
+        key = part if part.isdigit() else current
+        if what == "parts":
+            if op == "capture":
+                return "drop", pmode, current, total
+            if op == "merged":
+                current = str(int(key) + 1)
+                if total and int(key) >= total:
+                    pmode = "whole"
+            elif op == "stop":
+                pmode = "whole"
+            return key, pmode, current, total
+        if (head == "steps" and rest in PARTS_STEP) or what == "review.local":
+            return key, pmode, current, total
+        if what == EDGE and _map_of(_edge(r)[0]) == "detail":
+            return "drop", pmode, current, total
+        return None, pmode, current, total
+    if pmode == "whole":
+        if what == "steps.code":
+            r[WHOLE] = True
+            if op in ("close", "finish"):
+                pmode = "done"
+            return (last[0] if last else current), pmode, current, total
+        if head == "steps" and op == "open":
+            pmode = "done"
+    return None, pmode, current, total
+
+
 WORKSHOP_START = ("w_find", "w_ask", "w_open", "w_change", "w_ready", "w_exit", "w_ready_gate")
 WORKSHOP_OUT = {
     "blocked": ("w_leaks", "w_leak_ask", "w_held"), "held": ("w_leaks", "w_leak_ask", "w_held"),
@@ -502,9 +641,15 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
     """The feature's way through the maps, for the page to play, and what
     each place took (`metrics`) when the sessions' transcripts are given:
     a function from a session id to claude_usage.read's summary, or None."""
-    rows = history_rows(lines)
+    # Copies: a part's rows are marked with their place for the costs.
+    rows = [dict(r) for r in history_rows(lines)]
     places = _Places()
     friction, workshop, regression, syncs = {}, {}, {}, {}
+    # A feature built in parts: each part's rows, where the parts stand
+    # (None, build, whole, done), the part a row with no `part` is taken to
+    # be in, the parts' count, the time they span, and whether the detailed
+    # map went on past step 2 over the whole.
+    parts, pmode, pcurrent, ptotal, pspan, pon = {}, None, "1", 0, [], False
     # The cycle's recorded edges, and the friction reviews whose pass began.
     edges, quiet = [], {}
     last_run = {}
@@ -516,6 +661,23 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         what, op, at = r["what"], r["op"], r["at"]
         head, _, rest = what.partition(".")
         places.run = r.get("run")
+        into, pmode, pcurrent, ptotal = _part_of(r, pmode, pcurrent, ptotal, list(parts)[-1:])
+        if into == "drop":
+            continue
+        if into:
+            if into not in parts:
+                parts[into] = []
+                places.detour("parts", into, at)
+            parts[into].append(r)
+            if op == "open" and r.get("session") and head == "steps":
+                r[ON] = ("parts", "p_whole" if r.get(WHOLE) else PARTS_STEP[rest])
+            pspan[:] = [pspan[0] if pspan else at, at]
+            places.last = at
+            if r.get("run"):
+                places.last_of[r["run"]] = at
+            continue
+        if pmode == "done" and not pon and parts and head == "steps" and op == "open":
+            pon = True
         if what == EDGE:
             on = _map_of(_edge(r)[0])
             if on == "detail":
@@ -716,12 +878,15 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         return got
     def started(x):
         return x.get("from") or (x["sittings"][0][0] if x.get("sittings") else None)
+    def in_parts(x):
+        """A pass run while the parts were built."""
+        return bool(pspan) and bool(x.get("from")) and _when(pspan[0]) <= _when(x["from"]) <= _when(pspan[1])
     for vi, v in enumerate(visits):
         if "pass" in v:
             # A regression run or a sync stands between two places of the
             # cycle (an R, an S on the way): it is played after the way that
             # led to it, which waited until it began.
-            if (v["pass"][0] in ("regression", "sync") or held) and prev is not None:
+            if (v["pass"][0] in ("regression", "sync", "parts") or held) and prev is not None:
                 held.append(v)
             else:
                 out.append({"pass": v["pass"]})
@@ -729,8 +894,12 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         copy = v["n"] in COPIES
         stop = prev
         entered = None
+        # The parts of a feature built in parts, and the passes run while
+        # they were built, go inside step 2: after its block on the way, and
+        # nothing on the way before them waited while they ran.
+        inside = [h for h in held if h["pass"][0] == "parts" or in_parts(h)]
         if prev is not None and not copy:
-            until = held[0].get("from") if held else None
+            until = next((h.get("from") for h in held if h not in inside), None)
             until = until or v.get("from") or (v["sittings"][0][0] if v["sittings"] else None)
             # A place with no time of its own takes the edges up to the next
             # place that has one (all that are left where none has); the
@@ -760,16 +929,26 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
                 if len(way) > FILL_MAX:
                     way = []
             # A stay still going is not waited after: its sitting holds it.
-            gap = None if any(not b for a, b in prev.get("sittings", [])) else _seconds(prev.get("to"), until)
-            waited = next((n for n in way if process_model.NODES[n][2] in WAITS_ON), None)
+            after = prev.get("to")
+            at_code = None
+            if inside:
+                after = pspan[1]
+                at_code = next((i for i, n in enumerate(way) if n == "code"), len(way))
+            gap = None if any(not b for a, b in prev.get("sittings", [])) else _seconds(after, until)
+            waited = next((i for i, n in enumerate(way) if (at_code is None or i > at_code)
+                           and process_model.NODES[n][2] in WAITS_ON), None)
             for i, n in enumerate(way):
                 step = {"n": n}
                 if i in vias:
                     step["via"] = vias[i]
-                if n == waited and gap and gap >= 60:
-                    step.update({"s": gap, "from": prev.get("to"), "to": until, "wait": True,
-                                 SPANS: [(prev.get("to"), until)]})
+                if i == waited and gap and gap >= 60:
+                    step.update({"s": gap, "from": after, "to": until, "wait": True,
+                                 SPANS: [(after, until)]})
                 out.append(step)
+                if i == at_code:
+                    out += [{"pass": h["pass"]} for h in inside]
+            if at_code is not None and at_code < len(way):
+                held = [h for h in held if h not in inside]
         out += [{"pass": h["pass"]} for h in held]
         held = []
         step = {"n": v["n"]}
@@ -813,7 +992,7 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
 
     names = _session_names(state)
     workshop_sessions = set(workshop)
-    passes = {"friction": [], "workshop": [], "regression": [], "sync": []}
+    passes = {"friction": [], "workshop": [], "regression": [], "sync": [], "parts": []}
     index = {}
     def unseen(rs):
         """For a pass's sitting left with no end: where it ended unseen. One
@@ -843,6 +1022,19 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
                                       now_iso if key == list(syncs)[-1] and process_position._session_going(state, "sync") else None,
                                       unseen(rs)),
                             rs, "y_when", process_model.SYNC_EDGES, labels)})
+    for j, (key, rs) in enumerate(parts.items()):
+        index[("parts", key)] = len(passes["parts"])
+        last = j == len(parts) - 1
+        # The part's conversation open now: the state's step, and its run.
+        opened = next((x for x in reversed(rs) if x["op"] == "open" and x["what"].startswith("steps.")), None)
+        step = opened["what"].split(".", 1)[1] if opened else ""
+        going = last and step and state.get("step") == step and process_position._session_going(state, step)
+        ends = [x["op"] for x in rs if x["what"] == "parts"]
+        whole = any(x.get(WHOLE) for x in rs)
+        passes["parts"].append({
+            "label": "%s · part %s%s%s%s" % (_short(rs[0]["at"]), key, ("/%d" % ptotal) if ptotal else "",
+                                          (" · " + ends[-1]) if ends else "", " · the whole" if whole else ""),
+            "steps": _parts_way(rs, j == 0, last and pon, now_iso if going else None, unseen(rs))})
     for key, rs in friction.items():
         if not quiet.get(key):
             continue
@@ -934,6 +1126,9 @@ def deviations(steps):
         if "pass" not in s:
             continue
         letter = PASS_LETTER.get(s["pass"][0])
+        # The parts are step 2's own, reached from no lettered block.
+        if not letter:
+            continue
         # Its block may stand a gate or two back: a run after your yes on
         # step 2's work is played after "Accept the work?" (history's fill).
         before = []

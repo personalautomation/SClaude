@@ -1,8 +1,21 @@
-The feature "<feature>" is done and I've accepted it. Close it out as a pull request.
+<if:not-in-parts>The feature "<feature>" is done and I've accepted it. Close it out as a pull request.
+</if:not-in-parts><if:in-parts>Part <part> of <parts> of the feature "<feature>" — <part-title> — is built. Close it out as a pull request into the feature's branch, `<base>`.
 
+**This is one part of a feature built in parts.** Its pull request goes into `<base>`, where the earlier parts are merged, not into main: it is reviewed there alone, and merged there by the orchestrator once its review closes. The feature goes to main later, through a pull request of its own, with every part in it. So, on top of what follows:
+
+- **`gh pr create --base <base>`**, and the title ends with ` (part <part>/<parts>)`.
+- The description is this part's: what it builds, where its line with the next part runs, what it rests on from the parts before it. The criteria section holds only the criteria below — this part's.<if:issue>
+- **The body ends with `Refs #<issue>`, not a closing keyword:** the issue closes with the feature's own pull request, once every part is in and shipped.</if:issue>
+- Leave the manuals' pages for the parts after this one: describe what this part makes true.
+
+</if:in-parts><if:parts-done>Every part of the feature "<feature>" is built, reviewed and merged into `<umbrella>`, and I've accepted the whole. Close it out as the feature's pull request into main.
+
+**This pull request carries the parts, each already reviewed in its own pull request into `<umbrella>`.** Its description is the feature's: what it does as a whole, then a section **Built in parts** that lists each part's pull request with a line on what it built (`gh pr list --base <umbrella> --state merged --json number,title,url`). The review of this pull request reads the seams between the parts and what changed on `<umbrella>` after them; it does not read every line again.
+
+</if:parts-done>
 Work through the `/pr` skill — invoke it. It differs from its usual course because the orchestrator has already done part of the work:
 
-- The branch exists and you're on it; the commits are made. The "switch to a branch" step reduces to checking that the branch isn't `main` and is branched off a current `origin/main`.
+- The branch exists and you're on it; the commits are made. The "switch to a branch" step reduces to checking that the branch isn't `main` and is branched off a current `origin/<base>`. Wherever the skill reads `origin/main`, read `origin/<base>`: that is what this pull request goes into.
 - Take the feature description from `.sclaude/local/feature/plan.md` — that's what we agreed on while planning — and cross-check it against the `Requirement:` footers of the commits. Where the plan and the footers disagree, ask me: a mismatch means something changed during development, and either side may be right.
 - **The "Requested by the customer (for QA)" section is the acceptance criteria, as a plain list.** The skill builds that section from the commits' footers; the agreed list replaces that draft, because it was written before the code and doesn't move with it. Copy it verbatim — identifiers and wording — in the skill's own order rule: what a tester would do first. **No checkboxes:** QA ticks the criteria in the issue, not in the pull request, and a second checklist here is a second place for a tick to land and disagree with the first.
 
@@ -10,7 +23,7 @@ Work through the `/pr` skill — invoke it. It differs from its usual course bec
 
 </if:issue>  The list is below if the orchestrator could read it out of the issue. If there's no block there, take it from the `## Acceptance criteria` heading of `.sclaude/local/feature/plan.md`, where step 1 put the same list; if neither has it, this feature was planned before criteria existed — build the section from the footers as the skill says, and say so when you report.
 
-  Then use the footers the way the skill says, but as a check rather than a source. Walk `git log origin/main..HEAD --format='%(trailers:key=Requirement,valueonly)'` and compare:
+  Then use the footers the way the skill says, but as a check rather than a source. Walk `git log origin/<base>..HEAD --format='%(trailers:key=Requirement,valueonly)'` and compare:
 
   - a footer whose text has drifted from the criterion it names — the criterion's wording wins, and say so when you report. A criterion with a list under it is named on one line, its first line and items joined by `; `: that is its wording, not drift;
   - a footer with no identifier — something asked for during development that isn't in the list. Add it to the section as an unnumbered item, under a line saying it was also built during development. Do not ask me about it again: step 2 asked whether it is a criterion we missed or scope that grew, and a missed criterion was numbered then.
@@ -37,8 +50,8 @@ Work through the `/pr` skill — invoke it. It differs from its usual course bec
   **Argue against — and this is the ordinary outcome — when** the change is cosmetic or a wording change; when it is one screen's own behaviour with no rule behind it; when a compile error or a red check would catch the same break; when the assertion would be about markup rather than about a rule; or when a spec would mostly re-run what an existing one already walks through.
 
   Tell me your answer either way, in one short paragraph: what would break, how we would find out without a test, and what it would cost in between. If the answer is a test, say **which existing spec it belongs in** before proposing a new file — a new case inside a spec that already signs in as the right people costs seconds, a new spec costs a fixture and a sign-in of its own. Do not write it in this session: you are opening a pull request, and a suite that grew without my agreeing to it is exactly the growth the question exists to prevent.
-<if:issue>- This feature closes issue **#<issue>**. The PR body must end with `Closes #<issue>` on its own line, so GitHub links the issue and closes it on merge.
-- Don't set a milestone: the orchestrator sets it, taking the one the pull request's issues belong to, and asks me when they disagree. That's its job because a milestone is the exact name of an existing repository milestone — it can check that, rather than guess.
+<if:issue><if:not-in-parts>- This feature closes issue **#<issue>**. The PR body must end with `Closes #<issue>` on its own line, so GitHub links the issue and closes it on merge.
+</if:not-in-parts>- Don't set a milestone: the orchestrator sets it, taking the one the pull request's issues belong to, and asks me when they disagree. That's its job because a milestone is the exact name of an existing repository milestone — it can check that, rather than guess.
 </if:issue>
 
 <block:acceptance>

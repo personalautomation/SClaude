@@ -210,6 +210,11 @@ mine = [r for r in runs if r.get("session") == session] if session else []
 if op == "open":
     if not mine:
         runs.append({"session": session, "started": now})
+        # The part of a feature built in parts this conversation works on
+        # (state_file.part_about): the summary and the costs tell the parts apart.
+        about = state_file.part_about(data)
+        if about:
+            runs[-1]["part"] = about["part"]
     # Resumed after a stall or a close on its marker: the conversation is
     # going now, whatever it did at the door or how it ended the first time.
     for r in mine:
@@ -269,6 +274,8 @@ if os.path.basename(path) == "state.json":
     # thing (the status: the preview's, or the cycle's end).
     if os.environ.get("SCLAUDE_ABOUT"):
         row["about"] = os.environ["SCLAUDE_ABOUT"]
+    # The part, as history_add says it (state_file.part_about).
+    row.update(state_file.part_about(data))
     with open(os.path.join(os.path.dirname(path), "history.jsonl"), "a") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 PYRUN
@@ -307,6 +314,16 @@ history_add() {
   # Which sclaude process wrote it (SCLAUDE_RUN, bin/sclaude): a run cut off
   # ends where its own last line is.
   [[ -n "${SCLAUDE_RUN:-}" ]] && set -- "$@" run="$SCLAUDE_RUN"
+  # Which part of a feature built in parts (parts.sh) it happened in: `part`
+  # the part's number while the parts are built, `whole` after; with the
+  # part's branch and pull request. Read only where the state holds parts,
+  # and never over a part= the caller gave.
+  local about
+  if [[ " $* " != *" part="* ]] && grep -q '"parts": {' "$state" 2>/dev/null \
+     && about="$(parts_about "$state")" && [[ -n "$about" ]]; then
+    # shellcheck disable=SC2086
+    set -- "$@" $about
+  fi
   for kv in "$@"; do
     value="${kv#*=}"
     value="${value//\\/\\\\}"; value="${value//\"/\\\"}"; value="${value//[[:cntrl:]]/ }"
@@ -315,6 +332,24 @@ history_add() {
   printf '{"at": "%s", "what": "%s", "op": "%s"%s}\n' "$(date -Iseconds)" "$what" "$op" "$extra" \
     >> "${state%/*}/history.jsonl" 2>/dev/null
   return 0
+}
+
+# What history_add and session_runs say of the part a row is about: nothing
+# for a feature not built in parts; `part=<n> part_branch=<b> part_pr=<pr>`
+# while part <n> is built (the pull request once it has one); `part=whole`
+# once every part is in. Words without spaces, one a field.
+#
+#   parts_about <state>
+parts_about() {
+  PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$1" <<'PY' 2>/dev/null || true
+import json, sys
+import state_file
+try:
+    data = json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    sys.exit(0)
+print(" ".join("%s=%s" % kv for kv in state_file.part_about(data).items()))
+PY
 }
 
 # A way taken on one of the process maps, the moment the code takes it: the

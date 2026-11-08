@@ -80,6 +80,14 @@ review, then the merge. These paths count as such in every product:
 One file anywhere else and the branch goes the whole way. A product whose
 `docs/` is built into its site is the case this assumption gets wrong.
 
+A feature too big for one review is built in parts, at the person's word at
+step 1: each part has a pull request of its own into the feature's branch,
+reviewed alone and merged there, and the gates after step 2 — the person's
+acceptance, the demo, preview, QA, production — run once, for the whole
+feature, which reaches main through one pull request. Before each part goes
+on, sclaude checks that nobody changed the parts' pull requests by hand on
+GitHub — a base, a merge, a branch rewritten — and stops if somebody did.
+
 ## Production rollback that refuses to trample somebody else
 
 If the tests fail on production, sclaude rolls production back to the release

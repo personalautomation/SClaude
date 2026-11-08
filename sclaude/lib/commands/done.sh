@@ -39,6 +39,10 @@ cmd_done() {
   IFS=$'\t' read -r merged pr < <(gh pr view "$branch" --repo "$(git -C "$REPO" remote get-url origin)" \
     --json state,number --jq '[.state, .number] | @tsv' 2>/dev/null) || true
   local no_change; no_change="$(state_get "$wt/.sclaude/local/feature/state.json" no_change 2>/dev/null || true)"
+  # A feature built in parts (parts.sh): its parts' branches go with it,
+  # read now — the state goes with the tree.
+  local part_branches=""
+  declare -F parts_branches >/dev/null && part_branches="$(parts_branches "$wt/.sclaude/local/feature/state.json")"
   local issue; issue="$(state_get "$wt/.sclaude/local/feature/state.json" issue 2>/dev/null || true)"
   [[ "$no_change" == "true" || "$merged" == "MERGED" ]] \
     || die "the PR for $branch is not merged (state: ${merged:-not found}). Cleaning up comes after the merge."
@@ -301,6 +305,23 @@ cmd_done() {
     git -C "$REPO" push origin --delete "$branch" >/dev/null 2>&1 \
       || warn "  could not delete origin/$branch"
   fi
+
+  # The parts' branches: each one's pull request was squashed into the
+  # feature's branch, so git cannot see them merged; GitHub's word that the
+  # pull request merged is what lets them go.
+  local part_branch
+  while IFS= read -r part_branch; do
+    [[ -n "$part_branch" ]] || continue
+    [[ "$(branch_pr_state "$part_branch")" == MERGED ]] || {
+      git -C "$REPO" rev-parse -q --verify "refs/heads/$part_branch" >/dev/null \
+        && warn "  local branch $part_branch kept: its pull request is not merged"
+      continue
+    }
+    git -C "$REPO" branch -D "$part_branch" >/dev/null 2>&1 || true
+    [[ -n "$(git -C "$REPO" ls-remote --heads origin "$part_branch" 2>/dev/null)" ]] \
+      && { git -C "$REPO" push origin --delete "$part_branch" >/dev/null 2>&1 \
+             || warn "  could not delete origin/$part_branch"; }
+  done <<< "$part_branches"
 
   echo "${GREEN}Feature '$slug' cleaned up.${OFF}"
 }

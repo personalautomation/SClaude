@@ -19,6 +19,7 @@
 #   <key>    a friction review's key (the step or stage it reviewed, `unread-N`,
 #            `fix-<stage>-<n>`)
 #   <field>  any field of the node, for code that walks them
+#   <n>      a part's number, from 1 (parts.sh)
 #
 # tests/state-file.py reads every state_get and state_set in the code and fails
 # on a path that is not here, so a mistyped field — which reads as "not set",
@@ -30,7 +31,7 @@ FEATURE, EPILOGUE, WATCH = "feature", "epilogue", "watch"
 FIELDS = [
     # --- the feature itself ----------------------------------------------------
     ("feature", (FEATURE, EPILOGUE, WATCH), "the feature's slug"),
-    ("branch", (FEATURE,), "its git branch"),
+    ("branch", (FEATURE,), "its git branch at work: a part's while a split feature's parts are built (parts.sh)"),
     ("worktree", (FEATURE, WATCH), "its worktree; the watch sends the timer's messages to its topic"),
     ("issue", (FEATURE, EPILOGUE), "the GitHub issue's number"),
     ("pr", (FEATURE, EPILOGUE, WATCH), "the pull request's number, once step 3 opened it"),
@@ -67,6 +68,20 @@ FIELDS = [
     ("steps.review.stuck_pr", (FEATURE,), "the pull request the stuck review was about"),
     ("steps.review.stuck_said", (FEATURE,), "the pull request the person was last told was stuck"),
     ("review.local.running", (FEATURE,), "when the local review's passes began; null once they end"),
+
+    # --- a feature built in parts (parts.sh) ------------------------------------
+    ("parts", (FEATURE,), "the whole node, cleared when a replan no longer splits the feature"),
+    ("parts.total", (FEATURE,), "how many parts the plan splits it into; none when it is not split"),
+    ("parts.umbrella", (FEATURE,), "the parts' common branch, which each part's pull request goes into"),
+    ("parts.current", (FEATURE,), "the part being built"),
+    ("parts.done", (FEATURE,), "every part is merged into the common branch: step 2 closes on the whole"),
+    ("parts.dropped", (FEATURE,), "the first part the person left out (`sclaude parts <name> stop`); it and the ones after are not built"),
+    ("parts.<n>.title", (FEATURE,), "a part's title, from the plan"),
+    ("parts.<n>.branch", (FEATURE,), "its branch, <umbrella>-<n>"),
+    ("parts.<n>.pr", (FEATURE,), "its pull request into the common branch"),
+    ("parts.<n>.merged", (FEATURE,), "when its pull request was merged into the common branch"),
+    ("parts.<n>.before", (FEATURE,), "the common branch on GitHub before sclaude merged the part, for the check for commits no part brought; `checked` once it has passed"),
+    ("parts.<n>.steps", (FEATURE,), "what its code, pull-request and review steps held, kept when the next part began"),
 
     # --- a reopened feature ----------------------------------------------------
     ("reopened", (FEATURE,), "the step the feature was sent back to after it closed"),
@@ -177,7 +192,7 @@ FIELDS = [
 
 # Written whole from Python (start.sh's heredoc, session_runs) rather than
 # through state_set, so no state_get/state_set names them.
-WRITTEN_WHOLE = {"created", "steps.<step>.runs", "friction.<key>.runs"}
+WRITTEN_WHOLE = {"created", "steps.<step>.runs", "friction.<key>.runs", "parts.<n>.steps"}
 
 WILD = "<*>"
 

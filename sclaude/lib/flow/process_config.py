@@ -318,6 +318,7 @@ COMMANDS = [
     ("sclaude dev [name]", "dev", "always", "start the dev server (--stop stops it)", "prepare"),
     ("sclaude sync <name>", "sync", "always", "merge origin/main in; a conflict opens the sync session", "merge_check"),
     ("sclaude replan <name>", "replan", "before the cycle ends", "back to step 1 in a new conversation; the code stays", "plan"),
+    ("sclaude parts <name> stop", "", "before the cycle ends", "a feature built in parts ends with the parts merged so far; the rest become an issue", "p_whole"),
     ("sclaude return <name> [reason]", "return", "a finished feature", "back to step 4 with what was said since", "review"),
     ("sclaude issue <name>", "issue", "always", "link or create the feature's issue", "new"),
     ("sclaude news <name>", "news", "with a pull request", "what moved on the PR since the last session", "review_found"),
@@ -367,4 +368,5 @@ def node_sets():
             ("workshop", process_model.WORKSHOP_LANES, process_model.WORKSHOP_NODES, process_model.WORKSHOP_EDGES),
             ("friction", process_model.FRICTION_LANES, process_model.FRICTION_NODES, process_model.FRICTION_EDGES),
             ("regression", process_model.REGRESSION_LANES, process_model.REGRESSION_NODES, process_model.REGRESSION_EDGES),
-            ("sync", process_model.SYNC_LANES, process_model.SYNC_NODES, process_model.SYNC_EDGES)]
+            ("sync", process_model.SYNC_LANES, process_model.SYNC_NODES, process_model.SYNC_EDGES),
+            ("parts", process_model.PARTS_LANES, process_model.PARTS_NODES, process_model.PARTS_EDGES)]

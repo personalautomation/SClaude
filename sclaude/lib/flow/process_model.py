@@ -128,6 +128,10 @@ SPEC = {
     "f_review": ("opus", "medium", "plan"),
     "f_monthly": ("opus", "medium", "plan"),
     "f_classify": ("haiku", "default", "claude -p, no tools"),
+    # A part's sessions are the steps' own, launched the same way.
+    **{"p_" + s["name"]: (s["model"], s["effort"], s["mode"]) for s in cycle_steps.STEPS
+       if s["name"] in ("code", "pr", "review")},
+    "p_whole": next((s["model"], s["effort"], s["mode"]) for s in cycle_steps.STEPS if s["name"] == "code"),
 }
 
 # What each block does, at more length than fits on it: the note under the
@@ -137,7 +141,7 @@ DETAILS = {
     "prepare": "Brings the main checkout up to origin/main when it is on main (a fast-forward, with npm ci there if its lockfile moved, not while a Node process works in it), branches feat/<slug> from a fresh origin/main into a worktree of its own, links the environment and hard-links the main checkout's node_modules, claims a port and a <feature>.localhost address, and on a local database starts a Supabase stack for this feature alone.",
     "board_start": "Moves the issue out of Backlog to In progress on every board it is on, and fills an empty Start date with today. Once, at the start; a column moved by hand is left alone.",
     "main_in": "Before each step sclaude merges origin/main into the branch without asking, so every session works on what will merge. A merge that would conflict goes to the sync session (5); only the deferred logs it merges itself.",
-    "plan": "The session reads the issue with its parents and comments and the manuals' tables of contents, says what it understood the scope to be and waits for corrections, then plans. The plan ends with numbered acceptance criteria, each checkable on a deployment without reading code. A feature split into several pull requests keeps the first part; the session files each later one as an issue of its own, a sub-issue of the feature's issue when it has one.",
+    "plan": "The session reads the issue with its parents and comments and the manuals' tables of contents, says what it understood the scope to be and waits for corrections, then plans. The plan ends with numbered acceptance criteria, each checkable on a deployment without reading code. A feature too big for one review is split at the person's word into parts: one issue, one plan and one QA, a section ## Parts, and each criterion naming its part — built in step 2, a pull request for each (A feature built in parts).",
     "approve": "You correct the scope, then approve the plan in Claude Code's plan dialog. The criteria are what QA will tick later, so this is where a missing one costs least. Or press n twice in sclaude's tab while the dialog is open: the session is closed and the plan on screen counts as approved, which saves the turn Claude would take to read your approval; N twice does the same and stops before step 2, which the next sclaude <name> starts.",
     "plan_check": "sclaude reads the approved plan back from the session's transcript into .sclaude/local/feature/plan.md, the bridge to step 2. Not found: the same session is sent back to present it again, at most twice.",
     "ac": "The criteria go into a comment of their own on the issue, between sclaude's markers; the issue's description is never edited. QA ticks them there.",
@@ -156,6 +160,18 @@ DETAILS = {
     "review_close": "Leaving step 4 closes it only when nothing is open — no unresolved thread, no running or red check — and the local regression is green again. Otherwise sclaude waits and what is open goes back to a session without a question; [s] or ⏭ makes the next session the last for new findings. A session you left yourself (/exit, Ctrl-C) with [g] off holds step 4 open until the next sclaude <name>. A session sclaude closed on its done marker — always so for a review on this machine, which writes no round marker — goes back by whose work is open: threads from before it, or a red check, to the same session; only new ones to the same session while its context is under 40% and its last request under 55 minutes old, else to a fresh one. With [g] on the rounds go on even then (30 a step 4, then it asks), a pass that did not run is tried again ten times with growing pauses, and after the search ended the fixes are checked. A night session itself resolves a minor finding the review posted, with no reply under it yet, and replies saying so; the others it leaves for you to confirm: sclaude asks whether to go through them now, and on your yes they go back to a fresh session that asks about each and, on your yes, replies and resolves them; the rest of your threads wait for your hand on GitHub.",
     "hold_ways": "Production carries this feature and its regression there was not green, with nothing rolled back: the rollback failed or was refused, another release landed on top and the repeated run was red too, or the suite could not run in a broken environment (a project with no production suite or address is not held after its ship). A red run made by hand lands here as well. Every later pass of sclaude <name> checks this first and stops on it, so nothing is shipped, closed or cleaned up. The ways out: sclaude regression <name> prod runs production's suite again, and green goes on to the epilogue — as it does when the project has had no production suite since the red (prodRegression none, or no list), which lifts the hold; sclaude rollback puts the previous release back and sends the fix to step 4; sclaude return fixes forward from step 4.",
     "merge_check": "git merge-tree tells in memory whether the branch merges cleanly with main — no session, no GitHub call. Asked before the preview, after QA's yes, and every two minutes while waiting for the merge.",
+    "p_split": "Step 1 proposed splitting a feature too big for one review, and the person said yes: the plan keeps a ## Parts section, a ### Part n — title heading for each, and every acceptance criterion names the part that makes it true, AC7. [part 2]. It stays one issue, one plan and one QA. sclaude reads the parts when the plan is approved, or when a plan is split after step 2 began.",
+    "p_enter": "Before a part's session the tree goes onto the part's own branch, <branch>-<n>, made off the feature's branch with every earlier part in it; the feature's branch goes to GitHub, the base of the part's pull request. Work begun on the feature's branch before the split becomes part 1, and the feature's branch goes back where it left main, while GitHub has not got it past that point. Never over uncommitted work.",
+    "p_code": "A step-2 session for this part alone, handed only its criteria and the feature's: a migration an earlier part merged is not edited, and a flaw found in an earlier part is fixed here, with a line on that part's pull request. Nobody is asked whether it works — that is the whole feature's question; the session ends on its own marker, and the local regression follows.",
+    "p_pr": "A step-3 session opens the part's pull request as a draft into the feature's branch, the title ending (part n/N), Refs #N instead of a closing keyword, and the part's criteria for the reviewer.",
+    "p_review": "The step-4 review as any pull request has it, read against the feature's branch: the earlier parts are in the base, so the review reads this part alone. The local review keeps its journal and the findings waiting to be posted per pull request, and starts each part from the whole of it.",
+    "p_check": "What GitHub has of the parts against what the cycle left: each part's pull request into the feature's branch, the earlier ones merged, the one at work open and a draft, its branch on GitHub what the tree has or behind it. Checked before every part's session and before each merge.",
+    "p_stop": "A base edited, a part merged or marked ready before its review closed, a branch rewritten or moved on GitHub: sclaude says what and what to do, and nothing goes on until it holds. A part merged early is asked about: taken as the part's end, or left for the person.",
+    "p_merge": "sclaude marks the part's pull request ready and squashes it into the feature's branch: one commit a part there, the part's own history on its pull request. Anything else found on the feature's branch is shown before the cycle builds on it.",
+    "p_sync": "Main merged into the feature's branch between two parts, while no session works: the next part starts on it, and nothing piles up for the end. A conflict goes to the sync session.",
+    "p_more": "Another part: back to its branch and its session. The last part: step 2 closes on the feature's branch.",
+    "p_whole": "With every part in, a step-2 session on the feature's branch checks the whole feature as one, end to end against every criterion, and fixes the seams; it records the demo and ends on Accept, as any feature's step 2 does.",
+    "p_on": "Step 3 opens the feature's pull request into main, listing the parts' pull requests and closing the issue. Step 4 reads it in one pass over the seams between the parts, threads still open on the parts' pull requests in its snapshot; what lands on the branch after that — QA's returns, a sync — is read in full, commit by commit. Preview, QA, the merge and production run once, for the whole feature.",
     "sync": "Merges origin/main into the branch (never a rebase), resolves each conflict keeping both sides' intent, checks the result as the project's CLAUDE.md says and pushes. sclaude then checks it settled; a pull request handed over goes back to a draft.",
     "preview": "Deploys the worktree to a preview from the main repository (up to three tries), applies the branch's migrations there, and runs the preview regression against the deployment. An unchanged tree already green is not deployed again, nor, once merged, one whose preview QA accepted. A deploy that fails three times goes to the fixing session as a red run does — the command that failed named — and deploys again; after two such sessions it is yours.",
     "preview_ok": "Green: when the product's code changed since the last demo, a headless session records a delta of what changed for the user and the whole demo again, published once it ends with the issue's demo comment replaced, or keeps the demo there is, comment and all, when nothing a user meets changed — QA sees the feature as it is and what changed; then the issue goes to In QA. Red: no label is claimed, the cycle goes back to step 4 and a fixing session opens there.",
@@ -540,6 +556,50 @@ SYNC_EDGES = [
     ("main_in", "y_on", "", ""),
 ]
 
+# A feature built in parts, out of the detailed map: inside step 2, a pull
+# request for each part into the feature's branch (parts.sh). After the last
+# part step 2 closes on the whole, and the detailed map goes on at step 3.
+PARTS_LANES = [("sclaude", "sclaude"), ("session", "Claude session"), ("github", "GitHub")]
+PARTS_NODES = {
+    "p_split": ("sclaude", 0, "start", "A plan in parts",
+                "the plan's ## Parts; each criterion names its part", ""),
+    "p_enter": ("sclaude", 1, "task", "On the part's branch",
+                "<branch>-<n> off the feature's branch", ""),
+    "p_code": ("session", 2, "session", "2 · code a part",
+               "this part alone, its criteria; nobody is asked", "FR"),
+    "p_pr": ("session", 3, "session", "3 · pr of the part",
+             "a draft into the feature's branch, Refs #N", "F"),
+    "p_review": ("session", 4, "session", "4 · review of the part",
+                 "read against the feature's branch: the part alone", "FR"),
+    "p_check": ("sclaude", 5, "gate", "Parts as left?",
+                "bases, drafts, merges, branches on GitHub", ""),
+    "p_stop": ("sclaude", 6, "end", "The cycle stops",
+               "what changed by hand, and what to do", ""),
+    "p_merge": ("github", 6, "task", "Part merged",
+                "squashed into the feature's branch", ""),
+    "p_sync": ("sclaude", 7, "task", "Main into the feature's branch",
+               "between parts, no session at work", "S"),
+    "p_more": ("sclaude", 8, "gate", "Another part?", "", ""),
+    "p_whole": ("session", 9, "session", "2 · code the whole",
+                "every part in: checked as one, the demo, Accept", "FR"),
+    "p_on": ("sclaude", 10, "end", "On to step 3",
+             "the feature's PR into main; step 4 reads the seams", ""),
+}
+PARTS_EDGES = [
+    ("p_split", "p_enter", "", ""),
+    ("p_enter", "p_code", "", ""),
+    ("p_code", "p_pr", "", ""),
+    ("p_pr", "p_review", "", ""),
+    ("p_review", "p_check", "closed", ""),
+    ("p_check", "p_merge", "as left", ""),
+    ("p_check", "p_stop", "changed by hand", ""),
+    ("p_merge", "p_sync", "", ""),
+    ("p_sync", "p_more", "", ""),
+    ("p_more", "p_enter", "yes — the next part", "back"),
+    ("p_more", "p_whole", "no", ""),
+    ("p_whole", "p_on", "accepted", ""),
+]
+
 # Where a feature can stand (what `position` answers): the detailed node, and
 # the overview's block lit with it.
 POSITIONS = {
@@ -559,6 +619,9 @@ POSITIONS = {
     "prod": "o_prod",
     "ship": "o_prod",
     "local_pass": "o_review",
+    "p_code": "o_code",
+    "p_pr": "o_code",
+    "p_review": "o_code",
     "epilogue": "o_epilogue",
     "done_cmd": "o_retro",
     "friction_left": "o_retro",

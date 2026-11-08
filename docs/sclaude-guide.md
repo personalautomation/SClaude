@@ -19,6 +19,7 @@ sclaude preview <name>  # deploy the branch to a preview
 sclaude rollback <name> # put production back to the release before this feature
 sclaude regression <name> prod  # run the production tests again; green (or no production tests) lifts a hold
 sclaude replan <name>   # take a feature back to step 1 and plan it again
+sclaude parts <name> stop  # a feature built in parts ships with the parts merged so far
 sclaude return <name> [reason]  # send a finished feature back to step 4
 sclaude reset <name>    # start the current step over, forgetting its conversation
 sclaude done <name>     # clean up after the merge: worktree and branches
@@ -85,11 +86,31 @@ request, the criteria and the status are separate comments, so the task as it
 was given stays readable.
 
 A feature too large for one review (about 10,000 changed lines) is offered as
-a split. If you take it, the feature becomes the first part only — one feature
-is one pull request — and each later part is filed as an issue of its own,
-a sub-issue of the feature's issue when it has one, to go through a cycle of
-its own. The feature's issue closes when the first part ships, as any
-feature's does; the later parts stay open under it.
+a split. If you take it, it stays **one feature: one issue, one plan, one QA**,
+built in parts. The plan gets a `## Parts` section (`### Part 1 — …`) and each
+criterion names its part (`AC7. [part 2] …`). Step 2 then builds the parts one
+after another, each on its own branch (`feat/<slug>-1`, `-2`, …) with a pull
+request of its own into the feature's branch: the part's session, its pull
+request, its review — which reads that part alone, since the earlier parts are
+in its base — and sclaude merges it there. Nobody is asked whether a part
+works, and no demo is recorded for one. When every part is in, step 2 closes
+on the feature's branch as for any feature: the whole thing checked as one,
+the demo, your Accept. Step 3 opens the feature's pull request into main,
+listing the parts' pull requests and closing the issue, and step 4 reads the
+seams between the parts. Preview, QA, the merge and production happen once,
+for the whole feature. The menu shows where the parts are:
+`2/7 development · part 2/3 · review`.
+
+Before each part's session and each merge, sclaude checks that GitHub still
+holds the parts as it left them. A base changed by hand, a part's pull request
+merged or marked ready before its review closed, or a part's branch rewritten
+on GitHub stops the cycle with what to do. A part merged early is asked
+about: take it as the part's end, or leave it to you.
+
+To ship a split feature with the parts merged so far, `sclaude parts <name>
+stop` leaves out the part at work and the ones after it: step 2 closes on the
+merged parts, and its session strikes the left-out parts' criteria, files them
+as an issue of their own and takes them off the issue's list.
 
 **Step 2, code.** A fresh session builds it, with the approved plan as its
 brief. Each commit names the criterion it serves in a `Requirement:` footer.

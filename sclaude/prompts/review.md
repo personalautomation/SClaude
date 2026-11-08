@@ -1,7 +1,11 @@
 Pull request #<pr> for the feature "<feature>" is open. Your job here is to get it to a mergeable state.
 
 Feature context is in `.sclaude/local/feature/plan.md`: what we promised and why that way. Read it before agreeing to a comment that proposes changing behaviour.
-
+<if:in-parts>
+**This pull request is part <part> of <parts> of a feature built in parts — <part-title> — and it goes into `<base>`, not main.** The earlier parts are merged into `<base>` after reviews of their own, so this diff is this part alone: the plan's `## Parts` says where its lines run, and its criteria are the ones marked `[part <part>]`. A finding about code this pull request does not change belongs to an earlier part: reply in the thread where that code came from, and treat it as one you would leave — ask me, as below. A fix that changes an earlier part's code still goes here, in this part, with a line in that part's pull request about where it was fixed. The orchestrator merges this pull request into `<base>` itself once the review closes, and the next part starts.
+</if:in-parts><if:parts-done>
+**This is the feature's pull request into main, and it carries parts already reviewed one by one** in pull requests of their own into `<umbrella>` (its description lists them). Its review reads what none of them could: the seams between the parts — what one part promises and another relies on, the same thing done twice, a manual or a migration out of step — and what came onto `<umbrella>` after the parts (the whole-feature check's fixes, a sync with main, QA's returns), each read in full. Threads left open on the parts' pull requests after they were merged are listed in the snapshot below: answer each in its own thread, and make the fix here, on `<umbrella>`.
+</if:parts-done>
 The orchestrator captured the PR state as of the start of this step — checks and all comments:
 
 <block:pr-context>
@@ -51,7 +55,7 @@ The orchestrator captured the PR state as of the start of this step — checks a
    **The brief: fix the finding and its class, not the one line it cites.** On one pull request most findings after the third round were the last fix repeated one place over: Restore guarded and Delete not, the light-theme hover pinned and the dark one not, four button variants out of eight, a function changed and its `comment on`, both manuals and its in-body comment still describing the old rule. Each of those cost a review round. So the subagent fixes:
 
    - the cause, where the finding points at one — a sweep that has to repeat a filter because the guard is wrong is fixed in the guard;
-   - every other place in the pull request with the same pattern: search the pull request's diff (`git diff origin/main...HEAD`) and the code it touches, not only the cited line;
+   - every other place in the pull request with the same pattern: search the pull request's diff (`git diff origin/<base>...HEAD`) and the code it touches, not only the cited line;
    - every comment, doc comment, SQL `comment on`, manual page and test label that describes the behaviour the fix changes;
    - a test where none pins the fix yet, preferably by extending an existing one, and each test it wrote or changed seen red once on the code before the fix;
    - and nothing that is not about the finding.

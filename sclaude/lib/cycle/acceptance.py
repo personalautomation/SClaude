@@ -409,7 +409,7 @@ def gap(text):
     return "\n" if text.endswith("\n") else "\n\n"
 
 
-def render(number, cwd=None):
+def render(number, cwd=None, part=None):
     """The block a step's prompt embeds, or "" when there is nothing to embed.
 
     A plain numbered list, for both readers. Step 2 is told what to build and
@@ -417,16 +417,27 @@ def render(number, cwd=None):
     request for the code's reviewer — without boxes, because the boxes are
     ticked in the issue, where QA works, and a second checklist in the PR is a
     second place for a tick to land and drift from the first.
+
+    With <part>, a feature built in parts (plan_parts.py): only the criteria
+    that part makes true, and the ones that name no part. The rest are other
+    parts' — built before or after this one, in pull requests of their own —
+    and a step handed them would build them here too.
     """
     found = parse(fetch_text(number, cwd))
+    if part:
+        from plan_parts import of_part
+        found = of_part(found, int(part))
     if not found:
         return ""
 
-    out = ["#### Acceptance criteria",
-           "",
-           "Agreed with the human at step 1 and kept in issue #%s. This is what "
-           "the feature has to do — the plan says how." % number,
-           ""]
+    lead = ("Agreed with the human at step 1 and kept in issue #%s. This is what "
+            "the feature has to do — the plan says how." % number)
+    if part:
+        lead = ("Part %s's criteria, agreed with the human at step 1 and kept in "
+                "issue #%s; the issue lists every part's, and the others are not "
+                "this part's to build. This is what the part has to do — the plan "
+                "says how." % (part, number))
+    out = ["#### Acceptance criteria", "", lead, ""]
     for cid, text, _ in found:
         out.append("- **%s.** %s" % (cid, text))
     out.append("")
@@ -703,6 +714,10 @@ def unticked(number, cwd=None):
 def main():
     argv = sys.argv[1:]
     mode = None
+    # --part <n> before the rest: the block for one part of a split feature.
+    part = None
+    if len(argv) >= 2 and argv[0] == "--part":
+        part, argv = argv[1], argv[2:]
     if argv and argv[0] in ("--sync", "--extend", "--status", "--unticked",
                             "--verdict", "--tick", "--reworded", "--reword"):
         mode, argv = argv[0], argv[1:]
@@ -743,7 +758,7 @@ def main():
         elif mode == "--unticked":
             sys.stdout.write(unticked(number, cwd))
         else:
-            sys.stdout.write(render(number, cwd))
+            sys.stdout.write(render(number, cwd, part))
     except Exception:
         return 1 if mode in ("--sync", "--extend", "--verdict", "--tick",
                              "--reworded", "--reword") else 0

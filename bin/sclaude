@@ -137,7 +137,7 @@ INSTRUMENTS="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 # without executing anything. A read error on any of them is death on the spot:
 # half an orchestrator is worse than none.
 for _module in core/io core/ui core/steps core/state core/project core/environment core/developer \
-               tree/branches tree/worktree tree/featuredb core/lock core/pane cycle/run \
+               tree/branches tree/worktree tree/parts tree/featuredb core/lock core/pane cycle/run \
                cycle/prompt cycle/session_watch cycle/acceptance review/review_round \
                review/review_gate improve/friction improve/instruments github/github \
                github/issue_sync github/board github/outcome cycle/plan ship/deploy ship/shipped \
@@ -368,6 +368,7 @@ main() {
     rollback)      shift; cmd_rollback "$(slugify "${1:-}")" || true ;;
     issue)         shift; cmd_issue "$(slugify "${1:-}")" ;;
     replan)        shift; cmd_replan "$(slugify "${1:-}")" ;;
+    parts)         shift; _slug="$(slugify "${1:-}")"; shift || true; cmd_parts "$_slug" "$@" ;;
     return)        shift; _slug="$(slugify "${1:-}")"; shift || true; cmd_return "$_slug" "$@" ;;
     # Refusing the clean-up is not a script failure: the epilogue reads
     # cmd_done's exit code, whereas to a command from the terminal it would say

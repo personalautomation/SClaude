@@ -156,7 +156,8 @@ const player = (() => {
                     ...[...g.querySelectorAll('.badge .dot')].map((d) => +d.getAttribute('cx') - 14)) - x;
   };
   const TITLE = {friction: 'the friction review', workshop: 'how a session changes sclaude',
-                 regression: "a stage's regression", sync: 'main and the branch'};
+                 regression: "a stage's regression", sync: 'main and the branch',
+                 parts: 'a feature built in parts'};
   // The maps a pass is played on, each a way of its own from the main one.
   // Who took a way, as history_edge (state.sh) names them.
   const BY = {person: 'you', setting: 'by the setting', sclaude: 'sclaude', session: 'the session',

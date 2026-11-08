@@ -901,9 +901,10 @@ def render(cwd, pr, repo):
     return "\n".join(out).rstrip("\n")
 
 
-def feature_in_history(cwd):
+def feature_in_history(cwd, base="main"):
     """Whether .sclaude/local/feature/ got into the branch's commits — a block for step 3, or
-    empty.
+    empty. <base> is the branch the pull request goes into: a part of a split
+    feature goes into the feature's common branch (parts.sh).
 
     The check is deterministic and almost always clean, so the block appears
     only when there is something to talk about: a prompt with an "all clean"
@@ -911,7 +912,7 @@ def feature_in_history(cwd):
     """
     try:
         done = subprocess.run(
-            ["git", "log", "origin/main..HEAD", "--name-only", "--format="],
+            ["git", "log", "origin/%s..HEAD" % (base or "main"), "--name-only", "--format="],
             cwd=cwd, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -1620,7 +1621,41 @@ def night_yours(cwd, pr, repo):
                if NIGHT_MARK in line.split("\t", 2)[-1])
 
 
+def parts_threads(cwd, repo, prs):
+    """The threads still open on a split feature's parts' pull requests
+    (parts.sh), for the review of the feature's own pull request: a block, or
+    "" when none is open or GitHub cannot be read.
+
+    A part's pull request is merged once its review closes, and a thread
+    somebody opens on it after that reaches no session of its own: the
+    feature's pull request is the last place it can be answered before main.
+    """
+    out = []
+    for pr in prs:
+        try:
+            threads, _ = open_threads(cwd, pr, repo)
+        except Exception:
+            continue
+        for t in threads or []:
+            out.append("- PR #%s · `%s:%s` — %s %s" % (
+                pr, t.get("path"), t.get("line"),
+                headline(((t.get("comments") or [{}])[0] or {}).get("body") or ""),
+                t.get("url") or ""))
+    if not out:
+        return ""
+    return ("#### Threads open on the parts' pull requests\n\n"
+            "Opened or left after the part was merged. Answer each in its own "
+            "thread, and fix it here, on the feature's branch:\n\n" + "\n".join(out))
+
+
 def main():
+    # `--parts-threads <cwd> <repo> <pr>...`: the block of parts_threads.
+    if len(sys.argv) >= 4 and sys.argv[1] == "--parts-threads":
+        try:
+            sys.stdout.write(parts_threads(sys.argv[2], sys.argv[3], sys.argv[4:]))
+        except Exception:
+            pass
+        return 0
     # `--threads <cwd> <pr> <repo> [since]`: "<open> <opened since>", or
     # nothing when it cannot be read. See thread_counts.
     if len(sys.argv) >= 5 and sys.argv[1] == "--threads":

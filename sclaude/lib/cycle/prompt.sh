@@ -68,6 +68,36 @@ render_prompt() {
   # Whether step 2 records a demo (project_demo_mode): <if:demo> in code.md.
   local -x SCLAUDE_V_DEMO=""
   [[ "$(project_demo_mode "$wt")" == on ]] && SCLAUDE_V_DEMO=1
+  # A feature built in parts (parts.sh). <if:in-parts> while a part is built:
+  # <part> of <parts>, its branch going into <umbrella>, which is <base>, what
+  # its pull request and its review are read against. <if:parts-done> once
+  # every part is in <umbrella>: step 2 closes on the whole feature, step 3
+  # opens its pull request into main, step 4 reads the seams. <base> is main
+  # for every other feature. No demo in a part's session: it is the whole
+  # feature's, recorded once the parts are in.
+  local -x SCLAUDE_V_BASE="main" SCLAUDE_V_PART="" SCLAUDE_V_PARTS="" SCLAUDE_V_PART_TITLE=""
+  local -x SCLAUDE_V_UMBRELLA="" SCLAUDE_V_IN_PARTS="" SCLAUDE_V_PARTS_DONE="" SCLAUDE_V_NOT_IN_PARTS=1
+  local -x SCLAUDE_V_PARTS_DROPPED=""
+  if [[ -n "$wt" && -f "$wt/.sclaude/local/feature/state.json" ]] \
+     && declare -F parts_split >/dev/null && parts_split "$wt/.sclaude/local/feature/state.json"; then
+    local pstate="$wt/.sclaude/local/feature/state.json"
+    SCLAUDE_V_UMBRELLA="$(parts_umbrella "$pstate")"
+    SCLAUDE_V_PARTS="$(state_get "$pstate" parts.total)"
+    if parts_open "$pstate"; then
+      SCLAUDE_V_IN_PARTS=1 SCLAUDE_V_NOT_IN_PARTS=""
+      SCLAUDE_V_PART="$(parts_now "$pstate")"
+      SCLAUDE_V_PART_TITLE="$(state_get "$pstate" "parts.$SCLAUDE_V_PART.title" 2>/dev/null || true)"
+      SCLAUDE_V_BASE="$SCLAUDE_V_UMBRELLA"
+      SCLAUDE_V_DEMO=""
+    else
+      SCLAUDE_V_PARTS_DONE=1
+      local dropped; dropped="$(state_get "$pstate" parts.dropped 2>/dev/null || true)"
+      if [[ "$dropped" =~ ^[0-9]+$ ]]; then
+        SCLAUDE_V_PARTS_DROPPED="$dropped-$SCLAUDE_V_PARTS"
+        [[ "$dropped" == "$SCLAUDE_V_PARTS" ]] && SCLAUDE_V_PARTS_DROPPED="$dropped"
+      fi
+    fi
+  fi
   local -x SCLAUDE_B_ISSUE_CONTEXT=""
   local -x SCLAUDE_B_MANUAL_TOC=""
   local -x SCLAUDE_B_PR_CONTEXT=""
@@ -101,7 +131,7 @@ render_prompt() {
       # empty, its line drops out of the prompt, and the step reads the criteria
       # out of the plan as it would have anyway.
       [[ -n "$issue" ]] && SCLAUDE_B_ACCEPTANCE="$(
-        python3 "$LIB/cycle/acceptance.py" "$issue" "$wt" 2>/dev/null || true)"
+        python3 "$LIB/cycle/acceptance.py" ${SCLAUDE_V_PART:+--part "$SCLAUDE_V_PART"} "$issue" "$wt" 2>/dev/null || true)"
       # The "User request" comment step 1 keeps. Step 2 adds to it what the
       # human asked for during development: without it that lived only in a
       # commit footer, and the issue went on describing the planned scope.
@@ -114,11 +144,11 @@ import sys
 sys.path.insert(0, sys.argv[1])
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from pr_context import feature_in_history
-sys.stdout.write(feature_in_history(sys.argv[2]))' "$LIB" "$wt" 2>/dev/null || true)"
+sys.stdout.write(feature_in_history(sys.argv[2], sys.argv[3]))' "$LIB" "$wt" "$SCLAUDE_V_BASE" 2>/dev/null || true)"
       # The same plain list as step 2's. It goes into the pull request for the
       # code's reviewer; the boxes stay in the issue, where QA ticks them.
       [[ -n "$issue" ]] && SCLAUDE_B_ACCEPTANCE="$(
-        python3 "$LIB/cycle/acceptance.py" "$issue" "$wt" 2>/dev/null || true)"
+        python3 "$LIB/cycle/acceptance.py" ${SCLAUDE_V_PART:+--part "$SCLAUDE_V_PART"} "$issue" "$wt" 2>/dev/null || true)"
       # Back after the merge, for commits the retrospective left (retro.sh): the
       # feature's pull request is merged, and this one carries only them.
       [[ -n "$wt" ]] && SCLAUDE_B_REOPENED="$(retro_pr_block "$wt" 2>/dev/null || true)"
@@ -126,6 +156,22 @@ sys.stdout.write(feature_in_history(sys.argv[2]))' "$LIB" "$wt" 2>/dev/null || t
     review)
       [[ -n "$pr" ]] && SCLAUDE_B_PR_CONTEXT="$(
         python3 "$LIB/review/pr_context.py" "$wt" "$pr" "$(gh_repo)" 2>/dev/null || true)"
+      # The feature's own pull request after its parts: what is still open on
+      # the parts' pull requests, which no session reads any more.
+      if [[ -n "$SCLAUDE_V_PARTS_DONE" ]]; then
+        local part_prs=() pn ppr
+        local last_part="$SCLAUDE_V_PARTS"
+        [[ "${dropped:-}" =~ ^[0-9]+$ ]] && last_part=$((dropped - 1))
+        for (( pn = 1; pn <= last_part; pn++ )); do
+          ppr="$(state_get "$wt/.sclaude/local/feature/state.json" "parts.$pn.pr" 2>/dev/null || true)"
+          [[ -n "$ppr" && "$ppr" != null ]] && part_prs+=("$ppr")
+        done
+        if [[ ${#part_prs[@]} -gt 0 ]]; then
+          local parts_open_block
+          parts_open_block="$(python3 "$LIB/review/pr_context.py" --parts-threads "$wt" "$(gh_repo)" "${part_prs[@]}" 2>/dev/null || true)"
+          [[ -n "$parts_open_block" ]] && SCLAUDE_B_PR_CONTEXT+=$'\n\n'"$parts_open_block"
+        fi
+      fi
       # The review a production rollback sent the cycle back to. No gate opens
       # it, so nobody else fills the block: without this the session got the
       # ordinary review prompt about a pull request it was told was open, with

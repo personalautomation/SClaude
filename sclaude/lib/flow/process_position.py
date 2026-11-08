@@ -306,6 +306,19 @@ def position(state, pr_state="", epilogue=None):
 def _in_step(state, step):
     if _sync_in_step(state):
         return "sync", "a sync with main is open, ahead of the step"
+    # A feature built in parts (parts.sh) is in step 2 while its parts are:
+    # code, pull request and review of the part at work.
+    parts = state.get("parts") or {}
+    if (isinstance(parts.get("total"), int) and parts["total"] >= 2 and parts.get("done") is not True
+            and step in ("code", "pr", "review")):
+        if step in ("code", "review") and _running(state, "local"):
+            return "reg_local", "part %s/%s: the local regression is running" % (parts.get("current"), parts["total"])
+        if step == "review" and _fresh(((state.get("review") or {}).get("local") or {}).get("running")):
+            return "local_pass", "part %s/%s: the local review is reading its pull request" % (
+                parts.get("current"), parts["total"])
+        return "p_" + step, "step 2, part %s/%s: %s" % (
+            parts.get("current"), parts["total"], {"code": "development", "pr": "its pull request",
+                                                  "review": "its review"}[step])
     if step in ("code", "review") and _running(state, "local"):
         return "reg_local", "the local regression is running"
     if step == "code" and _fix_open(state, "local"):

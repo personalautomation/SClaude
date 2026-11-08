@@ -170,19 +170,43 @@ local_review_run() {
     warn "  ${head:0:7} is not the head of PR #$pr: the local review posts on what the pull request carries. Push, then run $SELF again." >&2
     return 1
   fi
-  if python3 "$LIB/review/local_review.py" cached "$journal" "$head" 2>/dev/null; then
+  if python3 "$LIB/review/local_review.py" cached "$journal" "$head" "$pr" 2>/dev/null; then
     python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null || return 1
     return 0
   fi
-  # From the last head reviewed — or, when this head was left with more to
-  # read (a capped pass whose follow-up never ran), over the same range again.
-  last="$(python3 "$LIB/review/local_review.py" since "$journal" "$head" 2>/dev/null || true)"
+  # What the pull request goes into: main, or for a part of a feature built in
+  # parts the feature's common branch (parts_base), where the earlier parts
+  # are — read against main, a part's review would read them all again.
+  local into=main
+  declare -F parts_base >/dev/null && into="$(parts_base "$wt/.sclaude/local/feature/state.json")"
+  # From this pull request's last head reviewed — or, when this head was left
+  # with more to read (a capped pass whose follow-up never ran), over the same
+  # range again.
+  last="$(python3 "$LIB/review/local_review.py" since "$journal" "$head" "$pr" 2>/dev/null || true)"
+  local seams="" merges=""
   if [[ -n "$last" && "$last" != "$head" ]] && git -C "$wt" merge-base --is-ancestor "$last" "$head" 2>/dev/null; then
     base="$last"
-    scope="the commits since the last review: \`git diff $base..$head\`"
+    merges="$(git -C "$wt" rev-list --merges "$last..$head" 2>/dev/null | tr '\n' ' ')"
+    if [[ -z "${merges// /}" ]]; then
+      scope="the commits since the last review: \`git diff $base..$head\`"
+    else
+      # A merge since then (main into the branch, a sync) brought code that
+      # is not this pull request's: the commits made here are read, each in
+      # full, and the merges for how they resolved conflicts — never the
+      # range's diff, which carries everything the merges brought.
+      scope="the commits since the last review that were made on this branch, each read whole: \`git log --first-parent --no-merges -p $base..$head\`; and, for each merge in that range (${merges% }), only how it resolved its conflicts: \`git show --remerge-diff <merge>\` (empty when it had none). Not \`git diff $base..$head\`: the merges brought code from other branches, reviewed there"
+    fi
   else
-    base="$(git -C "$wt" merge-base origin/main "$head" 2>/dev/null)" || return 1
+    base="$(git -C "$wt" merge-base "origin/$into" "$head" 2>/dev/null)" || return 1
     scope="the whole pull request: \`git diff $base..$head\`"
+    # The feature's own pull request after its parts, read for the first
+    # time: every line in it was reviewed in a part's pull request, so this
+    # pass reads what none of them could see.
+    local pstate="$wt/.sclaude/local/feature/state.json"
+    if declare -F parts_split >/dev/null && parts_split "$pstate" && ! parts_open "$pstate"; then
+      seams=1
+      scope="the seams between the parts this pull request carries, in \`git diff $base..$head\`. Each part was reviewed on its own in a pull request merged into this branch (\`git log --first-parent $base..$head\` lists them), so do not look for every bug again: look for what no single part's review could see — a contract one part promises and another relies on, the same thing built twice, an error or permission handled in one part and not another, manuals, migrations, tests or settings out of step between the parts"
+    fi
   fi
 
   # Once the person said the search is over (review_enough), a head is only
@@ -206,7 +230,11 @@ local_review_run() {
   fi
 
   local earlier began new more cap pass=1 round
-  round="$(python3 "$LIB/review/local_review.py" round "$journal" "$head" 2>/dev/null || echo 1)"
+  round="$(python3 "$LIB/review/local_review.py" round "$journal" "$head" "$pr" 2>/dev/null || echo 1)"
+  # One pass over the seams: the search is narrow, and a second would only
+  # widen it back to the whole diff.
+  local LOCAL_REVIEW_PASSES="$LOCAL_REVIEW_PASSES"
+  [[ -n "$seams" ]] && LOCAL_REVIEW_PASSES=1
   answer="$(local_review_file "$wt" -answer.md)"
   # The lines above are indented, and the topic leaves those out: it hears
   # of the review by these two, here and at the end.
@@ -268,7 +296,7 @@ local_review_run() {
       # Not a review of the head, but a conversation that cost: journaled
       # for the report to price (spent in local_review.py).
       python3 "$LIB/review/local_review.py" spent "$journal" "$base" "$head" "$((SECONDS - began))" \
-        "$pass_session" 2>/dev/null || true
+        "$pass_session" "$pr" 2>/dev/null || true
       warn "  Stopped pass $pass as you said; what earlier passes and rounds posted stays open on PR #$pr" >&2
       warn "  and goes to the review session." >&2
       count="$(python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
@@ -283,7 +311,7 @@ local_review_run() {
                                       "$base" "$head" "$((SECONDS - began))" "$journal" "$cap" ${verify:+verify} \
                                       2>>"$(local_review_file "$wt" .log)") || [[ -z "${count:-}" ]]; then
       python3 "$LIB/review/local_review.py" spent "$journal" "$base" "$head" "$((SECONDS - began))" \
-        "$pass_session" 2>/dev/null || true
+        "$pass_session" "$pr" 2>/dev/null || true
       # A later pass that fails leaves the earlier ones recorded: the head
       # counts as reviewed with what they posted.
       if [[ "$pass" -gt 1 ]]; then
@@ -691,7 +719,8 @@ local_review_count() {
 local_review_done() {
   local head
   head="$(git -C "$1" rev-parse HEAD 2>/dev/null)" || return 1
-  python3 "$LIB/review/local_review.py" cached "$(local_review_file "$1" -rounds.jsonl)" "$head" 2>/dev/null
+  python3 "$LIB/review/local_review.py" cached "$(local_review_file "$1" -rounds.jsonl)" "$head" \
+    "$(state_get "$1/.sclaude/local/feature/state.json" pr 2>/dev/null || true)" 2>/dev/null
 }
 
 # What the headless check is told once the search for new findings is over:
@@ -781,5 +810,6 @@ local_review_pushed() {
 
 # The head the last local review covered, or nothing.
 local_review_head() {
-  python3 "$LIB/review/local_review.py" base "$(local_review_file "$1" -rounds.jsonl)" 2>/dev/null || true
+  python3 "$LIB/review/local_review.py" base "$(local_review_file "$1" -rounds.jsonl)" \
+    "$(state_get "$1/.sclaude/local/feature/state.json" pr 2>/dev/null || true)" 2>/dev/null || true
 }

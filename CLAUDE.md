@@ -40,15 +40,20 @@ These are load-bearing. Do not "fix" them.
 Some text is compared, grepped for or quoted elsewhere. Changing one side alone
 breaks the other silently — grep before you edit:
 
-- A feature split into several pull requests: `sclaude/prompts/plan.md`
-  ("If I choose to split") tells step 1 to keep the first part and file the
-  rest as sub-issues, and `sclaude/prompts/code.md` ("This feature is one pull
-  request.") tells step 2 to do the same with a plan that still holds several;
-  `tests/plan-split.py` checks both.
+- A feature built in parts (`sclaude/lib/tree/parts.sh`): the plan's
+  `## Parts` section, its `### Part <n> — <title>` headings and a criterion's
+  `[part <n>]` are spelled out for step 1 in `sclaude/prompts/plan.md` ("If I
+  choose to split") and read by `plan_parts.py` (`SECTION`, `PART`, `TAG`),
+  which `acceptance.py --part` filters each part's criteria by;
+  `tests/plan-split.py` checks the shape the prompt shows is the one read.
+  The `<if:in-parts>`/`<if:parts-done>` keys and `<part>`, `<parts>`,
+  `<umbrella>`, `<base>` are set by `render_prompt` in `prompt.sh` for
+  `code.md`, `pr.md` and `review.md`; `tests/parts.py` renders them.
 
-  <!-- Added by Claude on 2026-11-07 during a friction review: step 1 was told
-  to propose a split and nothing after it, and the orchestrator runs one pull
-  request per feature. -->
+  <!-- Changed by Claude on 2026-11-08 at the user's decision: a split
+  feature stays one issue, one plan and one QA, built in parts inside step 2,
+  a pull request for each into the feature's branch; before, the later parts
+  became issues of their own. -->
 
 - `KeepAwake.ps1` writes hold-log lines that `bin/keepawake` greps for
   (`hold set|hold released|holding`).

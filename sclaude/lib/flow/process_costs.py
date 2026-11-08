@@ -53,7 +53,11 @@ def _session_place(rows, opened=None):
         if r["op"] not in ("open", "start") or not r.get("session"):
             continue
         head, _, rest = r["what"].partition(".")
-        if head == "steps" and rest in process_model.NODES:
+        if r.get(process_history.ON):
+            # A part's session of a feature built in parts: on the parts
+            # map, where history played it.
+            out[r["session"]] = tuple(r[process_history.ON])
+        elif head == "steps" and rest in process_model.NODES:
             out[r["session"]] = ("detail", rest)
         elif head == "fix" and rest in process_history.STAGE_NODE:
             out[r["session"]] = ("regression", "fix_" + rest)

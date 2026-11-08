@@ -14,11 +14,17 @@
 # the account logged in here, each ending with LOCAL_SIGNATURE so that a
 # reader can tell them from what a person wrote (pr_context.review_state).
 #
-#   local_review.py cached <journal> <head>       exit 0 when <head> is the last reviewed
-#   local_review.py base <journal>                the last reviewed head, or nothing
-#   local_review.py since <journal> <head>        the commit the next run starts from
-#   local_review.py round <journal> <head>        which round reviewing <head> is: one
+#   local_review.py cached <journal> <head> [pr]  exit 0 when <head> is the last reviewed
+#   local_review.py base <journal> [pr]           the last reviewed head, or nothing
+#   local_review.py since <journal> <head> [pr]   the commit the next run starts from
+#   local_review.py round <journal> <head> [pr]   which round reviewing <head> is: one
 #                                                 more than the other heads reviewed
+#
+# With [pr], only that pull request's runs count. A feature built in parts
+# (parts.sh) has a pull request for each part and one for the whole, in one
+# journal: a part's review starting from the last head the part before it
+# reviewed would read that part again, and number its rounds on from it.
+# A row from before the journal kept the number counts for every one.
 #   local_review.py prompt <cwd> <pr> <repo> <journal>  the part of the review's prompt
 #                                                 about earlier findings
 #   local_review.py record <cwd> <pr> <repo> <answer> <base> <head> <seconds> <journal> [cap] [verify]
@@ -158,7 +164,8 @@ def prompt(cwd, pr, repo, journal):
         for t, why in declined:
             out.append("- %s:%s — %s (%s)" % (t["path"], t["line"], headline(t["bodies"][0]), why))
         out.append("")
-    waiting = pending_of(journal)
+    # This pull request's alone: another's waits for it (flush).
+    waiting = [f for f in pending_of(journal) if not f.get("pr") or str(f["pr"]) == str(pr)]
     if waiting:
         out.append("Findings already reported that are still waiting to be posted — do not "
                    "report them again: %s." % "; ".join(
@@ -248,12 +255,18 @@ def flush(cwd, pr, repo, journal):
             pending = json.load(fh)
     except (OSError, ValueError):
         return 0, 0
+    # Another pull request's findings stay for it: a feature built in parts
+    # has one for each part, and a finding is about the diff it was found in.
+    others = [f for f in pending if f.get("pr") and str(f["pr"]) != str(pr)]
+    pending = [f for f in pending if f not in others]
+    if not pending:
+        return 0, 0
     found = threads(cwd, pr, repo)
     if found is None:
         return 0, len(pending)
     left = [f for f in pending
             if not already(found, f) and not post(cwd, pr, repo, f["head"], f)]
-    keep(path, left)
+    keep(path, others + left)
     return len(pending) - len(left), len(left)
 
 
@@ -326,7 +339,7 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     # Some did: the run stands, and the rest wait in a file of their own, to
     # be posted on the next call (flush) and counted open until they are.
     _, waiting = flush(cwd, pr, repo, journal)
-    keep(unposted_file(journal), pending_of(journal) + lost)
+    keep(unposted_file(journal), pending_of(journal) + [dict(f, pr=str(pr)) for f in lost])
     closed = 0
     by_rid = {t["rid"]: t for t in checkable(cwd, before)}
     for rid, how in resolved.items():
@@ -337,7 +350,7 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     began = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=int(seconds))
     row = {"at": began.isoformat(timespec="seconds"),
            "seconds": int(seconds), "base": base, "head": head,
-           "new": posted, "lost": len(lost), "resolved": closed,
+           "new": posted, "lost": len(lost), "resolved": closed, "pr": str(pr),
            # Found as many as the cap: likely stopped with more unsaid, so this
            # head is not done — the next call reads the same range again.
            "more": int(cap) > 0 and count >= int(cap)}
@@ -355,7 +368,7 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     return 0
 
 
-def spent(journal, base, head, seconds, session):
+def spent(journal, base, head, seconds, session, pr=""):
     """A pass that ran and was not recorded — stopped by the person, or its
     answer not taken — journaled all the same, marked `spent`, so that the
     report prices its conversation. rows() leaves it out unless asked: the
@@ -363,6 +376,8 @@ def spent(journal, base, head, seconds, session):
     began = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=int(seconds))
     row = {"at": began.isoformat(timespec="seconds"), "seconds": int(seconds),
            "base": base, "head": head, "spent": True}
+    if pr:
+        row["pr"] = str(pr)
     if session:
         row["session"] = session
     with open(journal, "a", encoding="utf-8") as fh:
@@ -370,11 +385,14 @@ def spent(journal, base, head, seconds, session):
     return 0
 
 
-def rows(journal, with_spent=False):
+def rows(journal, with_spent=False, pr=None):
     """The journal's runs, oldest first: each a dict with at least `at` (the
     run's start, ISO) and `head`; with <with_spent>, the passes journaled by
-    spent() too. The one reader of the file; the report reads it through
-    here."""
+    spent() too; with <pr>, that pull request's alone (and the rows from
+    before the journal named one). The one reader of the file; the report
+    reads it through here."""
+    if str(pr) in ("", "null", "None"):
+        pr = None
     out = []
     try:
         with open(journal, encoding="utf-8") as fh:
@@ -384,7 +402,8 @@ def rows(journal, with_spent=False):
                 except ValueError:
                     continue
                 if isinstance(row, dict) and row.get("head") and row.get("at") \
-                        and (with_spent or not row.get("spent")):
+                        and (with_spent or not row.get("spent")) \
+                        and (not pr or not row.get("pr") or str(row["pr"]) == str(pr)):
                     out.append(row)
     except OSError:
         pass
@@ -395,19 +414,19 @@ def main(argv):
     if not argv:
         return 2
     cmd, args = argv[0], argv[1:]
-    if cmd == "cached" and len(args) == 2:
+    if cmd == "cached" and len(args) in (2, 3):
         # Reviewed, and not left with more to read (a capped pass that the
         # next one never followed, an interrupted review).
-        last = rows(args[0])
+        last = rows(args[0], pr=args[2] if len(args) > 2 else None)
         return 0 if last and last[-1]["head"] == args[1] and not last[-1].get("more") else 1
-    if cmd == "base" and len(args) == 1:
-        last = rows(args[0])
+    if cmd == "base" and len(args) in (1, 2):
+        last = rows(args[0], pr=args[1] if len(args) > 1 else None)
         print(last[-1]["head"] if last else "")
         return 0
-    if cmd == "since" and len(args) == 2:
+    if cmd == "since" and len(args) in (2, 3):
         # Where the next run starts: the last head reviewed, or — when that
         # head is this one and was left with more — the same range again.
-        last = rows(args[0])
+        last = rows(args[0], pr=args[2] if len(args) > 2 else None)
         if not last:
             print("")
         elif last[-1]["head"] == args[1] and last[-1].get("more"):
@@ -415,16 +434,17 @@ def main(argv):
         else:
             print(last[-1]["head"])
         return 0
-    if cmd == "round" and len(args) == 2:
+    if cmd == "round" and len(args) in (2, 3):
         # A round is a head: the passes over one head, and a capped head read
         # again later, are the same round.
-        print(len({r["head"] for r in rows(args[0]) if r["head"] != args[1]}) + 1)
+        mine = rows(args[0], pr=args[2] if len(args) > 2 else None)
+        print(len({r["head"] for r in mine if r["head"] != args[1]}) + 1)
         return 0
     if cmd == "prompt" and len(args) == 4:
         return prompt(*args)
     if cmd in ("record",) and len(args) in (8, 9, 10):
         return record(*args)
-    if cmd == "spent" and len(args) == 5:
+    if cmd == "spent" and len(args) in (5, 6):
         return spent(*args)
     if cmd == "open" and len(args) == 4:
         # Waiting findings first: posted now, they are threads below.

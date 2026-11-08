@@ -623,6 +623,74 @@ sy = process.history({}, [
 check("history: a sync plays along its edges and keeps its session's time",
       len(sy) == 1 and [x["n"] for x in sy[0]["steps"]] == ["y_when", "merge_check", "sync", "merge_check", "main_in", "y_on"]
       and next(x for x in sy[0]["steps"] if x["n"] == "sync").get("s") == 20 * 60, str(sy))
+
+# A feature built in two parts: each part's steps 2-4 a pass on the parts
+# map, step 2 over the whole after the last, then step 3 on the detailed map.
+def part_rows(n, h, mine=True):
+    """Part n's rows from hour h; `mine`: with the part each row says."""
+    p = {"part": str(n)} if mine else {}
+    s = "%02d" % h
+    return [
+        dict({"at": at(s + ":00"), "what": "steps.code", "op": "open", "session": "c%d" % n}, **p),
+        dict({"at": at(s + ":20"), "what": "steps.code", "op": "finish", "session": "c%d" % n}, **p),
+        edge(s + ":20", "code", "works", "sclaude", **p), edge(s + ":20", "works", "pr", "sclaude", **p),
+        dict({"at": at(s + ":21"), "what": "steps.pr", "op": "open", "session": "p%d" % n}, **p),
+        dict({"at": at(s + ":30"), "what": "steps.pr", "op": "finish", "session": "p%d" % n}, **p),
+        edge(s + ":30", "pr", "pr_check", "sclaude", **p), edge(s + ":30", "pr_check", "draft_pr", "sclaude", **p),
+        edge(s + ":31", "draft_pr", "local_pass", "setting", **p),
+        dict({"at": at(s + ":31"), "what": "review.local", "op": "start"}, **p),
+        dict({"at": at(s + ":36"), "what": "review.local", "op": "done"}, **p),
+        dict({"at": at(s + ":40"), "what": "steps.review", "op": "open", "session": "r%d" % n}, **p),
+        dict({"at": at(s + ":50"), "what": "steps.review", "op": "finish", "session": "r%d" % n}, **p),
+        edge(s + ":50", "review", "review_close", "sclaude", **p),
+        {"at": at(s + ":51"), "what": "parts", "op": "merged", "part": str(n), "pr": str(100 + n)}]
+for mine in (True, False):
+    wh = {"part": "whole"} if mine else {}
+    split = process.history({}, [
+        {"at": at("08:00"), "what": "steps.plan", "op": "open", "session": "pl"},
+        {"at": at("08:30"), "what": "steps.plan", "op": "finish", "session": "pl"},
+        {"at": at("08:59"), "what": "parts", "op": "capture", "total": "2"}]
+        + part_rows(1, 9, mine) + part_rows(2, 10, mine) + [
+        dict({"at": at("11:00"), "what": "steps.code", "op": "open", "session": "cw"}, **wh),
+        dict({"at": at("11:30"), "what": "steps.code", "op": "finish", "session": "cw"}, **wh),
+        edge("11:30", "code", "works", "sclaude", **wh), edge("11:40", "works", "pr", "person", **wh),
+        dict({"at": at("11:41"), "what": "steps.pr", "op": "open", "session": "pf"}, **wh),
+        dict({"at": at("11:50"), "what": "steps.pr", "op": "finish", "session": "pf"}, **wh)],
+        transcripts={"c1": {"cost": 2.0}, "pf": {"cost": 1.0}, "cw": {"cost": 3.0}}.get)
+    ps = split["passes"]["parts"]
+    seqs = [[x["n"] for x in p["steps"]] for p in ps]
+    way = ["p_enter", "p_code", "p_pr", "p_review", "p_check", "p_merge", "p_sync", "p_more"]
+    how = "with each row's part" if mine else "from the rows' order"
+    check("history: a split feature plays a pass of the parts map per part, " + how,
+          seqs == [["p_split"] + way, way + ["p_whole", "p_on"]]
+          and [x.get("s") for x in ps[0]["steps"] if x["n"] in ("p_code", "p_pr", "p_review")] == [20 * 60, 9 * 60, 15 * 60]
+          and next(x for x in ps[1]["steps"] if x["n"] == "p_whole").get("s") == 30 * 60, str(seqs))
+    vs = [v.get("n") or v["pass"][0] for v in split["visits"]]
+    check("history: a split feature's detailed map plays steps 2-4 once, the parts inside step 2, " + how,
+          vs.count("code") == 1 and vs.count("pr") == 1 and "review" not in vs and "local_pass" not in vs
+          and vs[vs.index("code") + 1:vs.index("code") + 3] == ["parts", "parts"]
+          and vs.index("works") > vs.index("code") + 2, str(vs))
+    works = next(v for v in split["visits"] if v.get("n") == "works")
+    check("history: the wait after a split feature's parts counts from their end, " + how,
+          works.get("s") == 11 * 60 and works.get("from") == at("11:30"), str(works))
+    cost = split["metrics"]["cost"]
+    check("history: a part's sessions cost on the parts map, the feature's PR on the detailed one, " + how,
+          cost.get("parts") == {"p_code": 2.0, "p_whole": 3.0} and cost.get("detail") == {"pr": 1.0}, str(cost))
+
+undone = process.history({}, [
+    {"at": at("08:59"), "what": "parts", "op": "capture", "total": "2"},
+    {"at": at("09:00"), "what": "steps.code", "op": "open", "session": "c1", "part": "1"},
+    {"at": at("09:10"), "what": "steps.code", "op": "end", "session": "c1", "part": "1"},
+    {"at": at("09:20"), "what": "parts", "op": "uncapture"},
+    {"at": at("09:21"), "what": "steps.code", "op": "open", "session": "c2"},
+    {"at": at("09:30"), "what": "steps.code", "op": "finish", "session": "c2"},
+    edge("09:30", "code", "works", "sclaude"), edge("09:40", "works", "pr", "person"),
+    {"at": at("09:41"), "what": "steps.pr", "op": "open", "session": "p"},
+    {"at": at("09:50"), "what": "steps.pr", "op": "finish", "session": "p"}])
+uv = [v.get("n") for v in undone["visits"]]
+check("history: after a replan undoes the split, steps 2-3 play on the detailed map",
+      "works" in uv and "pr" in uv and len(undone["passes"]["parts"]) <= 1, str(uv))
+
 fr = process.history({}, [
     edge("09:00", "f_log", "f_empty", "sclaude", key="code-1"),
     edge("09:00", "f_empty", "f_rules", "sclaude", key="code-1"),
@@ -1600,7 +1668,7 @@ check("the page offers the metrics by checkboxes, each with the whole feature's 
       'class="metrics"' in page and 'value="input"' in page and 'value="cost"' in page
       and 'value="time"' in page and 'value="expired"' in page and page.count('class="mt-total"') == 5)
 check("every map's heading carries its own whole of the metrics",
-      page.count('class="mt-map"') == 6 and "document.querySelectorAll('.mt-map')" in page)
+      page.count('class="mt-map"') == 7 and "document.querySelectorAll('.mt-map')" in page)
 check("an answer to sclaude and a command go into the history",
       "history_add \"$ASK_TREE/.sclaude/local/feature/state.json\" ask answered" in read("sclaude", "lib", "core", "io.sh")
       and "history_command \"$wt\"" in read("sclaude", "lib", "core", "state.sh")

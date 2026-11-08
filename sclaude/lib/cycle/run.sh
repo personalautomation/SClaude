@@ -90,6 +90,21 @@ run_step() {
   model="$(step_model "$step")"
   effort="$(step_effort "$step")"
   mode="$(step_mode "$step")"
+  # A feature built in parts (parts.sh): the tree on the part at work before
+  # anything below asks which branch, which pull request. A plan split after
+  # step 2 began is taken up here too, its work so far becoming part 1.
+  [[ "$step" == code ]] && { parts_capture "$wt" || return 0; }
+  if [[ "$step" == code || "$step" == pr || "$step" == review ]] && parts_open "$state"; then
+    # A part merged by a run cut off before the next part began: that run's
+    # way on, not the part's session again.
+    local part_now merged_at; part_now="$(parts_now "$state")"
+    merged_at="$(state_get "$state" "parts.$part_now.merged" 2>/dev/null || true)"
+    if [[ -n "$merged_at" && "$merged_at" != null ]]; then
+      parts_advance "$wt" "$slug" merged
+      return 0
+    fi
+    parts_enter "$wt" || return 0
+  fi
   [[ "$step" == "review" ]] && capture_reopened_pr "$wt"
   pr="$(state_get "$state" pr || true)"
   local issue; issue="$(state_get "$state" issue || true)"
@@ -133,6 +148,13 @@ run_step() {
   if [[ "$reopened" != "$step" ]] && [[ "$step" == "pr" || "$step" == "review" ]]; then
     local branch pr_state
     branch="$(state_get "$state" branch || true)"
+    # A part's pull request goes into the common branch, and its merge there
+    # is the part's end only once its review closed: one merged before is a
+    # hand on GitHub, asked about (parts_merged_early).
+    if parts_open "$state" && [[ -n "$branch" ]] && [[ "$(branch_pr_state "$branch")" == "MERGED" ]]; then
+      parts_merged_early "$wt" "$slug" || true
+      return 0
+    fi
     if [[ -n "$branch" ]] && [[ "$(branch_pr_state "$branch")" == "MERGED" ]]; then
       capture_pr "$wt"
       echo ""
@@ -228,7 +250,17 @@ run_step() {
   # server means changing the code under its feet, and a merge stalled on
   # conflicts leaves a tree on which a session must not be opened at all. A
   # refusal here is the one case where a step does not start.
-  sync_branch "$wt" || return 0
+  #
+  # Not into a part's branch: its pull request goes into the common branch,
+  # and main merged in here would be read as the part's own change. Main goes
+  # into the common branch between parts (parts_advance), and the part has it
+  # from there. Checked instead: what GitHub has of the parts is where the
+  # cycle left it (parts_check).
+  if parts_open "$state"; then
+    parts_check_say "$wt" || { info "  The step waits. Come back with: $SELF $slug"; return 0; }
+  else
+    sync_branch "$wt" || return 0
+  fi
 
   # A review that passed clean has nothing for a session to answer.
   #
@@ -1077,7 +1109,9 @@ after_step() {
         extend_acceptance "$wt" reworded
         reword_acceptance "$wt"
       fi
-      if [[ "$pr_state" == "MERGED" ]]; then
+      if parts_open "$state"; then
+        info "  The review of part $(parts_now "$state") closed — PR #${pr:-?} goes into $(parts_umbrella "$state")."
+      elif [[ "$pr_state" == "MERGED" ]]; then
         info "  PR #${pr:-?} is merged — the review is done."
       elif no_deploy_feature "$wt"; then
         info "  Review closed. Next: the merge of PR #${pr:-?}, with no preview, QA or production."
@@ -1109,8 +1143,16 @@ after_step() {
       # proposal still open — the question is asked here, as before.
       [[ "$gate_only" == "gate" ]] || extend_acceptance "$wt"
       local accept_by=person accept_how=""
+      # A part of a split feature is not asked about: the person's word that
+      # everything works is for the whole feature, once every part is in
+      # (parts.sh). The part's session ends on its own marker, and its
+      # pull request and review follow.
+      local in_part=""
+      parts_open "$state" && in_part=1
       if [[ "$gate_only" == "gate" ]]; then
         answer=y
+      elif [[ -n "$in_part" ]]; then
+        answer=y accept_by=sclaude accept_how="part $(parts_now "$state"): asked once the parts are in"
       elif [[ "$(state_get "$state" "steps.$step.gate" 2>/dev/null || true)" == "true" ]]; then
         answer=y
         info "  You accepted the work: in the session, or with [n] in this terminal."
@@ -1154,7 +1196,7 @@ after_step() {
       #
       # And no regression for a change nothing deploys (no_change.sh): the
       # suite would test main's product, which this branch does not touch.
-      if no_change_feature "$wt" >/dev/null; then
+      if [[ -z "$in_part" ]] && no_change_feature "$wt" >/dev/null; then
         no_change_finish "$wt" "$slug" code
         return 0
       fi
@@ -1210,6 +1252,13 @@ after_step() {
   state_set "$state" reopened null 2>/dev/null || true
   state_set "$state" reopened_pr null 2>/dev/null || true
   state_set "$state" reopened_by null 2>/dev/null || true
+
+  # A part's review closed: the part goes into the common branch, and the
+  # next part starts — or step 2 closes on the common branch (parts.sh).
+  if [[ "$step" == review ]] && parts_open "$state"; then
+    parts_advance "$wt" "$slug"
+    return 0
+  fi
 
   if ! next="$(step_next "$step")"; then
     state_set "$state" step "done"

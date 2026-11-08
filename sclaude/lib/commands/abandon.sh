@@ -137,6 +137,17 @@ cmd_abandon() {
   [[ "$issue" == "null" ]] && issue=""
   [[ "$pr" == "null" ]] && pr=""
   repo="$(gh_repo)" || repo=""
+  # A feature built in parts (parts.sh): the parts' pull requests still
+  # open, beside the one at work, closed with it.
+  # And the parts' other branches — the common one and each part's — which
+  # follow the answers about the one at work, here and on GitHub.
+  local part_prs="" part_others=""
+  if declare -F parts_open_prs >/dev/null; then
+    part_prs="$(parts_open_prs "$wt" | grep -vx "${pr:-}" || true)"
+    part_others="$( { parts_umbrella "$state"; parts_branches "$state"; } 2>/dev/null \
+                    | grep -v '^null$' | grep -vx "${branch:-}" | sort -u || true)"
+    parts_split "$state" || part_others=""
+  fi
 
   echo ""
   info "Looking at what feature '$slug' has left around…"
@@ -194,6 +205,22 @@ cmd_abandon() {
     fi
   fi
 
+  # The parts' other local branches: with the one at work when it was asked
+  # about, on a question of their own when it was not (no local branch).
+  local want_part_local=0 part_local="" pb
+  for pb in $part_others; do
+    git -C "$REPO" rev-parse -q --verify "refs/heads/$pb" >/dev/null && part_local+="$pb "
+  done
+  if [[ -n "$part_local" && "$want_tree" -eq 1 ]]; then
+    if [[ "$want_branch" -ne 0 ]]; then
+      want_part_local="$want_branch"
+    else
+      echo ""
+      ask "${BOLD}Delete the parts' local branches (${part_local% })? [y/n] ${OFF}" answer yn
+      is_yes "$answer" && want_part_local=1 || want_part_local=2
+    fi
+  fi
+
   # --- the pull request --------------------------------------------------
   #
   # We close rather than delete: deleting a PR through the API is not possible at
@@ -224,6 +251,30 @@ cmd_abandon() {
     else
       ask "${BOLD}Delete origin/$branch on GitHub? [y/n] ${OFF}" answer yn
       is_yes "$answer" && want_origin=1 || want_origin=2
+    fi
+  fi
+
+  # The parts' other branches on GitHub: with the one at work when it was
+  # asked about, on a question of their own when it was not (not pushed yet).
+  local want_part_origin=0 part_remote="" pb
+  for pb in $part_others; do
+    git -C "$REPO" show-ref --verify --quiet "refs/remotes/origin/$pb" && part_remote+="$pb "
+  done
+  # A part's pull request kept open goes into the common branch, and
+  # deleting its base would close it on GitHub: that one stays, unasked.
+  local keep_base=""
+  if [[ "$want_pr" -eq 2 ]] && declare -F parts_open >/dev/null && parts_open "$state"; then
+    keep_base="$(parts_umbrella "$state")"
+    part_remote="$(printf '%s\n' $part_remote | grep -vxF "$keep_base" | tr '\n' ' ' || true)"
+    part_remote="${part_remote% }"; [[ -n "$part_remote" ]] && part_remote+=" "
+  fi
+  if [[ -n "$part_remote" ]]; then
+    if [[ "$want_origin" -ne 0 ]]; then
+      want_part_origin="$want_origin"
+    else
+      echo ""
+      ask "${BOLD}Delete the parts' branches on GitHub (${part_remote% })? [y/n] ${OFF}" answer yn
+      is_yes "$answer" && want_part_origin=1 || want_part_origin=2
     fi
   fi
 
@@ -284,6 +335,14 @@ cmd_abandon() {
   elif [[ "$want_branch" -eq 2 ]]; then
     info "  local branch kept."
   fi
+  if [[ "$want_part_local" -eq 1 && "$wt_gone" -eq 1 ]]; then
+    for pb in $part_local; do
+      git -C "$REPO" branch -D "$pb" >/dev/null 2>&1 \
+        && echo "  ${GREEN}deleted${OFF} $pb" || warn "  could not delete $pb"
+    done
+  elif [[ -n "$part_local" && "$want_part_local" -ne 0 ]]; then
+    info "  the parts' local branches kept: ${part_local% }"
+  fi
 
   # The worktree was to go and stayed: the feature is still in progress, and
   # its pull request, branch and issue stay with it whatever was answered.
@@ -305,6 +364,16 @@ cmd_abandon() {
   elif [[ "$want_pr" -eq 2 ]]; then
     info "  PR #$pr kept open."
   fi
+  # The other parts' pull requests go with the one at work, on the same word.
+  local part_pr
+  if [[ "$want_pr" -eq 1 || ( -z "$pr" && "$wt_gone" -eq 1 ) ]]; then
+    for part_pr in $part_prs; do
+      gh pr close "$part_pr" --repo "$repo" \
+        --comment "Closed: the feature was abandoned before the merge." >/dev/null 2>&1 \
+        && echo "  ${GREEN}closed${OFF} PR #$part_pr (a part)" \
+        || warn "  could not close PR #$part_pr (a part) — close it by hand"
+    done
+  fi
 
   if [[ "$want_origin" -eq 1 ]]; then
     # The output is muted: .githooks/pre-push does not tell deleting a branch
@@ -319,6 +388,15 @@ cmd_abandon() {
   elif [[ "$want_origin" -eq 2 ]]; then
     info "  origin/$branch kept."
   fi
+  if [[ "$want_part_origin" -eq 1 && "$wt_gone" -eq 1 ]]; then
+    for pb in $part_remote; do
+      git -C "$REPO" push origin --delete "$pb" >/dev/null 2>&1 \
+        && echo "  ${GREEN}deleted${OFF} origin/$pb" || warn "  could not delete origin/$pb"
+    done
+  elif [[ -n "$part_remote" ]]; then
+    info "  the parts' branches on GitHub kept: ${part_remote% }"
+  fi
+  [[ -n "$keep_base" ]] && info "  origin/$keep_base kept: pull request #$pr goes into it."
 
   if [[ "$want_issue" -eq 1 ]]; then
     if gh issue close "$issue" --repo "$repo" --reason "not planned" \

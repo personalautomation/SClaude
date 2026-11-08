@@ -645,6 +645,19 @@ cycle_total() { echo $((${#STEPS[@]} + ${#AFTER_STEPS[@]})); }
 # Without the worktree, or when GitHub does not answer, it is "4/7 done".
 step_label() {
   local total; total="$(cycle_total)"
+  # A feature built in parts (parts.sh) is in step 2 until its last part is
+  # merged, whichever of code, pull request and review the part is on:
+  # "2/7 development · part 2/3 · review".
+  if [[ "$1" != "done" && -n "${2:-}" ]] && declare -F parts_open >/dev/null \
+     && parts_open "$2/.sclaude/local/feature/state.json"; then
+    local part; part="$(parts_label "$2/.sclaude/local/feature/state.json")"
+    if [[ "$1" == code ]]; then
+      echo "$(($(step_index code) + 1))/$total $(step_title code) · $part"
+    else
+      echo "$(($(step_index code) + 1))/$total $(step_title code) · $part · $(step_title "$1")"
+    fi
+    return
+  fi
   if [[ "$1" != "done" ]]; then
     echo "$(($(step_index "$1") + 1))/$total $(step_title "$1")"
     return

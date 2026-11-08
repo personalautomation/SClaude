@@ -92,6 +92,7 @@ def _page(label, demo=None):
 <h2 id="map-friction">The friction review%s</h2><div class="card mini">%s</div>
 <h2 id="map-regression">A stage's regression%s</h2><div class="card mini">%s</div>
 <h2 id="map-sync">Main and the branch%s</h2><div class="card mini">%s</div>
+<h2 id="map-parts">A feature built in parts%s</h2><div class="card mini">%s</div>
 <h2>Every command</h2>%s
 </div>
 <aside class="panel">
@@ -120,5 +121,6 @@ def _page(label, demo=None):
        play_head("friction", "The friction review", passes=True), process_diagram.Diagram(*process_config.node_sets()[3]).svg(),
        play_head("regression", "A stage's regression", passes=True), process_diagram.Diagram(*process_config.node_sets()[4]).svg(),
        play_head("sync", "Main and the branch", passes=True), process_diagram.Diagram(*process_config.node_sets()[5]).svg(),
+       play_head("parts", "A feature built in parts", passes=True), process_diagram.Diagram(*process_config.node_sets()[6]).svg(),
        process_doc.commands_table(), PLAYER_BAR,
        process_doc.INTERACT_SCRIPT.replace("/*MODEL*/", json.dumps(process_doc.client_model())), PLAY_SCRIPT, script)

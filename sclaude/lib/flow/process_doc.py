@@ -24,7 +24,7 @@ def _rows(lo, hi):
 
 # A run and a sync come after step 1 and before the cycle ends; production's
 # part of the regression map only once it shipped.
-_SUB = list(process_model.REGRESSION_NODES) + list(process_model.SYNC_NODES)
+_SUB = list(process_model.REGRESSION_NODES) + list(process_model.SYNC_NODES) + list(process_model.PARTS_NODES)
 _PROD = ["r_prod", "prod_ok", "rollback", "hold_ways", "fix_prod"]
 WHEN = {
     "always": _rows(0, 34) + _SUB,
@@ -227,7 +227,7 @@ would only shrink each sheet without making fewer of them. Leave the dialog's ma
 SECTIONS = ["1. The cycle at a glance", "2. The whole process",
             "3. How a session changes sclaude", "4. The friction review",
             "5. A stage's regression", "6. Main and the branch",
-            "7. Commands and where they lead"]
+            "7. A feature built in parts", "8. Commands and where they lead"]
 
 
 def running_heads():
@@ -295,7 +295,13 @@ step 4; production is rolled back first.</p>
 <p class="muted">Every block marked S checks main here: it is merged in without asking, and a conflict goes to
 the sync session.</p>
 <div class="card">%s</div>
-</section><section style="page:s7">
+</section><section style="page:s7" id="map-parts">
+<h2>%s</h2>
+<p class="muted">A feature split at step 1 stays one issue, one plan and one QA, and builds its parts inside
+step 2: a pull request for each into the feature's branch, reviewed alone, merged there. Main gets the whole
+feature once, through its own pull request.</p>
+<div class="card">%s</div>
+</section><section style="page:s8">
 <h2>%s <button type="button" class="pin pin-head screen-only">📌 Pin</button></h2>
 <p class="muted">A feature's action list shows only those that apply to it now. A command lights the place it
 leads to; a block lights the commands open there.</p>
@@ -308,5 +314,6 @@ leads to; a block lights the commands open there.</p>
        process_diagram.esc(SECTIONS[1]), PRINT_BAR, detail.svg(), detail.svg(symbol=True), tiles(detail),
        process_diagram.esc(SECTIONS[2]), process_diagram.Diagram(*process_config.node_sets()[2]).svg(), process_diagram.esc(SECTIONS[3]), process_diagram.Diagram(*process_config.node_sets()[3]).svg(),
        process_diagram.esc(SECTIONS[4]), process_diagram.Diagram(*process_config.node_sets()[4]).svg(), process_diagram.esc(SECTIONS[5]), process_diagram.Diagram(*process_config.node_sets()[5]).svg(),
-       process_diagram.esc(SECTIONS[6]), commands_table(),
+       process_diagram.esc(SECTIONS[6]), process_diagram.Diagram(*process_config.node_sets()[6]).svg(),
+       process_diagram.esc(SECTIONS[7]), commands_table(),
        commands_dock(), INTERACT_SCRIPT.replace("/*MODEL*/", json.dumps(client_model())), PRINT_SCRIPT, DOCK_SCRIPT)

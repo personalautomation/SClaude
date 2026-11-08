@@ -31,7 +31,7 @@ FEATURE, EPILOGUE, WATCH = "feature", "epilogue", "watch"
 FIELDS = [
     # --- the feature itself ----------------------------------------------------
     ("feature", (FEATURE, EPILOGUE, WATCH), "the feature's slug"),
-    ("branch", (FEATURE,), "its git branch at work: a part's while a split feature's parts are built (parts.sh)"),
+    ("branch", (FEATURE,), "its git branch at work: a part's while a split feature's parts are built and reviewed (parts.sh)"),
     ("worktree", (FEATURE, WATCH), "its worktree; the watch sends the timer's messages to its topic"),
     ("issue", (FEATURE, EPILOGUE), "the GitHub issue's number"),
     ("pr", (FEATURE, EPILOGUE, WATCH), "the pull request's number, once step 3 opened it"),
@@ -73,8 +73,10 @@ FIELDS = [
     ("parts", (FEATURE,), "the whole node, cleared when a replan no longer splits the feature"),
     ("parts.total", (FEATURE,), "how many parts the plan splits it into; none when it is not split"),
     ("parts.umbrella", (FEATURE,), "the parts' common branch, which each part's pull request goes into"),
-    ("parts.current", (FEATURE,), "the part being built"),
-    ("parts.done", (FEATURE,), "every part is merged into the common branch: step 2 closes on the whole"),
+    ("parts.current", (FEATURE,), "the part being built, then the part whose pull request is reviewed"),
+    ("parts.built", (FEATURE,), "every part is built: step 2 checks the whole on the last part's branch"),
+    ("parts.accepted", (FEATURE,), "the person accepted the whole: the parts' pull requests are opened and reviewed, one by one"),
+    ("parts.done", (FEATURE,), "every part is reviewed and merged into the common branch: the feature's pull request into main"),
     ("parts.dropped", (FEATURE,), "the first part the person left out (`sclaude parts <name> stop`); it and the ones after are not built"),
     ("parts.<n>.title", (FEATURE,), "a part's title, from the plan"),
     ("parts.<n>.branch", (FEATURE,), "its branch, <umbrella>-<n>"),

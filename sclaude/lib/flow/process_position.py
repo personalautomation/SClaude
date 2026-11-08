@@ -156,10 +156,10 @@ def busy(state, workshop=None):
 
 
 def _local_block(state):
-    """The local suite's block, where position stands it: step 2's for a
-    feature built in parts, step 4's close at step 4."""
+    """The local suite's block, where position stands it: step 2's while a
+    feature's parts are built, step 4's close at step 4."""
     step = state.get("step") or "plan"
-    if _parts_open(state) and step in ("code", "pr", "review"):
+    if _parts_building(state) and step == "code":
         return "code"
     if step == "review":
         return "review_close"
@@ -326,6 +326,24 @@ def _parts_open(state):
     return isinstance(parts.get("total"), int) and parts["total"] >= 2 and parts.get("done") is not True
 
 
+def _parts_building(state):
+    """A feature built in parts with a part still being built (step 2)."""
+    return _parts_open(state) and (state.get("parts") or {}).get("built") is not True
+
+
+def _parts_reviewing(state):
+    """A feature built in parts whose whole is accepted: a part's pull
+    request and review (steps 3 and 4)."""
+    return _parts_open(state) and (state.get("parts") or {}).get("accepted") is True
+
+
+def _parts_count(parts):
+    """The last part built: the plan's last, or the one before the first the
+    person left out (parts_last in parts.sh)."""
+    dropped = parts.get("dropped")
+    return dropped - 1 if isinstance(dropped, int) else parts.get("total")
+
+
 def _step4_local(state):
     """The regression map's block a local run at step 4 stands on, and why;
     None when none is going on."""
@@ -351,20 +369,24 @@ def also(state):
 def _in_step(state, step):
     if _sync_in_step(state):
         return "sync", "a sync with main is open, ahead of the step"
-    # A feature built in parts (parts.sh) is in step 2 while its parts are:
-    # code, pull request and review of the part at work.
+    # A feature built in parts (parts.sh) is in step 2 while its parts are
+    # built, and in steps 3 and 4 for each part's pull request and review once
+    # the whole is accepted. Step 2 over the whole is any feature's step 2.
     parts = state.get("parts") or {}
-    if _parts_open(state) and step in ("code", "pr", "review"):
-        if step in ("code", "review") and _running(state, "local"):
-            return "reg_local", "part %s/%s: the local regression is running" % (parts.get("current"), parts["total"])
-        # The part's own review is p_review: local_pass is step 4's block,
-        # and would light the overview's step 4 while the parts are in step 2.
+    of = "%s/%s" % (parts.get("current"), _parts_count(parts))
+    if _parts_building(state) and step == "code":
+        if _running(state, "local"):
+            return "reg_local", "part %s: the local regression is running" % of
+        return "p_code", "step 2, part %s: development" % of
+    if _parts_reviewing(state) and step in ("pr", "review"):
+        # The part's own review is p_review: local_pass is the feature's
+        # step 4, on the detailed map.
         if step == "review" and _fresh(((state.get("review") or {}).get("local") or {}).get("running")):
-            return "p_review", "part %s/%s: the local review is reading its pull request" % (
-                parts.get("current"), parts["total"])
-        return "p_" + step, "step 2, part %s/%s: %s" % (
-            parts.get("current"), parts["total"], {"code": "development", "pr": "its pull request",
-                                                  "review": "its review"}[step])
+            return "p_review", "part %s: the local review is reading its pull request" % of
+        if step == "review" and _running(state, "local"):
+            return "p_review", "part %s: the local regression is running before its review closes" % of
+        return "p_" + step, "step %s, part %s: %s" % (
+            3 if step == "pr" else 4, of, {"pr": "its pull request", "review": "its review"}[step])
     if step == "code" and _running(state, "local"):
         return "reg_local", "the local regression is running"
     if step == "code" and _fix_open(state, "local"):

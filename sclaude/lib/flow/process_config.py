@@ -115,6 +115,11 @@ VARIANTS = {
     "code": [("demo", {"off"}, {
         "text": "builds it, checks it in Chrome, commits with Requirement: ACn",
         "details": "A fresh session builds from the plan, checks the result in Chrome at the feature's own address, and commits with a Requirement: ACn footer naming the criterion each commit serves. It closes with a report criterion by criterion. demo: off — no demo video is recorded."})],
+    # A look at each part (partAccept: each, parts.sh): a part's session ends
+    # on its demo and the Accept question too.
+    "p_code": [("partAccept", {"each"}, {
+        "text": "this part alone, read by a fresh subagent; Accept",
+        "details": "A step-2 session for this part alone, handed only its criteria and the feature's. Before it closes, a fresh subagent reads the part's diff for what would cost more later — the design the next parts build on, bugs the tests miss, a criterion not met — and the session fixes what it agrees with, up to three rounds. A request the person makes goes where the session puts it: now when it touches what is built, into a later part in the plan otherwise. partAccept: each — the part is shown with its demo and ends on the Accept question; the whole is accepted again once every part is built. The local regression follows. No pull request yet."})],
     "works": [("demo", {"off"}, {
         "text": "the report, then Accept in the session's dialog, or remarks to it"})],
     "preview_ok": [("demo", {"off"}, {
@@ -166,6 +171,8 @@ def setting(cfg, name):
         return cfg.get("ship") if cfg.get("ship") in ("auto", "off") else "ask"
     if name == "demo":
         return "off" if cfg.get("demo") == "off" else "on"
+    if name == "partAccept":
+        return "each" if cfg.get("partAccept") == "each" else "whole"
     if name.startswith("regression."):
         # As project_regression_parts runs them: a deployed stage set to
         # none has no suite, and one set to smoke runs the smoke list when
@@ -332,7 +339,7 @@ COMMANDS = [
     ("sclaude dev [name]", "dev", "always", "start the dev server (--stop stops it)", "prepare"),
     ("sclaude sync <name>", "sync", "always", "merge origin/main in; a conflict opens the sync session", "merge_check"),
     ("sclaude replan <name>", "replan", "before the cycle ends", "back to step 1 in a new conversation; the code stays", "plan"),
-    ("sclaude parts <name> stop", "", "before the cycle ends", "a feature built in parts ends with the parts merged so far; the rest become an issue", "p_whole"),
+    ("sclaude parts <name> stop", "", "before the cycle ends", "a feature built in parts ends with the parts built so far; the rest become an issue", "p_whole"),
     ("sclaude return <name> [reason]", "return", "a finished feature", "back to step 4 with what was said since", "review"),
     ("sclaude issue <name>", "issue", "always", "link or create the feature's issue", "new"),
     ("sclaude news <name>", "news", "with a pull request", "what moved on the PR since the last session", "review"),

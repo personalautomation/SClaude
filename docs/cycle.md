@@ -81,12 +81,18 @@ One file anywhere else and the branch goes the whole way. A product whose
 `docs/` is built into its site is the case this assumption gets wrong.
 
 A feature too big for one review is built in parts, at the person's word at
-step 1: each part has a pull request of its own into the feature's branch,
-reviewed alone and merged there, and the gates after step 2 — the person's
-acceptance, the demo, preview, QA, production — run once, for the whole
-feature, which reaches main through one pull request. Before each part goes
-on, sclaude checks that nobody changed the parts' pull requests by hand on
-GitHub — a base, a merge, a branch rewritten — and stops if somebody did.
+step 1. The parts are built one after another and the person accepts the
+whole once — the demo, Accept — before any review is spent: a review of code
+the person has not seen is thrown away by the first large remark. Then each
+part has a pull request of its own into the feature's branch, reviewed alone
+in the order the parts were built and merged there; preview, QA and
+production run once, for the whole feature, which reaches main through one
+pull request. Before each part's pull request and merge, sclaude checks that
+nobody changed the parts' pull requests by hand on GitHub — a base, a merge, a
+branch rewritten — and stops if somebody did. A part whose branch does not
+take the feature's branch in without conflicts gets the sync session, which
+merges the feature's branch instead of main and keeps what the earlier parts'
+reviews decided.
 
 ## Production rollback that refuses to trample somebody else
 
@@ -219,6 +225,10 @@ declares no smoke list gets its full list, said in the run's heading.
 before its question, and it is recorded again when the code changed since —
 before QA, or before the last epilogue with `qa: auto`) and `off` (no demo videos anywhere in the cycle; the report and the
 criteria are the check).
+`partAccept` takes `whole` (the default: a feature built in parts is shown to
+the person once, whole, when every part is built) and `each` (every part's
+session ends on its demo and the Accept question too, and the whole is
+accepted again at the end).
 
 Before sclaude merges, or asks to, it builds what the merge would put on main
 when main has moved past the branch: the branch merged with the newer main, in

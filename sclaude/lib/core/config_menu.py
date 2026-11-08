@@ -91,6 +91,13 @@ CHOICES["demo"] = [
     ("off", "no demo videos: the report and the criteria are the check"),
 ]
 
+CHOICES["partAccept"] = [
+    ("whole", "a feature built in parts is shown once, whole, when every part "
+              "is built; the parts' reviews follow"),
+    ("each", "each part's session ends on its demo and the Accept question, "
+             "and the whole is accepted again at the end"),
+]
+
 CHOICES["metricsTeam"] = [
     ("real", "the metrics page compares the people whose work is in the records"),
     ("demo", "three generated teammates beside them, drawn from the real figures, "

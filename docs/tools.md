@@ -427,7 +427,7 @@ features with what each step is doing (🟢 running, 🟡 waiting for you, ⚪ i
 when something blocks it, with the branch name to correct, or from a name with
 a tick for creating its issue, as `sclaude new` offers at the terminal — and 🧩
 the project's config, every section explained, with `review`, `qa`, `merge`,
-`ship`, `previewRegression`, `prodRegression`, `demo` and `sleep_mode` set by a button; 💻 Code-server; 🌐 Chrome and the list of every
+`ship`, `previewRegression`, `prodRegression`, `demo`, `partAccept` and `sleep_mode` set by a button; 💻 Code-server; 🌐 Chrome and the list of every
 feature; 🛠 Workshop — `sclaude workshop` in a tab on the laptop, a session that
 changes sclaude, picked up over Remote Control in the Claude app; ⚙️ Settings — language, docs, restarting the bot (the screen waits
 and says when it is back), phone access. Each

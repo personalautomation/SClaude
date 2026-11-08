@@ -46,14 +46,33 @@ breaks the other silently — grep before you edit:
   choose to split") and read by `plan_parts.py` (`SECTION`, `PART`, `TAG`),
   which `acceptance.py --part` filters each part's criteria by;
   `tests/plan-split.py` checks the shape the prompt shows is the one read.
-  The `<if:in-parts>`/`<if:parts-done>` keys and `<part>`, `<parts>`,
-  `<umbrella>`, `<base>` are set by `render_prompt` in `prompt.sh` for
-  `code.md`, `pr.md` and `review.md`; `tests/parts.py` renders them.
+  The `<if:in-parts>`/`<if:parts-built>`/`<if:parts-done>`/`<if:asks-accept>`/
+  `<if:part-alone>` keys and `<part>`, `<parts>`, `<part-base>`, `<umbrella>`,
+  `<base>` are set by `render_prompt` in `prompt.sh` for `code.md`, `pr.md`
+  and `review.md`, by the phase `parts_building`/`parts_whole`/
+  `parts_reviewing` in `parts.sh` and by `partAccept` (`project_part_accept`
+  in `project.sh`, `CHOICES` in `config_menu.py`); `tests/parts.py` renders
+  them. `parts built`, `parts accepted`, `parts merged` and `parts stop` rows
+  are read by `_part_of` in `process_history.py`; `tests/process.py` plays them.
+  A part's branch that does not take the part before it or the common
+  branch in without conflicts goes to the sync session (`parts_merge_in` →
+  `sync_with_main`) with `SYNC_FROM`/`SYNC_REF` set to it: the sync
+  session's path in `sync.sh` reads it through `sync_source`
+  (`merge_build_check`, about main alone, is not reached from there), and
+  `sync.md` takes
+  `<from>` and `<if:from-parts>` from it; `tests/parts.py` runs the
+  hand-over.
 
   <!-- Changed by Claude on 2026-11-08 at the user's decision: a split
   feature stays one issue, one plan and one QA, built in parts inside step 2,
   a pull request for each into the feature's branch; before, the later parts
   became issues of their own. -->
+
+  <!-- Changed by Claude on 2026-11-08 at the user's decision: the parts are
+  built first and the whole accepted once; only then is each part's pull
+  request opened and reviewed, one by one, in the order they were built — a
+  review spent before the person has seen the feature is thrown away by their
+  first large remark. -->
 
 - `KeepAwake.ps1` writes hold-log lines that `bin/keepawake` greps for
   (`hold set|hold released|holding`).

@@ -238,6 +238,14 @@ project_demo_mode() {
   [[ "$(project_get demo "${1:-}" 2>/dev/null || true)" == off ]] && echo off || echo on
 }
 
+# Whether a feature built in parts is shown to the person after each part
+# (parts.sh): `whole`, the default — the person accepts the whole feature
+# once every part is built — or `each`, where every part's session ends on
+# its demo and the same Accept question.
+project_part_accept() {
+  [[ "$(project_get partAccept "${1:-}" 2>/dev/null || true)" == each ]] && echo each || echo whole
+}
+
 # Whether the merge goes on to production: `ask` (the question after the
 # merge), `auto` (shipped without it, unless a gate was passed over or other
 # features' code rides along, which are still asked) or `off` (sclaude never deploys production). Absent or unknown

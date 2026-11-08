@@ -19,7 +19,7 @@ sclaude preview <name>  # deploy the branch to a preview
 sclaude rollback <name> # put production back to the release before this feature
 sclaude regression <name> prod  # run the production tests again; green (or no production tests) lifts a hold
 sclaude replan <name>   # take a feature back to step 1 and plan it again
-sclaude parts <name> stop  # a feature built in parts ships with the parts merged so far
+sclaude parts <name> stop  # a feature built in parts ships with the parts built so far
 sclaude return <name> [reason]  # send a finished feature back to step 4
 sclaude reset <name>    # start the current step over, forgetting its conversation
 sclaude done <name>     # clean up after the merge: worktree and branches
@@ -90,27 +90,42 @@ A feature too large for one review (about 10,000 changed lines) is offered as
 a split. If you take it, it stays **one feature: one issue, one plan, one QA**,
 built in parts. The plan gets a `## Parts` section (`### Part 1 — …`) and each
 criterion names its part (`AC7. [part 2] …`). Step 2 then builds the parts one
-after another, each on its own branch (`feat/<slug>-1`, `-2`, …) with a pull
-request of its own into the feature's branch: the part's session, its pull
-request, its review — which reads that part alone, since the earlier parts are
-in its base — and sclaude merges it there. Nobody is asked whether a part
-works, and no demo is recorded for one. When every part is in, step 2 closes
-on the feature's branch as for any feature: the whole thing checked as one,
-the demo, your Accept. Step 3 opens the feature's pull request into main,
-listing the parts' pull requests and closing the issue, and step 4 reads the
-seams between the parts. Preview, QA, the merge and production happen once,
-for the whole feature. The menu shows where the parts are:
-`2/7 development · part 2/3 · review`.
+after another, each in a session of its own on its own branch
+(`feat/<slug>-1`, `-2`, …) over the part before it. No pull request and no
+review yet: before a part closes, a fresh subagent reads its diff for what
+would cost more to fix later — the design the next parts build on, bugs the
+tests miss — and the session fixes what it agrees with. Ask for something
+while a part is built and the session decides where it goes: now, when it
+touches what is built; into a later part of the plan, when that part covers
+it. Nobody is asked whether a part works, and no demo is recorded for one —
+unless the project sets `partAccept` to `each` (`sclaude config`), and then
+each part ends on its demo and your Accept too. When every part is built,
+step 2 closes on the last part's branch as for any feature: the whole thing
+checked as one, the demo, your Accept.
 
-Before each part's session and each merge, sclaude checks that GitHub still
+Only then are the parts reviewed, one by one, in the order they were built:
+for each, its branch takes in the part before it as its review left it and
+the feature's branch, step 3 opens its pull request into the feature's
+branch, step 4 reviews that part alone, and sclaude merges it there. After
+the last part, step 3 opens the feature's pull request into main, listing the
+parts' pull requests and closing the issue, and step 4 reads the seams
+between the parts. Preview, QA, the merge and production happen once, for the
+whole feature. The menu shows where the parts are: `2/7 development · part
+2/3` while they are built, `4/7 review · part 2/3` while they are reviewed.
+
+Before each part's pull request and each merge, sclaude checks that GitHub still
 holds the parts as it left them. A base changed by hand, a part's pull request
 merged or marked ready before its review closed, or a part's branch rewritten
-on GitHub stops the cycle with what to do. A part merged early is asked
-about: take it as the part's end, or leave it to you.
+on GitHub stops the cycle with what to do. A part whose branch does not take
+the feature's branch in without conflicts — an earlier part's review fix
+meeting this part's code — gets the sync session, as a conflict with main
+does: it merges the feature's branch, keeps what the reviews decided and
+adapts the part to it. A part merged early is asked about: take it as the
+part's end, or leave it to you.
 
-To ship a split feature with the parts merged so far, `sclaude parts <name>
-stop` leaves out the part at work and the ones after it: step 2 closes on the
-merged parts, and its session strikes the left-out parts' criteria, files them
+To ship a split feature with the parts built so far, `sclaude parts <name>
+stop`, while the parts are built, leaves out the part at work and the ones
+after it: step 2 closes on the parts kept, and its session strikes the left-out parts' criteria, files them
 as an issue of their own and takes them off the issue's list.
 
 **Step 2, code.** A fresh session builds it, with the approved plan as its

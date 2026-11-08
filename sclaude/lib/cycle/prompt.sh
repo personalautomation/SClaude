@@ -68,33 +68,53 @@ render_prompt() {
   # Whether step 2 records a demo (project_demo_mode): <if:demo> in code.md.
   local -x SCLAUDE_V_DEMO=""
   [[ "$(project_demo_mode "$wt")" == on ]] && SCLAUDE_V_DEMO=1
-  # A feature built in parts (parts.sh). <if:in-parts> while a part is built:
-  # <part> of <parts>, its branch going into <umbrella>, which is <base>, what
-  # its pull request and its review are read against. <if:parts-done> once
-  # every part is in <umbrella>: step 2 closes on the whole feature, step 3
-  # opens its pull request into main, step 4 reads the seams. <base> is main
-  # for every other feature. No demo in a part's session: it is the whole
-  # feature's, recorded once the parts are in.
+  # A feature built in parts (parts.sh). <if:in-parts> while a part is built
+  # (step 2) and while its pull request is opened and reviewed (steps 3 and
+  # 4): <part> of <parts>, its branch built on <part-base> — the part before
+  # it, the common branch <umbrella> for part 1 — and going into <umbrella>,
+  # which is then <base>, what its pull request and review are read against.
+  # <if:parts-built> once every part is built: step 2 checks the whole on the
+  # last part's branch. <if:parts-done> once every part is reviewed and in
+  # <umbrella>: step 3 opens its pull request into main, step 4 reads the
+  # seams. <base> is main for every other feature. <if:asks-accept>: the
+  # session ends on the Accept question — every step 2 but a part's, unless
+  # the project asks for a look at each part (`partAccept: each`), which also
+  # brings back the part's demo. <if:part-alone> is the other side: a part's
+  # session that ends on its own marker. <if:part-again>: step 2 again on a
+  # part whose pull request is reviewed.
   local -x SCLAUDE_V_BASE="main" SCLAUDE_V_PART="" SCLAUDE_V_PARTS="" SCLAUDE_V_PART_TITLE=""
   local -x SCLAUDE_V_UMBRELLA="" SCLAUDE_V_IN_PARTS="" SCLAUDE_V_PARTS_DONE="" SCLAUDE_V_NOT_IN_PARTS=1
-  local -x SCLAUDE_V_PARTS_DROPPED=""
+  local -x SCLAUDE_V_PARTS_DROPPED="" SCLAUDE_V_PARTS_BUILT="" SCLAUDE_V_PART_BASE="" SCLAUDE_V_ASKS_ACCEPT=1
+  local -x SCLAUDE_V_PART_ALONE="" SCLAUDE_V_PART_AGAIN=""
   if [[ -n "$wt" && -f "$wt/.sclaude/local/feature/state.json" ]] \
      && declare -F parts_split >/dev/null && parts_split "$wt/.sclaude/local/feature/state.json"; then
     local pstate="$wt/.sclaude/local/feature/state.json"
     SCLAUDE_V_UMBRELLA="$(parts_umbrella "$pstate")"
-    SCLAUDE_V_PARTS="$(state_get "$pstate" parts.total)"
-    if parts_open "$pstate"; then
+    SCLAUDE_V_PARTS="$(parts_last "$pstate")"
+    if parts_building "$pstate" || parts_reviewing "$pstate"; then
       SCLAUDE_V_IN_PARTS=1 SCLAUDE_V_NOT_IN_PARTS=""
       SCLAUDE_V_PART="$(parts_now "$pstate")"
       SCLAUDE_V_PART_TITLE="$(state_get "$pstate" "parts.$SCLAUDE_V_PART.title" 2>/dev/null || true)"
+      SCLAUDE_V_PART_BASE="$(parts_below "$pstate" "$SCLAUDE_V_PART")"
       SCLAUDE_V_BASE="$SCLAUDE_V_UMBRELLA"
-      SCLAUDE_V_DEMO=""
+      # Step 2 again while a part is reviewed (a replan, a way back): the
+      # part's own work, not its build — <if:part-again> in code.md.
+      if [[ "$step" == code ]] && parts_reviewing "$pstate"; then
+        SCLAUDE_V_IN_PARTS="" SCLAUDE_V_PART_AGAIN=1
+      fi
+      if parts_building "$pstate" && [[ "$(project_part_accept "$wt")" != each ]]; then
+        SCLAUDE_V_ASKS_ACCEPT="" SCLAUDE_V_DEMO="" SCLAUDE_V_PART_ALONE=1
+      fi
     else
-      SCLAUDE_V_PARTS_DONE=1
+      if parts_whole "$pstate"; then
+        SCLAUDE_V_PARTS_BUILT=1
+      else
+        SCLAUDE_V_PARTS_DONE=1
+      fi
       local dropped; dropped="$(state_get "$pstate" parts.dropped 2>/dev/null || true)"
       if [[ "$dropped" =~ ^[0-9]+$ ]]; then
-        SCLAUDE_V_PARTS_DROPPED="$dropped-$SCLAUDE_V_PARTS"
-        [[ "$dropped" == "$SCLAUDE_V_PARTS" ]] && SCLAUDE_V_PARTS_DROPPED="$dropped"
+        SCLAUDE_V_PARTS_DROPPED="$dropped-$(state_get "$pstate" parts.total)"
+        [[ "$dropped" == "$(state_get "$pstate" parts.total)" ]] && SCLAUDE_V_PARTS_DROPPED="$dropped"
       fi
     fi
   fi
@@ -160,8 +180,7 @@ sys.stdout.write(feature_in_history(sys.argv[2], sys.argv[3]))' "$LIB" "$wt" "$S
       # the parts' pull requests, which no session reads any more.
       if [[ -n "$SCLAUDE_V_PARTS_DONE" ]]; then
         local part_prs=() pn ppr
-        local last_part="$SCLAUDE_V_PARTS"
-        [[ "${dropped:-}" =~ ^[0-9]+$ ]] && last_part=$((dropped - 1))
+        local last_part="$SCLAUDE_V_PARTS"   # the last part built (parts_last)
         for (( pn = 1; pn <= last_part; pn++ )); do
           ppr="$(state_get "$wt/.sclaude/local/feature/state.json" "parts.$pn.pr" 2>/dev/null || true)"
           [[ -n "$ppr" && "$ppr" != null ]] && part_prs+=("$ppr")

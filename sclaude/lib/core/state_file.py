@@ -53,14 +53,17 @@ def part_about(data):
     """Which part of a feature built in parts (parts.sh) the state is at, for
     a history row or a session's run: {} for a feature not built in parts;
     {"part": "<n>", "part_branch": ..., "part_pr": ...} while part <n> is
-    built (its branch and pull request once it has them); {"part": "whole"}
-    once every part is in. The one place this is decided: the rows and the
-    runs must not tell the parts apart differently."""
+    built or reviewed (its branch and pull request once it has them);
+    {"part": "whole"} while step 2 checks the whole, and once every part is
+    in. The one place this is decided: the rows and the runs must not tell
+    the parts apart differently."""
     parts = data.get("parts") or {}
     total = parts.get("total")
     if not isinstance(total, int) or total < 2:
         return {}
     if parts.get("done") is True:
+        return {"part": "whole"}
+    if parts.get("built") is True and parts.get("accepted") is not True:
         return {"part": "whole"}
     n = str(parts.get("current") or "")
     part = parts.get(n) or {}

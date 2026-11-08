@@ -1223,9 +1223,12 @@ local `origin/*` outlives branches that have long been gone and the check lies.
 
 A feature too big for one review is split at step 1, at the person's word,
 into parts reviewed one by one, and stays one issue, one plan and one QA
-(`sclaude/lib/tree/parts.sh`, `sclaude/lib/cycle/plan_parts.py`). The earlier
-way made the first part the feature and filed the rest as issues: preview, QA,
-the demo and production then ran once per part, and main took each part alone.
+(`sclaude/lib/tree/parts.sh`, `sclaude/lib/cycle/plan_parts.py`). The parts
+are built first and reviewed after the person has accepted the whole: a
+review spent on code the person has not seen is thrown away by the first
+large remark, and a person shown half a feature cannot judge it. (Before, each
+part was built, reviewed and merged in turn inside step 2, and the whole was
+seen only at the end; before that, the later parts were filed as issues.)
 
 **The plan is the record.** `## Parts` with a `### Part <n> — <title>` per part,
 numbered from 1, and `[part <n>]` after a criterion's identifier
@@ -1234,48 +1237,108 @@ or the section inside a fence is no split. `parts_capture` puts the count, the
 titles and the common branch into the state (`parts.*`) when `run_step`
 enters step 2 of a feature with no pull request yet — so a plan split after
 step 2 began is taken up too, and a feature further on is never split under
-it — and again on a replan while part 1 has no pull request. Such a replan
-that no longer splits the feature undoes it (`parts_uncapture`): part 1's
-branch is fast-forwarded back into the feature's branch.
+it — and again on a replan while part 1 is being built. Such a replan that no
+longer splits the feature undoes it (`parts_uncapture`): part 1's branch is
+fast-forwarded back into the feature's branch.
 
-**The parts live inside step 2.** `step` goes code → pr → review for each part,
-so the sessions, the gates and the review's machinery are the ones every
-feature has; `parts.done` false makes `step_label` and `position` call it all
-step 2 (`2/7 development · part 2/3 · review`, the `p_*` places of the map's
-"A feature built in parts"). `branch` names the branch at work — the part's,
-`<umbrella>-<n>`, while parts are built, and the common branch after — so
-every "which pull request, is it merged" question asked by the branch is
+**Three phases, told apart by the state.** `parts_building` — `parts.built`
+not yet true: step 2, one part at a time (`parts.current`). `parts_whole` —
+built, `parts.accepted` not yet true: step 2 once more, over the whole.
+`parts_reviewing` — accepted, `parts.done` not yet true: `step` goes pr →
+review for each part, `parts.current` counting from 1 again. `parts.done`:
+every part is in the common branch, and the feature's own pull request
+follows. The sessions, gates and review machinery are the ones every feature
+has; `step_label` and `position` name the part (`2/7 development · part 2/3`,
+`4/7 review · part 2/3`, the `p_*` places of the map's "A feature built in
+parts"). `branch` names the branch at work — the part's, `<umbrella>-<n>` —
+so every "which pull request, is it merged" question asked by the branch is
 about the part at work; `parts.umbrella` keeps the common branch.
 
-**Entering a part** (`parts_enter`, before the part's session): the part's
-branch made off the common branch, or switched to; the common branch pushed
-when GitHub lacks it, being the pull request's base. Work made on the common
-branch before the split becomes part 1, and the common branch goes back to
-where it left main — only while GitHub does not have it past that point. Never
-over uncommitted work or a merge under way. Main is not merged into a part
-(`sync_branch` is skipped): its pull request goes into the common branch, and
-main there would read as the part's change.
+**Building** (`parts_enter`, before a part's session): the part's branch made
+off the part before it (part 1 off the common branch, which stays where it
+left main), or switched to. Work made on the common branch before the split
+becomes part 1, and the common branch goes back to where it left main — only
+while GitHub does not have it past that point. Never over uncommitted work or
+a merge under way. Main is not merged into a part (`sync_branch` is skipped):
+the part's pull request will go into the common branch, and main there would
+read as the part's change. A part's step 2 (`<if:in-parts>` in `code.md`) has
+its diff read by a fresh subagent before it closes — design the next parts
+build on, bugs the tests miss, a criterion not met — and fixes what it agrees
+with, up to three rounds; a request the person makes goes where the session
+puts it, now or into a later part of the plan. It asks nobody whether it
+works and ends on its marker (`<if:part-alone>`), unless `partAccept` is
+`each` (`project_part_accept`): then its demo and the Accept question, as any
+step 2 (`<if:asks-accept>`). Its no-change end is skipped. When its
+regression is green, `after_step` hands over to `parts_built`: the step's
+record kept under `parts.<n>.steps`, step 2 afresh for the next part — or,
+after the last, `parts.built` and step 2 on the last part's branch.
 
-**Closing a part** (`parts_advance`, after the part's review closes in
-`after_step`): the pull request is marked ready and squashed into the common
-branch, the tree goes onto it, and anything else found on it since the last
-part — commits no part brought — is shown and asked about. Each step's record
-is kept under `parts.<n>.steps`, and the steps start afresh — a new
-conversation each, a review's rounds counted again — keeping the list of
-conversations (`runs`) the issue's summary and the costs read. Main is merged
-into the common branch then, with no session at work (`sync_branch`), and the
-next part begins; after the last, step 2 runs once more on the common branch:
-the whole feature checked, the demo, Accept. A part's step 2 asks nobody
-whether it works and ends on its marker; its no-change end is skipped.
+**The whole** (`<if:parts-built>`): the feature checked as one, the demo,
+Accept; its fixes go into the last part's pull request. On Accept,
+`after_step` sets `parts.accepted`, and step 3 begins with part 1.
+
+**Reviewing** (`parts_enter`, before a part's pull request and review): the
+tree goes onto the part's branch, and `parts_take_common` merges into it
+first the part before it as its review left it (the head its pull request was
+squashed from, by GitHub's word (`parts_head`) — origin's copy of the branch,
+fetched, only when no pull request is on record, since GitHub may have deleted
+the branch on merge; never the local branch, which may lack a suggestion
+committed on GitHub or carry a commit nobody reviewed; a head that cannot be
+found holds the part, saying what to do), then the common branch, fetched
+afresh, commit by commit on its first parent: the part before's merge there —
+one commit for a squash or a merge commit, the part's commits one by one for a
+rebase, found as the run whose last commit's tree is what its first commit's
+parent and the reviewed head make together (by trees: a commit's patch moves
+with the lines around it) — recorded as merged (`-s ours`; the earlier
+squashes are in that head already) — merged again from a base before every part, it would conflict on
+every line this part changed in an earlier part's code — and the rest, main's
+syncs and commits put there by hand, merged; so that its pull request into the
+common branch shows the part alone; the common branch is pushed when GitHub lacks it, being the
+pull request's base. The part before comes first because this part was built
+on that part's commits from before its review: merged from the common branch
+alone, whose base is from before every part, a change this part carries would
+win over the review's undoing of it — a revert, a file deleted — without a
+conflict. A merge that would stop on conflicts goes to the sync session
+(`parts_merge_in`): `sync_with_main` with `SYNC_FROM` naming what it merges
+and `SYNC_REF` the revision when it is not origin's (locals the sync
+session's path reads through `sync_source`; main otherwise), and `sync.md`'s
+`<if:from-parts>` telling it that the reviewed side stands and a change the
+person asked for is combined with it, not dropped. A merge it leaves
+unresolved holds the part, and the next run carries it on, with what
+`MERGE_HEAD` says it merges. `sclaude sync`
+refuses a feature whose parts are open: main reaches them through the common
+branch. A step 2 run while a part is reviewed (a replan) is told it works on
+that part (`<if:part-again>`). The order
+is the build order and no other: a part's diff is its own only once the parts
+before it are in the common branch, and a fix in part 1 changes what the rest
+stand on.
+
+**Closing a part's review** (`parts_advance`, from `after_step`): the pull
+request is marked ready and squashed into the common branch (the
+repository's own way where it allows no squash; a way GitHub refuses — a
+rebase that would drop the merges a part's branch took the earlier parts in
+by, or GitHub busy — is followed by the others, after a look whether the pull
+request merged all the same; the next part finds the merge by its tree
+whichever way it went), the tree goes
+onto it, and anything else found on it since the last part — commits no part
+brought — is shown and asked about. The pr and review steps' records are kept
+under `parts.<n>.steps` and start afresh — a new conversation each, a review's
+rounds counted again — keeping the list of conversations (`runs`) the issue's
+summary and the costs read, and the whole's step 2 and its Accept. Main is
+merged into the common branch then, with no session at work (`sync_branch`),
+and the next part's pull request follows; after the last, `parts.done`, and
+step 3 opens the feature's own pull request into main.
 
 **What a hand on GitHub could change is checked, never repaired**
-(`parts_check`, `parts_check_say`), before each part's step and each merge,
-and with `final` before the feature's pull request merges (`merge_offer`):
-each part's pull request into the common branch; the earlier ones merged;
-the one at work open and a draft until its review closes; GitHub's copy of
-its branch what the tree has or behind it; the common branch on GitHub. A
-finding stops the cycle with what to do. A part merged before its review
-closed is asked about (`parts_merged_early`): the part's end, or left.
+(`parts_check`, `parts_check_say`), before each part's pull request and review
+and each merge, and with `final` before the feature's pull request merges
+(`merge_offer`); nothing is checked while the parts are built, when no part
+has a pull request: each part's pull request into the common branch; the
+earlier ones merged; the one at work open and a draft until its review
+closes; GitHub's copy of its branch what the tree has or behind it; the common
+branch on GitHub. A finding stops the cycle with what to do. A part merged
+before its review closed is asked about (`parts_merged_early`): the part's
+end, or left.
 
 **The review reads each pull request against its own base.** A part's local
 review takes `merge-base origin/<common branch>` (`parts_base`), and step 4's
@@ -1299,25 +1362,29 @@ the feature's pull request closes the issue at the end, as any feature's.
 `sclaude done` deletes the parts' branches once GitHub says each pull request
 merged; abandoning a feature closes its parts' open pull requests.
 
-**Ending early** (`cmd_parts <slug> stop`, `sclaude parts <name> stop`): with
-at least one part merged and the part at work not, that part's pull request
-is closed, the tree goes onto the common branch, `parts.dropped` names the
-first part left out (the count stays the plan's, and `parts_check` stops
-before it); step 2 closes on the common branch, and its session
+**Ending early** (`cmd_parts <slug> stop`, `sclaude parts <name> stop`): only
+while the parts are built, with at least one part built. `parts.dropped` names
+the first part left out (the count stays the plan's; `parts_last` is the one
+before it, and the reviews and `parts_check` stop there); the tree goes onto
+the last part kept, and step 2 checks the whole there; its session
 (`<if:parts-dropped>` in `code.md`) strikes the left-out criteria, files them
-as an issue and takes them off the issue's list.
+as an issue and takes them off the issue's list. Once the whole is accepted,
+leaving a part out is a replan's.
 
 **A run cut off between a part's merge and the next part** — a sync with a
 conflict, a fast-forward refused, Ctrl-C — leaves `parts.<n>.merged` set with
 the part still current; the next `run_step` goes on from there
-(`parts_advance … merged`) rather than into the merged part's session, and
+(`parts_advance … merged`) rather than into the merged part's review, and
 records the merge once.
 
 **The history names the part.** For a feature built in parts every row
 `history_add` and `session_runs` write carries `part` — the part's number
-while parts are built, `whole` after — with `part_branch` and `part_pr` while
-a part is at work (`parts_about`), and each new entry of `steps.<step>.runs`
-its `part`; the played history and the costs place a row by it.
+while it is built or reviewed, `whole` while the whole is checked and after
+the last part is in — with `part_branch` and `part_pr` while a part is at work
+(`parts_about`, `state_file.part_about`), and each new entry of
+`steps.<step>.runs` its `part`; the played history (`_part_of`, `_parts_way`)
+and the costs place a row by it: each part one pass of the parts map, its
+build and later its review, the whole on the last part's pass.
 
 ## Preview and production
 

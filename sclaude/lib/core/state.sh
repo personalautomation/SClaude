@@ -315,7 +315,8 @@ history_add() {
   # ends where its own last line is.
   [[ -n "${SCLAUDE_RUN:-}" ]] && set -- "$@" run="$SCLAUDE_RUN"
   # Which part of a feature built in parts (parts.sh) it happened in: `part`
-  # the part's number while the parts are built, `whole` after; with the
+  # the part's number while the parts are built or reviewed, `whole` while
+  # the whole is checked and after the last part is in; with the
   # part's branch and pull request. Read only where the state holds parts,
   # and never over a part= the caller gave.
   local about
@@ -336,8 +337,8 @@ history_add() {
 
 # What history_add and session_runs say of the part a row is about: nothing
 # for a feature not built in parts; `part=<n> part_branch=<b> part_pr=<pr>`
-# while part <n> is built (the pull request once it has one); `part=whole`
-# once every part is in. Words without spaces, one a field.
+# while part <n> is built or reviewed (the pull request once it has one);
+# `part=whole` while the whole is checked and once every part is in. Words without spaces, one a field.
 #
 #   parts_about <state>
 parts_about() {

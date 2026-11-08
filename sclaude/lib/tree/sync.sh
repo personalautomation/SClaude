@@ -36,6 +36,18 @@ SYNC_MODEL="sonnet"
 SYNC_EFFORT="medium"
 
 # The branch the tree is on; 1, and nothing printed, when HEAD is detached.
+# What the sync merges in: main, or — for a part of a feature built in parts
+# before its pull request (parts_merge_in in parts.sh) — the part before it
+# or the feature's common branch, set as locals around the call: bash hands
+# them to every function the caller calls. SYNC_FROM names it; SYNC_REF,
+# when set, is the revision itself (a local branch, which origin may have
+# deleted once its pull request merged), and is not fetched. The sync
+# session's path reads it through sync_source.
+SYNC_FROM="${SYNC_FROM:-main}"
+SYNC_REF="${SYNC_REF:-}"
+
+sync_source() { printf '%s\n' "${SYNC_REF:-origin/$SYNC_FROM}"; }
+
 sync_branch_name() {
   local b
   b="$(git -C "$1" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
@@ -70,11 +82,11 @@ sync_close_open() {
   session_runs "$1" sync close
 }
 
-# Fetches origin's main and, when origin has it, the tree's branch: what
-# merge_conflicts asks about. 1 when main could not be fetched.
+# Fetches origin's main (SYNC_FROM) and, when origin has it, the tree's
+# branch: what merge_conflicts asks about. 1 when main could not be fetched.
 sync_fetch() {
   local branch
-  git -C "$1" fetch -q origin main 2>/dev/null || return 1
+  [[ -n "$SYNC_REF" ]] || git -C "$1" fetch -q origin "$SYNC_FROM" 2>/dev/null || return 1
   branch="$(sync_branch_name "$1")" \
     && { git -C "$1" fetch -q origin "$branch" 2>/dev/null || true; }
   return 0
@@ -117,7 +129,7 @@ merge_conflicts() {
 #   merge_conflicts_at <wt> <rev>
 merge_conflicts_at() {
   local out rc=0
-  out="$(git -C "$1" merge-tree --write-tree --name-only --no-messages "$2" origin/main 2>/dev/null)" || rc=$?
+  out="$(git -C "$1" merge-tree --write-tree --name-only --no-messages "$2" "$(sync_source)" 2>/dev/null)" || rc=$?
   case "$rc" in
     0) return 0 ;;
     # The first line is the tree it would write; the paths follow.
@@ -270,11 +282,11 @@ sync_push_pending() {
   git -C "$wt" merge-base --is-ancestor "$remote" HEAD 2>/dev/null || return 1
   # And main is in it: the unpushed work is the merge with main, not some
   # other session's commits that happen to merge cleanly.
-  git -C "$wt" merge-base --is-ancestor origin/main HEAD 2>/dev/null || return 1
+  git -C "$wt" merge-base --is-ancestor "$(sync_source)" HEAD 2>/dev/null || return 1
   ! merge_under_way "$wt" && tree_clean "$wt" || return 1
   merge_conflicts_at "$wt" HEAD >/dev/null || return 1
   if ! GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q origin "$branch" >/dev/null 2>&1; then
-    warn "  main is merged into $branch here, but the push failed. Push it by hand:"
+    warn "  $SYNC_FROM is merged into $branch here, but the push failed. Push it by hand:"
     warn "    git -C $wt push origin $branch"
     return 2
   fi
@@ -315,7 +327,7 @@ sync_deferred() {
   tree_clean "$wt" || return 1
   # --no-commit, so that the merge is committed below and only there, after
   # the logs: it stops on their conflicts anyway.
-  git -C "$wt" merge -q --no-ff --no-commit origin/main >/dev/null 2>&1
+  git -C "$wt" merge -q --no-ff --no-commit "$(sync_source)" >/dev/null 2>&1
   merge_under_way "$wt" || return 1
   tmp="$(mktemp -d)"
   for f in "$@"; do
@@ -342,7 +354,7 @@ sync_deferred() {
   fi
   [[ -n "$(sync_origin_tip "$wt")" ]] || return 0
   if ! GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q --no-verify origin "$branch" >/dev/null 2>&1; then
-    warn "  main is merged into $branch here, but the push failed. Push it by hand:"
+    warn "  $SYNC_FROM is merged into $branch here, but the push failed. Push it by hand:"
     warn "    git -C $wt push origin $branch"
     return 2
   fi
@@ -481,8 +493,8 @@ sync_plain_merge() {
   # leaves the orchestrator waiting on a window that may be in another program
   # entirely ("Waiting for your editor to close the file..."), with nothing in
   # the terminal to say what it is waiting for.
-  if git -C "$wt" merge --no-edit origin/main; then
-    echo "  ${GREEN}merged — $branch now carries everything from main${OFF}"
+  if git -C "$wt" merge --no-edit "$(sync_source)"; then
+    echo "  ${GREEN}merged — $branch now carries everything from $SYNC_FROM${OFF}"
     return 0
   fi
   warn ""
@@ -540,7 +552,7 @@ sync_with_main() {
     local prc=0
     sync_push_pending "$wt" || prc=$?
     if [[ "$prc" -eq 0 ]]; then
-      info "  main was merged into the branch here and not pushed — pushed it now."
+      info "  $SYNC_FROM was merged into the branch here and not pushed — pushed it now."
       sync_close_open "$state"
       return 3
     fi
@@ -575,10 +587,15 @@ sync_with_main() {
   # prompt says that pull request is open, so a merged one is no review's.
   local reviewed=""
   [[ "$(state_get "$state" step 2>/dev/null || true)" == "done" && "$named" =~ ^[0-9]+$ ]] && reviewed=1
+  # A part's branch taking its feature's common branch in (parts.sh): said
+  # so, and the session told what that branch holds.
+  local from_parts="" moved="main moved"
+  [[ "$SYNC_FROM" != main ]] && from_parts=1 moved="$SYNC_FROM moved" named=""
+  [[ -n "$unfinished" && -n "$from_parts" ]] && what="a merge of $SYNC_FROM is under way here, resolved and not committed"
   if [[ "$named" =~ ^[0-9]+$ ]]; then
     warn "PR #$pr does not merge with main: $what."
   else
-    warn "The branch does not merge with main: $what."
+    warn "The branch does not merge with $SYNC_FROM: $what."
   fi
   (( ${#files[@]} )) && printf '%s\n' "${files[@]}" | sed 's/^/    /'
 
@@ -586,11 +603,11 @@ sync_with_main() {
     local drc=0
     sync_deferred "$wt" "${files[@]}" || drc=$?
     if [[ "$drc" -eq 0 ]]; then
-      history_edge "$state" y_when merge_check sclaude "main moved"
+      history_edge "$state" y_when merge_check sclaude "$moved"
       history_edge "$state" merge_check main_in sclaude "only the deferred logs" note="${#files[@]} file(s)"
       history_edge "$state" main_in y_on sclaude ""
       sync_close_open "$state"
-      info "  Only the deferred logs: main is merged in with both sides' rows."
+      info "  Only the deferred logs: $SYNC_FROM is merged in with both sides' rows."
       ask_feed say "$(phase_line finished sync) · only the deferred logs, merged by sclaude"
       return 3
     fi
@@ -621,7 +638,7 @@ sync_with_main() {
     session="$(new_session_id)"
   fi
   if [[ -z "$resume" ]]; then
-    history_edge "$state" y_when merge_check sclaude "main moved"
+    history_edge "$state" y_when merge_check sclaude "$moved"
     history_edge "$state" merge_check sync sclaude "git merge-tree" note="${#files[@]} file(s): $what"
   fi
   session_runs "$state" sync open "$session"
@@ -629,7 +646,7 @@ sync_with_main() {
   [[ "$n" =~ ^[1-9][0-9]*$ ]] || n=1
 
   echo ""
-  echo "${BOLD}${BLUE}── $slug · $(phase_title sync): merge main into $branch ──${OFF}"
+  echo "${BOLD}${BLUE}── $slug · $(phase_title sync): merge $SYNC_FROM into $branch ──${OFF}"
   info "   $SYNC_MODEL / $SYNC_EFFORT / $(step_mode review) · $wt"
   echo ""
   ask_feed say "$(phase_line "$([[ -n "$resume" ]] && echo resumed || echo started)" sync "$n") · $what"
@@ -638,9 +655,9 @@ sync_with_main() {
   session_watch_start "$wt" "$session"
   if [[ -n "$resume" ]]; then
     if [[ -n "$unfinished" ]]; then
-      prompt="The merge with \`origin/main\` is still under way here: nothing is left unmerged, but it is not committed. Check it and carry on with the sync as agreed above."
+      prompt="The merge with \`$(sync_source)\` is still under way here: nothing is left unmerged, but it is not committed. Check it and carry on with the sync as agreed above."
     else
-      prompt="The branch still does not merge with \`origin/main\`. These files conflict now:"$'\n\n'"$(printf '    %s\n' "${files[@]}")"$'\n\n'"Carry on with the sync as agreed above."
+      prompt="The branch still does not merge with \`$(sync_source)\`. These files conflict now:"$'\n\n'"$(printf '    %s\n' "${files[@]}")"$'\n\n'"Carry on with the sync as agreed above."
     fi
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --resume "$session" \
         --model "$SYNC_MODEL" --effort "$SYNC_EFFORT" \
@@ -648,8 +665,9 @@ sync_with_main() {
         -n "$(session_label sync "$n")/$slug" "$prompt" )
   else
     prompt="$(SCLAUDE_V_BRANCH="$branch" SCLAUDE_V_CONFLICTS="$conflicts" SCLAUDE_V_UNFINISHED="$unfinished" \
-      SCLAUDE_V_REVIEWED="$reviewed" \
-      SCLAUDE_V_UNREVIEWED="$([[ -z "$reviewed" ]] && echo 1)" \
+      SCLAUDE_V_REVIEWED="$reviewed" SCLAUDE_V_FROM="$(sync_source)" SCLAUDE_V_FROM_PARTS="$from_parts" \
+      SCLAUDE_V_FROM_MAIN="$([[ -z "$from_parts" ]] && echo 1)" \
+      SCLAUDE_V_UNREVIEWED="$([[ -z "$reviewed" && -z "$from_parts" ]] && echo 1)" \
       render_prompt sync "$slug" "$pr" "$issue" "$wt")" || { session_watch_stop; return 1; }
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --session-id "$session" \
         --model "$SYNC_MODEL" --effort "$SYNC_EFFORT" \
@@ -687,8 +705,10 @@ sync_with_main() {
   fi
   [[ -n "$settled" ]] && return 3
   echo ""
-  warn "The branch still does not merge cleanly with main, or is not pushed."
-  if [[ -n "$reviewed" ]]; then
+  warn "The branch still does not merge cleanly with $SYNC_FROM, or is not pushed."
+  if [[ -n "$from_parts" ]]; then
+    info "  The part's pull request waits for it. Carry on with: $SELF $slug"
+  elif [[ -n "$reviewed" ]]; then
     info "  The preview, QA and the merge wait for it. Carry on with: $SELF $slug"
   else
     info "  The session is resumed by the next sync: $SELF sync $slug"

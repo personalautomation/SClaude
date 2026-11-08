@@ -318,16 +318,51 @@ instruments_state() {
 
 # Whether HEAD reached <now> from <was> by commits alone, as the reflog tells:
 # a pull, a checkout or a reset moves it too, and the session watched can run
-# those, while it cannot commit.
+# those, while it cannot commit. A fast-forward to what origin/main has passes,
+# and one reset: to origin/main, in a squash that is published, below.
 #
 #   instruments_committed_only <was> <now>
 instruments_committed_only() {
-  local was="$1" sha how
+  local was="$1" sha how published="" newer="" into="" replaced=""
+  # A maintainer squashes before a push: a reset to origin/main, then one
+  # commit. Once that commit is on origin/main, and it holds what the reset
+  # left behind (the head before the reset, merged into the commit made after
+  # it, changes nothing), the checkout lost nothing and holds only what is
+  # published: as harmless as a commit. A retrospective was warned loudly over
+  # exactly that. A reset that threw unpublished commits away stays loud.
+  # The merge is into the squash, not into origin/main as it is now: a later
+  # change on main to the same lines would make it conflict. So the squash is
+  # the first commit after the reset (a fast-forward is main's, not it), or
+  # the reset's own head when none came — followed through an amend to the
+  # commit that replaced it, as a fixed message is; and it must still be in
+  # HEAD. An amend that left the work out is that commit, and fails the merge.
+  git -C "$INSTRUMENTS" merge-base --is-ancestor HEAD refs/remotes/origin/main 2>/dev/null \
+    && published=1
   while read -r sha how; do
+    if [[ -n "$into" ]]; then
+      git -C "$INSTRUMENTS" merge-base --is-ancestor "$into" HEAD 2>/dev/null || return 1
+      [[ "$(git -C "$INSTRUMENTS" merge-tree --write-tree "$into" "$sha" 2>/dev/null | head -1)" \
+         == "$(git -C "$INSTRUMENTS" rev-parse "$into^{tree}")" ]] || return 1
+      into=""
+    fi
     [[ "$sha" == "$was" ]] && return 0
+    if [[ "$how" == commit* ]]; then
+      [[ -n "$replaced" ]] || newer="$sha"
+      replaced=""; [[ "$how" == "commit (amend)"* ]] && replaced=1
+      continue
+    fi
+    replaced=""
     # sclaude's own fast-forward to what a workshop published
-    # (workshop_live_update) is as harmless as a commit.
-    [[ "$how" == commit* || "$how" == "merge origin/main: Fast-forward" ]] || return 1
+    # (workshop_live_update) is as harmless as a commit; so is a person's
+    # pull, or any fast-forward, to what origin/main has. One to a branch of
+    # its own is not.
+    if [[ "$how" == "merge origin/main: Fast-forward" ]] \
+       || { [[ "$how" == *": Fast-forward" ]] \
+            && git -C "$INSTRUMENTS" merge-base --is-ancestor "$sha" refs/remotes/origin/main 2>/dev/null; }; then
+      newer=""; continue
+    fi
+    [[ -n "$published" && "$how" == "reset: moving to origin/main" ]] || return 1
+    into="${newer:-$sha}" newer=""
   done < <(git -C "$INSTRUMENTS" log -g --format='%H %gs' HEAD 2>/dev/null)
   return 1
 }
@@ -359,7 +394,9 @@ instruments_workers() {
 # time, and the session watched here cannot commit (the guard refuses it): a
 # retrospective was told it had changed the checkout when two commits of
 # another session's had landed while it ran. So a HEAD that moved by commits
-# alone (the reflog says so; a pull, a checkout or a reset is not that), over a
+# alone (the reflog says so; a checkout or a reset is not that, but a pull to
+# what origin/main has, and a published squash's reset to origin/main, are —
+# instruments_committed_only), over a
 # tree clean before and after, with the same config and hooks, is said
 # quietly, with the commits named; whatever else changed is loud, the commits
 # named with it.

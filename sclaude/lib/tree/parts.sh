@@ -41,6 +41,22 @@
 # Part of sclaude; pulled in with source from bin/sclaude.
 # It does not run on its own.
 
+# Pushes <refspec> to origin within a minute, and on failure says <what>
+# with git's own words under it — the product's pre-push hook runs here, and
+# a refusal without what it found leaves nothing to go on — or that it timed
+# out, which leaves no words.
+#
+#   parts_push <wt> <refspec> <what>
+parts_push() {
+  local push_out rc=0
+  push_out="$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$1" push -q origin "$2" 2>&1)" || rc=$?
+  (( rc == 0 )) && return 0
+  warn "  $3"
+  (( rc == 124 )) && push_out="the push timed out after a minute"
+  [[ -z "$push_out" ]] || warn "$(tail -n 12 <<< "$push_out" | sed 's/^/     /')"
+  return 1
+}
+
 # Whether the feature is split, and where its parts stand.
 #
 #   parts_split <state>      — split into two or more parts
@@ -256,8 +272,8 @@ parts_enter() {
     parts_take_common "$wt" "$state" "$n" || return 1
     # The pull request goes into the common branch, so GitHub has to have it.
     if [[ -z "$(GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$wt" ls-remote --heads origin "$umbrella" 2>/dev/null)" ]]; then
-      GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$wt" push -q origin "refs/heads/$umbrella:refs/heads/$umbrella" 2>/dev/null \
-        || warn "  Could not push $umbrella: the part's pull request needs it on GitHub (git push origin $umbrella)."
+      parts_push "$wt" "refs/heads/$umbrella:refs/heads/$umbrella" \
+        "Could not push $umbrella: the part's pull request needs it on GitHub (git push origin $umbrella)." || true
     fi
   fi
   if parts_whole "$state"; then
@@ -668,8 +684,7 @@ parts_advance() {
   # and nothing piles up for the end.
   sync_branch "$wt" || { info "  The next part waits for the sync. Come back with: $SELF $slug"; return 1; }
   if [[ "$(git -C "$wt" rev-parse HEAD)" != "$(git -C "$wt" rev-parse -q --verify "refs/remotes/origin/$umbrella" 2>/dev/null)" ]]; then
-    GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$wt" push -q origin "HEAD:refs/heads/$umbrella" 2>/dev/null \
-      || warn "  Could not push $umbrella after the sync: git -C $wt push origin $umbrella"
+    parts_push "$wt" "HEAD:refs/heads/$umbrella" "Could not push $umbrella after the sync: git -C $wt push origin $umbrella" || true
   fi
 
   if (( n < total )); then

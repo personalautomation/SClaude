@@ -42,9 +42,11 @@ instruments_propose() {
   fi
 
   info "  instruments: pushing $ahead commit(s) to $remote/$branch"
-  if ! GIT_TERMINAL_PROMPT=0 git -C "$dir" push -q -u "$remote" "$branch" >/dev/null 2>&1; then
+  local push_out
+  if ! push_out="$(GIT_TERMINAL_PROMPT=0 git -C "$dir" push -q -u "$remote" "$branch" 2>&1)"; then
     warn "  instruments: push failed — the work is committed but not sent"
     warn "  finish it by hand: git -C $dir push $remote $branch"
+    [[ -z "$push_out" ]] || warn "$(tail -n 12 <<< "$push_out" | sed 's/^/     /')"
     return 2
   fi
 

@@ -285,9 +285,13 @@ sync_push_pending() {
   git -C "$wt" merge-base --is-ancestor "$(sync_source)" HEAD 2>/dev/null || return 1
   ! merge_under_way "$wt" && tree_clean "$wt" || return 1
   merge_conflicts_at "$wt" HEAD >/dev/null || return 1
-  if ! GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q origin "$branch" >/dev/null 2>&1; then
+  # The push's words are kept: the product's pre-push hook runs here, and a
+  # failure said without what it found leaves nothing to go on.
+  local push_out
+  if ! push_out="$(GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q origin "$branch" 2>&1)"; then
     warn "  $SYNC_FROM is merged into $branch here, but the push failed. Push it by hand:"
     warn "    git -C $wt push origin $branch"
+    [[ -z "$push_out" ]] || warn "$(tail -n 12 <<< "$push_out" | sed 's/^/     /')"
     return 2
   fi
   return 0
@@ -353,9 +357,11 @@ sync_deferred() {
     return 1
   fi
   [[ -n "$(sync_origin_tip "$wt")" ]] || return 0
-  if ! GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q --no-verify origin "$branch" >/dev/null 2>&1; then
+  local push_out
+  if ! push_out="$(GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q --no-verify origin "$branch" 2>&1)"; then
     warn "  $SYNC_FROM is merged into $branch here, but the push failed. Push it by hand:"
     warn "    git -C $wt push origin $branch"
+    [[ -z "$push_out" ]] || warn "$(tail -n 12 <<< "$push_out" | sed 's/^/     /')"
     return 2
   fi
   return 0

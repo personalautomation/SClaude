@@ -192,8 +192,9 @@ deferred_to_main() {
   [[ -n "$files" ]] || return 1
 
   tmp="$(mktemp -d)"
-  local attempt sent=1
+  local attempt sent=1 push_out=""
   for attempt in 1 2; do
+    push_out=""
     git -C "$wt" worktree remove --force "$tmp/tree" >/dev/null 2>&1 || true
     (( attempt == 1 )) || git -C "$wt" fetch -q origin main 2>/dev/null || true
     git -C "$wt" worktree add -q --detach "$tmp/tree" origin/main >/dev/null 2>&1 || break
@@ -243,7 +244,7 @@ deferred_to_main() {
         -m "Entries put off on $branch after its review go to main directly (deferred_to_main in sclaude)." \
         >/dev/null 2>&1 || break
     fi
-    if GIT_TERMINAL_PROMPT=0 git -C "$tmp/tree" push -q --no-verify origin HEAD:main >/dev/null 2>&1; then
+    if push_out="$(GIT_TERMINAL_PROMPT=0 git -C "$tmp/tree" push -q --no-verify origin HEAD:main 2>&1)"; then
       sha="$(git -C "$tmp/tree" rev-parse --short HEAD)"
       sent=0; break
     fi
@@ -253,6 +254,7 @@ deferred_to_main() {
   rm -rf "$tmp"
   if [[ "$sent" != 0 ]]; then
     warn "  could not send the deferred entries on $branch to main — they stay on the branch"
+    [[ -z "$push_out" ]] || warn "$(tail -n 12 <<< "$push_out" | sed 's/^/     /')"
     return 2
   fi
   git -C "$wt" fetch -q origin main 2>/dev/null || true
@@ -552,13 +554,19 @@ PY
   fi
   if [[ "$committed" -gt 0 || "$unsent" -gt 0 ]]; then
     [[ "$committed" -gt 0 ]] || info "  sending what an earlier review today committed and did not push"
-    if GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q -u origin "$branch" >/dev/null 2>&1; then
+    # The push's output is kept: the product's pre-push hook runs its checks,
+    # and a failure said without them leaves nothing to go on once the tree
+    # is gone.
+    local push_out
+    if push_out="$(GIT_TERMINAL_PROMPT=0 git -C "$wt" push -q -u origin "$branch" 2>&1)"; then
       local pr
       pr="$(cd "$wt" && gh pr list --head "$branch" --state open --json url --jq '.[0].url // ""' 2>/dev/null)" || pr=""
       [[ -n "$pr" ]] || pr="$(cd "$wt" && gh pr create --base main --head "$branch" --fill 2>/dev/null)" || pr=""
       info "  the review's changes: ${pr:-pushed to $branch; open its pull request by hand}"
     else
-      warn "  the review committed to $branch in $wt, and the push failed — push it by hand"
+      warn "  the review committed to $branch, and the push failed — push it by hand:"
+      warn "    git -C $(printf '%q' "$root") push -u origin $(printf '%q' "$branch")"
+      [[ -z "$push_out" ]] || warn "$(tail -n 12 <<< "$push_out" | sed 's/^/     /')"
     fi
   elif [[ -z "$dirty" ]]; then
     # Not "changed nothing": a fix to Claude Code's memory is made outside

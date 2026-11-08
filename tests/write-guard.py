@@ -642,6 +642,61 @@ try:
     check("instruments-commits-and-edits-loud",
           "changed sclaude's own checkout" in both and "more" in both and both.endswith("changed"), True)
     subprocess.run(["git", "-C", inst, "checkout", "-q", "a"], check=True)
+    # A maintainer's squash before a push — commits, a reset to origin/main,
+    # one commit — is quiet once that commit is on origin/main, and loud
+    # while it is not.
+    squash = ('info() { echo "INFO $*"; }; INSTRUMENTS="%s"; g() { git -C "$INSTRUMENTS" '
+              '-c user.name=t -c user.email=t@t "$@"; }; s="$(instruments_state)"; '
+              'echo x%s > "$INSTRUMENTS/a"; g commit -qam published; '
+              'g update-ref refs/remotes/origin/main HEAD; echo %s > "$INSTRUMENTS/a"; g commit -qam work; '
+              'g reset -q --soft origin/main; g commit -qm squashed; %s'
+              'instruments_unchanged "$s" review 2>&1 && echo quiet || echo changed')
+    pushed = sh(squash % (inst, 11, 11, 'g update-ref refs/remotes/origin/main HEAD; '), repo)
+    check("instruments-squash-pushed-quiet",
+          ("squashed" in pushed, pushed.endswith("quiet"), "WARN" not in pushed), (True, True, True))
+    # ...and stays quiet when main later changes the same lines.
+    later = sh(squash % (inst, 14, 14, 'g update-ref refs/remotes/origin/main HEAD; echo later > '
+                         '"$INSTRUMENTS/a"; g commit -qam later; g update-ref refs/remotes/origin/main HEAD; '),
+               repo)
+    check("instruments-squash-then-main-moves-quiet", later.endswith("quiet"), True)
+    # ...and when sclaude fast-forwards the checkout to such a change of main's.
+    later_ff = ('g update-ref refs/remotes/origin/main HEAD; '
+                'b=$(echo later | g hash-object -w --stdin); '
+                't=$(g ls-tree HEAD | awk -v b="$b" \'$4 == "a" {$3 = b} {print $1" "$2" "$3"\\t"$4}\' | g mktree); '
+                'g update-ref refs/remotes/origin/main "$(g commit-tree -p HEAD -m later "$t")"; '
+                'g merge -q --ff-only origin/main; ')
+    # The squash was pushed from elsewhere: the reset lands on it, and the
+    # fast-forward comes right after, with no commit between.
+    moved_ff = sh(squash.replace('g reset -q --soft origin/main; g commit -qm squashed; ',
+                                 'g update-ref refs/remotes/origin/main '
+                                 '"$(g commit-tree -p origin/main -m elsewhere "HEAD^{tree}")"; '
+                                 'g reset -q --soft origin/main; ')
+                  % (inst, 15, 15, later_ff), repo)
+    check("instruments-squash-then-fast-forward-quiet", moved_ff.endswith("quiet"), True)
+    # An amend that took the work back out of the squash is loud, pushed or not.
+    amended = sh(squash % (inst, 16, 16, 'g checkout -q HEAD~1 -- a; g commit -q --allow-empty --amend -m amended; '
+                           'g update-ref refs/remotes/origin/main HEAD; '), repo)
+    check("instruments-squash-amended-away-loud", amended.endswith("changed"), True)
+    # An amend that only fixed the squash's message is quiet.
+    reworded = sh(squash % (inst, 17, 17, 'g commit -q --amend -m reworded; '
+                            'g update-ref refs/remotes/origin/main HEAD; '), repo)
+    check("instruments-squash-reworded-quiet", reworded.endswith("quiet"), True)
+    # A person's pull, or any fast-forward to what origin/main has, is quiet.
+    pulled = sh('info() { echo "INFO $*"; }; INSTRUMENTS="%s"; g() { git -C "$INSTRUMENTS" '
+                '-c user.name=t -c user.email=t@t "$@"; }; s="$(instruments_state)"; '
+                'b=$(echo pulled | g hash-object -w --stdin); '
+                't=$(g ls-tree HEAD | awk -v b="$b" \'$4 == "a" {$3 = b} {print $1" "$2" "$3"\\t"$4}\' | g mktree); '
+                'g update-ref refs/remotes/origin/main "$(g commit-tree -p HEAD -m pulled "$t")"; '
+                'g merge -q --ff-only refs/remotes/origin/main; '
+                'instruments_unchanged "$s" review 2>&1 && echo quiet || echo changed' % inst, repo)
+    check("instruments-pull-to-main-quiet", pulled.endswith("quiet"), True)
+    unpushed = sh(squash % (inst, 12, 12, ''), repo)
+    check("instruments-squash-unpushed-loud", unpushed.endswith("changed"), True)
+    # A hard reset to origin/main that throws an unpublished commit away is
+    # loud, though HEAD ends on origin/main.
+    lost = sh(squash.replace('g reset -q --soft origin/main; g commit -qm squashed; ',
+                             'g reset -q --hard origin/main; ') % (inst, 13, 13, ''), repo)
+    check("instruments-hard-reset-drop-loud", lost.endswith("changed"), True)
     # Untracked content and the repository's config count too.
     with open(os.path.join(inst, "loose"), "w") as fh:
         fh.write("1\n")

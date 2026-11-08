@@ -661,11 +661,15 @@ friction_push_project() {
     friction_propose_project "$wt" "$from" "$branch" "$sent"
     return 0
   fi
-  if git -C "$wt" push -q origin "$branch" 2>/dev/null; then
+  # The push's words are kept: the product's pre-push hook runs here, and a
+  # failure said without what it found leaves nothing to go on.
+  local push_out
+  if push_out="$(git -C "$wt" push -q origin "$branch" 2>&1)"; then
     info "  the friction review's fix to the project is pushed to $branch"
   else
     warn "  could not push the friction review's fix to $branch — push it by hand:"
     warn "    git -C $wt push origin $branch"
+    [[ -z "$push_out" ]] || warn "$(tail -n 12 <<< "$push_out" | sed 's/^/     /')"
   fi
 }
 
@@ -683,7 +687,7 @@ friction_push_project() {
 #
 #   friction_propose_project <wt> <from> <branch> [entries-sent]
 friction_propose_project() {
-  local wt="$1" from="$2" branch="$3" sent="${4:-}" new tmp pr commits
+  local wt="$1" from="$2" branch="$3" sent="${4:-}" new tmp pr commits why="" push_out="" listed=""
   new="sclaude/friction-${branch##*/}-$(date +%Y%m%d-%H%M%S)"
   tmp="$(mktemp -d)"
   git -C "$wt" fetch -q origin main 2>/dev/null || true
@@ -701,17 +705,44 @@ friction_propose_project() {
       return 0
     fi
   else
-    commits="$(git -C "$wt" rev-list --reverse --no-merges HEAD "^$from" ^origin/main 2>/dev/null)"
+    # An empty list is nothing to carry only when every merge in the range
+    # is clean: its tree what git makes of its two parents alone. A fix made
+    # while merging — a conflict resolved, a line edited — is in no commit
+    # rev-list names, and is said and left to the person. Judged at each
+    # merge, not against main as it is now, which may have moved on or
+    # reverted since.
+    if commits="$(git -C "$wt" rev-list --reverse --no-merges HEAD "^$from" ^origin/main 2>/dev/null)"; then
+      listed=1
+      if [[ -z "$commits" ]] && friction_merges_clean "$wt" "$from"; then
+        if [[ "$(git -C "$wt" rev-parse HEAD)" == "$(git -C "$wt" rev-parse "$from^{commit}" 2>/dev/null)" ]]; then
+          info "  $branch has merged; the friction review committed nothing to carry"
+        else
+          info "  $branch has merged; the friction review only took main in, and holds nothing to carry"
+        fi
+        rm -rf "$tmp"
+        return 0
+      fi
+    fi
   fi
-  if git -C "$wt" worktree add -q -b "$new" "$tmp/tree" origin/main 2>/dev/null \
-      && [[ -n "$commits" ]] \
-      && friction_carry "$wt" "$tmp/tree" "$sent" "$commits" \
-      && git -C "$tmp/tree" push -q -u origin "$new" 2>/dev/null; then
+  # Which step stopped it is said: each wants a different hand.
+  if [[ -z "$commits" && -n "$listed" ]]; then
+    why="no commit of its own that main lacks — a change made inside a merge commit is not carried"
+  elif [[ -z "$commits" ]]; then
+    why="git could not list its commits"
+  elif ! git -C "$wt" worktree add -q -b "$new" "$tmp/tree" origin/main 2>/dev/null; then
+    why="no tree could be made from origin/main"
+  elif ! friction_carry "$wt" "$tmp/tree" "$sent" "$commits"; then
+    why="its commits do not apply on main"
+  elif ! push_out="$(git -C "$tmp/tree" push -q -u origin "$new" 2>&1)"; then
+    why="the push of $new failed"
+  fi
+  if [[ -z "$why" ]]; then
     pr="$(cd "$tmp/tree" && gh pr create --base main --head "$new" --fill 2>/dev/null)" || pr=""
     info "  $branch has merged; the friction review's fix goes to main as ${pr:-$new (open its pull request by hand)}"
   else
     git -C "$tmp/tree" cherry-pick --abort >/dev/null 2>&1 || true
-    warn "  $branch has merged, and the friction review's fix could not be put on a branch of its own."
+    warn "  $branch has merged, and the friction review's fix could not be put on a branch of its own: $why."
+    [[ -z "$push_out" ]] || warn "$(tail -n 12 <<< "$push_out" | sed 's/^/     /')"
     if [[ -n "$sent" ]]; then
       # Not the whole range: its deferred commits would undo main's entries.
       local named="$from..HEAD"
@@ -727,6 +758,21 @@ friction_propose_project() {
   # Pushed, or carried by hand from $wt: the local copy is of no use either way.
   git -C "$wt" branch -D "$new" >/dev/null 2>&1 || true
   rm -rf "$tmp"
+}
+
+# Whether every merge in <from>..HEAD of <wt> that main lacks is clean: two
+# parents, and its tree what `git merge-tree` makes of them.
+#
+#   friction_merges_clean <wt> <from>
+friction_merges_clean() {
+  local wt="$1" from="$2" m p1 p2 extra
+  while read -r m p1 p2 extra; do
+    [[ -n "$m" ]] || continue
+    [[ -n "$p2" && -z "$extra" ]] || return 1
+    [[ "$(git -C "$wt" merge-tree --write-tree "$p1" "$p2" 2>/dev/null | head -1)" \
+       == "$(git -C "$wt" rev-parse "$m^{tree}")" ]] || return 1
+  done < <(git -C "$wt" rev-list --merges --parents HEAD "^$from" ^origin/main 2>/dev/null || echo fail)
+  return 0
 }
 
 # Puts <commits> onto <tree>, in order: picked whole, or with <entries-sent>

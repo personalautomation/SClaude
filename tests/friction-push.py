@@ -192,6 +192,7 @@ try:
     check("fix conflicts: names the carried commit alone",
           ("Its commits are %s in" % fix in out, "..HEAD" in out), (True, False))
     check("fix conflicts: says to leave the deferred folders out", "leaving out the deferred folders" in out, True)
+    check("fix conflicts: says which step stopped it", "its commits do not apply on main" in out, True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -204,6 +205,7 @@ try:
     check("unlisted range: no branch", friction_branch(origin), [])
     check("unlisted range: by hand, not nothing to carry",
           ("carry them to main by hand" in out, "nothing else to carry" in out), (True, False))
+    check("unlisted range: says which step stopped it", "git could not list its commits" in out, True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -215,6 +217,104 @@ try:
     out = push(wt, frm, "MERGED", "")
     check("entries not sent: no branch", friction_branch(origin), [])
     check("entries not sent: carried by hand", "carry them to main by hand" in out, True)
+    # HEAD did not move (deferred_to_main had nothing to send): nothing done.
+    out = push(wt, git(wt, "rev-parse", "HEAD"), "MERGED", "")
+    check("nothing committed: said so, quietly",
+          ("committed nothing to carry" in out, "only took main in" in out, "WARN" in out), (True, False, False))
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+tmp = tempfile.mkdtemp()
+try:
+    # The review only merged main, cleanly: nothing to carry, said quietly.
+    origin = os.path.join(tmp, "origin.git")
+    wt = os.path.join(tmp, "myapp-12-x")
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", origin], check=True)
+    subprocess.run(["git", "clone", "-q", origin, wt], check=True, capture_output=True)
+    git(wt, "commit", "-q", "--allow-empty", "-m", "base")
+    git(wt, "push", "-q", "origin", "HEAD:main")
+    git(wt, "switch", "-q", "-c", "feat/12-x")
+    write(wt, "feature.md", "the feature\n")
+    git(wt, "add", "feature.md")
+    git(wt, "commit", "-q", "-m", "the feature")
+    frm = git(wt, "rev-parse", "HEAD")
+    other = os.path.join(tmp, "other")
+    subprocess.run(["git", "clone", "-q", origin, other], check=True, capture_output=True)
+    write(other, "main.md", "main\n")
+    git(other, "add", "main.md")
+    git(other, "commit", "-q", "-m", "on main")
+    git(other, "push", "-q", "origin", "HEAD:main")
+    git(wt, "fetch", "-q", "origin")
+    git(wt, "merge", "-q", "--no-edit", "origin/main")
+    out = push(wt, frm, "MERGED", "")
+    check("clean merge only: nothing to carry, quietly",
+          ("only took main in" in out, "WARN" in out), (True, False))
+    # The same merge with a line edited inside it is no longer clean: said.
+    git(wt, "reset", "-q", "--hard", frm)
+    subprocess.run(["git", "-C", wt, "merge", "-q", "--no-commit", "origin/main"], capture_output=True, env=ENV)
+    write(wt, "feature.md", "the feature, fixed in the merge\n")
+    git(wt, "add", "feature.md")
+    git(wt, "commit", "-q", "--no-edit")
+    out = push(wt, frm, "MERGED", "")
+    check("edited merge: said, by hand",
+          ("no commit of its own that main lacks" in out, "by hand" in out), (True, True))
+    # A fast-forward onto main (the branch had merged into it) took main in too.
+    git(wt, "reset", "-q", "--hard", frm)
+    git(wt, "push", "-q", "origin", "HEAD:refs/heads/feat/12-x")
+    git(other, "fetch", "-q", "origin")
+    git(other, "merge", "-q", "--no-edit", "origin/feat/12-x")
+    write(other, "later.md", "later\n")
+    git(other, "add", "later.md")
+    git(other, "commit", "-q", "-m", "later on main")
+    git(other, "push", "-q", "origin", "HEAD:main")
+    git(wt, "fetch", "-q", "origin")
+    git(wt, "merge", "-q", "--ff-only", "origin/main")
+    out = push(wt, frm, "MERGED", "")
+    check("fast-forward onto main: took main in, quietly",
+          ("only took main in" in out, "committed nothing" in out, "WARN" in out), (True, False, False))
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+tmp = tempfile.mkdtemp()
+try:
+    # A fix made only inside a merge of main: no commit rev-list names, but
+    # main lacks it — said, with the advice, not dropped.
+    origin, wt, frm = world(tmp)
+    git(wt, "reset", "-q", "--hard", frm)
+    other = os.path.join(tmp, "other")
+    write(other, "main-only.md", "main\n")
+    git(other, "add", "main-only.md")
+    git(other, "commit", "-q", "-m", "more on main")
+    git(other, "push", "-q", "origin", "HEAD:main")
+    git(wt, "fetch", "-q", "origin")
+    # The deferred rows conflict (the branch dropped them): main's copy taken.
+    subprocess.run(["git", "-C", wt, "merge", "-q", "--no-commit", "origin/main"],
+                   capture_output=True, env=ENV)
+    git(wt, "checkout", "origin/main", "--", ROWS)
+    write(wt, "prompt.md", "fixed inside the merge\n")
+    git(wt, "add", "prompt.md")
+    git(wt, "commit", "-q", "--no-edit")
+    out = push(wt, frm, "MERGED", "")
+    check("fix inside a merge: said, not dropped",
+          ("inside a merge commit" in out, "by hand" in out), (True, True))
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+tmp = tempfile.mkdtemp()
+try:
+    # origin refuses every push, with its reason: the reason is said beside
+    # the advice, on the feature's branch and on a branch of its own alike.
+    origin, wt, frm = world(tmp)
+    hook = os.path.join(origin, "hooks", "pre-receive")
+    with open(hook, "w") as fh:
+        fh.write("#!/bin/sh\necho 'the checks found: lint failed in prompt.md'\nexit 1\n")
+    os.chmod(hook, 0o755)
+    out = push(wt, frm, "OPEN", "1")
+    check("refused on the branch: the reason is said",
+          ("could not push the friction review's fix" in out, "lint failed in prompt.md" in out), (True, True))
+    out = push(wt, frm, "MERGED", "1")
+    check("refused on its own branch: the step and the reason are said",
+          ("the push of sclaude/friction-" in out, "lint failed in prompt.md" in out), (True, True))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

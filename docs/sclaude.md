@@ -774,7 +774,12 @@ A script in a file is still out of sight.
 
 What the guard cannot name — rsync, patch, an unpacked archive — is caught
 after a review session by the checkout's own state (`instruments_unchanged`):
-commits alone over a clean tree are said quietly, anything else loudly. When
+commits alone over a clean tree are said quietly, anything else loudly. A
+fast-forward to what origin/main has — sclaude's own, or a person's pull —
+counts as commits; one to a branch of its own does not. A
+maintainer's squash before a push counts as commits once it is on origin/main
+and holds everything the reset dropped; a reset that threw unpublished
+commits away stays loud. When
 Claude processes have their working directory in the checkout itself
 (`instruments_workers`), the loud warning lists them, by pid and directory,
 after the session watched: a session that ran its own review loop there, committing and then

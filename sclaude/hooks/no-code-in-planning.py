@@ -50,7 +50,7 @@ REASON = (
     "just a different tool. The session scratchpad is not banned: a "
     "redirection there passes when its path is written out, or set as a "
     "plain literal in a variable earlier in the same command, and so does "
-    "mkdir or touch of a path written out there. The friction "
+    "mkdir, touch, cp or sed -i of a path written out there. The friction "
     "log is the exception: append to "
     ".sclaude/local/feature/friction.log what this refusal cost you. If the plan is ready "
     "and approved, tell the human and stop."
@@ -257,6 +257,100 @@ def makes_only_allowed(name, words):
             continue
         return False
     return True
+
+
+# Commands that write only where their file operands say: cp to the last of
+# them, sed -i to each file it edits. Step 1 reads a file into the
+# scratchpad and edits it there (an issue comment's body before sending it
+# back), as it may with Write and Edit; refusing cp and sed -i there made
+# planning sessions retype whole texts. Flags are the ones that change
+# nothing about where; any other (`cp -t DIR`, `--target-directory`) keeps it
+# a write.
+CP_FLAGS = set("rRapfnv")
+CP_LONG = ("--recursive", "--archive", "--force", "--no-clobber", "--verbose")
+SED_FLAGS = set("nErsuz")
+SED_LONG = ("--in-place", "--quiet", "--silent", "--regexp-extended",
+            "--separate", "--unbuffered", "--null-data")
+
+
+def literal_scratch(word):
+    """A path written out in full inside the scratchpad, nothing bash expands."""
+    return not re.search(r"[$`*?\[{]", word) and word.startswith(("/", "~")) \
+        and in_scratchpad(word)
+
+
+def operands_of(words):
+    """The words without redirections and their targets."""
+    out, skip = [], False
+    for word in words:
+        if skip:
+            skip = False
+            continue
+        if re.match(r"\d*>|&>|<", word):
+            skip = re.fullmatch(r"\d*>>?|&>>?|<<?<?", word) is not None
+            continue
+        out.append(word)
+    return out
+
+
+def writes_only_scratch(name, words):
+    """Does this cp or sed -i write only to literal scratchpad paths?
+
+    cp: every operand literal (a glob could change which one is last) and
+    the last one in the scratchpad; the sources are only read. sed -i: the
+    script is the first word without a dash unless -e or -f gave it, and
+    every file after it is in the scratchpad.
+    """
+    words = operands_of(words)
+    if name == "cp":
+        operands = []
+        for word in words:
+            if word.startswith("--"):
+                if word not in CP_LONG:
+                    return False
+            elif word.startswith("-") and word != "-":
+                if not set(word[1:]) <= CP_FLAGS:
+                    return False
+            else:
+                operands.append(word)
+        if len(operands) < 2 or any(re.search(r"[$`*?\[{]", w) for w in operands):
+            return False
+        return literal_scratch(operands[-1])
+    # sed
+    positional, script_given, take, i = [], False, False, 0
+    while i < len(words):
+        word = words[i]
+        i += 1
+        if take:
+            take = False
+            continue
+        if word == "--":
+            positional.extend(words[i:])
+            break
+        if word.startswith("--"):
+            key = word.split("=", 1)[0]
+            if key in ("--expression", "--file"):
+                script_given = True
+                take = "=" not in word
+                continue
+            if key not in SED_LONG:
+                return False
+            continue
+        if word.startswith("-") and word != "-":
+            for j, c in enumerate(word[1:]):
+                if c in SED_FLAGS:
+                    continue
+                if c == "i":
+                    break  # the rest is the backup suffix
+                if c in "ef":
+                    script_given = True
+                    take = j == len(word) - 2
+                    break
+                return False
+            continue
+        positional.append(word)
+    files = positional if script_given else positional[1:]
+    return bool(files) and all(literal_scratch(w) for w in files)
 
 
 def allowed_path(path):
@@ -673,6 +767,10 @@ def writes(command):
         if name in PATH_MAKERS and not behind_xargs \
                 and makes_only_allowed(name, raw[len(raw) - len(rest):]):
             # This command alone, like the reading flags above.
+            continue
+        if name in ("cp", "sed") and not behind_xargs \
+                and writes_only_scratch(name, raw[len(raw) - len(rest):]):
+            # This command alone, like mkdir and touch above.
             continue
         if name in WRITERS:
             return True

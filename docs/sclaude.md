@@ -45,8 +45,11 @@ part the worktree's list adds to it run too, in its place there, and named
 above the list when a whole stage starts (`project_regression_parts`,
 `project_regression_added`): a branch that added a check otherwise went
 through its own regression without it. A part the branch drops still runs
-until the merge. One key is the other way round:
-`commands["e2e:server"]`, how the local e2e serves the run's build, comes from
+until the merge. A command, or the local database's tool (`database.local.cli`),
+that the branch itself changed is the worktree's (`project_tree_first`): its
+code depends on it, and main's made the branch's session redo by hand what
+sclaude had started; one the branch left alone stays main's. One key is
+always the other way round: `commands["e2e:server"]`, how the local e2e serves the run's build, comes from
 the worktree's copy alone (`regression_serve_command`), because whether a
 build can stand in for the dev server depends on the branch's code. A change
 to that file left uncommitted in the main tree stops production
@@ -1529,7 +1532,10 @@ copy: rows the branch took from main at an earlier merge and main has since
 removed — the monthly review removes what it decided — would otherwise come
 back. Less main's additions, not all of main's copy: `deferred_to_main` sends
 a branch's rows to main, and they come once, but a row the branch repeats on
-purpose stays repeated. The menu's line about such a merge says so, rather
+purpose stays repeated. `deferred_to_main` works against `<from>` the same
+way: it applies to main's copy what the range did since — the rows added
+appended, the rows taken out (a review settling them, a file deleted)
+removed — so main can lose rows to a branch as well as gain them. The menu's line about such a merge says so, rather
 than naming a session.
 
 The sync runs the same way at a step's start and from the menu

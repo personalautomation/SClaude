@@ -614,7 +614,9 @@ try:
     write(os.path.join(repo, "a.txt"), "stop now\n")
     git("commit", "-qam", "stop now", cwd=repo)
     git("push", "-q", cwd=repo)
-    write(os.path.join(tmp, "during"), "sleep 30\n")
+    # Long enough that the pass cannot end by itself before the keys reach
+    # it on a loaded machine: the stop kills it anyway.
+    write(os.path.join(tmp, "during"), "sleep 120\n")
     write(os.path.join(tmp, "answer"), batch("never", 1))
     with open(journal) as fh:
         before = fh.read()
@@ -652,14 +654,16 @@ try:
         return marker in seen
 
     import time
-    check_true("stop-now-hint", read_until(b"[n n] stop now", 20))
+    check_true("stop-now-hint", read_until(b"[n n] stop now", 60))
     # The boxes: [g] ticked shows ticked on the status line, and is kept.
     check_true("boxes-unticked", "☐ [s] last pass".encode() in seen and "auto ☐ [g] go on".encode() in seen)
     # g goes round auto → on → off; on is left for the checks below.
     os.write(master, b"g")
     check_true("go-on-ticked", read_until(" ☑ [g] go on".encode(), 5))
     os.write(master, b"n")
-    time.sleep(1.5)
+    # The second press only once the first has armed the stop: sent blind
+    # after a fixed pause, it reached a loaded machine's loop too early.
+    check_true("stop-now-armed", read_until(b"press [n] again", 15))
     os.write(master, b"n")
     check_true("stop-now-count", read_until(b"COUNT=", 15))
     proc.wait(timeout=15)

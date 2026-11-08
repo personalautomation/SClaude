@@ -41,6 +41,19 @@ def hook(tool, args=("--team",), cwd="/r", **data):
 
 
 # --- the hook ------------------------------------------------------------------
+def reason(args, path):
+    out = subprocess.run([sys.executable, HOOK] + list(args), input=json.dumps(
+        {"tool_name": "Write", "tool_input": {"file_path": path}, "cwd": "/r"}),
+        capture_output=True, text=True).stdout
+    return json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"] if out else ""
+
+
+# A step is refused team/ for being a step, not for who runs it.
+check("step: the reason is the step", "no step of the cycle" in
+      reason(["--team", "--step"], "/r/.sclaude/team/policy.json"), True)
+check("review: the reason is the maintainers", "maintainers" in
+      reason(["--team"], "/r/.sclaude/team/policy.json"), True)
+
 for path, want in (("/r/.sclaude/team/policy.json", "deny"),
                    (".sclaude/team/x.md", "deny"),
                    ("/r/.sclaude/people/ann/policy.json", "allow"),

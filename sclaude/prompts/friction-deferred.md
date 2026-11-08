@@ -17,9 +17,9 @@ Over the month the friction reviews put two kinds of things in these files rathe
 3. For each class, propose one of:
    - **lift** — a restriction that keeps getting in the way: an `allow` in `<rules>/policy.json`, or a fix to the product's code;
    - **ban for good** — it recurs, and it is my step every time: a `deny` in `<rules>/policy.json`, so its refusals stop reaching the log;
-   - **write the rule** — a proposed `CLAUDE.md` line that keeps being needed: into the product's `CLAUDE.md`, by its own rules;
+   - **write the rule** — a proposed `CLAUDE.md` line that keeps being needed: into the product's `CLAUDE.md`, by its own rules. Weigh it against relaxing or dropping a line instead: every line is read by every session, and a review applies it as a checklist;
    - **relax the rule** — class `claude-md-relax-…`, a rule review sessions found too strict, redundant or out of date because it kept producing findings that fixed nothing real: loosen or remove that line of the product's `CLAUDE.md` (or the rule it names), by the product's own rules;
-   - **change sclaude** — class `sclaude-default`, or anything that is plainly wrong for every product: say what sclaude's default or code should become, as an item of its own in the plan. Once I approve it, make it in the workshop (below), and remove the entries it settles; an entry whose change you do not make stays in the file;
+   - **change sclaude** — class `sclaude-default`, or anything that is plainly wrong for every product: say what sclaude's default or code should become, as an item of its own in the plan. Read first what was already decided about that code (the comments beside it, sreview's branch logs in `<instruments>`'s git directory), and say in the plan when the change needs new behaviour designed rather than a mistake corrected. Once I approve it, make it in the workshop (below), and remove the entries it settles; an entry whose change you do not make stays in the file;
    - **keep waiting** — too rare to decide; it stays in the file;
    - **drop** — no longer true (the code it was about has changed) or not worth a rule; it goes from the file.
 

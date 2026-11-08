@@ -544,6 +544,33 @@ docker() {
         shutil.rmtree(root, ignore_errors=True)
 
 
+def main_container_cases():
+    """The main stack is named by the main checkout's project_id, not by a
+    branch's: a branch that renamed it would look for main under its new name."""
+    root = tempfile.mkdtemp(prefix="sclaude-main-name-")
+    try:
+        for name, pid in (("repo", "first"), ("wt", "renamed")):
+            os.makedirs(os.path.join(root, name, "supabase"))
+            with open(os.path.join(root, name, "supabase", "config.toml"), "w") as fh:
+                fh.write('project_id = "%s"\n' % pid)
+        src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sclaude",
+                           "lib", "tree", "featuredb.sh")
+        body = open(src).read()
+        start = body.index("db_container() {")
+        end = body.index("\n}\n", body.index("db_main_container() {")) + 3
+        line = re.search(r'main="\$\(db_main_container "\$\{REPO[^\n]*', body).group(0)
+        line = line.replace(" || return 1", "")
+        head = body[start:end] + '\nwt="%s"\n' % os.path.join(root, "wt")
+        for repo, want, name in ((os.path.join(root, "repo"), "supabase_db_first",
+                                  "the main stack is named from the main checkout"),
+                                 ("", "supabase_db_renamed", "with no main checkout, from the tree")):
+            script = head + 'REPO="%s"\n%s\necho "$main"' % (repo, line)
+            out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
+            check(name, out.strip(), want)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def same_schema_cases():
     """A copy loads into main's schema, emptied, and the feature's migrations
     come after: reference rows with generated ids differ between two stacks,
@@ -748,6 +775,7 @@ def main():
     failed_start_cases()
     copy_cases()
     same_schema_cases()
+    main_container_cases()
     main_up_cases()
     shared_cases()
     for name, want, got in failures:

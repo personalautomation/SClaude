@@ -37,7 +37,7 @@ DB_BLOCK_FIRST=55000
 DB_BLOCK_LAST=55990
 
 db_cli() {
-  local cli; cli="$(project_get database.local.cli "$1" 2>/dev/null || true)"
+  local cli; cli="$(project_tree_first database.local.cli "$1" 2>/dev/null || true)"
   echo "${cli:-npx --yes supabase}"
 }
 
@@ -404,9 +404,11 @@ ensure_db() {
 # The Postgres container of a stack, by its project_id.
 db_container() { echo "supabase_db_$1"; }
 
-# The main local stack's Postgres container, by the project_id in a tree's
-# tracked config (every tree carries the main one's), kept to the CLI's form
-# as db_project_id keeps a feature's.
+# The main local stack's Postgres container, by the project_id in the main
+# checkout's config, kept to the CLI's form as db_project_id keeps a
+# feature's. Asked of the main checkout before a feature's tree: a branch
+# that renames the project_id carries the new name, and the main stack runs
+# under the old one.
 db_main_container() {
   local own
   own="$(sed -n 's/^project_id *= *"\([^"]*\)".*/\1/p' "$1/supabase/config.toml" 2>/dev/null | head -1)"
@@ -575,7 +577,7 @@ db_copy_main() {
   local wt="$1" log="$1/.sclaude/local/feature/db.log" state="$1/.sclaude/local/feature/state.json"
   local main feature errors
   [[ "$(project_get database.local.copyFromMain "$wt" 2>/dev/null)" == "true" ]] || return 1
-  main="$(db_main_container "$wt")" || return 1
+  main="$(db_main_container "${REPO:-}" 2>/dev/null || db_main_container "$wt")" || return 1
   feature="$(db_container "$(db_project_id "$wt")")"
   # A Docker started a moment ago (docker_ensure) is still bringing the main
   # stack's containers back, and a copy refused now is refused for good: the

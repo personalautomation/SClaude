@@ -188,6 +188,40 @@ try:
     check("main-config-wins", out.strip(), "pnpm typecheck")
     out, _, _ = run_bash('REPO=%s; project_get commands.fresh %s' % (proj, wt), tmp)
     check("worktree-adds-a-key-main-lacks", out.strip(), "only-here")
+    # A command the branch changed is the branch's: its code needs it. One it
+    # left alone is still main's, edits by hand in the main checkout included.
+    repo = os.path.join(tmp, "git-main")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+
+    def g(cwd, *a):
+        subprocess.run(["git", "-C", cwd] + list(a), check=True, env=env,
+                       capture_output=True)
+
+    def put(root, cfg):
+        with open(_cfg(os.path.join(root, ".sclaude/config.json")), "w") as fh:
+            json.dump(cfg, fh)
+
+    os.makedirs(repo)
+    g(repo, "init", "-q", "-b", "main")
+    put(repo, {"commands": {"build": "old build", "lint": "lint"},
+               "database": {"local": {"cli": "tool@1"}}})
+    g(repo, "add", "-A")
+    g(repo, "commit", "-q", "-m", "base")
+    tree = os.path.join(tmp, "git-feature")
+    g(repo, "worktree", "add", "-q", "-b", "feat", tree)
+    put(tree, {"commands": {"build": "new build", "lint": "lint"},
+               "database": {"local": {"cli": "tool@2"}}})
+    g(tree, "commit", "-q", "-am", "the branch needs a new build and tool")
+    put(repo, {"commands": {"build": "old build", "lint": "lint --fixed"},
+               "database": {"local": {"cli": "tool@1"}}})
+    out, _, _ = run_bash('REPO=%s; project_command build %s' % (repo, tree), tmp)
+    check("branch-changed-command-is-the-branchs", out.strip(), "new build")
+    out, _, _ = run_bash('REPO=%s; project_command lint %s' % (repo, tree), tmp)
+    check("branch-left-command-is-mains", out.strip(), "lint --fixed")
+    out, _, _ = run_bash('REPO=%s; project_tree_first database.local.cli %s' % (repo, tree), tmp)
+    check("branch-pinned-tool-is-the-branchs", out.strip(), "tool@2")
+
     # A whole section read at once comes from where it is: main's when it has
     # one, the worktree's when only that one does.
     out, _, _ = run_bash('REPO=%s; project_config_with commands %s' % (proj, wt), tmp)

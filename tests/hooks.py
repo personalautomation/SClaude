@@ -183,6 +183,16 @@ PLANNING = [
     ("mkdir -p src/x/.sclaude/local/feature", DENY),
     ("echo src/new | xargs mkdir -p " + SCRATCH + "/x", DENY),
     ("git ls-files | xargs touch " + SCRATCH + "/a", DENY),
+    ("cp " + SCRATCH + "/p/a.md docs/a.md", DENY),
+    ("cp -t docs " + SCRATCH + "/p/a.md", DENY),
+    ("cp " + SCRATCH + "/p/a.md " + SCRATCH + "/p/*", DENY),
+    ("cp a " + SCRATCH + "/../../home/x", DENY),
+    ("sed -i 's/a/b/' src/a.ts", DENY),
+    ("sed -i 's/a/b/' " + SCRATCH + "/p/a.md src/a.ts", DENY),
+    ("sed -i -e 's/a/b/' $F", DENY),
+    ("sed --in-place --follow-symlinks 's/a/b/' " + SCRATCH + "/p/a", DENY),
+    ("sed -i 's/a/b/' " + SCRATCH + "/p/a && rm -rf src", DENY),
+    ("ls | xargs sed -i 's/a/b/' " + SCRATCH + "/p/a", DENY),
     ("echo x >> src/a.sclaude/local/feature/friction.log; ls", DENY),
     ("echo x >> ../other/.sclaude/local/feature/friction.log; ls", DENY),
     # The log in a chain: the other links are still judged.
@@ -252,6 +262,13 @@ PLANNING = [
     ("cd " + SCRATCH + "/p 2>/dev/null || mkdir -p " + SCRATCH + "/p && cd "
      + SCRATCH + "/p; echo ==; timeout 20 $b gen types 2>&1 | head -5", ALLOW),
     ("touch " + SCRATCH + "/p/a.txt", ALLOW),
+    # cp into the scratchpad and sed -i there: a file read in and edited
+    # where Write and Edit already may, instead of retyping it.
+    ("cp docs/a.md " + SCRATCH + "/p/a.md", ALLOW),
+    ("cp -r docs " + SCRATCH + "/p/", ALLOW),
+    ("sed -i 's/a/b/' " + SCRATCH + "/p/a.md", ALLOW),
+    ("sed -i.bak -e 's/a/b/' " + SCRATCH + "/p/a.md && cat " + SCRATCH + "/p/a.md", ALLOW),
+    ("sed -ni '1p' " + SCRATCH + "/p/a.md", ALLOW),
     # An append to the log in a chain, and mkdir of its folder before it:
     # live sessions lost entries to both.
     ("echo 'a; b' >> .sclaude/local/feature/friction.log; ls -la ~/.npm", ALLOW),
@@ -608,6 +625,8 @@ FORBIDDEN = [
     # production regression has a reason to make.
     ("vercel rollback status", ALLOW),
     ("vercel rollback status agora", ALLOW),
+    ("vercel crons ls", ALLOW),
+    ("vercel crons add", DENY),
     # Writing to Vercel is still the human's step, subcommand or not.
     ("vercel", DENY),
     ("vercel --prod", DENY),

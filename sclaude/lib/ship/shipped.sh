@@ -288,7 +288,9 @@ prod_drift_report() {
     promote="$(project_get database.promote "$REPO" || true)"
     warn "  They include migrations${promote:+: $promote comes first}."
   fi
-  info "  To ship them: cd $REPO && ${promote:+$promote && }vercel --prod"
+  # The pull first: `vercel --prod` uploads the checkout as it is, and one
+  # behind origin's main would ship the old commit and leave this notice up.
+  info "  To ship them: cd $REPO && git pull --ff-only && ${promote:+$promote && }vercel --prod"
 }
 
 # Whether the branch holds migrations that main does not: whether a db:promote

@@ -50,6 +50,7 @@ instruments_state() { echo same; }; instruments_unchanged() { :; }
 session_watch_start() { :; }; session_watch_stop() { :; }; session_closed() { return 0; }
 claude_launch() { printf '%%s' "${@: -1}" > "%(out)s"; [[ -z "${DIRTY:-}" ]] || echo x > dirty.txt; }
 gh() { :; }
+link_node_modules() { echo "LINKED $REPO -> $1"; }
 cmd_deferred
 ''' % {"lib": LIB, "prompts": PROMPTS, "root": ROOT, "out": prompt_out}
     env = dict(os.environ, DIRTY="1" if dirty else "", SCLAUDE_DEV="tester")
@@ -104,9 +105,15 @@ try:
     check("nothing-says-so", "the review committed nothing to the product" in out, True)
     check("nothing-no-tree", trees(tmp), [])
     check("nothing-no-branch", branches(repo), [])
+    # Without node_modules in the product nothing is linked.
+    check("no-deps-not-linked", "LINKED" in out, False)
 
     # Edits it did not commit are named, and the tree holding them stays.
+    # The product's dependencies are linked into the review's tree, from the
+    # main checkout, so its own checks can run there.
+    os.makedirs(os.path.join(repo, "node_modules"))
     out = review(repo, out_file, dirty=True)
+    check("deps-linked-from-main", ("LINKED %s -> " % repo) in out, True)
     check("dirty-not-nothing", "the review committed nothing to the product" in out, False)
     check("dirty-named", "did not commit" in out and trees(tmp)[0] in out if trees(tmp) else False, True)
     for w in trees(tmp):

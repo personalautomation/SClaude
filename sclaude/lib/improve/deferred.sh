@@ -110,21 +110,11 @@ deferred_only_revs() {
   return 0
 }
 
-# Two copies of one log as one: main's rows as they are, then each row of the
-# branch's copy that main does not hold as many times. A row may come back on
-# purpose (the monthly review counts the repeats), so it is counted, not
-# looked up. Used by deferred_to_main; the sync with main (sync_deferred)
-# subtracts only main's additions instead, with deferred_minus.
-# The first file is told apart by its name, not by NR == FNR: an empty one
-# would make every row of the second count as its own.
-#
-#   deferred_union <main's copy> <the branch's copy>   → the rows, on stdout
-deferred_union() {
-  awk 'FILENAME == ARGV[1] { seen[$0]++; print; next } seen[$0] > 0 { seen[$0]--; next } { print }' "$1" "$2"
-}
-
-# The rows of <after> beyond what <before> holds, counted the same way: what
-# one side added to a log since an older copy of it.
+# The rows of <after> beyond what <before> holds, counted, not looked up: a
+# row may come back on purpose (the monthly review counts the repeats). What
+# one side added to a log since an older copy of it, or, the other way round,
+# what it took out. The first file is told apart by its name, not by
+# NR == FNR: an empty one would make every row of the second count as its own.
 #
 #   deferred_minus <before> <after>   → the rows, on stdout
 deferred_minus() {
@@ -146,12 +136,13 @@ deferred_minus() {
 #
 # The rows are merged into main's copy of each file rather than picked as
 # commits: main's copy may hold rows the branch does not, or the other way
-# round. The branch then drops what it sent: reset past the commits when they
+# round. Rows the range took out (a review settling them) are taken out of
+# main's copy too. The branch then drops what it sent: reset past the commits when they
 # held nothing else, or a commit that puts the folders back the way <from> had
 # them when they did. Either way the branch carries no change to the folders,
 # and its own merge cannot meet main's rows in a conflict.
 #
-# Left to the caller (returns 1): no entries in the range, a commit in it that
+# Left to the caller (returns 1): no change to the deferred folders in the range, a commit in it that
 # is already on origin, or an open pull request whose branch carried entries
 # before <from> — those reach main with that pull request, and rows sent ahead
 # of them would conflict with them at its merge.
@@ -163,7 +154,10 @@ deferred_to_main() {
   head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)" || return 1
   [[ "$head" != "$from" ]] || return 1
   files="$(git -C "$wt" diff --name-only "$from" "$head" -- "${DEFERRED_PATHSPECS[@]}" 2>/dev/null)"
-  [[ -n "$files" ]] || return 1
+  # Nothing changed since <from> and no merge in the range: nothing to send.
+  # With a merge, a file the same at both ends may still carry a change of
+  # the range's against what came in (see `side` below).
+  [[ -n "$files" || -n "$(git -C "$wt" rev-list --merges "$from..$head" 2>/dev/null)" ]] || return 1
   branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   [[ -n "$branch" && "$branch" != "HEAD" && "$branch" != "main" ]] || return 1
   git -C "$wt" fetch -q origin 2>/dev/null || return 2
@@ -180,6 +174,23 @@ deferred_to_main() {
   [[ -z "$(git -C "$wt" log --format=%H "$from..$head" -- . "${DEFERRED_EXCLUDES[@]}" 2>/dev/null)" ]] \
     || only=0
 
+  # Where main's side of the range begins: <from>, or, when the branch took
+  # main in after <from> (a resumed review keeps an old <from>), what it took
+  # in. Rows that arrived with that merge are main's, not the range's own,
+  # and a branch that keeps other commits is put back to that point at the
+  # end (one with nothing else is reset to <from>, the merge going with it).
+  local side="$from" mb
+  mb="$(git -C "$wt" merge-base HEAD origin/main 2>/dev/null || true)"
+  if [[ -n "$mb" ]] && ! git -C "$wt" merge-base --is-ancestor "$mb" "$from" 2>/dev/null; then
+    side="$mb"
+    # A file the same at <from> and at HEAD may still be changed against
+    # what came in: a row main gave that the branch settled.
+    files="$(printf '%s\n%s\n' "$files" \
+      "$(git -C "$wt" diff --name-only "$side" "$head" -- "${DEFERRED_PATHSPECS[@]}" 2>/dev/null)" \
+      | sed '/^$/d' | sort -u)"
+  fi
+  [[ -n "$files" ]] || return 1
+
   tmp="$(mktemp -d)"
   local attempt sent=1
   for attempt in 1 2; do
@@ -188,16 +199,41 @@ deferred_to_main() {
     git -C "$wt" worktree add -q --detach "$tmp/tree" origin/main >/dev/null 2>&1 || break
     while IFS= read -r f; do
       [[ -n "$f" ]] || continue
-      # Gone on the branch: nothing of it to send.
-      git -C "$wt" cat-file -e "$head:$f" 2>/dev/null || continue
-      mkdir -p "$(dirname "$tmp/tree/$f")"
-      [[ -f "$tmp/tree/$f" ]] || : > "$tmp/tree/$f"
-      git -C "$wt" show "$head:$f" > "$tmp/branch-copy"
-      deferred_union "$tmp/tree/$f" "$tmp/branch-copy" > "$tmp/merged" && cat "$tmp/merged" > "$tmp/tree/$f"
-      git -C "$tmp/tree" add -- "$f"
+      # What the range did to the file since <from>, applied to main's copy:
+      # the rows it added appended, the rows it took out (a review settling
+      # them; a file deleted takes out all of them) removed. Against <from>,
+      # not the branch's whole copy, as sync_deferred works against the base:
+      # a row main dropped meanwhile stays dropped. The rows that came in
+      # with a merge of main are not the range's own and are not sent.
+      git -C "$wt" show "$from:$f" > "$tmp/from-copy" 2>/dev/null || : > "$tmp/from-copy"
+      git -C "$wt" show "$head:$f" > "$tmp/branch-copy" 2>/dev/null || : > "$tmp/branch-copy"
+      git -C "$wt" show "$side:$f" > "$tmp/side-copy" 2>/dev/null || : > "$tmp/side-copy"
+      cat "$tmp/tree/$f" > "$tmp/main-copy" 2>/dev/null || : > "$tmp/main-copy"
+      if [[ "${f##*/}" == last-reviewed ]]; then
+        # A stamp, not a log: the branch's own date wins, whole.
+        cmp -s "$tmp/branch-copy" "$tmp/side-copy" && continue
+        cat "$tmp/branch-copy" > "$tmp/merged"
+      else
+        # The range's own changes are measured from <from> plus what came in
+        # with main: a row main gave that the branch then settled is a removal
+        # of the range's, and a row main gave is not an addition of it.
+        deferred_minus "$tmp/from-copy" "$tmp/side-copy" > "$tmp/brought"
+        cat "$tmp/from-copy" "$tmp/brought" > "$tmp/own-base"
+        deferred_minus "$tmp/own-base" "$tmp/branch-copy" > "$tmp/added"
+        deferred_minus "$tmp/branch-copy" "$tmp/own-base" > "$tmp/removed"
+        deferred_minus "$tmp/removed" "$tmp/main-copy" > "$tmp/merged"
+        cat "$tmp/added" >> "$tmp/merged"
+      fi
+      if [[ -s "$tmp/merged" ]]; then
+        mkdir -p "$(dirname "$tmp/tree/$f")"
+        cat "$tmp/merged" > "$tmp/tree/$f"
+        git -C "$tmp/tree" add -- "$f"
+      elif [[ -f "$tmp/tree/$f" ]]; then
+        git -C "$tmp/tree" rm -q -- "$f"
+      fi
     done <<< "$files"
     if git -C "$tmp/tree" diff --cached --quiet; then
-      sent=0; break                       # main holds every row already
+      sent=0; break                       # main has the change already
     fi
     if [[ "$only" == 1 && "$n" == 1 ]]; then
       git -C "$tmp/tree" commit -q --no-verify -C "$head" >/dev/null 2>&1 || break
@@ -227,8 +263,8 @@ deferred_to_main() {
       || warn "  the deferred entries are on main; $branch still carries them — reset it to ${from:0:8} by hand"
   else
     ( while IFS= read -r f; do
-        if git -C "$wt" cat-file -e "$from:$f" 2>/dev/null; then
-          git -C "$wt" checkout -q "$from" -- "$f"
+        if git -C "$wt" cat-file -e "$side:$f" 2>/dev/null; then
+          git -C "$wt" checkout -q "$side" -- "$f"
         else
           git -C "$wt" rm -q -- "$f"
         fi || exit 1
@@ -237,9 +273,9 @@ deferred_to_main() {
            -m "chore(sclaude): leave the deferred entries to main" \
            -m "They went to main directly (deferred_to_main in sclaude); the branch carries no change to the deferred folders, so its merge cannot conflict with them."
     ) >/dev/null 2>&1 \
-      || warn "  the deferred entries are on main; put $branch's deferred folders back to ${from:0:8} by hand"
+      || warn "  the deferred entries are on main; put $branch's deferred folders back to ${side:0:8} by hand"
   fi
-  info "  the deferred entries went to main${sha:+ as $sha}, past the pull request"
+  info "  the deferred entries' changes went to main${sha:+ as $sha}, past the pull request"
   return 0
 }
 
@@ -433,6 +469,11 @@ cmd_deferred() {
     info "Nothing deferred on main in $root."
     return 0
   fi
+  # The product's own checks run in the review's tree too (a link checker
+  # over the docs it edits), and without the dependencies they cannot.
+  # Linked as a feature's tree links them; a product without them is left so.
+  [[ -d "$root/node_modules" ]] && declare -F link_node_modules >/dev/null \
+    && REPO="$root" link_node_modules "$wt"
   local f list="" stamps=""
   for f in "${files[@]}"; do
     list+="- \`$f\`"$'\n'

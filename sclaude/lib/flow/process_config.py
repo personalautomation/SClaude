@@ -140,7 +140,7 @@ VARIANTS = {
              ("ship", {"off"}, {
         "title": "Not shipped from here",
         "text": "ship: off — the issue closes as merged and accepted",
-        "details": "With ship set to off, sclaude never deploys production: once the merge is in the issue closes as merged and accepted, and the epilogue and the clean-up follow. Shipping is cd <repo> && vercel --prod, by hand."})],
+        "details": "With ship set to off, sclaude never deploys production: once the merge is in the issue closes as merged and accepted, and the epilogue and the clean-up follow. Shipping is cd <repo> && git pull --ff-only && vercel --prod, by hand."})],
     "r_preview": [("previewRegression", {"smoke"}, {
         "text": "the product's smoke set, against the preview, before QA"})],
     "r_prod": [("prodRegression", {"smoke"}, {

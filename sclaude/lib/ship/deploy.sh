@@ -556,7 +556,7 @@ remind_prod() {
       info "  Merge it, then run: $SELF done $slug"
       info "  It removes the worktree and the branches. Production comes after"
       local promote_cmd; promote_cmd="$(project_get database.promote "$wt" 2>/dev/null || true)"
-      info "  that, from $REPO: ${migrations:+${promote_cmd:-the promote command}, then }vercel --prod."
+      info "  that, from $REPO: git pull --ff-only, ${migrations:+${promote_cmd:-the promote command}, }then vercel --prod."
     fi
     # No status session for waiting on the merge — a session per wait spent
     # money to restate the pull request's state — but the labels the preview
@@ -710,7 +710,7 @@ remind_prod() {
   elif [[ "$ship_mode" == off ]]; then
     echo ""
     info "Production: not deployed — ship is off in the project config ($SELF config)."
-    info "  Ship it by hand when you choose: cd $REPO && vercel --prod"
+    info "  Ship it by hand when you choose: cd $REPO && git pull --ff-only && vercel --prod"
   elif [[ -n "$migrations" ]]; then
     # The promote's own commands come from the project: which script applies
     # migrations to production, which paths hold them and the schema snapshot,

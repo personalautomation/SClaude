@@ -84,6 +84,14 @@ UNKNOWN_REASON = ("where this command writes cannot be told — a target in a va
 REASON = ("the product's shared sclaude rules (.sclaude/team/) are written by its "
           "maintainers — `maintainers` in .sclaude/config.json. Put the rule in your own "
           ".sclaude/people/<name>/ instead; a maintainer can lift it into team/.")
+# A step's session is refused team/ whoever runs it, a maintainer included:
+# the rules change in the reviews after the steps, not in a step. The text
+# above told a maintainer's step that only maintainers write there, and the
+# person asked why a maintainer was refused.
+STEP_TEAM_REASON = ("no step of the cycle writes the product's shared sclaude rules "
+                    "(.sclaude/team/): the friction review, the retrospective and the "
+                    "monthly review change them. Say in .sclaude/local/feature/friction.log "
+                    "what you would change, and carry on with the step's own work.")
 
 # Bash words that change a file named after them.
 WRITERS = ("cp", "mv", "rm", "tee", "touch", "install", "ln", "truncate", "mkdir",
@@ -730,6 +738,8 @@ def main():
     except Exception as exc:  # noqa: BLE001
         reason = "the write guard failed on this call (%s: %s), so it is refused" % (
             type(exc).__name__, exc)
+    if reason == REASON and "--step" in argv:
+        reason = STEP_TEAM_REASON
     if reason:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",

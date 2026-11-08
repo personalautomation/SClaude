@@ -130,7 +130,9 @@ sclaude printed and what you typed — and says what could go better and, when
 the run points at one, a setting that would suit how you work. The monthly review
 can add the same, and also finds lines in CLAUDE.md, other instructions and
 Claude Code's memory that the tool's changes made untrue, and proposes tools to
-install or remove — each only on evidence, with how sure it is.
+install or remove — each only on evidence, with how sure it is. It weighs a
+new rule against loosening or dropping one, and reads what was decided about
+sclaude's code before proposing to change it.
 
 ## What is measured
 

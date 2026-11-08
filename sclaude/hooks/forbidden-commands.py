@@ -135,12 +135,13 @@ DB_PUSH_REASON = ("this environment is protected (or could not be identified) â€
 # has a real reason to ask â€” the same class of read as `vercel env ls preview`,
 # which this list was widened for once already. The lookup below tries the
 # two-word prefix before the one-word one, so it matches ahead of a bare
-# `rollback`, which stays banned.
+# `rollback`, which stays banned. `crons ls` lists a project's cron jobs
+# and their schedule, and changes nothing.
 VERCEL_READS = {
     ("env", "ls"), ("inspect",), ("ls",), ("list",), ("logs",),
     ("whoami",), ("teams", "ls"), ("project", "ls"), ("projects", "ls"),
     ("domains", "ls"), ("certs", "ls"), ("dns", "ls"),
-    ("rollback", "status"), ("promote", "status"),
+    ("rollback", "status"), ("promote", "status"), ("crons", "ls"),
 }
 # The global options that take a value, which is never a subcommand's name:
 # `vercel --cwd ls --prod` deploys the directory ls to production.

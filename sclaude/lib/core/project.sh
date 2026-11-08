@@ -35,9 +35,10 @@
 # only with no main checkout's at all; project_get also takes from it a key
 # the main checkout does not have yet, a feature in flight adding it, and a
 # regression stage takes the parts the worktree's list adds to main's
-# (project_regression_parts). One key is read from the worktree alone: see
-# regression_serve_command; and the check before a merge reads the merged
-# tree's (merge_build_check).
+# (project_regression_parts). A command or the stack's tool the branch
+# changed is the worktree's (project_tree_first), one key is read from the
+# worktree alone (regression_serve_command), and the check before a merge
+# reads the merged tree's (merge_build_check).
 project_config() {
   local wt="${1:-}"
   if [[ -n "${REPO:-}" && -f "$REPO/.sclaude/config.json" ]]; then
@@ -272,10 +273,33 @@ project_regression_added() {
   echo "$out"
 }
 
+# A value the branch's own code depends on — the commands a stage runs, the
+# tool version a feature's stack starts on — is the tree's when the branch
+# changed it. Every other key is read main first (project_config), and so
+# were these: a branch that changed the command its code needed, or pinned a
+# newer tool, ran with main's, and its session redid by hand what sclaude had
+# started. A value the branch left as it found it is still main's, so a fix
+# made in the main checkout reaches every feature as before.
+#
+#   project_tree_first <dotted.path> [wt]
+project_tree_first() {
+  local path="$1" wt="${2:-}" mine base then
+  if [[ -n "$wt" && -f "$wt/.sclaude/config.json" ]] \
+     && mine="$(project_value "$wt/.sclaude/config.json" "$path")"; then
+    base="$(git -C "$wt" merge-base HEAD main 2>/dev/null)"
+    then="$(project_value <(git -C "$wt" show "$base:.sclaude/config.json" 2>/dev/null) "$path")"
+    if [[ -n "$base" && "$mine" != "$then" ]]; then
+      printf '%s\n' "$mine"
+      return 0
+    fi
+  fi
+  project_get "$path" "$wt"
+}
+
 # The command behind a named part. Empty means the part is not described, which
 # regression_run treats as a typo rather than as something to skip.
 project_command() {
-  project_get "commands.$1" "${2:-}" 2>/dev/null
+  project_tree_first "commands.$1" "${2:-}" 2>/dev/null
 }
 
 # Where production lives, as the suite should address it: the siteUrl of the

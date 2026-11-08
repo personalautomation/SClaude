@@ -101,6 +101,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("behind-is-said", "Production is 1 commit(s) behind origin/main" in out, True)
     check("behind-names-the-commit", "%s fix: straight to main" % fix[:7] in out, True)
     check("behind-says-how-to-ship", "vercel --prod" in out, True)
+    # A checkout behind origin's main would ship the old commit: pull first.
+    check("behind-pulls-before-shipping", "git pull --ff-only && " in out, True)
     check("no-migrations-no-promote", "db:promote" in out, False)
 
     # A commit with deferred entries alone ships nothing: left out of the

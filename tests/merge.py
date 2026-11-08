@@ -624,7 +624,8 @@ check_true("qa-done-guarded-in-offer",
 # The arrow after the first key must be swallowed too, or it would answer the
 # next question.
 check_true("review-wait-polls-with-poll-pause",
-           'poll_pause "$MERGE_POLL"' in (body_of(run_sh, "review_wait_state") or ""))
+           'poll_pause "$MERGE_POLL"' in (body_of(open(os.path.join(ROOT, "sclaude", "lib", "review", "review_gate.sh"),
+                                                    encoding="utf-8").read(), "review_close_gate") or ""))
 
 
 def pause_in_pty(keys):

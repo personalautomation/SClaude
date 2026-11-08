@@ -191,7 +191,7 @@ check("a place is lit on every map that has it",
 import process_config  # noqa: E402
 _rc = process_config.VARIANTS["review_close"][0]
 check("no local suite: step 4 closes on the pull request alone",
-      _rc[:2] == ("regression.local", {False}) and "local" not in _rc[2]["title"]
+      _rc[:2] == ("regression.local", {False}) and "local suite" not in _rc[2]["text"]
       and "local regression" not in _rc[2]["details"])
 # Merged and not shipped is a way the cycle takes (ship → epilogue): the
 # glance draws it.
@@ -268,6 +268,24 @@ with tempfile.TemporaryDirectory() as tmp:
 check("config_of: a stage the tree adds is taken key by key",
       got.get("regression") == {"local": ["e2e"], "preview": ["e2e"]}, str(got))
 check("config_of: null in the main checkout is no value", got.get("review") == "local", str(got))
+with process.configured({"ship": "auto"}):
+    check("ship: auto is sclaude's, as merge: auto and qa: auto are",
+          process.NODES["ship"][0] == "sclaude" and process.NODES["ship"][3] == "Ship to Prod?",
+          str(process.NODES["ship"][:4]))
+with process.configured({"qa": "auto", "board": {"columns": {"done": "Done"}}}):
+    check("qa: auto is sclaude's \"Skip QA?\"",
+          process.NODES["qa_check"][0] == "sclaude" and process.NODES["qa_check"][3] == "Skip QA?",
+          str(process.NODES["qa_check"][:4]))
+    check("qa: auto has no QA verdict to wait for", "qa_verdict" not in process.NODES
+          and ("qa_check", "handoff") in {(a, b) for a, b, _l, _k in process.EDGES}, str(sorted(process.NODES)))
+with process.configured({"board": {"columns": {"done": "Done"}}}):
+    check("qa: the verdict otherwise", "qa_verdict" in process.NODES)
+    check("qa: the person's check otherwise", process.NODES["qa_check"][3] == "QA checks the criteria",
+          str(process.NODES["qa_check"][:4]))
+with process.configured({}):
+    check("ship: ask keeps the question in your lane",
+          process.NODES["ship"][0] == "person" and process.NODES["ship"][3] == "Ship to production?",
+          str(process.NODES["ship"][:4]))
 check("QA is on the map by the Done column alone",
       "qa_check" in process.for_config({"board": {"columns": {"done": "Done"}}}, process.NODES, process.EDGES)[0]
       and "in_qa" not in process.for_config({"board": {"columns": {"done": "Done"}}}, process.NODES, process.EDGES)[0])
@@ -286,6 +304,22 @@ check("a smaller map's place lights its block on the whole process",
       all(any(x in process.NODES for x in _lit.get(k, [])) for k in process.POSITIONS if k not in process.NODES
           and process.on_map(process.HOSTS.get(k, ""))),
       str({k: _lit.get(k) for k in process.POSITIONS if k not in process.NODES}))
+import process_position  # noqa: E402
+_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+check("a local run at step 4 lights its block of the regression map beside the close",
+      process_position.also({"step": "review", "regression": {"local": {"status": "running", "started": _now}}})
+      == ["reg_local"]
+      and process_position.also({"step": "review", "regression": {"local": {"fix_status": "red open"}}})
+      == ["fix_local"]
+      and process_position.also({"step": "code", "regression": {"local": {"status": "running", "started": _now}}})
+      == [])
+_gate = read("sclaude", "lib", "review", "review_gate.sh")
+check("the gate writes a way out of its own pass whichever way it ends",
+      all(w in _gate for w in ('review_back_edge "$wt" "$back_from"', "local_pass review_close", "review_close local_pass"))
+      and "back_from=local_pass" in _gate)
+check("the flow's answer carries what is lit beside the place",
+      '"also": also' in read("sclaude", "lib", "commands", "actions.sh")
+      and "v.also" in read("sclaude", "lib", "flow", "process_live.js"))
 check("the local regression at step 4 lights step 4, not step 2",
       process.POSITIONS["review_close"] == "o_review" and process.HOSTS["reg_local"] == "code")
 
@@ -742,14 +776,14 @@ late = [v.get("n") for v in process.history({}, [
     {"at": at("09:10"), "what": "steps.pr", "op": "finish", "session": "p"},
     edge("09:10", "pr", "pr_check", "session"),
     edge("09:10", "pr_check", "draft_pr", "sclaude"),
+    edge("09:10", "draft_pr", "review_close", "setting"),
     {"at": at("09:11"), "what": "review.local", "op": "start"},
-    edge("09:11", "draft_pr", "local_pass", "sclaude"),
+    edge("09:11", "review_close", "local_pass", "sclaude"),
     {"at": at("09:15"), "what": "review.local", "op": "end"},
-    edge("09:15", "local_pass", "review_found", "sclaude"),
-    edge("09:15", "review_found", "review", "sclaude"),
+    edge("09:15", "local_pass", "review", "sclaude"),
     {"at": at("09:16"), "what": "steps.review", "op": "open", "session": "r"}])["visits"]]
 check("history: an edge into a place written after the row that entered it is not played twice",
-      late[late.index("pr"):] == ["pr", "pr_check", "draft_pr", "local_pass", "review_found", "review"], str(late))
+      late[late.index("pr"):] == ["pr", "pr_check", "draft_pr", "review_close", "local_pass", "review"], str(late))
 none = process.history({}, [edge("09:00", "w_ask", "w_open", "person", session="f"),
                             edge("09:00", "w_open", "w_change", "sclaude", session="f"),
                             {"at": at("09:10"), "what": "workshop", "op": "none", "session": "f"}])
@@ -1703,6 +1737,52 @@ check("cmd_flow sends the history, played as process.py history plays it",
       "process.played(state, node)" in read("sclaude", "lib", "commands", "actions.sh")
       and "process_history.played(argv[1]" in read("sclaude", "lib", "flow", "process.py")
       and '"history": history' in read("sclaude", "lib", "commands", "actions.sh"))
+# cmd_flow's own snippet, run: an error in it empties busy, notes, stalled
+# and also on every call, which no grep above would notice.
+_snip = re.search(r"done \| python3 -c '(.*?)' (\"\$node\"[^\n]*)", read("sclaude", "lib", "commands", "actions.sh"), re.S)
+check("cmd_flow's answer snippet is found", _snip is not None)
+# Its arguments as the shell hands them, in the order the test hands them.
+check("cmd_flow hands the snippet the arguments it unpacks",
+      _snip is not None and _snip.group(2).split() == ['"$node"', '"$title"', '"$why"', '"$where"', '"$slug"',
+                                                     '"$LIB"', '"$state"', '"$pr_state"', '"$wt"'],
+      _snip.group(2) if _snip else "")
+if _snip:
+    with tempfile.TemporaryDirectory() as _t:
+        _state = os.path.join(_t, "state.json")
+        # A project with a local suite: its config is what the rings follow.
+        os.makedirs(os.path.join(_t, ".sclaude"))
+        with open(os.path.join(ROOT, "sclaude", "config.example.json")) as _src, \
+                open(os.path.join(_t, ".sclaude", "config.json"), "w") as _dst:
+            _dst.write(_src.read())
+        with open(_state, "w") as _fh:
+            json.dump({"step": "review", "regression": {"local": {"status": "running", "started": now}}}, _fh)
+        _out = subprocess.run([sys.executable, "-c", _snip.group(1), "review_close", "t", "w", "4/7", "f", LIB,
+                               _state, "", _t], input="", capture_output=True, text=True)
+        try:
+            _ans = json.loads(_out.stdout)
+        except ValueError:
+            _ans = {}
+        check("cmd_flow's answer lights the regression map beside the close", _ans.get("also") == ["reg_local"],
+              _out.stdout[-300:] + _out.stderr[-300:])
+        check("cmd_flow's answer turns R on the close the suite runs at", _ans.get("busy") == {"review_close": ["R"]},
+              str(_ans.get("busy")))
+_parts = {"step": "review", "parts": {"total": 3, "current": 2},
+          "regression": {"local": {"status": "running", "started": now}}}
+_both = {"step": "review", "regression": {"local": {"status": "running", "started": now},
+                                          "preview": {"fix_status": "red open"}}}
+with process.configured({"regression": {"local": ["e2e"], "preview": ["e2e"]}}):
+    _notes = process.busy_notes(_both)
+check("each R says its own stage's words",
+      "local suite" in _notes.get("review_close", {}).get("R", "")
+      and "preview" in _notes.get("review", {}).get("R", ""), str(_notes))
+with process.configured({"regression": {"preview": ["e2e"]}}):
+    check("a preview fix turns R on step 4 with no local suite",
+          process.busy({"step": "review", "regression": {"preview": {"fix_status": "red open"}}}) == {"review": ["R"]},
+          str(process.busy({"step": "review", "regression": {"preview": {"fix_status": "red open"}}})))
+check("the rings turn on the glance's block a place is lit on",
+      "[id].concat(M.alias[id] || [], f === 'R' ? POS[id] || [] : []).forEach((at) =>" in process.LIVE_SCRIPT)
+check("a part's local suite turns R on step 2, where the parts are", process.busy(_parts) == {"code": ["R"]},
+      str(process.busy(_parts)))
 check("the state's writers name the same file",
       '"history.jsonl"' in read("sclaude", "lib", "core", "state.sh") and "history.jsonl" in read("sclaude", "lib", "core", "state.sh"))
 check("the map is not centred across on open (it hid the first lanes)",

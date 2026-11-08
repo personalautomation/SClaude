@@ -133,50 +133,6 @@ review_skippable() {
   return 0
 }
 
-# Wait for the automatic review of the pull request, then say how it went.
-#
-#   review_wait_state <wt> <slug> <pr>   → clean | unreviewed | dirty | unknown
-#
-# Step 4 used to open its session straight after step 3, while the review was
-# still running, and the session then waited on it or read an empty list. When
-# the review finds nothing — "No issues found", every check green —
-# that session had nothing to do but say so, and cost a launch to say it.
-#
-# pr_context.py decides; this only waits out `pending`, the way the merge wait
-# does, and gives up after REVIEW_WAIT_MAX seconds with `unknown`, which opens
-# the session as before. Ctrl-C leaves and loses nothing: the step has not
-# started. Everything it prints goes to stderr, since stdout is the answer.
-review_wait_state() {
-  local wt="$1" slug="$2" pr="$3" word waited=0 announced=0 start=$SECONDS
-  [[ -n "$pr" && "$pr" != "null" ]] || { echo unknown; return 0; }
-  command -v gh >/dev/null 2>&1 || { echo unknown; return 0; }
-  local repo; repo="$(gh_repo 2>/dev/null || true)"
-  [[ -n "$repo" ]] || { echo unknown; return 0; }
-  while :; do
-    word="$(python3 "$LIB/review/pr_context.py" --state "$wt" "$pr" "$repo" 2>/dev/null || true)"
-    if [[ "$word" == "dirty" ]] && review_quota_rerun "$wt" "$slug" "$pr" "$repo"; then
-      continue
-    fi
-    [[ "$word" == "pending" ]] || break
-    if [[ "$waited" -ge "$REVIEW_WAIT_MAX" ]]; then
-      word="unknown"
-      break
-    fi
-    if [[ "$announced" -eq 0 ]]; then
-      announced=1
-      info "  Waiting for the automatic review of PR #$pr to finish." >&2
-      info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug" >&2
-    fi
-    # Not "Human in the loop": that marks the waits that need the person.
-    [[ -t 2 ]] && printf '\r\033[2K\033[?7l  %sRunning by itself%s — waiting for the review checks (%s so far, next check in %ss, any key checks now)\033[?7h' \
-      "$DIM" "$OFF" "$(regression_duration "$waited")" "$MERGE_POLL" >&2
-    poll_pause "$MERGE_POLL"
-    waited=$((SECONDS - start))
-  done
-  [[ "$announced" -eq 1 && -t 2 ]] && printf '\r\033[2K' >&2
-  echo "${word:-unknown}"
-}
-
 # The automatic review stopped on Claude's usage limit: wait for the reset and
 # run it again, rather than open a session to find that out.
 #
@@ -191,8 +147,8 @@ review_wait_state() {
 # had nothing to fix: RED_CHECK_ADVICE in pr_context.py told it to rerun after
 # the reset, and the session stood waiting for hours, on the same quota. The
 # wait is sclaude's now, and costs nothing. Ctrl-C leaves it; nothing has
-# started. Everything it prints goes to stderr: review_wait_state answers on
-# stdout.
+# started. Everything it prints goes to stderr, as the gate's waits
+# (review_close_gate) print theirs.
 review_quota_rerun() {
   local wt="$1" slug="$2" pr="$3" repo="$4" got run reset due now left
   got="$(python3 "$LIB/review/pr_context.py" --quota "$wt" "$pr" "$repo" 2>/dev/null || true)"

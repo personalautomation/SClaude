@@ -22,19 +22,19 @@ import process_model
 # an arrow not in NEEDS is on every project's map.
 
 # A block, or an arrow by (from, to), and the setting it needs: (name,
-# values). An arrow named here is not carried past a block taken out — it
+# values), or a list of them of which any will do. An arrow named here is not carried past a block taken out — it
 # is one way of a choice, and the choice drops it.
 NEEDS = {
     "ci_review": ("review", {"github"}),
     "local_pass": ("review", {"local"}),
     ("draft_pr", "ci_review"): ("review", {"github"}),
-    ("draft_pr", "local_pass"): ("review", {"local"}),
     ("review_close", "local_pass"): ("review", {"local"}),
+    ("local_pass", "review_close"): ("review", {"local"}),
     "f_away": ("review", {"local"}),
     ("f_rules", "f_away"): ("review", {"local"}),
     ("f_away", "f_review"): ("review", {"local"}),
-    # Off, or local with the search ended (no pass runs on the first entry).
-    ("draft_pr", "review_found"): ("review", {"off", "local"}),
+    # Off, or local: step 4 opens on its gate, whose pass is the local one.
+    ("draft_pr", "review_close"): ("review", {"off", "local"}),
     # A review on this machine writes no round marker: no round gate, the
     # session goes straight to step 4's close.
     "round": ("review", {"github", "off"}),
@@ -45,7 +45,10 @@ NEEDS = {
     "r_prod": ("regression.prod", {True}),
     # A badge by (block, letter): R only where that stage has a suite.
     ("code", "R"): ("regression.local", {True}),
-    ("review", "R"): ("regression.local", {True}),
+    # Step 4's suites: a red preview or production fixed from its session,
+    # and the local suite its gate runs (whose R the glance's 4 · review
+    # borrows from this block).
+    ("review", "R"): [("regression.local", {True}), ("regression.preview", {True}), ("regression.prod", {True})],
     ("review_close", "R"): ("regression.local", {True}),
     ("preview", "R"): ("regression.preview", {True}),
     ("prod", "R"): ("regression.prod", {True}),
@@ -59,7 +62,7 @@ NEEDS = {
     "hold_ways": ("regression.prod", {True}),
     "in_qa": ("board.qa", {True}),
     "qa_check": ("board.done", {True}),
-    "qa_verdict": ("board.done", {True}),
+    "qa_verdict": ("board.verdict", {True}),
     "merge": ("merge", {"both", "auto"}),
     "o_ghreview": ("review", {"github", "local"}),
     "o_qa": ("board.done", {True}),
@@ -71,7 +74,7 @@ NEEDS = {
 # Where the flow goes on when a block is taken out: an arrow into it is
 # carried to this one, and on down the chain while that one is out too.
 PASS = {
-    "ci_review": "review_found", "local_pass": "review_found",
+    "ci_review": "review_close", "local_pass": "review_close",
     "reg_local": "pr", "preview_ok": "in_qa", "in_qa": "qa_check",
     "qa_check": "qa_verdict", "qa_verdict": "handoff", "prod_ok": "epilogue",
     "merge": "merge_wait",
@@ -91,7 +94,7 @@ VARIANTS = {
     "merge_wait": [("merge", {"github"}, {
         "text": "merge it on GitHub; polled every 30 s, main checked every 2 min"})],
     "qa_check": [("qa", {"auto"}, {
-        "lane": "sclaude", "title": "Accepted by sclaude",
+        "lane": "sclaude", "title": "Skip QA?",
         "text": "qa: auto — moved to Done once the preview regression is green",
         "details": "With qa set to auto, sclaude moves the issue to Done itself once the preview regression is green; a person can still hand it back from the board."}),
                  ("qa", {"both"}, {
@@ -123,7 +126,7 @@ VARIANTS = {
                ("regression.prod", {False}, {"kind": "task", "text": "shipped; no suite runs there"}),
                ("ship", {"auto"}, {"text": "shipped by sclaude; a red suite, not rolled back: held here"})],
     "ship": [("ship", {"auto"}, {
-        "title": "Ship to production?",
+        "lane": "sclaude", "title": "Ship to Prod?",
         "text": "ship: auto — asked only when a gate was passed over, or others' code rides along",
         "details": "With ship set to auto, sclaude ships once the merge is in without asking — the deployment production runs now is recorded first, for a rollback. The question comes back where QA or a check was passed over on the way (merged before the preview went green or QA accepted it, or merged as a change nothing deploys that carried more), and where other features' code between production and main would go out with it."}),
              ("ship", {"off"}, {
@@ -137,8 +140,8 @@ VARIANTS = {
     "o_preview": [("regression.preview", {False}, {"kind": "task", "text": "deployed"})],
     # No local suite: step 4 closes on the pull request alone.
     "review_close": [("regression.local", {False}, {
-        "title": "All closed?",
-        "details": 'Leaving step 4 closes it only when nothing is open — no unresolved thread, no running or red check. Otherwise sclaude waits and what is open goes back to a session without a question; [s] or ⏭ makes the next session the last for new findings. A session you left yourself (/exit, Ctrl-C) with [g] off holds step 4 open until the next sclaude <name>. A session sclaude closed on its done marker — always so for a review on this machine, which writes no round marker — goes back by whose work is open: threads from before it, or a red check, to the same session; only new ones to the same session while its context is under 40% and its last request under 55 minutes old, else to a fresh one. With [g] on the rounds go on even then (30 a step 4, then it asks), a pass that did not run is tried again ten times with growing pauses, and after the search ended the fixes are checked. A night session itself resolves a minor finding the review posted, with no reply under it yet, and replies saying so; the others it leaves for you to confirm: sclaude asks whether to go through them now, and on your yes they go back to a fresh session that asks about each and, on your yes, replies and resolves them; the rest of your threads wait for your hand on GitHub.'})],
+        "text": "on the way in and after each session: threads, red or running checks",
+        "details": 'Step 4 opens on this gate, and every session of it ends on it. On the way in, before any session, it asks more: a person\'s comment anywhere on the pull request is open too, and a pull request it cannot read opens a session; with nothing open and nothing waiting for a session (one interrupted, a review sent back) the step closes with no session at all. Leaving step 4 closes it only when nothing is open — no unresolved thread, no running or red check. Otherwise sclaude waits and what is open goes back to a session without a question; [s] or ⏭ makes the next session the last for new findings. A session you left yourself (/exit, Ctrl-C) with [g] off holds step 4 open until the next sclaude <name>. A session sclaude closed on its done marker — always so for a review on this machine, which writes no round marker — goes back by whose work is open: threads from before it, or a red check, to the same session; only new ones to the same session while its context is under 40% and its last request under 55 minutes old, else to a fresh one. With [g] on the rounds go on even then (30 a step 4, then it asks), a pass that did not run is tried again ten times with growing pauses, and after the search ended the fixes are checked. A night session itself resolves a minor finding the review posted, with no reply under it yet, and replies saying so; the others it leaves for you to confirm: sclaude asks whether to go through them now, and on your yes they go back to a fresh session that asks about each and, on your yes, replies and resolves them; the rest of your threads wait for your hand on GitHub.'})],
     "o_merge": [("merge", {"auto"}, {"lane": "sclaude", "text": "by sclaude: merge auto"}),
                 ("merge", {"github"}, {"text": "yours, on GitHub"})],
 }
@@ -181,14 +184,21 @@ def setting(cfg, name):
         # is moved to before it (issue_qa_ready).
         columns = (cfg.get("board") or {}).get("columns") or {}
         return bool(columns.get("done") and (name == "board.done" or columns.get("qa")))
+    if name == "board.verdict":
+        # QA's word read off the board: none with qa auto, where sclaude
+        # accepts the green preview itself and waits for nobody.
+        return setting(cfg, "board.done") and setting(cfg, "qa") != "auto"
     if name.startswith("database."):
         return bool((cfg.get("database") or {}).get(name.split(".", 1)[1]))
     return None
 
 
 def _needs(cfg, key):
+    """Whether cfg runs key: its (name, values), or any of a list of them."""
     need = NEEDS.get(key)
-    return not need or setting(cfg, need[0]) in need[1]
+    if not need:
+        return True
+    return any(setting(cfg, name) in values for name, values in (need if isinstance(need, list) else [need]))
 
 
 def for_config(cfg, nodes, edges):
@@ -322,7 +332,7 @@ COMMANDS = [
     ("sclaude parts <name> stop", "", "before the cycle ends", "a feature built in parts ends with the parts merged so far; the rest become an issue", "p_whole"),
     ("sclaude return <name> [reason]", "return", "a finished feature", "back to step 4 with what was said since", "review"),
     ("sclaude issue <name>", "issue", "always", "link or create the feature's issue", "new"),
-    ("sclaude news <name>", "news", "with a pull request", "what moved on the PR since the last session", "review_found"),
+    ("sclaude news <name>", "news", "with a pull request", "what moved on the PR since the last session", "review"),
     ("sclaude preview <name>", "preview", "after step 1", "deploy a preview of the branch", "preview"),
     ("sclaude rollback <name>", "rollback", "once production carried it", "the previous release back; a red one sends the fix to step 4", "rollback"),
     ("sclaude regression <name>", "regression", "always", "the local regression, the one steps 2 and 4 close on", "reg_local"),

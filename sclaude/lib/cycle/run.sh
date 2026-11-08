@@ -292,11 +292,8 @@ run_step() {
   # request labelled so the workflow skips itself; one that reviews on this
   # machine is reviewed here, on the head the session would open on. Findings
   # keep the session; none leave the step to the checks and the comments.
-  local review_word="" review_mode="" local_count="" review_first="" local_ran=""
+  local review_word="" review_mode="" local_count=""
   if [[ "$step" == "review" ]]; then
-    # The step's first entry, for the history's way into it: a return to the
-    # review comes by an arrow of its own (a round, a gate, QA, a stage).
-    [[ "$(state_get "$state" steps.review.started 2>/dev/null || true)" =~ ^(null)?$ ]] && review_first=1
     # What a regression's fixing session committed, which it is not told to
     # push, goes to the pull request first: the review reads only what the
     # pull request carries, and with four such commits behind it the review
@@ -304,47 +301,39 @@ run_step() {
     regression_push_fix "$wt" "${pr:-}" || true
     review_mode="$(project_review_mode "$wt")"
     review_label_sync "$wt" "$pr"
-    # Once the person ended the search (review_enough), nothing is reviewed
-    # on the way in: what is open goes to the session, and a check of its
-    # fixes waits for the person's word (review_close_gate). Unreadable, the
-    # pull request's own state decides below.
-    if [[ "$review_mode" == "local" && -n "$(review_enough "$wt")" ]]; then
-      local_count="$(local_review_count "$wt" "$pr")" || local_count=""
-    elif [[ "$review_mode" == "local" ]]; then
-      # A pass that runs here — the first of step 4, or the first on a head
-      # nobody reviewed yet — is reported before the session opens, to the
-      # terminal and the topic, as the gate reports one it runs: the session
-      # started on findings whose numbers nobody had been shown. A head the
-      # gate reviewed already was reported there.
-      local fresh_pass=1
-      local_review_done "$wt" && fresh_pass=0
-      # Before the pass's own row, which enters the place this way leads to.
-      [[ -n "$review_first" ]] && { cycle_edge "$wt" draft_pr local_pass sclaude "review: local"; local_ran=1; }
-      local_count="$(local_review "$wt" "$pr")" || local_count="failed"
-      # Nothing found too: the table is where a pass that came back empty is
-      # said (local_review leaves that to the report).
-      [[ "$fresh_pass" -eq 1 && "$local_count" =~ ^[0-9]+$ ]] && review_report "$wt" "$slug"
+    # Where the feature stands by its history decides the ways written:
+    # from the draft pull request on the way into step 4, from the gate's
+    # place when an entry was left there, none (quiet) where it stands at
+    # the session already or past step 4.
+    local here; here="$(review_entry_place "$wt")"
+    # The search ended: read once, and what the review left open counted
+    # once, for the way in and for the gate (REVIEW_KNOWN_COUNT); a count
+    # that could not be read is `?`, which opens the session.
+    local enough="" known=""
+    [[ "$review_mode" == local ]] && enough="$(review_enough "$wt")"
+    if [[ -n "$enough" && -n "${pr:-}" && "$pr" != null ]]; then
+      known="$(local_review_count "$wt" "$pr" 2>/dev/null)" || known=""
+      [[ "$known" =~ ^[0-9]+$ ]] || known="?"
     fi
-  fi
-  [[ "$step" == "review" ]] && [[ -z "$local_count" || "$local_count" == "0" ]] \
-    && review_skippable "$wt" "$slug" \
-    && review_word="$(review_wait_state "$wt" "$slug" "$pr")"
-  if [[ -n "$review_first" ]]; then
-    case "$review_mode" in
-      local) if [[ -z "$local_ran" ]]; then
-               cycle_edge "$wt" draft_pr review_found person "you ended the search" note="${local_count:-?} finding(s) open"
-             else
-               cycle_edge "$wt" local_pass review_found sclaude "the review on this machine" note="${local_count:-?} finding(s)"
-             fi ;;
-      off)   cycle_edge "$wt" draft_pr review_found setting "review: off" ;;
-      *)     cycle_edge "$wt" draft_pr ci_review github "the review workflow"
-             cycle_edge "$wt" ci_review review_found github "the review workflow" note="${review_word:-not waited for}" ;;
-    esac
-    if [[ "$review_word" == "clean" || "$review_word" == "unreviewed" ]]; then
-      cycle_edge "$wt" review_found review_close sclaude "nothing open on the PR" note="$review_word"
-    else
-      cycle_edge "$wt" review_found review sclaude "something open on the PR" note="${review_word:-$local_count}"
+    if [[ "$here" == out ]]; then
+      case "$review_mode" in
+        local) if [[ -n "$enough" ]]; then
+                 cycle_edge "$wt" draft_pr review_close person "you ended the search" note="${known:-?} finding(s) open"
+               else
+                 cycle_edge "$wt" draft_pr review_close setting "review: local"
+               fi ;;
+        off)   cycle_edge "$wt" draft_pr review_close setting "review: off" ;;
+        *)     cycle_edge "$wt" draft_pr ci_review github "the review workflow"
+               cycle_edge "$wt" ci_review review_close github "the review workflow" ;;
+      esac
     fi
+    # Step 4 opens on its own gate, the one each of its sessions ends on
+    # (review_close_gate): the local review's pass, the wait for the review
+    # in Actions, the report — asked the way in's question. Nothing open and
+    # nothing waiting for a session: the step closes with none at all.
+    REVIEW_KNOWN_COUNT="$known" review_close_gate "$wt" "$slug" "${pr:-}" \
+      "$([[ "$here" == session || "$here" == later ]] && echo quiet || echo entry)" && review_word="$REVIEW_ENTRY_WORD"
+    local_count="$REVIEW_ENTRY_COUNT"
   fi
   if [[ "$review_word" == "clean" || "$review_word" == "unreviewed" ]]; then
     state_set "$state" "steps.$step.started" "$(date -Iseconds)"

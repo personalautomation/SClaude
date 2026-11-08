@@ -1688,6 +1688,37 @@ of step 4's sessions, posting their findings on the pull request), or none
 green — step 4 opens no session at all and closes at once, saying which of
 the three it was.
 
+**Step 4 opens on its own gate.** The gate every session of step 4 ends on,
+`review_close_gate`, also opens the step (`entry`): the local review's pass,
+the wait for the review in Actions, a rerun after the review ran out of
+quota, the report and the history's ways are one code for both. Only the
+question differs, and on purpose: on the way in it is `pr_context.py
+--state` (`review_state`), which counts a person's comment anywhere and opens
+a session on a pull request it cannot read, since a wrong "clean" there skips
+the only look at what people wrote; on the way out it is `--close`
+(`close_state`), which reads threads and checks only, and lets the step close
+on what it cannot read, so that a network fault does not hold it shut. On
+the way in the gate asks nothing and opens no session itself: a session is
+run_step's to open, and the questions after a session ([g]'s ceiling, "Close
+step 4 anyway?") have no session before them yet. A step with a session of
+its own already, or a review sent back (`review_skippable`), is not closed
+there and the pull request is not asked at all — nothing waited for, no
+rerun after the review's quota — only the local pass runs for its count, or,
+once the person ended the search, the open threads are counted. On
+the way in the local pass comes before any wait, and threads it left open
+once the person ended the search are open whatever `--state` says, since
+that word does not count the review's own threads; run_step reads that the
+search ended and counts them once, for the way in and for the gate
+(`REVIEW_KNOWN_COUNT`), and a count it could not read opens the session.
+The ways written follow where the feature stands by its history
+(`review_entry_place`). Before step 4 (on the draft pull request), they
+start there. Left in the gate by an earlier entry, they go on from the
+gate's place. At the session already (resumed, a fresh session for the
+next round, sent back to it by the gate), or past step 4 (a hand-back, a
+rollback, a return from a held production), none are written (`quiet`).
+On the map this is one block, "Anything left open?", which the draft pull
+request leads to.
+
 **The local review's keys are boxes the person can see.** While a pass runs
 (`local_review_wait`), `s` ends the search for new findings
 (`steps.review.enough`) and `g` lets the review go on by itself

@@ -337,7 +337,7 @@ cmd_flow() {
     printf '%s\t%s\n' "${verbs[$i]}" "${labels[$i]}"
   done | python3 -c '
 import json, os, sys
-node, title, why, where, feature, lib, state, pr_state = sys.argv[1:9]
+node, title, why, where, feature, lib, state, pr_state, tree = sys.argv[1:10]
 actions = []
 for line in sys.stdin:
     verb, _, rest = line.rstrip("\n").partition("\t")
@@ -366,15 +366,20 @@ try:
             workshop = json.load(fh)
     except (OSError, ValueError):
         workshop = None
-    busy = process.busy(data, workshop)
-    notes = process.busy_notes(data, workshop)
-    stalled = process.stalled(data, pr_state)
+    # On the map the project draws, as played() reads it: a letter or a
+    # block its config leaves out turns no ring.
+    import process_config, process_model, process_position
+    with process_model.configured(process_config.config_of(tree)):
+        busy = process.busy(data, workshop)
+        notes = process.busy_notes(data, workshop)
+        stalled = process.stalled(data, pr_state)
+        also = process_position.also(data)
 except Exception:
-    busy, notes, stalled = {}, {}, {}
+    busy, notes, stalled, also = {}, {}, {}, []
 print(json.dumps({"feature": feature, "node": node, "title": title, "why": why,
                   "where": where, "actions": actions, "history": history, "busy": busy,
-                  "notes": notes, "stalled": stalled}))
-' "$node" "$title" "$why" "$where" "$slug" "$LIB" "$state" "$pr_state"
+                  "notes": notes, "stalled": stalled, "also": also}))
+' "$node" "$title" "$why" "$where" "$slug" "$LIB" "$state" "$pr_state" "$wt"
 }
 
 # Gathers the applicable actions and carries out the chosen one.

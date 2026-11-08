@@ -1175,7 +1175,7 @@ check_true("orchestrator-fixes-are-limited",
            'orchestrator_fixes' in gate_body and '"$ofix" -lt "$REGRESSION_MAX_ATTEMPTS"' in gate_body)
 run_step_body = run_sh[run_sh.find("run_step() {"):run_sh.find("\n}\n", run_sh.find("run_step() {"))]
 check_true("review-skip-before-the-dev-server",
-           -1 < run_step_body.find("review_skippable") < run_step_body.find('ensure_dev "$wt"'))
+           -1 < run_step_body.find('review_close_gate "$wt" "$slug" "${pr:-}"') < run_step_body.find('ensure_dev "$wt"'))
 check_true("watcher-knows-in-qa", 'field "$file" columns.qa' in watcher)
 check_true("orchestrator-fix-checked-before-blocked",
            -1 < gate_body.find('"$frc" -eq 4') < gate_body.find('"$frc" -eq 3'))

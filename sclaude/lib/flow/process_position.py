@@ -144,19 +144,36 @@ def busy(state, workshop=None):
     # R: a suite running, or a session fixing what it found, on the block the
     # stage runs from; S: a sync with main going, on the step it runs ahead
     # of, or on the preview once the steps are done.
-    step = state.get("step") or "plan"
-    at_step = step if step in process_model.NODES else "review"
-    for stage, block in (("local", at_step), ("preview", "preview"), ("prod", "prod")):
-        fixing = _fix_open(state, stage)
-        if _running(state, stage) or fixing:
-            nid = "review" if fixing and stage != "local" else block
-            if "R" in process_model.NODES.get(nid, ("",) * 6)[5] and "R" not in out.get(nid, []):
-                out.setdefault(nid, []).append("R")
+    for _stage, nid in _r_blocks(state, _local_block(state)):
+        if "R" in process_model.NODES.get(nid, ("",) * 6)[5] and "R" not in out.get(nid, []):
+            out.setdefault(nid, []).append("R")
     sync = _runs(state.get("sync"))
     if sync and _going(sync[-1]):
         nid = _sync_block(state)
         if "S" in process_model.NODES.get(nid, ("",) * 6)[5]:
             out.setdefault(nid, []).append("S")
+    return out
+
+
+def _local_block(state):
+    """The local suite's block, where position stands it: step 2's for a
+    feature built in parts, step 4's close at step 4."""
+    step = state.get("step") or "plan"
+    if _parts_open(state) and step in ("code", "pr", "review"):
+        return "code"
+    if step == "review":
+        return "review_close"
+    return step if step in process_model.NODES else "review"
+
+
+def _r_blocks(state, at_step):
+    """(stage, block) for each stage whose suite runs or is being fixed: the
+    block its R turns on, which busy_notes says the same stage's words for."""
+    out = []
+    for stage, block in (("local", at_step), ("preview", "preview"), ("prod", "prod")):
+        fixing = _fix_open(state, stage)
+        if _running(state, stage) or fixing:
+            out.append((stage, "review" if fixing and stage != "local" else block))
     return out
 
 
@@ -202,7 +219,7 @@ BADGE_WHY = {
     ("qa_check", "S"): "S — once QA accepted, main is checked before the hand-over; a conflict goes to the sync, and the run to the preview and QA again, as do commits that reached the branch from elsewhere.",
     ("merge", "S"): "S — while the merge waits, main is checked every 2 min; a conflict goes to the sync, the PR back to a draft, and the run to the preview again.",
     ("code", "R"): "R — after your yes the local suite runs against this feature's server; red opens a fixing session, two at most.",
-    ("review", "R"): "R — a red preview or production comes back here to be fixed.",
+    ("review", "R"): "R — step 4's suites: the local one its gate runs before it closes, a red preview or production fixed here.",
     ("review_close", "R"): "R — the local suite runs again before step 4 closes; red opens a fixing session, two at most.",
     ("local_pass", "S"): "S — main is merged in when step 4 starts or is taken up again, before the local review's pass; a conflict goes to the sync first.",
     ("preview", "R"): "R — the preview suite runs against this deployment; green sends the issue to QA, red back to step 4.",
@@ -237,7 +254,7 @@ def busy_notes(state, workshop=None):
         for flag in flags:
             text = ""
             if flag == "R":
-                for stage in ("local", "preview", "prod"):
+                for stage in [st for st, block in _r_blocks(state, _local_block(state)) if block == nid]:
                     run = (state.get("regression") or {}).get(stage) or {}
                     if _running(state, stage):
                         tries = str(run.get("attempts") or 0)
@@ -303,14 +320,41 @@ def position(state, pr_state="", epilogue=None):
     return _past_steps(state, pr_state, epilogue)
 
 
+def _parts_open(state):
+    """A feature built in parts (parts.sh) whose parts are not all in."""
+    parts = state.get("parts") or {}
+    return isinstance(parts.get("total"), int) and parts["total"] >= 2 and parts.get("done") is not True
+
+
+def _step4_local(state):
+    """The regression map's block a local run at step 4 stands on, and why;
+    None when none is going on."""
+    if _running(state, "local"):
+        return "reg_local", "the local regression is running before step 4 closes"
+    if _fix_open(state, "local"):
+        return "fix_local", "a session is fixing the local regression before step 4 closes"
+    return None
+
+
+def also(state):
+    """Places lit beside the one position answers: the regression map's own
+    block while step 4 stands on its close for a local run."""
+    if (state.get("step") == "review" and not _sync_in_step(state)
+            and not any(_fix_open(state, s) for s in ("prod", "preview"))):
+        if not _parts_open(state):
+            local = _step4_local(state)
+            if local:
+                return [local[0]]
+    return []
+
+
 def _in_step(state, step):
     if _sync_in_step(state):
         return "sync", "a sync with main is open, ahead of the step"
     # A feature built in parts (parts.sh) is in step 2 while its parts are:
     # code, pull request and review of the part at work.
     parts = state.get("parts") or {}
-    if (isinstance(parts.get("total"), int) and parts["total"] >= 2 and parts.get("done") is not True
-            and step in ("code", "pr", "review")):
+    if _parts_open(state) and step in ("code", "pr", "review"):
         if step in ("code", "review") and _running(state, "local"):
             return "reg_local", "part %s/%s: the local regression is running" % (parts.get("current"), parts["total"])
         # The part's own review is p_review: local_pass is step 4's block,
@@ -330,11 +374,11 @@ def _in_step(state, step):
             if _fix_open(state, stage):
                 return "fix_" + stage, "a session is fixing the %s regression" % stage
         # At step 4 the local suite is the gate that closes the step: lit
-        # there, not on reg_local, which the overview places in step 2.
-        if _running(state, "local"):
-            return "review_close", "the local regression is running before step 4 closes"
-        if _fix_open(state, "local"):
-            return "review_close", "a session is fixing the local regression before step 4 closes"
+        # there, not on reg_local, which the overview places in step 2. Its
+        # own block on the regression map is lit beside it (also).
+        local = _step4_local(state)
+        if local:
+            return "review_close", local[1]
         if _fresh(((state.get("review") or {}).get("local") or {}).get("running")):
             return "local_pass", "the local review is reading the pull request"
     return (step if step in process_model.NODES else "plan"), "step %s" % step

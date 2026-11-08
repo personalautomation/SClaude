@@ -1,32 +1,96 @@
 #!/usr/bin/env bash
 #
-# Closing step 4: the gate that asks the pull request whether the review
-# finished with nothing open, the threads the person kept, and the reports.
+# Step 4's gate, on the way in and on the way out: it asks the pull request
+# whether the review finished with nothing open, the threads the person kept,
+# and the reports.
 #
 # Part of sclaude; pulled in with source from bin/sclaude.
 # It does not run on its own.
+
+# The way back to a session, from the gate or from the local review whose
+# pass found something; each spelled out, as the map's arrows are.
+#
+#   review_back_edge <wt> <review_close|local_pass> <by> <how> [<key>=<value>…]
+review_back_edge() {
+  local wt="$1" from="$2"
+  shift 2
+  if [[ "$from" == local_pass ]]; then
+    cycle_edge "$wt" local_pass review "$@"
+  else
+    cycle_edge "$wt" review_close review "$@"
+  fi
+}
+
+# Where a feature stands as step 4 opens, by the ways its history wrote:
+# `out` before the step (on the draft pull request, or nothing written),
+# `gate` where an entry was left in the gate, `session` at the session —
+# or past step 4 (`later`), sent back by a way no code writes into the
+# session (a hand-back taken up at the next start, a rollback, a return
+# from a held production): then the gate's ways would hang from the last
+# pass's close, and none are written.
+#
+#   review_entry_place <wt>
+review_entry_place() {
+  case "$(last_place "$1" draft_pr ci_review review_close local_pass review \
+            preview in_qa qa_check qa_verdict handoff merge merge_wait merged ship prod hold_ways epilogue)" in
+    review) echo session ;;
+    ci_review|review_close|local_pass) echo gate ;;
+    draft_pr|"") echo out ;;
+    *) echo later ;;
+  esac
+}
 
 # May step 4 close? Waits out a review still running, then, if anything is
 # left open, goes back to a review session unasked — held instead when the
 # person left the last one with [g] off. Returns 0 to go on closing.
 #
-#   review_close_gate <wt> <slug> <pr>
+#   review_close_gate <wt> <slug> <pr> [entry|quiet]
 #
 # Its answer, as `pr_context.py --close` gives it: `ok`, `pending` or
 # `open: <why>`. Anything unreadable is `ok`.
+#
+# With `entry` or `quiet`, the same gate opens step 4, before any session.
+# `quiet` writes none of the gate's ways to the history: run_step gives it
+# where the feature stands at the session already, or past step 4
+# (review_entry_place) — it came there by a way of its own, or by one no
+# code writes. With a known REVIEW_KNOWN_COUNT (review: local,
+# the search ended, counted by run_step) no pass runs and that count decides;
+# `?`, a count that could not be read, opens the session. 0 when the
+# step may close with no session at all, 1 when a session is needed, which
+# run_step then opens — the gate asks nothing and opens none itself. It asks
+# the pull request the way in's question, `pr_context.py --state` (clean,
+# unreviewed, dirty, pending, unknown): conservative where the way out is
+# lenient — a person's comment anywhere, or a state that cannot be read, is a
+# session — since a wrong "clean" here skips the only look at what people
+# wrote. The word it ended on is left in REVIEW_ENTRY_WORD, and the local
+# review's count of what is open (or `failed`) in REVIEW_ENTRY_COUNT, for the
+# session run_step opens.
 review_close_gate() {
-  local wt="$1" slug="$2" pr="$3" word waited=0 announced=0 answer repo said="" said_read=0 failed=0 go_box=""
-  local gate_reported=0
-  # Where the way back to a session starts: the close, or the findings'
-  # question when the gate's own pass found something.
+  local wt="$1" slug="$2" pr="$3" entry="${4:-}" word waited=0 announced=0 answer repo said="" said_read=0 failed=0 go_box=""
+  local gate_reported=0 question=--close skippable=1 edges=1
+  if [[ -n "$entry" ]]; then
+    question=--state
+    [[ "$entry" == quiet ]] && edges=0
+    # A session of its own already (one interrupted is resumed, never
+    # skipped), or the review sent back: the pull request is not asked —
+    # the session opens whatever it shows, so nothing is waited for, no
+    # rerun after the quota either — only the local pass gives its count.
+    review_skippable "$wt" "$slug" || skippable=0
+  fi
+  REVIEW_ENTRY_WORD="" REVIEW_ENTRY_COUNT=""
+  # Where the way back to a session starts: the gate, or the local review
+  # when the gate's own pass found something.
   local back_from=review_close
   # Who let the step close, for the history's way out of the gate, written
   # as the step closes (after_step); the way back is written here.
   REVIEW_CLOSE_BY=sclaude REVIEW_CLOSE_HOW="nothing open on the PR" REVIEW_CLOSE_NOTE=""
-  [[ -n "$pr" && "$pr" != "null" ]] || return 0
-  command -v gh >/dev/null 2>&1 || return 0
+  # No pull request to ask: the way out lets the step close, the way in
+  # opens the session, as it did before the gate was asked there.
+  local unread=0; [[ -n "$entry" ]] && unread=1
+  [[ -n "$pr" && "$pr" != "null" ]] || return "$unread"
+  command -v gh >/dev/null 2>&1 || return "$unread"
   repo="$(gh_repo 2>/dev/null || true)"
-  [[ -n "$repo" ]] || return 0
+  [[ -n "$repo" ]] || return "$unread"
   # A project that reviews on this machine: the review the workflow would run
   # after the session's push runs here, once the pull request has nothing
   # open but review threads — it resolves the ones the push fixed and posts
@@ -35,15 +99,40 @@ review_close_gate() {
   # it would be paid for nothing. A review that did not run is put to the
   # person rather than sent back to a session, which could do nothing about
   # it and would end the same way.
+  #
+  # On the way in the pass runs whatever the pull request shows — the session
+  # it opens starts on the findings — except once the person ended the
+  # search: what is open then goes to the session as it is.
   local local_due=0
   [[ "$(project_review_mode "$wt")" == "local" ]] && local_due=1
+  if [[ -n "$entry" && -n "${REVIEW_KNOWN_COUNT:-}" ]]; then
+    local_due=0
+    REVIEW_ENTRY_COUNT="$REVIEW_KNOWN_COUNT"
+  fi
   while :; do
-    word="$(python3 "$LIB/review/pr_context.py" --close "$wt" "$pr" "$repo" 2>/dev/null || true)"
-    if [[ "$word" == open:*red:* ]] && review_quota_rerun "$wt" "$slug" "$pr" "$repo"; then
-      continue
+    # Findings the review on this machine left open are open, whatever the
+    # pull request answers: its own threads are not in review_state's word;
+    # nor is a count that could not be read.
+    if [[ -n "$entry" && "$REVIEW_ENTRY_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+      word="open: the review on this machine leaves $REVIEW_ENTRY_COUNT finding(s) open"
+      break
     fi
-    if [[ "$word" != "pending" ]]; then
-      if [[ "$local_due" -eq 1 ]] && [[ "$word" == "ok" || "$word" == yours:* \
+    if [[ -n "$entry" && "$REVIEW_ENTRY_COUNT" == "?" ]]; then
+      word="open: the threads the review left could not be counted"
+      break
+    fi
+    if [[ -n "$entry" && "$skippable" -eq 0 ]]; then
+      word="open: the step's own session"
+    else
+      word="$(python3 "$LIB/review/pr_context.py" "$question" "$wt" "$pr" "$repo" 2>/dev/null || true)"
+      if [[ "$word" == open:*red:* || "$word" == dirty ]] && review_quota_rerun "$wt" "$slug" "$pr" "$repo"; then
+        continue
+      fi
+    fi
+    # On the way in the local pass comes first, whatever is still running:
+    # what it finds is the session's; a wait is only for a close.
+    if [[ "$word" != "pending" || ( -n "$entry" && "$local_due" -eq 1 ) ]]; then
+      if [[ "$local_due" -eq 1 ]] && [[ -n "$entry" || "$word" == "ok" || "$word" == yours:* \
             || "$word" =~ ^open:\ [0-9]+\ review\ thread\(s\)\ open$ ]]; then
         local_due=0
         local count
@@ -87,19 +176,32 @@ review_close_gate() {
             return 0
           fi
         fi
-        # The pass the gate runs is a block of the map's own: back from the
-        # close to the local review, and from it to the findings' question.
-        cycle_edge "$wt" review_close local_pass sclaude "only review threads open" note="${word}"
+        # The pass the gate runs is a block of the map's own: from the gate
+        # to the local review, and from it back to the gate, or on to a
+        # session with what it found (the way back below starts there).
+        [[ "$edges" -eq 0 ]] || cycle_edge "$wt" review_close local_pass sclaude "review: local" note="${word}"
+        # On the way in, a head the gate reviewed already was reported where
+        # it ran: its table is not printed again before the session.
+        local fresh_pass=1
+        [[ -n "$entry" ]] && local_review_done "$wt" && fresh_pass=0
         count="$(local_review "$wt" "$pr")" || count="failed"
-        if [[ "$count" =~ ^[0-9]+$ ]]; then
-          cycle_edge "$wt" local_pass review_found sclaude "the review on this machine" note="$count finding(s)"
-          [[ "$count" -eq 0 ]] && cycle_edge "$wt" review_found review_close sclaude "nothing found"
-          [[ "$count" -gt 0 ]] && back_from=review_found
+        [[ -n "$entry" ]] && REVIEW_ENTRY_COUNT="$count"
+        # Nothing printed is read as nothing found below, and recorded so.
+        if [[ "$count" =~ ^[0-9]*$ ]]; then
+          [[ "${count:-0}" -eq 0 && "$edges" -eq 1 ]] && cycle_edge "$wt" local_pass review_close sclaude "nothing found"
+          [[ "${count:-0}" -gt 0 ]] && back_from=local_pass
         fi
         if [[ "$count" == "failed" ]]; then
+          [[ "$edges" -eq 0 ]] || cycle_edge "$wt" local_pass review_close sclaude "the review on this machine" note="it did not run"
           failed=$((failed + 1))
           warn ""
           warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
+          # On the way in the session opens on what is open, as before the
+          # gate was asked there; the pass runs again at its end.
+          if [[ -n "$entry" ]]; then
+            word="open: the review on this machine did not run"
+            break
+          fi
           # A "no" is not "leave": the review is what the person wants, so it
           # runs again here, rather than at the next `sclaude` they would
           # have to type. Only no answer at all (nobody to ask) leaves it open.
@@ -130,12 +232,14 @@ review_close_gate() {
           # (found nothing, nothing to fix) ends the table the person last saw
           # — unless that table is the one just printed on this head, by the
           # pass on the way into step 4.
-          review_report_unshown "$wt" "$slug"; gate_reported=1
+          [[ "$fresh_pass" -eq 1 ]] && review_report_unshown "$wt" "$slug"
+          gate_reported=1
         elif [[ "$count" -gt 0 ]]; then
           # The report printed as the session ended was made before this
           # run: once more with it, where the person decides whether to go
           # on fixing.
-          review_report "$wt" "$slug"; gate_reported=1
+          [[ "$fresh_pass" -eq 1 ]] && review_report "$wt" "$slug"
+          gate_reported=1
           # Open by its own count, not by asking GitHub again: a finding in
           # the conversation, or one still waiting to be posted, is no thread
           # for the pull request to show.
@@ -152,7 +256,11 @@ review_close_gate() {
     fi
     if [[ "$announced" -eq 0 ]]; then
       announced=1
-      info "  The automatic review of PR #$pr is still running; step 4 closes once it has finished."
+      if [[ -n "$entry" ]]; then
+        info "  Waiting for the automatic review of PR #$pr to finish."
+      else
+        info "  The automatic review of PR #$pr is still running; step 4 closes once it has finished."
+      fi
       info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug"
     fi
     # `s` here as in the local review, for the review in Actions: what it
@@ -184,6 +292,17 @@ review_close_gate() {
       fi
     fi
   done
+  # The way in: closed with no session when nothing is open and nothing
+  # waits for one; else run_step opens the session, which asks nothing here.
+  if [[ -n "$entry" ]]; then
+    REVIEW_ENTRY_WORD="$word"
+    if [[ "$skippable" -eq 1 && ( "$word" == clean || "$word" == unreviewed ) ]]; then
+      REVIEW_CLOSE_NOTE="$word"
+      return 0
+    fi
+    [[ "$edges" -eq 0 ]] || review_back_edge "$wt" "$back_from" sclaude "something open on the PR" note="$word"
+    return 1
+  fi
   # The search ended (review_enough), with the review in Actions: it cannot
   # be told to only check the fixes, so what it posted after the last session
   # began is left on the pull request; what that session had and did not
@@ -271,7 +390,7 @@ review_close_gate() {
   # conversation within seconds when it had committed nothing new.
   if [[ -n "${SESSION_EXITED:-}" && "$go_on" -eq 0 ]]; then
     info "  You left the session: step 4 stays open. Come back with: $SELF $slug"
-    cycle_edge "$wt" "$back_from" review person "${SESSION_HOW:-/exit or Ctrl-C}" note="held: ${word#open: }"
+    review_back_edge "$wt" "$back_from" person "${SESSION_HOW:-/exit or Ctrl-C}" note="held: ${word#open: }"
     return 1
   fi
   # Unsaid: the session's own heading follows, its status line with [s].
@@ -284,7 +403,7 @@ review_close_gate() {
     answer=y
   fi
   if is_yes "$answer"; then
-    cycle_edge "$wt" "$back_from" review "$back_by" "$back_how" note="${word#open: }"
+    review_back_edge "$wt" "$back_from" "$back_by" "$back_how" note="${word#open: }"
     # A session sclaude closed: review_reopen picks the session, a fresh one
     # for a new round, as it does unasked.
     if [[ -n "${SESSION_AUTO_CLOSED:-}" ]]; then
@@ -297,7 +416,7 @@ review_close_gate() {
   ask "${BOLD}Close step 4 anyway, with that left as it is? [y/n] ${OFF}" answer yn && back_by=person || back_by=none
   if ! is_yes "$answer"; then
     info "  Left open. Come back with: $SELF $slug"
-    cycle_edge "$wt" "$back_from" review "$back_by" "$ASKED_HOW" note="held: ${word#open: }"
+    review_back_edge "$wt" "$back_from" "$back_by" "$ASKED_HOW" note="held: ${word#open: }"
     return 1
   fi
   REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="$ASKED_HOW" REVIEW_CLOSE_NOTE="closed anyway: ${word#open: }"

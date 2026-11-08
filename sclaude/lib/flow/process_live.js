@@ -16,12 +16,17 @@ function render(v) {
   // The glance's blocks carry their step's letters (ALIAS):
   // they turn with it.
   Object.entries(v.busy || {}).forEach(([id, flags]) => flags.forEach((f) =>
-    [id].concat(M.alias[id] || []).forEach((at) =>
+    // R also on the glance's block the place is lit on (POS), for a place
+    // no block there borrows: step 4's close turns 4 · review. Not F: a
+    // fix block's POS is step 2's, though its friction may follow step 4.
+    [id].concat(M.alias[id] || [], f === 'R' ? POS[id] || [] : []).forEach((at) =>
     document.querySelectorAll('svg.map [data-node="' + at + '"] .b-' + f).forEach((b) => {
-      b.classList.add('busy');
-      // On hover, how it goes now, under why it is there.
+      // On hover, how it goes now, under why it is there: each place's note
+      // added, where two places turn the same letter of one block.
       const note = ((v.notes || {})[id] || {})[f];
-      b.querySelector('title').textContent = b.dataset.why + (note ? '\n' + note : '');
+      const t = b.querySelector('title');
+      t.textContent = (b.classList.contains('busy') ? t.textContent : b.dataset.why) + (note ? '\n' + note : '');
+      b.classList.add('busy');
     }))));
   // A sync with main has no block on the glance: its S stands
   // on the block it runs ahead of, which is lit for it, the S turning — or,
@@ -41,7 +46,9 @@ function render(v) {
       if (!b.classList.contains('stalled')) b.classList.add('busy');
     })));
   if (here) {
-    [here].concat(POS[here] || (here === 'sync' ? syncAt.flatMap((id) => POS[id] || []) : [])).forEach((id) =>
+    // also: a block of a smaller map the place stands on meanwhile (a
+    // local run at step 4 on the regression map).
+    [here].concat(POS[here] || (here === 'sync' ? syncAt.flatMap((id) => POS[id] || []) : []), v.also || []).forEach((id) =>
       document.querySelectorAll('svg.map [data-node="' + id + '"]').forEach((n) => n.classList.add('here')));
   }
   if (here && here !== last) {

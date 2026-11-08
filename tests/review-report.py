@@ -483,13 +483,12 @@ RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
 BIN = "".join(open(os.path.join(ROOT, _p)).read()
     for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 # Four for the rounds of the review on GitHub, two where the review on this
-# machine ends a pass after a session (review_close_gate: something open, or
-# nothing — the last table, its round of nothing included), and one where
-# it finds something on the way into step 4, before the first session, and
-# one where the gate finds what is open with no report on this head printed
-# (review_close_gate).
+# machine ends a pass (review_close_gate: something open, or nothing — the
+# last table, its round of nothing included — on the way into step 4 too),
+# and one where the gate finds what is open with no report on this head
+# printed (review_close_gate).
 check("printed-at-every-round-close",
-      len(re.findall(r'review_report(?:_unshown)? "\$wt" "\$slug"', RUN)), 8)
+      len(re.findall(r'review_report(?:_unshown)? "\$wt" "\$slug"', RUN)), 7)
 check("checks-red-takes-up-the-round",
       ('run_took_up "$wt" wait' in RUN, '(( rc == 1 )) && run_took_up "$wt" red' in RUN), (True, True))
 check("cost-taken-at-session-end", '[[ "$step" == "review" ]] && run_cost "$wt" "$session"' in RUN, True)

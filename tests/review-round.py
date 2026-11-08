@@ -1106,9 +1106,14 @@ echo "watcher=[$SESSION_WATCHER]"
     # REVIEW_KEPT_SAID is for one call: taken before the first way out.
     check("kept-said-taken-before-any-return",
           entry.index('REVIEW_KEPT_SAID=""') < entry.index("&& return"), True)
+    # The way in is step 4's gate (review_close_gate ... entry), whose pass
+    # reports what it found unless that head was reported where it ran.
     check("entry-pass-reported",
-          'local_review_done "$wt" && fresh_pass=0' in entry
-          and '[[ "$fresh_pass" -eq 1 && "$local_count" =~ ^[0-9]+$ ]] && review_report "$wt" "$slug"' in entry, True)
+          'REVIEW_KNOWN_COUNT="$known" review_close_gate "$wt" "$slug" "${pr:-}"' in entry
+          and '"$([[ "$here" == session || "$here" == later ]] && echo quiet || echo entry)"' in entry
+          and '[[ -n "$entry" ]] && local_review_done "$wt" && fresh_pass=0' in RUN
+          and '[[ "$fresh_pass" -eq 1 ]] && review_report "$wt" "$slug"' in RUN
+          and '[[ "$fresh_pass" -eq 1 ]] && review_report_unshown "$wt" "$slug"' in RUN, True)
     check("not-done-says-where-it-stands",
           'warn "  $standing"' in gate and 'ask_feed warn "  $standing"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
           and '"$(review_last_look "$wt")"' in gate, True)
@@ -1182,7 +1187,7 @@ echo "watcher=[$SESSION_WATCHER]"
     # count and says it ran, and `ask` answers from a list (no once it runs
     # out) and says what it was asked.
     def enough_gate(said, word, count, mode="local", split="0 0", answers=(), done=False, go_on=False,
-                    auto=False, exited=False):
+                    auto=False, exited=False, entry=False, skippable=True, open_count=3, known=""):
         wt = os.path.join(tmp, "enough-wt")
         fake = os.path.join(tmp, "enough-lib")
         os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"), exist_ok=True)
@@ -1196,27 +1201,90 @@ echo "watcher=[$SESSION_WATCHER]"
         with open(os.path.join(fake, "review/pr_context.py"), "w") as fh:
             fh.write("import sys\nprint(%r if '--open-since' in sys.argv else %r)\n" % (split, word))
         body = 'source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
-        body += functions(["review_close_gate", "review_enough_close", "review_session_since",
+        body += functions(["review_close_gate", "review_back_edge", "review_enough_close", "review_session_since",
                                 "review_stuck_say", "review_report_unshown"])
         body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5; REVIEW_GO_ON_PAUSE=0\n'
                  'gh_repo() { echo o/r; }\nproject_review_mode() { echo %s; }\n'
                  'local_review() { echo REVIEWED >&2; [[ %s == failed ]] && return 1; echo %s; }\n'
-                 'local_review_count() { echo 3; }\nlocal_review_done() { %s; }\n'
-                 'review_report() { echo REPORT; }\nreview_quota_rerun() { return 1; }\n'
+                 'local_review_count() { echo COUNTED >&2; echo %s; }\nlocal_review_done() { %s; }\n'
+                 'review_report() { echo REPORT; }\nreview_quota_rerun() { echo QUOTA; return 1; }\n'
                  'ANSWERS=(%s); is_yes() { [[ "$1" == y ]]; }\n'
                  'ask() { echo "ASKED: $1"; printf -v "$2" %%s "${ANSWERS[0]:-n}"; ANSWERS=("${ANSWERS[@]:1}"); }\n'
                  'say() { echo "$*"; }\ninfo() { echo "$*"; }\nwarn() { echo "$*"; }\n'
                  'run_step() { echo "RUN_STEP $3"; }\nreview_reopen() { echo REOPEN; }\n'
                  'SESSION_AUTO_CLOSED=%s; SESSION_EXITED=%s\n'
-                 'review_close_gate %s x 143; echo "RC=$?"\n') % (
-                     fake, mode, count, count, "true" if done else "false",
-                     " ".join(answers), "1" if auto else "", "1" if exited else "", wt)
+                 'review_skippable() { %s; }\ncycle_edge() { echo "EDGE $2 $3 $5 $6"; }\n'
+                 'REVIEW_KNOWN_COUNT=%s review_close_gate %s x 143 %s; echo "RC=$?"\n') % (
+                     fake, mode, count, count, open_count, "true" if done else "false",
+                     " ".join(answers), "1" if auto else "", "1" if exited else "",
+                     "true" if skippable else "false", "'%s'" % known, wt,
+                     (entry if isinstance(entry, str) else "entry") if entry else "")
         out = subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=60,
                              env=dict(os.environ, PATH=os.environ["PATH"]), stdin=subprocess.DEVNULL)
         with open(state) as fh:
             left = json.load(fh)
         return out.stdout + out.stderr, left
 
+    # The same gate opens step 4 (entry): it closes the step with no session
+    # when nothing is open, else hands run_step the session to open — asking
+    # nothing and opening none itself.
+    out, left = enough_gate("", "clean", 0, entry=True)
+    check("entry-clean-closes", "REVIEWED" in out and "RC=0" in out and "RUN_STEP" not in out, True)
+    out, left = enough_gate("", "clean", 2, entry=True)
+    check("entry-findings-to-session", "RC=1" in out and "EDGE local_pass review" in out
+          and "RUN_STEP" not in out and "ASKED" not in out, True)
+    out, left = enough_gate("", "dirty", 0, entry=True)
+    check("entry-dirty-to-session", "RC=1" in out and "EDGE review_close review" in out, True)
+    out, left = enough_gate("", "clean", 0, mode="github", entry=True)
+    check("entry-github-clean-closes", "REVIEWED" not in out and "RC=0" in out, True)
+    out, left = enough_gate("", "dirty", 0, mode="github", entry=True, skippable=False)
+    check("entry-own-session-not-skipped", "RC=1" in out and "the step's own session" in out, True)
+    check("entry-own-session-no-quota-wait", "QUOTA" not in out, True)
+    # The search ended: no pass, and what it left open is open — the pull
+    # request's word does not count the review's own threads.
+    # run_step counts them once and hands the count over: the gate reads
+    # none itself, and a count it could not read opens the session.
+    out, left = enough_gate("now", "unreviewed", 0, entry=True, known="0")
+    check("entry-search-ended-no-pass", "REVIEWED" not in out and "ASKED" not in out and "RC=0" in out
+          and "COUNTED" not in out, True)
+    out, left = enough_gate("now", "unreviewed", 0, entry=True, known="3")
+    check("entry-search-ended-open-to-session", "REVIEWED" not in out and "RC=1" in out
+          and "leaves 3 finding(s) open" in out and "COUNTED" not in out, True)
+    out, left = enough_gate("now", "unreviewed", 0, entry=True, known="?")
+    check("entry-search-ended-uncounted-to-session", "RC=1" in out and "could not be counted" in out, True)
+    # On the way in the pass runs before any wait for checks still running.
+    out, left = enough_gate("", "pending", 2, entry=True)
+    check("entry-pass-before-pending-wait", "REVIEWED" in out and "RC=1" in out
+          and "leaves 2 finding(s) open" in out, True)
+    # A later entry writes no ways: the one it came by is written already.
+    # At the session already — a fresh session for the next round, its id
+    # cleared, included — or past step 4: no way written.
+    for sk in (True, False):
+        out, left = enough_gate("", "clean", 2, entry="quiet", skippable=sk)
+        check("entry-at-session-writes-no-edges-%s" % sk, "RC=1" in out and "EDGE" not in out, True)
+    # Where the feature stands by its history: before step 4, left in the
+    # gate (its ways go on from there), or at the session (none written).
+    def place_of(ways):
+        pw = os.path.join(tmp, "place-wt")
+        os.makedirs(os.path.join(pw, ".sclaude", "local", "feature"), exist_ok=True)
+        with open(os.path.join(pw, ".sclaude", "local", "feature", "history.jsonl"), "w") as fh:
+            for w in ways:
+                fh.write(json.dumps({"at": "2026-01-01T00:00:00+00:00", "what": "edge", "op": w}) + "\n")
+        body = 'source "%s/core/state.sh"\n%s\nreview_entry_place "%s"\n' % (
+            LIB, functions(["review_entry_place"]), pw)
+        return subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=30).stdout.strip()
+    check("entry-place-out", [place_of([]), place_of(["pr_check draft_pr"])], ["out", "out"])
+    check("entry-place-left-in-gate", [place_of(["pr_check draft_pr", "draft_pr review_close"]),
+                                       place_of(["draft_pr review_close", "review_close local_pass"]),
+                                       place_of(["draft_pr ci_review", "f_log f_empty"])], ["gate"] * 3)
+    check("entry-place-session", [place_of(["review_close local_pass", "local_pass review"]),
+                                  place_of(["review_close preview", "preview review"])], ["session"] * 2)
+    # Sent back past step 4 by a way no code writes into the session.
+    check("entry-place-later", [place_of(["local_pass review_close", "review_close preview"]),
+                                place_of(["round review_close", "review_close preview", "preview in_qa",
+                                          "hold_ways rollback"])], ["later"] * 2)
+    out, left = enough_gate("", "clean", "failed", entry=True)
+    check("entry-failed-pass-to-session", "RC=1" in out and "ASKED" not in out, True)
     # Locally, once the search ended, the session's fixes are checked only on
     # the person's word: asked first, reviewed on a yes, and what is still
     # open then goes to a session again.

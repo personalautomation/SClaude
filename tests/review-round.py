@@ -594,8 +594,10 @@ echo "watcher=[$SESSION_WATCHER]"
                           capture_output=True, text=True).stdout
     check("exit-advice-cut", last,
           "Done.\n\n- all closed;\n- sclaude goes on.\n\nReady. Then the preview.\n")
-    check("closed-said-after-the-report",
-          "No /exit needed" in RUN[RUN.index("session_report() {"):], True)
+    # The close is said before the message, whose exit advice is cut:
+    # nothing after it tells the person what sclaude already did.
+    check("nothing-said-after-the-report",
+          "No /exit needed" in RUN[RUN.index("session_report() {"):], False)
     report = RUN[RUN.index("session_report() {"):]
     report = report[:report.index("\n}\n")]
     check("report-stays-in-the-terminal", "say " in report, False)
@@ -1097,12 +1099,16 @@ echo "watcher=[$SESSION_WATCHER]"
         LR = fh.read()
     check("pass-headings-stay-off-the-topic",
           LR.count("printf '%s\\n' \"${BOLD}── ") == 2 and 'info "${BOLD}── ' not in LR, True)
-    # A pass run on the way into step 4 is reported before its session opens.
+    # A pass run on the way into step 4 is reported before its session opens,
+    # one that found nothing too: the table says it came back empty.
     entry = RUN[RUN.index("run_step() {"):]
     entry = entry[:entry.index("\n}\n")]
+    # REVIEW_KEPT_SAID is for one call: taken before the first way out.
+    check("kept-said-taken-before-any-return",
+          entry.index('REVIEW_KEPT_SAID=""') < entry.index("&& return"), True)
     check("entry-pass-reported",
           'local_review_done "$wt" && fresh_pass=0' in entry
-          and '[[ "$fresh_pass" -eq 1 && "$local_count" =~ ^[1-9][0-9]*$ ]] && review_report "$wt" "$slug"' in entry, True)
+          and '[[ "$fresh_pass" -eq 1 && "$local_count" =~ ^[0-9]+$ ]] && review_report "$wt" "$slug"' in entry, True)
     check("not-done-says-where-it-stands",
           'warn "  $standing"' in gate and 'ask_feed warn "  $standing"' in gate and '--brief "$wt" "$pr" "$repo"' in gate
           and '"$(review_last_look "$wt")"' in gate, True)
@@ -1191,7 +1197,7 @@ echo "watcher=[$SESSION_WATCHER]"
             fh.write("import sys\nprint(%r if '--open-since' in sys.argv else %r)\n" % (split, word))
         body = 'source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
         body += functions(["review_close_gate", "review_enough_close", "review_session_since",
-                                "review_stuck_say"])
+                                "review_stuck_say", "review_report_unshown"])
         body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5; REVIEW_GO_ON_PAUSE=0\n'
                  'gh_repo() { echo o/r; }\nproject_review_mode() { echo %s; }\n'
                  'local_review() { echo REVIEWED >&2; [[ %s == failed ]] && return 1; echo %s; }\n'
@@ -1288,8 +1294,15 @@ echo "watcher=[$SESSION_WATCHER]"
     # No report on this head showed them: printed now (REVIEW_REPORTED).
     check("unshown-findings-get-the-report", "REPORT" in out, True)
     # bin/sclaude runs under set -u: unset before any report in the process.
-    check("reported-read-with-a-default", 'local reported="${REVIEW_REPORTED:-}"' in gate
-          and "${REVIEW_REPORTED%%" not in gate, True)
+    unshown = RUN[RUN.index("review_report_unshown() {"):]
+    unshown = unshown[:unshown.index("\n}\n")]
+    check("reported-read-with-a-default", 'local reported="${REVIEW_REPORTED:-}"' in unshown
+          and "${REVIEW_REPORTED%%" not in unshown, True)
+    # A pass that leaves nothing open ends on the table, but not on one the
+    # pass into step 4 printed on this head just now.
+    zero = gate[gate.index('elif [[ "$count" -eq 0 ]]; then'):]
+    zero = zero[:zero.index('elif [[ "$count" -gt 0 ]]')]
+    check("nothing-open-table-unless-shown", "review_report_unshown" in zero and "review_report " not in zero, True)
     out, left = enough_gate("now", "open: red: build", 0, mode="github")
     check("github-red-to-session", "ASKED" not in out and "RUN_STEP review" in out, True)
     check("github-red-word-kept", left["steps"]["review"].get("enough"), "now")

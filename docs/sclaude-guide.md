@@ -55,7 +55,8 @@ warning that says what to run once it is out of the way.
 **Closing a session from sclaude's terminal.** Under Windows Terminal in WSL a
 session runs in a tab of its own, and while it works the tab sclaude waits in
 takes keys of its own; they are listed, a word each, on one line under the
-line that says the session started, and `k` is a box on the status line. Every session sclaude starts closes by itself once its work is done;
+line that says the first session started (the same keys are not listed
+again for the next ones), and `k` is a box on the status line. Every session sclaude starts closes by itself once its work is done;
 these give you the word instead, and change nothing else: going forward is
 the session's own end, going again is your `/exit`. The letter says which, the
 case says when — lower case goes on now, upper case stops sclaude until the
@@ -158,9 +159,13 @@ night without you, and lists it in its report; unresolve it on GitHub to make it
 open work again. Any other waits for you, and in the morning sclaude offers a
 session that asks you about each such thread and, on your yes, replies and
 resolves it on GitHub itself. The
-report after each round shows what each round cost in two parts: `review`, the
-pass on this machine as Claude Code accounts for it (`—` for GitHub's review,
-which sclaude cannot price), and `fixes`, the fixing session's launch. When the
+report after each round has a row per review run, in the order of the cycle:
+`find` — what the run found and what it cost, the pass on this machine as
+Claude Code accounts for it (`—` for GitHub's review, which sclaude cannot
+price); `fix` — the session that fixed those findings, its time and cost, and
+what it declined; and `result` — fixed, waiting. A `w` is a value not known yet: a run
+still going, findings no session has started on, a launch whose cost comes
+when it ends. When the
 report says the rounds stopped converging, or that the fixes are feeding the review two rounds running, its verdict is red, and the
 feature's topic is told once, with the keys that end the search for new findings. What a round leaves open goes back
 to a review session without a question: `s` (⏭ on the topic) is how the rounds

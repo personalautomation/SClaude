@@ -44,9 +44,11 @@
 # that started before it was posted. Not the review id GitHub gives a comment —
 # the review posts each inline comment as a review of its own, so that counted
 # every finding as a round. A run that found nothing is a round with nothing,
-# which is what convergence looks like. The rounds are summed per review
-# session (state.json), the run going to the session last started before it:
-# a session's push is what starts the run its findings come from.
+# which is what convergence looks like. A round opens with its findings and
+# goes on with their fix: the review session (state.json) whose launches began
+# after the run and before the next one is the one that answered it. Its row
+# reads in that order — find, fix, result — and a value that will come but has
+# not yet is WAIT, never a zero.
 #
 # Silent on trouble, like pr_context.py: no gh, no network — it says what it
 # could not read and prints the rest.
@@ -118,18 +120,51 @@ def rule(title):
     return paint("── %s %s" % (title, "─" * max(3, 56 - len(title))), BOLD)
 
 
-def row(cells, open_col=9, fixed_col=7, base="", rnd=""):
-    """A table row, its open findings red and its fixes green once padded:
+# A cell whose value will come but has not yet: a review run still going, a
+# fix not begun, a launch whose cost is taken when it ends. "—" is for what
+# will never be known (the workflow's review is not priced).
+WAIT = "w"
+
+# The table's columns after the round's number, in the cycle's order: what
+# the review found, the fix that answered it, what became of the findings.
+# (heading, format, group)
+COLUMNS = (
+    ("started", "%-11s", "find"), ("took", "%6s", "find"), ("cost", "%6s", "find"),
+    ("found", "%5s", "find"), ("on fixes", "%8s", "find"), ("repeats", "%7s", "find"),
+    ("session", "%7s", "fix"), ("took", "%6s", "fix"), ("cost", "%6s", "fix"),
+    ("declined", "%8s", "fix"), ("fixed", "%5s", "result"), ("waiting", "%7s", "result"),
+)
+FIXED_COL, WAITING_COL = 10, 11
+
+
+def heading():
+    """The table's two heading lines: the groups over their columns, then the
+    columns."""
+    spans, widths = [], {}
+    for name, fmt, group in COLUMNS:
+        width = int(re.sub(r"\D", "", fmt))
+        widths[group] = widths.get(group, -1) + width + 1
+    for group in ("find", "fix", "result"):
+        spans.append(("── %s " % group).ljust(widths[group], "─"))
+    names = " ".join(fmt % name for name, fmt, _ in COLUMNS)
+    return (paint("  %-5s %s" % ("", " ".join(spans)), DIM),
+            paint("  %-5s %s" % ("round", names), DIM))
+
+
+def row(cells, base="", rnd=""):
+    """A table row, its waiting findings red and its fixes green once padded:
     the colour codes would otherwise count in the widths. <base> colours the
-    rest of the row, cell by cell, so that red and green keep theirs."""
+    rest of the row, cell by cell, so that red and green keep theirs; WAIT is
+    dim."""
     out = [paint("%-5s" % rnd, base) if base and rnd else "%-5s" % rnd]
-    fmt = ("%-7s", "%-11s", "%6s", "%7s", "%6s", "%4s", "%5s", "%5s", "%6s", "%4s", "%8s", "%7s")
-    for i, (f, c) in enumerate(zip(fmt, cells)):
+    for i, ((_, f, _), c) in enumerate(zip(COLUMNS, cells)):
         text = f % c
-        if i == open_col and isinstance(c, int) and c:
+        if i == WAITING_COL and isinstance(c, int) and c:
             text = paint(text, RED)
-        elif i == fixed_col and isinstance(c, int) and c:
+        elif i == FIXED_COL and isinstance(c, int) and c:
             text = paint(text, GREEN)
+        elif c == WAIT:
+            text = paint(text, DIM)
         elif base and text.strip():
             text = paint(text, base)
         out.append(text)
@@ -150,27 +185,41 @@ def review_cost(gs):
     return dollars(sum(known)) if known else "—"
 
 
-def fixes_per_round(s, gs):
+def timed(s):
+    """Whether session <s> has a start time for each of its launches."""
+    ats = s.get("cost_at") or []
+    return bool(s["costs"]) and len(ats) == len(s["costs"]) and all(ats)
+
+
+def fixes_per_round(s, gs, mine=None):
     """The fixing cost of each review run in <gs>, from session <s>: each
-    launch goes on the first run that started after the launch began
-    (`cost_at`, run_cost in steps.sh) — on this machine the pass follows the
-    launch, on GitHub the launch waits inside for the run of its own push —
-    so that a launch which pushed nothing (reopened, resumed after a crash)
-    adds to its run instead of shifting every later one. A launch begun after
-    the last run is the fix going on now: in the total, not on a round. A
+    launch goes on the last run that started before the launch began
+    (`cost_at`, run_cost in steps.sh) — the run whose findings it fixed. On
+    GitHub a launch waits inside for the run of its own push and ends after
+    it, but it began on the findings of the run before. A launch which pushed
+    nothing (reopened, resumed after a crash) adds to its run instead of
+    shifting every later one; one begun before every run goes on the first. A
     state from before launches had a time is matched by position, one launch
-    a run; [] when nothing matches."""
+    to each of the runs the session answered (<mine>, indexes into <gs>), the
+    launches left over on the last of them; [] when nothing matches."""
     costs = s["costs"] if s else []
-    ats = s.get("cost_at") or [] if s else []
     if not gs or not costs:
         return []
-    if len(ats) != len(costs) or not all(ats):
-        return costs[:len(gs)] if len(costs) >= len(gs) else []
     per = [None] * len(gs)
-    for cost, at in zip(costs, ats):
-        j = next((i for i, g in enumerate(gs) if g["at"] and at <= g["at"]), None)
-        if j is not None:
+    if not timed(s):
+        mine = list(mine if mine is not None else range(len(gs)))
+        if not mine:
+            return []
+        for k, cost in enumerate(costs):
+            j = mine[min(k, len(mine) - 1)]
             per[j] = round((per[j] or 0) + cost, 4)
+        return per
+    for cost, at in zip(costs, s["cost_at"]):
+        j = 0
+        for i, g in enumerate(gs):
+            if g["at"] and g["at"] <= at:
+                j = i
+        per[j] = round((per[j] or 0) + cost, 4)
     return per
 
 
@@ -361,11 +410,12 @@ def local_runs(cwd, since=None, root=None):
 
 
 def rounds(found, runs):
-    """[{at, running, threads}] — one per review run, empty ones included;
-    sets each thread's "round" to its index. Without runs, threads are split
-    where ROUND_GAP passes between two of them."""
+    """[{at, seconds, running, cost, threads}] — one per review run, empty
+    ones included; sets each thread's "round" to its index. Without runs,
+    threads are split where ROUND_GAP passes between two of them."""
     if runs:
-        out = [{"at": r["start"], "running": r["running"], "cost": r.get("cost"), "threads": []}
+        out = [{"at": r["start"], "seconds": r.get("seconds"), "running": r["running"],
+                "cost": r.get("cost"), "threads": []}
                for r in runs]
         for t in found:
             i = 0
@@ -378,7 +428,8 @@ def rounds(found, runs):
     out, last = [], None
     for t in found:
         if not out or not (t["created"] and last and t["created"] - last <= ROUND_GAP):
-            out.append({"at": t["created"], "running": False, "cost": None, "threads": []})
+            out.append({"at": t["created"], "seconds": None, "running": False, "cost": None,
+                        "threads": []})
         t["round"] = len(out) - 1
         out[-1]["threads"].append(t)
         last = t["created"] or last
@@ -429,31 +480,94 @@ def sessions(cwd, since=None):
         a = parse(r.get("started"))
         # Only the last run can still be going: an earlier one without an end
         # is one that never ended properly, and counted until now it grew by
-        # every hour the step ran after it.
-        going = i == len(runs) - 1 and not r.get("done") and not r.get("outcome")
-        b = parse(r.get("finished")) or (now if going else None)
+        # every hour the step ran after it. Going means a launch is on now:
+        # one not ended, or taken up again after its end (session_runs keeps
+        # the end and sets `resumed`, as process_position reads it). A session
+        # between its launches has given every launch's cost so far.
+        ended, resumed = parse(r.get("finished")), parse(r.get("resumed"))
+        going = i == len(runs) - 1 and not r.get("done") and (
+            (ended is None and not r.get("outcome")) or bool(resumed and ended and resumed > ended))
+        b = now if going else ended
         costs = [c for c in (r.get("costs") or []) if isinstance(c, (int, float))]
         ats = [parse(t) for t in (r.get("cost_at") or [])]
-        out.append({"start": a, "rounds": r.get("rounds"), "costs": costs, "cost_at": ats,
+        # A launch that gave its cost has ended, though its end is written
+        # after the report the session's close prints (session_ended in
+        # run.sh): run_cost dates the cost by the launch's start.
+        if going and ats and ats[-1] and ats[-1] >= (resumed or a or ats[-1]):
+            going = False
+        out.append({"start": a, "end": b, "going": going, "resumed": resumed,
+                    "took_up": [parse(t) for t in (r.get("took_up") or [])],
+                    "rounds": r.get("rounds"),
+                    "costs": costs, "cost_at": ats,
                     "seconds": (b - a).total_seconds() if a and b and b > a else None})
     return out
 
 
-def by_session(groups, runs):
-    """[(label, session or None, [rounds])]: each round goes to the session
-    last started before it; rounds before the first go to "before"."""
-    rows = [("before", None, [])] + [(str(i), s, []) for i, s in enumerate(runs, start=1)]
-    for g in groups:
-        k = 0
-        for i, s in enumerate(runs, start=1):
-            if s["start"] and g["at"] and s["start"] <= g["at"]:
-                k = i
-        rows[k][2].append(g)
-    return [r for r in rows if r[1] is not None or r[2]]
+def launches(s, took=True):
+    """When session <s>'s launches began: those that gave their cost
+    (`cost_at`, when there is one for each), its start, the launch taken up
+    again (`resumed`), whose cost comes when it ends, and — with <took> —
+    each time a launch took up the next round itself (`took_up`, run_took_up
+    in steps.sh)."""
+    return [t for t in (s["cost_at"] if timed(s) else []) + [s["start"], s.get("resumed")]
+            + ((s.get("took_up") or []) if took else []) if t]
+
+
+def answering(i, groups, s):
+    """Session <s>'s launches that answer run <i>: in its window, a launch
+    taking the round up counted only where the run found something — a red
+    deployment check on a run of nothing, fixed and waited on again, is no
+    fix of that run."""
+    return [t for t in launches(s, bool(groups[i].get("threads"))) if window(i, groups, t)]
+
+
+def window(i, groups, t):
+    """Whether a launch begun at <t> answers run <i>: after the run began and
+    before the next one did — the first run's window open to the past, for a
+    launch begun before any run."""
+    lo = groups[i]["at"] if i else None
+    hi = groups[i + 1]["at"] if i + 1 < len(groups) else None
+    return (lo is None or t >= lo) and (hi is None or t < hi)
+
+
+def fixers(groups, people):
+    """For each review run in <groups>, the indexes into <people> of the
+    sessions with a launch in its window (window), the first one first: the
+    sessions that answered its findings; one session can answer several runs.
+    [] for a run nobody has begun to answer — never the session that was
+    going when it ran: on GitHub that is the launch waiting for the run of its
+    own push, which fixed the run before."""
+    out = []
+    for i in range(len(groups)):
+        events = sorted((t, k) for k, s in enumerate(people) for t in answering(i, groups, s))
+        mine = []
+        for _, k in events:
+            if k not in mine:
+                mine.append(k)
+        out.append(mine)
+    return out
+
+
+def fix_window(i, groups, people, mine):
+    """How long the fix of run <i> took, in seconds: from the first launch of
+    its sessions <mine> in its window to the next run, or to the last of them
+    ending (now, for one still going); None when it cannot be told."""
+    starts = [t for k in mine for t in answering(i, groups, people[k])]
+    ends = [people[k]["end"] for k in mine]
+    until = max(ends) if ends and all(ends) else None
+    if i + 1 < len(groups) and groups[i + 1]["at"]:
+        until = min(until, groups[i + 1]["at"]) if until else groups[i + 1]["at"]
+    if not starts or not until or until <= min(starts):
+        return None
+    return (until - min(starts)).total_seconds()
 
 
 def hours(seconds):
+    """A span in six characters at most: a session left going for days must
+    not push the columns after it out of line."""
     m = int(round(seconds / 60))
+    if m >= 24 * 60:
+        return "%dd%02dh" % (m // (24 * 60), m // 60 % 24)
     return "%dh%02dm" % (m // 60, m % 60) if m >= 60 else "%dm" % m
 
 
@@ -512,31 +626,33 @@ def count(ts, fate):
     return sum(1 for t in ts if t["fate"] == fate)
 
 
-# Where review stands, for a phone: the newest session's numbers, written to
+# Where review stands, for a phone: the last finished round's numbers, written to
 # the file this names when it is set. sclaude sends it to the feature's topic
 # in Telegram after every round (review_report in review_gate.sh), each round a
 # message of its own: the topic keeps the history, each message says only
 # what is new.
 BRIEF_ENV = "SCLAUDE_REPORT_BRIEF"
-BRIEF_ROWS = ("runs", "found", "fixed", "no fix", "open", "on fixes", "repeats")
+BRIEF_ROWS = ("found", "on fixes", "repeats", "declined", "fixed", "waiting")
 
 
 def newest(columns):
-    """The last session that ran: one just opened has no run yet, and its
-    zeros would say nothing."""
-    ran = [c for c in columns if c[1]["runs"]]
-    return ran[-1] if ran else None
+    """The last round that has finished, as (label, {measure: n}), from
+    [(label, {measure: n}, running)]: one still running has not said what it
+    found, and its zeros would say nothing. None when no round has finished."""
+    done = [c[:2] for c in columns if not c[2]]
+    return done[-1] if done else None
 
 
-def brief(pr, session, verdict_line):
-    """The status update: session is (label, {measure: n}) or None."""
-    if not session:
-        return "Review — PR %s: no review run yet.\n%s\n" % (pr, verdict_line)
-    label, values = session
-    # No "#": Telegram makes a hashtag of "#N". The findings from before the
-    # first session have the label "before" in the table.
+def brief(pr, last, verdict_line, going=False):
+    """The status update: <last> is (label, {measure: n}) or None; <going>,
+    that a review run has begun and not finished."""
+    if not last:
+        return "Review — PR %s: %s\n%s\n" % (
+            pr, "the first review run is going." if going else "no review run yet.", verdict_line)
+    label, values = last
+    # No "#": Telegram makes a hashtag of "#N".
     return "Review — PR %s, %s\n%s\n%s\n" % (
-        pr, "before the sessions" if label == "before" else "session " + label, " · ".join("%s %d" % (row, values[row]) for row in BRIEF_ROWS),
+        pr, label, " · ".join("%s %d" % (row, values[row]) for row in BRIEF_ROWS),
         verdict_line)
 
 
@@ -597,73 +713,91 @@ def main():
     columns = []
 
     if groups:
-        table = []
         print("")
-        print(paint("  %-5s %-7s %-11s %6s %7s %6s %4s %5s %5s %6s %4s %8s %7s" % (
-            "round", "session", "started", "time", "review", "fixes", "runs", "found", "fixed",
-            "no fix", "open", "on fixes", "repeats"), DIM))
-        for label, s, gs in by_session(groups, people):
-            ts = [t for g in gs for t in g["threads"]]
-            values = (len(gs), len(ts), count(ts, "fixed"), count(ts, "no fix"),
-                      count(ts, "open"), sum(1 for t in ts if t["near_fix"]),
-                      sum(1 for t in ts if t["repeat"]))
-            columns.append((label, dict(zip(BRIEF_ROWS, values))))
-            # A session that went several rounds has a row per round and none
-            # of its own: the session's row was their sum, read as a round
-            # of its own. A row's cost is in two parts: the review run it
-            # counts (review_cost), and the fixing launches that run read
-            # (fixes_per_round). Launches that cannot be matched to rounds
-            # give the session's whole on its first round. The first round
-            # runs from the session's start, each to the next review run,
-            # the last to the session's end: the rows add up to the session.
-            fixes = (s["costs"] if s else [])
-            per = fixes_per_round(s, gs)
-            if s is None or len(gs) <= 1:
-                fix = per[0] if gs and per else (sum(fixes) if fixes else None)
-                table.append((
-                    label,
-                    s["start"].astimezone().strftime("%m-%d %H:%M") if s and s["start"] else "",
-                    hours(s["seconds"]) if s and s["seconds"] else "",
-                    review_cost(gs), dollars(fix) if fix is not None else "") + values)
-                continue
-            end = (s["start"] + datetime.timedelta(seconds=s["seconds"])
-                   if s["start"] and s["seconds"] else None)
-            for j, g in enumerate(gs, start=1):
-                rt = g["threads"]
-                began = (s["start"] or g["at"]) if j == 1 else g["at"]
-                until = gs[j]["at"] if j < len(gs) else end
-                took = (until - began).total_seconds() if began and until and until > began else 0
-                cost = per[j - 1] if per else (sum(fixes) if j == 1 and fixes else None)
-                table.append((
-                    "%s.%d" % (label, j),
-                    began.astimezone().strftime("%m-%d %H:%M") if began else "",
-                    hours(took) if took else "", review_cost([g]),
-                    dollars(cost) if cost is not None else "",
-                    1, len(rt), count(rt, "fixed"), count(rt, "no fix"), count(rt, "open"),
-                    sum(1 for t in rt if t["near_fix"]), sum(1 for t in rt if t["repeat"])))
-        # The last round that ran is yellow while anything is open: it is
-        # where the review stands, and review_close_gate says no more of it.
-        # A session just opened, with no run yet, is not that round.
-        ran = [i for i, cells in enumerate(table) if cells[5]]
-        last = ran[-1] if ran and opened else None
-        # The review run's number, first: what the verdict and the topic
-        # call a round, which a session's label (2.1, 2.2…) does not count.
-        n = 0
+        for line in heading():
+            print(line)
+        who = fixers(groups, people)
+        # The fixing cost of each run, summed over the sessions that answered
+        # it (fixes_per_round); a session still going has not given the cost
+        # of the launch running now, which goes on the run its start falls
+        # after, as fixes_per_round will put it.
+        fix_cost = [None] * len(groups)
+        pending, fixing = set(), set()
+        for k, s in enumerate(people):
+            mine = [i for i, m in enumerate(who) if k in m]
+            for i, c in enumerate(fixes_per_round(s, groups, mine)):
+                if c is not None:
+                    fix_cost[i] = round((fix_cost[i] or 0) + c, 4)
+            now_on = s.get("resumed") or s["start"]
+            if s["going"] and now_on:
+                pending.update(i for i in range(len(groups)) if window(i, groups, now_on))
+                # The runs this launch took up since (took_up): fixed now too.
+                fixing.update(i for i in range(len(groups)) for t in answering(i, groups, s)
+                              if t >= now_on)
+        # A session that answered several runs labels each N.1, N.2…: the
+        # session's sum, as a row of its own, read as one more round.
+        answered = {}
+        for m in who:
+            if m:
+                answered[m[0]] = answered.get(m[0], 0) + 1
+        seen = {}
+        table, totals = [], {"ftook": [], "fcost": [], "xtook": [], "xcost": []}
+        for i, g in enumerate(groups):
+            ts = g["threads"]
+            counts = (len(ts), sum(1 for t in ts if t["near_fix"]), sum(1 for t in ts if t["repeat"]))
+            # Declined is the fix's decision, as it reads the findings.
+            result = (count(ts, "no fix"), count(ts, "fixed"), count(ts, "open"))
+            columns.append(("round %d" % (i + 1), dict(zip(BRIEF_ROWS, counts + result)), g["running"]))
+            if g["running"]:
+                ftook = fcost = WAIT
+            else:
+                ftook = hours(g["seconds"]) if g["seconds"] else ""
+                fcost = review_cost([g])
+            mine = who[i]
+            if mine:
+                k = mine[0]
+                seen[k] = seen.get(k, 0) + 1
+                session = str(k + 1) if answered[k] <= 1 else "%d.%d" % (k + 1, seen[k])
+                took = fix_window(i, groups, people, mine)
+                xtook = hours(took) if took else ""
+                xcost = WAIT if i in pending else dollars(fix_cost[i]) if fix_cost[i] is not None else ""
+                columns[-1] = ("%s, session %s" % (columns[-1][0], session),) + columns[-1][1:]
+            elif g["running"] or ts:
+                # Findings nobody has begun to fix, or a run that has not
+                # said yet what it found.
+                session = xtook = xcost = WAIT
+            else:
+                session = xtook = xcost = ""
+            for key, value in (("ftook", (ftook, g["seconds"])), ("fcost", (fcost, g.get("cost"))),
+                               ("xtook", (xtook, took if mine else None)),
+                               ("xcost", (xcost, fix_cost[i] if mine else None))):
+                totals[key].append(value)
+            # What became of the findings is not told while their fix has not
+            # ended — not begun, or its launch still running: zeros there
+            # read as a fix that fixed nothing. The total says where every
+            # thread stands now.
+            if session == WAIT or i in fixing or i in pending:
+                result = (WAIT,) * 3
+            table.append((g["at"].astimezone().strftime("%m-%d %H:%M") if g["at"] else "",
+                          ftook, fcost) + counts + (session, xtook, xcost) + result)
+        # The last round is yellow while anything is open: it is where the
+        # review stands, and review_close_gate says no more of it.
+        last = len(table) - 1 if opened else None
         for i, cells in enumerate(table):
-            runs = cells[5]
-            rnd = "" if not runs else str(n + 1) if runs == 1 else "%d-%d" % (n + 1, n + runs)
-            n += runs or 0
-            # A session no review run has followed yet — the one fixing now —
-            # has no findings to count: its zeros read as a round that found
-            # nothing. Its time and cost stay, the total counts them.
-            if not cells[5]:
-                cells = cells[:5] + ("",) * (len(cells) - 5)
-            print(row(cells, base=YELLOW + ";" + BOLD, rnd=rnd) if i == last else row(cells, rnd=rnd))
-        seconds = sum(s["seconds"] or 0 for s in people)
-        costs = [c for s in people for c in s["costs"]]
-        values = (len(groups), total, fixed, nofix, opened, near_all, len(repeats))
-        print(row(("total", "", hours(seconds) if seconds else "", review_cost(groups),
-                   dollars(sum(costs)) if costs else "") + values))
+            print(row(cells, base=YELLOW + ";" + BOLD, rnd=str(i + 1)) if i == last
+                  else row(cells, rnd=str(i + 1)))
+
+        def column(key, show):
+            """A column's sum of what is known now: the total is where the
+            review stands, and a row still waiting adds when it comes."""
+            cells = totals[key]
+            known = [v for c, v in cells if c not in ("", "—", WAIT) and v]
+            if key == "fcost":
+                return review_cost([g for g, (c, _) in zip(groups, cells) if c != WAIT])
+            return show(sum(known)) if known else ""
+        print(row(("", column("ftook", hours), column("fcost", dollars), len(found), near_all,
+                   len(repeats), "", column("xtook", hours), column("xcost", dollars),
+                   nofix, fixed, opened), rnd="total"))
         print("")
     else:
         print("  No review threads on the pull request.")
@@ -701,7 +835,7 @@ def main():
     if path and not threads_failed:
         try:
             with open(path, "w") as fh:
-                fh.write(brief(pr, newest(columns), said))
+                fh.write(brief(pr, newest(columns), said, bool(columns)))
         except OSError:
             pass
     path = os.environ.get(STUCK_ENV, "")

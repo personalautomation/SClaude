@@ -134,6 +134,9 @@ try:
     out = buf.getvalue()
     check_true("report-says-local", "reviewed on this machine" in out)
     check_true("report-fates", "Fixed 2 of 4 (50%) · without a fix 1 (25%)" in out)
+    # Findings no session has begun to fix: the fix waits, it is not zero.
+    check("fix-waits-for-a-session", [l.split()[8:11] for l in out.splitlines() if l.startswith("  3 ")],
+          [["w", "w", "w"]])
 
     # Switched back to the workflow: a journal left from the local rounds is
     # not read, the workflow's runs are.

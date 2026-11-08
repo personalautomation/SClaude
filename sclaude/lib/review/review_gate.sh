@@ -114,6 +114,12 @@ review_close_gate() {
             local_due=1
             continue
           fi
+        elif [[ "$count" -eq 0 ]]; then
+          # Nothing left open: the step closes on this pass, and its round
+          # (found nothing, nothing to fix) ends the table the person last saw
+          # — unless that table is the one just printed on this head, by the
+          # pass on the way into step 4.
+          review_report_unshown "$wt" "$slug"; gate_reported=1
         elif [[ "$count" -gt 0 ]]; then
           # The report printed as the session ended was made before this
           # run: once more with it, where the person decides whether to go
@@ -224,14 +230,7 @@ review_close_gate() {
     # Printed by this gate's own pass just now; else asked again, and said
     # only when what it shows — the open findings and the rounds — is not
     # what was last shown on this head.
-    if [[ "$gate_reported" -eq 0 ]]; then
-      local unless=""
-      # Unset until a report in this process showed something (set -u).
-      local reported="${REVIEW_REPORTED:-}"
-      [[ -n "$reported" && "${reported%% *}" == "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" ]] \
-        && unless="${reported#* }"
-      REVIEW_REPORT_UNLESS="$unless" review_report "$wt" "$slug"
-    fi
+    [[ "$gate_reported" -eq 0 ]] && review_report_unshown "$wt" "$slug"
     # And kept for a question that may follow ([g]'s ceiling, then "Close
     # step 4 anyway?"): the phone shows a question with the lines before it
     # (ask_note), and this is what that question is about.
@@ -405,6 +404,19 @@ cmd_review_stats() {
 # Printed at the close of every review round and by `sclaude review-report`.
 #
 #   review_report <wt> <slug>
+# The report, unless what it would show is what the last report in this
+# process showed on this head (REVIEW_REPORTED, written by review_report).
+#
+#   review_report_unshown <wt> <slug>
+review_report_unshown() {
+  local unless=""
+  # Unset until a report in this process showed something (set -u).
+  local reported="${REVIEW_REPORTED:-}"
+  [[ -n "$reported" && "${reported%% *}" == "$(git -C "$1" rev-parse HEAD 2>/dev/null)" ]] \
+    && unless="${reported#* }"
+  REVIEW_REPORT_UNLESS="$unless" review_report "$1" "$2"
+}
+
 review_report() {
   local wt="$1" slug="$2" state pr repo
   state="$wt/.sclaude/local/feature/state.json"
@@ -463,5 +475,10 @@ cmd_checks() {
   fi
   [[ "$pr" =~ ^[0-9]+$ ]] || { echo "could not read: not a pull request number: $pr"; exit 4; }
   repo="$(REPO="$wt" gh_repo)"
-  exec python3 "$LIB/review/pr_context.py" --wait "$wt" "$pr" "$repo" "$REVIEW_WAIT_MAX"
+  local rc=0
+  # Waiting again after a red: this launch fixed what that red showed.
+  run_took_up "$wt" wait
+  python3 "$LIB/review/pr_context.py" --wait "$wt" "$pr" "$repo" "$REVIEW_WAIT_MAX" || rc=$?
+  (( rc == 1 )) && run_took_up "$wt" red
+  exit "$rc"
 }

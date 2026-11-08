@@ -388,7 +388,9 @@ session_keys_legend() {
   for k in n N r R; do
     session_key_has "$k" && line+="${line:+ · }${BOLD:-}[$k]${OFF:-} $(session_key_label "$k")"
   done
-  [[ -n "$line" ]] && info "   ${DIM:-}Keys here, each pressed twice:${OFF:-} $line"
+  # Once in this process: the keys stay the same from round to round.
+  [[ -n "$line" && "${KEYS_SAID:-}" != "$line" ]] && info "   ${DIM:-}Keys here, each pressed twice:${OFF:-} $line"
+  KEYS_SAID="$line"
   return 0
 }
 

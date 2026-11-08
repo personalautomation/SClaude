@@ -330,7 +330,9 @@ ensure_db() {
   db_workdir "$wt" "$base" || { rm -f "$envf"; warn "  database: could not lay out $dir"; return 0; }
   cli="$(db_cli "$wt")"
 
+  local started=""
   if ! (cd "$wt" && $cli status --workdir "$dir" -o env) >/dev/null 2>&1; then
+    started=1
     if [[ "$(state_get "$state" db.ready 2>/dev/null)" == "true" ]]; then
       info "  database: starting this feature's own Supabase again (its data is kept)…"
     else
@@ -391,7 +393,12 @@ ensure_db() {
       fi
     fi
   fi
-  info "  database: this feature's own, API :$((base + 1)), Postgres :$((base + 2))"
+  # Said when the stack was started here, else once in this process: a
+  # database already up said so again at every session and regression.
+  if [[ -n "$started" || "${DB_SAID:-}" != "$wt" ]]; then
+    info "  database: this feature's own, API :$((base + 1)), Postgres :$((base + 2))"
+  fi
+  DB_SAID="$wt"
 }
 
 # The Postgres container of a stack, by its project_id.

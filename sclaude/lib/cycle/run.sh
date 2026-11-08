@@ -79,6 +79,9 @@ run_step() {
   local wt="$1" slug="$2" step="$3" told="${4:-}" kept="${5:-}"
   local state="$wt/.sclaude/local/feature/state.json"
   local model effort mode session prompt pr
+  # For this call alone, taken before any way out of it: left set, it would
+  # silence the "resuming" line of a later session it was never said for.
+  local kept_said="${REVIEW_KEPT_SAID:-}"; REVIEW_KEPT_SAID=""
   stop_asked "step '$(step_title "$step")'" "$slug" && return 0
   # While a review session works in its own tab, this terminal takes the
   # review's boxes, [s] and [g] (review_pane_keys); the tab wait in
@@ -204,6 +207,12 @@ run_step() {
 
   echo ""
   echo "${BOLD}${BLUE}── $slug · $(phase_title step "$step") ──${OFF}"
+  # The lines under the banner once a step in this process: a session taken
+  # up again for the next round of the same step said them all again, every
+  # round, with nothing in them changed.
+  local again=""
+  [[ "${STEP_HEADER_SAID:-}" == "$slug:$step" ]] && again=1
+  STEP_HEADER_SAID="$slug:$step"
   # The topic hears of the step's session once it is opened, below, and of the
   # step itself when it closes: entering it here is often a return to one that
   # goes on. The indented lines under the banner stay here (notices.py).
@@ -213,14 +222,16 @@ run_step() {
   # page that lists the feature's users, each a sign-in without a password
   # (users_page in bin/sclaude-proxy): the address alone was said again by
   # the dev server's line below, and landed on a sign-in form.
-  local users
-  if users="$(dev_users_address "$wt")"; then
-    echo "   ${BOLD}Sign in as any user: $users${OFF}"
-  else
-    echo "   ${BOLD}Open it at $(dev_address "$wt")${OFF}"
+  local users map
+  if [[ -z "$again" ]]; then
+    if users="$(dev_users_address "$wt")"; then
+      echo "   ${BOLD}Sign in as any user: $users${OFF}"
+    else
+      echo "   ${BOLD}Open it at $(dev_address "$wt")${OFF}"
+    fi
+    map="$(flow_address "$wt")" && info "   Where it stands: $map"
+    info "   $model / $effort / $mode · $wt"
   fi
-  local map; map="$(flow_address "$wt")" && info "   Where it stands: $map"
-  info "   $model / $effort / $mode · $wt"
   # A step whose session is finished, and which waits only on the local
   # regression (after_step marks it, and session_ended on step 2's accept in
   # the session, before the friction review), goes back to its closing check.
@@ -310,7 +321,9 @@ run_step() {
       # Before the pass's own row, which enters the place this way leads to.
       [[ -n "$review_first" ]] && { cycle_edge "$wt" draft_pr local_pass sclaude "review: local"; local_ran=1; }
       local_count="$(local_review "$wt" "$pr")" || local_count="failed"
-      [[ "$fresh_pass" -eq 1 && "$local_count" =~ ^[1-9][0-9]*$ ]] && review_report "$wt" "$slug"
+      # Nothing found too: the table is where a pass that came back empty is
+      # said (local_review leaves that to the report).
+      [[ "$fresh_pass" -eq 1 && "$local_count" =~ ^[0-9]+$ ]] && review_report "$wt" "$slug"
     fi
   fi
   [[ "$step" == "review" ]] && [[ -z "$local_count" || "$local_count" == "0" ]] \
@@ -465,7 +478,9 @@ run_step() {
       news="$(printf '%s\n\n%s\n\n%s\n' "${news:-}" "$(return_brief "$wt" "$issue" "$pr")" "$qa")"
       info "   resuming this step's session — the feature was returned to development"
     elif [[ -n "$news" ]]; then
-      info "   resuming this step's session — the PR has moved on since"
+      # Said already, with its reason, when sclaude kept this session for
+      # the next round just now (review_keep's line, REVIEW_KEPT_SAID).
+      [[ -n "$kept_said" ]] || info "   resuming this step's session — the PR has moved on since"
     else
       info "   resuming this step's interrupted session"
     fi
@@ -685,6 +700,7 @@ session_ended() {
       say_here "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
       [[ -n "$round_note" ]] && info "  $round_note"
       info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the new findings."
+      REVIEW_KEPT_SAID=1  # run_step leaves out its own "resuming" line
       review_yours_report "$wt" "$pr" || true
       review_report "$wt" "$slug"
       run_step "$wt" "$slug" "$step" "$(review_carry_on "$pct")"

@@ -930,13 +930,18 @@ ensure_chrome() {
   # address, in a background tab, and not even that if a tab of this feature
   # is already open.
   if curl -sf -m 2 "http://127.0.0.1:$CHROME_PORT/json/version" >/dev/null 2>&1; then
+    # "Already up" once in this process: nothing done, said again at every
+    # session of every round.
+    local up=""
+    [[ "${CHROME_SAID:-}" == 1 ]] || up="  chrome: already up on port $CHROME_PORT"
+    CHROME_SAID=1
     if command -v chrome-debug >/dev/null 2>&1; then
       case "$(chrome-debug --tab "$(dev_address "$wt")" 2>/dev/null)" in
         *opened*) info "  chrome: up on port $CHROME_PORT, this feature opened in a background tab" ;;
-        *) info "  chrome: already up on port $CHROME_PORT" ;;
+        *) [[ -n "$up" ]] && info "$up" ;;
       esac
     else
-      info "  chrome: already up on port $CHROME_PORT"
+      [[ -n "$up" ]] && info "$up"
     fi
     return 0
   fi

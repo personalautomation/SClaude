@@ -919,7 +919,13 @@ friction_defer_proposals() {
   # Only a "no" writes them in now. An ask that got no answer — the feature
   # ended elsewhere, no terminal — puts them off, as before the question.
   if [[ "${SCLAUDE_FRICTION_ASK:-off}" != "on" ]]; then
-    info "  Put off to the monthly review (SCLAUDE_FRICTION_ASK=on asks first)."
+    # The switch named once in this process, not under every list.
+    if [[ -z "${FRICTION_HINT_SAID:-}" ]]; then
+      info "  Put off to the monthly review (SCLAUDE_FRICTION_ASK=on asks first)."
+      FRICTION_HINT_SAID=1
+    else
+      info "  Put off to the monthly review."
+    fi
   elif ask "${BOLD}Put them off to the monthly review? (n writes them into CLAUDE.md now) [y/n] ${OFF}" answer yn \
      && ! is_yes "$answer"; then
     FRICTION_APPLY_NOW=1

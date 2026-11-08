@@ -425,6 +425,4 @@ session_report() {
   echo "${BOLD}Its last message:${OFF}"
   echo ""
   printf '%s\n' "$text" | sed 's/^/  /'
-  echo ""
-  echo "${BOLD}No /exit needed — sclaude carries on.${OFF}"
 }

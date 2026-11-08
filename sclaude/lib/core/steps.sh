@@ -951,6 +951,57 @@ state_file.write(path, data)
 PY
 }
 
+# When a review session's launch took up the next round itself. On GitHub
+# a launch that `sclaude checks` answers red may go on, in the same launch,
+# to what that run found (sclaude/prompts/review.md, "a new finding is on
+# your own fixes") — or hand the findings on and end, or have only a red CI
+# check to look at. So the red is only kept (`checks_red`), and becomes a
+# `took_up` when the same launch waits for checks again: it pushed what it
+# fixed after that red. Written on the review's last run while it is going,
+# read by `launches` in review_report.py: without it the run that launch
+# fixed has no launch in its window and reads as nobody's.
+#
+#   run_took_up <wt> red|wait
+run_took_up() {
+  PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$1/.sclaude/local/feature/state.json" "$2" <<'PY' 2>/dev/null || true
+import datetime, json, os, sys
+path, what = sys.argv[1:3]
+
+
+def when(text):
+    """A time as a moment: session_runs writes the local offset, this the
+    UTC one, and as text the two do not order."""
+    try:
+        return datetime.datetime.fromisoformat(text) if text else None
+    except ValueError:
+        return None
+if not os.path.exists(path):
+    sys.exit(0)
+import state_file
+state_file.lock(path)
+with open(path) as fh:
+    data = json.load(fh)
+runs = ((data.get("steps") or {}).get("review") or {}).get("runs") or []
+run = runs[-1] if runs and isinstance(runs[-1], dict) else None
+if not run or run.get("done"):
+    sys.exit(0)
+began, ended = when(run.get("resumed") or run.get("started")), when(run.get("finished"))
+# Going as sessions() in review_report.py reads it: not ended, or taken up
+# again after its end; one with an outcome and no end has ended.
+if (ended and (not began or ended >= began)) or (not ended and run.get("outcome")):
+    sys.exit(0)
+red = run.pop("checks_red", None)
+if what == "red":
+    run["checks_red"] = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+elif red and (not began or (when(red) or began) >= began):
+    # A red from this launch, not one before it was taken up again.
+    run.setdefault("took_up", []).append(red)
+elif not red:
+    sys.exit(0)
+state_file.write(path, data)
+PY
+}
+
 step_run() {
   session_runs "$1/.sclaude/local/feature/state.json" "steps.$2" "$3" "${4:-}" "${5:-}"
 }

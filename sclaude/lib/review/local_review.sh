@@ -342,9 +342,8 @@ local_review_run() {
       && REVIEW_REPORT_QUIET=1 review_report "$wt" "${ASK_SLUG:-}" >&2
     info "  That pass found the cap ($LOCAL_REVIEW_CAP): reading ${base:0:7}..${head:0:7} again for the rest, pass $pass." >&2
   done
-  # What it leaves open is the report's to say, printed after it; nothing
-  # open is said here, where no report may follow.
-  [[ "$count" -eq 0 ]] && info "  The local review leaves nothing open on PR #$pr." >&2
+  # What it leaves open is the report's to say, printed after it
+  # (review_close_gate), nothing open included.
   ask_feed say "$(phase_line finished local-review "${pr:-?}" "$round" $verify) · $count open"
   history_add "$wt/.sclaude/local/feature/state.json" review.local end open="$count"
   echo "$count"

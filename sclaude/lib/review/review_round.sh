@@ -294,6 +294,7 @@ review_reopen() {
         # The round it closed is counted by run_step, and only once it has
         # resumed this session (`kept`).
         info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the new findings."
+        REVIEW_KEPT_SAID=1  # run_step leaves out its own "resuming" line
         run_step "$wt" "$slug" review "$(review_carry_on "$pct")" kept
         return 0
       fi

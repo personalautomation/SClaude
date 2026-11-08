@@ -1114,7 +1114,11 @@ Chrome resolves `*.localhost` by itself, but Node asks the system resolver,
 and a stock WSL Ubuntu answers ENOTFOUND. The suite then has to answer those
 names itself, in a test fixture.
 
-Every step starts by printing the address under the step's header. Where
+Every step starts by printing the address under the step's header — the
+first time that step runs in a sclaude process: a session taken up again
+for the next round of the same step leaves the lines under the banner
+out (`STEP_HEADER_SAID` in `run.sh`), as it does the database's line and
+Chrome's "already up" unless something was started. Where
 the proxy's page can list the feature's users — through the proxy, with
 `devLogin` in the project's config and a local database of the feature's own
 (`dev_users_address`) — it is that page, each user a sign-in without a
@@ -1889,21 +1893,47 @@ still go on, each on the last one's fixes — four fresh sessions in a row once
 rewrote comments the one before had written. Not on one round: a last finding
 that happens to sit on an earlier fix says it too.
 
-**What a round cost is in two parts.** `review` is the review run's own
+**A round opens with its findings and goes on with their fix.** Each row of
+the report is one review run, read in the cycle's order: `find` (when the
+run started, how long it took, what it cost, what it found and how much of
+that sat on earlier fixes or repeated a decline), `fix` (the session that
+answered those findings, its time and cost, and what it declined — the
+fix is where that is decided) and `result` (fixed, waiting). The session that answered a run is the one with a launch after
+the run began and before the next one did — its start, each launch that gave
+its cost, the launch taken up again (`resumed`), and the moment a launch took
+up the next round itself: on GitHub one that `sclaude checks` answers red may
+go on to that run's findings, so `cmd_checks` keeps the red and writes it as
+`took_up` when the same launch waits for checks again — a launch that hands
+the findings on, or only had a red CI check to look at, does not
+(`run_took_up` in `steps.sh`) — never the one merely going when the run
+began, which is the launch waiting for the run of its own push (`fixers` in
+`review_report.py`); one that answered several runs
+labels them `N.1`, `N.2`. The fix's time runs from that launch to the next
+run, or to the session's end (`fix_window`). The report once
+paired each fix with the run after it, so the findings of the pull request's
+first run stood alone in a row `before` and the session that fixed them came
+next, with a cost and no findings.
+
+**What a round cost is in two parts.** `find cost` is the review run's own
 cost: each pass on this machine is a headless session sclaude names, and
 Claude Code's account in its transcript, subagents included, is read by the
 journal's `session` (`pass_cost` in `review_report.py`, `read` in
 `claude_usage.py`); a pass the person stopped, or whose answer was not
 taken, is journaled as `spent` for its cost alone (`spent` in
 `local_review.py`), never as a reviewed head. The workflow's review runs on
-GitHub and shows `—`. `fixes` is the fixing launches that run read, by when
-each began (`cost_at`, `run_cost` in `steps.sh`; `fixes_per_round` — on
-GitHub a launch waits for the run of its own push and ends after it), so a
-launch that pushed nothing adds to its run instead of shifting the rest;
-the launch no run has read yet counts in the total only. The process map
-prices the passes from the same journal, on their own block. The
-report once showed the fixes alone under `cost`, the reviews left out, and
-put a session's whole spend on its first round after every session.
+GitHub and shows `—`, which is what will never be known. `fix cost` is the
+fixing launches that began after the run and before the next one
+(`cost_at`, `run_cost` in `steps.sh`; `fixes_per_round` — on GitHub a launch
+waits for the run of its own push and ends after it, but began on the run
+before), so a launch that pushed nothing adds to its run instead of
+shifting the rest. A value that will come and has not yet is `w`: the
+run still going, findings no session has begun to fix, the launch running
+now, whose cost is taken when it ends. A round's `result` is `w` until its
+fix has ended. The total is where the review stands now: the sums of what is
+known, a `w` left out until it comes, and where every thread stands. The process map prices the passes from the same journal, on their
+own block. The report once showed the fixes alone under `cost`, the reviews
+left out, and put a session's whole spend on its first round after every
+session.
 
 **A second pull request starts its own report.** A feature reopened after
 its merge — a retrospective's fixes, a rollback — goes on under a new pull

@@ -785,8 +785,7 @@ regression_run() {
   # one did, on 2026-10-09, minutes after this one. That case is
   # regression_server_wedged's, and regression_run_body retries e2e on it.
   if [[ "$stage" == "local" && -z "$only" ]] && declare -F ensure_dev >/dev/null; then
-    declare -F stop_own_dev >/dev/null && stop_own_dev "$wt" \
-      && info "  dev server: stopped, so the suite meets a fresh one"
+    declare -F stop_own_dev >/dev/null && stop_own_dev "$wt"
     ensure_dev "$wt"
   fi
 

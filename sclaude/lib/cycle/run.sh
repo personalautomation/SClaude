@@ -1429,8 +1429,11 @@ return_brief() {
 #
 #   * after step 1 the approved plan is printed whole, every time — a replan
 #     included;
-#   * after any other session it is printed only when .sclaude/local/feature/plan.md differs
-#     from the copy printed last, under a headline saying that it changed.
+#   * after any other session only what changed is printed, when
+#     .sclaude/local/feature/plan.md differs from the copy printed last: the
+#     lines added and removed, one line around each, under the heading of the
+#     plan they sit in — the person read the whole plan once, and a reprint of
+#     it hides a one-line change in a screen of text they already know.
 #
 # .sclaude/local/feature/plan.printed is that copy. A feature planned before it existed has
 # none: the plan is then taken as seen, since there is nothing to tell a change
@@ -1449,19 +1452,61 @@ plan_report() {
       return 0
     fi
     cmp -s "$plan" "$printed" && return 0
-    headline="Plan changed (.sclaude/local/feature/plan.md):"
-    # The plan is printed for this terminal alone; the topic gets how much
+    # The change is printed for this terminal alone; the topic gets how much
     # of it changed, a path being nothing to a phone.
     local added removed
     read -r added removed < <(diff "$printed" "$plan" 2>/dev/null \
       | awk '/^>/ { a++ } /^</ { r++ } END { print a + 0, r + 0 }')
+    headline="Plan changed (.sclaude/local/feature/plan.md) · +$added −$removed lines:"
     told="Plan changed · +$added −$removed lines"
   fi
   ask_feed say "$told"
   echo ""
   say_here "${BOLD}$headline${OFF}"
   echo ""
-  sed 's/^/  /' "$plan"
+  if [[ "$step" == "plan" ]]; then
+    sed 's/^/  /' "$plan"
+  else
+    plan_changes "$printed" "$plan"
+    echo ""
+    echo "  The whole plan: .sclaude/local/feature/plan.md"
+  fi
   echo ""
   cp "$plan" "$printed" 2>/dev/null || true
+}
+
+# What changed between two versions of a plan, indented for the terminal: each
+# stretch of change opens with the heading of the plan it sits under, then its
+# lines with + for added, - for removed and one line of context on each side.
+#
+#   plan_changes <old> <new>
+#
+# The heading is read from the new plan here rather than taken from diff -F,
+# which cuts the line to 40 bytes (a multi-byte character in half) and takes
+# any line starting with # — a shell comment in a fenced block included. A
+# heading is a Markdown one ("#", "##"… then a space) outside a fence. A
+# stretch whose first line is a heading needs none above it, and one with no
+# heading above it gets none.
+plan_changes() {
+  diff -U1 "$1" "$2" 2>/dev/null | awk '
+    FILENAME != "-" {
+      if (/^(```|~~~)/) fence = !fence
+      else if (!fence && /^#+ /) heading[FNR] = $0
+      next
+    }
+    FNR <= 2 && /^(---|\+\+\+) / { next }
+    /^@@/ {
+      split($3, at, ",")
+      start = substr(at[1], 2) + 0
+      above = ""
+      for (n = start - 1; n > 0; n--) if (n in heading) { above = heading[n]; break }
+      if (shown++) print ""
+      first = 1
+      next
+    }
+    {
+      if (first && above != "" && !(/^ / && (start in heading))) print "  " above
+      first = 0
+      print "  " $0
+    }' "$2" -
 }

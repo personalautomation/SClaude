@@ -188,6 +188,7 @@ FIELDS = [
     ("columns.done", (WATCH,), "its Done column"),
     ("columns.back", (WATCH,), "the column a return goes to"),
     ("columns.backlog", (WATCH,), "the backlog, a hand-back too"),
+    ("merge", (WATCH,), "the project's `merge` setting as the timer's hand-off read it: auto, both, github"),
 ]
 
 # Written whole from Python (start.sh's heredoc, session_runs) rather than

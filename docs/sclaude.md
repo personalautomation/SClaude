@@ -2051,7 +2051,11 @@ came back, the acceptance criteria, how many review findings were found and how
 many are still open, whether the review finished on this head (zero findings
 mean nothing if it did not), the checks and the regressions. This happens once
 per head; a later accepted head rewrites the summary in place. After the merge
-the pull request goes to `Done` (`pr_board_set`).
+the pull request goes to `Done` (`pr_board_set`). With `merge` set to `auto`
+there is no merger to hand it to: the PR is marked ready and summarised, but
+stays in its column and assigned to its author, because sclaude merges it next.
+Where that merge does not go through, the PR is the author's to finish. The
+line `remind_prod` opens with says who makes the merge by the same setting.
 
 The hand-off does not need anybody at a terminal. sclaude runs it while it
 waits for QA. The QA timer runs it too, through `sclaude _handoff <feature>` in

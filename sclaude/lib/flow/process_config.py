@@ -91,6 +91,9 @@ VARIANTS = {
         "text": "merge: auto — once QA passed and GitHub says the way is clear",
         "details": "With merge set to auto, sclaude merges the pull request itself once QA passed and GitHub says the way is clear; a red check of the merge with main holds it until the branch or main moves."}),
               ("merge", {"both"}, {"text": "offered here once QA passed, or merge it on GitHub"})],
+    "handoff": [("merge", {"auto"}, {
+        "text": "ready for review, a summary; stays with its author for sclaude to merge",
+        "details": "The draft is marked ready and a summary of what the merge rests on is posted: the preview, QA's verdict, the criteria, the review's findings, the checks. With merge set to auto it stays in its column and with its author: sclaude merges it next, and a merge that does not go through is the author's to finish."})],
     "merge_wait": [("merge", {"github"}, {
         "text": "merge it on GitHub; polled every 30 s, main checked every 2 min"})],
     "qa_check": [("qa", {"auto"}, {

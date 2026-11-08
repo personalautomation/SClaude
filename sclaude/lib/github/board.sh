@@ -497,6 +497,13 @@ pr_undraft() {
 #   * a summary comment says what the merge decision rests on (pr_handoff.py
 #     summary), so the merger does not have to open the issue.
 #
+# With `merge` auto in the project's config there is no person to hand it to:
+# sclaude merges it next (merge_offer). The PR is still marked ready and
+# summarised, but stays in its column and with its author — moved to the
+# backlog and unassigned, it would tell the team the merge is anybody's while
+# sclaude makes it seconds later, and where the merge does not go through
+# after all, it is the author's to finish, as merge_offer then says.
+#
 # Once per head. The state records the head handed over, so a resume does not
 # undo a person's later moves or post the summary again; QA accepting a newer
 # head after a return hands it over afresh, and the summary is rewritten in
@@ -591,17 +598,21 @@ pr_qa_handoff_now() {
       failed=1
     fi
   fi
-  pr_board_set "$pr" "$PROGRESS_FROM" "$issue" || failed=1
+  if [[ "$(project_flow_mode merge)" == auto ]]; then
+    info "PR #$pr stays with its author: \`merge\` is auto, sclaude merges it next."
+  else
+    pr_board_set "$pr" "$PROGRESS_FROM" "$issue" || failed=1
 
-  local assignees
-  assignees="$(gh pr view "$pr" --repo "$repo" --json assignees \
-                 --jq '[.assignees[].login] | join(",")' 2>/dev/null)" || { assignees=""; failed=1; }
-  if [[ -n "$assignees" ]]; then
-    if gh pr edit "$pr" --repo "$repo" --remove-assignee "$assignees" >/dev/null 2>&1; then
-      info "PR #$pr unassigned ($assignees) — the merge is whoever picks it up."
-    else
-      warn "  could not unassign PR #$pr — do it by hand"
-      failed=1
+    local assignees
+    assignees="$(gh pr view "$pr" --repo "$repo" --json assignees \
+                   --jq '[.assignees[].login] | join(",")' 2>/dev/null)" || { assignees=""; failed=1; }
+    if [[ -n "$assignees" ]]; then
+      if gh pr edit "$pr" --repo "$repo" --remove-assignee "$assignees" >/dev/null 2>&1; then
+        info "PR #$pr unassigned ($assignees) — the merge is whoever picks it up."
+      else
+        warn "  could not unassign PR #$pr — do it by hand"
+        failed=1
+      fi
     fi
   fi
 

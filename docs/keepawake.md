@@ -264,7 +264,7 @@ the step itself is told once, when it closes: "Step 4/7 done: review". The
 review on this machine, which runs inside a step with no session of its own,
 is told the same way ("Local review started: PR #7, round 3", and at its end
 how many findings it leaves open), and so is a plan a session changed, by how
-much: "Plan changed · +3 −1 lines" — the plan itself is printed in the terminal.
+much: "Plan changed · +3 −1 lines" — the lines that changed are printed in the terminal.
 A step 4 session is a fix session: it fixes what the review found. Its line
 says what it is handed — "Step 4/7 review: fix session 1 resumed · findings:
 2 not fixed yet, 4 new · red: tests" — and the "Step 4 is not done" warning

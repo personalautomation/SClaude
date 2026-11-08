@@ -9,7 +9,10 @@
 #   * pr_setup makes a new PR a draft assigned to its author, once per PR;
 #   * pr_qa_handoff waits for every issue to be in Done, then marks the PR
 #     ready, moves it to the backlog column, clears its assignees and posts the
-#     summary — once per head;
+#     summary — once per head; under `merge` auto it leaves the column and the
+#     assignees alone, sclaude being the one to merge;
+#   * the timer's message after its hand-off says the same, by the `merge`
+#     that hand-off recorded in the watch;
 #   * the summary says where the review did not finish, so zero findings is
 #     not read as a clean review;
 #   * remind_prod hands over after QA's yes and puts a merged PR in Done.
@@ -120,6 +123,8 @@ HARNESS = "\n".join([
     'say() { echo "SAY $*"; }; info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }',
     'ask() { echo "ASK $1"; printf -v "$2" "%s" "${FAKE_ANSWER:-}"; }',
     "gh_repo() { echo o/r; }",
+    # Who merges, as the project's config would say: both unless a case sets it.
+    'project_flow_mode() { [[ "$1" == merge ]] && echo "${FAKE_MERGE:-both}" || echo github; }',
     functions(["state_get", "state_set"]),
     functions(["column_is"]),
     functions(["pr_milestone", "pr_setup"]),
@@ -216,6 +221,19 @@ check("handoff-once-per-head", [c for c in calls() if not c.startswith("pr view"
 out = sh(for_number + '\npr_qa_handoff "%s" 40 7; echo "rc=$?"' % WT)
 check("handoff-before-is-3", "rc=3" in out, True)
 
+# Under merge: auto sclaude merges next: ready and summarised, but neither
+# moved to the backlog nor unassigned — the merge is nobody else's.
+setup(handoff_table("Done", "Done"))
+out = sh(for_number + '\npr_qa_handoff "%s" 40 7; echo "rc=$?"' % WT, FAKE_MERGE="auto")
+log = calls()
+check("auto-handoff-done", "rc=0" in out, True)
+check("auto-handoff-ready", "pr ready 40 --repo o/r" in log, True)
+check("auto-handoff-no-backlog", any(c.startswith("project item-edit") for c in log), False)
+check("auto-handoff-no-unassign", any("--remove-assignee" in c for c in log), False)
+check("auto-handoff-comment", any(c.startswith("api repos/o/r/issues/40/comments --input") for c in log), True)
+check("auto-handoff-says-why", "stays with its author: `merge` is auto" in out, True)
+check("auto-handoff-head-recorded", json.load(open(STATE)).get("handoff"), "abc123")
+
 # A step that warns leaves the head unrecorded, so the next look repeats it.
 table = handoff_table("Done", "Done")
 table.insert(0, [r"^project item-edit", "", 1])
@@ -300,6 +318,10 @@ check("timer-tells-handed", "out of draft" in told, True)
 check("timer-records-handed", w.get("handoff"), "done")
 ran, told, w = sweep("Done", dict(BASE, status="Done", handoff="done"))
 check("timer-handed-once", (ran, told), ("", ""))
+ran, told, w = sweep("Done", dict(BASE, status="In QA", merge="auto"))
+check("timer-auto-stays-with-author", "stays with its author" in told, True)
+check("timer-auto-not-backlog", "unassigned" in told or "Backlog" in told, False)
+check("timer-auto-names-the-run", "sclaude demo" in told, True)
 ran, told, w = sweep("Done", dict(BASE, status="Done"))
 check("timer-retries-while-done", "ready to merge" in told, True)
 # To the feature's topic, through the worktree its watch recorded, the name
@@ -339,6 +361,11 @@ check("timer-no-root-no-handoff", ran, "")
 deploy = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("ship/deploy.sh", "ship/shipped.sh", "ship/vercel.sh", "ship/qa.sh", "ship/merge.sh", "ship/demo.sh"))
 check("remind-hands-over", 'pr_qa_handoff "$wt" "$pr" "$issue" || handed=$?' in deploy, True)
 check("remind-merged-done", 'pr_board_set "$pr" "$QA_DONE" "$issue"' in deploy, True)
+# remind_prod's opening line names who merges by the same setting the hand-off
+# follows: never "yours to do" where sclaude makes the merge.
+_opening = deploy[deploy.index("PR #$pr is open."):deploy.index("# Whether the branch merges with main")]
+check("remind-next-by-merge-mode", _opening.count('if [[ "$(project_flow_mode merge)" == auto ]]; then'), 2)
+check("remind-next-auto-words", _opening.count("(\\`merge\\` is auto)"), 2)
 github = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh"))
 check("capture-sets-up", 'pr_setup "$wt" "$number"' in github, True)
 watch = open(os.path.join(LIB, "cycle", "watch.sh"), encoding="utf-8").read()
@@ -348,6 +375,7 @@ check("watch-rearm-clears-handoff", 'state_set "$file" handoff null' in watch, T
 sclaude = "".join(open(os.path.join(ROOT, _p), encoding="utf-8").read() for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
 check("handoff-command", '_handoff)      shift; cmd_handoff' in sclaude, True)
 check("handoff-no-sync", "_handoff|-h|--help" in sclaude, True)
+check("handoff-records-merge", 'state_set "$watch" merge "$(project_flow_mode merge)"' in sclaude, True)
 prompt = open(os.path.join(ROOT, "sclaude", "prompts", "pr.md"), encoding="utf-8").read()
 check("prompt-draft", "--draft" in prompt, True)
 

@@ -10,7 +10,8 @@
 # is sclaude's job, when the human comes back to the feature — with one
 # exception. When QA accepts the work, the pull request is handed over to the
 # merger (`sclaude _handoff`, pr_qa_handoff in board.sh): marked ready, moved
-# to the backlog, unassigned, summarised. Nobody needs to be at a terminal for
+# to the backlog, unassigned, summarised — or, under `merge` auto, marked ready
+# and summarised for sclaude to merge. Nobody needs to be at a terminal for
 # that, and a merger should not wait for the author to come back before the PR
 # says it is ready. It is sclaude's own code doing it, run in the project; this
 # script only notices the moment.
@@ -285,8 +286,6 @@ look() {
   [[ -n "$now" ]] || return 0
 
   local handed="" said="" ready
-  ready="PR #$pr is out of draft, in ${QA_BACKLOG:-the backlog}, unassigned,
-and its conversation has the summary for the merge."
   if [[ -n "$QA_DONE" && "$(norm "$now")" == "$(norm "$QA_DONE")" ]]; then
     case "$(field "$file" handoff || true)" in
       done|gone) ;;
@@ -294,6 +293,16 @@ and its conversation has the summary for the merge."
          handed="${said%%$'\n'*}"
          [[ "$said" == *$'\n'* ]] && said="${said#*$'\n'}" || said="" ;;
     esac
+  fi
+  # Worded after the hand-off, by the `merge` it recorded (cmd_handoff): what
+  # it did, not what the setting was when the watch was armed.
+  if [[ "$(field "$file" merge || true)" == auto ]]; then
+    ready="PR #$pr is out of draft and stays with its author, and its conversation
+has the summary for the merge. \`merge\` is auto: sclaude merges it on its next
+run — sclaude $slug"
+  else
+    ready="PR #$pr is out of draft, in ${QA_BACKLOG:-the backlog}, unassigned,
+and its conversation has the summary for the merge."
   fi
 
   if [[ "$(norm "$now")" == "$(norm "$was")" ]]; then

@@ -9,8 +9,9 @@
 #     a replan even when its text is the same;
 #   * after a later session nothing is printed while .sclaude/local/feature/plan.md is the
 #     plan printed last;
-#   * a later session that changed the plan gets it printed, under a headline
-#     saying it changed, and only once;
+#   * a later session that changed the plan gets only the change printed —
+#     the lines added and removed, under the heading they sit in — under a
+#     headline saying how much changed, and only once;
 #   * a feature with no record of a printed plan prints nothing and starts one;
 #   * plan_report runs in session_ended, on both ways out of a session.
 #
@@ -37,6 +38,10 @@ with open(os.path.join(LIB, "cycle", "run.sh")) as fh:
 found = re.search(r"^plan_report\(\) \{\n.*?^\}\n", RUN, re.S | re.M)
 if not found:
     print("FAIL plan_report not found in run.sh")
+    sys.exit(1)
+changes = re.search(r"^plan_changes\(\) \{\n.*?^\}\n", RUN, re.S | re.M)
+if not changes:
+    print("FAIL plan_changes not found in run.sh")
     sys.exit(1)
 
 # capture_plan is stubbed: it writes the approved plan from $APPROVED, or fails
@@ -70,7 +75,7 @@ def fed():
 
 def report(wt, step, approved=""):
     env = dict(os.environ, APPROVED=approved, FEED=FEED)
-    body = PRELUDE + found.group(0) + 'plan_report "%s" "%s"\n' % (wt, step)
+    body = PRELUDE + changes.group(0) + found.group(0) + 'plan_report "%s" "%s"\n' % (wt, step)
     return subprocess.run(["bash", "-c", body], capture_output=True, text=True,
                           env=env, timeout=30).stdout
 
@@ -97,8 +102,11 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(plan, "a") as fh:
         fh.write("- and this too\n")
     out = report(wt, "code")
-    check("changed-headline", "Plan changed" in out, True)
-    check("changed-body", "  - and this too\n" in out, True)
+    check("changed-headline", "Plan changed (.sclaude/local/feature/plan.md) · +1 −0 lines:" in out, True)
+    check("changed-line-added", "  +- and this too\n" in out, True)
+    check("changed-context-kept", "   - do it\n" in out, True)
+    check("changed-under-its-heading", "  # Plan\n   - do it\n  +- and this too\n" in out, True)
+    check("changed-names-the-file", "The whole plan: .sclaude/local/feature/plan.md" in out, True)
     check("changed-told-by-size", fed(), "Plan changed · +1 −0 lines\n")
     check("changed-only-once", report(wt, "review"), "")
 
@@ -113,6 +121,54 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(plan, "a") as fh:
         fh.write("- one more\n")
     check("tracked-after-start", "Plan changed" in report(wt, "code"), True)
+
+    # --- a change is shown under its own section's heading --------------------
+    with open(plan, "w") as fh:
+        fh.write("# Plan\n\n## One\n\n- a\n- b\n- c\n\n## Two\n\n- d\n- e\n- f\n")
+    report(wt, "code")
+    fed()
+    with open(plan, "w") as fh:
+        fh.write("# Plan\n\n## One\n\n- a\n- b\n- c\n\n## Two\n\n- d\n- E\n- f\n")
+    out = report(wt, "code")
+    check("section-heading-above", "  ## Two\n   - d\n  -- e\n  +- E\n   - f\n" in out, True)
+    check("section-other-left-out", "- b" in out, False)
+    check("section-replaced-counts", "· +1 −1 lines:" in out, True)
+    # A change right under a heading has that heading as its context line, so
+    # the section before it is not named above it.
+    with open(plan, "w") as fh:
+        fh.write("# Plan\n\n## One\n- A\n")
+    report(wt, "code")
+    with open(plan, "w") as fh:
+        fh.write("# Plan\n\n## One\n- B\n")
+    out = report(wt, "code")
+    check("heading-as-context", "   ## One\n  -- A\n  +- B\n" in out, True)
+    check("heading-not-doubled", "  # Plan\n" in out, False)
+    # The heading is the whole line, multi-byte characters and all — diff -F
+    # would cut it to 40 bytes.
+    long = "### Part 2 — Notifications in the topic and the terminal"
+    with open(plan, "w") as fh:
+        fh.write("# Plan\n\n%s\n\n- a\n- b\n- c\n" % long)
+    report(wt, "code")
+    with open(plan, "w") as fh:
+        fh.write("# Plan\n\n%s\n\n- a\n- B\n- c\n" % long)
+    check("heading-whole", "  %s\n   - a\n" % long in report(wt, "code"), True)
+    # A comment in a fenced block is not a heading.
+    fenced = "# Plan\n\n## Steps\n\n```\n# install deps\nnpm i\n```\n\n- a\n- %s\n- c\n"
+    with open(plan, "w") as fh:
+        fh.write(fenced % "b")
+    report(wt, "code")
+    with open(plan, "w") as fh:
+        fh.write(fenced % "B")
+    out = report(wt, "code")
+    check("fence-not-a-heading", "  ## Steps\n   - a\n" in out, True)
+    # No heading above the change: nothing is named above it.
+    with open(plan, "w") as fh:
+        fh.write("intro\n\n- a\n- b\n- c\n")
+    report(wt, "code")
+    with open(plan, "w") as fh:
+        fh.write("intro\n\n- a\n- B\n- c\n")
+    out = report(wt, "code")
+    check("no-heading-no-label", out.split("lines:\n\n", 1)[-1].startswith("   - a\n"), True)
 
 # --- wired into session_ended, on both ways out ------------------------------
 ended = re.search(r"^session_ended\(\) \{\n.*?^\}\n", RUN, re.S | re.M).group(0)

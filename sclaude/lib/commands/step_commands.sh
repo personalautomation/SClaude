@@ -440,5 +440,11 @@ cmd_handoff() {
   state="$wt/.sclaude/local/feature/state.json"
   pr="$(state_get "$state" pr || true)"
   issue="$(state_get "$state" issue || true)"
+  # Who merges, as this hand-off reads it, for the timer's words after it:
+  # under `merge` auto the pull request stays with its author for sclaude to
+  # merge (pr_qa_handoff) rather than waiting in the backlog. Written here,
+  # not when the watch was armed, since the setting may change while QA looks.
+  local watch; watch="$(watch_state "$slug")" \
+    && state_set "$watch" merge "$(project_flow_mode merge)"
   pr_qa_handoff "$wt" "$pr" "$issue"
 }

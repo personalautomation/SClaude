@@ -166,10 +166,18 @@ remind_prod() {
     sync_close_open "$wt/.sclaude/local/feature/state.json"
   elif [[ "$no_deploy" -eq 1 ]]; then
     echo "${BOLD}Feature $slug: PR #$pr is open.${OFF}"
-    echo "${DIM}Next: the merge, which is yours to do — nothing here deploys.${OFF}"
+    if [[ "$(project_flow_mode merge)" == auto ]]; then
+      echo "${DIM}Next: the merge, which sclaude makes (\`merge\` is auto) — nothing here deploys.${OFF}"
+    else
+      echo "${DIM}Next: the merge, which is yours to do — nothing here deploys.${OFF}"
+    fi
   else
     echo "${BOLD}Feature $slug: PR #$pr is open.${OFF}"
-    echo "${DIM}Next: the preview, then QA, then the merge — the merge is yours to do.${OFF}"
+    if [[ "$(project_flow_mode merge)" == auto ]]; then
+      echo "${DIM}Next: the preview, then QA, then the merge — sclaude makes it once QA has passed (\`merge\` is auto).${OFF}"
+    else
+      echo "${DIM}Next: the preview, then QA, then the merge — the merge is yours to do.${OFF}"
+    fi
   fi
 
   # Whether the branch merges with main, before anything is shown to QA: the
@@ -433,8 +441,13 @@ remind_prod() {
         && once_edge "$wt" handoff merge sclaude "pr_qa_handoff" note="PR #$pr ready"
       # Done before — by an earlier run, or by the QA timer while this one
       # waited, whose words went to Telegram rather than here.
-      [[ "$handed" -eq 3 ]] \
-        && info "PR #$pr was already handed over for the merge: ready, in the backlog, with its summary."
+      if [[ "$handed" -eq 3 ]]; then
+        if [[ "$(project_flow_mode merge)" == auto ]]; then
+          info "PR #$pr was already handed over for the merge: ready, with its summary."
+        else
+          info "PR #$pr was already handed over for the merge: ready, in the backlog, with its summary."
+        fi
+      fi
     fi
   fi
   # Without a deploy no QA hand-off makes the pull request ready, so it is
@@ -483,9 +496,10 @@ remind_prod() {
     issue_end_date "$(gh_repo)" "$issue"
   fi
   # The pull request's own column follows the merge to Done. The hand-off put
-  # it in the backlog to wait for the merger, and a board whose workflow moves
-  # merged PRs does this by itself — but not every board has that workflow
-  # switched on, and a merged PR left waiting in the backlog is a lie on it.
+  # it in the backlog to wait for the merger (unless `merge` is auto, which
+  # leaves it where it was), and a board whose workflow moves merged PRs does
+  # this by itself — but not every board has that workflow switched on, and a
+  # merged PR left waiting in the backlog is a lie on it.
   [[ "${merged:-}" == "MERGED" ]] && { pr_board_set "$pr" "$QA_DONE" "$issue" || true; }
 
   # And the cycle ends with it. A preview fix put the cycle back on the review

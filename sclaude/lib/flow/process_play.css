@@ -29,6 +29,8 @@ body.playing svg.map .edge:not(.pl-go):not(.pl-went){opacity:.3}
 .node.pl-seen .shape{stroke-width:2.8}
 .edge.pl-go path.line{stroke:var(--auto);stroke-width:4;stroke-dasharray:10 6;animation:pl-flow .5s linear infinite}
 .edge.pl-went path.line{stroke:var(--auto);stroke-width:2.4}
+/* A way back stays the colour it is drawn in: played, only thicker. */
+.edge.e-back.pl-go path.line,.edge.e-back.pl-went path.line{stroke:var(--human)}
 @keyframes pl-flow{to{stroke-dashoffset:-16}}
 body.pl-paused .edge.pl-go path.line{animation-play-state:paused}
 .pl-clock circle{fill:var(--surface);stroke:var(--auto);stroke-width:2}

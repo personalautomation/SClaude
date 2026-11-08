@@ -17,6 +17,9 @@
 review_close_gate() {
   local wt="$1" slug="$2" pr="$3" word waited=0 announced=0 answer repo said="" said_read=0 failed=0 go_box=""
   local gate_reported=0
+  # Where the way back to a session starts: the close, or the findings'
+  # question when the gate's own pass found something.
+  local back_from=review_close
   # Who let the step close, for the history's way out of the gate, written
   # as the step closes (after_step); the way back is written here.
   REVIEW_CLOSE_BY=sclaude REVIEW_CLOSE_HOW="nothing open on the PR" REVIEW_CLOSE_NOTE=""
@@ -84,7 +87,15 @@ review_close_gate() {
             return 0
           fi
         fi
+        # The pass the gate runs is a block of the map's own: back from the
+        # close to the local review, and from it to the findings' question.
+        cycle_edge "$wt" review_close local_pass sclaude "only review threads open" note="${word}"
         count="$(local_review "$wt" "$pr")" || count="failed"
+        if [[ "$count" =~ ^[0-9]+$ ]]; then
+          cycle_edge "$wt" local_pass review_found sclaude "the review on this machine" note="$count finding(s)"
+          [[ "$count" -eq 0 ]] && cycle_edge "$wt" review_found review_close sclaude "nothing found"
+          [[ "$count" -gt 0 ]] && back_from=review_found
+        fi
         if [[ "$count" == "failed" ]]; then
           failed=$((failed + 1))
           warn ""
@@ -260,7 +271,7 @@ review_close_gate() {
   # conversation within seconds when it had committed nothing new.
   if [[ -n "${SESSION_EXITED:-}" && "$go_on" -eq 0 ]]; then
     info "  You left the session: step 4 stays open. Come back with: $SELF $slug"
-    cycle_edge "$wt" review_close review person "${SESSION_HOW:-/exit or Ctrl-C}" note="held: ${word#open: }"
+    cycle_edge "$wt" "$back_from" review person "${SESSION_HOW:-/exit or Ctrl-C}" note="held: ${word#open: }"
     return 1
   fi
   # Unsaid: the session's own heading follows, its status line with [s].
@@ -273,7 +284,7 @@ review_close_gate() {
     answer=y
   fi
   if is_yes "$answer"; then
-    cycle_edge "$wt" review_close review "$back_by" "$back_how" note="${word#open: }"
+    cycle_edge "$wt" "$back_from" review "$back_by" "$back_how" note="${word#open: }"
     # A session sclaude closed: review_reopen picks the session, a fresh one
     # for a new round, as it does unasked.
     if [[ -n "${SESSION_AUTO_CLOSED:-}" ]]; then
@@ -286,7 +297,7 @@ review_close_gate() {
   ask "${BOLD}Close step 4 anyway, with that left as it is? [y/n] ${OFF}" answer yn && back_by=person || back_by=none
   if ! is_yes "$answer"; then
     info "  Left open. Come back with: $SELF $slug"
-    cycle_edge "$wt" review_close review "$back_by" "$ASKED_HOW" note="held: ${word#open: }"
+    cycle_edge "$wt" "$back_from" review "$back_by" "$ASKED_HOW" note="held: ${word#open: }"
     return 1
   fi
   REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="$ASKED_HOW" REVIEW_CLOSE_NOTE="closed anyway: ${word#open: }"

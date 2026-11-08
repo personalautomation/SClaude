@@ -274,6 +274,7 @@ EDGES = [
     ("round", "review_close", "no — the session ended", ""),
     ("review", "review_close", "the session ended", ""),
     ("review_close", "review", "no — back unasked; held if you left it, [g] off; threads left at night, at your yes", "back"),
+    ("review_close", "local_pass", "only review threads open — the fixes are read here", "back"),
     ("review_close", "preview", "yes", ""),
     ("preview", "in_qa", "green", "msg"),
     ("preview", "review", "red, or the deploy failed: fixed from step 4", "back"),
@@ -619,6 +620,7 @@ POSITIONS = {
     "prod": "o_prod",
     "ship": "o_prod",
     "local_pass": "o_review",
+    "review_close": "o_review",
     "p_code": "o_code",
     "p_pr": "o_code",
     "p_review": "o_code",
@@ -628,6 +630,20 @@ POSITIONS = {
     "retro": "o_retro",
     "cleanup": "o_end",
     "end": "o_end",
+}
+
+# A place drawn only on a smaller map (the regression's, the parts') has no
+# block of its own on the whole process: the one it happens inside is lit
+# there with it, so that map does not stand blank while the feature is busy.
+HOSTS = {
+    "reg_local": "code",
+    "fix_local": "code",
+    "fix_preview": "review",
+    "fix_prod": "review",
+    "hold_ways": "prod",
+    "p_code": "code",
+    "p_pr": "code",
+    "p_review": "code",
 }
 
 

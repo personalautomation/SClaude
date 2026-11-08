@@ -313,13 +313,15 @@ def _in_step(state, step):
             and step in ("code", "pr", "review")):
         if step in ("code", "review") and _running(state, "local"):
             return "reg_local", "part %s/%s: the local regression is running" % (parts.get("current"), parts["total"])
+        # The part's own review is p_review: local_pass is step 4's block,
+        # and would light the overview's step 4 while the parts are in step 2.
         if step == "review" and _fresh(((state.get("review") or {}).get("local") or {}).get("running")):
-            return "local_pass", "part %s/%s: the local review is reading its pull request" % (
+            return "p_review", "part %s/%s: the local review is reading its pull request" % (
                 parts.get("current"), parts["total"])
         return "p_" + step, "step 2, part %s/%s: %s" % (
             parts.get("current"), parts["total"], {"code": "development", "pr": "its pull request",
                                                   "review": "its review"}[step])
-    if step in ("code", "review") and _running(state, "local"):
+    if step == "code" and _running(state, "local"):
         return "reg_local", "the local regression is running"
     if step == "code" and _fix_open(state, "local"):
         return "fix_local", "a session is fixing the local regression"
@@ -327,8 +329,12 @@ def _in_step(state, step):
         for stage in ("prod", "preview"):
             if _fix_open(state, stage):
                 return "fix_" + stage, "a session is fixing the %s regression" % stage
+        # At step 4 the local suite is the gate that closes the step: lit
+        # there, not on reg_local, which the overview places in step 2.
+        if _running(state, "local"):
+            return "review_close", "the local regression is running before step 4 closes"
         if _fix_open(state, "local"):
-            return "fix_local", "a session is fixing the local regression"
+            return "review_close", "a session is fixing the local regression before step 4 closes"
         if _fresh(((state.get("review") or {}).get("local") or {}).get("running")):
             return "local_pass", "the local review is reading the pull request"
     return (step if step in process_model.NODES else "plan"), "step %s" % step

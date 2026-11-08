@@ -29,6 +29,7 @@ NEEDS = {
     "local_pass": ("review", {"local"}),
     ("draft_pr", "ci_review"): ("review", {"github"}),
     ("draft_pr", "local_pass"): ("review", {"local"}),
+    ("review_close", "local_pass"): ("review", {"local"}),
     "f_away": ("review", {"local"}),
     ("f_rules", "f_away"): ("review", {"local"}),
     ("f_away", "f_review"): ("review", {"local"}),

@@ -277,12 +277,30 @@ with process.configured({}):
 
 # --- where a feature stands --------------------------------------------------
 
+# A place only a smaller map draws lights the block of the whole process it
+# happens inside, and every place lit sits on the overview step it belongs to.
+import process_page  # noqa: E402
+with process.configured(process.example_config()):
+    _lit = process_page.lit_with()
+check("a smaller map's place lights its block on the whole process",
+      all(any(x in process.NODES for x in _lit.get(k, [])) for k in process.POSITIONS if k not in process.NODES
+          and process.on_map(process.HOSTS.get(k, ""))),
+      str({k: _lit.get(k) for k in process.POSITIONS if k not in process.NODES}))
+check("the local regression at step 4 lights step 4, not step 2",
+      process.POSITIONS["review_close"] == "o_review" and process.HOSTS["reg_local"] == "code")
+
 now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 cases = [
     ("a step", {"step": "code"}, "", "code"),
     ("a local run", {"step": "code", "regression": {"local": {"status": "running", "started": now}}},
      "", "reg_local"),
     ("a local fix", {"step": "code", "regression": {"local": {"fix_status": "red open"}}}, "", "fix_local"),
+    ("a local run at step 4", {"step": "review", "regression": {"local": {"status": "running", "started": now}}},
+     "", "review_close"),
+    ("a local fix at step 4", {"step": "review", "regression": {"local": {"fix_status": "red open"}}},
+     "", "review_close"),
+    ("a part's local review is the part's", {"step": "review", "parts": {"total": 2, "current": 1},
+                                              "review": {"local": {"running": now}}}, "", "p_review"),
     ("a preview fix", {"step": "review", "regression": {"preview": {"fix_status": "open"}}}, "", "fix_preview"),
     ("an old run", {"step": "review", "regression": {"local": {"status": "running",
                                                                "started": "2020-01-01T00:00:00+00:00"}}},
@@ -996,7 +1014,7 @@ got = seq_of([{"at": at("09:00"), "what": "steps.review", "op": "open", "session
               {"at": at("09:31"), "what": "review.local", "op": "start"},
               {"at": at("09:35"), "what": "review.local", "op": "end"}])
 check("history: no long way round is made up between two places",
-      got[-2:] == ["review", "local_pass"] and "merged" not in got, str(got))
+      got[-3:] == ["review", "review_close", "local_pass"] and "merged" not in got, str(got))
 review = [v for v in process.history({}, [
     {"at": at("09:00"), "what": "steps.review", "op": "open", "session": "r"},
     {"at": at("10:00"), "what": "steps.review", "op": "open", "session": "r"},

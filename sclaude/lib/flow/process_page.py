@@ -64,11 +64,22 @@ def page(label, cfg=None, demo=None):
         return _page(label, demo)
 
 
+def lit_with():
+    """What each place lights besides itself: its overview block, and the
+    whole process's block it happens inside when only a smaller map draws it."""
+    lit = {k: [v] if v else [] for k, v in process_model.POSITIONS.items()}
+    for k, host in process_model.HOSTS.items():
+        drawn = process_config.on_map(host)
+        if drawn and drawn not in lit.setdefault(k, []):
+            lit[k].append(drawn)
+    return lit
+
+
 def _page(label, demo=None):
     detail = process_diagram.Diagram(*process_config.node_sets()[0])
     overview = process_diagram.Diagram(*process_config.node_sets()[1])
     script = LIVE_SCRIPT.replace("/*LABEL*/", json.dumps(label)).replace(
-        "/*POSITIONS*/", json.dumps({k: [v] if v else [] for k, v in process_model.POSITIONS.items()}))
+        "/*POSITIONS*/", json.dumps(lit_with()))
     return """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">

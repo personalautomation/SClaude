@@ -66,7 +66,10 @@ demo_refresh() {
     local state="$wt/.sclaude/local/feature/state.json" session rc=0
     session="$(new_session_id)"
     [[ -f "$state" ]] && SCLAUDE_ABOUT="$stage" session_runs "$state" demo open "$session"
-    ( cd "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
+    # The feature's environment, as every session sclaude starts in a tree
+    # gets it (dev_env_load): without it a script that reaches the feature's
+    # own database directly had no address for it.
+    ( cd "$wt" && dev_env_load "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
         SCLAUDE_DEMO_HOLD=1 timeout 2400 \
         claude -p "$(demo_refresh_prompt "$wt" "$script" "$head" "$stage")" \
         --session-id "$session" \
@@ -95,7 +98,7 @@ demo_refresh() {
     fi
     demo_publish_held "$wt" "$stage" "$tool" "$before" >>"$log" 2>&1
   else
-    ( cd "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
+    ( cd "$wt" && dev_env_load "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
         python3 "$tool" replay </dev/null ) >"$log" 2>&1
   fi
   demo_findings "$wt" "$findings" "$before"

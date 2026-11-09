@@ -206,6 +206,41 @@ with tempfile.TemporaryDirectory() as root:
     check("replay: still plays the kept demo's own script",
           os.path.isfile(os.path.join(wt, demo.DEMO_DIR, demo.last_main(wt)["id"], "demo.mjs")), True)
 
+    # demo_refresh starts its session with the feature's environment, as every
+    # other session in a tree: a feature with a database of its own (db.env)
+    # hands its address to the session, and from it to what the session plays.
+    write(os.path.join(wt, "app.ts"), "export const x = 3\n")
+    git(wt, "-c", "user.email=t@x", "-c", "user.name=t", "commit", "-qam", "change")
+    write(os.path.join(wt, ".sclaude", "local", "feature", "db.env"),
+          "POSTGRES_URL_NON_POOLING=postgresql://feature-own:1/db\n")
+    # demo.py, run from the tree, knows the feature by the registry's link.
+    os.makedirs(os.environ["SCLAUDE_DEV_REGISTRY"], exist_ok=True)
+    os.symlink(wt, os.path.join(os.environ["SCLAUDE_DEV_REGISTRY"], "f1"))
+    seen = os.path.join(root, "claude-saw")
+    write(os.path.join(stub, "claude"),
+          '#!/bin/sh\nprintf "%%s" "$POSTGRES_URL_NON_POOLING" > %s\n' % seen)
+    os.chmod(os.path.join(stub, "claude"), 0o755)
+    bash = """
+set -u
+INSTRUMENTS=%(root)s
+LIB=%(lib)s
+source %(lib)s/tree/worktree.sh
+source %(lib)s/tree/featuredb.sh
+source %(lib)s/ship/demo.sh
+info() { :; }
+warn() { :; }
+project_demo_mode() { echo on; }
+new_session_id() { echo s-refresh; }
+step_model() { echo m; }
+unset POSTGRES_URL_NON_POOLING
+demo_refresh %(wt)s epilogue
+""" % {"root": ROOT, "lib": LIB, "wt": wt}
+    done = subprocess.run(["bash", "-c", bash], capture_output=True, text=True,
+                          stdin=subprocess.DEVNULL)
+    got = open(seen).read() if os.path.exists(seen) else "(claude never started: %s)" % done.stderr[-300:]
+    check("refresh: the session gets the feature's own database from db.env",
+          got, "postgresql://feature-own:1/db")
+
     # demo.sh: the session plays held, sclaude publishes and says what was found.
     with open(os.path.join(LIB, "ship", "demo.sh")) as fh:
         body = fh.read()

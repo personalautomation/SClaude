@@ -3500,6 +3500,98 @@ with sandbox() as box:
         with state.locked() as st:
             st["topics_off_until"] = 0
 
+        # Any other refusal holds topics off too, longer on each repeat:
+        # Telegram has made a broken topic for every such refusal.
+        bot15b = FakeBot()
+        made = []
+        def refuse_wrong_home(nm):
+            made.append(nm)
+            bot15b.last_error = '{"ok":false,"error_code":400,"description":"bad request: bot_topic_wrong_home"}'
+            return 0
+        bot15b.create_topic = refuse_wrong_home
+        feature_tree(repo, "w")
+        before = int(time.time())
+        topics.feature_topic(bot15b, "shop", "w")
+        topics.feature_topic(bot15b, "shop", "w")
+        check("a topic refused with a 400 is not asked for every turn", len(made), 1)
+        st = state.read()
+        check("the first refusal holds topics off for the first wait",
+              st.get("topics_off_until", 0) - before in range(topics.TOPICS_REFUSED_FIRST - 1,
+                                                                topics.TOPICS_REFUSED_FIRST + 2), True)
+        check("meanwhile a note goes to the main chat",
+              card_view.note_topic(bot15b, "shop", "w"), 0)
+        with state.locked() as st:
+            st["topics_off_until"] = 0
+        topics.feature_topic(bot15b, "shop", "w")
+        check("a repeat waits twice as long",
+              state.read().get("topics_refused_wait"), 2 * topics.TOPICS_REFUSED_FIRST)
+        with state.locked() as st:
+            st["topics_off_until"] = 0
+            st["topics_refused_wait"] = topics.TOPICS_REFUSED_MAX
+        topics.feature_topic(bot15b, "shop", "w")
+        check("the wait stops growing at its ceiling",
+              state.read().get("topics_refused_wait"), topics.TOPICS_REFUSED_MAX)
+        with state.locked() as st:
+            st["topics_off_until"] = 0
+        bot15c = FakeBot()
+        check("a topic made again", bool(topics.feature_topic(bot15c, "shop", "w")), True)
+        check("clears the wait", state.read().get("topics_refused_wait") or 0, 0)
+        offline = FakeBot()
+        offline.offline = True
+        feature_tree(repo, "v")
+        topics.feature_topic(offline, "shop", "v")
+        check("the network is not a refusal", state.read().get("topics_off_until") or 0, 0)
+
+        def refusing(body):
+            bot = FakeBot()
+            tries = []
+            def refuse(nm):
+                tries.append(nm)
+                bot.last_error = body
+                return 0
+            bot.create_topic = refuse
+            return bot, tries
+        # A refusal of one request holds that feature alone.
+        bot_n, tries = refusing('{"ok":false,"error_code":400,"description":"bad request: topic_name_invalid"}')
+        feature_tree(repo, "u")
+        topics.feature_topic(bot_n, "shop", "u")
+        topics.feature_topic(bot_n, "shop", "u")
+        check("a refused name is not asked for every turn", len(tries), 1)
+        check("it does not hold the chat", state.read().get("topics_off_until") or 0, 0)
+        check("its notes go to the main chat meanwhile", card_view.note_topic(bot_n, "shop", "u"), 0)
+        feature_tree(repo, "t")
+        check("another feature still gets its topic",
+              bool(topics.feature_topic(FakeBot(), "shop", "t")), True)
+        topics.TOPIC_REFUSED.clear()
+        # A rate limit is not a refusal; a 403 is about the whole chat.
+        bot_r, tries = refusing('{"ok":false,"error_code":429,"description":"too many requests"}')
+        feature_tree(repo, "s")
+        topics.feature_topic(bot_r, "shop", "s")
+        topics.feature_topic(bot_r, "shop", "s")
+        check("a rate limit is asked again", (len(tries), state.read().get("topics_off_until") or 0),
+              (2, 0))
+        bot_5, tries = refusing('{"ok":false,"error_code":500,"description":"internal server error"}')
+        topics.feature_topic(bot_5, "shop", "s")
+        topics.feature_topic(bot_5, "shop", "s")
+        check("a server error is asked again",
+              (len(tries), state.read().get("topics_off_until") or 0), (2, 0))
+        bot_x, tries = refusing('{"ok":false,"error_code":400,"description":"bad request: not enough rights to create a topic"}')
+        topics.feature_topic(bot_x, "shop", "s")
+        check("an unknown refusal holds the chat", (state.read().get("topics_off_until") or 0) > 0, True)
+        with state.locked() as st:
+            st["topics_off_until"] = 0
+        bot_f, tries = refusing("http error 403: forbidden")
+        topics.feature_topic(bot_f, "shop", "s")
+        check("a 403 holds the chat", (state.read().get("topics_off_until") or 0) > 0, True)
+        # A topic made by the new-feature path clears the wait too.
+        with state.locked() as st:
+            st["topics_off_until"] = 0
+            st.pop("new_topics", None)
+        check("a new-feature topic made", bool(topics.new_feature_topic(FakeBot(), "shop")), True)
+        check("clears the wait as well", state.read().get("topics_refused_wait") or 0, 0)
+        with state.locked() as st:
+            st.pop("new_topics", None)
+
         # The feature list keeps within Telegram's 64 bytes.
         saved_feats, saved_choice = repos.features_of_name, repos.repo_choice
         repos.features_of_name = lambda n: ([("s" * 50, "1/6 plan", ""),

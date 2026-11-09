@@ -209,15 +209,17 @@ def open_card(bot, name, slug):
 
 def note_topic(bot, name, slug):
     """Where a feature's notes go: its topic; the main chat (0) only when
-    the chat has no topics; None while neither — a topic not made yet, the
-    network, a feature whose worktree has gone."""
+    no topic is to be had for it — the chat has no topics, or Telegram's
+    refusal holds the chat or this feature (topics.held); None while
+    neither — a topic not made yet, the network, a feature whose worktree
+    has gone."""
     repo = repos.repo_path(name)
     if not repo or not topics.feature_dir(repo, slug):
         return None
     thread = topics.feature_topic(bot, name, slug)
     if thread:
         return thread
-    return 0 if time.time() < (read().get("topics_off_until") or 0) else None
+    return 0 if topics.held(name, slug) else None
 
 
 def redraw_cards(bot):

@@ -207,8 +207,9 @@ def check(bot, channels, topic, log, now=None, at_terminal=None, shown=None, los
     for name, slug, channel in channels:
         # Only to the feature's topic. The feed mirrors the terminal, and in
         # the main chat it would mix every feature's lines; the terminal still
-        # has them. No topic yet (None): the lines wait for it. A chat with no
-        # topics (0): they are let go.
+        # has them. No topic yet (None): the lines wait for it. No topic to
+        # be had (0) — no topics in the chat, or a refusal holding the chat or
+        # this feature: they are let go.
         thread = None
         if os.path.exists(os.path.join(channel, NOTES_DIR, FEED_FILE)):
             thread = topic(name, slug)

@@ -139,7 +139,7 @@ class Bot(object):
             return (out.get("result") or {}).get("message_id", 0)
         except Exception as exc:
             self.last_error = getattr(exc, "telegram", "") or str(exc).lower()
-            log.warning("did not send: %s", exc)
+            log.warning("did not send: %s %s", exc, getattr(exc, "telegram", ""))
             return 0
 
     def ask(self, text, placeholder):
@@ -299,7 +299,9 @@ class Bot(object):
             return (out.get("result") or {}).get("message_thread_id", 0)
         except Exception as exc:
             self.last_error = getattr(exc, "telegram", "") or str(exc).lower()
-            log.warning("no topic was made: %s", exc)
+            # Telegram's own words, not only the status: a 400 alone does not
+            # say whether the topic stayed unmade.
+            log.warning("no topic was made: %s %s", exc, self.last_error)
             return 0
 
     def rename_topic(self, thread, name):
@@ -323,7 +325,7 @@ class Bot(object):
                       message_thread_id=thread)
             return True
         except Exception as exc:
-            log.warning("the topic was not deleted: %s", exc)
+            log.warning("the topic was not deleted: %s %s", exc, getattr(exc, "telegram", ""))
             # Gone already, by hand, or topics are off: nothing left to
             # delete. Any other failure is tried again on the next turn; the
             # orchestrator clears a mark left a week (io.sh).

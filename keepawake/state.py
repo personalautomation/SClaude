@@ -290,6 +290,10 @@ def blank():
         # Until when a refusal to make a feature topic stands (Threaded Mode
         # off in @BotFather); topics are not asked for before then.
         "topics_off_until": 0,
+        # How long the last refusal other than "not a forum" holds topics off,
+        # doubled on each repeat; cleared once a topic is made
+        # (topics_refused in keepawake/topics.py).
+        "topics_refused_wait": 0,
         # The profile texts last set (Bot.describe): set again only when they
         # change.
         "described": "",

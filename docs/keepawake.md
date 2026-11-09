@@ -309,7 +309,16 @@ name the feature in their data when it fits 64 bytes and leave it to the topic
 otherwise. The main chat keeps what is not about one feature: sleep, status,
 Chrome and the list of features, code-server, the repositories and their
 features — a press on one opens its topic — and Settings. Without Threaded Mode
-the card stands where the feature list was, with a way back to it. With phone
+the card stands where the feature list was, with a way back to it. Any other
+refusal (`bot_topic_wrong_home`, a 403, one the bot does not know) is taken for
+the whole chat and treated the same: the main chat for fifteen minutes, twice as long on each repeat, up to
+six hours, until a topic is made again. Telegram has answered such a request
+with a refusal and made a broken topic all the same, so asking again on every
+turn filled the chat with copies. A refusal known to be about one request
+alone (a name Telegram does not take) holds only that feature, for fifteen
+minutes, its review notes going to the main chat meanwhile (its feed of
+terminal lines is let go, as in a chat without topics); a rate limit, a server
+error or the network holds nothing. With phone
 access on all of this lives in the menu app (below), and the chat's menu and a
 topic's card are each one button to it.
 

@@ -159,12 +159,76 @@ TOPIC_GONE = ("thread not found", "topic_id_invalid", "topic_deleted", "not a fo
 MAIN_CARDS = 20
 # How long a refusal to make a topic ("the chat is not a forum") is believed.
 TOPICS_OFF_RETRY = 600
+# The same for any other refusal: the first wait, doubled on each repeat up
+# to the last (topics_refused).
+TOPICS_REFUSED_FIRST = 900
+TOPICS_REFUSED_MAX = 6 * 3600
+# Refusals about one request rather than the whole chat (topics_refused).
+# Any other refusal is taken for the whole chat: an unknown one asked for by
+# every feature would make a topic each.
+REQUEST_REFUSALS = ("topic_name_invalid",)
+# A feature whose own request was refused: key → until when it is not asked
+# again. In memory: a restart asks again, once.
+TOPIC_REFUSED = {}
 TOPIC_NAME_SLUG_MIN = 16
 # A feature whose worktree is gone without the clean-up saying so — removed by
 # hand — loses its channel this long after it last changed. Its topic stays: its
 # id went with the worktree. Not at once, so that a channel being written while
 # the worktree is created is not taken for one.
 TOPIC_GRACE = 600
+
+
+def topics_refused(bot, key, now):
+    # A createForumTopic refused, for the feature (or the new-feature topic)
+    # key. Telegram's answer says whether the refusal is about the whole chat
+    # or this request alone; the network is neither and is tried again.
+    #
+    # "Not a forum" is Threaded Mode off. Others about the whole chat hold
+    # topics off for longer each time they repeat: Telegram has been seen to
+    # answer "bot_topic_wrong_home" and make the topic anyway, broken —
+    # nothing can be sent into it or delete it. Asked again on every turn of
+    # the loop, the chat filled with such topics; meanwhile everything goes to
+    # the main chat. The person chose this over holding until they act
+    # (2026-11-09): a broken topic each time the wait runs out, about four a
+    # day at its ceiling, is the price of finding out by itself that topics
+    # work again.
+    #
+    # A refusal of this request alone — a name Telegram does not take — holds
+    # only its own feature: the others go on in their topics, and its notes go
+    # to the main chat meanwhile (held, card_view.note_topic).
+    error = bot.last_error or ""
+    refused = ('"error_code":4' in error or "http error 4" in error) \
+        and '"error_code":429' not in error and "http error 429" not in error
+    if "not a forum" in error:
+        with locked() as st:
+            st["topics_off_until"] = now + TOPICS_OFF_RETRY
+    elif not refused:
+        return
+    elif not any(w in error for w in REQUEST_REFUSALS):
+        with locked() as st:
+            wait = min(max((st.get("topics_refused_wait") or 0) * 2, TOPICS_REFUSED_FIRST),
+                       TOPICS_REFUSED_MAX)
+            st["topics_refused_wait"] = wait
+            st["topics_off_until"] = now + wait
+        log.warning("Telegram refused topics in the chat; the main chat for %d min", wait // 60)
+    else:
+        TOPIC_REFUSED[key] = now + TOPICS_REFUSED_FIRST
+        log.warning("Telegram refused the topic of %s; asked again in %d min",
+                    "/".join(k for k in key if k), TOPICS_REFUSED_FIRST // 60)
+
+
+def held(name, slug):
+    """Whether topics are refused for now: the chat's, or this feature's."""
+    now = time.time()
+    return now < (read().get("topics_off_until") or 0) or now < TOPIC_REFUSED.get((name, slug), 0)
+
+
+def topics_made(key):
+    # A topic made: whatever held topics off is over.
+    TOPIC_REFUSED.pop(key, None)
+    if read().get("topics_refused_wait"):
+        with locked() as st:
+            st.pop("topics_refused_wait", None)
 
 
 def topic_lost(bot):
@@ -258,12 +322,13 @@ def feature_topic(bot, name, slug, renew=False):
             save_record(repo, slug, record)
             card_view.post_card(bot, name, slug)
             return thread
+        if now < TOPIC_REFUSED.get((name, slug), 0):
+            return 0
         thread = bot.create_topic(topic_name(name, slug))
         if not thread:
-            if "not a forum" in bot.last_error:
-                with locked() as st:
-                    st["topics_off_until"] = now + TOPICS_OFF_RETRY
+            topics_refused(bot, (name, slug), now)
             return 0
+        topics_made((name, slug))
         log.info("a topic for %s/%s: %s", name, slug, thread)
         record.pop("card", None)
         record["thread"] = thread
@@ -301,8 +366,13 @@ def new_feature_topic(bot, name):
         return old["thread"]
     if int(time.time()) < (read().get("topics_off_until") or 0):
         return 0
+    if int(time.time()) < TOPIC_REFUSED.get((name, ""), 0):
+        return 0
     thread = bot.create_topic(t("feat.newtopic", repo=name)[:TOPIC_NAME_MAX])
+    if not thread:
+        topics_refused(bot, (name, ""), int(time.time()))
     if thread:
+        topics_made((name, ""))
         with locked() as st:
             topics = st.get("new_topics") or {}
             topics[name] = {"thread": thread, "since": int(time.time())}

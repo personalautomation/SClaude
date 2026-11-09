@@ -14,8 +14,11 @@ decision that matters.
 [Get started](#get-started) ·
 [Documentation](#documentation)
 
-**Watch a real feature go through it** — a 7-minute walkthrough, and the story
-of why sclaude exists:
+**What it is and why** — seven minutes:
+
+https://github.com/user-attachments/assets/0f322031-5667-4bc7-a581-47819db40531
+
+**Then watch a real feature go through it** — a 7-minute walkthrough:
 
 https://github.com/user-attachments/assets/74c2ccd0-c63f-4860-b814-7b8d606e01f9
 
@@ -185,8 +188,9 @@ so the map never drifts from what actually runs. Interactive, and printable on
 A4. Each feature gets its own copy with where it stands lit, and its whole
 history can be played back on it.
 
-**Video.** The 7-minute walkthrough of a real feature is
-[at the top](#sclaude) and in the [v1.0 release](https://github.com/personalautomation/SClaude/releases/tag/v1.0).
+**Video.** What sclaude is and why, and a 7-minute walkthrough of a real
+feature, are [at the top](#sclaude); the walkthrough is also in the
+[v1.0 release](https://github.com/personalautomation/SClaude/releases/tag/v1.0).
 And every feature comes with videos of its own: step 2 records a demo of what
 was built — a video per scenario, on a desktop and a phone, with the steps
 beside it and a link to take over from any of them by hand

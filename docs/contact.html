@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Contact — SClaude</title>
+<meta name="description" content="Write to the author of SClaude: a question, an idea, or an orchestrator for your team.">
+<link rel="canonical" href="https://personalautomation.github.io/SClaude/contact.html">
+<meta name="theme-color" content="#081321">
+<link rel="icon" href="media/brand/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="media/brand/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Source+Serif+4:opsz,wght@8..60,600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* The tokens, the nav and the footer are the landing page's (index.html);
+   keep the two in step. */
+:root{
+  --bg:#F7F5F0; --surface:#FFFFFF; --surface-2:#F0EDE6; --ink:#121826; --ink-2:#3A4356; --muted:#5F6779;
+  --line:#E2DED5; --accent:#0F766E; --accent-2:#0B5C56; --accent-soft:#DDF0EC; --warm:#A44A1B; --warm-soft:#F8E6DA;
+  --hero:#081321; --hero-ink:#EEF1F6; --hero-muted:#9AA4B8; --hero-line:#1F2A40; --glow:#00F0C8;
+  --serif:"Instrument Serif",Georgia,serif; --sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+  --radius:14px; --shadow:0 1px 2px rgba(18,24,38,.04),0 8px 28px rgba(18,24,38,.06);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E131E; --surface:#151C2B; --surface-2:#1A2233; --ink:#E8ECF3; --ink-2:#C2C9D6; --muted:#8E98AC;
+  --line:#26314A; --accent:#3CC4B2; --accent-2:#5ED6C6; --accent-soft:#12302D; --warm:#F08A55; --warm-soft:#3A2418;
+  --hero:#070B14; --hero-line:#1A2335; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.35); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E131E; --surface:#151C2B; --surface-2:#1A2233; --ink:#E8ECF3; --ink-2:#C2C9D6; --muted:#8E98AC;
+  --line:#26314A; --accent:#3CC4B2; --accent-2:#5ED6C6; --accent-soft:#12302D; --warm:#F08A55; --warm-soft:#3A2418;
+  --hero:#070B14; --hero-line:#1A2335; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.35); color-scheme:dark}
+*{box-sizing:border-box}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 var(--sans);-webkit-font-smoothing:antialiased;display:flex;flex-direction:column}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1160px;margin:0 auto;padding:0 24px;width:100%}
+@media (max-width:600px){.wrap{padding:0 16px}}
+
+.nav{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--hero) 88%,transparent);backdrop-filter:saturate(1.4) blur(12px);-webkit-backdrop-filter:saturate(1.4) blur(12px);border-bottom:1px solid var(--hero-line)}
+.nav .wrap{display:flex;align-items:center;gap:28px;height:60px}
+.brand{display:inline-flex;align-items:center;gap:10px;font:600 24px/1 "Source Serif 4",var(--serif);color:var(--hero-ink);letter-spacing:-.01em;white-space:nowrap}
+.brand:hover{text-decoration:none}
+.brand img{width:34px;height:auto}
+.brand b{font-weight:600;color:var(--glow)}
+.nav-link{margin-left:auto;color:var(--hero-muted);font-size:14px;font-weight:500}
+.nav-link:hover{color:var(--hero-ink);text-decoration:none}
+.nav-link[aria-current="page"]{color:var(--hero-ink)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 22px;border-radius:999px;font:600 15px var(--sans);border:1px solid transparent;cursor:pointer;transition:transform .15s,background .15s,opacity .15s}
+.btn:hover{text-decoration:none;transform:translateY(-1px)}
+.btn-primary{background:var(--glow);color:#04201C}
+.btn-primary:hover{background:#5CF5DA}
+.btn-ghost{color:var(--hero-ink);border-color:#33405C}
+.btn-ghost:hover{background:#141D30}
+.btn-sm{padding:8px 14px;font-size:13px}
+.btn[disabled]{opacity:.6;cursor:progress;transform:none}
+
+main{flex:1;padding:72px 0 88px}
+.grid{display:grid;grid-template-columns:1fr 1.15fr;gap:64px;align-items:start}
+@media (max-width:860px){.grid{grid-template-columns:1fr;gap:32px}main{padding:44px 0 64px}}
+.kicker{font:600 13px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin:0 0 10px}
+h1{font-family:var(--serif);font-weight:400;font-size:clamp(38px,5vw,60px);line-height:1.02;letter-spacing:-.015em;margin:0 0 18px}
+h1 em{color:var(--accent)}
+.lede{color:var(--ink-2);font-size:17px;margin:0 0 22px;max-width:44ch}
+.topics{list-style:none;margin:0;padding:0;display:grid;gap:10px;color:var(--ink-2);font-size:15px}
+.topics li{display:flex;gap:10px}
+.topics li::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-top:.6em}
+
+form{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:28px;display:grid;gap:18px}
+@media (max-width:600px){form{padding:20px}}
+label{display:grid;gap:7px;font:600 14px var(--sans);color:var(--ink)}
+label small{font-weight:400;color:var(--muted)}
+input,textarea{width:100%;font:16px/1.5 var(--sans);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px 13px;transition:border-color .15s,box-shadow .15s}
+textarea{min-height:180px;resize:vertical}
+input:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.trap{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.row{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.note{font-size:13px;color:var(--muted);margin:0}
+.status{margin:0;padding:12px 14px;border-radius:10px;font-size:15px}
+.status[hidden]{display:none}
+.status.ok{background:var(--accent-soft);color:var(--ink)}
+.status.err{background:var(--warm-soft);color:var(--ink)}
+
+footer{padding:40px 0;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
+footer .wrap{display:flex;gap:24px;flex-wrap:wrap;justify-content:space-between}
+footer a{color:var(--ink-2)}
+.foot-brand{display:inline-flex;align-items:center;gap:10px}
+.foot-brand img{width:26px;height:auto}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="media/brand/mark.svg" alt="" width="34" height="32"><span><b>S</b>Claude</span></a>
+    <a class="nav-link" href="contact.html" aria-current="page">Contact</a>
+    <a class="btn btn-ghost btn-sm" href="https://github.com/personalautomation/SClaude">GitHub ↗</a>
+  </div>
+</nav>
+
+<main>
+  <div class="wrap grid">
+    <div>
+      <p class="kicker">Contact</p>
+      <h1>Write to me. <em>I read every message.</em></h1>
+      <p class="lede">A question about SClaude, an idea, a bug you would rather not file in public, or an orchestrator built around your own team's process.</p>
+      <ul class="topics">
+        <li>Trying SClaude on your project and stuck somewhere</li>
+        <li>Bringing AI coding to a team with guardrails and metrics</li>
+        <li>Anything else — I answer by email</li>
+      </ul>
+    </div>
+
+    <form id="contact" novalidate>
+      <label><span>Your name <small>(optional)</small></span>
+        <input name="name" autocomplete="name" maxlength="120">
+      </label>
+      <label>Your email
+        <input name="email" type="email" autocomplete="email" required maxlength="200" placeholder="you@company.com">
+      </label>
+      <label>Message
+        <textarea name="message" required maxlength="5000" placeholder="What would you like to talk about?"></textarea>
+      </label>
+      <div class="trap" aria-hidden="true"><label>Leave this empty <input name="botcheck" tabindex="-1" autocomplete="off"></label></div>
+      <p class="status" id="status" role="status" hidden></p>
+      <div class="row">
+        <button class="btn btn-primary" type="submit" id="send">Send message</button>
+        <p class="note">Your email is used only to answer you.</p>
+      </div>
+    </form>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span class="foot-brand"><picture><source srcset="media/brand/mark.svg" media="(prefers-color-scheme: dark)"><img src="media/brand/mark-ink.svg" alt="" width="26" height="24"></picture><span>SClaude · open source under the <a href="https://github.com/personalautomation/SClaude/blob/main/LICENSE">MIT licence</a></span></span>
+    <span><a href="https://github.com/personalautomation/SClaude">GitHub</a> · <a href="https://github.com/personalautomation/SClaude/releases/tag/v1.1">v1.1 release</a> · <a href="https://github.com/personalautomation/SClaude/blob/main/CONTRIBUTING.md">Contributing</a></span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  // GitHub Pages sends nothing, so the message goes through Web3Forms,
+  // which mails it to the address the access key was issued for, with
+  // Reply-To set to the sender. The key is public by design: it can only
+  // send to that one address. botcheck is a honeypot a person never fills.
+  var ACCESS_KEY='2dd7912f-34b4-4a2e-895e-24174c4f3adc';
+  var form=document.getElementById('contact'), send=document.getElementById('send'), status=document.getElementById('status');
+  function say(text,ok){ status.textContent=text; status.className='status '+(ok?'ok':'err'); status.hidden=false; }
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    var d=new FormData(form), email=(d.get('email')||'').trim(), message=(d.get('message')||'').trim();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ say('Please enter an email I can answer to.'); form.email.focus(); return; }
+    if(!message){ say('Please write a message.'); form.message.focus(); return; }
+    var name=(d.get('name')||'').trim();
+    send.disabled=true; send.textContent='Sending…'; status.hidden=true;
+    // Sent as form fields, not JSON: a JSON body makes the browser ask
+    // first (a CORS preflight), and Web3Forms does not answer that.
+    var body=new FormData();
+    [['access_key',ACCESS_KEY],['subject','SClaude site: message from '+(name||email)],['from_name','SClaude site'],
+     ['name',name],['email',email],['message',message],['botcheck',d.get('botcheck')||'']]
+      .forEach(function(kv){ body.append(kv[0],kv[1]); });
+    fetch('https://api.web3forms.com/submit',{ method:'POST', headers:{Accept:'application/json'}, body:body }).then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ return r.ok && j.success; }); })
+      .then(function(ok){
+        if(ok){ form.reset(); say('Thank you — your message is on its way. I will answer at the address you gave.',true); }
+        else say('The message did not go through. Please try again in a minute.');
+      })
+      .catch(function(){ say('No connection to the mail service. Please check your network and try again.'); })
+      .then(function(){ send.disabled=false; send.textContent='Send message'; });
+  });
+})();
+</script>
+</body>
+</html>

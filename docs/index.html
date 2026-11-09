@@ -71,6 +71,9 @@ code{font-family:var(--mono);font-size:.9em;background:var(--surface-2);padding:
 .nav ul a{color:var(--hero-muted);font-size:14px;font-weight:500}
 .nav ul a:hover{color:var(--hero-ink);text-decoration:none}
 .nav .gh{margin-left:auto}
+.nav-link{margin-left:auto;color:var(--hero-muted);font-size:14px;font-weight:500;white-space:nowrap}
+.nav-link:hover{color:var(--hero-ink);text-decoration:none}
+.nav-link + .gh{margin-left:0}
 @media (max-width:900px){.nav ul{display:none}}
 
 .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:999px;font-weight:600;font-size:15px;border:1px solid transparent;transition:transform .15s,background .15s}
@@ -100,10 +103,7 @@ code{font-family:var(--mono);font-size:.9em;background:var(--surface-2);padding:
 .stat b{display:block;font-family:var(--serif);font-weight:400;font-size:38px;line-height:1;color:var(--hero-ink)}
 .stat span{display:block;margin-top:8px;color:var(--hero-muted);font-size:14px}
 @media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
-@media (max-width:600px){.stat{padding:18px 16px}.stat b{font-size:34px}.stats{margin-top:48px}.video-frame{margin-top:48px}}
-.video-frame{margin:72px auto 0;max-width:980px;border-radius:18px;overflow:hidden;border:1px solid var(--hero-line);box-shadow:0 30px 80px rgba(0,0,0,.5);background:#000;position:relative}
-.video-frame video{width:100%;aspect-ratio:16/9;object-fit:contain;background:#000}
-.video-cap{position:absolute;left:16px;top:16px;font:500 12px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:#fff;background:rgba(0,0,0,.55);padding:6px 10px;border-radius:6px;pointer-events:none}
+@media (max-width:600px){.stat{padding:18px 16px}.stat b{font-size:34px}.stats{margin-top:48px}}
 
 /* sections */
 section.alt{background:var(--surface-2)}
@@ -319,12 +319,37 @@ section > .wrap,.hero > .wrap{width:100%}
 section.dark{background:var(--hero);color:var(--hero-ink)}
 section.dark h2{color:var(--hero-ink)}
 section.dark h2 em{color:var(--glow)}
-#watch .video-frame{margin:8px auto 0;max-width:min(1040px,calc((100vh - 290px) * 16 / 9))}
+#watch .reel{margin:8px auto 0;max-width:min(1200px,calc((100vh - 270px) * 16 / 9 / .86))}
+.watch-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px 32px;flex-wrap:wrap;margin-bottom:18px}
+.watch-head h2{margin:0}
+.reel-tabs{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+@media (max-width:860px){.reel-tabs{flex-direction:row;flex-wrap:wrap}}
+.reel-tab{display:flex;align-items:center;gap:9px;font:500 14px var(--sans);color:var(--hero-muted);background:transparent;border:1px solid var(--hero-line);border-radius:999px;padding:7px 14px 7px 8px;cursor:pointer;transition:color .2s,border-color .2s,background .2s}
+.reel-tab b{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--hero-line);color:var(--hero-ink);font:600 12px var(--mono)}
+.reel-tab small{font:12px var(--mono);opacity:.75;margin-left:auto;padding-left:6px}
+.reel-tab:hover{color:var(--hero-ink)}
+.reel-tab[aria-selected="true"]{color:var(--hero-ink);border-color:var(--glow);background:rgba(0,240,200,.08)}
+.reel-tab[aria-selected="true"] b{background:var(--glow);color:#081321}
+.reel-tab:focus-visible,.slide-cover:focus-visible{outline:2px solid var(--glow);outline-offset:3px}
+.reel-track{position:relative;display:flex;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain}
+.reel-track::-webkit-scrollbar{display:none}
+.slide{flex:0 0 86%;scroll-snap-align:start;position:relative;border-radius:18px;overflow:hidden;border:1px solid var(--hero-line);background:#000;box-shadow:0 30px 80px rgba(0,0,0,.5);transition:opacity .4s,transform .4s}
+.slide:last-child{scroll-snap-align:end}
+.slide:not(.on){opacity:.45;transform:scale(.96)}
+.slide video{width:100%;aspect-ratio:16/9;display:block;object-fit:contain;background:#000}
+.slide-cover{display:none;position:absolute;inset:0;width:100%;border:0;padding:0 18px;background:transparent;cursor:pointer;align-items:center;gap:12px;color:var(--hero-ink)}
+.slide:not(.on) .slide-cover{display:flex}
+.slide:first-child .slide-cover{justify-content:flex-end}
+.slide-cover span{flex:none;display:grid;place-items:center;width:52px;height:52px;border-radius:50%;background:var(--glow);color:#081321;font:600 30px/1 var(--sans);padding-bottom:4px;animation:peek-ring 2.2s ease-out infinite}
+@keyframes peek-ring{0%{box-shadow:0 0 0 0 rgba(0,240,200,.55)}70%,100%{box-shadow:0 0 0 18px rgba(0,240,200,0)}}
+.reel-track.nudge .slide{animation:reel-nudge 1.6s cubic-bezier(.45,0,.25,1) 1}
+@keyframes reel-nudge{0%,100%{translate:0}40%,60%{translate:-12% 0}}
+@media (max-width:600px){.slide{flex-basis:80%}.reel-track{gap:12px}.slide-cover{padding:0 8px}.slide-cover span{width:40px;height:40px;font-size:24px}.reel-tab{font-size:13px}}
 .stats{margin-top:44px}
 @media (max-width:760px),(max-height:700px){
   .hero,section{min-height:0}
   section{padding:56px 0}
-  #watch .video-frame{max-width:100%}
+  #watch .reel{max-width:100%}
 }
 .dots{position:fixed;right:20px;top:50%;transform:translateY(-50%);z-index:60;display:flex;flex-direction:column;gap:10px;list-style:none;margin:0;padding:0}
 .dots a{display:block;width:10px;height:10px;border-radius:50%;background:var(--muted);opacity:.35;position:relative;transition:opacity .2s,transform .2s,background .2s}
@@ -393,6 +418,7 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
       <li><a href="#learning">Metrics</a></li>
       <li><a href="#decks">Decks</a></li>
     </ul>
+    <a class="nav-link" href="contact.html">Contact</a>
     <a class="btn btn-ghost btn-sm gh" href="https://github.com/personalautomation/SClaude">GitHub ↗</a>
   </div>
 </nav>
@@ -406,7 +432,7 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
     <h1>AI speed is easy to buy. <em>Control</em> has to be designed.</h1>
     <p class="lede"><strong>SClaude is manageable, scalable AI coding for a team.</strong> An orchestrator that takes every feature from issue to production on one fixed path: the agent does the typing, the harness keeps the process, and a person makes every decision that matters.</p>
     <div class="cta">
-      <a class="btn btn-primary" href="#watch">▶&nbsp; Watch the 7-minute walkthrough</a>
+      <a class="btn btn-primary" href="#watch">▶&nbsp; Watch the videos</a>
       <a class="btn btn-ghost" href="https://github.com/personalautomation/SClaude">Get it on GitHub</a>
     </div>
     <div class="stats">
@@ -419,15 +445,34 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
 
 <section id="watch" class="dark">
   <div class="wrap">
-    <p class="kicker" style="color:var(--glow)">Watch</p>
-    <h2>A real feature, <em>start to finish</em>, in seven minutes.</h2>
-    <div class="video-frame">
-      <video controls preload="none" playsinline poster="presentations/src/img/flow.webp">
-        <source src="https://github.com/user-attachments/assets/74c2ccd0-c63f-4860-b814-7b8d606e01f9" type="video/mp4">
-        <a href="https://github.com/personalautomation/SClaude/releases/tag/v1.0">Watch the walkthrough in the v1.0 release</a>
-      </video>
+    <div class="watch-head">
+      <div>
+        <p class="kicker" style="color:var(--glow)">Watch</p>
+        <h2>What it is and why. <em>Then a real feature</em>, start to finish.</h2>
+      </div>
+      <div class="reel-tabs" role="tablist" aria-label="Videos">
+        <button class="reel-tab" type="button" role="tab" id="reel-tab-1" aria-controls="reel-1" aria-selected="true"><b>1</b>What it is and why<small>7 min</small></button>
+        <button class="reel-tab" type="button" role="tab" id="reel-tab-2" aria-controls="reel-2" aria-selected="false" tabindex="-1"><b>2</b>A real feature, start to finish<small>7 min</small></button>
+      </div>
     </div>
-  </div>
+    <div class="reel">
+      <div class="reel-track">
+        <div class="slide on" id="reel-1" role="tabpanel" aria-labelledby="reel-tab-1">
+          <video controls preload="none" playsinline poster="media/overview.jpg">
+            <source src="https://github.com/user-attachments/assets/0f322031-5667-4bc7-a581-47819db40531" type="video/mp4">
+            <a href="https://github.com/personalautomation/SClaude/releases">Watch it in the releases</a>
+          </video>
+          <button class="slide-cover" type="button" tabindex="-1" aria-label="Back to video 1: What it is and why"><span aria-hidden="true">‹</span></button>
+        </div>
+        <div class="slide" id="reel-2" role="tabpanel" aria-labelledby="reel-tab-2">
+          <video controls preload="none" playsinline poster="presentations/src/img/flow.webp">
+            <source src="https://github.com/user-attachments/assets/74c2ccd0-c63f-4860-b814-7b8d606e01f9" type="video/mp4">
+            <a href="https://github.com/personalautomation/SClaude/releases/tag/v1.0">Watch the walkthrough in the v1.0 release</a>
+          </video>
+          <button class="slide-cover" type="button" tabindex="-1" aria-label="Next, video 2: A real feature, start to finish"><span aria-hidden="true">›</span></button>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -811,7 +856,7 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
       </div>
       <div class="cta" style="margin-top:22px">
         <a class="btn btn-primary" href="https://github.com/personalautomation/SClaude">Get it on GitHub</a>
-        <a class="btn btn-ghost" href="#watch">▶&nbsp; Watch the walkthrough</a>
+        <a class="btn btn-ghost" href="#watch">▶&nbsp; Watch the videos</a>
       </div>
     </div>
   </div>
@@ -820,7 +865,7 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
 <footer>
   <div class="wrap">
     <span class="foot-brand"><picture><source srcset="media/brand/mark.svg" media="(prefers-color-scheme: dark)"><img src="media/brand/mark-ink.svg" alt="" width="26" height="24"></picture><span>SClaude · open source under the <a href="https://github.com/personalautomation/SClaude/blob/main/LICENSE">MIT licence</a></span></span>
-    <span><a href="https://github.com/personalautomation/SClaude">GitHub</a> · <a href="https://github.com/personalautomation/SClaude/releases/tag/v1.0">v1.0 release</a> · <a href="https://github.com/personalautomation/SClaude/blob/main/CONTRIBUTING.md">Contributing</a></span>
+    <span><a href="https://github.com/personalautomation/SClaude">GitHub</a> · <a href="https://github.com/personalautomation/SClaude/releases/tag/v1.1">v1.1 release</a> · <a href="https://github.com/personalautomation/SClaude/blob/main/CONTRIBUTING.md">Contributing</a></span>
   </div>
 </footer>
 
@@ -922,12 +967,61 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
   vids.forEach(function(v){ io.observe(v); });
 })();
 (function(){
-  // The walkthrough plays only by the reader's click, and stops when they
-  // scroll away from it rather than talking on off screen.
-  var v=document.querySelector('#watch video'); if(!v||!('IntersectionObserver' in window))return;
+  // The two videos side by side, one at a time. The next one peeks in at
+  // the edge, dimmed, with a pulsing arrow; the first time the reel comes
+  // into view it slides over to show the second and back, since a lone dot
+  // under a carousel is the thing readers miss. A video stops when another
+  // is chosen or the reader scrolls away; the first, played to its end,
+  // hands over to the second. Played only by the reader's click.
+  var reel=document.querySelector('#watch .reel'); if(!reel)return;
+  var track=reel.querySelector('.reel-track');
+  var slides=[].slice.call(track.querySelectorAll('.slide'));
+  var tabs=[].slice.call(document.querySelectorAll('#watch .reel-tab'));
+  var vids=slides.map(function(s){ return s.querySelector('video'); });
+  var cur=0, touched=false;
+  function mark(i){
+    if(i===cur)return; cur=i;
+    slides.forEach(function(s,k){ s.classList.toggle('on',k===i); });
+    tabs.forEach(function(t,k){ t.setAttribute('aria-selected',k===i?'true':'false'); t.tabIndex=k===i?0:-1; });
+    vids.forEach(function(v,k){ if(k!==i && !v.paused) v.pause(); });
+  }
+  function show(i){
+    touched=true; track.classList.remove('nudge');
+    var s=slides[i], last=i===slides.length-1;
+    track.scrollTo({left:last ? track.scrollWidth-track.clientWidth : s.offsetLeft, behavior:'smooth'});
+    mark(i);
+  }
+  track.addEventListener('scroll',function(){
+    var max=track.scrollWidth-track.clientWidth; if(max<=0)return;
+    mark(Math.round(track.scrollLeft/max*(slides.length-1)));
+  },{passive:true});
+  track.addEventListener('pointerdown',function(){ touched=true; });
+  tabs.forEach(function(t,k){
+    t.addEventListener('click',function(){ show(k); });
+    t.addEventListener('keydown',function(e){
+      var d=e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0; if(!d)return;
+      e.preventDefault(); var n=(k+d+tabs.length)%tabs.length; show(n); tabs[n].focus();
+    });
+  });
+  slides.forEach(function(s,k){ s.querySelector('.slide-cover').addEventListener('click',function(){ show(k); }); });
+  vids.forEach(function(v,k){
+    v.addEventListener('play',function(){ touched=true; });
+    if(k<vids.length-1) v.addEventListener('ended',function(){ show(k+1); });
+  });
+  if(!('IntersectionObserver' in window))return;
   new IntersectionObserver(function(es){ es.forEach(function(e){
-    if(!e.isIntersecting && !v.paused) v.pause();
-  }); },{threshold:.25}).observe(v);
+    if(!e.isIntersecting) vids.forEach(function(v){ if(!v.paused) v.pause(); });
+  }); },{threshold:.25}).observe(track);
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  var hint=new IntersectionObserver(function(es){ es.forEach(function(e){
+    if(!e.isIntersecting)return; hint.disconnect();
+    setTimeout(function(){
+      if(touched || cur!==0)return;
+      track.classList.add('nudge');
+      track.addEventListener('animationend',function(){ track.classList.remove('nudge'); },{once:true});
+    },900);
+  }); },{threshold:.6});
+  hint.observe(track);
 })();
 (function(){
   // Settle on a screen: once scrolling has stopped for a moment, and the

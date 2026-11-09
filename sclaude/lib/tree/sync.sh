@@ -239,7 +239,9 @@ merge_check_pair() {
 merge_check_red() {
   local wt="$1" c_tip c_main c_rc c_failed
   [[ -n "$wt" ]] || return 0
-  read -r c_tip c_main c_rc c_failed < "$wt/.sclaude/local/feature/$MERGE_VERDICT" 2>/dev/null \
+  # stderr first: redirections apply left to right, and a missing verdict
+  # (no check made yet) is no news to print.
+  read -r c_tip c_main c_rc c_failed 2>/dev/null < "$wt/.sclaude/local/feature/$MERGE_VERDICT" \
     || return 0
   [[ "$c_rc" == 1 && "$c_tip $c_main" == "$(merge_check_pair "$wt")" ]] && printf '%s\n' "$c_failed"
   return 0

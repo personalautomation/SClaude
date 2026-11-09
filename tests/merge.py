@@ -104,6 +104,22 @@ if ready_src:
     view = deploy[deploy.index("merge_readiness() {"):]
     view = view[:view.index("PYREADY")]
     view = "\n".join(l for l in view.splitlines() if not l.lstrip().startswith("#"))
+    # UNSTABLE for the findings check alone, every finding resolved, is
+    # ready: asked of pr_context with the tree, which both callers pass.
+    body = deploy[deploy.index("merge_readiness() {"):deploy.index("\nmerge_obstacle()")]
+    check("unstable-asks-merge-red",
+          ("--merge-red" in body, "word=excused" in body,
+           deploy.count('merge_readiness "$pr" "$wt"')),
+          (True, True, 2))
+    # Excused is merged as ready by both callers, and the question does not
+    # call a pull request with a red check on GitHub "clean".
+    offer_body = body_of(deploy, "merge_offer") or ""
+    check("excused-merged-and-said",
+          ('"$ready" != ready && "$ready" != excused' in offer_body,
+           "^(ready|excused)$" in deploy,
+           '[[ "$ready" == excused ]]' in offer_body,
+           offer_body.count("$clean")),
+          (True, True, True, 3))
     check("readiness-in-one-graphql-call",
           ("gh pr view" in view, view.count("gh api graphql"), "viewerCanUpdate}}}" in view),
           (False, 1, True))
@@ -231,8 +247,10 @@ if offer:
                          offer) is not None)
     check_true("offer-needs-gh", "command -v gh" in offer)
 
-    # Only `ready` reaches the question.
-    check_true("only-ready-is-offered", '"$ready" != "ready"' in offer)
+    # Only `ready` (or `excused`, a stale findings check alone) reaches the
+    # question.
+    check_true("only-ready-is-offered",
+               '"$ready" != ready && "$ready" != excused' in offer)
     # And an obstacle we have no words for is not announced: merge_obstacle
     # answers empty for `unknown`, and that empty is what keeps a lazily
     # computed mergeability off the screen.

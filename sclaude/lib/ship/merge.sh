@@ -29,6 +29,8 @@
 # What GitHub says about merging this pull request, as one word:
 #
 #   ready     — mergeable, clean, and ours to merge
+#   excused   — as ready, but GitHub calls it UNSTABLE for a stale findings
+#               check alone (below); merged like ready, said differently
 #   dirty     — conflicts with main
 #   blocked   — a required review or check is missing
 #   behind    — main has moved and the branch must catch up
@@ -41,8 +43,18 @@
 # pushed branch answers UNKNOWN, and the answer arrives a second or two later.
 # That is not a state to report to anybody — it is "ask again" — so the caller
 # treats unknown as a reason to say nothing rather than a reason to complain.
+#
+# With the feature's tree, `unstable` is looked at closer: when the one red
+# check is the findings check and every finding it lists is resolved by now
+# or one the person decided to leave (merge_red in pr_context.py), it is
+# `excused`, which callers merge as `ready` and the question words as it is
+# — not "nothing open": a kept thread may be. The check is not run again when
+# a thread is resolved, so GitHub calls the pull request UNSTABLE for as long
+# as nobody pushes, and a `merge: auto` feature waited on it for ever.
+#
+#   merge_readiness <pr> [worktree]
 merge_readiness() {
-  local pr="$1" repo json
+  local pr="$1" wt="${2:-}" repo json word
   [[ -n "$pr" && "$pr" != "null" ]] || { echo unknown; return 0; }
   command -v gh >/dev/null 2>&1 || { echo unknown; return 0; }
   repo="$(gh_repo)" || { echo unknown; return 0; }
@@ -64,7 +76,7 @@ merge_readiness() {
     --jq .data.repository.pullRequest 2>/dev/null)" || { echo unknown; return 0; }
   [[ -n "$json" && "$json" != "null" ]] || { echo unknown; return 0; }
 
-  MERGE_JSON="$json" python3 - <<'PYREADY'
+  word="$(MERGE_JSON="$json" python3 - <<'PYREADY'
 import json, os
 
 try:
@@ -101,6 +113,12 @@ else:
         # that for the one state we understand completely.
         print("unknown")
 PYREADY
+)"
+  if [[ "$word" == unstable && -n "$wt" ]] \
+     && [[ "$(python3 "$LIB/review/pr_context.py" --merge-red "$wt" "$pr" "$repo" 2>/dev/null)" == stale ]]; then
+    word=excused
+  fi
+  echo "$word"
 }
 
 # Why a merge is not on offer, in a human's words. Empty for the states the
@@ -251,9 +269,9 @@ merge_offer() {
     # qa_checked at 0 and is asked the unchecked question.
   fi
 
-  ready="$(merge_readiness "$pr")"
+  ready="$(merge_readiness "$pr" "$wt")"
 
-  if [[ "$ready" != "ready" ]]; then
+  if [[ "$ready" != ready && "$ready" != excused ]]; then
     obstacle="$(merge_obstacle "$ready")"
     # `unknown` says nothing: gh was silent, or GitHub has not finished
     # computing mergeability. Naming a state we do not know is how a tool
@@ -291,16 +309,20 @@ merge_offer() {
   # available here — the repository is private on a free plan, where branch
   # protection is refused, so nothing but the wording stands between a green
   # preview and main.
-  local prompt
+  local prompt clean="is clean: no conflicts, nothing GitHub is holding it for."
+  # The one red check is the findings check, gone stale: GitHub shows it red,
+  # and "clean" above it would be the one line here that is not true.
+  [[ "$ready" == excused ]] \
+    && clean="has no conflicts; its one red check is the findings check, red only for threads resolved since it ran or left to you."
   echo ""
   if [[ "$mode" == nodeploy ]]; then
     say "${BOLD}PR #$pr changes nothing that deploys — no preview, no QA on one.${OFF}"
-    say "${DIM}It is clean: no conflicts, nothing GitHub is holding it for. The review${OFF}"
-    say "${DIM}is what this rests on.${OFF}"
+    say "${DIM}It $clean${OFF}"
+    say "${DIM}The review is what this rests on.${OFF}"
     prompt="Merge it now?"
   elif [[ "$qa_checked" -eq 1 ]]; then
     say "${BOLD}QA passed issue #$issue — it is in '$QA_DONE'.${OFF}"
-    say "${DIM}PR #$pr is clean: no conflicts, nothing GitHub is holding it for.${OFF}"
+    say "${DIM}PR #$pr $clean${OFF}"
     prompt="Merge it now?"
   else
     # Two ways to arrive here, and they are worth telling apart: a feature with
@@ -313,8 +335,8 @@ merge_offer() {
     else
       say "${BOLD}No issue on GitHub for this one — nobody signed off on the deployment.${OFF}"
     fi
-    say "${DIM}The preview regression is green and PR #$pr is clean, and that is all${OFF}"
-    say "${DIM}this rests on.${OFF}"
+    say "${DIM}The preview regression is green and PR #$pr $clean${OFF}"
+    say "${DIM}That is all this rests on.${OFF}"
     prompt="Merge it unchecked?"
   fi
 
@@ -476,7 +498,7 @@ merge_wait() {
       [[ "$offered" -eq 1 ]] \
         && info "  Nothing to merge from here yet: QA has not passed it, or GitHub has not called it ready."
     elif [[ "$mode" == auto && "$answered" -eq 0 && "$held" != "$(merge_check_pair "$wt")" \
-            && "$(merge_readiness "$pr")" == ready ]]; then
+            && "$(merge_readiness "$pr" "$wt")" =~ ^(ready|excused)$ ]]; then
       [[ -t 1 ]] && printf '\r\033[2K'
       offered=0
       MERGE_IN_WAIT=1 merge_offer "$slug" "$pr" "$issue" "$offer_mode" "$wt" || offered=$?

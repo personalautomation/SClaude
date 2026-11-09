@@ -269,7 +269,7 @@ count_ssh() {
   local -A seen=()
   local pid cmd tty
   for pid in $(pgrep -x sshd 2>/dev/null); do
-    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
+    cmd=$(tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline")
     [[ "$cmd" != sshd:* ]] && continue
     [[ "$cmd" == *"[accepted]"* || "$cmd" == *"[listener]"* || "$cmd" == *"[net]"* ]] && continue
     [[ "$cmd" != *@* ]] && continue
@@ -583,7 +583,7 @@ count_dev() {
       mtime=$(stat -L -c %Y "$log" 2>/dev/null || echo 0)
       grew "dev:$log" "$mtime" 1 prev && active=1
     elif [[ "$port" == "$DEV_PORT" ]] \
-         && ! tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q sclaude-proxy; then
+         && ! tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline" | grep -q sclaude-proxy; then
       wchar=$(io_wchar_of "$pid")
       [[ -n "$wchar" ]] || continue
       # A threshold in bytes rather than zero: the server occasionally writes

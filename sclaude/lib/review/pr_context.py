@@ -344,6 +344,32 @@ def red_rows(cwd, pr, repo, view, nodes=None):
     return red
 
 
+def merge_red(cwd, pr, repo):
+    """Why GitHub calls the pull request UNSTABLE, as one word: `running` (a
+    check has not finished), `red` (a check a person or a session has to act
+    on), `stale` (the only red is the findings check, and every finding it
+    lists is resolved or the person's) or `unknown` (unreadable, or nothing
+    red in the rollup to account for UNSTABLE).
+
+    GitHub reads the findings check as it was last written, and it is not run
+    again when a thread is resolved by hand or by a session: read as "not
+    ready", a `merge: auto` pull request with every finding resolved waited
+    for the merge for ever.
+    """
+    view = gh_json(["pr", "view", str(pr), "--json", "statusCheckRollup,headRefOid"], cwd=cwd)
+    if not view:
+        return "unknown"
+    rollup = view.get("statusCheckRollup") or []
+    if any(running(c) for c in rollup):
+        return "running"
+    if red_rows(cwd, pr, repo, view):
+        return "red"
+    # Nothing red left only because the findings check was excused: an empty
+    # rollup (checks not registered yet) or a cause GitHub does not list is
+    # not known to be stale.
+    return "stale" if FINDINGS_CHECK in red_checks(rollup) else "unknown"
+
+
 def brief(cwd, pr, repo, since="", handed=False, done=False):
     """Where the review stands, counted, for a line in the feature's topic —
     "" when GitHub cannot say.
@@ -1749,6 +1775,13 @@ def main():
             sys.stdout.write("%s: the wait broke off (%s); the checks are unknown.\n"
                              % (CHECKS_VERDICTS[CHECKS_UNREADABLE], exc))
             return CHECKS_UNREADABLE
+    # `--merge-red <cwd> <pr> <repo>`: one word, see merge_red.
+    if len(sys.argv) >= 5 and sys.argv[1] == "--merge-red":
+        try:
+            sys.stdout.write(merge_red(sys.argv[2], sys.argv[3], sys.argv[4]) + "\n")
+        except Exception:
+            sys.stdout.write("unknown\n")
+        return 0
     # `--state <cwd> <pr> <repo>`: one word, see review_state.
     if len(sys.argv) >= 5 and sys.argv[1] == "--state":
         try:

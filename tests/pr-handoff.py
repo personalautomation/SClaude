@@ -379,6 +379,30 @@ check("handoff-records-merge", 'state_set "$watch" merge "$(project_flow_mode me
 prompt = open(os.path.join(ROOT, "sclaude", "prompts", "pr.md"), encoding="utf-8").read()
 check("prompt-draft", "--draft" in prompt, True)
 
+# The summary's Checks and Last review lines: a findings check red only for
+# threads resolved since it ran or left by the author (it is not run again
+# for that) is no ⚠ — one
+# summary said "74 resolved, 0 open" over two warnings that findings were open.
+sys.path.insert(0, LIB)
+import _path  # noqa: E402,F401
+import pr_handoff  # noqa: E402
+F = pr_handoff.FINDINGS_CHECK
+ok = {"name": "build", "conclusion": "SUCCESS", "status": "COMPLETED"}
+red_f = [{"name": F, "conclusion": "FAILURE", "status": "COMPLETED"}, {"context": F, "state": "FAILURE"}]
+check("checks-findings-red", pr_handoff.checks_line([ok] + red_f).startswith("⚠ red: " + F), True)
+check("checks-findings-stale", pr_handoff.checks_line([ok] + red_f, stale=True),
+      "✓ the findings check is red only for threads resolved since it ran or left by the author")
+got = pr_handoff.checks_line([ok, {"name": "e2e", "conclusion": "FAILURE", "status": "COMPLETED"}] + red_f, stale=True)
+check("checks-stale-other-red", got.startswith("⚠ red: e2e;") and F not in got, True)
+saved = pr_handoff.gh_json
+try:
+    pr_handoff.gh_json = lambda *a, **k: {"check_runs": [{"name": F, "status": "completed",
+                                                         "external_id": "reviewed", "conclusion": "failure"}]}
+    check("review-findings-open", pr_handoff.review_line(".", "o/r", "abc").startswith("⚠"), True)
+    check("review-findings-stale", pr_handoff.review_line(".", "o/r", "abc", True).startswith("✓"), True)
+finally:
+    pr_handoff.gh_json = saved
+
 shutil.rmtree(tmp)
 for name, want, got in failures:
     print("FAIL %s: want %r, got %r" % (name, want, got))

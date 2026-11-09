@@ -39,7 +39,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import acceptance  # noqa: E402
 import issue_comments  # noqa: E402
-from pr_context import FINDINGS_CHECK, GREEN, gh, gh_json, pr_view, review_mode  # noqa: E402
+from pr_context import (FINDINGS_CHECK, GREEN, findings_red_explained, gh, gh_json,  # noqa: E402
+                        pr_view, review_mode)
 from review_report import local_runs, pr_created  # noqa: E402
 
 
@@ -117,7 +118,7 @@ def threads(cwd, pr, repo):
         after = info.get("endCursor")
 
 
-def review_line(cwd, repo, head):
+def review_line(cwd, repo, head, stale=False):
     """Whether the automatic review finished on this head, in words.
 
     The question is the one the summary exists to answer: zero findings means
@@ -140,11 +141,19 @@ def review_line(cwd, repo, head):
     if (latest.get("external_id") or "") != "reviewed":
         return "⚠ did not finish on this head (failed or skipped) — zero findings may mean it never looked"
     if (latest.get("conclusion") or "") != "success":
+        if stale:
+            return "✓ finished on this head; every finding it counted is resolved since or left by the author"
         return "⚠ finished on this head with findings still open"
     return "✓ finished on this head, nothing left open"
 
 
-def checks_line(rollup):
+def checks_line(rollup, stale=False):
+    """The checks in words; `stale` when the findings check is red only for
+    threads resolved since it ran or kept by the person
+    (findings_red_explained), which is not red news: that check is not run
+    again when a thread is resolved, and a kept thread is the author's own
+    decision, counted open in the Review findings row. The summary is read by
+    the team, so the words name the author, not "you"."""
     if not rollup:
         return "none reported"
     red, running = [], []
@@ -162,11 +171,17 @@ def checks_line(rollup):
                          if FINDINGS_CHECK in (c.get("name"), c.get("context"))) - 1)
     once = lambda names: [n for i, n in enumerate(names)
                           if n != FINDINGS_CHECK or FINDINGS_CHECK not in names[:i]]
+    note = ""
+    if stale and FINDINGS_CHECK in red:
+        red = [n for n in red if n != FINDINGS_CHECK]
+        note = "the findings check is red only for threads resolved since it ran or left by the author"
     if red:
         parts.append("⚠ red: " + ", ".join(once(red)))
     if running:
         parts.append("still running: " + ", ".join(once(running)))
-    return "; ".join(parts) if parts else "✓ all %d green" % (len(rollup) - doubled)
+    if not parts:
+        return "✓ " + note if note else "✓ all %d green" % (len(rollup) - doubled)
+    return "; ".join(parts + ([note] if note else []))
 
 
 def regression_line(state):
@@ -202,6 +217,11 @@ def summary(cwd, pr, state_path, done, numbers):
     repo = repo_of(cwd)
     view = pr_view(cwd, pr, "headRefOid,statusCheckRollup") or {}
     head = view.get("headRefOid") or ""
+    rollup = view.get("statusCheckRollup") or []
+    findings_red = any(FINDINGS_CHECK in (c.get("name"), c.get("context"))
+                       and (c.get("conclusion") or c.get("state") or "").upper() not in GREEN
+                       for c in rollup)
+    stale = bool(findings_red and repo and findings_red_explained(cwd, pr, repo, view))
 
     rows = []
     preview = ((state.get("regression") or {}).get("preview") or {}).get("url")
@@ -227,8 +247,8 @@ def summary(cwd, pr, state_path, done, numbers):
                         runs[-1]["start"].strftime("%Y-%m-%d %H:%M UTC")) if runs
                      else "none on this machine yet"))
     else:
-        rows.append(("Last review", review_line(cwd, repo, head) if repo and head else "unknown"))
-    rows.append(("Checks", checks_line(view.get("statusCheckRollup") or [])))
+        rows.append(("Last review", review_line(cwd, repo, head, stale) if repo and head else "unknown"))
+    rows.append(("Checks", checks_line(rollup, stale)))
     rows.append(("Regression", regression_line(state)))
 
     when = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

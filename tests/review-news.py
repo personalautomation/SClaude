@@ -130,6 +130,26 @@ def main():
             pr_context.findings_red_explained = lambda *a: False
             got = pr_context.render_new(".", 89, "o/r", SINCE)
             check("unexplained-findings-reported", "checks are red" in got, True)
+
+            # The merge reads the same: a pull request GitHub calls UNSTABLE
+            # only for the explained findings check is ready to merge (a
+            # `merge: auto` feature waited on one for ever); anything else red
+            # or still running holds it.
+            check("merge-red-unexplained", pr_context.merge_red(".", 89, "o/r"), "red")
+            pr_context.findings_red_explained = lambda *a: True
+            check("merge-red-stale", pr_context.merge_red(".", 89, "o/r"), "stale")
+            pr_context.gh_json = fake_gh(findings + RED, [], [])
+            check("merge-red-other-red", pr_context.merge_red(".", 89, "o/r"), "red")
+            pr_context.gh_json = fake_gh(findings + [{"name": "build", "status": "IN_PROGRESS"}], [], [])
+            check("merge-red-running", pr_context.merge_red(".", 89, "o/r"), "running")
+            pr_context.gh_json = lambda *a, **k: None
+            check("merge-red-unreadable", pr_context.merge_red(".", 89, "o/r"), "unknown")
+            # Nothing red to excuse — checks not registered yet, or the cause
+            # of UNSTABLE not in the rollup — is not stale.
+            pr_context.gh_json = fake_gh([], [], [])
+            check("merge-red-empty-rollup", pr_context.merge_red(".", 89, "o/r"), "unknown")
+            pr_context.gh_json = fake_gh(GREEN, [], [])
+            check("merge-red-all-green", pr_context.merge_red(".", 89, "o/r"), "unknown")
         finally:
             pr_context.findings_red_explained = explained
 
@@ -147,7 +167,7 @@ def main():
         check("naive-mark-parsed",
               pr_context.parse_ts("2026-09-06T10:00:00") is not None, True)
 
-        total = 18
+        total = 25
         for name, want, got in failures:
             print("FAIL %s\n  want: %r\n  got:  %r" % (name, want, got))
         print("%d/%d passed" % (total - len(failures), total))

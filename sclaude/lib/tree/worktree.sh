@@ -181,7 +181,7 @@ main_node_pid() {
 main_node_claude() {
   [[ "$(cat "/proc/$1/comm" 2>/dev/null)" == claude ]] && return 0
   local cmd
-  cmd="$(tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null)"
+  cmd="$(tr '\0' ' ' 2>/dev/null <"/proc/$1/cmdline")"
   [[ "$cmd" == */claude-code/* || "$cmd" == */.claude/plugins/* ]]
 }
 
@@ -695,7 +695,7 @@ dev_exposed_warn() {
 dev_marked() {
   local pid="$1" n=0
   while [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 1 && "$n" -lt 32 ]]; do
-    tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qx 'SCLAUDE_DEV_LOOPBACK=1' && return 0
+    tr '\0' '\n' 2>/dev/null <"/proc/$pid/environ" | grep -qx 'SCLAUDE_DEV_LOOPBACK=1' && return 0
     pid="$(awk '/^PPid:/ { print $2 }' "/proc/$pid/status" 2>/dev/null)"
     n=$((n + 1))
   done

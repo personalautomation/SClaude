@@ -258,7 +258,8 @@ held under `[g]`, one cut off, a log no review read — then the retrospective,
 and asks before removing the worktree and branches.
 
 Every Claude session sclaude starts, its model and permissions, and where the
-issue's summary table shows it:
+issue's summary table shows it. The table lists the sessions in the order they
+began, whatever their kind:
 
 | Session | Model | Permissions | What it does | In the issue |
 | --- | --- | --- | --- | --- |
@@ -270,9 +271,10 @@ issue's summary table shows it:
 | 5. sync | sonnet / medium | `auto` | Only on a conflict with main: the merge of main into the branch, its conflicts resolved, checked and pushed | a row per session |
 | 6. epilogue | sonnet / medium | `auto` | The outcome as one comment per issue, on the feature's issue and every parent; changes nothing in the repository | a row |
 | 7. retro | opus / medium | `plan` | What you missed, how to work better, what sclaude could do better. What it fixes goes on the feature's branch and sends the feature back to step 3 | a row |
-| friction review | opus / medium | `plan` | After each step and fix session: reads what the safety rules refused, and loosens a rule that was in the way | the Friction column of that row |
+| friction review | opus / medium | `plan` | After each step and fix session: reads what the safety rules refused, and loosens a rule that was in the way | a row of its own, and what it came to in the Friction column of the session it read |
+| demo refresh | as step 2, `claude -p` | the demo's files only | With `demo: on`, when the code moved past the feature's demo: records it again before QA and at the epilogue | a row per session |
 | local review pass | opus, `claude -p` | read-only | With the project's review set to `local`: finds problems in the pull request before step 4's session | a row per pass the journal recorded, with the findings it posted; the findings land on the pull request, the report in the feature's Telegram topic |
-| friction matching | haiku, `claude -p` | no tools | One call that matches proposed rules to the ones already put off | not in the table: it is not a session |
+| friction matching | haiku, `claude -p` | no tools | One call that matches proposed rules to the ones already put off, when there are any to match them to | not a row of its own: it keeps no conversation; the "friction put off" row that follows it says the proposals were put off |
 | monthly friction review | opus / medium | `plan` | `sclaude deferred`: the rules put off across features | not on a feature's issue: it belongs to none |
 | sclaude's workshop | opus / medium | `plan` | `sclaude workshop` (the bot's 🛠): changes sclaude with you in a worktree of its own, reviews it and publishes it on your word | not on an issue: it belongs to no product |
 

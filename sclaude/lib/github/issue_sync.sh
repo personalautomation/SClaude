@@ -279,7 +279,45 @@ def fix_status_cell(stage, number):
 COMMENTS_ICON = "\U0001F4AC"
 ROUNDS_ICON = "\U0001F501"
 
+# Every session the feature ran, one row each, in the order they began: the
+# rows are gathered kind by kind below and sorted once at the end, so a
+# friction review sits right after the session it read and a demo refresh
+# after the merge it followed. A step not reached yet goes last, in the
+# cycle's order (one rewound past keeps its old start, shown, and sorts by
+# it); any other row with no start of its own stays beside the row
+# gathered before it.
 rows = []
+LATER = datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
+
+
+def moment(value):
+    """A recorded time as a comparable moment; None when there is none.
+    A time without an offset is the machine's own."""
+    try:
+        at = datetime.datetime.fromisoformat(value or "")
+    except (TypeError, ValueError):
+        return None
+    return at if at.tzinfo else at.astimezone()
+
+
+def add(started, text, later=False):
+    at = LATER if later else moment(started)
+    if at is None:
+        before = [r[0] for r in rows if r[0] != LATER]
+        at = before[-1] if before else datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    rows.append((at, len(rows), text))
+
+
+def part_word(run):
+    """Which part of a feature built in parts (parts.sh) a session worked on,
+    as session_runs recorded it: a part's number, or `whole` while the whole
+    is checked and after the last part is in."""
+    part = run.get("part")
+    if not part:
+        return ""
+    return " · the whole" if part == "whole" else " · part %s" % part
+
+
 for name in ORDER:
     node = steps.get(name) or {}
     session = node.get("session")
@@ -300,14 +338,15 @@ for name in ORDER:
     if not runs:
         # A feature from before `runs`, or a step that opened no session (a
         # clean review): the step's own fields, as they always were.
-        rows.append("| %s | %s | %s | %s | %s | %s |" % (
+        add(node.get("started"), "| %s | %s | %s | %s | %s | %s |" % (
             TITLES[name],
             status,
             "`%s`" % session[:8] if session else "—",
             when(node.get("started")),
             when(node.get("finished")),
             friction_cell(name),
-        ))
+        ), later=status == "—" and not node.get("started") and current in ORDER
+           and ORDER.index(name) > ORDER.index(current))
         continue
     # The friction review follows every session (session_ended), keyed
     # `<step>-<n>` by the session's row — so each row has its own cell. A
@@ -339,7 +378,8 @@ for name in ORDER:
             value = run.get(field)
             if isinstance(value, int):
                 said += " - %d %s" % (value, icon)
-        rows.append("| %s | %s | %s | %s | %s | %s |" % (
+        said = part_word(run) + said
+        add(run.get("started"), "| %s | %s | %s | %s | %s | %s |" % (
             TITLES[name] + (" (%d)" % number if len(runs) > 1 else "") + said,
             run_status,
             "`%s`" % sid[:8] if sid else "—",
@@ -384,7 +424,7 @@ def review_pass_rows():
         except (ValueError, TypeError):
             pass
         found = row.get("new")
-        rows.append("| %s%s%s | %s | %s | %s | %s | — |" % (
+        add(began, "| %s%s%s | %s | %s | %s | %s | — |" % (
             "local review",
             " (%d)" % number if len(passes) > 1 else "",
             " - %d %s" % (found, COMMENTS_ICON) if isinstance(found, int) else "",
@@ -428,7 +468,7 @@ for stage in STAGE_ORDER:
             end = ends[number - 1] if number <= len(ends) else ""
             node = {"started": starts[number - 1],
                     "finished": "" if end == "-" else end}
-        rows.append("| %s (%d) | %s | `%s` | %s | %s | %s |" % (
+        add(node.get("started"), "| %s (%d) | %s | `%s` | %s | %s | %s |" % (
             fix_name(stage),
             number,
             fix_status_cell(stage, number),
@@ -456,10 +496,13 @@ def run_rows(node, name, friction=False):
         elif run.get("done"):
             word = "done"
         else:
-            word = "interrupted"
-        rows.append("| %s%s | %s | %s | %s | %s | %s |" % (
+            # A reason the orchestrator gave at its end (a demo refresh's
+            # exit code), or none: left behind.
+            word = run.get("outcome") or "interrupted"
+        add(run.get("started"), "| %s%s%s | %s | %s | %s | %s | %s |" % (
             name,
             " (%d)" % number if len(runs) > 1 else "",
+            part_word(run),
             word,
             "`%s`" % sid[:8] if sid else "—",
             when(run.get("started")),
@@ -477,6 +520,75 @@ def run_rows(node, name, friction=False):
 sync_runs = run_rows("sync", "sync with main", friction=True)
 epilogue_runs = run_rows("epilogue", "status update")
 retro_runs = run_rows("retro", "retrospective")
+# The demo recorded again once the code moved past it (demo_refresh, demo.sh):
+# a `claude -p` of its own before QA and at the epilogue.
+run_rows("demo", "demo refresh")
+
+
+def friction_subject(key):
+    """The session a friction review read, named as its own row is: `code-1`
+    is development — development (1) when the step ran in more than one
+    conversation — `fix-local-2` the second fix after regression, `sync-1`
+    the sync with main. A key from before per-session keys is the step's
+    name alone."""
+    if key.startswith("fix-"):
+        stage, _, number = key[4:].rpartition("-")
+        return "%s (%s)" % (fix_name(stage), number) if stage else key
+    name, _, number = key.rpartition("-")
+    if not number.isdigit():
+        name, number = key, ""
+    title = TITLES.get(name) or {"sync": "sync with main"}.get(name, name)
+    node = steps.get(name) if name in TITLES else s.get(name)
+    many = len((node or {}).get("runs") or []) > 1 if isinstance(node, dict) else False
+    return "%s (%s)" % (title, number) if number and many else title
+
+
+# The friction reviews' own conversations, each a row like any other session:
+# the Friction column says what a session's review came to, this row when it
+# ran. A log of proposals alone is put off without a session
+# (friction_defer_proposals): a row with no id, timed by the put-off's
+# commit. The `claude -p` call that may match them to the rules put off
+# before (friction_classify.py, kept by nobody, made only when there is
+# anything to match them to) runs just before it and has no row of its own.
+# An empty log called nothing and has none.
+for key, node in reviews.items():
+    if not isinstance(node, dict):
+        continue
+    runs = [r for r in (node.get("runs") or []) if isinstance(r, dict)]
+    for number, run in enumerate(runs, start=1):
+        sid = run.get("session") or ""
+        if not sid:
+            continue
+        if sid.startswith("deferred-"):
+            add(run.get("started"), "| friction put off - %s%s%s | %s | — | %s | %s | — |" % (
+                friction_subject(key),
+                " (%d)" % number if len(runs) > 1 else "",
+                part_word(run),
+                "put off" if run.get("done") else "interrupted",
+                when(run.get("started")),
+                when(run.get("finished")),
+            ))
+            continue
+        last = number == len(runs)
+        if run.get("stalled"):
+            word = "stalled"
+        elif run.get("done"):
+            word = run.get("outcome") or "reviewed"
+        elif last and node.get("session") == sid and not node.get("done"):
+            # As the Friction column says it: holding the cycle until it is
+            # resumed or closed.
+            word = "open"
+        else:
+            word = "interrupted"
+        add(run.get("started"), "| friction review - %s%s%s | %s | `%s` | %s | %s | — |" % (
+            friction_subject(key),
+            " (%d)" % number if len(runs) > 1 else "",
+            part_word(run),
+            word,
+            sid[:8],
+            when(run.get("started")),
+            when(run.get("finished")),
+        ))
 
 # The cycle counts seven steps, as the menu does (step_label and
 # cycle_number in steps.sh): the four of ORDER, then the sync with main, the
@@ -513,7 +625,7 @@ out = [
     "",
     "| Step | Status | Session | Started | Finished | Friction |",
     "|---|---|---|---|---|---|",
-    *rows,
+    *[text for _, _, text in sorted(rows)],
     "",
 ]
 

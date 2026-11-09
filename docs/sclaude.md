@@ -2243,15 +2243,27 @@ its comment to rewrite it. The local review's findings on a pull request
 are another kind: each is about a line, titled by the finding, and found by
 its thread rather than by a heading.
 
-The table lists every Claude session of the feature: the steps' own, the
-fixing sessions, the sync, the epilogue and the retrospective, and each pass
-of the local review (`claude -p`) that the journal recorded, read from
+The table lists every Claude session of the feature, in the order they
+began, whatever their kind — a step not reached yet goes last: the steps'
+own, the friction reviews, the fixing sessions, the sync, the epilogue, the
+demo refresh (`claude -p`, `demo_refresh` in `demo.sh`, which rewrites the
+table itself once it ends, and shows `exit <n>` when claude failed after
+the conversation began — one that died before its first answer was no
+session and has no row), the
+retrospective, and each pass of the local review (`claude -p`) that the
+journal recorded. A friction log of proposals alone is put off with no
+session (`friction_defer_proposals`): its row has no id and is timed by the
+put-off's commit; the `claude -p` call that may match the proposals to the
+rules put off before runs just before it, keeps no conversation and has no
+row of its own. In a feature built in parts the rows of the steps, the
+friction reviews, the syncs, the status updates, the retrospective and the
+demo refresh say the part their session worked on, or `the whole`. The local review's passes are read from
 `local-review-rounds.jsonl` beside the state, with the findings it posted and
 its times in the machine's own clock. A pass is started with a session id of
 its own, which the journal keeps; a pass journaled before that has a dash for
 its id. A pass in which no model ran — a head with nothing open to check — is
-no session and has no row, and neither has one that left no record: stopped
-half-way, or an answer that could not be recorded. The summary is written
+no session and has no row; one stopped half-way, or whose answer could not
+be recorded, ran all the same and has its row, `stopped, not recorded`. The summary is written
 again as the retrospective starts, which `run_retro` marks as running, so the
 friction review before it and the retrospective itself are on it while it
 runs, rather than only after the clean-up. It is written once more as the

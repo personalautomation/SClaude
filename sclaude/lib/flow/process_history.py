@@ -665,6 +665,9 @@ def _session_names(state):
     for what in ("sync", "retro", "epilogue"):
         for run in process_position._runs(state.get(what) if isinstance(state.get(what), dict) else None):
             names[run.get("session")] = process_config.all_nodes()[what][3]
+    # The demo recorded again (demo_refresh, demo.sh): no place of a map.
+    for run in process_position._runs(state.get("demo") if isinstance(state.get("demo"), dict) else None):
+        names[run.get("session")] = "demo refresh"
     names.pop(None, None)
     return names
 

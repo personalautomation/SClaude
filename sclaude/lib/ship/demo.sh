@@ -60,15 +60,39 @@ demo_refresh() {
   # nothing when it ended on `demo.py keep` (demo_publish_held).
   if command -v claude >/dev/null 2>&1 && [[ -f "$script" && -n "$head" ]]; then
     info "  A session writes it again from the last one (sdemo skill); its log: $log"
+    # A conversation like every other one sclaude starts, so it is named in
+    # the state's `demo` runs and gets its row in the issue's sessions table
+    # (issue_sync.sh); without the id it ran unseen there.
+    local state="$wt/.sclaude/local/feature/state.json" session rc=0
+    session="$(new_session_id)"
+    [[ -f "$state" ]] && SCLAUDE_ABOUT="$stage" session_runs "$state" demo open "$session"
     ( cd "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
         SCLAUDE_DEMO_HOLD=1 timeout 2400 \
         claude -p "$(demo_refresh_prompt "$wt" "$script" "$head" "$stage")" \
+        --session-id "$session" \
         --model "$(step_model code)" --permission-mode dontAsk \
         --allowedTools "Read" "Grep" "Glob" "Skill" "Edit(/$wt/.sclaude/local/demo/**)" \
           "Bash(python3 $tool:*)" "Bash(python3 ~/.claude/skills/sdemo/demo.py:*)" \
           "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" \
         --disallowedTools "NotebookEdit" "Bash(gh:*)" "Bash(git push:*)" "Bash(git commit:*)" \
-        >"$log" 2>&1 </dev/null )
+        >"$log" 2>&1 </dev/null ) || rc=$?
+    if [[ -f "$state" ]]; then
+      # Whether a conversation took place, by its transcript, as for the
+      # epilogue: a claude that died at the door leaves no session to name.
+      if ! session_started "$wt" "$session"; then
+        session_runs "$state" demo drop "$session"
+      elif (( rc == 0 )); then
+        SCLAUDE_ABOUT="$stage" session_runs "$state" demo finish "$session"
+      else
+        SCLAUDE_ABOUT="$stage" session_runs "$state" demo end "$session" "exit $rc"
+      fi
+      # Its row goes into the issue now. Before QA the next rewrite of the
+      # table may be a long way off; at the epilogue run_status follows, but
+      # skips the table when the status already describes the head
+      # (status_fingerprint knows nothing of the demo). Written twice there
+      # at worst.
+      declare -F issue_sync >/dev/null && issue_sync "$wt"
+    fi
     demo_publish_held "$wt" "$stage" "$tool" "$before" >>"$log" 2>&1
   else
     ( cd "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \

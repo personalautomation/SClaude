@@ -619,6 +619,15 @@ which are updated the same way when the push changes something they describe.
 a front page that draws people in, and everything technical moved to the
 guides under docs/. -->
 
+The GitHub wiki is built from the same material: `wiki/pages/` holds its
+front page, its concept pages and its sidebar, written by hand and kept in step
+with the README the same way, and `python3 wiki/build.py <clone of
+SClaude.wiki.git>` turns every guide and `docs/sclaude.md`/`docs/keepawake.md`
+into its detailed pages. A heading renamed in `docs/` renames a wiki page;
+`tests/wiki.py` fails on a link of `wiki/pages/` left pointing at the old
+name. The wiki is pushed with the rebuilt pages after a push that changed the
+docs or the pages, on the same word as the push itself.
+
 The process map is read the same way. A change to the cycle's path — a way
 back, a hold, a gate's outcomes, a question asked, where a feature stands and
 what the menu calls it, what happens to the issue — is checked against the

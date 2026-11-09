@@ -1,0 +1,1 @@
+SClaude is open source under MIT · [Repository](https://github.com/personalautomation/SClaude) · [Landing page](https://personalautomation.github.io/SClaude/) · [Contact](https://personalautomation.github.io/SClaude/contact.html)

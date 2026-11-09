@@ -8,6 +8,7 @@ decision that matters.
 > AI speed is easy to buy. Control is what has to be designed.
 
 **[The landing page →](https://personalautomation.github.io/SClaude/)** ·
+**[The wiki →](https://github.com/personalautomation/SClaude/wiki)** ·
 [What it solves](#what-it-solves) ·
 [See it](#see-it) ·
 [In the industry's words](#what-this-is-in-the-industrys-words) ·

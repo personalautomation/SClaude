@@ -590,7 +590,7 @@ suite red for every session after you.
 <!-- Added by Claude on 2026-11-03 at the user's word, after two tests red
 only under the parallel run were passed over as nobody's. -->
 
-## The README and the guides before a push
+## The README, the wiki and the guides before a push
 
 Before every push, bring the user documentation up to date with what the push
 carries: a new command, key, switch or behaviour a user meets goes in, and one
@@ -609,8 +609,8 @@ start to finish), `docs/cycle.md` (gates, refusals, rollback, metrics, the
 decisions a product hands to sclaude), `docs/team.md`, `docs/privacy.md`,
 `docs/tools.md` (the skills and the other tools) and
 `docs/presentations/README.md`. A change a user meets goes into the guide that
-describes it; the README changes only when what sclaude offers changes, and
-then so does `docs/index.html` — the landing page GitHub Pages serves from
+describes it; the README changes when what sclaude offers changes — every new
+feature of the tools does (below) — and then so does `docs/index.html` — the landing page GitHub Pages serves from
 `docs/` on `main`, which tells the same story with the decks' material. How a
 part works inside and why goes to `docs/sclaude.md` or `docs/keepawake.md`,
 which are updated the same way when the push changes something they describe.
@@ -625,8 +625,18 @@ with the README the same way, and `python3 wiki/build.py <clone of
 SClaude.wiki.git>` turns every guide and `docs/sclaude.md`/`docs/keepawake.md`
 into its detailed pages. A heading renamed in `docs/` renames a wiki page;
 `tests/wiki.py` fails on a link of `wiki/pages/` left pointing at the old
-name. The wiki is pushed with the rebuilt pages after a push that changed the
-docs or the pages, on the same word as the push itself.
+name.
+
+**A significant new feature of the tools updates the README and the wiki** —
+one that changes what sclaude offers a team, not every `feat`: it is not done
+until the README names what it gives and the wiki's concept page it belongs
+to in `wiki/pages/` carries it (a page of its own, linked from Home and
+`_Sidebar.md`, when it is a story of its own). A maintainer who pushes `main`
+then rebuilds the wiki into its clone and pushes it; nobody else can push the
+wiki.
+
+<!-- Added by Claude on 2026-11-09 at the user's request: a significant new
+feature of the tools updates the README and the wiki, not only the guides. -->
 
 The process map is read the same way. A change to the cycle's path — a way
 back, a hold, a gate's outcomes, a question asked, where a feature stands and

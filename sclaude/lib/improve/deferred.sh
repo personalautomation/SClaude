@@ -474,7 +474,8 @@ cmd_deferred() {
   # The product's own checks run in the review's tree too (a link checker
   # over the docs it edits), and without the dependencies they cannot.
   # Linked as a feature's tree links them; a product without them is left so.
-  [[ -d "$root/node_modules" ]] && declare -F link_node_modules >/dev/null \
+  local depdir; depdir="$(deps_get dir "$root" 2>/dev/null)"
+  declare -F link_node_modules >/dev/null && [[ -n "$depdir" && -d "$root/$depdir" ]] \
     && REPO="$root" link_node_modules "$wt"
   local f list="" stamps=""
   for f in "${files[@]}"; do

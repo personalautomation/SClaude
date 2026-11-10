@@ -311,7 +311,7 @@ db_wait_up() {
 ensure_db() {
   local wt="$1" dir="$1/.sclaude/local/feature/supabase" envf="$1/.sclaude/local/feature/db.env"
   local log="$1/.sclaude/local/feature/db.log" state="$1/.sclaude/local/feature/state.json"
-  local base cli exclude setup status
+  local base cli exclude status
 
   if ! db_wanted "$wt"; then
     rm -f "$envf"
@@ -358,7 +358,7 @@ ensure_db() {
   # fails is the stack's alone, and rebuilding it is the answer.
   if ! (cd "$wt" && $cli migration up --include-all --workdir "$dir") >> "$log" 2>&1; then
     warn "  database: pending migrations did not apply — see .sclaude/local/feature/db.log."
-    warn "  This feature's database is its own; rebuild it with: npx supabase db reset"
+    warn "  This feature's database is its own; rebuild it with: sclaude dev --rebuild-db"
   fi
 
   # The temporary file is this process's own: a lazy start of the dev server
@@ -375,30 +375,62 @@ ensure_db() {
 
   # Filled once: a new stack has the schema and nothing else, and a feature
   # that cannot sign anybody in cannot be looked at.
-  if [[ "$(state_get "$state" db.ready 2>/dev/null)" != "true" ]]; then
-    if db_copy_main "$wt"; then
-      state_set "$state" db.ready true
-    else
-      setup="$(project_get database.local.setup "$wt" 2>/dev/null || true)"
-      if [[ -n "$setup" ]]; then
-        info "  database: filling it ($setup)…"
-        if (cd "$wt" && set -a && . "$envf" && set +a && eval "$setup") >> "$log" 2>&1; then
-          state_set "$state" db.ready true
-          state_set "$state" db.filled "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        else
-          warn "  database: $setup failed — see .sclaude/local/feature/db.log"
-        fi
-      else
-        state_set "$state" db.ready true
-      fi
-    fi
-  fi
+  [[ "$(state_get "$state" db.ready 2>/dev/null)" == "true" ]] || db_fill "$wt"
   # Said when the stack was started here, else once in this process: a
   # database already up said so again at every session and regression.
   if [[ -n "$started" || "${DB_SAID:-}" != "$wt" ]]; then
     info "  database: this feature's own, API :$((base + 1)), Postgres :$((base + 2))"
   fi
   DB_SAID="$wt"
+}
+
+# Fills the stack the way the product asked for: a copy of the main local
+# database (db_copy_main) where it sets copyFromMain, else its own `setup`
+# command. sclaude decides nothing about the data itself — what a filled
+# database holds is the product's to say. Fails when the setup does.
+db_fill() {
+  local wt="$1" envf="$1/.sclaude/local/feature/db.env" log="$1/.sclaude/local/feature/db.log"
+  local state="$1/.sclaude/local/feature/state.json" setup
+  if db_copy_main "$wt"; then
+    state_set "$state" db.ready true
+    return 0
+  fi
+  setup="$(project_get database.local.setup "$wt" 2>/dev/null || true)"
+  if [[ -n "$setup" ]]; then
+    info "  database: filling it ($setup)…"
+    if (cd "$wt" && set -a && . "$envf" && set +a && eval "$setup") >> "$log" 2>&1; then
+      state_set "$state" db.ready true
+      state_set "$state" db.filled "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      return 0
+    fi
+    warn "  database: $setup failed — see .sclaude/local/feature/db.log"
+    return 1
+  fi
+  state_set "$state" db.ready true
+}
+
+# `sclaude dev --rebuild-db`: the feature's database built again from its
+# migrations and filled again, as a new stack is. A session that resets the
+# database itself leaves it empty — the fill happens once, and nothing tells a
+# reset apart from a database the project keeps empty — so the hook sends a
+# plain reset of the feature's own stack here (supabase-own-reset). People
+# the feature made since the first fill go with the reset; what they left in
+# object storage stays behind, a cost and not a loss.
+db_rebuild() {
+  local wt="$1" envf="$1/.sclaude/local/feature/db.env" state="$1/.sclaude/local/feature/state.json"
+  ensure_db "$wt"
+  [[ -f "$envf" ]] || { warn "  database: this feature has no local database of its own — nothing rebuilt"; return 1; }
+  info "  database: building it again from this feature's migrations…"
+  # Not ready from here on: a reset that fails half way leaves the database
+  # emptied, and the next start has to fill it once it is whole again.
+  state_set "$state" db.ready false
+  state_set "$state" db.copied false
+  if ! (cd "$wt" && $(db_cli "$wt") db reset \
+          --workdir "$wt/.sclaude/local/feature/supabase") >> "$wt/.sclaude/local/feature/db.log" 2>&1; then
+    warn "  database: the reset failed — see .sclaude/local/feature/db.log"
+    return 1
+  fi
+  db_fill "$wt"
 }
 
 # The Postgres container of a stack, by its project_id.
@@ -514,7 +546,7 @@ db_feature_rebuild() {
   local wt="$1"
   (cd "$wt" && $(db_cli "$wt") db reset --no-seed \
      --workdir "$wt/.sclaude/local/feature/supabase") >> "$wt/.sclaude/local/feature/db.log" 2>&1 && return 0
-  warn "  database: rebuilding this feature's database failed — rebuild it with: npx supabase db reset"
+  warn "  database: rebuilding this feature's database failed — rebuild it with: sclaude dev --rebuild-db"
   return 1
 }
 
@@ -525,7 +557,7 @@ db_feature_up() {
   (cd "$wt" && $(db_cli "$wt") migration up --include-all \
      --workdir "$wt/.sclaude/local/feature/supabase") >> "$wt/.sclaude/local/feature/db.log" 2>&1 && return 0
   warn "  database: this feature's migrations did not apply — see .sclaude/local/feature/db.log."
-  warn "  This feature's database is its own; rebuild it with: npx supabase db reset"
+  warn "  This feature's database is its own; rebuild it with: sclaude dev --rebuild-db"
   return 1
 }
 
@@ -534,11 +566,10 @@ db_feature_up() {
 # the caller falls back to the project's setup.
 #
 # A copy rather than a seed because the main database is what a developer has
-# built up to look at things with — every person copied in from prod, not only
-# the seeded cast — and because the ids come with it: objects in the bucket are
-# kept under the user's id, the bucket is one per developer, so the copied
-# people's avatars are already there and nothing new is uploaded for them. A
-# seed makes new people with new ids and uploads theirs afresh.
+# built up to look at things with, not only what a seed makes, and because the
+# ids come with it: whatever the project keeps outside the database under a
+# row's id is already there for the copied rows. A seed makes new rows with
+# new ids.
 #
 # Data only, over the schema the main database has: the feature's stack is set
 # back to main's last migration first (db reset --version) when it has more,
@@ -570,9 +601,10 @@ db_feature_up() {
 # A main database behind the feature's migrations is the usual reason rows do
 # not fit, so the warning says so and names how far behind it is.
 #
-# The ids that came across are recorded, and when: teardown (db_remove) needs
-# to tell the people shared with the main database, whose objects are the main
-# database's, from the ones this feature made.
+# When the copy was made is recorded (db.filled), and that it was (db.copied):
+# the project's teardown is told the time, and works out for itself which of
+# the stack's rows are the main database's — what a row is, sclaude does not
+# know.
 db_copy_main() {
   local wt="$1" log="$1/.sclaude/local/feature/db.log" state="$1/.sclaude/local/feature/state.json"
   local main feature errors
@@ -692,8 +724,6 @@ db_copy_main() {
     return 1
   fi
   errors="$(grep -c 'ERROR:' <<<"$out")"
-  docker exec "$feature" psql -U supabase_admin -d postgres -Atc "select id from auth.users" \
-    > "$wt/.sclaude/local/feature/db-copied-users" 2>>"$log" || return 1
   state_set "$state" db.filled "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   state_set "$state" db.copied true
   if [[ "${errors:-0}" -gt 0 ]]; then
@@ -701,7 +731,7 @@ db_copy_main() {
     warn "  by table: $(db_error_tables <<<"$out")"
     db_warn_main_behind "$main" "$feature"
   fi
-  info "  database: $(wc -l < "$wt/.sclaude/local/feature/db-copied-users") people copied from the main database"
+  info "  database: the main database copied into it"
   return 0
 }
 
@@ -724,7 +754,7 @@ db_warn_main_behind() {
   [[ "$missing" -gt 0 ]] || return 0
   newest="$(tail -1 <<<"$theirs")"
   warn "  The main local database is $missing migration(s) behind this feature's (it stops at ${newest:-none})."
-  warn "  Bring it up to date in the main checkout with: npx supabase migration up"
+  warn "  Bring it up to date in the main checkout with: $(db_cli "${REPO:-.}") migration up"
 }
 
 # The shared environment this feature works against, when it is not the
@@ -796,17 +826,16 @@ db_stop() {
 # What the database owned outside itself goes first: the project's `teardown`
 # (for example, the objects its people have in object storage, a bucket every
 # local database of the developer's shares). It needs the database to ask who was in it, so a
-# stack stopped for idling is started for the purpose. It is told which people
-# were copied from the main database, and when — their objects are partly the
-# main database's. A failed teardown is said, not fatal: a leftover object is a
+# stack stopped for idling is started for the purpose. It is told when the
+# stack was filled (SCLAUDE_DB_FILLED); which of its rows came from the main
+# database it asks the main database itself. A failed teardown is said, not fatal: a leftover object is a
 # cost, and the tree is going either way.
 db_remove() {
   local wt="$1" dir="$1/.sclaude/local/feature/supabase" envf="$1/.sclaude/local/feature/db.env"
   local log="$1/.sclaude/local/feature/db.log" cli teardown exclude
   [[ -f "$dir/supabase/config.toml" ]] || return 0
   # Started if it has to be: this is the last moment anything knows the stack
-  # and its teardown exist — the tree goes next, and with it db.env and the
-  # list of people copied.
+  # and its teardown exist — the tree goes next, and with it db.env.
   docker_ensure || { warn "  database: Docker is down — this feature's stack is left behind"; return 0; }
   cli="$(db_cli "$wt")"
   teardown="$(project_get database.local.teardown "$wt" 2>/dev/null || true)"
@@ -817,16 +846,7 @@ db_remove() {
     fi
     # Exported rather than prefixed: `eval` is a special builtin, and an
     # assignment in front of one is not passed to what it runs.
-    #
-    # The list of copied people is named only for a stack that was copied. A
-    # seeded one has none, and saying so by leaving the variable out keeps the
-    # other case unambiguous: a list named and unreadable is a reason for the
-    # teardown to remove nothing, not a sign that nobody was copied.
-    local copied=""
-    [[ "$(state_get "$wt/.sclaude/local/feature/state.json" db.copied 2>/dev/null)" == "true" ]] \
-      && copied="$wt/.sclaude/local/feature/db-copied-users"
     if (cd "$wt" && set -a && . "$envf" && set +a \
-          && { [[ -z "$copied" ]] || export SCLAUDE_DB_COPIED_USERS="$copied"; } \
           && export SCLAUDE_DB_FILLED="$(state_get "$wt/.sclaude/local/feature/state.json" db.filled 2>/dev/null)" \
           && eval "$teardown") >> "$log" 2>&1; then
       tail -1 "$log" | sed 's/^ */  /'

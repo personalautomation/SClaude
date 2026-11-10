@@ -234,8 +234,21 @@ def environment_is_protected(cwd, name):
 # the next step's server, checks and database calls would all work there
 # without anybody seeing it. A product's own switch script is named in its
 # policy; this is the one every product shares.
-ENV_SWITCH_REASON = ("this points .env.local at a protected environment's file, and the "
+ENV_SWITCH_REASON = ("this points {link} at a protected environment's file, and the "
                      "next step would work against its real data without knowing it")
+_LINK = []
+
+
+def env_link():
+    """The file a tree points at its environment with (envs.link_name), as
+    main's config names it: a tree's own config is the session's to edit, and
+    renaming the link there must not move the ban off the real one. Read once,
+    and only when a call writes or links something."""
+    if not _LINK:
+        data, unreadable = environments_data()
+        _LINK.append(envs_lib.DEFAULT_LINK if unreadable
+                     else envs_lib.link_name(project_dir(), data))
+    return _LINK[0]
 
 
 def env_switch_refuses(words, raw, into=(), base=None):
@@ -248,17 +261,17 @@ def env_switch_refuses(words, raw, into=(), base=None):
     if not words:
         return None
     paths = [w for w in raw[1:] if not w.startswith("-")]
-    if any(os.path.basename(t.rstrip("/")) == ".env.local" for t in into):
+    if any(os.path.basename(t.rstrip("/")) == env_link() for t in into):
         sources = paths
     elif words[0] in ("ln", "cp", "install", "mv") and paths \
-            and os.path.basename(paths[-1].rstrip("/")) == ".env.local":
+            and os.path.basename(paths[-1].rstrip("/")) == env_link():
         sources = paths[:-1]
     else:
         return None
     data, unreadable = environments_data()
     if unreadable:
         return ("main's .sclaude/config.json cannot be read, so which file is production's "
-                "cannot be told; nothing is put onto .env.local until it can")
+                "cannot be told; nothing is put onto %s until it can" % env_link())
     tree = project_dir()
     # Every protected environment's file, not only the one production() can
     # single out: a second protected one (staging with real data) was let in,
@@ -281,9 +294,9 @@ def env_switch_refuses(words, raw, into=(), base=None):
         full = os.path.join(base or tree, os.path.expanduser(p))
         if os.path.exists(full):
             if os.path.realpath(full) in real:
-                return ENV_SWITCH_REASON
+                return ENV_SWITCH_REASON.format(link=env_link())
         elif os.path.basename(p) in unique:
-            return ENV_SWITCH_REASON
+            return ENV_SWITCH_REASON.format(link=env_link())
     return None
 
 
@@ -337,10 +350,10 @@ def env_pipeline_refuses(command, inner_parts):
             if inner is not None:
                 args += [w for w in tokenize(inner) or [] if not w.startswith("-")]
             sources += args
-            writes = writes or any(os.path.basename(t.rstrip("/")) == ".env.local" for t in targets)
+            writes = writes or any(os.path.basename(t.rstrip("/")) == env_link() for t in targets)
         if writes:
-            named = [w for w in sources + extra if os.path.basename(w) != ".env.local"]
-            reason = env_switch_refuses(["cat"], ["cat"] + named, into=[".env.local"])
+            named = [w for w in sources + extra if os.path.basename(w) != env_link()]
+            reason = env_switch_refuses(["cat"], ["cat"] + named, into=[env_link()])
             if reason:
                 return reason
     return None
@@ -515,6 +528,32 @@ WORKDIR_REASON = ("this feature has its own local Supabase, and SUPABASE_WORKDIR
                   "already points the CLI at it; --workdir would reach another "
                   "stack — the main repository's or another feature's. Drop the "
                   "flag")
+
+
+# A plain `supabase db reset` of the feature's own stack (SUPABASE_WORKDIR set,
+# no remote target) empties it: the stack is filled once, by the product's
+# copyFromMain or setup, and a reset leaves the people and rows it put there
+# gone, with nothing to fill them again — every e2e that needed them then
+# failed for want of data. `sclaude dev --rebuild-db` is the same reset
+# followed by the same fill, and it is what the session is sent to.
+OWN_RESET_REASON = ("a plain `db reset` empties this feature's own database, and "
+                    "nothing fills it again: the data sclaude put in when the stack "
+                    "was made — the project's copy or seed — is gone. Run "
+                    "`sclaude dev --rebuild-db` instead: the same reset, then the "
+                    "same fill")
+
+
+def own_reset_refuses(words, raw=None):
+    """The reason this reset of the feature's own stack is sent elsewhere, or None."""
+    if not os.environ.get("SUPABASE_WORKDIR") or words[:1] != ["supabase"]:
+        return None
+    if supabase_positionals(words)[:2] != ["db", "reset"]:
+        return None
+    if remote_target(raw or words)[0] not in (None, "local"):
+        return None
+    if not rule_on("supabase-own-reset", words):
+        return None
+    return OWN_RESET_REASON
 
 
 # The programs a heredoc's body is only data to: what they do with it is copy
@@ -1292,6 +1331,7 @@ def refuses(command, step, cwd=None, depth=0):
                                redirected or also, known)
                   or api_merge_refuses(words, raw[len(raw) - len(words):])
                   or db_push_refuses(words, raw[len(raw) - len(words):])
+                  or own_reset_refuses(words, raw[len(raw) - len(words):])
                   or env_switch_refuses(words, raw[len(raw) - len(words):], into,
                                         here if here != visited[0] else None)
                   or vercel_refuses(words, raw[len(raw) - len(words):]))

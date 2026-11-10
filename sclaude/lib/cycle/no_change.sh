@@ -109,9 +109,10 @@ no_change_send() {
     # neither its dependencies nor its .env files: the hooks then refused the
     # push for want of a package and of an environment's name. They get the
     # main repository's, as a feature's tree does (link_env) — a symlink for
-    # node_modules, since nothing here builds.
+    # the dependencies (deps.dir), since nothing here builds.
     if [[ "$verify" == 1 && -n "${REPO:-}" ]]; then
-      [[ -d "$REPO/node_modules" ]] && ln -s "$REPO/node_modules" "$tmp/tree/node_modules"
+      local depdir; depdir="$(deps_get dir "$REPO" 2>/dev/null)"
+      [[ -n "$depdir" && -d "$REPO/$depdir" ]] && ln -s "$REPO/$depdir" "$tmp/tree/$depdir"
       link_env "$tmp/tree" >/dev/null 2>&1 || true
     fi
     if git -C "$tmp/tree" diff --cached --quiet; then

@@ -12,7 +12,7 @@ sclaude status          # every feature and its step
 sclaude actions [name]  # everything you can do with one feature, in one list
 sclaude doctor          # what this machine lacks, and how to fix it
 sclaude config          # the product's settings, each one explained; set <key> <value>
-sclaude dev [name]      # start a feature's dev server; --stop to stop it
+sclaude dev [name]      # start a feature's dev server; --stop to stop it, --rebuild-db to build and fill its database again
 sclaude sync <name>     # merge the latest main into a feature's branch
 sclaude news <name>     # what has happened on the pull request
 sclaude preview <name>  # deploy the branch to a preview
@@ -47,10 +47,12 @@ The chosen issue suggests a branch name, which you can edit. sclaude moves the
 issue to `In progress` on the board and fills in its start date. Before it
 creates the worktree, it brings the main checkout up to `origin/main` (a
 fast-forward, and only when it is on `main`) and, if its lockfile moved, runs
-`npm ci` there: the new worktree links the main checkout's `node_modules`.
+the product's clean install there (`npm ci` unless its config names another,
+`deps.ci`): the new worktree links the main checkout's dependency folder.
 An edit in the way of the fast-forward, or a Node process working in the main
 checkout (a dev server, a typecheck, a test run), leaves it as it is, with a
-warning that says what to run once it is out of the way.
+warning that says what to run once it is out of the way. For dependencies other
+than npm's, it asks before it reinstalls.
 
 **Closing a session from sclaude's terminal.** Under Windows Terminal in WSL a
 session runs in a tab of its own, and while it works the tab sclaude waits in

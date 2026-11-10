@@ -957,7 +957,12 @@ def main():
     # --workdir is the one way past that, to somebody else's stack.
     own = "/tmp/feature-x/.sclaude/local/feature/supabase"
     workdir_cases = [
-        ("npx supabase db reset", {"SUPABASE_WORKDIR": own}, ALLOW),
+        # A plain reset of its own stack empties it for good: it goes through
+        # `sclaude dev --rebuild-db`, which fills it again.
+        ("npx supabase db reset", {"SUPABASE_WORKDIR": own}, DENY),
+        ("supabase db reset --local --workdir " + own, {"SUPABASE_WORKDIR": own}, DENY),
+        ("npx supabase db reset", {}, ALLOW),
+        ("npx supabase migration up", {"SUPABASE_WORKDIR": own}, ALLOW),
         ("npx supabase migration up --workdir " + own, {"SUPABASE_WORKDIR": own}, ALLOW),
         ("npx --yes supabase db reset --workdir /home/u/myapp",
          {"SUPABASE_WORKDIR": own}, DENY),
@@ -1151,6 +1156,19 @@ def main():
                               ("diff .env.prod .env.dev && cat .env.dev > .env.local", "allow")):
             if verdict(command) != want:
                 failures.append(("shared", command, want, verdict(command)))
+        # A product whose link is another file (envLink) is guarded on that one.
+        with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:
+            json.dump({"envLink": ".env",
+                       "environments": {"dev": {"env": ".env.dev"}, "localdb": {"env": ".env.localdb"},
+                                        "prod": {"env": ".env.prod", "protected": True}}}, fh)
+        for command, want in (("cp .env.prod .env", "deny"),
+                              ("cat .env.prod | tee .env", "deny"),
+                              ("cp .env.prod .env.local", "allow")):
+            if verdict(command) != want:
+                failures.append(("envLink", command, want, verdict(command)))
+        with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:
+            json.dump({"environments": {"dev": {"env": ".env.dev"}, "localdb": {"env": ".env.localdb"},
+                                        "prod": {"env": ".env.prod", "protected": True}}}, fh)
         # Every protected environment, not only the one taken for production.
         open(os.path.join(tree, ".env.staging"), "w").close()
         with open(os.path.join(tree, ".sclaude/config.json"), "w") as fh:

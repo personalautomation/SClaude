@@ -468,6 +468,31 @@ def main():
         check("switch: to a file that is not there fails",
               run('environment_switch "%s" nosuch && echo ok || echo no' % sw), "no")
 
+        # The link and what a build keeps are the product's to name (envLink,
+        # buildCache): a product whose code loads .env and builds into dist/
+        # is switched by those, and its .env.local and .next are none of
+        # sclaude's business.
+        named = project(os.path.join(tmp, "named"), {"localdb": {"ref": None},
+                                                      "dev": {"ref": None}})
+        cfgp = os.path.join(named, ".sclaude", "config.json")
+        with open(cfgp) as fh:
+            ncfg = json.load(fh)
+        ncfg.update({"envLink": ".env", "buildCache": ["dist"]})
+        with open(cfgp, "w") as fh:
+            json.dump(ncfg, fh)
+        for d in ("dist", ".next"):
+            os.makedirs(os.path.join(named, d))
+        os.symlink(".env.localdb", os.path.join(named, ".env"))
+        out = run('environment_switch "%s" dev >/dev/null 2>&1; environment_current "%s"'
+                  % (named, named))
+        check("envLink: the named file is switched", (out, os.readlink(os.path.join(named, ".env"))
+                                                       .endswith(".env.dev")), ("dev", True))
+        check("envLink: .env.local is not made", os.path.lexists(os.path.join(named, ".env.local")),
+              False)
+        check("buildCache: the named build is gone, the other kept",
+              (os.path.exists(os.path.join(named, "dist")), os.path.exists(os.path.join(named, ".next"))),
+              (False, True))
+
         # A snapshot puts a tree back exactly, including a .env.local that is
         # a plain file of the person's own: no name could switch back to that,
         # and a rollback left the tree on production.

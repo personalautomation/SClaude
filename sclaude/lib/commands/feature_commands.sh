@@ -289,10 +289,13 @@ cmd_dev() {
   # --no-browser is for sclaude-proxy, which starts a server because a browser
   # is already asking for it — and may be a phone's, where a window opening on
   # the laptop helps nobody.
-  local browser=1 a
+  local browser=1 rebuild=0 a
   local -a args=()
   for a in "$@"; do
     [[ "$a" == "--no-browser" ]] && { browser=0; continue; }
+    # The feature's database built and filled again (db_rebuild): what a
+    # session runs instead of resetting the database itself.
+    [[ "$a" == "--rebuild-db" ]] && { rebuild=1; browser=0; continue; }
     args+=("$a")
   done
   set -- "${args[@]}"
@@ -335,6 +338,12 @@ cmd_dev() {
     wt="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not a git repository"
   fi
   mkdir -p "$wt/.sclaude/local/feature"
+  if [[ "$rebuild" -eq 1 ]]; then
+    declare -F db_rebuild >/dev/null || die "this sclaude has no feature databases"
+    db_rebuild "$wt" || die "the database was not rebuilt — see .sclaude/local/feature/db.log"
+    echo "${GREEN}rebuilt${OFF}"
+    return 0
+  fi
   ensure_dev "$wt"
   [[ "$browser" -eq 1 ]] && ensure_chrome "$wt"
   return 0

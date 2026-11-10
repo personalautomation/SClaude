@@ -41,7 +41,8 @@
 #   sclaude actions [name]  every action on one feature in a single list
 #   sclaude dev [name]      start the dev server (without a name, for the
 #                           current directory); it opens at
-#                           http://<name>.localhost:3000
+#                           http://<name>.localhost:3000;
+#                           --rebuild-db builds and fills its database again
 #   sclaude sync <name>     merge origin/main into a feature's branch
 #   sclaude news <name>     what has changed on the pull request
 #   sclaude preview <name>  ship the branch to preview

@@ -120,6 +120,13 @@ else:
 PY
 }
 
+# Whether the product uses an integration (vercel, supabase): named in its
+# team's `integrations`, or, while it names none, evidently there
+# (policy.py uses). What an integration runs is run only where it is on.
+product_uses() {
+  python3 "$(dirname "${BASH_SOURCE[0]}")/../improve/policy.py" uses "${2:-${REPO:-.}}" "$1" 2>/dev/null
+}
+
 # True when the project describes something under this key.
 project_has() {
   [[ -n "$(project_get "$1" "${2:-}" 2>/dev/null || true)" ]]

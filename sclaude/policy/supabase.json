@@ -14,6 +14,8 @@
     "                   every environment counts as protected.",
     "supabase-workdir   no --workdir past the feature's own local stack.",
     "supabase-shared    a question before a schema change on a shared project.",
+    "supabase-own-reset a plain `db reset` of the feature's own stack goes through",
+    "                   `sclaude dev --rebuild-db`, which fills it again.",
     "",
     "The writing tools of Supabase's MCP are off: schema changes go as",
     "migrations through files."
@@ -21,7 +23,8 @@
   "rules": [
     "supabase-db-push",
     "supabase-workdir",
-    "supabase-shared"
+    "supabase-shared",
+    "supabase-own-reset"
   ],
   "tools": {
     "deny": [

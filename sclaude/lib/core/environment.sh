@@ -54,6 +54,25 @@ envs() {
   python3 "$(dirname "${BASH_SOURCE[0]}")/envs.py" "$@" 2>/dev/null
 }
 
+# The file in a tree that points at its environment (`envLink`, envs.py).
+environment_link() {
+  echo "$1/$(envs link "$1" || echo .env.local)"
+}
+
+# What the product's build keeps of the environment it was made on, removed
+# when the tree moves to another one (`buildCache`, folders under the tree's
+# root; `.next` when the config names none — a framework that inlines public
+# settings at build time keeps serving the old project's URL and keys from it).
+environment_clear_build() {
+  local wt="$1" dir list
+  list="$(project_get buildCache "$wt" 2>/dev/null)" || list=".next"
+  while IFS= read -r dir; do
+    [[ -n "$dir" && "$dir" != /* && "$dir" != *..* ]] || continue
+    [[ -e "$wt/$dir" ]] && rm -rf "${wt:?}/$dir"
+  done <<<"$list"
+  return 0
+}
+
 environment_names() {
   envs names "$1" || true
 }
@@ -124,23 +143,23 @@ environment_value() {
 #
 #   environment_switch <tree> <name> [--over-file]
 environment_switch() {
-  local wt="$1" name="$2" file ref password
+  local wt="$1" name="$2" file ref password link
   file="$(envs file "$wt" "$name")" || return 1
   [[ -f "$file" ]] || { warn "  $name: $file does not exist"; return 1; }
+  link="$(environment_link "$wt")"
   # A .env.local that is a file of the person's own, not a link, is theirs:
   # replaced, it was gone, and no name could bring it back. Left alone, unless
   # the caller kept it to put back (--over-file, after environment_snapshot).
-  if [[ -e "$wt/.env.local" && ! -L "$wt/.env.local" && "${3:-}" != "--over-file" ]]; then
-    warn "  $wt/.env.local is a file of its own, not a link to an environment: left as it is."
+  if [[ -e "$link" && ! -L "$link" && "${3:-}" != "--over-file" ]]; then
+    warn "  $link is a file of its own, not a link to an environment: left as it is."
     warn "  Move it to .env.<name> and name it under \"environments\" in .sclaude/config.json."
     return 1
   fi
-  local before; before="$(readlink -f "$wt/.env.local" 2>/dev/null || true)"
-  ln -sfn "$(readlink -f "$file")" "$wt/.env.local" || return 1
-  # NEXT_PUBLIC_* is inlined at build time, so a .next built on the old file
-  # keeps serving the old project's URL and keys. Only when the target moved:
-  # relinking the CLI alone leaves the build as it is.
-  [[ "$before" != "$(readlink -f "$file")" && -d "$wt/.next" ]] && rm -rf "$wt/.next"
+  local before; before="$(readlink -f "$link" 2>/dev/null || true)"
+  ln -sfn "$(readlink -f "$file")" "$link" || return 1
+  # A build made on the old file can keep its settings (environment_clear_build).
+  # Only when the target moved: relinking the CLI alone leaves the build as it is.
+  [[ "$before" != "$(readlink -f "$file")" ]] && environment_clear_build "$wt"
   [[ -f "$wt/supabase/config.toml" ]] || return 0
   if ref="$(envs ref "$wt" "$name")"; then
     password="$(envs value "$wt" "$name" "$(environment_key "$wt" database)" \
@@ -166,12 +185,13 @@ environment_switch() {
 #
 #   environment_snapshot <tree>
 environment_snapshot() {
-  local wt="$1" dir
+  local wt="$1" dir link
+  link="$(environment_link "$wt")"
   dir="$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/sclaude-env.XXXXXX")" || return 1
-  if [[ -L "$wt/.env.local" ]]; then
-    readlink "$wt/.env.local" > "$dir/link"
-  elif [[ -e "$wt/.env.local" ]]; then
-    cp -p "$wt/.env.local" "$dir/file"
+  if [[ -L "$link" ]]; then
+    readlink "$link" > "$dir/link"
+  elif [[ -e "$link" ]]; then
+    cp -p "$link" "$dir/file"
   fi
   [[ -d "$wt/supabase/.temp" ]] && cp -rp "$wt/supabase/.temp" "$dir/temp"
   echo "$dir"
@@ -181,22 +201,22 @@ environment_snapshot() {
 #
 #   environment_restore <tree> <dir>
 environment_restore() {
-  local wt="$1" dir="$2" before
+  local wt="$1" dir="$2" before link
   [[ -n "$dir" && -d "$dir" ]] || return 1
-  before="$(readlink -f "$wt/.env.local" 2>/dev/null || true)"
-  rm -f "$wt/.env.local"
+  link="$(environment_link "$wt")"
+  before="$(readlink -f "$link" 2>/dev/null || true)"
+  rm -f "$link"
   if [[ -f "$dir/link" ]]; then
-    ln -sfn "$(cat "$dir/link")" "$wt/.env.local"
+    ln -sfn "$(cat "$dir/link")" "$link"
   elif [[ -f "$dir/file" ]]; then
-    cp -p "$dir/file" "$wt/.env.local"
+    cp -p "$dir/file" "$link"
   fi
   if [[ -d "$wt/supabase" ]]; then
     rm -rf "$wt/supabase/.temp"
     [[ -d "$dir/temp" ]] && cp -rp "$dir/temp" "$wt/supabase/.temp"
   fi
   # A build made on the file in between serves its keys: as environment_switch.
-  [[ "$before" != "$(readlink -f "$wt/.env.local" 2>/dev/null || true)" && -d "$wt/.next" ]] \
-    && rm -rf "$wt/.next"
+  [[ "$before" != "$(readlink -f "$link" 2>/dev/null || true)" ]] && environment_clear_build "$wt"
   rm -rf "$dir"
 }
 

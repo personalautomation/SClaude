@@ -23,7 +23,7 @@ skipped, and sclaude says so where it would have acted:
 
 | what | what it gives you | without it |
 |---|---|---|
-| a Node app with `npm run dev` that listens on `PORT` (Next.js is what it is built on); on WSL, Node through nvm, which `wsl-update` keeps current | a dev server per feature at its own address, Claude checking its work in a browser | no dev server or browser check; the cycle still runs |
+| a dev server that listens on `PORT` — `npm run dev` unless the product names its own in `.sclaude/config.json` (`commands.dev`); for a Node app on WSL, Node through nvm, which `wsl-update` keeps current | a dev server per feature at its own address, Claude checking its work in a browser | no dev server or browser check; the cycle still runs |
 | a test suite the product names in `.sclaude/config.json` | the local, preview and production test gates | no test gates |
 | an automatic Claude review on the product's pull requests (a `claude-code-review.yml` workflow) | the findings step 4 works through | step 4 has no findings to work from |
 | a GitHub project board | the issue moving through `In progress`, `In QA`, `Done`; QA's hand-back | QA's verdict cannot be read from the board |

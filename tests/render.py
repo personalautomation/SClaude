@@ -103,7 +103,8 @@ def main():
         values = {"feature": "test", "pr": "1", "issue": "68",
                   "labels": "deployed-preview",
                   "dev-url": "http://test.localhost:3000", "dev-port": "3100",
-                  "db-api": "http://127.0.0.1:55001", "shared-db": "dev"}
+                  "db-api": "http://127.0.0.1:55001", "shared-db": "dev",
+                  "db-cli": "npx --yes supabase", "dev-cmd": "npm run dev"}
         blocks = {"issue-context": "the issue", "manual-toc": "the contents",
                   "pr-context": "the checks", "feature-in-history": "history",
                   "issue-chain": "the chain", "deploy-outcome": "shipped",

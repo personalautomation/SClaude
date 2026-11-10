@@ -68,7 +68,6 @@ FILES = [
     ("db.env", "the feature database's connection, sourced by the regression's local stage"),
     ("db.log", "the feature database's start and migrations"),
     ("db-copy.sql", "main's rows, dumped for the copy into the feature's database"),
-    ("db-copied-users", "the people copied from the main database, one id a line"),
     ("supabase", "the feature's own Supabase project"),
     ("telegram.json", "the bot's record of the feature's topic (FEATURE_RECORD in topics.py)"),
 ]

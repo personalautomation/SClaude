@@ -100,7 +100,7 @@ def main():
 
     # Both servers sclaude starts go through it: the dev server and the build
     # the regression serves. The suite's own parts do not (see dev_net_env).
-    for path, starts in (("tree/worktree.sh", "setsid --fork npm run dev"), ("ship/regression.sh", 'bash -c "$serve"')):
+    for path, starts in (("tree/worktree.sh", 'setsid --fork bash -c "$devcmd"'), ("ship/regression.sh", 'bash -c "$serve"')):
         text = open(os.path.join(LIB, path)).read()
         lines = text.splitlines()
         # The command and the line before it: a long start is continued with \.

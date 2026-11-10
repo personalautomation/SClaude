@@ -207,6 +207,17 @@ try:
         'run_block "T" "" "Go?" "cd %s" >/dev/null; pwd' % REPO, tmp)
     check("block-cd-does-not-leak", out.strip().split("\n")[-1], tmp)
 
+    # A product's own deploy: the last URL its last line prints is kept for the
+    # caller, colours and closing punctuation off, and the `cd` before it holds.
+    urlf = os.path.join(tmp, "url")
+    out, _, _ = run_bash(
+        'ask() { printf -v "$2" %%s y; }\n'
+        'SCLAUDE_VERCEL_URL_FILE=%s run_block "T" "" "Go?" "cd %s" '
+        '"pwd > %s; printf \'Ready: \\033[32mhttps://p.example/x\\033[0m.\\n\'" >/dev/null'
+        % (urlf, REPO, marks), tmp)
+    check("block-own-deploy-url", (open(urlf).read().strip() if os.path.exists(urlf) else "",
+                                   open(marks).read().strip()), ("https://p.example/x", REPO))
+
     # --- main_unpushed --------------------------------------------------------
     #
     # Decides whether production stops before its question. Silent wrongly, and

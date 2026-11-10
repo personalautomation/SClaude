@@ -35,6 +35,10 @@
 #
 # and `secretKey` (SUPABASE_SECRET_KEY), which only dev_login.py reads.
 #
+# The file in a tree that names its environment by pointing at one is
+# `.env.local` unless the product's config names another (`envLink`): it is
+# whatever file the product's own code loads its settings from.
+#
 # Used by environment.sh through the command line below, and by
 # forbidden-commands.py as a module.
 #
@@ -45,9 +49,11 @@
 #   envs.py file <root> <name>              its .env file, absolute
 #   envs.py ref <root> <name>               its Supabase project ref, if hosted
 #   envs.py value <root> <name> <key>       one value from its file
+#   envs.py link <root>                     the file that points at the environment
 #   envs.py current <root> <tree>           the environment the tree is on
 #   envs.py settled <root> <tree>           the same, only when the Supabase
 #                                           CLI's link agrees with it
+#   envs.py deployed <root>                 the deployments' environment's name
 #   envs.py production <root>               production's name
 #   envs.py site <root>                     production's siteUrl
 #   envs.py old <root>                      why the config is of the old shape
@@ -62,6 +68,7 @@ DEFAULT_KEYS = {"supabaseUrl": "NEXT_PUBLIC_SUPABASE_URL",
                 "database": "POSTGRES_URL_NON_POOLING"}
 HOSTED = re.compile(r"^https://([a-z0-9]{20})\.supabase\.co/?$")
 LINKED_REF = os.path.join("supabase", ".temp", "project-ref")
+DEFAULT_LINK = ".env.local"
 
 
 def config(root):
@@ -217,9 +224,19 @@ def ref(root, name, data=None):
     return found.group(1) if found else None
 
 
+def link_name(root, data=None):
+    """The file in a tree that points at its environment (`envLink`): a plain
+    name at the tree's root, `.env.local` when the config names none."""
+    data = config(root) if data is None else data
+    name = data.get("envLink") if isinstance(data, dict) else None
+    if isinstance(name, str) and name and "/" not in name and name not in (".", ".."):
+        return name
+    return DEFAULT_LINK
+
+
 def current(root, tree, data=None):
-    """The environment whose file the tree's .env.local points at, or None."""
-    link = os.path.join(tree, ".env.local")
+    """The environment whose file the tree's link (link_name) points at, or None."""
+    link = os.path.join(tree, link_name(root, data))
     try:
         target = os.path.realpath(link) if os.path.islink(link) else None
     except OSError:
@@ -256,6 +273,13 @@ def settled(root, tree, data=None):
     except OSError:
         linked = None
     return name if linked == want else None
+
+
+def deployed(root, data=None):
+    """The environment of deployments with no fixed address (`deployed`), when
+    exactly one is marked so; None otherwise."""
+    found = [n for n, e in environments(root, data).items() if e.get("deployed")]
+    return found[0] if len(found) == 1 else None
 
 
 def production(root, data=None):
@@ -295,6 +319,9 @@ def main(argv):
     # Which file a name stands for is a protection too: a tree that mapped
     # "dev" to .env.prod had the orchestrator link production in as dev. So
     # names and files come from main as well; the files resolve in the tree.
+    if what == "link":
+        print(link_name(root, guarded(root)))
+        return 0
     if what == "names":
         for name in environments(root, guarded(root)):
             print(name)
@@ -320,6 +347,12 @@ def main(argv):
     if what == "value" and len(rest) >= 2:
         found = value(root, rest[0], rest[1], guarded(root))
         if found is None:
+            return 1
+        print(found)
+        return 0
+    if what == "deployed":
+        found = deployed(root, guarded(root))
+        if not found:
             return 1
         print(found)
         return 0

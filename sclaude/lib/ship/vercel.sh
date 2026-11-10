@@ -183,6 +183,19 @@ run_block() {
       [[ -n "${SCLAUDE_BLOCK_AT:-}" ]] && printf '%s\n' "$cmd" > "$SCLAUDE_BLOCK_AT"
       if [[ "$cmd" == vercel\ * ]]; then
         run_vercel "$cmd" || exit 1
+      elif [[ -n "${SCLAUDE_VERCEL_URL_FILE:-}" && "$cmd" == "${!#}" ]]; then
+        # A product's own deploy, the block's last line: its address is the
+        # last URL it prints, kept for the caller as run_vercel keeps
+        # Vercel's — colours and a sentence's closing punctuation taken off.
+        # In a subshell for the pipe, so only that line: a `cd` before it has
+        # to stay.
+        local seen; seen="$(mktemp)"
+        ( set -o pipefail; eval "$cmd" 2>&1 | tee "$seen" ) || { rm -f "$seen"; exit 1; }
+        sed -E 's/\x1b\][^\x1b]*\x1b\\//g; s/\x1b\[[0-9;?]*[a-zA-Z]//g' "$seen" \
+          | grep -oE $'https?://[^][:space:]"<>()\x1b]+' \
+          | sed -E 's/[.,;:!?]+$//' | tail -1 > "$SCLAUDE_VERCEL_URL_FILE.tmp" \
+          && [[ -s "$SCLAUDE_VERCEL_URL_FILE.tmp" ]] && mv "$SCLAUDE_VERCEL_URL_FILE.tmp" "$SCLAUDE_VERCEL_URL_FILE"
+        rm -f "$seen" "$SCLAUDE_VERCEL_URL_FILE.tmp"
       else
         eval "$cmd" || exit 1
       fi
@@ -358,7 +371,20 @@ preview_apply_migrations() {
 # The note does not say which database the preview uses: that is the project's
 # Vercel setting, which sclaude cannot see.
 preview_deploy() {
-  local wt="$1"
+  local wt="$1" cmd
+  if cmd="$(project_get deploy.preview "$wt" 2>/dev/null)" && [[ -n "$cmd" ]]; then
+    run_block \
+      "Preview — see the branch on real hosting" \
+      "Its own URL for this build." \
+      "" \
+      "cd $(printf '%q' "$wt")" \
+      "$cmd"
+    return
+  fi
+  if ! product_uses vercel; then
+    warn "  No preview deploy: the product names none (deploy.preview in .sclaude/config.json)."
+    return 4
+  fi
   write_vercelignore "$wt"
   run_block \
     "Preview — see the branch on real hosting" \
@@ -366,6 +392,18 @@ preview_deploy() {
     "" \
     "cd $REPO" \
     "vercel $wt$(vercel_project_flag)"
+}
+
+# The command that ships the main checkout to production: the product's own
+# (deploy.prod), else Vercel's where the product uses it. Empty when there is
+# none, and production is then not offered.
+prod_deploy_command() {
+  local cmd
+  if cmd="$(project_get deploy.prod "${REPO:-.}" 2>/dev/null)" && [[ -n "$cmd" ]]; then
+    echo "$cmd"
+  elif product_uses vercel; then
+    echo "vercel --prod"
+  fi
 }
 
 # Deploys the worktree to preview, trying again on failure, and writes down
@@ -389,7 +427,17 @@ preview_ship() {
   ask_feed say "$(phase_line started deploy preview)"
   history_add "$wt/.sclaude/local/feature/state.json" deploy.preview start
   for ((try = 1; try <= PREVIEW_TRIES; try++)); do
-    if SCLAUDE_BLOCK_AT="$at" SCLAUDE_VERCEL_URL_FILE="$url_file" preview_deploy "$wt"; then
+    local deploy_rc=0
+    SCLAUDE_BLOCK_AT="$at" SCLAUDE_VERCEL_URL_FILE="$url_file" preview_deploy "$wt" || deploy_rc=$?
+    # None named (4): no retry would find one, and the session the gate opens
+    # is told which key is missing rather than which command failed.
+    if [[ "$deploy_rc" -eq 4 ]]; then
+      echo "no preview deploy named (deploy.preview in .sclaude/config.json)" > "$at"
+      history_add "$state" deploy.preview failed
+      ask_feed alarm "$(phase_line failed deploy preview) · no deploy.preview"
+      break
+    fi
+    if [[ "$deploy_rc" -eq 0 ]]; then
       deploy_remember "$wt" preview
       if [[ -s "$url_file" ]]; then
         state_set "$wt/.sclaude/local/feature/state.json" regression.preview.url "$(< "$url_file")"

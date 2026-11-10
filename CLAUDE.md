@@ -570,6 +570,26 @@ deferred friction and the session rules in the product's `.sclaude/`
 in its `.sclaude/local/`, which git and every Vercel upload are kept out of
 (`sclaude/lib/core/scratch.sh`).
 
+## Nothing in sclaude knows one product
+
+sclaude drives products it has never seen, so its code, prompts and hooks
+assume nothing about a product's data, schema, stack, scripts, files or
+routes: no table read to decide something, no `npm run …` or framework
+command typed into a prompt, no product file named in a message. What a
+product does is a key in its `.sclaude/config.json` (documented in
+`sclaude/config.example.json`), with today's common value as the preset when
+the key is absent — a product's trees take a new key only when its branch
+merges, and sclaude's change reaches every tree at once. What only one product
+needs (its routes, its own scripts, a habit) goes into that product's
+`.sclaude/team/` — a prompt addition, a policy entry — not here. Behaviour
+that belongs to an integration (Supabase, Vercel) runs only where the
+integration is on (`rule_on`, `integrations`), and the commands it runs are
+the ones the product's config names.
+
+<!-- Added by Claude on 2026-11-10 at the user's request, after a friction
+review found sclaude telling sessions one stack's commands and deciding
+things from a product's tables. -->
+
 ## Who commits the orchestrator to main
 
 `MAINTAINERS` lists the git addresses allowed to commit sclaude's core straight

@@ -104,7 +104,8 @@ before the feature and runs the tests again to confirm the old release works —
 before anybody starts fixing. If somebody else deployed in the meantime, nothing
 is rolled back: that release is not ours to remove. Migrations are undone only
 where their undo instructions can actually be run, and sclaude shows the SQL and
-asks first.
+asks first. The code is rolled back on Vercel, the hosting sclaude knows how to
+ask for the previous release; on any other, production is rolled back by hand.
 
 While production carries a feature whose last production tests were red — the
 rollback failed, you declined it, another release sits on top, or the tests

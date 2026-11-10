@@ -961,19 +961,24 @@ hard links (`cp -al`): Turbopack refuses to work with a symlink that leads
 outside the project, and `next dev` dies at start-up. Links to the same inodes do
 not duplicate the data — some ten seconds and almost no space. The directory is
 correct while the branch has not touched the dependencies; the script notices a
-`package-lock.json` that differs from the main repository's and offers an
-`npm install`. A finished install leaves the hash of the lockfile it installed in
-`node_modules/.sclaude-lock` (`check_deps` in `worktree.sh`), and a tree whose
+lockfile that differs from the main repository's and offers the product's
+install. The folder, the lockfile and the two installs are the product's
+(`deps` in its config: `node_modules`, `package-lock.json`, `npm install` and
+`npm ci` when it names none). A finished install leaves the hash of the lockfile it installed in
+`<dir>/.sclaude-lock` (`check_deps` in `worktree.sh`), and a tree whose
 lockfile still has that hash is not asked again — the main checkout lagging behind
 origin is enough to make the two differ.
 
 The main checkout is the source of those links, so it is brought up to date first
 (`refresh_main` in `worktree.sh`, called before the worktree is added): on `main`
 it is fast-forwarded to `origin/main` (never over an edit, never with a stash),
-and a lockfile that moved since its last install gets `npm ci` there — `ci`,
-which removes `node_modules` first, so the files other trees link stay as they
-were — unless a Node process works in the checkout. Both run under a lock that
-linking a tree from that `node_modules` takes too. A lockfile comparison alone could not see a main
+and a lockfile that moved since its last install gets the clean install there
+(`deps.ci`, `npm ci` by default, which removes the folder first, so the files
+other trees link stay as they were) — unasked for npm's folder unless a Node
+process works in the checkout. Another tool's folder cannot be told in use, so
+its reinstall is asked about, after the lock is let go; a yes takes the lock
+again and installs unless another start already did. Both run under a lock that
+linking a tree from that folder takes too. A lockfile comparison alone could not see a main
 checkout whose lockfile had moved without an install: the tree's lockfile and
 the main one agreed, and every new feature started on the old packages.
 
@@ -1144,8 +1149,10 @@ and recorded in the state as `db.project_id`), its own block of ten ports from 5
 project needs. For a typical web app that is a handful of containers and a
 few hundred MB, up in under a minute the first time. It is filled once: with a copy of the main local
 database's data when the project sets `copyFromMain` and the main stack is up —
-the same people with the same ids, so the objects they own in the bucket are
-already there — and with the project's seed otherwise.
+the same rows under the same ids, so whatever the project keeps outside the
+database under those ids is already there — and with the project's seed
+otherwise (a reset of it goes through `sclaude dev --rebuild-db`, which fills it
+again the same way).
 
 The copy goes into main's schema, not the feature's. A migration that inserts
 reference rows with generated ids gives them different ids in every stack, so
@@ -1174,12 +1181,16 @@ feature's and main's after a sync, are applied on every start.
 
 `.sclaude/local/feature/db.env` points the feature at it, and every process sclaude starts
 there sources it — the dev server, the local regression, the claude session.
-It carries `SUPABASE_WORKDIR`, so a bare `npx supabase db reset` typed in the
-session rebuilds this feature's database and no other; a hook refuses
+It carries `SUPABASE_WORKDIR`, so the database CLI typed in the session
+reaches this feature's database and no other. A plain `db reset` of it is
+refused (`supabase-own-reset`): it would empty the database for good, since
+the fill runs once, and the refusal sends the session to `sclaude dev
+--rebuild-db`, the same reset followed by the same fill. A hook refuses
 `--workdir` pointing anywhere else — in a call, or a heredoc a shell may run,
 not in one that `cat` or `tee` only writes to a file. The project decides the rest in
 `.sclaude/config.json` under `database.local` (see `sclaude/config.example.json`), and
-its own dotenv loading must let an exported value win over `.env.local`.
+its own dotenv loading must let an exported value win over its environment
+link (`envLink`, `.env.local` unless named).
 
 **Nothing runs that nobody uses.** `sclaude-proxy` starts a stopped feature on
 the first request for it — a page says it is starting and reloads until the
@@ -1196,8 +1207,9 @@ regression brings the feature up itself before its parts run.
 The stack is removed with its data when the feature is merged or abandoned,
 after the project's `teardown` — for example, deleting from object storage
 what the feature's people uploaded and the main database does not reference; it is told
-which people were copied and when, since their objects are partly the main
-database's.
+when the stack was filled (`SCLAUDE_DB_FILLED`), and asks the main database
+itself which of the stack's rows are its own — sclaude knows nothing of what a
+row is.
 The main repository keeps its own stack, and a feature on the shared cloud
 project has none. With Docker down sclaude starts it — Docker Desktop from WSL,
 or `docker.service` where sudo needs no password — and waits up to
@@ -1458,14 +1470,16 @@ epilogue and the clean-up, as after a "no". No answer at all is not a "no":
 nothing is closed or cleaned up, the issue hears of the merge, the feature
 stays on the question (`prod_pass.shipping`), and the next run asks it again.
 On a
-"yes" sclaude runs it itself: `vercel --prod` from the main repository, and if
+"yes" sclaude runs it itself: the product's production deploy (`deploy.prod`,
+`vercel --prod` where the product is on Vercel; with neither, production is
+never offered, as with `off`) from the main repository, and if
 the branch added migrations, the project's promote command first — whether one
 is needed sclaude determines by whether the branch touches the migrations
 directory. The chain breaks off at the first error, so that a promote that did
 not go through does not drag a deploy along with it. The production regression
 follows, and a red one rolls production back (see "Production rollback").
 A ship that fails is looked into at once, time being dear there: production
-keeps the release it had — `vercel --prod` switches it whole — but when the
+keeps the release it had — a deploy switches it whole — but when the
 promote began, the old code may stand on the new migrations, so production's
 suite runs against it first. Then a fixing session opens, told which command
 failed and, when it is red, what production's suite says. A fix in the code
@@ -2164,7 +2178,7 @@ merge before them would be offering to merge something nobody has checked. QA
 comes next and before the merge, because a verdict given after the merge can no
 longer hold anything back. The merge is the human's step, so it is offered
 rather than taken, and only once QA has passed the issue and GitHub says the way
-is clear. Production follows the merge because `vercel --prod` ships what is in
+is clear. Production follows the merge because its deploy ships what is in
 main.
 
 Step 4 used to close only on a merged pull request, and that ran this order

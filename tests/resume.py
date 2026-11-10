@@ -271,8 +271,12 @@ exec %s "$@"
         """
         prompts = os.path.join(self.root, "prompts.txt")
         open(prompts, "w").close()
+        # Nothing a session that runs this bench was started with: a prompt
+        # value or block sclaude exported into it read as this world's.
+        inherited = {k: v for k, v in os.environ.items()
+                     if not k.startswith(("SCLAUDE_B_", "SCLAUDE_V_"))}
         env = dict(
-            os.environ,
+            inherited,
             HOME=self.home,
             PATH=self.bin + os.pathsep + os.environ["PATH"],
             SCLAUDE_TEST_PROMPTS=prompts,

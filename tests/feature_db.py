@@ -266,6 +266,37 @@ def ensure_cases():
         check("migrations are applied every time",
               len([c for c in calls(root) if c.startswith("migration up")]), 2)
 
+        # `sclaude dev --rebuild-db`: the reset a session would have run, then
+        # the same fill — never the reset alone, which left the stack empty.
+        state_file = os.path.join(a, ".sclaude/local/feature", "state.json")
+        bash(root, 'state_set "%s" db.copied true' % state_file)
+        before = len(calls(root))
+        out = bash(root, 'db_rebuild "%s"' % a)
+        resets = [c for c in calls(root)[before:] if c.startswith("db reset")]
+        check("a rebuild resets the feature's own stack",
+              len(resets) == 1 and os.path.join(a, ".sclaude/local/feature/supabase") in resets[0], True)
+        check("and fills it again", open(seeded).read().count("run"), 2)
+        check("a rebuild ends ready", state(a).get("db", {}).get("ready"), True)
+        check("a seeded rebuild names no copied list", state(a).get("db", {}).get("copied"), False)
+        bash(root, 'ensure_db "%s"' % a)
+        check("the fill does not run again after a rebuild", open(seeded).read().count("run"), 2)
+        failing = os.path.join(root, "fails-reset")
+        with open(failing, "w") as fh:
+            fh.write('#!/usr/bin/env bash\n[[ "$1" == db ]] && exit 1\nexec "%s" "$@"\n' % cli)
+        os.chmod(failing, 0o755)
+        with open(os.path.join(a, ".sclaude/config.json")) as fh:
+            cfg = json.load(fh)
+        cfg["database"]["local"]["cli"] = failing
+        with open(os.path.join(a, ".sclaude/config.json"), "w") as fh:
+            json.dump(cfg, fh)
+        out = bash(root, 'db_rebuild "%s"; echo "rc=$?"' % a)
+        check("a failed reset is said and fills nothing",
+              "the reset failed" in out and "rc=1" in out
+              and open(seeded).read().count("run") == 2, True)
+        cfg["database"]["local"]["cli"] = cli
+        with open(os.path.join(a, ".sclaude/config.json"), "w") as fh:
+            json.dump(cfg, fh)
+
         # The id kept to what the Supabase CLI keeps, 40 characters of
         # [a-zA-Z0-9_.-]: the containers carry that form, so a longer id names
         # a container that is not there. A longer one ends in a hash, so two
@@ -395,7 +426,9 @@ def ensure_cases():
         check("off does not claim a failed start", "could not start it" in out, False)
 
         # Removing the tree removes the stack, data and all — after the
-        # project's teardown, which is told who was copied and when.
+        # project's teardown, which is told when the stack was filled, and is
+        # never handed a list of the stack's rows: what a row is, sclaude does
+        # not know.
         torn = os.path.join(root, "torn")
         with open(os.path.join(b, ".sclaude/config.json")) as fh:
             cfg = json.load(fh)
@@ -406,20 +439,12 @@ def ensure_cases():
             json.dump(cfg, fh)
         bash(root, 'state_set "%s/.sclaude/local/feature/state.json" db.filled 2026-09-23T10:00:00Z; ensure_db "%s"'
              % (b, b))
-        # A seeded stack: no list of copied people is named at all.
-        bash(root, 'db_remove "%s"' % b)
-        seen = open(torn).read().strip() if os.path.exists(torn) else ""
-        check("a seeded stack's teardown is named no copied list",
-              seen.startswith("|2026-09-23T10:00:00Z|http://127.0.0.1:"), True)
-        # A copied one: the list is named.
-        os.remove(torn)
         bash(root, 'state_set "%s/.sclaude/local/feature/state.json" db.copied true; ensure_db "%s"' % (b, b))
         before = len(calls(root))
         bash(root, 'db_remove "%s"' % b)
         seen = open(torn).read().strip() if os.path.exists(torn) else ""
-        check("teardown runs with the copied people, the time and the feature's env",
-              seen.startswith(os.path.join(b, ".sclaude/local/feature", "db-copied-users")
-                              + "|2026-09-23T10:00:00Z|http://127.0.0.1:"), True)
+        check("teardown runs with the time and the feature's env, and no list of rows",
+              seen.startswith("|2026-09-23T10:00:00Z|http://127.0.0.1:"), True)
         check("removal stops without a backup, after the teardown",
               any(c.startswith("stop --no-backup") for c in calls(root)[before:]), True)
 
@@ -447,9 +472,16 @@ def ensure_cases():
 
         # The preview stage runs with the credentials the deployment reads, not
         # with .env.local, which is localdb for the dev server's sake.
+        # The file is the one of the environment the product marks `deployed`,
+        # whatever it is called.
         pvf = os.path.join(a, ".env.preview")
         with open(pvf, "w") as fh:
             fh.write("Y=1\n")
+        with open(os.path.join(a, ".sclaude/config.json")) as fh:
+            cfg = json.load(fh)
+        cfg["environments"]["preview"] = {"env": ".env.preview", "deployed": True}
+        with open(os.path.join(a, ".sclaude/config.json"), "w") as fh:
+            json.dump(cfg, fh)
         preview = bash(root, 'source "$LIB/core/developer.sh"; source "$LIB/ship/regression.sh"; '
                              'regression_command e2e https://x.example "%s" preview' % a)
         prod = bash(root, 'source "$LIB/core/developer.sh"; source "$LIB/ship/regression.sh"; '
@@ -484,8 +516,6 @@ docker() {
       if [[ "$*" == *pg_dump* ]]; then
         [[ -f "$DUMP_FAILS" ]] && { echo "pg_dump: connection lost" >&2; return 1; }
         echo "INSERT INTO auth.users VALUES (1) ON CONFLICT DO NOTHING;"
-      elif [[ "$*" == *"select id from auth.users"* ]]; then
-        echo 11111111-1111-1111-1111-111111111111
       else
         cat >/dev/null
       fi ;;
@@ -509,9 +539,8 @@ docker() {
             bash(root, docker + 'ensure_db "%s"' % wt, {"DUMP_FAILS": flag})
         ok, broken = os.path.join(root, "ok"), os.path.join(root, "broken")
         check("a good copy is recorded", state(ok).get("db", {}).get("copied"), True)
-        check("a good copy lists the people it brought",
-              open(os.path.join(ok, ".sclaude/local/feature", "db-copied-users")).read().strip(),
-              "11111111-1111-1111-1111-111111111111")
+        check("a good copy reads none of the product's tables",
+              os.path.exists(os.path.join(ok, ".sclaude/local/feature", "db-copied-users")), False)
         check("a failed dump is not recorded as a copy",
               state(broken).get("db", {}).get("copied"), None)
         check("a failed dump falls back to the seed",

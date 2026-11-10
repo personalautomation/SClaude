@@ -35,7 +35,6 @@ KNOWN_PARTS = [
     ("build", ["build"]),
     ("migrations", ["check:migrations"]),
     ("schema", ["db:schema"]),
-    ("check:rls", ["check:rls"]),
     ("e2e", ["test:e2e", "e2e", "test:playwright"]),
 ]
 
@@ -58,8 +57,6 @@ MANUAL_PARTS = ("typecheck", "lint", "build")
 # Where a project might keep the two manuals. The pair is what step 1 reads
 # before it guesses at the scope, and step 3 updates in the same pull request.
 MANUAL_HINTS = [
-    ("app/(app)/help/page.tsx", "user-facing — what a person can do"),
-    ("app/(app)/help/technical/page.tsx", "technical — where things apply"),
     ("app/help/page.tsx", "user-facing — what a person can do"),
     ("app/help/technical/page.tsx", "technical — where things apply"),
     ("docs/help.md", "user-facing — what a person can do"),

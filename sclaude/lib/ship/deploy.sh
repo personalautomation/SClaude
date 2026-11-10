@@ -556,7 +556,8 @@ remind_prod() {
       info "  Merge it, then run: $SELF done $slug"
       info "  It removes the worktree and the branches. Production comes after"
       local promote_cmd; promote_cmd="$(project_get database.promote "$wt" 2>/dev/null || true)"
-      info "  that, from $REPO: git pull --ff-only, ${migrations:+${promote_cmd:-the promote command}, }then vercel --prod."
+      local ship_cmd; ship_cmd="$(prod_deploy_command)"
+      info "  that, from $REPO: git pull --ff-only, ${migrations:+${promote_cmd:-the promote command}, }then ${ship_cmd:-its deploy}."
     fi
     # No status session for waiting on the merge — a session per wait spent
     # money to restate the pull request's state — but the labels the preview
@@ -614,8 +615,14 @@ remind_prod() {
   # The project's say in the question (project_ship_mode): `auto` ships
   # without the plain one — the "anyway" ones below are still asked, since a
   # gate was passed over and nobody said yes to that — and `off` never ships.
-  local prod_note prod_ask ship_mode
+  local prod_note prod_ask ship_mode prod_cmd
   ship_mode="$(project_ship_mode "$wt")"
+  # A product that names no production deploy, and is not on Vercel, has
+  # nothing to ship with: production is never offered, as with ship off, and
+  # the history and the issue say so rather than that it shipped or was
+  # declined.
+  prod_cmd="$(prod_deploy_command)"
+  [[ -z "$prod_cmd" ]] && ship_mode=off
   if [[ "$merged_unchecked" -eq 1 ]]; then
     prod_note="Merged as a change nothing deploys, but it carried more — no regression, preview or QA ran on it."
     prod_ask="Ship to production anyway?"
@@ -707,10 +714,13 @@ remind_prod() {
   if [[ "$prod_same" -eq 1 ]]; then
     echo ""
     info "Production already at $(deploy_head "$wt" prod | cut -c1-8) — unchanged, skipping."
+  elif [[ -z "$prod_cmd" ]]; then
+    echo ""
+    info "Production: not offered — the product names no deploy (deploy.prod in .sclaude/config.json)."
   elif [[ "$ship_mode" == off ]]; then
     echo ""
     info "Production: not deployed — ship is off in the project config ($SELF config)."
-    info "  Ship it by hand when you choose: cd $REPO && git pull --ff-only && vercel --prod"
+    info "  Ship it by hand when you choose: cd $REPO && git pull --ff-only && $prod_cmd"
   elif [[ -n "$migrations" ]]; then
     # The promote's own commands come from the project: which script applies
     # migrations to production, which paths hold them and the schema snapshot,
@@ -731,7 +741,7 @@ remind_prod() {
       prod_cmds+=("git add $migrations_dir${schema_path:+ $schema_path}")
       # Only with something to commit: a promote of what production has
       # already (an earlier run's record, a rider's) changes no file, and a
-      # bare `git commit` then failed the block before `vercel --prod`.
+      # bare `git commit` then failed the block before the deploy.
       prod_cmds+=("git diff --cached --quiet || git commit -m 'chore(db): promote migrations for $slug'")
       prod_cmds+=("git push")
     else
@@ -739,7 +749,7 @@ remind_prod() {
       info "  They will not be applied to production by this block; .sclaude/config.json"
       info "  describes it under database.promote."
     fi
-    prod_cmds+=("vercel --prod")
+    prod_cmds+=("$prod_cmd")
     # What production uploads is the main tree, and sclaude keeps its own
     # folder there (scratch.sh).
     write_vercelignore "$REPO"
@@ -764,7 +774,7 @@ remind_prod() {
     fi
     if [[ -n "$snapshot" ]]; then
       environment_restore "$REPO" "$snapshot" \
-        || warn "  could not put the main tree's environment back — check: readlink $REPO/.env.local"
+        || warn "  could not put the main tree's environment back — check: readlink $(environment_link "$REPO")"
     fi
   else
     write_vercelignore "$REPO"
@@ -774,7 +784,7 @@ remind_prod() {
       "$prod_ask" \
       "cd $REPO" \
       "git pull --ff-only --autostash" \
-      "vercel --prod"; then
+      "$prod_cmd"; then
       prod_done=1
       deploy_remember "$wt" prod
     else
@@ -786,7 +796,7 @@ remind_prod() {
   # The way out of the question, for the history: the person's answer, the
   # project's ship setting, or nobody's.
   if [[ "$prod_same" -eq 0 && "$ship_mode" == off ]]; then
-    cycle_edge "$wt" ship epilogue setting "ship=off"
+    cycle_edge "$wt" ship epilogue setting "$([[ -n "$prod_cmd" ]] && echo "ship=off" || echo "no deploy.prod")"
   elif [[ "$prod_same" -eq 0 ]]; then
     local ship_by=person ship_how="$ASKED_HOW"
     [[ -z "$prod_ask" ]] && ship_by=setting ship_how="ship=auto"

@@ -47,6 +47,8 @@
 # "there is nothing there".
 vercel_prod_deployments() {
   local json
+  # Vercel's listing, for a product that deploys there; any other is unknown.
+  product_uses vercel || return 0
   json="$(cd "$REPO" && vercel ls --json --environment production --limit 20 \
             2>/dev/null)" || return 0
   [[ -n "$json" ]] || return 0
@@ -185,6 +187,10 @@ rollback_collateral() {
 # is the same question asked of the world rather than of a process.
 rollback_vercel() {
   local wt="$1" url="$2" rc waited=0
+  if ! product_uses vercel; then
+    warn "  Production is not on Vercel, and sclaude knows no other way to roll it back: roll it back by hand."
+    return 1
+  fi
 
   echo ""
   echo "${BLUE}\$ vercel rollback $url --yes --timeout 3m${OFF}"
@@ -598,7 +604,7 @@ rollback_apply_sql() {
   # Back to where the tree was, always — including after every early return
   # above, which is why they set the status and fall through to here.
   environment_restore "$REPO" "$snapshot" \
-    || warn "  could not put the main tree's environment back — check: readlink $REPO/.env.local"
+    || warn "  could not put the main tree's environment back — check: readlink $(environment_link "$REPO")"
   return 0
 }
 

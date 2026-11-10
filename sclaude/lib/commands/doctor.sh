@@ -51,8 +51,10 @@ doctor_tools() {
     || doctor_warn "script is not on PATH" "the terminal is not recorded for the retrospective before sclaude done: apt install bsdutils"
   command -v tmux >/dev/null 2>&1 && doctor_ok "tmux" \
     || doctor_warn "tmux is not on PATH" "the terminal recording cannot be read back for the retrospective: apt install tmux"
-  command -v vercel >/dev/null 2>&1 && doctor_ok "vercel" \
-    || doctor_warn "vercel is not on PATH" "needed only to ship previews and production: npm i -g vercel"
+  if product_uses vercel; then
+    command -v vercel >/dev/null 2>&1 && doctor_ok "vercel" \
+      || doctor_warn "vercel is not on PATH" "the product deploys to Vercel: npm i -g vercel"
+  fi
   case ":$PATH:" in
     *":$HOME/.local/bin:"*) doctor_ok "~/.local/bin is on PATH" ;;
     *) doctor_bad "~/.local/bin is not on PATH" "add it in your shell rc; install.sh links everything there" ;;

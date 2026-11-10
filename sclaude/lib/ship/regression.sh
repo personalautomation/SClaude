@@ -26,11 +26,10 @@
 # short label next to a duration, and so a failure can say which part failed
 # without quoting a command line back at the human.
 #
-# The suite is not given a list of specs per stage, and that is deliberate: the
-# project's own playwright.config.ts drops specs/account and specs/reading
-# wherever accounts may not be created (testIgnore on target.canWrite). Naming
-# them here would restate a rule that already exists in the one place that can
-# enforce it, and the two copies would drift the first time a group is added.
+# The suite is not given a list of specs per stage, and that is deliberate:
+# which of its tests may run against a deployed host is the suite's own rule,
+# kept in the one place that can enforce it. Naming them here would restate it,
+# and the two copies would drift the first time a group is added.
 #
 # What the stages really differ by is one variable. E2E_BASE_URL absent means
 # the dev server on this machine; set, it names a deployed host, and the suite
@@ -119,15 +118,18 @@ regression_command() {
     cmd="set -a; . $(printf '%q' "$wt/.sclaude/local/feature/db.env"); set +a; $cmd"
   fi
   # The preview stage runs against the credentials the deployment itself reads.
-  # A feature on the local stack has .env.local pointing at localdb — for its
-  # dev server's sake — and a suite seeding that database while it looks at a
-  # deployed preview checks nothing: the project's fixtures refuse to start on
-  # that combination. Switching .env.local would pull the dev server off its
-  # stack, so the preview file is sourced instead, the way db.env is above; a
-  # project's dotenv loading lets an already-set variable win. Only preview:
+  # A feature on the local stack has its environment link pointing at the
+  # local one — for its dev server's sake — and a suite seeding that database
+  # while it looks at a deployed preview checks nothing. Switching the link
+  # would pull the dev server off its stack, so the file of the environment
+  # the product marks `deployed` is sourced instead, the way db.env is above;
+  # a project's dotenv loading lets an already-set variable win. Only preview:
   # production is read-only by its host, and its credentials are never loaded.
-  if [[ -n "$browser" && "$stage" == "preview" && -n "$wt" && -f "$wt/.env.preview" ]]; then
-    cmd="set -a; . $(printf '%q' "$wt/.env.preview"); set +a; $cmd"
+  local previewenv=""
+  [[ -n "$browser" && "$stage" == "preview" && -n "$wt" ]] \
+    && previewenv="$(envs file "$wt" "$(envs deployed "$wt")")"
+  if [[ -n "$previewenv" && -f "$previewenv" ]]; then
+    cmd="set -a; . $(printf '%q' "$previewenv"); set +a; $cmd"
   fi
   # And against this feature's own dev server. E2E_LOCAL_URL is where the
   # suite looks for it — localhost:3000 is the proxy's list of features now —

@@ -156,7 +156,8 @@ def supabase(wt):
     else:
         name = envs.current(root, wt, data)
         if not name:
-            raise Refused("this tree's .env.local points at none of the project's environments")
+            raise Refused("this tree's %s points at none of the project's environments"
+                          % envs.link_name(root, data))
         if envs.protected(root, name, data) or not envs.runnable(root, name, data):
             raise Refused("this tree is on %s, which is not an environment to sign into "
                           "with one click" % name)

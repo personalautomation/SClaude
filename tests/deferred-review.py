@@ -51,6 +51,7 @@ session_watch_start() { :; }; session_watch_stop() { :; }; session_closed() { re
 claude_launch() { printf '%%s' "${@: -1}" > "%(out)s"; [[ -z "${DIRTY:-}" ]] || echo x > dirty.txt; }
 gh() { :; }
 link_node_modules() { echo "LINKED $REPO -> $1"; }
+deps_get() { [[ "$1" == dir ]] && echo node_modules; }
 cmd_deferred
 ''' % {"lib": LIB, "prompts": PROMPTS, "root": ROOT, "out": prompt_out}
     env = dict(os.environ, DIRTY="1" if dirty else "", SCLAUDE_DEV="tester")

@@ -46,6 +46,18 @@ render_prompt() {
   # And its own database, when it has one: the conditional paragraph about it
   # drops out of the prompt otherwise.
   local -x SCLAUDE_V_DB_API=""
+  # The CLI the product runs its local database with (database.local.cli), so
+  # the prompt names that command and not one stack's spelling of it.
+  local -x SCLAUDE_V_DB_CLI=""
+  [[ -n "$wt" ]] && declare -F db_cli >/dev/null && SCLAUDE_V_DB_CLI="$(db_cli "$wt")"
+  # The product's own dev command, its test runner and its hosting, so the
+  # prompt says only what holds for this product (dev_command, testRunner,
+  # product_uses).
+  local -x SCLAUDE_V_DEV_CMD="the dev command" SCLAUDE_V_PLAYWRIGHT="" SCLAUDE_V_VERCEL=""
+  declare -F dev_command >/dev/null && SCLAUDE_V_DEV_CMD="$(dev_command "${wt:-${REPO:-.}}")"
+  [[ "$(project_get testRunner "${wt:-${REPO:-.}}" 2>/dev/null || echo playwright)" == playwright ]] \
+    && SCLAUDE_V_PLAYWRIGHT=1
+  declare -F product_uses >/dev/null && product_uses vercel && SCLAUDE_V_VERCEL=1
   # The shared environment the feature works against, if it is not the local
   # one — the prompt then says what not to do there.
   local -x SCLAUDE_V_SHARED_DB=""

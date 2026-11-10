@@ -36,6 +36,9 @@
 #   policy.py flags <product root> <person> [step [tree]]  disallowed, then allowed,
 #                                                   one Claude rule per line,
 #                                                   a blank line between
+#   policy.py uses <product root> <integration>    exit 0 when the product uses it
+#                                                   (named in the team's
+#                                                   `integrations`, or detected)
 import json
 import os
 import shlex
@@ -284,6 +287,12 @@ def claude_rule(command):
 
 
 def main(argv):
+    if len(argv) == 3 and argv[0] == "uses":
+        try:
+            names = merged(argv[1])["integrations"]
+        except Exception:  # noqa: BLE001 — unreadable presets: none is on
+            return 1
+        return 0 if argv[2] in names else 1
     if len(argv) < 3 or argv[0] not in ("json", "flags"):
         sys.stderr.write(__doc__ or "")
         return 2

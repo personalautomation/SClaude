@@ -112,6 +112,8 @@ write_vercelignore() {
   local wt="$1"
   local f="$wt/.vercelignore" missing
   [[ -n "$wt" && -d "$wt" ]] || return 0
+  # Vercel's file, for a product that deploys there and no other.
+  if declare -F product_uses >/dev/null && ! product_uses vercel; then return 0; fi
   missing="$(vercelignore_missing "$wt")"
   [[ -n "$missing" ]] || return 0
   if vercelignore_tracked "$wt"; then

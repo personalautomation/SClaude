@@ -202,8 +202,12 @@ regression_fix() {
   effort="$(step_effort "$step")"
   mode="$(step_mode "$step")"
 
-  local -x SCLAUDE_B_REGRESSION
-  SCLAUDE_B_REGRESSION="$(regression_fix_block "$wt" "$stage" "$merged" gate)"
+  # Handed to render_prompt for its one call, never exported here: exported,
+  # it rode into the session's environment, and everything the session ran
+  # under it — a test of sclaude's own, a nested render — read a regression
+  # block that was not its own.
+  local block
+  block="$(regression_fix_block "$wt" "$stage" "$merged" gate)"
 
   local settings
   # 5: not started, for sclaude's own trouble rather than the branch's, so the
@@ -300,12 +304,12 @@ regression_fix() {
     # status, and the session knows anyway.
     prompt="$(printf '**The %s %s again.** If you ended last time on a note, it was taken off: write `.sclaude/local/feature/regression.blocked` again if the cause is still outside this tree, or this session ends as a fix that did not hold.\n\n%s\n\n%s\n' \
       "$stage" "$([[ "$failed" == "the deploy" ]] && echo "deploy failed" || echo "regression ran again and failed on the same part")" \
-      "$(marker_gone .sclaude/local/feature/session-done)" "$SCLAUDE_B_REGRESSION")"
+      "$(marker_gone .sclaude/local/feature/session-done)" "$block")"
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --resume "$session" \
         --model "$model" --effort "$effort" \
         --permission-mode "$mode" "${extra[@]}" -n "$name" "$prompt" )
   else
-    prompt="$(render_prompt "$step" "$slug" "$pr" "$issue" "$wt")"
+    prompt="$(SCLAUDE_B_REGRESSION="$block" render_prompt "$step" "$slug" "$pr" "$issue" "$wt")"
     ( cd "$wt" && dev_env_load "$wt" && claude_launch --session-id "$session" \
         --model "$model" --effort "$effort" \
         --permission-mode "$mode" "${extra[@]}" -n "$name" "$prompt" )

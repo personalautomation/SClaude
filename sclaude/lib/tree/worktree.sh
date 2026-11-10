@@ -124,7 +124,7 @@ force_env() {
   # dev server kept off it (2).
   warn ""
   warn "  switching this worktree to $want failed, and it is on ${now:-an unknown environment}."
-  warn "  No dev server runs in it until that is fixed: readlink $wt/.env.local"
+  warn "  No dev server runs in it until that is fixed: readlink $(environment_link "$wt")"
   return 2
 }
 
@@ -132,16 +132,53 @@ force_env() {
 # the lockfile it installed, which check_deps reads.
 DEPS_MARK=".sclaude-lock"
 
-deps_lock_hash() {
-  sha256sum "$1/package-lock.json" 2>/dev/null | cut -d' ' -f1
+# The product's dependencies (`deps` in its config): the folder they install
+# into (dir), the lockfile that pins them, the command that installs them in
+# place (install) and from scratch (ci), and a cache their old versions leave
+# behind (cache, "" for none). The presets are npm's; a tree without the
+# lockfile or the folder has nothing done to it, and a product that sets the
+# folder or the lockfile to "" has no dependencies sclaude handles.
+deps_get() {
+  local key="$1" wt="${2:-${REPO:-}}" value
+  if value="$(project_get "deps.$key" "$wt" 2>/dev/null)"; then
+    echo "$value"
+    return 0
+  fi
+  case "$key" in
+    dir)      echo node_modules ;;
+    lockfile) echo package-lock.json ;;
+    install)  echo "npm install" ;;
+    ci)       echo "npm ci" ;;
+    cache)    echo ".next/dev" ;;
+  esac
 }
 
-# npm install in a tree, and the mark when it finished.
+# The cache old dependencies leave in a tree, removed with them.
+deps_drop_cache() {
+  local cache; cache="$(deps_get cache "$1")"
+  [[ -n "$cache" && "$cache" != /* && "$cache" != *..* ]] && rm -rf "${1:?}/$cache"
+  return 0
+}
+
+# Whether the product has dependencies sclaude handles: a folder and a
+# lockfile named. Without this, `rm -rf "$wt/$dir"` on an empty dir would be
+# the whole tree.
+deps_named() {
+  [[ -n "$(deps_get dir "$1")" && -n "$(deps_get lockfile "$1")" ]]
+}
+
+deps_lock_hash() {
+  sha256sum "$1/$(deps_get lockfile "$1")" 2>/dev/null | cut -d' ' -f1
+}
+
+# The product's install in a tree, and the mark when it finished.
 deps_install() {
-  if ( cd "$1" && npm install ); then
-    deps_lock_hash "$1" > "$1/node_modules/$DEPS_MARK" 2>/dev/null || true
+  deps_named "$1" || return 0
+  local install; install="$(deps_get install "$1")"
+  if ( cd "$1" && eval "$install" ); then
+    deps_lock_hash "$1" > "$1/$(deps_get dir "$1")/$DEPS_MARK" 2>/dev/null || true
   else
-    warn "  npm install failed"
+    warn "  $install failed"
   fi
 }
 
@@ -249,7 +286,7 @@ deps_lock_file() {
 # finished install leaves DEPS_MARK as a tree's does; with no mark yet, npm's
 # own hidden lockfile newer than the lockfile says the install is current.
 refresh_main() {
-  local branch
+  local branch askf
   branch="$(git -C "$REPO" symbolic-ref -q --short HEAD 2>/dev/null || true)"
   if [[ "$branch" != main ]]; then
     warn "  the main checkout is on ${branch:-a detached HEAD}, not main: left as it is,"
@@ -259,36 +296,80 @@ refresh_main() {
   # The fast-forward and the install under one lock: a second start moving
   # the lockfile while the first installs would leave the first marking
   # packages it never installed.
+  askf="$(mktemp)"
   (
     flock 9
-    local hash mark pid
+    local hash mark pid dir ci
     if ! git -C "$REPO" merge -q --ff-only origin/main >/dev/null 2>&1; then
       warn "  the main checkout could not be fast-forwarded to origin/main (an edit in"
       warn "  the way, or commits of its own): left as it is. Once it is not:"
       warn "  git -C $REPO merge --ff-only origin/main"
     fi
-    [[ -f "$REPO/package-lock.json" && -d "$REPO/node_modules" ]] || exit 0
+    deps_named "$REPO" || exit 0
+    dir="$(deps_get dir "$REPO")"
+    ci="$(deps_get ci "$REPO")"
+    [[ -f "$REPO/$(deps_get lockfile "$REPO")" && -d "$REPO/$dir" ]] || exit 0
     hash="$(deps_lock_hash "$REPO")"
-    mark="$(cat "$REPO/node_modules/$DEPS_MARK" 2>/dev/null || true)"
+    mark="$(cat "$REPO/$dir/$DEPS_MARK" 2>/dev/null || true)"
     [[ -n "$hash" && "$mark" == "$hash" ]] && exit 0
-    if [[ -z "$mark" && "$REPO/node_modules/.package-lock.json" -nt "$REPO/package-lock.json" ]]; then
-      printf '%s\n' "$hash" > "$REPO/node_modules/$DEPS_MARK" 2>/dev/null || true
+    # npm keeps a hidden copy of the lockfile it installed; newer than the
+    # lockfile, the install is current. Other tools keep none, and are asked.
+    if [[ -z "$mark" && "$REPO/$dir/.package-lock.json" -nt "$REPO/$(deps_get lockfile "$REPO")" ]]; then
+      printf '%s\n' "$hash" > "$REPO/$dir/$DEPS_MARK" 2>/dev/null || true
+      exit 0
+    fi
+    # Only npm's install is run unasked: main_node_pid sees what works in
+    # npm's folder, and what holds another tool's folder it cannot tell. So
+    # another tool's is asked about, below and outside the lock — a question
+    # can wait for hours, and every other start would wait on it — and its
+    # mark written when it ran here: a file's time in the folder is no proof
+    # of an install.
+    if [[ "$dir" != node_modules ]]; then
+      printf '%s\n' "$hash" > "$askf"
       exit 0
     fi
     pid="$(main_node_pid)"
     if [[ -n "$pid" ]]; then
       warn "  the main checkout's lockfile changed, but a Node process works in it (pid $pid):"
-      warn "  its node_modules was not reinstalled. Once it ends: (cd $REPO && npm ci)"
+      warn "  its $dir was not reinstalled. Once it ends: (cd $REPO && $ci)"
       exit 0
     fi
-    info "  node_modules: the main checkout's lockfile changed — npm ci there…"
-    if ( cd "$REPO" && npm ci ); then
-      rm -rf "$REPO/.next/dev"
-      printf '%s\n' "$hash" > "$REPO/node_modules/$DEPS_MARK" 2>/dev/null || true
+    info "  $dir: the main checkout's lockfile changed — $ci there…"
+    if ( cd "$REPO" && eval "$ci" ); then
+      deps_drop_cache "$REPO"
+      printf '%s\n' "$hash" > "$REPO/$dir/$DEPS_MARK" 2>/dev/null || true
     else
-      warn "  npm ci failed in the main checkout: run it there by hand — (cd $REPO && npm ci)"
+      warn "  $ci failed in the main checkout: run it there by hand — (cd $REPO && $ci)"
     fi
   ) 9>"$(deps_lock_file)"
+  if [[ -s "$askf" ]]; then
+    local dir ci answer=""
+    dir="$(deps_get dir "$REPO")"
+    ci="$(deps_get ci "$REPO")"
+    warn "  the main checkout's lockfile changed, and its $dir may be behind it."
+    ask "  Run $ci there now? Nothing should be running in it. [y/n] " answer yn || answer=""
+    if is_yes "$answer"; then
+      # The lock again, and the lockfile and the mark looked at again: the
+      # question may have waited hours, and another start fast-forwarded and
+      # installed meanwhile. The mark is the hash installed now, not the one
+      # the question was asked about.
+      (
+        flock 9
+        local now; now="$(deps_lock_hash "$REPO")"
+        [[ -n "$now" && "$(cat "$REPO/$dir/$DEPS_MARK" 2>/dev/null)" == "$now" ]] && exit 0
+        if ( cd "$REPO" && eval "$ci" ); then
+          deps_drop_cache "$REPO"
+          printf '%s\n' "$now" > "$REPO/$dir/$DEPS_MARK.tmp" 2>/dev/null \
+            && mv "$REPO/$dir/$DEPS_MARK.tmp" "$REPO/$dir/$DEPS_MARK" 2>/dev/null || true
+        else
+          warn "  $ci failed in the main checkout: run it there by hand — (cd $REPO && $ci)"
+        fi
+      ) 9>"$(deps_lock_file)"
+    else
+      warn "  its $dir was not reinstalled. When nothing runs there: (cd $REPO && $ci)"
+    fi
+  fi
+  rm -f "$askf"
 }
 
 # Hard links rather than a symlink to a directory: Turbopack refuses to work
@@ -298,16 +379,18 @@ refresh_main() {
 # data is not duplicated: about 10 seconds and almost no space, while the
 # directory is a real one.
 link_node_modules() {
-  local wt="$1"
-  [[ -d "$REPO/node_modules" ]] || { warn "  the main repo has no node_modules — skipping"; return; }
-  [[ -e "$wt/node_modules" ]] && return
+  local wt="$1" dir
+  deps_named "$wt" || return 0
+  dir="$(deps_get dir "$wt")"
+  [[ -d "$REPO/$dir" ]] || { warn "  the main repo has no $dir — skipping"; return; }
+  [[ -e "$wt/$dir" ]] && return
   # A symlink from earlier versions: it breaks Turbopack, so we replace it with
   # links.
-  [[ -L "$wt/node_modules" ]] && rm -f "$wt/node_modules"
-  info "  node_modules: hard-linking from the main repo…"
-  # Under refresh_main's lock: never from a directory npm ci is rebuilding.
-  if ( flock -s 9; cp -al "$REPO/node_modules" "$wt/node_modules" ) 9>"$(deps_lock_file)" 2>/dev/null; then
-    info "  node_modules: done"
+  [[ -L "$wt/$dir" ]] && rm -f "$wt/$dir"
+  info "  $dir: hard-linking from the main repo…"
+  # Under refresh_main's lock: never from a directory a clean install is rebuilding.
+  if ( flock -s 9; cp -al "$REPO/$dir" "$wt/$dir" ) 9>"$(deps_lock_file)" 2>/dev/null; then
+    info "  $dir: done"
   else
     # Different filesystems or links refused — then an honest install.
     warn "  hard links did not work out, installing dependencies instead"
@@ -337,22 +420,25 @@ link_node_modules() {
 # it installed (DEPS_MARK), and a tree whose lockfile still has that hash is
 # not asked.
 check_deps() {
-  local wt="$1" answer hash
-  [[ -d "$wt/node_modules" ]] || return 0
-  cmp -s "$REPO/package-lock.json" "$wt/package-lock.json" && return 0
+  local wt="$1" answer hash dir lock
+  deps_named "$wt" || return 0
+  dir="$(deps_get dir "$wt")"
+  lock="$(deps_get lockfile "$wt")"
+  [[ -d "$wt/$dir" ]] || return 0
+  cmp -s "$REPO/$lock" "$wt/$lock" && return 0
   hash="$(deps_lock_hash "$wt")"
-  [[ -n "$hash" && "$(cat "$wt/node_modules/$DEPS_MARK" 2>/dev/null)" == "$hash" ]] && return 0
+  [[ -n "$hash" && "$(cat "$wt/$dir/$DEPS_MARK" 2>/dev/null)" == "$hash" ]] && return 0
   warn ""
-  warn "  package-lock.json here differs from the main repo's (the branch or the main"
-  warn "  checkout moved), and node_modules was linked from there: it may not match."
-  ask "  Run npm install in this worktree? [y/n] " answer yn
+  warn "  $lock here differs from the main repo's (the branch or the main"
+  warn "  checkout moved), and $dir was linked from there: it may not match."
+  ask "  Run $(deps_get install "$wt") in this worktree? [y/n] " answer yn
   if is_yes "$answer"; then
-    # npm install edits the directory in place, and hard links share files with
+    # An install edits the directory in place, and hard links share files with
     # the main repo — the edit would reach there too. So we tear it down and
     # install from scratch.
     stop_own_dev "$wt" && info "  dev server: stopped for the reinstall, it starts again fresh"
-    rm -rf "$wt/.next/dev"
-    rm -rf "$wt/node_modules"
+    deps_drop_cache "$wt"
+    rm -rf "${wt:?}/$dir"
     deps_install "$wt"
   fi
 }
@@ -870,10 +956,11 @@ ensure_dev() {
   # address, and left at localhost:3000 they lead to the list of features — or,
   # through a cookie, to another feature entirely. What the app does with it is
   # the project's business; sclaude only says it.
-  local url; url="$(dev_address "$wt")"
+  local url devcmd; url="$(dev_address "$wt")"
+  devcmd="$(dev_command "$wt")"
   log_new "$wt" dev.log dev
   ( cd "$wt" && dev_env_load "$wt" && dev_net_env && PORT="$port" SCLAUDE_DEV_URL="$url" \
-      setsid --fork npm run dev > "$log" 2>&1 < /dev/null & ) >/dev/null 2>&1
+      SCLAUDE_DEV_TREE="$wt" setsid --fork bash -c "$devcmd" > "$log" 2>&1 < /dev/null & ) >/dev/null 2>&1
 
   if [[ -z "$DEV_PORT_PINNED" ]] && ! proxy_up; then
     warn "  sclaude-proxy is not answering on :$PROXY_PORT — use the port directly,"
@@ -894,13 +981,30 @@ ensure_dev() {
     [[ -n "$(dev_pid "$port")" ]] && { info "  dev server: up on $(dev_address "$wt")"; dev_exposed_warn "$wt" "$port"; return 0; }
   done
   # The port is not open yet — that is normal for a cold build, but not when the
-  # process is already dead. The difference is visible from whether a single next
-  # is alive in this directory.
-  if pgrep -f "$wt.*next" >/dev/null 2>&1 || pgrep -f "scripts/dev.mjs" >/dev/null 2>&1; then
+  # process is already dead. The difference is whether a process of its own
+  # session still works in this tree (dev_alive).
+  if dev_alive "$wt"; then
     info "  dev server: building, $(dev_address "$wt") opens in a minute (log: .sclaude/local/feature/dev.log)"
   else
     warn "  the dev server did not start — see $log"
   fi
+}
+
+# The command that runs the product's dev server (`commands.dev`), `npm run
+# dev` when the config names none. It is told where to listen by PORT.
+dev_command() {
+  project_get commands.dev "$1" 2>/dev/null || echo "npm run dev"
+}
+
+# Whether the dev server started in this tree is still alive, port open or
+# not: every process it started carries SCLAUDE_DEV_TREE=<tree> in its
+# environment, whatever it runs and whatever it calls itself.
+dev_alive() {
+  local proc want="SCLAUDE_DEV_TREE=$1"
+  for proc in /proc/[0-9]*; do
+    grep -qzxF -- "$want" "$proc/environ" 2>/dev/null && return 0
+  done
+  return 1
 }
 
 # --- the browser -------------------------------------------------------------
@@ -1137,35 +1241,6 @@ side_worktrees_offer() {
   done < <(git -C "$REPO" worktree list --porcelain 2>/dev/null | awk '
     /^worktree /{ p = substr($0, 10) }
     /^branch refs\/heads\//{ print p "\t" substr($0, 19) }')
-}
-
-# tsconfig.json includes .next/types, where Next writes the types of its routes —
-# LayoutProps among them. That is a build product, it is not in git, and in a
-# fresh worktree `npm run typecheck` dies on names it cannot find until a build
-# has happened. In the main repo the directory is always there from the last
-# `npm run dev`, so this can be run into exactly here. A symlink to a shared
-# .next will not do: a `next dev` in the worktree would overwrite the main repo's
-# build. A typecheck script that runs `next typegen` writes the types itself,
-# and there is nothing to warn about — whether it says so in package.json or in
-# a file of the worktree that the script runs (`bash scripts/typecheck.sh`).
-check_next_types() {
-  local wt="$1" cmd word words=()
-  [[ -f "$wt/tsconfig.json" ]] || return 0
-  grep -q '\.next/types' "$wt/tsconfig.json" || return 0
-  cmd="$(grep -o '"typecheck": *"[^"]*"' "$wt/package.json" 2>/dev/null)"
-  [[ "$cmd" == *"next typegen"* ]] && return 0
-  cmd="${cmd#*: *\"}"
-  # Words split at the shell's separators too: `bash scripts/a.sh&&tsc`.
-  cmd="${cmd%\"}"
-  read -ra words <<< "${cmd//[&;|]/ }"
-  for word in "${words[@]}"; do
-    [[ "$word" == */* && -f "$wt/$word" ]] && grep -q 'next typegen' "$wt/$word" && return 0
-  done
-  [[ -d "$wt/.next/types" ]] && return 0
-  warn ""
-  warn "  this worktree has no .next/types yet — npm run typecheck will fail on"
-  warn "  LayoutProps and its like until the first build has run."
-  warn "  Either one fixes it: npm run dev or npm run build."
 }
 
 # The internal paths sclaude creates itself (SCRATCH_PATHS) and how they are
@@ -1414,7 +1489,6 @@ prepare_worktree() {
   ensure_linked "$wt"
   link_node_modules "$wt"
   check_deps "$wt"
-  check_next_types "$wt"
   scratch_hide "$REPO"
   write_vercelignore "$wt"
 }

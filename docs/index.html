@@ -63,7 +63,10 @@ code{font-family:var(--mono);font-size:.9em;background:var(--surface-2);padding:
 .brand:hover{text-decoration:none}
 .brand img{width:34px;height:auto}
 .brand b{font-weight:600;color:var(--glow)}
-.hero-mark{position:absolute;right:24px;top:50%;transform:translateY(-50%);width:min(30vw,380px);opacity:.92;filter:drop-shadow(0 0 60px rgba(0,240,200,.18));pointer-events:none}
+/* The mark stands beside the headline block, centred on it rather than on
+   the whole hero with its figures below. */
+.hero-main{position:relative}
+.hero-mark{position:absolute;right:0;top:50%;transform:translateY(-50%);width:min(26vw,44vh,330px);opacity:.8;filter:drop-shadow(0 0 60px rgba(0,240,200,.18));pointer-events:none}
 @media (max-width:1100px){.hero-mark{display:none}}
 .foot-brand{display:inline-flex;align-items:center;gap:10px}
 .foot-brand img{width:26px;height:auto}
@@ -449,6 +452,7 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
 
 <header class="hero" id="top">
   <div class="wrap">
+    <div class="hero-main">
     <img class="hero-mark" src="media/brand/mark.svg" alt="" width="380" height="356">
     <span class="eyebrow"><i></i>Open source · MIT · built on Claude Code</span>
     <h1>AI speed is easy to buy. <em>Control</em> has to be designed.</h1>
@@ -456,6 +460,7 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
     <div class="cta">
       <a class="btn btn-primary" href="#watch">▶&nbsp; Watch the videos</a>
       <a class="btn btn-ghost" href="https://github.com/personalautomation/SClaude">Get it on GitHub</a>
+    </div>
     </div>
     <div class="stats">
       <div class="stat"><b>10–20%</b><span>productivity improvement observed in the team</span></div>

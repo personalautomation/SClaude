@@ -1049,7 +1049,7 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
 })();
 (function(){
   // Settle on a screen: once scrolling has stopped for a moment, and the
-  // next screen in the scroll's direction starts within 40% of the window,
+  // next screen in the scroll's direction starts within 46% of the window,
   // glide to it, easing in and out. Farther away, the page stays where the
   // reader left it; a turn of the wheel during the glide stops it. Not on
   // phones, short windows, with the deck open, or for readers who want
@@ -1057,7 +1057,7 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
   var big=window.matchMedia('(min-width:761px) and (min-height:701px)');
   var calm=window.matchMedia('(prefers-reduced-motion: reduce)');
   var screens=[].slice.call(document.querySelectorAll('.hero, section'));
-  var timer=null, gliding=false, NAV=60, REACH=0.4, WAIT=150, GLIDE=700;
+  var timer=null, gliding=false, NAV=60, REACH=0.46, WAIT=150, GLIDE=700;
   var lastY=window.scrollY, dir=0, frame=0;
   var ease=function(x){ return x<.5 ? 4*x*x*x : 1-Math.pow(-2*x+2,3)/2; };
   function stop(){ if(gliding){ cancelAnimationFrame(frame); gliding=false; lastY=window.scrollY; } }

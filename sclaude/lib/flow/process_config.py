@@ -357,7 +357,7 @@ COMMANDS = [
     ("sclaude core-ready", "", "in a session", "mark the workshop's change ready to publish", "w_ready"),
     ("sclaude propose", "", "a developer's branch", "send dev/<name>'s commits to sclaude as a PR", "w_pr"),
     ("sclaude workshop", "", "always", "a session that changes sclaude with you, in a worktree of its own", ""),
-    ("sclaude core-send", "", "a workshop change held", "send the tree's held change to sclaude after all", "w_send"),
+    ("sclaude core-send", "", "a workshop change waiting", "answer send to the question the tree's workshop change waits on", "w_decide"),
     ("sclaude update", "", "always", "take sclaude's main now, whatever sclaude.update says", ""),
 ]
 

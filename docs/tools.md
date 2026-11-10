@@ -238,6 +238,13 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   its "this map only" box keeps a play on the map it started from, the friction reviews,
   regressions and syncs left out rather than opened on their maps — a steady view to watch or
   record. The box is remembered, and ticking it during a play starts that play again.
+  The page's address follows what you see, as you scroll and click: the
+  section in view, the boxes ticked, the panel's tab, what is selected, and a
+  play — which map, which pass, the place it is at, its speed, "this map
+  only" and paused. Copy the address and it opens the page as it was, a play
+  resumed at that place; the printable map (`/__sclaude/bpmn`,
+  `bpmn_diagrams.html`) keeps its section, selection and pinned commands the
+  same way.
 - `localhost:3000/__sclaude/dora` — the product's metrics, linked under main
   as "main — DORA metrics": DORA, delivery, development quality, Claude's work
   and token efficiency. Production deploys and builds come from Vercel, each

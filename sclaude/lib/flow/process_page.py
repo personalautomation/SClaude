@@ -96,15 +96,15 @@ def _page(label, demo=None):
 <label title="How long the feature stood on each place, every stay added up — what the player's clock shows; ⚠ where a conversation ended with no end written (a Ctrl-C, a terminal that died) and its time is a guess, up to the last line it wrote"><input type="checkbox" value="time"> ⏱ time in the step <b class="mt-total" data-kind="time"></b></label></div>
 <div class="live" style="margin-top:14px">
 <div>
-<h2 class="first-map">The whole process%s</h2>
+<h2 class="first-map" id="map-detail">The whole process%s</h2>
 <div class="card detail-card">%s</div>
-<h2>The cycle at a glance%s</h2><div class="card mini">%s</div>
+<h2 id="map-overview">The cycle at a glance%s</h2><div class="card mini">%s</div>
 <h2 id="map-workshop">How a session changes sclaude%s</h2><div class="card mini">%s</div>
 <h2 id="map-friction">The friction review%s</h2><div class="card mini">%s</div>
 <h2 id="map-regression">A stage's regression%s</h2><div class="card mini">%s</div>
 <h2 id="map-sync">Main and the branch%s</h2><div class="card mini">%s</div>
 <h2 id="map-parts">A feature built in parts%s</h2><div class="card mini">%s</div>
-<h2>Every command</h2>%s
+<h2 id="commands">Every command</h2>%s
 </div>
 <aside class="panel">
 <div class="tabs" role="tablist"><button type="button" data-tab="actions" class="on">Actions</button><button type="button" data-tab="history">History</button></div>
@@ -122,7 +122,7 @@ def _page(label, demo=None):
 </div>
 <button id="clear" type="button" hidden>Clear the selection</button>
 %s
-</main><script>%s%s%s</script></body></html>
+</main><script>%s%s%s%s</script></body></html>
 """ % (process_diagram.esc(label), process_diagram.STYLE, LIVE_STYLE + PLAY_STYLE, process_diagram.esc(label),
        ' · <a href="%s">🎬 demo: %s</a>' % (process_diagram.esc(demo[0]), process_diagram.esc(demo[1])) if demo else "",
        process_diagram.esc(label), process_diagram.LEGEND,
@@ -134,4 +134,4 @@ def _page(label, demo=None):
        play_head("sync", "Main and the branch", passes=True), process_diagram.Diagram(*process_config.node_sets()[5]).svg(),
        play_head("parts", "A feature built in parts", passes=True), process_diagram.Diagram(*process_config.node_sets()[6]).svg(),
        process_doc.commands_table(), PLAYER_BAR,
-       process_doc.INTERACT_SCRIPT.replace("/*MODEL*/", json.dumps(process_doc.client_model())), PLAY_SCRIPT, script)
+       process_doc.INTERACT_SCRIPT.replace("/*MODEL*/", json.dumps(process_doc.client_model())), PLAY_SCRIPT, script, process_doc.URL_SCRIPT)

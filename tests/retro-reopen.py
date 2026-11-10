@@ -150,11 +150,15 @@ check("done-resumes-the-feature",
       'retro_reopen "$wt" "$pr" "$slug"' in body and 'cmd_resume "$slug"' in body, True)
 check("no-change-reopen-stops-the-watch", 'watch_stop "$slug"\n    issue_hold_open "$issue"' in body, True)
 # sclaude's code changed under the clean-up: it goes on in a fresh process by
-# itself, not by a command the person has to type (and may type wrong).
-check("done-goes-on-fresh", body.count('done_fresh "$slug"'), 3)
+# itself, not by a command the person has to type (and may type wrong): after
+# the workshop published before the retrospective, and after the
+# retrospective's own (the retry that came third is gone: a stopped change
+# is the person's question now, and the clean-up waits for its answer).
+check("done-goes-on-fresh", body.count('done_fresh "$slug"'), 2)
 # After the retrospective the fresh run does not ask about it again; before
 # it, it holds it.
-check("fresh-run-after-the-retro", body.count('done_fresh "$slug" "$retro_flag"'), 2)
+check("fresh-run-after-the-retro", body.count('done_fresh "$slug" "$retro_flag"'), 1)
+check("clean-up-waits-for-the-workshop", 'if [[ "$(workshop_state "$wt")" != none ]]; then' in body, True)
 check("fresh-run-keeps-the-word", 'done_fresh "$slug" "${retro_ran_here:+retro}"' in body, True)
 check("fresh-run-skips-it-once", 'if [[ -z "$retro_ran_here" ]]; then\n    run_retro' in body
       and "unset SCLAUDE_DONE_RETRO_RAN" in body, True)

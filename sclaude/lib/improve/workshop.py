@@ -16,10 +16,10 @@
 #   put <record> <key> <json>             set one, dotted too (null removes it)
 #   ready <record> <session> <head> <how> the session finished and reviewed its
 #                                         change at <head>, by <how>; publish it
-#   pending <record> <session> <cwd> <args…>
-#                                         remember a session that left its
-#                                         change unfinished, to offer it back
-#   pending-args <record>                 its cwd and arguments, NUL-separated
+#   reopen <record> <session> <cwd> <args…>
+#                                         remember the session that made the
+#                                         change, for the person to reopen it
+#   reopen-args <record>                  its cwd and arguments, NUL-separated
 #   leaks <workshop> <base> <tree>        what in base..HEAD names the product
 #   squash-message <workshop> <base>      one message for base..HEAD
 #
@@ -221,16 +221,16 @@ def main(argv):
             node[last] = value
         save(args[0], data)
         return 0
-    if cmd == "pending":
+    if cmd == "reopen":
         data = load(args[0])
-        data["pending"] = {"session": args[1], "cwd": args[2], "args": args[3:]}
+        data["reopen"] = {"session": args[1], "cwd": args[2], "args": args[3:]}
         save(args[0], data)
         return 0
-    if cmd == "pending-args":
-        pending = load(args[0]).get("pending") or {}
-        if not pending.get("args"):
+    if cmd == "reopen-args":
+        reopen = load(args[0]).get("reopen") or {}
+        if not reopen.get("args"):
             return 1
-        sys.stdout.write("\0".join([pending.get("cwd") or "."] + pending["args"]) + "\0")
+        sys.stdout.write("\0".join([reopen.get("cwd") or "."] + reopen["args"]) + "\0")
         return 0
     if cmd == "leaks":
         found = leaks(*args[:3])

@@ -831,97 +831,90 @@ records the head as ready. For a maintainer of sclaude the review is sreview:
 it is whatever review they choose, named with `--review`, and the
 maintainer's review of the pull request is the gate.
 
-**The machine's say in the leak question.** `workshop_leaks` asks "Publish it
-anyway?" by `sclaude.leaks` (`leaks_mode` in `developer.sh`): `ask`, also what
-unset means, asks; `auto` shows the lines and goes on; `off` holds the change
-(1, as a no). Under `sclaude core-send` an `off` asks instead: the person sent
-it by name and is at the terminal.
-
-**The machine's say in sending.** Before anything is pushed, after the leak
-check and the tests, `workshop_consent` reads `sclaude.contribute`
-(`contribute_mode` in `developer.sh`): `send` sends; `ask`, which is also what
-unset means, shows the commits and `git diff --stat`, where they go and that it
-is public, and sends only on a yes (a list too long for the phone is asked at
-the terminal, as the leak question is; while the person is away, by
-`review_go_on` — `[g]` as ticked by hand or by `sleep_mode` and the night — it waits and is asked when the tree is next opened); `off`
-holds it. A no and `off` both hold the change at its head (`workshop_block`),
-and `sclaude core-send` (`cmd_core_send`) sends a held change on the person's
-word. Under `off` no session should have made one: `core-open` refuses, and
-`workshop_rules` gives the sessions `_workshop-closed.md` in place of
-`_workshop.md`. In the feature's history these are `declined`, `waits` and
-`contribute-off`; the leak check's are `held` (the person's no), `leaks-off`
-and `leaks-waits` (nobody answered: asked again at the next opening). A hold by the setting is written apart from a no, so the process
-map plays it past the question nobody was asked.
+**One question for every stop.** Whatever stops a change on its way out is
+the person's question, `workshop_decide`: "Send, reopen or drop?", with what
+stopped it shown — what is missing from a change not finished, the red tests
+and their log, the lines that may name the product with the commits, the
+files and where they go, or why main or the push could not be reached. Send
+publishes it as it is: after red tests, a refused push or a preparation that
+failed it checks it again from the start — a maintainer's on the main it goes
+onto — and pushes it; and given after the lines and the commits were
+shown it overrides `sclaude.leaks` and `sclaude.contribute` (`off` asks as
+`ask` does: the person who sends after seeing them takes the risk knowingly).
+Reopen sends the session that made the change back into the same
+conversation, told what stopped it (`WORKSHOP_RESUME` for a change not
+finished, `WORKSHOP_REOPEN_WORD` otherwise; the session's launch is kept in
+the record's `reopen`). Drop empties the workshop and keeps what it held,
+committed as it was left, under `refs/sclaude/dropped/<time>` in sclaude's
+checkout (`workshop_drop`). A change not finished offers reopen and drop only;
+one whose session cannot be reopened (where it ran is gone), drop only.
+Nothing is decided for the person: unanswered, or while they are away
+(`review_go_on`: `[g]` ticked by hand or by `sleep_mode`, a night), the
+question is asked again whenever the tree is opened (`workshop_pending`, at a
+start, at the `done` step and for a monthly review's kept trees; a ready
+change goes through its checks again first, since main or the tests may have
+moved), and `sclaude done` will not clear the tree while the workshop holds
+anything. `sclaude core-send` is a send typed by hand: the checks run again
+as at an opening without showing the commits, and lines that may name the
+product, red tests, a failed preparation or a failed push still stop it with
+the question. A context too long for
+the phone is asked at the terminal alone, so that a send from the phone never
+covers lines it did not show. In the feature's history these are `red`,
+`asked`, `reopened` and `dropped`, beside `sent-back`, `main` and `pr`.
 
 **Publishing**, from `claude_launch` once the session exits
 (`workshop_after_session`): with the head ready, `workshop_publish` fetches
-`origin/main`; for a maintainer it rebases onto it (a conflict leaves the
-change where it is, said), checks it for the product's details
+`origin/main`; for a maintainer it rebases onto it and squashes it into one
+commit (`squash-message`: the first commit that is not a review round leads,
+the rest are listed, the trailers merged) — main out of reach or a conflict
+is the question. It checks the change for the product's details
 (`workshop.py leaks`: the product's repository and folder names, the
 feature's slug and branch, the package's name, `#12`-like numbers and
 pull-request or issue references, and paths of the product's own files, in
-the added lines and the commit messages; a hit is the person's to wave
-through), squashes it into one commit (`squash-message`: the first commit
-that is not a review round leads, the rest are listed, the trailers merged),
-runs the tests the change touches in a clean environment, a line on the
-terminal for each as it runs, each in a session of its own with no terminal (Ctrl-C and a closed tab are passed on to it,
-`workshop_tests`; the output goes to `.sclaude/local/instruments-tests.log`
-beside the workshop, one file per tree), and pushes
-`HEAD:main`. Then, where `sclaude.update` is `auto`, the live checkout is fast-forwarded to it when nothing else
-runs from it (`workshop_live_update`), so the next session runs the fix (elsewhere it says `sclaude update`); the
+the added lines and the commit messages); the check asks nothing itself —
+`sclaude.leaks` `auto` shows the lines and lets them go, anything else hands
+them to the question after the tests, and a send is kept for the lines it was
+shown (`leaks_ok`), so a retry does not ask about them and a line not shown
+then does. It runs the tests the change touches in a clean environment, a
+line on the terminal for each as it runs, each in a session of its own with
+no terminal (Ctrl-C and a closed tab are passed on to it, `workshop_tests`;
+the output goes to `.sclaude/local/instruments-tests.log` beside the
+workshop, one file per tree). Red right after the session that made the
+change reopens that session, unasked (`WORKSHOP_RED_WORD`, with the red files
+and the log): it still has the change in mind, and a flaky test or one red on
+the base is as much its to fix. Twice at most; then it is the question. Green,
+it is asked when there is something to ask — a hit, or `sclaude.contribute`
+other than `send` — and otherwise goes on unasked. A maintainer's goes to
+`HEAD:main`; where `sclaude.update` is `auto`, the live checkout is
+fast-forwarded to it when nothing else runs from it (`workshop_live_update`),
+so the next session runs the fix (elsewhere it says `sclaude update`); the
 next sclaude start does it otherwise, and a checkout holding commits of its
-own that origin lacks is told to bring them on top (`pull --rebase`). Anybody else's goes through the same
-check and tests, unsquashed, to its branch and its one pull request
-(`instruments_propose` from the workshop; a push that failed is not taken
-for sent). The rebase and the squash leave the head ready, so a publication
-stopped short — red tests, no gh or no login, no network, a refused push, a
-conflict with main — is tried again, silently, whenever the tree is opened
-(`workshop_pending`, also at the `done` step, before `sclaude done` clears the
-tree, and for a monthly review's kept trees). The person's own "no" to the
-product's details is the one stop that holds the change at its head
-(`workshop_block`): asking again would not help, and a session's new commit,
-marked ready, lifts it. A "yes" to the same question is kept for the lines it
-was shown, so a retry does not ask it again, and a line not shown then does.
-Red tests right after the session that made the change reopen that session,
-unasked (`WORKSHOP_RED_WORD`, with the red files and the log): it still has
-the change in mind, and a flaky test or one red on the base is as much its to
-fix. Twice at most; still red after that, the change waits, ready, for the
-next opening, as it does at once when the session sent back leaves the head
-as it was.
-In `sclaude done` the retry comes before the retrospective; when it moves
-sclaude's code, the clean-up goes on in a fresh run, retrospective and all,
-which sclaude starts itself (`done_fresh`); moved by the retrospective or
-after it, the fresh run does not ask about the retrospective again. A feature on `done` whose pass
-through production got to the clean-up for its pull request and the release
-production still carries (`prod_pass.ended`) goes straight to the clean-up
-when opened, without production and the epilogue again.
-The retrospective's own change, stopped on the way (no network, a refused
-push), gets one more try before the clean-up takes the workshop; one stopped
-by its head — red tests, a conflict — would only stop again, and is kept on
-its branch. The live checkout's state,
-which the reviews compare before and after, leaves out what sending a
-workshop's change records in the shared config: the `fork` remote and the
-`dev/` and `workshop/` branches.
+own that origin lacks is told to bring them on top (`pull --rebase`). Anybody
+else's goes unsquashed to its branch and its one pull request
+(`instruments_propose` from the workshop; a push that failed is not taken for
+sent, and is the question). When `sclaude done`'s retrospective publishes and
+moves sclaude's code, the clean-up goes on in a fresh run, which sclaude
+starts itself (`done_fresh`), and does not ask about the retrospective again.
+A feature on `done` whose pass through production got to the clean-up for
+its pull request and the release production still carries
+(`prod_pass.ended`) goes straight to the clean-up when opened, without
+production and the epilogue again. The live checkout's state, which the
+reviews compare before and after, leaves out what sending a workshop's change
+records in the shared config: the `fork` remote and the `dev/` and
+`workshop/` branches.
 
 **Unfinished.** A change uncommitted, or not marked ready at its head, is not
-published. The session is offered back at once — the same conversation, with
-`WORKSHOP_RESUME` in place of its prompt (`claude_again_args`), and the
-question and that prompt both name what is missing (`workshop_missing`):
-uncommitted work, sreview's mark at the head, or `core-ready` not run (a
-sreview the person stopped with "stop" marks the head too: a review they
-called enough is finished, and without the mark the session was sent back
-to review again and again). A "no" to that
-question records the session's launch in the record's `pending`, which `workshop_pending` offers
-again when the feature is next opened (and the monthly review on its next run
-that day: its tree is kept while its workshop holds anything unpublished).
-The record stays while the session is sent back, and goes when its
-change is finished or held, or when the session cannot be sent back (where
-it ran is gone), which is said once: cleared before the launch, it was lost to a run
-cut off after the session. An unfinished workshop with no session recorded
-is still said on every opening, with what is missing. While one is pending, what later sessions make waits behind it.
-When the tree goes, `workshop_remove` takes the workshop with it: work never
-published is committed as it was left and kept on its branch in the checkout,
-and named.
+published: the question offers reopen — the same conversation, with
+`WORKSHOP_RESUME` in place of its prompt (`claude_again_args`), naming what
+is missing (`workshop_missing`): uncommitted work, sreview's mark at the head,
+or `core-ready` not run (a sreview the person stopped with "stop" marks the
+head too) — or drop. Under `sclaude.contribute` `off` no session should have
+made a change: `core-open` refuses, and `workshop_rules` gives the sessions
+`_workshop-closed.md` in place of `_workshop.md`.
+When the tree goes, `workshop_remove` takes the workshop with it; by then
+the question has been answered (`sclaude done` waits for it), and anything a
+removal elsewhere finds unpublished is committed as it was left, kept on its
+branch in the checkout, and named.
 
 The reviews' own refusals no longer reach the step's friction log
 (`_friction.py` skips `--step friction`): a retrospective's refused push sat

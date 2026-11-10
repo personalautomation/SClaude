@@ -172,10 +172,22 @@ echo "rc=$?"
         # A key is sent only once the one before it has been taken: the wait
         # reads a key and then swallows whatever else is waiting (poll_pause,
         # so that an arrow or a stray word answers nothing), and a second key
-        # sent while the loop lagged under the suite's load went with it. Two
-        # status lines drawn since the last key mean it was read: the first
-        # may be the draw that was under way, the second follows the read.
-        drawn_at_send = None
+        # sent while the loop lagged under the suite's load went with it. A
+        # key read changes the status line (armed, cleared, a box ticked), so
+        # a status line unlike the one before the send means it was taken —
+        # and the next goes at once: a pair must land within five seconds
+        # (session_keys), which waiting for two draws under load overran.
+        status_at_send = None
+        sent_at_len = 0
+
+        def statuses(t):
+            """The status lines drawn whole in t, each from its words to its
+            end (session_keys_line closes one with ESC[?7h)."""
+            out = []
+            for x in t.split(b"\r\x1b[2K"):
+                if STATUS_LINE in x and b"\x1b[?7h" in x:
+                    out.append(x[x.index(STATUS_LINE):].split(b"\x1b[?7h")[0])
+            return out
         while True:
             # interrupt_after: seconds from the start, or (bytes, seconds) — from
             # when those bytes show, as for keys_after.
@@ -189,10 +201,13 @@ echo "rc=$?"
             if keys_after and isinstance(keys_after, bytes) and keys_after in text:
                 keys_after = time.time()
             base = keys_after if isinstance(keys_after, float) else (None if keys_after else start)
-            taken = drawn_at_send is None or text.count(STATUS_LINE) >= drawn_at_send + 2
+            taken = status_at_send is None or any(
+                x != status_at_send for x in statuses(text[sent_at_len:]))
             if keys and base is not None and taken and time.time() - base > keys[0][0]:
                 os.write(fd, keys.pop(0)[1])
-                drawn_at_send = text.count(STATUS_LINE)
+                done = statuses(text)
+                status_at_send = done[-1] if done else b""
+                sent_at_len = len(text)
             try:
                 r, _, _ = select.select([fd], [], [], 0.2)
                 if r:

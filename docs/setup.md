@@ -100,14 +100,14 @@ It asks three questions about this machine, once (a re-run keeps the answers):
 - **Sending fixes of sclaude back.** The retrospective and the friction reviews
   can fix sclaude itself and send the fix to this public repository (see "When
   a session finds a bug in sclaude"). `ask`: you see the commits and the files,
-  and nothing goes out without your yes. `send`: it goes out by itself. `off`:
-  no session changes sclaude on your machine.
+  and nothing goes out without your send ("Send, reopen or drop?"). `send`: it
+  goes out by itself. `off`: no session changes sclaude on your machine.
 
 - **When a fix may name your product.** Before a fix of sclaude is sent it is
   searched for your product's name, numbers and paths. `ask`: the matching
-  lines are shown, and "Publish it anyway?" waits for your yes. `auto`: they
-  are shown, and it goes out without the question. `off`: a change that
-  matches never goes out until a session rewords it.
+  lines are shown with "Send, reopen or drop?", and nothing goes out without
+  your send. `auto`: they are shown, and it goes out without the question.
+  `off`: the same as `ask` — your send, given after seeing them, is yours.
 
 `./install.sh --update=notify|auto|off --contribute=ask|send|off
 --leaks=ask|auto|off` answers them without asking. Run without a terminal, the installer leaves them unset, and

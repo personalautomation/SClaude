@@ -144,9 +144,12 @@ def busy(state, workshop=None):
     # R: a suite running, or a session fixing what it found, on the block the
     # stage runs from; S: a sync with main going, on the step it runs ahead
     # of, or on the preview once the steps are done.
-    for _stage, nid in _r_blocks(state, _local_block(state)):
+    for stage, nid in _r_blocks(state, _local_block(state)):
         if "R" in process_model.NODES.get(nid, ("",) * 6)[5] and "R" not in out.get(nid, []):
             out.setdefault(nid, []).append("R")
+            # A part's suite turns the part's R on the parts map too.
+            if stage == "local" and nid == "code" and _parts_building(state) and "R" in drawn.get("p_code", ("",) * 6)[5]:
+                out.setdefault("p_code", []).append("R")
     sync = _runs(state.get("sync"))
     if sync and _going(sync[-1]):
         nid = _sync_block(state)
@@ -356,7 +359,12 @@ def _step4_local(state):
 
 def also(state):
     """Places lit beside the one position answers: the regression map's own
-    block while step 4 stands on its close for a local run."""
+    block while step 4 stands on its close for a local run; the part's block
+    on the parts map while its regression runs or is being fixed, which
+    position answers on the regression map."""
+    if (_parts_building(state) and state.get("step") == "code"
+            and (_running(state, "local") or _fix_open(state, "local"))):
+        return ["p_code"]
     if (state.get("step") == "review" and not _sync_in_step(state)
             and not any(_fix_open(state, s) for s in ("prod", "preview"))):
         if not _parts_open(state):

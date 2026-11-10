@@ -48,9 +48,9 @@ try:
     check("ready-head", ws_py("get", rec, "ready.head").stdout.strip(), "abc")
     ws_py("put", rec, "ready", "null")
     check("ready-cleared", ws_py("get", rec, "ready.head").returncode, 1)
-    ws_py("pending", rec, "s1", "/some/cwd", "--session-id", "s1", "-n", "x", "the prompt")
-    out = ws_py("pending-args", rec).stdout.split("\0")
-    check("pending-args", out[:5], ["/some/cwd", "--session-id", "s1", "-n", "x"])
+    ws_py("reopen", rec, "s1", "/some/cwd", "--session-id", "s1", "-n", "x", "the prompt")
+    out = ws_py("reopen-args", rec).stdout.split("\0")
+    check("reopen-args", out[:5], ["/some/cwd", "--session-id", "s1", "-n", "x"])
 
     # --- the sandbox -------------------------------------------------------------
     origin = os.path.join(tmp, "origin.git")
@@ -126,42 +126,40 @@ export SCLAUDE_SESSION=%(session)s
     check("open-without-session", "DIE" in sh("cmd_core_open", session=""), True)
 
     # Nothing made: nothing to publish, nothing asked.
-    check("state-none", sh('workshop_state "%s" s1' % tree).strip(), "none")
+    check("state-none", sh('workshop_state "%s"' % tree).strip(), "none")
     check("after-nothing", sh('workshop_after_session s1 --session-id s1 -n x p').strip(), "")
 
-    # Made and not ready: the session is offered back; a "no" leaves it pending.
+    # Made and not ready: the person is asked to reopen the session or drop
+    # the change; unanswered, nothing is decided, and the session to reopen is
+    # kept for the next opening.
     with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
         fh.write("echo more\n")
     check("ready-refuses-dirty", "DIE" in sh("cmd_core_ready"), True)
     git(ws, "commit", "-qam", "feat(sclaude): the tool says more")
     check("ready-refuses-without-sreview", "sreview has not finished" in sh("cmd_core_ready"), True)
-    check("state-unready", sh('workshop_state "%s" s1' % tree).strip(), "unready")
-    out = sh('workshop_after_session s1 --session-id s1 --model opus -n x "the prompt"', answer="n")
+    check("state-unready", sh('workshop_state "%s"' % tree).strip(), "unready")
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; ask() { echo "ASK $1 ${*:4}"; return 1; }; '
+             'workshop_after_session s1 --session-id s1 --model opus -n x "the prompt"')
     check("after-unready-asks", "ASK" in out and "RELAUNCH" not in out, True)
+    check("after-unready-unanswered-history", "HISTORY asked" in out, True)
+    check("after-unready-offers-reopen-and-drop", ("Reopen" in out, "Drop" in out, "Send —" in out), (True, True, False))
     check("after-unready-names-the-mark", "sreview's mark" in out, True)
-    check("after-unready-pending", ws_py("get", record, "pending.session").stdout.strip(), "s1")
-    check("state-pending-for-other", sh('workshop_state "%s" s2' % tree).strip(), "pending")
-    # A "yes" resumes the same session, with its arguments and a new word.
-    out = sh('workshop_after_session s1 --session-id s1 --model opus -n x "the prompt"', answer="y n")
-    check("after-yes-resumes", "RELAUNCH --resume s1 --model opus -n x" in out, True)
-    check("after-yes-says-what-is-missing", "What is missing: sreview's mark" in out, True)
-    check("after-yes-asks-again", out.count("ASK"), 2)
-
-    # Sent back from the next opening, the record stays until it is finished:
-    # a run cut off after the session would otherwise forget it.
-    out = sh('claude_launch() { echo "LAUNCH $*"; }; workshop_pending "%s"' % tree, answer="y")
-    check("pending-resumed", "LAUNCH --resume s1" in out and "Missing:" in out, True)
-    check("pending-kept-while-resumed", ws_py("get", record, "pending.session").stdout.strip(), "s1")
-    # A session whose directory is gone cannot be sent back: said, and dropped.
-    ws_py("pending", record, "s1", "/no/such/dir", "--session-id", "s1", "-n", "x", "p")
-    out = sh('claude_launch() { echo "LAUNCH $*"; }; workshop_pending "%s"' % tree, answer="n")
-    check("pending-gone-dir-said", "is gone" in out and "LAUNCH" not in out and "ASK" not in out, True)
-    check("pending-gone-dir-dropped", ws_py("get", record, "pending.session").returncode, 1)
-    # Unfinished with no session recorded is still said.
-    ws_py("put", record, "pending", "null")
-    out = sh('workshop_pending "%s"' % tree)
-    check("unfinished-without-record-said", "no session is" in out and "Missing:" in out, True)
-    ws_py("pending", record, "s1", "/some/cwd", "--session-id", "s1", "-n", "x", "p")
+    check("after-unready-keeps-the-session", ws_py("get", record, "reopen.session").stdout.strip(), "s1")
+    check("after-unready-stays", sh('workshop_state "%s"' % tree).strip(), "unready")
+    # Reopen resumes the same session, with its arguments and what is missing.
+    out = sh('workshop_after_session s1 --session-id s1 --model opus -n x "the prompt"', answer="1 0")
+    check("after-reopen-resumes", "RELAUNCH --resume s1 --model opus -n x" in out, True)
+    check("after-reopen-says-what-is-missing", "What is missing: sreview's mark" in out, True)
+    check("after-reopen-asks-again", out.count("ASK") >= 2, True)
+    # From the next opening, the same question; reopen launches the session.
+    out = sh('claude_launch() { echo "LAUNCH $*"; }; workshop_pending "%s"' % tree, answer="1")
+    check("pending-reopened", "LAUNCH --resume s1" in out and "What is missing:" in out, True)
+    # A session whose directory is gone cannot be reopened: only drop is offered.
+    ws_py("reopen", record, "s1", "/no/such/dir", "--session-id", "s1", "-n", "x", "p")
+    out = sh('claude_launch() { echo "LAUNCH $*"; }; workshop_pending "%s"' % tree, answer="0")
+    check("pending-gone-dir-drop-only", ("ASK" in out, "Reopen" in out, "Drop" in out, "LAUNCH" in out),
+          (True, False, True, False))
+    ws_py("reopen", record, "s1", "/some/cwd", "--session-id", "s1", "-n", "x", "p")
 
     # sreview's mark at the head makes it ready for a maintainer.
     common = git(ws, "rev-parse", "--path-format=absolute", "--git-common-dir")
@@ -170,10 +168,9 @@ export SCLAUDE_SESSION=%(session)s
     os.makedirs(os.path.dirname(mark), exist_ok=True)
     with open(mark, "w") as fh:
         fh.write(git(ws, "rev-parse", "HEAD") + "\n")
-    ws_py("put", record, "pending", "null")
     out = sh("cmd_core_ready")
     check("ready-with-mark", "Ready" in out, True)
-    check("state-ready", sh('workshop_state "%s" s1' % tree).strip(), "ready")
+    check("state-ready", sh('workshop_state "%s"' % tree).strip(), "ready")
 
     # A second commit: squashed into one on publication, and the tests the
     # change touches run.
@@ -183,8 +180,10 @@ export SCLAUDE_SESSION=%(session)s
     with open(mark, "w") as fh:
         fh.write(git(ws, "rev-parse", "HEAD") + "\n")
     sh("cmd_core_ready")
-    out = sh('workshop_after_session s1 --session-id s1 -n x p')
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_after_session s1 --session-id s1 -n x p')
     check("published-to-main", "Published to sclaude's main" in out, True)
+    # Nothing to ask under sclaude.contribute send: past the question unasked.
+    check("published-unasked-edge", ("HISTORY w_clear w_who by=setting" in out, "w_decide" in out), (True, False))
     check("published-checked", "1 test file(s)" in out, True)
     log = git(origin, "log", "--format=%s", "main")
     check("published-squashed", log.splitlines()[0], "feat(sclaude): the tool says more")
@@ -196,7 +195,7 @@ export SCLAUDE_SESSION=%(session)s
     out = sh("workshop_live_update")
     check("live-own-commits-said", "1 commit(s) of its own" in out and "pull --rebase" in out, True)
     git(live, "reset", "-q", "--hard", "origin/main")
-    check("state-none-after", sh('workshop_state "%s" s1' % tree).strip(), "none")
+    check("state-none-after", sh('workshop_state "%s"' % tree).strip(), "none")
 
     # The product's details hold it back unless the person says otherwise.
     with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
@@ -210,57 +209,54 @@ export SCLAUDE_SESSION=%(session)s
         fh.write(git(ws, "rev-parse", "HEAD") + "\n")
     sh("cmd_core_ready")
     before = git(origin, "rev-parse", "main")
-    out = sh('workshop_after_session s1 --session-id s1 -n x p', answer="n")
-    check("leak-asked", "may name the product" in out and "ASK" in out, True)
+    # Found lines are shown with the one question after the tests;
+    # unanswered, nothing goes and nothing is decided.
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_after_session s1 --session-id s1 -n x p', answer="0")
+    check("leak-asked-after-tests", ("may name the product" in out, "ASK" in out,
+                                     out.find("Testing sclaude itself") < out.find("ASK")), (True, True, True))
+    check("leak-shown-with-the-commits", ("which is public" in out, "app/orders/checkout.tsx" in out), (True, True))
     check("leak-not-published", git(origin, "rev-parse", "main"), before)
-    # A "yes" holds for the same change: a retry does not ask it again.
-    out = sh('workshop_leaks "%s" origin/main "%s" && echo PASSED' % (ws, tree), answer="y")
-    check("leak-yes-asked", "ASK" in out and "PASSED" in out, True)
-    out = sh('workshop_leaks "%s" origin/main "%s" && echo PASSED' % (ws, tree), answer="n")
-    check("leak-yes-remembered", "ASK" not in out and "PASSED" in out, True)
+    check("leak-unanswered-stays-ready", sh('workshop_state "%s"' % tree).strip(), "ready")
+    check("leak-unanswered-history", "HISTORY asked" in out, True)
+    # The check itself asks nothing: it hands the lines on.
+    out = sh('workshop_leaks "%s" origin/main "%s"; echo "HITS=[${WORKSHOP_HITS:0:5}]"' % (ws, tree))
+    check("leaks-handed-on", ("ASK" in out, "HITS=[]" in out), (False, False))
+    # A send is kept for the lines it was shown: a retry does not ask about them.
+    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="1")
+    check("leak-send-sent", "PROPOSE" in out, True)
+    out = sh('workshop_leaks "%s" origin/main "%s"; echo "HITS=[$WORKSHOP_HITS]"' % (ws, tree))
+    check("leak-send-remembered", "HITS=[]" in out, True)
     # A new line naming the product is asked about, though the diff is the same.
     git(ws, "commit", "-q", "--allow-empty", "-m", "fix(sclaude): as seen in issue #77")
-    out = sh('workshop_leaks "%s" origin/main "%s" && echo PASSED' % (ws, tree), answer="n")
-    check("leak-new-line-asked", "ASK" in out and "PASSED" not in out, True)
+    out = sh('workshop_leaks "%s" origin/main "%s"; echo "HITS=[$WORKSHOP_HITS]"' % (ws, tree))
+    check("leak-new-line-asked", "HITS=[]" in out, False)
     git(ws, "reset", "-q", "--hard", "HEAD~1")
     ws_py("put", record, "leaks_ok", "null")
-    # The machine's say in that question (sclaude.leaks): auto sends with
-    # the lines shown, off holds unasked; core-send is asked even under off.
+    # sclaude.leaks auto shows them and lets them go; off asks like ask — the
+    # person who sends after seeing them takes the risk.
     git(live, "config", "sclaude.leaks", "auto")
-    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_leaks "%s" origin/main "%s" && echo PASSED' % (ws, tree), answer="n")
-    check("leaks-auto-shown-unasked", ("may name the product" in out, "ASK" in out, "PASSED" in out),
-          (True, False, True))
-    # Its way on the map is the setting's, past the question nobody asked.
-    check("leaks-auto-edge", ("HISTORY w_leaks w_tests by=setting" in out, "w_leak_ask" in out), (True, False))
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_leaks "%s" origin/main "%s"; echo "HITS=[$WORKSHOP_HITS]"' % (ws, tree))
+    check("leaks-auto-shown-unasked", ("go out unasked" in out, "HITS=[]" in out), (True, True))
+    check("leaks-auto-edge", "HISTORY w_leaks w_tests by=setting" in out, True)
     git(live, "config", "sclaude.leaks", "off")
-    out = sh('workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree), answer="y")
-    check("leaks-off-held-unasked", ("ASK" in out, "rc=3" in out), (False, True))
-    # Not the person's no: written apart in the history, and said apart.
-    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_publish "%s"' % tree, answer="y")
-    check("leaks-off-history", ("HISTORY leaks-off" in out, "sclaude.leaks is off)" in out), (True, True))
-    check("leaks-off-edge", ("HISTORY w_leaks w_held by=setting" in out, "w_leak_ask" in out), (True, False))
-    out = sh('WORKSHOP_SEND=1 workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree), answer="y")
-    check("leaks-off-core-send-asks", ("ASK" in out, "rc=0" in out), (True, True))
-    ws_py("put", record, "leaks_ok", "null")
+    out = sh('workshop_leaks "%s" origin/main "%s"; echo "HITS=[$WORKSHOP_HITS]"' % (ws, tree))
+    check("leaks-off-asks", "HITS=[]" in out, False)
     git(live, "config", "--unset", "sclaude.leaks")
-    # No answer to a short list is not a no either: tried again, not held.
-    out = sh('history_add() { echo "HISTORY $3 $4"; }; ask() { echo ASK; return 1; }; workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree))
-    check("short-list-unanswered-not-held", ("ASK" in out, "rc=2" in out), (True, True))
-    check("short-list-unanswered-edge", ("HISTORY w_leaks w_leak_ask by=sclaude" in out,
-                                         "HISTORY w_leak_ask w_wait by=none" in out), (True, True))
-    # A list too long for a question on the phone is asked at the terminal
-    # alone; nobody there is no answer, and nothing is held.
-    git(ws, "commit", "-q", "--allow-empty", "-m", "fix(sclaude): long",
-        "-m", "\n".join("seen in issue #%d of myshop, %s" % (n, "x" * 60) for n in range(40)))
+    # A context too long for a question on the phone is asked at the terminal
+    # alone; nobody there is no answer.
     out = sh('ASK_DIR=/somewhere; ask() { echo "ASK dir=[$ASK_DIR]"; return 1; }; '
-             'workshop_leaks "%s" origin/main "%s"; echo "rc=$?"' % (ws, tree))
-    check("long-list-at-terminal", "ASK dir=[]" in out and "answer it here" in out, True)
-    check("long-list-unanswered-not-held", "rc=2" in out, True)
-    git(ws, "reset", "-q", "--hard", "HEAD~1")
-    # The person's "no" holds it: asking again on every opening would not help.
-    check("leak-no-held", sh('workshop_state "%s" ""' % tree).strip(), "blocked")
-    out = sh('workshop_pending "%s"' % tree)
-    check("leak-no-not-asked-again", "waits" in out and "ASK" not in out, True)
+             'workshop_decide "%s" "long" "$(for n in $(seq 40); do echo "issue #$n of myshop $(printf x%%.0s $(seq 60))"; done)" send reopen drop; '
+             'echo "choice=$WORKSHOP_CHOICE"' % tree)
+    check("long-context-at-terminal", ("ASK dir=[]" in out, "answer it here" in out, "choice=none" in out), (True, True, True))
+    # Drop empties the workshop and keeps the change under a ref of its own.
+    head = git(ws, "rev-parse", "HEAD")
+    ws_py("reopen", record, "s1", tree, "--session-id", "s1", "-n", "x", "p")
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_decide "%s" "x" "" send reopen drop; echo "choice=$WORKSHOP_CHOICE"' % tree, answer="3")
+    check("drop-chosen", ("choice=drop" in out, "HISTORY dropped" in out, "HISTORY w_decide w_drop by=person" in out),
+          (True, True, True))
+    dropped = git(live, "for-each-ref", "--format=%(objectname)", "refs/sclaude/dropped")
+    check("drop-kept-under-a-ref", head in dropped.split(), True)
+    check("drop-empties-the-workshop", sh('workshop_state "%s"' % tree).strip(), "none")
 
     # Clean text passes the check.
     git(ws, "reset", "-q", "--hard", "origin/main")
@@ -281,32 +277,27 @@ export SCLAUDE_SESSION=%(session)s
     # Anybody else's goes to its pull request, unsquashed, from the branch.
     out = sh('workshop_publish "%s"' % tree, maintainer=False)
     check("other-proposes", "PROPOSE" in out and ws in out, True)
-    # A push that failed is not taken for sent: the change stays ready.
+    # A push that failed is the person's question too: unanswered, the change
+    # stays ready, and the next opening goes through it again.
     with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
         fh.write("# and once more\n")
     git(ws, "commit", "-qam", "fix(sclaude): once more")
     start = ws_py("get", record, "start").stdout.strip()
     ws_py("ready", record, "s1", git(ws, "rev-parse", "HEAD"), "a read")
-    out = sh('instruments_propose() { return 2; }; workshop_publish "%s"' % tree, maintainer=False)
+    out = sh('instruments_propose() { return 2; }; workshop_publish "%s"' % tree, maintainer=False, answer="0")
+    check("failed-push-asked", ("pull request was not sent" in out, "ASK" in out), (True, True))
     check("failed-push-not-sent", ws_py("get", record, "start").stdout.strip(), start)
-    check("failed-push-stopped-on-the-way", ws_py("get", record, "stopped").stdout.strip(), "on the way")
-    check("failed-push-stays-ready", sh('workshop_state "%s" ""' % tree).strip(), "ready")
+    check("failed-push-stays-ready", sh('workshop_state "%s"' % tree).strip(), "ready")
     check("failed-push-unpublished", sh('workshop_unpublished "%s" && echo yes' % tree).strip(), "yes")
-    # And it is tried again when the tree is next opened.
-    out = sh('workshop_pending "%s"' % tree, maintainer=False)
-    check("ready-retried-on-entry", "PROPOSE" in out, True)
-    # No gh, or no login, is tried again too: it may be fixed meanwhile.
-    with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
-        fh.write("# and again\n")
-    git(ws, "commit", "-qam", "fix(sclaude): and again")
-    ws_py("ready", record, "s1", git(ws, "rev-parse", "HEAD"), "a read")
-    out = sh('instruments_propose() { return 1; }; workshop_publish "%s"' % tree, maintainer=False)
-    check("no-gh-stays-ready", sh('workshop_state "%s" ""' % tree).strip(), "ready")
-    check("no-gh-said", "tried again" in out, True)
+    # A send tries the push again.
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; n=0; instruments_propose() { n=$((n + 1)); (( n > 1 )) && echo PROPOSE; (( n > 1 )); }; '
+             'workshop_publish "%s"' % tree, maintainer=False, answer="1")
+    check("failed-push-send-retries", ("PROPOSE" in out, "HISTORY w_who w_decide" in out, "HISTORY w_decide w_leaks by=person" in out,
+                                       out.count("Testing sclaude itself")), (True, True, True, 2))
+    check("failed-push-then-sent", sh('workshop_state "%s"' % tree).strip(), "none")
 
     # A maintainer's publication stopped by red tests after the squash leaves
-    # the squashed head ready, to be tried again rather than taken for an
-    # unfinished change.
+    # the squashed head ready, and asks the person.
     git(ws, "reset", "-q", "--hard", "origin/main")
     ws_py("put", record, "start", json.dumps(git(ws, "rev-parse", "HEAD")))
     for n in (1, 2):
@@ -314,34 +305,38 @@ export SCLAUDE_SESSION=%(session)s
             fh.write("# checks tool\nimport sys\nsys.exit(%d)\n" % n)
         git(ws, "commit", "-qam", "fix(sclaude): tool test %d" % n)
     ws_py("ready", record, "s1", git(ws, "rev-parse", "HEAD"), "sreview")
-    out = sh('workshop_publish "%s"' % tree)
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_publish "%s"' % tree, answer="0")
     check("red-not-published", "Red:" in out and "Published" not in out, True)
+    check("red-asked", ("ASK" in out, "HISTORY red" in out, "HISTORY w_clear w_decide" in out), (True, True, True))
     check("red-test-named", "✗ tool.py" in out, True)
     check("red-squashed-head-ready", ws_py("get", record, "ready.head").stdout.strip(),
           git(ws, "rev-parse", "HEAD"))
-    check("red-stays-ready", sh('workshop_state "%s" ""' % tree).strip(), "ready")
-    check("red-not-on-the-way", ws_py("get", record, "stopped").returncode, 1)
-    out = sh('workshop_pending "%s"' % tree)
-    check("red-retried-on-entry", "Testing sclaude itself" in out, True)
+    check("red-stays-ready", sh('workshop_state "%s"' % tree).strip(), "ready")
+    out = sh('workshop_pending "%s"' % tree, answer="0")
+    check("red-retried-on-entry", ("Testing sclaude itself" in out, "ASK" in out), (True, True))
+    # A send after red runs the tests again.
+    out = sh('workshop_publish "%s"' % tree, answer="1 0")
+    check("red-send-tests-again", out.count("Testing sclaude itself"), 2)
+    # A reopen from the question launches the session that made it.
+    ws_py("reopen", record, "s1", tree, "--session-id", "s1", "-n", "x", "p")
+    out = sh('claude_launch() { echo "LAUNCH $*"; }; workshop_pending "%s"' % tree, answer="2")
+    check("red-reopen-launches", ("LAUNCH --resume s1" in out, "The person reopened this session" in out), (True, True))
+    check("red-reopen-says-what-was-red", "What stopped it: red: tests/tool.py" in out, True)
+    # No session to reopen: reopen is not offered.
+    ws_py("put", record, "reopen", "null")
+    out = sh('workshop_publish "%s"' % tree, answer="0")
+    check("red-no-session-no-reopen", ("Send —" in out, "Reopen —" in out), (True, False))
     # Red right after the session that made it: that session is reopened
     # unasked, told which tests and where their output is — twice, and then
-    # the change waits, ready.
-    # The reopened session commits and marks the head ready, and the test
-    # stays red.
+    # it is the person's question.
     fix = ('claude_launch_once() { echo "RELAUNCH $*"; git -C "%s" commit -q --allow-empty -m "fix: try"; '
            'workshop_py ready "%s" s1 "$(git -C "%s" rev-parse HEAD)" sreview; }; ' % (ws, record, ws))
-    out = sh(fix + 'workshop_after_session s1 --session-id s1 -n x p')
+    out = sh(fix + 'workshop_after_session s1 --session-id s1 -n x p', answer="0")
     check("red-reopens-the-session", "RELAUNCH --resume s1 -n x" in out, True)
-    check("red-not-asked", "ASK" in out, False)
     check("red-word-names-the-test", "Red: tests/tool.py. Their output: %s-tests.log" % ws in out, True)
     check("red-log-beside-the-workshop", os.path.exists(ws + "-tests.log"), True)
-    check("red-twice-at-most", (out.count("RELAUNCH"), "Sent back twice" in out), (2, True))
-    check("red-then-stays-ready", sh('workshop_state "%s" s1' % tree).strip(), "ready")
-    # A session sent back that leaves the head as it was ends the returns:
-    # the change waits, ready, for the next opening.
-    out = sh('workshop_after_session s1 --session-id s1 -n x p')
-    check("red-left-as-it-was-stops", (out.count("RELAUNCH"), "left it as it was" in out), (1, True))
-    check("red-left-as-it-was-ready", sh('workshop_state "%s" s1' % tree).strip(), "ready")
+    check("red-twice-then-asked", (out.count("RELAUNCH"), "Send, reopen or drop?" in out), (2, True))
+    check("red-then-stays-ready", sh('workshop_state "%s"' % tree).strip(), "ready")
     git(ws, "reset", "-q", "--hard", "origin/main")
     ws_py("put", record, "ready", "null")
     with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
@@ -375,42 +370,72 @@ export SCLAUDE_SESSION=%(session)s
         with open(os.path.join(ws, "sclaude", "lib", "tool.sh"), "a") as fh:
             fh.write("# %s\n" % text)
         git(ws, "commit", "-qam", "fix(sclaude): %s" % text)
-        ws_py("put", record, "blocked", "null")
+        ws_py("put", record, "asked", "null")
         ws_py("ready", record, "s1", git(ws, "rev-parse", "HEAD"), "a read")
 
     git(live, "config", "sclaude.contribute", "ask")
     ready_change("asked first")
-    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="n")
-    check("ask-shows-and-asks", ("Send it?" in out, "which is public" in out,
+    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="0")
+    check("ask-shows-and-asks", ("Send, reopen or drop?" in out, "which is public" in out,
                                  "asked first" in out, "tool.sh" in out), (True, True, True, True))
-    check("ask-no-not-sent", "PROPOSE" in out, False)
-    check("ask-no-held", sh('workshop_state "%s" ""' % tree).strip(), "blocked")
-    check("ask-no-names-core-send", "core-send" in ws_py("get", record, "blocked.why").stdout, True)
-    out = sh("cmd_core_send", maintainer=False, answer="y")
+    check("ask-unanswered-not-sent", "PROPOSE" in out, False)
+    check("ask-unanswered-stays-ready", sh('workshop_state "%s"' % tree).strip(), "ready")
+    out = sh("cmd_core_send", maintainer=False, answer="1")
     check("core-send-refused-to-a-session", ("DIE" in out, "PROPOSE" in out), (True, False))
-    out = sh("cmd_core_send", maintainer=False, answer="n", session="")
-    check("core-send-sends-unasked", ("PROPOSE" in out, "Send it?" in out), (True, False))
-    ready_change("asked and said yes")
-    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_publish "%s"' % tree, maintainer=False, answer="y")
-    check("ask-yes-sent", ("Send it?" in out, "PROPOSE" in out), (True, True))
-    check("ask-yes-edges", ("HISTORY w_tests w_send by=sclaude" in out, "HISTORY w_send w_who by=person" in out,
-                            "HISTORY w_who w_pr by=sclaude" in out), (True, True, True))
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; cmd_core_send', maintainer=False, answer="0", session="")
+    check("core-send-sends-unasked", ("PROPOSE" in out, "Send, reopen or drop?" in out), (True, False))
+    check("core-send-edge", "HISTORY w_decide w_leaks by=person" in out, True)
+    # Out of reach on core-send with no question open: from the ready gate
+    # to the question, and no way into the checks.
+    ready_change("sent while out of reach")
+    git(live, "remote", "set-url", "origin", os.path.join(tmp, "nowhere.git"))
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; cmd_core_send', maintainer=False, answer="0", session="")
+    git(live, "remote", "set-url", "origin", origin)
+    check("core-send-out-of-reach-asks-from-the-gate", ("out of reach" in out, "HISTORY w_decide w_leaks" in out,
+                                           "HISTORY w_ready_gate w_decide" in out), (True, False, True))
+    # A send at the out-of-reach question goes back through the checks, its
+    # way written once, after the preparation that then went through.
+    ready_change("sent after out of reach")
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; eval "real_$(declare -f workshop_prepare)"; n=0; '
+             'workshop_prepare() { n=$((n + 1)); (( n > 1 )) && { real_workshop_prepare "$@"; return; }; '
+             'WORKSHOP_WHY="out of reach"; return 1; }; workshop_publish "%s"' % tree, maintainer=False, answer="1 0")
+    check("send-after-out-of-reach-checks-again", (out.count("HISTORY w_decide w_leaks by=person"), "Testing sclaude itself" in out),
+          (1, True))
+    # Opened again on a question nobody answered: checked again, by sclaude.
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_pending "%s"' % tree, maintainer=False, answer="0")
+    check("reopened-tree-checks-again", "HISTORY w_decide w_leaks by=sclaude" in out, True)
+    # A ready change with no question left open (a run cut off before it
+    # asked) comes back from the ready gate.
+    ws_py("put", record, "asked", "null")
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_pending "%s"' % tree, maintainer=False, answer="0")
+    check("cut-off-run-checks-from-the-gate", ("HISTORY w_ready_gate w_leaks by=sclaude" in out, "HISTORY w_decide w_leaks" in out),
+          (True, False))
+    # Lines that may name the product are still shown and asked about, once.
+    ready_change("seen in issue #77 of myshop")
+    out = sh("cmd_core_send", maintainer=False, answer="0", session="")
+    check("core-send-asks-about-lines", ("PROPOSE" in out, "may name the product" in out, "issue #77" in out),
+          (False, True, True))
+    ws_py("reopen", record, "s1", tree, "--session-id", "s1", "-n", "x", "p")
+    out = sh('claude_launch() { echo "LAUNCH send=[${WORKSHOP_SEND:-}] from=[${WORKSHOP_FROM:-}] $*"; }; cmd_core_send', maintainer=False, answer="2", session="")
+    check("core-send-reopen-launches", ("LAUNCH send=[] from=[] --resume s1" in out, "may name the product" in out), (True, True))
+    git(ws, "reset", "-q", "--hard", "HEAD~1")
+    ready_change("asked and said send")
+    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_publish "%s"' % tree, maintainer=False, answer="1")
+    check("ask-send-sent", ("Send, reopen or drop?" in out, "PROPOSE" in out), (True, True))
+    check("ask-send-edges", ("HISTORY w_tests w_clear by=sclaude" in out, "HISTORY w_clear w_decide by=sclaude" in out,
+                             "HISTORY w_decide w_who by=person" in out, "HISTORY w_who w_pr by=sclaude" in out,
+                             "HISTORY w_pr w_done by=sclaude" in out), (True, True, True, True, True))
     ready_change("asked while away")
-    out = sh('history_add() { echo "HISTORY $3 $4"; }; review_go_on() { return 0; }; workshop_publish "%s"' % tree, maintainer=False, answer="y")
+    out = sh('review_go_on() { return 0; }; workshop_publish "%s"' % tree, maintainer=False, answer="1")
     check("away-not-asked-not-sent", ("ASK" in out, "PROPOSE" in out, "You are away" in out), (False, False, True))
-    check("away-edge", "HISTORY w_send w_wait by=setting" in out, True)
-    check("away-stays-ready", sh('workshop_state "%s" ""' % tree).strip(), "ready")
+    check("away-stays-ready", sh('workshop_state "%s"' % tree).strip(), "ready")
     git(live, "config", "--unset", "sclaude.contribute")
-    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="n")
-    check("unset-is-ask", ("Send it?" in out, "PROPOSE" in out), (True, False))
+    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="0")
+    check("unset-is-ask", ("Send, reopen or drop?" in out, "PROPOSE" in out), (True, False))
     git(live, "config", "sclaude.contribute", "off")
     ready_change("made before it was off")
-    out = sh('history_add() { echo "HISTORY $3 $4"; }; workshop_publish "%s"' % tree, maintainer=False, answer="y")
-    check("off-held-unasked", ("PROPOSE" in out, "ASK" in out), (False, False))
-    # Not the person's no: the map plays it past the question.
-    check("off-held-history", ("HISTORY contribute-off" in out, "HISTORY w_tests w_held by=setting" in out,
-                               "w_send" in out), (True, True, False))
-    check("off-held", sh('workshop_state "%s" ""' % tree).strip(), "blocked")
+    out = sh('workshop_publish "%s"' % tree, maintainer=False, answer="0")
+    check("off-asks-too", ("Send, reopen or drop?" in out, "PROPOSE" in out), (True, False))
     out = sh("cmd_core_open", session="s9")
     check("off-core-open-refused", ("DIE" in out, "is off" in out), (True, True))
     closed = sh('workshop_rules "%s"' % tree)

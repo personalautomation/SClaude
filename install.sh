@@ -30,7 +30,7 @@
 #   --contribute=ask|send|off    ask shows the change and waits for a yes;
 #                                off keeps sessions from changing sclaude
 #   --leaks=ask|auto|off         a change that may name your product: asked
-#                                about, sent unasked, or never sent
+#                                about (ask, and off alike) or sent unasked
 #
 # With no terminal to ask in, they stay unset, which sclaude reads as ask.
 #

@@ -314,6 +314,12 @@ check("a local run at step 4 lights its block of the regression map beside the c
       == ["fix_local"]
       and process_position.also({"step": "code", "regression": {"local": {"status": "running", "started": _now}}})
       == [])
+_parts1 = {"step": "code", "parts": {"total": 3, "current": 1},
+           "regression": {"local": {"status": "running", "started": _now}}}
+check("a part's regression lights the part's block and its R on the parts map",
+      process_position.position(_parts1)[0] == "reg_local" and process_position.also(_parts1) == ["p_code"]
+      and "R" in process.busy(_parts1).get("p_code", [])
+      and process_position.also(dict(_parts1, regression={})) == [], str(process_position.also(_parts1)))
 _gate = read("sclaude", "lib", "review", "review_gate.sh")
 check("the gate writes a way out of its own pass whichever way it ends",
       all(w in _gate for w in ('review_back_edge "$wt" "$back_from"', "review_run review_close", "review_close review_run"))
@@ -502,6 +508,16 @@ check("the doc lists the commands", "sclaude return &lt;name&gt; [reason]" in do
 page = process.page("x<y")
 check("page escapes the label", "x&lt;y" in page and "x<y</h1>" not in page)
 check("page asks for its state", "/__sclaude/flow/state?f=" in page)
+# The address keeps the page's state (process_url.js): every map with ▶ is a
+# section it can name, and the player and the selection answer it.
+_plays = set(re.findall(r'data-play="([a-z]+)"', page))
+check("page keeps its state in the address",
+      "window.processUrl" in page and "window.player = player" in page and "selected: selected" in page
+      and all('id="map-%s"' % m in page for m in _plays) and 'id="commands"' in page,
+      str(sorted(m for m in _plays if 'id="map-%s"' % m not in page)))
+_doc = process.doc()
+check("the printable map keeps its state in the address too",
+      "window.processUrl" in _doc and all('id="map-%s"' % m in _doc for m in ("detail", "overview", "workshop")))
 known = subprocess.run(["bash", "-c", 'source "%s/tree/branches.sh"; gh() { echo ASKED; }; '
                         'PR_STATE_KNOWN=1 PR_STATE=MERGED branch_pr_state feat/x' % LIB],
                        capture_output=True, text=True, timeout=30).stdout.strip()
@@ -593,27 +609,19 @@ check("history: the places between are filled in along the map",
 import process_history  # noqa: E402
 ws_way = lambda ops: [x["n"] for x in process_history._workshop_way([{"op": o} for o in ops])][len(process_history.WORKSHOP_START):]
 RETURN = ["w_change", "w_ready", "w_exit", "w_ready_gate"]
-check("history: red ends in the wait; a session sent back plays the return",
-      (ws_way(["ready", "red", "ready"]),
-       ws_way(["ready", "red", "sent-back", "ready", "main"]),
-       ws_way(["ready", "red", "sent-back", "unready", "left"]),
-       ws_way(["ready", "red", "ready", "main"]),
-       ws_way(["ready", "red", "sent-back", "ready", "unchanged"]),
-       ws_way(["ready", "red", "sent-back", "ready", "unchanged", "main"])[-6:]) ==
-      (["w_leaks", "w_tests", "w_wait"],
-       ["w_leaks", "w_tests"] + RETURN + ["w_leaks", "w_tests", "w_send", "w_who", "w_main"],
-       ["w_leaks", "w_tests"] + RETURN + ["w_back", "w_pending"],
-       ["w_leaks", "w_tests", "w_leaks", "w_tests", "w_send", "w_who", "w_main"],
-       ["w_leaks", "w_tests"] + RETURN + ["w_wait"],
-       ["w_wait", "w_leaks", "w_tests", "w_send", "w_who", "w_main"]))
-check("history: a hold by the machine's setting goes past the person's questions; an unanswered one waits",
-      (ws_way(["ready", "leaks-off"]), ws_way(["ready", "contribute-off"]),
-       ws_way(["ready", "held"]), ws_way(["ready", "declined"]), ws_way(["ready", "leaks-waits"]),
-       ws_way(["ready", "leaks-waits", "main"])) ==
-      (["w_leaks", "w_held"], ["w_leaks", "w_tests", "w_held"],
-       ["w_leaks", "w_leak_ask", "w_held"], ["w_leaks", "w_tests", "w_send", "w_held"],
-       ["w_leaks", "w_leak_ask", "w_wait"],
-       ["w_leaks", "w_leak_ask", "w_leaks", "w_tests", "w_send", "w_who", "w_main"]))
+check("history: red asks the person; a session sent back plays the return; the answer ends the pass",
+      (ws_way(["ready", "red"]),
+       ws_way(["ready", "sent-back", "ready", "main"]),
+       ws_way(["ready", "red", "reopened", "unready", "dropped"]),
+       ws_way(["ready", "red", "main"]),
+       ws_way(["ready", "asked", "pr"]),
+       ws_way(["unready", "asked"])) ==
+      (["w_leaks", "w_tests", "w_clear", "w_decide"],
+       ["w_leaks", "w_tests"] + RETURN + ["w_leaks", "w_tests", "w_clear", "w_who", "w_main", "w_done"],
+       ["w_leaks", "w_tests", "w_clear", "w_decide", "w_change", "w_exit", "w_ready_gate", "w_decide", "w_drop"],
+       ["w_leaks", "w_tests", "w_clear", "w_decide", "w_who", "w_main", "w_done"],
+       ["w_decide", "w_who", "w_pr", "w_done"],
+       ["w_decide"]))
 # The edges the code writes (history_edge) lead the played way.
 def edge(hhmm, a, b, by, how="", **kw):
     return dict({"at": at(hhmm), "what": "edge", "op": "%s %s" % (a, b), "by": by, "how": how}, **kw)
@@ -621,25 +629,27 @@ def ws_pass(rows):
     return process.history({}, rows)["passes"]["workshop"][0]["steps"]
 eg = ws_pass([{"at": at("09:00"), "what": "workshop", "op": "blocked", "session": "s"},
                edge("09:00", "w_exit", "w_ready_gate", "sclaude", session="s"),
-               edge("09:00", "w_ready_gate", "w_held", "sclaude", "held at this head before", session="s")])
-check("history: a change held before ends held, past no gate it did not meet",
-      [x["n"] for x in eg][-3:] == ["w_exit", "w_ready_gate", "w_held"]
-      and not {"w_leaks", "w_leak_ask", "w_send"} & {x["n"] for x in eg}, str(eg))
+               edge("09:00", "w_ready_gate", "w_decide", "sclaude", note="not finished", session="s")])
+check("history: a change not finished goes to the question, past no check it did not meet",
+      [x["n"] for x in eg][-3:] == ["w_exit", "w_ready_gate", "w_decide"]
+      and not {"w_leaks", "w_tests", "w_clear"} & {x["n"] for x in eg}, str(eg))
 eg = ws_pass([edge("09:00", "w_ready_gate", "w_leaks", "sclaude", session="s"),
                edge("09:00", "w_leaks", "w_tests", "setting", "sclaude.leaks=auto", note="2 line(s)", session="s"),
-               edge("09:01", "w_tests", "w_wait", "sclaude", note="red: tests/a.py", session="s"),
-               edge("10:00", "w_wait", "w_leaks", "sclaude", "the tree opened again"),
+               edge("09:01", "w_tests", "w_clear", "sclaude", note="red: tests/a.py", session="s"),
+               edge("09:01", "w_clear", "w_decide", "sclaude", session="s"),
+               edge("10:00", "w_decide", "w_leaks", "person", "phone"),
                edge("10:00", "w_leaks", "w_tests", "sclaude"),
-               edge("10:01", "w_tests", "w_send", "sclaude"),
-               edge("10:02", "w_send", "w_who", "person", "phone"),
-               edge("10:02", "w_who", "w_main", "sclaude")])
+               edge("10:01", "w_tests", "w_clear", "sclaude"),
+               edge("10:02", "w_clear", "w_who", "setting", "sclaude.contribute=send"),
+               edge("10:02", "w_who", "w_main", "sclaude"),
+               edge("10:02", "w_main", "w_done", "sclaude")])
 tests_via = next(x for x in eg if x["n"] == "w_tests").get("via", {})
-check("history: a way the setting took says so, and a retry plays from the wait",
+check("history: a way the setting took says so, and a send after red plays the tests again",
       [x["n"] for x in eg][[x["n"] for x in eg].index("w_ready_gate") + 1:] ==
-      ["w_leaks", "w_tests", "w_wait", "w_leaks", "w_tests", "w_send", "w_who", "w_main"]
+      ["w_leaks", "w_tests", "w_clear", "w_decide", "w_leaks", "w_tests", "w_clear", "w_who", "w_main", "w_done"]
       and tests_via.get("by") == "setting" and tests_via.get("how") == "sclaude.leaks=auto"
-      and tests_via.get("note") == "2 line(s)" and tests_via.get("label", "").startswith("none")
-      and next(x for x in eg if x["n"] == "w_who")["via"]["how"] == "phone", str(eg))
+      and tests_via.get("note") == "2 line(s)"
+      and next(x for x in eg if x["n"] == "w_leaks" and x.get("via", {}).get("by") == "person")["via"]["how"] == "phone", str(eg))
 eg = process.history({}, [
     {"at": at("09:00"), "what": "steps.code", "op": "open", "session": "c"},
     {"at": at("09:30"), "what": "steps.code", "op": "end", "session": "c"},
@@ -871,7 +881,7 @@ check("history: a review that fixed sclaude in the workshop goes by its bug",
       [s["n"] for s in fr[0]["steps"]][-4:] == ["f_bug", "f_verdict", "f_push", "f_next"], str(fr[0]["steps"]))
 ws = got["passes"]["workshop"]
 check("history: a publication without its session is the last pass's",
-      len(ws) == 1 and ws[0]["steps"][-1]["n"] == "w_main", str(ws))
+      len(ws) == 1 and ws[0]["steps"][-1]["n"] == "w_done", str(ws))
 nodes = process.all_nodes()
 check("history: every place it plays is on a map",
       all(s["n"] in nodes for p in fr + ws for s in p["steps"])
@@ -1806,7 +1816,7 @@ with process.configured({"regression": {"preview": ["e2e"]}}):
           str(process.busy({"step": "review", "regression": {"preview": {"fix_status": "red open"}}})))
 check("the rings turn on the glance's block a place is lit on",
       "[id].concat(M.alias[id] || [], f === 'R' ? POS[id] || [] : []).forEach((at) =>" in process.LIVE_SCRIPT)
-check("a part's local suite turns R on step 2 while it is built", process.busy(_built) == {"code": ["R"]},
+check("a part's local suite turns R on step 2 and on the part while it is built", process.busy(_built) == {"code": ["R"], "p_code": ["R"]},
       str(process.busy(_built)))
 check("a part's local suite turns R on step 4's close while it is reviewed", process.busy(_parts) == {"review_close": ["R"]},
       str(process.busy(_parts)))

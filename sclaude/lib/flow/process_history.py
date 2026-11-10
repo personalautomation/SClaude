@@ -603,41 +603,31 @@ def _part_of(r, pmode, current, total, last):
 
 WORKSHOP_START = ("w_find", "w_ask", "w_open", "w_change", "w_ready", "w_exit", "w_ready_gate")
 WORKSHOP_OUT = {
-    "blocked": ("w_leaks", "w_leak_ask", "w_held"), "held": ("w_leaks", "w_leak_ask", "w_held"),
-    "left": ("w_back", "w_pending"), "red": ("w_leaks", "w_tests", "w_wait"),
-    "unchanged": ("w_wait",),
-    "declined": ("w_leaks", "w_tests", "w_send", "w_held"), "waits": ("w_leaks", "w_tests", "w_send"),
-    # Held unasked, by the machine's setting: past the person's gates.
-    "leaks-off": ("w_leaks", "w_held"), "contribute-off": ("w_leaks", "w_tests", "w_held"),
-    # The leak question unanswered: it waits, asked again at the next opening.
-    "leaks-waits": ("w_leaks", "w_leak_ask", "w_wait"),
-    "stopped": ("w_leaks", "w_tests", "w_send", "w_who"),
-    "main": ("w_leaks", "w_tests", "w_send", "w_who", "w_main"),
-    "pr": ("w_leaks", "w_tests", "w_send", "w_who", "w_pr"),
+    "sent-back": ("w_leaks", "w_tests", "w_change"),
+    "red": ("w_leaks", "w_tests", "w_clear", "w_decide"),
+    # The person's question left unanswered: asked again at the next opening.
+    "asked": ("w_decide",),
+    "reopened": ("w_decide", "w_change"),
+    "dropped": ("w_decide", "w_drop"),
+    "main": ("w_leaks", "w_tests", "w_clear", "w_who", "w_main", "w_done"),
+    "pr": ("w_leaks", "w_tests", "w_clear", "w_who", "w_pr", "w_done"),
 }
+# From the question, a send goes straight on to the push.
+_FROM_DECIDE = {"main": ("w_who", "w_main", "w_done"), "pr": ("w_who", "w_pr", "w_done")}
 
 
 def _workshop_way(rows):
     """A session's change to sclaude, from the session's end to how its
-    publication went."""
+    publication went: a send, a drop, or the question still open."""
     way = list(WORKSHOP_START)
     for r in rows:
-        if way[-1] == "w_pending" and r["op"] != "left":
-            way += ["w_change", "w_ready", "w_exit", "w_ready_gate"]
-        # Red and an unanswered leak question end in the wait, unless the
-        # session was sent back for red (sent-back, written as it reopens):
-        # then the return is the way. A publication after such a wait with
-        # no return between is a retry at a later opening, played from the
-        # gate that stopped it, as a jump the map does not draw; after the
-        # wait of a session that left the head as it was (unchanged), the
-        # wait stays, as the stop between the two openings.
-        if way[-1] == "w_wait" and way[-2] in ("w_tests", "w_leak_ask"):
-            if r["op"] == "sent-back":
-                way = way[:-1] + ["w_change", "w_ready", "w_exit", "w_ready_gate"]
-                continue
-            if r["op"] in WORKSHOP_OUT:
-                way.pop()
-        for n in WORKSHOP_OUT.get(r["op"], ()):
+        op = r["op"]
+        # Back in the session (red tests unasked, or the person's reopen):
+        # its next end is a way round again.
+        if way[-1] == "w_change" and op in ("ready", "unready", "none"):
+            way += ["w_ready", "w_exit", "w_ready_gate"] if op == "ready" else ["w_exit", "w_ready_gate"]
+        steps = _FROM_DECIDE.get(op) if way[-1] == "w_decide" else None
+        for n in steps or WORKSHOP_OUT.get(op, ()):
             if n != way[-1]:
                 way.append(n)
     return [{"n": n} for n in way]

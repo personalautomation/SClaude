@@ -254,7 +254,7 @@ contribute_modes_explain() {
   from your fork for anybody else). Written while working in your product,
   such a change is checked for the product's details, but only by a heuristic.
     1 ask   you see the commits and the files, and nothing goes out without
-            your yes
+            your send (the question is "Send, reopen or drop?")
     2 send  it goes out by itself once it is reviewed and its tests are green
     3 off   no session changes sclaude on this machine; what got in its way
             stays in your product's friction log
@@ -265,10 +265,10 @@ leaks_modes_explain() {
   cat <<'TXT'
   Before a fix of sclaude is sent, it is searched for your product's details:
   its name, issue and pull-request numbers, paths of its files. When something
-  matches, sclaude asks "Publish it anyway?".
-    1 ask   the matching lines are shown, and nothing goes out without your yes
+  matches, the lines are shown with the question "Send, reopen or drop?".
+    1 ask   nothing that matches goes out without your send
     2 auto  they are shown, and it goes out without the question
-    3 off   a change that matches never goes out; a session rewords it first
+    3 off   as ask: your send, given after seeing the lines, is yours to give
 TXT
 }
 

@@ -26,10 +26,11 @@ propose` sends your own commits, only when you run it.
 sent, sclaude searches it for your product's name, issue and pull-request
 numbers, and paths of its files. The search is a heuristic and will not
 catch everything: a table name or business logic described in a commit
-message can still get through. `ask` shows the matches and waits for your
-yes, `auto` sends with them, and `off` holds the fix until a session
-rewords it. A question about them that nobody answers holds nothing: it is
-asked again when the tree is next opened.
+message can still get through. `ask` shows the matches with the question
+"Send, reopen or drop?" and nothing goes out without your send; `auto` sends
+with them; `off` asks as `ask` does — a send you give after seeing them is
+yours. Nothing is decided for you: a question nobody answers is asked again
+when the tree is next opened.
 
 **To your own services**, as part of the cycle:
 - Anthropic: everything a Claude Code session reads, as with any Claude Code

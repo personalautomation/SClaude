@@ -66,25 +66,28 @@ in the feature's workshop instead, a copy of the checkout at
 
 When the session ends, sclaude publishes the change itself. It looks for your
 project's details in it — the project's name, issue or pull-request numbers,
-paths of its files — and asks you before it sends anything that matches; it
-runs the tests the change touches, a line on the screen for each as it
-runs; with sending on `ask` (the default) it shows you the commits and the
-files and waits for your yes, and while you are away it waits for you; then it pushes a maintainer's change to
-`main` as one commit, and sends anybody else's as one pull request per
-feature. A change left uncommitted or unreviewed is not published: sclaude
-offers you the session back to finish it, at once and when you next open the
-feature, and says what is missing. Red tests right after the session send
-that session back by themselves, told which tests failed, twice at most. A publication that stops — red tests, no network, a refused push —
-is tried again, quietly, every time you open the feature; only your own "no"
-— to the project's details, or to sending it — holds it, until a session
-rewords the change or you run `sclaude core-send` in the feature's tree.
-With sending `off`, sessions do not open the workshop at all, and what they
-found stays in the feature's friction log. A list
-of matches too long for a phone question is asked at the terminal only. A
-workshop goes with its feature; a change in it never published
-stays on its branch in this checkout, and the clean-up names it. When the
-retrospective's change reaches this checkout, `sclaude done` carries on with
-the clean-up in a fresh run of the new code by itself.
+paths of its files — and runs the tests the change touches, a line on the
+screen for each as it runs. Red tests right after the session send that
+session back by themselves, told which tests failed, twice at most. Then, if
+there is anything to ask — lines that may name your project, red tests, or
+sending on `ask` (the default) — you get one question with everything shown:
+**Send, reopen or drop?** Send publishes it as it is (your send, given after
+seeing the lines, overrides the settings); reopen sends the session that made
+it back, told what stopped it; drop empties the workshop and keeps the change
+under `refs/sclaude/dropped/` in this checkout. A change left uncommitted or
+unreviewed gets the same question with reopen and drop, and so does one whose
+push failed or whose main was out of reach. Nothing is decided for you: while
+you are away or have not answered, the question is asked again every time you
+open the feature, and `sclaude done` waits for your answer before it cleans
+up. A maintainer's change goes to `main` as one commit, anybody else's as one
+pull request per feature. `sclaude core-send` in the feature's tree is a send
+typed by hand: lines that may name your project, red tests, a failed
+preparation (main out of reach, a conflict) or a failed push still stop it
+with the question. With sending `off`, sessions do not open the workshop at all,
+and what they found stays in the feature's friction log. A question too long
+for the phone is asked at the terminal only. When the retrospective's change
+reaches this checkout, `sclaude done` carries on with the clean-up in a fresh
+run of the new code by itself.
 
 **Who keeps a product's rules.** `maintainers` in the product's
 `.sclaude/config.json` lists who curates the shared rules in `.sclaude/team/`.

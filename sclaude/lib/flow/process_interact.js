@@ -109,4 +109,12 @@ document.addEventListener('click', (ev) => {
   }
 });
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { sel.clear(); paint(); } });
-window.processMap = {paint: paint, model: M};
+// What is selected, and a selection to restore (process_url.js): only keys
+// the page draws.
+function selected() { return [...sel]; }
+function select(keys) {
+  sel.clear();
+  keys.forEach((k) => { if (document.querySelector('[data-key="' + CSS.escape(k) + '"]')) sel.add(k); });
+  paint();
+}
+window.processMap = {paint: paint, model: M, selected: selected, select: select};

@@ -1,6 +1,6 @@
 
 const player = (() => {
-  let data = null, token = 0, paused = false, speed = 1;
+  let data = null, token = 0, paused = false, speed = 1, at = 0, wanted = null;
   const bar = document.getElementById('player');
   const say = (t) => { bar.querySelector('.pl-text').textContent = t; };
   function dur(s) {
@@ -46,7 +46,7 @@ const player = (() => {
     drawMetrics();
   }
   function stop() {
-    token++; paused = false; clear(); bar.hidden = true; playing = null;
+    token++; paused = false; clear(); bar.hidden = true; playing = null; at = 0;
     bar.querySelector('.pl-pause').textContent = '⏸';
     document.body.classList.remove('pl-paused');
     document.querySelectorAll('#hist li.on').forEach((li) => li.classList.remove('on'));
@@ -190,11 +190,11 @@ const player = (() => {
     const key = s.map + ':' + s.n;
     played[key] = addUp(played[key] || {}, Object.assign({visits: 1, unsure: s.unsure ? 1 : 0}, s.m));
   }
-  async function run(steps, label, start) {
+  async function run(steps, label, start, map) {
     stop();
     start = start || 0;
     const mine = ++token;
-    playing = {steps: steps, label: label};
+    playing = {steps: steps, label: label, map: map};
     played = {}; inPlay = new Set(steps.map((s) => s.map));
     document.body.classList.add('playing');
     bar.hidden = false;
@@ -204,6 +204,7 @@ const player = (() => {
     let prev = start ? steps[start - 1] : null;
     for (let i = start; i < steps.length; i++) {
       const s = steps[i];
+      at = i;
       pick(i);
       if (s.map !== (prev && prev.map) && prev) {
         say(label + ' · ' + (PASSES.includes(s.map)
@@ -343,7 +344,7 @@ const player = (() => {
       } else li.classList.add('h-pass');
       li.addEventListener('click', () => {
         const b = document.querySelector('.play.on');
-        run(steps, label, i);
+        run(steps, label, i, playing && playing.map);
         if (b) { b.textContent = '■'; b.classList.add('on'); }
       });
       ul.append(li);
@@ -377,7 +378,7 @@ const player = (() => {
   }
   document.querySelectorAll('.play').forEach((b) => b.addEventListener('click', () => {
     if (b.classList.contains('on')) { stop(); return; }
-    run(expand(b.dataset.play), b.dataset.label);
+    run(expand(b.dataset.play), b.dataset.label, 0, b.dataset.play);
     b.textContent = '■'; b.classList.add('on');
   }));
   bar.querySelector('.pl-pause').addEventListener('click', (ev) => {
@@ -396,7 +397,7 @@ const player = (() => {
     try { localStorage.setItem('process-stay', stay.checked ? '1' : '0'); } catch (e) {}
     const b = document.querySelector('.play.on');
     if (!b || PASSES.includes(b.dataset.play)) return;
-    run(expand(b.dataset.play), b.dataset.label);
+    run(expand(b.dataset.play), b.dataset.label, 0, b.dataset.play);
     b.textContent = '■'; b.classList.add('on');
   });
   bar.querySelector('.pl-stop').addEventListener('click', stop);
@@ -422,7 +423,8 @@ const player = (() => {
     document.querySelectorAll('.play').forEach((b) => {
       if (!PASSES.includes(b.dataset.play)) b.disabled = false;
     });
-    if (bar.hidden) list(expand('detail'), 'The whole process');
+    if (bar.hidden && !wanted) list(expand('detail'), 'The whole process');
+    if (wanted) { const w = wanted; wanted = null; resume(w); }
   }
   // The panel's two faces: what can be done now, and how it went.
   function showTab(name) {
@@ -602,12 +604,52 @@ const player = (() => {
         }
       });
     });
-    try { localStorage.setItem('process-metrics', JSON.stringify(on)); } catch (e) {}
   }
   try {
     const kept = JSON.parse(localStorage.getItem('process-metrics') || '[]');
     document.querySelectorAll('.metrics input').forEach((c) => { c.checked = kept.includes(c.value); });
   } catch (e) {}
-  document.querySelectorAll('.metrics input').forEach((c) => c.addEventListener('change', drawMetrics));
-  return {update: (h) => { update(h); if (h) drawMetrics(); }, stop: stop};
+  // Kept for this browser when the person ticks them; a link's own choice
+  // (process_url.js, window.processUrlRestoring) is for that view alone.
+  // Only the box ticked is changed in what is kept: the boxes a link turned
+  // on stay out of it.
+  document.querySelectorAll('.metrics input').forEach((c) => c.addEventListener('change', () => {
+    drawMetrics();
+    if (window.processUrlRestoring) return;
+    try {
+      const kept = JSON.parse(localStorage.getItem('process-metrics') || '[]').filter((v) => v !== c.value);
+      if (c.checked) kept.push(c.value);
+      localStorage.setItem('process-metrics', JSON.stringify(kept));
+    } catch (e) {}
+  }));
+  // A play as the address keeps it (process_url.js): which map, which pass,
+  // where it is, how fast, on this map only, paused.
+  function state() {
+    if (bar.hidden || !playing || !playing.map) return null;
+    const sel = document.querySelector('select.pass[data-pass="' + playing.map + '"]');
+    return {map: playing.map, pass: PASSES.includes(playing.map) && sel ? sel.value : null, at: at,
+            speed: speed, only: stay.checked, paused: paused};
+  }
+  // The same, started again once the history has come.
+  function resume(w) {
+    const b = document.querySelector('.play[data-play="' + w.map + '"]');
+    if (!b) return;
+    const sel = document.querySelector('select.pass[data-pass="' + w.map + '"]');
+    if (sel && w.pass != null && sel.querySelector('option[value="' + w.pass + '"]')) sel.value = w.pass;
+    stay.checked = !!w.only;
+    speed = w.speed || 1;
+    bar.querySelector('.pl-speed').value = String(speed);
+    const steps = expand(w.map);
+    run(steps, b.dataset.label, Math.min(w.at || 0, Math.max(0, steps.length - 1)), w.map);
+    b.textContent = '■'; b.classList.add('on');
+    if (w.paused) {
+      say(b.dataset.label + ' · paused at ' + (at + 1) + '/' + steps.length);
+      paused = true;
+      bar.querySelector('.pl-pause').textContent = '▶';
+      document.body.classList.add('pl-paused');
+    }
+  }
+  return {update: (h) => { update(h); if (h) drawMetrics(); }, stop: stop, state: state,
+          want: (w) => { if (data) resume(w); else wanted = w; }};
 })();
+window.player = player;

@@ -27,7 +27,7 @@ sclaude drop <name>     # abandon a feature and remove its traces, here and on G
 sclaude propose         # send your commits to sclaude as a pull request
 sclaude workshop        # a session that changes sclaude with you, in a worktree of its own
 sclaude update          # take sclaude's latest main (updates on notify or off)
-sclaude core-send       # in a feature's tree: send the workshop change you held back
+sclaude core-send       # in a feature's tree: answer send to the workshop change's question
 sclaude core-open       # run by a session: open the feature's workshop to change sclaude
 sclaude core-ready      # run by a session: its change there is reviewed; publish it at the end
 ```

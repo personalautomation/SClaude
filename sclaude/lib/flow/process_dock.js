@@ -9,7 +9,8 @@ function pin(on) {
   document.body.classList.toggle('pinned', on);
   dockWidth();
   document.querySelectorAll('.pin-head').forEach((b) => { b.textContent = on ? '📌 Unpin' : '📌 Pin'; });
-  try { localStorage.setItem('process-pinned', on ? '1' : '0'); } catch (e) {}
+  // A link's own choice (process_url.js) is for that view alone.
+  if (!window.processUrlRestoring) try { localStorage.setItem('process-pinned', on ? '1' : '0'); } catch (e) {}
 }
 let pinned = true;
 try { pinned = localStorage.getItem('process-pinned') !== '0'; } catch (e) {}

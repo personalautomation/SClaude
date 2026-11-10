@@ -681,7 +681,7 @@ def core_open_refused(command, step):
     return None
 
 
-# `sclaude core-send` sends a held workshop change as the person's own yes
+# `sclaude core-send` answers send to the workshop change's question as the person
 # (workshop.sh cmd_core_send): no session runs it, whatever its step, or it
 # would answer the questions sclaude.contribute and sclaude.leaks ask the
 # person. Refused here rather than only by the variable cmd_core_send reads,

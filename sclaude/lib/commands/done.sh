@@ -107,20 +107,13 @@ cmd_done() {
     return
   fi
 
-  # The retrospective's own change, whose publication stopped on the way as
-  # it ended — no network, a refused push — gets one more try: past here the
-  # workshop goes with the tree, and what it holds waits on a branch nobody
-  # tries again. Red tests or a conflict would only stop it again, minutes
-  # later. A try that moves sclaude's code sends the clean-up into a fresh
-  # run, as above.
-  if [[ "$(workshop_state "$wt" "")" == ready \
-        && "$(workshop_py get "$(workshop_record "$wt")" stopped 2>/dev/null)" == "on the way" ]]; then
-    live_before="$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)"
-    WORKSHOP_FROM=w_wait workshop_publish "$wt"
-    if [[ "$(git -C "$INSTRUMENTS" rev-parse HEAD 2>/dev/null || true)" != "$live_before" ]]; then
-      done_fresh "$slug" "$retro_flag"
-      return
-    fi
+  # A change to sclaude still in the workshop waits on the person's question
+  # (workshop_decide): send, reopen or drop. Past here the workshop goes with
+  # the tree, so the clean-up waits for the answer, which the next run asks
+  # for again (workshop_pending, above).
+  if [[ "$(workshop_state "$wt")" != none ]]; then
+    warn "  The clean-up waits for sclaude's change in this tree's workshop: send, reopen or drop it — $SELF done $slug asks again."
+    return 1
   fi
 
   # A retrospective that committed the feature's own work on a branch with no

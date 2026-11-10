@@ -41,7 +41,7 @@ WHEN = {
     "in a session": [nid for nid, n in process_config.all_nodes().items() if n[2] == "session"],
     "with review rounds": ["review", "review_run", "review_close"],
     "a developer's branch": [],
-    "a workshop change held": ["w_held"],
+    "a workshop change waiting": ["w_decide"],
 }
 
 KIND_WORDS = {
@@ -200,6 +200,9 @@ INTERACT_SCRIPT = page_asset.read(__file__, "process_interact.js")
 # The pinned commands: shown unless unpinned, a choice the browser keeps.
 DOCK_SCRIPT = page_asset.read(__file__, "process_dock.js")
 
+# The page's state in its address (process_url.js), on both pages.
+URL_SCRIPT = page_asset.read(__file__, "process_url.js")
+
 # The printed page's own choice of paper and scale: the sheets are cut again
 # for it, and @page is set to match. The page names the paper itself, so a
 # browser's print dialog hides Layout and Paper size: they are chosen here.
@@ -257,7 +260,7 @@ def _doc():
 <title>sclaude Process Map</title>
 <style>%s
 %s</style><style id="pagesize">@page{size:A4 landscape;margin:12mm 9mm 9mm}</style></head><body><main>
-<section style="page:s1">
+<section style="page:s1" id="map-overview">
 <h1>sclaude — the process</h1>
 <p class="lead">The feature cycle as BPMN: who does what, in which order, and every way back.
 Drawn from <code>sclaude/lib/flow/process.py</code>, which tests check against the code; a feature's own copy,
@@ -267,7 +270,7 @@ with where it stands lit and its actions, is at <code>http://localhost:3000/__sc
 click to keep it lit, Ctrl-click to add more, Esc to clear.</p>
 <h2 class="first">%s</h2>
 <div class="card">%s</div>
-</section><section style="page:s2">
+</section><section style="page:s2" id="map-detail">
 <h2>%s</h2>
 <p class="muted">Every lane, every check and every way back.</p>
 %s
@@ -301,7 +304,7 @@ the sync session.</p>
 step 2: a pull request for each into the feature's branch, reviewed alone, merged there. Main gets the whole
 feature once, through its own pull request.</p>
 <div class="card">%s</div>
-</section><section style="page:s8">
+</section><section style="page:s8" id="commands">
 <h2>%s <button type="button" class="pin pin-head screen-only">📌 Pin</button></h2>
 <p class="muted">A feature's action list shows only those that apply to it now. A command lights the place it
 leads to; a block lights the commands open there.</p>
@@ -309,11 +312,11 @@ leads to; a block lights the commands open there.</p>
 </section>
 <button id="clear" class="screen-only" type="button" hidden>Clear the selection</button>
 %s
-</main><script>%s%s%s</script></body></html>
+</main><script>%s%s%s%s</script></body></html>
 """ % (process_diagram.STYLE, running_heads(), process_diagram.LEGEND, process_diagram.esc(SECTIONS[0]), overview.svg(),
        process_diagram.esc(SECTIONS[1]), PRINT_BAR, detail.svg(), detail.svg(symbol=True), tiles(detail),
        process_diagram.esc(SECTIONS[2]), process_diagram.Diagram(*process_config.node_sets()[2]).svg(), process_diagram.esc(SECTIONS[3]), process_diagram.Diagram(*process_config.node_sets()[3]).svg(),
        process_diagram.esc(SECTIONS[4]), process_diagram.Diagram(*process_config.node_sets()[4]).svg(), process_diagram.esc(SECTIONS[5]), process_diagram.Diagram(*process_config.node_sets()[5]).svg(),
        process_diagram.esc(SECTIONS[6]), process_diagram.Diagram(*process_config.node_sets()[6]).svg(),
        process_diagram.esc(SECTIONS[7]), commands_table(),
-       commands_dock(), INTERACT_SCRIPT.replace("/*MODEL*/", json.dumps(client_model())), PRINT_SCRIPT, DOCK_SCRIPT)
+       commands_dock(), INTERACT_SCRIPT.replace("/*MODEL*/", json.dumps(client_model())), PRINT_SCRIPT, DOCK_SCRIPT, URL_SCRIPT)

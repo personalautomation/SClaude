@@ -57,7 +57,9 @@ function render(v) {
       || document.querySelector('svg.map [data-node="' + here + '"]');
     // Down to it only: centred across as well, the card scrolled the map's
     // first lanes off its left edge with no way to tell they were there.
-    if (n && last === '') n.scrollIntoView({block: 'center', inline: 'nearest'});
+    // Not over a section or a play the address asked for (process_url.js).
+    if (n && last === '' && !(window.processUrl && window.processUrl.section) && !location.hash.includes('play='))
+      n.scrollIntoView({block: 'center', inline: 'nearest'});
     last = here;
   }
   const ul = document.getElementById('acts');

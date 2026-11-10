@@ -74,6 +74,10 @@ code{font-family:var(--mono);font-size:.9em;background:var(--surface-2);padding:
 .nav-link{margin-left:auto;color:var(--hero-muted);font-size:14px;font-weight:500;white-space:nowrap}
 .nav-link:hover{color:var(--hero-ink);text-decoration:none}
 .nav-link + .gh{margin-left:0}
+.nav-about + .nav-link{margin-left:-16px}
+.nav-about,.nav-about + .nav-link{padding:6px 14px;border:1px solid #33405C;border-radius:999px;line-height:1.2}
+.nav-about:hover,.nav-about + .nav-link:hover{border-color:#5F6B85;background:#141D30}
+@media (max-width:480px){.nav .wrap{gap:10px}.nav .btn-sm{display:none}.nav-about,.nav-about + .nav-link{padding:6px 11px}.nav-about + .nav-link{margin-left:0}}
 @media (max-width:900px){.nav ul{display:none}}
 
 .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:999px;font-weight:600;font-size:15px;border:1px solid transparent;transition:transform .15s,background .15s}
@@ -304,7 +308,7 @@ pre .p{color:var(--glow);user-select:none}
 .mit b{display:block;color:var(--hero-ink);margin-bottom:4px}
 .mit span{color:var(--hero-muted);font-size:14px}
 
-footer{padding:56px 0;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
+footer{padding:30px 0;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
 footer .wrap{display:flex;gap:24px;flex-wrap:wrap;justify-content:space-between;align-items:center}
 footer a{color:var(--ink-2)}
 .foot-social{display:inline-flex;gap:18px;align-items:center}
@@ -422,6 +426,7 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
       <li><a href="#learning">Metrics</a></li>
       <li><a href="#decks">Decks</a></li>
     </ul>
+    <a class="nav-link nav-about" href="media/cv/Ilia_Poliakov_CV.pdf" data-about>Ilia Poliakov</a>
     <a class="nav-link" href="contact.html">Contact</a>
     <a class="btn btn-ghost btn-sm gh" href="https://github.com/personalautomation/SClaude">GitHub ↗</a>
   </div>
@@ -1072,5 +1077,6 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
   },{passive:true});
 })();
 </script>
+<script src="about.js" defer></script>
 </body>
 </html>

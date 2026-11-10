@@ -49,6 +49,11 @@ a:hover{text-decoration:underline}
 .nav-link{margin-left:auto;color:var(--hero-muted);font-size:14px;font-weight:500}
 .nav-link:hover{color:var(--hero-ink);text-decoration:none}
 .nav-link[aria-current="page"]{color:var(--hero-ink)}
+.nav-about + .nav-link{margin-left:-16px}
+.nav-about,.nav-about + .nav-link{padding:6px 14px;border:1px solid #33405C;border-radius:999px;line-height:1.2}
+.nav-about:hover,.nav-about + .nav-link:hover{border-color:#5F6B85;background:#141D30}
+@media (max-width:480px){.nav .wrap{gap:10px}.nav .btn-sm{display:none}.nav-about,.nav-about + .nav-link{padding:6px 11px}.nav-about + .nav-link{margin-left:0}}
+.nav-link{white-space:nowrap}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 22px;border-radius:999px;font:600 15px var(--sans);border:1px solid transparent;cursor:pointer;transition:transform .15s,background .15s,opacity .15s}
 .btn:hover{text-decoration:none;transform:translateY(-1px)}
 .btn-primary{background:var(--glow);color:#04201C}
@@ -84,7 +89,7 @@ input:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 
 .status.ok{background:var(--accent-soft);color:var(--ink)}
 .status.err{background:var(--warm-soft);color:var(--ink)}
 
-footer{padding:40px 0;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
+footer{padding:26px 0;color:var(--muted);font-size:14px;border-top:1px solid var(--line)}
 footer .wrap{display:flex;gap:24px;flex-wrap:wrap;justify-content:space-between;align-items:center}
 footer a{color:var(--ink-2)}
 .foot-social{display:inline-flex;gap:18px;align-items:center}
@@ -100,6 +105,7 @@ footer a{color:var(--ink-2)}
 <nav class="nav">
   <div class="wrap">
     <a class="brand" href="./"><img src="media/brand/mark.svg" alt="" width="34" height="32"><span><b>S</b>Claude</span></a>
+    <a class="nav-link nav-about" href="media/cv/Ilia_Poliakov_CV.pdf" data-about>Ilia Poliakov</a>
     <a class="nav-link" href="contact.html" aria-current="page">Contact</a>
     <a class="btn btn-ghost btn-sm" href="https://github.com/personalautomation/SClaude">GitHub ↗</a>
   </div>
@@ -178,5 +184,6 @@ footer a{color:var(--ink-2)}
   });
 })();
 </script>
+<script src="about.js" defer></script>
 </body>
 </html>

@@ -74,9 +74,10 @@ code{font-family:var(--mono);font-size:.9em;background:var(--surface-2);padding:
 .nav-link{margin-left:auto;color:var(--hero-muted);font-size:14px;font-weight:500;white-space:nowrap}
 .nav-link:hover{color:var(--hero-ink);text-decoration:none}
 .nav-link + .gh{margin-left:0}
-.nav-about + .nav-link{margin-left:-16px}
-.nav-about,.nav-about + .nav-link{padding:6px 14px;border:1px solid #33405C;border-radius:999px;line-height:1.2}
-.nav-about:hover,.nav-about + .nav-link:hover{border-color:#5F6B85;background:#141D30}
+.nav-about + .nav-link{margin-left:-20px}
+.nav-about + .nav-link + .btn-sm{margin-left:-14px}
+.nav-about,.nav-about + .nav-link{padding:6px 14px;border:1px solid rgba(0,240,200,.2);border-radius:999px;line-height:1.2;background:rgba(0,240,200,.06)}
+.nav-about:hover,.nav-about + .nav-link:hover{border-color:rgba(0,240,200,.38);background:rgba(0,240,200,.12)}
 @media (max-width:480px){.nav .wrap{gap:10px}.nav .btn-sm{display:none}.nav-about,.nav-about + .nav-link{padding:6px 11px}.nav-about + .nav-link{margin-left:0}}
 @media (max-width:900px){.nav ul{display:none}}
 
@@ -354,6 +355,18 @@ section.dark h2 em{color:var(--glow)}
 @keyframes reel-nudge{0%,100%{translate:0}40%,60%{translate:-12% 0}}
 @media (max-width:600px){.slide{flex-basis:80%}.reel-track{gap:12px}.slide-cover{padding:0 8px}.slide-cover span{width:40px;height:40px;font-size:24px}.reel-tab{font-size:13px}}
 .stats{margin-top:44px}
+/* Each screen fits a short window too: the headlines and the gaps
+   follow the height as well as the width. */
+@media (min-width:761px){
+  .hero{padding:clamp(20px,3.5vh,48px) 0}
+  .hero h1{font-size:clamp(44px,min(6.4vw,9.2vh),82px);margin:clamp(12px,2.2vh,22px) 0 clamp(12px,2vh,20px)}
+  .hero .lede{margin-bottom:clamp(16px,2.6vh,28px)}
+  .stats{margin-top:clamp(20px,4vh,44px)}
+  section{padding:clamp(20px,3vh,36px) 0}
+  h2{font-size:clamp(30px,min(3.5vw,5.8vh),48px)}
+  .sub{margin-bottom:clamp(14px,2.4vh,26px)}
+}
+@media (min-width:761px) and (max-height:820px){th,td{padding:8px 16px}}
 @media (max-width:760px),(max-height:700px){
   .hero,section{min-height:0}
   section{padding:56px 0}

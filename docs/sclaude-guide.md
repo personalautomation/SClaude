@@ -149,8 +149,12 @@ criteria copied in as a plain list for QA, who ticks them in the issue, and the
 manuals updated in the same pull request.
 
 **Step 4, review.** The project's automatic review reads the pull request, and
-a session fixes what it found, one round at a time. The step closes when the
-review has nothing left open, the preview is deployed and its tests pass.
+a session fixes what it found, one round at a time. After every round —
+including the rounds a session takes up by itself — sclaude prints the review
+report in its terminal and sends it to the feature's topic: per round, what
+was found and how much of it sat on earlier fixes, and what the fix took and
+cost. The step closes when the review has nothing left open, the preview is
+deployed and its tests pass.
 Once the preview's tests pass, before the issue goes to QA, when the
 product's code changed since the last demo — the review may have changed what
 the feature does — a headless session records a delta of what changed for the

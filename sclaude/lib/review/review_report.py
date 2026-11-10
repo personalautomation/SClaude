@@ -56,6 +56,7 @@ import datetime
 import json
 import os
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -340,7 +341,7 @@ def review_runs(cwd, branch, since=None):
     # The limit is high on purpose: every comment starts the @mention
     # workflow, and at 200 those runs pushed the review's own off the list.
     data = gh_json(["run", "list", "--branch", branch, "--limit", "1000", "--json",
-                    "workflowName,createdAt,updatedAt,status"], cwd=cwd)
+                    "workflowName,createdAt,startedAt,updatedAt,status,headSha"], cwd=cwd)
     if not isinstance(data, list):
         return None
     out = []
@@ -352,9 +353,15 @@ def review_runs(cwd, branch, since=None):
         if not a or not after(a, since):
             continue
         running = (r.get("status") or "completed") != "completed"
-        seconds = (b - a).total_seconds() if b and b > a else 0.0
+        # Timed from its last attempt's start: a run re-run after a usage
+        # limit keeps the hour it was created at, and read from there its
+        # wait for the limit counted as the review's time.
+        began = parse(r.get("startedAt"))
+        began = began if began and began >= a else a
+        seconds = (b - began).total_seconds() if b and b > began else 0.0
         if running or seconds >= SKIP_SECONDS:
-            out.append({"start": a, "seconds": seconds, "running": running})
+            out.append({"start": a, "seconds": seconds, "running": running,
+                        "head": r.get("headSha") or None})
     out.sort(key=lambda r: r["start"])
     return out
 
@@ -404,7 +411,7 @@ def local_runs(cwd, since=None, root=None):
                 out[-1]["cost"] = (out[-1]["cost"] or 0) + cost
             continue
         out.append({"start": parse(row["at"]), "seconds": float(row.get("seconds") or 0),
-                    "running": False, "cost": cost})
+                    "running": False, "cost": cost, "head": row.get("head")})
         last = key
     return out
 
@@ -415,7 +422,7 @@ def rounds(found, runs):
     threads are split where ROUND_GAP passes between two of them."""
     if runs:
         out = [{"at": r["start"], "seconds": r.get("seconds"), "running": r["running"],
-                "cost": r.get("cost"), "threads": []}
+                "cost": r.get("cost"), "head": r.get("head"), "threads": []}
                for r in runs]
         for t in found:
             i = 0
@@ -441,12 +448,58 @@ def near(a, b):
             and abs(a["line"] - b["line"]) <= NEAR_LINES)
 
 
-def mark_near_fixes(found):
-    """Marks each thread posted near a line an earlier round's fixed thread
-    sat on, in the same file."""
+HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
+
+
+def fixed_lines(cwd, base, head):
+    """{path: [(first, last)]} — the lines the feature's own commits between
+    two reviewed heads wrote: first-parent and no merges, so main merged in
+    on the way is not taken for a fix. Each range is where its commit put it,
+    which later commits of the same stretch may have moved a little; NEAR_LINES
+    absorbs that. {} when git cannot tell."""
+    if not base or not head or base == head:
+        return {}
+    try:
+        # Only a branch that moved forward: rebased or force-pushed between
+        # the two runs, base..head is every commit of the feature again.
+        if subprocess.run(["git", "merge-base", "--is-ancestor", base, head], cwd=cwd,
+                          capture_output=True, timeout=30).returncode != 0:
+            return {}
+        out = subprocess.run(["git", "log", "--first-parent", "--no-merges", "--format=", "-p",
+                              "-U0", "%s..%s" % (base, head)],
+                             cwd=cwd, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if out.returncode != 0:
+        return {}
+    lines, path = {}, None
+    for text in out.stdout.splitlines():
+        if text.startswith("+++ "):
+            path = text[6:] if text.startswith("+++ b/") else None
+        elif path and text.startswith("@@"):
+            m = HUNK.match(text)
+            if m:
+                first, count = int(m.group(1)), int(m.group(2) or 1)
+                if count:
+                    lines.setdefault(path, []).append((first, first + count - 1))
+    return lines
+
+
+def mark_near_fixes(found, groups=None, cwd=None):
+    """Marks each thread posted on the fixes: near a line an earlier round's
+    fixed thread sat on, in the same file, or on lines the feature's commits
+    since the run before wrote (fixed_lines). The first alone missed every
+    finding on code a fix added somewhere else — a new function, the guide,
+    a migration — and read a round of findings on the fixes as none."""
+    wrote = {}
+    for i, g in enumerate(groups or []):
+        if i and cwd and g.get("head") and groups[i - 1].get("head"):
+            wrote[i] = fixed_lines(cwd, groups[i - 1]["head"], g["head"])
     for i, t in enumerate(found):
+        spans = wrote.get(t["round"], {}).get(t["path"], []) if t["line"] is not None else []
         t["near_fix"] = any(e["fate"] == "fixed" and e["round"] != t["round"] and near(e, t)
-                            for e in found[:i])
+                            for e in found[:i]) \
+            or any(a - NEAR_LINES <= t["line"] <= b + NEAR_LINES for a, b in spans)
 
 
 def mark_repeats(found):
@@ -492,11 +545,15 @@ def sessions(cwd, since=None):
         ats = [parse(t) for t in (r.get("cost_at") or [])]
         # A launch that gave its cost has ended, though its end is written
         # after the report the session's close prints (session_ended in
-        # run.sh): run_cost dates the cost by the launch's start.
-        if going and ats and ats[-1] and ats[-1] >= (resumed or a or ats[-1]):
+        # run.sh): run_cost marks it with the launch's start (`costed`). Not
+        # read off `cost_at`, which a share closed at a round the launch took
+        # up (run_took_up) dates as well while the launch goes on.
+        costed = parse(r.get("costed"))
+        if going and costed and costed >= (resumed or a or costed):
             going = False
         out.append({"start": a, "end": b, "going": going, "resumed": resumed,
                     "took_up": [parse(t) for t in (r.get("took_up") or [])],
+                    "cost_split": [parse(t) for t in (r.get("cost_split") or [])],
                     "rounds": r.get("rounds"),
                     "costs": costs, "cost_at": ats,
                     "seconds": (b - a).total_seconds() if a and b and b > a else None})
@@ -592,7 +649,11 @@ def verdict(per_round, acted, near_last, last_found, open_now):
     words = []
     if not per_round:
         return "No findings yet."
-    if len(per_round) < 3:
+    if len(per_round) >= 2 and per_round[-1] == 0:
+        # A clean pass says more than any average: "converging slowly" was
+        # said after 9, 8, 0, since the mean of the last two still stood at 4.
+        words.append("Converging: the last round found nothing.")
+    elif len(per_round) < 3:
         words.append("Too few rounds for a trend.")
     else:
         # A moving average: the last TAIL_ROUNDS rounds against the last
@@ -699,7 +760,7 @@ def main():
     print(rule("Review report · PR #%s%s" % (pr, " · reviewed on this machine" if local else "")))
     if threads_failed:
         print("  The review threads could not be read (gh, network or permissions).")
-    mark_near_fixes(found)
+    mark_near_fixes(found, groups, cwd)
     mark_repeats(found)
     people = sessions(cwd, since)
 
@@ -711,6 +772,9 @@ def main():
     done = [g for g in groups if not g["running"]]
     per_round = [len(g["threads"]) for g in done]
     columns = []
+    # The runs whose findings are still being decided: a fix going on them,
+    # or findings nobody has begun. Read for the share acted on below.
+    busy = set()
 
     if groups:
         print("")
@@ -728,12 +792,18 @@ def main():
             for i, c in enumerate(fixes_per_round(s, groups, mine)):
                 if c is not None:
                     fix_cost[i] = round((fix_cost[i] or 0) + c, 4)
-            now_on = s.get("resumed") or s["start"]
+            # What the launch spends now is dated by its last split
+            # (share_start): the round it took up there waits for its cost,
+            # the rounds before it are priced already.
+            began = s.get("resumed") or s["start"]
+            splits = [t for t in s.get("cost_split") or [] if t and began and t >= began]
+            now_on = max(splits) if splits else began
             if s["going"] and now_on:
                 pending.update(i for i in range(len(groups)) if window(i, groups, now_on))
                 # The runs this launch took up since (took_up): fixed now too.
                 fixing.update(i for i in range(len(groups)) for t in answering(i, groups, s)
                               if t >= now_on)
+        busy = pending | fixing | {i for i, m in enumerate(who) if not m and groups[i]["threads"]}
         # A session that answered several runs labels each N.1, N.2…: the
         # session's sum, as a row of its own, read as one more round.
         answered = {}
@@ -804,7 +874,15 @@ def main():
 
     # The figures under the table, a line each, and only the ones that say
     # something: a line of zeros was read every round and meant nothing.
-    unsettled = {t["round"] for t in found if t["fate"] == "open"}
+    # A run whose fix has ended, and that a later run has finished reading
+    # after, is settled though threads of it stay open: what that run did not
+    # close was left to somebody else. Leaving the whole run out read "the
+    # last 9" off the first run while the second waited on two such threads.
+    # Before a later run has finished, an open thread may be a fix the review
+    # has yet to confirm, and the run waits as it did.
+    read_after = max([i for i, g in enumerate(groups) if not g["running"]], default=-1)
+    unsettled = {t["round"] for t in found if t["fate"] == "open"
+                 and (t["round"] in busy or t["round"] >= read_after)}
     # The share acted on, over the newest settled findings: an open finding
     # has not been decided yet. Nor has its round: a decline is a reply posted
     # as the finding is read, a fix closes its thread only after the fixing

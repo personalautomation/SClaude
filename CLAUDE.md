@@ -270,13 +270,24 @@ breaks the other silently — grep before you edit:
   edit to one side does not silently break the other. -->
 
 - `CHECKS_VERDICTS` in `sclaude/lib/review/pr_context.py` — the exit codes and first
-  words that `sclaude checks` ends on — is listed in `sclaude/prompts/review.md`,
+  words of the verdict line `sclaude checks` prints — is listed in `sclaude/prompts/review.md`,
   which tells step 4 what each one means; `tests/checks-wait.py` checks the two
   agree.
 
   <!-- Added by Claude on 2026-10-14, as the plan for the bounded step 4 wait
   asked: the prompt acts on the codes, so a code changed on one side alone
   would send a session the wrong way without an error. -->
+
+- `CHECKS_KEEP_YES`/`CHECKS_KEEP_NO` in `sclaude/lib/review/review_round.sh`
+  — what `sclaude checks` adds on a red, whether the session is kept for the
+  findings on code it did not touch (`review_checks_keep`) — open the lines
+  `sclaude/prompts/review.md` tells step 4 to act on; `tests/review-round.py`
+  checks the two agree. `review-checked`, which `cmd_checks` writes as it
+  returns, is what `review_pane_keys` in `local_review.sh` prints the report
+  by; `tests/local-review.py` runs it.
+
+  <!-- Added by Claude on 2026-11-10 at the user's request, after a review
+  that stopped a round only to have two findings handed back to it. -->
 
 - `LOCAL_SIGNATURE` in `sclaude/lib/review/pr_context.py` ends every finding and
   reply a review run on this machine posts (`local_review.py`), and is how

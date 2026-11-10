@@ -249,7 +249,7 @@ review_reopen() {
       if why="$(review_keep "$wt" "$session" "$held")"; then
         # The round it closed is counted by run_step, and only once it has
         # resumed this session (`kept`).
-        info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the new findings."
+        info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the findings still open."
         REVIEW_KEPT_SAID=1  # run_step leaves out its own "resuming" line
         run_step "$wt" "$slug" review "$(review_carry_on "$pct")" kept
         return 0
@@ -398,6 +398,33 @@ review_keep() {
   return 0
 }
 
+# What `sclaude checks` adds on a red, for the session waiting on it: whether
+# review_keep would keep this conversation for the findings on code it did
+# not touch. Kept, it takes them at once, in the push it is making anyway
+# (sclaude/prompts/review.md, step 4): stopping for them cost a whole review
+# round when they came with findings on its own fixes, and a restart when
+# they came alone — only for sclaude to hand them back to it. Not kept, it
+# stops as before and a fresh session takes them. No line when the session
+# cannot be read: the prompt's rule without one is to stop.
+#
+# The two lines' openings are spelled out in review.md; tests/review-round.py
+# checks the two agree.
+CHECKS_KEEP_YES="New findings on code you did not touch are yours as well"
+CHECKS_KEEP_NO="New findings on code you did not touch go to a fresh session"
+#
+#   review_checks_keep <wt>
+review_checks_keep() {
+  local wt="$1" session held why
+  session="$(state_get "$wt/.sclaude/local/feature/state.json" steps.review.session 2>/dev/null || true)"
+  [[ -n "$session" && "$session" != "null" ]] || return 0
+  held="$(review_context "$wt" "$session")"
+  if why="$(review_keep "$wt" "$session" "$held")"; then
+    echo "$CHECKS_KEEP_YES: this conversation would be kept for them ($why, context $(awk '{print $3}' <<<"$held")%)."
+  else
+    echo "$CHECKS_KEEP_NO: $why."
+  fi
+}
+
 # One line per review session's end, in the main tree's .sclaude/local/,
 # where it outlives the feature's worktree; tab-separated:
 #
@@ -446,5 +473,5 @@ reversals_file() {
 #
 #   review_carry_on <pct>
 review_carry_on() {
-  printf '%s' "**The review round is closed, and this conversation takes the next one.** The review confirmed every fix you made. Your context is at $1% — under the ${REVIEW_CONTEXT_MAX_PCT}% at which sclaude opens a fresh session — and still cached, so the new findings are yours now: what this conversation settled stays in view while you fix them. Re-read the pull request (\`gh pr checks <pr>\`, \`gh pr view <pr> --comments\`, \`gh api repos/{owner}/{repo}/pulls/<pr>/comments\`); its open threads are your list. Work them as step 1 of the prompt says, through subagents. From here they are threads you are fixing, and the round ends by the same rules as before."
+  printf '%s' "**The review round is closed, and this conversation takes the next one.** The review confirmed every fix you made. Your context is at $1% — under the ${REVIEW_CONTEXT_MAX_PCT}% at which sclaude opens a fresh session — and still cached, so the findings still open are yours now: what this conversation settled stays in view while you fix them. Re-read the pull request (\`gh pr checks <pr>\`, \`gh pr view <pr> --comments\`, \`gh api repos/{owner}/{repo}/pulls/<pr>/comments\`); its open threads are your list. Work them as step 1 of the prompt says, through subagents. From here they are threads you are fixing, and the round ends by the same rules as before."
 }

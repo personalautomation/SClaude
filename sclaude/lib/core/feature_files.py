@@ -27,6 +27,7 @@ FILES = [
     ("plan.printed", "the plan as last printed, so a later session prints it only when it changed"),
     ("session-done", "a session's marker: its work is done (the session writes it, the watcher reads it)"),
     ("review-round", "a review session's marker: this round is done"),
+    ("review-checked", "`sclaude checks` returned on a review run (its code, head, time): sclaude's tab prints the report by it"),
     ("closing", "the worktree's removal has begun: no lazy start, the menu offers it no more"),
     ("terminal", "the terminal recordings that touched the feature, one path a line"),
     ("terminal.txt", "those recordings played back into text"),

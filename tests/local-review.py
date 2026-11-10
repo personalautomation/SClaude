@@ -780,6 +780,18 @@ try:
     check("review-local-renders", rc, 0)
     check_true("review-local-told", "reviews on this machine" in text
                and "Nothing in this project's flow runs on GitHub Actions" in text)
+
+    # `sclaude checks` returning in the session's tab prints the report in
+    # sclaude's: once per new mark, and not for a mark left before the launch.
+    checked = os.path.join(repo, ".sclaude", "local", "feature", "review-checked")
+    write(checked, "1 aaa 1\n")
+    out, err, _ = run_bash(
+        'review_report_unshown() { echo "REPORT $2"; }; review_enough() { :; }; '
+        'review_go_box() { :; }; review_box() { :; }; '
+        'review_pane_keys "%s" slug ""; review_pane_keys "%s" slug ""; '
+        'echo "0 bbb 2" > "%s"; review_pane_keys "%s" slug ""; review_pane_keys "%s" slug ""'
+        % (repo, repo, checked, repo, repo))
+    check("pane-report-once-per-mark", err.count("REPORT slug"), 1)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

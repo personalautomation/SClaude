@@ -584,10 +584,27 @@ review_go_on_round() {
 # and every ten seconds, not every second: a python per poll for a hint, and
 # a press from the phone shows within ten seconds.
 #
-#   review_pane_keys <wt> <key>
+# A review run the session waited on in its tab (`sclaude checks`, which
+# writes review-checked as it returns) prints the report here, between the
+# status lines: a session that takes the next rounds up itself otherwise
+# left this terminal without a table until it ended, three rounds later.
+#
+#   review_pane_keys <wt> <slug> <key>
 REVIEW_PANE_TICK=0
+REVIEW_PANE_CHECKED=""
 review_pane_keys() {
-  local wt="$1" key="${2:-}"
+  local wt="$1" slug="$2" key="${3:-}"
+  local checked; checked="$(review_checked_file "$wt")"
+  if [[ -s "$checked" && "$(cat "$checked" 2>/dev/null)" != "$REVIEW_PANE_CHECKED" ]]; then
+    local first="$REVIEW_PANE_CHECKED"
+    REVIEW_PANE_CHECKED="$(cat "$checked" 2>/dev/null)"
+    # Not on the first look: a mark left before this launch was reported.
+    if [[ -n "$first" || "${REVIEW_PANE_TICK:-0}" -gt 0 ]]; then
+      printf '\r\033[2K\033[?25h' >&2
+      review_report_unshown "$wt" "$slug" >&2
+      REVIEW_PANE_TICK=0
+    fi
+  fi
   case "$key" in
     s|S) if [[ -n "$(review_enough "$wt")" ]]; then review_enough_set "$wt" ""; else review_enough_set "$wt" pass; fi
          REVIEW_PANE_TICK=0 ;;
@@ -613,11 +630,19 @@ review_pane_keys() {
 # review's boxes for step 4, none otherwise. Called in the launch's own
 # subshell, so the array ends with it.
 #
-#   pane_keys_for <step> <wt>
+#   pane_keys_for <step> <wt> <slug>
 pane_keys_for() {
   PANE_KEYS=()
-  [[ "$1" == review ]] && PANE_KEYS=(review_pane_keys "$2")
+  [[ "$1" == review ]] && PANE_KEYS=(review_pane_keys "$2" "${3:-}")
   return 0
+}
+
+# The mark `sclaude checks` leaves as it returns on a finished review run:
+# its exit code and the head it waited on (cmd_checks in review_gate.sh).
+#
+#   review_checked_file <wt>
+review_checked_file() {
+  echo "$1/.sclaude/local/feature/review-checked"
 }
 
 # The pause before [g] retries a failed pass, with its box on a status line:

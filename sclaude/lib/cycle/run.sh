@@ -473,7 +473,9 @@ run_step() {
       # Said already, with its reason, when sclaude kept this session for
       # the next round just now (review_keep's line, REVIEW_KEPT_SAID).
       [[ -n "$kept_said" ]] || info "   resuming this step's session — the PR has moved on since"
-    else
+    elif [[ -z "$kept_said" ]]; then
+      # Not when sclaude kept it for the next round just now: that session
+      # was not interrupted, and review_keep's line said why it goes on.
       info "   resuming this step's interrupted session"
     fi
     # Whatever there is to tell, and nothing when there is nothing: a silent
@@ -523,8 +525,11 @@ run_step() {
     # counting the findings that round brought; without this the issue kept the
     # first round's count until the session finally ended.
     issue_sync "$wt"
+    # Where the review stands, before its session takes it: unless the same
+    # table was just printed on this head (review_report_unshown).
+    [[ "$step" == "review" ]] && review_report_unshown "$wt" "$slug"
     session_watch_start "$wt" "$session" "" "" "$step"
-    ( cd "$wt" && dev_env_load "$wt" && pane_keys_for "$step" "$wt" && session_git_env "$session" && claude_launch --resume "$session" \
+    ( cd "$wt" && dev_env_load "$wt" && pane_keys_for "$step" "$wt" "$slug" && session_git_env "$session" && claude_launch --resume "$session" \
         --model "$model" --effort "$effort" \
         --permission-mode "$mode" "${extra[@]}" -n "$(session_label step "$state" "$step" "$session")/$slug" ${opening:+"$opening"} )
     session_watch_stop
@@ -578,8 +583,11 @@ run_step() {
     RUN_STEP_LAUNCHED=1
     state_set "$state" "steps.$step.gate" null
     issue_sync "$wt"
+    # The findings the session opens on, as a table here: the first review
+    # run's included, which no session's end had printed yet.
+    [[ "$step" == "review" ]] && review_report_unshown "$wt" "$slug"
     session_watch_start "$wt" "$session" "" "" "$step"
-    ( cd "$wt" && dev_env_load "$wt" && pane_keys_for "$step" "$wt" && session_git_env "$session" && claude_launch --session-id "$session" \
+    ( cd "$wt" && dev_env_load "$wt" && pane_keys_for "$step" "$wt" "$slug" && session_git_env "$session" && claude_launch --session-id "$session" \
         --model "$model" --effort "$effort" \
         --permission-mode "$mode" "${extra[@]}" -n "$(session_label step "$state" "$step" "$session")/$slug" "$prompt" )
     session_watch_stop
@@ -691,7 +699,7 @@ session_ended() {
       echo ""
       say_here "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
       [[ -n "$round_note" ]] && info "  $round_note"
-      info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the new findings."
+      info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the findings still open."
       REVIEW_KEPT_SAID=1  # run_step leaves out its own "resuming" line
       review_yours_report "$wt" "$pr" || true
       review_report "$wt" "$slug"
@@ -1349,8 +1357,19 @@ regression_push_fix() {
   [[ "$ahead" =~ ^[1-9][0-9]*$ ]] || return 1
   branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   [[ -n "$branch" && "$branch" != "HEAD" && "$branch" != "main" ]] || return 2
+  # What those commits are: main merged in on the way into the step
+  # (sync_branch) is no fix of the regression's, and was said to be one.
+  local own merges
+  own="$(git -C "$wt" rev-list --no-merges --count HEAD --not --remotes 2>/dev/null || echo "$ahead")"
+  merges=$(( ahead - own ))
   echo ""
-  info "  The regression's fix is $ahead commit(s) PR #$pr does not carry — pushing $branch."
+  if (( own == 0 )); then
+    info "  main, merged in, is $ahead commit(s) PR #$pr does not carry — pushing $branch."
+  elif (( merges > 0 )); then
+    info "  The regression's fix and main merged in are $ahead commit(s) PR #$pr does not carry — pushing $branch."
+  else
+    info "  The regression's fix is $ahead commit(s) PR #$pr does not carry — pushing $branch."
+  fi
   if git -C "$wt" push -q origin "$branch"; then
     info "  pushed; the automatic review reads it before step 4 closes"
     return 0

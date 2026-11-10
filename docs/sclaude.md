@@ -1970,7 +1970,14 @@ this machine writes no round marker: its session ends on its done marker,
 which closes its run in the issue and runs its friction review as any
 session's end does, and `review_reopen` then asks `review_keep` the same
 question when the threads left open are all new ones — kept, the same
-session is resumed with the round counted; otherwise a fresh one opens. Its snapshot of the pull request lists only the review threads still
+session is resumed with the round counted; otherwise a fresh one opens.
+`sclaude checks` asks the same question on a red, while the session still
+waits in it (`review_checks_keep` in `review_round.sh`), and says the answer
+on a line of its own: kept, the session takes the findings on code it did
+not touch at once, in the push it is making anyway, instead of stopping on
+its round marker to have them handed back. Stopping cost a review round when
+they came beside findings on its own fixes, and a restart when they came
+alone. Its snapshot of the pull request lists only the review threads still
 open — the resolved ones are counted, not repeated — so the new round starts
 with the new findings and nothing else.
 
@@ -2023,6 +2030,28 @@ paired each fix with the run after it, so the findings of the pull request's
 first run stood alone in a row `before` and the session that fixed them came
 next, with a cost and no findings.
 
+**A finding on the fixes is one on lines they wrote.** `on fixes` counts the
+threads of a run that sit within `NEAR_LINES` of an earlier round's fixed
+thread, or of a line the feature's own commits since the run before wrote —
+first-parent and without merges, so main merged in is no fix (`fixed_lines`,
+by the runs' `headSha`). By the threads alone, a round whose findings were
+all on a new function, the guide or a migration a fix had added read as
+none on the fixes. A run's `took` is timed from its last attempt's start
+(`startedAt`): re-run after a usage limit, it once counted the hours of the
+wait. The verdict says a last round that found nothing as convergence
+before any average, and the share acted on is taken over the settled
+findings, a run's open threads left out only while its fix goes on or no
+later run has finished — what a later run left open was left to somebody
+else.
+
+**The report is printed as each round ends, not only with the session.**
+sclaude prints it before a review session opens on findings, and whenever
+`sclaude checks` returns on a review run in the session's tab: it writes
+`review-checked` (its exit code, the head, the time), and the review's
+status line in sclaude's tab (`review_pane_keys`) prints the report by it
+and sends it to the topic. A session that took up its next rounds itself
+once left the terminal without a table for three rounds.
+
 **What a round cost is in two parts.** `find cost` is the review run's own
 cost: each pass on this machine is a headless session sclaude names, and
 Claude Code's account in its transcript, subagents included, is read by the
@@ -2035,7 +2064,14 @@ fixing launches that began after the run and before the next one
 (`cost_at`, `run_cost` in `steps.sh`; `fixes_per_round` — on GitHub a launch
 waits for the run of its own push and ends after it, but began on the run
 before), so a launch that pushed nothing adds to its run instead of
-shifting the rest. A value that will come and has not yet is `w`: the
+shifting the rest. A launch that took up the next round itself is split
+there: `run_took_up` reads its spend at the red (`checks_red_cost`) and
+closes the share up to it when the red becomes a `took_up` (`cost_split`);
+what it spends after is dated by that red, so the round it took up gets its
+own cost. With no spend read at the red nothing is split, and the launch's
+cost stays dated by its start. That a launch has ended is `costed`, which
+only `run_cost` writes: a share's `cost_at` says nothing of it.
+Once one launch that worked three rounds was one sum on the first of them. A value that will come and has not yet is `w`: the
 run still going, findings no session has begun to fix, the launch running
 now, whose cost is taken when it ends. A round's `result` is `w` until its
 fix has ended. The total is where the review stands now: the sums of what is

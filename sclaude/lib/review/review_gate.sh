@@ -609,6 +609,10 @@ cmd_checks() {
   # Waiting again after a red: this launch fixed what that red showed.
   run_took_up "$wt" wait
   python3 "$LIB/review/pr_context.py" --wait "$wt" "$pr" "$repo" "$REVIEW_WAIT_MAX" || rc=$?
-  (( rc == 1 )) && run_took_up "$wt" red
+  (( rc == 1 )) && { run_took_up "$wt" red; review_checks_keep "$wt"; }
+  # A verdict on a review run (green, red, the head unreviewed): sclaude's tab
+  # prints the report by it (review_pane_keys). Not "could not read".
+  (( rc <= 3 )) && printf '%s %s %s\n' "$rc" "$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)" "$(date +%s)" \
+    > "$(review_checked_file "$wt")" 2>/dev/null
   exit "$rc"
 }

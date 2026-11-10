@@ -69,7 +69,7 @@ NODES = {
     "review": ("session", 13, "session", "4 · review",
                "fixes the findings through subagents, pushes, one round, stops", "FRS"),
     "round": ("sclaude", 14, "gate", "New findings posted?",
-              "the session's round marker; the same session takes them under 40% context and cached, else a fresh one", ""),
+              "the session's round marker; the same session takes them under 40% context and cached, else a fresh one — kept, it takes them at once on the red sclaude checks gave", ""),
     # end of the cycle
     "preview": ("sclaude", 17, "task", "Preview",
                 "deployed (three tries), the preview regression run against it", "RS"),

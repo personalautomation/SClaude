@@ -1277,7 +1277,7 @@ sync_branch() {
   # review have worked on a branch that is not what merges.
   warn ""
   warn "  $branch is $behind commit(s) behind origin/main and has commits of its own:"
-  warn "  merging main in before the step, so it does not start on a stale branch."
+  warn "  merging main in before the session opens, so it does not work on a stale branch."
   # A merge that would stop on conflicts is the sync with main's (sync_offer),
   # which resolves them — the person cannot, from a phone, and a step must not
   # open on a half-merged tree. Otherwise the plain merge below, and also after

@@ -745,7 +745,7 @@ echo "watcher=[$SESSION_WATCHER]"
     check("rotation-opens-a-fresh-session", 'run_step "$wt" "$slug" "$step"' in rot, True)
     # A round carried on in the same session resumes it through run_step, and
     # the issue row must show the comments that round added.
-    resume = RUN[RUN.index('claude_launch --resume "$session"') - 600:RUN.index('claude_launch --resume "$session"')]
+    resume = RUN[RUN.index('claude_launch --resume "$session"') - 1000:RUN.index('claude_launch --resume "$session"')]
     check("resume-writes-the-issue",
           resume.index('run_comments "$wt" "$session" "$pr"') < resume.index('issue_sync "$wt"'), True)
     check("every-step-launch-watched",
@@ -794,6 +794,13 @@ echo "watcher=[$SESSION_WATCHER]"
           and "not a deviation to report" in prompt
           and "ends with this round" not in prompt, True)
     check("code-watches-the-same-file", 'echo "$1/.sclaude/local/feature/review-round"' in RUN, True)
+    # `sclaude checks` says whether the findings on code the session did not
+    # touch are its own already (review_checks_keep); the prompt acts on the
+    # same two openings.
+    for name in ("CHECKS_KEEP_YES", "CHECKS_KEEP_NO"):
+        said = re.search(r'^%s="([^"]+)"' % name, RUN, re.M)
+        check("checks-keep-%s-in-prompt" % name, bool(said) and ("`%s" % said.group(1)) in prompt, True)
+    check("checks-keep-on-red", 'run_took_up "$wt" red; review_checks_keep "$wt"' in RUN, True)
 
     # --- the context a session holds: its own requests, not a subagent's ------
     def used(tokens, cached=0, side=False):

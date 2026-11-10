@@ -952,7 +952,9 @@ PY
 # review run after that, by time, since a launch that pushed nothing
 # (reopened, resumed after a crash) is a launch all the same. Its start, not
 # its end: a launch that waits for the workflow's review of its own push
-# ends after the run it started.
+# ends after the run it started. A launch that took up the next round itself
+# (run_took_up), with its spend read at the red, closed its share there; what it spends from
+# then on is dated by that round's red, so the report puts it on that round.
 #
 #   run_cost <wt> <session>
 run_cost() {
@@ -980,7 +982,10 @@ run = mine[-1]
 seen = run.get("cost_seen") or 0
 run["cost_seen"] = cost
 run.setdefault("costs", []).append(round(cost - seen if cost >= seen else cost, 4))
-run.setdefault("cost_at", []).append(run.get("resumed") or run.get("started") or "")
+run.setdefault("cost_at", []).append(state_file.share_start(run))
+# The launch that gave its whole cost: it has ended (sessions() in
+# review_report.py), which a share closed at a round taken up does not say.
+run["costed"] = run.get("resumed") or run.get("started") or ""
 state_file.write(path, data)
 PY
 }
@@ -995,11 +1000,30 @@ PY
 # read by `launches` in review_report.py: without it the run that launch
 # fixed has no launch in its window and reads as nobody's.
 #
+# The launch's spend so far is read at the red too (`checks_red_cost`, from
+# the status line as run_cost reads it), and closed as a share of its own
+# when the red becomes a `took_up`: one launch that worked three rounds was
+# one sum, all of it on the first round, and the next two read as free.
+#
 #   run_took_up <wt> red|wait
 run_took_up() {
-  PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$1/.sclaude/local/feature/state.json" "$2" <<'PY' 2>/dev/null || true
+  local wt="$1" session file=""
+  session="$(state_get "$wt/.sclaude/local/feature/state.json" steps.review.session 2>/dev/null || true)"
+  [[ -n "$session" && "$session" != "null" ]] \
+    && file="/tmp/claude-statusline-context-$(session_latest "$wt" "$session")"
+  PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$wt/.sclaude/local/feature/state.json" "$2" "$file" <<'PY' 2>/dev/null || true
 import datetime, json, os, sys
-path, what = sys.argv[1:3]
+path, what, context = sys.argv[1:4]
+
+
+def spent():
+    """The launch's running total, as the status line last left it."""
+    try:
+        with open(context) as fh:
+            cost = json.load(fh).get("cost_usd")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return cost if isinstance(cost, (int, float)) else None
 
 
 def when(text):
@@ -1025,10 +1049,24 @@ began, ended = when(run.get("resumed") or run.get("started")), when(run.get("fin
 if (ended and (not began or ended >= began)) or (not ended and run.get("outcome")):
     sys.exit(0)
 red = run.pop("checks_red", None)
+red_cost = run.pop("checks_red_cost", None)
 if what == "red":
     run["checks_red"] = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+    cost = spent() if context else None
+    if cost is not None:
+        run["checks_red_cost"] = cost
 elif red and (not began or (when(red) or began) >= began):
     # A red from this launch, not one before it was taken up again.
+    # What the launch spent up to it fixed the round before: its share is
+    # closed here, dated as the launch's work since its start or its last
+    # round taken up. A total under what was seen (a resume counting from
+    # zero) is left whole to run_cost.
+    seen = run.get("cost_seen") or 0
+    if isinstance(red_cost, (int, float)) and red_cost >= seen:
+        run.setdefault("cost_at", []).append(state_file.share_start(run))
+        run.setdefault("costs", []).append(round(red_cost - seen, 4))
+        run["cost_seen"] = red_cost
+        run.setdefault("cost_split", []).append(red)
     run.setdefault("took_up", []).append(red)
 elif not red:
     sys.exit(0)

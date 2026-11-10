@@ -154,6 +154,53 @@ with tempfile.TemporaryDirectory() as wt:
     check("stuck-over-enough-rounds", review_report.stuck([5, 5, 5, 5], "Not converging: hold level."), True)
     check("not-stuck-too-few", review_report.stuck([5, 5, 5], "Not converging: hold level."), False)
     check("not-stuck-converging", review_report.stuck([9, 5, 3, 1], "Converging: half."), False)
+    # A run re-run after a usage limit is timed from its last attempt.
+    saved_gh = review_report.gh_json
+    review_report.gh_json = lambda args, cwd=None: [
+        {"workflowName": "Claude Code Review", "status": "completed", "createdAt": "2026-10-14T00:20:00Z",
+         "startedAt": "2026-10-14T02:00:00Z", "updatedAt": "2026-10-14T02:06:00Z"}]
+    try:
+        check("rerun-timed-from-its-attempt", [r["seconds"] for r in review_report.review_runs(wt, "feat")], [360.0])
+    finally:
+        review_report.gh_json = saved_gh
+    # The lines the feature's own commits wrote between two reviewed heads:
+    # main merged in on the way is not a fix.
+    g = tempfile.mkdtemp()
+    try:
+        def git(*args):
+            return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", g] + list(args),
+                                  capture_output=True, text=True, check=True).stdout.strip()
+        git("init", "-q", "-b", "main")
+        with open(os.path.join(g, "a.txt"), "w") as fh:
+            fh.write("".join("line %d\n" % n for n in range(1, 41)))
+        git("add", "."); git("commit", "-qm", "base")
+        git("checkout", "-qb", "feat")
+        with open(os.path.join(g, "a.txt")) as fh:
+            body = fh.read().replace("line 30\n", "fixed 30\nfixed 30b\n")
+        with open(os.path.join(g, "a.txt"), "w") as fh:
+            fh.write(body)
+        git("commit", "-qam", "feat")
+        reviewed = git("rev-parse", "HEAD")
+        with open(os.path.join(g, "a.txt"), "w") as fh:
+            fh.write(body.replace("line 10\n", "fix 10\n"))
+        git("commit", "-qam", "the fix")
+        git("checkout", "-q", "main")
+        with open(os.path.join(g, "b.txt"), "w") as fh:
+            fh.write("main\n")
+        git("add", "."); git("commit", "-qm", "main moves")
+        git("checkout", "-q", "feat"); git("merge", "-q", "--no-edit", "main")
+        check("fixed-lines-own-commits-only",
+              review_report.fixed_lines(g, reviewed, git("rev-parse", "HEAD")), {"a.txt": [(10, 10)]})
+        on_fix = [{"path": "a.txt", "line": 12, "round": 1, "fate": "open"},
+                  {"path": "a.txt", "line": 30, "round": 1, "fate": "open"}]
+        review_report.mark_near_fixes(on_fix, [{"head": reviewed}, {"head": git("rev-parse", "HEAD")}], g)
+        check("near-fix-on-written-lines", [t["near_fix"] for t in on_fix], [True, False])
+        check("fixed-lines-not-across-a-rewrite", review_report.fixed_lines(g, git("rev-parse", "main"), reviewed), {})
+    finally:
+        shutil.rmtree(g, ignore_errors=True)
+    # A clean last pass is convergence, whatever the average of the last two.
+    check("verdict-last-round-clean", review_report.verdict([9, 8, 0], None, 0, 0, 2).split(".")[0],
+          "Converging: the last round found nothing")
     said = "Converging: half. " + review_report.FEEDING
     check("stuck-when-fixes-feed-it-two-rounds", review_report.stuck([8, 6, 5, 3, 2], said, 2), True)
     check("not-stuck-feeding-one-round", review_report.stuck([6, 4, 2, 1], said, 1), False)
@@ -298,6 +345,11 @@ with tempfile.TemporaryDirectory() as wt:
         "2026-10-14T10:10:00+00:00", "2026-10-14T11:10:00+00:00"])
     with open(os.path.join(back, ".sclaude/local/feature/state.json"), "w") as fh:
         json.dump(given, fh)
+    # A share closed at a round the launch took up dates a cost too: going.
+    check("share-closed-launch-going", review_report.sessions(back)[0]["going"], True)
+    given["steps"]["review"]["runs"][0]["costed"] = "2026-10-14T11:10:00+00:00"
+    with open(os.path.join(back, ".sclaude/local/feature/state.json"), "w") as fh:
+        json.dump(given, fh)
     check("cost-given-launch-ended", review_report.sessions(back)[0]["going"], False)
     check("resumed-answers-the-next-run", review_report.fixers(runs2, resumed), [[0], [0]])
     shutil.rmtree(back, ignore_errors=True)
@@ -348,6 +400,50 @@ with tempfile.TemporaryDirectory() as wt:
     check("took-up-not-a-red-before-the-resume",
           took_up(dict(going_run, checks_red="2026-10-14T10:40:00+00:00",
                        resumed="2026-10-14T11:00:00+00:00", finished="2026-10-14T10:45:00+00:00"), "wait"), 0)
+    # The launch's spend is split at a round it took up: the share up to the
+    # red goes on the round before, the rest (run_cost, at its end) on the
+    # round it took up, dated by that red.
+    sid = "test-%d-%s" % (os.getpid(), os.path.basename(took))
+    context = "/tmp/claude-statusline-context-%s" % sid
+
+    def spend(total, what):
+        with open(context, "w") as fh:
+            json.dump({"cost_usd": total}, fh)
+        script = ('source "$1/core/state.sh"; source "$1/core/steps.sh"; '
+                  'session_latest() { echo "$2"; }; ')
+        script += 'run_cost "$2" "$4"' if what == "end" else 'run_took_up "$2" "$3"'
+        subprocess.run(["bash", "-c", script, "_", LIB, took, what, sid], check=True, timeout=30)
+    try:
+        with open(took_state, "w") as fh:
+            json.dump({"steps": {"review": {"session": sid, "runs": [
+                {"session": sid, "started": "2026-10-14T10:05:00+00:00"}]}}}, fh)
+        spend(1.0, "wait")
+        spend(4.0, "red")
+        spend(4.5, "wait")
+        spend(6.0, "end")
+        with open(took_state) as fh:
+            split = json.load(fh)["steps"]["review"]["runs"][0]
+        check("cost-split-at-took-up", split["costs"], [4.0, 2.0])
+        check("cost-split-dated", [split["cost_at"][0], split["cost_at"][1] == split["took_up"][0]],
+              ["2026-10-14T10:05:00+00:00", True])
+        check("cost-split-red-cost-cleared", "checks_red_cost" in split, False)
+        # With no spend read at the red no share is closed, and the launch's
+        # whole cost stays dated by its start, not by the round it took up.
+        with open(took_state, "w") as fh:
+            json.dump({"steps": {"review": {"session": sid, "runs": [
+                {"session": sid, "started": "2026-10-14T10:05:00+00:00"}]}}}, fh)
+        os.remove(context)
+        subprocess.run(["bash", "-c", 'source "$1/core/state.sh"; source "$1/core/steps.sh"; '
+                        'session_latest() { echo "$2"; }; run_took_up "$2" red; run_took_up "$2" wait',
+                        "_", LIB, took, sid], check=True, timeout=30)
+        spend(3.0, "end")
+        with open(took_state) as fh:
+            unsplit = json.load(fh)["steps"]["review"]["runs"][0]
+        check("cost-unsplit-dated-by-launch", (unsplit["costs"], unsplit["cost_at"], len(unsplit["took_up"])),
+              ([3.0], ["2026-10-14T10:05:00+00:00"], 1))
+    finally:
+        if os.path.exists(context):
+            os.remove(context)
     shutil.rmtree(took, ignore_errors=True)
     # Read back, the run it took up is that launch's, and fixed while it goes.
     gh = [{"at": t("10:00")}, {"at": t("10:30")}, {"at": t("11:05")}]
@@ -485,12 +581,13 @@ BIN = "".join(open(os.path.join(ROOT, _p)).read()
 # Four for the rounds of the review on GitHub, two where the review on this
 # machine ends a pass (review_close_gate: something open, or nothing — the
 # last table, its round of nothing included — on the way into step 4 too),
-# and one where the gate finds what is open with no report on this head
-# printed (review_close_gate).
+# one where the gate finds what is open with no report on this head
+# printed (review_close_gate), and two where a session is launched on the
+# findings (run_step, fresh and resumed).
 check("printed-at-every-round-close",
-      len(re.findall(r'review_report(?:_unshown)? "\$wt" "\$slug"', RUN)), 7)
+      len(re.findall(r'review_report(?:_unshown)? "\$wt" "\$slug"', RUN)), 9)
 check("checks-red-takes-up-the-round",
-      ('run_took_up "$wt" wait' in RUN, '(( rc == 1 )) && run_took_up "$wt" red' in RUN), (True, True))
+      ('run_took_up "$wt" wait' in RUN, '(( rc == 1 )) && { run_took_up "$wt" red;' in RUN), (True, True))
 check("cost-taken-at-session-end", '[[ "$step" == "review" ]] && run_cost "$wt" "$session"' in RUN, True)
 with open(os.path.join(ROOT, "sclaude", "prompts", "review.md")) as fh:
     check("prompt-cites-declines", "`as on r<id>`" in fh.read(), True)

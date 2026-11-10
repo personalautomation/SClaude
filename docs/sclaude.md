@@ -174,7 +174,7 @@ alone, and none takes a standard module's name; `tests/paths.py` checks both.
 | `sclaude/lib/ship/vercel.sh` | running a deploy: vercel or the project's command, a preview with its migrations |
 | `sclaude/lib/ship/qa.sh` | QA on the preview: accepted, missed, a retest, the wait for its verdict |
 | `sclaude/lib/ship/merge.sh` | the merge: what stands in its way, how it is made, the offer and the wait |
-| `sclaude/lib/ship/demo.sh` | the demo recorded again once the preview is green |
+| `sclaude/lib/ship/demo.sh` | the demo recorded again once the preview is green, and a part's demo between two parts |
 | `sclaude/lib/ship/demo_progress.py` | what that refresh is doing, said as it goes: a bold line per change and a status line, from the session's events and the recording's `demo_progress` |
 | `sclaude/lib/ship/regression.sh` | the regression run: the suite's parts, the run, its timings and its line |
 | `sclaude/lib/ship/regression_gate.sh` | the gate that closes a step only on a green run |

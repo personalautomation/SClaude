@@ -8,7 +8,6 @@
 # each inline comment as a review of its own, and grouping by that id once
 # turned one pull request into 118 rounds of one finding each.
 import contextlib
-import datetime
 import io
 import json
 import os
@@ -72,15 +71,15 @@ NODES = [
     thread(9, R3, "a.py", 49),
     thread(10, R3, "c.py", 3),
 ]
-RUN = {"workflowName": "Claude Code Review", "status": "completed"}
+RUN = {"workflowName": "Claude Code Review", "status": "completed", "conclusion": "success"}
 RUNS = [
-    dict(RUN, createdAt="2026-10-14T08:58:00Z", updatedAt="2026-10-14T09:10:00Z"),
-    dict(RUN, createdAt="2026-10-14T09:58:00Z", updatedAt="2026-10-14T10:20:00Z"),
-    dict(RUN, createdAt="2026-10-14T10:58:00Z", updatedAt="2026-10-14T11:05:00Z"),
+    dict(RUN, databaseId=1, headSha="h1", createdAt="2026-10-14T08:58:00Z", updatedAt="2026-10-14T09:10:00Z"),
+    dict(RUN, databaseId=2, headSha="h2", createdAt="2026-10-14T09:58:00Z", updatedAt="2026-10-14T10:20:00Z"),
+    dict(RUN, databaseId=3, headSha="h3", createdAt="2026-10-14T10:58:00Z", updatedAt="2026-10-14T11:05:00Z"),
     # Refused on workflow validation in seconds: reviewed nothing.
-    dict(RUN, createdAt="2026-10-14T11:30:00Z", updatedAt="2026-10-14T11:30:10Z"),
+    dict(RUN, databaseId=4, headSha="h4", createdAt="2026-10-14T11:30:00Z", updatedAt="2026-10-14T11:30:10Z"),
     # Still running: not in the trend yet.
-    dict(RUN, createdAt="2026-10-14T12:00:00Z", updatedAt="2026-10-14T12:00:00Z", status="in_progress"),
+    dict(RUN, databaseId=5, headSha="h5", createdAt="2026-10-14T12:00:00Z", updatedAt="2026-10-14T12:00:00Z", status="in_progress"),
     {"workflowName": "Claude on @mention", "status": "completed",
      "createdAt": R2, "updatedAt": "2026-10-14T10:05:00Z"},
     {"workflowName": "Tests", "status": "completed", "createdAt": R2, "updatedAt": "2026-10-14T11:00:00Z"},
@@ -364,96 +363,29 @@ with tempfile.TemporaryDirectory() as wt:
     waiting = {"start": t("10:05"), "end": t("10:45"), "going": False, "costs": [], "cost_at": []}
     check("waiting-launch-not-the-next-runs-fix",
           review_report.fixers([{"at": t("10:00")}, {"at": t("10:30")}], [waiting]), [[0], []])
-    # On GitHub a launch that comes back red from `sclaude checks` may fix
-    # that run's findings itself (review.md, "on your own fixes"), hand them
-    # on, or have only a red CI check: the red counts as taken up only when
-    # the same launch waits for checks again, and nothing is written on a
-    # run that has ended.
+    # A launch's whole cost is dated by its start: every round begins a
+    # launch of its own (the session ends on its marker).
     took = tempfile.mkdtemp()
     os.makedirs(os.path.join(took, ".sclaude/local/feature"))
     took_state = os.path.join(took, ".sclaude/local/feature/state.json")
-
-    def took_up(run, *steps):
-        with open(took_state, "w") as fh:
-            json.dump({"steps": {"review": {"runs": [run]}}}, fh)
-        for what in steps:
-            subprocess.run(["bash", "-c", 'source "$1/core/state.sh"; source "$1/core/steps.sh"; run_took_up "$2" "$3"',
-                            "_", LIB, took, what], check=True, timeout=30)
-        with open(took_state) as fh:
-            return len(json.load(fh)["steps"]["review"]["runs"][0].get("took_up") or [])
-    going_run = {"session": "a", "started": "2026-10-14T10:05:00+00:00"}
-    check("took-up-red-then-wait", took_up(dict(going_run), "wait", "red", "wait"), 1)
-    check("took-up-not-on-a-red-handed-on", took_up(dict(going_run), "wait", "red"), 0)
-    check("took-up-not-without-a-red", took_up(dict(going_run), "wait", "wait"), 0)
-    check("took-up-not-after-the-end", took_up(dict(going_run, finished="2026-10-14T10:45:00+00:00"),
-                                               "red", "wait"), 0)
-    # Times from session_runs carry the local offset, the red's the UTC one:
-    # read as moments, not as text.
-    # Begun two minutes ago, written ten hours east: as text it sorts after
-    # the red stamped now in UTC, as moments before it.
-    east = datetime.timezone(datetime.timedelta(hours=10))
-    begun = (datetime.datetime.now(east) - datetime.timedelta(minutes=2)).replace(microsecond=0).isoformat()
-    check("took-up-across-offsets", took_up({"session": "a", "started": begun}, "red", "wait"), 1)
-    check("took-up-not-with-an-outcome", took_up(dict(going_run, outcome="fixes confirmed"), "red", "wait"), 0)
-    check("took-up-resumed", took_up(dict(going_run, finished="2026-10-14T10:45:00+00:00",
-                                          resumed="2026-10-14T11:00:00+00:00"), "red", "wait"), 1)
-    check("took-up-not-a-red-before-the-resume",
-          took_up(dict(going_run, checks_red="2026-10-14T10:40:00+00:00",
-                       resumed="2026-10-14T11:00:00+00:00", finished="2026-10-14T10:45:00+00:00"), "wait"), 0)
-    # The launch's spend is split at a round it took up: the share up to the
-    # red goes on the round before, the rest (run_cost, at its end) on the
-    # round it took up, dated by that red.
     sid = "test-%d-%s" % (os.getpid(), os.path.basename(took))
     context = "/tmp/claude-statusline-context-%s" % sid
-
-    def spend(total, what):
-        with open(context, "w") as fh:
-            json.dump({"cost_usd": total}, fh)
-        script = ('source "$1/core/state.sh"; source "$1/core/steps.sh"; '
-                  'session_latest() { echo "$2"; }; ')
-        script += 'run_cost "$2" "$4"' if what == "end" else 'run_took_up "$2" "$3"'
-        subprocess.run(["bash", "-c", script, "_", LIB, took, what, sid], check=True, timeout=30)
     try:
         with open(took_state, "w") as fh:
             json.dump({"steps": {"review": {"session": sid, "runs": [
                 {"session": sid, "started": "2026-10-14T10:05:00+00:00"}]}}}, fh)
-        spend(1.0, "wait")
-        spend(4.0, "red")
-        spend(4.5, "wait")
-        spend(6.0, "end")
-        with open(took_state) as fh:
-            split = json.load(fh)["steps"]["review"]["runs"][0]
-        check("cost-split-at-took-up", split["costs"], [4.0, 2.0])
-        check("cost-split-dated", [split["cost_at"][0], split["cost_at"][1] == split["took_up"][0]],
-              ["2026-10-14T10:05:00+00:00", True])
-        check("cost-split-red-cost-cleared", "checks_red_cost" in split, False)
-        # With no spend read at the red no share is closed, and the launch's
-        # whole cost stays dated by its start, not by the round it took up.
-        with open(took_state, "w") as fh:
-            json.dump({"steps": {"review": {"session": sid, "runs": [
-                {"session": sid, "started": "2026-10-14T10:05:00+00:00"}]}}}, fh)
-        os.remove(context)
+        with open(context, "w") as fh:
+            json.dump({"cost_usd": 3.0}, fh)
         subprocess.run(["bash", "-c", 'source "$1/core/state.sh"; source "$1/core/steps.sh"; '
-                        'session_latest() { echo "$2"; }; run_took_up "$2" red; run_took_up "$2" wait',
-                        "_", LIB, took, sid], check=True, timeout=30)
-        spend(3.0, "end")
+                        'session_latest() { echo "$2"; }; run_cost "$2" "$3"', "_", LIB, took, sid],
+                       check=True, timeout=30)
         with open(took_state) as fh:
-            unsplit = json.load(fh)["steps"]["review"]["runs"][0]
-        check("cost-unsplit-dated-by-launch", (unsplit["costs"], unsplit["cost_at"], len(unsplit["took_up"])),
-              ([3.0], ["2026-10-14T10:05:00+00:00"], 1))
+            whole = json.load(fh)["steps"]["review"]["runs"][0]
+        check("cost-dated-by-launch", (whole["costs"], whole["cost_at"]), ([3.0], ["2026-10-14T10:05:00+00:00"]))
     finally:
         if os.path.exists(context):
             os.remove(context)
     shutil.rmtree(took, ignore_errors=True)
-    # Read back, the run it took up is that launch's, and fixed while it goes.
-    gh = [{"at": t("10:00")}, {"at": t("10:30")}, {"at": t("11:05")}]
-    fixing = dict(waiting, start=t("10:40"), end=None, going=True, took_up=[t("11:20")])
-    gh[2]["threads"] = [{"fate": "open"}]
-    check("took-up-answers-its-run", review_report.fixers(gh, [fixing]), [[], [0], [0]])
-    # A red on a run of nothing (a deployment check), fixed and waited on
-    # again: no fix of that run.
-    gh[2]["threads"] = []
-    check("took-up-not-on-a-run-of-nothing", review_report.fixers(gh, [fixing]), [[], [0], []])
     # A run begun and not finished is not "no review run yet" on the phone.
     check("brief-first-run-going", review_report.brief(7, None, "", True).splitlines()[0],
           "Review — PR 7: the first review run is going.")
@@ -578,16 +510,14 @@ RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
           for m in ("cycle/run.sh", "review/review_round.sh", "review/review_gate.sh", "improve/friction.sh", "cycle/session_watch.sh"))
 BIN = "".join(open(os.path.join(ROOT, _p)).read()
     for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
-# Four for the rounds of the review on GitHub, two where the review on this
-# machine ends a pass (review_close_gate: something open, or nothing — the
-# last table, its round of nothing included — on the way into step 4 too),
-# one where the gate finds what is open with no report on this head
-# printed (review_close_gate), and two where a session is launched on the
-# findings (run_step, fresh and resumed).
+# Where a round closes — a session's end, the gate's pass with findings or
+# without (on the way into step 4 too), the gate finding what is open with no
+# report on this head printed — and where a session is launched on the
+# findings (run_step, fresh and resumed). The round marker's two are gone
+# with it: every round now closes at the gate.
 check("printed-at-every-round-close",
-      len(re.findall(r'review_report(?:_unshown)? "\$wt" "\$slug"', RUN)), 9)
-check("checks-red-takes-up-the-round",
-      ('run_took_up "$wt" wait' in RUN, '(( rc == 1 )) && { run_took_up "$wt" red;' in RUN), (True, True))
+      len(re.findall(r'review_report(?:_unshown)? "\$wt" "\$slug"', RUN)), 7)
+check("checks-take-up-nothing", "run_took_up" in RUN, False)
 check("cost-taken-at-session-end", '[[ "$step" == "review" ]] && run_cost "$wt" "$session"' in RUN, True)
 with open(os.path.join(ROOT, "sclaude", "prompts", "review.md")) as fh:
     check("prompt-cites-declines", "`as on r<id>`" in fh.read(), True)

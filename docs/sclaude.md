@@ -1759,17 +1759,50 @@ review of step 4's next session, as the step's close already did; four of
 them once left the review saying it had not run, for a person to push.
 
 **Who reviews is the project's choice** (`review` in `.sclaude/config.json`,
-`project_review_mode`): the review workflow on GitHub, a review on this
-machine (`local`: read-only `claude -p` passes, `local_review.sh`, before each
+`project_review_setting`; where a feature's review runs now is
+`project_review_mode`): the review workflow on GitHub (`github`), the same
+with this machine as the backup when it cannot run (`github-local`), a review
+on this machine (`local`: read-only `claude -p` passes, `local_review.sh`, before each
 of step 4's sessions, posting their findings on the pull request), or none
 (`off`). When the review left nothing — no finding, no comment, every check
 green — step 4 opens no session at all and closes at once, saying which of
 the three it was.
 
+**A review that cannot run on GitHub stops, or moves here.** When the gate
+reads a red Claude review job, `pr_context.py --fallback` (`review_fallback`)
+asks why: Claude's limit (a 429 with the reset it names, claude's own words
+for a spent limit) or an API key's credit in the job's log, or a job GitHub
+never started for the account's spending limit, said only in the check run's
+annotations. Under `review: github` the gate stops step 4 there
+(`review_github_stopped` in `review_round.sh`) and says why; no session is
+opened, since none can fix it. Under `github-local` the feature moves to the
+local review (`review_fallback_switch`): the mark
+`.sclaude/local/feature/review-fallback` (`<why>\t<when>\t<seen|inherited>`)
+makes `github-local` read as `local` for that tree on both sides
+(`project_review_mode`, `review_mode`), the pull request is labelled
+`no-review`, and the pass runs at once. Moved for the minutes, every Actions
+check leaves the verdict, as under `local`; moved for Claude's limit alone,
+only what that subscription runs on Actions does — the review workflow's
+jobs, @claude's, the findings check (`without_review`) — since the CI still
+runs. A limit whose named reset has passed neither stops nor moves anything:
+the gate runs the job again on GitHub two minutes past the reset and waits
+for it (`review_reset_rerun`); only a rerun
+GitHub refuses goes on to the stop or the move.
+The feature stays local to its end — switched back,
+its review would read the pull request from the start again. The main
+checkout's `.sclaude/local/review-fallback` (`<until>\t<why>`) keeps the
+machine local for new `github-local` features too
+(`review_fallback_inherit`, at step 3's prompt and step 4's start): until
+Claude's limit resets, or five hours, its window, when the log did not say,
+none when the reset has passed; a day for the minutes, after which the next
+feature tries GitHub again — a job GitHub does not start costs nothing. A
+longer window is never shortened by a later one. The report keeps GitHub's
+rounds before the move and adds the passes here after them.
+
 **Step 4 opens on its own gate.** The gate every session of step 4 ends on,
 `review_close_gate`, also opens the step (`entry`): the local review's pass,
-the wait for the review in Actions, a rerun after the review ran out of
-quota, the report and the history's ways are one code for both. Only the
+the wait for the review in Actions, the move to the local review when the
+one in Actions could not run, the report and the history's ways are one code for both. Only the
 question differs, and on purpose: on the way in it is `pr_context.py
 --state` (`review_state`), which counts a person's comment anywhere and opens
 a session on a pull request it cannot read, since a wrong "clean" there skips
@@ -1781,7 +1814,7 @@ run_step's to open, and the questions after a session ([g]'s ceiling, "Close
 step 4 anyway?") have no session before them yet. A step with a session of
 its own already, or a review sent back (`review_skippable`), is not closed
 there and the pull request is not asked at all — nothing waited for, no
-rerun after the review's quota — only the local pass runs for its count, or,
+move after a review that could not run — only the local pass runs for its count, or,
 once the person ended the search, the open threads are counted. On
 the way in the local pass comes before any wait, and threads it left open
 once the person ended the search are open whatever `--state` says, since
@@ -1789,13 +1822,14 @@ that word does not count the review's own threads; run_step reads that the
 search ended and counts them once, for the way in and for the gate
 (`REVIEW_KNOWN_COUNT`), and a count it could not read opens the session.
 The ways written follow where the feature stands by its history
-(`review_entry_place`). Before step 4 (on the draft pull request), they
-start there. Left in the gate by an earlier entry, they go on from the
+(`review_entry_place`). Before step 4 (the pull request just opened, the
+feature standing in the Review block step 3's check led to), they start
+there. Left in the gate by an earlier entry, they go on from the
 gate's place. At the session already (resumed, a fresh session for the
 next round, sent back to it by the gate), or past step 4 (a hand-back, a
 rollback, a return from a held production), none are written (`quiet`).
-On the map this is one block, "Anything left open?", which the draft pull
-request leads to.
+On the map this is one block, "Anything left open?", which Review leads to
+(with review off, "PR ready?" itself).
 
 **The local review's keys are boxes the person can see.** While a pass runs
 (`local_review_wait`), `s` ends the search for new findings
@@ -1945,39 +1979,34 @@ only the coordination. It fixes in place a finding of a line or two, and a
 round whose findings all sit in a few dozen lines it has already read: a
 subagent would read them again, and the context limit below bounds the
 conversation anyway — sessions that fixed such a round themselves reported it
-as a deviation every time. Once
-the automatic review closes every thread it fixed and posts new ones, it writes `.sclaude/local/feature/review-round` and
-stops. A watcher started beside every review session sees the file and ends
-the `claude` process (found by `--session-id`/`--resume` and its id). Claude
-Code may carry a running conversation on under a new id, in a new transcript
-that holds all of it, and end the old one on a `continued-in` entry; the
-process keeps the id it was launched with. Everything that reads a session's
-transcript follows that chain to its last file (`chain` in `session_end.py`,
-`session_transcript` in `state.sh`), the watcher on every growth of it, a
-`--resume` opens the last id, and the workshop's write guard takes the launched
-id from `SCLAUDE_SESSION` as well as the one Claude Code reports. Then
-sclaude reads how full the session's context is (`review_context`, from the
-status line's file) and when it last asked the model (`requested` in
-`session_end.py`). The same conversation takes the new findings while both
-hold (`review_keep`): its context is under `REVIEW_CONTEXT_MAX_PCT` (40%),
-and its last request is younger than `REVIEW_CACHE_TTL` less
-`REVIEW_CACHE_MARGIN` (an hour less five minutes) — Claude Code caches a
-conversation for an hour, and one resumed after that sends its whole context
-again uncached, which costs more than a fresh session. Otherwise, or when
-either figure cannot be read, the run is recorded in the issue as "fixes
-confirmed", its friction review runs, and a fresh session opens. A review on
-this machine writes no round marker: its session ends on its done marker,
-which closes its run in the issue and runs its friction review as any
-session's end does, and `review_reopen` then asks `review_keep` the same
-question when the threads left open are all new ones — kept, the same
-session is resumed with the round counted; otherwise a fresh one opens.
-`sclaude checks` asks the same question on a red, while the session still
-waits in it (`review_checks_keep` in `review_round.sh`), and says the answer
-on a line of its own: kept, the session takes the findings on code it did
-not touch at once, in the push it is making anyway, instead of stopping on
-its round marker to have them handed back. Stopping cost a review round when
-they came beside findings on its own fixes, and a restart when they came
-alone. Its snapshot of the pull request lists only the review threads still
+as a deviation every time. Step 4's sessions are named `4-fix-review` (`session_label`), in the shape of the regression's fixing sessions (`4-fix-preview`): they fix what the review found, and the step itself is `review`, the phase of checks they work inside. The session never waits for the review, wherever it runs: it pushes, waits
+for the other checks with `sclaude checks` (which leaves the review's own
+checks out, `without_review`), and ends on its done marker. A watcher
+started beside every review session sees the marker and ends the `claude`
+process (found by `--session-id`/`--resume` and its id). Claude Code may
+carry a running conversation on under a new id, in a new transcript that
+holds all of it, and end the old one on a `continued-in` entry; the process
+keeps the id it was launched with. Everything that reads a session's
+transcript follows that chain to its last file (`chain` in
+`session_end.py`, `session_transcript` in `state.sh`), the watcher on every
+growth of it, a `--resume` opens the last id, and the workshop's write guard
+takes the launched id from `SCLAUDE_SESSION` as well as the one Claude Code
+reports. Step 4's gate then waits for the review of the last push in
+Actions, or runs it here, and `review_reopen` decides who takes what is
+open: threads from before the session go back to it; only new ones go to
+the same conversation while `review_keep` holds — its context is under
+`REVIEW_CONTEXT_MAX_PCT` (40%), read from the status line's file
+(`review_context`), and its last request (`requested` in `session_end.py`)
+is younger than `REVIEW_CACHE_TTL` less `REVIEW_CACHE_MARGIN` (an hour less
+five minutes). The prompt cache lives from the last request, not with the
+process: a conversation resumed within the hour reads its context from the
+cache as one that waited inside it would have, and one resumed after that
+sends it all again uncached, which costs more than a fresh session.
+Otherwise, or when either figure cannot be read, a fresh session opens; the
+session's end goes to `review-context.log` (`done` or `exit`, with the rounds it closed). Before, a session under
+GitHub's review waited for it inside `sclaude checks` and ended its round on
+a marker of its own: two ways for one round, which the map drew twice.
+Its snapshot of the pull request lists only the review threads still
 open — the resolved ones are counted, not repeated — so the new round starts
 with the new findings and nothing else.
 
@@ -2016,13 +2045,9 @@ that sat on earlier fixes or repeated a decline), `fix` (the session that
 answered those findings, its time and cost, and what it declined — the
 fix is where that is decided) and `result` (fixed, waiting). The session that answered a run is the one with a launch after
 the run began and before the next one did — its start, each launch that gave
-its cost, the launch taken up again (`resumed`), and the moment a launch took
-up the next round itself: on GitHub one that `sclaude checks` answers red may
-go on to that run's findings, so `cmd_checks` keeps the red and writes it as
-`took_up` when the same launch waits for checks again — a launch that hands
-the findings on, or only had a red CI check to look at, does not
-(`run_took_up` in `steps.sh`) — never the one merely going when the run
-began, which is the launch waiting for the run of its own push (`fixers` in
+its cost and the launch taken up again (`resumed`) — every round begins a
+launch, since the session ends on its marker and the gate brings it back —
+never the one merely going when the run began (`fixers` in
 `review_report.py`); one that answered several runs
 labels them `N.1`, `N.2`. The fix's time runs from that launch to the next
 run, or to the session's end (`fix_window`). The report once
@@ -2064,14 +2089,8 @@ fixing launches that began after the run and before the next one
 (`cost_at`, `run_cost` in `steps.sh`; `fixes_per_round` — on GitHub a launch
 waits for the run of its own push and ends after it, but began on the run
 before), so a launch that pushed nothing adds to its run instead of
-shifting the rest. A launch that took up the next round itself is split
-there: `run_took_up` reads its spend at the red (`checks_red_cost`) and
-closes the share up to it when the red becomes a `took_up` (`cost_split`);
-what it spends after is dated by that red, so the round it took up gets its
-own cost. With no spend read at the red nothing is split, and the launch's
-cost stays dated by its start. That a launch has ended is `costed`, which
-only `run_cost` writes: a share's `cost_at` says nothing of it.
-Once one launch that worked three rounds was one sum on the first of them. A value that will come and has not yet is `w`: the
+shifting the rest. That a launch has ended is `costed`, which only
+`run_cost` writes. A value that will come and has not yet is `w`: the
 run still going, findings no session has begun to fix, the launch running
 now, whose cost is taken when it ends. A round's `result` is `w` until its
 fix has ended. The total is where the review stands now: the sums of what is
@@ -2294,7 +2313,9 @@ rules put off before runs just before it, keeps no conversation and has no
 row of its own. In a feature built in parts the rows of the steps, the
 friction reviews, the syncs, the status updates, the retrospective and the
 demo refresh say the part their session worked on, or `the whole`. The local review's passes are read from
-`local-review-rounds.jsonl` beside the state, with the findings it posted and
+`review-rounds.jsonl` beside the state — the review's one journal, which
+also holds the workflow's runs in Actions (`source: github`, added by
+`github_runs` as the report is made, and left out here) — with the findings it posted and
 its times in the machine's own clock. A pass is started with a session id of
 its own, which the journal keeps; a pass journaled before that has a dash for
 its id. A pass in which no model ran — a head with nothing open to check — is

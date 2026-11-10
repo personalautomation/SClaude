@@ -79,7 +79,7 @@ try:
 
     rc, out = menu("choices", "review")
     check("review-choices", [l.split("\t")[0] for l in out.splitlines()],
-          ["github", "local", "off"])
+          ["github", "github-local", "local", "off"])
     rc, out = menu("choices", "commands")
     check("structure-has-no-choices", out, "")
 

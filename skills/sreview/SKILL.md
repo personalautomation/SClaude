@@ -68,7 +68,9 @@ checkout this skill is installed from, wherever that is:
 `I="$(cd "$(readlink -f ~/.claude/skills/sreview)/../.." && pwd)"`. Take:
 - the check commands: `commands` (`typecheck`, `lint`, and whatever the
   project's `CLAUDE.md` asks for after the kind of change made);
-- `review`: `local` / `github` / `off`;
+- `review`: `local` / `github` / `github-local` / `off` — `github-local` is
+  `github` until the feature's review moved to this machine (the mark
+  `.sclaude/local/feature/review-fallback` in its tree), and `local` after;
 - the rules of sclaude's review step, `$I/sclaude/prompts/review.md`:
   read its step 1 and follow it — the fix brief, "a fix that would undo an earlier
   one is not a fix", findings on the review workflow file or on deferred files,
@@ -88,17 +90,21 @@ request, as sclaude keeps them.
   the answer and post it:
   `python3 $I/sclaude/lib/review/local_review.py record <cwd> <pr> <owner/repo> <answer> <base> <head> <seconds> <journal>`
   — it posts new threads and resolves the ones the reviewer marked `RESOLVED`.
-  The journal is `.sclaude/local/feature/local-review-rounds.jsonl` when that
+  The journal is `.sclaude/local/feature/review-rounds.jsonl` when that
   directory exists (so sclaude counts these rounds), else `$S/branches/<branch>.rounds.jsonl`.
   `record` posts on the head the pull request carries: while HEAD is ahead of
   it (not pushed), keep the findings in the branch log and post them on the
   first iteration whose head the PR carries.
 - `review: github` — the review workflow is the reviewer, and it reads only
-  what was pushed: when the iteration's commit is on the PR, wait with
-  `sclaude checks <pr>` in the background and take the open threads as the
-  iteration's findings (exit `2` or `3`: the push was not reviewed — stop and
-  tell the user, as `review.md` says). When it is not, review with your own
-  subagent as in local mode.
+  what was pushed: when the iteration's commit is on the PR, wait in the
+  background for the review workflow's run on that head to finish
+  (`gh run list --commit <sha> --json databaseId,workflowName,status`, then
+  `gh run watch <id>` on the review's run; `sclaude checks <pr>` waits only
+  for the other checks, never for the review) and take the open threads as
+  the iteration's findings. No review run on the head within half an hour,
+  or one that failed: the push was not reviewed — stop and tell the user.
+  When the commit is not on the PR, review with your own subagent as in
+  local mode.
 - A thread you decline is answered and resolved as `review.md` describes. A
   decline that follows from a policy needs no new question: cite the policy in
   the reply (`Left as it is, at the author's decision: <policy in a line>`) and

@@ -729,8 +729,7 @@ def case_l():
     #
     # The review session was closed in a run long finished; the return opens
     # it again from a new `sclaude <feature>` with QA's notes, and the note
-    # goes with them. A review run on this machine is not told of review-round,
-    # which it never writes; this one is GitHub's.
+    # goes with them.
     w = World(os.path.join(tmp, "l"), merged=False)
     w.set_state(dict(DONE_STATE, worktree=w.wt))
     w.watch({"feature": "demo", "verdict": "returned", "status": "In progress"},
@@ -743,8 +742,7 @@ def case_l():
     check_true("qa-return-resumes-the-review-session", "old-session" in w.sessions)
     check_true("qa-return-notes-reach-it", "avatar does not load" in w.prompts)
     check_true("qa-return-told-the-marker-is-gone",
-               "No marker closes this session now** (`.sclaude/local/feature/session-done` or "
-               "`.sclaude/local/feature/review-round`)" in w.prompts)
+               "No marker closes this session now** (`.sclaude/local/feature/session-done`)" in w.prompts)
 
 
 # What a run is stopped at (`until` of World.resume): the merge wait, which

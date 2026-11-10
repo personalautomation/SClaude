@@ -398,7 +398,7 @@ for name in ORDER:
 # a session all the same, marked so: it reviewed nothing.
 def review_pass_rows():
     path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])),
-                        "local-review-rounds.jsonl")
+                        "review-rounds.jsonl")
     passes = []
     try:
         with open(path, encoding="utf-8") as fh:
@@ -407,7 +407,8 @@ def review_pass_rows():
                     row = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(row, dict) and int(row.get("seconds") or 0) > 0:
+                if isinstance(row, dict) and int(row.get("seconds") or 0) > 0 \
+                        and row.get("source") != "github":
                     passes.append(row)
     except OSError:
         return

@@ -29,8 +29,10 @@
 # What GitHub says about merging this pull request, as one word:
 #
 #   ready     — mergeable, clean, and ours to merge
-#   excused   — as ready, but GitHub calls it UNSTABLE for a stale findings
-#               check alone (below); merged like ready, said differently
+#   excused   — as ready, but GitHub calls it UNSTABLE only for checks the
+#               verdict does not count: a stale findings check, a run a newer
+#               one took over, the Actions checks of a review here (merge_red);
+#               merged like ready, said differently
 #   dirty     — conflicts with main
 #   blocked   — a required review or check is missing
 #   behind    — main has moved and the branch must catch up

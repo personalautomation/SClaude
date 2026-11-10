@@ -381,7 +381,8 @@ def transcripts_of(state_path):
     # The local review's passes, each a conversation of its own, for metrics
     # to price on their block: every caller of history gets them so.
     from local_review import rows as journal_rows
-    read.passes = journal_rows(os.path.join(feature, process_history.LOCAL_JOURNAL), with_spent=True)
+    read.passes = journal_rows(os.path.join(feature, process_history.LOCAL_JOURNAL), with_spent=True,
+                               local_only=True)
     return read
 
 

@@ -243,6 +243,22 @@ breaks the other silently — grep before you edit:
   (`.sclaude/local/feature/<name>`) that is not there, and on an entry
   nothing names. A file added goes there in the same change.
 
+- `.sclaude/local/feature/review-fallback` — a feature whose review could not
+  run on GitHub and moved to this machine — is written by
+  `review_fallback_set`/`review_fallback_inherit` in
+  `sclaude/lib/review/review_round.sh` and read by `project_review_mode` in
+  `sclaude/lib/core/project.sh` and `FALLBACK_FILE` in
+  `sclaude/lib/review/pr_context.py`; `MINUTES` and the `QUOTA_*` patterns
+  there read the job's annotations and log for why. The setting `github-local`
+  that allows the move is in `CHOICES` (`config_menu.py`), read by
+  `project_review_setting` and `review_mode`, and drawn by the map
+  (`NEEDS`, `setting` in `process_config.py`). `tests/parallel.py` runs
+  both sides. Renamed on one side alone, the pass runs here while the
+  verdict still counts the red review job in Actions.
+
+  <!-- Added by Claude on 2026-11-10 at the user's request: the review moves
+  to this machine when GitHub's runs out of Claude quota or Actions minutes. -->
+
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/review/review_round.sh`, which decides by it
   whether a review round stays in the same session; `tests/review-round.py`
@@ -278,16 +294,9 @@ breaks the other silently — grep before you edit:
   asked: the prompt acts on the codes, so a code changed on one side alone
   would send a session the wrong way without an error. -->
 
-- `CHECKS_KEEP_YES`/`CHECKS_KEEP_NO` in `sclaude/lib/review/review_round.sh`
-  — what `sclaude checks` adds on a red, whether the session is kept for the
-  findings on code it did not touch (`review_checks_keep`) — open the lines
-  `sclaude/prompts/review.md` tells step 4 to act on; `tests/review-round.py`
-  checks the two agree. `review-checked`, which `cmd_checks` writes as it
-  returns, is what `review_pane_keys` in `local_review.sh` prints the report
-  by; `tests/local-review.py` runs it.
-
-  <!-- Added by Claude on 2026-11-10 at the user's request, after a review
-  that stopped a round only to have two findings handed back to it. -->
+- `review-checked`, which `cmd_checks` writes as it returns, is what
+  `review_pane_keys` in `local_review.sh` prints the report by;
+  `tests/local-review.py` runs it.
 
 - `LOCAL_SIGNATURE` in `sclaude/lib/review/pr_context.py` ends every finding and
   reply a review run on this machine posts (`local_review.py`), and is how
@@ -295,10 +304,14 @@ breaks the other silently — grep before you edit:
   account; `tests/review-skip.py` and `tests/local-review.py` check both
   sides. `sclaude/prompts/review.md` spells it out for the night check of a
   minor thread, which takes only a bot's finding or one ending with it;
-  `tests/review-report.py` checks the prompt names it. `local-review-rounds.jsonl` is named in `local_review.sh` and read
-  by `LOCAL_JOURNAL` in `review_report.py` and in `process.py`, which price
-  each pass by its `session`, the unrecorded ones (`spent`) included;
-  `tests/local-review-report.py` reads what the other side wrote.
+  `tests/review-report.py` checks the prompt names it. `review-rounds.jsonl`, the review's one journal wherever it
+  ran, is named by `review_journal` in `local_review.sh`, `JOURNAL` in
+  `local_review.py` (whose `github_runs` adds the workflow's runs, `source:
+  github`), `LOCAL_JOURNAL` in `process_history.py` and `review_pass_rows` in
+  `issue_sync.sh`; the report reads its rounds from it alone, and the map and
+  the issue price each local pass by its `session`, the unrecorded ones
+  (`spent`) included; `tests/local-review-report.py` reads what the other
+  side wrote.
 
   <!-- Extended by Claude on 2026-11-04 at the user's request: the review
   passes are priced in the report and on the process map from the journal. -->

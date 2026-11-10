@@ -56,7 +56,7 @@ REVIEW_WAIT_MAX="${REVIEW_WAIT_MAX:-1800}"
 
 # The share of its context window, in percent, under which a review session
 # takes the next round itself rather than handing it to a fresh one (see
-# round_marker in review_round.sh). A share, as the status line shows it: with a
+# review_keep and review_reopen in review_round.sh). A share, as the status line shows it: with a
 # window of 1M tokens 40% is 400k. .sclaude/local/review-context.log keeps
 # what every review session ended on, to judge the figure by.
 REVIEW_CONTEXT_MAX_PCT="${REVIEW_CONTEXT_MAX_PCT:-40}"
@@ -952,9 +952,7 @@ PY
 # review run after that, by time, since a launch that pushed nothing
 # (reopened, resumed after a crash) is a launch all the same. Its start, not
 # its end: a launch that waits for the workflow's review of its own push
-# ends after the run it started. A launch that took up the next round itself
-# (run_took_up), with its spend read at the red, closed its share there; what it spends from
-# then on is dated by that round's red, so the report puts it on that round.
+# ends after the run it started.
 #
 #   run_cost <wt> <session>
 run_cost() {
@@ -984,92 +982,8 @@ run["cost_seen"] = cost
 run.setdefault("costs", []).append(round(cost - seen if cost >= seen else cost, 4))
 run.setdefault("cost_at", []).append(state_file.share_start(run))
 # The launch that gave its whole cost: it has ended (sessions() in
-# review_report.py), which a share closed at a round taken up does not say.
+# review_report.py).
 run["costed"] = run.get("resumed") or run.get("started") or ""
-state_file.write(path, data)
-PY
-}
-
-# When a review session's launch took up the next round itself. On GitHub
-# a launch that `sclaude checks` answers red may go on, in the same launch,
-# to what that run found (sclaude/prompts/review.md, "a new finding is on
-# your own fixes") — or hand the findings on and end, or have only a red CI
-# check to look at. So the red is only kept (`checks_red`), and becomes a
-# `took_up` when the same launch waits for checks again: it pushed what it
-# fixed after that red. Written on the review's last run while it is going,
-# read by `launches` in review_report.py: without it the run that launch
-# fixed has no launch in its window and reads as nobody's.
-#
-# The launch's spend so far is read at the red too (`checks_red_cost`, from
-# the status line as run_cost reads it), and closed as a share of its own
-# when the red becomes a `took_up`: one launch that worked three rounds was
-# one sum, all of it on the first round, and the next two read as free.
-#
-#   run_took_up <wt> red|wait
-run_took_up() {
-  local wt="$1" session file=""
-  session="$(state_get "$wt/.sclaude/local/feature/state.json" steps.review.session 2>/dev/null || true)"
-  [[ -n "$session" && "$session" != "null" ]] \
-    && file="/tmp/claude-statusline-context-$(session_latest "$wt" "$session")"
-  PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$wt/.sclaude/local/feature/state.json" "$2" "$file" <<'PY' 2>/dev/null || true
-import datetime, json, os, sys
-path, what, context = sys.argv[1:4]
-
-
-def spent():
-    """The launch's running total, as the status line last left it."""
-    try:
-        with open(context) as fh:
-            cost = json.load(fh).get("cost_usd")
-    except (OSError, ValueError, AttributeError):
-        return None
-    return cost if isinstance(cost, (int, float)) else None
-
-
-def when(text):
-    """A time as a moment: session_runs writes the local offset, this the
-    UTC one, and as text the two do not order."""
-    try:
-        return datetime.datetime.fromisoformat(text) if text else None
-    except ValueError:
-        return None
-if not os.path.exists(path):
-    sys.exit(0)
-import state_file
-state_file.lock(path)
-with open(path) as fh:
-    data = json.load(fh)
-runs = ((data.get("steps") or {}).get("review") or {}).get("runs") or []
-run = runs[-1] if runs and isinstance(runs[-1], dict) else None
-if not run or run.get("done"):
-    sys.exit(0)
-began, ended = when(run.get("resumed") or run.get("started")), when(run.get("finished"))
-# Going as sessions() in review_report.py reads it: not ended, or taken up
-# again after its end; one with an outcome and no end has ended.
-if (ended and (not began or ended >= began)) or (not ended and run.get("outcome")):
-    sys.exit(0)
-red = run.pop("checks_red", None)
-red_cost = run.pop("checks_red_cost", None)
-if what == "red":
-    run["checks_red"] = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
-    cost = spent() if context else None
-    if cost is not None:
-        run["checks_red_cost"] = cost
-elif red and (not began or (when(red) or began) >= began):
-    # A red from this launch, not one before it was taken up again.
-    # What the launch spent up to it fixed the round before: its share is
-    # closed here, dated as the launch's work since its start or its last
-    # round taken up. A total under what was seen (a resume counting from
-    # zero) is left whole to run_cost.
-    seen = run.get("cost_seen") or 0
-    if isinstance(red_cost, (int, float)) and red_cost >= seen:
-        run.setdefault("cost_at", []).append(state_file.share_start(run))
-        run.setdefault("costs", []).append(round(red_cost - seen, 4))
-        run["cost_seen"] = red_cost
-        run.setdefault("cost_split", []).append(red)
-    run.setdefault("took_up", []).append(red)
-elif not red:
-    sys.exit(0)
 state_file.write(path, data)
 PY
 }
@@ -1135,13 +1049,13 @@ session_number() {
 }
 
 # A name with its round, which only a second conversation and later carry:
-# `4-review`, then `4-review(2)`.
+# `4-fix-review`, then `4-fix-review(2)`.
 with_round() {
   if [[ "$2" -gt 1 ]]; then echo "$1($2)"; else echo "$1"; fi
 }
 
 # The name a feature's session goes by: `<number>-<kind>(<round>)/<slug>`,
-# e.g. `1-plan/12-login`, `4-review(2)/12-login`, `4-friction(2)/12-login`
+# e.g. `1-plan/12-login`, `4-fix-review(2)/12-login`, `4-friction(2)/12-login`
 # for the friction review of that review round, `5-sync(2)/…` for a second
 # sync with main, `6-epilogue/…`, `7-retro/…`.
 # One shape for every kind, so the round is always last: the status line
@@ -1158,8 +1072,12 @@ session_label() {
   local number round
   case "$1" in
     step)
+      # Step 4's sessions fix what the review found: named as the fixing
+      # sessions are (`4-fix-preview`), the step itself stays `review`.
+      local name="$3"
+      [[ "$name" == review ]] && name=fix-review
       read -r number round <<< "$(session_number "$(step_run_key "$2" "$3" "$4")")"
-      with_round "$number-$3" "$round" ;;
+      with_round "$number-$name" "$round" ;;
     friction)
       read -r number round <<< "$(session_number "$2")"
       with_round "$number-friction" "$round" ;;

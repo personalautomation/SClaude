@@ -62,7 +62,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from pr_context import (SKIP_SECONDS, decline_of, gh_json, is_claude_review,  # noqa: E402
-                        review_mode, thread_line, yours)
+                        moved_for, review_mode, thread_line, yours)
 from local_review import rows as journal_rows  # noqa: E402
 import claude_usage  # noqa: E402
 
@@ -341,7 +341,7 @@ def review_runs(cwd, branch, since=None):
     # The limit is high on purpose: every comment starts the @mention
     # workflow, and at 200 those runs pushed the review's own off the list.
     data = gh_json(["run", "list", "--branch", branch, "--limit", "1000", "--json",
-                    "workflowName,createdAt,startedAt,updatedAt,status,headSha"], cwd=cwd)
+                    "workflowName,createdAt,startedAt,updatedAt,status,conclusion,headSha,databaseId,attempt"], cwd=cwd)
     if not isinstance(data, list):
         return None
     out = []
@@ -361,7 +361,9 @@ def review_runs(cwd, branch, since=None):
         seconds = (b - began).total_seconds() if b and b > began else 0.0
         if running or seconds >= SKIP_SECONDS:
             out.append({"start": a, "seconds": seconds, "running": running,
-                        "head": r.get("headSha") or None})
+                        "head": r.get("headSha") or None, "id": r.get("databaseId"),
+                        "attempt": r.get("attempt") or 1, "conclusion": r.get("conclusion") or "",
+                        "source": "github"})
     out.sort(key=lambda r: r["start"])
     return out
 
@@ -369,7 +371,7 @@ def review_runs(cwd, branch, since=None):
 # A review run on this machine (`review: local`, local_review.py) posts its
 # findings as threads, read above like the workflow's; its runs are not
 # workflow runs, so they are read from its journal instead.
-LOCAL_JOURNAL = ".sclaude/local/feature/local-review-rounds.jsonl"
+from local_review import JOURNAL, github_runs  # noqa: E402
 
 
 def pass_cost(cwd, session, root=None):
@@ -386,12 +388,13 @@ def pass_cost(cwd, session, root=None):
 
 
 def local_runs(cwd, since=None, root=None):
-    """The local review's runs since <since>, oldest first, shaped as
-    review_runs gives the workflow's; None when the feature has no journal.
+    """The review's runs since <since> from the journal, wherever they ran
+    (the workflow's, `source: github`, carry no cost here), oldest first,
+    shaped as review_runs gives them; None when the feature has no journal.
     Read by the journal's own reader (local_review.rows), so both agree on
     what a run is. Each carries the cost of its passes (pass_cost), None when
     none of them has one to read."""
-    path = os.path.join(cwd, LOCAL_JOURNAL)
+    path = os.path.join(cwd, JOURNAL)
     if not os.path.exists(path):
         return None
     # The passes over one range — a capped pass and the ones that follow it
@@ -403,15 +406,16 @@ def local_runs(cwd, since=None, root=None):
     for row in journal_rows(path, with_spent=True):
         if not after(parse(row.get("at")), since):
             continue
-        key = (row.get("base"), row.get("head"))
-        cost = pass_cost(cwd, row.get("session"), root)
+        key = (row.get("base"), row.get("head"), row.get("run"))
+        cost = pass_cost(cwd, row.get("session"), root) if row.get("session") else None
         if out and key == last:
             out[-1]["seconds"] += float(row.get("seconds") or 0)
             if cost is not None:
                 out[-1]["cost"] = (out[-1]["cost"] or 0) + cost
             continue
         out.append({"start": parse(row["at"]), "seconds": float(row.get("seconds") or 0),
-                    "running": False, "cost": cost, "head": row.get("head")})
+                    "running": False, "cost": cost, "head": row.get("head"),
+                    "source": row.get("source") or "local"})
         last = key
     return out
 
@@ -545,37 +549,27 @@ def sessions(cwd, since=None):
         ats = [parse(t) for t in (r.get("cost_at") or [])]
         # A launch that gave its cost has ended, though its end is written
         # after the report the session's close prints (session_ended in
-        # run.sh): run_cost marks it with the launch's start (`costed`). Not
-        # read off `cost_at`, which a share closed at a round the launch took
-        # up (run_took_up) dates as well while the launch goes on.
+        # run.sh): run_cost marks it with the launch's start (`costed`).
         costed = parse(r.get("costed"))
         if going and costed and costed >= (resumed or a or costed):
             going = False
         out.append({"start": a, "end": b, "going": going, "resumed": resumed,
-                    "took_up": [parse(t) for t in (r.get("took_up") or [])],
-                    "cost_split": [parse(t) for t in (r.get("cost_split") or [])],
                     "rounds": r.get("rounds"),
                     "costs": costs, "cost_at": ats,
                     "seconds": (b - a).total_seconds() if a and b and b > a else None})
     return out
 
 
-def launches(s, took=True):
+def launches(s):
     """When session <s>'s launches began: those that gave their cost
-    (`cost_at`, when there is one for each), its start, the launch taken up
-    again (`resumed`), whose cost comes when it ends, and — with <took> —
-    each time a launch took up the next round itself (`took_up`, run_took_up
-    in steps.sh)."""
-    return [t for t in (s["cost_at"] if timed(s) else []) + [s["start"], s.get("resumed")]
-            + ((s.get("took_up") or []) if took else []) if t]
+    (`cost_at`, when there is one for each), its start, and the launch taken
+    up again (`resumed`), whose cost comes when it ends."""
+    return [t for t in (s["cost_at"] if timed(s) else []) + [s["start"], s.get("resumed")] if t]
 
 
 def answering(i, groups, s):
-    """Session <s>'s launches that answer run <i>: in its window, a launch
-    taking the round up counted only where the run found something — a red
-    deployment check on a run of nothing, fixed and waited on again, is no
-    fix of that run."""
-    return [t for t in launches(s, bool(groups[i].get("threads"))) if window(i, groups, t)]
+    """Session <s>'s launches that answer run <i>: those in its window."""
+    return [t for t in launches(s) if window(i, groups, t)]
 
 
 def window(i, groups, t):
@@ -729,13 +723,21 @@ def main():
     # not by whether a journal is left over from an earlier mode.
     local = review_mode(cwd) == "local"
     since = pr_created(cwd, pr)
-    bot = (local_runs(cwd, since) or []) if local else None
     found = threads(cwd, pr, repo)
     threads_failed = found is None
     if found is None:
         found = []
-    if not local:
-        bot = review_runs(cwd, branch, since)
+    # The runs from the one journal (JOURNAL), wherever they ran: the
+    # workflow's finished runs are added to it first, and one still going is
+    # shown beside them. Reviewed only here, GitHub is not asked.
+    running = []
+    if not local or moved_for(cwd):
+        on_github = review_runs(cwd, branch, since) or []
+        github_runs(os.path.join(cwd, JOURNAL), on_github, pr)
+        running = [r for r in on_github if r["running"]]
+    bot = (local_runs(cwd, since) or []) + running
+    sources = {r.get("source") or "local" for r in bot}
+    moved = sources == {"github", "local"}
     groups = rounds(found, bot)
     # What the report shows, for step 4's gate (review_close_gate): a report
     # showing the open findings and the rounds the terminal was last shown,
@@ -757,7 +759,8 @@ def main():
         except OSError:
             pass
     print("")
-    print(rule("Review report · PR #%s%s" % (pr, " · reviewed on this machine" if local else "")))
+    print(rule("Review report · PR #%s%s" % (pr, " · on GitHub, then on this machine" if moved
+                                             else " · reviewed on this machine" if local else "")))
     if threads_failed:
         print("  The review threads could not be read (gh, network or permissions).")
     mark_near_fixes(found, groups, cwd)
@@ -786,24 +789,18 @@ def main():
         # of the launch running now, which goes on the run its start falls
         # after, as fixes_per_round will put it.
         fix_cost = [None] * len(groups)
-        pending, fixing = set(), set()
+        pending = set()
         for k, s in enumerate(people):
             mine = [i for i, m in enumerate(who) if k in m]
             for i, c in enumerate(fixes_per_round(s, groups, mine)):
                 if c is not None:
                     fix_cost[i] = round((fix_cost[i] or 0) + c, 4)
-            # What the launch spends now is dated by its last split
-            # (share_start): the round it took up there waits for its cost,
-            # the rounds before it are priced already.
-            began = s.get("resumed") or s["start"]
-            splits = [t for t in s.get("cost_split") or [] if t and began and t >= began]
-            now_on = max(splits) if splits else began
+            # What the launch going now spends waits for its end: the run it
+            # answers is priced then.
+            now_on = s.get("resumed") or s["start"]
             if s["going"] and now_on:
                 pending.update(i for i in range(len(groups)) if window(i, groups, now_on))
-                # The runs this launch took up since (took_up): fixed now too.
-                fixing.update(i for i in range(len(groups)) for t in answering(i, groups, s)
-                              if t >= now_on)
-        busy = pending | fixing | {i for i, m in enumerate(who) if not m and groups[i]["threads"]}
+        busy = pending | {i for i, m in enumerate(who) if not m and groups[i]["threads"]}
         # A session that answered several runs labels each N.1, N.2…: the
         # session's sum, as a row of its own, read as one more round.
         answered = {}
@@ -846,7 +843,7 @@ def main():
             # ended — not begun, or its launch still running: zeros there
             # read as a fix that fixed nothing. The total says where every
             # thread stands now.
-            if session == WAIT or i in fixing or i in pending:
+            if session == WAIT or i in pending:
                 result = (WAIT,) * 3
             table.append((g["at"].astimezone().strftime("%m-%d %H:%M") if g["at"] else "",
                           ftook, fcost) + counts + (session, xtook, xcost) + result)

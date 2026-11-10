@@ -63,11 +63,15 @@ RED_CHECK_ADVICE = (
     "error line in it. The cause is in the run's result — grep the job log "
     "for `##[error]` or `is_error:true` and read `api_error_status` and "
     "`result` next to it.\n\n"
-    "`api_error_status: 429` with a `result` naming a session limit means the "
-    "reviewer bot ran out of quota mid-run. Nothing in the diff caused it and "
-    "no change to the diff will clear it: rerun after the reset "
-    "(`gh run rerun <run-id> --failed`), and if the reset is hours away, say "
-    "so plainly instead of hunting for a fault that isn't there."
+    "`api_error_status: 429` with a `result` naming a session limit, or a "
+    "job GitHub did not start for the account's spending limit, means the "
+    "review could not run on GitHub. Nothing in the diff caused it and no "
+    "change to the diff will clear it. Once the reset it names has passed, "
+    "rerun it (`gh run rerun <run-id> --failed`). Before that, with "
+    "`review: github-local` sclaude "
+    "moves the feature's review to this machine itself; otherwise it is mine "
+    "to decide: say so plainly, write no marker, instead of hunting for a "
+    "fault that isn't there."
 )
 
 
@@ -106,15 +110,72 @@ def pr_view(cwd, pr, fields):
     and what is left is what does not run on Actions (a deployment). What the
     Actions checks did is the regression's `local` stage, which sclaude runs
     itself. Read the pull request's checks through this, never around it.
+
+    A feature that moved here for Claude's limit alone (moved_for) still has
+    its minutes, and its CI runs: only the review's own checks leave it.
     """
     data = gh_json(["pr", "view", str(pr), "--json", fields], cwd=cwd)
-    if (isinstance(data, dict) and "statusCheckRollup" in data
-            and review_mode(cwd) == "local"):
-        data["statusCheckRollup"] = without_actions(data.get("statusCheckRollup") or [])
+    if isinstance(data, dict) and "statusCheckRollup" in data:
+        data["statusCheckRollup"] = verdict_rollup(cwd, data.get("statusCheckRollup") or [])
     return data
 
 
+def superseded(rollup):
+    """The rollup without the runs another run of the same job took over: a
+    cancelled one beside a newer run of the same workflow and name that is
+    green or still going (a concurrency group cancels the older of two). Two
+    cancelled, a cancelled run newer than the green one, a cancelled job
+    beside a green one of another workflow, or runs with no start to compare,
+    stay."""
+    def key(c):
+        return (c.get("workflowName") or "", c.get("name") or c.get("context") or "")
+
+    def start(c):
+        # gh writes a time GitHub has not set as Go's zero, year 1: no start.
+        when = parse_ts(c.get("startedAt"))
+        return when if when and when.year > 1 else None
+
+    def taken_over(c):
+        began = start(c)
+        if (c.get("conclusion") or "").upper() != "CANCELLED" or not began:
+            return False
+        return any(o is not c and key(o) == key(c)
+                   and (start(o) or began) > began
+                   and ((o.get("conclusion") or o.get("state") or "").upper() in GREEN or running(o))
+                   for o in rollup)
+    return [c for c in rollup if not taken_over(c)]
+
+
+def verdict_rollup(cwd, rollup):
+    """The checks a verdict may rest on (pr_view says which), the runs taken
+    over by another left out (superseded)."""
+    rollup = superseded(rollup)
+    if review_mode(cwd) != "local":
+        return rollup
+    return without_review(rollup) if moved_for(cwd) == "quota" else without_actions(rollup)
+
+
 _MODES = {}
+
+# A feature whose review could not run on GitHub — Claude's limit, or the
+# Actions minutes — and moved to this machine for the rest of its life:
+# written by review_fallback_set in review_round.sh, read by
+# project_review_mode in project.sh and by review_mode here.
+FALLBACK_FILE = ".sclaude/local/feature/review-fallback"
+_TOPS = {}
+
+
+def moved_for(cwd):
+    """Why the feature's review moved here — `quota` or `minutes`, the mark's
+    first field — or "" when it did not."""
+    key = cwd or os.getcwd()
+    if key not in _TOPS:
+        review_mode(cwd)
+    try:
+        with open(os.path.join(_TOPS.get(key, key), FALLBACK_FILE)) as fh:
+            return (fh.readline().split("\t") + [""])[0].strip()
+    except OSError:
+        return ""
 
 
 def review_mode(cwd):
@@ -122,17 +183,22 @@ def review_mode(cwd):
     way project_review_mode in project.sh reads it — this machine's choice in
     the main checkout's .sclaude/local/config.json first (overrides in
     config_menu.py), then the main checkout, the tree only where the main
-    checkout has no such key."""
+    checkout has no such key. `github-local` is `github`, or `local` for a
+    feature whose review could not run on GitHub and moved here
+    (FALLBACK_FILE in its tree)."""
     key = cwd or os.getcwd()
     if key in _MODES:
         return _MODES[key]
     roots = []
+    top = ""
     try:
-        common = subprocess.run(["git", "rev-parse", "--path-format=absolute",
-                                 "--git-common-dir"], cwd=cwd, capture_output=True,
-                                text=True, timeout=30).stdout.strip()
-        if common:
-            roots.append(os.path.dirname(common))
+        lines = subprocess.run(["git", "rev-parse", "--path-format=absolute",
+                                "--git-common-dir", "--show-toplevel"], cwd=cwd,
+                               capture_output=True, text=True, timeout=30).stdout.split("\n")
+        if lines and lines[0].strip():
+            roots.append(os.path.dirname(lines[0].strip()))
+        if len(lines) > 1:
+            top = lines[1].strip()
     except (OSError, subprocess.SubprocessError):
         pass
     roots.append(key)
@@ -147,13 +213,26 @@ def review_mode(cwd):
                 value = json.load(fh).get("review")
         except (OSError, ValueError, AttributeError):
             continue
-        if path == mine and value not in ("github", "local", "off"):
+        if path == mine and value not in ("github", "github-local", "local", "off"):
             continue
         if value is not None:
-            mode = value if value in ("local", "off") else "github"
+            mode = value if value in ("local", "off", "github-local") else "github"
             break
+    _TOPS[key] = top or key
+    if mode == "github-local":
+        mode = "local" if os.path.isfile(os.path.join(top or key, FALLBACK_FILE)) else "github"
     _MODES[key] = mode
     return mode
+
+
+def without_review(rollup):
+    """The rollup without what Claude's subscription runs on Actions: the
+    review workflow's jobs, @claude's, and the findings check the review
+    writes. A CI check that merely says "review" stays."""
+    return [c for c in rollup
+            if "claude" not in (c.get("workflowName") or "").lower()
+            and not is_claude_review(c.get("name") or "", c.get("workflowName") or "")
+            and (c.get("name") or c.get("context") or "") != FINDINGS_CHECK]
 
 
 def without_actions(rollup):
@@ -355,15 +434,24 @@ def merge_red(cwd, pr, repo):
     again when a thread is resolved by hand or by a session: read as "not
     ready", a `merge: auto` pull request with every finding resolved waited
     for the merge for ever.
+
+    The checks GitHub counts and the verdict does not (verdict_rollup) are
+    `stale` too: reviewed on this machine, a feature moved here for Claude's
+    limit keeps its red review job for good, and waited on it the same way;
+    and a cancelled run a newer run of the same job took over (superseded)
+    stays red on GitHub, which reads the rollup as it is.
     """
     view = gh_json(["pr", "view", str(pr), "--json", "statusCheckRollup,headRefOid"], cwd=cwd)
     if not view:
         return "unknown"
-    rollup = view.get("statusCheckRollup") or []
+    raw = view.get("statusCheckRollup") or []
+    rollup = view["statusCheckRollup"] = verdict_rollup(cwd, raw)
     if any(running(c) for c in rollup):
         return "running"
     if red_rows(cwd, pr, repo, view):
         return "red"
+    if len(rollup) < len(raw) and red_checks(raw):
+        return "stale"
     # Nothing red left only because the findings check was excused: an empty
     # rollup (checks not registered yet) or a cause GitHub does not list is
     # not known to be stale.
@@ -1172,19 +1260,23 @@ def review_state(cwd, pr, repo):
     return "clean" if mark == "reviewed" else "unreviewed"
 
 
-# The Claude review job that stopped on its quota: the subscription it runs
-# under is the one the sessions on this machine spend, and two features' worth
-# of sessions and reviews run it out (it has happened). Nothing in the
-# diff caused that and no session can fix it — the job is to be run again once
-# the limit resets, which sclaude does by itself (review_quota_rerun in
-# review_round.sh). Read from the job's log, where the action leaves its result:
-# `api_error_status: 429` and claude's own "You've hit your … limit ·
-# resets 4am (Europe/Lisbon)".
+# The Claude review job that could not review on GitHub: the subscription the
+# workflow runs under ran out (two features' worth of reviews do it), or the
+# account's Actions minutes did and the job never started. Nothing in the diff
+# caused either and no session can fix it, so the feature's review moves to
+# this machine (review_fallback_switch in review_round.sh). Read from the
+# job's log, where the action leaves its result — `api_error_status: 429`,
+# claude's own "You've hit your … limit · resets 4am (Europe/Lisbon)", an API
+# key's "Credit balance is too low" — and, for a job that never started and
+# has no log, from the check run's annotations, where GitHub says why.
 QUOTA_429 = re.compile(r'api_error_status"?\s*[:=]\s*429')
 QUOTA_LIMIT = re.compile(r"hit your (?:session |weekly |usage )?limit")
 QUOTA_RESETS = re.compile(
     r"resets (?:([A-Z][a-z]{2}) (\d{1,2}), )?(\d{1,2})(?::(\d{2}))?\s*(am|pm)"
     r"(?: \(([^)]+)\))?")
+QUOTA_CREDIT = re.compile(r"credit balance is too low", re.I)
+MINUTES = re.compile(r"job was not started because|spending limit needs to be increased"
+                     r"|locked due to a billing issue", re.I)
 JOB_LINK = re.compile(r"/actions/runs/(\d+)/job/(\d+)")
 
 
@@ -1240,13 +1332,27 @@ def quota_reset(text, now=None):
     return int(moment.timestamp())
 
 
-def review_quota(cwd, pr, repo):
-    """(run id, reset) for a Claude review job on the PR that failed on its
-    quota, or None. `reset` is seconds since the epoch, 0 when unknown."""
-    view = pr_view(cwd, pr, "statusCheckRollup")
-    if view is None:
+def job_annotations(cwd, repo, job):
+    """The messages GitHub annotated a job's check run with, as one text; ""
+    when there are none or they cannot be read. A job's id is its check run's."""
+    data = gh_json(["api", "repos/%s/check-runs/%s/annotations" % (repo, job)], cwd=cwd)
+    if not isinstance(data, list):
+        return ""
+    return "\n".join(str(a.get("message") or "") for a in data if isinstance(a, dict))
+
+
+def review_fallback(cwd, pr, repo):
+    """("quota", reset, run) or ("minutes", 0, run) for a Claude review job
+    on the PR that could not review on GitHub, or None. `reset` is when
+    Claude's limit resets, seconds since the epoch, 0 when unknown; `run` the
+    job's workflow run, for a rerun once the limit has reset.
+
+    Asked of the pull request as GitHub has it: the review's checks are read
+    before review_mode would take them out for a feature reviewed here."""
+    data = gh_json(["pr", "view", str(pr), "--json", "statusCheckRollup"], cwd=cwd)
+    if not isinstance(data, dict):
         return None
-    for c in view.get("statusCheckRollup") or []:
+    for c in data.get("statusCheckRollup") or []:
         if not is_claude_review(c.get("name") or "", c.get("workflowName") or ""):
             continue
         if (c.get("conclusion") or c.get("state") or "").upper() not in ("FAILURE", "TIMED_OUT"):
@@ -1254,12 +1360,20 @@ def review_quota(cwd, pr, repo):
         link = JOB_LINK.search(c.get("detailsUrl") or c.get("link") or "")
         if not link:
             continue
+        if MINUTES.search(job_annotations(cwd, repo, link.group(2))):
+            return "minutes", 0, link.group(1)
         log = job_log(cwd, repo, link.group(2))
-        if not log or not (QUOTA_429.search(log) or QUOTA_LIMIT.search(log)):
+        if not log:
             continue
-        # Counted from when the job stopped, not from now: a "resets 4am" read
-        # at five has reset already, and is not tomorrow's.
-        return link.group(1), quota_reset(log, parse_ts(c.get("completedAt")))
+        if MINUTES.search(log):
+            return "minutes", 0, link.group(1)
+        # A bare 429 may be a rate limit gone in a minute: only with the
+        # reset it names, or claude's own words for a spent limit.
+        if ((QUOTA_429.search(log) and QUOTA_RESETS.search(log))
+                or QUOTA_LIMIT.search(log) or QUOTA_CREDIT.search(log)):
+            # Counted from when the job stopped, not from now: a "resets 4am"
+            # read at five has reset already, and is not tomorrow's.
+            return "quota", quota_reset(log, parse_ts(c.get("completedAt"))), link.group(1)
     return None
 
 
@@ -1335,6 +1449,12 @@ def close_state(cwd, pr, repo):
         return "ok"
     if any(running(c) for c in rollup):
         return "pending"
+    # The session no longer waits for the review: the gate does, here. A
+    # fast CI finishes before the review's check even registers on the head,
+    # and the findings check comes after the review — read as "nothing
+    # running", the step closed on a push nobody had reviewed.
+    if review_mode(cwd) != "local" and not review_finished(cwd, pr, repo, head, rollup):
+        return "pending"
     red = red_checks(rollup)
     threads, _ = open_threads(cwd, pr, repo)
     mine, threads = split_yours(cwd, threads or [])
@@ -1351,6 +1471,72 @@ def close_state(cwd, pr, repo):
     # Only what the person decided to leave is open: nothing for a session,
     # and the step waits for their hand on GitHub. See YOURS_FILE.
     return "yours: %d" % len(mine) if mine else "ok"
+
+
+# How many of the pull request's commits to look through for an earlier review.
+CHECKS_HISTORY = 20
+
+
+def reviewed_before(cwd, pr, repo):
+    """(review, findings): whether any of the pull request's commits carries a
+    review check, and a findings check; None when it cannot be read.
+
+    This is what tells a project with a review workflow from one without: the
+    head just pushed has no check yet in either, and waiting for a review that
+    never comes would cost the full REVIEW_WAIT_MAX on every push — the trap
+    names_review was once caught in. A rebase leaves no earlier commit to
+    ask, so a review the journal holds for the pull request counts too.
+    """
+    view = gh_json(["pr", "view", str(pr), "--json", "commits"], cwd=cwd)
+    if view is None:
+        return None
+    oids = [c.get("oid") for c in (view.get("commits") or []) if c.get("oid")]
+    review = findings = False
+    for oid in reversed(oids[-CHECKS_HISTORY:]):
+        runs = gh_json(["api", "repos/%s/commits/%s/check-runs?per_page=100" % (repo, oid)],
+                       cwd=cwd)
+        if runs is None:
+            return None
+        names = [r.get("name") or "" for r in runs.get("check_runs") or []]
+        review = review or any(names_review(n) for n in names)
+        findings = findings or FINDINGS_CHECK in names
+        if review and findings:
+            break
+    if not review:
+        from local_review import JOURNAL, rows
+        review = any(r.get("source") == "github"
+                     for r in rows(os.path.join(cwd or ".", JOURNAL), pr=pr))
+    return review, findings
+
+
+def review_finished(cwd, pr, repo, head, rollup):
+    """Whether the review in Actions has finished with `head`: its check is
+    on it and done, and the findings check the review writes after it has
+    run — or the pull request never had a review to wait for. A review
+    skipped on purpose writes no findings check, nor may one that ended red
+    (on Claude's limit, waiting for approval): its red is the gate's to act
+    on, at once. A cancelled one is not finished. What cannot be
+    read is finished, as close_state reads it: a network fault does not hold
+    the step shut."""
+    reviews = [c for c in rollup if names_review(c.get("name") or c.get("context"))]
+    if reviews and any(running(c) for c in reviews):
+        return False
+    states = {(c.get("conclusion") or c.get("state") or "").upper() for c in reviews}
+    # Any end that is not green is the gate's red, cancelled aside: a run a
+    # concurrency group cancelled is out of the rollup already (superseded),
+    # and one cancelled by hand is waited out like a review never started.
+    if reviews and (states == {"SKIPPED"} or states - set(GREEN) - {"CANCELLED"}):
+        return True
+    before = reviewed_before(cwd, pr, repo)
+    if before is None:
+        return True
+    expect_review, expect_findings = before
+    if not reviews:
+        return not expect_review
+    if not expect_findings:
+        return True
+    run = findings_run(cwd, repo, head)
+    return run is None or (bool(run) and (run.get("status") or "") == "completed")
 
 
 def findings_run(cwd, repo, head):
@@ -1377,66 +1563,31 @@ def findings_run(cwd, repo, head):
 # ci]`, the workflow disabled), and with one it stopped quietly, read the
 # checks it had as final, and the last push went unreviewed with nobody told.
 #
-# So the wait is two phases, each bounded by REVIEW_WAIT_MAX, and runs out
-# aloud: the review check appears on the pull request's head; then every
-# check has finished, the findings check among them. Its answer is a line
+# That wait is not the session's any more: step 4's gate waits for the
+# review once the session has ended (review_finished in close_state). The
+# session waits only for the other checks — the build, the tests, a
+# deployment — bounded by REVIEW_WAIT_MAX, and runs out aloud. Its answer is a line
 # starting with one of the words in CHECKS_VERDICTS, and the exit code next to
 # it; sclaude/prompts/review.md tells the session what each means.
-CHECKS_GREEN, CHECKS_RED, CHECKS_NO_REVIEW, CHECKS_NOT_DONE, CHECKS_UNREADABLE = range(5)
+CHECKS_GREEN, CHECKS_RED, CHECKS_NOT_DONE, CHECKS_UNREADABLE = 0, 1, 3, 4
 CHECKS_VERDICTS = {
     CHECKS_GREEN: "green",
     CHECKS_RED: "red",
-    CHECKS_NO_REVIEW: "no review",
     CHECKS_NOT_DONE: "not finished",
     CHECKS_UNREADABLE: "could not read",
 }
 # Reads that may fail in a row before the wait gives up: one blip in half an
 # hour of polling is not worth an answer, a network that stays down is.
 CHECKS_READ_RETRIES = 4
-# How many of the pull request's commits to look through for an earlier review.
-CHECKS_HISTORY = 20
-
-
-def reviewed_before(cwd, pr, repo):
-    """(review, findings): whether any of the pull request's commits carries a
-    review check, and a findings check. (True, True) when it cannot be read.
-
-    This is what tells a project with a review workflow from one without: the
-    head just pushed has no check yet in either, and waiting for a review that
-    never comes would cost the full REVIEW_WAIT_MAX on every push — the trap
-    names_review was once caught in. Step 4 answers a review, so its pull
-    request has had one on an earlier commit. Unreadable counts as reviewed:
-    the wait then still ends, and says no review came, where a wrong "no
-    review here" would call an unreviewed push finished.
-    """
-    view = gh_json(["pr", "view", str(pr), "--json", "commits"], cwd=cwd)
-    if view is None:
-        return True, True
-    oids = [c.get("oid") for c in (view.get("commits") or []) if c.get("oid")]
-    review = findings = False
-    for oid in reversed(oids[-CHECKS_HISTORY:]):
-        runs = gh_json(["api", "repos/%s/commits/%s/check-runs?per_page=100" % (repo, oid)],
-                       cwd=cwd)
-        if runs is None:
-            return True, True
-        names = [r.get("name") or "" for r in runs.get("check_runs") or []]
-        review = review or any(names_review(n) for n in names)
-        findings = findings or FINDINGS_CHECK in names
-        if review and findings:
-            break
-    return review, findings
-
-
 def wait_checks(cwd, pr, repo, limit, period, say=None, clock=None, sleep=None):
     """Wait for the pull request's checks after a push; the exit code, and the
     verdict line printed last. See CHECKS_VERDICTS for the codes.
 
-    Phase 1 waits up to `limit` seconds for a review check on the head
-    (names_review decides what is one); phase 2 waits up to `limit` more for
-    every check to finish and, where the project has one, for the findings
-    check's run on the head — it is written by a job that registers only after
-    the review, so the rollup alone can read "all finished" a minute too soon.
-    A review check that finished as skipped has no findings check to wait for.
+    Never for the review: wherever it runs, step 4's gate waits for it, or
+    runs it, once the session has ended (review_close_gate), and brings back
+    what it finds. So the review's own checks — its jobs, @claude's, the
+    findings check — are left out here, and the rest is waited for up to
+    `limit` seconds: the build, the tests, a deployment.
     """
     import time
     say = say or (lambda line: (sys.stdout.write(line + "\n"), sys.stdout.flush()))
@@ -1456,19 +1607,9 @@ def wait_checks(cwd, pr, repo, limit, period, say=None, clock=None, sleep=None):
         say("%s: %s" % (CHECKS_VERDICTS[code], text))
         return code
 
-    # Reviewed on this machine: no review check will come, and the checks
-    # Actions would run are not read at all (pr_view); what is left is waited
-    # for, as any project's checks are.
-    local = review_mode(cwd) == "local"
-    expect_review, expect_findings = (False, False) if local else reviewed_before(cwd, pr, repo)
-    phase, started, failures, rollup, head = 1 if expect_review else 2, clock(), 0, [], ""
-    if local:
-        say("This project reviews on this machine: GitHub Actions checks are not read, "
-            "only the others are waited for.")
-    elif expect_review:
-        say("Waiting up to %s for the review check to appear…" % span(limit))
-    else:
-        say("No review check on this pull request's commits: waiting only for the checks.")
+    started, failures, rollup, head = clock(), 0, [], ""
+    say("Waiting up to %s for the checks; the review is not waited for here — "
+        "sclaude waits for it once this session ends." % span(limit))
     while True:
         view = pr_view(cwd, pr, "headRefOid,statusCheckRollup,state,createdAt")
         if view is None:
@@ -1487,20 +1628,14 @@ def wait_checks(cwd, pr, repo, limit, period, say=None, clock=None, sleep=None):
                 return verdict(CHECKS_UNREADABLE, "%d commit(s) here are not pushed: "
                                "push first, then wait." % ahead)
             head = view.get("headRefOid") or ""
-            rollup = view.get("statusCheckRollup") or []
+            rollup = without_review(view.get("statusCheckRollup") or [])
             # For a few seconds after a push the pull request still names the
             # commit before it, its checks long finished: see close_state.
             stale = bool(head) and behind_head(cwd, head)
             if stale and not recent(None, cwd):
                 return verdict(CHECKS_UNREADABLE, "PR #%s still names %s as its head, "
                                "behind this branch." % (pr, head[:7]))
-            if not stale and phase == 1 and any(
-                    names_review(c.get("name") or c.get("context")) for c in rollup):
-                phase, started = 2, clock()
-                say("The review check is on %s; waiting up to %s for every check "
-                    "to finish…" % (head[:7], span(limit)))
-            if not stale and phase == 2 and finished(cwd, repo, head, rollup,
-                                                     expect_findings, view):
+            if not stale and checks_finished(rollup, view, cwd):
                 red = red_checks(rollup)
                 if red:
                     return verdict(CHECKS_RED, "on %s: %s." % (head[:7], ", ".join(red)),
@@ -1508,30 +1643,17 @@ def wait_checks(cwd, pr, repo, limit, period, say=None, clock=None, sleep=None):
                 return verdict(CHECKS_GREEN, "every check on %s has finished green."
                                % head[:7], rollup)
         if clock() - started >= limit:
-            sha = head[:7] or "the head"
-            if phase == 1:
-                return verdict(CHECKS_NO_REVIEW, "No review started on %s within %s — "
-                               "this push is not reviewed." % (sha, span(limit)), rollup)
-            return verdict(CHECKS_NOT_DONE, "The review on %s is still running or queued "
-                           "after %s — this push is not reviewed yet." % (sha, span(limit)),
-                           rollup)
+            return verdict(CHECKS_NOT_DONE, "the checks on %s are still running or queued "
+                           "after %s." % (head[:7] or "the head", span(limit)), rollup)
         sleep(period)
 
 
-def finished(cwd, repo, head, rollup, expect_findings, view):
-    """Whether every check on `head` has finished, the findings check included
-    where the project writes one."""
+def checks_finished(rollup, view, cwd):
+    """Whether every check on the head has finished. An empty rollup is
+    "not yet" just after a push, and "no checks" after that: see review_state."""
     if not rollup:
-        # Not registered yet, or a project with no checks at all: see review_state.
         return not recent(view.get("createdAt"), cwd)
-    if any(running(c) for c in rollup):
-        return False
-    reviews = [c for c in rollup if names_review(c.get("name") or c.get("context"))]
-    if not expect_findings or not reviews or all(
-            (c.get("conclusion") or c.get("state") or "").upper() == "SKIPPED" for c in reviews):
-        return True
-    run = findings_run(cwd, repo, head)
-    return bool(run) and (run.get("status") or "") == "completed"
+    return not any(running(c) for c in rollup)
 
 
 def findings_red_explained(cwd, pr, repo, view, nodes=None):
@@ -1724,15 +1846,15 @@ def main():
         except Exception:
             sys.stdout.write("0\n")
         return 0
-    # `--quota <cwd> <pr> <repo>`: "<run id> <reset>" for a review that ran
-    # out of quota, or nothing. See review_quota.
-    if len(sys.argv) >= 5 and sys.argv[1] == "--quota":
+    # `--fallback <cwd> <pr> <repo>`: "<quota|minutes> <reset> <run>" for a review
+    # that could not run on GitHub, or nothing. See review_fallback.
+    if len(sys.argv) >= 5 and sys.argv[1] == "--fallback":
         try:
-            got = review_quota(sys.argv[2], sys.argv[3], sys.argv[4])
+            got = review_fallback(sys.argv[2], sys.argv[3], sys.argv[4])
         except Exception:
             got = None
         if got:
-            sys.stdout.write("%s %d\n" % got)
+            sys.stdout.write("%s %d %s\n" % got)
         return 0
     # `--yours <cwd> <pr> <repo>`: the person's open threads, see yours_open.
     if len(sys.argv) >= 5 and sys.argv[1] == "--yours":

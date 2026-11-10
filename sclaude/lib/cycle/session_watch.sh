@@ -103,7 +103,7 @@ marker_gone() {
 #
 #   session_watch_start <wt> <session> [<marker> <cwd> <kind> <said>]
 #
-# The session writes a marker — round_marker or done_marker — and gives its
+# The session writes its marker — done_marker — and gives its
 # report as its last message. The watcher waits for that turn to end, then
 # SESSION_GRACE seconds more for the person to read it, and ends the claude
 # process, found by its session id in its arguments (`--session-id` or
@@ -139,13 +139,12 @@ marker_gone() {
 # SESSION_POLL and SESSION_GRACE are seconds, overridable for the tests.
 session_watch_start() {
   local wt="$1" session="$2" done="${3:-}" cwd="${4:-$1}" kind="${5:-}" said="${6:-}"
-  local round="" transcript ctl
+  local transcript ctl
   SESSION_WATCHER=""
   SESSION_WATCHED=""
   [[ -n "$session" ]] || return 0
-  [[ -n "$wt" ]] && round="$(round_marker "$wt")"
   [[ -n "$done" ]] || done="$(done_marker "$wt")"
-  rm -f ${round:+"$round"} "$done"
+  rm -f "$done"
   # The person's word from sclaude's tab (session_keys in pane.sh): [n] closes
   # the session as if it had written its marker, [k] keeps it open. A word
   # left by an earlier launch is not this one's. The watched file tells the
@@ -186,11 +185,9 @@ session_watch_start() {
       word="$(cat "$ctl" 2>/dev/null || true)"
       if [[ "$word" == next || "$word" == next-later ]]; then
         # [n] or [N]: the work is taken as done, so the marker is written
-        # here, the way the session would have — the done one, never a review
-        # round's, since the person asked for the step to go on, not for
-        # another round. Not for the retrospective, whose marker says it has
-        # nothing to act on: it is closed as its /exit would close it.
-        [[ -n "$round" ]] && rm -f "$round"
+        # here, the way the session would have. Not for the retrospective,
+        # whose marker says it has nothing to act on: it is closed as its
+        # /exit would close it.
         [[ "$kind" == retro || -s "$done" ]] || echo "closed from sclaude's terminal ([n])" > "$done"
         rm -f "$watched_mark"
         pkill -TERM -f -- "(--session-id|--resume) ($ids)( |$)" 2>/dev/null || true
@@ -206,7 +203,7 @@ session_watch_start() {
         # ends as one a person left. Leaving the marker instead closed the
         # reopened conversation once the grace ran out — within three seconds
         # of step 2's accept — and an old approval did the same to a plan.
-        rm -f ${round:+"$round"} "$done"
+        rm -f "$done"
         # To the fraction of a second: an approval given in the same second,
         # just before the press, is not the reopened conversation's.
         started="$(date +%s.%N)"
@@ -257,9 +254,7 @@ session_watch_start() {
         continue
       fi
       marker="" since=""
-      if [[ -n "$round" && -s "$round" ]]; then marker="$round"
-      elif [[ -s "$done" ]]; then marker="$done"
-      fi
+      [[ -s "$done" ]] && marker="$done"
       if [[ -n "$marker" ]]; then
         since="$(stat -c %Y "$marker" 2>/dev/null || echo 0)"
       elif [[ "$kind" != "plan" && -z "$said" ]]; then

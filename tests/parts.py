@@ -658,7 +658,7 @@ finally:
 # --- the local review's journal, per pull request ------------------------------------
 tmp = tempfile.mkdtemp()
 try:
-    j = os.path.join(tmp, "local-review-rounds.jsonl")
+    j = os.path.join(tmp, "review-rounds.jsonl")
     with open(j, "w") as fh:
         for row in ({"at": "2026-01-01T00:00:00+00:00", "head": "a1", "pr": "101"},
                     {"at": "2026-01-02T00:00:00+00:00", "head": "a2", "pr": "101"},

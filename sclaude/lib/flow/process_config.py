@@ -25,20 +25,17 @@ import process_model
 # values), or a list of them of which any will do. An arrow named here is not carried past a block taken out — it
 # is one way of a choice, and the choice drops it.
 NEEDS = {
-    "ci_review": ("review", {"github"}),
-    "local_pass": ("review", {"local"}),
-    ("draft_pr", "ci_review"): ("review", {"github"}),
-    ("review_close", "local_pass"): ("review", {"local"}),
-    ("local_pass", "review_close"): ("review", {"local"}),
+    # The review, wherever it runs: the same arrows for every setting; with
+    # review off it is taken out and the flow carried past it (PASS).
+    "review_run": ("review", {"github", "local", "github-local"}),
+    # With no review, the ways straight to the gate it would have stood before.
+    ("pr_check", "review_close"): ("review", {"off"}),
+    ("review", "review_close"): ("review", {"off"}),
+    ("review_run", "S"): ("review", {"local", "github-local"}),
     "f_away": ("review", {"local"}),
     ("f_rules", "f_away"): ("review", {"local"}),
     ("f_away", "f_review"): ("review", {"local"}),
     # Off, or local: step 4 opens on its gate, whose pass is the local one.
-    ("draft_pr", "review_close"): ("review", {"off", "local"}),
-    # A review on this machine writes no round marker: no round gate, the
-    # session goes straight to step 4's close.
-    "round": ("review", {"github", "off"}),
-    ("review", "review_close"): ("review", {"local"}),
     "r_local": ("regression.local", {True}),
     "r_stop": ("regression.local", {True}),
     "r_preview": ("regression.preview", {True}),
@@ -64,7 +61,7 @@ NEEDS = {
     "qa_check": ("board.done", {True}),
     "qa_verdict": ("board.verdict", {True}),
     "merge": ("merge", {"both", "auto"}),
-    "o_ghreview": ("review", {"github", "local"}),
+    "o_ghreview": ("review", {"github", "local", "github-local"}),
     "o_qa": ("board.done", {True}),
     # ship: off never deploys: the yes and what follows it go.
     ("ship", "prod"): ("ship", {"ask", "auto"}),
@@ -74,7 +71,7 @@ NEEDS = {
 # Where the flow goes on when a block is taken out: an arrow into it is
 # carried to this one, and on down the chain while that one is out too.
 PASS = {
-    "ci_review": "review_close", "local_pass": "review_close",
+    "review_run": "review_close",
     "reg_local": "pr", "preview_ok": "in_qa", "in_qa": "qa_check",
     "qa_check": "qa_verdict", "qa_verdict": "handoff", "prod_ok": "epilogue",
     "merge": "merge_wait",
@@ -149,7 +146,7 @@ VARIANTS = {
     # No local suite: step 4 closes on the pull request alone.
     "review_close": [("regression.local", {False}, {
         "text": "on the way in and after each session: threads, red or running checks",
-        "details": 'Step 4 opens on this gate, and every session of it ends on it. On the way in, before any session, it asks more: a person\'s comment anywhere on the pull request is open too, and a pull request it cannot read opens a session; with nothing open and nothing waiting for a session (one interrupted, a review sent back) the step closes with no session at all. Leaving step 4 closes it only when nothing is open — no unresolved thread, no running or red check. Otherwise sclaude waits and what is open goes back to a session without a question; [s] or ⏭ makes the next session the last for new findings. A session you left yourself (/exit, Ctrl-C) with [g] off holds step 4 open until the next sclaude <name>. A session sclaude closed on its done marker — always so for a review on this machine, which writes no round marker — goes back by whose work is open: threads from before it, or a red check, to the same session; only new ones to the same session while its context is under 40% and its last request under 55 minutes old, else to a fresh one. With [g] on the rounds go on even then (30 a step 4, then it asks), a pass that did not run is tried again ten times with growing pauses, and after the search ended the fixes are checked. A night session itself resolves a minor finding the review posted, with no reply under it yet, and replies saying so; the others it leaves for you to confirm: sclaude asks whether to go through them now, and on your yes they go back to a fresh session that asks about each and, on your yes, replies and resolves them; the rest of your threads wait for your hand on GitHub.'})],
+        "details": 'Step 4 opens on this gate, and every session of it ends on it. On the way in, before any session, it asks more: a person\'s comment anywhere on the pull request is open too, and a pull request it cannot read opens a session; with nothing open and nothing waiting for a session (one interrupted, a review sent back) the step closes with no session at all. Leaving step 4 closes it only when nothing is open — no unresolved thread, no running or red check. Otherwise sclaude waits and what is open goes back to a session without a question; [s] or ⏭ makes the next session the last for new findings. A session you left yourself (/exit, Ctrl-C) with [g] off holds step 4 open until the next sclaude <name>. A session sclaude closed on its done marker — the review is waited for, or run here, only after it — goes back by whose work is open: threads from before it, or a red check, to the same session; only new ones to the same session while its context is under 40% and its last request under 55 minutes old, else to a fresh one. With [g] on the rounds go on even then (30 a step 4, then it asks), a pass that did not run is tried again ten times with growing pauses, and after the search ended the fixes are checked. A night session itself resolves a minor finding the review posted, with no reply under it yet, and replies saying so; the others it leaves for you to confirm: sclaude asks whether to go through them now, and on your yes they go back to a fresh session that asks about each and, on your yes, replies and resolves them; the rest of your threads wait for your hand on GitHub.'})],
     "o_merge": [("merge", {"auto"}, {"lane": "sclaude", "text": "by sclaude: merge auto"}),
                 ("merge", {"github"}, {"text": "yours, on GitHub"})],
 }
@@ -161,7 +158,7 @@ def setting(cfg, name):
     board's columns in project.sh)."""
     cfg = cfg or {}
     if name == "review":
-        return cfg.get("review") if cfg.get("review") in ("local", "off") else "github"
+        return cfg.get("review") if cfg.get("review") in ("local", "off", "github-local") else "github"
     if name in ("qa", "merge"):
         mode = cfg.get(name)
         return mode if mode in ("github", "both", "auto") else ("both" if name == "merge" else "github")

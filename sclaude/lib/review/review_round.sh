@@ -133,66 +133,172 @@ review_skippable() {
   return 0
 }
 
-# The automatic review stopped on Claude's usage limit: wait for the reset and
-# run it again, rather than open a session to find that out.
+# The automatic review could not run on GitHub: the subscription the workflow
+# runs under hit Claude's limit, or the account's Actions minutes ran out and
+# the job never started. What follows is the project's `review`: under
+# `github-local` the feature's review moves to this machine
+# (review_fallback_switch); under `github` step 4 stops and says why
+# (review_github_stopped) — no session can fix it, and waiting for a reset
+# nobody can see is not the person's choice.
 #
-#   review_quota_rerun <wt> <slug> <pr> <repo>
+#   review_fallback_why <wt> <pr> <repo>   → "<quota|minutes> <reset> <run>", or 1
+review_fallback_why() {
+  local got why
+  got="$(python3 "$LIB/review/pr_context.py" --fallback "$1" "$2" "$3" 2>/dev/null || true)"
+  read -r why _ <<<"$got"
+  [[ "$why" == quota || "$why" == minutes ]] || return 1
+  echo "$got"
+}
+
+# The review job stopped on Claude's limit, and the reset its log names has
+# passed: run it again on GitHub — under any `review` — rather than stop or
+# move for a limit no longer in force. Two minutes past the reset, as the
+# machine's window counts it: a rerun at the very minute fails on a limit
+# not lifted yet, and its new failure names tomorrow's reset.
 #
-# Returns 0 when it started the rerun — the caller goes back to waiting for
-# the review — and 1 when the review did not fail on its quota, or the rerun
-# could not be started; then everything goes on as before.
+#   review_reset_rerun <wt> <pr> <repo>
 #
-# The review runs under the same subscription as the sessions here, so with
-# two features at work it runs out with them. A session handed that red check
-# had nothing to fix: RED_CHECK_ADVICE in pr_context.py told it to rerun after
-# the reset, and the session stood waiting for hours, on the same quota. The
-# wait is sclaude's now, and costs nothing. Ctrl-C leaves it; nothing has
-# started. Everything it prints goes to stderr, as the gate's waits
-# (review_close_gate) print theirs.
-review_quota_rerun() {
-  local wt="$1" slug="$2" pr="$3" repo="$4" got run reset due now left
-  got="$(python3 "$LIB/review/pr_context.py" --quota "$wt" "$pr" "$repo" 2>/dev/null || true)"
-  [[ -n "$got" ]] || return 1
-  read -r run reset <<<"$got"
-  [[ "$run" =~ ^[0-9]+$ ]] || return 1
+# 0 when the job runs again — started here, or by somebody already; the
+# caller waits for it as for any review. 1 when it is no such job, or the
+# rerun was refused: then the red is put where any job that could not run
+# goes (review_fallback_switch, review_github_stopped).
+review_reset_rerun() {
+  local got why reset run status now
+  got="$(python3 "$LIB/review/pr_context.py" --fallback "$1" "$2" "$3" 2>/dev/null || true)"
+  read -r why reset run <<<"$got"
+  [[ "$why" == quota && "$reset" =~ ^[0-9]+$ && "$run" =~ ^[0-9]+$ ]] || return 1
+  now="$(date +%s)"
+  (( reset > 0 && reset <= now )) || return 1
+  (( reset + 120 > now )) && sleep $(( reset + 120 - now ))
   # Already running again — ours from a moment ago, still shown as the old
   # failure, or somebody else's: nothing to start, only to wait for.
-  local status; status="$(gh run view "$run" --json status --jq .status 2>/dev/null || true)"
-  if [[ -n "$status" && "$status" != "completed" ]]; then
+  status="$(cd "$1" && gh run view "$run" --json status --jq .status 2>/dev/null || true)"
+  if [[ -n "$status" && "$status" != completed ]]; then
     sleep "${MERGE_POLL:-30}"
     return 0
   fi
-  # Two minutes past the reset, or half an hour when the log did not say.
-  if [[ "$reset" =~ ^[0-9]+$ && "$reset" -gt 0 ]]; then
-    due=$(( reset + 120 ))
-  else
-    due=$(( $(date +%s) + 1800 ))
+  (cd "$1" && gh run rerun "$run" --failed >/dev/null 2>&1) || return 1
+  info "  The automatic review of PR #$2 stopped on Claude's limit, which has reset since: it runs again (run $run)." >&2
+  # GitHub takes a moment to mark the rerun as running; asked at once, the
+  # pull request still shows the failure.
+  sleep "${MERGE_POLL:-30}"
+  return 0
+}
+
+# The cause in words, for the terminal and the topic.
+#
+#   review_fallback_words <quota|minutes>
+review_fallback_words() {
+  if [[ "$1" == quota ]]; then echo "the Claude usage limit of its GitHub subscription"
+  else echo "no Actions minutes left on the GitHub account"; fi
+}
+
+# `github-local`: move the feature's review here.
+#
+#   review_fallback_switch <wt> <slug> <pr> <repo>
+#
+# Returns 0 when it moved it — the caller runs the local pass and asks the
+# pull request again, the review's checks now out of the verdict (pr_view;
+# for Claude's limit alone the CI's checks stay in it) — and 1 when the
+# review did not fail for either reason; then everything goes on as before.
+# A review that cannot run here either (the same subscription) ends as any
+# local pass that did not run: retried under [g], put to the person
+# otherwise. Everything it prints goes to stderr, as the gate's waits
+# (review_close_gate) print theirs.
+review_fallback_switch() {
+  local wt="$1" slug="$2" pr="$3" repo="$4" got why reset
+  got="$(review_fallback_why "$wt" "$pr" "$repo")" || return 1
+  read -r why reset _ <<<"$got"
+  review_fallback_set "$wt" "$why" "$reset"
+  {
+    echo ""
+    warn "  The automatic review of PR #$pr could not run on GitHub: $(review_fallback_words "$why") — not the code."
+    info "  review: github-local — this feature is reviewed on this machine from now on."
+  } >&2
+  review_label_sync "$wt" "$pr" >&2
+  notify_feature "$slug" --wt "$wt" --quiet \
+    "The automatic review of PR #$pr could not run on GitHub ($(review_fallback_words "$why")); the feature is reviewed on this machine now (review: github-local)." \
+    >/dev/null 2>&1 || true
+  return 0
+}
+
+# `github`: say why the review cannot run and what the person can do.
+# Returns 1 when it did not fail for either reason.
+#
+#   review_github_stopped <wt> <slug> <pr> <repo>
+review_github_stopped() {
+  local wt="$1" slug="$2" pr="$3" repo="$4" got why reset when=""
+  got="$(review_fallback_why "$wt" "$pr" "$repo")" || return 1
+  read -r why reset _ <<<"$got"
+  if [[ "$reset" =~ ^[0-9]+$ && "$reset" -gt "$(date +%s)" ]]; then
+    when=" (it resets at $(date -d "@$reset" '+%d %b %H:%M'))"
+  elif [[ "$reset" =~ ^[0-9]+$ && "$reset" -gt 0 ]]; then
+    when=" (it has reset, but GitHub refused to rerun the job)"
   fi
   {
     echo ""
-    warn "  The automatic review of PR #$pr stopped on Claude's usage limit — not on the code."
-    info "  sclaude runs it again at $(date -d "@$due" +%H:%M), once the limit has reset; no session is needed for it."
-    info "  Ctrl-C to leave — the feature resumes here with: $SELF $slug"
+    warn "  The automatic review of PR #$pr could not run on GitHub: $(review_fallback_words "$why")$when — not the code."
+    info "  review: github — step 4 stops here. Rerun the review on GitHub once it can run, or set"
+    info "  review to github-local or local ($SELF config) to have it reviewed on this machine."
+    info "  Come back with: $SELF $slug"
   } >&2
   notify_feature "$slug" --wt "$wt" --quiet \
-    "The automatic review of PR #$pr ran out of Claude quota; sclaude reruns it at $(date -d "@$due" +%H:%M)." \
+    "The automatic review of PR #$pr could not run on GitHub ($(review_fallback_words "$why")$when); step 4 stopped (review: github)." \
     >/dev/null 2>&1 || true
-  while now="$(date +%s)"; (( now < due )); do
-    left=$(( due - now ))
-    [[ -t 2 ]] && printf '\r\033[2K\033[?7l  %sRunning by itself%s — the review reruns in %s\033[?7h' \
-      "$DIM" "$OFF" "$(regression_duration "$left")" >&2
-    sleep $(( left < 60 ? left : 60 ))
-  done
-  [[ -t 2 ]] && printf '\r\033[2K' >&2
-  if ! gh run rerun "$run" --failed >/dev/null 2>&1; then
-    warn "  Could not rerun it (gh run rerun $run --failed) — the review session will look at it." >&2
-    return 1
-  fi
-  info "  The automatic review is running again (run $run)." >&2
-  # GitHub takes a moment to mark the rerun as running; asked at once, the
-  # pull request still shows the failure, and this would start it twice.
-  sleep "${MERGE_POLL:-30}"
   return 0
+}
+
+# Mark the feature as reviewed here, and the machine for a while, so that
+# the next feature to reach step 3 or 4 does not wait for its own review to
+# fail first (review_fallback_inherit). For Claude's limit, until it resets
+# — or five hours, its window, when the log did not say; none when the reset
+# it names has passed already (the rerun was refused, review_reset_rerun);
+# for the minutes, a day: a job GitHub does not
+# start costs nothing, so a day later the next feature tries GitHub again. A
+# window already longer is kept: a short limit does not end a day without
+# minutes. The feature's mark says why, and that GitHub's review ran on it
+# (`seen`), where an inherited one did not (`inherited`).
+#
+#   review_fallback_set <wt> <quota|minutes> [reset]
+review_fallback_set() {
+  local wt="$1" why="$2" reset="${3:-0}" until now mark old
+  now="$(date +%s)"
+  mkdir -p "$wt/.sclaude/local/feature" 2>/dev/null || true
+  printf '%s\t%s\tseen\n' "$why" "$(date -Iseconds)" > "$wt/.sclaude/local/feature/review-fallback" 2>/dev/null || true
+  if [[ "$why" == quota ]]; then
+    [[ "$reset" =~ ^[0-9]+$ ]] || reset=0
+    if (( reset > now )); then until=$(( reset + 120 ))
+    elif (( reset > 0 )); then return 0
+    else until=$(( now + 5 * 3600 )); fi
+  else
+    until=$(( now + 24 * 3600 ))
+  fi
+  [[ -n "${REPO:-}" && -d "$REPO" ]] || return 0
+  mark="$REPO/.sclaude/local/review-fallback"
+  old="$(cut -f1 "$mark" 2>/dev/null || true)"
+  [[ "$old" =~ ^[0-9]+$ ]] && (( old > until )) && return 0
+  mkdir -p "$REPO/.sclaude/local" 2>/dev/null || true
+  printf '%s\t%s\n' "$until" "$why" > "$mark" 2>/dev/null || true
+}
+
+# A feature reaching step 3 or 4 under `github-local` while the machine's
+# mark says GitHub's review cannot run (review_fallback_set) is reviewed here
+# at once. A feature that moved stays here to its end: its pull request
+# carries `no-review`, and a review switched back mid-way would read it from
+# the start again.
+#
+#   review_fallback_inherit <wt>
+review_fallback_inherit() {
+  local wt="$1" mark until why
+  mark="${REPO:-}/.sclaude/local/review-fallback"
+  [[ -n "${REPO:-}" && -f "$mark" ]] || return 0
+  [[ "$(project_review_setting "$wt")" == github-local ]] || return 0
+  [[ "$(project_review_mode "$wt")" == github ]] || return 0
+  IFS=$'\t' read -r until why < "$mark" || true
+  [[ "$until" =~ ^[0-9]+$ && "$until" -gt "$(date +%s)" ]] || return 0
+  mkdir -p "$wt/.sclaude/local/feature" 2>/dev/null || true
+  printf '%s\t%s\tinherited\n' "$why" "$(date -Iseconds)" > "$wt/.sclaude/local/feature/review-fallback" 2>/dev/null || true
+  info "  GitHub's review could not run on this machine's last try ($(review_fallback_words "$why")) until $(date -d "@$until" '+%d %b %H:%M'): this feature is reviewed on this machine (review: github-local)."
 }
 
 # When the review step's current session began: its first run's start, or
@@ -226,9 +332,9 @@ PY
 #   * threads open since before the session began, or a red check — that
 #     session's own work, and it knows why it changed what it did: it is
 #     resumed, and told what is still open;
-#   * only threads opened after it began — a new round, which goes where a
-#     round marker would send it: to the same session while review_keep says
-#     its context is light and cached, to a fresh one otherwise.
+#   * only threads opened after it began — a new round: to the same session
+#     while review_keep says its context is light and cached, to a fresh one
+#     otherwise.
 review_reopen() {
   local wt="$1" slug="$2" pr="$3" repo="$4" waited="$5"
   local state="$wt/.sclaude/local/feature/state.json" since split older newer session held pct why
@@ -302,33 +408,18 @@ review_stuck_say() {
   return 0
 }
 
-# The review step, one round per session.
-#
-# A review round: the session fixes the open findings — through subagents, so
-# its own context holds the coordination rather than every file it read — and
-# pushes; the automatic review reads the fixes and closes what they fixed. When
-# it has closed every one of them and posted new findings, the session that
-# fixed the old ones has nothing left to answer, and all it carries into the
-# new findings is context. Once five rounds ran in one conversation.
-#
-# A session cannot clear its own context — /clear and /compact are the
-# person's, and no tool reaches them — so the orchestrator does it. The
-# session writes round_marker and stops; the watcher below ends the claude
-# process, and session_ended decides who takes the new findings.
-#
-# Not always a fresh session. A fresh one starts from nothing on a pull
-# request this one has been settling, and may undo what it settled; it pays
-# the door again, too — the plan, the snapshot, the rules. So while the
-# conversation holds less than REVIEW_CONTEXT_MAX_PCT of its window, the same
-# session is resumed with the new findings (review_carry_on). Past it, the
-# session is recorded as ended with "fixes confirmed" and a fresh one opens,
-# whose prompt carries the pull request as it stands — the new findings, and
-# only them, open. A round is closed only once every fix the session made is
-# confirmed, so the threshold never takes a session away from its own
-# unfinished work.
-round_marker() {
-  echo "$1/.sclaude/local/feature/review-round"
-}
+# The review step, one round per session. A review round: the session fixes
+# the open findings — through subagents, so its own context holds the
+# coordination rather than every file it read — pushes, and ends on its done
+# marker; step 4's gate then waits for the review of that push, or runs it
+# here, and what it finds goes back to a session (review_reopen). Not always
+# a fresh one: a fresh one starts from nothing on a pull request this one has
+# been settling, and pays the door again — the plan, the snapshot, the rules.
+# So while the conversation holds less than REVIEW_CONTEXT_MAX_PCT of its
+# window and its prompt cache is likely alive (review_keep), the same session
+# is resumed with the new findings (review_carry_on). The cache lives from the
+# last request, not with the process: a session resumed after a wait reads it
+# as one that waited inside would have.
 
 # How full a review session's context is.
 #
@@ -398,41 +489,16 @@ review_keep() {
   return 0
 }
 
-# What `sclaude checks` adds on a red, for the session waiting on it: whether
-# review_keep would keep this conversation for the findings on code it did
-# not touch. Kept, it takes them at once, in the push it is making anyway
-# (sclaude/prompts/review.md, step 4): stopping for them cost a whole review
-# round when they came with findings on its own fixes, and a restart when
-# they came alone — only for sclaude to hand them back to it. Not kept, it
-# stops as before and a fresh session takes them. No line when the session
-# cannot be read: the prompt's rule without one is to stop.
-#
-# The two lines' openings are spelled out in review.md; tests/review-round.py
-# checks the two agree.
-CHECKS_KEEP_YES="New findings on code you did not touch are yours as well"
-CHECKS_KEEP_NO="New findings on code you did not touch go to a fresh session"
-#
-#   review_checks_keep <wt>
-review_checks_keep() {
-  local wt="$1" session held why
-  session="$(state_get "$wt/.sclaude/local/feature/state.json" steps.review.session 2>/dev/null || true)"
-  [[ -n "$session" && "$session" != "null" ]] || return 0
-  held="$(review_context "$wt" "$session")"
-  if why="$(review_keep "$wt" "$session" "$held")"; then
-    echo "$CHECKS_KEEP_YES: this conversation would be kept for them ($why, context $(awk '{print $3}' <<<"$held")%)."
-  else
-    echo "$CHECKS_KEEP_NO: $why."
-  fi
-}
 
 # One line per review session's end, in the main tree's .sclaude/local/,
 # where it outlives the feature's worktree; tab-separated:
 #
 #   <time> <feature> <session> <outcome> <tokens now> <tokens at start> <pct> <window> <rounds> <comments> <reversals>
 #
-# The outcome is "carried on" (the same session takes the next round), "fresh
-# session" (the threshold sent the next round elsewhere), "done" (sclaude
-# closed it on its done marker) or "exit" (a person did). rounds is how many
+# The outcome is "done" (sclaude closed it on its done marker) or "exit" (a
+# person did); every round ends its session, so a row is a round. Older logs
+# also hold "carried on" and "fresh session", written when a round ended
+# inside its session. rounds is how many
 # rounds the session closed, comments the threads the review handed it
 # (run_comments), reversals the findings the session declined since the last
 # row because they would undo a settled fix (reversals_file). It is what
@@ -473,5 +539,5 @@ reversals_file() {
 #
 #   review_carry_on <pct>
 review_carry_on() {
-  printf '%s' "**The review round is closed, and this conversation takes the next one.** The review confirmed every fix you made. Your context is at $1% — under the ${REVIEW_CONTEXT_MAX_PCT}% at which sclaude opens a fresh session — and still cached, so the findings still open are yours now: what this conversation settled stays in view while you fix them. Re-read the pull request (\`gh pr checks <pr>\`, \`gh pr view <pr> --comments\`, \`gh api repos/{owner}/{repo}/pulls/<pr>/comments\`); its open threads are your list. Work them as step 1 of the prompt says, through subagents. From here they are threads you are fixing, and the round ends by the same rules as before."
+  printf '%s' "**The review read your last push, and this conversation takes what it found.** Your context is at $1% — under the ${REVIEW_CONTEXT_MAX_PCT}% at which sclaude opens a fresh session — and still cached, so the findings still open are yours now: what this conversation settled stays in view while you fix them. Re-read the pull request (\`gh pr checks <pr>\`, \`gh pr view <pr> --comments\`, \`gh api repos/{owner}/{repo}/pulls/<pr>/comments\`); its open threads are your list. Work them as step 1 of the prompt says, through subagents. From here they are threads you are fixing, and the round ends by the same rules as before."
 }

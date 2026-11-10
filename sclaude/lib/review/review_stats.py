@@ -58,9 +58,10 @@ def rows(path):
 def segment(row):
     """Which round of its session the stretch a row closes was.
 
-    A row is written where a session stopped: at a round's end ("carried on",
-    "fresh session"), where `rounds` counts that round, or at the session's
-    end ("done", "exit"), where it counts the rounds closed before it.
+    A row is written where a session stopped ("done", "exit"), where `rounds`
+    counts the rounds closed before it. Older logs also have a row at a
+    round's end inside its session ("carried on", "fresh session"), where
+    `rounds` counts that round.
     """
     rounds = row["rounds"] or 0
     return rounds if row["outcome"] in ("carried on", "fresh session") else rounds + 1

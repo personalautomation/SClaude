@@ -170,9 +170,9 @@ with tempfile.TemporaryDirectory() as tmp:
     out = report(wt, "code")
     check("no-heading-no-label", out.split("lines:\n\n", 1)[-1].startswith("   - a\n"), True)
 
-# --- wired into session_ended, on both ways out ------------------------------
+# --- wired into session_ended, on its way out --------------------------------
 ended = re.search(r"^session_ended\(\) \{\n.*?^\}\n", RUN, re.S | re.M).group(0)
-check("called-twice-in-session-ended", ended.count('plan_report "$wt" "$step"'), 2)
+check("called-in-session-ended", ended.count('plan_report "$wt" "$step"'), 1)
 
 if failures:
     for name, want, got in failures:

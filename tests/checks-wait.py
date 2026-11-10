@@ -53,10 +53,10 @@ LIMIT, PERIOD = 600, 15
 
 BUILD = {"name": "checks", "status": "COMPLETED", "conclusion": "SUCCESS"}
 BUILD_RUNNING = {"name": "checks", "status": "IN_PROGRESS", "conclusion": ""}
-REVIEW_DONE = {"name": REVIEW_JOB, "status": "COMPLETED", "conclusion": "SUCCESS"}
-REVIEW_RUNNING = {"name": REVIEW_JOB, "status": "IN_PROGRESS", "conclusion": ""}
-REVIEW_QUEUED = {"name": REVIEW_JOB, "status": "QUEUED", "conclusion": ""}
-REVIEW_SKIPPED = {"name": REVIEW_JOB, "status": "COMPLETED", "conclusion": "SKIPPED"}
+REVIEW_DONE = {"name": REVIEW_JOB, "workflowName": "Claude Code Review", "status": "COMPLETED", "conclusion": "SUCCESS"}
+REVIEW_RUNNING = {"name": REVIEW_JOB, "workflowName": "Claude Code Review", "status": "IN_PROGRESS", "conclusion": ""}
+REVIEW_QUEUED = {"name": REVIEW_JOB, "workflowName": "Claude Code Review", "status": "QUEUED", "conclusion": ""}
+REVIEW_SKIPPED = {"name": REVIEW_JOB, "workflowName": "Claude Code Review", "status": "COMPLETED", "conclusion": "SKIPPED"}
 FINDINGS_STATUS = {"context": ctx.FINDINGS_CHECK, "state": "SUCCESS"}
 FINDINGS_DONE = {"name": ctx.FINDINGS_CHECK, "status": "completed", "conclusion": "success"}
 FINDINGS_RED = {"name": ctx.FINDINGS_CHECK, "status": "completed", "conclusion": "failure"}
@@ -125,70 +125,34 @@ try:
                                clock=lambda: now[0], sleep=sleep)
         return code, lines, reads["view"], now[0]
 
-    # --- AC1: returns only once the review is there and everything finished --
-    code, lines, reads, _ = wait(
-        [[BUILD_RUNNING], [BUILD], [BUILD, REVIEW_RUNNING],
-         [BUILD, REVIEW_DONE, FINDINGS_STATUS]])
-    check("late-review: green", code, ctx.CHECKS_GREEN)
-    check("late-review: waited for every read", reads, 4)
-    check("late-review: verdict line", lines[-1].startswith("green: "), True)
-    check("late-review: table printed", any(REVIEW_JOB in l for l in lines), True)
+    # --- the review is never waited for: only the other checks -----------------
+    code, lines, reads, _ = wait([[BUILD_RUNNING], [BUILD]])
+    check("checks-only: green", code, ctx.CHECKS_GREEN)
+    check("checks-only: waited for the build", reads, 2)
+    check("checks-only: verdict line", lines[-1].startswith("green: "), True)
+    check("checks-only: says the review is not waited for", "not waited for" in lines[0], True)
+    code, _, reads, _ = wait([[BUILD, REVIEW_RUNNING]])
+    check("review-running: not waited for", (code, reads), (ctx.CHECKS_GREEN, 1))
+    code, _, _, _ = wait([[BUILD, dict(REVIEW_DONE, conclusion="FAILURE"),
+                           dict(FINDINGS_STATUS, state="FAILURE")]])
+    check("review-red: not the session's red", code, ctx.CHECKS_GREEN)
 
-    # The rollup reads "all finished" before the findings check registers.
-    code, lines, reads, _ = wait([[BUILD, REVIEW_DONE]],
-                                 findings=[None, None, {"name": ctx.FINDINGS_CHECK,
-                                                        "status": "in_progress"},
-                                           FINDINGS_DONE])
-    check("findings-late: green", code, ctx.CHECKS_GREEN)
-    check("findings-late: not before the findings run completed", reads, 4)
-
-    code, lines, _, _ = wait([[BUILD, REVIEW_DONE, dict(FINDINGS_STATUS, state="FAILURE")]],
-                             findings=[FINDINGS_RED])
+    red = dict(BUILD, conclusion="FAILURE")
+    code, lines, _, _ = wait([[red, REVIEW_DONE]])
     check("red: code", code, ctx.CHECKS_RED)
-    check("red: names the check", lines[-1].startswith("red: ") and ctx.FINDINGS_CHECK in lines[-1],
-          True)
+    check("red: names the check", lines[-1].startswith("red: ") and "checks" in lines[-1], True)
 
-    # A review skipped on purpose writes no findings check: nothing to wait for.
-    code, _, reads, _ = wait([[BUILD, REVIEW_SKIPPED]], findings=[None])
-    check("skipped-review: no findings wait", (code, reads), (ctx.CHECKS_GREEN, 1))
-
-    # --- AC2: no review check within the limit ---------------------------------
-    code, lines, _, waited = wait([[BUILD]])
-    check("no-review: code", code, ctx.CHECKS_NO_REVIEW)
-    check("no-review: says so", lines[-1],
-          "no review: No review started on %s within 10 min — this push is not reviewed."
-          % head[:7])
-    check("no-review: bounded by the limit", LIMIT <= waited < LIMIT + 2 * PERIOD, True)
-
-    # --- AC3: the review is there, and stuck --------------------------------
-    code, lines, _, waited = wait([[BUILD], [BUILD, REVIEW_QUEUED]])
-    check("queued: code", code, ctx.CHECKS_NOT_DONE)
-    check("queued: says so", "still running or queued" in lines[-1]
+    # --- a check stuck past the limit -----------------------------------------
+    code, lines, _, waited = wait([[BUILD_RUNNING]])
+    check("stuck: code", code, ctx.CHECKS_NOT_DONE)
+    check("stuck: says so", "still running or queued" in lines[-1]
           and lines[-1].startswith("not finished: "), True)
-    # The second limit counts from the review appearing, not from the start.
-    check("queued: two limits at most", LIMIT + PERIOD <= waited < 2 * LIMIT + 2 * PERIOD, True)
-
-    # --- AC5: what counts as the review check ---------------------------------
-    preview = {"name": "Preview Comments", "status": "COMPLETED", "conclusion": "SUCCESS"}
-    code, _, _, _ = wait([[BUILD, preview, FINDINGS_STATUS]])
-    check("names: Preview and the findings check are not the review", code,
-          ctx.CHECKS_NO_REVIEW)
-    late_word = {"name": "Claude review of the delta", "status": "COMPLETED",
-                 "conclusion": "SUCCESS"}
-    code, _, _, _ = wait([[BUILD, late_word]], history=["Claude review of the delta"])
-    check("names: the word anywhere in the name", code, ctx.CHECKS_GREEN)
-
-    # --- a pull request no review ever ran on ---------------------------------
-    code, lines, reads, _ = wait([[BUILD_RUNNING], [BUILD, preview]], history=["checks"],
-                                 findings=[None])
-    check("no-review-project: waits for the checks only", (code, reads),
-          (ctx.CHECKS_GREEN, 2))
+    check("stuck: bounded by the limit", LIMIT <= waited < LIMIT + 2 * PERIOD, True)
 
     # --- right after the push GitHub still names the commit before ------------
-    code, _, reads, _ = wait([[BUILD, REVIEW_DONE], [BUILD], [BUILD, REVIEW_DONE]],
-                             heads=[before, head])
-    check("old-head: its finished review is not this push's", (code, reads),
-          (ctx.CHECKS_GREEN, 3))
+    code, _, reads, _ = wait([[BUILD], [BUILD]], heads=[before, head])
+    check("old-head: its finished checks are not this push's", (code, reads),
+          (ctx.CHECKS_GREEN, 2))
 
     # --- said at once, never green --------------------------------------------
     code, lines, _, waited = wait([[]], fail=True)

@@ -217,7 +217,7 @@ bare = {}
 configs = [("no sections", bare)] + [
     ("review %s, qa %s, merge %s" % (r, q, m),
      dict(process.example_config(), review=r, qa=q, merge=m))
-    for r in ("github", "local", "off") for q in ("github", "both", "auto") for m in ("github", "both", "auto")]
+    for r in ("github", "github-local", "local", "off") for q in ("github", "both", "auto") for m in ("github", "both", "auto")]
 for name, cfg in configs:
     nodes, edges = process.for_config(cfg, process.NODES, process.EDGES)
     check("%s: every arrow between blocks drawn" % name, all(a in nodes and b in nodes for a, b, *_ in edges))
@@ -228,7 +228,8 @@ for name, cfg in configs:
     cells = [(n[0], n[1]) for n in nodes.values()]
     check("%s: no two blocks in one cell" % name, len(cells) == len(set(cells)),
           str(sorted(c for c in cells if cells.count(c) > 1)))
-    check("%s: one reviewer at most" % name, not ("ci_review" in nodes and "local_pass" in nodes))
+    check("%s: the review drawn unless it is off" % name,
+          ("review_run" in nodes) == (cfg.get("review") != "off"))
     n2, e2 = process.for_config(cfg, process.OVERVIEW_NODES, process.OVERVIEW_EDGES)
     check("%s: the glance's arrows drawn" % name, all(a in n2 and b in n2 for a, b, *_ in e2))
     with process.configured(cfg):
@@ -243,8 +244,8 @@ for name, cfg in configs:
     check("%s: every gate has a way for each answer" % name, not lonely, str(lonely))
 gh = process.for_config(dict(process.example_config(), review="github"), process.NODES, process.EDGES)[0]
 lo = process.for_config(dict(process.example_config(), review="local"), process.NODES, process.EDGES)[0]
-check("review github draws the review on CI", "ci_review" in gh and "local_pass" not in gh)
-check("review local draws the local passes", "local_pass" in lo and "ci_review" not in lo)
+check("review github and local draw the same review block",
+      gh["review_run"][:5] == lo["review_run"][:5] and gh["review_run"][3] == "Review")
 none = process.for_config(bare, process.NODES, process.EDGES)
 check("no regression, no board: no gates for them, the flow carried past",
       not {"reg_local", "preview_ok", "prod_ok", "qa_check"} & set(none[0])
@@ -315,8 +316,8 @@ check("a local run at step 4 lights its block of the regression map beside the c
       == [])
 _gate = read("sclaude", "lib", "review", "review_gate.sh")
 check("the gate writes a way out of its own pass whichever way it ends",
-      all(w in _gate for w in ('review_back_edge "$wt" "$back_from"', "local_pass review_close", "review_close local_pass"))
-      and "back_from=local_pass" in _gate)
+      all(w in _gate for w in ('review_back_edge "$wt" "$back_from"', "review_run review_close", "review_close review_run"))
+      and "back_from=review_run" in _gate)
 check("the flow's answer carries what is lit beside the place",
       '"also": also' in read("sclaude", "lib", "commands", "actions.sh")
       and "v.also" in read("sclaude", "lib", "flow", "process_live.js"))
@@ -382,7 +383,7 @@ cases = [
         "sync": {"runs": [{"session": "s", "started": now, "finished": now}]}}, "", "review"),
     ("a sync left unfinished in a step before", {"step": "review", "review": {"local": {"running": now}},
                                                  "sync": {"runs": [{"session": "s", "started": now,
-                                                                    "finished": now}]}}, "OPEN", "local_pass"),
+                                                                    "finished": now}]}}, "OPEN", "review_run"),
     ("a sync taken up again", {"step": "code", "sync": {"runs": [
         {"session": "s", "started": "2026-01-01T00:00:00+00:00", "finished": "2026-01-01T01:00:00+00:00",
          "resumed": now}]}}, "", "sync"),
@@ -390,7 +391,7 @@ cases = [
         {"session": "s", "started": "2020-01-01T00:00:00+00:00"}]}}, "", "code"),
     ("a sync killed, then taken up a day later", {"step": "code", "sync": {"runs": [
         {"session": "s", "started": "2020-01-01T00:00:00+00:00", "resumed": now}]}}, "", "sync"),
-    ("local review passes", {"step": "review", "review": {"local": {"running": now}}}, "OPEN", "local_pass"),
+    ("local review passes", {"step": "review", "review": {"local": {"running": now}}}, "OPEN", "review_run"),
     ("local review passes long killed", {"step": "review", "review": {"local": {"running": "2020-01-01T00:00:00+00:00"}}},
      "OPEN", "review"),
     ("asked to ship, or shipping", {"step": "done", "pr": 7, "prod_pass": {"shipping": now}}, "MERGED", "ship"),
@@ -697,8 +698,7 @@ def review_rows(n, h, mine=True):
     return [
         dict({"at": at(s + ":21"), "what": "steps.pr", "op": "open", "session": "p%d" % n}, **p),
         dict({"at": at(s + ":30"), "what": "steps.pr", "op": "finish", "session": "p%d" % n}, **p),
-        edge(s + ":30", "pr", "pr_check", "sclaude", **p), edge(s + ":30", "pr_check", "draft_pr", "sclaude", **p),
-        edge(s + ":31", "draft_pr", "local_pass", "setting", **p),
+        edge(s + ":30", "pr", "pr_check", "sclaude", **p), edge(s + ":30", "pr_check", "review_run", "sclaude", **p),
         dict({"at": at(s + ":31"), "what": "review.local", "op": "start"}, **p),
         dict({"at": at(s + ":36"), "what": "review.local", "op": "done"}, **p),
         dict({"at": at(s + ":40"), "what": "steps.review", "op": "open", "session": "r%d" % n}, **p),
@@ -733,7 +733,7 @@ for mine in (True, False):
           and next(x for x in ps[1]["steps"] if x["n"] == "p_whole").get("s") == 30 * 60, str(seqs))
     vs = [v.get("n") or v["pass"][0] for v in split["visits"]]
     check("history: a split feature's detailed map plays steps 2-4 once, the parts beside them, " + how,
-          vs.count("code") == 1 and vs.count("pr") == 1 and "review" not in vs and "local_pass" not in vs
+          vs.count("code") == 1 and vs.count("pr") == 1 and "review" not in vs and "review_run" not in vs
           and vs[vs.index("code") + 1:vs.index("code") + 3] == ["parts", "parts"]
           and vs.index("works") > vs.index("code") + 2, str(vs))
     cost = split["metrics"]["cost"]
@@ -799,15 +799,14 @@ late = [v.get("n") for v in process.history({}, [
     {"at": at("09:00"), "what": "steps.pr", "op": "open", "session": "p"},
     {"at": at("09:10"), "what": "steps.pr", "op": "finish", "session": "p"},
     edge("09:10", "pr", "pr_check", "session"),
-    edge("09:10", "pr_check", "draft_pr", "sclaude"),
-    edge("09:10", "draft_pr", "review_close", "setting"),
+    edge("09:10", "pr_check", "review_run", "sclaude"),
     {"at": at("09:11"), "what": "review.local", "op": "start"},
-    edge("09:11", "review_close", "local_pass", "sclaude"),
     {"at": at("09:15"), "what": "review.local", "op": "end"},
-    edge("09:15", "local_pass", "review", "sclaude"),
+    edge("09:15", "review_run", "review_close", "sclaude"),
+    edge("09:15", "review_close", "review", "sclaude"),
     {"at": at("09:16"), "what": "steps.review", "op": "open", "session": "r"}])["visits"]]
 check("history: an edge into a place written after the row that entered it is not played twice",
-      late[late.index("pr"):] == ["pr", "pr_check", "draft_pr", "review_close", "local_pass", "review"], str(late))
+      late[late.index("pr"):] == ["pr", "pr_check", "review_run", "review_close", "review"], str(late))
 none = process.history({}, [edge("09:00", "w_ask", "w_open", "person", session="f"),
                             edge("09:00", "w_open", "w_change", "sclaude", session="f"),
                             {"at": at("09:10"), "what": "workshop", "op": "none", "session": "f"}])
@@ -883,8 +882,8 @@ check("history: every detailed place a feature stands on is on the overview",
 # for, a map of its own reached from no block with its letter; a history
 # along the map has none.
 check("deviations: none along the map", not any(v.get("off") for v in got["visits"]), str(got["visits"]))
-# Two review sessions in a row: the round gate on a map that has it, the
-# close on one with a review on this machine, which has none.
+# Two review sessions in a row: through the review and step 4's close,
+# wherever the review runs — every map draws the same cycle.
 _two = [{"at": at("09:00"), "what": "steps.review", "op": "open", "session": "r"},
         {"at": at("09:10"), "what": "steps.review", "op": "end", "session": "r"},
         {"at": at("09:20"), "what": "steps.review", "op": "open", "session": "s"}]
@@ -893,7 +892,7 @@ for _r in ("github", "local"):
     with process.configured(dict(process.example_config(), review=_r)):
         _ways.append([v["n"] for v in process.history({}, _two, "review")["visits"]])
 check("history: played on the map the project draws",
-      _ways == [["new", "review", "round", "review"], ["new", "review", "review_close", "review"]], str(_ways))
+      _ways == [["new", "review", "review_run", "review_close", "review"]] * 2, str(_ways))
 # And by `process.py history`, which reads the project's config beside the
 # state: a local review's tree plays through the close.
 with tempfile.TemporaryDirectory() as _t:
@@ -910,7 +909,7 @@ with tempfile.TemporaryDirectory() as _t:
     _vs = json.loads(_cli.stdout or "{}").get("visits", [])
     check("process.py history plays on the project's map",
           ([v["n"] for v in _vs], _vs[-1].get("here") if _vs else None)
-          == (["new", "review", "review_close", "review"], True), _cli.stdout[-300:] + _cli.stderr[-300:])
+          == (["new", "review", "review_run", "review_close", "review"], True), _cli.stdout[-300:] + _cli.stderr[-300:])
     # A place that map does not draw (no QA board) stands where it goes on.
     _cli = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "flow", "process.py"), "history",
                            os.path.join(_fd, "state.json"), "in_qa"], capture_output=True, text=True, timeout=60)
@@ -1054,7 +1053,7 @@ local = process.history({}, [{"at": at("09:00"), "what": "review.local", "op": "
                              {"at": at("09:10"), "what": "fix.local", "op": "end"},
                              {"at": at("10:00"), "what": "review.local", "op": "start"},
                              {"at": at("10:04"), "what": "review.local", "op": "end"}])["visits"]
-passes = [v for v in local if v.get("n") == "local_pass"]
+passes = [v for v in local if v.get("n") == "review_run"]
 check("history: a start after an interrupted run is a stay of its own",
       len(passes) == 2 and passes[1]["s"] == 240, str(local))
 got = seq_of([{"at": at("09:00"), "what": "qa", "op": "in"},
@@ -1072,7 +1071,7 @@ got = seq_of([{"at": at("09:00"), "what": "steps.review", "op": "open", "session
               {"at": at("09:31"), "what": "review.local", "op": "start"},
               {"at": at("09:35"), "what": "review.local", "op": "end"}])
 check("history: no long way round is made up between two places",
-      got[-3:] == ["review", "review_close", "local_pass"] and "merged" not in got, str(got))
+      got[-2:] == ["review", "review_run"] and "merged" not in got, str(got))
 review = [v for v in process.history({}, [
     {"at": at("09:00"), "what": "steps.review", "op": "open", "session": "r"},
     {"at": at("10:00"), "what": "steps.review", "op": "open", "session": "r"},
@@ -1397,9 +1396,9 @@ lp = process.history({}, [{"at": at("09:00"), "what": "steps.review", "op": "ope
                      [{"at": at("09:41"), "head": "h", "session": "p1"},
                       {"at": at("09:43"), "head": "h", "session": "p2", "spent": True}])["metrics"]
 check("metrics: a local review's passes cost on the pass, from the journal, the fixing session on its step",
-      lp["cost"]["detail"] == {"review": 3.0, "local_pass": 1.75}, str(lp["cost"]))
+      lp["cost"]["detail"] == {"review": 3.0, "review_run": 1.75}, str(lp["cost"]))
 check("metrics: a pass's cache written again counts on the pass too",
-      lp["expired"] == {"detail": {"local_pass": 1}}, str(lp["expired"]))
+      lp["expired"] == {"detail": {"review_run": 1}}, str(lp["expired"]))
 ep = process.history({}, [{"at": at("09:00"), "what": "steps.review", "op": "open", "session": "r"},
                           {"at": at("09:30"), "what": "steps.review", "op": "end", "session": "r"},
                           {"at": at("09:40"), "what": "epilogue", "op": "open", "session": "e1", "about": "preview"},

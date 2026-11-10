@@ -622,8 +622,8 @@ try:
           ["⚙️ review · local", "⚙️ qa · github (not set)", "⚙️ merge · both (not set)"])
     check_true("every section of the example", any(x.startswith("commands · lint") for x in labels))
     out = press("cfg:shop:review")
-    check("the one in force is marked", [b["text"] for row in out["rows"] for b in row][:3],
-          ["github", "✓ local", "off"])
+    check("the one in force is marked", [b["text"] for row in out["rows"] for b in row][:4],
+          ["github", "github-local", "✓ local", "off"])
     check_true("the explanation is sclaude's", "where the pull request" in out["text"])
     ran = []
     shell.run = lambda cmd, timeout=25: ran.append(cmd) or "✓ review: github\nrc=0"

@@ -37,9 +37,12 @@
 #   local_review.py open <cwd> <pr> <repo> <journal>  post what waits to be posted,
 #                                                 then say how many are open
 #
-# The journal (local-review-rounds.jsonl) is one line per run: when, how long,
-# which range, how many new and resolved. It is what the report counts rounds
-# by, as it counts the workflow's runs on GitHub; the findings are on GitHub.
+# The journal (JOURNAL, review-rounds.jsonl) is one line per review run,
+# wherever it ran: when, how long, which head. A pass here adds the range and
+# how many it posted and resolved; a run of the workflow in Actions is added
+# by github_runs once it finished, `source: github`. The report, the process
+# map and where the next pass starts all read it, and nothing else; the
+# findings are on GitHub.
 import datetime
 import json
 import os
@@ -52,6 +55,9 @@ import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from pr_context import (LOCAL_SIGNATURE, OUTSIDE_DIFF, RESOLVER_PREFIX,  # noqa: E402
                         decline_of, gh, headline, review_threads, signed_locally,
                         split_yours, thread_line, yours)
+
+JOURNAL = ".sclaude/local/feature/review-rounds.jsonl"
+
 
 # A finding's heading as the prompt asks for it, `### <path>:<line> — <title>`,
 # and the ways a model drifts from it: the path in backticks, a range of
@@ -385,11 +391,12 @@ def spent(journal, base, head, seconds, session, pr=""):
     return 0
 
 
-def rows(journal, with_spent=False, pr=None):
+def rows(journal, with_spent=False, pr=None, local_only=False):
     """The journal's runs, oldest first: each a dict with at least `at` (the
     run's start, ISO) and `head`; with <with_spent>, the passes journaled by
     spent() too; with <pr>, that pull request's alone (and the rows from
-    before the journal named one). The one reader of the file; the report
+    before the journal named one); with <local_only>, the passes here alone,
+    each a conversation to price. The one reader of the file; the report
     reads it through here."""
     if str(pr) in ("", "null", "None"):
         pr = None
@@ -403,11 +410,46 @@ def rows(journal, with_spent=False, pr=None):
                     continue
                 if isinstance(row, dict) and row.get("head") and row.get("at") \
                         and (with_spent or not row.get("spent")) \
-                        and (not pr or not row.get("pr") or str(row["pr"]) == str(pr)):
+                        and (not pr or not row.get("pr") or str(row["pr"]) == str(pr)) \
+                        and not (local_only and row.get("source") == "github"):
                     out.append(row)
     except OSError:
         pass
     return out
+
+
+def github_runs(journal, runs, pr=""):
+    """Add to the journal the workflow's runs (review_runs in
+    review_report.py) that reviewed their head — finished, and green: one
+    that stopped on Claude's limit or found no minutes reviewed nothing, and
+    a local pass after a move would take its head as read — each attempt
+    once (a rerun keeps the run's id)."""
+    have = set()
+    try:
+        with open(journal, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and row.get("run"):
+                    have.add((row["run"], row.get("attempt") or 1))
+    except OSError:
+        pass
+    new = [r for r in runs if not r.get("running") and r.get("id") and r.get("head")
+           and (r.get("conclusion") or "").lower() == "success"
+           and (r["id"], r.get("attempt") or 1) not in have]
+    if not new:
+        return
+    os.makedirs(os.path.dirname(journal), exist_ok=True)
+    with open(journal, "a", encoding="utf-8") as fh:
+        for r in new:
+            row = {"at": r["start"].isoformat(timespec="seconds"), "seconds": int(r["seconds"]),
+                   "head": r.get("head"), "source": "github", "run": r["id"],
+                   "attempt": r.get("attempt") or 1}
+            if pr:
+                row["pr"] = str(pr)
+            fh.write(json.dumps(row) + "\n")
 
 
 def main(argv):

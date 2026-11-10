@@ -123,7 +123,7 @@ def functions(names):
 
 
 WATCH = 'source "%s/core/state.sh"\nLIB="%s"\n' % (LIB, LIB) + functions(
-    ["round_marker", "done_marker", "session_ctl_file", "session_keep_file", "session_watched_file",
+    ["done_marker", "session_ctl_file", "session_keep_file", "session_watched_file",
      "wait_note", "session_watch_start", "session_watch_stop"])
 
 wt = os.path.join(tmp, "wt")
@@ -244,6 +244,165 @@ check("reset-tomorrow", ctx.quota_reset("resets 4am (Europe/Lisbon)", now), 1791
 check("reset-dated", ctx.quota_reset("resets Oct 10, 4am (Europe/Lisbon)", now), 1791601200)
 check("reset-unreadable", ctx.quota_reset("no reset here", now), 0)
 check("quota-in-log", bool(ctx.QUOTA_429.search('"api_error_status":429')), True)
+
+# --- a review that could not run on GitHub -------------------------------------
+# Claude's limit in the log, an API key's credit, or a job GitHub never started
+# for the account's minutes — said only in the check run's annotations.
+saved = (ctx.gh_json, ctx.job_log)
+rollup = {"statusCheckRollup": [{"name": "claude-review", "workflowName": "Claude Code Review",
+                                 "conclusion": "FAILURE", "completedAt": "2026-10-06T17:05:00Z",
+                                 "detailsUrl": "https://github.com/o/r/actions/runs/7/job/9"}]}
+def fake(annotations, log):
+    ctx.gh_json = lambda args, cwd=None: annotations if "annotations" in args[1] else rollup
+    ctx.job_log = lambda cwd, repo, job: log
+fake([], 'is_error:true api_error_status:429 hit your session limit · resets 6:50pm (Europe/Lisbon)')
+check("fallback-quota", ctx.review_fallback(None, 1, "o/r"), ("quota", 1791309000, "7"))
+fake([], "Credit balance is too low")
+check("fallback-credit", ctx.review_fallback(None, 1, "o/r"), ("quota", 0, "7"))
+fake([{"message": "The job was not started because recent account payments have failed or your "
+                  "spending limit needs to be increased."}], None)
+check("fallback-minutes", ctx.review_fallback(None, 1, "o/r"), ("minutes", 0, "7"))
+fake([], 'api_error_status:429 rate limited, try again')
+check("fallback-bare-429-stays", ctx.review_fallback(None, 1, "o/r"), None)
+fake([], 'api_error_status: 429 · resets 12pm (UTC)')
+check("fallback-429-with-reset", ctx.review_fallback(None, 1, "o/r")[0], "quota")
+fake([], "TypeError: the code is wrong")
+check("fallback-code-red", ctx.review_fallback(None, 1, "o/r"), None)
+ctx.gh_json, ctx.job_log = saved
+
+# The gate waits for the review on the head (review_finished): a finished
+# green review with its findings check run is finished; one still running,
+# or with its findings check not run yet, is not; a failed one is finished
+# at once (its red is the gate's); nothing on the head, in a pull request
+# that had a review, is not; unreadable is finished.
+saved = (ctx.reviewed_before, ctx.findings_run)
+green = {"name": "claude-review", "workflowName": "Claude Code Review", "status": "COMPLETED",
+         "conclusion": "SUCCESS"}
+ctx.reviewed_before = lambda cwd, pr, repo: (True, True)
+ctx.findings_run = lambda cwd, repo, head: {"status": "completed"}
+check("review-finished-green", ctx.review_finished(None, 1, "o/r", "h", [green]), True)
+ctx.findings_run = lambda cwd, repo, head: {}
+check("review-finished-awaits-findings", ctx.review_finished(None, 1, "o/r", "h", [green]), False)
+check("review-finished-running", ctx.review_finished(None, 1, "o/r", "h",
+                                                     [dict(green, status="IN_PROGRESS", conclusion="")]), False)
+check("review-finished-failed", ctx.review_finished(None, 1, "o/r", "h", [dict(green, conclusion="FAILURE")]), True)
+check("review-finished-not-cancelled", ctx.review_finished(None, 1, "o/r", "h",
+                                                           [dict(green, conclusion="CANCELLED")]), False)
+check("review-finished-red-not-failed", ctx.review_finished(None, 1, "o/r", "h",
+                                                            [dict(green, conclusion="ACTION_REQUIRED")]), True)
+cancelled = dict(green, conclusion="CANCELLED", startedAt="2026-11-10T10:00:00Z")
+green = dict(green, startedAt="2026-11-10T10:05:00Z")
+check("superseded-by-green", ctx.superseded([cancelled, green]), [green])
+check("superseded-by-skipped", ctx.superseded([cancelled, dict(green, conclusion="SKIPPED")]),
+      [dict(green, conclusion="SKIPPED")])
+check("two-cancelled-stay", len(ctx.superseded([cancelled, dict(cancelled)])), 2)
+check("cancelled-newer-than-green-stays",
+      len(ctx.superseded([dict(cancelled, startedAt="2026-11-10T10:09:00Z"), green])), 2)
+check("cancelled-without-start-stays", len(ctx.superseded([dict(cancelled, startedAt=None), green])), 2)
+check("cancelled-zero-start-stays",
+      len(ctx.superseded([dict(cancelled, startedAt="0001-01-01T00:00:00Z"), green])), 2)
+check("other-workflow-not-superseding",
+      len(ctx.superseded([cancelled, dict(green, workflowName="CI")])), 2)
+check("review-finished-not-on-head", ctx.review_finished(None, 1, "o/r", "h", []), False)
+ctx.reviewed_before = lambda cwd, pr, repo: None
+check("review-finished-unreadable", ctx.review_finished(None, 1, "o/r", "h", []), True)
+ctx.reviewed_before, ctx.findings_run = saved
+
+# The mark in a feature's tree makes `github-local` local, on both sides;
+# `github` alone, `off` and `local` stay what they are.
+fb = tempfile.mkdtemp()
+subprocess.run(["git", "init", "-q", fb], check=True)
+os.makedirs(os.path.join(fb, ".sclaude", "local", "feature"))
+def review_config(path, word):
+    with open(os.path.join(path, ".sclaude", "config.json"), "w") as fh:
+        json.dump({"review": word}, fh)
+    ctx._MODES.clear()
+    ctx._TOPS.clear()
+def shell_mode(path):
+    return subprocess.run(["bash", "-c", 'source "%s/core/project.sh"; REPO="%s" project_review_mode "%s"'
+                           % (LIB, path, path)], capture_output=True, text=True, timeout=30).stdout.strip()
+review_config(fb, "github-local")
+check("mode-github-local-no-mark", ctx.review_mode(fb), "github")
+with open(os.path.join(fb, ctx.FALLBACK_FILE), "w") as fh:
+    fh.write("quota\tnow\tseen\n")
+review_config(fb, "github-local")
+check("mode-mark-local", ctx.review_mode(fb), "local")
+check("moved-for", ctx.moved_for(fb), "quota")
+check("shell-mode-mark-local", shell_mode(fb), "local")
+review_config(fb, "github")
+check("mode-github-ignores-mark", (ctx.review_mode(fb), shell_mode(fb)), ("github", "github"))
+review_config(fb, "off")
+check("mode-mark-keeps-off", ctx.review_mode(fb), "off")
+review_config(fb, "github-local")
+
+# Moved for Claude's limit alone, only the review's checks leave the verdict;
+# moved for the minutes, every Actions check does.
+ci = {"name": "Checks", "workflowName": "CI", "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/o/r/actions/runs/1/job/2"}
+rv = {"name": "claude-review", "workflowName": "Claude Code Review", "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/o/r/actions/runs/1/job/3"}
+mention = {"name": "claude", "workflowName": "Claude Code", "conclusion": "FAILURE"}
+schema = {"name": "Schema review", "workflowName": "CI", "conclusion": "FAILURE"}
+check("quota-keeps-ci", [c["name"] for c in ctx.verdict_rollup(fb, [ci, rv, mention, schema])],
+      ["Checks", "Schema review"])
+with open(os.path.join(fb, ctx.FALLBACK_FILE), "w") as fh:
+    fh.write("minutes\tnow\tseen\n")
+review_config(fb, "github-local")
+check("minutes-drops-actions", ctx.verdict_rollup(fb, [ci, rv]), [])
+os.remove(os.path.join(fb, ctx.FALLBACK_FILE))
+review_config(fb, "github-local")
+
+# Switched once, the machine is marked: the next github-local feature
+# reaching step 4 in the window is reviewed here at once; past it, it tries
+# GitHub again. A later, shorter window does not shorten it; a reset that
+# has passed marks nothing.
+other = tempfile.mkdtemp()
+subprocess.run(["git", "init", "-q", other], check=True)
+os.makedirs(os.path.join(other, ".sclaude"))
+review_config(other, "github-local")
+inherit = """
+source "%s/core/project.sh"; source "%s/review/review_round.sh"
+info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }
+REPO="%s"
+review_fallback_set "%s" quota 0
+cut -f2 "$REPO/.sclaude/local/review-fallback"
+review_fallback_inherit "%s"
+project_review_mode "%s"
+""" % (LIB, LIB, fb, fb, other, other)
+got = subprocess.run(["bash", "-c", inherit], capture_output=True, text=True, timeout=30).stdout
+check("fallback-machine-mark", "quota" in got.splitlines()[0], True)
+check("fallback-inherited", got.strip().splitlines()[-1], "local")
+with open(os.path.join(other, ctx.FALLBACK_FILE)) as fh:
+    check("fallback-inherited-says-so", fh.read().strip().endswith("inherited"), True)
+os.remove(os.path.join(other, ".sclaude", "local", "feature", "review-fallback"))
+mark = os.path.join(fb, ".sclaude", "local", "review-fallback")
+far = int(time.time()) + 20 * 3600
+with open(mark, "w") as fh:
+    fh.write("%d\tminutes\n" % far)
+subprocess.run(["bash", "-c", 'source "%s/review/review_round.sh"; REPO="%s"; review_fallback_set "%s" quota %d'
+                % (LIB, fb, fb, int(time.time()) + 600)], timeout=30)
+with open(mark) as fh:
+    check("fallback-longer-window-kept", fh.read(), "%d\tminutes\n" % far)
+os.remove(mark)
+subprocess.run(["bash", "-c", 'source "%s/review/review_round.sh"; REPO="%s"; review_fallback_set "%s" quota %d'
+                % (LIB, fb, fb, int(time.time()) - 600)], timeout=30)
+check("fallback-past-reset-no-mark", os.path.exists(mark), False)
+# A reset already passed neither moves nor stops: the job is run again; a
+# rerun GitHub refuses leaves the red to the stop or the move.
+def rerun(refused, ago=600):
+    return subprocess.run(["bash", "-c", 'source "%s/review/review_round.sh"; LIB="%s"; MERGE_POLL=0\n'
+                           'info() { :; }\npython3() { echo "quota %d 7"; }\n'
+                           'gh() { [[ "$2" == view ]] && { echo completed; return 0; }; echo RERUN >&3; return %d; }\nexec 3>&1\n'
+                           'review_reset_rerun "$PWD" 1 o/r; echo "rc=$?"'
+                           % (LIB, LIB, int(time.time()) - ago, 1 if refused else 0)],
+                          capture_output=True, text=True, timeout=60).stdout.split()
+check("fallback-past-reset-reruns", rerun(False), ["RERUN", "rc=0"])
+check("fallback-refused-rerun-falls-through", rerun(True), ["RERUN", "rc=1"])
+with open(os.path.join(fb, ".sclaude", "local", "review-fallback"), "w") as fh:
+    fh.write("1\tquota\n")
+got = subprocess.run(["bash", "-c", inherit.replace('review_fallback_set "%s" quota 0\n' % fb, "")],
+                     capture_output=True, text=True, timeout=30).stdout
+check("fallback-expired-github", got.strip().splitlines()[-1], "github")
 
 # --- the person's threads ------------------------------------------------------
 A = "https://github.com/o/r/pull/1#discussion_r1"

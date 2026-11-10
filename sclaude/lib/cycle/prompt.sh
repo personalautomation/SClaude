@@ -61,10 +61,18 @@ render_prompt() {
   # Where the project's review runs (project_review_mode): step 3 opens the
   # pull request labelled no-review unless it is GitHub's, and step 4 is told
   # when the findings come from this machine rather than from threads.
-  local -x SCLAUDE_V_REVIEW_MODE SCLAUDE_V_NO_REVIEW="" SCLAUDE_V_REVIEW_LOCAL=""
+  local -x SCLAUDE_V_REVIEW_MODE SCLAUDE_V_NO_REVIEW="" SCLAUDE_V_REVIEW_LOCAL="" SCLAUDE_V_ACTIONS_OFF=""
+  # While GitHub's review cannot run (review_fallback_set), a pull request
+  # opened now is opened for the review here, labelled.
+  [[ "$step" == pr && -n "$wt" ]] && declare -F review_fallback_inherit >/dev/null \
+    && review_fallback_inherit "$wt" >&2
   SCLAUDE_V_REVIEW_MODE="$(project_review_mode "$wt")"
   [[ "$SCLAUDE_V_REVIEW_MODE" != "github" ]] && SCLAUDE_V_NO_REVIEW=1
   [[ "$SCLAUDE_V_REVIEW_MODE" == "local" ]] && SCLAUDE_V_REVIEW_LOCAL=1
+  # <if:actions-off>: the Actions checks are out of the verdict — all but a
+  # feature moved here for Claude's limit alone, whose CI still runs (pr_view).
+  [[ "$SCLAUDE_V_REVIEW_LOCAL" == 1 && "$(cut -f1 "$wt/.sclaude/local/feature/review-fallback" 2>/dev/null)" != quota ]] \
+    && SCLAUDE_V_ACTIONS_OFF=1
   # Whether step 2 records a demo (project_demo_mode): <if:demo> in code.md.
   local -x SCLAUDE_V_DEMO=""
   [[ "$(project_demo_mode "$wt")" == on ]] && SCLAUDE_V_DEMO=1

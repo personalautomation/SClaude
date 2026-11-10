@@ -84,6 +84,7 @@ def usage_checks(root):
         ("2-fix-local(2) 🔧/12-price-field", "fix"),
         ("2-fix-local-friction(2) 🧱/12-price-field", "friction"),
         ("4-2-review/13-icons", "review"),
+        ("4-fix-review(2) 🛠/13-icons", "review"),
         # The feature's own name starts with a number and a step's word.
         ("14-review-the-menu/plan", "plan"),
         ("15-fix-the-layout/code", "code"),
@@ -205,11 +206,11 @@ def usage_checks(root):
     # and its subagents go to the new one.
     thing = os.path.join(projects, base + "-7-thing")
     write(os.path.join(thing, "s6.jsonl"), [
-        {"type": "custom-title", "customTitle": "4-review 🛠/7-thing"},
+        {"type": "custom-title", "customTitle": "4-fix-review 🛠/7-thing"},
         assistant("g"), cost_state(7, 2.0, 20),
         {"type": "continued-in", "continuedInSessionId": "s7"}])
     write(os.path.join(thing, "s7.jsonl"), [
-        {"type": "custom-title", "customTitle": "4-review 🛠/7-thing"},
+        {"type": "custom-title", "customTitle": "4-fix-review 🛠/7-thing"},
         assistant("g"), assistant("h"), cost_state(7, 5.0, 50)])
     write(os.path.join(thing, "s6", "subagents", "agent-y.jsonl"), [assistant("i")])
     # One whose new transcript is not there: kept.

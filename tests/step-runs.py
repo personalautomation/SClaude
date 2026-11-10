@@ -259,7 +259,7 @@ with tempfile.TemporaryDirectory() as wt:
     with open(path, "w") as fh:
         json.dump({"feature": "42-some-thing", "step": "done", "pr": 7,
                    "retro": {"runs": [{"session": "t1111111-x", "started": "2026-10-02T10:00:00+00:00"}]}}, fh)
-    with open(os.path.join(feature, "local-review-rounds.jsonl"), "w") as fh:
+    with open(os.path.join(feature, "review-rounds.jsonl"), "w") as fh:
         for row in ({"at": "2026-10-01T09:00:00+00:00", "seconds": 120, "new": 3, "session": "p1111111-a"},
                     {"at": "2026-10-01T09:30:00+00:00", "seconds": 0, "new": 0},
                     {"at": "2026-10-01T10:00:00+00:00", "seconds": 60, "new": 1},

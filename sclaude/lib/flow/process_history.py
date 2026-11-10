@@ -30,7 +30,7 @@ import process_config, process_costs, process_model, process_position
 HISTORY_FILE = "history.jsonl"
 # The local review's journal beside it, for the passes' conversations
 # (local_review.sh names it, review_report.py reads it too).
-LOCAL_JOURNAL = "local-review-rounds.jsonl"
+LOCAL_JOURNAL = "review-rounds.jsonl"  # JOURNAL in local_review.py
 # What the transcripts said of each conversation, kept beside the history.
 TRANSCRIPT_CACHE = "transcripts.json"
 TRANSCRIPT_FRESH = 60
@@ -811,7 +811,7 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
             places.point("prod", at)
         elif what == "review.local":
             if op == "start":
-                places.enter("local_pass", at, what)
+                places.enter("review_run", at, what)
             else:
                 places.leave(what, at)
         elif what == "qa":

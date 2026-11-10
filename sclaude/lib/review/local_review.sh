@@ -40,13 +40,19 @@ LOCAL_REVIEW_PASSES="${LOCAL_REVIEW_PASSES:-5}"
 # The local review's own files, beside the feature's other scratch. The
 # findings are not among them: they are threads on the pull request.
 #
-#   local-review-rounds.jsonl   one line per run: when, how long, the range,
+#   review-rounds.jsonl         the review's journal, wherever it ran
+#                               (review_journal, JOURNAL in local_review.py):
+#                               one line per run: when, how long, the range,
 #                               how many posted and resolved — the rounds the
 #                               report counts, and the head last reviewed
 #   local-review-unposted.json  findings GitHub would not take yet, posted on
 #                               the next call and counted open until then
 #   local-review-answer.md      the last run's answer, as the model gave it
 #   local-review.log            the last run's stderr
+review_journal() {
+  echo "$1/.sclaude/local/feature/review-rounds.jsonl"
+}
+
 local_review_file() {
   echo "$1/.sclaude/local/feature/local-review$2"
 }
@@ -74,7 +80,9 @@ review_label_sync() {
 }
 
 # Switch the repository's own GitHub Actions workflows off for `review: local`,
-# and back on for `github` — the ones this switched off, and no others.
+# and back on for `github` or `github-local` — the ones this switched off, and
+# no others. A feature that moved to the review here (review_fallback_set)
+# switches nothing: the move is the feature's, not the project's.
 #
 #   review_actions_sync <repo root> <mode>
 #
@@ -106,7 +114,7 @@ review_actions_sync() {
       done < <(cd "$root" && gh api "repos/{owner}/{repo}/actions/workflows" --paginate \
                  --jq '.workflows[] | select(.state == "active" and (.path | startswith(".github/workflows/"))) | "\(.id)\t\(.name)"' 2>/dev/null)
       ;;
-    github)
+    github|github-local)
       [[ -s "$list" ]] || return 0
       while IFS=$'\t' read -r id name; do
         [[ -n "$id" ]] || continue
@@ -160,7 +168,7 @@ local_review_mark() {
 
 local_review_run() {
   local wt="$1" pr="$2" head last base scope out count answer repo
-  local journal; journal="$(local_review_file "$wt" -rounds.jsonl)"
+  local journal; journal="$(review_journal "$wt")"
   head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)" || return 1
   repo="$(REPO="$wt" gh_repo 2>/dev/null || true)"
   [[ -n "$repo" ]] || { warn "  No GitHub repository for $wt: the local review did not run." >&2; return 1; }
@@ -735,7 +743,7 @@ local_review_count() {
   local wt="$1" pr="$2" repo
   repo="$(REPO="$wt" gh_repo 2>/dev/null || true)"
   [[ -n "$repo" ]] || return 1
-  python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$(local_review_file "$wt" -rounds.jsonl)" 2>/dev/null
+  python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$(review_journal "$wt")" 2>/dev/null
 }
 
 # Whether the tree's HEAD has had its local review already: a call to
@@ -743,7 +751,7 @@ local_review_count() {
 local_review_done() {
   local head
   head="$(git -C "$1" rev-parse HEAD 2>/dev/null)" || return 1
-  python3 "$LIB/review/local_review.py" cached "$(local_review_file "$1" -rounds.jsonl)" "$head" \
+  python3 "$LIB/review/local_review.py" cached "$(review_journal "$1")" "$head" \
     "$(state_get "$1/.sclaude/local/feature/state.json" pr 2>/dev/null || true)" 2>/dev/null
 }
 
@@ -834,6 +842,6 @@ local_review_pushed() {
 
 # The head the last local review covered, or nothing.
 local_review_head() {
-  python3 "$LIB/review/local_review.py" base "$(local_review_file "$1" -rounds.jsonl)" \
+  python3 "$LIB/review/local_review.py" base "$(review_journal "$1")" \
     "$(state_get "$1/.sclaude/local/feature/state.json" pr 2>/dev/null || true)" 2>/dev/null || true
 }

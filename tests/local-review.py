@@ -187,7 +187,7 @@ try:
     head = git("rev-parse", "HEAD", cwd=repo)
     os.makedirs(os.path.join(repo, ".sclaude", "local", "feature"))
     config = os.path.join(repo, ".sclaude", "config.json")
-    journal = os.path.join(repo, ".sclaude", "local", "feature", "local-review-rounds.jsonl")
+    journal = os.path.join(repo, ".sclaude", "local", "feature", "review-rounds.jsonl")
 
     def run_bash(script, env_extra=None):
         body = "set -uo pipefail\n"
@@ -775,11 +775,16 @@ try:
     check_true("pr-local-label", "/pr no-review" in text and "`local`" in text)
     rc, text = render("review")
     check("review-github-renders", rc, 0)
-    check_true("review-github-no-local", "reviews on this machine" not in text)
-    rc, text = render("review", SCLAUDE_V_REVIEW_LOCAL="1", SCLAUDE_V_REVIEW_MODE="local")
+    check_true("review-github-no-local", "reviewed on this machine" not in text)
+    rc, text = render("review", SCLAUDE_V_REVIEW_LOCAL="1", SCLAUDE_V_REVIEW_MODE="local",
+                      SCLAUDE_V_ACTIONS_OFF="1")
     check("review-local-renders", rc, 0)
-    check_true("review-local-told", "reviews on this machine" in text
+    check_true("review-local-told", "reviewed on this machine" in text
                and "Nothing in this project's flow runs on GitHub Actions" in text)
+    # Moved here for Claude's limit alone: the CI still runs, and counts.
+    rc, text = render("review", SCLAUDE_V_REVIEW_LOCAL="1", SCLAUDE_V_REVIEW_MODE="local")
+    check_true("review-moved-for-quota-keeps-ci", "reviewed on this machine" in text
+               and "Nothing in this project's flow runs on GitHub Actions" not in text)
 
     # `sclaude checks` returning in the session's tab prints the report in
     # sclaude's: once per new mark, and not for a mark left before the launch.

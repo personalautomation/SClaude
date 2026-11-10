@@ -248,6 +248,7 @@ claude_here() {
 pane_icon() {
   case "$1" in
     *friction*)             phase_icon friction ;;
+    [0-9]*-fix-review[/\(\ ]*) phase_icon step review ;;
     *-fix-*)                phase_icon fix ;;
     [0-9]*-plan[/\(\ ]*)    phase_icon step plan ;;
     [0-9]*-code[/\(\ ]*)    phase_icon step code ;;
@@ -260,7 +261,7 @@ pane_icon() {
 }
 
 # A session name with its kind's emoji between the label and the slug:
-# `4-review(2)/12-login` is `4-review(2) 🛠/12-login`. In the name rather than
+# `4-fix-review(2)/12-login` is `4-fix-review(2) 🛠/12-login`. In the name rather than
 # only in wt.exe's --title, because claude titles the tab with the session
 # name and the title given at the start does not survive; and before the
 # slash, because the tab cuts a long title at its end, where the slug is. A

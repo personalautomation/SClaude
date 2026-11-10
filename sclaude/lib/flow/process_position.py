@@ -221,7 +221,7 @@ BADGE_WHY = {
     ("code", "R"): "R — after your yes the local suite runs against this feature's server; red opens a fixing session, two at most.",
     ("review", "R"): "R — step 4's suites: the local one its gate runs before it closes, a red preview or production fixed here.",
     ("review_close", "R"): "R — the local suite runs again before step 4 closes; red opens a fixing session, two at most.",
-    ("local_pass", "S"): "S — main is merged in when step 4 starts or is taken up again, before the local review's pass; a conflict goes to the sync first.",
+    ("review_run", "S"): "S — main is merged in when step 4 starts or is taken up again, before the local review's pass; a conflict goes to the sync first.",
     ("preview", "R"): "R — the preview suite runs against this deployment; green sends the issue to QA, red back to step 4.",
     ("prod", "R"): "R — production's suite runs after the ship; red is rolled back first, then fixed from step 4 — or held.",
     ("plan", "F"): "F — what the safety rules refused the plan's session is reviewed once it ends.",
@@ -379,7 +379,7 @@ def _in_step(state, step):
             return "reg_local", "part %s: the local regression is running" % of
         return "p_code", "step 2, part %s: development" % of
     if _parts_reviewing(state) and step in ("pr", "review"):
-        # The part's own review is p_review: local_pass is the feature's
+        # The part's own review is p_review: review_run is the feature's
         # step 4, on the detailed map.
         if step == "review" and _fresh(((state.get("review") or {}).get("local") or {}).get("running")):
             return "p_review", "part %s: the local review is reading its pull request" % of
@@ -402,7 +402,7 @@ def _in_step(state, step):
         if local:
             return "review_close", local[1]
         if _fresh(((state.get("review") or {}).get("local") or {}).get("running")):
-            return "local_pass", "the local review is reading the pull request"
+            return "review_run", "the local review is reading the pull request"
     return (step if step in process_model.NODES else "plan"), "step %s" % step
 
 

@@ -576,7 +576,7 @@ journalctl --user -u keepawake-telegram.service -f   # the bot's log
 ## statusline.py
 
 Claude Code's status line. On the left, the sclaude session (`1-plan`,
-`4-review(2)`, `4-fix-preview`, `5-sync`, `6-epilogue`, …) and the path; in the middle the
+`4-fix-review(2)`, `4-fix-preview`, `5-sync`, `6-epilogue`, …) and the path; in the middle the
 branch, the feature's pull request, the session's name and the worktree; on the
 right the model, the effort, how full the context is, the prompt cache, and the
 usage limits. On a narrow terminal the least important fields drop out first.

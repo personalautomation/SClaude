@@ -71,7 +71,7 @@ RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
           for m in ("cycle/run.sh", "cycle/session_watch.sh", "review/review_round.sh", "review/review_gate.sh",
                     "improve/friction.sh"))
 WATCH = 'source "%s/core/state.sh"\nsource "%s/core/pane.sh"\nLIB="%s"\n' % (LIB, LIB, LIB) + functions(
-    ["round_marker", "done_marker", "wait_note", "session_watch_start", "session_watch_stop", "stop_file"])
+    ["done_marker", "wait_note", "session_watch_start", "session_watch_stop", "stop_file"])
 END = os.path.join(LIB, "cycle", "session_end.py")
 
 tmp = tempfile.mkdtemp()
@@ -223,7 +223,7 @@ session_watch_stop
             end_watcher(proc, clean)
 
     # --- a marker and an ended turn end that session's process, and only it ---
-    for marker in ("review-round", "session-done"):
+    for marker in ("session-done",):
         target = fake("--session-id %s --model opus" % session)
         resumed_other = fake("--resume 99999999-0000-0000-0000-000000000000")
         mentions = fake("--name x-%s" % session)  # the id, but not as a session flag
@@ -419,13 +419,13 @@ echo "watcher=[$SESSION_WATCHER]"
     check("no-marker-no-kill", target.poll(), None)
     check("watcher-cleared", "watcher=[]" in out, True)
     # Writing the marker after the watcher is stopped changes nothing.
-    with open(os.path.join(wt, ".sclaude/local/feature", "review-round"), "w") as fh:
+    with open(os.path.join(wt, ".sclaude/local/feature", "session-done"), "w") as fh:
         fh.write("late\n")
     say(turn_end())
     time.sleep(0.5)
     check("stopped-watcher-stays-stopped", target.poll(), None)
     target.kill()
-    os.remove(os.path.join(wt, ".sclaude/local/feature", "review-round"))
+    os.remove(os.path.join(wt, ".sclaude/local/feature", "session-done"))
 
     # --- step 1: the plan's approval is its marker ----------------------------
     for approval, closes in (("User has approved your plan.", True),
@@ -733,16 +733,13 @@ echo "watcher=[$SESSION_WATCHER]"
     lines = "\n".join(issue_context.request_lines(5, []))
     check("new-request-names-its-marker", issue_context.REQUEST in lines, True)
 
-    # --- run_step rotates on the marker ----------------------------------------
-    rot = RUN[RUN.index('if [[ "$step" == "review" && -s "$(round_marker "$wt")" ]]; then'):]
-    rot = rot[:rot.index("\n  fi\n")]
-    check("rotation-records-the-reason", 'step_run "$wt" "$step" end "$session" "fixes confirmed"' in rot, True)
-    check("rotation-forgets-the-session", 'state_set "$state" "steps.$step.session" null' in rot, True)
-    check("rotation-writes-the-issue", 'issue_sync "$wt"' in rot, True)
-    check("rotation-counts-its-rounds", 'run_rounds "$wt" "$session" "$rounds"' in rot, True)
-    check("carry-on-counts-the-next-round", 'run_rounds "$wt" "$session" "$((rounds + 1))"' in rot, True)
+    # --- a review session ends on its done marker; the gate takes the round ----
+    check("review-session-goes-to-the-review",
+          'cycle_edge "$wt" review review_run "$SESSION_BY" "$SESSION_HOW"' in RUN, True)
+    check("gate-keeps-a-light-session",
+          'run_step "$wt" "$slug" review "$(review_carry_on "$pct")" kept' in RUN, True)
+    check("no-round-marker-left", "round_marker" in RUN or "review-round" in RUN, False)
     check("fresh-review-is-round-one", '&& run_rounds "$wt" "$session" 1' in RUN, True)
-    check("rotation-opens-a-fresh-session", 'run_step "$wt" "$slug" "$step"' in rot, True)
     # A round carried on in the same session resumes it through run_step, and
     # the issue row must show the comments that round added.
     resume = RUN[RUN.index('claude_launch --resume "$session"') - 1000:RUN.index('claude_launch --resume "$session"')]
@@ -784,7 +781,7 @@ echo "watcher=[$SESSION_WATCHER]"
     # --- the prompt names the marker the orchestrator watches -----------------
     with open(os.path.join(ROOT, "sclaude", "prompts", "review.md")) as fh:
         prompt = fh.read()
-    check("prompt-names-the-marker", "> .sclaude/local/feature/review-round" in prompt, True)
+    check("prompt-names-the-marker", "echo done > .sclaude/local/feature/session-done" in prompt, True)
     check("prompt-uses-subagents", "Fix through subagents" in prompt, True)
     # A round in a few dozen lines already read is fixed by the session itself:
     # the context limit bounds the conversation anyway.
@@ -793,14 +790,10 @@ echo "watcher=[$SESSION_WATCHER]"
           and "once yours is past its limit" in prompt
           and "not a deviation to report" in prompt
           and "ends with this round" not in prompt, True)
-    check("code-watches-the-same-file", 'echo "$1/.sclaude/local/feature/review-round"' in RUN, True)
-    # `sclaude checks` says whether the findings on code the session did not
-    # touch are its own already (review_checks_keep); the prompt acts on the
-    # same two openings.
-    for name in ("CHECKS_KEEP_YES", "CHECKS_KEEP_NO"):
-        said = re.search(r'^%s="([^"]+)"' % name, RUN, re.M)
-        check("checks-keep-%s-in-prompt" % name, bool(said) and ("`%s" % said.group(1)) in prompt, True)
-    check("checks-keep-on-red", 'run_took_up "$wt" red; review_checks_keep "$wt"' in RUN, True)
+    # The session waits for the checks, never for the review: the gate does.
+    check("prompt-does-not-wait-for-the-review",
+          "not the review, which sclaude waits for" in prompt and "sclaude's to wait for, not yours" in prompt, True)
+    check("checks-take-up-nothing", "run_took_up" in RUN, False)
 
     # --- the context a session holds: its own requests, not a subagent's ------
     def used(tokens, cached=0, side=False):
@@ -876,12 +869,14 @@ echo "watcher=[$SESSION_WATCHER]"
     check("context-without-statusline", out.split("\n")[0], "120003 50010 - -")
 
     # --- the round goes on in the same session under the threshold -------------
+    rot = RUN[RUN.index("review_reopen() {"):]
+    rot = rot[:rot.index("\n}\n")]
     check("threshold-decides", 'if why="$(review_keep "$wt" "$session" "$held")"; then' in rot, True)
-    check("carry-on-resumes-with-a-word", 'run_step "$wt" "$slug" "$step" "$(review_carry_on "$pct")"' in rot, True)
-    carry = rot[rot.index('review_keep "$wt" "$session" "$held")"; then'):rot.index("    fi\n")]
-    check("carry-on-keeps-the-session", "steps.$step.session" in carry or "end \"$session\"" in carry, False)
-    check("rotation-logged", 'review_context_log "$wt" "$slug" "$session" "fresh session"' in rot, True)
-    check("exit-logged", RUN.count('review_context_log "$wt" "$slug" "$session"'), 3)
+    check("carry-on-resumes-with-a-word", 'run_step "$wt" "$slug" review "$(review_carry_on "$pct")" kept' in rot, True)
+    carry = rot[rot.index('review_keep "$wt" "$session" "$held")"; then'):rot.index("      fi\n")]
+    check("carry-on-keeps-the-session", "steps.review.session null" in carry, False)
+    # One row a session end (session_ended): a round ends with its session.
+    check("exit-logged", RUN.count('review_context_log "$wt" "$slug" "$session"'), 1)
     with open(os.path.join(LIB, "core", "steps.sh")) as fh:
         steps_sh = fh.read()
     check("threshold-default", 'REVIEW_CONTEXT_MAX_PCT="${REVIEW_CONTEXT_MAX_PCT:-40}"' in steps_sh, True)
@@ -926,8 +921,8 @@ echo "watcher=[$SESSION_WATCHER]"
     check("fresh-when-share-unknown", "RC=1" in out and "unknown" in out, True)
     out = keep("120003 50010 13 1000000", None)
     check("fresh-when-time-unknown", "RC=1" in out and "could not be read" in out, True)
-    check("prompt-four-passes", "Four such passes at most" in prompt, True)
-    check("prompt-leaves-the-choice", "who takes them is the orchestrator's call" in prompt, True)
+    check("prompt-four-returns", "Four such returns at most" in prompt, True)
+    check("prompt-leaves-the-choice", "to this conversation while its context is light, to a fresh session otherwise" in prompt, True)
     check("prompt-names-the-reversals-file",
           ">> .sclaude/local/feature/review-reversals" in prompt
           and 'echo "$1/.sclaude/local/feature/review-reversals"' in RUN, True)
@@ -1078,12 +1073,6 @@ echo "watcher=[$SESSION_WATCHER]"
     os.unlink(os.path.join(tmp, pc.YOURS_FILE))
     gate = RUN[RUN.index("review_close_gate() {"):]
     gate = gate[:gate.index("\n}\n")]
-    # A round closed inside a fix session is told as its end is, with the tally.
-    rnd = RUN[RUN.index('if [[ "$step" == "review" && -s "$(round_marker "$wt")" ]]; then'):]
-    rnd = rnd[:rnd.index("\n  fi\n")]
-    check("round-told-as-an-end",
-          'ask_feed say "$(phase_line finished step "$step"' in rnd and '"$rounds")${tally:+ · $tally}"' in rnd
-          and 'say "${BOLD}Review round closed' not in rnd, True)
     # A round goes on across a person's leave and return; it begins anew only
     # after it ended — closed by sclaude on its report, or by the review.
     rstate = os.path.join(wt, ".sclaude/local/feature", "state.json")
@@ -1163,7 +1152,7 @@ echo "watcher=[$SESSION_WATCHER]"
     # really resumed — not counted here, and not left in the state, where a
     # start that stops short would count it on some later resume.
     out, left, rounds = reopen_run("0 3", True)
-    check("reopen-new-round-kept", (left, rounds, "RUN_STEP review [**The review round is closed" in out,
+    check("reopen-new-round-kept", (left, rounds, "RUN_STEP review [**The review read your last push" in out,
                                     out.rstrip().endswith("] kept"), "RUN_ROUNDS" in out), ("S1", 1, True, True, False))
     resumed = RUN[RUN.index('review_brief "$wt" "$step" resumed'):]
     resumed = resumed[:resumed.index("claude_launch --resume")]
@@ -1208,13 +1197,13 @@ echo "watcher=[$SESSION_WATCHER]"
         with open(os.path.join(fake, "review/pr_context.py"), "w") as fh:
             fh.write("import sys\nprint(%r if '--open-since' in sys.argv else %r)\n" % (split, word))
         body = 'source "%s/core/state.sh"\nsource "%s/review/local_review.sh"\n' % (LIB, LIB)
-        body += functions(["review_close_gate", "review_back_edge", "review_enough_close", "review_session_since",
+        body += functions(["review_close_gate", "review_back_edge", "review_leave_run", "review_enough_close", "review_session_since",
                                 "review_stuck_say", "review_report_unshown"])
         body += ('LIB="%s"; SELF=sclaude; BOLD=""; DIM=""; OFF=""; MERGE_POLL=1; REVIEW_WAIT_MAX=5; REVIEW_GO_ON_PAUSE=0\n'
                  'gh_repo() { echo o/r; }\nproject_review_mode() { echo %s; }\n'
                  'local_review() { echo REVIEWED >&2; [[ %s == failed ]] && return 1; echo %s; }\n'
                  'local_review_count() { echo COUNTED >&2; echo %s; }\nlocal_review_done() { %s; }\n'
-                 'review_report() { echo REPORT; }\nreview_quota_rerun() { echo QUOTA; return 1; }\n'
+                 'review_report() { echo REPORT; }\nreview_fallback_switch() { echo QUOTA; return 1; }\n'
                  'ANSWERS=(%s); is_yes() { [[ "$1" == y ]]; }\n'
                  'ask() { echo "ASKED: $1"; printf -v "$2" %%s "${ANSWERS[0]:-n}"; ANSWERS=("${ANSWERS[@]:1}"); }\n'
                  'say() { echo "$*"; }\ninfo() { echo "$*"; }\nwarn() { echo "$*"; }\n'
@@ -1238,7 +1227,7 @@ echo "watcher=[$SESSION_WATCHER]"
     out, left = enough_gate("", "clean", 0, entry=True)
     check("entry-clean-closes", "REVIEWED" in out and "RC=0" in out and "RUN_STEP" not in out, True)
     out, left = enough_gate("", "clean", 2, entry=True)
-    check("entry-findings-to-session", "RC=1" in out and "EDGE local_pass review" in out
+    check("entry-findings-to-session", "RC=1" in out and "EDGE review_close review" in out
           and "RUN_STEP" not in out and "ASKED" not in out, True)
     out, left = enough_gate("", "dirty", 0, entry=True)
     check("entry-dirty-to-session", "RC=1" in out and "EDGE review_close review" in out, True)
@@ -1280,15 +1269,17 @@ echo "watcher=[$SESSION_WATCHER]"
         body = 'source "%s/core/state.sh"\n%s\nreview_entry_place "%s"\n' % (
             LIB, functions(["review_entry_place"]), pw)
         return subprocess.run(["bash", "-c", body], capture_output=True, text=True, timeout=30).stdout.strip()
-    check("entry-place-out", [place_of([]), place_of(["pr_check draft_pr"])], ["out", "out"])
-    check("entry-place-left-in-gate", [place_of(["pr_check draft_pr", "draft_pr review_close"]),
-                                       place_of(["draft_pr review_close", "review_close local_pass"]),
-                                       place_of(["draft_pr ci_review", "f_log f_empty"])], ["gate"] * 3)
-    check("entry-place-session", [place_of(["review_close local_pass", "local_pass review"]),
+    check("entry-place-out", [place_of([]), place_of(["pr_check review_run"]),
+                              place_of(["pr_check review_close"]),
+                              place_of(["pr_check review_run", "f_log f_empty"])], ["out"] * 4)
+    check("entry-place-left-in-gate", [place_of(["pr_check review_run", "review_run review_close"]),
+                                       place_of(["review_close review_run"]),
+                                       place_of(["review_close review", "review review_run"])], ["gate"] * 3)
+    check("entry-place-session", [place_of(["review_run review_close", "review_close review"]),
                                   place_of(["review_close preview", "preview review"])], ["session"] * 2)
     # Sent back past step 4 by a way no code writes into the session.
-    check("entry-place-later", [place_of(["local_pass review_close", "review_close preview"]),
-                                place_of(["round review_close", "review_close preview", "preview in_qa",
+    check("entry-place-later", [place_of(["review_run review_close", "review_close preview"]),
+                                place_of(["review_run review_close", "review_close preview", "preview in_qa",
                                           "hold_ways rollback"])], ["later"] * 2)
     out, left = enough_gate("", "clean", "failed", entry=True)
     check("entry-failed-pass-to-session", "RC=1" in out and "ASKED" not in out, True)

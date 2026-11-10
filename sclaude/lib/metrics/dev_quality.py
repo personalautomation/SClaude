@@ -111,7 +111,7 @@ def review_log(repo):
     `end_pct` the median share of the window it had used when it handed back.
 
     review_context_log writes a row each time a review session hands its
-    round back — carried on into the next, done, or left — with the threads
+    round back — done, or left (older logs: carried on into the next) — with the threads
     that round was handed and the findings it declined since the row before.
     So a row is a round, and both counts add up across rows."""
     sessions, rounds, comments, reversals = set(), 0, 0, 0

@@ -167,7 +167,7 @@ try:
 
 
     BODY = functions(["session_ended", "session_take_as_done", "session_closed",
-                      "done_marker", "round_marker", "stop_file", "stop_asked"])
+                      "done_marker", "stop_file", "stop_asked"])
     log = os.path.join(tmp, "calls")
 
     def ended(step, said, marker, plan_ok=True):

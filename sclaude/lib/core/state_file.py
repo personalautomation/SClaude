@@ -114,21 +114,8 @@ def update(path, create=False):
 
 
 def share_start(run):
-    """When the share of a review session's launch now being closed began
-    (`cost_at`, run_cost and run_took_up in steps.sh): the launch's last round
-    taken up whose share was closed (`cost_split`), else its start
-    (`resumed`, or `started` for the first launch). A round taken up with no
-    spend read at its red closed no share: dated by it, the launch's whole
-    spend went on its last round. One split before the launch began belongs
-    to an earlier launch."""
-    import datetime
-
-    def when(text):
-        try:
-            return datetime.datetime.fromisoformat(text) if text else None
-        except ValueError:
-            return None
-    start = run.get("resumed") or run.get("started") or ""
-    began = when(start)
-    taken = [t for t in (run.get("cost_split") or []) if when(t) and (not began or when(t) >= began)]
-    return max(taken, key=when) if taken else start
+    """When the launch of a review session whose cost is now closed began
+    (`cost_at`, run_cost in steps.sh): `resumed`, or `started` for the first
+    launch. Every round begins a launch of its own: the session ends on its
+    marker and the gate brings it back."""
+    return run.get("resumed") or run.get("started") or ""

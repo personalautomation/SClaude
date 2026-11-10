@@ -316,21 +316,41 @@ project_migrations_dir() {
 }
 
 # Who reviews the project's pull requests: `github` (the review workflow in
-# Actions, what every project had before this key), `local` (sclaude runs the
-# same /code-review on this machine, local_review.sh) or `off`. Absent, or a
-# word it does not know, is `github`: the review a project already has is not
-# switched off by a typo.
+# Actions, what every project had before this key), `github-local` (the same,
+# and when it cannot run — Claude's limit, no Actions minutes — the feature
+# moves to the review here), `local` (sclaude runs the same /code-review on
+# this machine, local_review.sh) or `off`. Absent, or a word it does not
+# know, is `github`: the review a project already has is not switched off by
+# a typo. With `github` alone a review that cannot run stops step 4.
 #
 # Read from the main checkout first, not the feature's tree: where the review
 # runs is a choice about the project's spending, made now (`sclaude config`),
 # and a feature branched last week must not go on with the old one until it
 # merges main. The tree's copy answers only where the main checkout has none.
-project_review_mode() {
+#
+# project_review_setting is the word as set; project_review_mode where the
+# feature's review runs now: `github-local` is `github`, or `local` for a
+# feature whose review could not run on GitHub and moved to this machine
+# (review_fallback_set in review_round.sh): its tree holds the mark.
+project_review_setting() {
   local mode
   mode="$(project_get review "${1:-}" 2>/dev/null || true)"
   case "$mode" in
-    local|off) echo "$mode" ;;
+    local|off|github-local) echo "$mode" ;;
     *) echo github ;;
+  esac
+}
+
+project_review_mode() {
+  local mode
+  mode="$(project_review_setting "${1:-}")"
+  case "$mode" in
+    local|off|github) echo "$mode" ;;
+    *) if [[ -n "${1:-}" && -f "$1/.sclaude/local/feature/review-fallback" ]]; then
+         echo local
+       else
+         echo github
+       fi ;;
   esac
 }
 

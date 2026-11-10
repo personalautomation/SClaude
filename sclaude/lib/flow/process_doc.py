@@ -39,7 +39,7 @@ WHEN = {
     "an epilogue broken off": ["epilogue"],
     "monthly, offered": [],
     "in a session": [nid for nid, n in process_config.all_nodes().items() if n[2] == "session"],
-    "with review rounds": ["review", "round"],
+    "with review rounds": ["review", "review_run", "review_close"],
     "a developer's branch": [],
     "a workshop change held": ["w_held"],
 }

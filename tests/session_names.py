@@ -47,8 +47,8 @@ with tempfile.TemporaryDirectory() as tmp:
         }}, fh)
     check("plan", label("step", state, "plan", "p1"), "1-plan")
     check("code-again", label("step", state, "code", "c2"), "2-code(2)")
-    check("review-first", label("step", state, "review", "r1"), "4-review")
-    check("review-second", label("step", state, "review", "r2"), "4-review(2)")
+    check("review-first", label("step", state, "review", "r1"), "4-fix-review")
+    check("review-second", label("step", state, "review", "r2"), "4-fix-review(2)")
     number = lambda *a: subprocess.run(
         ["bash", "-c", 'source "%s/core/steps.sh"; step_session_number "$@"' % LIB, "bash"] + list(a),
         capture_output=True, text=True, timeout=30).stdout.strip()
@@ -75,7 +75,7 @@ def icon(title):
 
 
 for title, want in (("1-plan/x", "📝"), ("2-code(2)/x", "💻"), ("3-pr/x", "📤"),
-                    ("4-review/x", "🛠"), ("4-review(2)/x", "🛠"), ("4-friction(2)/x", "🧱"),
+                    ("4-fix-review/x", "🛠"), ("4-fix-review(2)/x", "🛠"), ("4-friction(2)/x", "🧱"),
                     ("4-fix-preview(2)/x", "🔧"), ("4-fix-preview-friction/x", "🧱"),
                     ("5-sync/x", "🔀"), ("5-sync(2)/x", "🔀"),
                     ("6-epilogue/x", "🏁"), ("7-retro/x", "🔁"),
@@ -92,8 +92,8 @@ def named(name):
 
 # The emoji goes into the name, before the slug: claude titles the tab with
 # the name, and cuts it at the end.
-for name, want in (("4-review(2)/x", "4-review(2) 🛠/x"), ("1-plan/x", "1-plan 📝/x"),
-                   ("4-review(2) 🛠/x", "4-review(2) 🛠/x"), ("demo/code", "demo/code"),
+for name, want in (("4-fix-review(2)/x", "4-fix-review(2) 🛠/x"), ("1-plan/x", "1-plan 📝/x"),
+                   ("4-fix-review(2) 🛠/x", "4-fix-review(2) 🛠/x"), ("demo/code", "demo/code"),
                    ("chat", "chat")):
     check("named " + name, named(name), want)
     check("icon kept " + name, icon(named(name)), icon(name))

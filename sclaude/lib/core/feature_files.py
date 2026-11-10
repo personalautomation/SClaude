@@ -26,7 +26,6 @@ FILES = [
     ("plan.md", "the plan step 1 wrote and the person approved"),
     ("plan.printed", "the plan as last printed, so a later session prints it only when it changed"),
     ("session-done", "a session's marker: its work is done (the session writes it, the watcher reads it)"),
-    ("review-round", "a review session's marker: this round is done"),
     ("review-checked", "`sclaude checks` returned on a review run (its code, head, time): sclaude's tab prints the report by it"),
     ("closing", "the worktree's removal has begun: no lazy start, the menu offers it no more"),
     ("terminal", "the terminal recordings that touched the feature, one path a line"),
@@ -42,7 +41,9 @@ FILES = [
     ("review-yours", "review threads the person decided to leave (YOURS_FILE in pr_context.py)"),
     ("review-night", "the night's decisions on threads, to be confirmed in the morning (NIGHT_FILE)"),
     ("review-reversals", "threads a review session reversed (reversals_file in review_round.sh)"),
-    ("local-review<suffix>", "a review run on this machine: -rounds.jsonl its journal, -unposted.json "
+    ("review-fallback", "GitHub's review could not run (Claude's limit, no Actions minutes): the feature is reviewed on this machine (review_fallback_set, FALLBACK_FILE)"),
+    ("review-rounds.jsonl", "the review's journal, one line per run wherever it ran (review_journal, JOURNAL in local_review.py)"),
+    ("local-review<suffix>", "a review run on this machine: -unposted.json "
                              "findings GitHub would not take yet, -answer.md the last answer, .log its stderr"),
 
     # --- regression and deploy -------------------------------------------------

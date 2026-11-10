@@ -92,6 +92,9 @@ def fold(word):
     review after any of them is a friction review."""
     if word.endswith("-friction"):
         return "friction"
+    # Step 4's sessions are named fix-review; the step is review.
+    if word == "fix-review":
+        return "review"
     return "fix" if re.fullmatch(r"fix(-[a-z]+)?", word) else word
 
 

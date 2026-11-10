@@ -39,6 +39,7 @@ the same conversation resumes.
 |---|---|---|
 | **regression is red** (local, preview or production) | run once more (the commonest red is a flaky test), then a fixing session, at most twice | still red: a person is asked. No endless loops |
 | **production is red** right after the release | roll back first — unless somebody else shipped since: that release is not ours to remove | a clean check of the old release |
+| **the review in Actions cannot run** (Claude's limit, no Actions minutes) | rerun once the limit has reset | still blocked: `review: github` stops step 4 and says why; `github-local` reviews the feature on this machine |
 | **QA sends it back** | the cycle rewinds to the step that must change | back through QA, same criteria, same issue |
 | **a closed laptop** or a dropped connection | pick up where it stopped | nothing lost or redone |
 

@@ -52,7 +52,7 @@ tmp = tempfile.mkdtemp()
 try:
     wt = os.path.join(tmp, "wt")
     feature = os.path.join(wt, ".sclaude", "local", "feature")
-    journal = os.path.join(feature, "local-review-rounds.jsonl")
+    journal = os.path.join(feature, "review-rounds.jsonl")
 
     # --- the issue row ------------------------------------------------------------
     write(os.path.join(feature, "state.json"), json.dumps(

@@ -302,6 +302,7 @@ run_step() {
     # pull request carries, and with four such commits behind it the review
     # here did not run and the session was told so, for a person to push.
     regression_push_fix "$wt" "${pr:-}" || true
+    review_fallback_inherit "$wt"
     review_mode="$(project_review_mode "$wt")"
     review_label_sync "$wt" "$pr"
     # Where the feature stands by its history decides the ways written:
@@ -318,18 +319,6 @@ run_step() {
       known="$(local_review_count "$wt" "$pr" 2>/dev/null)" || known=""
       [[ "$known" =~ ^[0-9]+$ ]] || known="?"
     fi
-    if [[ "$here" == out ]]; then
-      case "$review_mode" in
-        local) if [[ -n "$enough" ]]; then
-                 cycle_edge "$wt" draft_pr review_close person "you ended the search" note="${known:-?} finding(s) open"
-               else
-                 cycle_edge "$wt" draft_pr review_close setting "review: local"
-               fi ;;
-        off)   cycle_edge "$wt" draft_pr review_close setting "review: off" ;;
-        *)     cycle_edge "$wt" draft_pr ci_review github "the review workflow"
-               cycle_edge "$wt" ci_review review_close github "the review workflow" ;;
-      esac
-    fi
     # Step 4 opens on its own gate, the one each of its sessions ends on
     # (review_close_gate): the local review's pass, the wait for the review
     # in Actions, the report — asked the way in's question. Nothing open and
@@ -337,6 +326,10 @@ run_step() {
     REVIEW_KNOWN_COUNT="$known" review_close_gate "$wt" "$slug" "${pr:-}" \
       "$([[ "$here" == session || "$here" == later ]] && echo quiet || echo entry)" && review_word="$REVIEW_ENTRY_WORD"
     local_count="$REVIEW_ENTRY_COUNT"
+    # `review: github` and GitHub's review could not run: the gate said why.
+    [[ "$REVIEW_ENTRY_WORD" == stopped ]] && return 0
+    # The gate may have moved the review here (review_fallback_switch).
+    review_mode="$(project_review_mode "$wt")"
   fi
   if [[ "$review_word" == "clean" || "$review_word" == "unreviewed" ]]; then
     state_set "$state" "steps.$step.started" "$(date -Iseconds)"
@@ -492,11 +485,9 @@ run_step() {
     local opening="$news"
     [[ -n "$told" ]] && opening="$(printf '%s%s' "$told" "${news:+$'\n\n'$news}")"
     # No marker_gone for step 1, which writes no marker: the plan's approval
-    # closes it. A review on this machine writes no review-round (review.md).
+    # closes it.
     if [[ -n "$opening" && "$step" != "plan" ]]; then
-      local gone=(.sclaude/local/feature/session-done)
-      [[ "$step" == "review" && "$review_mode" != "local" ]] && gone+=(.sclaude/local/feature/review-round)
-      opening="$(printf '%s\n\n%s' "$opening" "$(marker_gone "${gone[@]}")")"
+      opening="$(printf '%s\n\n%s' "$opening" "$(marker_gone .sclaude/local/feature/session-done)")"
     fi
     RUN_STEP_LAUNCHED=1
     state_set "$state" "steps.$step.gate" null
@@ -660,75 +651,11 @@ session_ended() {
   # person's word came after it.
   local said_key taken_at=""
   said_key="$(session_ctl_take "$session")"
-  [[ "$said_key" == later ]] && rm -f "$(done_marker "$wt")" "$(round_marker "$wt")"
+  [[ "$said_key" == later ]] && rm -f "$(done_marker "$wt")"
   # When the key closed it: the marker the watcher wrote then (capture_plan).
   # To the fraction of a second: the plan's call may be written in the same
   # second, just before.
   [[ "$said_key" == next* ]] && taken_at="$(stat -c %.Y "$(done_marker "$wt")" 2>/dev/null || true)"
-  # The review round is over: the automatic review closed every finding this
-  # session fixed, and posted new ones. While its context is light and still
-  # cached the same session takes them; otherwise they go to a session of
-  # their own, with none of this one's context (review_keep). That session's
-  # row in the issue says why this one ended; the next one is a row of its
-  # own. See round_marker.
-  if [[ "$step" == "review" && -s "$(round_marker "$wt")" ]]; then
-    local round_note; round_note="$(head -c 300 "$(round_marker "$wt")")"
-    rm -f "$(round_marker "$wt")"
-    # The terminal may have been left mid-redraw by the signal.
-    stty sane 2>/dev/null || true
-    session_report "$wt" "$session"
-    plan_report "$wt" "$step"
-    local rounds; rounds="$(state_get "$state" "steps.$step.rounds" 2>/dev/null || true)"
-    [[ "$rounds" =~ ^[0-9]+$ ]] || rounds=0
-    rounds=$((rounds + 1))
-    # The topic hears of the round as of a fix session's end, with what it
-    # left; the terminal keeps its own words for it below.
-    local tally; tally="$(review_tally "$wt" "$step")"
-    review_round_ends "$wt"
-    ask_feed say "$(phase_line finished step "$step" "$(step_session_number "$state" "$step" "$session")" "$rounds")${tally:+ · $tally}"
-    local held pct why
-    held="$(review_context "$wt" "$session")"
-    pct="$(awk '{print $3}' <<<"$held")"
-    cycle_edge "$wt" review round session "its round marker" note="round $rounds${tally:+ · $tally}"
-    if why="$(review_keep "$wt" "$session" "$held")"; then
-      cycle_edge "$wt" round review sclaude "the same session" note="context ${pct:-?}%, $why"
-      state_set "$state" "steps.$step.rounds" "$rounds"
-      # The round it now starts counts too; run_step writes it to the issue.
-      run_rounds "$wt" "$session" "$((rounds + 1))"
-      review_context_log "$wt" "$slug" "$session" "carried on" "$held" "$rounds"
-      echo ""
-      say_here "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
-      [[ -n "$round_note" ]] && info "  $round_note"
-      info "  Its context is at ${pct}% (under ${REVIEW_CONTEXT_MAX_PCT}%) and $why: the same session takes the findings still open."
-      REVIEW_KEPT_SAID=1  # run_step leaves out its own "resuming" line
-      review_yours_report "$wt" "$pr" || true
-      review_report "$wt" "$slug"
-      run_step "$wt" "$slug" "$step" "$(review_carry_on "$pct")"
-      return 0
-    fi
-    review_context_log "$wt" "$slug" "$session" "fresh session" "$held" "$rounds"
-    cycle_edge "$wt" round review sclaude "a fresh session" note="context ${pct:-?}%, $why"
-    state_set "$state" "steps.$step.rounds" null
-    # Every round it worked was closed, the last one included.
-    run_rounds "$wt" "$session" "$rounds"
-    step_run "$wt" "$step" end "$session" "fixes confirmed"
-    local round_key; round_key="$(step_run_key "$state" "$step" "$session")"
-    state_set "$state" "steps.$step.session" null
-    watch_seen "$slug"
-    issue_sync "$wt"
-    echo ""
-    say_here "${BOLD}Review round closed: the automatic review confirmed every fix this session made.${OFF}"
-    [[ -n "$round_note" ]] && info "  $round_note"
-    info "  The new findings go to a fresh session, without this one's context: $why."
-    review_yours_report "$wt" "$pr" || true
-    review_report "$wt" "$slug"
-    if ! run_friction "$wt" "$slug" "$round_key"; then
-      info "  The next round waits for it: $SELF $slug"
-      return 0
-    fi
-    run_step "$wt" "$slug" "$step"
-    return 0
-  fi
   # The session said it was done and the watcher closed it: its report is
   # printed here, since claude's screen went with it, and the gates after it
   # act on what they find without asking — the person did not type /exit, so
@@ -798,15 +725,13 @@ session_ended() {
       plan)   cycle_edge "$wt" plan approve "$SESSION_BY" "$SESSION_HOW" ;;
       code)   cycle_edge "$wt" code works "$SESSION_BY" "$SESSION_HOW" ;;
       pr)     cycle_edge "$wt" pr pr_check "$SESSION_BY" "$SESSION_HOW" ;;
-      review)
-        # Where the map asks for a round marker (a review on GitHub, or none),
-        # through that check; a review on this machine has no rounds of its own.
-        if [[ "$(project_review_mode "$wt")" == local ]]; then
-          cycle_edge "$wt" review review_close "$SESSION_BY" "$SESSION_HOW"
-        else
-          cycle_edge "$wt" review round "$SESSION_BY" "$SESSION_HOW"
-          cycle_edge "$wt" round review_close sclaude "no round marker"
-        fi ;;
+      # Wherever the review runs, it reads the push next: step 4's gate
+      # waits for it or runs it. With none, straight to the gate.
+      review) if [[ "$(project_review_mode "$wt")" == off ]]; then
+                cycle_edge "$wt" review review_close "$SESSION_BY" "$SESSION_HOW"
+              else
+                cycle_edge "$wt" review review_run "$SESSION_BY" "$SESSION_HOW"
+              fi ;;
     esac
   fi
 
@@ -1243,7 +1168,11 @@ after_step() {
   step_run "$wt" "$step" close
   case "$step" in
     plan)   cycle_edge "$wt" plan_check code sclaude "the plan kept in plan.md" ;;
-    pr)     cycle_edge "$wt" pr_check draft_pr sclaude "gh" note="PR #${number:-?}, all pushed" ;;
+    pr)     if [[ "$(project_review_mode "$wt")" == off ]]; then
+              cycle_edge "$wt" pr_check review_close sclaude "gh" note="PR #${number:-?}, all pushed"
+            else
+              cycle_edge "$wt" pr_check review_run sclaude "gh" note="PR #${number:-?}, all pushed"
+            fi ;;
     review) cycle_edge "$wt" review_close preview "${REVIEW_CLOSE_BY:-sclaude}" "${REVIEW_CLOSE_HOW:-}" \
               note="${REVIEW_CLOSE_NOTE:-}" ;;
   esac

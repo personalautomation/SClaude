@@ -10,19 +10,31 @@
 # The way back to a session, from the gate or from the local review whose
 # pass found something; each spelled out, as the map's arrows are.
 #
-#   review_back_edge <wt> <review_close|local_pass> <by> <how> [<key>=<value>…]
+#   review_back_edge <wt> <review_close|review_run> <by> <how> [<key>=<value>…]
 review_back_edge() {
   local wt="$1" from="$2"
   shift 2
-  if [[ "$from" == local_pass ]]; then
-    cycle_edge "$wt" local_pass review "$@"
-  else
-    cycle_edge "$wt" review_close review "$@"
-  fi
+  # From the review's block, or standing in it still (a session sent back
+  # with no answer read, a wait that ran out): out of it first.
+  review_leave_run "$wt" sclaude "$([[ "$from" == review_run ]] && echo findings || echo "the gate's answer")"
+  cycle_edge "$wt" review_close review "$@"
+}
+
+# Out of the review's block to the gate, when the feature stands in it — the
+# pull request just opened, or a session's push just made — and has not left
+# it by a way of its own: the review in Actions finished, a pass found
+# nothing, the person ended the search. 1 when it stood elsewhere.
+#
+#   review_leave_run <wt> <by> <how> [<key>=<value>…]
+review_leave_run() {
+  local wt="$1"
+  shift
+  [[ "$(last_place "$wt" pr_check review_run review_close review preview)" == review_run ]] || return 1
+  cycle_edge "$wt" review_run review_close "$@"
 }
 
 # Where a feature stands as step 4 opens, by the ways its history wrote:
-# `out` before the step (on the draft pull request, or nothing written),
+# `out` before the step (the pull request just opened, or nothing written),
 # `gate` where an entry was left in the gate, `session` at the session —
 # or past step 4 (`later`), sent back by a way no code writes into the
 # session (a hand-back taken up at the next start, a rollback, a return
@@ -31,11 +43,17 @@ review_back_edge() {
 #
 #   review_entry_place <wt>
 review_entry_place() {
-  case "$(last_place "$1" draft_pr ci_review review_close local_pass review \
+  # Just past step 3, the pull request opened: the feature stands in the
+  # review's block, entered from step 3's check, and is out of step 4 yet.
+  local last
+  last="$(tac "$1/.sclaude/local/feature/history.jsonl" 2>/dev/null \
+    | sed -n 's/.*"what": "edge", "op": "\([a-z0-9_]*\) \(review_run\|review_close\|review\|preview\)".*/\1 \2/p' | head -1)"
+  [[ "$last" == "pr_check review_run" || "$last" == "pr_check review_close" ]] && { echo out; return; }
+  case "$(last_place "$1" pr_check review_close review_run review \
             preview in_qa qa_check qa_verdict handoff merge merge_wait merged ship prod hold_ways epilogue)" in
     review) echo session ;;
-    ci_review|review_close|local_pass) echo gate ;;
-    draft_pr|"") echo out ;;
+    review_close|review_run) echo gate ;;
+    pr_check|"") echo out ;;
     *) echo later ;;
   esac
 }
@@ -109,6 +127,12 @@ review_close_gate() {
     local_due=0
     REVIEW_ENTRY_COUNT="$REVIEW_KNOWN_COUNT"
   fi
+  # In the review's block with a count already known: it stands for the
+  # pass, and the feature goes on to the gate. The review in Actions leaves
+  # the block once it has answered (below).
+  if [[ "$edges" -eq 1 && "$local_due" -eq 0 && -n "${REVIEW_KNOWN_COUNT:-}" ]]; then
+    review_leave_run "$wt" person "you ended the search" note="${REVIEW_KNOWN_COUNT} finding(s) open"
+  fi
   while :; do
     # Findings the review on this machine left open are open, whatever the
     # pull request answers: its own threads are not in review_state's word;
@@ -125,8 +149,31 @@ review_close_gate() {
       word="open: the step's own session"
     else
       word="$(python3 "$LIB/review/pr_context.py" "$question" "$wt" "$pr" "$repo" 2>/dev/null || true)"
-      if [[ "$word" == open:*red:* || "$word" == dirty ]] && review_quota_rerun "$wt" "$slug" "$pr" "$repo"; then
-        continue
+      # The review in Actions has answered this head: out of its block.
+      [[ "$word" != pending && "$edges" -eq 1 && "$local_due" -eq 0 ]] \
+        && review_leave_run "$wt" github "the review workflow"
+      # The review in Actions could not run — Claude's limit, no minutes:
+      # under `github-local` the feature's review moves here and its pass
+      # runs at once; under `github` step 4 stops, saying why.
+      if [[ "$word" == open:*red:* || "$word" == dirty ]] && [[ "$local_due" -eq 0 ]] \
+          && [[ "$(project_review_mode "$wt")" == github ]]; then
+        if review_reset_rerun "$wt" "$pr" "$repo"; then
+          [[ "$edges" -eq 0 ]] || cycle_edge "$wt" review_close review_run sclaude "Claude's limit has reset" note="the review runs again"
+          continue
+        fi
+        case "$(project_review_setting "$wt")" in
+          github-local)
+            if review_fallback_switch "$wt" "$slug" "$pr" "$repo"; then
+              local_due=1
+              continue
+            fi ;;
+          github)
+            if review_github_stopped "$wt" "$slug" "$pr" "$repo"; then
+              REVIEW_ENTRY_WORD=stopped
+              [[ "$edges" -eq 0 ]] || review_back_edge "$wt" review_close none "" note="GitHub's review could not run"
+              return 1
+            fi ;;
+        esac
       fi
     fi
     # On the way in the local pass comes first, whatever is still running:
@@ -140,6 +187,7 @@ review_close_gate() {
         # person says so — a pass is paid for, and they stopped the review
         # to stop paying for rounds.
         if [[ -n "$(review_enough "$wt")" ]] && ! local_review_done "$wt"; then
+          [[ "$edges" -eq 0 ]] || review_leave_run "$wt" person "you ended the search"
           count="$(local_review_count "$wt" "$pr")" || count="?"
           echo ""
           info "  You ended the search for new findings; $count thread(s) are open on PR #$pr."
@@ -165,7 +213,7 @@ review_close_gate() {
           if [[ "$answer" != 1 ]]; then
             if [[ "$answer" != 2 ]]; then
               info "  Left open. Come back with: $SELF $slug"
-              cycle_edge "$wt" review_close review "$( [[ -n "$ASKED_HOW" ]] && echo person || echo none)" \
+              review_back_edge "$wt" review_close "$( [[ -n "$ASKED_HOW" ]] && echo person || echo none)" \
                 "$ASKED_HOW" note="left open, $count thread(s)"
               return 1
             fi
@@ -179,7 +227,10 @@ review_close_gate() {
         # The pass the gate runs is a block of the map's own: from the gate
         # to the local review, and from it back to the gate, or on to a
         # session with what it found (the way back below starts there).
-        [[ "$edges" -eq 0 ]] || cycle_edge "$wt" review_close local_pass sclaude "review: local" note="${word}"
+        # Standing in the block already (the pull request just opened, a
+        # session's push just made), the pass is that stay.
+        [[ "$edges" -eq 0 ]] || [[ "$(last_place "$wt" pr_check review_run review_close review preview)" == review_run ]] \
+          || cycle_edge "$wt" review_close review_run sclaude "review: local" note="${word}"
         # On the way in, a head the gate reviewed already was reported where
         # it ran: its table is not printed again before the session.
         local fresh_pass=1
@@ -188,11 +239,11 @@ review_close_gate() {
         [[ -n "$entry" ]] && REVIEW_ENTRY_COUNT="$count"
         # Nothing printed is read as nothing found below, and recorded so.
         if [[ "$count" =~ ^[0-9]*$ ]]; then
-          [[ "${count:-0}" -eq 0 && "$edges" -eq 1 ]] && cycle_edge "$wt" local_pass review_close sclaude "nothing found"
-          [[ "${count:-0}" -gt 0 ]] && back_from=local_pass
+          [[ "${count:-0}" -eq 0 && "$edges" -eq 1 ]] && cycle_edge "$wt" review_run review_close sclaude "nothing found"
+          [[ "${count:-0}" -gt 0 ]] && back_from=review_run
         fi
         if [[ "$count" == "failed" ]]; then
-          [[ "$edges" -eq 0 ]] || cycle_edge "$wt" local_pass review_close sclaude "the review on this machine" note="it did not run"
+          [[ "$edges" -eq 0 ]] || cycle_edge "$wt" review_run review_close sclaude "the review on this machine" note="it did not run"
           failed=$((failed + 1))
           warn ""
           warn "  The review on this machine did not run on $(git -C "$wt" rev-parse --short HEAD 2>/dev/null); its log: $(local_review_file "$wt" .log)"
@@ -217,7 +268,7 @@ review_close_gate() {
           fi
           if ! ask "${BOLD}Go on with this head unreviewed? n reviews it again [y/n] ${OFF}" answer yn; then
             info "  Left open. Come back with: $SELF $slug"
-            cycle_edge "$wt" review_close review none "" note="the review on this machine did not run"
+            review_back_edge "$wt" review_close none "" note="the review on this machine did not run"
             return 1
           fi
           is_yes "$answer" && REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="$ASKED_HOW" \
@@ -323,6 +374,9 @@ review_close_gate() {
   # else is open by then takes the ordinary way.
   if [[ "$word" == yours:* ]]; then
     if review_night_offer "$wt" "$slug" "$pr" "$repo"; then
+      # review_back_edge's two writes, spelled out: its call with `person`
+      # would read to the map's test as an edge to a place called so.
+      review_leave_run "$wt" sclaude "the gate's answer"
       cycle_edge "$wt" review_close review person "$ASKED_HOW" note="threads left at night"
       # Taken back: the threads are open work again, and the round goes the
       # way any open thread does — a fresh session (the one resumed would be
@@ -599,6 +653,8 @@ cmd_checks() {
   local pr="${1:-}" wt repo
   wt="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || { echo "could not read: not a git repository: $(pwd)"; exit 4; }
+  # The main checkout: this machine's config over the project's.
+  REPO="$(cd "$wt" && main_repo)" || REPO=""
   if [[ -z "$pr" ]]; then
     pr="$(cd "$wt" && gh pr view --json number --jq .number 2>/dev/null)" \
       || { echo "could not read: no pull request for this branch; name it, $SELF checks <pr>"; exit 4; }
@@ -606,10 +662,7 @@ cmd_checks() {
   [[ "$pr" =~ ^[0-9]+$ ]] || { echo "could not read: not a pull request number: $pr"; exit 4; }
   repo="$(REPO="$wt" gh_repo)"
   local rc=0
-  # Waiting again after a red: this launch fixed what that red showed.
-  run_took_up "$wt" wait
   python3 "$LIB/review/pr_context.py" --wait "$wt" "$pr" "$repo" "$REVIEW_WAIT_MAX" || rc=$?
-  (( rc == 1 )) && { run_took_up "$wt" red; review_checks_keep "$wt"; }
   # A verdict on a review run (green, red, the head unreviewed): sclaude's tab
   # prints the report by it (review_pane_keys). Not "could not read".
   (( rc <= 3 )) && printf '%s %s %s\n' "$rc" "$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)" "$(date +%s)" \

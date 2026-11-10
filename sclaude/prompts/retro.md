@@ -7,6 +7,8 @@ The feature "<feature>" <if:pr-number>is merged</if:pr-number><if:no-change>has 
 - <if:pr-number>The pull request #<pr-number><if:issue> and the issue #<issue></if:issue></if:pr-number><if:no-change>The issue #<issue></if:no-change>, with `gh`, if you need what was said there.
 - The session transcripts, only when you need what happened inside a session or there is no recording of the terminal — they are large: `<transcripts>/<session id>.jsonl`, the ids are in `state.json`. The raw terminal recordings are listed in `<terminal-raw>`.
 
+**Who reads what.** <if:terminal>The terminal is yours to read: it is the thread of the whole feature, and it fits. </if:terminal>Every other source goes to a subagent — `Explore`, which only reads, so plan mode holds — sent with one concrete question: what to look for and why, not "summarise this". Independent questions go out together. Each brings back points with a quote and where it stands, the file and line or field; when one matters and looks doubtful, check it yourself with a narrow read. Do not read those sources whole yourself: transcripts run to megabytes, and a context compacted under them loses the quotes the report stands on.
+
 **What to answer.** Three sections, in this order, and a fourth when you have something for it:
 
 1. **What I may have missed.** Warnings that scrolled past, a question I answered without the information under it, a review thread left unanswered, something a session promised and did not do, a follow-up mentioned and never filed, uncommitted work, anything that exists only in this worktree. The worktree is still here, so this is the section to act on now.

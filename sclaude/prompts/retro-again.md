@@ -4,7 +4,7 @@
 
 <block:since>
 
-Take everything you concluded above as a draft written before that, not as the answer. Re-read what changed: <if:terminal>the terminal recording `<terminal>` again from where your reading ended — it has grown with every run since — </if:terminal>the state, the branch's commits, the pull request<if:issue> and the issue #<issue></if:issue>. Then go over your sections critically: a point that no longer holds goes; a "nothing" may not be nothing any more; something new — above all a step that ran again, a rollback and why it happened, a fix that went round the cycle — is what this pass is for. Where you changed your mind, say so and why. The same rule as before: facts only, each point on something you read.
+Take everything you concluded above as a draft written before that, not as the answer. Re-read what changed: <if:terminal>the terminal recording `<terminal>` again from where your reading ended — it has grown with every run since — </if:terminal>the state, the branch's commits, the pull request<if:issue> and the issue #<issue></if:issue> — read as before<if:terminal>, the terminal yourself and</if:terminal> the rest through subagents with a question each. Then go over your sections critically: a point that no longer holds goes; a "nothing" may not be nothing any more; something new — above all a step that ran again, a rollback and why it happened, a fix that went round the cycle — is what this pass is for. Where you changed your mind, say so and why. The same rule as before: facts only, each point on something you read.
 
 <include:retro-rules>
 

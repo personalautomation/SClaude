@@ -97,11 +97,23 @@ would cost more to fix later — the design the next parts build on, bugs the
 tests miss — and the session fixes what it agrees with. Ask for something
 while a part is built and the session decides where it goes: now, when it
 touches what is built; into a later part of the plan, when that part covers
-it. Nobody is asked whether a part works, and no demo is recorded for one —
-unless the project sets `partAccept` to `each` (`sclaude config`), and then
-each part ends on its demo and your Accept too. When every part is built,
-step 2 closes on the last part's branch as for any feature: the whole thing
-checked as one, the demo, your Accept.
+it. Nobody is asked whether a part works — unless the project sets
+`partAccept` to `each` (`sclaude config`), and then each part ends on its demo
+and your Accept too.
+
+You still see each part as soon as it is built. Between two parts, before the
+next one starts, sclaude records a demo of what the part just added — only
+that, on a desktop and a phone — and sends it to the feature's Telegram topic
+and prints its page in the terminal: `🎬 Part 1's demo is ready`. It asks
+nothing: watch it, and say what to change in the next part's session, which
+starts then — at the terminal or from the phone. That session changes what is
+already built and writes into the plan what a later part should. The next
+part waits for the recording, a few minutes; no demo is recorded after the
+last part, for a part that changed nothing a user sees, or with `demo: off`.
+
+When every part is built, step 2 closes on the last part's branch as for any
+feature: the whole thing checked as one, the demo — written from the parts'
+scenarios, not from scratch — and your Accept.
 
 Only then are the parts reviewed, one by one, in the order they were built:
 for each, its branch takes in the part before it as its review left it and

@@ -17,6 +17,9 @@
 # when the project asks for a look at each part (`partAccept: each`). After
 # the last part a session on its branch checks the whole feature as one, with
 # the demo and the person's Accept (`parts.built`, then `parts.accepted`).
+# Between two parts, the one just built is shown to the person in a demo of
+# what it added (demo_part in demo.sh), so that their remarks reach the next
+# part's session early; the whole feature's demo starts from those scenarios.
 #
 # Then steps 3 and 4 run once for each part, in the order they were built: the
 # feature's branch becomes the parts' common branch, each part's pull request
@@ -705,7 +708,8 @@ parts_advance() {
   fi
 }
 
-# A part's session closed and its regression is green: the next part is
+# A part's session closed and its regression is green: the part's demo is
+# recorded and sent to the person (demo_part), and the next part is
 # built — or, after the last one, step 2 checks the whole feature on the last
 # part's branch, with the demo and the person's Accept, and the parts' pull
 # requests follow from part 1.
@@ -721,6 +725,11 @@ parts_built() {
   if (( n < last )); then
     state_set "$state" parts.current $((n + 1))
     issue_sync "$wt"
+    # Shown to the person before the next part builds on it: a demo of what
+    # the part added, recorded here between the parts (demo.sh). After the
+    # state moved on: a recording cut off (Ctrl-C, a closed terminal) leaves
+    # the next part to start, not this one to be built again.
+    declare -F demo_part >/dev/null && demo_part "$wt" "$n"
     echo ""
     info "  On to part $((n + 1)) of $last."
   else

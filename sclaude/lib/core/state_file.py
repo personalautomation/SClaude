@@ -49,6 +49,14 @@ def unlock(path):
         fh.close()
 
 
+def demo_name(run):
+    """A demo session's name, for the issue's sessions table (issue_sync.sh)
+    and the map (process_history): a part's own demo when its run is about a
+    part (`about` "part <n>", demo_part in demo.sh), any other a refresh.
+    The part itself is said beside it, as for every run (`part`)."""
+    return "part demo" if str(run.get("about") or "").startswith("part ") else "demo refresh"
+
+
 def part_about(data):
     """Which part of a feature built in parts (parts.sh) the state is at, for
     a history row or a session's run: {} for a feature not built in parts;

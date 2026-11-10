@@ -564,9 +564,20 @@ import ctypes, time
 ctypes.CDLL("libc.so.6").prctl(15, b"npm exec chrome", 0, 0, 0)
 time.sleep(15)
 """])
-time.sleep(0.6)
+# Waited for rather than slept on: with the suite running in parallel the
+# child took longer than a fixed pause to rename itself, and every check
+# below read the interpreter's own name.
+deadline = time.time() + 10
+comm = ""
+while time.time() < deadline:
+    try:
+        comm = open("/proc/%d/comm" % spaced.pid).read().strip()
+    except OSError:
+        comm = ""
+    if comm == "npm exec chrome":
+        break
+    time.sleep(0.1)
 try:
-    comm = open("/proc/%d/comm" % spaced.pid).read().strip()
     check("comm really does contain spaces", comm, "npm exec chrome")
 
     snippet = subprocess.run(

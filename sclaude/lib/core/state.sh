@@ -192,7 +192,18 @@ session_runs() {
     PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$file" "$node" "$op" "$session" "$(date -Iseconds)" "$outcome" <<'PYRUN' 2>/dev/null || true
 import json, sys
 path, dotted, op, session, now, outcome = sys.argv[1:7]
+import os
 import state_file
+
+
+def part_of(data):
+    """The part a run is about: the state's (state_file.part_about), unless
+    the caller names one (SCLAUDE_ABOUT_PART) — a part's demo is recorded
+    after the state has moved on to the next part (demo_part, demo.sh)."""
+    named = os.environ.get("SCLAUDE_ABOUT_PART", "")
+    return {"part": named} if named else state_file.part_about(data)
+
+
 state_file.lock(path)
 with open(path) as fh:
     data = json.load(fh)
@@ -212,9 +223,13 @@ if op == "open":
         runs.append({"session": session, "started": now})
         # The part of a feature built in parts this conversation works on
         # (state_file.part_about): the summary and the costs tell the parts apart.
-        about = state_file.part_about(data)
+        about = part_of(data)
         if about:
             runs[-1]["part"] = about["part"]
+        # What it is about, where one node runs for more than one thing (a
+        # demo refreshed, or a part's demo): the summary names it by this.
+        if os.environ.get("SCLAUDE_ABOUT"):
+            runs[-1]["about"] = os.environ["SCLAUDE_ABOUT"]
     # Resumed after a stall or a close on its marker: the conversation is
     # going now, whatever it did at the door or how it ended the first time.
     for r in mine:
@@ -275,7 +290,7 @@ if os.path.basename(path) == "state.json":
     if os.environ.get("SCLAUDE_ABOUT"):
         row["about"] = os.environ["SCLAUDE_ABOUT"]
     # The part, as history_add says it (state_file.part_about).
-    row.update(state_file.part_about(data))
+    row.update(part_of(data))
     with open(os.path.join(os.path.dirname(path), "history.jsonl"), "a") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 PYRUN

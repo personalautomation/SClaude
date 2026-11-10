@@ -104,8 +104,10 @@ PY
     fi
   done
 
-  body="$(SCLAUDE_STEPS="$spec" SCLAUDE_FIXES="$fixes" SCLAUDE_TOTAL="$(cycle_total)" python3 - "$state" <<'PY' 2>/dev/null
+  body="$(SCLAUDE_STEPS="$spec" SCLAUDE_FIXES="$fixes" SCLAUDE_TOTAL="$(cycle_total)" \
+    PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$state" <<'PY' 2>/dev/null
 import datetime, json, os, sys
+import state_file
 
 ORDER, TITLES = [], {}
 for line in os.environ.get("SCLAUDE_STEPS", "").splitlines():
@@ -485,7 +487,17 @@ for stage in STAGE_ORDER:
 # epilogue and the retrospective have none.
 def run_rows(node, name, friction=False):
     runs = [r for r in ((s.get(node) or {}).get("runs") or []) if isinstance(r, dict)]
+    # A name that depends on the run (a demo: a part's or a refresh) is
+    # counted among the runs of its own name and part — a part's number is
+    # said beside it already (part_word). A fixed name keeps its position,
+    # which its friction review's title (`sync-<n>`) names it by too.
+    keys = [(name(r), part_word(r)) for r in runs] if callable(name) else []
     for number, run in enumerate(runs, start=1):
+        if keys:
+            label, key = keys[number - 1][0], keys[number - 1]
+            same, nth = keys.count(key), keys[:number].count(key)
+        else:
+            label, same, nth = name, len(runs), number
         sid = run.get("session") or ""
         # Running only when the caller says so: run_retro writes the summary
         # as the retrospective starts (SCLAUDE_SUMMARY_RUNNING). Read from the
@@ -501,8 +513,8 @@ def run_rows(node, name, friction=False):
             # exit code), or none: left behind.
             word = run.get("outcome") or "interrupted"
         add(run.get("started"), "| %s%s%s | %s | %s | %s | %s | %s |" % (
-            name,
-            " (%d)" % number if len(runs) > 1 else "",
+            label,
+            " (%d)" % nth if same > 1 else "",
             part_word(run),
             word,
             "`%s`" % sid[:8] if sid else "—",
@@ -522,8 +534,9 @@ sync_runs = run_rows("sync", "sync with main", friction=True)
 epilogue_runs = run_rows("epilogue", "status update")
 retro_runs = run_rows("retro", "retrospective")
 # The demo recorded again once the code moved past it (demo_refresh, demo.sh):
-# a `claude -p` of its own before QA and at the epilogue.
-run_rows("demo", "demo refresh")
+# a `claude -p` of its own before QA and at the epilogue; or a part's own demo,
+# recorded between the parts (demo_part), which its run's `about` names.
+run_rows("demo", state_file.demo_name)
 
 
 def friction_subject(key):

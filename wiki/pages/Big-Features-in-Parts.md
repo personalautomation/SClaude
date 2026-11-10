@@ -37,7 +37,14 @@ part closes, a fresh subagent reads its diff and looks for what would cost
 more to fix later. Ask for a change meanwhile, and the session decides where it
 belongs: now, or in a later part.
 
-**You check the whole feature once.** One demo, one Accept. Only then does
+**You see each part as soon as it is built.** Before the next part starts,
+SClaude records a short demo of what the part just added and sends it to
+Telegram and the terminal. Nothing waits for your answer: tell the next part's
+session what to change. The earlier a remark arrives, the less the next part
+builds on what you would have said no to.
+
+**You check the whole feature once.** One demo, built from the parts'
+scenarios, one Accept. Only then does
 review start. Why after Accept? Because a demo often brings changes, and after
 any change every review has to be done again.
 

@@ -1282,6 +1282,27 @@ regression is green, `after_step` hands over to `parts_built`: the step's
 record kept under `parts.<n>.steps`, step 2 afresh for the next part — or,
 after the last, `parts.built` and step 2 on the last part's branch.
 
+**The part's demo** (`demo_part` in `ship/demo.sh`), between a part and the
+next, in the same tree so that it plays the part's own code — once the state
+has moved on to the next part, so that a recording cut off leaves that part
+to start, its run named as part N's by `SCLAUDE_ABOUT_PART` (`session_runs`)
+and in the issue's sessions table and on the map as `part demo · part N`
+(its run's `about`, `demo_name` in `core/state_file.py`): a headless
+session with the sdemo skill, as `demo_refresh` starts one (`demo_session`),
+records what the part added — a delta with `SCLAUDE_DEMO_PART` and
+`SCLAUDE_DEMO_BASE` (where the part began), which `demo.py` keeps in the
+history as the entry's `part` — held, then published to the feature's topic
+(`🧩 Part N`) and printed with the feature's demo page — said to be in the
+topic only when its messages came back (`demo_refresh.py sent`, from the
+history's `messages`; otherwise the reason publish kept there, `unsent`), its progress said
+as it records (`demo_progress`, which names it by the part); the history gets
+a `parts demo` row. On the map it is told in the gate's words (`p_built`), as
+the other recordings are in the blocks they happen in. Not after the last
+part, with `demo: off`, or with `partAccept: each`, whose part sessions show
+their own. The next part's session is told remarks on it may come
+(`<if:part-alone>`), and the whole's (`<if:parts-built>`, `<if:demo>`) writes
+the full demo from `demo.py parts`, the parts' scripts.
+
 **The whole** (`<if:parts-built>`): the feature checked as one, the demo,
 Accept; its fixes go into the last part's pull request. On Accept,
 `after_step` sets `parts.accepted`, and step 3 begins with part 1.

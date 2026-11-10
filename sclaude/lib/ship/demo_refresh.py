@@ -13,6 +13,10 @@ the ones past the count taken before it.
                                                    last_tries, kept or not
     demo_refresh.py kept <wt> <before>             why nothing was recorded, if
                                                    the session kept the demo
+    demo_refresh.py sent <wt> <before>             what publishing did: telegram
+                                                   (its messages came back),
+                                                   `page: <why not>` (published,
+                                                   no message), or nothing
 
 The history is `history.json` in DEMO_DIR (skills/sdemo/demo.py)."""
 import json
@@ -88,9 +92,23 @@ def kept(wt, before):
     return ""
 
 
+def sent(wt, before):
+    """What publishing the session's recordings did, read from the history
+    rather than from what demo.py printed: `messages` are kept only for what
+    Telegram took (keep_messages, the ids sclaude-notify --ids gave back);
+    a published one has no `held`, and one Telegram did not take keeps why
+    in `unsent` (demo.py publish)."""
+    out = [e for e in since(wt, before)
+           if not e.get("held") and not e.get("broken") and not e.get("kept")]
+    if any(e.get("messages") for e in out):
+        return "telegram"
+    why = next((e["unsent"] for e in reversed(out) if e.get("unsent")), "")
+    return "page: %s" % why if out else ""
+
+
 def main(argv):
     if len(argv) < 3:
-        sys.exit("usage: demo_refresh.py count|held|findings|kept <wt> …")
+        sys.exit("usage: demo_refresh.py count|held|findings|kept|sent <wt> …")
     cmd, wt = argv[1], argv[2]
     if cmd == "count":
         print(len(history(wt)))
@@ -100,6 +118,8 @@ def main(argv):
         print("\n".join(findings(wt, argv[3], argv[4])))
     elif cmd == "kept":
         print(kept(wt, argv[3]))
+    elif cmd == "sent":
+        print(sent(wt, argv[3]))
     else:
         sys.exit("demo_refresh.py: no command %s" % cmd)
 

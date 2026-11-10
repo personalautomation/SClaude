@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 #
 # What a demo refresh is doing, shown while it runs (demo_refresh in
-# demo.sh). The session that writes the demo again runs headless for up to
+# demo.sh), or the demo of one part of a feature built in parts (demo_part,
+# which sets SCLAUDE_DEMO_PART: its delta is said as that part). The session that writes the demo again runs headless for up to
 # forty minutes; without this the terminal said one grey line and nothing
 # more until it ended.
 #
@@ -37,6 +38,15 @@ DEMO_DIR = ".sclaude/local/demo"
 FIELD = "demo_progress"
 DIM, BOLD, OFF = "\033[2m", "\033[1m", "\033[0m"
 KINDS = {"delta": "the delta", "main": "the whole feature"}
+
+
+def kind_name(kind, other=None):
+    """What a recording is called on the screen: a part's delta by its part
+    (SCLAUDE_DEMO_PART, set by demo_part), the others by KINDS."""
+    part = os.environ.get("SCLAUDE_DEMO_PART", "").strip()
+    if kind == "delta" and part.isdigit():
+        return "part %s" % part
+    return KINDS.get(kind, kind if other is None else other)
 
 
 def clock(seconds):
@@ -146,7 +156,7 @@ class Watch:
         if not self.tty:
             return
         if now:
-            kind = KINDS.get(now.get("kind"), "the demo")
+            kind = kind_name(now.get("kind"), "the demo")
             n, of = int(now.get("scenario") or 0), int(now.get("of") or 0)
             what = "recording %s %s scenario %d of %d" % (kind, bar(n - 1, of), n, of)
             if now.get("title"):
@@ -241,7 +251,7 @@ class Watch:
             self.phase = "recording"
             again = ", try %d" % self.tries[kind] if self.tries[kind] > 1 else ""
             self.say("say", "Recording", "%s — %s%s" % (
-                KINDS.get(kind, kind), plural(int(now["of"]), "scenario"), again))
+                kind_name(kind), plural(int(now["of"]), "scenario"), again))
         self.draw(now if self.playing else None)
 
     def ended(self):
@@ -250,14 +260,14 @@ class Watch:
         self.phase = "checking the recording"
         got = recorded(self.wt, since or self.began)
         if not got:
-            self.say("warn", "Stopped", "recording %s — it did not finish" % KINDS.get(kind, kind))
+            self.say("warn", "Stopped", "recording %s — it did not finish" % kind_name(kind))
             return
         kind, n, bad = got
         if bad:
             self.say("warn", "Recorded", "%s: %s, %d not as expected" % (
-                KINDS.get(kind, kind), plural(n, "scenario"), bad))
+                kind_name(kind), plural(n, "scenario"), bad))
         else:
-            self.say("ok", "Recorded", "%s: %s" % (KINDS.get(kind, kind), plural(n, "scenario")))
+            self.say("ok", "Recorded", "%s: %s" % (kind_name(kind), plural(n, "scenario")))
 
     def run(self, stream):
         poller = threading.Thread(target=self.poll, daemon=True)

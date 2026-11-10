@@ -20,6 +20,9 @@ import tempfile
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 LIB = os.path.join(ROOT, "sclaude", "lib")
+# The renderer cut out of issue_sync imports state_file, as sclaude runs it
+# (PYTHONPATH set by issue_sync).
+os.environ["PYTHONPATH"] = os.path.join(LIB, "core")
 github = "".join(open(os.path.join(LIB, _m), encoding="utf-8").read() for _m in ("github/github.sh", "github/issue_sync.sh", "github/board.sh", "github/outcome.sh"))
 
 failures = []
@@ -177,6 +180,32 @@ with tempfile.TemporaryDirectory() as wt:
     ''')
     sync_row = [r for r in render(path) if r.startswith("| sync with main")][0]
     check("sync-row-names-its-friction-review", "—" not in sync_row.split("|")[6], True)
+
+    # A part's own demo (demo_part) and a refresh: each named and counted
+    # among its own kind and part, the part said once.
+    shell(wt, '''
+        f="$wt/.sclaude/local/feature/state.json"
+        SCLAUDE_ABOUT="part 1" SCLAUDE_ABOUT_PART=1 session_runs "$f" demo open d1111111
+        SCLAUDE_ABOUT="part 1" SCLAUDE_ABOUT_PART=1 session_runs "$f" demo finish d1111111
+        SCLAUDE_ABOUT="part 2" SCLAUDE_ABOUT_PART=2 session_runs "$f" demo open d2222222
+        SCLAUDE_ABOUT="part 2" SCLAUDE_ABOUT_PART=2 session_runs "$f" demo finish d2222222
+        SCLAUDE_ABOUT="preview" session_runs "$f" demo open d3333333
+        SCLAUDE_ABOUT="preview" session_runs "$f" demo finish d3333333
+    ''')
+    demo_rows = [r.split("|")[1].strip() for r in render(path) if "demo" in r.split("|")[1]]
+    check("demo rows: a part's demo by its part, a refresh apart, each counted among its own",
+          demo_rows, ["part demo · part 1", "part demo · part 2", "demo refresh"])
+
+    # Syncs across parts keep their position, which their friction reviews'
+    # titles (sync-<n>) name them by.
+    with open(path) as fh:
+        data = json.load(fh)
+    data["sync"] = {"runs": [{"session": "s%d" % k, "part": p} for k, p in ((1, "1"), (2, "2"), (3, "2"))]}
+    with open(path, "w") as fh:
+        json.dump(data, fh)
+    sync_rows = [r.split("|")[1].strip() for r in render(path) if r.startswith("| sync with main")]
+    check("sync rows: numbered by position across parts",
+          sync_rows, ["sync with main (1) · part 1", "sync with main (2) · part 2", "sync with main (3) · part 2"])
 
     status_rows = [r for r in rows if r.startswith("| status update")]
     check("epilogue-is-a-row", len(status_rows), 1)

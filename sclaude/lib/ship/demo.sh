@@ -62,47 +62,7 @@ demo_refresh() {
   # nothing when it ended on `demo.py keep` (demo_publish_held).
   if command -v claude >/dev/null 2>&1 && [[ -f "$script" && -n "$head" ]]; then
     info "  A session writes it again from the last one (sdemo skill); its log: $log"
-    # A conversation like every other one sclaude starts, so it is named in
-    # the state's `demo` runs and gets its row in the issue's sessions table
-    # (issue_sync.sh); without the id it ran unseen there.
-    local state="$wt/.sclaude/local/feature/state.json" session rc=0
-    session="$(new_session_id)"
-    [[ -f "$state" ]] && SCLAUDE_ABOUT="$stage" session_runs "$state" demo open "$session"
-    # The feature's environment, as every session sclaude starts in a tree
-    # gets it (dev_env_load): without it a script that reaches the feature's
-    # own database directly had no address for it.
-    # Its events as a stream, read by demo_progress.py: what it is at, and
-    # which scenario of which recording plays, said as it goes — headless,
-    # it ran for up to forty minutes with nothing on the screen.
-    : >"$log"
-    ( cd "$wt" && dev_env_load "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
-        SCLAUDE_DEMO_HOLD=1 timeout "$DEMO_REFRESH_LIMIT" \
-        claude -p "$(demo_refresh_prompt "$wt" "$script" "$head" "$stage")" \
-        --session-id "$session" --output-format stream-json --verbose \
-        --model "$(step_model code)" --permission-mode dontAsk \
-        --allowedTools "Read" "Grep" "Glob" "Skill" "Edit(/$wt/.sclaude/local/demo/**)" \
-          "Bash(python3 $tool:*)" "Bash(python3 ~/.claude/skills/sdemo/demo.py:*)" \
-          "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" \
-        --disallowedTools "NotebookEdit" "Bash(gh:*)" "Bash(git push:*)" "Bash(git commit:*)" \
-        2>&1 </dev/null ) | demo_progress "$wt" "$log"
-    rc="${PIPESTATUS[0]}"
-    if [[ -f "$state" ]]; then
-      # Whether a conversation took place, by its transcript, as for the
-      # epilogue: a claude that died at the door leaves no session to name.
-      if ! session_started "$wt" "$session"; then
-        session_runs "$state" demo drop "$session"
-      elif (( rc == 0 )); then
-        SCLAUDE_ABOUT="$stage" session_runs "$state" demo finish "$session"
-      else
-        SCLAUDE_ABOUT="$stage" session_runs "$state" demo end "$session" "exit $rc"
-      fi
-      # Its row goes into the issue now. Before QA the next rewrite of the
-      # table may be a long way off; at the epilogue run_status follows, but
-      # skips the table when the status already describes the head
-      # (status_fingerprint knows nothing of the demo). Written twice there
-      # at worst.
-      declare -F issue_sync >/dev/null && issue_sync "$wt"
-    fi
+    demo_session "$wt" "$stage" "$log" "$(demo_refresh_prompt "$wt" "$script" "$head" "$stage")"
     say "🎬 ${BOLD}Publishing${OFF} the recordings"
     demo_publish_held "$wt" "$stage" "$tool" "$before" >>"$log" 2>&1
   else
@@ -124,8 +84,150 @@ demo_refresh() {
   return 0
 }
 
+# A part of a feature built in parts, shown as soon as it is built: the
+# earlier the person sees what a part does, the less the next part builds on
+# what they would have said no to. Between the parts — part N's regression
+# green, part N+1 not started — in the same tree, so that the recording
+# plays the part's own code, not the next part's half-written one; it costs
+# the person the recording's minutes, and the next part starts after it.
+# A recording of only what the part added for a user (a delta, `part` in
+# the history), measured from where the part began; the whole feature's demo,
+# once every part is built, starts from these scripts (`demo.py parts`,
+# code.md). Not after the last part — the whole feature's demo follows at
+# once — nor where the person accepts each part in its own session
+# (`partAccept: each`), which records it there. The person's remarks go to
+# the next part's session, which places them (code.md). Breaks nothing: the
+# next part starts whatever happens here.
+#
+#   demo_part <wt> <n>
+demo_part() {
+  local wt="$1" n="$2" tool="$INSTRUMENTS/skills/sdemo/demo.py" state="$1/.sclaude/local/feature/state.json"
+  local base log findings before published label page why
+  [[ -f "$tool" ]] || return 0
+  [[ "$(project_demo_mode "$wt")" == on ]] || return 0
+  [[ "$(project_part_accept "$wt")" != each ]] || return 0
+  (( n < $(parts_last "$state") )) || return 0
+  echo ""
+  if ! command -v claude >/dev/null 2>&1; then
+    info "  No demo of part $n: claude is not on this machine to write one."
+    return 0
+  fi
+  base="$(git -C "$wt" merge-base "$(parts_below "$state" "$n")" HEAD 2>/dev/null || true)"
+  log="$wt/.sclaude/local/demo/part-$n.log"
+  findings="$wt/.sclaude/local/demo/findings.md"
+  mkdir -p "$wt/.sclaude/local/demo"
+  : >"$findings" 2>/dev/null || true
+  say "🎬 ${BOLD}Recording what part $n added, for you to see before part $((n + 1)) builds on it.${OFF}"
+  info "  A session writes it (sdemo skill); its log: $log"
+  before="$(demo_history_count "$wt")"
+  # The part the session is about, for demo.py and for its run in the state
+  # (session_runs), which has moved on to the next part by now.
+  local -x SCLAUDE_DEMO_PART="$n" SCLAUDE_DEMO_BASE="$base" SCLAUDE_ABOUT_PART="$n"
+  demo_session "$wt" "part $n" "$log" "$(demo_part_prompt "$wt" "$n" "$base")"
+  demo_publish_held "$wt" "part $n" "$tool" "$before" >>"$log" 2>&1
+  demo_findings "$wt" "$findings" "$before"
+  # What publishing did, by the history, not what was held: a recording that
+  # went to the page but not to Telegram is said so.
+  published="$(python3 "$INSTRUMENTS/sclaude/lib/ship/demo_refresh.py" sent "$wt" "$before")"
+  if [[ -z "$published" ]]; then
+    history_add "$state" parts demo part="$n" recorded=no
+    info "  Part $n shows nothing new to a user, or its demo did not play: none was sent ($log)."
+    return 0
+  fi
+  history_add "$state" parts demo part="$n" recorded=yes
+  label="$(state_get "$state" dev.label 2>/dev/null || true)"
+  page="http://${label:-feature}.localhost:$PROXY_PORT/__sclaude/demo/${label:-feature}/"
+  if [[ "$published" == telegram ]]; then
+    say "🎬 ${BOLD}Part $n's demo is ready${OFF} — in the feature's Telegram topic, and here: $page"
+  else
+    say "🎬 ${BOLD}Part $n's demo is ready${OFF} — here: $page"
+    # The reason publish kept with the recording: a refusal, a network
+    # error, or no bot set up here.
+    why="${published#page}"; why="${why#: }"
+    warn "  It did not reach the feature's Telegram topic: ${why:+$why — }$log"
+  fi
+  info "  Watch it and say what to change in part $((n + 1))'s session, which starts now:"
+  info "  it changes what is built already, and writes into the plan what a later part should."
+  return 0
+}
+
+# What a part's demo session is told: what the part was to build, what it
+# changed, and to record only what a user gets from it.
+demo_part_prompt() {
+  local wt="$1" n="$2" base="$3" title
+  title="$(state_get "$wt/.sclaude/local/feature/state.json" "parts.$n.title" 2>/dev/null || true)"
+  cat <<EOF
+Use the sdemo skill for the feature in this tree. Nobody is at the terminal: decide by yourself, ask nothing.
+
+This feature is built in parts, and part $n${title:+ — $title} is built: the plan, .sclaude/local/feature/plan.md, says in its ## Parts section what it covers. The person sees each part as soon as it is built, so that their remarks reach the next parts early. Record what this part added for a user, and nothing else: read its change (git diff ${base:-HEAD~1} HEAD, git log ${base:-HEAD~1}..HEAD) and the plan.
+
+If nothing in it changes what a user sees or does — a part of data or plumbing the next parts build on — record nothing: say so in one line and stop.
+
+Otherwise write a script with kind: "delta" and change: — what this part gives a user, in one sentence, in business terms. Its scenarios show only what this part brought, desktop and phone where they differ, as the skill's delta step says; there is no full demo to start from yet, so do not run demo.py last. Name the script's scenarios so that they can be reused: once every part is built, the whole feature's demo starts from the parts' scripts.
+
+Call demo.py by its full path, one command at a time and nothing chained to it — python3 $INSTRUMENTS/skills/sdemo/demo.py users, … play — since only that is allowed here. Check the recording's demo.json; fix a script that failed and play it again, twice at most. Nothing goes out while you play: once you end, sclaude publishes your last recording.
+
+Whatever you find wrong in the product itself while you record — a step that does not show what the part promises, a scenario you had to take round a fault — write to $wt/.sclaude/local/demo/findings.md, one line each: what a user sees, and where.
+
+End with one line: what the demo shows, or why there is none.
+EOF
+}
+
 # How long a refresh session may run, and so what its status line counts to.
 DEMO_REFRESH_LIMIT=2400
+
+# A headless session with the sdemo skill that records the feature's demo
+# with nobody watching: a refresh (demo_refresh) or a part's own demo
+# (demo_part). It writes nowhere but the feature's demo directory, plays
+# held (SCLAUDE_DEMO_HOLD) and is named in the state's `demo` runs; the
+# caller publishes what it held. SCLAUDE_DEMO_PART and SCLAUDE_DEMO_BASE,
+# when the caller sets them, reach demo.py through it.
+#
+#   demo_session <wt> <stage> <log> <prompt>
+demo_session() {
+  local wt="$1" stage="$2" log="$3" prompt="$4" tool="$INSTRUMENTS/skills/sdemo/demo.py"
+  # A conversation like every other one sclaude starts, so it is named in
+  # the state's `demo` runs and gets its row in the issue's sessions table
+  # (issue_sync.sh); without the id it ran unseen there.
+  local state="$wt/.sclaude/local/feature/state.json" session rc=0
+  session="$(new_session_id)"
+  [[ -f "$state" ]] && SCLAUDE_ABOUT="$stage" session_runs "$state" demo open "$session"
+  # The feature's environment, as every session sclaude starts in a tree
+  # gets it (dev_env_load): without it a script that reaches the feature's
+  # own database directly had no address for it.
+  # Its events as a stream, read by demo_progress.py: what it is at, and
+  # which scenario of which recording plays, said as it goes — headless,
+  # it ran for up to forty minutes with nothing on the screen.
+  : >"$log"
+  ( cd "$wt" && dev_env_load "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
+      SCLAUDE_DEMO_HOLD=1 timeout "$DEMO_REFRESH_LIMIT" \
+      claude -p "$prompt" \
+      --session-id "$session" --output-format stream-json --verbose \
+      --model "$(step_model code)" --permission-mode dontAsk \
+      --allowedTools "Read" "Grep" "Glob" "Skill" "Edit(/$wt/.sclaude/local/demo/**)" \
+        "Bash(python3 $tool:*)" "Bash(python3 ~/.claude/skills/sdemo/demo.py:*)" \
+        "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" \
+      --disallowedTools "NotebookEdit" "Bash(gh:*)" "Bash(git push:*)" "Bash(git commit:*)" \
+      2>&1 </dev/null ) | demo_progress "$wt" "$log"
+  rc="${PIPESTATUS[0]}"
+  if [[ -f "$state" ]]; then
+    # Whether a conversation took place, by its transcript, as for the
+    # epilogue: a claude that died at the door leaves no session to name.
+    if ! session_started "$wt" "$session"; then
+      session_runs "$state" demo drop "$session"
+    elif (( rc == 0 )); then
+      SCLAUDE_ABOUT="$stage" session_runs "$state" demo finish "$session"
+    else
+      SCLAUDE_ABOUT="$stage" session_runs "$state" demo end "$session" "exit $rc"
+    fi
+    # Its row goes into the issue now. Before QA the next rewrite of the
+    # table may be a long way off; at the epilogue run_status follows, but
+    # skips the table when the status already describes the head
+    # (status_fingerprint knows nothing of the demo). Written twice there
+    # at worst.
+    declare -F issue_sync >/dev/null && issue_sync "$wt"
+  fi
+}
 
 # What a refresh is doing, said as it goes: demo_progress.py reads the
 # session's events (or replay's output) on stdin and the recording's place

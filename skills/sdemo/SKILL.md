@@ -166,6 +166,22 @@ is now, desktop and phone where the change differs between them. A delta is
 recorded before the full demo that follows it: played, it goes to the
 feature's topic, and into the issue with that full demo.
 
+## 4b. A part's demo, and the whole feature from the parts
+
+A feature sclaude builds in parts is shown part by part: between two parts
+sclaude starts a session with this skill (`SCLAUDE_DEMO_PART`, set by
+`demo_part` in sclaude) that records only what the part just built added — a
+delta measured from where the part began, not from a full demo, so it does not
+run `demo.py last`. The history keeps it with its `part`, the topic gets it as
+`🧩 Part N: <change>`, and the feature's page lists it among the changes
+before the first full demo.
+
+`python3 $D/demo.py parts` lists each part's last such recording: the commit
+it shows, what it added and its script (`none:` when there is none). Once
+every part is built, the whole feature's script is written from those —
+keep the scenarios that still show the feature, rewrite what a later part
+changed, add what only the parts together show — rather than anew.
+
 ## 5. Playing it
 
 ```bash

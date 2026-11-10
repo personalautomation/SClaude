@@ -10,6 +10,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import process_config, process_costs, process_model, process_position
+import state_file
 
 
 # --- how a feature went ------------------------------------------------------
@@ -666,8 +667,10 @@ def _session_names(state):
         for run in process_position._runs(state.get(what) if isinstance(state.get(what), dict) else None):
             names[run.get("session")] = process_config.all_nodes()[what][3]
     # The demo recorded again (demo_refresh, demo.sh): no place of a map.
+    # Or a part's own demo (demo_part), named by state_file.demo_name.
     for run in process_position._runs(state.get("demo") if isinstance(state.get("demo"), dict) else None):
-        names[run.get("session")] = "demo refresh"
+        name = state_file.demo_name(run)
+        names[run.get("session")] = name + (" · part %s" % run["part"] if run.get("part") and name == "part demo" else "")
     names.pop(None, None)
     return names
 

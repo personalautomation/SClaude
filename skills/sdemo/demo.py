@@ -16,6 +16,9 @@
 #   demo.py replay [--feature F]        the last full demo's script played again
 #   demo.py last [--feature F]          the last full demo: what a delta is
 #                                       measured from (its commit, its script)
+#   demo.py parts [--feature F]         the parts' own demos, recorded between
+#                                       the parts (SCLAUDE_DEMO_PART): what the
+#                                       whole feature's demo starts from
 #   demo.py keep <reason> [--feature F] the last full demo carried on to the
 #                                       code as it is, nothing a user meets
 #                                       having changed: no recording, nothing
@@ -396,8 +399,12 @@ def publish(wt, label, demo, entry, results, phone):
     # move on to the feature's own host.
     here = "http://127.0.0.1:%d%s%s/" % (PROXY_PORT, DEMO_PREFIX, label)
     title = results.get("title") or demo
-    head_line = ("Δ %s → %s: %s" % (entry["from"] or "?", entry["stage"], entry["change"] or title)
-                 if entry["kind"] == "delta" else "🎬 " + title)
+    if entry.get("part"):
+        head_line = "🧩 Part %d: %s" % (entry["part"], entry["change"] or title)
+    elif entry["kind"] == "delta":
+        head_line = "Δ %s → %s: %s" % (entry["from"] or "?", entry["stage"], entry["change"] or title)
+    else:
+        head_line = "🎬 " + title
     lines = [head_line] + (["📱 " + phone] if phone else []) + ["💻 " + here]
     # The videos themselves too, an album of them under the links: watched in
     # the chat without opening anything.
@@ -405,16 +412,24 @@ def publish(wt, label, demo, entry, results, phone):
     sent = subprocess.run(["sclaude-notify", "--quiet", "--ids", "--in", wt]
                           + [a for c in clips[:10] for a in ("--video", c)]
                           + ["\n".join(lines)], capture_output=True, text=True)
-    if sent.returncode == 0 and TEXT_ONLY in sent.stderr:
+    ids = [int(w) for line in sent.stdout.splitlines() if line.startswith(SENT)
+           for w in line[len(SENT):].split() if w.isdigit()] if sent.returncode == 0 else []
+    # Sent only when Telegram gave message ids back: sclaude-notify on a
+    # machine with no bot set up exits 0 and says nothing.
+    if ids and TEXT_ONLY in sent.stderr:
         print("sent: the links to the feature's Telegram topic; the videos were refused ("
               + sent.stderr.strip().splitlines()[-1] + ")")
-    elif sent.returncode == 0 and not sent.stderr.strip():
+    elif ids:
         print("sent: the links%s to the feature's Telegram topic"
               % (" and %d video(s)" % len(clips[:10]) if clips else ""))
     else:
-        print("not sent to Telegram: " + (sent.stderr.strip() or "sclaude-notify failed"))
-    ids = [int(w) for line in sent.stdout.splitlines() if line.startswith(SENT)
-           for w in line[len(SENT):].split() if w.isdigit()] if sent.returncode == 0 else []
+        why = "; ".join(line.strip() for line in sent.stderr.splitlines() if line.strip()) or (
+            "sclaude-notify sent nothing — no bot set up here?" if sent.returncode == 0
+            else "sclaude-notify failed")
+        print("not sent to Telegram: " + why)
+        # Kept with the recording, for whoever says where it went
+        # (demo_refresh.py sent, demo_part in sclaude).
+        keep_field(wt, demo, "unsent", why)
     if ids:
         keep_messages(wt, demo, ids)
         # A full demo that went out makes the one before it, and what came
@@ -503,6 +518,23 @@ def history(wt):
         return []
 
 
+def part_of():
+    """The part of a feature built in parts a recording shows, when sclaude
+    records it between the parts (SCLAUDE_DEMO_PART); 0 otherwise."""
+    named = os.environ.get("SCLAUDE_DEMO_PART", "").strip()
+    return int(named) if named.isdigit() and int(named) > 0 else 0
+
+
+def part_demos(wt):
+    """The last published recording of each part, by part: what the whole
+    feature's demo is built from once every part is built."""
+    found = {}
+    for e in history(wt):
+        if e.get("part") and not e.get("broken") and not e.get("held") and not e.get("kept"):
+            found[e["part"]] = e
+    return [found[n] for n in sorted(found)]
+
+
 def broken(results):
     """How many scenarios did not play: not signed in, or a step that could
     not be done (a check that failed is a finding, not this)."""
@@ -521,7 +553,10 @@ def last_main(wt):
 
 def remember(wt, demo, results):
     """The recording into the history; its entry."""
-    kind = "delta" if results.get("kind") == "delta" else "main"
+    # A recording made for one part (SCLAUDE_DEMO_PART) is that part's
+    # delta whatever its script said: taken for a full demo, it would become
+    # what `stale` and every later delta measure from, and go into the issue.
+    kind = "delta" if results.get("kind") == "delta" or part_of() else "main"
     entry = {"id": demo, "kind": kind, "stage": stage(wt), "when": results.get("made") or "",
              "head": results.get("head") or "", "tree": results.get("tree") or "",
              "title": results.get("title") or "",
@@ -532,12 +567,22 @@ def remember(wt, demo, results):
     if os.environ.get("SCLAUDE_DEMO_HOLD") == "1":
         entry["held"] = True
     base = last_main(wt)
-    if kind == "delta":
+    part = part_of()
+    if kind == "delta" and part:
+        # What one part of a feature built in parts added, recorded by
+        # sclaude between the parts (demo_part in sclaude/lib/ship/demo.sh):
+        # measured from where the part began, not from a full demo — there
+        # is none before the parts are all built.
+        entry["part"] = part
+        entry["from"] = "part %d" % (part - 1) if part > 1 else "main"
+        entry["base"] = os.environ.get("SCLAUDE_DEMO_BASE", "").strip()
+    elif kind == "delta":
         entry["from"] = base["stage"] if base else ""
         entry["base"] = base["head"] if base else ""
+    if kind == "delta":
         log = subprocess.run(["git", "-C", wt, "log", "--format=%h %s",
                               "%s..%s" % (entry["base"], entry["head"])],
-                             capture_output=True, text=True) if base else None
+                             capture_output=True, text=True) if entry["base"] else None
         entry["commits"] = log.stdout.splitlines() if log and log.returncode == 0 else []
     found = history(wt) + [entry]
     with open(os.path.join(wt, DEMO_DIR, "history.json"), "w") as fh:
@@ -545,15 +590,20 @@ def remember(wt, demo, results):
     return entry
 
 
-def keep_messages(wt, demo, ids):
-    """The Telegram messages a recording went out as, into its entry, so a
-    later full demo can take them back out of the chat."""
+def keep_field(wt, demo, key, value):
+    """One field into a recording's entry in the history."""
     entries = history(wt)
     for e in entries:
         if e.get("id") == demo and not e.get("kept"):
-            e["messages"] = ids
+            e[key] = value
     with open(os.path.join(wt, DEMO_DIR, "history.json"), "w") as fh:
         json.dump(entries, fh, indent=1)
+
+
+def keep_messages(wt, demo, ids):
+    """The Telegram messages a recording went out as, into its entry, so a
+    later full demo can take them back out of the chat."""
+    keep_field(wt, demo, "messages", ids)
 
 
 def withdraw_old(wt, demo):
@@ -913,6 +963,20 @@ def cmd_last(label, wt):
     print("script: " + os.path.join(wt, DEMO_DIR, main["id"], "demo.mjs"))
 
 
+def cmd_parts(label, wt):
+    """The parts' own demos, recorded between the parts: for each part its
+    last published recording, the commit it shows, what it added and its
+    script — where the whole feature's demo starts from."""
+    found = part_demos(wt)
+    if not found:
+        print("none: no part of %s has a demo recorded here" % label)
+        return
+    for e in found:
+        print("part %d: %s on %s — %s" % (e["part"], e["id"], (e.get("head") or "")[:7],
+                                          e.get("change") or e.get("title") or "?"))
+        print("script: " + os.path.join(wt, DEMO_DIR, e["id"], "demo.mjs"))
+
+
 def cmd_replay(label, wt, where):
     """The last full demo's script, played again as it is: what sclaude falls
     back to when it cannot start a session to write the demo again. A step
@@ -1051,9 +1115,9 @@ def main(argv):
         else:
             rest.append(arg)
     if not rest or rest[0] not in ("link", "users", "criteria", "open", "play", "stale",
-                                   "replay", "last", "keep", "publish"):
+                                   "replay", "last", "parts", "keep", "publish"):
         die("usage: demo.py link <email> [<path>] | users | criteria | "
-            "open <email> <path>... | play <demo.mjs> [--live] | stale | replay | last | "
+            "open <email> <path>... | play <demo.mjs> [--live] | stale | replay | last | parts | "
             "keep <reason> | publish <id>  "
             "[--feature F] [--where laptop|phone]")
     label, wt = feature(label)
@@ -1063,6 +1127,8 @@ def main(argv):
         cmd_criteria(label, wt)
     elif rest[0] == "last":
         cmd_last(label, wt)
+    elif rest[0] == "parts":
+        cmd_parts(label, wt)
     elif rest[0] == "replay":
         cmd_replay(label, wt, where)
     elif rest[0] == "stale":

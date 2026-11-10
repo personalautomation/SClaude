@@ -233,6 +233,25 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-11-10 at the user's request: a demo recorded
   with nobody watching showed nothing for up to forty minutes. -->
 
+  A part's demo, recorded between two parts by `demo_part` in
+  `sclaude/lib/ship/demo.sh` (called by `parts_built`), hands demo.py
+  `SCLAUDE_DEMO_PART` and `SCLAUDE_DEMO_BASE` (`part_of` and `remember`),
+  which keep the entry's `part`; `demo.py parts` (`part_demos`) lists them for
+  the whole feature's demo, which `<if:parts-built>` in `code.md` starts
+  from; `kind_name` in `sclaude/lib/ship/demo_progress.py` reads
+  `SCLAUDE_DEMO_PART` too, to say the recording's progress as that part's;
+  `SCLAUDE_ABOUT_PART` names the part of its run to `session_runs` in
+  `state.sh`, the state having moved on to the next part, and its `about`
+  (`part <n>`) is what `demo_name` in `state_file.py` names it by, for the
+  issue (`issue_sync.sh`) and the map (`process_history.py`) alike; whether
+  it reached Telegram is `demo_refresh.py sent`, reading the history's
+  `messages`, which `keep_messages` writes only for ids sclaude-notify gave
+  back, and `unsent`, the reason `publish` keeps when none came.
+  `tests/demo-parts.py` runs each side.
+
+  <!-- Added by Claude on 2026-11-10 at the user's request: a part is shown
+  as soon as it is built, so that a remark reaches the next part early. -->
+
   <!-- Added by Claude on 2026-11-03, with the refresh held and kept, at the
   user's request after a retrospective: a name changed on one side alone
   would publish every try again, or none. -->

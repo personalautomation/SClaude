@@ -380,7 +380,11 @@ local_review_wait() {
   # The round counts heads reviewed; a pass is another read of this head,
   # after one that found the cap, so the first pass goes unsaid.
   which="round $round"; [[ "$pass" -gt 1 ]] && which+=", pass $pass"
-  said="$(review_enough "$wt")"
+  # The word from the state alone: a press in the topic that came as the
+  # pass started is the loop's below to take, with the wait's meaning — a
+  # stop now that stops it. Taken here, it was turned into "last pass" and
+  # the pass ran on to its end.
+  said="$(review_enough "$wt" keep)"
   go="$(review_go_box "$wt")"
   said_file="$(review_said_file)" || said_file=""
   # No echo while it waits: a key pressed between two reads would otherwise
@@ -461,7 +465,8 @@ local_review_wait() {
 #
 review_enough() {
   local said
-  review_said_take "$1" >/dev/null
+  # `keep` leaves a press in the topic unread, for a wait that takes it.
+  [[ "${2:-}" == keep ]] || review_said_take "$1" >/dev/null
   said="$(state_get "$1/.sclaude/local/feature/state.json" steps.review.enough 2>/dev/null || true)"
   [[ "$said" == pass || "$said" == now ]] && echo "$said"
   return 0

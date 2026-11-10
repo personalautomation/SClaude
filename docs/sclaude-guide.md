@@ -168,7 +168,15 @@ session records nothing and keeps the demo there is (`demo.py keep`), and
 sclaude says why. Nothing it records goes out while it works: the last delta
 and the last full recording it made are sent to the topic and the issue after
 it, once each — none when it ended by keeping the demo — and a try it fixed is
-sent nowhere. What it found wrong
+sent nowhere. While it works the terminal says what it is at, a bold line
+for each change, which goes to the feature's topic too — reading what
+changed, writing the script, recording the delta or the whole feature and
+which try, what the recording came to — under a status line that counts the
+scenarios as they play (`scenario 3 of 6 … step 4`) and the time against its
+forty minutes; `refresh.log` in the demo's folder keeps the same with what
+the session said. Wherever a demo plays in a feature's tree — step 2's
+`/sdemo` too — Claude Code's status line shows the scenario and the step
+(`🎬 delta 2/4 · step 5`). What it found wrong
 in the product while recording — a check that failed, a fault it had to go
 round — is printed in sclaude's terminal. At night (`/isleep`) a finding the
 session would leave as it is does not hold the step till morning. A minor one the

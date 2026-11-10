@@ -221,6 +221,18 @@ breaks the other silently — grep before you edit:
   `kept` entry `demo.py keep` writes and the session's `findings.md` there;
   `tests/demo-refresh.py` runs both sides.
 
+  How far a recording got is the player's `progress: {json}` lines
+  (`progress` in `skills/sdemo/play.mjs`), which `play_watched` in demo.py
+  (`PROGRESS`) keeps in the feature's state as `demo_progress` (in
+  `state_schema.py`), cleared when the player ends; it is read by
+  `demo_progress.py` in `sclaude/lib/ship` — which `demo_refresh` pipes the
+  session's `--output-format stream-json` events into — and by
+  `demo_progress` in `statusline.py`. `tests/demo-progress.py` runs each
+  side.
+
+  <!-- Added by Claude on 2026-11-10 at the user's request: a demo recorded
+  with nobody watching showed nothing for up to forty minutes. -->
+
   <!-- Added by Claude on 2026-11-03, with the refresh held and kept, at the
   user's request after a retrospective: a name changed on one side alone
   would publish every try again, or none. -->

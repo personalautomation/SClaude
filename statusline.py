@@ -356,12 +356,11 @@ def dig(d, *path):
 NAME_MIN = 12
 
 
-def feature_pr(d):
-    """`#812`: the pull request of the sclaude feature this worktree holds.
+def feature_state(d):
+    """The state of the sclaude feature this worktree holds, or None.
 
-    Read on every refresh from the feature's state, which sclaude rewrites when
-    the pull request changes, so a new one shows up by itself. One small read
-    of a file in the worktree root; nothing at all outside sclaude.
+    One small read of a file in the worktree root, on every refresh, so what
+    sclaude rewrites there shows up by itself; nothing at all outside sclaude.
     """
     root = dig(d, "workspace", "project_dir") or dig(d, "workspace", "current_dir") \
         or d.get("cwd")
@@ -369,10 +368,38 @@ def feature_pr(d):
         return None
     try:
         with open(os.path.join(root, ".sclaude/local/feature/state.json")) as f:
-            pr = json.load(f).get("pr")
-    except (OSError, ValueError, AttributeError):
+            state = json.load(f)
+    except (OSError, ValueError):
         return None
+    return state if isinstance(state, dict) else None
+
+
+def feature_pr(d, state=None):
+    """`#812`: the pull request of the sclaude feature this worktree holds."""
+    state = feature_state(d) if state is None else state
+    pr = (state or {}).get("pr")
     return "#%s" % pr if isinstance(pr, (int, str)) and str(pr).isdigit() else None
+
+
+def demo_progress(d, state=None):
+    """`🎬 delta 2/4 · step 5`: the demo being recorded in this tree now —
+    the feature's `demo_progress`, which demo.py play keeps from the player.
+    Step 2 records one with /sdemo, and a Bash call that runs for minutes
+    said nothing else of how far it got. None when nothing plays, or when the
+    process that wrote it is gone."""
+    state = feature_state(d) if state is None else state
+    now = (state or {}).get("demo_progress")
+    if not isinstance(now, dict) or not now.get("of"):
+        return None
+    try:
+        os.kill(int(now.get("pid")), 0)
+    except (OSError, TypeError, ValueError):
+        return None
+    kind = "delta" if now.get("kind") == "delta" else "demo"
+    text = "🎬 %s %s/%s" % (kind, now.get("scenario") or "?", now["of"])
+    if now.get("step"):
+        text += " · step %s" % now["step"]
+    return text
 
 
 def session_name(d):
@@ -440,9 +467,13 @@ def build(d, opts):
     mid = []
     if branch and not merged:
         mid.append(paint(ico("⎇") + branch, GREEN))
-    pr = feature_pr(d)
+    state = feature_state(d)
+    pr = feature_pr(d, state)
     if pr:
         mid.append(paint("PR " + pr, ORANGE))
+    demo = demo_progress(d, state)
+    if demo:
+        mid.append(paint(demo, YELLOW))
     if opts["session"]:
         name = session_name(d)
         if name:

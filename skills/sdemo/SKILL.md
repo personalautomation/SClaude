@@ -214,6 +214,12 @@ recording, nothing published, and `stale` says `fresh` again; the feature's
 page says the demo is still current, and why. It is for the same question a
 delta asks first — use it instead of recording the same thing twice.
 
+In a feature's tree, `play` keeps how far the recording got in the
+feature's state (`demo_progress`: the scenario of how many, the step) from
+the player's `progress:` lines, and clears it at the end; Claude Code's
+status line shows it while the call runs, and sclaude's terminal while it
+records a demo again. Nothing to do for it.
+
 With `SCLAUDE_DEMO_HOLD=1`, which sclaude sets when it records a demo again
 with nobody watching, `play` records into its own folder and sends nothing
 (`held:`); the feature's page keeps showing the demo it had — check the

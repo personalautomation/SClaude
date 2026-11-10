@@ -246,6 +246,61 @@ def demo_links(label, demo=""):
             origin + tail if origin else "")
 
 
+# The feature's state, where the recording that is playing says how far it
+# got (`demo_progress`): the status lines read it — sclaude's terminal while
+# it refreshes the demo (demo_progress.py) and Claude Code's in the session
+# that runs /sdemo (statusline.py). A tree that is not a feature of sclaude's
+# has no state, and nothing is written.
+STATE = ".sclaude/local/feature/state.json"
+PROGRESS = "progress: "
+
+
+def progress_set(wt, fields):
+    """Merge the player's fields into `demo_progress`, or clear it (None).
+    Never fails the recording: the state is only for showing."""
+    path = os.path.join(wt, STATE)
+    if not os.path.isfile(path):
+        return
+    try:
+        import state_file
+        with state_file.update(path) as data:
+            if fields is None:
+                data["demo_progress"] = None
+                return
+            now = data.get("demo_progress")
+            if not isinstance(now, dict) or now.get("pid") != os.getpid():
+                now = {"pid": os.getpid(), "since": int(time.time())}
+            now.update(fields)
+            data["demo_progress"] = now
+    except Exception:  # noqa: BLE001 — showing the progress is never worth a failed demo
+        pass
+
+
+def play_watched(run, wt):
+    """Run the player, passing its lines on, and keep the `progress:` ones in
+    the feature's state rather than on the screen. Its exit code."""
+    proc = subprocess.Popen(run, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            text=True, bufsize=1)
+    try:
+        for line in proc.stdout:
+            if line.startswith(PROGRESS):
+                try:
+                    fields = json.loads(line[len(PROGRESS):])
+                except ValueError:
+                    fields = None
+                if isinstance(fields, dict):
+                    progress_set(wt, fields)
+                    continue
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        return proc.wait()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        progress_set(wt, None)
+
+
 def cmd_play(args, label, wt, where, live):
     """Run a demo script (play.mjs): recorded into DEMO_DIR/<id>/ and its page
     named, or live in chrome-debug, left running for the person."""
@@ -276,10 +331,10 @@ def cmd_play(args, label, wt, where, live):
                              stdin=subprocess.DEVNULL, start_new_session=True)
         print("live: playing in chrome-debug; ⏸ on the page hands it over. Its log: " + log)
         return
-    done = subprocess.run(run, stdin=subprocess.DEVNULL)
-    if done.returncode or not os.path.isfile(os.path.join(out, "index.html")):
+    returncode = play_watched(run, wt)
+    if returncode or not os.path.isfile(os.path.join(out, "index.html")):
         die("the demo did not finish (exit %d); what it recorded is in %s"
-            % (done.returncode, out))
+            % (returncode, out))
     try:
         with open(os.path.join(out, "demo.json")) as fh:
             results = json.load(fh)

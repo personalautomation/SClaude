@@ -227,8 +227,10 @@ LIB=%(lib)s
 source %(lib)s/tree/worktree.sh
 source %(lib)s/tree/featuredb.sh
 source %(lib)s/ship/demo.sh
+BOLD=""; OFF=""
 info() { :; }
 warn() { :; }
+say() { :; }
 project_demo_mode() { echo on; }
 new_session_id() { echo s-refresh; }
 step_model() { echo m; }

@@ -225,12 +225,21 @@ const words = (x) => (x && typeof x === "object"
   : { say: String(x || ""), look: "", why: "" });
 const length = (w) => w.say.length + w.look.length + w.why.length;
 
+// Where the recording stands, one line on stdout for demo.py play to read
+// (`progress: {json}`): which scenario of how many, which step. demo.py keeps
+// it in the feature's state as `demo_progress`, where the status lines read
+// it — sclaude's terminal (demo_progress.py) and Claude Code's (statusline.py).
+function progress(fields) {
+  if (!LIVE) console.log("progress: " + JSON.stringify(fields));
+}
+
 function helpers(page, record, started) {
   const note = (kind, w, extra = {}) => {
     const step = { kind, text: w.say, t: (Date.now() - started) / 1000, url: page.url(), ...extra };
     if (w.look) step.look = w.look;
     if (w.why) step.why = w.why;
     record.steps.push(step);
+    progress({ step: record.steps.length });
     return step;
   };
   // A step whose tab the person closed under it did not happen: it leaves
@@ -507,6 +516,9 @@ async function main() {
       console.log(`scenario ${i + 1}: not started, stopped by the person`);
       break;
     }
+    progress({ kind: results.kind, scenario: i + 1, of: demo.scenarios.length, title: String(s.title),
+      viewport: VIEWPORTS[s.viewport] ? s.viewport : VIEWPORTS[demo.viewport] ? demo.viewport : "desktop",
+      step: 0 });
     try {
       const r = await scenario(browser, demo, s, i, contexts);
       // A skip pressed while this scenario signed in, ended or failed was

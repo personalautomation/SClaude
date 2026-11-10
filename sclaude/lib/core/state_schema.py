@@ -68,6 +68,7 @@ FIELDS = [
     ("steps.review.stuck_pr", (FEATURE,), "the pull request the stuck review was about"),
     ("steps.review.stuck_said", (FEATURE,), "the pull request the person was last told was stuck"),
     ("review.local.running", (FEATURE,), "when the local review's passes began; null once they end"),
+    ("demo_progress", (FEATURE,), "the demo being recorded now, written by demo.py play from the player's `progress:` lines: pid, since, kind, scenario of, title, viewport, step; null once it ends, and stale once pid is gone. Read by demo_progress.py and statusline.py"),
 
     # --- a feature built in parts (parts.sh) ------------------------------------
     ("parts", (FEATURE,), "the whole node, cleared when a replan no longer splits the feature"),
@@ -193,9 +194,10 @@ FIELDS = [
     ("merge", (WATCH,), "the project's `merge` setting as the timer's hand-off read it: auto, both, github"),
 ]
 
-# Written whole from Python (start.sh's heredoc, session_runs) rather than
+# Written whole from Python (start.sh's heredoc, session_runs, demo.py play) rather than
 # through state_set, so no state_get/state_set names them.
-WRITTEN_WHOLE = {"created", "steps.<step>.runs", "friction.<key>.runs", "parts.<n>.steps"}
+WRITTEN_WHOLE = {"created", "steps.<step>.runs", "friction.<key>.runs", "parts.<n>.steps",
+                 "demo_progress"}
 
 WILD = "<*>"
 

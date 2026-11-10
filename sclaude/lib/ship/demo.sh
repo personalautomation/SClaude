@@ -40,10 +40,12 @@ demo_refresh() {
   log="$wt/.sclaude/local/demo/refresh.log"
   findings="$wt/.sclaude/local/demo/findings.md"
   echo ""
+  # The headline in bold, the details under it grey: all grey, the one line
+  # that says what is happening read like the file list beside it.
   if [[ "$stage" == preview ]]; then
-    info "The code changed since the feature's demo — recording what changed, and the whole of it, for QA."
+    say "🎬 ${BOLD}The code changed since the feature's demo — recording what changed, and the whole of it, for QA.${OFF}"
   else
-    info "The code changed since the feature's demo — recording it again for the issue."
+    say "🎬 ${BOLD}The code changed since the feature's demo — recording it again for the issue.${OFF}"
   fi
   info "  ${verdict#stale: }"
   # What the session finds wrong in the product while it records is written
@@ -69,16 +71,21 @@ demo_refresh() {
     # The feature's environment, as every session sclaude starts in a tree
     # gets it (dev_env_load): without it a script that reaches the feature's
     # own database directly had no address for it.
+    # Its events as a stream, read by demo_progress.py: what it is at, and
+    # which scenario of which recording plays, said as it goes — headless,
+    # it ran for up to forty minutes with nothing on the screen.
+    : >"$log"
     ( cd "$wt" && dev_env_load "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
-        SCLAUDE_DEMO_HOLD=1 timeout 2400 \
+        SCLAUDE_DEMO_HOLD=1 timeout "$DEMO_REFRESH_LIMIT" \
         claude -p "$(demo_refresh_prompt "$wt" "$script" "$head" "$stage")" \
-        --session-id "$session" \
+        --session-id "$session" --output-format stream-json --verbose \
         --model "$(step_model code)" --permission-mode dontAsk \
         --allowedTools "Read" "Grep" "Glob" "Skill" "Edit(/$wt/.sclaude/local/demo/**)" \
           "Bash(python3 $tool:*)" "Bash(python3 ~/.claude/skills/sdemo/demo.py:*)" \
           "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" \
         --disallowedTools "NotebookEdit" "Bash(gh:*)" "Bash(git push:*)" "Bash(git commit:*)" \
-        >"$log" 2>&1 </dev/null ) || rc=$?
+        2>&1 </dev/null ) | demo_progress "$wt" "$log"
+    rc="${PIPESTATUS[0]}"
     if [[ -f "$state" ]]; then
       # Whether a conversation took place, by its transcript, as for the
       # epilogue: a claude that died at the door leaves no session to name.
@@ -96,10 +103,12 @@ demo_refresh() {
       # at worst.
       declare -F issue_sync >/dev/null && issue_sync "$wt"
     fi
+    say "🎬 ${BOLD}Publishing${OFF} the recordings"
     demo_publish_held "$wt" "$stage" "$tool" "$before" >>"$log" 2>&1
   else
+    : >"$log"
     ( cd "$wt" && dev_env_load "$wt" && SCLAUDE_SESSION="${SCLAUDE_SESSION:-sclaude}" SCLAUDE_DEMO_STAGE="$stage" \
-        python3 "$tool" replay </dev/null ) >"$log" 2>&1
+        python3 "$tool" replay </dev/null 2>&1 ) | demo_progress "$wt" "$log"
   fi
   demo_findings "$wt" "$findings" "$before"
   if [[ "$(cd "$wt" && python3 "$tool" stale 2>/dev/null)" == fresh:* ]]; then
@@ -112,6 +121,32 @@ demo_refresh() {
   else
     warn "  the demo was not recorded again ($log); the issue keeps the earlier one"
   fi
+  return 0
+}
+
+# How long a refresh session may run, and so what its status line counts to.
+DEMO_REFRESH_LIMIT=2400
+
+# What a refresh is doing, said as it goes: demo_progress.py reads the
+# session's events (or replay's output) on stdin and the recording's place
+# in the feature's state (`demo_progress`, kept by demo.py play), redraws a
+# status line, and prints a line for each change — `<level>\t<verb>\t<rest>`
+# — which goes out here in bold, to the terminal and the feature's topic.
+#
+#   … | demo_progress <wt> <log>
+demo_progress() {
+  local level verb rest
+  python3 "$INSTRUMENTS/sclaude/lib/ship/demo_progress.py" watch "$1" "$2" "$DEMO_REFRESH_LIMIT" \
+    | while IFS=$'\t' read -r level verb rest; do
+        [[ -n "$verb" ]] || continue
+        # The status line off first, or the line lands after it.
+        [[ -t 2 ]] && printf '\r\033[2K' >&2
+        case "$level" in
+          ok)   say "  ✅ ${BOLD}$verb${OFF} $rest" ;;
+          warn) warn "  🎬 $verb $rest" ;;
+          *)    say "  🎬 ${BOLD}$verb${OFF} $rest" ;;
+        esac
+      done
   return 0
 }
 

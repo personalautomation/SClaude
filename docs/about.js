@@ -25,7 +25,7 @@
         '<li class="ab-old"><i>2007 \u2013 2025</i><b>Expert in project delivery and process automation</b></li>' +
         '<li><i>2023 \u00b7 First AI project</i><b>A client asked for AI</b><span>The brief was an AI-powered, RAG-based chat that answers from the product’s own data. That is how my team and I went deep into AI.</span></li>' +
         '<li><i>2025 · AI lab</i><b>Led the AI transformation</b><span>As the only manager in the company with hands-on AI experience, I ran the AI lab: agentic proofs of concept for incident prioritisation, autoscaling driven by AWS logs, test-impact analysis and process QA, plus Claude Code MVPs that generate code from specifications.</span></li>' +
-        '<li class="ab-now"><i>2026 · SClaude</i><b>Experience, turned into a method</b><span>Working on both sides, technical and managerial, I created SClaude: where vibe coding meets process and scalability, with guardrails, metrics, feedback loops and best-practice sharing.</span></li>' +
+        '<li class="ab-now"><i>2026 · SClaude, AI solutions</i><b>Experience, turned into a method</b><span>Working on both sides, technical and managerial, I created SClaude: where vibe coding meets process and scalability, with guardrails, metrics, feedback loops and best-practice sharing.</span></li>' +
       '</ol>' +
     '</div>' +
     '<div class="ab-cta">' +

@@ -404,6 +404,65 @@ rm -f "$(stop_file)"
     check("exit-does-not-call-it-off", gone(target), True)
     target.kill()
 
+    # --- nor /isleep: the person is going away, queued while the turn ended ---
+    target = fake("--resume %s" % session)
+    watched(done_file, lambda: [turn_end(), typed("<command-message>isleep</command-message>\n"
+                                                  "<command-name>/isleep</command-name>")])
+    # Its turn is under way: not closed under it.
+    check("isleep-turn-not-closed", target.poll(), None)
+    check("isleep-keeps-the-marker", os.path.exists(done_file), True)
+    target.kill()
+    target = fake("--resume %s" % session)
+    watched(done_file, lambda: [turn_end(), typed("<command-name>/isleep</command-name>"),
+                                turn_end("Night mode on.")],
+            until=lambda: gone(target))
+    check("isleep-closes-at-its-turn-end", gone(target), True)
+    target.kill()
+
+    # --- /isleep off, report or with a task: the person is at it ---------------
+    for args in ("off", "report", "fix the login too"):
+        target = fake("--resume %s" % session)
+        watched(done_file, lambda: [turn_end(), typed("<command-name>/isleep</command-name>\n"
+                                                      "<command-args>%s</command-args>" % args)],
+                until=marker_gone)
+        check("isleep-%s-calls-it-off" % args.split()[0], (target.poll(), marker_gone()), (None, True))
+        target.kill()
+
+    # --- what is printed after the close: the report, not the night's reply ----
+    # The report is the turn that ended after the marker was written.
+    def at(entry, offset):
+        entry = dict(entry)
+        entry["timestamp"] = stamp(offset)
+        return entry
+
+    def lastof(since, *entries):
+        open(transcript, "w").close()
+        say(*entries)
+        # Whole seconds, as session_closed reads the marker's time.
+        argv = [sys.executable, END, "last", transcript] + ([str(int(time.time() + since))] if since is not None else [])
+        return subprocess.run(argv, capture_output=True, text=True).stdout.strip()
+
+    night = typed("<command-name>/isleep</command-name>\n<command-args>here 8h</command-args>")
+    report_then_night = (at(turn_end("Earlier."), -30), at(typed("go on"), -25),
+                         at(turn_end("The report."), -19),
+                         at(night, -18), at(turn_end("Night mode on."), -10))
+    check("isleep-last-is-the-report", lastof(-20, *report_then_night), "The report.")
+    check("last-without-since-is-the-last", lastof(None, *report_then_night), "Night mode on.")
+    # The night's turn worked on and wrote the marker again: its report.
+    check("isleep-marker-again-last-is-its-report", lastof(-12, *report_then_night), "Night mode on.")
+    # Nothing ended after the marker ([n] from the tab): the last message.
+    check("no-turn-after-marker-last-is-the-last", lastof(-5, *report_then_night), "Night mode on.")
+    # A turn a background check's notification started after the report is
+    # the report when it ends last; a /isleep after it still is not.
+    notice = {"type": "user", "message": {"content": "<task-notification/>"}}
+    check("notice-turn-last-is-it",
+          lastof(-20, at(turn_end("Checks running."), -19), at(notice, -15),
+                 at(turn_end("All green."), -12)), "All green.")
+    check("notice-turn-then-isleep-last-is-it",
+          lastof(-20, at(turn_end("Checks running."), -19), at(notice, -15),
+                 at(turn_end("All green."), -12), at(night, -10), at(turn_end("Night mode on."), -5)),
+          "All green.")
+
     # --- no marker: the watcher is stopped and kills nothing ------------------
     target = fake("--resume %s" % session)
     script = WATCH + """
@@ -606,13 +665,15 @@ echo "watcher=[$SESSION_WATCHER]"
     # not be done. The terminal gets the same line, said to be sclaude's close.
     closer = ('source "%s/core/steps.sh"\nfor _m in ship/regression ship/regression_gate ship/regression_fix; do source "%s/$_m.sh"; done\n'
               'ask_feed() { printf "FEED %%s\\n" "$2"; }\nask_note() { :; }\n'
-              'session_report() { echo REPORT; }\nsay_here() { echo "$*"; }\nBOLD=; OFF=\n' % (LIB, LIB)
+              'session_report() { echo "REPORT${3:+ since $3}"; }\nsay_here() { echo "$*"; }\nBOLD=; OFF=\n' % (LIB, LIB)
               + functions(["session_closed"]))
 
     def closed(marked, *args):
         marker = os.path.join(tmp, "closed.done")
         with open(marker, "w") as fh:
             fh.write("done" if marked else "")
+        # The marker's time goes to the report: the turn that ended after it.
+        os.utime(marker, (1700000000, 1700000000))
         p = subprocess.run(["bash", "-c", closer + '\nsession_closed "$@"; echo "rc=$?"',
                             "_", marker, wt, session] + list(args),
                            capture_output=True, text=True, timeout=30)
@@ -621,7 +682,7 @@ echo "watcher=[$SESSION_WATCHER]"
     # A step's session, not the step: the step goes on after it.
     check("closed-by-sclaude", closed(True, "", "", "step", "code", "2"),
           ["FEED 💻 Step 2/7 development: session 2 finished",
-           "💻 Step 2/7 development: session 2 finished — sclaude closed it.", "REPORT", "rc=0"])
+           "💻 Step 2/7 development: session 2 finished — sclaude closed it.", "REPORT since 1700000000", "rc=0"])
     check("left-by-a-person", closed(False, "", "", "step", "code", "1"),
           ["FEED 💻 Step 2/7 development: session 1 ended", "rc=1"])
     # A fix session's tally goes with it however it ended; the note only

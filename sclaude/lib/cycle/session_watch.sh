@@ -390,6 +390,7 @@ session_closed() {
     ask_feed say "$(phase_line ended "$@")${tally:+ · $tally}"
     return 1
   fi
+  local written; written="$(stat -c %Y "$marker" 2>/dev/null || true)"
   rm -f "$marker"
   line="$(phase_line finished "$@")${tally:+ · $tally}${note:+ · $note}"
   ask_feed say "$line"
@@ -397,7 +398,7 @@ session_closed() {
   stty sane 2>/dev/null || true
   echo ""
   say_here "${BOLD}$line — sclaude closed it.${OFF}"
-  session_report "$cwd" "$session"
+  session_report "$cwd" "$session" "$written"
   return 0
 }
 
@@ -411,10 +412,13 @@ session_closed() {
 # itself never reaches the feature's topic, and the two headings around it
 # would arrive there bare, the /exit one about a terminal the reader is not at.
 #
-#   session_report <wt> <session>
+# <since>, when the session's marker was written: the report is the turn that
+# ended after it, not a reply to a /isleep typed later (last in session_end.py).
+#
+#   session_report <wt> <session> [<since>]
 session_report() {
   local text
-  text="$(python3 "$LIB/cycle/session_end.py" last "$(session_transcript "$1" "$2")" 2>/dev/null || true)"
+  text="$(python3 "$LIB/cycle/session_end.py" last "$(session_transcript "$1" "$2")" ${3:+"$3"} 2>/dev/null || true)"
   [[ -n "$text" ]] || return 0
   echo ""
   echo "${BOLD}Its last message:${OFF}"

@@ -179,6 +179,10 @@ over every session is (not an `/isleep here` one), under `sleep_mode: auto`
 (the default): step 4's review rounds go on without asking, and in the
 morning they ask again. `on` keeps `[g]` on all the
 time, `off` leaves it to the box alone; a box you set yourself wins either way.
+`/isleep` (alone, or with `here` or a length) typed into a step's session
+that has just reported its work done does not keep it open, as other words
+typed there do: sclaude closes it when the `/isleep` turn ends and prints the
+report from before it.
 
 The night is kept in `~/.local/state/isleep/night.json`, not only in the
 conversation, and covers every Claude session on the machine — already

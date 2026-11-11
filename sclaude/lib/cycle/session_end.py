@@ -24,7 +24,9 @@
 #   session_end.py approved <transcript>        → when the plan was approved
 #   session_end.py accepted <transcript> <after> → yes | no: step 2's work
 #                                                 accepted in its own dialog
-#   session_end.py last <transcript>            → the last message's text
+#   session_end.py last <transcript> [<since>]  → the last message's text;
+#                                                 with <since>, of the first
+#                                                 turn ended after it
 #   session_end.py first <transcript>           → the text that ended the first
 #                                                 turn, before anybody answered
 #   session_end.py limit <transcript> [<after>] → the usage limit it stopped on
@@ -141,11 +143,48 @@ def typed_by_a_person(entry):
     return False
 
 
+# A night begun: /isleep with nothing after it but `here` or a length
+# (`8h`). Not `/isleep off` or `report`, which the person types on coming
+# back, nor `/isleep <what to carry on with>`, which gives the session work.
+ARGS = re.compile(r"<command-args>(.*?)</command-args>", re.S)
+NIGHT_ARG = re.compile(r"^(here|\d+(\.\d+)?h)$", re.I)
+
+
+def going_away(entry):
+    """A prompt that says the person is leaving the session, not working on
+    in it: a night begun (/isleep, see NIGHT_ARG).
+
+    A review session's report ended, the person typed /isleep a moment later
+    — queued while the turn finished — and the watcher took it for the
+    person at the keyboard: the marker came off, the session, told nothing,
+    said its marker stood, and stayed open all night. Read by `watch` alone,
+    which keeps the marker and waits the night's turn out; every other reader
+    still counts it as the person typing. What is printed after the close is
+    the turn that ended after the marker (`last` with `since`), not the
+    night's reply.
+    """
+    if not typed_by_a_person(entry) or entry.get("type") != "user":
+        return False
+    content = (entry.get("message") or {}).get("content")
+    if isinstance(content, list):
+        content = " ".join(str(b.get("text") or "") for b in content if isinstance(b, dict))
+    content = str(content or "")
+    found = COMMAND.search(content)
+    if not found or found.group(1) != "/isleep":
+        return False
+    args = ARGS.search(content)
+    return all(NIGHT_ARG.match(w) for w in (args.group(1) if args else "").split())
+
+
 def watch(path, since):
     state = "working"
     for entry in entries(path):
         moment = when(entry)
         if moment is None or moment < since:
+            continue
+        if going_away(entry):
+            # A turn begins on it: not closed under it, closed at its end.
+            state = "working"
             continue
         if typed_by_a_person(entry):
             return "human"
@@ -433,7 +472,7 @@ def requested(path):
     return moment
 
 
-def last(path):
+def last(path, since=None):
     """The text the session wrote after the last thing it was handed.
 
     A turn interleaves text with tool calls; what the person reads at the end
@@ -446,10 +485,18 @@ def last(path):
     tool call between them, and after "Accept" writes its marker and one
     line: the report is the text before the question, kept ahead of that
     line until somebody types again.
+
+    With `since` — when the session's marker was written — a /isleep typed
+    after a turn that ended after it (going_away) ends the reading: the
+    night's turn is a reply, not the report. A turn something else started
+    meanwhile — a background check's notification — is read as before, and
+    is the report when it ends last.
     """
-    texts, carried, asked = [], [], {}
+    texts, carried, asked, reported = [], [], {}, False
     for entry in entries(path):
         kind = entry.get("type")
+        if reported and going_away(entry):
+            break
         if kind == "user":
             # Somebody typing ends what an accept carried: the person, or
             # sclaude's message a launch opens on, which is marked as typed.
@@ -475,6 +522,10 @@ def last(path):
                 elif isinstance(block, dict) and block.get("type") == "tool_use" \
                         and block.get("name") == "AskUserQuestion":
                     asked[block.get("id")] = list(texts)
+            moment = when(entry)
+            if since is not None and moment is not None and moment >= since \
+                    and (entry.get("message") or {}).get("stop_reason") == "end_turn":
+                reported = True
     return without_exit("\n\n".join(carried + texts))
 
 
@@ -585,8 +636,10 @@ def main():
             sys.stdout.write("%d\n" % int(moment))
     elif len(args) == 2 and args[0] == "chain":
         sys.stdout.write("\n".join(chain(args[1])) + "\n")
-    elif len(args) == 2 and args[0] in ("last", "first"):
-        text = (last if args[0] == "last" else first)(args[1])
+    elif len(args) in (2, 3) and args[0] in ("last", "first") \
+            and (len(args) == 2 or args[0] == "last"):
+        text = last(args[1], float(args[2])) if len(args) == 3 \
+            else (last if args[0] == "last" else first)(args[1])
         if text:
             sys.stdout.write(text + "\n")
     return 0

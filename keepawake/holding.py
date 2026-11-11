@@ -199,6 +199,36 @@ def parse_hhmm(text, now):
     return int(target.timestamp())
 
 
+def decide(action, stamp, now):
+    """An answer to the warning — "extend" or "sleep" — for the window whose
+    deadline is stamp: ("stale", None, 0) when the window is another one now,
+    otherwise (action, the new deadline's label or None, until_ts).
+
+    One place for the warning's buttons and its widget."""
+    with locked() as st:
+        live_until = st.get("until_ts") or 0
+        if stamp is None or stamp != live_until:
+            # The window is a different one now: it was extended
+            # differently, or the laptop managed to sleep and the cycle
+            # started again.
+            log.warning("the decision %r is stale: stamp %s, in the state %s",
+                        action, stamp, live_until)
+            return "stale", None, 0
+        if action == "extend":
+            state.extend(st, now, manual=True)
+            state.touch(st, now)
+            st["decision"] = "extend"
+            st["decision_ts"] = now
+            log.info("the warning: extend, deadline until %s", st["until_local"])
+            return "extend", st["until_local"], st["until_ts"]
+    # Not "sleep now" but "stop holding": Windows will count its own fifteen
+    # minutes of idling as usual. Released by release_hold, after the lock,
+    # so no copy of its fields drifts from it.
+    release_hold(now)
+    log.info("the warning: let it sleep, hold released")
+    return "sleep", None, now
+
+
 def warn_keyboard(until_ts):
     # The deadline stamp inside callback_data is what tells a fresh press from
     # a press on yesterday's message. Without it the "Extend" button from an old

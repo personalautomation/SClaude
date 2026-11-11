@@ -268,6 +268,11 @@ STRINGS = {
                           "Turn phone access off? This app closes with it, and it "
                           "can be turned back on only from the chat."),
     "svc.phoneoffyes":   ("🔒 Выключить", "🔒 Turn off"),
+    # How the bot sends: widgets where they replace a message (questions,
+    # running processes, the sleep warning, the menu) and messages for the
+    # rest — or messages only.
+    "svc.widgetson":    ("🧩 Отправка: виджеты + сообщения", "🧩 Sending: widgets + messages"),
+    "svc.widgetsoff":   ("🧩 Отправка: только сообщения", "🧩 Sending: messages only"),
     "svc.restart":       ("🔁 Перезапуск демона", "🔁 Restart daemon"),
     "svc.restarting":    ("🔁 Перезапускаюсь…\nСообщу, когда поднимусь.",
                           "🔁 Restarting…\nI will report once I am back."),
@@ -359,6 +364,11 @@ STRINGS = {
                           "<b>%(repo)s</b> / <b>%(slug)s</b>%(links)s\n"
                           "Step: %(step)s\n"
                           "Worktree: <code>%(wt)s</code>%(session)s"),
+    # The card's words beside its widget, which shows the step and the session.
+    "feat.cardslim":     ("<b>%(repo)s</b> / <b>%(slug)s</b>%(links)s\n"
+                          "Worktree: <code>%(wt)s</code>",
+                          "<b>%(repo)s</b> / <b>%(slug)s</b>%(links)s\n"
+                          "Worktree: <code>%(wt)s</code>"),
     # The feature's card in its topic: the dev server and code-server lines.
     "card.dev":          ("\n\n🖥 Dev-сервер: %(state)s\n%(link)s · <code>%(local)s</code>",
                           "\n\n🖥 Dev server: %(state)s\n%(link)s · <code>%(local)s</code>"),
@@ -631,6 +641,8 @@ STRINGS = {
     "ask.context":       ("<pre>%(body)s</pre>\n\n", "<pre>%(body)s</pre>\n\n"),
     "ask.yes":           ("✅ Да", "✅ Yes"),
     "ask.no":            ("❌ Нет", "❌ No"),
+    # A typed answer's suggestion as a widget's button; typing still answers.
+    "ask.use":           ("Взять «%(name)s»", "Use “%(name)s”"),
     "ask.text":          ("Ответьте сообщением.", "Reply with a message."),
     # What the question's message becomes once it is answered, wherever from:
     # the question and its answer, without buttons.
@@ -724,6 +736,22 @@ STRINGS = {
                           "☕ Extended until <b>%(at)s</b>."),
     "sleep.accepted":    ("😴 Хорошо, ноутбук уснёт как обычно.",
                           "😴 Fine, the laptop will sleep as usual."),
+    # The warning as a widget (widget_html/hold.html): the caption, and what
+    # the widget counts down by itself.
+    "widget.hold.caption": ("⏰ Ноутбук уснёт в <b>%(at)s</b>",
+                            "⏰ The laptop sleeps at <b>%(at)s</b>"),
+    "widget.hold.left":  ("💤 Через %(left)s", "💤 In %(left)s"),
+    "widget.hold.next":  ("Потом Windows уснёт сама, минут через 15 простоя.",
+                          "Windows then sleeps on its own, after about 15 minutes idle."),
+    "widget.hold.now":   ("Время вышло — дальше Windows уснёт сама, минут через 15 простоя.",
+                          "Time is up — Windows now sleeps on its own after about 15 minutes idle."),
+    # Any widget's answer to a tap that did not reach the bot.
+    "widget.busy":       ("Предыдущее нажатие ещё в пути — нажмите ещё раз.",
+                          "The previous tap is still on its way — tap again."),
+    # A menu screen in the widget that wants typing, which a widget cannot.
+    "widget.typing":     ("Здесь нужно ввести текст — это делается в приложении (☰ Menu) или командой в чате.",
+                          "This needs typing — do it in the app (☰ Menu) or with a command in the chat."),
+    "widget.failed":     ("Бот не ответил", "The bot did not answer"),
     "sleep.stale":       ("Это сообщение устарело", "This message is out of date"),
     "extended.plain":    ("Продлено до <b>%(at)s</b>.",
                           "Extended until <b>%(at)s</b>."),

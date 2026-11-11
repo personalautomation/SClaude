@@ -70,6 +70,8 @@ means exactly what it says.
 | `keepawake/holding.py` | the awake screen: extending and releasing the hold |
 | `keepawake/status_report.py` | the status screen: what holds the machine and why |
 | `keepawake/sleep_warning.py` | the warning before sleep, forgotten hard holders, the phone after a boot |
+| `keepawake/processes.py` | a process sclaude runs as a widget in its feature's topic: its lines go into it, one message when it ends |
+| `keepawake/widgets.py`, `keepawake/widget_html/` | HTML widgets (Bot API 10.4): the templates, their state within Telegram's 1024 bytes, the switch between them and plain messages |
 | `keepawake/asks.py` | sclaude's questions on the phone and what becomes of their messages |
 | `keepawake/topics.py` | a topic per feature: its record, naming it, deleting it with the feature |
 | `keepawake/card_view.py` | the feature's card in its topic |
@@ -223,7 +225,9 @@ warning or an alarm is in it and the person is not at the terminal that printed
 it — the same test of the terminal's last keystroke that keeps questions silent
 at the laptop. The feed goes only to the topic: with none yet the file waits,
 lines a failed send took go back to it for an hour (`FEED_KEEP`), and a long
-batch is cut by whole lines, never through an HTML entity.
+batch is cut by whole lines, never through an HTML entity. With widgets on, the
+lines of a running process go into its widget instead, and one message follows
+when it ends (the widgets paragraph below).
 
 Each of these lines opens with its kind's icon, the one its tab carries
 where it has one (`phase_icon` in `steps.sh`): 🛠 a review fix session, 🔍
@@ -340,6 +344,102 @@ one that holds now. A line the network kept is tried again on the next turn. The
 once nothing holds, someone typed, or no session is left; the "until what time?"
 prompt becomes the answer, or goes with its input box when the person leaves it.
 
+**Active things are moving to widgets.** Bot API 10.4 lets a message carry a
+small HTML widget whose state the bot changes silently (`editMessageWidgetData`)
+and which asks the bot on a tap (`widget_query`, answered with
+`answerWidgetQuery` within 15 seconds — always, a failed tap too). The daemon
+asks for `widget_query` by name in `allowed_updates`, since it is not in
+Telegram's default set. The sleep warning is the first: a widget
+(`widget_html/hold.html`) that counts down to the deadline by itself, says
+why sleep is coming and what Windows does next, and answers "add an hour" and
+"let it sleep" in place. A deadline moved elsewhere changes the widget's state
+and caption, not its text; a tap on a window that is over is answered "out of
+date" and the widget goes, as the message's button did. A widget's code is
+fixed once sent — the labels in the person's language go into it then — and
+everything else is its state, at most 1024 bytes (`widgets.state` cuts the
+longest field to fit). A session's question is the second (`widget_html/ask.html`,
+`asks.widget_press`): yes/no, or every option of a choice as a button — eight
+labels or forty digits a page, the next page asked of the bot — so a list
+longer than an inline keyboard takes needs no typed number. Labels the
+question did not pass are read from the numbered list printed above it, which
+then leaves the caption. The question itself is the caption above the widget,
+its context cut until it fits Telegram's 1024 characters; answered — here, at
+the terminal or by text — the widget shows the answer and its buttons go. A
+question that wants typed text stays a message, unless it suggests an answer
+("Branch name [<suggested>]: " when a feature starts from an issue): the
+suggestion is then the widget's one button, and a typed reply still answers
+it. A process sclaude runs is the
+third (`processes.py`, `widget_html/proc.html`): the feed line that starts one
+("🧪 Regression started", a review pass, a session) opens a widget captioned by
+it, which counts the time itself and shows the latest lines — they go into it
+by a silent edit instead of piling up below. The line that ends it (a `✅`, or
+a phase line of the same kind that starts nothing: "finished", "failed"), or
+the next start, takes the widget away and leaves one message with its account:
+the start, then its latest lines — the result last — with how many between were
+left out; a warning while it runs sends the widget again, with sound, the
+review's keys moved onto it. A process begun and ended within one turn stays a
+message, and one whose printing processes are all gone and which has printed
+nothing — its detail lines included — for an hour (`QUIET_END`) is ended after
+that turn's lines are read: the process that prints a start is not always the
+one that runs it. Such an end the network keeps refusing is given up unsent —
+an hour from its first refusal when its topic is gone, a day otherwise
+(`GIVE_UP`).
+Lines before a new start in one turn are the open process's last, a warning
+among them aside — it goes with the start it leads to. An end sends its
+account before anything that follows; not sent, nothing changes and the lines
+come back next turn. The ended widget's removal waits in the record
+(`notes/process.json` in the feature's channel, with the open process) and is
+tried every turn until done; a widget whose edit fails — deleted by hand — is
+sent again. Turned off, a new start goes as a message and ends the open widget.
+
+The menu is the fourth (`menu_widget.py`, `widget_html/menu.html`): /menu or
+"Menu" in the main chat sends the whole menu as a widget, the last one taken
+away, and it works with phone access off — the widget needs no network. A tap
+asks the bot with the button's place on the screen (`m:<row>.<place>`; the
+actions are kept in the state as `menu_widget`); the bot answers the query at
+once and runs the press through `webmenu.answer` — the Mini App's own screens —
+since a press may take longer than the 15 seconds a query has, and the next
+screen arrives as the widget's state. A screen too
+large for the state's 1024 bytes loses rows from the bottom — the last, the
+way back, stays — then shorter labels, then whole lines of its text, which
+then loses its markup. The press is answered at once and runs right after,
+in the loop; the next screen carries a press counter, so the widget always
+hears it, and a tap names the counter of the screen it was made on — one made
+on an earlier screen is answered with the current one. The buttons are off
+while a press is out; a press whose screen never comes gives up after a
+minute, and one that failed is drawn as failed. Such a press leaves no
+"📱" line in the chat: the widget shows what it did; a change to the hold still
+takes the earlier lines about sleep away. Links open from the
+widget; the Mini App's own buttons are left out, and a screen that wants
+typing says to use the app or a command. A topic's menu stays its feature's
+card.
+
+The feature's card is the fifth (`card_view.py`, `widget_html/card.html`): in
+its topic it is a slim widget — the cycle's places by their icons, the one the
+feature is at highlighted, and what its session is doing — whose caption is
+the rest of the card (the names, the links, the dev server and code-server;
+`feat.cardslim` leaves out the step and the session the widget shows) and whose
+buttons stand under it as before. The place is read from the label's "N/7"
+(the state's step stops at the four steps). A redraw (`card_view.redraw`)
+changes the widget's state and caption; words past a caption's 1024
+characters lose the card's last lines before a press's note, which is cut
+only when the card's first line and the note alone do not fit
+(`card_widget` in the feature's record says the card is a widget). A widget past Telegram's 48 hours for deleting is drawn
+out of date by its state (`menus.retire`). ⚙️ Settings → 🧩 Sending has two
+values: **widgets + messages** — widgets where they replace a message, plain
+messages for the rest — and **messages only** (`widgets` in the state,
+`widgets.enabled`). The messages-only path is kept but no longer extended.
+
+While widgets are on and the bot is running (`bot_running`: its systemd unit
+is active), `bin/sclaude-notify --in` does not send a phase line
+meant for a feature's topic ("🧪 Regression started", its end): it writes it
+into the feature's feed, as `ask_feed` does, so the regression's widget takes
+it — a regression tells of itself through `sclaude-notify`, not through the
+feed. A line it would have sent with sound is written at the level `ring`,
+which sounds (`FEED_SOUND`) without the ⚠️ of a warning, and keeps its
+indented lines (a red part's log tail); the person at the terminal that asked
+keeps it silent, as every feed line.
+
 **At the laptop a question arrives silently.** It is sent anyway — one can step
 away mid-step, and then the message is already waiting in the chat — but while
 the person is sitting at that very terminal it does not buzz the phone
@@ -368,7 +468,8 @@ The question declares the answer's form itself — as `ask`'s third argument
 rather than by parsing the prompt: guessing from `[y/N]` would diverge from the
 code at the first edit to the text. `yn` and `yn:yes` give two buttons (the first
 being the one Enter gives in the terminal), `pick:N` gives a button per option
-and for a large N asks for a number as text, as in the terminal; with no form the
+(as messages only, behind ⚙️ Settings → 🧩 Sending, a large N asks for a number as
+text, as in the terminal); with no form the
 answer arrives as an ordinary message. What was printed before the question
 travels with it: a "Publish?" without the list of commands `run_block` shows in
 the terminal would be agreement to who knows what.
@@ -408,10 +509,11 @@ as for the bot: the chat's own setting changes at once, the bot's only when a
 chat is reopened) opens a Mini App served by the gate. The chat keeps the
 bot's questions as buttons that become their answers, and a line, marked 📱,
 of everything started from the app — in the feature's topic when it was about
-a feature. What only showed something leaves nothing. Without phone access the
-app cannot open, so the chat's `/menu` keeps what must work without it: the
-hold and turning access on; the command list (`setMyCommands`) follows the same
-split.
+a feature. What only showed something leaves nothing. With widgets on, the
+chat's `/menu` gives the whole menu as a widget (above), phone access on or
+off; with widgets off it gives the way to the app, or, without phone access,
+what must work without it: the hold and turning access on. The command list
+(`setMyCommands`) follows phone access.
 
 **The page has no screens of its own** (`keepawake/webmenu.py`). A press is
 handed to the chat's own `Handler.callback` as though it came from a menu

@@ -48,6 +48,11 @@ def answers_on(port):
         return False
 
 
+def read_file(path):
+    with open(path, errors="replace") as fh:
+        return fh.read()
+
+
 def wait_for(predicate, seconds=10):
     deadline = time.time() + seconds
     while time.time() < deadline:
@@ -362,7 +367,11 @@ def check_gate_new_code(root):
                    SCLAUDE_GATE_PORT=str(port))
         argv = ([sys.executable, "-c", GATE_SOCKET, os.path.join(tree, "bin", "sclaude-proxy"), str(port)]
                 if socketed else [sys.executable, os.path.join(tree, "bin", "sclaude-proxy"), "--gate"])
-        proc = subprocess.Popen(argv, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        # Its stderr in a file: what it says is waited for while it runs.
+        errfile = os.path.join(root, "gate-%d.err" % port)
+        with open(errfile, "w") as err:
+            proc = subprocess.Popen(argv, env=env, stdout=subprocess.DEVNULL, stderr=err)
+        proc.errfile = errfile
         # An HTTP answer, not a connection: started by the socket, the port
         # takes connections before the gate has read its code's stamp.
         wait_for(lambda: http_answers(port), 15)
@@ -392,15 +401,17 @@ def check_gate_new_code(root):
         with open(touched, "a") as fh:
             fh.write("\nthis is not python(\n")
         touch()
-        time.sleep(2)
+        # The new code is tried in a child before anything else: waited for
+        # by what the gate says, seconds under a full parallel run.
+        said = wait_for(lambda: "does not import" in read_file(proc.errfile), 30)
         check("gate: new code that does not import, it stays on the old", proc.poll(), None)
     finally:
         with open(touched, "w") as fh:
             fh.write(good)
         if proc.poll() is None:
             proc.kill()
-        err = proc.communicate()[1].decode(errors="replace")
-    check("gate: and says so", "does not import" in err, True)
+        proc.wait()
+    check("gate: and says so", said, True)
 
     proc = start(False)
     try:
@@ -970,21 +981,26 @@ def main():
                     "os.environ.update(LISTEN_PID=str(os.getpid()), LISTEN_FDS='1')\n"
                     "os.execv(sys.executable, [sys.executable, %r])\n" % (port, copy))
         senv = dict(env)
-        proc = subprocess.Popen([sys.executable, "-c", launcher], env=senv,
-                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        errfile = os.path.join(watched, "socket.err")
+        with open(errfile, "w") as errfh:
+            proc = subprocess.Popen([sys.executable, "-c", launcher], env=senv,
+                                    stdout=subprocess.DEVNULL, stderr=errfh)
         try:
             wait_for(lambda: answers_on(port), 5)
             # The socket listens before the proxy is up on it: give it time
             # to read its own file first.
             time.sleep(1)
             os.utime(copy, (time.time() + 10, time.time() + 10))
-            time.sleep(1.5)
+            # The new code is tried in a child first: waited for by what the
+            # proxy says, seconds under a full parallel run.
+            restarted = wait_for(lambda: "its code changed" in read_file(errfile), 30)
+            wait_for(lambda: answers_on(port), 10)
             check("socket-started: still the same process", proc.poll(), None)
             check("socket-started: answers on the new code", answers_on(port), True)
         finally:
             proc.terminate()
-            _, err = proc.communicate(timeout=5)
-        check("socket-started: it restarted in place", b"its code changed" in err, True)
+            proc.wait(timeout=5)
+        check("socket-started: it restarted in place", restarted, True)
     finally:
         shutil.rmtree(watched, ignore_errors=True)
 

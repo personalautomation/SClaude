@@ -48,6 +48,11 @@ from keepawake.state import (HARD_HOLDERS, HOLD_SECONDS, REFUSAL_HOLDS,
                              blank, extend, needs_warning, read, refuses,
                              should_hold, touch)
 
+# This bench checks the plain messages, the path kept while the bot moves
+# over to widgets; the widgets' own path is tests/widgets.py.
+from keepawake import widgets  # noqa: E402
+widgets.enabled = lambda: False
+
 failures = []
 
 
@@ -879,6 +884,26 @@ class FakeBot(object):
         self.sent.append((text, kb, quiet))
         self.threads.append(thread)
         return 777
+
+    def send_widget(self, html, data, caption, keyboard=None, quiet=False, thread=None,
+                    above=False):
+        # Kept apart from sent: the checks on messages count those alone.
+        if self.offline:
+            self.last_error = "timed out"
+            return 0
+        self.widgets = getattr(self, "widgets", []) + [(caption, data, quiet)]
+        return 779
+
+    def widget_data(self, mid, data):
+        self.widget_states = getattr(self, "widget_states", []) + [(mid, data)]
+        return not self.offline
+
+    def caption(self, mid, text, keyboard=None):
+        self.edits.append((mid, text))
+        return not self.offline
+
+    def answer_widget(self, qid, data=None):
+        self.answers.append((data, False))
 
     def create_topic(self, name):
         if self.no_topics:

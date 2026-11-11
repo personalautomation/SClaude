@@ -39,10 +39,15 @@ from keepawake import notices, review_keys
 from keepawake.i18n import current, set_lang
 from keepawake.state import read
 
-from keepawake import asks, botapi, card_view, handling, holding, menus, phone_access, repos, sleep_warning, topics
+from keepawake import asks, botapi, card_view, handling, holding, menus, phone_access, processes, repos, sleep_warning, topics
 
 
 log = logging.getLogger("keepawake")
+
+# The updates the bot reads, named outright: a widget's queries are not in
+# Telegram's default set, and the list given last stays with the bot for
+# the next poller too.
+UPDATES = ["message", "callback_query", "widget_query"]
 
 
 # --- start-up ----------------------------------------------------------------
@@ -187,7 +192,8 @@ def main():
                     os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
         try:
             out = bot.call("getUpdates", http_timeout=botapi.POLL_TIMEOUT + 10,
-                           offset=bot.offset, timeout=botapi.POLL_TIMEOUT)
+                           offset=bot.offset, timeout=botapi.POLL_TIMEOUT,
+                           allowed_updates=UPDATES)
         except urllib.error.HTTPError as exc:
             if exc.code == 409:
                 # A second instance on the same token: two daemons would for
@@ -231,6 +237,13 @@ def main():
                     handling.remember_lang(cq.get("from"))
                     bot.thread = topics.message_thread(cq.get("message") or {})
                     handler.callback(cq)
+                elif "widget_query" in upd:
+                    wq = upd["widget_query"]
+                    if (wq.get("chat") or {}).get("id") != bot.chat_id:
+                        log.warning("a foreign chat in a widget: %s", (wq.get("chat") or {}).get("id"))
+                        continue
+                    handling.remember_lang(wq.get("from"))
+                    handler.widget_query(wq)
             except Exception as exc:
                 log.exception("handling the update: %s", exc)
             finally:
@@ -265,7 +278,7 @@ def main():
                           shown=asks.channel_context,
                           lost=lambda name, slug: topics.topic_lost(bot)
                           and topics.feature_topic(bot, name, slug, renew=True),
-                          keys=review_keys)
+                          keys=review_keys, procs=processes)
         except Exception as exc:
             log.exception("sending sclaude's notes: %s", exc)
 

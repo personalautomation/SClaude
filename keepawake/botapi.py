@@ -142,6 +142,72 @@ class Bot(object):
             log.warning("did not send: %s %s", exc, getattr(exc, "telegram", ""))
             return 0
 
+    # --- widgets (widgets.py) -----------------------------------------------
+
+    def send_widget(self, html, data, caption, keyboard=None, quiet=False, thread=None,
+                    above=False):
+        # A message with an HTML widget, allowed to ask the bot. The caption
+        # is what the chat list, a notification and a client without widgets
+        # show. Telegram protects every widget's content by itself: no
+        # forwarding, and on the phone no screenshots while one is on screen.
+        try:
+            out = self.call("sendWidget", chat_id=self.chat_id, html=html,
+                            chat_data=data or None, caption=caption, parse_mode="HTML",
+                            # above: the caption is what the widget answers,
+                            # a question, read before the buttons.
+                            show_caption_above_media="true" if above else None,
+                            allow_queries="true",
+                            message_thread_id=(self.thread if thread is None
+                                               else thread) or None,
+                            disable_notification="true" if quiet else None,
+                            reply_markup={"inline_keyboard": keyboard} if keyboard else None)
+            self.last_error = ""
+            return (out.get("result") or {}).get("message_id", 0)
+        except Exception as exc:
+            self.last_error = getattr(exc, "telegram", "") or str(exc).lower()
+            log.warning("the widget did not send: %s %s", exc, getattr(exc, "telegram", ""))
+            return 0
+
+    def widget_data(self, message_id, data):
+        # The widget's new state: an open one redraws at once, silently.
+        # Whether it went through; the same state again counts as done.
+        try:
+            self.call("editMessageWidgetData", chat_id=self.chat_id,
+                      message_id=message_id, chat_data=data)
+            self.last_error = ""
+            return True
+        except Exception as exc:
+            # Kept: "message to edit not found" says the widget is gone, which
+            # a timeout does not (processes.py).
+            self.last_error = getattr(exc, "telegram", "") or str(exc).lower()
+            if "not modified" in self.last_error:
+                return True
+            log.warning("the widget's state did not change: %s %s", exc,
+                        getattr(exc, "telegram", ""))
+            return False
+
+    def caption(self, message_id, text, keyboard=None):
+        # A widget's caption, which a state change leaves as it was.
+        try:
+            self.call("editMessageCaption", chat_id=self.chat_id,
+                      message_id=message_id, caption=text, parse_mode="HTML",
+                      reply_markup={"inline_keyboard": keyboard} if keyboard else None)
+            return True
+        except Exception as exc:
+            if "not modified" in (getattr(exc, "telegram", "") or str(exc)).lower():
+                return True
+            log.warning("the caption did not change: %s", exc)
+            return False
+
+    def answer_widget(self, query_id, data=None):
+        # Every query is answered, within 15 seconds, or the widget shows a
+        # timeout; the data reaches only the widget that asked.
+        try:
+            self.call("answerWidgetQuery", widget_query_id=query_id, data=data,
+                      http_timeout=10)
+        except Exception as exc:
+            log.warning("answerWidgetQuery: %s %s", exc, getattr(exc, "telegram", ""))
+
     def ask(self, text, placeholder):
         # A question that expects text. The input box in a chat with a bot is
         # always there — the Bot API does not allow removing it — but usually a

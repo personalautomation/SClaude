@@ -11,7 +11,7 @@ import urllib.request
 
 from keepawake.i18n import STRINGS, current, t
 from keepawake.state import locked, read
-from keepawake import handling, phone_access, repos, status_report, topics
+from keepawake import handling, phone_access, repos, status_report, topics, widgets
 
 
 log = logging.getLogger("keepawake")
@@ -27,9 +27,17 @@ def retire(bot, message_id):
     # possible.
     # Returns whether the message is gone or edited: False is the network's,
     # and a caller that keeps the id can try again.
+    # A widget has no text to edit: its state is turned into "out of date",
+    # which every widget draws without buttons, and its caption — the
+    # question, the deadline — says the same.
     if not message_id:
         return True
-    return bool(bot.delete(message_id) or bot.edit(message_id, t("msg.stale")))
+    if bot.delete(message_id) or bot.edit(message_id, t("msg.stale")):
+        return True
+    if bot.widget_data(message_id, widgets.state(widgets.STALE)):
+        bot.caption(message_id, t("msg.stale"))
+        return True
+    return False
 
 
 def unstyled(markup):
@@ -102,6 +110,10 @@ def services_keyboard():
         [{"text": t("svc.lang"), "callback_data": "svc_lang"},
          {"text": t("svc.docs"), "callback_data": "svc_docs"}],
         [{"text": t("svc.restart"), "callback_data": "svc_restart"}],
+        # Sending: widgets + messages (widgets where they replace a message)
+        # or messages only — one button, its caption the current choice.
+        [{"text": t("svc.widgetson") if widgets.enabled() else t("svc.widgetsoff"),
+          "callback_data": "svc_widgets"}],
         # On and off in one button, its caption the current state.
         [{"text": t("svc.phoneon") if phone_access.gate_origin(None, False) else t("svc.phoneoff"),
           "callback_data": "phone_toggle"}],

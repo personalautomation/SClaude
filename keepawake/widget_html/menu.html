@@ -1,0 +1,79 @@
+<style>
+body{margin:0;padding:8px 12px max(8px,env(safe-area-inset-bottom))}
+#t{margin-bottom:8px;white-space:pre-wrap;word-break:break-word}
+.row{display:flex;gap:6px;margin-top:6px}
+.row button{flex:1}
+#n{display:flex;gap:8px;align-items:center;margin-top:6px}
+#n button{flex:1}
+#n span,#e{color:var(--tg-theme-hint-color);font-size:.9em}
+#e{margin-top:4px}
+</style>
+<div id="t"></div><div id="b"></div><div id="n"><button id="pv">‹</button><span id="pg"></span><button id="nx">›</button></div><div id="e"></div>
+<script>
+// The bot's menu: a screen — its text and its buttons — that a tap replaces
+// with the next one, which the bot sends back in its answer. The screens are
+// the Mini App's own (webmenu.py), so both always do the same. State: {t: the
+// screen's text (HTML), r: rows of buttons, each a label or [label, https
+// link], s: "o" out of date, n: the press counter — every new state is heard,
+// and a tap names the screen it was made on — x: the press failed}.
+const W = window.TelegramWidget, L = /*L*/{};
+const ROWS = 7;
+let S = {}, q = 0, waiting = false, gave = 0;
+const $ = (i) => document.getElementById(i);
+function load() { try { S = JSON.parse(W.chatData) || {}; } catch (e) { S = {}; } q = 0; }
+function pages() { return Math.max(1, Math.ceil((S.r || []).length / ROWS)); }
+function draw() {
+  $("t").innerHTML = S.s ? L.o : S.t || "";
+  const box = $("b");
+  box.innerHTML = "";
+  $("n").style.display = !S.s && pages() > 1 ? "flex" : "none";
+  if (S.s) return;
+  (S.r || []).forEach((row, i) => {
+    if (Math.floor(i / ROWS) != q) return;
+    const line = document.createElement("div");
+    line.className = "row";
+    row.forEach((b, j) => {
+      const el = document.createElement("button");
+      el.textContent = Array.isArray(b) ? b[0] : b;
+      el.onclick = Array.isArray(b) ? () => W.openLink(b[1]) : () => tap(i + "." + j);
+      // A link cannot race the counter: only the bot's buttons wait.
+      el.disabled = waiting && !Array.isArray(b);
+      line.append(el);
+    });
+    box.append(line);
+  });
+  $("pg").textContent = q + 1 + " / " + pages();
+  $("pv").disabled = q == 0;
+  $("nx").disabled = q >= pages() - 1;
+}
+function wait(on) {
+  // Buttons are off while a press is out: a second tap would be read against
+  // the next screen. A press whose screen never comes gives up after a minute.
+  waiting = on;
+  clearTimeout(gave);
+  if (on) gave = setTimeout(() => { $("e").textContent = L.fail; wait(false); }, 60000);
+  draw();
+}
+function tap(at) {
+  // The next screen comes as the state (chatDataChanged): a press may take
+  // longer than a query is answered in. "…" stays until it does.
+  $("e").textContent = "…";
+  wait(true);
+  W.request("m:" + (S.n || 0) + ":" + at).then((a) => {
+    // Answered in the query itself: out of date, or the screen as it is.
+    if (a.result) { try { S = JSON.parse(a.result); q = 0; } catch (e) {} $("e").textContent = ""; wait(false); }
+  }, (e) => {
+    $("e").textContent = e.code == "BUSY" ? L.busy : L.fail + " (" + e.code + ")";
+    wait(false);
+  });
+}
+$("pv").onclick = () => { q = Math.max(0, q - 1); draw(); };
+$("nx").onclick = () => { q = Math.min(pages() - 1, q + 1); draw(); };
+W.onEvent("chatDataChanged", () => {
+  load();
+  $("e").textContent = S.x ? L.fail : "";
+  wait(false);
+});
+load();
+draw();
+</script>

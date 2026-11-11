@@ -1,0 +1,56 @@
+<style>
+body{margin:0;padding:10px 12px max(10px,env(safe-area-inset-bottom))}
+.big{font-size:1.4em;font-weight:600;font-variant-numeric:tabular-nums}
+#w,#nx,#e{color:var(--tg-theme-hint-color);font-size:.9em;margin-top:6px}
+#b{display:flex;gap:8px;margin-top:10px}
+#b button{flex:1}
+</style>
+<div id="l"></div><div id="w"></div><div id="nx"></div><div id="b"><button id="x"></button><button id="z"></button></div><div id="e"></div>
+<script>
+// keepawake's hold: the countdown to sleep, counted here, and the two answers.
+// Drawn from the chat state alone: {u: deadline, a: its label, w: why, s: ""
+// waiting, "x" extended, "z" let sleep, "o" out of date}; what was answered is
+// said by the caption. L is filled by the bot.
+const W = window.TelegramWidget, L = /*L*/{};
+let S = {}, tm = 0;
+const $ = (i) => document.getElementById(i);
+function load() { try { S = JSON.parse(W.chatData) || {}; } catch (e) { S = {}; } }
+function span(s) {
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60;
+  return (h ? h + ":" + (m < 10 ? "0" : "") : "") + m + ":" + (x < 10 ? "0" : "") + x;
+}
+function draw() {
+  // Waiting for an answer: the countdown, why, what next and the buttons.
+  // Extended: the countdown to the new deadline, the caption saying so. Let
+  // sleep: what Windows does now.
+  const left = Math.max(0, Math.round((S.u || 0) - Date.now() / 1000));
+  const count = !S.s || S.s == "x", ask = !S.s && left > 0;
+  $("l").className = count && left > 0 ? "big" : "";
+  if (count) $("l").textContent = left > 0 ? L.l.replace("%(left)s", span(left)) : L.n;
+  else if (S.s == "z") $("l").textContent = L.nx;
+  else $("l").innerHTML = L.o;
+  $("w").textContent = ask ? S.w || "" : "";
+  $("nx").textContent = ask ? L.nx : "";
+  $("b").style.display = ask ? "flex" : "none";
+  return count && left > 0;
+}
+function tick() { clearTimeout(tm); if (draw()) tm = setTimeout(tick, 1000); }
+function press(k) {
+  $("e").textContent = "…";
+  $("x").disabled = $("z").disabled = true;
+  W.request("hold:" + k + ":" + S.u).then((a) => {
+    $("e").textContent = "";
+    if (a.result) try { S = JSON.parse(a.result); } catch (e) {}
+  }, (e) => {
+    $("e").textContent = e.code == "BUSY" ? L.busy : L.fail + " (" + e.code + ")";
+  }).finally(() => { $("x").disabled = $("z").disabled = false; tick(); });
+}
+$("x").textContent = L.ext;
+$("z").textContent = L.let;
+$("x").onclick = () => press("x");
+$("z").onclick = () => press("z");
+W.onEvent("chatDataChanged", () => { load(); tick(); });
+W.onEvent("activated", tick);
+load();
+tick();
+</script>

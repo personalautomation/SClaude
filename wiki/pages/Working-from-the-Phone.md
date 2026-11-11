@@ -28,6 +28,14 @@ their own answer, each paid for in time and tokens. SClaude ships one.
   agreeing to an unseen action is not an option.
 - **Shows every feature**, with links to its issue and pull request, and
   starts and stops dev servers, the browser and code-server from buttons.
+- **Live widgets instead of a pile of messages.** What is active is a widget
+  that updates itself in place: a question with every option a button, paged,
+  however long the list; a running regression, review pass or session with
+  its timer and latest lines, which leaves one message with the whole account
+  when it ends; the countdown to sleep with **Extend** and **Let it sleep**;
+  the feature's card with where it stands in the cycle; and the whole menu,
+  which works with phone access off. Settings → Sending
+  chooses widgets + messages, or messages only.
 - Answers in the language of your Telegram client.
 
 | the moment | the classic way: VPN + SSH | with the bot |

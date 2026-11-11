@@ -82,7 +82,7 @@ HIDDEN = ()
 
 # The bot's unit, which the page's restart restarts: the chat's restart
 # restarts the process it runs in, and here that is the gate.
-BOT_UNIT = os.environ.get("KEEPAWAKE_UNIT") or "keepawake-telegram.service"
+BOT_UNIT = state.BOT_UNIT
 
 # How long the page waits for the restarted bot before it says it is not back.
 RESTART_WAIT = 60
@@ -814,14 +814,24 @@ def trace(token, chat_id, action, label, done, context, now):
     said = bot.send("📱 " + text, thread=thread)
     # A line about the hold is what holds now: the earlier ones about sleep
     # go, as they do after a press in the chat.
-    if action.startswith(("awake:", "until:", "awake_forever")):
+    if action.startswith(HOLD_ACTIONS) and action != "awake_release":
         sleep_warning.said_sleep(bot, said, state.read().get("until_ts") or 0)
     elif action == "awake_release":
         sleep_warning.said_sleep(bot, said, now + sleep_warning.IDLE_SLEPT_KEEP)
 
 
-def answer(token, chat_id, user, action, context, now, label="", home=""):
-    """The page's one call: the screen after the press, as JSON-ready data."""
+# The presses that change the hold: a line about them replaces what was said
+# about sleep before.
+HOLD_ACTIONS = ("awake:", "until:", "awake_forever", "awake_release")
+
+
+def answer(token, chat_id, user, action, context, now, label="", home="", traced=True,
+           chat_bot=None):
+    """The page's one call: the screen after the press, as JSON-ready data.
+    traced: the chat keeps a "📱" line of a press that did something — not
+    for the menu widget (menu_widget.py), which is in the chat already; its
+    hold presses still take the earlier lines about sleep away, through
+    chat_bot."""
     with held():
         handling.remember_lang(user)
         bot = PageBot(token, chat_id)
@@ -838,8 +848,10 @@ def answer(token, chat_id, user, action, context, now, label="", home=""):
             context = press(bot, user, action, context, now, home)
         finally:
             menus.ON_PAGE = False
-        if not bot.untraced:
+        if traced and not bot.untraced:
             trace(token, chat_id, action, label, bot.done, context or pressed_on, now)
+        elif not traced and bot.done is not None and action.startswith(HOLD_ACTIONS):
+            sleep_warning.said_elsewhere(chat_bot or botapi.Bot(token, chat_id))
         # The card of the feature the page stands on — drawn by any of its
         # buttons, Refresh too — has no list of repositories to go back to.
         if bot.screen and context and home_feature(bot.home if bot.home is not None else home) \
@@ -862,4 +874,6 @@ def answer(token, chat_id, user, action, context, now, label="", home=""):
             "help": help_for(action, bot.done) if text is not None else "",
             "home": bot.home,
             "follow": bot.follow,
+            # Whether the press did something (a line the chat would keep).
+            "done": bot.done is not None,
         }

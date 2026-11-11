@@ -67,6 +67,10 @@ FEED_FILE = "feed.tsv"
 FEED_MAX_LINES = 12
 # Lines that matter to someone away from the laptop.
 FEED_LOUD = ("warn", "alarm")
+# What sounds: those, and "ring" — a line that needs the person without being
+# a warning, such as a regression's failure that bin/sclaude-notify puts here
+# (its own sound), which is not marked ⚠️.
+FEED_SOUND = FEED_LOUD + ("ring",)
 # How long lines that could not be sent are put back before they are let go.
 FEED_KEEP = 3600
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -166,7 +170,7 @@ def feed_message(lines, shown=""):
     for level, _pid, text, *_ in lines:
         # Indented lines are the detail under a headline; a line an open
         # question carries is already on the phone.
-        if not text.strip() or (text[:1].isspace() and level not in FEED_LOUD):
+        if not text.strip() or (text[:1].isspace() and level not in FEED_SOUND):
             continue
         # The prompt is a line of its own that ends in its form ("[y/n]"):
         # the printed question is the start of that line.
@@ -189,11 +193,11 @@ def feed_message(lines, shown=""):
     # A message that opens with a phase line is about that phase — the batch
     # is cut so (feed_groups) — and leads with its icon, not the laptop's.
     head = "" if OWN_ICON.match(kept[0][1]) else "🖥 "
-    return head + "\n".join(body), any(level in FEED_LOUD for level, _ in kept)
+    return head + "\n".join(body), any(level in FEED_SOUND for level, _ in kept)
 
 
 def check(bot, channels, topic, log, now=None, at_terminal=None, shown=None, lost=None,
-          keys=None):
+          keys=None, procs=None):
     """Send every waiting note. channels: [(name, slug, directory)] of the
     features; topic(name, slug): the feature's topic, 0 for the main chat
     (no topics there), None for none yet — the notes then wait.
@@ -202,7 +206,8 @@ def check(bot, channels, topic, log, now=None, at_terminal=None, shown=None, los
     lost(name, slug): called when a send failed — a topic deleted by hand is
     made again there, and what waits goes to the new one. keys: the review's
     buttons (review_keys.py) — a message that a review pass or fix session
-    started carries them, and the next phase line takes them off."""
+    started carries them, and the next phase line takes them off. procs: a
+    running process as a widget (processes.py) — its lines go into it."""
     now = time.time() if now is None else now
     for name, slug, channel in channels:
         # Only to the feature's topic. The feed mirrors the terminal, and in
@@ -216,6 +221,7 @@ def check(bot, channels, topic, log, now=None, at_terminal=None, shown=None, los
         lines = take_feed(channel, now) if thread is not None else []
         context = shown(channel) if shown and lines else ""
         groups = feed_groups(lines) if lines else []
+        kept_back = False
         for i, group in enumerate(groups):
             text, loud = feed_message(group, context)
             if not (text and thread):
@@ -227,18 +233,26 @@ def check(bot, channels, topic, log, now=None, at_terminal=None, shown=None, los
             # message is about.
             if keys and keys.has_phase(group):
                 keys.drop(bot, channel)
-            sent = bot.send(text, keyboard=keys.buttons_for(group) if keys else None,
-                            quiet=not loud, thread=thread)
-            if sent and keys:
+            keyboard = keys.buttons_for(group) if keys else None
+            sent = procs.take(bot, channel, group, thread, loud, keyboard, keys, context) if procs else None
+            if sent is None:
+                sent = bot.send(text, keyboard=keyboard, quiet=not loud, thread=thread)
+            # -1: the group had nothing left to say, and nothing carries it.
+            if sent and sent > 0 and keys:
                 keys.sent(channel, group, sent)
             if not sent:
                 # The network: back to the file, this group and the rest,
                 # for the next turn.
                 put_back(channel, [line for g in groups[i:] for line in g])
+                kept_back = True
                 log.warning("the feed of %s/%s waits: not sent", name, slug)
                 if lost:
                     lost(name, slug)
                 break
+        # Not after lines put back: a closing line among them would be split
+        # from its process's account by a sweep that ends it first.
+        if procs and not kept_back:
+            procs.sweep(bot, channel)
         notes = pending(channel)
         if not notes:
             continue

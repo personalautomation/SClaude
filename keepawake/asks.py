@@ -5,6 +5,7 @@
 # Part of the bot that keepawake/telegramd.py runs.
 
 import glob
+import html
 import json
 import logging
 import os
@@ -13,7 +14,7 @@ import time
 
 from keepawake.i18n import STRINGS, t
 from keepawake.state import locked, read
-from keepawake import menus, repos, sessions, status_report, topics
+from keepawake import menus, repos, sessions, status_report, topics, widgets
 
 
 log = logging.getLogger("keepawake")
@@ -313,25 +314,28 @@ def forget_ask(key, message_id, repo=None):
     return entry
 
 
+def answer_shown(question, reply):
+    """The answer as the person reads it, marked: the yes/no buttons' labels
+    carry their own mark (✅ / ❌); any other answer gets the ✅ of
+    "answered"."""
+    reply = str(reply or "").strip()
+    shown = option_label((question or {}).get("options"), reply)
+    if not shown and ((question or {}).get("form") or "").startswith("yn"):
+        if reply.lower() in YES_WORDS:
+            return t("ask.yes")
+        if reply.lower() in NO_WORDS:
+            return t("ask.no")
+    return "✅ " + (shown or reply or "—")
+
+
 def answered_text(repo_name, question, reply, source=""):
     # The question and the answer it got, for the question's own message.
     # A number is shown as the option it chose and y/n as the buttons say it:
     # "3" says nothing a day later.
     question = question or {}
-    reply = str(reply or "").strip()
-    # The yes/no buttons' labels carry their own mark (✅ / ❌); any other
-    # answer gets the ✅ of "answered".
-    shown = option_label(question.get("options"), reply)
-    marked = False
-    if not shown and (question.get("form") or "").startswith("yn"):
-        if reply.lower() in YES_WORDS:
-            shown, marked = t("ask.yes"), True
-        elif reply.lower() in NO_WORDS:
-            shown, marked = t("ask.no"), True
     prompt = clip(status_report.strip_ansi(question.get("prompt") or "").strip(), ASK_PROMPT_MAX)
     text = t("ask.answered", repo=status_report.escape(repo_name), prompt=status_report.escape(prompt),
-             reply=status_report.escape(shown or reply or "—") if marked
-             else "✅ " + status_report.escape(shown or reply or "—"))
+             reply=status_report.escape(answer_shown(question, reply)))
     if source in ("tty", "stdin"):
         text += "\n<i>%s</i>" % t("ask.by.terminal")
     # What was printed before the question is what happened on the laptop;
@@ -354,10 +358,18 @@ def settle_ask(bot, name, entry, record):
     if not msg:
         return
     if record and record.get("reply") is not None:
-        bot.edit(msg, answered_text(name, entry, record.get("reply"),
-                                    record.get("from") or ""))
+        show_answered(bot, name, entry, record.get("reply"), record.get("from") or "")
     else:
         menus.retire(bot, msg)
+
+
+def show_answered(bot, name, entry, reply, source=""):
+    # The question's message becomes its answer: a widget's state, or a
+    # message's text. entry is what put_shown kept, with the options shown.
+    if entry.get("widget"):
+        bot.widget_data(entry["msg"], widgets.state(answered_state(entry, reply, source)))
+    else:
+        bot.edit(entry["msg"], answered_text(name, entry, reply, source))
 
 
 def ask_keyboard(repo_name, question):
@@ -487,7 +499,10 @@ def _pick_n(question):
         return -1
 
 
-def ask_text(repo_name, question, in_topic=False, slug=""):
+def ask_text(repo_name, question, in_topic=False, slug="", widget=False,
+             context_max=ASK_CONTEXT_MAX):
+    # widget: the caption above a widget whose buttons are every option
+    # (ask_caption), labelled whenever labels could be found.
     body = ""
 
     # A question about a particular feature is shown with its card — the very
@@ -522,7 +537,9 @@ def ask_text(repo_name, question, in_topic=False, slug=""):
     # meaningless — "3" says nothing until it is written next to it what the
     # third option is.
     named = len(question.get("options") or "") == _pick_n(question)
-    if context and named and ask_keyboard(repo_name, question):
+    if widget:
+        named = bool(listed_options(question))
+    if context and named and (widget or ask_keyboard(repo_name, question)):
         kept = [ln for ln in context.splitlines() if not NUMBERED.match(ln)]
         context = "\n".join(kept).strip()
     # The "feature · issue #N · PR #N" line is printed by the orchestrator
@@ -533,7 +550,7 @@ def ask_text(repo_name, question, in_topic=False, slug=""):
         context = "\n".join(context.splitlines()[1:]).strip()
     if context:
         body += t("ask.context",
-                  body=status_report.escape(clip(status_report.strip_ansi(context), ASK_CONTEXT_MAX)))
+                  body=status_report.escape(clip(status_report.strip_ansi(context), context_max)))
     if slug:
         # The prompt itself in italics and without "<repository> is asking": the
         # repository and the feature are already named by the card a line
@@ -545,9 +562,168 @@ def ask_text(repo_name, question, in_topic=False, slug=""):
     form = (question.get("form") or "").strip()
     if not form:
         body += "\n\n<i>%s</i>" % t("ask.text")
-    elif form.startswith("pick:") and not ask_keyboard(repo_name, question):
+    elif form.startswith("pick:") and not widget and not ask_keyboard(repo_name, question):
         body += "\n\n<i>%s</i>" % t("ask.pick")
     return body
+
+
+# --- a question as a widget (widget_html/ask.html) ----------------------------
+#
+# Every option of a choice is a button there, however many — paged, eight
+# labels or forty digits a page — so a long list needs no typed number. The
+# question itself is the caption above it; answered, the widget shows the
+# answer and its buttons go. A question that wants typed text stays a message.
+
+ASK_LABELS = {"yes": "ask.yes", "no": "ask.no", "use": "ask.use", "g": "ask.gone", "o": "msg.stale",
+              "term": "ask.by.terminal", "busy": "widget.busy", "fail": "widget.failed"}
+# Labels a page; each is cut to a button's 60 bytes, so a page stays well
+# inside the state's 1024.
+ASK_PAGE = 8
+# Telegram's ceiling on a caption, in characters after the markup is parsed.
+CAPTION_MAX = 1024
+# A numbered line's number and text, its columns apart by two spaces or more.
+NUMBERED_LINE = re.compile(r"^\s*(\d+)\)\s+(.*\S)")
+
+
+# A typed answer's suggestion, "Branch name [<suggested>]: " (start.sh): an
+# empty answer takes it, and the widget offers it as a button.
+SUGGESTED = re.compile(r"\[([^\[\]]+)\]:?\s*$")
+
+
+def suggested(question):
+    """What a typed answer's question suggests, "" for none."""
+    question = question or {}
+    if (question.get("form") or "").strip():
+        return ""
+    m = SUGGESTED.search(status_report.strip_ansi(question.get("prompt") or ""))
+    return m.group(1).strip() if m else ""
+
+
+def widget_form(question):
+    """Whether a widget can take the answer: yes/no, a choice, or a typed
+    answer with a suggestion — typed text still answers it as a message."""
+    return ((question or {}).get("form") or "").strip().startswith("yn") \
+        or _pick_n(question) >= 1 or bool(suggested(question))
+
+
+def listed_options(question):
+    """The options' labels, cut to fit a button: the question's own, or else
+    the numbered list printed above it (align_columns) when it numbers
+    exactly its options; [] when neither is there."""
+    n = _pick_n(question)
+    if n < 1:
+        return []
+    options = question.get("options") or []
+    if len(options) != n:
+        found = {}
+        for line in status_report.strip_ansi(question.get("context") or "").splitlines():
+            m = NUMBERED_LINE.match(line)
+            if m:
+                found[int(m.group(1))] = re.sub(r"\s{2,}", " — ", m.group(2))
+        if sorted(found) != list(range(1, n + 1)):
+            return []
+        options = [found[i] for i in range(1, n + 1)]
+    return [clip_bytes(status_report.strip_ansi(str(o)).strip(), 60) or str(i)
+            for i, o in enumerate(options, 1)]
+
+
+def visible_length(text):
+    # As Telegram counts a caption: the text the markup leaves, in UTF-16.
+    plain = html.unescape(re.sub(r"<[^>]+>", "", text))
+    return len(plain.encode("utf-16-le")) // 2
+
+
+def ask_caption(repo_name, question, in_topic=False, slug=""):
+    """The question as a widget's caption, its context cut until it fits; None
+    when even without the context it does not (a long card) — the question
+    then goes as a message."""
+    limit = ASK_CONTEXT_MAX
+    while True:
+        text = ask_text(repo_name, question, in_topic, slug, widget=True, context_max=limit)
+        over = visible_length(text) - CAPTION_MAX
+        if over <= 0:
+            return text
+        if limit <= 50:
+            return None
+        limit = max(50, limit - over - 10)
+
+
+def ask_state(question):
+    if ((question.get("form") or "").strip()).startswith("yn"):
+        return {"y": 1}
+    if suggested(question):
+        return {"d": clip_bytes(suggested(question), 60)}
+    labels = listed_options(question)
+    if labels:
+        return {"o": labels[:ASK_PAGE], "t": len(labels), "k": ASK_PAGE}
+    return {"t": _pick_n(question)}
+
+
+def answered_state(entry, reply, source=""):
+    # Cut like a button: an option passed without being cut (no labels found
+    # for the widget) could take the state past its 1024 bytes.
+    return {"s": "a", "r": clip_bytes(answer_shown(entry, reply), 200),
+            "f": 1 if source in ("tty", "stdin") else 0}
+
+
+def shown_by_message(message_id):
+    """(name, key, repo, entry) of the question a message shows, or showed
+    until answered here; None when it shows none."""
+    if not message_id:
+        return None
+    for repo in repos.known_repos():
+        name = os.path.basename(repo)
+        for key in repo_keys(name, repo):
+            entry = get_shown(key, repo) or {}
+            if message_id in (entry.get("msg"), entry.get("answered")):
+                return name, key, repo, entry
+    return None
+
+
+def widget_press(bot, raw, message_id, back=None):
+    """A tap in a question's widget — ask:<reply>, or ask:p<n> for a page of
+    labels: what to answer it with, and what to do after the answer. back(name)
+    shows the repository's features: an answer leaving a list in the main chat
+    leads back to what the person was leaving, as the message's button did."""
+    arg = raw.partition(":")[2]
+    found = shown_by_message(message_id)
+    if not found:
+        return widgets.state(widgets.STALE), lambda: menus.retire(bot, message_id)
+    name, key, repo, entry = found
+    if arg.startswith("p") and arg[1:].isdigit():
+        page = int(arg[1:])
+        labels = entry.get("options") or []
+        return json.dumps({"q": page, "o": labels[page * ASK_PAGE:(page + 1) * ASK_PAGE]},
+                          ensure_ascii=False, separators=(",", ":")), None
+    if entry.get("answered") == message_id:
+        # A second tap on a question just answered here: its state says so.
+        return None, None
+    channel = channel_dir(key)
+    question = pending_ask(channel)
+    form = ((question or {}).get("form") or "").strip()
+    mark = (question.get("id") or question.get("asked") or 0) if question else None
+    if not question or (not entry.get("legacy") and entry.get("id") != mark):
+        # Answered at the laptop, or another question asked since: the loop
+        # settles this message into what happened.
+        return widgets.state({"s": "g"}), None
+    if arg == "d" and suggested(question):
+        arg = suggested(question)
+    elif not (form.startswith("yn") and arg in ("y", "n")) \
+            and not (form.startswith("pick:") and option_in_range(question, arg)):
+        return None, None
+    if not answer_ask(channel, arg, question.get("id")):
+        return widgets.state({"s": "g"}), None
+    forget_ask(key, message_id, repo)
+    answer = widgets.state(answered_state(entry, arg))
+    log.info("a widget answered the sclaude question from %s: %r", key, arg)
+    leaving = back and not entry.get("thread") \
+        and is_back_option(option_label(entry.get("options"), arg))
+
+    def after():
+        bot.widget_data(message_id, answer)
+        if leaving:
+            back(name)
+    return answer, after
 
 
 # --- the person at the terminal ----------------------------------------------
@@ -781,10 +957,19 @@ def check_channel(bot, key, name, slug, channel, repo):
         return
     if thread:
         topics.TOPIC_TRIED.pop(key, None)
-    text = ask_text(name, question, in_topic=bool(thread), slug=slug)
-    keyboard = ask_keyboard(name, question)
     quiet = at_terminal(question)
-    msg = bot.send(text, keyboard, quiet=quiet, thread=thread)
+    widget = widgets.enabled() and widget_form(question) \
+        and ask_caption(name, question, slug=slug) is not None
+    keyboard = ask_keyboard(name, question)
+
+    def post(thread, in_topic):
+        if widget:
+            return bot.send_widget(widgets.code("ask", ASK_LABELS), widgets.state(ask_state(question)),
+                                   ask_caption(name, question, in_topic, slug),
+                                   quiet=quiet, thread=thread, above=True)
+        return bot.send(ask_text(name, question, in_topic=in_topic, slug=slug), keyboard,
+                        quiet=quiet, thread=thread)
+    msg = post(thread, bool(thread))
     if not msg and thread and topics.topic_lost(bot):
         # The topic is gone — the person deleted it by hand. A new one is
         # made once; failing that the question goes to the main chat, since a
@@ -796,16 +981,19 @@ def check_channel(bot, key, name, slug, channel, repo):
             topics.drop_new_topic(name)
             thread = 0
         if thread:
-            msg = bot.send(text, keyboard, quiet=quiet, thread=thread)
+            msg = post(thread, True)
         if not msg:
             # The main chat, with the card that names the feature.
             thread = 0
-            msg = bot.send(ask_text(name, question, slug=slug), keyboard, quiet=quiet, thread=0)
+            msg = post(0, False)
     if not msg:
         return
     put_shown(key, {"id": mark, "msg": msg, "thread": thread,
                     "prompt": question.get("prompt") or "",
                     "form": question.get("form") or "",
-                    "options": question.get("options") or []}, repo)
+                    # The labels the widget shows, found in the context too.
+                    "options": (listed_options(question) if widget else None)
+                    or question.get("options") or [],
+                    "widget": widget}, repo)
     log.info("showed the sclaude question from %s: %r", key,
              (question.get("prompt") or "")[:60])

@@ -1,0 +1,84 @@
+<style>
+body{margin:0;padding:8px 12px max(8px,env(safe-area-inset-bottom))}
+#b{display:flex;flex-direction:column;gap:6px}
+#b.y{flex-direction:row}
+#b.y button{flex:1}
+#b.d{display:grid;grid-template-columns:repeat(5,1fr)}
+#b.l button{text-align:left;white-space:normal}
+#n{display:flex;gap:8px;align-items:center;margin-top:6px}
+#n button{flex:1}
+#n span{color:var(--tg-theme-hint-color);font-size:.9em}
+#r{font-weight:600}
+#e{color:var(--tg-theme-hint-color);font-size:.9em;margin-top:4px}
+</style>
+<div id="r"></div><div id="b"></div><div id="n"><button id="pv">‹</button><span id="pg"></span><button id="nx">›</button></div><div id="e"></div>
+<script>
+// A session's question: its answers as buttons, paged, and once answered the
+// answer. The question itself is the caption above. State: {y: 1 for yes/no,
+// d: a typed answer's suggestion,
+// o: the first page's labels, t: how many options, k: a page's size, s: ""
+// open, "a" answered (r: what, f: 1 at the terminal), "g" gone, "o" out of
+// date}. Another page's labels come in the answer to "ask:p<n>".
+const W = window.TelegramWidget, L = /*L*/{};
+const DIGITS = 40;
+let S = {}, P = null, q = 0;
+const $ = (i) => document.getElementById(i);
+function load() { try { S = JSON.parse(W.chatData) || {}; } catch (e) { S = {}; } P = null; q = 0; }
+function pages() {
+  if (S.y || S.d) return 1;
+  return Math.max(1, Math.ceil((S.t || 0) / (S.o ? S.k || 8 : DIGITS)));
+}
+function button(text, reply) {
+  const b = document.createElement("button");
+  b.textContent = text;
+  b.onclick = () => send("ask:" + reply, (a) => { S = a; P = null; });
+  return b;
+}
+function draw() {
+  const box = $("b");
+  box.innerHTML = "";
+  box.className = "";
+  // The answer is text; the labels for "gone" and "out of date" are the bot's HTML.
+  if (S.s == "a") $("r").textContent = S.r + (S.f ? " · " + L.term : "");
+  else $("r").innerHTML = S.s ? L[S.s] || L.o : "";
+  $("n").style.display = !S.s && pages() > 1 ? "flex" : "none";
+  if (S.s) return;
+  if (S.y) {
+    box.className = "y";
+    box.append(button(L.no, "n"), button(L.yes, "y"));
+  } else if (S.d) {
+    box.append(button(L.use.replace("%(name)s", S.d), "d"));
+  } else if (S.o) {
+    box.className = "l";
+    const k = S.k || 8, page = P && P.q == q ? P.o : q ? [] : S.o;
+    page.forEach((label, i) => box.append(button(label, q * k + i + 1)));
+  } else {
+    box.className = "d";
+    for (let i = q * DIGITS + 1; i <= Math.min(S.t || 0, (q + 1) * DIGITS); i++) box.append(button(String(i), i));
+  }
+  $("pg").textContent = q + 1 + " / " + pages();
+  $("pv").disabled = q == 0;
+  $("nx").disabled = q >= pages() - 1;
+}
+function send(data, take, undo) {
+  $("e").textContent = "…";
+  W.request(data).then((a) => {
+    $("e").textContent = "";
+    if (a.result) try { take(JSON.parse(a.result)); } catch (e) {}
+  }, (e) => {
+    $("e").textContent = e.code == "BUSY" ? L.busy : L.fail + " (" + e.code + ")";
+    if (undo) undo();
+  }).finally(draw);
+}
+function turn(d) {
+  const was = q;
+  q = Math.min(pages() - 1, Math.max(0, q + d));
+  if (S.o && q && !(P && P.q == q)) send("ask:p" + q, (a) => { P = a; }, () => { q = was; });
+  else draw();
+}
+$("pv").onclick = () => turn(-1);
+$("nx").onclick = () => turn(1);
+W.onEvent("chatDataChanged", () => { load(); draw(); });
+load();
+draw();
+</script>

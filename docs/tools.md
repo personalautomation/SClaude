@@ -323,6 +323,32 @@ your own, comma-separated.
 
 `sclaude dev` in the main checkout serves it at `main.localhost:3000`.
 
+### Live widgets in the chat
+
+What is active comes to the chat as a widget — a small block drawn inside a
+message that the bot updates in place, silently — rather than as a stream of
+messages:
+
+- **a session's question**: yes/no, or every option of a choice as a button,
+  paged however long the list; a branch name the bot suggests is a button too,
+  and typing still answers. Answered — here or at the terminal — it shows the
+  answer;
+- **a running process** in the feature's topic (a regression, a review pass, a
+  session): its timer and latest lines, with the review's keys under it; when
+  it ends it leaves one message with the whole account; a warning sends it
+  again, with sound;
+- **the warning before sleep**: the countdown, why, **Add an hour** and **Let it
+  sleep**; extended elsewhere, it says so itself;
+- **the feature's card** in its topic: where the feature stands in the cycle and
+  what its session is doing, the links and buttons as before;
+- **the menu**: `/menu` or "☰ Menu" in the main chat sends the whole menu, which
+  works with phone access off. What needs typing or the app's own screens stays
+  with the app.
+
+Widgets work in Telegram for phones and Telegram Web. ⚙️ Settings → 🧩 Sending
+chooses between **widgets + messages** (widgets where they replace a message,
+messages for the rest; the default) and **messages only**.
+
 ### The bot as an app in Telegram, with no Tailscale on the phone
 
 While phone access is on, the bot's menu is a Telegram Mini App: "☰ Menu" by

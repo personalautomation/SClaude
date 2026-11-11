@@ -1,0 +1,37 @@
+<style>
+body{margin:0;padding:8px 12px max(8px,env(safe-area-inset-bottom))}
+#p{display:flex;gap:4px}
+#p span{flex:1;text-align:center;padding:4px 0;border-radius:8px;background:var(--tg-theme-secondary-bg-color)}
+#p span.d{opacity:.45}
+#p span.c{background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color)}
+#n{margin-top:6px;font-weight:600}
+#w{margin-top:2px;color:var(--tg-theme-hint-color);font-size:.9em}
+</style>
+<div id="p"></div><div id="n"></div><div id="w"></div>
+<script>
+// A feature's card, slim: where it stands in the cycle and what its session
+// is doing. The card's words and links are the caption, its buttons under it.
+// State: {p: the places' icons, c: the current one (-1 none, p.length all
+// done), n: the place's name, w: the session's state, s: "o" out of date}.
+const W = window.TelegramWidget, L = /*L*/{};
+let S = {};
+const $ = (i) => document.getElementById(i);
+function load() { try { S = JSON.parse(W.chatData) || {}; } catch (e) { S = {}; } }
+function draw() {
+  const box = $("p");
+  box.innerHTML = "";
+  if (S.s) { $("n").innerHTML = L.o; $("w").textContent = ""; return; }
+  (S.p || []).forEach((icon, i) => {
+    const el = document.createElement("span");
+    el.textContent = icon;
+    if (i < S.c) el.className = "d";
+    if (i == S.c) el.className = "c";
+    box.append(el);
+  });
+  $("n").textContent = S.n || "";
+  $("w").textContent = S.w || "";
+}
+W.onEvent("chatDataChanged", () => { load(); draw(); });
+load();
+draw();
+</script>

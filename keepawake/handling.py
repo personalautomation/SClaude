@@ -14,7 +14,8 @@ import time
 from keepawake import docs, review_keys, state
 from keepawake.i18n import DEFAULT, current, set_lang, t
 from keepawake.state import HOLD_SECONDS, locked, read
-from keepawake import asks, card_view, holding, menus, phone_access, project_config, repos, services, sessions, shell, sleep_warning, status_report, topics
+from keepawake import asks, card_view, holding, menus, phone_access, project_config, repos, services, sessions, shell, sleep_warning, status_report, topics, widgets
+from keepawake import menu_widget
 
 
 log = logging.getLogger("keepawake")
@@ -240,13 +241,12 @@ class Handler(object):
                         or (form.startswith("pick:") and not asks.option_in_range(question, text)):
                     self.bot.delete(msg.get("message_id") or 0)
                     return
-                answered = asks.answered_text(name, question, text)
                 entry = asks.forget_ask(key, (asks.get_shown(key) or {}).get("msg"))
                 if entry:
-                    self.bot.edit(entry["msg"], answered)
+                    asks.show_answered(self.bot, name, dict(question or {}, **entry), text)
                     self.bot.delete(msg.get("message_id") or 0)
                 else:
-                    self.bot.send(answered)
+                    self.bot.send(asks.answered_text(name, question, text))
                 return
 
         # Any command clears an open question about the time: the person has
@@ -337,6 +337,14 @@ class Handler(object):
         holding.forget_screen(message_id)
 
     def cmd_menu(self, now=0):
+        # In the main chat, with widgets on, the whole menu as a widget, which
+        # works with phone access off; a topic's menu is its feature's card.
+        if widgets.enabled() and not self.bot.thread:
+            try:
+                if menu_widget.open_menu(self.bot, now):
+                    return
+            except Exception as exc:
+                log.exception("the menu widget: %s", exc)
         self.screen(*menus.chat_menu(self.bot.thread))
 
     def cmd_status(self, now=0):
@@ -570,6 +578,11 @@ class Handler(object):
                 self.bot.edit(message_id, repos.repo_text(name), sessions.features_keyboard(name))
             else:
                 self.bot.edit(message_id, t("repo.pick"), menus.repos_keyboard())
+        elif data_raw == "svc_widgets":
+            with locked() as st:
+                st["widgets"] = st.get("widgets", True) is False
+            log.info("widgets are %s", "on" if widgets.enabled() else "off")
+            self.bot.edit(message_id, t("svc.title"), menus.services_keyboard())
         elif data_raw == "svc_lang":
             self.bot.edit(message_id, menus.lang_text(), menus.lang_keyboard())
         elif data_raw.startswith("lang:"):
@@ -707,7 +720,11 @@ class Handler(object):
         name, slug = asks.split_key(key)
         repo = repos.repo_path(name) if slug else None
         if not repo or not topics.feature_dir(repo, slug):
-            self.bot.edit(message_id, t("feat.gone", slug=status_report.escape(slug or "?")))
+            # A widget card has no text to edit: its caption says it, the
+            # buttons go.
+            gone = t("feat.gone", slug=status_report.escape(slug or "?"))
+            if not self.bot.edit(message_id, gone):
+                self.bot.caption(message_id, gone)
             return
         note, feats = "", None
         if action in ("go", "acts"):
@@ -758,8 +775,8 @@ class Handler(object):
                 if services.code_running():
                     break
                 time.sleep(0.5)
-        self.bot.edit(message_id, *card_view.card(name, slug, note, in_topic=bool(self.bot.thread),
-                                        feats=feats))
+        card_view.redraw(self.bot, message_id, name, slug, note, in_topic=bool(self.bot.thread),
+                         feats=feats)
 
     def answer_button(self, cid, data_raw, message_id):
         # An answer to an orchestrator's question. Three fields rather than
@@ -833,7 +850,7 @@ class Handler(object):
             st["restart_page"] = False
         subprocess.Popen(
             ["bash", "-c",
-             "sleep 2; systemctl --user restart keepawake-telegram.service"],
+             "sleep 2; systemctl --user restart " + state.BOT_UNIT],
             start_new_session=True,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -843,51 +860,48 @@ class Handler(object):
             stamp = int(ts)
         except ValueError:
             stamp = None
-
-        with locked() as st:
-            live_until = st.get("until_ts") or 0
-            if stamp is None or stamp != live_until:
-                # The window is a different one now: it was extended
-                # differently, or the laptop managed to sleep and the cycle
-                # started again.
-                log.warning("the decision %r is stale: stamp %s, in the state %s",
-                            action, stamp, live_until)
-                # The alert says why; the message goes at once (after the
-                # lock), being about a window that is over.
-                self.bot.answer(cid, t("sleep.stale"), alert=True)
-                stale = True
-            else:
-                stale = False
-                self.bot.answer(cid)
-                if action == "extend":
-                    state.extend(st, now, manual=True)
-                    state.touch(st, now)
-                    st["decision"] = "extend"
-                    st["decision_ts"] = now
-                    until = st["until_local"]
-                    text = t("sleep.extended", at=status_report.local_for_lang(until))
-                else:
-                    # Not "sleep now" but "stop holding": Windows will count its
-                    # own fifteen minutes of idling as usual. Released by
-                    # release_hold, after the lock, so no copy of its fields
-                    # drifts from it.
-                    until = None
-                    text = t("sleep.accepted")
-                expires = (now + sleep_warning.IDLE_SLEPT_KEEP) if until is None else st["until_ts"]
-        if stale:
+        kind, until, until_ts = holding.decide(action, stamp, now)
+        if kind == "stale":
+            # The alert says why; the message goes at once, being about a
+            # window that is over.
+            self.bot.answer(cid, t("sleep.stale"), alert=True)
             if not menus.retire(self.bot, message_id):
                 sleep_warning.trail(message_id, now)
             return
-        if until is None:
-            holding.release_hold(now)
-        # We write after the lock: there is no reason to hold a flock on the
-        # state file for the sake of a log entry.
-        if until is None:
-            log.info("the warning: let it sleep, hold released")
+        self.bot.answer(cid)
+        if kind == "extend":
+            text = t("sleep.extended", at=status_report.local_for_lang(until))
+            expires = until_ts
         else:
-            log.info("the warning: extend, deadline until %s", until)
+            text = t("sleep.accepted")
+            expires = now + sleep_warning.IDLE_SLEPT_KEEP
         # We remove the keyboard: there will be nothing left to press a second
         # time. The answer stays while true: until the new deadline, or, let
         # go, while Windows counts its idle time.
         self.bot.edit(message_id, text)
         sleep_warning.said_sleep(self.bot, message_id, expires)
+
+    def widget_query(self, wq):
+        # A tap in one of the bot's widgets (widgets.py). Every query is
+        # answered, a failed one too, or the widget waits fifteen seconds for
+        # a timeout; the answer goes first, the slower follow-up (edits,
+        # deletes) after it.
+        data_raw = wq.get("data") or ""
+        message_id = wq.get("message_id") or 0
+        now = int(time.time())
+        answer, after = None, None
+        try:
+            if data_raw.startswith("hold:"):
+                answer, after = sleep_warning.hold_press(self.bot, data_raw, message_id, now)
+            elif data_raw.startswith("m:"):
+                answer, after = menu_widget.press(self.bot, wq, now)
+            elif data_raw.startswith("ask:"):
+                answer, after = asks.widget_press(
+                    self.bot, data_raw, message_id,
+                    back=lambda name: self.screen(repos.repo_text(name), sessions.features_keyboard(name)))
+            else:
+                answer = widgets.state(widgets.STALE)
+        finally:
+            self.bot.answer_widget(wq.get("id"), answer)
+        if after:
+            after()

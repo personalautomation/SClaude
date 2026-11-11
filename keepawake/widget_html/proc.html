@@ -1,0 +1,30 @@
+<style>
+body{margin:0;padding:8px 12px max(8px,env(safe-area-inset-bottom))}
+#t{font-size:1.2em;font-weight:600;font-variant-numeric:tabular-nums}
+#l{color:var(--tg-theme-hint-color);font-size:.9em;margin-top:4px;white-space:pre-wrap;word-break:break-word}
+</style>
+<div id="t"></div><div id="l"></div>
+<script>
+// A process sclaude runs (a regression, a review pass, a session): how long
+// it has run, counted here, and its latest lines. What it is, is the caption.
+// State: {b: when it began, l: its latest lines, s: "o" out of date}.
+const W = window.TelegramWidget, L = /*L*/{};
+let S = {}, tm = 0;
+const $ = (i) => document.getElementById(i);
+function load() { try { S = JSON.parse(W.chatData) || {}; } catch (e) { S = {}; } }
+function span(s) {
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60;
+  return (h ? h + ":" + (m < 10 ? "0" : "") : "") + m + ":" + (x < 10 ? "0" : "") + x;
+}
+function draw() {
+  if (S.s) { $("t").innerHTML = L.o; $("l").textContent = ""; return false; }
+  $("t").textContent = "⏱ " + span(Math.max(0, Math.round(Date.now() / 1000 - (S.b || 0))));
+  $("l").textContent = S.l || "";
+  return true;
+}
+function tick() { clearTimeout(tm); if (draw()) tm = setTimeout(tick, 1000); }
+W.onEvent("chatDataChanged", () => { load(); tick(); });
+W.onEvent("activated", tick);
+load();
+tick();
+</script>

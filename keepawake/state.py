@@ -300,6 +300,15 @@ def blank():
         # Messages about sleep that became answers, kept while true:
         # [[message id, expiry]] (trail in keepawake/sleep_warning.py).
         "sleep_trail": [],
+        # Whether the warning before sleep went as a widget (widgets.py),
+        # whose answers change its state rather than its text.
+        "warn_widget": False,
+        # The menu widget of the main chat (menu_widget.py): its message, its
+        # buttons' actions, and the context and feature its screen stands on.
+        "menu_widget": {},
+        # The settings' switch between widgets and the plain messages they
+        # replace; on unless turned off (widgets.enabled).
+        "widgets": True,
         # Which language the keyboard below the input box is set in. Empty
         # means it is not set at all. It cannot be set at every start: it only
         # arrives together with a message, and the daemon restarts both by
@@ -307,6 +316,11 @@ def blank():
         # restart.
         "anchor_lang": "",
     }
+
+
+# The bot's systemd unit: what the page's restart restarts, and what
+# bin/sclaude-notify asks is running before it hands a line to the bot.
+BOT_UNIT = os.environ.get("KEEPAWAKE_UNIT") or "keepawake-telegram.service"
 
 
 def local_label(ts):

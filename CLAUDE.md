@@ -132,7 +132,11 @@ breaks the other silently — grep before you edit:
   `sclaude/lib/core/io.sh` and read by `NOTES_DIR` in `keepawake/notices.py`;
   `tests/notices.py` runs both sides. So does `notes/feed.tsv` — what sclaude
   prints about a feature, one tab-separated line each — written by `ask_feed`
-  in `io.sh` and read by `FEED_FILE` in `notices.py`. The text itself is the file that
+  in `io.sh` and read by `FEED_FILE` in `notices.py`; `bin/sclaude-notify --in`
+  writes a phase line there too while widgets are on (`into_feed`, imports
+  `FEED_FILE` and `OWN_ICON`), and `tests/widgets.py` reads what it wrote. A
+  running process's widget keeps its record beside it, `notes/process.json`
+  (`PROC_FILE` in `keepawake/processes.py`). The text itself is the file that
   `SCLAUDE_REPORT_BRIEF` names to `sclaude/lib/review/review_report.py`
   (`review_report` in `review_gate.sh`).
 

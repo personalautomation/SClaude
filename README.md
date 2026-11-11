@@ -140,8 +140,11 @@ most of them built into the flow, the rest shared as team practice:
 The phone is a channel to the orchestrator. Every question goes to the
 terminal and to your own Telegram bot at once, and whichever you answer first
 counts; the feature running on the laptop opens full screen inside Telegram;
-the laptop stays awake only while there is work. Most phone moments are look,
-tap, done:
+the laptop stays awake only while there is work. What is going on lives in the
+chat as live widgets — a question with every option a button, a regression
+counting its minutes with its latest lines, the sleep countdown, the whole
+menu even with phone access off — instead of a pile of messages. Most phone
+moments are look, tap, done:
 
 | the moment | the classic way: VPN + SSH | with sclaude's bot |
 |---|---|---|

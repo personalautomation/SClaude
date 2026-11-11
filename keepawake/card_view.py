@@ -5,6 +5,7 @@
 
 import logging
 import os
+import re
 import shlex
 import time
 import urllib.error
@@ -13,7 +14,7 @@ import urllib.request
 
 from keepawake.i18n import t
 from keepawake.state import read
-from keepawake import asks, menus, phone_access, repos, services, sessions, shell, topics
+from keepawake import asks, cycle_table, menus, phone_access, repos, services, sessions, shell, topics, widgets
 
 
 log = logging.getLogger("keepawake")
@@ -61,15 +62,16 @@ def card_data(action, key):
     return data if len(data.encode("utf-8")) <= 64 else "fc:" + action
 
 
-def card(name, slug, note="", in_topic=True, feats=None, config=None):
+def card(name, slug, note="", in_topic=True, feats=None, config=None, slim=False):
     """(text, keyboard) of the feature's card. The dev server, code-server and
     the phone gate are each looked at once: every look is a process or a
     socket, on the loop that answers getUpdates. config: tailscale's, when
-    the caller draws several cards."""
+    the caller draws several cards. slim: the caption of the card's widget,
+    which shows the step and the session itself."""
     if menus.ON_PAGE and feats is None:
         # Read once: the page's Continue is named by the step.
         feats, _ = repos.features_of_name(name)
-    text = sessions.feature_card(name, slug, feats)
+    text = sessions.feature_card(name, slug, feats, slim=slim)
     if in_topic and not menus.ON_PAGE:
         # Whatever draws the topic's card — the loop, /menu, a press — says
         # which session state it shows, for check_card_states to compare.
@@ -155,6 +157,102 @@ def card(name, slug, note="", in_topic=True, feats=None, config=None):
     return text, rows
 
 
+# --- the card as a widget (widget_html/card.html) -----------------------------
+#
+# With widgets on, the topic's card is a slim widget: where the feature stands
+# in the cycle and what its session is doing, drawn from its state; the card's
+# words — the names, the links, the dev server and code-server — are its
+# caption, and its buttons stand under it as before.
+
+CARD_LABELS = {"o": "msg.stale"}
+
+
+def card_state(name, slug, feats=None, state=None):
+    """The card widget's state: the cycle's places by their icons, the one
+    the feature is at, its name, and the session's state. The place comes
+    from the label's "N/7" (sclaude's cycle_number): the state's step stops
+    at the four steps, and past them reads "done"."""
+    repo = repos.repo_path(name)
+    places = cycle_table.steps.places()
+    icons = [s["icon"] for s in cycle_table.steps.STEPS + cycle_table.steps.AFTER]
+    if feats is None:
+        feats, _ = repos.features_of_name(name)
+    row = next((r for r in feats if r[0] == slug), None)
+    shown = row[1] if row else ""
+    # " done" is how sclaude's labels say the steps are over ("4/7 done, …",
+    # "steps done, shipping to production", "all done"; step_label in
+    # steps.sh), as the message card reads it (sessions.feature_card).
+    done = " done" in shown or shown.startswith("all done")
+    m = re.search(r"\b(\d+)/%d\b" % len(places), shown)
+    if m:
+        # "4/7 done, waiting for merge": the next place is the one ahead.
+        current = int(m.group(1)) - 1 + (1 if " done" in shown else 0)
+    elif shown.startswith("all done"):
+        current = len(places)
+    elif done:
+        # "steps done, shipping to production": merged and synced, the
+        # epilogue (and the retrospective) still ahead — step_label numbers
+        # them when they run.
+        current = places.index("epilogue")
+    else:
+        current = -1
+    if state is None:
+        session = sessions.feature_session(repo, slug)[0] if repo else ""
+        state = sessions.session_state(session)
+    word = ({"working": "feat.working", "busy": "feat.working", "blocked": "feat.blocked",
+             "waiting": "feat.blocked"}.get(state, "feat.idle") if state
+            else "feat.nosessiondone" if done else "feat.nosession")
+    return widgets.state({"p": icons, "c": current, "n": shown, "w": t(word).strip()}, trim="n")
+
+
+def card_caption(name, slug, note="", feats=None, config=None):
+    """(caption, keyboard) of the card widget. Words past a caption's 1024
+    characters lose the card's last lines — the dev server's and
+    code-server's — before a press's note, which is cut only when it alone
+    does not fit; so a widget card is never edited as the text it cannot
+    be."""
+    from keepawake import asks as _asks
+    text, keyboard = card(name, slug, in_topic=True, feats=feats, config=config, slim=True)
+    # The note says how a press ended: it stays, and the card's own last
+    # lines go before it does.
+    tail = "\n\n" + note if note else ""
+    lines = text.split("\n")
+    while len(lines) > 1 and _asks.visible_length("\n".join(lines) + tail) > _asks.CAPTION_MAX:
+        lines.pop()
+    text = ("\n".join(lines).rstrip() + tail).strip()
+    if _asks.visible_length(text) > _asks.CAPTION_MAX:
+        # One line still too long: its markup goes, and it is cut.
+        import html
+        # Counted as Telegram counts it, in UTF-16.
+        plain = html.unescape(re.sub(r"<[^>]+>", "", text))
+        while plain and _asks.visible_length(html.escape(plain) + "…") > _asks.CAPTION_MAX:
+            plain = plain[:-max(1, (_asks.visible_length(html.escape(plain)) - _asks.CAPTION_MAX) // 2)]
+        text = html.escape(plain) + "…"
+    return text, keyboard
+
+
+def shown_now(repo, slug):
+    """The session state the card just recorded (shown_state)."""
+    return topics.load_record(repo, slug).get("card_state") or ""
+
+
+def redraw(bot, msg, name, slug, note="", in_topic=True, feats=None, config=None):
+    """The card in message msg drawn again: its widget's state and caption,
+    or a message's text. Whether it went."""
+    repo = repos.repo_path(name)
+    record = topics.load_record(repo, slug) if repo else {}
+    if in_topic and record.get("card") == msg and record.get("card_widget"):
+        if feats is None:
+            # Read once: each read is sclaude's status of every feature.
+            feats, _ = repos.features_of_name(name)
+        # The caption first: drawing it records the session's state, which
+        # the widget then shows — one reading, so the two never disagree.
+        shown = card_caption(name, slug, note, feats, config)
+        ok = bot.widget_data(msg, card_state(name, slug, feats, shown_now(repo, slug)))
+        return bot.caption(msg, *shown) and ok
+    return bot.edit(msg, *card(name, slug, note=note, in_topic=in_topic, feats=feats, config=config))
+
+
 def post_card(bot, name, slug):
     # A fresh card at the bottom of the feature's topic; the previous one
     # goes. Returns the card's message id, 0 when there is no topic.
@@ -165,14 +263,23 @@ def post_card(bot, name, slug):
     thread = record.get("thread") or 0
     if not thread:
         return 0
-    text, keyboard = card(name, slug)
-    msg = bot.send(text, keyboard, quiet=True, thread=thread)
+    widget = widgets.enabled()
+    if widget:
+        feats, _ = repos.features_of_name(name)
+        text, keyboard = card_caption(name, slug, feats=feats)
+        msg = bot.send_widget(widgets.code("card", CARD_LABELS),
+                              card_state(name, slug, feats, shown_now(repo, slug)),
+                              text, keyboard=keyboard, quiet=True, thread=thread)
+    else:
+        text, keyboard = card(name, slug)
+        msg = bot.send(text, keyboard, quiet=True, thread=thread)
     if not msg:
         return 0
     menus.retire(bot, record.get("card") or 0)
     # Read again: card() has just written the state it shows.
     record = topics.load_record(repo, slug)
     record["card"] = msg
+    record["card_widget"] = widget
     topics.save_record(repo, slug, record)
     return msg
 
@@ -236,7 +343,7 @@ def redraw_cards(bot):
                 continue
             if feats is None:
                 feats, _ = repos.features_of_name(name)
-            bot.edit(msg, *card(name, slug, feats=feats, config=serve))
+            redraw(bot, msg, name, slug, feats=feats, config=serve)
 
 
 def shown_state(name, slug, state=None):
@@ -299,7 +406,7 @@ def redraw_changed_cards(bot):
                 feats, _ = repos.features_of_name(name)
             if serve is None:
                 serve = phone_access.serve_config()
-            if not bot.edit(msg, *card(name, slug, feats=feats, config=serve)):
+            if not redraw(bot, msg, name, slug, feats=feats, config=serve):
                 # Not drawn: what the card shows is still the old state, and
                 # the next look tries again.
                 shown_state(name, slug, record.get("card_state") or "")

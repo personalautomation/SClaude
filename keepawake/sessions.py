@@ -286,7 +286,9 @@ def _start(repo, args):
     log.info("started %s in %s", line, repo)
 
 
-def feature_card(name, slug, feats=None):
+def feature_card(name, slug, feats=None, slim=False):
+    # slim: the card's words beside its widget (card_view), which shows the
+    # step and the session itself — without them here.
     if feats is None:
         feats, _ = repos.features_of_name(name)
     row = next((r for r in feats if r[0] == slug), None)
@@ -310,6 +312,10 @@ def feature_card(name, slug, feats=None):
         # it was drawn with.
         if menus.ON_PAGE:
             note += cache_note(session)
+    if slim:
+        return t("feat.cardslim", repo=status_report.escape(name), slug=status_report.escape(slug),
+                 wt=status_report.escape(row[2] or "—"),
+                 links=repos.links_line(feature_links(repo, slug)) if repo else "")
     return t("feat.card", repo=status_report.escape(name), slug=status_report.escape(slug),
              step=status_report.escape(row[1]), wt=status_report.escape(row[2] or "—"), session=note,
              links=repos.links_line(feature_links(repo, slug)) if repo else "")

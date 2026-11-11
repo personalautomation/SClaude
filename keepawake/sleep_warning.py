@@ -4,13 +4,15 @@
 #
 # Part of the bot that keepawake/telegramd.py runs.
 
+import html
 import logging
+import re
 import shutil
 import time
 
 from keepawake.i18n import t
 from keepawake.state import local_label, locked, needs_warning, read
-from keepawake import card_view, holding, menus, phone_access, services, shell, status_report
+from keepawake import card_view, holding, menus, phone_access, services, shell, status_report, widgets
 
 
 log = logging.getLogger("keepawake")
@@ -249,6 +251,20 @@ def said_sleep(bot, message_id, expires):
     trail(message_id, expires)
 
 
+def said_elsewhere(bot):
+    """A reply about sleep that has no line of its own — the menu widget
+    shows it: every earlier line about sleep goes, the open warning too, as
+    after any other reply."""
+    sweep_trail(bot, int(time.time()), everything=True)
+    warn = read().get("warn_message_id") or 0
+    if warn:
+        if not menus.retire(bot, warn):
+            trail(warn, 0)
+        with locked() as st:
+            if st.get("warn_message_id") == warn:
+                st["warn_message_id"] = 0
+
+
 def sweep_trail(bot, now, everything=False):
     # The chat holds no message about sleep that is no longer true: those past
     # their deadline go, and with a new warning every earlier one goes.
@@ -284,16 +300,102 @@ def settle_warning(bot, data, now):
     elif until == warned:
         return
     elif until > warned:
-        bot.edit(msg, t("sleep.extended", at=status_report.local_for_lang(data.get("until_local"))))
+        say_settled(bot, msg, data, "x", now)
         trail(msg, until)
     elif data.get("decision") == "sleep":
-        bot.edit(msg, t("sleep.accepted"))
+        say_settled(bot, msg, data, "z", now)
         trail(msg, now + IDLE_SLEPT_KEEP)
     elif not menus.retire(bot, msg):
         trail(msg, now)
     with locked() as st:
         if st.get("warn_message_id") == msg:
             st["warn_message_id"] = 0
+            st["warn_widget"] = False
+
+
+# --- the warning as a widget (widget_html/hold.html) ------------------------
+#
+# The same warning, its countdown counted by the widget itself and its answers
+# taps in it. A change of the deadline from elsewhere changes the widget's
+# state rather than its text; a press on one whose window is over is answered
+# with "out of date" and the widget goes, as the message's button did.
+
+HOLD_LABELS = {"l": "widget.hold.left", "n": "widget.hold.now", "nx": "widget.hold.next",
+               "o": "msg.stale",
+               "ext": "sleep.extend", "let": "sleep.let",
+               "busy": "widget.busy", "fail": "widget.failed"}
+# The widget's answers, by the letter its buttons send.
+HOLD_ACTIONS = {"x": "extend", "z": "sleep"}
+
+
+def plain(text):
+    """The bot's HTML as the text a widget sets."""
+    return html.unescape(re.sub(r"<[^>]+>", "", text or ""))
+
+
+def hold_state(data, now, status=""):
+    """The widget's state: the deadline, its label, why it is coming, and
+    what happened ("" while it waits for an answer)."""
+    at = status_report.escape(status_report.local_for_lang(data.get("until_local")) or "?")
+    return widgets.state({"u": data.get("until_ts") or 0, "a": at, "s": status,
+                          "w": "" if status else plain(sleep_reason(data, now))}, trim="w")
+
+
+def settled_text(data, status):
+    return (t("sleep.extended", at=status_report.local_for_lang(data.get("until_local")))
+            if status == "x" else t("sleep.accepted"))
+
+
+def say_settled(bot, msg, data, status, now):
+    # The warning answered — "x" extended, "z" let sleep: a widget's state
+    # and caption, or a message's text.
+    if data.get("warn_widget"):
+        bot.widget_data(msg, hold_state(data, now, status))
+        bot.caption(msg, settled_text(data, status))
+    else:
+        bot.edit(msg, settled_text(data, status))
+
+
+def send_hold(bot, data, now):
+    at = status_report.local_for_lang(data.get("until_local")) or "?"
+    return bot.send_widget(widgets.code("hold", HOLD_LABELS), hold_state(data, now),
+                           t("widget.hold.caption", at=status_report.escape(at)))
+
+
+def hold_press(bot, raw, message_id, now):
+    """A tap in the hold widget, hold:<x|z>:<deadline>: the state to answer
+    it with, and what is done after the answer (None for nothing)."""
+    _hold, key, ts = (raw.split(":") + ["", ""])[:3]
+    action = HOLD_ACTIONS.get(key)
+    stamp = int(ts) if ts.isdigit() else None
+    if not action:
+        return widgets.state(widgets.STALE), None
+    kind, _until, until_ts = holding.decide(action, stamp, now)
+    if kind == "stale":
+        def gone():
+            if not menus.retire(bot, message_id):
+                trail(message_id, now)
+        return widgets.state(widgets.STALE), gone
+    # Answered: the loop no longer settles this message; after() does.
+    holding.let_go(message_id)
+    status = "x" if kind == "extend" else "z"
+    data = read()
+    answer = hold_state(data, now, status)
+    expires = until_ts if kind == "extend" else now + IDLE_SLEPT_KEEP
+
+    def after():
+        # The state stays with the message: a widget drawn again later (the
+        # app restarted, scrolled back) shows the answer, not the question.
+        # Not kept, the widget would ask again with the old deadline: it goes.
+        # Either way the deadline did move, and earlier lines about sleep go
+        # with said_sleep; a widget the network kept is tried again next turn.
+        kept = bot.widget_data(message_id, answer)
+        if kept:
+            bot.caption(message_id, settled_text(data, status))
+        said_sleep(bot, message_id, expires)
+        if not kept and not menus.retire(bot, message_id):
+            trail(message_id, now)
+    return answer, after
 
 
 def check_warning(bot):
@@ -310,7 +412,8 @@ def check_warning(bot):
     left = max(0, (until - now) // 60)
     text = t("sleep.warn", at=status_report.local_for_lang(data.get("until_local")) or "?",
              min=left, why=sleep_reason(data, now))
-    msg_id = bot.send(text, holding.warn_keyboard(until))
+    widget = widgets.enabled()
+    msg_id = send_hold(bot, data, now) if widget else bot.send(text, holding.warn_keyboard(until))
     if not msg_id:
         # The send failed — there is no network, and on a laptop it drops
         # regularly. We do not set the mark: otherwise the warning for this
@@ -327,4 +430,5 @@ def check_warning(bot):
         # for the new deadline, by itself.
         st["warned_for_ts"] = until
         st["warn_message_id"] = msg_id
+        st["warn_widget"] = widget
     log.info("the warning was sent for %s", data.get("until_local"))

@@ -26,6 +26,15 @@
 # where features share one place, and nowhere in the topic, which is the
 # feature already.
 #
+# One exception, while the bot's widgets are on (⚙️ Settings → 🧩 Sending)
+# and the bot is running: a phase line for a feature's topic ("🧪 Regression
+# started", its end) is not sent but written into the feature's feed
+# (notes/feed.tsv, as ask_feed writes it), so the regression's widget in the
+# topic takes it (keepawake/processes.py). A line that would sound is written
+# at the level "ring", which sounds without a warning's mark; the person at
+# the terminal that asked keeps it silent, as every feed line. With the bot
+# down, or widgets off, the line is sent here as before.
+#
 # Why a separate sender rather than the daemon: keepawake-telegram is a long
 # poll that owns getUpdates, and a regression run has no business waking it.
 # This is a one-shot HTTP request with the same token, and it exits.
@@ -100,7 +109,7 @@ chat="${chat%\"}"; chat="${chat#\"}"
 # The checkout this script lives in, through the link in ~/.local/bin: the
 # bot's record of a topic is named by its code, which is imported from there.
 root="$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")"
-python3 - "$token" "$chat" "$text" "${quiet:-}" "$feature" "$root" "$name" "$videos" "$ids" "$deletes" <<'PY' || nothing
+python3 - "$token" "$chat" "$text" "${quiet:-}" "$feature" "$root" "$name" "$videos" "$ids" "$deletes" "$PPID" <<'PY' || nothing
 import html
 import json
 import os
@@ -113,6 +122,7 @@ token, chat, text, quiet, feature, root, name = sys.argv[1:8]
 videos = [v for v in sys.argv[8].split("\n") if v] if len(sys.argv) > 8 else []
 print_ids = len(sys.argv) > 9 and sys.argv[9] == "1"
 deletes = [int(d) for d in sys.argv[10].split()] if len(sys.argv) > 10 else []
+caller = sys.argv[11] if len(sys.argv) > 11 else "0"
 
 # The feature's topic, when it has one: the bot keeps its id in the worktree.
 thread = 0
@@ -275,6 +285,66 @@ def delete():
 
 if deletes:
     delete()
+    sys.exit(0)
+
+
+def bot_running():
+    """Whether the bot that reads the feed is up: otherwise a line written
+    there would wait, and go after an hour unsent."""
+    said = os.environ.get("KEEPAWAKE_BOT_ALIVE")
+    if said is not None:
+        return said == "1"
+    import subprocess
+    from keepawake.state import BOT_UNIT
+    try:
+        return subprocess.run(["systemctl", "--user", "is-active", "--quiet", BOT_UNIT],
+                              timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def into_feed():
+    """A phase line to a feature's topic ("🧪 Regression started", its end)
+    while the bot's widgets are on: written into the feature's feed
+    (notes/feed.tsv, as ask_feed in sclaude/lib/core/io.sh writes it) rather
+    than sent, so the process's widget takes it (keepawake/processes.py).
+    Whether it went there; anything else is sent as before."""
+    if not (feature and thread) or videos or print_ids:
+        return False
+    try:
+        sys.path.insert(0, root)
+        from keepawake import notices, widgets
+        # The bus last: most lines are not phase lines, and asking systemd
+        # costs a process.
+        if not widgets.enabled() or not notices.OWN_ICON.match(text.strip()) or not bot_running():
+            return False
+        with open(feature + "/.sclaude/local/feature/state.json") as fh:
+            slug = (json.load(fh) or {}).get("feature") or ""
+        # The repository's git directory, where the channels are: a
+        # worktree's .git file names it (gitdir: <repo>/.git/worktrees/<x>).
+        dot = os.path.join(feature, ".git")
+        if os.path.isdir(dot):
+            common = dot
+        else:
+            with open(dot) as fh:
+                gitdir = fh.read().split("gitdir:", 1)[1].strip()
+            common = os.path.dirname(os.path.dirname(gitdir))
+        channel = os.path.join(common, "sclaude", "ask", slug)
+        if not slug or not os.path.isdir(channel) or os.path.exists(os.path.join(channel, "ended")):
+            return False
+        os.makedirs(os.path.join(channel, notices.NOTES_DIR), exist_ok=True)
+        level = "info" if quiet else "ring"
+        import time
+        with open(os.path.join(channel, notices.NOTES_DIR, notices.FEED_FILE), "a") as fh:
+            for line in text.splitlines():
+                if line.strip():
+                    fh.write("%d\t%s\t%s\t%s\n" % (time.time(), level, caller, line.replace("\t", " ")))
+        return True
+    except Exception:
+        return False
+
+
+if into_feed():
     sys.exit(0)
 
 

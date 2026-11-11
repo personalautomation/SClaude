@@ -1332,7 +1332,12 @@ squashes are in that head already) — merged again from a base before every par
 every line this part changed in an earlier part's code — and the rest, main's
 syncs and commits put there by hand, merged; so that its pull request into the
 common branch shows the part alone; the common branch is pushed when GitHub lacks it, being the
-pull request's base. The part before comes first because this part was built
+pull request's base — past the product's pre-push hook while it is all in
+origin's main, there being nothing in it to judge, as is the push after each
+sync. The branches of the parts not yet reviewed that GitHub lacks go up
+together, in one push the hook judges whole: the tree holds every part's
+work (a database migrated by all of them), and a hook that asks whether a
+branch on GitHub carries it refuses a part pushed alone. The part before comes first because this part was built
 on that part's commits from before its review: merged from the common branch
 alone, whose base is from before every part, a change this part carries would
 win over the review's undoing of it — a revert, a file deleted — without a

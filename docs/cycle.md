@@ -95,7 +95,10 @@ nobody changed the parts' pull requests by hand on GitHub — a base, a merge, a
 branch rewritten — and stops if somebody did. A part whose branch does not
 take the feature's branch in without conflicts gets the sync session, which
 merges the feature's branch instead of main and keeps what the earlier parts'
-reviews decided.
+reviews decided. When the reviews begin, the parts' branches go up to GitHub
+together, in one push: a product's pre-push hook that asks what GitHub
+already carries should count the branches that push sends, or it refuses
+every part while the others are on the laptop only.
 
 ## Production rollback that refuses to trample somebody else
 

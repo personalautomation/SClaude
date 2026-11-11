@@ -308,6 +308,9 @@ cmd_done() {
     [[ "$(branch_pr_state "$part_branch")" == MERGED ]] || {
       git -C "$REPO" rev-parse -q --verify "refs/heads/$part_branch" >/dev/null \
         && warn "  local branch $part_branch kept: its pull request is not merged"
+      # Pushed before its review (parts_enter), it is on GitHub too.
+      [[ -n "$(git -C "$REPO" ls-remote --heads origin "$part_branch" 2>/dev/null)" ]] \
+        && warn "  origin/$part_branch kept: its pull request is not merged (git push origin --delete $part_branch)"
       continue
     }
     git -C "$REPO" branch -D "$part_branch" >/dev/null 2>&1 || true

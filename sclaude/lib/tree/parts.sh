@@ -49,15 +49,26 @@
 # a refusal without what it found leaves nothing to go on — or that it timed
 # out, which leaves no words.
 #
-#   parts_push <wt> <refspec> <what>
+#   parts_push <wt> <what> <refspec or push option>...
 parts_push() {
   local push_out rc=0
-  push_out="$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$1" push -q origin "$2" 2>&1)" || rc=$?
+  push_out="$(GIT_TERMINAL_PROMPT=0 timeout 60 git -C "$1" push -q origin "${@:3}" 2>&1)" || rc=$?
   (( rc == 0 )) && return 0
-  warn "  $3"
+  warn "  $2"
   (( rc == 124 )) && push_out="the push timed out after a minute"
   [[ -z "$push_out" ]] || warn "$(tail -n 12 <<< "$push_out" | sed 's/^/     /')"
   return 1
+}
+
+# Whether <ref> is all in origin's main — the common branch where it left
+# main, before any part merged: such a push carries nothing for the
+# product's pre-push hook to judge. A hook that looks at the tree's database
+# finds every part's work there and would refuse the push whenever a part is
+# not on GitHub — its push failed, say. A stale origin/main only says no.
+#
+#   parts_in_main <wt> <ref>
+parts_in_main() {
+  git -C "$1" merge-base --is-ancestor "$2" refs/remotes/origin/main 2>/dev/null
 }
 
 # Whether the feature is split, and where its parts stand.
@@ -218,7 +229,7 @@ parts_uncapture() {
 #   parts_enter <wt>   → 1 when the tree could not be put there
 parts_enter() {
   local wt="$1" state="$1/.sclaude/local/feature/state.json"
-  local umbrella n part here base remote below
+  local umbrella n part here base remote below b
   parts_open "$state" || return 0
   umbrella="$(parts_umbrella "$state")"; n="$(parts_now "$state")"
   [[ -n "$umbrella" && "$n" =~ ^[0-9]+$ ]] || return 0
@@ -273,10 +284,28 @@ parts_enter() {
   parts_on "$state" "$n" "$part"
   if parts_reviewing "$state"; then
     parts_take_common "$wt" "$state" "$n" || return 1
+    local heads k refs=()
+    heads="$(GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$wt" ls-remote --heads origin 2>/dev/null || true)"
+    # The parts not yet reviewed go up together, those not on GitHub yet:
+    # the tree holds the work of every part — a database migrated by all of
+    # them, say — and a pre-push hook that asks whether a branch on GitHub
+    # carries that work refuses a part pushed alone while the later parts
+    # are on this machine only. One push hands the hook every part at once.
+    for (( k = n; k <= $(parts_last "$state"); k++ )); do
+      b="$(parts_branch "$umbrella" "$k")"
+      git -C "$wt" rev-parse -q --verify "refs/heads/$b" >/dev/null || continue
+      grep -q "[[:space:]]refs/heads/$b\$" <<< "$heads" || refs+=("refs/heads/$b:refs/heads/$b")
+    done
+    (( ${#refs[@]} )) && { parts_push "$wt" \
+      "Could not push the parts' branches: each part's pull request comes from its own (git push origin ${refs[*]%%:*})." \
+      "${refs[@]}" || true; }
     # The pull request goes into the common branch, so GitHub has to have it.
-    if [[ -z "$(GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$wt" ls-remote --heads origin "$umbrella" 2>/dev/null)" ]]; then
-      parts_push "$wt" "refs/heads/$umbrella:refs/heads/$umbrella" \
-        "Could not push $umbrella: the part's pull request needs it on GitHub (git push origin $umbrella)." || true
+    if ! grep -q "[[:space:]]refs/heads/$umbrella\$" <<< "$heads"; then
+      local verify=()
+      parts_in_main "$wt" "refs/heads/$umbrella" && verify=(--no-verify)
+      parts_push "$wt" \
+        "Could not push $umbrella: the part's pull request needs it on GitHub (git push origin $umbrella)." \
+        "refs/heads/$umbrella:refs/heads/$umbrella" "${verify[@]}" || true
     fi
   fi
   if parts_whole "$state"; then
@@ -333,15 +362,29 @@ parts_take_common() {
     # copy from before a suggestion committed there. Never the local branch,
     # which may lack such a commit or carry one nobody reviewed. Only with
     # no pull request on record (the part merged by hand), origin's branch,
-    # fetched now. The earlier parts' squashes are in it already: that part
-    # took them in the same way.
-    local below=$((n - 1))
+    # fetched now into a ref of sclaude's own, emptied first — never
+    # origin/<part> left from an earlier fetch: the parts' branches go up
+    # before their reviews (parts_enter), so a branch GitHub deleted on merge
+    # leaves that copy at the head from before the review. Nor FETCH_HEAD,
+    # which a setting stops git writing and any other fetch rewrites. A fetch
+    # that fails is told apart: the branch gone, or origin not reached. The
+    # earlier parts' squashes are in it already: that part took them in the
+    # same way.
+    local below=$((n - 1)) own unreached=""
     pr="$(state_get "$state" "parts.$below.pr" 2>/dev/null || true)"
     if [[ -n "$pr" && "$pr" != null ]]; then
       head="$(parts_head "$wt" "$pr" "")"
     else
-      GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$wt" fetch -q origin "$prev" 2>/dev/null || true
-      head="$(git -C "$wt" rev-parse -q --verify "refs/remotes/origin/$prev" 2>/dev/null || true)"
+      own="refs/sclaude/parts/$prev"
+      git -C "$wt" update-ref -d "$own" 2>/dev/null || true
+      if GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$wt" fetch -q origin "+refs/heads/$prev:$own" 2>/dev/null; then
+        head="$(git -C "$wt" rev-parse -q --verify "$own^{commit}" 2>/dev/null || true)"
+      else
+        local listed=0
+        GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$wt" ls-remote -q --exit-code --heads origin "refs/heads/$prev" >/dev/null 2>&1 || listed=$?
+        (( listed == 2 )) || unreached=1
+      fi
+      git -C "$wt" update-ref -d "$own" 2>/dev/null || true
     fi
     if [[ ! "$head" =~ ^[0-9a-f]{40}$ ]]; then
       warn ""
@@ -349,6 +392,9 @@ parts_take_common() {
       if [[ -n "$pr" && "$pr" != null ]]; then
         warn "  GitHub did not say what PR #$pr merged, or its head could not be fetched"
         warn "  (refs/pull/$pr/head). The part waits: run $SELF again once GitHub answers."
+      elif [[ -n "$unreached" ]]; then
+        warn "  $prev could not be fetched from origin (no answer, or refused)."
+        warn "  The part waits: run $SELF again once origin answers."
       else
         warn "  no pull request of part $((n - 1)) is on record, and origin has no $prev."
         warn "  Push part $((n - 1)) as its review left it there (git push origin <commit>:refs/heads/$prev),"
@@ -686,8 +732,13 @@ parts_advance() {
   # work: the next part takes it in with the parts before it (parts_enter),
   # and nothing piles up for the end.
   sync_branch "$wt" || { info "  The next part waits for the sync. Come back with: $SELF $slug"; return 1; }
+  # Past the product's pre-push hook, as sync_with_main pushes its own merge
+  # (sync.sh): the merged parts were reviewed in their pull requests and main
+  # is origin's, while the tree's database holds every part's work, which
+  # such a hook refuses the push for whenever a part is not on GitHub.
   if [[ "$(git -C "$wt" rev-parse HEAD)" != "$(git -C "$wt" rev-parse -q --verify "refs/remotes/origin/$umbrella" 2>/dev/null)" ]]; then
-    parts_push "$wt" "HEAD:refs/heads/$umbrella" "Could not push $umbrella after the sync: git -C $wt push origin $umbrella" || true
+    parts_push "$wt" "Could not push $umbrella after the sync: git -C $wt push origin $umbrella" \
+      "HEAD:refs/heads/$umbrella" --no-verify || true
   fi
 
   if (( n < total )); then

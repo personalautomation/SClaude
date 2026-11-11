@@ -314,9 +314,34 @@ esac
     check("the-whole-has-a-plain-label", out.strip().splitlines()[-1], "2/7 development")
 
     # Accepted: part 1's pull request, into the common branch.
+    # The product's pre-push hook refuses every push of the common branch
+    # here: still where it left main, it carries nothing for the hook to
+    # judge and goes up past it. The parts' branches meet the hook, all in
+    # one push.
+    hooks = os.path.join(tmp, "refusing-hooks")
+    hook_log = os.path.join(tmp, "pre-push.log")
+    os.makedirs(hooks, exist_ok=True)
+    with open(os.path.join(hooks, "pre-push"), "w") as fh:
+        fh.write('#!/bin/sh\nrefs="$(cat)"\necho "$refs" | awk \'{ printf "%%s ", $3 } END { print "" }\' >> "%s"\n'
+                 'echo "$refs" | grep -q " refs/heads/feat/t [0-9a-f]*$" || exit 0\n'
+                 'echo refused by the hook >&2\nexit 1\n' % hook_log)
+    os.chmod(os.path.join(hooks, "pre-push"), 0o755)
+    git("config", "core.hooksPath", hooks, cwd=wt)
     st = read_state(); st["parts"]["accepted"] = True; st["step"] = "pr"; write_state(st)
     out, rc = run_bash('parts_enter "%s"' % wt, wt, bin_dir)
+    git("config", "--unset", "core.hooksPath", cwd=wt)
     check("review-starts-at-part-1", (rc, git("branch", "--show-current", cwd=wt)), (0, "feat/t-1"))
+    check("umbrella-push-not-refused-by-the-hook", "refused by the hook" in out, False)
+    check("the-parts-meet-the-hook-in-one-push", open(hook_log).read().split("\n")[0].split(),
+          ["refs/heads/feat/t-1", "refs/heads/feat/t-2"])
+    check("the-parts-on-github", [bool(git("ls-remote", "--heads", "origin", b, cwd=wt)) for b in ("feat/t-1", "feat/t-2")],
+          [True, True])
+    # A common branch that carries a commit main lacks still meets the hook.
+    git("branch", "-q", "carrying", "feat/t-1", cwd=wt)
+    out, rc = run_bash('parts_in_main "%s" refs/heads/feat/t && echo IN; parts_in_main "%s" refs/heads/carrying || echo OUT'
+                       % (wt, wt), wt, bin_dir)
+    git("branch", "-q", "-D", "carrying", cwd=wt)
+    check("only-a-branch-all-in-main-skips-the-hook", out.split(), ["IN", "OUT"])
     check("umbrella-on-github-for-the-base",
           bool(git("ls-remote", "--heads", "origin", "feat/t", cwd=wt)), True)
     out, rc = run_bash('step_label pr "%s"; parts_base "%s"' % (wt, spath), wt, bin_dir)
@@ -378,8 +403,16 @@ esac
                              "runs": [{"session": "r1"}]}
     st["step"] = "review"
     write_state(st)
-    out, rc = run_bash('parts_advance "%s" t' % wt, wt, bin_dir)
+    # The same refusing hook: the common branch, with main merged in by the
+    # sync (an empty commit stands for it), goes up past it.
+    git("config", "core.hooksPath", hooks, cwd=wt)
+    out, rc = run_bash('parts_advance "%s" t' % wt, wt, bin_dir,
+                       'sync_branch() { echo SYNC_BRANCH; git -C "$1" commit -q --allow-empty --no-verify -m "main in"; }\n')
+    git("config", "--unset", "core.hooksPath", cwd=wt)
     check("advance-ok", rc, 0)
+    check("synced-umbrella-push-not-refused-by-the-hook",
+          ("refused by the hook" in out, git("rev-parse", "feat/t", cwd=wt) == git("ls-remote", "origin", "refs/heads/feat/t", cwd=wt).split()[0]),
+          (False, True))
     st = read_state()
     check("part-1-merged-recorded", bool(st["parts"]["1"].get("merged")), True)
     check("on-to-part-2", st["parts"].get("current"), 2)
@@ -392,6 +425,26 @@ esac
     check("pr-marked-ready-before-merge", "pr ready 101" in open(os.path.join(tmp, "gh.log")).read(), True)
     check("tree-on-the-common-branch", git("branch", "--show-current", cwd=wt), "feat/t")
     check("common-branch-has-part-1", os.path.exists(os.path.join(wt, "a.txt")), True)
+    # Part 1 with no pull request on record and its branch gone from GitHub:
+    # origin/feat/t-1, left from the push before its review, is not taken as
+    # the head its review left.
+    saved = read_state()
+    st = read_state(); st["parts"]["1"]["pr"] = None; write_state(st)
+    gone = git("rev-parse", "origin/feat/t-1", cwd=wt)
+    git("push", "-q", "--no-verify", "origin", "--delete", "feat/t-1", cwd=wt)
+    git("update-ref", "refs/remotes/origin/feat/t-1", gone, cwd=wt)
+    out, rc = run_bash('parts_take_common "%s" "%s" 2' % (wt, spath), wt, bin_dir)
+    check("a-stale-copy-of-the-part-before-is-not-its-reviewed-head",
+          (rc, "origin has no feat/t-1" in out), (1, True))
+    # Origin not reached is not "origin has no branch": no push is asked for.
+    url = git("remote", "get-url", "origin", cwd=wt)
+    git("remote", "set-url", "origin", url + ".nowhere", cwd=wt)
+    out, rc = run_bash('parts_take_common "%s" "%s" 2' % (wt, spath), wt, bin_dir)
+    git("remote", "set-url", "origin", url, cwd=wt)
+    check("origin-not-reached-waits-without-a-push-asked",
+          (rc, "could not be fetched from origin" in out, "git push origin" in out), (1, True, False))
+    git("push", "-q", "--no-verify", "origin", "%s:refs/heads/feat/t-1" % gone, cwd=wt)
+    write_state(saved)
     # Run again over the same part (as run_step does after a cut-off run):
     # the merge is not recorded twice, and the part's steps stay kept.
     st = read_state(); st["parts"]["current"] = 1; st["step"] = "review"; write_state(st)

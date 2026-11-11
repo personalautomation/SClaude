@@ -1247,6 +1247,40 @@ def git_globals(raw, where, command=""):
     return i - 1, where, redirected
 
 
+# `git config` asked to change a key rather than print it.
+CONFIG_WRITES = {"--unset", "--unset-all", "--add", "--replace-all", "--edit", "-e",
+                 "--rename-section", "--remove-section",
+                 "set", "unset", "edit", "rename-section", "remove-section"}
+CONFIG_READS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color",
+                "--get-colorbool", "-l", "--list", "get", "list"}
+
+
+def sets_hooks_path(options, rest):
+    """Whether one git call sets core.hooksPath.
+
+    `options` are git's own options before the subcommand, `rest` the
+    subcommand and its words. A `-c` or `--config-env` naming the key sets it
+    for this call; `git config` sets it when it writes: a write option or
+    subcommand, or a value after the key. Any other mention, a read among
+    them, sets nothing.
+    """
+    key = lambda w: w.lower().replace(" ", "")
+    if any("core.hookspath" in key(w) for w in options):
+        return True
+    if not rest or rest[0] != "config":
+        return False
+    args = rest[1:]
+    at = [i for i, w in enumerate(args) if key(w).startswith("core.hookspath")]
+    if not at:
+        return False
+    if any(w in CONFIG_WRITES for w in args):
+        return True
+    if any(w in CONFIG_READS for w in args):
+        return False
+    after = args[at[0] + 1:]
+    return "=" in args[at[0]] or bool(after and not after[0].startswith("-"))
+
+
 def refuses(command, step, cwd=None, depth=0):
     """The reason to refuse this command, or None."""
     parts = segments(command)
@@ -1319,13 +1353,14 @@ def refuses(command, step, cwd=None, depth=0):
         # in stays `where`.
         here, also = where, False
         if words[0] == "git":
+            call = raw[len(raw) - len(words):]
+            taken, here, also = git_globals(call, where, command)
             # Pointing core.hooksPath elsewhere skips pre-push as surely as
-            # --no-verify does.
-            if any(w.lower().replace(" ", "").startswith("core.hookspath")
-                   for w in raw[len(raw) - len(words):]):
+            # --no-verify does. Only setting it does: reading it, or a word
+            # that merely mentions it, skips nothing.
+            if sets_hooks_path(call[1:1 + taken], call[1 + taken:]):
                 return ("core.hooksPath set on the command line bypasses .githooks/pre-push, "
                         "which exists precisely to catch the database drifting from the repo")
-            taken, here, also = git_globals(raw[len(raw) - len(words):], where, command)
             words = words[:1] + words[1 + taken:]
         reason = (push_refuses(words, command, parts, here, raw,
                                redirected or also, known)

@@ -194,8 +194,10 @@ feature, are [at the top](#sclaude); the walkthrough is also in the
 [v1.0 release](https://github.com/personalautomation/SClaude/releases/tag/v1.0).
 And every feature comes with videos of its own: step 2 records a demo of what
 was built — a video per scenario, on a desktop and a phone, with the steps
-beside it and a link to take over from any of them by hand
-([skills/sdemo](docs/tools.md#skillssdemo)).
+beside it and a link to take over from any of them by hand. A remark about
+one points at it: the page's address holds the second, the product's page and
+a point put on the frame, copied in one click, and the session that gets the
+link looks at that very frame ([skills/sdemo](docs/tools.md#skillssdemo)).
 
 ## What this is, in the industry's words
 

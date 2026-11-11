@@ -26,6 +26,10 @@
 #   demo.py publish <id> [--feature F]  a recording held back while sclaude
 #                                       recorded (SCLAUDE_DEMO_HOLD=1), sent
 #                                       to the topic and the issue now
+#   demo.py at <link>                   a moment the person pointed at on a
+#                                       demo page (deeplink.js): the video,
+#                                       the step under way, the frame cut out
+#                                       with the point drawn on it
 #
 # A full demo that goes to the topic deletes the messages of the full demo
 # before it and of everything older (withdraw_old): the topic keeps the
@@ -709,6 +713,13 @@ def lasted(start, end):
     return "%d days" % round(mins / 1440)
 
 
+def deeplink_script():
+    """deeplink.js, for inlining: the place in a video in the address and its
+    copy button. One file for both demo pages; play.mjs puts it in the other."""
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "deeplink.js")) as fh:
+        return fh.read().replace("</", "<\\/")
+
+
 def write_feature_page(wt, label):
     """DEMO_DIR/index.html: the feature's demos as versions. On top the
     current one — the latest full demo, since when it is current, what
@@ -732,12 +743,18 @@ def write_feature_page(wt, label):
         return out
 
     def grid(entry, preload):
+        # data-v names the video in the address (deeplink.js): the demo's id
+        # and the scenario's number, so a link stays good as versions pile up.
         return "<div class=grid>%s</div>" % "".join(
             "<figure>%s<figcaption>%s</figcaption></figure>" % (
-                "<video controls playsinline preload=%s src='%s'></video>" % (preload, h.escape(c))
+                "<video controls playsinline preload=%s data-v='%s' data-pages='%s' src='%s'></video>" % (
+                    preload, h.escape("%s.%d" % (entry["id"], n)),
+                    h.escape(json.dumps([[0, sc.get("path") or ""]] + [
+                        [st.get("t") or 0, st.get("url") or ""] for st in sc.get("steps") or []])),
+                    h.escape(c))
                 if c else "<p class=sub>⚠ no video: %s</p>" % h.escape(sc.get("error") or "not recorded"),
                 h.escape(sc.get("title", "")))
-            for c, sc in clips(entry))
+            for n, (c, sc) in enumerate(clips(entry), 1))
 
     def facts(e):
         return "%s · on <code>%s</code> · %d scenario(s)" % (
@@ -831,7 +848,8 @@ details{margin:4px 0}summary{cursor:pointer;color:var(--mute);font-size:13px}
 .timeline>li{position:relative}.timeline>li::before{content:"";position:absolute;left:-26px;top:20px;
 width:10px;height:10px;border-radius:50%%;background:var(--line);border:2px solid var(--bg)}
 code{font-size:13px}
-</style></head><body><main>%s</main></body></html>""" % (h.escape(label), "".join(parts))
+</style></head><body><main>%s</main><script>%s</script></body></html>""" % (
+        h.escape(label), "".join(parts), deeplink_script())
     with open(os.path.join(wt, DEMO_DIR, "index.html"), "w") as fh:
         fh.write(page)
 
@@ -1098,6 +1116,116 @@ def cmd_criteria(label, wt):
     sys.stdout.write(done.stdout)
 
 
+def link_moment(link):
+    """(feature, demo id, scenario number, seconds, point or None) of a demo
+    page's link with a moment in it, as deeplink.js writes the address:
+    #v=s<n>&t=<s>[&p=<x>,<y>][&u=<path>] on one demo's page, #v=<id>.<n>&...
+    on the feature's page; u, the product's page at that second, is the
+    step's own address, which `at` prints from the recording."""
+    from urllib.parse import parse_qs
+    parts = urlsplit(link.strip())
+    path = parts.path
+    if DEMO_PREFIX not in path:
+        die("not a demo page's link (no %s in it): %s" % (DEMO_PREFIX, link))
+    names = [n for n in path.split(DEMO_PREFIX, 1)[1].split("/") if n]
+    if not names:
+        die("the link names no feature: %s" % link)
+    q = {k: v[-1] for k, v in parse_qs(parts.fragment).items()}
+    v = q.get("v", "")
+    if not v:
+        die("the link holds no moment (#v=...&t=...): open the video, play or pause it, "
+            "and copy the link with 🔗")
+    if v.startswith("s") and v[1:].isdigit() and len(names) > 1:
+        demo, n = names[1], int(v[1:])
+    elif "." in v and v.rsplit(".", 1)[1].isdigit():
+        demo, n = v.rsplit(".", 1)[0], int(v.rsplit(".", 1)[1])
+    else:
+        die("cannot read the video %r in the link" % v)
+    try:
+        t = sum(float(x) * 60 ** i for i, x in enumerate(reversed(q.get("t", "0").split(":"))))
+    except ValueError:
+        t = 0.0
+    point = None
+    try:
+        xy = [float(x) for x in q.get("p", "").split(",")]
+        if len(xy) == 2 and all(0 <= c <= 100 for c in xy):
+            point = xy
+    except ValueError:
+        pass
+    return names[0], demo, n, t, point
+
+
+def cmd_at(args, label, wt):
+    """What the person meant by a moment of a demo's video: the scenario, the
+    step under way and the page it was on, and the frame cut out — plain, and
+    with the point drawn on it when the link has one — for the session to
+    read before it acts on the remark."""
+    _, demo, n, t, point = link_moment(args[0])
+    rec = recording(wt, demo)
+    scenarios = rec.get("scenarios") or []
+    if not 1 <= n <= len(scenarios):
+        die("demo %s of %s has no scenario %d" % (demo, label, n))
+    sc = scenarios[n - 1]
+    video = pick(os.path.join(wt, DEMO_DIR, demo), sc)
+    clock = "%d:%04.1f" % (t // 60, t % 60)
+    print("scenario %d: %s — as %s, %s" % (n, sc.get("title", "?"), sc.get("as", "?"),
+                                          sc.get("viewport") or "desktop"))
+    steps = sc.get("steps") or []
+    now = [i for i, st in enumerate(steps) if (st.get("t") or 0) <= t + 0.2]
+    if now:
+        st = steps[now[-1]]
+        print("at %s: step %d, %s (from %s)" % (clock, now[-1] + 1, st.get("text") or st.get("kind"),
+                                               "%d:%02d" % divmod(int(st.get("t") or 0), 60)))
+        for key, what in (("look", "look at"), ("why", "why"), ("error", "error")):
+            if st.get(key):
+                print("  %s: %s" % (what, st[key]))
+        if st.get("url"):
+            print("  page: " + st["url"])
+        if now[-1] + 1 < len(steps):
+            nxt = steps[now[-1] + 1]
+            print("next: %s at %d:%02d" % (nxt.get("text") or nxt.get("kind"),
+                                           *divmod(int(nxt.get("t") or 0), 60)))
+    else:
+        print("at %s: before the first step" % clock)
+    if not video:
+        die("no video of scenario %d in %s" % (n, demo))
+    print("video: " + video)
+    if not shutil.which("ffmpeg"):
+        print("frame: none — no ffmpeg here")
+        return
+    out = os.path.join(wt, DEMO_DIR, demo, "frames")
+    os.makedirs(out, exist_ok=True)
+    base = os.path.join(out, "s%d-%s" % (n, ("%.1f" % t).replace(".", "_")))
+    cut = ["ffmpeg", "-loglevel", "error", "-y", "-ss", "%.2f" % t, "-i", video, "-frames:v", "1"]
+    if subprocess.run(cut + [base + ".png"]).returncode:
+        die("ffmpeg could not cut the frame at %s" % clock)
+    print("frame: %s.png" % base)
+    if point:
+        size = []
+        if shutil.which("ffprobe"):  # a lone static ffmpeg comes without it
+            size = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                   "stream=width,height", "-of", "csv=p=0", video],
+                                  capture_output=True, text=True).stdout.strip().split(",")
+        x, y = point
+        if len(size) == 2 and all(c.isdigit() for c in size):
+            w, h = int(size[0]), int(size[1])
+            print("point: %g%% × %g%% of the frame = %d,%d px of %d×%d, from its top left corner"
+                  % (x, y, w * x / 100, h * y / 100, w, h))
+        else:
+            print("point: %g%% × %g%% of the frame, from its top left corner (no ffprobe "
+                  "here to give its pixels)" % (x, y))
+        # A red ring and a cross through it; the plain frame shows what is under them.
+        cx, cy = "iw*%g/100" % x, "ih*%g/100" % y
+        draw = ",".join([
+            "drawbox=x=%s-28:y=%s-28:w=56:h=56:color=red@0.9:t=4" % (cx, cy),
+            "drawbox=x=%s-2:y=%s-60:w=4:h=36:color=red@0.9:t=fill" % (cx, cy),
+            "drawbox=x=%s-2:y=%s+24:w=4:h=36:color=red@0.9:t=fill" % (cx, cy),
+            "drawbox=x=%s-60:y=%s-2:w=36:h=4:color=red@0.9:t=fill" % (cx, cy),
+            "drawbox=x=%s+24:y=%s-2:w=36:h=4:color=red@0.9:t=fill" % (cx, cy)])
+        if subprocess.run(cut + ["-vf", draw, base + "-point.png"]).returncode == 0:
+            print("marked: %s-point.png" % base)
+
+
 def main(argv):
     label = where = ""
     live = False
@@ -1115,13 +1243,20 @@ def main(argv):
         else:
             rest.append(arg)
     if not rest or rest[0] not in ("link", "users", "criteria", "open", "play", "stale",
-                                   "replay", "last", "parts", "keep", "publish"):
+                                   "replay", "last", "parts", "keep", "publish", "at"):
         die("usage: demo.py link <email> [<path>] | users | criteria | "
             "open <email> <path>... | play <demo.mjs> [--live] | stale | replay | last | parts | "
-            "keep <reason> | publish <id>  "
+            "keep <reason> | publish <id> | at <link>  "
             "[--feature F] [--where laptop|phone]")
+    if rest[0] == "at":
+        if len(rest) < 2:
+            die("usage: demo.py at <a demo page's link with #v=...&t=...>")
+        # The link names its feature: any session can read it, in any tree.
+        label = label or link_moment(rest[1])[0]
     label, wt = feature(label)
-    if rest[0] == "users":
+    if rest[0] == "at":
+        cmd_at(rest[1:], label, wt)
+    elif rest[0] == "users":
         cmd_users(label, wt)
     elif rest[0] == "criteria":
         cmd_criteria(label, wt)

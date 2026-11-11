@@ -163,6 +163,8 @@ with tempfile.TemporaryDirectory() as root:
         page = fh.read()
     check("page: the delta that went out is shown, the try before it is not",
           ("Second try" in page, "First try" in page), (True, False))
+    check("page: it carries the place in a video in the address",
+          demo.deeplink_script() in page, True)
     check("history: the try never published stays held",
           [e.get("held") for e in demo.history(wt) if e["id"] == first_delta], [True])
     code, lines = said(demo.cmd_publish, ["nothing"], "f1", wt)

@@ -560,7 +560,8 @@ async function main() {
     // Functions, not strings: a "$&" in a caption would otherwise be read as
     // a pattern of replace() itself.
     .replace("/*DEMO*/null", () => JSON.stringify(results).replace(/</g, "\\u003c"))
-    .replace('/*FEATURE*/""', () => JSON.stringify(FEATURE).replace(/</g, "\\u003c"));
+    .replace('/*FEATURE*/""', () => JSON.stringify(FEATURE).replace(/</g, "\\u003c"))
+    .replace("/*DEEPLINK*/", () => fs.readFileSync(new URL("./deeplink.js", import.meta.url), "utf8"));
   fs.writeFileSync(path.join(OUT, "index.html"), page);
 }
 

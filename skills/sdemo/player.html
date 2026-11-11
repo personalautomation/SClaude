@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Feature demo</title>
 <!-- Written by play.mjs beside the videos: DEMO below is replaced by what the
-     run recorded (demo.json). Served by sclaude-proxy at
+     run recorded (demo.json), DEEPLINK by deeplink.js. Served by sclaude-proxy at
      /__sclaude/demo/<feature>/<id>/. -->
 <style>
 :root{--bg:#f7f7f5;--card:#fff;--ink:#1c1917;--mute:#78716c;--line:#e7e5e4;--acc:#2563eb;
@@ -71,7 +71,7 @@ ${esc(new Date(DEMO.made).toLocaleString())} · tap a step to jump there; "take 
 to go on by hand</div><nav>${DEMO.scenarios.map((s, i) => `<a href="#s${i + 1}">${i + 1}. ${esc(s.title)}</a>`).join("")}</nav>` +
 DEMO.scenarios.map((s, i) => `<section id="s${i + 1}"><h2>${i + 1}. ${esc(s.title)}</h2>
 <div class=who>as ${esc(s.as)}<span class=vp>${s.viewport === "phone" ? "📱 phone" : "🖥 desktop"}</span></div><div class=grid><div>
-${s.sources && s.sources.length ? `<video controls playsinline preload=metadata data-i=${i}${s.viewport === "phone" ? " class=phone" : ""}>${s.sources.map((v) =>
+${s.sources && s.sources.length ? `<video controls playsinline preload=metadata data-i=${i} data-v="s${i + 1}" data-pages="${esc(JSON.stringify([[0, s.path || ""], ...s.steps.map((st) => [st.t, st.url || ""])]))}"${s.viewport === "phone" ? " class=phone" : ""}>${s.sources.map((v) =>
   `<source src="${esc(v.src)}" type='${esc(v.type)}'>`).join("")}${s.captions ?
   `<track kind=captions srclang=en label="Steps" src="${esc(s.captions)}"${PHONE ? " default" : ""}>` : ""}</video>
 <div class=now data-i=${i}></div>` : ""}
@@ -107,6 +107,9 @@ for (const ol of document.querySelectorAll("ol[data-i]")) {
     }
   });
 }
+// The place in a video in the address, and its copy button (deeplink.js,
+// put here by play.mjs).
+/*DEEPLINK*/
 </script>
 </body>
 </html>

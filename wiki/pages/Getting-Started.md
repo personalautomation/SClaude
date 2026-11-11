@@ -45,7 +45,7 @@ sclaude done <name>     # clean up after the merge
 |---|---|
 | `/pr` | opens a pull request the GitHub-flow way |
 | `/sreview` | review-and-fix rounds until the review finds nothing substantive; your answers become policies |
-| `/sdemo` | records a demo of the feature, a video per scenario, with a link to take over any step by hand |
+| `/sdemo` | records a demo of the feature, a video per scenario, with a link to take over any step by hand and a link to any moment, with a point on the frame, to send Claude with a remark |
 | `/isleep` | night mode: Claude decides instead of asking and leaves a morning summary |
 
 ## The guides

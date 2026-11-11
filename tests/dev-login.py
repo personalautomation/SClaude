@@ -581,8 +581,31 @@ def check_proxy(root, wt, dport, login_file):
         player = open(os.path.join(ROOT, "skills", "sdemo", "player.html")).read()
         filler = open(os.path.join(ROOT, "skills", "sdemo", "play.mjs")).read()
         check("demo: play.mjs fills the markers player.html has",
-              [m in player and m in filler for m in ('/*DEMO*/null', '/*FEATURE*/""')],
-              [True, True])
+              [m in player and m in filler for m in ('/*DEMO*/null', '/*FEATURE*/""', '/*DEEPLINK*/')],
+              [True, True, True])
+        check("demo: both pages carry the place in a video in the address",
+              ('data-v="s${i + 1}"' in player, "./deeplink.js" in filler,
+               "video[data-v]" in demo.deeplink_script(),
+               # play.mjs inlines the file as it is: a "</" there ends the page's script.
+               "</" not in open(os.path.join(ROOT, "skills", "sdemo", "deeplink.js")).read()),
+              (True, True, True, True))
+        script = demo.deeplink_script()
+        check("demo: the moment deeplink.js writes is the one demo.py at reads",
+              (demo.link_moment("http://f1.localhost/__sclaude/demo/f1/20261031-120000/#v=s2&t=12.5&p=30,40.5&u=/a/b?x%3D1%26y%3D2"),
+               demo.link_moment("http://x/__sclaude/demo/f1/#v=20261031-120000.3&t=1:05"),
+               "{v: video.dataset.v, t: String(t)}" in script, 'q.p = video.point.join(",")' in script,
+               'p.get("p")' in script, "data-pages" in player, "q.u = page" in script),
+              (("f1", "20261031-120000", 2, 12.5, [30.0, 40.5]), ("f1", "20261031-120000", 3, 65.0, None),
+               True, True, True, True, True))
+        # Step 2 and every fix session (fix-review, a regression's, after a
+        # rollback) render code.md or review.md: one include for them all.
+        prompts = os.path.join(ROOT, "sclaude", "prompts")
+        check("demo: a session is told to read such a link with demo.py at",
+              ("demo.py at '<link>'" in open(os.path.join(ROOT, "skills", "sdemo", "SKILL.md")).read(),
+               "demo.py at '<link>'" in open(os.path.join(prompts, "_demo-link.md")).read(),
+               ["<include:demo-link>" in open(os.path.join(prompts, f)).read()
+                for f in ("code.md", "review.md")]),
+              (True, True, [True, True]))
         recorded = os.path.join(wt, demo.DEMO_DIR, "20261031-120000")
         write(os.path.join(recorded, "index.html"), "<h1>the demo</h1>")
         write(os.path.join(recorded, "scenario-1.webm"), "0123456789")

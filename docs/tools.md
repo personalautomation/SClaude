@@ -78,6 +78,16 @@ terminal only — with:
 - checks marked ✓ or ✗;
 - **take over** on every step: that page, signed in as that user, to go on by
   hand.
+- the moment on the screen in the address: playing, seeking or pausing a video
+  writes `#v=<video>&t=<seconds>` into it, so the link opens that video there;
+  📍 then a click on the frame adds a point (`&p=<x>,<y>`, per cent of the
+  video's own frame from its top left corner, black bars left out, so the same
+  on any screen) and copies the link at once; the link also ends with
+  `&u=<path>`, the product's page the video shows at that second; 🔗 copies it without a point, and
+  ⛶ goes full screen with these buttons still on it. Send the link to Claude
+  with what to change there: `demo.py at <link>` (which `/sdemo`, step 2
+  and every fix session know to run) names the scenario and the step at that second and cuts out the
+  frame with the point marked, for the session to look at.
 
 Each feature has one demo page, `/__sclaude/demo/<feature>/`, with every demo
 it ever had, as versions: a full demo and the deltas recorded before it — a

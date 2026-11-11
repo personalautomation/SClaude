@@ -115,6 +115,8 @@ The orchestrator captured the PR state as of the start of this step — checks a
 
 <include:dev-server>
 
+<if:demo><include:demo-link></if:demo>
+
 <block:regression>
 
 <include:questions>

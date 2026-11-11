@@ -1,6 +1,6 @@
 ---
 name: sdemo
-description: A feature's demo, played for the person. `/sdemo` records a demo of the feature's main functionality — Playwright signs in as each scenario's user, clicks and types through it, with captions on the page saying what each step shows, where to look and why it matters — and gives one link to a page with a video per scenario, the steps beside it, and "take over" links that open any step's page signed in to go on by hand; `/sdemo ac` walks through the acceptance criteria instead; `/sdemo live` plays it in the laptop's chrome-debug with ⏸ to take over; `/sdemo links` gives plain signed-in links with what to check (`links open` opens them in chrome-debug). Links are for where the person is — the laptop's <feature>.localhost, or the tailnet's address on the phone. Use when the user invokes /sdemo, or asks to demo, show, try or check a feature.
+description: A feature's demo, played for the person. `/sdemo` records a demo of the feature's main functionality — Playwright signs in as each scenario's user, clicks and types through it, with captions on the page saying what each step shows, where to look and why it matters — and gives one link to a page with a video per scenario, the steps beside it, and "take over" links that open any step's page signed in to go on by hand; `/sdemo ac` walks through the acceptance criteria instead; `/sdemo live` plays it in the laptop's chrome-debug with ⏸ to take over; `/sdemo links` gives plain signed-in links with what to check (`links open` opens them in chrome-debug). Links are for where the person is — the laptop's <feature>.localhost, or the tailnet's address on the phone. Use when the user invokes /sdemo, or asks to demo, show, try or check a feature — and when they send a link to a demo page (`/__sclaude/demo/…`) with a moment in it (`#v=…&t=…`, maybe `&p=x,y`): that is the place their remark is about, read with `demo.py at <link>`.
 argument-hint: "[ac | delta] [live | links [open]] [feature] [what to show]"
 ---
 
@@ -39,6 +39,24 @@ How it is shown:
   the videos also go to the feature's Telegram topic and to a comment of its
   own on the feature's issue, which replaces the one before; anywhere else
   the link is given here alone.
+
+  Playing a video writes where it is into the page's address,
+  `#v=<video>&t=<seconds>`, and 📍 then a click on the frame adds a point,
+  `&p=<x>,<y>` — per cent of the video's own frame from its top left
+  corner, the black bars left out, so the same on any screen; the link is
+  copied (🔗, or at once with the point). `&u=<path>` at the end is the
+  product's page the video shows at that second. `v` is `s<n>`, scenario n, on a
+  demo's page, and `<demo id>.<n>` on the feature's page.
+
+  **A link like that, sent with a remark, names what the remark is about.**
+  Before acting on it run `python3 ~/.claude/skills/sdemo/demo.py at '<link>'` — the link
+  names its feature, so it works from any directory. It prints the
+  scenario, the step under way at that second with its page's address, the
+  point in the frame's pixels, and cuts the frame out: `frame:` plain and
+  `marked:` with a red cross on the point. Read the marked frame (and the
+  plain one when the cross hides what is under it) and say in a line what
+  you see there before changing anything — "the button's label at the
+  point", not a guess from the step's caption.
 - **`live`** — the same script, played in the laptop's chrome-debug, a
   window per user with cookies of its own. The page carries ⏸ ▶ ⏭ ⏹: on
   pause the page is the person's, ▶ goes on, ⏹ ends the script and leaves

@@ -259,6 +259,20 @@ breaks the other silently — grep before you edit:
   <!-- Added by Claude on 2026-10-31 with the recorded demo of /sdemo; the
   issue comment and the steps' demo on 2026-11-01. -->
 
+- A moment of a demo's video in a page's address,
+  `#v=<video>&t=<s>&p=<x>,<y>&u=<path>` (`u` from each video's `data-pages`,
+  the steps' recorded `url`; `v` is `s<n>` on a demo's page, `<demo id>.<n>`
+  on the feature's page — `data-v` in `player.html` and `grid` in
+  `write_feature_page`), is written
+  by `skills/sdemo/deeplink.js` — inlined by play.mjs at `/*DEEPLINK*/` and
+  by `deeplink_script` in demo.py — and read by `link_moment` for `demo.py at`,
+  which `skills/sdemo/SKILL.md` and `sclaude/prompts/_demo-link.md` (included
+  by `code.md` and `review.md`, so step 2 and every fix session) tell a
+  session to run on such a link; `tests/dev-login.py` checks each side.
+
+  <!-- Added by Claude on 2026-11-11 at the user's request: a remark about a
+  demo names the second and the place in the frame it is about. -->
+
 - Every state field the shell names — `state_get`, `state_set`, a
   `state_snapshot`'s `${snap[...]}` — is listed in
   `sclaude/lib/core/state_schema.py`, with its meaning; `tests/state-file.py`

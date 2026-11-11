@@ -515,11 +515,17 @@ breaks the other silently — grep before you edit:
   `tests/regression.py`, `tests/merge.py` and `tests/process.py` check each
   side. A word changed on one side alone ships what was set to be asked, or
   runs a suite the map says is gone.
+  `demoVoice` (`on`, `off`) is in `CHOICES` and the example too, and read by
+  `voice_on` in `skills/sdemo/demo.py`, which passes `--voice` to play.mjs
+  (`startVoice`/`trackArgs` in `skills/sdemo/voice.mjs`, which runs
+  `voice.py serve` and speaks its JSON lines); `tests/demo-voice.py` checks
+  each side. `spokenFor` there is measured on voice.py's `SPEED`: change one,
+  measure the other again, or steps are held too short or too long.
   A choice set from `sclaude config` or the bot is this machine's, in
   `.sclaude/local/config.json` beside the committed file (`local_path`,
   `overrides` in `config_menu.py`), and is read first by `project_get`,
-  `review_mode` in `pr_context.py`, `config_of` in `process_config.py` and
-  `team_mode` in `dora_team.py`; `tests/config-menu.py` checks the writer
+  `review_mode` in `pr_context.py`, `config_of` in `process_config.py`,
+  `voice_on` in `skills/sdemo/demo.py` and `team_mode` in `dora_team.py`; `tests/config-menu.py` checks the writer
   and `project_get`. A reader that skips it acts on the project's
   recommendation while the screen shows the person's choice.
 

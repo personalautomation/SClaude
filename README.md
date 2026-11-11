@@ -158,8 +158,8 @@ moments are look, tap, done:
 ### And more
 
 - **Demo videos, recorded by the agent.** Each feature is clicked through as
-  its users, with captions on what to look at, and the video lands on the
-  issue for QA.
+  its users, with captions on what to look at, spoken aloud by a voice model
+  run on the laptop itself, and the video lands on the issue for QA.
 - **Night mode.** Go to sleep; Claude carries on, decides instead of asking,
   and gives you a summary of its decisions in the morning.
 - **Built for the bad days.** Red tests get a fixing session, twice, then a

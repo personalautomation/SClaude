@@ -235,6 +235,9 @@ declares no smoke list gets its full list, said in the run's heading.
 before its question, and it is recorded again when the code changed since —
 before QA, or before the last epilogue with `qa: auto`) and `off` (no demo videos anywhere in the cycle; the report and the
 criteria are the check).
+`demoVoice` takes `on` (the default: the demo's videos are spoken, in English,
+by a model run on the machine's CPU — see [skills/sdemo](tools.md#skillssdemo))
+and `off` (silent videos, the captions alone).
 `partAccept` takes `whole` (the default: a feature built in parts is accepted
 once, whole, when every part is built; each part before the last is shown in a
 demo of what it added, which asks nothing) and `each` (every part's

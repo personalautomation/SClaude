@@ -360,6 +360,24 @@ def again_from(wt, only, script):
     return folder, numbers
 
 
+def voice_on(wt):
+    """Whether the recorded videos are spoken (voice.py): the project's
+    `demoVoice`, `on` unless set `off` — this machine's choice first, then the
+    main checkout's config, then the feature's copy, as project_get reads."""
+    import config_menu
+    # The main checkout is the first tree `git worktree list` names, however
+    # its git directory is laid out (a submodule, --separate-git-dir).
+    listed = subprocess.run(["git", "-C", wt, "worktree", "list", "--porcelain"],
+                            capture_output=True, text=True).stdout.split("\n", 1)[0]
+    main = listed[len("worktree "):] if listed.startswith("worktree ") else wt
+    config = os.path.join(main, ".sclaude", "config.json")
+    value = config_menu.overrides(config).get("demoVoice")
+    for path in (config, os.path.join(wt, ".sclaude", "config.json")):
+        if value is None:
+            value = (config_menu.load(path) or {}).get("demoVoice")
+    return value != "off"
+
+
 def cmd_play(args, label, wt, where, live, only=""):
     """Run a demo script (play.mjs): recorded into DEMO_DIR/<id>/ and its page
     named, or live in chrome-debug, left running for the person."""
@@ -382,6 +400,8 @@ def cmd_play(args, label, wt, where, live, only=""):
     base = "http://%s.localhost:%d" % (label, PROXY_PORT)
     run = ["node", os.path.join(HERE, "play.mjs"), script, "--out", out, "--base", base,
            "--feature", label]
+    if not live and voice_on(wt):
+        run.append("--voice")
     if keep:
         run += ["--keep-from", keep[0], "--only", ",".join(map(str, keep[1]))]
         print("again: scenario(s) %s; the others from %s where they are unchanged"

@@ -164,6 +164,12 @@ A target is a Playwright locator (or a CSS selector string). Prefer
 render — read them, do not guess; `.first()` where several match. `text` is a
 line, or `{say, look, why}` — what happens, where to look, what it proves;
 give `look` and `why` on the steps that carry the point, not on every click.
+A recording speaks each step's `say` (and the scenario's title on its card)
+unless the project's `demoVoice` is off: write the line so it reads well
+aloud too, and where it cannot — a bare "Send", a code, a symbol — give
+`{say, voice}`, the words for the ear (`voice: ""` keeps the step silent; a
+scenario's own `voice` replaces its title). Keep lines to a sentence: a
+long line is a long step.
 The scenario's `shows`, `look` and `why` open it as a card. A failed action
 ends its scenario (the next one runs); a failed check does not.
 

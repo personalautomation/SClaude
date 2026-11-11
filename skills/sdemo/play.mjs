@@ -7,7 +7,7 @@
 // and take over.
 //
 //   node play.mjs <demo.mjs> --out DIR --base URL [--live] [--cdp URL]
-//                 [--keep-from DIR --only 2,7]
+//                 [--keep-from DIR --only 2,7] [--voice]
 //
 // demo.py play is what calls it: it knows the feature, its address and
 // where the results go (DEMO_DIR). The script is a module the skill writes:
@@ -44,6 +44,12 @@
 // (`sig`: its title, user, path, cards and steps' source). One that changed
 // since, or did not play there, is played again too. A retry then costs the
 // scenarios that failed, not the whole demo.
+//
+// --voice (recorded only; demo.py passes it unless the project's demoVoice is
+// off) speaks each step's line and the scenario's card on the video's sound
+// track: voice.mjs runs the voice beside the browser, the line is made while
+// its step plays, and the next step waits until it should have been said (by
+// its length, or its estimate while it is being made).
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
@@ -51,6 +57,7 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { startVoice, trackArgs, spokenFor } from "./voice.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt = "") => {
@@ -64,6 +71,7 @@ const LIVE = args.includes("--live");
 const FEATURE = opt("--feature");
 const CDP = opt("--cdp", "http://127.0.0.1:" + (process.env.CHROME_DEBUG_PORT || 9222));
 const KEEP_FROM = opt("--keep-from");
+const VOICE = args.includes("--voice") && !LIVE;
 const ONLY = new Set(opt("--only").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0));
 if (!scriptPath || !OUT || !BASE) {
   console.error("usage: play.mjs <demo.mjs> --out DIR --base URL [--live]");
@@ -199,6 +207,9 @@ const readFor = (text) => Math.min(6000, Math.max(1400, String(text || "").lengt
 let state = "playing"; // live only: playing | paused | skip | stopped
 const shown = () => (state === "skip" ? "playing" : state);
 const contexts = new Map(); // live: a context per user, its windows
+let voice = null; // the voice, when --voice and it started (voice.mjs)
+const READY_FOR = 90 * 1000; // how long the recording waits for it to start
+const CLIPS = new WeakMap(); // a scenario's record → its lines, for its encoding
 class Skip extends Error {}
 class Stop extends Error {}
 
@@ -231,11 +242,53 @@ async function gate(page) {
   if (state === "stopped") throw new Stop();
 }
 
-// What a step says: a line, or {say, look, why} — what happens, where to
-// look, and what it proves.
-const words = (x) => (x && typeof x === "object"
-  ? { say: String(x.say || ""), look: String(x.look || ""), why: String(x.why || "") }
-  : { say: String(x || ""), look: "", why: "" });
+// What a step says: a line, or {say, look, why, voice} — what happens, where
+// to look, and what it proves; `voice` is what is spoken instead of `say`
+// when the line is written for the eye ("" for nothing spoken).
+const words = (x) => {
+  const w = x && typeof x === "object"
+    ? { say: String(x.say || ""), look: String(x.look || ""), why: String(x.why || "") }
+    : { say: String(x || ""), look: "", why: "" };
+  w.voice = x && typeof x === "object" && typeof x.voice === "string" ? x.voice : w.say;
+  return w;
+};
+
+// A scenario's spoken lines: each said from the moment its step starts, at
+// the time the video is at then, and `hold` waits until the last one has
+// been said — the next step, the end card. Without a voice both do nothing.
+//
+// The hold goes by the line's length once it is made, and by its estimate
+// (`spokenFor`) while it is not: beside a recording browser the voice can run
+// slower than speech, and waiting for it would put dead seconds in the video.
+// A line that comes out longer than its place is fitted there when the
+// track is laid (trackArgs).
+function talker(started, n) {
+  const clips = [];
+  let last = null;
+  return {
+    clips,
+    say(text) {
+      if (!voice || !String(text || "").trim()) return;
+      // A voice that stopped mid-recording speaks no more: the steps after go
+      // at their own pace, not held for lines nobody will hear.
+      if (voice.dead()) {
+        console.log(`voice: ${voice.dead()}; the rest of the demo is silent`);
+        voice = null;
+        return;
+      }
+      const clip = { t: (Date.now() - started) / 1000, file: path.join(OUT, `voice-${n}-${clips.length + 1}.wav`),
+        seconds: null, guess: spokenFor(text) };
+      clip.done = voice.say(text, clip.file).then((s) => { clip.seconds = s; });
+      clips.push(clip);
+      last = clip;
+    },
+    async hold(gap = 300) {
+      if (!last) return;
+      const end = started + (last.t + (last.seconds ?? last.guess)) * 1000 + gap;
+      if (end > Date.now()) await sleep(end - Date.now());
+    },
+  };
+}
 const length = (w) => w.say.length + w.look.length + w.why.length;
 
 // Where the recording stands, one line on stdout for demo.py play to read
@@ -246,12 +299,16 @@ function progress(fields) {
   if (!LIVE) console.log("progress: " + JSON.stringify(fields));
 }
 
-function helpers(page, record, started) {
-  const note = (kind, w, extra = {}) => {
+function helpers(page, record, started, talk) {
+  // The step before has been said by now: a step's line never runs over the
+  // next one's.
+  const note = async (kind, w, extra = {}) => {
+    await talk.hold();
     const step = { kind, text: w.say, t: (Date.now() - started) / 1000, url: page.url(), ...extra };
     if (w.look) step.look = w.look;
     if (w.why) step.why = w.why;
     record.steps.push(step);
+    talk.say(w.voice);
     progress({ step: record.steps.length });
     return step;
   };
@@ -282,7 +339,7 @@ function helpers(page, record, started) {
   async function act(kind, text, target, fn) {
     await gate(page);
     const w = words(text);
-    const step = note(kind, w);
+    const step = await note(kind, w);
     await caption(w);
     try {
       const p = target ? await point(target) : {};
@@ -326,7 +383,7 @@ function helpers(page, record, started) {
     check: async (target, text) => {
       await gate(page);
       const w = words(text);
-      const step = note("check", w);
+      const step = await note("check", w);
       await caption(w);
       try {
         await point(target);
@@ -471,15 +528,21 @@ async function scenario(browser, demo, s, i, contexts) {
     return record;
   }
   await page.waitForLoadState("load").catch(() => {});
+  const talk = talker(started, i + 1);
   try {
     // A pause pressed as the page landed holds before the card covers it.
     await gate(page);
     await onPage(page, (h) => window.__sdemo?.card(h), cardHtml(s));
+    // The card spoken: its title — what it shows is a paragraph, read on the
+    // card — or the scenario's own `voice` ("" for nothing).
+    talk.say(typeof s.voice === "string" ? s.voice : s.title);
     await sleep(Math.min(9000, readFor((s.shows || "") + (s.why || "") + record.look.join(" "))));
+    await talk.hold(0);
     await gate(page);
     await onPage(page, () => window.__sdemo?.card(null));
     await sleep(400);
-    await s.steps(helpers(page, record, started));
+    await s.steps(helpers(page, record, started, talk));
+    await talk.hold();
     await gate(page);
     await page.evaluate(() => window.__sdemo?.caption('<b>✓ end of this scenario</b>')).catch(() => {});
     await sleep(1500);
@@ -493,6 +556,13 @@ async function scenario(browser, demo, s, i, contexts) {
     if (err instanceof Skip || (LIVE && page.isClosed())) record.skipped = true;
     else record.error = String(err.message || err).split("\n")[0];
   } finally {
+    // A scenario cut short mid-line still lets its line end: the video stops
+    // after the voice does, not under it.
+    if (!LIVE) await talk.hold(0);
+    CLIPS.set(record, talk.clips);
+    // Recorded with the voice on to its end — whether there was anything to
+    // say or not; a voice that stopped on the way leaves it silent.
+    if (voice && !voice.dead()) record.voiced = true;
     if (!LIVE) {
       const video = page.video();
       await context.close();
@@ -515,12 +585,14 @@ function localTime() {
 }
 
 // What makes a scenario the same one in two recordings: everything the
-// script says of it, its steps' source included. A helper of the script's
+// script says of it, its steps' source and its spoken title included. (Its
+// recording having the voice on is the record's `voiced`, which keepPlan
+// compares too.) A helper of the script's
 // own outside the scenario is not in it — change one, and play all again.
 function sig(s, demo) {
   const look = Array.isArray(s.look) ? s.look : s.look ? [s.look] : [];
   return createHash("sha1").update(JSON.stringify([s.title, s.as, s.path || "/", viewportOf(s, demo),
-    s.shows || "", look, s.why || "", String(s.steps)])).digest("hex").slice(0, 16);
+    s.shows || "", look, s.why || "", String(s.steps), s.voice ?? null])).digest("hex").slice(0, 16);
 }
 
 // The scenarios taken from the earlier recording (--keep-from), by index:
@@ -544,11 +616,16 @@ function keepPlan(demo) {
     if (ONLY.has(i + 1)) continue;
     const r = (before.scenarios || [])[i];
     const files = r ? [...(r.sources || []).map((v) => v.src), r.captions].filter(Boolean) : [];
-    const ok = r && !r.error && !r.skipped && r.sig && r.sig === sig(s, demo) && files.length
+    // Spoken now and silent there, or the other way: played again, so that
+    // one demo's videos are all spoken or all silent.
+    const sameVoice = r?.voiced !== "partly" && !!r?.voiced === !!voice;
+    const ok = r && !r.error && !r.skipped && r.sig && r.sig === sig(s, demo) && sameVoice && files.length
       && files.every((f) => fs.existsSync(path.join(KEEP_FROM, f)));
     if (!ok) {
       if (r) console.log(`scenario ${i + 1}: plays again — ${r.error || r.skipped ? "it did not play there"
-        : r.sig === sig(s, demo) ? "its video is not there" : "it changed since"}`);
+        : r.sig !== sig(s, demo) ? "it changed since" : !sameVoice ? (r.voiced === "partly" ? "it is partly spoken there"
+          : voice ? "it is silent there" : "it is spoken there")
+        : "its video is not there"}`);
       continue;
     }
     for (const f of files) {
@@ -569,7 +646,20 @@ function keepPlan(demo) {
 
 // A scenario's video made what the page plays, and its captions.
 async function finish(r) {
-  r.sources = await squeeze(r.video);
+  const clips = CLIPS.get(r) || [];
+  await Promise.all(clips.map((c) => c.done));
+  const made = clips.filter((c) => c.seconds != null);
+  try {
+    let refused;
+    [r.sources, refused] = await squeeze(r.video, made);
+    // Spoken through (`true`), silent (none), or "partly": some lines on
+    // the track and some not — the voice died or a line never came — which
+    // neither a spoken retry nor a silent one takes (keepPlan).
+    if (refused || (clips.length && !made.length)) delete r.voiced;
+    else if (made.length && (made.length < clips.length || !r.voiced)) r.voiced = "partly";
+  } finally {
+    for (const c of clips) fs.rmSync(c.file, { force: true });
+  }
   r.captions = r.video.replace(/\.webm$/, ".vtt");
   fs.writeFileSync(path.join(OUT, r.captions), vtt(r));
 }
@@ -587,6 +677,22 @@ async function main() {
     }
   }
   fs.mkdirSync(OUT, { recursive: true });
+  // The voice first: whether this recording speaks decides which scenarios
+  // an earlier one can lend (keepPlan). Waited for a minute and a half at
+  // most — a first run fetching the model on a slow line does not hold the
+  // demo up; it is let go to go on fetching, and the next recording speaks.
+  if (VOICE) {
+    const starting = startVoice();
+    let timer;
+    const why = await Promise.race([starting.ready, new Promise((r) => {
+      timer = setTimeout(() => r("not ready yet (fetching the model?) — the next recording speaks"), READY_FOR);
+    })]);
+    clearTimeout(timer);
+    if (why) {
+      console.log(`voice: off — ${why}; the videos are silent`);
+      starting.release();
+    } else voice = starting;
+  }
   const kept = LIVE ? [] : keepPlan(demo);
   // Opened for the first scenario that plays: one taken whole from the
   // earlier recording needs no browser.
@@ -673,6 +779,10 @@ async function main() {
   }
   if (browser) await browser.close();
   await encoding;
+  // A line the voice finished after its video was encoded without it is
+  // swept up once the voice has gone.
+  await voice?.close();
+  for (const f of fs.readdirSync(OUT)) if (/^voice-\d+-\d+\.wav$/.test(f)) fs.rmSync(path.join(OUT, f), { force: true });
   fs.writeFileSync(path.join(OUT, "demo.json"), JSON.stringify(results, null, 1));
   const page = fs.readFileSync(new URL("./player.html", import.meta.url), "utf8")
     // Functions, not strings: a "$&" in a caption would otherwise be read as
@@ -714,25 +824,43 @@ function vtt(r) {
 // AV1 was measured against it on such a recording (SVT-AV1 1.7, its
 // screen-content tools on): 1% smaller at three times the encoding time, 7%
 // at six — not worth a second file. Without ffmpeg, the WebM alone.
-async function squeeze(name) {
+//
+// The voice's lines, when there are any, go on its sound track (trackArgs);
+// the second value is true when ffmpeg refused the track and the video went
+// silent.
+async function squeeze(name, clips = []) {
   const src = path.join(OUT, name);
   const webm = [{ src: name, type: "video/webm" }];
   const mp4 = name.replace(/\.webm$/, ".mp4");
+  const encode = (sound) => new Promise((resolve, reject) => {
+    const child = execFile("ffmpeg", ["-y", "-loglevel", "error", "-i", src, ...sound, "-c:v", "libx264", "-preset", "slow",
+      "-crf", "26", "-tune", "stillimage", "-pix_fmt", "yuv420p", "-profile:v", "high", "-g", "100",
+      "-movflags", "+faststart", path.join(OUT, mp4)], (err, _out, stderr) =>
+      (err ? reject(new Error(String(stderr || err.message).split("\n")[0])) : resolve()));
+    // Below the browser that records the next scenario: a frame it drops
+    // is a jerk in the video, an encoding a second slower is nothing.
+    try { os.setPriority(child.pid, 10); } catch {}
+  });
+  const track = trackArgs(clips);
+  let refused = false;
   try {
-    await new Promise((resolve, reject) => {
-      const child = execFile("ffmpeg", ["-y", "-loglevel", "error", "-i", src, "-c:v", "libx264", "-preset", "slow",
-        "-crf", "26", "-tune", "stillimage", "-pix_fmt", "yuv420p", "-profile:v", "high", "-g", "100",
-        "-movflags", "+faststart", "-an", path.join(OUT, mp4)], (err) => (err ? reject(err) : resolve()));
-      // Below the browser that records the next scenario: a frame it drops
-      // is a jerk in the video, an encoding a second slower is nothing.
-      try { os.setPriority(child.pid, 10); } catch {}
-    });
-    if (!fs.statSync(path.join(OUT, mp4)).size) return webm;
+    // A track ffmpeg refuses costs the voice, not the MP4: encoded again
+    // silent — and blamed on the track only when that one works.
+    if (track) {
+      try {
+        await encode([...track.inputs, "-filter_complex", track.filter, ...track.map]);
+      } catch (err) {
+        await encode(["-an"]);
+        refused = true;
+        console.log(`voice: ${name} is silent — ffmpeg refused its track: ${err.message}`);
+      }
+    } else await encode(["-an"]);
+    if (!fs.statSync(path.join(OUT, mp4)).size) return [webm, false];
   } catch {
-    return webm;
+    return [webm, false];
   }
   fs.unlinkSync(src);
-  return [{ src: mp4, type: "video/mp4" }];
+  return [[{ src: mp4, type: "video/mp4" }], refused];
 }
 
 main().catch((err) => {

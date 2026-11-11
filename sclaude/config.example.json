@@ -210,6 +210,10 @@
     "            recorded again when the code changed since — before QA, or",
     "            before the last epilogue with qa auto; the default) or \"off\" (no demo videos anywhere in the cycle:",
     "            the report and the criteria are the check).",
+    "demoVoice — whether a recorded demo is spoken: \"on\" (each step's line",
+    "            and each scenario's card read aloud on the video, in English,",
+    "            by a model run on this machine's CPU — fetched once, ~350 MB,",
+    "            through uv; the default) or \"off\" (silent videos).",
     "partAccept — a feature built in parts: \"whole\" (the person sees it",
     "            once, when every part is built, and accepts it then; the",
     "            parts' pull requests and reviews follow; the default) or",
@@ -237,6 +241,8 @@
   "ship": "ask",
 
   "demo": "on",
+
+  "demoVoice": "on",
 
   "partAccept": "whole",
 

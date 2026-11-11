@@ -139,6 +139,12 @@ The videos are H.264 when `ffmpeg` is installed (`sudo apt install ffmpeg`),
 which every browser and Telegram play; without it, the recording's own WebM,
 four times the size, which Safari before 17.4 does not play. A demo is kept in the feature's `.sclaude/local/demo/`.
 
+The videos are spoken: each scenario's title and each step's line, in
+English, by a voice model run on the laptop's CPU. The first recording on a
+machine fetches the model (~350 MB, once) through
+[uv](https://docs.astral.sh/uv/); without it the videos are silent. A project
+turns the voice off with `"demoVoice": "off"` (`sclaude config`).
+
 `skills/sdemo/demo.py` does each part by hand: `play <script.mjs> [--live]`
 plays a script (`--only failed` records again only the scenarios that failed
 last time it played, the others kept from that recording), `replay` plays the last one again, `stale` says whether the

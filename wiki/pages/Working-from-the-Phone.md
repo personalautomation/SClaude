@@ -64,8 +64,8 @@ three features in parallel included.
 - **Night mode** (`/isleep`): go to sleep; Claude carries on, decides instead
   of asking, and gives you a summary of its decisions in the morning.
 - **Demo videos**, recorded by the agent: each feature clicked through as its
-  users, on a desktop and a phone, with captions; the video lands on the issue
-  for QA.
+  users, on a desktop and a phone, with captions read aloud by a voice model
+  run on the laptop; the video lands on the issue for QA.
 
 ## Read more
 

@@ -94,6 +94,12 @@ CHOICES["demo"] = [
     ("off", "no demo videos: the report and the criteria are the check"),
 ]
 
+CHOICES["demoVoice"] = [
+    ("on", "a recorded demo is spoken: each step's line and each scenario's "
+           "card, in English, by a model on this machine's CPU (~350 MB, once)"),
+    ("off", "the demo videos are silent; the captions say it all"),
+]
+
 CHOICES["partAccept"] = [
     ("whole", "a feature built in parts is shown once, whole, when every part "
               "is built; the parts' reviews follow"),

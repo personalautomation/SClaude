@@ -290,7 +290,9 @@ parts_enter() {
     # the tree holds the work of every part — a database migrated by all of
     # them, say — and a pre-push hook that asks whether a branch on GitHub
     # carries that work refuses a part pushed alone while the later parts
-    # are on this machine only. One push hands the hook every part at once.
+    # are on this machine only. One push hands the hook every part at once,
+    # atomic: a hook that passed the parts for each other must not see origin
+    # take some and refuse the rest.
     for (( k = n; k <= $(parts_last "$state"); k++ )); do
       b="$(parts_branch "$umbrella" "$k")"
       git -C "$wt" rev-parse -q --verify "refs/heads/$b" >/dev/null || continue
@@ -298,7 +300,7 @@ parts_enter() {
     done
     (( ${#refs[@]} )) && { parts_push "$wt" \
       "Could not push the parts' branches: each part's pull request comes from its own (git push origin ${refs[*]%%:*})." \
-      "${refs[@]}" || true; }
+      --atomic "${refs[@]}" || true; }
     # The pull request goes into the common branch, so GitHub has to have it.
     if ! grep -q "[[:space:]]refs/heads/$umbrella\$" <<< "$heads"; then
       local verify=()

@@ -9,7 +9,9 @@
 // seeks that video there, paused. Each video gets a copy button over its
 // corner, and a full-screen button that puts the video and the copy button
 // on the screen together: the browser's own full screen shows the video
-// alone, and the person tells Claude about a place mostly from there.
+// alone, and the person tells Claude about a place mostly from there. On
+// the screen it pauses on a click and takes the keys as a video's own full
+// screen does: space or k, the arrows or j and l, m, f.
 //
 // 📍 then a click on the frame puts a point in the address too: p=<x>,<y>,
 // in per cent of the video's own frame from its top left corner — not of the
@@ -45,10 +47,35 @@ border:3px solid #fff;background:rgba(220,38,38,.85);box-shadow:0 0 0 2px #dc262
 font:600 15px/1.4 system-ui,sans-serif;color:#fff;background:rgba(0,0,0,.82);border-radius:10px;padding:10px 16px;
 text-align:center;pointer-events:none;opacity:0;transition:opacity .2s}
 .vw .toast.on{opacity:1}
-.vw:fullscreen{background:#000;display:flex;align-items:center;justify-content:center;width:100%;max-width:none;margin:0}
-.vw:fullscreen video{width:100%;height:100%;max-width:none;max-height:none;object-fit:contain;border-radius:0}
-.vw:-webkit-full-screen{background:#000;width:100%;height:100%}
-.vw:-webkit-full-screen video{width:100%;height:100%;max-height:none;object-fit:contain}`;
+/* The steps' strip under the video; see steps(). */
+.vw .vs{position:relative;padding:7px 0 3px;cursor:pointer;touch-action:pan-y}
+.vw .vs .tr{position:relative;height:8px;transition:height .1s}
+.vw .vs:hover .tr{height:12px}
+.vw .vs i{position:absolute;top:0;bottom:0;border-left:2px solid transparent;background-clip:padding-box;
+background-color:rgba(120,113,108,.35);border-radius:3px;overflow:hidden}
+.vw .vs i:first-child{border-left:0}
+.vw .vs i.bad{background-color:rgba(220,38,38,.35)}
+.vw .vs i b{display:block;height:100%;background:#2563eb}
+.vw .vs i.bad b{background:#dc2626}
+.vw .vs i.now{box-shadow:inset 0 0 0 1px rgba(37,99,235,.7)}
+.vw .vs .tip{position:absolute;bottom:100%;left:0;z-index:4;max-width:280px;padding:6px 8px;
+border-radius:8px;background:rgba(0,0,0,.88);color:#fff;font:600 12px/1.35 system-ui,sans-serif;display:none;
+cursor:text;user-select:text;-webkit-user-select:text;touch-action:auto}
+.vw .vs .tip.on{display:block}
+.vw .vs .tip canvas{display:none;border-radius:4px;margin:0 auto 5px}
+.vw .vs .tip.pic canvas{display:block}
+.vw .lk{font-weight:400;opacity:.85}
+/* The step under way over the picture: full screen hides the steps beside it. */
+.vw .cap{position:absolute;left:12px;top:12px;z-index:3;max-width:min(560px,70%);padding:8px 12px;border-radius:10px;
+background:rgba(0,0,0,.78);color:#fff;font:600 16px/1.4 system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .25s;
+cursor:text;user-select:text;-webkit-user-select:text}
+.vw .cap.on{opacity:1;pointer-events:auto}
+.vw:fullscreen{background:#000;display:flex;flex-direction:column;width:100%;max-width:none;margin:0}
+.vw:fullscreen video{flex:1;min-height:0;width:100%;height:auto;max-width:none;max-height:none;object-fit:contain;border-radius:0}
+.vw:fullscreen .vs{flex:none;padding:8px 16px 12px}
+.vw:-webkit-full-screen{background:#000;display:flex;flex-direction:column;width:100%;height:100%}
+.vw:-webkit-full-screen video{flex:1;min-height:0;width:100%;height:auto;max-height:none;object-fit:contain}
+.vw:-webkit-full-screen .vs{flex:none;padding:8px 16px 12px}`;
   document.head.appendChild(css);
 
   const clock = (t) => Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padStart(2, "0");
@@ -149,6 +176,291 @@ text-align:center;pointer-events:none;opacity:0;transition:opacity .2s}
     if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
   }
 
+  const flip = (video) => (video.paused ? video.play().catch(() => {}) : video.pause());
+  function say(wrap, text) {
+    const toast = wrap.querySelector(".toast");
+    toast.textContent = text;
+    toast.classList.add("on");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => toast.classList.remove("on"), 1200);
+  }
+
+  // The steps on a strip under the video. The browser draws no chapters on
+  // its own time line (a <track kind=chapters> loads and shows nothing in
+  // Chrome), so the strip is the page's: a stretch for each step, from its
+  // second to the next one's, a failed check red, the played part filled; a
+  // hover says the step and shows the frame there, a click goes there.
+  // data-steps='[[t, text, ok, look], …]' — ok 1, 0 or null — names them.
+  function stepsOf(video) {
+    if (!video.steps) {
+      try { video.steps = JSON.parse(video.dataset.steps || "[]").map(([t, text, ok, look]) => ({t: +t || 0, text, ok, look})); }
+      catch { video.steps = []; }
+    }
+    return video.steps;
+  }
+  // The step under way: the same rule as the steps beside the video.
+  function stepAt(video, t) {
+    let at = -1;
+    stepsOf(video).forEach((s, i) => { if (s.t <= t + 0.2) at = i; });
+    return at;
+  }
+  const markOf = (s) => (s.ok === 1 ? "✓ " : s.ok === 0 ? "✗ " : "");
+  function stepText(video, i) {
+    const all = stepsOf(video);
+    return i < 0 ? {head: "Start", look: ""}
+      : {head: (i + 1) + "/" + all.length + " · " + markOf(all[i]) + all[i].text, look: all[i].look};
+  }
+  function fill(box, {head, look}) {
+    box.textContent = "";
+    const h = document.createElement("div");
+    h.textContent = head;
+    box.append(h);
+    if (look) {
+      const l = document.createElement("div");
+      l.className = "lk";
+      l.textContent = "👀 " + look;
+      box.append(l);
+    }
+  }
+  // Over the picture, top left: full screen hides the steps beside the video.
+  function showStep(video, cap, ms) {
+    if (!stepsOf(video).length) return;
+    const txt = stepText(video, stepAt(video, video.currentTime));
+    // The same step again keeps its text, and a selection in it.
+    if (cap.dataset.head !== txt.head) { fill(cap, txt); cap.dataset.head = txt.head; }
+    cap.classList.add("on");
+    clearTimeout(cap.timer);
+    if (!cap.matches(":hover")) cap.timer = setTimeout(() => cap.classList.remove("on"), ms);
+  }
+  // [ and ]: the next step's start, or this one's — the one before when
+  // this one has only just begun, as a player's "previous" does.
+  function jump(wrap, d) {
+    const video = wrap.querySelector("video"), all = stepsOf(video);
+    if (!all.length) return;
+    const now = video.currentTime, i = stepAt(video, now);
+    let to;
+    if (d > 0) { if (i + 1 >= all.length) return; to = all[i + 1].t; }
+    else { const start = i >= 0 ? all[i].t : 0; to = now - start > 1.5 ? start : i > 0 ? all[i - 1].t : 0; }
+    video.currentTime = to;
+    // Said for the second the seek lands on, not the one it left.
+    video.addEventListener("seeked", () => showStep(video, wrap.querySelector(".cap"), 2500), {once: true});
+  }
+  // The recordings are 25 frames a second.
+  function frameStep(video, d) {
+    video.pause();
+    video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + d / 25));
+  }
+  const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2], RATE_KEY = "sdemo-rate";
+  function speed(wrap, d) {
+    const now = wrap.querySelector("video").playbackRate;
+    let i = RATES.findIndex((r) => r >= now - 0.01);
+    if (i < 0) i = RATES.length - 1;
+    const r = RATES[Math.max(0, Math.min(RATES.length - 1, (RATES[i] > now + 0.01 && d > 0 ? i - 1 : i) + d))];
+    // Every video on the page, and the next visit: one way of watching.
+    for (const v of document.querySelectorAll("video[data-v]")) v.defaultPlaybackRate = v.playbackRate = r;
+    try { localStorage.setItem(RATE_KEY, String(r)); } catch {}
+    say(wrap, "Speed " + r + "×");
+  }
+
+  function steps(video, wrap, cap) {
+    const strip = document.createElement("div");
+    strip.className = "vs";
+    const track = document.createElement("div");
+    track.className = "tr";
+    const tip = document.createElement("div");
+    tip.className = "tip";
+    const pic = document.createElement("canvas");
+    const words = document.createElement("div");
+    tip.append(pic, words);
+    strip.append(track, tip);
+    let segs = [], shown = null;
+
+    // A WebM straight from the recorder (no ffmpeg to squeeze it) has no
+    // duration in its header: Infinity until read to the end. What is known
+    // stands in — the last step's second a little on, or as far as it was
+    // played or loaded — and the strip is drawn again as that grows.
+    let drawn = 0;
+    const length = () => {
+      const d = video.duration, all = stepsOf(video), b = video.buffered;
+      if (isFinite(d) && d > 0) return d;
+      return Math.max(all.length ? all[all.length - 1].t + 3 : 0, video.currentTime + 1,
+        b.length ? b.end(b.length - 1) : 0);
+    };
+    function build() {
+      const all = stepsOf(video), dur = length();
+      if (!all.length || dur <= 0) return;
+      drawn = dur;
+      if (!strip.parentNode) wrap.insertBefore(strip, video.nextSibling);
+      track.textContent = "";
+      const bounds = (all[0].t > 0.5 ? [{t: 0, i: -1}] : []).concat(all.map((s, i) => ({t: s.t, i})));
+      segs = bounds.map((b, k) => {
+        const end = k + 1 < bounds.length ? bounds[k + 1].t : dur;
+        const el = document.createElement("i");
+        if (b.i >= 0 && all[b.i].ok === 0) el.className = "bad";
+        el.style.left = (b.t / dur * 100) + "%";
+        el.style.width = (Math.max(0, end - b.t) / dur * 100) + "%";
+        el.append(document.createElement("b"));
+        track.append(el);
+        return {from: b.t, to: end, i: b.i, el};
+      });
+      paint();
+    }
+    function paint() {
+      const t = video.currentTime;
+      if (!isFinite(video.duration) && length() > drawn + 0.5) return build();
+      for (const s of segs) {
+        s.el.firstChild.style.width = (t >= s.to ? 100 : t <= s.from ? 0 : (t - s.from) / (s.to - s.from) * 100) + "%";
+        s.el.classList.toggle("now", t >= s.from && t < s.to);
+      }
+      const at = stepAt(video, t);
+      if (at !== shown) {
+        // A new step on the screen says itself there.
+        if (shown !== null && full() === wrap && !video.paused) showStep(video, cap, 4000);
+        shown = at;
+      }
+    }
+    const timeAt = (x) => {
+      const r = track.getBoundingClientRect();
+      // By the length the strip was drawn with, which a stand-in may have outgrown.
+      return Math.max(0, Math.min(1, (x - r.left) / r.width)) * drawn;
+    };
+
+    // The frame under the pointer, from a second copy of the video that
+    // seeks there: nothing to cut out at recording, and the old demos have it
+    // too. One seek at a time; the latest wish is the next one.
+    let ghost = null, want = null, busy = false;
+    function seekGhost() {
+      if (want === null || busy || ghost.readyState < 1) return;
+      busy = true;
+      ghost.currentTime = want;
+      want = null;
+    }
+    function preview(t) {
+      if (!ghost) {
+        ghost = document.createElement("video");
+        ghost.muted = true;
+        // Metadata only: each seek fetches the ranges it needs, not the file again.
+        ghost.preload = "metadata";
+        ghost.src = video.currentSrc || video.src || (video.querySelector("source") || {}).src || "";
+        ghost.addEventListener("loadedmetadata", seekGhost);
+        ghost.addEventListener("seeked", () => {
+          busy = false;
+          const k = Math.min(240 / ghost.videoWidth, 150 / ghost.videoHeight);
+          pic.width = Math.round(ghost.videoWidth * k);
+          pic.height = Math.round(ghost.videoHeight * k);
+          pic.getContext("2d").drawImage(ghost, 0, 0, pic.width, pic.height);
+          tip.classList.add("pic");
+          seekGhost();
+        });
+      }
+      want = t;
+      seekGhost();
+    }
+    function hover(e) {
+      // Over the tip itself it stays put: its text is there to be selected.
+      if (!segs.length || tip.contains(e.target)) return;
+      const t = timeAt(e.clientX), seg = segs.find((s) => t >= s.from && t < s.to) || segs[segs.length - 1];
+      const txt = stepText(video, seg.i);
+      fill(words, {head: clock(t) + " · " + txt.head, look: txt.look});
+      clearTimeout(tip.timer);
+      tip.classList.add("on");
+      const r = track.getBoundingClientRect(), w = tip.offsetWidth;
+      tip.style.left = Math.max(0, Math.min(r.width - w, e.clientX - r.left - w / 2)) + "px";
+      preview(t);
+    }
+    let lifted = null;  // the finger or pen that just lifted, whose leave follows
+    // Only that pointer moving again (a pen hovering on) ends its lift.
+    const again = (e) => { if (lifted === e.pointerId) lifted = null; hover(e); };
+    strip.addEventListener("pointermove", again);
+    strip.addEventListener("pointerdown", again);
+    // A finger, or a pen that cannot hover, leaves as it lifts: the tip
+    // stays four seconds after that leave, to be read. A pen still hovering
+    // has not left and keeps it, as a mouse does. A leave with no lift before
+    // it (a mouse, a hovering pen moving off) hides it; so does a swipe the
+    // page takes for a scroll, which cancels the touch.
+    strip.addEventListener("pointerleave", (e) => {
+      if (e.pointerType !== "mouse" && lifted === e.pointerId) {
+        lifted = null;
+        clearTimeout(tip.timer);
+        tip.timer = setTimeout(() => tip.classList.remove("on"), 4000);
+        return;
+      }
+      tip.classList.remove("on");
+    });
+    strip.addEventListener("pointercancel", () => tip.classList.remove("on"));
+    strip.addEventListener("pointerup", (e) => {
+      if (e.pointerType !== "mouse") lifted = e.pointerId;
+    });
+    // A click goes to the start of the step under it: the strip is for
+    // finding a step; the time line above is for a second.
+    strip.addEventListener("click", (e) => {
+      if (tip.contains(e.target) || !segs.length) return;
+      const t = timeAt(e.clientX);
+      video.currentTime = (segs.find((s) => t >= s.from && t < s.to) || segs[segs.length - 1]).from;
+      used = wrap;
+    });
+
+    video.addEventListener("loadedmetadata", build);
+    video.addEventListener("durationchange", build);
+    video.addEventListener("timeupdate", paint);
+    video.addEventListener("seeked", paint);
+    if (video.readyState >= 1) build();
+  }
+
+  // The keys, as a video player takes them, by the key's place on the
+  // keyboard (e.code), so another layout's letters work the same. They go
+  // to the video on the screen, else the one under the pointer or holding
+  // the focus, else the last one played while half in view — that one only
+  // while focus is on no link, summary or button of the page. A field keeps
+  // its keys always; with no video, the page keeps them (space scrolls). A
+  // focused video takes space, Enter and the arrows itself: twice would
+  // undo them.
+  const KEYS = "Keys: space or K play/pause · ← → or J L 5 s · [ ] step · , . frame · < > speed · M sound · F full screen";
+  let hovered = null, used = null;
+  // [wrapper, chosen]: chosen when the person points at it — on the screen,
+  // under the pointer, holding the focus — not when it is only remembered.
+  function active() {
+    const f = full();
+    if (f && f.classList && f.classList.contains("vw")) return [f, true];
+    if (hovered) return [hovered, true];
+    const a = document.activeElement && document.activeElement.closest && document.activeElement.closest(".vw");
+    if (a) return [a, true];
+    if (used) {
+      const r = used.getBoundingClientRect();
+      if (Math.min(r.bottom, innerHeight) - Math.max(r.top, 0) > r.height / 2) return [used, false];
+    }
+    return [null, false];
+  }
+  const NATIVE = ["Space", "Enter", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // A field keeps its keys always; anything else of the page's own (a link,
+    // a summary) keeps them unless a video is chosen — on the screen or
+    // under the pointer — rather than only the last one played.
+    const t = e.target;
+    if (t.closest && t.closest("input,textarea,select,[contenteditable]:not([contenteditable=false])")) return;
+    const [wrap, chosen] = active();
+    if (!wrap) return;
+    if (!chosen && t !== document.body && t !== document.documentElement) return;
+    const video = wrap.querySelector("video");
+    if (t === video && NATIVE.includes(e.code)) return;
+    const c = e.code, s = e.shiftKey;
+    // Space on a button just pressed (⛶ itself) would press it again.
+    if (c === "Space" || c === "KeyK") flip(video);
+    else if (c === "ArrowLeft" || c === "KeyJ") video.currentTime = Math.max(0, video.currentTime - 5);
+    else if (c === "ArrowRight" || c === "KeyL") video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
+    else if (c === "BracketLeft") jump(wrap, -1);
+    else if (c === "BracketRight") jump(wrap, 1);
+    else if (c === "Comma") s ? speed(wrap, -1) : frameStep(video, -1);
+    else if (c === "Period") s ? speed(wrap, 1) : frameStep(video, 1);
+    else if (c === "KeyM") video.muted = !video.muted;
+    else if (c === "KeyF") toggle(wrap);
+    else return;
+    used = wrap;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
   for (const video of document.querySelectorAll("video[data-v]")) {
     const wrap = document.createElement("div");
     wrap.className = "vw" + (video.classList.contains("phone") ? " phone" : "");
@@ -195,6 +507,46 @@ text-align:center;pointer-events:none;opacity:0;transition:opacity .2s}
     link.addEventListener("click", () => copy(video, link));
     big.addEventListener("click", () => toggle(wrap));
     video.addEventListener("dblclick", (e) => { e.preventDefault(); toggle(wrap); });
+    // The wrapper on the screen is not the browser's own full screen of a
+    // video, so a click on the picture pausing and playing goes with it:
+    // Chrome does it only for a video that is itself in full screen; Firefox
+    // plays on a click anywhere, so the click acts only when the browser did
+    // not. Clicks on Chrome's control bar do not reach the page; the strip at
+    // the bottom is left alone for a browser whose do.
+    video.addEventListener("click", (e) => {
+      if (full() !== wrap || video.getBoundingClientRect().bottom - e.clientY < 48) return;
+      const was = video.paused;
+      setTimeout(() => { if (video.paused === was) flip(video); }, 0);
+    });
+    const sync = () => {
+      const on = full() === wrap;
+      big.textContent = on ? "✕" : "⛶";
+      big.title = on ? "Leave full screen (Esc)" : "Full screen, with the copy button\n\n" + KEYS;
+      if (!on) cap.classList.remove("on");
+    };
+    const cap = document.createElement("div");
+    cap.className = "cap";
+    wrap.append(cap);
+    // Selectable: it stays while the pointer is on it.
+    cap.addEventListener("pointerenter", () => clearTimeout(cap.timer));
+    cap.addEventListener("pointerleave", () => { cap.timer = setTimeout(() => cap.classList.remove("on"), 1500); });
+    // In full screen a click on it is one on the picture under it — unless
+    // it selects words: waited out, so a double click on a word only selects.
+    cap.addEventListener("click", (e) => {
+      clearTimeout(cap.flip);
+      if (full() !== wrap || e.detail > 1) return;
+      cap.flip = setTimeout(() => { if (!String(getSelection())) flip(video); }, 300);
+    });
+    sync();
+    steps(video, wrap, cap);
+    wrap.addEventListener("pointerenter", () => { hovered = wrap; });
+    wrap.addEventListener("pointerleave", () => { if (hovered === wrap) hovered = null; });
+    for (const ev of ["play", "click", "seeked"]) video.addEventListener(ev, () => { used = wrap; });
+    // Shown again with the browser's own controls, which a move brings back.
+    wrap.addEventListener("pointermove", () => { if (full() === wrap) showStep(video, cap, 2500); });
+    try { const r = +localStorage.getItem(RATE_KEY); if (RATES.includes(r)) video.defaultPlaybackRate = video.playbackRate = r; } catch {}
+    document.addEventListener("fullscreenchange", sync);
+    document.addEventListener("webkitfullscreenchange", sync);
     video.addEventListener("timeupdate", () => {
       if (!link.textContent.startsWith("🔗")) return;
       link.textContent = "🔗 " + clock(video.currentTime);

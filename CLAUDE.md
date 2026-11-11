@@ -269,6 +269,10 @@ breaks the other silently — grep before you edit:
   which `skills/sdemo/SKILL.md` and `sclaude/prompts/_demo-link.md` (included
   by `code.md` and `review.md`, so step 2 and every fix session) tell a
   session to run on such a link; `tests/dev-login.py` checks each side.
+  The strip of steps under each video is drawn by deeplink.js from the
+  video's `data-steps` (`[t, text, ok, look]`), written by `player.html` and
+  by `steps_strip` in demo.py for the feature's page; `tests/dev-login.py`
+  checks the three name it alike.
 
   <!-- Added by Claude on 2026-11-11 at the user's request: a remark about a
   demo names the second and the place in the frame it is about. -->

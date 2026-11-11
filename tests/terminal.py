@@ -226,10 +226,11 @@ term_render "%s"
         with open(os.path.join(wt, ".sclaude/local/feature", "state.json"), "w") as fh:
             fh.write(state)
         script = r'''
-PROMPTS="%s/../prompts"
+LIB="%s"
+PROMPTS="$LIB/../prompts"
 info() { echo "INFO $*"; }
 term_render() { echo "RENDERED" > /dev/tty; }
-render_prompt() { echo "PROMPT $1 SINCE[$SCLAUDE_B_SINCE]" > /dev/tty; return 1; }
+render_prompt() { echo "PROMPT $1 SINCE[$SCLAUDE_B_SINCE] MAP[$SCLAUDE_V_MAP_OFF|$SCLAUDE_B_MAP_OFF]" > /dev/tty; return 1; }
 new_session_id() { echo new-id; }
 source "%s/core/state.sh"
 source "%s/improve/retro.sh"
@@ -270,6 +271,19 @@ echo "rc=$?"
     check("retro-unstarted-is-new", "PROMPT retro SINCE" in text, True)
     text = retro('{}')
     check("retro-first-is-new", "PROMPT retro SINCE" in text, True)
+    check("retro-map-off-none-along-the-map", "MAP[|]" in text, True)
+    # Where the feature left the process map (process.py off): a sync where
+    # no block carries S is handed over, flag and lines both.
+    rows = [("09:00", "epilogue", "open", "e"), ("09:10", "epilogue", "finish", "e"),
+            ("09:40", "sync", "open", "y"), ("09:50", "sync", "finish", "y")]
+    history = os.path.join(wt, ".sclaude/local/feature", "history.jsonl")
+    with open(history, "w") as fh:
+        for t, what, op, session in rows:
+            fh.write(json.dumps({"at": "2026-10-09T%s:00+01:00" % t, "what": what, "op": op,
+                                 "session": session}) + "\n")
+    text = retro('{}')
+    os.remove(history)
+    check("retro-map-off-handed-over", "MAP[1|- a sync with main ran between" in text, True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

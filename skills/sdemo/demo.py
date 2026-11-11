@@ -713,11 +713,25 @@ def lasted(start, end):
     return "%d days" % round(mins / 1440)
 
 
+# The tab's icon on both demo pages (player.html carries the same): a demo
+# among sclaude's tabs (page_asset.tab_icon draws the others).
+TAB_ICON = '<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%20100%20100%27%3E%3Ctext%20y%3D%27.9em%27%20font-size%3D%2790%27%3E%F0%9F%8E%AC%3C/text%3E%3C/svg%3E">'
+
+
 def deeplink_script():
     """deeplink.js, for inlining: the place in a video in the address and its
     copy button. One file for both demo pages; play.mjs puts it in the other."""
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "deeplink.js")) as fh:
         return fh.read().replace("</", "<\\/")
+
+
+def steps_strip(sc):
+    """A scenario's steps for the strip under its video (deeplink.js reads
+    data-steps): [t, text, ok, look], ok 1 for a check passed, 0 failed —
+    the same marks the steps beside a demo's video carry (player.html)."""
+    return [[st.get("t") or 0, st.get("text") or st.get("kind") or "",
+             1 if st.get("ok") is True else 0 if st.get("ok") is False or st.get("error") else None,
+             st.get("look") or ""] for st in sc.get("steps") or []]
 
 
 def write_feature_page(wt, label):
@@ -747,10 +761,11 @@ def write_feature_page(wt, label):
         # and the scenario's number, so a link stays good as versions pile up.
         return "<div class=grid>%s</div>" % "".join(
             "<figure>%s<figcaption>%s</figcaption></figure>" % (
-                "<video controls playsinline preload=%s data-v='%s' data-pages='%s' src='%s'></video>" % (
+                "<video controls playsinline preload=%s data-v='%s' data-pages='%s' data-steps='%s' src='%s'></video>" % (
                     preload, h.escape("%s.%d" % (entry["id"], n)),
                     h.escape(json.dumps([[0, sc.get("path") or ""]] + [
                         [st.get("t") or 0, st.get("url") or ""] for st in sc.get("steps") or []])),
+                    h.escape(json.dumps(steps_strip(sc))),
                     h.escape(c))
                 if c else "<p class=sub>⚠ no video: %s</p>" % h.escape(sc.get("error") or "not recorded"),
                 h.escape(sc.get("title", "")))
@@ -823,7 +838,7 @@ def write_feature_page(wt, label):
     if not entries:
         parts.append("<p>No demo recorded yet.</p>")
     page = """<!doctype html><html lang=en><head><meta charset=utf-8>
-<meta name=viewport content='width=device-width,initial-scale=1'><title>%s — demos</title><style>
+<meta name=viewport content='width=device-width,initial-scale=1'>%s<title>%s — demos</title><style>
 :root{--bg:#f7f7f5;--card:#fff;--ink:#1c1917;--mute:#78716c;--line:#e7e5e4;--green:#15803d;
 --greenbg:#dcfce7;--amber:#b45309;--amberbg:#fef3c7;--grey:#57534e;--greybg:#e7e5e4}
 @media (prefers-color-scheme:dark){:root{--bg:#18181b;--card:#232326;--ink:#f4f4f5;--mute:#a1a1aa;
@@ -849,7 +864,7 @@ details{margin:4px 0}summary{cursor:pointer;color:var(--mute);font-size:13px}
 width:10px;height:10px;border-radius:50%%;background:var(--line);border:2px solid var(--bg)}
 code{font-size:13px}
 </style></head><body><main>%s</main><script>%s</script></body></html>""" % (
-        h.escape(label), "".join(parts), deeplink_script())
+        TAB_ICON, h.escape(label), "".join(parts), deeplink_script())
     with open(os.path.join(wt, DEMO_DIR, "index.html"), "w") as fh:
         fh.write(page)
 

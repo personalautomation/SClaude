@@ -654,6 +654,7 @@ def render(repo, data, m):
             "<meta name=viewport content='width=device-width,initial-scale=1'>"
             # An open tab follows the rebuilds by itself.
             "<meta http-equiv=refresh content=3600>"
+            + page_asset.tab_icon("📊") +
             "<title>DORA metrics</title><style>%s</style></head><body>%s"
             "<div id=tip role=tooltip></div><script>%s</script><script>%s</script></body></html>"
             % (STYLE, body, TIP_JS, dora_team.TEAM_JS))

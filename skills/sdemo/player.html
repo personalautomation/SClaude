@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%20100%20100%27%3E%3Ctext%20y%3D%27.9em%27%20font-size%3D%2790%27%3E%F0%9F%8E%AC%3C/text%3E%3C/svg%3E">
 <title>Feature demo</title>
 <!-- Written by play.mjs beside the videos: DEMO below is replaced by what the
      run recorded (demo.json), DEEPLINK by deeplink.js. Served by sclaude-proxy at
@@ -71,7 +72,7 @@ ${esc(new Date(DEMO.made).toLocaleString())} · tap a step to jump there; "take 
 to go on by hand</div><nav>${DEMO.scenarios.map((s, i) => `<a href="#s${i + 1}">${i + 1}. ${esc(s.title)}</a>`).join("")}</nav>` +
 DEMO.scenarios.map((s, i) => `<section id="s${i + 1}"><h2>${i + 1}. ${esc(s.title)}</h2>
 <div class=who>as ${esc(s.as)}<span class=vp>${s.viewport === "phone" ? "📱 phone" : "🖥 desktop"}</span></div><div class=grid><div>
-${s.sources && s.sources.length ? `<video controls playsinline preload=metadata data-i=${i} data-v="s${i + 1}" data-pages="${esc(JSON.stringify([[0, s.path || ""], ...s.steps.map((st) => [st.t, st.url || ""])]))}"${s.viewport === "phone" ? " class=phone" : ""}>${s.sources.map((v) =>
+${s.sources && s.sources.length ? `<video controls playsinline preload=metadata data-i=${i} data-v="s${i + 1}" data-pages="${esc(JSON.stringify([[0, s.path || ""], ...s.steps.map((st) => [st.t, st.url || ""])]))}" data-steps="${esc(JSON.stringify(s.steps.map((st) => [st.t, st.text || st.kind || "", st.ok === true ? 1 : st.ok === false || st.error ? 0 : null, st.look || ""])))}"${s.viewport === "phone" ? " class=phone" : ""}>${s.sources.map((v) =>
   `<source src="${esc(v.src)}" type='${esc(v.type)}'>`).join("")}${s.captions ?
   `<track kind=captions srclang=en label="Steps" src="${esc(s.captions)}"${PHONE ? " default" : ""}>` : ""}</video>
 <div class=now data-i=${i}></div>` : ""}
@@ -91,7 +92,8 @@ for (const ol of document.querySelectorAll("ol[data-i]")) {
   if (!video) continue;
   ol.addEventListener("click", (e) => {
     const li = e.target.closest("li[data-t]");
-    if (!li) return;
+    // A step's text selected to be copied is not a tap on it.
+    if (!li || String(getSelection())) return;
     video.currentTime = Math.max(0, +li.dataset.t - 0.3);
     video.play();
   });

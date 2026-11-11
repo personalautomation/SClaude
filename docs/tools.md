@@ -84,10 +84,22 @@ terminal only — with:
   video's own frame from its top left corner, black bars left out, so the same
   on any screen) and copies the link at once; the link also ends with
   `&u=<path>`, the product's page the video shows at that second; 🔗 copies it without a point, and
-  ⛶ goes full screen with these buttons still on it. Send the link to Claude
+  ⛶ goes full screen with these buttons still on it (a click on the picture
+  pauses there, and ✕ or Esc leaves). Send the link to Claude
   with what to change there: `demo.py at <link>` (which `/sdemo`, step 2
   and every fix session know to run) names the scenario and the step at that second and cuts out the
   frame with the point marked, for the session to look at.
+- a strip of the steps under each video: a stretch per step, a failed check
+  red; hovering says the step and shows the frame at that second, a click
+  goes to the start of that step. In full screen the step under way shows
+  over the picture as it starts. The step's words in both can be selected and
+  copied.
+- keys, for the video in full screen, under the pointer or holding the focus
+  (any of its buttons), or else the last one played while half of it is in view and
+  focus is on no link or button of the page (a text field keeps its keys
+  always): space or K play and pause, ← → or J L five seconds, `[` `]` the
+  step before or after, `,` `.` a frame on pause, `<` `>` the speed (kept
+  for the next visit), M the sound, F full screen. ⛶'s tooltip lists them.
 
 Each feature has one demo page, `/__sclaude/demo/<feature>/`, with every demo
 it ever had, as versions: a full demo and the deltas recorded before it — a
@@ -103,7 +115,8 @@ earlier ones there — all but a message older than 48 hours, which Telegram
 does not let a bot delete. `/sdemo delta` records one
 by hand; when nothing changed for a user, it records nothing. The page is
 linked from the proxy's list of features, under the feature, and from its
-process map.
+process map — a feature built in parts too, whose page has only the parts'
+deltas until the whole is shown.
 
 `/sdemo ac` walks through the acceptance criteria in the issue instead, a
 scenario per criterion (or a few together), and names the ones no page can
@@ -196,7 +209,9 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   with a page that waits for it.
 - `localhost:3000`, or the machine's Tailscale address — the list of features.
   From another device, choosing a feature makes the bare address serve it from
-  then on.
+  then on. Each kind of sclaude's own pages has its icon in the browser's tab:
+  🗂 the list, 🎬 a demo, 🗺 a process map, 📊 the DORA metrics, 👤 signing
+  in.
 - Under each feature and main, a line for each web tool of its own: its
   Supabase Studio and Inbucket while its database stack runs, Code Server
   opened on its tree (started on the way when it is down; from this machine

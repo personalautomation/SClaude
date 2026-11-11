@@ -83,6 +83,7 @@ def _page(label, demo=None):
     return """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+""" + page_asset.tab_icon("🗺") + """
 <title>%s — sclaude map</title>
 <style>%s%s</style></head><body><main>
 <p class="muted"><a href="/__sclaude/">features</a> · <a href="/__sclaude/select?f=%s">open the feature</a>%s</p>

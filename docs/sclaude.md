@@ -335,7 +335,10 @@ than guessing it from the places around. Where the feature left the map — a ju
 for, a map of its own reached from no block carrying its letter
 (`deviations`) — the place is marked: the History tab counts them, and the
 play stops there, rings the places, draws the way it took as a ghost and
-says what happened, since there the map or the code is wrong. `sclaude _flow` sends it with the position, and the page
+says what happened, since there the map or the code is wrong. The
+retrospective is given the same places as lines (`process.py off`, one per
+cause with the passes' times, `run_retro` in `retro.sh`), to find which side is
+wrong and propose the fix. `sclaude _flow` sends it with the position, and the page
 plays it.
 
 **The ways taken are written too, where the code takes them.** A row

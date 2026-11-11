@@ -931,6 +931,15 @@ odd = process.history({}, [{"at": at("09:00"), "what": "steps.code", "op": "open
                            {"at": at("10:00"), "what": "steps.plan", "op": "open", "session": "p"}], "plan")["visits"]
 check("deviations: a jump with no way on the map",
       [v["n"] for v in odd if v.get("off")] == ["plan"] and "no way from 2 · code to 1 · plan" in odd[-1]["off"], str(odd))
+_jump = process.process_history.off_lines({"visits": odd})
+check("deviations: a jump's line names when it happened",
+      _jump == "- the map has no way from 2 · code to 1 · plan (once: %s)\n"
+      % process.process_history._short(at("10:00")), _jump)
+# One with no time says so rather than counting more than it shows.
+check("deviations: an occurrence with no time says so",
+      process.process_history.off_lines({"visits": odd + [{"n": "plan", "off": odd[-1]["off"]}]})
+      == "- the map has no way from 2 · code to 1 · plan (2 times: %s; time unknown)\n"
+      % process.process_history._short(at("10:00")))
 odd = process.history({}, [{"at": at("09:00"), "what": "epilogue", "op": "open", "session": "e"},
                            {"at": at("09:10"), "what": "epilogue", "op": "finish", "session": "e"},
                            {"at": at("09:40"), "what": "sync", "op": "open", "session": "y"},
@@ -938,6 +947,21 @@ odd = process.history({}, [{"at": at("09:00"), "what": "epilogue", "op": "open",
                            {"at": at("10:00"), "what": "retro", "op": "open", "session": "r"}], "retro")["visits"]
 check("deviations: a sync where no block carries S",
       [v["pass"][0] for v in odd if v.get("off")] == ["sync"], str(odd))
+# The retrospective is given them as lines (retro.sh): one per cause, with
+# the passes' times — a pass retried in the same wrong place is one line.
+_twice = process.history({}, [
+    {"at": at("09:00"), "what": "epilogue", "op": "open", "session": "e"},
+    {"at": at("09:10"), "what": "epilogue", "op": "finish", "session": "e"},
+    {"at": at("09:40"), "what": "sync", "op": "open", "session": "y"},
+    {"at": at("09:50"), "what": "sync", "op": "finish", "session": "y"},
+    {"at": at("09:55"), "what": "sync", "op": "open", "session": "z"},
+    {"at": at("09:58"), "what": "sync", "op": "finish", "session": "z"},
+    {"at": at("10:00"), "what": "retro", "op": "open", "session": "r"}], "retro")
+_lines = process.process_history.off_lines(_twice).splitlines()
+check("deviations: the retrospective's lines, one per cause with its times",
+      len(_lines) == 1 and _lines[0].startswith("- a sync with main ran between")
+      and "(2 times: " in _lines[0], str(_lines))
+check("deviations: no lines along the map", not process.process_history.off_lines(got), process.process_history.off_lines(got))
 # A status session run_status marked as the preview's (`about`) plays on
 # the epilogue's copy beside the preview, and the way on goes from the place
 # before it: no deviation. One with no mark is the cycle's own epilogue.

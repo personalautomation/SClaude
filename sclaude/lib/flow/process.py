@@ -36,6 +36,7 @@ splits across pages.
     process.py doc <out.html>
     process.py position <state.json> [pr-state] [epilogue.json]
     process.py history <state.json> [node]   the feature's way, for its page to play
+    process.py off <state.json>          where that way left the map, one line each, for the retrospective
     process.py page <label>              a feature's page shell, for a check
 """
 
@@ -122,6 +123,9 @@ def main(argv):
     if len(argv) >= 2 and argv[0] == "history":
         print(json.dumps(process_history.played(argv[1], argv[2] if len(argv) >= 3 else None)[2],
                          ensure_ascii=False))
+        return 0
+    if len(argv) >= 2 and argv[0] == "off":
+        sys.stdout.write(process_history.off_lines(process_history.played(argv[1], costs=False)[2]))
         return 0
     if len(argv) >= 2 and argv[0] == "page":
         sys.stdout.write(process_page.page(argv[1]))

@@ -1125,19 +1125,22 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
             "now": now_iso}
 
 
-def played(state_path, here=None):
+def played(state_path, here=None, costs=True):
     """The feature's history as both its readers take it — the feature's
     page (actions.sh) and `process.py history`: played on the map its
     project draws, so the ways filled in run through blocks it has, and a
     place that map does not draw (a merge awaited with no QA board) stands
     where the flow goes on from it. Gives the place on that map (None when
-    it draws none), its title, and the history."""
+    it draws none), its title, and the history. Without `costs` the
+    sessions' transcripts are not read, and the history has no metrics:
+    `process.py off` needs only the way, and a cold cache of a long
+    feature's transcripts once outran the retrospective's wait for it."""
     try:
         with open(state_path) as fh:
             state = json.load(fh)
     except (OSError, ValueError):
         state = {}
-    read = process_costs.transcripts_of(state_path)
+    read = process_costs.transcripts_of(state_path) if costs else None
     tree = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(state_path)))))
     try:
         with process_model.configured(process_config.config_of(tree)):
@@ -1147,7 +1150,34 @@ def played(state_path, here=None):
             return node, drawn[node][3] if node else None, \
                 history(state, process_costs.read_history(state_path), node, read)
     finally:
-        read.done()
+        if read:
+            read.done()
+
+
+def off_lines(played_history):
+    """Where a played history left the map, as the retrospective is given it
+    (retro.sh): one line for each thing that happened, with the time of each
+    pass or jump it happened on — a regression retried five times in the same wrong
+    place is one cause, not five. Empty along the map."""
+    seen = {}
+    passes = played_history.get("passes") or {}
+    for v in played_history.get("visits") or []:
+        if v.get("off"):
+            when = None
+            if "pass" in v:
+                try:
+                    when = passes[v["pass"][0]][v["pass"][1]]["label"]
+                except (KeyError, IndexError, TypeError):
+                    pass
+            # A jump is a place entered, at its own time.
+            elif v.get("from"):
+                when = _short(v["from"])
+            seen.setdefault(v["off"], []).append(when or "time unknown")
+    lines = []
+    for what, whens in seen.items():
+        times = "%d times" % len(whens) if len(whens) > 1 else "once"
+        lines.append("- %s (%s: %s)\n" % (what, times, "; ".join(whens)))
+    return "".join(lines)
 
 
 # A map of its own is reached from a block marked with its letter: a pass

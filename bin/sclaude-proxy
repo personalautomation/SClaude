@@ -86,6 +86,7 @@ import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import feature_db  # noqa: E402 — PORT_SLOTS, the single source of truth
 import dev_login  # noqa: E402
 import process  # noqa: E402 — the process map, and a feature's place on it
+import page_asset  # noqa: E402 — the tab's icon
 
 PORT = int(os.environ.get("SCLAUDE_PROXY_PORT") or 3000)
 BIND = os.environ.get("SCLAUDE_PROXY_BIND") or "0.0.0.0"
@@ -328,11 +329,11 @@ pre{background:#292524}}
 """
 
 
-def page(title, body):
+def page(title, body, icon="🗂"):
     return ("<!doctype html><html><head><meta charset=utf-8>"
-            "<meta name=viewport content='width=device-width,initial-scale=1'>"
+            "<meta name=viewport content='width=device-width,initial-scale=1'>%s"
             "<title>%s</title><style>%s</style></head><body><main>%s</main>"
-            "</body></html>" % (html.escape(title), STYLE, body))
+            "</body></html>" % (page_asset.tab_icon(icon), html.escape(title), STYLE, body))
 
 
 def probe_features():
@@ -751,7 +752,7 @@ async def login_page(url, host, headers):
     if asked and not who:
         return respond("400 Bad Request", page("Not signed in", (
             "<h1>Not signed in</h1><p>%s is not an address to sign in as.</p>")
-            % html.escape(asked)))
+            % html.escape(asked), "👤"))
     found = feature(label)
     if not found:
         return respond("404 Not Found",
@@ -783,7 +784,7 @@ async def login_page(url, host, headers):
         return respond("409 Conflict", page("Not signed in", (
             "<h1>%s: not signed in</h1><p>%s.</p><p><a href='%s'>Open it without "
             "signing in</a></p>") % (html.escape(label), html.escape(str(exc)),
-                                    html.escape(nxt if not local else origin + nxt))),
+                                    html.escape(nxt if not local else origin + nxt)), "👤"),
             routed)
     # The session the browser held goes, every chunk of it: a new one shorter
     # than the old would otherwise leave the old one's tail behind it — after
@@ -809,7 +810,7 @@ async def users_page(url, host):
         people = await asyncio.to_thread(dev_login.users, wt)
     except dev_login.Refused as exc:
         return respond("409 Conflict", page("Users", "<h1>%s: users</h1><p>%s.</p>" % (
-            html.escape(label), html.escape(str(exc)))))
+            html.escape(label), html.escape(str(exc))), "👤"))
     rows = "".join("<li><a href='%s'>%s</a></li>" % (
         html.escape("/__sclaude/login?" + urlencode({"f": label, "as": who})), html.escape(who))
         for who in people)
@@ -818,7 +819,7 @@ async def users_page(url, host):
         "of them with <code>/__sclaude/login?as=&lt;email&gt;&amp;next=&lt;path&gt;</code> "
         "on its own address, both URL-encoded (<code>qa%%2Ba%%40example.com</code>).</p>") % (
             html.escape(label), "<ul>%s</ul>" % rows if rows else
-            "<p>This database has no users yet: run the project's seed.</p>")))
+            "<p>This database has no users yet: run the project's seed.</p>"), "👤"))
 
 
 async def own_page(target, host, headers=None):
@@ -960,6 +961,7 @@ def latest_demo(wt):
         names = sorted((n for n in os.listdir(root) if DEMO_ID.match(n)), reverse=True)
     except OSError:
         return None
+    whole = os.path.isfile(os.path.join(root, "index.html"))
     for name in names:
         if not os.path.isfile(os.path.join(root, name, "index.html")):
             continue
@@ -968,14 +970,16 @@ def latest_demo(wt):
                 data = json.load(fh)
         except (OSError, ValueError):
             data = {}
-        # A recording that did not play, or a delta, is not the feature's
-        # demo: demo.py publishes neither as that (skills/sdemo).
-        if data.get("kind") == "delta" or any(
+        # A recording that did not play is not the feature's demo: demo.py
+        # publishes none as that (skills/sdemo). Nor is a delta alone — but
+        # the feature's page shows one as its newer change, and a feature
+        # built in parts has only those until the whole is shown.
+        delta = data.get("kind") == "delta"
+        if delta and not whole or any(
                 isinstance(s, dict) and s.get("error") for s in data.get("scenarios") or []):
             continue
         when = str(data.get("made") or "")[:16].replace("T", " ")
-        whole = os.path.isfile(os.path.join(root, "index.html"))
-        return name if not whole else "", str(data.get("title") or "the feature"), \
+        return name if not whole else "", ("Δ " if delta else "") + str(data.get("title") or "the feature"), \
             "recorded %s" % when if when else ""
     return None
 
@@ -992,15 +996,15 @@ def demo_file(path, wanted=""):
             with open(os.path.join(found[0], DEMO_DIR, "index.html"), "rb") as fh:
                 return respond("200 OK", fh.read().decode("utf-8", "replace"))
         except (OSError, TypeError):
-            return respond("404 Not Found", page("No demo", "<h1>No demo of this feature</h1>"))
+            return respond("404 Not Found", page("No demo", "<h1>No demo of this feature</h1>", "🎬"))
     if len(parts) != 3 or not DEMO_ID.match(parts[1]):
-        return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>"))
+        return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>", "🎬"))
     label, demo, name = parts
     name = name or "index.html"
     kind = DEMO_KINDS.get(os.path.splitext(name)[1])
     found = feature(label)
     if not found or not kind or not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$", name):
-        return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>"))
+        return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>", "🎬"))
     file = os.path.join(found[0], DEMO_DIR, demo, name)
     try:
         size = os.path.getsize(file)
@@ -1022,7 +1026,7 @@ def demo_file(path, wanted=""):
             fh.seek(start)
             data = fh.read(end - start + 1)
     except OSError:
-        return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>"))
+        return respond("404 Not Found", page("No demo", "<h1>No such demo</h1>", "🎬"))
     head = ["HTTP/1.1 %s" % status, "Content-Type: %s" % kind,
             "Content-Length: %d" % len(data), "Accept-Ranges: bytes",
             "Cache-Control: no-store", "Connection: close"]
@@ -1086,7 +1090,16 @@ FLOW_LIMIT = 60
 FLOW = {}
 
 
-_PROCESS_SEEN = [None]
+def _process_stamp():
+    try:
+        return max(os.stat(path).st_mtime_ns for path in process.files())
+    except (OSError, AttributeError):
+        return None
+
+
+# Taken as the model is imported, not at the first map asked for: a part
+# changed in between would otherwise count as seen and never be read.
+_PROCESS_SEEN = [_process_stamp()]
 
 
 def process_map():
@@ -1094,11 +1107,10 @@ def process_map():
     and sclaude's update pulls a new model under it: read again whenever the
     file changed, so the map served is the one the checkout has."""
     global process
-    try:
-        # The model is process.py and its parts (process_*.py): a change to
-        # any of them is a new model.
-        stamp = max(os.stat(path).st_mtime_ns for path in process.files())
-    except (OSError, AttributeError):
+    # The model is process.py and its parts (process_*.py): a change to any
+    # of them is a new model.
+    stamp = _process_stamp()
+    if stamp is None:
         return process
     if _PROCESS_SEEN[0] is not None and stamp != _PROCESS_SEEN[0]:
         try:

@@ -129,6 +129,12 @@ PY
   local config="$wt/.sclaude/local/feature/main-config.json"
   python3 "$LIB/core/config_menu.py" effective "$REPO/.sclaude/config.json" > "$config" 2>/dev/null \
     || cp "$REPO/.sclaude/config.json" "$config" 2>/dev/null || echo '{}' > "$config"
+  # Where the feature's way left the process map, played as its page plays it
+  # (process.py off): the map or the code is wrong there, and the
+  # retrospective is the one session that looks back over the whole way.
+  local map_off=""
+  [[ -f "$fstate" ]] \
+    && map_off="$(timeout 60 python3 "$LIB/flow/process.py" off "$fstate" 2>/dev/null || true)"
   session="${last:-$(new_session_id)}"
   done_file="${TMPDIR:-/tmp}/sclaude-retro-$slug.done"
   rm -f "$done_file"
@@ -148,6 +154,8 @@ PY
   fi
   prompt="$(SCLAUDE_V_TERMINAL="${terminal:-}" \
     SCLAUDE_B_SINCE="$since_block" \
+    SCLAUDE_B_MAP_OFF="$map_off" \
+    SCLAUDE_V_MAP_OFF="${map_off:+1}" \
     SCLAUDE_V_PR_NUMBER="$pr_number" \
     SCLAUDE_V_NO_CHANGE="$no_change" \
     SCLAUDE_V_TERMINAL_RAW="$wt/.sclaude/local/feature/terminal" \

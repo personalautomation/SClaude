@@ -720,8 +720,9 @@ def case_k():
         fh.write('{"type":"assistant","message":{"content":[]}}\n')
     # Stopped at the question asked again after the session: the answers
     # given run out there, and ask() asks until it hears y or n.
-    w.resume(answers="n\nthe form does not load\nn\n\n", timeout=60,
-             until=(CONFIRM, 2))
+    # The default time: `until` ends it as soon as the question is back, and
+    # sixty seconds ran out with the whole suite running alongside.
+    w.resume(answers="n\nthe form does not load\nn\n\n", until=(CONFIRM, 2))
     check_true("not-working-reaches-the-session", "the form does not load" in w.prompts)
     check("not-working-resumes-the-same-session", w.sessions.count("code-session") >= 2, True)
     check_true("not-working-told-the-marker-is-gone",

@@ -257,6 +257,7 @@ def _doc():
     return """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+""" + page_asset.tab_icon("🗺") + """
 <title>sclaude Process Map</title>
 <style>%s
 %s</style><style id="pagesize">@page{size:A4 landscape;margin:12mm 9mm 9mm}</style></head><body><main>

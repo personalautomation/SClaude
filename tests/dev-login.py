@@ -597,6 +597,17 @@ def check_proxy(root, wt, dport, login_file):
                'p.get("p")' in script, "data-pages" in player, "q.u = page" in script),
               (("f1", "20261031-120000", 2, 12.5, [30.0, 40.5]), ("f1", "20261031-120000", 3, 65.0, None),
                True, True, True, True, True))
+        sys.path.insert(0, os.path.join(ROOT, "sclaude", "lib", "core"))
+        import page_asset
+        check("demo: both demo pages carry the demo's tab icon",
+              (demo.TAB_ICON == page_asset.tab_icon("🎬"), demo.TAB_ICON in player), (True, True))
+        check("demo: the steps' strip reads the data-steps both pages write",
+              ("video.dataset.steps" in script, 'data-steps="${esc(' in player,
+               "data-steps='%s'" in open(os.path.join(ROOT, "skills", "sdemo", "demo.py")).read(),
+               demo.steps_strip({"steps": [
+                   {"t": 1.5, "text": "a", "ok": True, "look": "x"}, {"t": 3, "kind": "check", "error": "gone"},
+                   {"t": 4, "text": "c"}]})),
+              (True, True, True, [[1.5, "a", 1, "x"], [3, "check", 0, ""], [4, "c", None, ""]]))
         # Step 2 and every fix session (fix-review, a regression's, after a
         # rollback) render code.md or review.md: one include for them all.
         prompts = os.path.join(ROOT, "sclaude", "prompts")
@@ -651,6 +662,20 @@ def check_proxy(root, wt, dport, login_file):
         _, _, body = request(port, host, "/__sclaude/flow?f=f1")
         check("demo: the process map links it too",
               'href="/__sclaude/demo/f1/20261031-120000/"' in body, True)
+        # A feature built in parts has only deltas until the whole is shown:
+        # alone a delta is not the feature's demo, on the feature's page it is.
+        part = os.path.join(wt, demo.DEMO_DIR, "20261031-130000")
+        write(os.path.join(part, "index.html"), "<h1>a part</h1>")
+        write(os.path.join(part, "demo.json"), json.dumps({"kind": "delta", "title": "Part 1"}))
+        _, _, alone = request(port, host, "/__sclaude/")
+        whole = os.path.join(wt, demo.DEMO_DIR, "index.html")
+        write(whole, "<h1>the feature's demos</h1>")
+        _, _, paged = request(port, host, "/__sclaude/")
+        check("demo: a delta is linked once the feature's page shows it",
+              ("20261031-130000" in alone, "href='/__sclaude/demo/f1/'" in paged, "Δ Part 1" in paged),
+              (False, True, True))
+        shutil.rmtree(part)
+        os.remove(whole)
         status, _, _ = request(port, host, "/__sclaude/demo/nofeature/20261031-120000/")
         check("demo: an unknown feature's demo is not served", status.split(" ", 1)[1],
               "404 Not Found")

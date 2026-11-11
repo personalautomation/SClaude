@@ -140,10 +140,11 @@ which every browser and Telegram play; without it, the recording's own WebM,
 four times the size, which Safari before 17.4 does not play. A demo is kept in the feature's `.sclaude/local/demo/`.
 
 `skills/sdemo/demo.py` does each part by hand: `play <script.mjs> [--live]`
-plays a script, `replay` plays the last one again, `stale` says whether the
+plays a script (`--only failed` records again only the scenarios that failed
+last time it played, the others kept from that recording), `replay` plays the last one again, `stale` says whether the
 code changed since the last demo,
 `link <email> <path>` makes one link, `open <email> <path>…`
-opens links in chrome-debug, `users` lists who can sign in and `criteria`
+opens links in chrome-debug, `users` lists who can sign in, `db` names the feature's database and `criteria`
 prints the criteria.
 
 ## skills/isleep

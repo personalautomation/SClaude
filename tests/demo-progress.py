@@ -130,6 +130,7 @@ feed = watch.stdin
 feed.write(ev("system", subtype="init"))
 feed.write("a line that is not json\n")
 feed.write(ev("assistant", message={"content": [{"type": "text", "text": "Reading the diff first."}]}))
+feed.write(tool("Bash", command="python3 /x/skills/sdemo/demo.py last"))
 feed.write(tool("Bash", command="git diff abc123"))
 feed.write(tool("Read", file_path=os.path.join(wt2, "app.ts")))
 feed.write(tool("Write", file_path=os.path.join(wt2, ".sclaude/local/demo/delta.mjs")))
@@ -142,7 +143,13 @@ time.sleep(1.5)
 recording("20261110-1", "delta", [{"steps": [{"ok": True}]}] * 3)
 progress(None)
 time.sleep(1.5)
-progress({"pid": me, "since": int(time.time()), "kind": "delta", "scenario": 1, "of": 3})
+# Looking at the recording reads no change; a script edited by a heredoc is written.
+feed.write(tool("Read", file_path="/tmp/frame.png"))
+feed.write(tool("Bash", command="git show HEAD:app.ts"))
+feed.write(tool("Bash", command="python3 - <<'X'\np='.sclaude/local/demo/delta.mjs'\nopen(p,'w').write(s)\nX"))
+feed.flush()
+time.sleep(1)
+progress({"pid": me, "since": int(time.time()), "kind": "delta", "scenario": 1, "of": 3, "playing": 1})
 time.sleep(1.5)
 recording("20261110-2", "delta", [{"steps": [{"ok": False}]}, {"steps": []}])
 progress(None)
@@ -158,7 +165,8 @@ check("watch: one line per change, in order", said, [
     ["say", "Writing", "the demo script"],
     ["say", "Recording", "the delta — 3 scenarios"],
     ["ok", "Recorded", "the delta: 3 scenarios"],
-    ["say", "Recording", "the delta — 3 scenarios, try 2"],
+    ["say", "Writing", "the demo script"],
+    ["say", "Recording", "the delta — 1 of 3 scenarios again, try 2"],
     ["warn", "Recorded", "the delta: 2 scenarios, 1 not as expected"],
     ["say", "Keeping", "the last demo — nothing a user sees changed"],
 ])

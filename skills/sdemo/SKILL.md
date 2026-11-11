@@ -106,7 +106,9 @@ its own sake.
 `python3 $D/demo.py users` lists the users of the feature's database. Pick the
 user whose data and role show each scenario; read the seed
 (`supabase/seed.sql` or the project's seed script) or query the database when
-the list alone does not say who is who. Never invent an address: one that does
+the list alone does not say who is who — `python3 $D/demo.py db` prints the
+connection string of the one the feature's server works on (its own local
+database when it has one; the project's `.env` files may name another). Never invent an address: one that does
 not exist is refused, not created. When nobody in the database fits a
 scenario, say so and say what user it needs — do not create one unasked.
 
@@ -265,7 +267,13 @@ page, the topic or the issue; after `keep` it publishes nothing.
 Before giving the link, read `<tree>/.sclaude/local/demo/<id>/demo.json`: a
 scenario with `error`, or a step with `error` or `ok: false` that should have
 passed, is a script to fix (a name that differs, a wait too short) — fix it
-and play again, twice at most. A check that fails because the feature does
+and play again, twice at most, with `play <script> --only failed`: only the
+scenarios that failed play again, and the others are taken as they are from
+the last recording played from that same script file — keep editing and
+playing the one file (`--only 2,7` names them). A scenario you changed in
+the script plays again by itself; one whose helper outside the scenario you
+changed does not, so name it. Once the product's code changed, play them all
+— `--only` refuses then. A check that fails because the feature does
 not do what it should is a finding: keep it, and say so.
 
 The answer: one line where the link is for, the link, then a line per

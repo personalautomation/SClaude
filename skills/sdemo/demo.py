@@ -7,10 +7,14 @@
 #   demo.py users [--feature F]
 #   demo.py criteria [--feature F]      the issue's acceptance criteria
 #   demo.py play <demo.mjs> [--live] [--feature F] [--where laptop|phone]
+#                [--only failed|2,7]
 #                                       the demo the skill wrote, played
 #                                       (play.mjs): recorded, its page named
 #                                       in a session sclaude runs, also to the
-#                                       feature's topic and issue (DEMO comment)
+#                                       feature's topic and issue (DEMO comment);
+#                                       --only plays those scenarios again and
+#                                       takes the rest from the last recording
+#   demo.py db [--feature F]            the feature's database, to query
 #   demo.py stale [--feature F]         whether the code changed since the
 #                                       last demo: exit 0 record one, 1 fresh
 #   demo.py replay [--feature F]        the last full demo's script played again
@@ -308,11 +312,62 @@ def play_watched(run, wt):
         progress_set(wt, None)
 
 
-def cmd_play(args, label, wt, where, live):
+def failed_scenarios(results):
+    """The scenarios of a recording worth playing again, numbered from 1: one
+    that did not play, or a step or check not as expected."""
+    return [i for i, s in enumerate(results.get("scenarios") or [], 1)
+            if s.get("error") or s.get("skipped")
+            or any(x.get("error") or x.get("ok") is False for x in s.get("steps") or [])]
+
+
+def again_from(wt, only, script):
+    """(the folder of the last recording of this script, the scenarios to
+    play again) for `play --only`; dies when there is nothing to take the
+    rest from. Of this script: a refresh records a delta and a full demo,
+    and the numbers of one mean nothing in the other."""
+    last = results = None
+    for entry in reversed(history(wt)):
+        try:
+            with open(os.path.join(wt, DEMO_DIR, entry["id"], "demo.json")) as fh:
+                found = json.load(fh)
+        except (OSError, ValueError, KeyError):
+            continue
+        if found.get("script") == script:
+            last, results = entry, found
+            break
+    if not last:
+        die("--only takes the other scenarios from the last recording of %s, and there is none"
+            % script)
+    folder = os.path.join(wt, DEMO_DIR, last["id"])
+    # The scenarios kept show the code they were played on: with other code
+    # they would show what is no longer there under this commit's name. A
+    # tree git could not write is no proof the code is the same.
+    now = git_tree(wt)
+    if not last.get("tree") or not now or last["tree"] != now:
+        die("--only: the code changed since %s, so its scenarios no longer show it — "
+            "play every scenario" % last["id"])
+    if only == "failed":
+        numbers = failed_scenarios(results)
+        if not numbers:
+            die("--only failed: every scenario of %s played as expected" % last["id"])
+    else:
+        try:
+            numbers = sorted({int(n) for n in only.split(",") if n.strip()})
+        except ValueError:
+            die("--only is failed or scenario numbers: --only 2,7")
+        if not numbers or numbers[0] < 1:
+            die("--only is failed or scenario numbers: --only 2,7")
+    return folder, numbers
+
+
+def cmd_play(args, label, wt, where, live, only=""):
     """Run a demo script (play.mjs): recorded into DEMO_DIR/<id>/ and its page
     named, or live in chrome-debug, left running for the person."""
     if len(args) != 1 or not os.path.isfile(args[0]):
-        die("the demo script: demo.py play <demo.mjs> [--live]")
+        die("the demo script: demo.py play <demo.mjs> [--live] [--only failed|2,7]")
+    if only and live:
+        die("--only is for a recording: live, every scenario is the person's to watch")
+    keep = again_from(wt, only, os.path.realpath(args[0])) if only else None
     # By the second, and apart from any demo already there: a replay can
     # follow a recording within the same second.
     stamp = demo = time.strftime("%Y%m%d-%H%M%S")
@@ -327,6 +382,10 @@ def cmd_play(args, label, wt, where, live):
     base = "http://%s.localhost:%d" % (label, PROXY_PORT)
     run = ["node", os.path.join(HERE, "play.mjs"), script, "--out", out, "--base", base,
            "--feature", label]
+    if keep:
+        run += ["--keep-from", keep[0], "--only", ",".join(map(str, keep[1]))]
+        print("again: scenario(s) %s; the others from %s where they are unchanged"
+              % (", ".join(map(str, keep[1])), os.path.basename(keep[0])))
     if live:
         # Brought forward first: the demo plays in its windows, in front of
         # the person. The player then keeps them until they are closed, so it
@@ -339,6 +398,11 @@ def cmd_play(args, label, wt, where, live):
         print("live: playing in chrome-debug; ⏸ on the page hands it over. Its log: " + log)
         return
     returncode = play_watched(run, wt)
+    # 2 is the player's refusal before it recorded (a script it cannot play,
+    # an --only with nothing to play): no recording, so no folder of one.
+    if returncode == 2:
+        shutil.rmtree(out, ignore_errors=True)
+        die("nothing recorded")
     if returncode or not os.path.isfile(os.path.join(out, "index.html")):
         die("the demo did not finish (exit %d); what it recorded is in %s"
             % (returncode, out))
@@ -352,6 +416,8 @@ def cmd_play(args, label, wt, where, live):
     # are, committed or not.
     results["head"] = git_head(wt)
     results["tree"] = git_tree(wt)
+    # The script it was played from, which `play --only` finds it by.
+    results["script"] = os.path.realpath(args[0])
     with open(os.path.join(out, "demo.json"), "w") as fh:
         json.dump(results, fh, indent=1)
     entry = remember(wt, demo, results)
@@ -1106,6 +1172,18 @@ def cmd_publish(args, label, wt):
     publish(wt, label, args[0], entry, recording(wt, args[0]), phone)
 
 
+def cmd_db(label, wt):
+    """The feature's database, for a session choosing the data its scenarios
+    play on: the one the feature's server uses, not the project's default."""
+    try:
+        url, own = dev_login.database(wt)
+    except dev_login.Refused as exc:
+        die(str(exc))
+    print("db: %s" % url)
+    print("this feature's own local database" if own else
+          "the environment this tree points at — shared, not the feature's own")
+
+
 def cmd_users(label, wt):
     try:
         for address in dev_login.users(wt):
@@ -1242,7 +1320,7 @@ def cmd_at(args, label, wt):
 
 
 def main(argv):
-    label = where = ""
+    label = where = only = ""
     live = False
     rest = []
     it = iter(argv[1:])
@@ -1255,12 +1333,14 @@ def main(argv):
                 die("--where is laptop or phone")
         elif arg == "--live":
             live = True
+        elif arg == "--only":
+            only = next(it, "") or "failed"
         else:
             rest.append(arg)
-    if not rest or rest[0] not in ("link", "users", "criteria", "open", "play", "stale",
+    if not rest or rest[0] not in ("link", "users", "db", "criteria", "open", "play", "stale",
                                    "replay", "last", "parts", "keep", "publish", "at"):
-        die("usage: demo.py link <email> [<path>] | users | criteria | "
-            "open <email> <path>... | play <demo.mjs> [--live] | stale | replay | last | parts | "
+        die("usage: demo.py link <email> [<path>] | users | db | criteria | "
+            "open <email> <path>... | play <demo.mjs> [--live] [--only failed|2,7] | stale | replay | last | parts | "
             "keep <reason> | publish <id> | at <link>  "
             "[--feature F] [--where laptop|phone]")
     if rest[0] == "at":
@@ -1273,6 +1353,8 @@ def main(argv):
         cmd_at(rest[1:], label, wt)
     elif rest[0] == "users":
         cmd_users(label, wt)
+    elif rest[0] == "db":
+        cmd_db(label, wt)
     elif rest[0] == "criteria":
         cmd_criteria(label, wt)
     elif rest[0] == "last":
@@ -1284,7 +1366,7 @@ def main(argv):
     elif rest[0] == "stale":
         cmd_stale(label, wt)
     elif rest[0] == "play":
-        cmd_play(rest[1:], label, wt, where, live)
+        cmd_play(rest[1:], label, wt, where, live, only)
     elif rest[0] == "keep":
         cmd_keep(rest[1:], label, wt)
     elif rest[0] == "publish":

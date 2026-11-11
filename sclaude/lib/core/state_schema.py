@@ -68,7 +68,7 @@ FIELDS = [
     ("steps.review.stuck_pr", (FEATURE,), "the pull request the stuck review was about"),
     ("steps.review.stuck_said", (FEATURE,), "the pull request the person was last told was stuck"),
     ("review.local.running", (FEATURE,), "when the local review's passes began; null once they end"),
-    ("demo_progress", (FEATURE,), "the demo being recorded now, written by demo.py play from the player's `progress:` lines: pid, since, kind, scenario of, title, viewport, step; null once it ends, and stale once pid is gone. Read by demo_progress.py and statusline.py"),
+    ("demo_progress", (FEATURE,), "the demo being recorded now, written by demo.py play from the player's `progress:` lines: pid, since, kind, scenario of, playing (how many of them play, the rest kept by --only), title, viewport, step; null once it ends, and stale once pid is gone. Read by demo_progress.py and statusline.py"),
 
     # --- a feature built in parts (parts.sh) ------------------------------------
     ("parts", (FEATURE,), "the whole node, cleared when a replan no longer splits the feature"),

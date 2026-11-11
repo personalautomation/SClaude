@@ -165,7 +165,7 @@ If nothing in it changes what a user sees or does — a part of data or plumbing
 
 Otherwise write a script with kind: "delta" and change: — what this part gives a user, in one sentence, in business terms. Its scenarios show only what this part brought, desktop and phone where they differ, as the skill's delta step says; there is no full demo to start from yet, so do not run demo.py last. Name the script's scenarios so that they can be reused: once every part is built, the whole feature's demo starts from the parts' scripts.
 
-Call demo.py by its full path, one command at a time and nothing chained to it — python3 $INSTRUMENTS/skills/sdemo/demo.py users, … play — since only that is allowed here. Check the recording's demo.json; fix a script that failed and play it again, twice at most. Nothing goes out while you play: once you end, sclaude publishes your last recording.
+Call demo.py by its full path, one command at a time and nothing chained to it — python3 $INSTRUMENTS/skills/sdemo/demo.py users, … db (the feature's database), … play — since only that is allowed here. Check the recording's demo.json; fix a script that failed and play it again with --only failed (only the scenarios that failed are recorded again), twice at most. Nothing goes out while you play: once you end, sclaude publishes your last recording.
 
 Whatever you find wrong in the product itself while you record — a step that does not show what the part promises, a scenario you had to take round a fault — write to $wt/.sclaude/local/demo/findings.md, one line each: what a user sees, and where.
 
@@ -319,7 +319,7 @@ Otherwise start from that script: keep the scenarios that still show the feature
 
 $what
 
-Call demo.py by its full path, one command at a time and nothing chained to it — python3 $INSTRUMENTS/skills/sdemo/demo.py last, … play — since only that is allowed here. Check each recording's demo.json; fix a script that failed and play it again, twice at most. Nothing goes out while you play: once you end, sclaude publishes your last delta and your last full recording — or nothing, if you ended on keep.
+Call demo.py by its full path, one command at a time and nothing chained to it — python3 $INSTRUMENTS/skills/sdemo/demo.py last, … play — since only that is allowed here. Check each recording's demo.json; fix a script that failed and play it again with --only failed (only the scenarios that failed are recorded again), twice at most. Nothing goes out while you play: once you end, sclaude publishes your last delta and your last full recording — or nothing, if you ended on keep.
 
 Whatever you find wrong in the product itself while you record — a step that does not show what the feature promises, a scenario you had to take round a fault — write to $wt/.sclaude/local/demo/findings.md, one line each: what a user sees, and where. A fault you went round in the script and wrote down nowhere else is one nobody hears of.
 

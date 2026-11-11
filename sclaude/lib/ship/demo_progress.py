@@ -29,6 +29,7 @@
 #           went wrong.
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -38,6 +39,9 @@ DEMO_DIR = ".sclaude/local/demo"
 FIELD = "demo_progress"
 DIM, BOLD, OFF = "\033[2m", "\033[1m", "\033[0m"
 KINDS = {"delta": "the delta", "main": "the whole feature"}
+# A shell command that writes a file of the demo's folder: the sessions edit
+# their script with a heredoc as often as with Edit.
+WRITES = re.compile(r"open\([^)]*['\"][wa]['\"]|sed -i|>\s*\S*\.mjs|tee \S*\.mjs")
 
 
 def kind_name(kind, other=None):
@@ -217,10 +221,17 @@ class Watch:
         elif name == "Bash" and "demo.py" in command and " play" in command:
             # The recording says itself, from the state (poll).
             self.phase = "starting the player"
-        elif name in ("Edit", "Write") and DEMO_DIR in target:
+        elif (name in ("Edit", "Write") and DEMO_DIR in target) or (
+                name == "Bash" and DEMO_DIR in command and WRITES.search(command)):
             self.set_phase("writing the demo script", "say", "Writing", "the demo script")
+        elif self.tries:
+            # After a recording, reading is looking at it (its demo.json, its
+            # frames) or at the change again for a fix or the next demo —
+            # which of them, a tool call does not say, so nothing is claimed.
+            pass
         elif name in ("Read", "Grep", "Glob") or (
-                name == "Bash" and any(g in command for g in ("git diff", "git log", "git show"))):
+                name == "Bash" and (any(g in command for g in ("git diff", "git log", "git show"))
+                                    or ("demo.py" in command and " last" in command))):
             if self.phase not in ("writing the demo script",):
                 self.set_phase("reading what changed", "say", "Reading",
                                "what changed since the last demo")
@@ -250,8 +261,11 @@ class Watch:
             self.playing = key + (kind,)
             self.phase = "recording"
             again = ", try %d" % self.tries[kind] if self.tries[kind] > 1 else ""
-            self.say("say", "Recording", "%s — %s%s" % (
-                kind_name(kind), plural(int(now["of"]), "scenario"), again))
+            of, playing = int(now["of"]), int(now.get("playing") or now["of"])
+            # play --only: the rest is taken from the last recording.
+            count = ("%d of %s again" % (playing, plural(of, "scenario")) if playing < of
+                     else plural(of, "scenario"))
+            self.say("say", "Recording", "%s — %s%s" % (kind_name(kind), count, again))
         self.draw(now if self.playing else None)
 
     def ended(self):

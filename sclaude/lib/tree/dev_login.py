@@ -170,6 +170,33 @@ def supabase(wt):
     return path, url.rstrip("/"), secret, bool(own)
 
 
+def database(wt):
+    """(the database's connection string, the feature's own?) for a tree — the
+    one its server works on, read where `supabase` reads the rest — or Refused."""
+    root = main_root(wt)
+    data = envs.guarded(root)
+    key = envs.keys(root, data)["database"]
+    own = own_db(wt)
+    if own:
+        values = envs.read_env(own)
+    else:
+        name = envs.current(root, wt, data)
+        if not name:
+            raise Refused("this tree's %s points at none of the project's environments"
+                          % envs.link_name(root, data))
+        if envs.protected(root, name, data) or not envs.runnable(root, name, data):
+            raise Refused("this tree is on %s, not an environment of this machine" % name)
+        values = envs.read_env(envs.env_file(root, name, data) or "")
+    url = values.get(key) or ""
+    if not url:
+        raise Refused("no %s in this feature's environment" % key)
+    # Its password goes into a session's transcript: only a database of
+    # this machine's, as `supabase` signs in only to one.
+    if (urlsplit(url).hostname or "") not in LOOPBACK:
+        raise Refused("this feature's database is not on this machine")
+    return url, bool(own)
+
+
 def anybody(wt):
     """Whether a tree can sign in as any user: its own local database, usable."""
     try:

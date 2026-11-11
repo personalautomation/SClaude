@@ -7,6 +7,7 @@
 // and take over.
 //
 //   node play.mjs <demo.mjs> --out DIR --base URL [--live] [--cdp URL]
+//                 [--keep-from DIR --only 2,7]
 //
 // demo.py play is what calls it: it knows the feature, its address and
 // where the results go (DEMO_DIR). The script is a module the skill writes:
@@ -35,8 +36,18 @@
 // paused, so the page is the person's meanwhile; ⏹ ends the script and
 // leaves the windows to them. The state is kept here, not in the page,
 // which a navigation would reset.
+//
+// --keep-from names an earlier recording of the same script (demo.py play
+// --only): the scenarios --only lists are played again, every other one is
+// taken from it as it was — its videos and captions copied, its record kept
+// — when it played there without a fault and is the same scenario still
+// (`sig`: its title, user, path, cards and steps' source). One that changed
+// since, or did not play there, is played again too. A retry then costs the
+// scenarios that failed, not the whole demo.
 import { createRequire } from "node:module";
-import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { execFile, execFileSync } from "node:child_process";
+import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -46,12 +57,14 @@ const opt = (name, dflt = "") => {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : dflt;
 };
-const scriptPath = args.find((a, i) => !a.startsWith("--") && !args[i - 1]?.match(/^--(out|base|cdp|feature)$/));
+const scriptPath = args.find((a, i) => !a.startsWith("--") && !args[i - 1]?.match(/^--(out|base|cdp|feature|keep-from|only)$/));
 const OUT = opt("--out");
 const BASE = opt("--base").replace(/\/$/, "");
 const LIVE = args.includes("--live");
 const FEATURE = opt("--feature");
 const CDP = opt("--cdp", "http://127.0.0.1:" + (process.env.CHROME_DEBUG_PORT || 9222));
+const KEEP_FROM = opt("--keep-from");
+const ONLY = new Set(opt("--only").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0));
 if (!scriptPath || !OUT || !BASE) {
   console.error("usage: play.mjs <demo.mjs> --out DIR --base URL [--live]");
   process.exit(2);
@@ -341,6 +354,23 @@ function cardHtml(s) {
     (s.why ? `<h3>Why this case</h3><div>${esc(s.why)}</div>` : "");
 }
 
+// The page's own script in the scenario's first moments: a page that moves
+// on by itself as it loads (a redirect, a query string put right) destroys
+// the document an evaluate ran in. Waited for and tried again, three times —
+// before, such a page failed its whole scenario before its first step.
+async function onPage(page, fn, arg) {
+  for (let i = 0; ; i++) {
+    try {
+      return await page.evaluate(fn, arg);
+    } catch (err) {
+      if (i >= 3 || page.isClosed() || !/context was destroyed|navigat/i.test(String(err.message || err)))
+        throw err;
+      await page.waitForLoadState("load").catch(() => {});
+      await sleep(300);
+    }
+  }
+}
+
 // Everything the demo draws, taken off the page.
 const wipe = (page) => page.evaluate(() => {
   const d = window.__sdemo;
@@ -383,10 +413,14 @@ async function signIn(context, s) {
   return landed;
 }
 
+// The viewport a scenario plays at: its own, else the demo's, else desktop.
+const viewportOf = (s, demo) =>
+  VIEWPORTS[s.viewport] ? s.viewport : VIEWPORTS[demo.viewport] ? demo.viewport : "desktop";
+
 async function scenario(browser, demo, s, i, contexts) {
   // A scenario may set its own viewport: the same path shown on a desktop and
   // on a phone is two scenarios, one of each.
-  const viewport = VIEWPORTS[s.viewport] ? s.viewport : VIEWPORTS[demo.viewport] ? demo.viewport : "desktop";
+  const viewport = viewportOf(s, demo);
   const record = { title: s.title, as: s.as, path: s.path || "/", shows: s.shows || "", why: s.why || "",
     look: Array.isArray(s.look) ? s.look : s.look ? [s.look] : [], steps: [], viewport };
   const size = VIEWPORTS[viewport];
@@ -440,10 +474,10 @@ async function scenario(browser, demo, s, i, contexts) {
   try {
     // A pause pressed as the page landed holds before the card covers it.
     await gate(page);
-    await page.evaluate((h) => window.__sdemo?.card(h), cardHtml(s));
+    await onPage(page, (h) => window.__sdemo?.card(h), cardHtml(s));
     await sleep(Math.min(9000, readFor((s.shows || "") + (s.why || "") + record.look.join(" "))));
     await gate(page);
-    await page.evaluate(() => window.__sdemo?.card(null));
+    await onPage(page, () => window.__sdemo?.card(null));
     await sleep(400);
     await s.steps(helpers(page, record, started));
     await gate(page);
@@ -480,6 +514,66 @@ function localTime() {
   return `${local}${off >= 0 ? "+" : "-"}${pad(off / 60)}:${pad(off % 60)}`;
 }
 
+// What makes a scenario the same one in two recordings: everything the
+// script says of it, its steps' source included. A helper of the script's
+// own outside the scenario is not in it — change one, and play all again.
+function sig(s, demo) {
+  const look = Array.isArray(s.look) ? s.look : s.look ? [s.look] : [];
+  return createHash("sha1").update(JSON.stringify([s.title, s.as, s.path || "/", viewportOf(s, demo),
+    s.shows || "", look, s.why || "", String(s.steps)])).digest("hex").slice(0, 16);
+}
+
+// The scenarios taken from the earlier recording (--keep-from), by index:
+// its record with its files copied here, or null for one to play.
+function keepPlan(demo) {
+  const plan = demo.scenarios.map(() => null);
+  if (!KEEP_FROM) return plan;
+  const past = [...ONLY].filter((n) => n > demo.scenarios.length);
+  if (past.length) {
+    console.error(`error: the script has ${demo.scenarios.length} scenario(s), no ${past.join(", ")}`);
+    process.exit(2);
+  }
+  let before;
+  try {
+    before = JSON.parse(fs.readFileSync(path.join(KEEP_FROM, "demo.json"), "utf8"));
+  } catch {
+    console.log(`again: ${KEEP_FROM} has no demo.json — every scenario plays`);
+    return plan;
+  }
+  for (const [i, s] of demo.scenarios.entries()) {
+    if (ONLY.has(i + 1)) continue;
+    const r = (before.scenarios || [])[i];
+    const files = r ? [...(r.sources || []).map((v) => v.src), r.captions].filter(Boolean) : [];
+    const ok = r && !r.error && !r.skipped && r.sig && r.sig === sig(s, demo) && files.length
+      && files.every((f) => fs.existsSync(path.join(KEEP_FROM, f)));
+    if (!ok) {
+      if (r) console.log(`scenario ${i + 1}: plays again — ${r.error || r.skipped ? "it did not play there"
+        : r.sig === sig(s, demo) ? "its video is not there" : "it changed since"}`);
+      continue;
+    }
+    for (const f of files) {
+      // A hard link where the file system allows: the same video twice costs nothing.
+      try { fs.linkSync(path.join(KEEP_FROM, f), path.join(OUT, f)); }
+      catch { fs.copyFileSync(path.join(KEEP_FROM, f), path.join(OUT, f)); }
+    }
+    plan[i] = { ...r, kept: path.basename(KEEP_FROM) };
+  }
+  // Nothing left to play is no try: it would go into the history as one.
+  if (plan.every(Boolean)) {
+    console.error("error: every scenario is the same as in " + path.basename(KEEP_FROM) +
+      " and none is listed — nothing to play again");
+    process.exit(2);
+  }
+  return plan;
+}
+
+// A scenario's video made what the page plays, and its captions.
+async function finish(r) {
+  r.sources = await squeeze(r.video);
+  r.captions = r.video.replace(/\.webm$/, ".vtt");
+  fs.writeFileSync(path.join(OUT, r.captions), vtt(r));
+}
+
 async function main() {
   const demo = (await import(pathToFileURL(path.resolve(scriptPath)).href)).default;
   if (!demo || !Array.isArray(demo.scenarios) || !demo.scenarios.length) {
@@ -493,8 +587,20 @@ async function main() {
     }
   }
   fs.mkdirSync(OUT, { recursive: true });
-  const { chromium } = playwright();
-  const browser = LIVE ? await chromium.connectOverCDP(CDP) : await chromium.launch();
+  const kept = LIVE ? [] : keepPlan(demo);
+  // Opened for the first scenario that plays: one taken whole from the
+  // earlier recording needs no browser.
+  let browser = null;
+  const open = async () => {
+    if (browser) return browser;
+    const { chromium } = playwright();
+    browser = LIVE ? await chromium.connectOverCDP(CDP) : await chromium.launch();
+    return browser;
+  };
+  // Each video is encoded as soon as its scenario ends, one at a time and
+  // at a lower priority, while the next scenario records — most of which is
+  // waiting for a reader. Before, all of them were encoded after the last.
+  let encoding = Promise.resolve();
   // kind "delta": only what changed for the user since the last full demo,
   // `change` saying what, in a sentence (demo.py keeps the history of both).
   const results = { title: demo.title || "Demo", viewport: demo.viewport || "desktop",
@@ -516,11 +622,27 @@ async function main() {
       console.log(`scenario ${i + 1}: not started, stopped by the person`);
       break;
     }
+    if (kept[i]) {
+      results.scenarios.push(kept[i]);
+      console.log(`scenario ${i + 1}: kept from ${path.basename(KEEP_FROM)}`);
+      fs.writeFileSync(path.join(OUT, "demo.json"), JSON.stringify(results, null, 1));
+      continue;
+    }
     progress({ kind: results.kind, scenario: i + 1, of: demo.scenarios.length, title: String(s.title),
-      viewport: VIEWPORTS[s.viewport] ? s.viewport : VIEWPORTS[demo.viewport] ? demo.viewport : "desktop",
-      step: 0 });
+      viewport: viewportOf(s, demo),
+      step: 0, playing: demo.scenarios.length - kept.filter(Boolean).length });
     try {
-      const r = await scenario(browser, demo, s, i, contexts);
+      const r = await scenario(await open(), demo, s, i, contexts);
+      r.sig = sig(s, demo);
+      // A failure here is this video's alone: left to reject, it would kill
+      // the player in the middle of the next scenario. A scenario with no
+      // video did not play, for publishing and for --only failed alike.
+      if (r.video) encoding = encoding.then(() => finish(r)).catch((err) => {
+        const why = "its video was not finished: " + String(err.message || err).split("\n")[0];
+        // The scenario's own failure stays first: it is what the script needs fixed.
+        r.error = r.error ? `${r.error}; ${why}` : why;
+        console.log(`scenario ${i + 1}: ${why}`);
+      });
       // A skip pressed while this scenario signed in, ended or failed was
       // meant for it — not for the next one.
       if (state === "skip") state = "playing";
@@ -549,12 +671,8 @@ async function main() {
     while (open() && Date.now() < until) await sleep(2000);
     process.exit(0);
   }
-  await browser.close();
-  for (const r of results.scenarios) if (r.video) {
-    r.sources = squeeze(r.video);
-    r.captions = r.video.replace(/\.webm$/, ".vtt");
-    fs.writeFileSync(path.join(OUT, r.captions), vtt(r));
-  }
+  if (browser) await browser.close();
+  await encoding;
   fs.writeFileSync(path.join(OUT, "demo.json"), JSON.stringify(results, null, 1));
   const page = fs.readFileSync(new URL("./player.html", import.meta.url), "utf8")
     // Functions, not strings: a "$&" in a caption would otherwise be read as
@@ -596,14 +714,19 @@ function vtt(r) {
 // AV1 was measured against it on such a recording (SVT-AV1 1.7, its
 // screen-content tools on): 1% smaller at three times the encoding time, 7%
 // at six — not worth a second file. Without ffmpeg, the WebM alone.
-function squeeze(name) {
+async function squeeze(name) {
   const src = path.join(OUT, name);
   const webm = [{ src: name, type: "video/webm" }];
   const mp4 = name.replace(/\.webm$/, ".mp4");
   try {
-    execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", src, "-c:v", "libx264", "-preset", "slow",
-      "-crf", "26", "-tune", "stillimage", "-pix_fmt", "yuv420p", "-profile:v", "high", "-g", "100",
-      "-movflags", "+faststart", "-an", path.join(OUT, mp4)], { stdio: "ignore" });
+    await new Promise((resolve, reject) => {
+      const child = execFile("ffmpeg", ["-y", "-loglevel", "error", "-i", src, "-c:v", "libx264", "-preset", "slow",
+        "-crf", "26", "-tune", "stillimage", "-pix_fmt", "yuv420p", "-profile:v", "high", "-g", "100",
+        "-movflags", "+faststart", "-an", path.join(OUT, mp4)], (err) => (err ? reject(err) : resolve()));
+      // Below the browser that records the next scenario: a frame it drops
+      // is a jerk in the video, an encoding a second slower is nothing.
+      try { os.setPriority(child.pid, 10); } catch {}
+    });
     if (!fs.statSync(path.join(OUT, mp4)).size) return webm;
   } catch {
     return webm;

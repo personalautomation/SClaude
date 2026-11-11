@@ -152,7 +152,8 @@ review_close_gate() {
       # The review in Actions has answered this head: out of its block.
       [[ "$word" != pending && "$edges" -eq 1 && "$local_due" -eq 0 ]] \
         && review_leave_run "$wt" github "the review workflow"
-      # The review in Actions could not run — Claude's limit, no minutes:
+      # The review in Actions could not run — Claude's limit, no minutes, a
+      # runner without network:
       # under `github-local` the feature's review moves here and its pass
       # runs at once; under `github` step 4 stops, saying why.
       if [[ "$word" == open:*red:* || "$word" == dirty ]] && [[ "$local_due" -eq 0 ]] \

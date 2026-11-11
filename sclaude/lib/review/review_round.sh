@@ -134,19 +134,20 @@ review_skippable() {
 }
 
 # The automatic review could not run on GitHub: the subscription the workflow
-# runs under hit Claude's limit, or the account's Actions minutes ran out and
-# the job never started. What follows is the project's `review`: under
+# runs under hit Claude's limit, the account's Actions minutes ran out and
+# the job never started, or the runner could not reach the network to set
+# the job up. What follows is the project's `review`: under
 # `github-local` the feature's review moves to this machine
 # (review_fallback_switch); under `github` step 4 stops and says why
 # (review_github_stopped) — no session can fix it, and waiting for a reset
 # nobody can see is not the person's choice.
 #
-#   review_fallback_why <wt> <pr> <repo>   → "<quota|minutes> <reset> <run>", or 1
+#   review_fallback_why <wt> <pr> <repo>   → "<quota|minutes|runner> <reset> <run>", or 1
 review_fallback_why() {
   local got why
   got="$(python3 "$LIB/review/pr_context.py" --fallback "$1" "$2" "$3" 2>/dev/null || true)"
   read -r why _ <<<"$got"
-  [[ "$why" == quota || "$why" == minutes ]] || return 1
+  [[ "$why" == quota || "$why" == minutes || "$why" == runner ]] || return 1
   echo "$got"
 }
 
@@ -187,10 +188,13 @@ review_reset_rerun() {
 
 # The cause in words, for the terminal and the topic.
 #
-#   review_fallback_words <quota|minutes>
+#   review_fallback_words <quota|minutes|runner>
 review_fallback_words() {
-  if [[ "$1" == quota ]]; then echo "the Claude usage limit of its GitHub subscription"
-  else echo "no Actions minutes left on the GitHub account"; fi
+  case "$1" in
+    quota) echo "the Claude usage limit of its GitHub subscription" ;;
+    runner) echo "GitHub's runner could not reach the network to set the job up" ;;
+    *) echo "no Actions minutes left on the GitHub account" ;;
+  esac
 }
 
 # `github-local`: move the feature's review here.
@@ -200,7 +204,7 @@ review_fallback_words() {
 # Returns 0 when it moved it — the caller runs the local pass and asks the
 # pull request again, the review's checks now out of the verdict (pr_view;
 # for Claude's limit alone the CI's checks stay in it) — and 1 when the
-# review did not fail for either reason; then everything goes on as before.
+# review did not fail for any of the three; then everything goes on as before.
 # A review that cannot run here either (the same subscription) ends as any
 # local pass that did not run: retried under [g], put to the person
 # otherwise. Everything it prints goes to stderr, as the gate's waits
@@ -223,7 +227,7 @@ review_fallback_switch() {
 }
 
 # `github`: say why the review cannot run and what the person can do.
-# Returns 1 when it did not fail for either reason.
+# Returns 1 when it did not fail for any of the three.
 #
 #   review_github_stopped <wt> <slug> <pr> <repo>
 review_github_stopped() {
@@ -254,12 +258,14 @@ review_github_stopped() {
 # — or five hours, its window, when the log did not say; none when the reset
 # it names has passed already (the rerun was refused, review_reset_rerun);
 # for the minutes, a day: a job GitHub does not
-# start costs nothing, so a day later the next feature tries GitHub again. A
+# start costs nothing, so a day later the next feature tries GitHub again; for
+# a runner without network, an hour: such outages pass, and the next feature
+# should not be held off GitHub's review for a day by one. A
 # window already longer is kept: a short limit does not end a day without
 # minutes. The feature's mark says why, and that GitHub's review ran on it
 # (`seen`), where an inherited one did not (`inherited`).
 #
-#   review_fallback_set <wt> <quota|minutes> [reset]
+#   review_fallback_set <wt> <quota|minutes|runner> [reset]
 review_fallback_set() {
   local wt="$1" why="$2" reset="${3:-0}" until now mark old
   now="$(date +%s)"
@@ -270,6 +276,8 @@ review_fallback_set() {
     if (( reset > now )); then until=$(( reset + 120 ))
     elif (( reset > 0 )); then return 0
     else until=$(( now + 5 * 3600 )); fi
+  elif [[ "$why" == runner ]]; then
+    until=$(( now + 3600 ))
   else
     until=$(( now + 24 * 3600 ))
   fi

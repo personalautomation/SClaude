@@ -301,8 +301,8 @@ breaks the other silently — grep before you edit:
   `review_fallback_set`/`review_fallback_inherit` in
   `sclaude/lib/review/review_round.sh` and read by `project_review_mode` in
   `sclaude/lib/core/project.sh` and `FALLBACK_FILE` in
-  `sclaude/lib/review/pr_context.py`; `MINUTES` and the `QUOTA_*` patterns
-  there read the job's annotations and log for why. The setting `github-local`
+  `sclaude/lib/review/pr_context.py`; `MINUTES`, `RUNNER` and the `QUOTA_*`
+  patterns there read the job's annotations and log for why. The setting `github-local`
   that allows the move is in `CHOICES` (`config_menu.py`), read by
   `project_review_setting` and `review_mode`, and drawn by the map
   (`NEEDS`, `setting` in `process_config.py`). `tests/parallel.py` runs

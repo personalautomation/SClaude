@@ -780,11 +780,11 @@ try:
                       SCLAUDE_V_ACTIONS_OFF="1")
     check("review-local-renders", rc, 0)
     check_true("review-local-told", "reviewed on this machine" in text
-               and "Nothing in this project's flow runs on GitHub Actions" in text)
+               and "GitHub Actions is out of this feature's verdict" in text)
     # Moved here for Claude's limit alone: the CI still runs, and counts.
     rc, text = render("review", SCLAUDE_V_REVIEW_LOCAL="1", SCLAUDE_V_REVIEW_MODE="local")
     check_true("review-moved-for-quota-keeps-ci", "reviewed on this machine" in text
-               and "Nothing in this project's flow runs on GitHub Actions" not in text)
+               and "GitHub Actions is out of this feature's verdict" not in text)
 
     # `sclaude checks` returning in the session's tab prints the report in
     # sclaude's: once per new mark, and not for a mark left before the launch.

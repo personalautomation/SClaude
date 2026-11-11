@@ -44,7 +44,7 @@ CHOICES = {
         ("github", "the review workflow in GitHub Actions: runner minutes and its token; "
                    "step 4 stops when it cannot run"),
         ("github-local", "the review workflow in GitHub Actions, and when it cannot run "
-                         "(Claude's limit, no Actions minutes) the feature moves to the review here"),
+                         "(Claude's limit, no Actions minutes, a runner without network) the feature moves to the review here"),
         ("local", "sclaude runs /code-review on this machine, your Claude account; "
                   "the repository's Actions workflows are switched off"),
         ("off", "no review; step 4 answers only the checks and people"),

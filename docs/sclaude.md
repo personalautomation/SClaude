@@ -1810,7 +1810,8 @@ reads a red Claude review job, `pr_context.py --fallback` (`review_fallback`)
 asks why: Claude's limit (a 429 with the reset it names, claude's own words
 for a spent limit) or an API key's credit in the job's log, or a job GitHub
 never started for the account's spending limit, said only in the check run's
-annotations. Under `review: github` the gate stops step 4 there
+annotations, or a runner that could not reach the network while the job set
+itself up (`RUNNER`: apt stopping, `E:`, on packages it could not fetch). Under `review: github` the gate stops step 4 there
 (`review_github_stopped` in `review_round.sh`) and says why; no session is
 opened, since none can fix it. Under `github-local` the feature moves to the
 local review (`review_fallback_switch`): the mark
@@ -1818,7 +1819,8 @@ local review (`review_fallback_switch`): the mark
 makes `github-local` read as `local` for that tree on both sides
 (`project_review_mode`, `review_mode`), the pull request is labelled
 `no-review`, and the pass runs at once. Moved for the minutes, every Actions
-check leaves the verdict, as under `local`; moved for Claude's limit alone,
+check leaves the verdict, as under `local` — and so for a runner without
+network, whose CI ran in the same outage; moved for Claude's limit alone,
 only what that subscription runs on Actions does — the review workflow's
 jobs, @claude's, the findings check (`without_review`) — since the CI still
 runs. A limit whose named reset has passed neither stops nor moves anything:

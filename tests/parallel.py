@@ -266,6 +266,12 @@ fake([], 'api_error_status:429 rate limited, try again')
 check("fallback-bare-429-stays", ctx.review_fallback(None, 1, "o/r"), None)
 fake([], 'api_error_status: 429 · resets 12pm (UTC)')
 check("fallback-429-with-reset", ctx.review_fallback(None, 1, "o/r")[0], "quota")
+fake([], "W: Failed to fetch InRelease  Temporary failure resolving 'azure.archive.ubuntu.com'\n"
+         "E: Unable to fetch some archives, maybe run apt-get update")
+check("fallback-runner", ctx.review_fallback(None, 1, "o/r"), ("runner", 0, "7"))
+fake([], "W: Failed to fetch InRelease  Temporary failure resolving 'x'\nCould not resolve host: example.com\n"
+         "TypeError: the code is wrong")
+check("fallback-network-words-in-a-red-job-stay", ctx.review_fallback(None, 1, "o/r"), None)
 fake([], "TypeError: the code is wrong")
 check("fallback-code-red", ctx.review_fallback(None, 1, "o/r"), None)
 ctx.gh_json, ctx.job_log = saved
@@ -387,6 +393,13 @@ os.remove(mark)
 subprocess.run(["bash", "-c", 'source "%s/review/review_round.sh"; REPO="%s"; review_fallback_set "%s" quota %d'
                 % (LIB, fb, fb, int(time.time()) - 600)], timeout=30)
 check("fallback-past-reset-no-mark", os.path.exists(mark), False)
+# A runner without network holds the machine off GitHub for an hour, not a day.
+subprocess.run(["bash", "-c", 'source "%s/review/review_round.sh"; REPO="%s"; review_fallback_set "%s" runner'
+                % (LIB, fb, fb)], timeout=30)
+with open(mark) as fh:
+    until, why = fh.read().split()
+check("fallback-runner-an-hour", (why, abs(int(until) - time.time() - 3600) < 60), ("runner", True))
+os.remove(mark)
 # A reset already passed neither moves nor stops: the job is run again; a
 # rerun GitHub refuses leaves the red to the stop or the move.
 def rerun(refused, ago=600):

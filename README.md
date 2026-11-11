@@ -286,9 +286,10 @@ no direct pushes.
   unless somebody else shipped since: that release is not ours to remove.
 - **A review that cannot run is not waited on blindly.** When the review in
   GitHub Actions stops on its Claude subscription's limit, it is run again
-  once the limit resets; when the limit holds, or the account has no Actions
-  minutes, the project chooses: stop and say so, or (`github-local`) carry on
-  with the same review on this machine.
+  once the limit resets; when the limit holds, the account has no Actions
+  minutes, or GitHub's runner cannot reach the network, the project
+  chooses: stop and say so, or (`github-local`) carry on with the same
+  review on this machine.
 
 The whole list of what closes each step is in
 [How the cycle is kept in line](docs/cycle.md).

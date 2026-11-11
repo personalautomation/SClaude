@@ -220,8 +220,9 @@ question with three answers settles the rest: check the fixes, close the step,
 or leave it.
 
 When the review in Actions cannot run — the Claude subscription it runs
-under hit its usage limit, or the GitHub account has no Actions minutes left
-and the job never started — what happens is the project's `review` setting
+under hit its usage limit, the GitHub account has no Actions minutes left
+and the job never started, or GitHub's runner could not reach the network to
+set the job up (apt stopping on packages it could not fetch) — what happens is the project's `review` setting
 (`sclaude config`). Once a Claude limit has reset, sclaude reruns the job on
 GitHub itself, at the next look, and neither stops nor moves anything. Before
 that, with `github`, step 4 stops and says why, in the terminal and the
@@ -229,11 +230,12 @@ feature's topic: come back after the reset, or change the setting. With `github-
 that feature's review moves to this machine, as with `review: local`, labels
 its pull request `no-review`, and says so. It stays local to the feature's
 end. For a while after that — until Claude's limit resets (five hours when the
-log did not say when), or a day for the minutes — every other feature
+log did not say when), a day for the minutes, an hour for a runner without
+network — every other feature
 reaching step 3 or 4 on this machine is reviewed locally from the start;
 after that the next one tries GitHub again. Moved for Claude's limit alone,
-the feature's other Actions checks still count; moved for the minutes, none
-do.
+the feature's other Actions checks still count; moved for the minutes or a
+runner without network, none do.
 
 With the review on this machine, its status line shows two boxes while a pass
 runs, ticked until they apply: `[s]` makes the pass the last that looks for

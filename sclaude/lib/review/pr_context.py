@@ -112,7 +112,10 @@ def pr_view(cwd, pr, fields):
     itself. Read the pull request's checks through this, never around it.
 
     A feature that moved here for Claude's limit alone (moved_for) still has
-    its minutes, and its CI runs: only the review's own checks leave it.
+    its minutes, and its CI runs: only the review's own checks leave it. One
+    moved for a runner without network loses them all, as for the minutes:
+    its CI ran on the same runners in the same outage (the person's choice,
+    2026-11-11).
     """
     data = gh_json(["pr", "view", str(pr), "--json", fields], cwd=cwd)
     if isinstance(data, dict) and "statusCheckRollup" in data:
@@ -157,8 +160,8 @@ def verdict_rollup(cwd, rollup):
 
 _MODES = {}
 
-# A feature whose review could not run on GitHub — Claude's limit, or the
-# Actions minutes — and moved to this machine for the rest of its life:
+# A feature whose review could not run on GitHub — Claude's limit, the
+# Actions minutes, or a runner without network — and moved to this machine for the rest of its life:
 # written by review_fallback_set in review_round.sh, read by
 # project_review_mode in project.sh and by review_mode here.
 FALLBACK_FILE = ".sclaude/local/feature/review-fallback"
@@ -166,7 +169,7 @@ _TOPS = {}
 
 
 def moved_for(cwd):
-    """Why the feature's review moved here — `quota` or `minutes`, the mark's
+    """Why the feature's review moved here — `quota`, `minutes` or `runner`, the mark's
     first field — or "" when it did not."""
     key = cwd or os.getcwd()
     if key not in _TOPS:
@@ -1268,7 +1271,10 @@ def review_state(cwd, pr, repo):
 # job's log, where the action leaves its result — `api_error_status: 429`,
 # claude's own "You've hit your … limit · resets 4am (Europe/Lisbon)", an API
 # key's "Credit balance is too low" — and, for a job that never started and
-# has no log, from the check run's annotations, where GitHub says why.
+# has no log, from the check run's annotations, where GitHub says why. A
+# third cause is the runner's: it could not reach the network while the job
+# set itself up, and apt stopped on packages it could not fetch — so the job
+# ended before any review began.
 QUOTA_429 = re.compile(r'api_error_status"?\s*[:=]\s*429')
 QUOTA_LIMIT = re.compile(r"hit your (?:session |weekly |usage )?limit")
 QUOTA_RESETS = re.compile(
@@ -1277,6 +1283,11 @@ QUOTA_RESETS = re.compile(
 QUOTA_CREDIT = re.compile(r"credit balance is too low", re.I)
 MINUTES = re.compile(r"job was not started because|spending limit needs to be increased"
                      r"|locked due to a billing issue", re.I)
+# apt's own fatal lines, `E: …`: its `W: Failed to fetch … Temporary failure
+# resolving` is a warning it carries on past, and a reviewer's tool may print
+# "Could not resolve host" in a job that went red for another reason.
+RUNNER = re.compile(r"^(?:\S+\s+)?E: (?:Failed to fetch .*Temporary failure resolving"
+                    r"|Unable to fetch some archives)", re.M)
 JOB_LINK = re.compile(r"/actions/runs/(\d+)/job/(\d+)")
 
 
@@ -1342,7 +1353,7 @@ def job_annotations(cwd, repo, job):
 
 
 def review_fallback(cwd, pr, repo):
-    """("quota", reset, run) or ("minutes", 0, run) for a Claude review job
+    """("quota", reset, run), ("minutes", 0, run) or ("runner", 0, run) for a Claude review job
     on the PR that could not review on GitHub, or None. `reset` is when
     Claude's limit resets, seconds since the epoch, 0 when unknown; `run` the
     job's workflow run, for a rerun once the limit has reset.
@@ -1374,6 +1385,8 @@ def review_fallback(cwd, pr, repo):
             # Counted from when the job stopped, not from now: a "resets 4am"
             # read at five has reset already, and is not tomorrow's.
             return "quota", quota_reset(log, parse_ts(c.get("completedAt"))), link.group(1)
+        if RUNNER.search(log):
+            return "runner", 0, link.group(1)
     return None
 
 
@@ -1846,7 +1859,7 @@ def main():
         except Exception:
             sys.stdout.write("0\n")
         return 0
-    # `--fallback <cwd> <pr> <repo>`: "<quota|minutes> <reset> <run>" for a review
+    # `--fallback <cwd> <pr> <repo>`: "<quota|minutes|runner> <reset> <run>" for a review
     # that could not run on GitHub, or nothing. See review_fallback.
     if len(sys.argv) >= 5 and sys.argv[1] == "--fallback":
         try:

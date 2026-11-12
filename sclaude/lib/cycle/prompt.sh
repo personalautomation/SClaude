@@ -101,7 +101,11 @@ render_prompt() {
   # the project asks for a look at each part (`partAccept: each`), which also
   # brings back the part's demo. <if:part-alone> is the other side: a part's
   # session that ends on its own marker. <if:part-again>: step 2 again on a
-  # part whose pull request is reviewed.
+  # part whose pull request is reviewed. <if:parts-later> while a part that
+  # is not the last is reviewed, for review.md and for step 2 again:
+  # <later-parts> names each later part's branch, <parts-tip> the last one's,
+  # which carries them all (parts_later_set).
+  local -x SCLAUDE_V_PARTS_LATER="" SCLAUDE_V_PARTS_TIP="" SCLAUDE_V_LATER_PARTS=""
   local -x SCLAUDE_V_BASE="main" SCLAUDE_V_PART="" SCLAUDE_V_PARTS="" SCLAUDE_V_PART_TITLE=""
   local -x SCLAUDE_V_UMBRELLA="" SCLAUDE_V_IN_PARTS="" SCLAUDE_V_PARTS_DONE="" SCLAUDE_V_NOT_IN_PARTS=1
   local -x SCLAUDE_V_PARTS_DROPPED="" SCLAUDE_V_PARTS_BUILT="" SCLAUDE_V_PART_BASE="" SCLAUDE_V_ASKS_ACCEPT=1
@@ -121,6 +125,12 @@ render_prompt() {
       # part's own work, not its build — <if:part-again> in code.md.
       if [[ "$step" == code ]] && parts_reviewing "$pstate"; then
         SCLAUDE_V_IN_PARTS="" SCLAUDE_V_PART_AGAIN=1
+      fi
+      if [[ "$step" == review || -n "$SCLAUDE_V_PART_AGAIN" ]]; then
+        local PARTS_TIP PARTS_LATER_WORDS
+        parts_later_set "$wt" "$pstate"
+        SCLAUDE_V_PARTS_TIP="$PARTS_TIP" SCLAUDE_V_LATER_PARTS="$PARTS_LATER_WORDS"
+        [[ -n "$PARTS_TIP" ]] && SCLAUDE_V_PARTS_LATER=1
       fi
       if parts_building "$pstate" && [[ "$(project_part_accept "$wt")" != each ]]; then
         SCLAUDE_V_ASKS_ACCEPT="" SCLAUDE_V_DEMO="" SCLAUDE_V_PART_ALONE=1

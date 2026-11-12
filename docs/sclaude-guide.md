@@ -120,7 +120,10 @@ scenarios, not from scratch — and your Accept.
 Only then are the parts reviewed, one by one, in the order they were built:
 for each, its branch takes in the part before it as its review left it and
 the feature's branch, step 3 opens its pull request into the feature's
-branch, step 4 reviews that part alone, and sclaude merges it there. After
+branch, step 4 reviews that part alone, and sclaude merges it there. The review
+still sees the later parts' code, to know what relies on the part it reads;
+a decision that changes what a later part relies on is left in the plan as a
+note for that part, whose review checks it. After
 the last part, step 3 opens the feature's pull request into main, listing the
 parts' pull requests and closing the issue, and step 4 reads the seams
 between the parts. Preview, QA, the merge and production happen once, for the

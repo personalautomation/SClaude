@@ -216,11 +216,12 @@ local_review_run() {
       scope="the seams between the parts this pull request carries, in \`git diff $base..$head\`. Each part was reviewed on its own in a pull request merged into this branch (\`git log --first-parent $base..$head\` lists them), so do not look for every bug again: look for what no single part's review could see — a contract one part promises and another relies on, the same thing built twice, an error or permission handled in one part and not another, manuals, migrations, tests or settings out of step between the parts"
     fi
   fi
-
   # Once the person said the search is over (review_enough), a head is only
   # checked: which open findings its commits fixed, nothing new looked for.
   local verify=""
   [[ -n "$(review_enough "$wt")" ]] && verify=1
+  [[ -z "$seams$verify" ]] && scope+="$(local_review_parts_scope "$wt" "$head")"
+
   command -v claude >/dev/null 2>&1 || { warn "  No claude on this machine: the local review did not run." >&2; return 1; }
   # The headings are printed past info: a line of info that is not indented
   # goes to the feature's topic, which hears of the pass by its own phase
@@ -758,6 +759,28 @@ local_review_done() {
   head="$(git -C "$1" rev-parse HEAD 2>/dev/null)" || return 1
   python3 "$LIB/review/local_review.py" cached "$(review_journal "$1")" "$head" \
     "$(state_get "$1/.sclaude/local/feature/state.json" pr 2>/dev/null || true)" 2>/dev/null
+}
+
+# What the scope of a part's review pass adds, for the pass that reads no
+# prompt of the step — the same rules as review.md's in-parts and
+# parts-later. The notes an earlier part's review left for it in the plan —
+# all written before its review began, a part's review following the last
+# one's end, so every pass reads the same, and what one found is in the next
+# one's earlier findings; and for a part that is not the last, the later
+# parts' branches —
+# named so that a look past the diff sees the feature as it is meant to be,
+# and kept off the findings, which stay this part's own. Nothing outside a
+# parts' review.
+#
+#   local_review_parts_scope <wt> <head>
+local_review_parts_scope() {
+  local wt="$1" head="$2" pstate="$1/.sclaude/local/feature/state.json" PARTS_TIP PARTS_LATER_WORDS
+  declare -F parts_reviewing >/dev/null && parts_reviewing "$pstate" || return 0
+  printf '. This pull request is part %s of a feature built in parts. The feature as it is meant to be is in .sclaude/local/feature/plan.md: its Parts, its criteria, and its Agreed during review section' "$(parts_now "$pstate")"
+  printf '%s' ", where a note that opens with \`For part <n>:\` tells part n what an earlier part's review changed — this part's code not in step with a note for it is a finding"
+  parts_later_set "$wt" "$pstate"
+  [[ -n "$PARTS_TIP" ]] || return 0
+  printf '%s' ". The later parts are already written — $PARTS_LATER_WORDS. They are stacked: $PARTS_TIP carries every one of them, so a file read there is the file as the last part to touch it leaves it, and what one part alone added is \`git diff <its previous part's branch>...<its branch>\` (three dots). The checked-out tree shows every file outside this diff as it stands before the later parts, not as the feature will have it: when you read such a file, or need to know what relies on this part's code, read it on $PARTS_TIP too (\`git show $PARTS_TIP:<path>\`, \`git diff $head $PARTS_TIP -- <path>\`) — never as code under review: the later parts were written on this part as it was before its review and may lag behind it; where they contradict this part or the plan, this part and the plan win. Every finding is about this part's diff alone: a later part's code that disagrees with this part is not a finding here"
 }
 
 # What the headless check is told once the search for new findings is over:

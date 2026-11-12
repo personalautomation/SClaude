@@ -113,6 +113,57 @@ parts_now() { state_get "$1" parts.current 2>/dev/null || true; }
 parts_umbrella() { state_get "$1" parts.umbrella 2>/dev/null || true; }
 parts_branch() { printf '%s-%s\n' "$1" "$2"; }
 
+# While a part that is not the last is reviewed: the branch of each part
+# after it, one "<n> <branch>" line each ("<n> -" when neither has it) — the
+# tree's own, else GitHub's: no
+# later part has a pull request yet, so nothing lands on its branch there,
+# and the tree is where it was built. The parts are stacked, so the last
+# part's branch carries them all, and each one's own branch says what that
+# part alone added. A review reads them for what the later parts rely on,
+# never as code to review: they were written on the part as it was built, and
+# may lag behind what the part's review decided since. Nothing for the last
+# part, or outside a parts' review.
+#
+#   parts_later <wt> <state>
+parts_later() {
+  local wt="$1" state="$2" n last k b umbrella
+  parts_reviewing "$state" || return 0
+  n="$(parts_now "$state")"; last="$(parts_last "$state")"
+  [[ "$n" =~ ^[0-9]+$ && "$last" =~ ^[0-9]+$ ]] || return 0
+  umbrella="$(parts_umbrella "$state")"
+  for (( k = n + 1; k <= last; k++ )); do
+    b="$(parts_branch "$umbrella" "$k")"
+    if git -C "$wt" rev-parse -q --verify "refs/heads/$b" >/dev/null 2>&1; then echo "$k $b"
+    elif git -C "$wt" rev-parse -q --verify "refs/remotes/origin/$b" >/dev/null 2>&1; then echo "$k origin/$b"
+    else echo "$k -"
+    fi
+  done
+}
+
+# The later parts for a prompt, into the caller's PARTS_TIP — the last part's
+# branch, which carries them all — and PARTS_LATER_WORDS, "part 2 on
+# `<branch>`, part 3 on `<branch>`", a part whose branch is not found named
+# as such, so that no part is left out of whom a note may be for — its work
+# is on the last part's branch, the one sure to be there. Both empty
+# when the last part's branch is not found: a branch said to carry every part
+# must carry them.
+#
+#   parts_later_set <wt> <state>
+parts_later_set() {
+  local k b lines
+  PARTS_TIP="" PARTS_LATER_WORDS=""
+  lines="$(parts_later "$1" "$2")"
+  [[ -n "$lines" ]] || return 0
+  read -r k b <<< "$(tail -n 1 <<< "$lines")"
+  [[ "$b" != - ]] || return 0
+  PARTS_TIP="$b"
+  while read -r k b; do
+    if [[ "$b" == - ]]; then PARTS_LATER_WORDS+="${PARTS_LATER_WORDS:+, }part $k (its own branch not found: its work is on \`$PARTS_TIP\` with the later parts')"
+    else PARTS_LATER_WORDS+="${PARTS_LATER_WORDS:+, }part $k on \`$b\`"
+    fi
+  done <<< "$lines"
+}
+
 # "part 2/3" while a part is built or reviewed, nothing otherwise.
 parts_label() {
   parts_building "$1" || parts_reviewing "$1" || return 0

@@ -47,12 +47,19 @@ breaks the other silently — grep before you edit:
   which `acceptance.py --part` filters each part's criteria by;
   `tests/plan-split.py` checks the shape the prompt shows is the one read.
   The `<if:in-parts>`/`<if:parts-built>`/`<if:parts-done>`/`<if:asks-accept>`/
-  `<if:part-alone>` keys and `<part>`, `<parts>`, `<part-base>`, `<umbrella>`,
-  `<base>` are set by `render_prompt` in `prompt.sh` for `code.md`, `pr.md`
+  `<if:part-alone>`/`<if:part-again>`/`<if:parts-later>` keys and `<part>`, `<parts>`,
+  `<part-base>`, `<umbrella>`, `<base>`, `<later-parts>`, `<parts-tip>` are set by `render_prompt` in `prompt.sh` for `code.md`, `pr.md`
   and `review.md`, by the phase `parts_building`/`parts_whole`/
   `parts_reviewing` in `parts.sh` and by `partAccept` (`project_part_accept`
   in `project.sh`, `CHOICES` in `config_menu.py`); `tests/parts.py` renders
-  them. `parts built`, `parts accepted`, `parts merged` and `parts stop` rows
+  them. A part reviewed before the last sees the later parts' branches
+  (`parts_later_set` in `parts.sh`) in `review.md`, in `code.md` for step 2
+  again and in the scope `local_review.sh` gives its review pass, and the
+  notes that open with `For part <n>:` in the plan's `## Agreed during
+  review` are what one part's review leaves another: `review.md` and
+  `code.md` write them, and read them with the pass's scope
+  (`local_review_parts_scope`);
+  `tests/parts.py` checks that the writer's phrase is the reader's. `parts built`, `parts accepted`, `parts merged` and `parts stop` rows
   are read by `_part_of` in `process_history.py`; `tests/process.py` plays them.
   A part's branch that does not take the part before it or the common
   branch in without conflicts goes to the sync session (`parts_merge_in` →

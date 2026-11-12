@@ -346,6 +346,47 @@ esac
           bool(git("ls-remote", "--heads", "origin", "feat/t", cwd=wt)), True)
     out, rc = run_bash('step_label pr "%s"; parts_base "%s"' % (wt, spath), wt, bin_dir)
     check("review-label-and-base", out.split()[-1], "feat/t")
+    later = 'parts_later_set "%s" "%s"; echo "$PARTS_TIP"; echo "$PARTS_LATER_WORDS"'
+    out, rc = run_bash('parts_later "%s" "%s"; ' % (wt, spath) + later % (wt, spath), wt, bin_dir)
+    check("a-parts-review-names-the-later-parts", out.strip().splitlines(),
+          ["2 feat/t-2", "feat/t-2", "part 2 on `feat/t-2`"])
+    # Three parts: the one in between is named too, not only the last.
+    with open(spath) as fh:
+        three = json.load(fh)
+    three["parts"]["total"] = 3
+    spath3 = os.path.join(tmp, "state-three.json")
+    with open(spath3, "w") as fh:
+        json.dump(three, fh)
+    out, rc = run_bash(later % (wt, spath3), wt, bin_dir)
+    check("no-last-part-branch-no-later-parts", out.strip(), "")
+    git("branch", "-q", "feat/t-3", "feat/t-2", cwd=wt)
+    out, rc = run_bash(later % (wt, spath3), wt, bin_dir)
+    git("branch", "-q", "-D", "feat/t-3", cwd=wt)
+    check("every-later-part-is-named", out.strip().splitlines(),
+          ["feat/t-3", "part 2 on `feat/t-2`, part 3 on `feat/t-3`"])
+    # What the review pass is told: the notes on its pass over the whole part,
+    # the later parts on every pass, a part with no branch named as such.
+    shutil.copy(spath, spath + ".two")
+    shutil.copy(spath3, spath)
+    git("branch", "-q", "-m", "feat/t-2", "feat/t-2-away", cwd=wt)
+    git("branch", "-q", "feat/t-3", "feat/t-2-away", cwd=wt)
+    remote2 = git("rev-parse", "refs/remotes/origin/feat/t-2", cwd=wt)
+    try:
+        scope = 'source "%s/review/local_review.sh"; local_review_parts_scope "%s" H' % (LIB, wt)
+        first, rc = run_bash(scope, wt, bin_dir)
+        git("update-ref", "-d", "refs/remotes/origin/feat/t-2", cwd=wt)
+        lost, rc = run_bash(scope, wt, bin_dir)
+    finally:
+        git("update-ref", "refs/remotes/origin/feat/t-2", remote2, cwd=wt)
+        git("branch", "-q", "-D", "feat/t-3", cwd=wt)
+        git("branch", "-q", "-m", "feat/t-2-away", "feat/t-2", cwd=wt)
+        shutil.copy(spath + ".two", spath)
+    check("pass-told-it-is-part-1", first.startswith(". This pull request is part 1 of"), True)
+    check("pass-told-its-notes", "`For part <n>:` tells part n" in first, True)
+    check("a-part-from-github-when-the-tree-lacks-it", "part 2 on `origin/feat/t-2`, part 3 on `feat/t-3`" in first, True)
+    check("pass-told-every-later-part", ("part 2 (its own branch not found: its work is on `feat/t-3` with the later "
+                                         "parts'), part 3 on `feat/t-3`" in lost, "git show feat/t-3:<path>" in lost,
+                                         "...<its branch>`" in lost), (True, True, True))
 
     # The part's pull request; its review deletes the helper.
     git("rm", "-q", "helper.txt", cwd=wt)
@@ -804,6 +845,23 @@ check("feature-pr-lists-the-parts", "Built in parts" in pr, True)
 review = render("review", IN_PART)
 check("part-review-diffs-its-base", "git diff origin/feat/t...HEAD" in review, True)
 check("part-review-knows-its-part", "part 2 of 3" in review, True)
+check("part-review-reads-notes-for-it", "opens with `For part 2:`" in review, True)
+check("last-part-review-has-no-later-parts", ("later parts are already written" in review, "<parts-tip>" in review),
+      (False, False))
+LATER = dict(IN_PART, SCLAUDE_V_PART="1", SCLAUDE_V_PARTS_LATER="1", SCLAUDE_V_PARTS_TIP="feat/t-3",
+             SCLAUDE_V_LATER_PARTS="part 2 on `feat/t-2`, part 3 on `feat/t-3`")
+review = render("review", LATER)
+# The note one part's review writes is the one the next part's review reads.
+writer = "a note to the plan's `## Agreed during review` that opens with `For part <n>:`"
+check("note-written-as-it-is-read", (writer in review, "that opens with `For part 1:` was left" in review), (True, True))
+check("part-review-diffs-a-part-by-three-dots", "`git diff <its previous part's branch>...<its branch>`" in review, True)
+again = render("code", dict(LATER, SCLAUDE_V_IN_PARTS="", SCLAUDE_V_PART_ALONE="", SCLAUDE_V_ASKS_ACCEPT="1",
+                            SCLAUDE_V_PART_AGAIN="1"))
+check("step-2-again-sees-the-later-parts", ("git show feat/t-3:<path>" in again, writer in again,
+                                           "opens with `For part 1:` was left" in again), (True, True, True))
+check("part-review-names-every-later-part", "part 2 on `feat/t-2`, part 3 on `feat/t-3`" in review, True)
+check("part-review-sees-the-to-be", ("git show feat/t-3:<path>" in review, "never change a later part" in review,
+                                     "`For part <n>:`" in review), (True, True, True))
 review = render("review", DONE)
 check("feature-review-reads-the-seams", "the seams between the parts" in review, True)
 plan = render("plan", dict(DONE, SCLAUDE_V_IN_PARTS=""))
@@ -822,6 +880,7 @@ with open(os.path.join(LIB, "review", "local_review.sh")) as fh:
     lr_src = fh.read()
 check("local-review-base-is-the-prs", 'merge-base "origin/$into"' in lr_src, True)
 check("local-review-delta-skips-merges", "--first-parent --no-merges" in lr_src, True)
+check("local-review-adds-parts-only-to-a-search", '[[ -z "$seams$verify" ]] && scope+="$(local_review_parts_scope' in lr_src, True)
 
 for name, want, got in failures:
     print("FAIL %s: want %r, got %r" % (name, want, got))

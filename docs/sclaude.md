@@ -1356,6 +1356,26 @@ is the build order and no other: a part's diff is its own only once the parts
 before it are in the common branch, and a fix in part 1 changes what the rest
 stand on.
 
+**What a part's review sees past its diff** (`parts_later`, `parts_later_set`):
+the tree is on the part's branch, where every file outside the diff stands as
+it was before the later parts. While a part that is not the last is reviewed,
+the fix session (`<if:parts-later>` in `review.md`, and in `code.md` for step
+2 again) and the local pass (its scope in `local_review.sh`) are told each
+later part's branch — the tree's own, which is where the parts were built and
+what no pull request has touched yet, else origin's — and that the last one
+carries them all: a file read there is the file as the feature will have it.
+They are drafts written on the part before its review, so the part and the
+plan win where they disagree, and findings stay on the part's diff. A
+decision that changes what a later part relies on goes into the plan's
+`## Agreed during review` as a note opening with `For part <n>:`; that
+part's review checks its code against the notes for it — the fix session,
+step 2 again and every pass that searches (`local_review_parts_scope`): a
+part's review begins after the last one's ends, so its notes are all there
+by its first pass, and what one pass found is in the next one's earlier
+findings. The later
+parts' branches are left out without the last part's branch and for the last
+part; none of it on the seams or on a pass that only checks fixes.
+
 **Closing a part's review** (`parts_advance`, from `after_step`): the pull
 request is marked ready and squashed into the common branch (the
 repository's own way where it allows no squash; a way GitHub refuses — a

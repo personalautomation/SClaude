@@ -398,6 +398,10 @@ parts_join() {
       blocks_clear "$wt"
       state_set "$state" blocks.base "$(git -C "$wt" rev-parse "$theirs")"
     fi
+    # The state names the branch the tree is on before the sync reads it
+    # (parts_on): the session is told to merge into and push `branch`, and
+    # the umbrella left there would send it to the wrong one.
+    state_set "$state" branch "$tip"
     parts_merge_in "$wt" "$slug" "$tip" "$umbrella" "$theirs" || return 1
   fi
   if [[ "$here" == "$tip" ]]; then

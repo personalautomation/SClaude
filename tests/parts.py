@@ -356,6 +356,7 @@ esac
                            "1": {"branch": "lg-1", "pr": 101, "merged": "2026-11-12T10:00:00+00:00"},
                            "2": {"branch": "lg-2"}}})
     sync_stub = ('sync_with_main() { echo "SYNC_FROM=$SYNC_FROM"; '
+                 'echo "SYNC_INTO=$(state_get "$1/.sclaude/local/feature/state.json" branch)"; '
                  'git -C "$1" merge -q -X theirs --no-edit "$(sync_source)" >/dev/null 2>&1; return 3; }\n')
     # Its pull request not merged yet: its review's fixes would be left out.
     st = read_state(); merged_at = st["parts"]["1"].pop("merged"); write_state(st)
@@ -373,6 +374,9 @@ esac
     out, rc = run_bash('parts_join "%s" t' % wt, wt, bin_dir, sync_stub)
     st = read_state()
     check("old-way-join-ok", (rc, "SYNC_FROM=lg" in out, "RUN_STEP pr" in out), (0, True, True))
+    # The sync session is told to merge into and push the branch the tree
+    # is on — the last part's — not the feature's branch it is merging in.
+    check("old-way-sync-merges-into-the-last-part", "SYNC_INTO=lg-2" in out, True)
     check("old-way-joined-carries-both",
           [subprocess.run(["git", "merge-base", "--is-ancestor", c, "lg"], cwd=wt).returncode for c in (reviewed, lg2)],
           [0, 0])
@@ -554,6 +558,16 @@ check("dropped-parts-are-struck-and-filed",
       "parts 2-3" in dropped and "~~AC7. …~~" in dropped and "issues/41/sub_issues" in dropped, True)
 code = render("code", DONE)
 check("after-the-parts-a-plain-step-2", ("Accept work" in code, "built in parts" in code), (True, False))
+SYNC = dict(BASE_ENV, SCLAUDE_V_BRANCH="feat/t-3", SCLAUDE_V_FROM="refs/remotes/origin/feat/t",
+            SCLAUDE_V_FROM_PARTS="1", SCLAUDE_V_FROM_MAIN="", SCLAUDE_V_REVIEWED="", SCLAUDE_V_UNREVIEWED="",
+            SCLAUDE_V_CONFLICTS="a.txt", SCLAUDE_V_UNFINISHED="", SCLAUDE_V_DB_API="", SCLAUDE_V_DB_CLI="npx --yes supabase")
+sync = render("sync", SYNC)
+check("parts-sync-is-the-join", ("one pull request into main" in sync, "each through a pull request" in sync,
+                                 "`feat/t-3`, the branch this tree is on" in sync), (True, False, True))
+check("parts-sync-no-database-none-said", "migration up" in sync, False)
+sync = render("sync", dict(SYNC, SCLAUDE_V_DB_API="http://127.0.0.1:55001"))
+check("parts-sync-names-the-features-database",
+      ("`npx --yes supabase migration up`" in sync, "Don't pass `--workdir`" in sync), (True, True))
 pr = render("pr", DONE)
 check("feature-pr-closes-the-issue", "`Closes #41`" in pr, True)
 check("feature-pr-lists-the-parts", ("Built in parts" in pr, "carries every part" in pr), (True, True))

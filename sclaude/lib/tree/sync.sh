@@ -36,13 +36,13 @@ SYNC_MODEL="sonnet"
 SYNC_EFFORT="medium"
 
 # The branch the tree is on; 1, and nothing printed, when HEAD is detached.
-# What the sync merges in: main, or — for a part of a feature built in parts
-# before its pull request (parts_merge_in in parts.sh) — the part before it
-# or the feature's common branch, set as locals around the call: bash hands
-# them to every function the caller calls. SYNC_FROM names it; SYNC_REF,
-# when set, is the revision itself (a local branch, which origin may have
-# deleted once its pull request merged), and is not fetched. The sync
-# session's path reads it through sync_source.
+# What the sync merges in: main, or — when the accepted parts of a feature
+# become one branch (parts_join → parts_merge_in in parts.sh) — the
+# feature's common branch, merged into the last part, set as locals around
+# the call: bash hands them to every function the caller calls. SYNC_FROM
+# names it; SYNC_REF, when set, is the revision itself (a local branch,
+# which origin may have deleted once its pull request merged), and is not
+# fetched. The sync session's path reads it through sync_source.
 SYNC_FROM="${SYNC_FROM:-main}"
 SYNC_REF="${SYNC_REF:-}"
 

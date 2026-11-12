@@ -75,6 +75,7 @@ OWN_MARKERS = (
     "Then present the plan again.",
     "Then carry on with the step's own work.",
     "Write it more plainly, as separate calls, and carry on.",
+    "Do that instead, and carry on with the step's work.",
 )
 # The write guard's refusals are not among them: it writes nothing to the
 # log itself, so a refusal of its own, one getting in the way of real work

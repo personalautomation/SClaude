@@ -748,6 +748,24 @@ UNJUDGED = "a substitution in the command is left open, so it cannot be judged"
 UNNESTED = "a command nested this deep cannot be judged"
 UNPARSED_TAIL = "  Write it more plainly, as separate calls, and carry on."
 
+# A refusal that names its own way round — drop a flag, run another command
+# instead — leaves the person nothing to decide either. Ended with TAIL it sent
+# the session two ways at once: "run this instead" and "stop, the next move is
+# the human's"; one that obeyed the second would wait on a person for a
+# command it had been handed. collect-denials.py knows it as the hook's own
+# (OWN_MARKERS).
+REDIRECT_TAIL = "  Do that instead, and carry on with the step's work."
+REDIRECTS = (WORKDIR_REASON, OWN_RESET_REASON)
+
+
+def tail_for(reason):
+    """The ending of a refusal by refuses(): None for TAIL."""
+    if reason in (UNPARSED, UNJUDGED, UNNESTED):
+        return UNPARSED_TAIL
+    if reason in REDIRECTS:
+        return REDIRECT_TAIL
+    return None
+
 
 def segments(command, raw=False):
     """The command split on | && ; into separate calls, each without wrappers.
@@ -1465,7 +1483,7 @@ if payload.get("tool_name") == "Bash":
     if not reason and core_send_refused(command):
         deny(CORE_SEND_NO, step, command, CORE_OPEN_TAIL)
     if reason:
-        deny(reason, step, command, UNPARSED_TAIL if reason in (UNPARSED, UNJUDGED, UNNESTED) else None)
+        deny(reason, step, command, tail_for(reason))
     question = shared_schema_asks(command)
     if question:
         # Asked of the person at the terminal rather than refused: not our

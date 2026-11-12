@@ -1309,6 +1309,7 @@ def main():
                 const("_failsafe.py", "TAIL"),
                 const("forbidden-commands.py", "CORE_OPEN_TAIL"),
                 const("forbidden-commands.py", "UNPARSED_TAIL"),
+                const("forbidden-commands.py", "REDIRECT_TAIL"),
                 const("no-code-in-planning.py", "REASON"),
                 const("plan-on-disk.py", "TAIL"),
                 const("write-guard.py", "REASON"),
@@ -1325,6 +1326,26 @@ def main():
                           env=dict(os.environ, CLAUDE_PROJECT_DIR=PRODUCT)).stdout
     if const("forbidden-commands.py", "UNPARSED_TAIL") not in said:
         failures.append(("review", "unparsable line", "UNPARSED_TAIL", said.strip()[:120]))
+
+    # A refusal that names its own way round sends the session on to it, not
+    # to the person: ended with "stop, the next move is theirs" it would have
+    # a session wait on a person for a command it had just been handed.
+    own_stack = "/tmp/feature-x/.sclaude/local/feature/supabase"
+    for command in ("supabase db reset", "supabase db reset --workdir /elsewhere"):
+        said = subprocess.run([sys.executable, os.path.join(HOOKS, "forbidden-commands.py"),
+                               "--step", "review", "--root", PRODUCT],
+                              input=json.dumps({"tool_name": "Bash",
+                                                "tool_input": {"command": command}}),
+                              capture_output=True, text=True, timeout=20,
+                              env=dict(os.environ, CLAUDE_PROJECT_DIR=PRODUCT,
+                                       SUPABASE_WORKDIR=own_stack)).stdout
+        try:
+            reason = json.loads(said)["hookSpecificOutput"]["permissionDecisionReason"]
+        except (ValueError, KeyError):
+            reason = said
+        if not reason.endswith(const("forbidden-commands.py", "REDIRECT_TAIL")) \
+                or "next move is theirs" in reason:
+            failures.append(("review", command, "REDIRECT_TAIL", reason.strip()[-120:]))
 
     # A hook that breaks refuses rather than letting the call through: every
     # module it loads, broken in turn, and an empty core.json, which used to

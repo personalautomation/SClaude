@@ -6,7 +6,6 @@
 |---|---|---|
 | [![](https://raw.githubusercontent.com/personalautomation/SClaude/main/docs/media/overview.jpg)](https://github.com/user-attachments/assets/0f322031-5667-4bc7-a581-47819db40531) | **What it is and why** · 7 min | the problem, why limits live in code, the four things you get, feedback loops, two pieces of advice |
 | [![](https://raw.githubusercontent.com/personalautomation/SClaude/main/docs/media/cycle-played.jpg)](https://github.com/user-attachments/assets/74c2ccd0-c63f-4860-b814-7b8d606e01f9) | **A real feature, start to finish** · 7 min | a real feature through every step, the friction log, the retrospective, the metrics, how the idea came about ([v1.0](https://github.com/personalautomation/SClaude/releases/tag/v1.0)) |
-| [![](https://raw.githubusercontent.com/personalautomation/SClaude/main/docs/media/parts.jpg)](https://github.com/user-attachments/assets/05147af1-635f-471e-849c-bf1b25c7391f) | **Big features, built in parts** · 3 min | why big features hurt and how v1.1 builds them ([v1.1](https://github.com/personalautomation/SClaude/releases/tag/v1.1)) |
 
 ## Decks
 

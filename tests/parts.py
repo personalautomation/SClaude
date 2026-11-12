@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 #
 # A feature built in parts (parts.sh, plan_parts.py): one issue, one plan,
-# one QA; the parts built one after another, the whole accepted, then a pull
-# request for each part into the feature's common branch, reviewed in turn.
+# one pull request, one QA; the parts built one after another, the whole
+# accepted, then the parts made one branch.
 #
 # Guarded here, with git real (a bare origin in a temporary directory) and gh
 # faked:
@@ -12,24 +12,21 @@
 #     not split; each part's prompt gets its own criteria and the feature's;
 #   * parts_capture puts the parts into the state, and parts_enter puts the
 #     tree on the part — made off the part before it while building, the last
-#     part for the whole, and for a review the part's branch with the common
-#     branch merged in (pushed for the pull request's base); work done on the
-#     common branch before the split becomes part 1, the common branch put
-#     back where it left main; never over uncommitted work, and a merge that
-#     conflicts is undone;
+#     part for the whole; work done on the common branch before the split
+#     becomes part 1, the common branch put back where it left main; never
+#     over uncommitted work;
 #   * parts_built goes on to the next part, and after the last to the whole;
-#   * parts_check finds what a hand on GitHub could have done: a base edited,
-#     a part merged or marked ready before its review closed, a branch
-#     rewritten or moved on there;
-#   * parts_advance merges the part's pull request, puts the tree on the common
-#     branch with it, starts the next part's pull request and review afresh —
-#     keeping the list of conversations and the whole's step 2 — and after the
-#     last part goes on to the feature's pull request;
+#   * parts_join moves the feature's branch to the last part, keeps each
+#     part's range, and — for a feature whose first parts were merged the old
+#     way — merges that branch in (a conflict to the sync session) and reads
+#     the review from where it stood; parts_merge_in undoes a merge that
+#     conflicts and hands it to the sync session;
 #   * `sclaude parts <name> stop` while building checks the whole on the last
 #     part kept, and is refused once the whole is accepted;
 #   * the local review's journal and its waiting findings are kept per pull
-#     request, and its base is the common branch while a part is reviewed;
-#   * the menu says which part, and the prompts say what a part is.
+#     request;
+#   * the menu says which part, and the prompts say what a part and a review
+#     block are.
 #
 # Run it with: python3 tests/parts.py
 import json
@@ -68,7 +65,7 @@ def run_bash(script, cwd, bin_dir, extra=""):
     body = "set -uo pipefail\n"
     body += 'BOLD=""; OFF=""; GREEN=""; REPO=%s; LIB=%s; SELF=sclaude\n' % (cwd, LIB)
     for name in ("core/io", "core/ui", "core/steps", "core/state", "tree/branches",
-                 "tree/sync", "tree/parts", "core/cycle_steps"):
+                 "tree/sync", "tree/parts", "core/cycle_steps", "review/review_blocks"):
         body += 'source "%s/%s.sh"\n' % (LIB, name)
     body += ('info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }\n'
              'ask_feed() { :; }; issue_sync() { echo SYNC; }\n'
@@ -269,8 +266,6 @@ esac
     check("part-branch-recorded", st["parts"]["1"].get("branch"), "feat/t-1")
     out, rc = run_bash('step_label code "%s"' % wt, wt, bin_dir)
     check("label-says-the-part", out.strip(), "2/7 development · part 1/2")
-    out, rc = run_bash('parts_check "%s"' % wt, wt, bin_dir)
-    check("nothing-to-check-while-building", (rc, out.strip()), (0, ""))
 
     # Part 1 also adds a helper, which its review will delete.
     with open(os.path.join(wt, "helper.txt"), "w") as fh:
@@ -313,241 +308,83 @@ esac
           ("whole", "feat/t-2"))
     check("the-whole-has-a-plain-label", out.strip().splitlines()[-1], "2/7 development")
 
-    # Accepted: part 1's pull request, into the common branch.
-    # The product's pre-push hook refuses every push of the common branch
-    # here: still where it left main, it carries nothing for the hook to
-    # judge and goes up past it. The parts' branches meet the hook, all in
-    # one push.
-    hooks = os.path.join(tmp, "refusing-hooks")
-    hook_log = os.path.join(tmp, "pre-push.log")
-    os.makedirs(hooks, exist_ok=True)
-    with open(os.path.join(hooks, "pre-push"), "w") as fh:
-        fh.write('#!/bin/sh\nrefs="$(cat)"\necho "$refs" | awk \'{ printf "%%s ", $3 } END { print "" }\' >> "%s"\n'
-                 'echo "$refs" | grep -q " refs/heads/feat/t [0-9a-f]*$" || exit 0\n'
-                 'echo refused by the hook >&2\nexit 1\n' % hook_log)
-    os.chmod(os.path.join(hooks, "pre-push"), 0o755)
-    git("config", "core.hooksPath", hooks, cwd=wt)
-    st = read_state(); st["parts"]["accepted"] = True; st["step"] = "pr"; write_state(st)
-    out, rc = run_bash('parts_enter "%s"' % wt, wt, bin_dir)
-    git("config", "--unset", "core.hooksPath", cwd=wt)
-    check("review-starts-at-part-1", (rc, git("branch", "--show-current", cwd=wt)), (0, "feat/t-1"))
-    check("umbrella-push-not-refused-by-the-hook", "refused by the hook" in out, False)
-    check("the-parts-meet-the-hook-in-one-push", open(hook_log).read().split("\n")[0].split(),
-          ["refs/heads/feat/t-1", "refs/heads/feat/t-2"])
-    check("the-parts-on-github", [bool(git("ls-remote", "--heads", "origin", b, cwd=wt)) for b in ("feat/t-1", "feat/t-2")],
-          [True, True])
-    # A common branch that carries a commit main lacks still meets the hook.
-    git("branch", "-q", "carrying", "feat/t-1", cwd=wt)
-    out, rc = run_bash('parts_in_main "%s" refs/heads/feat/t && echo IN; parts_in_main "%s" refs/heads/carrying || echo OUT'
-                       % (wt, wt), wt, bin_dir)
-    git("branch", "-q", "-D", "carrying", cwd=wt)
-    check("only-a-branch-all-in-main-skips-the-hook", out.split(), ["IN", "OUT"])
-    check("umbrella-on-github-for-the-base",
-          bool(git("ls-remote", "--heads", "origin", "feat/t", cwd=wt)), True)
-    out, rc = run_bash('step_label pr "%s"; parts_base "%s"' % (wt, spath), wt, bin_dir)
-    check("review-label-and-base", out.split()[-1], "feat/t")
-    later = 'parts_later_set "%s" "%s"; echo "$PARTS_TIP"; echo "$PARTS_LATER_WORDS"'
-    out, rc = run_bash('parts_later "%s" "%s"; ' % (wt, spath) + later % (wt, spath), wt, bin_dir)
-    check("a-parts-review-names-the-later-parts", out.strip().splitlines(),
-          ["2 feat/t-2", "feat/t-2", "part 2 on `feat/t-2`"])
-    # Three parts: the one in between is named too, not only the last.
-    with open(spath) as fh:
-        three = json.load(fh)
-    three["parts"]["total"] = 3
-    spath3 = os.path.join(tmp, "state-three.json")
-    with open(spath3, "w") as fh:
-        json.dump(three, fh)
-    out, rc = run_bash(later % (wt, spath3), wt, bin_dir)
-    check("no-last-part-branch-no-later-parts", out.strip(), "")
-    git("branch", "-q", "feat/t-3", "feat/t-2", cwd=wt)
-    out, rc = run_bash(later % (wt, spath3), wt, bin_dir)
-    git("branch", "-q", "-D", "feat/t-3", cwd=wt)
-    check("every-later-part-is-named", out.strip().splitlines(),
-          ["feat/t-3", "part 2 on `feat/t-2`, part 3 on `feat/t-3`"])
-    # What the review pass is told: the notes on its pass over the whole part,
-    # the later parts on every pass, a part with no branch named as such.
-    shutil.copy(spath, spath + ".two")
-    shutil.copy(spath3, spath)
-    git("branch", "-q", "-m", "feat/t-2", "feat/t-2-away", cwd=wt)
-    git("branch", "-q", "feat/t-3", "feat/t-2-away", cwd=wt)
-    remote2 = git("rev-parse", "refs/remotes/origin/feat/t-2", cwd=wt)
-    try:
-        scope = 'source "%s/review/local_review.sh"; local_review_parts_scope "%s" H' % (LIB, wt)
-        first, rc = run_bash(scope, wt, bin_dir)
-        git("update-ref", "-d", "refs/remotes/origin/feat/t-2", cwd=wt)
-        lost, rc = run_bash(scope, wt, bin_dir)
-    finally:
-        git("update-ref", "refs/remotes/origin/feat/t-2", remote2, cwd=wt)
-        git("branch", "-q", "-D", "feat/t-3", cwd=wt)
-        git("branch", "-q", "-m", "feat/t-2-away", "feat/t-2", cwd=wt)
-        shutil.copy(spath + ".two", spath)
-    check("pass-told-it-is-part-1", first.startswith(". This pull request is part 1 of"), True)
-    check("pass-told-its-notes", "`For part <n>:` tells part n" in first, True)
-    check("a-part-from-github-when-the-tree-lacks-it", "part 2 on `origin/feat/t-2`, part 3 on `feat/t-3`" in first, True)
-    check("pass-told-every-later-part", ("part 2 (its own branch not found: its work is on `feat/t-3` with the later "
-                                         "parts'), part 3 on `feat/t-3`" in lost, "git show feat/t-3:<path>" in lost,
-                                         "...<its branch>`" in lost), (True, True, True))
-
-    # The part's pull request; its review deletes the helper.
-    git("rm", "-q", "helper.txt", cwd=wt)
-    with open(os.path.join(wt, "a.txt"), "w") as fh:
-        fh.write("part one, reviewed\n")
-    git("add", "a.txt", cwd=wt)
-    git("commit", "-q", "-m", "review: no helper, a.txt reworded", cwd=wt)
-    git("push", "-q", "-u", "origin", "feat/t-1", cwd=wt)
-    head1 = git("rev-parse", "HEAD", cwd=wt)
-    prs = {"101": {"baseRefName": "feat/t", "headRefName": "feat/t-1", "state": "OPEN",
-                   "isDraft": True, "headRefOid": head1}}
-    with open(prs_file, "w") as fh:
-        json.dump(prs, fh)
-    st = read_state(); st["parts"]["1"]["pr"] = 101; st["pr"] = 101; write_state(st)
-    out, rc = run_bash('parts_check "%s"' % wt, wt, bin_dir)
-    check("all-holds", (rc, out.strip()), (0, ""))
-    out, rc = run_bash('parts_head "%s" 101 feat/t-1; parts_head "%s" 999 feat/t-1' % (wt, wt), wt, bin_dir)
-    check("the-merged-head-is-githubs-and-the-branch-without-it", out.split(), [head1, "feat/t-1"])
+    # Accepted: the parts become one branch, the feature's, moved to the
+    # last part (a fast-forward: the parts are stacked).
+    tip1, tip2 = git("rev-parse", "feat/t-1", cwd=wt), git("rev-parse", "feat/t-2", cwd=wt)
+    st = read_state(); st["parts"]["accepted"] = True; write_state(st)
+    out, rc = run_bash('parts_joining "%s" && echo JOINING; parts_join "%s" t' % (spath, wt), wt, bin_dir)
     st = read_state()
-    check("a-merge-by-sclaude-checked-once", st["parts"]["1"].get("before"), None)
-
-    def problems(change, moment=""):
-        bad = json.loads(json.dumps(prs))
-        bad["101"].update(change)
-        with open(prs_file, "w") as fh:
-            json.dump(bad, fh)
-        got, code = run_bash('parts_check "%s" %s' % (wt, moment), wt, bin_dir)
-        with open(prs_file, "w") as fh:
-            json.dump(prs, fh)
-        return code, got
-
-    code, got = problems({"baseRefName": "main"})
-    check("base-edited", (code, "gh pr edit 101 --base feat/t" in got), (1, True))
-    code, got = problems({"state": "MERGED"})
-    check("merged-early", (code, "merged by hand" in got), (1, True))
-    code, got = problems({"isDraft": False})
-    check("ready-early", (code, "marked ready by hand" in got), (1, True))
-    code, got = problems({"isDraft": False}, "merge")
-    check("ready-at-the-merge-is-fine", code, 0)
-    code, got = problems({"headRefOid": base})
-    check("behind-github-is-fine", code, 0)
-    # A rewritten branch: GitHub's head is a commit the tree does not descend from.
-    git("switch", "-q", "-c", "elsewhere", base, cwd=wt)
-    git("commit", "-q", "--allow-empty", "-m", "rewritten", cwd=wt)
-    other = git("rev-parse", "HEAD", cwd=wt)
-    git("switch", "-q", "feat/t-1", cwd=wt)
-    code, got = problems({"headRefOid": other})
-    check("rewritten-on-github", (code, "rewritten there" in got), (1, True))
-
-    # parts_advance: merged into the common branch, the next part afresh.
-    st = read_state()
-    st["steps"]["code"] = {"session": "cw", "done": True, "runs": [{"session": "c1"}, {"session": "cw"}]}
-    st["steps"]["pr"] = {"session": "p1", "done": True, "runs": [{"session": "p1"}]}
-    st["steps"]["review"] = {"session": "r1", "done": True, "rounds": 3, "enough": True,
-                             "runs": [{"session": "r1"}]}
-    st["step"] = "review"
-    write_state(st)
-    # The same refusing hook: the common branch, with main merged in by the
-    # sync (an empty commit stands for it), goes up past it.
-    git("config", "core.hooksPath", hooks, cwd=wt)
-    out, rc = run_bash('parts_advance "%s" t' % wt, wt, bin_dir,
-                       'sync_branch() { echo SYNC_BRANCH; git -C "$1" commit -q --allow-empty --no-verify -m "main in"; }\n')
-    git("config", "--unset", "core.hooksPath", cwd=wt)
-    check("advance-ok", rc, 0)
-    check("synced-umbrella-push-not-refused-by-the-hook",
-          ("refused by the hook" in out, git("rev-parse", "feat/t", cwd=wt) == git("ls-remote", "origin", "refs/heads/feat/t", cwd=wt).split()[0]),
-          (False, True))
-    st = read_state()
-    check("part-1-merged-recorded", bool(st["parts"]["1"].get("merged")), True)
-    check("on-to-part-2", st["parts"].get("current"), 2)
-    check("next-part-starts-at-its-pr", (st.get("step"), "RUN_STEP pr" in out), ("pr", True))
-    check("pr-cleared", st.get("pr"), None)
-    check("review-afresh", st["steps"]["review"], {"runs": [{"session": "r1"}]})
-    check("the-wholes-step-2-stays", st["steps"]["code"].get("session"), "cw")
-    check("part-1-steps-kept", st["parts"]["1"]["steps"]["review"].get("rounds"), 3)
-    check("synced-between-parts", "SYNC_BRANCH" in out, True)
-    check("pr-marked-ready-before-merge", "pr ready 101" in open(os.path.join(tmp, "gh.log")).read(), True)
-    check("tree-on-the-common-branch", git("branch", "--show-current", cwd=wt), "feat/t")
-    check("common-branch-has-part-1", os.path.exists(os.path.join(wt, "a.txt")), True)
-    # Part 1 with no pull request on record and its branch gone from GitHub:
-    # origin/feat/t-1, left from the push before its review, is not taken as
-    # the head its review left.
-    saved = read_state()
-    st = read_state(); st["parts"]["1"]["pr"] = None; write_state(st)
-    gone = git("rev-parse", "origin/feat/t-1", cwd=wt)
-    git("push", "-q", "--no-verify", "origin", "--delete", "feat/t-1", cwd=wt)
-    git("update-ref", "refs/remotes/origin/feat/t-1", gone, cwd=wt)
-    out, rc = run_bash('parts_take_common "%s" "%s" 2' % (wt, spath), wt, bin_dir)
-    check("a-stale-copy-of-the-part-before-is-not-its-reviewed-head",
-          (rc, "origin has no feat/t-1" in out), (1, True))
-    # Origin not reached is not "origin has no branch": no push is asked for.
-    url = git("remote", "get-url", "origin", cwd=wt)
-    git("remote", "set-url", "origin", url + ".nowhere", cwd=wt)
-    out, rc = run_bash('parts_take_common "%s" "%s" 2' % (wt, spath), wt, bin_dir)
-    git("remote", "set-url", "origin", url, cwd=wt)
-    check("origin-not-reached-waits-without-a-push-asked",
-          (rc, "could not be fetched from origin" in out, "git push origin" in out), (1, True, False))
-    git("push", "-q", "--no-verify", "origin", "%s:refs/heads/feat/t-1" % gone, cwd=wt)
-    write_state(saved)
-    # Run again over the same part (as run_step does after a cut-off run):
-    # the merge is not recorded twice, and the part's steps stay kept.
-    st = read_state(); st["parts"]["current"] = 1; st["step"] = "review"; write_state(st)
-    git("switch", "-q", "feat/t", cwd=wt)
-    out, rc = run_bash('parts_advance "%s" t merged' % wt, wt, bin_dir)
-    st = read_state()
-    with open(os.path.join(fdir, "history.jsonl")) as fh:
-        merges = [l for l in fh if '"op": "merged"' in l and '"what": "parts"' in l]
-    check("a-merge-recorded-once", len(merges), 1)
-    check("the-hand-commit-check-passed-and-kept", read_state()["parts"]["1"].get("before"), "checked")
-    check("kept-steps-not-overwritten", st["parts"]["1"]["steps"]["review"].get("rounds"), 3)
-    check("on-to-part-2-again", st["parts"]["current"], 2)
-
-    # Part 2's branch takes in part 1 as reviewed (a conflict: the sync
-    # session, stubbed, keeps both) and the common branch (part 1's squash
-    # recorded, no second conflict): its diff is its own.
-    resolve = ('sync_with_main() { echo "SYNC $SYNC_FROM"; '
-               'git -C "$1" merge -q --no-edit "$(sync_source)" >/dev/null 2>&1; '
-               'printf "part one, reviewed\\npart two uses it\\n" > "$1/a.txt"; '
-               'git -C "$1" add a.txt && git -C "$1" commit -q --no-edit; return 3; }\n')
-    out, rc = run_bash('parts_enter "%s"' % wt, wt, bin_dir, resolve)
-    check("enter-part-2-review", (rc, out if rc else ""), (0, ""))
-    check("one-sync-session-for-the-part-before-none-for-its-squash",
-          [l for l in out.splitlines() if l.startswith("SYNC ")], ["SYNC feat/t-1"])
-    check("on-part-2-again", git("branch", "--show-current", cwd=wt), "feat/t-2")
-    git("fetch", "-q", "origin", cwd=wt)
-    check("part-2-has-the-common-branch",
-          subprocess.run(["git", "merge-base", "--is-ancestor", "origin/feat/t", "HEAD"], cwd=wt).returncode, 0)
-    check("part-2-diff-is-its-own", git("diff", "--name-only", "origin/feat/t...HEAD", cwd=wt).split(), ["a.txt", "b.txt"])
-    check("part-2-diff-on-part-1s-file-is-its-line",
-          [l for l in git("diff", "origin/feat/t...HEAD", "--", "a.txt", cwd=wt).splitlines()
-           if l.startswith(("+", "-")) and not l.startswith(("+++", "---"))], ["+part two uses it"])
-    check("what-part-1s-review-deleted-stays-deleted", os.path.exists(os.path.join(wt, "helper.txt")), False)
-    check("the-sync-session-names-the-part", read_state().get("branch"), "feat/t-2")
-    git("push", "-q", "-u", "origin", "feat/t-2", cwd=wt)
-    prs["102"] = {"baseRefName": "feat/t", "headRefName": "feat/t-2", "state": "OPEN",
-                  "isDraft": True, "headRefOid": git("rev-parse", "HEAD", cwd=wt)}
-    prs["101"]["state"] = "MERGED"
-    with open(prs_file, "w") as fh:
-        json.dump(prs, fh)
-    st = read_state(); st["parts"]["2"]["pr"] = 102; st["pr"] = 102; st["step"] = "review"
-    write_state(st)
-    out, rc = run_bash('parts_base "%s"' % spath, wt, bin_dir)
-    check("review-base-is-the-common-branch", out.strip(), "feat/t")
-    out, rc = run_bash('parts_advance "%s" t' % wt, wt, bin_dir)
-    st = read_state()
-    check("last-part-closes-the-loop", st["parts"].get("done"), True)
-    check("the-features-pr-next", (st.get("step"), "RUN_STEP pr" in out), ("pr", True))
-    check("state-back-on-the-common-branch", st.get("branch"), "feat/t")
-    check("both-parts-in", all(os.path.exists(os.path.join(wt, f)) for f in ("a.txt", "b.txt")), True)
-    out, rc = run_bash('parts_base "%s"; step_label pr "%s"' % (spath, wt), wt, bin_dir)
-    check("after-the-parts-main-and-a-plain-label", out.split()[0], "main")
-    check("after-the-parts-no-part-in-the-label", "part" in out, False)
+    check("join-ok", (rc, "JOINING" in out, "RUN_STEP pr" in out), (0, True, True))
+    check("joined-on-the-features-branch", (git("branch", "--show-current", cwd=wt), git("rev-parse", "feat/t", cwd=wt)),
+          ("feat/t", tip2))
+    check("joined-state", (st["parts"].get("done"), st.get("branch"), st.get("step")), (True, "feat/t", "pr"))
+    check("joined-ranges", (st["parts"]["1"].get("range"), st["parts"]["2"].get("range")),
+          ("%s..%s" % (base, tip1), "%s..%s" % (tip1, tip2)))
+    check("joined-reads-from-main", (st.get("blocks") or {}).get("base"), None)
+    out, rc = run_bash('parts_open "%s" || echo ONE; parts_joining "%s" || echo JOINED; step_label pr "%s"' % (spath, spath, wt),
+                       wt, bin_dir)
+    check("after-the-join-one-feature", (out.split()[:2], "part" in out.splitlines()[-1]), (["ONE", "JOINED"], False))
     out, rc = run_bash('parts_branches "%s"' % spath, wt, bin_dir)
     check("branches-for-the-clean-up", out.split(), ["feat/t-1", "feat/t-2"])
-    out, rc = run_bash('parts_check "%s" final' % wt, wt, bin_dir)
-    check("final-check-holds", (rc, out.strip()), (0, ""))
-    prs["102"]["state"] = "OPEN"
+    joined = read_state()
+
+    # A feature whose first part was reviewed and merged the old way: the
+    # feature's branch, with part 1 squashed in after its review changed a
+    # line part 2 built on, merges into the last part — the conflict to the
+    # sync session — and the review reads from where that branch stood.
+    git("switch", "-q", "-c", "lg", base, cwd=wt)
+    git("switch", "-q", "-c", "lg-1", cwd=wt)
+    with open(os.path.join(wt, "l.txt"), "w") as fh:
+        fh.write("one\n")
+    git("add", "l.txt", cwd=wt); git("commit", "-q", "-m", "lg part one", cwd=wt)
+    old1 = git("rev-parse", "HEAD", cwd=wt)
+    git("switch", "-q", "-c", "lg-2", cwd=wt)
+    with open(os.path.join(wt, "l.txt"), "a") as fh:
+        fh.write("two uses it\n")
+    git("add", "l.txt", cwd=wt); git("commit", "-q", "-m", "lg part two", cwd=wt)
+    lg2 = git("rev-parse", "HEAD", cwd=wt)
+    git("switch", "-q", "lg", cwd=wt)
+    with open(os.path.join(wt, "l.txt"), "w") as fh:
+        fh.write("one, reviewed\n")
+    git("add", "l.txt", cwd=wt); git("commit", "-q", "-m", "squash lg-1 (reviewed)", cwd=wt)
+    git("push", "-q", "origin", "lg", cwd=wt)
+    reviewed = git("rev-parse", "HEAD", cwd=wt)
+    git("switch", "-q", "lg-1", cwd=wt)
+    write_state({"feature": "t", "branch": "lg-1", "issue": 41, "step": "review", "pr": 101,
+                 "steps": {"code": {"session": "cw", "done": True}, "review": {"session": "r1", "rounds": 9}},
+                 "parts": {"total": 2, "umbrella": "lg", "current": 1, "built": True, "accepted": True,
+                           "1": {"branch": "lg-1", "pr": 101, "merged": "2026-11-12T10:00:00+00:00"},
+                           "2": {"branch": "lg-2"}}})
+    sync_stub = ('sync_with_main() { echo "SYNC_FROM=$SYNC_FROM"; '
+                 'git -C "$1" merge -q -X theirs --no-edit "$(sync_source)" >/dev/null 2>&1; return 3; }\n')
+    # Its pull request not merged yet: its review's fixes would be left out.
+    st = read_state(); merged_at = st["parts"]["1"].pop("merged"); write_state(st)
+    out, rc = run_bash('parts_join "%s" t' % wt, wt, bin_dir, sync_stub)
+    check("no-join-over-a-parts-open-pr", (rc, "#101, is not merged" in out, git("branch", "--show-current", cwd=wt)),
+          (1, True, "lg-1"))
+    # Merged by hand on GitHub since: read there and recorded.
     with open(prs_file, "w") as fh:
-        json.dump(prs, fh)
-    out, rc = run_bash('parts_check "%s" final' % wt, wt, bin_dir)
-    check("final-check-finds-a-part-open", (rc, "still open" in out), (1, True))
+        json.dump({"101": {"state": "MERGED"}}, fh)
+    out, rc = run_bash('parts_join "%s" t >/dev/null; echo' % wt, wt, bin_dir, 'parts_merge_in() { return 1; }\n')
+    check("a-parts-pr-merged-on-github-is-recorded", bool(read_state()["parts"]["1"].get("merged")), True)
+    with open(prs_file, "w") as fh:
+        json.dump({}, fh)
+    st["parts"]["1"]["merged"] = merged_at; write_state(st)
+    out, rc = run_bash('parts_join "%s" t' % wt, wt, bin_dir, sync_stub)
+    st = read_state()
+    check("old-way-join-ok", (rc, "SYNC_FROM=lg" in out, "RUN_STEP pr" in out), (0, True, True))
+    check("old-way-joined-carries-both",
+          [subprocess.run(["git", "merge-base", "--is-ancestor", c, "lg"], cwd=wt).returncode for c in (reviewed, lg2)],
+          [0, 0])
+    check("old-way-the-review-wins", open(os.path.join(wt, "l.txt")).read(), "one, reviewed\n")
+    check("old-way-reads-from-the-reviewed-branch", st["blocks"].get("base"), reviewed)
+    check("old-way-ranges-for-the-parts-not-merged",
+          (st["parts"]["1"].get("range"), st["parts"]["2"].get("range")), (None, "%s..%s" % (old1, lg2)))
+    check("old-way-the-parts-pr-cleared", (st.get("pr"), st["steps"].get("review"), st["parts"]["1"]["steps"]["review"]["rounds"]),
+          (None, {}, 9))
+    check("old-way-on-the-features-branch", (git("branch", "--show-current", cwd=wt), st.get("branch")), ("lg", "lg"))
+    write_state(joined)
+    git("switch", "-q", "feat/t", cwd=wt)
 
     # A part whose branch does not take the common branch in cleanly: the
     # merge is undone, and the part waits.
@@ -581,60 +418,6 @@ esac
     stuck = 'sync_with_main() { return 1; }\n'
     out, rc = run_bash('parts_merge_in "%s" t x-p x-u ""' % wt, wt, bin_dir, stuck)
     check("a-sync-left-unfinished-holds-the-part", (rc, "waits" in out or rc == 1), (1, True))
-
-    # The part before's reviewed head nowhere to be found: the part waits,
-    # never merging the local branch in its place.
-    lone = os.path.join(tmp, "lone.json")
-    with open(lone, "w") as fh:
-        json.dump({"feature": "t", "parts": {"total": 2, "umbrella": "zz", "current": 2}}, fh)
-    git("branch", "-q", "zz-1", base, cwd=wt)
-    out, rc = run_bash('parts_take_common "%s" "%s" 2' % (wt, lone), wt, bin_dir)
-    check("no-reviewed-head-holds-the-part", (rc, "no pull request of part 1 is on record" in out), (1, True))
-    git("branch", "-q", "-D", "zz-1", cwd=wt)
-
-    # A part rebased onto the common branch (a rebase-only repository, or by
-    # hand on GitHub), over lines that moved there meanwhile: its run of
-    # commits is found by the tree it leaves and recorded — a line its review
-    # removed stays removed, and nothing goes to a session.
-    git("switch", "-q", "-c", "rb", base, cwd=wt)
-    with open(os.path.join(wt, "r.txt"), "w") as fh:
-        fh.write("a\nb\nc\nd\n")
-    git("add", "r.txt", cwd=wt)
-    git("commit", "-q", "-m", "r base", cwd=wt)
-    git("push", "-q", "origin", "rb", cwd=wt)
-    git("switch", "-q", "-c", "rb-1", cwd=wt)
-    with open(os.path.join(wt, "r.txt"), "w") as fh:
-        fh.write("a\nb\nX\nc\nd\n")
-    git("commit", "-q", "-am", "part one adds X", cwd=wt)
-    with open(os.path.join(wt, "r.txt"), "w") as fh:
-        fh.write("a\nb\nX\nc\nd\ne\n")
-    git("commit", "-q", "-am", "part one adds e", cwd=wt)
-    git("switch", "-q", "-c", "rb-2", cwd=wt)
-    with open(os.path.join(wt, "s.txt"), "w") as fh:
-        fh.write("part two\n")
-    git("add", "s.txt", cwd=wt)
-    git("commit", "-q", "-m", "part two", cwd=wt)
-    git("switch", "-q", "rb-1", cwd=wt)
-    with open(os.path.join(wt, "r.txt"), "w") as fh:
-        fh.write("a\nb\nc\nd\ne\n")
-    git("commit", "-q", "-am", "review: no X", cwd=wt)
-    git("push", "-q", "origin", "rb-1", cwd=wt)
-    git("switch", "-q", "rb", cwd=wt)
-    with open(os.path.join(wt, "r.txt"), "w") as fh:
-        fh.write("A\nb\nc\nd\n")
-    git("commit", "-q", "-am", "context moved", cwd=wt)
-    git("cherry-pick", "rb-1~2", "rb-1~1", "rb-1", cwd=wt)
-    git("push", "-q", "origin", "rb", cwd=wt)
-    git("switch", "-q", "rb-2", cwd=wt)
-    rbstate = os.path.join(tmp, "rb.json")
-    with open(rbstate, "w") as fh:
-        json.dump({"feature": "t", "parts": {"total": 2, "umbrella": "rb", "current": 2}}, fh)
-    out, rc = run_bash('parts_take_common "%s" "%s" 2' % (wt, rbstate), wt, bin_dir,
-                       'sync_with_main() { echo "SYNC $SYNC_FROM"; return 1; }\n')
-    check("a-rebased-part-is-found-by-its-tree", (rc, "SYNC" in out), (0, False))
-    with open(os.path.join(wt, "r.txt")) as fh:
-        check("what-the-review-removed-stays-removed", fh.read(), "A\nb\nc\nd\ne\n")
-    check("after-a-rebase-the-diff-is-the-part", git("diff", "--name-only", "origin/rb...HEAD", cwd=wt), "s.txt")
 
     # `sclaude parts <name> stop`: ended with the parts built so far.
     st = read_state()
@@ -686,66 +469,6 @@ esac
     with open(os.path.join(fdir, "history.jsonl")) as fh:
         check("after-the-parts-the-whole", json.loads(fh.read().splitlines()[-1]).get("part"), "whole")
 
-    # What the common branch took past a part: neither its squash nor its
-    # own commits (a rebase merge), only what was put there by hand.
-    git("switch", "-q", "-c", "x-common", "feat/t", cwd=wt)
-    before = git("rev-parse", "HEAD", cwd=wt)
-    git("switch", "-q", "-c", "x-part", cwd=wt)
-    for name in ("p1", "p2"):
-        with open(os.path.join(wt, name), "w") as fh:
-            fh.write(name + "\n")
-        git("add", name, cwd=wt)
-        git("commit", "-q", "-m", name, cwd=wt)
-    git("switch", "-q", "x-common", cwd=wt)
-    git("merge", "-q", "--squash", "x-part", cwd=wt)
-    git("commit", "-q", "-m", "squashed part", cwd=wt)
-    with open(os.path.join(wt, "hand"), "w") as fh:
-        fh.write("hand\n")
-    git("add", "hand", cwd=wt)
-    git("commit", "-q", "-m", "by hand", cwd=wt)
-    out, rc = run_bash('parts_extra "%s" %s HEAD x-part' % (wt, before), wt, bin_dir)
-    check("extra-after-a-squash", [l.split(" ", 1)[1] for l in out.splitlines()], ["by hand"])
-    # Merged from GitHub's head, which took a suggestion the tree never had:
-    # read by that head, the squash is the part's.
-    git("reset", "-q", "--hard", before, cwd=wt)
-    git("switch", "-q", "-c", "x-github", "x-part", cwd=wt)
-    with open(os.path.join(wt, "p1"), "a") as fh:
-        fh.write("suggested\n")
-    git("commit", "-q", "-am", "suggestion", cwd=wt)
-    gh_head = git("rev-parse", "HEAD", cwd=wt)
-    git("switch", "-q", "x-common", cwd=wt)
-    git("merge", "-q", "--squash", "x-github", cwd=wt)
-    git("commit", "-q", "-m", "squashed from github", cwd=wt)
-    out, rc = run_bash('parts_extra "%s" %s HEAD %s' % (wt, before, gh_head), wt, bin_dir)
-    check("extra-read-by-the-merged-head", out.strip(), "")
-    git("reset", "-q", "--hard", before, cwd=wt)
-    git("cherry-pick", "x-part~1", "x-part", cwd=wt)
-    with open(os.path.join(wt, "hand2"), "w") as fh:
-        fh.write("hand\n")
-    git("add", "hand2", cwd=wt)
-    git("commit", "-q", "-m", "by hand after", cwd=wt)
-    out, rc = run_bash('parts_extra "%s" %s HEAD x-part' % (wt, before), wt, bin_dir)
-    check("extra-after-a-rebase", [l.split(" ", 1)[1] for l in out.splitlines()], ["by hand after"])
-    # A hand commit beside the part's lines, then the part squashed over it:
-    # the squash's context differs, and it is still the part's.
-    git("reset", "-q", "--hard", before, cwd=wt)
-    with open(os.path.join(wt, "lines"), "w") as fh:
-        fh.write("a\nb\nc\nd\n")
-    git("add", "lines", cwd=wt)
-    git("commit", "-q", "-m", "lines", cwd=wt)
-    base2 = git("rev-parse", "HEAD", cwd=wt)
-    git("switch", "-q", "-c", "x-part2", cwd=wt)
-    with open(os.path.join(wt, "lines"), "w") as fh:
-        fh.write("a\nb\nC\nd\n")
-    git("commit", "-q", "-am", "part edits c", cwd=wt)
-    git("switch", "-q", "x-common", cwd=wt)
-    with open(os.path.join(wt, "lines"), "w") as fh:
-        fh.write("A\nb\nc\nd\n")
-    git("commit", "-q", "-am", "hand edits a", cwd=wt)
-    git("merge", "-q", "--squash", "x-part2", cwd=wt)
-    git("commit", "-q", "-m", "squashed part 2", cwd=wt)
-    out, rc = run_bash('parts_extra "%s" %s HEAD x-part2' % (wt, base2), wt, bin_dir)
-    check("extra-by-tree-when-the-context-moved", [l.split(" ", 1)[1] for l in out.splitlines()], ["hand edits a"])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -822,10 +545,6 @@ check("part-session-no-demo", "/sdemo" in code, False)
 code = render("code", EACH)
 check("a-look-at-each-part-asks", ("Accept work" in code, "/sdemo" in code, "to the next part" in code), (True, True, True))
 check("a-look-at-each-part-no-marker-of-its-own", "starts the next part" in code, False)
-code = render("code", dict(IN_PART, SCLAUDE_V_IN_PARTS="", SCLAUDE_V_PART_ALONE="", SCLAUDE_V_ASKS_ACCEPT="1",
-                           SCLAUDE_V_PART_AGAIN="1"))
-check("step-2-during-a-parts-review-is-that-part", ("part 2 of 3 — Tickets" in code, "No part has a pull request" in code),
-      (True, False))
 code = render("code", WHOLE)
 check("whole-feature-session-is-accepted", "Accept work" in code, True)
 check("whole-feature-session-on-the-last-part", "the tree is on the last part's branch" in code, True)
@@ -835,35 +554,17 @@ check("dropped-parts-are-struck-and-filed",
       "parts 2-3" in dropped and "~~AC7. …~~" in dropped and "issues/41/sub_issues" in dropped, True)
 code = render("code", DONE)
 check("after-the-parts-a-plain-step-2", ("Accept work" in code, "built in parts" in code), (True, False))
-pr = render("pr", IN_PART)
-check("part-pr-into-the-common-branch", "gh pr create --base feat/t" in pr, True)
-check("part-pr-refs-the-issue", "`Refs #41`" in pr and "`Closes #41`" not in pr, True)
-check("part-pr-reads-its-base", "origin/feat/t..HEAD" in pr, True)
 pr = render("pr", DONE)
 check("feature-pr-closes-the-issue", "`Closes #41`" in pr, True)
-check("feature-pr-lists-the-parts", "Built in parts" in pr, True)
-review = render("review", IN_PART)
-check("part-review-diffs-its-base", "git diff origin/feat/t...HEAD" in review, True)
-check("part-review-knows-its-part", "part 2 of 3" in review, True)
-check("part-review-reads-notes-for-it", "opens with `For part 2:`" in review, True)
-check("last-part-review-has-no-later-parts", ("later parts are already written" in review, "<parts-tip>" in review),
-      (False, False))
-LATER = dict(IN_PART, SCLAUDE_V_PART="1", SCLAUDE_V_PARTS_LATER="1", SCLAUDE_V_PARTS_TIP="feat/t-3",
-             SCLAUDE_V_LATER_PARTS="part 2 on `feat/t-2`, part 3 on `feat/t-3`")
-review = render("review", LATER)
-# The note one part's review writes is the one the next part's review reads.
-writer = "a note to the plan's `## Agreed during review` that opens with `For part <n>:`"
-check("note-written-as-it-is-read", (writer in review, "that opens with `For part 1:` was left" in review), (True, True))
-check("part-review-diffs-a-part-by-three-dots", "`git diff <its previous part's branch>...<its branch>`" in review, True)
-again = render("code", dict(LATER, SCLAUDE_V_IN_PARTS="", SCLAUDE_V_PART_ALONE="", SCLAUDE_V_ASKS_ACCEPT="1",
-                            SCLAUDE_V_PART_AGAIN="1"))
-check("step-2-again-sees-the-later-parts", ("git show feat/t-3:<path>" in again, writer in again,
-                                           "opens with `For part 1:` was left" in again), (True, True, True))
-check("part-review-names-every-later-part", "part 2 on `feat/t-2`, part 3 on `feat/t-3`" in review, True)
-check("part-review-sees-the-to-be", ("git show feat/t-3:<path>" in review, "never change a later part" in review,
-                                     "`For part <n>:`" in review), (True, True, True))
+check("feature-pr-lists-the-parts", ("Built in parts" in pr, "carries every part" in pr), (True, True))
+check("feature-pr-no-part-pr", "gh pr create --base feat/t" in pr, False)
 review = render("review", DONE)
-check("feature-review-reads-the-seams", "the seams between the parts" in review, True)
+check("feature-review-plain-without-blocks", ("read in blocks" in review, "For part" in review), (False, False))
+BLOCK = dict(DONE, SCLAUDE_V_IN_BLOCKS="1", SCLAUDE_V_BLOCK="2", SCLAUDE_V_BLOCKS="4",
+             SCLAUDE_V_BLOCK_TITLE="Taking a ticket")
+review = render("review", BLOCK)
+check("block-review-knows-its-block", "block 2 of 4: Taking a ticket" in review, True)
+check("block-review-names-the-cut", ".sclaude/local/feature/review-blocks.json" in review, True)
 plan = render("plan", dict(DONE, SCLAUDE_V_IN_PARTS=""))
 check("plan-asks-for-the-parts-section", "`### Part <n> — <title>`" in plan, True)
 check("plan-files-no-issue-for-a-part", "gh issue create" in plan, False)
@@ -871,16 +572,18 @@ check("plan-files-no-issue-for-a-part", "gh issue create" in plan, False)
 # --- the cycle's code carries the hooks ---------------------------------------------------
 with open(os.path.join(LIB, "cycle", "run.sh")) as fh:
     run_src = fh.read()
-check("a-parts-review-advances", 'parts_reviewing "$state"; then\n    parts_advance' in run_src, True)
+check("the-accepted-parts-are-joined", 'parts.accepted true\n    parts_join "$wt" "$slug"' in run_src, True)
 check("a-part-built-goes-on", 'parts_building "$state"; then\n    parts_built' in run_src, True)
-check("no-main-into-a-part", "parts_check_say \"$wt\" || {" in run_src, True)
+check("a-join-cut-off-goes-on", 'parts_joining "$state"; then\n      parts_join' in run_src, True)
+check("a-review-block-closed-goes-on", 'blocks_next "$wt" "$slug"; then\n    run_step "$wt" "$slug" review' in run_src, True)
+check("no-main-into-a-part", 'parts_open "$state" || { sync_branch' in run_src, True)
 with open(os.path.join(LIB, "commands", "feature_commands.sh")) as fh:
     check("sclaude-sync-leaves-open-parts-to-the-run", 'parts_open "$wt/.sclaude/local/feature/state.json"; then' in fh.read(), True)
 with open(os.path.join(LIB, "review", "local_review.sh")) as fh:
     lr_src = fh.read()
-check("local-review-base-is-the-prs", 'merge-base "origin/$into"' in lr_src, True)
+check("local-review-whole-from-main", 'merge-base origin/main "$head"' in lr_src, True)
 check("local-review-delta-skips-merges", "--first-parent --no-merges" in lr_src, True)
-check("local-review-adds-parts-only-to-a-search", '[[ -z "$seams$verify" ]] && scope+="$(local_review_parts_scope' in lr_src, True)
+check("local-review-block-first-read", 'scope="$(blocks_scope "$wt" "$head"' in lr_src, True)
 
 for name, want, got in failures:
     print("FAIL %s: want %r, got %r" % (name, want, got))

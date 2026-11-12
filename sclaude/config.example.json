@@ -217,9 +217,13 @@
     "            through uv; the default) or \"off\" (silent videos).",
     "partAccept — a feature built in parts: \"whole\" (the person sees it",
     "            once, when every part is built, and accepts it then; the",
-    "            parts' pull requests and reviews follow; the default) or",
+    "            parts become one pull request; the default) or",
     "            \"each\" (every part's session ends on its demo and the",
     "            Accept question too).",
+    "reviewBlocks — a pull request too big for one review is read in",
+    "            blocks: \"from\" the changed lines past which it is cut",
+    "            (generated files left out; 5000 when unset), \"size\" the",
+    "            lines a block holds at most (3000 when unset).",
     "ship      — whether the merge goes on to production: \"ask\" (sclaude",
     "            asks Ship to production? after the merge; the default),",
     "            \"auto\" (shipped without that question — still asked when QA",
@@ -250,6 +254,7 @@
   "maintainers": ["lead@example.com"],
 
   "review": "github",
+  "reviewBlocks": {"from": 5000, "size": 3000},
 
   "commands": {
     "typecheck": "npm run typecheck",

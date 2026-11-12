@@ -1238,14 +1238,19 @@ local `origin/*` outlives branches that have long been gone and the check lies.
 
 ## A feature built in parts
 
-A feature too big for one review is split at step 1, at the person's word,
-into parts reviewed one by one, and stays one issue, one plan and one QA
-(`sclaude/lib/tree/parts.sh`, `sclaude/lib/cycle/plan_parts.py`). The parts
-are built first and reviewed after the person has accepted the whole: a
-review spent on code the person has not seen is thrown away by the first
-large remark, and a person shown half a feature cannot judge it. (Before, each
-part was built, reviewed and merged in turn inside step 2, and the whole was
-seen only at the end; before that, the later parts were filed as issues.)
+A feature too big to build and show in one go is split at step 1, at the
+person's word, into parts built one by one, and stays one issue, one plan,
+one pull request and one QA (`sclaude/lib/tree/parts.sh`,
+`sclaude/lib/cycle/plan_parts.py`). The parts are for building and showing:
+each is shown as soon as it is built, and the person accepts the whole once.
+The review reads the finished feature, cut into blocks of its own (below,
+"Review blocks"): the parts' lines were drawn before the code, and the same
+central files run through all of them. (Until 2026-11 each part had a pull
+request of its own into the feature's branch, reviewed and merged there one
+by one — a part's review then saw its neighbours as they were before the
+later parts, and the later parts lagged behind what its review decided;
+before that, each part was built, reviewed and merged in turn inside step 2;
+before that, the later parts were filed as issues.)
 
 **The plan is the record.** `## Parts` with a `### Part <n> — <title>` per part,
 numbered from 1, and `[part <n>]` after a criterion's identifier
@@ -1261,24 +1266,22 @@ fast-forwarded back into the feature's branch.
 **Three phases, told apart by the state.** `parts_building` — `parts.built`
 not yet true: step 2, one part at a time (`parts.current`). `parts_whole` —
 built, `parts.accepted` not yet true: step 2 once more, over the whole.
-`parts_reviewing` — accepted, `parts.done` not yet true: `step` goes pr →
-review for each part, `parts.current` counting from 1 again. `parts.done`:
-every part is in the common branch, and the feature's own pull request
-follows. The sessions, gates and review machinery are the ones every feature
-has; `step_label` and `position` name the part (`2/7 development · part 2/3`,
-`4/7 review · part 2/3`, the `p_*` places of the map's "A feature built in
-parts"). `branch` names the branch at work — the part's, `<umbrella>-<n>` —
-so every "which pull request, is it merged" question asked by the branch is
-about the part at work; `parts.umbrella` keeps the common branch.
+`parts_joining` — accepted, `parts.done` not yet true: the parts become one
+branch (`parts_join`). `parts.done`: the feature is one like any other. The
+sessions and gates are the ones every feature has; `step_label` and
+`position` name the part while it is built (`2/7 development · part 2/3`,
+the `p_*` places of the map's "A feature built in parts"). `branch` names the
+branch at work — the part's, `<umbrella>-<n>` — and `parts.umbrella` the
+feature's.
 
 **Building** (`parts_enter`, before a part's session): the part's branch made
 off the part before it (part 1 off the common branch, which stays where it
 left main), or switched to. Work made on the common branch before the split
 becomes part 1, and the common branch goes back to where it left main — only
 while GitHub does not have it past that point. Never over uncommitted work or
-a merge under way. Main is not merged into a part (`sync_branch` is skipped):
-the part's pull request will go into the common branch, and main there would
-read as the part's change. A part's step 2 (`<if:in-parts>` in `code.md`) has
+a merge under way. Main is not merged into a part (`sync_branch` is skipped)
+until the parts are joined: main there would read as the part's work in its
+demo and in the review's cut. A part's step 2 (`<if:in-parts>` in `code.md`) has
 its diff read by a fresh subagent before it closes — design the next parts
 build on, bugs the tests miss, a criterion not met — and fixes what it agrees
 with, up to three rounds; a request the person makes goes where the session
@@ -1312,142 +1315,118 @@ their own. The next part's session is told remarks on it may come
 the full demo from `demo.py parts`, the parts' scripts.
 
 **The whole** (`<if:parts-built>`): the feature checked as one, the demo,
-Accept; its fixes go into the last part's pull request. On Accept,
-`after_step` sets `parts.accepted`, and step 3 begins with part 1.
+Accept; its fixes are commits on the last part's branch. On Accept,
+`after_step` sets `parts.accepted` and joins the parts.
 
-**Reviewing** (`parts_enter`, before a part's pull request and review): the
-tree goes onto the part's branch, and `parts_take_common` merges into it
-first the part before it as its review left it (the head its pull request was
-squashed from, by GitHub's word (`parts_head`) — origin's copy of the branch,
-fetched, only when no pull request is on record, since GitHub may have deleted
-the branch on merge; never the local branch, which may lack a suggestion
-committed on GitHub or carry a commit nobody reviewed; a head that cannot be
-found holds the part, saying what to do), then the common branch, fetched
-afresh, commit by commit on its first parent: the part before's merge there —
-one commit for a squash or a merge commit, the part's commits one by one for a
-rebase, found as the run whose last commit's tree is what its first commit's
-parent and the reviewed head make together (by trees: a commit's patch moves
-with the lines around it) — recorded as merged (`-s ours`; the earlier
-squashes are in that head already) — merged again from a base before every part, it would conflict on
-every line this part changed in an earlier part's code — and the rest, main's
-syncs and commits put there by hand, merged; so that its pull request into the
-common branch shows the part alone; the common branch is pushed when GitHub lacks it, being the
-pull request's base — past the product's pre-push hook while it is all in
-origin's main, there being nothing in it to judge, as is the push after each
-sync. The branches of the parts not yet reviewed that GitHub lacks go up
-together, in one push the hook judges whole: the tree holds every part's
-work (a database migrated by all of them), and a hook that asks whether a
-branch on GitHub carries it refuses a part pushed alone. The part before comes first because this part was built
-on that part's commits from before its review: merged from the common branch
-alone, whose base is from before every part, a change this part carries would
-win over the review's undoing of it — a revert, a file deleted — without a
-conflict. A merge that would stop on conflicts goes to the sync session
-(`parts_merge_in`): `sync_with_main` with `SYNC_FROM` naming what it merges
-and `SYNC_REF` the revision when it is not origin's (locals the sync
-session's path reads through `sync_source`; main otherwise), and `sync.md`'s
-`<if:from-parts>` telling it that the reviewed side stands and a change the
-person asked for is combined with it, not dropped. A merge it leaves
-unresolved holds the part, and the next run carries it on, with what
-`MERGE_HEAD` says it merges. `sclaude sync`
-refuses a feature whose parts are open: main reaches them through the common
-branch. A step 2 run while a part is reviewed (a replan) is told it works on
-that part (`<if:part-again>`). The order
-is the build order and no other: a part's diff is its own only once the parts
-before it are in the common branch, and a fix in part 1 changes what the rest
-stand on.
-
-**What a part's review sees past its diff** (`parts_later`, `parts_later_set`):
-the tree is on the part's branch, where every file outside the diff stands as
-it was before the later parts. While a part that is not the last is reviewed,
-the fix session (`<if:parts-later>` in `review.md`, and in `code.md` for step
-2 again) and the local pass (its scope in `local_review.sh`) are told each
-later part's branch — the tree's own, which is where the parts were built and
-what no pull request has touched yet, else origin's — and that the last one
-carries them all: a file read there is the file as the feature will have it.
-They are drafts written on the part before its review, so the part and the
-plan win where they disagree, and findings stay on the part's diff. A
-decision that changes what a later part relies on goes into the plan's
-`## Agreed during review` as a note opening with `For part <n>:`; that
-part's review checks its code against the notes for it — the fix session,
-step 2 again and every pass that searches (`local_review_parts_scope`): a
-part's review begins after the last one's ends, so its notes are all there
-by its first pass, and what one pass found is in the next one's earlier
-findings. The later
-parts' branches are left out without the last part's branch and for the last
-part; none of it on the seams or on a pass that only checks fixes.
-
-**Closing a part's review** (`parts_advance`, from `after_step`): the pull
-request is marked ready and squashed into the common branch (the
-repository's own way where it allows no squash; a way GitHub refuses — a
-rebase that would drop the merges a part's branch took the earlier parts in
-by, or GitHub busy — is followed by the others, after a look whether the pull
-request merged all the same; the next part finds the merge by its tree
-whichever way it went), the tree goes
-onto it, and anything else found on it since the last part — commits no part
-brought — is shown and asked about. The pr and review steps' records are kept
-under `parts.<n>.steps` and start afresh — a new conversation each, a review's
-rounds counted again — keeping the list of conversations (`runs`) the issue's
-summary and the costs read, and the whole's step 2 and its Accept. Main is
-merged into the common branch then, with no session at work (`sync_branch`),
-and the next part's pull request follows; after the last, `parts.done`, and
-step 3 opens the feature's own pull request into main.
-
-**What a hand on GitHub could change is checked, never repaired**
-(`parts_check`, `parts_check_say`), before each part's pull request and review
-and each merge, and with `final` before the feature's pull request merges
-(`merge_offer`); nothing is checked while the parts are built, when no part
-has a pull request: each part's pull request into the common branch; the
-earlier ones merged; the one at work open and a draft until its review
-closes; GitHub's copy of its branch what the tree has or behind it; the common
-branch on GitHub. A finding stops the cycle with what to do. A part merged
-before its review closed is asked about (`parts_merged_early`): the part's
-end, or left.
-
-**The review reads each pull request against its own base.** A part's local
-review takes `merge-base origin/<common branch>` (`parts_base`), and step 4's
-prompt diffs `origin/<base>...HEAD`. The local review's journal and its
-findings waiting to be posted carry the pull request's number
-(`local_review.py`: `cached`, `since`, `round`, `base` take it; `flush` posts
-only that pull request's), so a part starts from the whole of its own diff and
-numbers its rounds from one. A range since the last review that holds a merge
-is read commit by commit on the first parent, and each merge only for how it
-resolved conflicts — never the range's diff, which carries what the merge
-brought. The feature's own pull request is read first in one pass over the
-seams between the parts (`seams` in `local_review_run`); what lands after —
-QA's returns, a sync — in full, by that same rule. Threads still open on the
-parts' pull requests reach that review's snapshot (`parts_threads` in
-`pr_context.py`). Where the project reviews on GitHub, the workflow reviews
-each part's pull request as any, and the feature's pull request in full.
-
-**The issue hears of the feature's pull request alone.** A part's pull request
-says `Refs #N` and is kept off the issue's links and the board (`capture_pr`);
-the feature's pull request closes the issue at the end, as any feature's.
-`sclaude done` deletes the parts' branches once GitHub says each pull request
-merged; abandoning a feature closes its parts' open pull requests.
+**Joining** (`parts_join`): the parts are stacked, so the last part's branch
+carries them all, and the feature's branch is moved to it — the tree with
+it — and step 3 opens the feature's one pull request (`<if:parts-done>` in
+`pr.md`, listing the parts). Each part's commits are kept first as
+`parts.<n>.range`, `<from>..<tip>`: the review's cut reads which part changed
+what. Where the feature's branch took commits since the parts left it — a
+feature whose first parts were merged there under the scheme before
+(`parts.<n>.merged`) — it is merged into the last part (`parts_merge_in`: a
+plain merge, else the sync session with `SYNC_FROM` the feature's branch), and
+`blocks.base` keeps where it stood, so the review reads from there and not
+from main: what those parts' reviews read is not read again. `parts_reset_steps
+… pr review` clears such a part's old pull request from the state. A run cut off
+half-way finds `parts_joining` true and comes back (`run_step`). `sclaude
+done` deletes the parts' branches with the feature's (`parts_branches`).
 
 **Ending early** (`cmd_parts <slug> stop`, `sclaude parts <name> stop`): only
 while the parts are built, with at least one part built. `parts.dropped` names
 the first part left out (the count stays the plan's; `parts_last` is the one
-before it, and the reviews and `parts_check` stop there); the tree goes onto
+before it, and the join takes it as the last); the tree goes onto
 the last part kept, and step 2 checks the whole there; its session
 (`<if:parts-dropped>` in `code.md`) strikes the left-out criteria, files them
 as an issue and takes them off the issue's list. Once the whole is accepted,
 leaving a part out is a replan's.
 
-**A run cut off between a part's merge and the next part** — a sync with a
-conflict, a fast-forward refused, Ctrl-C — leaves `parts.<n>.merged` set with
-the part still current; the next `run_step` goes on from there
-(`parts_advance … merged`) rather than into the merged part's review, and
-records the merge once.
-
 **The history names the part.** For a feature built in parts every row
 `history_add` and `session_runs` write carries `part` — the part's number
-while it is built or reviewed, `whole` while the whole is checked and after
-the last part is in — with `part_branch` and `part_pr` while a part is at work
-(`parts_about`, `state_file.part_about`), and each new entry of
-`steps.<step>.runs` its `part`; the played history (`_part_of`, `_parts_way`)
-and the costs place a row by it: each part one pass of the parts map, its
-build and later its review, the whole on the last part's pass.
+while it is built, `whole` while the whole is checked and after the parts
+are joined — with `part_branch` while a part is at work (`parts_about`,
+`state_file.part_about`), and each new entry of `steps.<step>.runs` its
+`part`; the played history (`_part_of`, `_parts_way`) and the costs place a
+row by it: each part one pass of the parts map, the whole and the join on the
+last part's pass; the feature's pull request and review on the detailed map.
+The rows of a part's own pull request and review, from before 2026-11, play
+on the detailed map too.
+
+## Review blocks
+
+A pull request too big for one review is read in blocks
+(`sclaude/lib/review/review_blocks.sh`, `review_blocks.py`). Past a few
+thousand changed lines a review pass reads part of the diff and calls the rest
+clean — one of ~9,700 lines was covered a third — so step 4 cuts such a pull
+request once, as it starts, and reads the blocks one after another. It is
+about size, not parts: a big feature built in one go is cut too, and a split
+one whose diff is small is read whole.
+
+**The cut** (`blocks_ensure`, from the review gate before the mode is
+decided): nothing while `blocks.total` is set (0 when the pull request is
+read whole) or the project has no review; read whole at or under
+`reviewBlocks.from` changed lines (5000; `size` in `review_blocks.py`, which
+leaves generated files out — lock files, snapshots, files marked
+`@generated`). Past it a headless, read-only session (`blocks_cut_session`,
+the review's model) is handed the changed files, their sizes, whether a tool
+wrote them and which parts changed them, and the plan, and answers with the
+cut's JSON (`take` reads it from around a fence): each block a group of the
+plan's criteria with the files that carry them — by behaviour, not by layer,
+since a rule's bugs are where the database, the server and the screen meet;
+tests with their code; manuals last; `rules` for criteria every behaviour
+follows (permissions, errors, notifications). `validate` checks every changed
+file in exactly one block, every criterion in one block or rule, no block
+past `reviewBlocks.size` changed lines (3000) unless it is one file; a second
+try is told what the first got wrong. Two refusals fall back to `draft`, the
+parts as blocks — each file owned by the part whose range changed most of it,
+each criterion by its tag — and, for a feature not built in parts, to a single
+read. Fewer than two blocks is a single read. The cut is
+`review-blocks.json`; the state keeps `blocks.total` (the blocks and the
+seams), `blocks.current` and `blocks.base`. The person is told the blocks in
+the topic and the terminal, and the review does not wait for them. The pull
+request takes the `no-review` label (`blocks.label_before` keeps whether
+GitHub said it carried one already: the seams leave on only a label that
+plainly was there — one nobody could tell about comes off, a review too many
+being better than none): while `review-blocks.json` is there
+`project_review_mode` and `review_mode` in `pr_context.py` answer `local` over
+a GitHub answer, as a review in Actions reads the whole and cannot be held
+to a block — and, under `github` or under `github-local` with no move here
+(a move for Actions minutes or a runner keeps its own rule), `in_blocks` and
+`project_review_in_blocks` keep the project's CI in the verdict, as for a
+review moved here for Claude's limit. `blocks.pr` names the first pull request
+seen since the node was emptied, decided or not: it owns the cut and the base
+the join left, and another one — after a merged one was reopened — empties
+the node, the cut on disk with it, and is decided afresh.
+
+**A block's first read** (`local_review_run`, `blocks_scope`): its criteria
+quoted from the plan, the rules, its own files to read whole at HEAD with
+`git diff <base>..<head> -- <files>`, its contracts, and the other blocks by
+name — opened only to follow its criteria end to end or check a contract. A
+changed file no block owns (a fix of an earlier block added it) goes to the
+block read now. The journal tags every run with `block` and `read`
+(`SCLAUDE_REVIEW_BLOCK`, `SCLAUDE_REVIEW_READ`, `tag` in `local_review.py`):
+`first` asks whether the block's first read is still to come, `round` and
+`cached` count the block's runs, and `since` stays the pull request's last
+head. **Its rounds** read the new commits across the whole pull request, with
+the closed blocks' files they touched and the criteria each answers for
+(`blocks_touched`): a fix made for one block may break another's rule, and
+the diff alone does not say which.
+
+**Closing a block** (`blocks_next`, from `after_step`): a review step that
+closed with nothing open closes the block instead while it is not the last —
+the head kept in the cut's `closed`, step 4's record begun again with its
+conversations kept and the old one under `blocks.<k>`, so the block's rounds,
+its `[s]` and the `[g]` ceiling count afresh — and step 4 runs again on the
+next block. The last block is **the seams** (`seams` in `review_blocks.py`):
+the behaviours together, what changed in each closed block's files since it
+closed, the rules across the feature, the criteria against the whole. After
+it the cut is taken off — the review goes back to where the project runs it,
+for a return from QA, the `no-review` label off again where that is GitHub —
+and step 4 closes as any other.
+`step_label` says `4/7 review · block 2/5`; `review.md` tells the fixing
+session which block it is in (`<if:in-blocks>`, `<block>`, `<blocks>`,
+`<block-title>`).
 
 ## Preview and production
 

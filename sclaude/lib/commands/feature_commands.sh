@@ -30,14 +30,12 @@ cmd_sync() {
   # sync_gate takes back a hand-off for the merge when the sync pushes code
   # nobody has checked, from here as from the run.
   pr="$(state_get "$wt/.sclaude/local/feature/state.json" pr 2>/dev/null || true)"
-  # A feature built in parts takes main through its common branch, between
-  # the parts' reviews (parts_advance), and a part takes it from there
-  # (parts_take_common): main merged into a part's branch here would read as
-  # the part's own change in its pull request — and a sync of the part's
-  # left unfinished is carried on by the run, with what it merges.
+  # A feature still built in parts takes main once its parts are one
+  # branch (parts_join): main merged into a part's branch here would read as
+  # that part's work in the review's cut and the part's demo.
   if declare -F parts_open >/dev/null && parts_open "$wt/.sclaude/local/feature/state.json"; then
-    info "Feature '$slug' is built in parts: main reaches its parts through $(parts_umbrella "$wt/.sclaude/local/feature/state.json"),"
-    info "  between the parts' reviews. Go on with: $SELF $slug"
+    info "Feature '$slug' is built in parts: main comes in once they are one branch, after your Accept."
+    info "  Go on with: $SELF $slug"
     return 0
   fi
 

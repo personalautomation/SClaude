@@ -178,21 +178,32 @@ local_review_run() {
     warn "  ${head:0:7} is not the head of PR #$pr: the local review posts on what the pull request carries. Push, then run $SELF again." >&2
     return 1
   fi
+  # A pull request read in blocks (review_blocks.sh): the journal counts
+  # the block's runs apart, and its first read reads its files whole.
+  local -x SCLAUDE_REVIEW_BLOCK="" SCLAUDE_REVIEW_READ=""
+  local block="" first=""
+  if declare -F blocks_active >/dev/null && blocks_active "$wt"; then
+    block="$(blocks_now "$wt")"
+    SCLAUDE_REVIEW_BLOCK="$block"
+    python3 "$LIB/review/local_review.py" first "$journal" "$head" "$pr" 2>/dev/null && first=1
+    SCLAUDE_REVIEW_READ="${first:+first}"
+  fi
   if python3 "$LIB/review/local_review.py" cached "$journal" "$head" "$pr" 2>/dev/null; then
     python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null || return 1
     return 0
   fi
-  # What the pull request goes into: main, or for a part of a feature built in
-  # parts the feature's common branch (parts_base), where the earlier parts
-  # are — read against main, a part's review would read them all again.
-  local into=main
-  declare -F parts_base >/dev/null && into="$(parts_base "$wt/.sclaude/local/feature/state.json")"
   # From this pull request's last head reviewed — or, when this head was left
   # with more to read (a capped pass whose follow-up never ran), over the same
   # range again.
   last="$(python3 "$LIB/review/local_review.py" since "$journal" "$head" "$pr" 2>/dev/null || true)"
-  local seams="" merges=""
-  if [[ -n "$last" && "$last" != "$head" ]] && git -C "$wt" merge-base --is-ancestor "$last" "$head" 2>/dev/null; then
+  local merges=""
+  if [[ -n "$first" ]]; then
+    # A block's first read: its own files whole, its criteria, its place
+    # among the other blocks — or, the last, the seams.
+    base="$(blocks_base "$wt")"
+    scope="$(blocks_scope "$wt" "$head" 2>>"$(local_review_file "$wt" .log)")"
+    [[ -n "$base" && -n "$scope" ]] || { warn "  The cut of PR #$pr into blocks could not be read: the local review did not run." >&2; return 1; }
+  elif [[ -n "$last" && "$last" != "$head" ]] && git -C "$wt" merge-base --is-ancestor "$last" "$head" 2>/dev/null; then
     base="$last"
     merges="$(git -C "$wt" rev-list --merges "$last..$head" 2>/dev/null | tr '\n' ' ')"
     if [[ -z "${merges// /}" ]]; then
@@ -204,23 +215,22 @@ local_review_run() {
       # range's diff, which carries everything the merges brought.
       scope="the commits since the last review that were made on this branch, each read whole: \`git log --first-parent --no-merges -p $base..$head\`; and, for each merge in that range (${merges% }), only how it resolved its conflicts: \`git show --remerge-diff <merge>\` (empty when it had none). Not \`git diff $base..$head\`: the merges brought code from other branches, reviewed there"
     fi
+    # A round's fixes read across the whole pull request, with the blocks
+    # already read whose files they changed.
+    [[ -n "$block" ]] && scope+="$(blocks_touched "$wt" "$base" "$head")"
   else
-    base="$(git -C "$wt" merge-base "origin/$into" "$head" 2>/dev/null)" || return 1
+    # From where the branch left main — or, for a feature whose first parts
+    # were reviewed in pull requests of their own, from where they left it
+    # (blocks_base): what was reviewed there is not read again.
+    if declare -F blocks_base >/dev/null; then base="$(blocks_base "$wt")"
+    else base="$(git -C "$wt" merge-base origin/main "$head" 2>/dev/null)"; fi
+    [[ -n "$base" ]] || return 1
     scope="the whole pull request: \`git diff $base..$head\`"
-    # The feature's own pull request after its parts, read for the first
-    # time: every line in it was reviewed in a part's pull request, so this
-    # pass reads what none of them could see.
-    local pstate="$wt/.sclaude/local/feature/state.json"
-    if declare -F parts_split >/dev/null && parts_split "$pstate" && ! parts_open "$pstate"; then
-      seams=1
-      scope="the seams between the parts this pull request carries, in \`git diff $base..$head\`. Each part was reviewed on its own in a pull request merged into this branch (\`git log --first-parent $base..$head\` lists them), so do not look for every bug again: look for what no single part's review could see — a contract one part promises and another relies on, the same thing built twice, an error or permission handled in one part and not another, manuals, migrations, tests or settings out of step between the parts"
-    fi
   fi
   # Once the person said the search is over (review_enough), a head is only
   # checked: which open findings its commits fixed, nothing new looked for.
   local verify=""
   [[ -n "$(review_enough "$wt")" ]] && verify=1
-  [[ -z "$seams$verify" ]] && scope+="$(local_review_parts_scope "$wt" "$head")"
 
   command -v claude >/dev/null 2>&1 || { warn "  No claude on this machine: the local review did not run." >&2; return 1; }
   # The headings are printed past info: a line of info that is not indented
@@ -235,15 +245,11 @@ local_review_run() {
     printf '%s\n' "${BOLD}── Checking the fixes · PR #${pr:-?} · $LOCAL_REVIEW_MODEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
     info "  You ended the search for new findings: this only resolves what the commits fixed." >&2
   else
-    printf '%s\n' "${BOLD}── Review pass · PR #${pr:-?} · $LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
+    printf '%s\n' "${BOLD}── Review pass · PR #${pr:-?}${block:+ · block $block/$(blocks_total "$wt")} · $LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
   fi
 
   local earlier began new more cap pass=1 round
   round="$(python3 "$LIB/review/local_review.py" round "$journal" "$head" "$pr" 2>/dev/null || echo 1)"
-  # One pass over the seams: the search is narrow, and a second would only
-  # widen it back to the whole diff.
-  local LOCAL_REVIEW_PASSES="$LOCAL_REVIEW_PASSES"
-  [[ -n "$seams" ]] && LOCAL_REVIEW_PASSES=1
   answer="$(local_review_file "$wt" -answer.md)"
   # The lines above are indented, and the topic leaves those out: it hears
   # of the review by these two, here and at the end.
@@ -759,28 +765,6 @@ local_review_done() {
   head="$(git -C "$1" rev-parse HEAD 2>/dev/null)" || return 1
   python3 "$LIB/review/local_review.py" cached "$(review_journal "$1")" "$head" \
     "$(state_get "$1/.sclaude/local/feature/state.json" pr 2>/dev/null || true)" 2>/dev/null
-}
-
-# What the scope of a part's review pass adds, for the pass that reads no
-# prompt of the step — the same rules as review.md's in-parts and
-# parts-later. The notes an earlier part's review left for it in the plan —
-# all written before its review began, a part's review following the last
-# one's end, so every pass reads the same, and what one found is in the next
-# one's earlier findings; and for a part that is not the last, the later
-# parts' branches —
-# named so that a look past the diff sees the feature as it is meant to be,
-# and kept off the findings, which stay this part's own. Nothing outside a
-# parts' review.
-#
-#   local_review_parts_scope <wt> <head>
-local_review_parts_scope() {
-  local wt="$1" head="$2" pstate="$1/.sclaude/local/feature/state.json" PARTS_TIP PARTS_LATER_WORDS
-  declare -F parts_reviewing >/dev/null && parts_reviewing "$pstate" || return 0
-  printf '. This pull request is part %s of a feature built in parts. The feature as it is meant to be is in .sclaude/local/feature/plan.md: its Parts, its criteria, and its Agreed during review section' "$(parts_now "$pstate")"
-  printf '%s' ", where a note that opens with \`For part <n>:\` tells part n what an earlier part's review changed — this part's code not in step with a note for it is a finding"
-  parts_later_set "$wt" "$pstate"
-  [[ -n "$PARTS_TIP" ]] || return 0
-  printf '%s' ". The later parts are already written — $PARTS_LATER_WORDS. They are stacked: $PARTS_TIP carries every one of them, so a file read there is the file as the last part to touch it leaves it, and what one part alone added is \`git diff <its previous part's branch>...<its branch>\` (three dots). The checked-out tree shows every file outside this diff as it stands before the later parts, not as the feature will have it: when you read such a file, or need to know what relies on this part's code, read it on $PARTS_TIP too (\`git show $PARTS_TIP:<path>\`, \`git diff $head $PARTS_TIP -- <path>\`) — never as code under review: the later parts were written on this part as it was before its review and may lag behind it; where they contradict this part or the plan, this part and the plan win. Every finding is about this part's diff alone: a later part's code that disagrees with this part is not a finding here"
 }
 
 # What the headless check is told once the search for new findings is over:

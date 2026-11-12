@@ -715,7 +715,7 @@ sync_with_main() {
   echo ""
   warn "The branch still does not merge cleanly with $SYNC_FROM, or is not pushed."
   if [[ -n "$from_parts" ]]; then
-    info "  The part's pull request waits for it. Carry on with: $SELF $slug"
+    info "  The parts wait for it to become one branch. Carry on with: $SELF $slug"
   elif [[ -n "$reviewed" ]]; then
     info "  The preview, QA and the merge wait for it. Carry on with: $SELF $slug"
   else

@@ -20,11 +20,16 @@
 #   local_review.py round <journal> <head> [pr]   which round reviewing <head> is: one
 #                                                 more than the other heads reviewed
 #
-# With [pr], only that pull request's runs count. A feature built in parts
-# (parts.sh) has a pull request for each part and one for the whole, in one
-# journal: a part's review starting from the last head the part before it
-# reviewed would read that part again, and number its rounds on from it.
-# A row from before the journal kept the number counts for every one.
+#   local_review.py first <journal> <head> <pr>   exit 0 when the review block's first
+#                                                 read is still to come
+#
+# With [pr], only that pull request's runs count: one journal may hold
+# several, a pull request closed and another opened, or a feature's parts'
+# from before 2026-11. While a pull request is read in review blocks
+# (review_blocks.sh) SCLAUDE_REVIEW_BLOCK names the block: `cached`, `round`
+# and `first` count its runs alone, and a run recorded then carries `block`
+# and `read` (tag); `since` stays the pull request's own. A row from before
+# the journal kept the number counts for every one.
 #   local_review.py prompt <cwd> <pr> <repo> <journal>  the part of the review's prompt
 #                                                 about earlier findings
 #   local_review.py record <cwd> <pr> <repo> <answer> <base> <head> <seconds> <journal> [cap] [verify]
@@ -364,6 +369,7 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     # issue's summary lists it among the feature's sessions.
     if os.environ.get("SCLAUDE_REVIEW_SESSION"):
         row["session"] = os.environ["SCLAUDE_REVIEW_SESSION"]
+    tag(row)
     with open(journal, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     after = threads(cwd, pr, repo)
@@ -372,6 +378,19 @@ def record(cwd, pr, repo, answer_path, base, head, seconds, journal, cap="0", mo
     still = open_count(cwd, after if after is not None else before)
     print("%d %d %d" % (still + waiting + len(lost) + talked, posted, 1 if row["more"] else 0))
     return 0
+
+
+def tag(row):
+    """The review block the run read (SCLAUDE_REVIEW_BLOCK), and whether it
+    was the block's first read of its files (SCLAUDE_REVIEW_READ=first) or a
+    round's new commits — local_review.sh sets both while blocks are read."""
+    if os.environ.get("SCLAUDE_REVIEW_BLOCK"):
+        row["block"] = os.environ["SCLAUDE_REVIEW_BLOCK"]
+        row["read"] = os.environ.get("SCLAUDE_REVIEW_READ") or "delta"
+
+
+def block_now():
+    return os.environ.get("SCLAUDE_REVIEW_BLOCK") or None
 
 
 def spent(journal, base, head, seconds, session, pr=""):
@@ -386,18 +405,20 @@ def spent(journal, base, head, seconds, session, pr=""):
         row["pr"] = str(pr)
     if session:
         row["session"] = session
+    tag(row)
     with open(journal, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     return 0
 
 
-def rows(journal, with_spent=False, pr=None, local_only=False):
+def rows(journal, with_spent=False, pr=None, local_only=False, block=None):
     """The journal's runs, oldest first: each a dict with at least `at` (the
     run's start, ISO) and `head`; with <with_spent>, the passes journaled by
     spent() too; with <pr>, that pull request's alone (and the rows from
     before the journal named one); with <local_only>, the passes here alone,
-    each a conversation to price. The one reader of the file; the report
-    reads it through here."""
+    each a conversation to price; with <block>, that review block's alone
+    (review_blocks.py). The one reader of the file; the report reads it
+    through here."""
     if str(pr) in ("", "null", "None"):
         pr = None
     out = []
@@ -411,7 +432,8 @@ def rows(journal, with_spent=False, pr=None, local_only=False):
                 if isinstance(row, dict) and row.get("head") and row.get("at") \
                         and (with_spent or not row.get("spent")) \
                         and (not pr or not row.get("pr") or str(row["pr"]) == str(pr)) \
-                        and not (local_only and row.get("source") == "github"):
+                        and not (local_only and row.get("source") == "github") \
+                        and (not block or str(row.get("block") or "") == str(block)):
                     out.append(row)
     except OSError:
         pass
@@ -459,8 +481,14 @@ def main(argv):
     if cmd == "cached" and len(args) in (2, 3):
         # Reviewed, and not left with more to read (a capped pass that the
         # next one never followed, an interrupted review).
-        last = rows(args[0], pr=args[2] if len(args) > 2 else None)
+        last = rows(args[0], pr=args[2] if len(args) > 2 else None, block=block_now())
         return 0 if last and last[-1]["head"] == args[1] and not last[-1].get("more") else 1
+    if cmd == "first" and len(args) == 3:
+        # The block's first read is still to come: none of its runs yet, or
+        # the last a first read of this head that found the cap.
+        mine = rows(args[0], pr=args[2], block=block_now())
+        return 0 if not mine or (mine[-1]["head"] == args[1] and mine[-1].get("more")
+                                 and mine[-1].get("read") == "first") else 1
     if cmd == "base" and len(args) in (1, 2):
         last = rows(args[0], pr=args[1] if len(args) > 1 else None)
         print(last[-1]["head"] if last else "")
@@ -479,7 +507,7 @@ def main(argv):
     if cmd == "round" and len(args) in (2, 3):
         # A round is a head: the passes over one head, and a capped head read
         # again later, are the same round.
-        mine = rows(args[0], pr=args[2] if len(args) > 2 else None)
+        mine = rows(args[0], pr=args[2] if len(args) > 2 else None, block=block_now())
         print(len({r["head"] for r in mine if r["head"] != args[1]}) + 1)
         return 0
     if cmd == "prompt" and len(args) == 4:

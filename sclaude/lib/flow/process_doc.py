@@ -301,9 +301,9 @@ the sync session.</p>
 <div class="card">%s</div>
 </section><section style="page:s7" id="map-parts">
 <h2>%s</h2>
-<p class="muted">A feature split at step 1 stays one issue, one plan and one QA, and builds its parts inside
-step 2: a pull request for each into the feature's branch, reviewed alone, merged there. Main gets the whole
-feature once, through its own pull request.</p>
+<p class="muted">A feature split at step 1 stays one issue, one plan, one pull request and one QA, and builds
+its parts inside step 2, each shown as it is built. Accepted, the parts become one branch, and the feature goes
+on as any other: one pull request into main, reviewed — at that size, in review blocks.</p>
 <div class="card">%s</div>
 </section><section style="page:s8" id="commands">
 <h2>%s <button type="button" class="pin pin-head screen-only">📌 Pin</button></h2>

@@ -1,16 +1,7 @@
 <if:not-in-parts>The feature "<feature>" is done and I've accepted it. Close it out as a pull request.
-</if:not-in-parts><if:in-parts>The feature "<feature>" is built in parts, and I've accepted the whole. Its parts are now reviewed one by one, in the order they were built: close out part <part> of <parts> — <part-title> — as a pull request into the feature's branch, `<base>`.
+</if:not-in-parts><if:parts-done>I've accepted the whole of the feature "<feature>", built in <parts> parts, and the parts are now one branch, `<umbrella>`.
 
-**This is one part of a feature built in parts.** Its pull request goes into `<base>`, where the earlier parts are merged after their reviews, not into main: it is reviewed there alone, and merged there by the orchestrator once its review closes. The orchestrator has merged `<base>` into this branch, so the diff is this part's alone. The feature goes to main later, through a pull request of its own, with every part in it. So, on top of what follows:
-
-- **`gh pr create --base <base>`**, and the title ends with ` (part <part>/<parts>)`.
-- The description is this part's: what it builds, where its line with the next part runs, what it rests on from the parts before it. The criteria section holds only the criteria below — this part's.<if:issue>
-- **The body ends with `Refs #<issue>`, not a closing keyword:** the issue closes with the feature's own pull request, once every part is in and shipped.</if:issue>
-- Leave the manuals' pages for the parts after this one: describe what this part makes true.
-
-</if:in-parts><if:parts-done>I've accepted the whole of the feature "<feature>", and every part of it is reviewed and merged into `<umbrella>`. Close it out as the feature's pull request into main.
-
-**This pull request carries the parts, each already reviewed in its own pull request into `<umbrella>`.** Its description is the feature's: what it does as a whole, then a section **Built in parts** that lists each part's pull request with a line on what it built (`gh pr list --base <umbrella> --state merged --json number,title,url`). The review of this pull request reads the seams between the parts and what changed on `<umbrella>` after them; it does not read every line again.
+**This pull request carries every part.** Its description is the feature's: what it does as a whole, then a section **Built in parts** with a line for each part on what it built (the plan's `## Parts`). The review reads the finished feature, not part by part.
 
 </if:parts-done>
 Work through the `/pr` skill — invoke it. It differs from its usual course because the orchestrator has already done part of the work:

@@ -82,57 +82,39 @@ render_prompt() {
   [[ "$SCLAUDE_V_REVIEW_MODE" != "github" ]] && SCLAUDE_V_NO_REVIEW=1
   [[ "$SCLAUDE_V_REVIEW_MODE" == "local" ]] && SCLAUDE_V_REVIEW_LOCAL=1
   # <if:actions-off>: the Actions checks are out of the verdict — all but a
-  # feature moved here for Claude's limit alone, whose CI still runs (pr_view).
+  # feature moved here for Claude's limit alone, or read in review blocks,
+  # whose CI still runs (pr_view, in_blocks).
   [[ "$SCLAUDE_V_REVIEW_LOCAL" == 1 && "$(cut -f1 "$wt/.sclaude/local/feature/review-fallback" 2>/dev/null)" != quota ]] \
-    && SCLAUDE_V_ACTIONS_OFF=1
+    && ! project_review_in_blocks "$wt" && SCLAUDE_V_ACTIONS_OFF=1
   # Whether step 2 records a demo (project_demo_mode): <if:demo> in code.md.
   local -x SCLAUDE_V_DEMO=""
   [[ "$(project_demo_mode "$wt")" == on ]] && SCLAUDE_V_DEMO=1
   # A feature built in parts (parts.sh). <if:in-parts> while a part is built
-  # (step 2) and while its pull request is opened and reviewed (steps 3 and
-  # 4): <part> of <parts>, its branch built on <part-base> — the part before
-  # it, the common branch <umbrella> for part 1 — and going into <umbrella>,
-  # which is then <base>, what its pull request and review are read against.
-  # <if:parts-built> once every part is built: step 2 checks the whole on the
-  # last part's branch. <if:parts-done> once every part is reviewed and in
-  # <umbrella>: step 3 opens its pull request into main, step 4 reads the
-  # seams. <base> is main for every other feature. <if:asks-accept>: the
+  # (step 2): <part> of <parts>, its branch built on <part-base> — the part
+  # before it, the feature's branch <umbrella> for part 1. <if:parts-built>
+  # once every part is built: step 2 checks the whole on the last part's
+  # branch. <if:parts-done> once the parts are one branch (parts_join): step
+  # 3 opens the feature's pull request into main. <if:asks-accept>: the
   # session ends on the Accept question — every step 2 but a part's, unless
   # the project asks for a look at each part (`partAccept: each`), which also
   # brings back the part's demo. <if:part-alone> is the other side: a part's
-  # session that ends on its own marker. <if:part-again>: step 2 again on a
-  # part whose pull request is reviewed. <if:parts-later> while a part that
-  # is not the last is reviewed, for review.md and for step 2 again:
-  # <later-parts> names each later part's branch, <parts-tip> the last one's,
-  # which carries them all (parts_later_set).
-  local -x SCLAUDE_V_PARTS_LATER="" SCLAUDE_V_PARTS_TIP="" SCLAUDE_V_LATER_PARTS=""
+  # session that ends on its own marker. <base> is main.
   local -x SCLAUDE_V_BASE="main" SCLAUDE_V_PART="" SCLAUDE_V_PARTS="" SCLAUDE_V_PART_TITLE=""
   local -x SCLAUDE_V_UMBRELLA="" SCLAUDE_V_IN_PARTS="" SCLAUDE_V_PARTS_DONE="" SCLAUDE_V_NOT_IN_PARTS=1
   local -x SCLAUDE_V_PARTS_DROPPED="" SCLAUDE_V_PARTS_BUILT="" SCLAUDE_V_PART_BASE="" SCLAUDE_V_ASKS_ACCEPT=1
-  local -x SCLAUDE_V_PART_ALONE="" SCLAUDE_V_PART_AGAIN=""
+  local -x SCLAUDE_V_PART_ALONE=""
   if [[ -n "$wt" && -f "$wt/.sclaude/local/feature/state.json" ]] \
      && declare -F parts_split >/dev/null && parts_split "$wt/.sclaude/local/feature/state.json"; then
     local pstate="$wt/.sclaude/local/feature/state.json"
     SCLAUDE_V_UMBRELLA="$(parts_umbrella "$pstate")"
     SCLAUDE_V_PARTS="$(parts_last "$pstate")"
-    if parts_building "$pstate" || parts_reviewing "$pstate"; then
+    if parts_building "$pstate"; then
       SCLAUDE_V_IN_PARTS=1 SCLAUDE_V_NOT_IN_PARTS=""
       SCLAUDE_V_PART="$(parts_now "$pstate")"
       SCLAUDE_V_PART_TITLE="$(state_get "$pstate" "parts.$SCLAUDE_V_PART.title" 2>/dev/null || true)"
       SCLAUDE_V_PART_BASE="$(parts_below "$pstate" "$SCLAUDE_V_PART")"
       SCLAUDE_V_BASE="$SCLAUDE_V_UMBRELLA"
-      # Step 2 again while a part is reviewed (a replan, a way back): the
-      # part's own work, not its build — <if:part-again> in code.md.
-      if [[ "$step" == code ]] && parts_reviewing "$pstate"; then
-        SCLAUDE_V_IN_PARTS="" SCLAUDE_V_PART_AGAIN=1
-      fi
-      if [[ "$step" == review || -n "$SCLAUDE_V_PART_AGAIN" ]]; then
-        local PARTS_TIP PARTS_LATER_WORDS
-        parts_later_set "$wt" "$pstate"
-        SCLAUDE_V_PARTS_TIP="$PARTS_TIP" SCLAUDE_V_LATER_PARTS="$PARTS_LATER_WORDS"
-        [[ -n "$PARTS_TIP" ]] && SCLAUDE_V_PARTS_LATER=1
-      fi
-      if parts_building "$pstate" && [[ "$(project_part_accept "$wt")" != each ]]; then
+      if [[ "$(project_part_accept "$wt")" != each ]]; then
         SCLAUDE_V_ASKS_ACCEPT="" SCLAUDE_V_DEMO="" SCLAUDE_V_PART_ALONE=1
       fi
     else
@@ -147,6 +129,16 @@ render_prompt() {
         [[ "$dropped" == "$(state_get "$pstate" parts.total)" ]] && SCLAUDE_V_PARTS_DROPPED="$dropped"
       fi
     fi
+  fi
+  # A pull request read in review blocks (review_blocks.sh), for review.md:
+  # <if:in-blocks> while one is read, <block> of <blocks> — the last one the
+  # seams — and <block-title>; the cut is review-blocks.json.
+  local -x SCLAUDE_V_IN_BLOCKS="" SCLAUDE_V_BLOCK="" SCLAUDE_V_BLOCKS="" SCLAUDE_V_BLOCK_TITLE=""
+  if [[ "$step" == review && -n "$wt" ]] && declare -F blocks_active >/dev/null && blocks_active "$wt"; then
+    SCLAUDE_V_IN_BLOCKS=1
+    SCLAUDE_V_BLOCK="$(blocks_now "$wt")" SCLAUDE_V_BLOCKS="$(blocks_total "$wt")"
+    SCLAUDE_V_BLOCK_TITLE="$(python3 -c 'import json,sys; b=json.load(open(sys.argv[1]))["blocks"]; k=int(sys.argv[2]); print(b[k-1]["title"] if k <= len(b) else "the seams between the blocks")' \
+      "$(blocks_file "$wt")" "$SCLAUDE_V_BLOCK" 2>/dev/null || echo "block $SCLAUDE_V_BLOCK")"
   fi
   local -x SCLAUDE_B_ISSUE_CONTEXT=""
   local -x SCLAUDE_B_MANUAL_TOC=""
@@ -206,21 +198,6 @@ sys.stdout.write(feature_in_history(sys.argv[2], sys.argv[3]))' "$LIB" "$wt" "$S
     review)
       [[ -n "$pr" ]] && SCLAUDE_B_PR_CONTEXT="$(
         python3 "$LIB/review/pr_context.py" "$wt" "$pr" "$(gh_repo)" 2>/dev/null || true)"
-      # The feature's own pull request after its parts: what is still open on
-      # the parts' pull requests, which no session reads any more.
-      if [[ -n "$SCLAUDE_V_PARTS_DONE" ]]; then
-        local part_prs=() pn ppr
-        local last_part="$SCLAUDE_V_PARTS"   # the last part built (parts_last)
-        for (( pn = 1; pn <= last_part; pn++ )); do
-          ppr="$(state_get "$wt/.sclaude/local/feature/state.json" "parts.$pn.pr" 2>/dev/null || true)"
-          [[ -n "$ppr" && "$ppr" != null ]] && part_prs+=("$ppr")
-        done
-        if [[ ${#part_prs[@]} -gt 0 ]]; then
-          local parts_open_block
-          parts_open_block="$(python3 "$LIB/review/pr_context.py" --parts-threads "$wt" "$(gh_repo)" "${part_prs[@]}" 2>/dev/null || true)"
-          [[ -n "$parts_open_block" ]] && SCLAUDE_B_PR_CONTEXT+=$'\n\n'"$parts_open_block"
-        fi
-      fi
       # The review a production rollback sent the cycle back to. No gate opens
       # it, so nobody else fills the block: without this the session got the
       # ordinary review prompt about a pull request it was told was open, with

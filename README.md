@@ -290,6 +290,11 @@ no direct pushes.
   minutes, or GitHub's runner cannot reach the network, the project
   chooses: stop and say so, or (`github-local`) carry on with the same
   review on this machine.
+- **A big pull request is read in blocks.** Past 5,000 changed lines a
+  review reads part of the diff and calls the rest clean, so sclaude cuts
+  it by behaviour — each rule with the code that carries it, from the
+  database to the screen — reads the blocks one by one, then the seams
+  between them.
 
 The whole list of what closes each step is in
 [How the cycle is kept in line](docs/cycle.md).

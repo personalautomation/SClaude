@@ -121,6 +121,9 @@ review_close_gate() {
   # On the way in the pass runs whatever the pull request shows — the session
   # it opens starts on the findings — except once the person ended the
   # search: what is open then goes to the session as it is.
+  # A pull request too big for one review is cut into blocks first, once
+  # (review_blocks.sh): read in blocks, it is read here.
+  declare -F blocks_ensure >/dev/null && blocks_ensure "$wt" "$pr"
   local local_due=0
   [[ "$(project_review_mode "$wt")" == "local" ]] && local_due=1
   if [[ -n "$entry" && -n "${REVIEW_KNOWN_COUNT:-}" ]]; then

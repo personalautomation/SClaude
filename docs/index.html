@@ -644,6 +644,7 @@ td a.src{font-size:12px;color:var(--muted);white-space:nowrap}
         <li><strong>A step closes on evidence</strong> — an approved plan, your yes and green tests, a real pull request, a review with nothing left open.</li>
         <li><strong>Tests run at up to four points</strong>: locally, on the preview, on production, and again after a rollback.</li>
         <li><strong>A review that cannot run is not waited on blindly</strong> — stopped on Claude quota on GitHub, it is rerun after the reset; out of Actions minutes, on a runner without network, or on a limit that holds, it stops, or carries on on this machine if the project says so.</li>
+        <li><strong>A big pull request is read in blocks</strong> — past 5,000 changed lines a review reads part of the diff and calls the rest clean, so SClaude cuts it by behaviour, each rule with the code that carries it, and reads the blocks one by one, then the seams between them.</li>
         <li><strong>Review is an agent's, the merge is a person's</strong> — Anthropic's own split (<a class="src" href="https://claude.com/blog/code-review" target="_blank" rel="noopener">Anthropic, Claude Code Review</a>). The decision arrives prepared: criteria as QA left them, checks, every finding and what was done about it.</li>
       </ul>
     </div>

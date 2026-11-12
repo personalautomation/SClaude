@@ -155,7 +155,26 @@ def verdict_rollup(cwd, rollup):
     rollup = superseded(rollup)
     if review_mode(cwd) != "local":
         return rollup
-    return without_review(rollup) if moved_for(cwd) == "quota" else without_actions(rollup)
+    # Read here for Claude's limit alone, or because the pull request is read
+    # in review blocks: the project's CI still runs on GitHub and counts.
+    if moved_for(cwd) == "quota" or in_blocks(cwd):
+        return without_review(rollup)
+    return without_actions(rollup)
+
+
+def in_blocks(cwd):
+    """Whether the review is here only because the pull request is read in
+    review blocks (BLOCKS_FILE): `github`, or `github-local` with no move
+    here (FALLBACK_FILE) — the Actions run, and their CI counts. The same
+    rule as project_review_in_blocks in project.sh."""
+    key = cwd or os.getcwd()
+    if key not in _TOPS:
+        review_mode(cwd)
+    top = _TOPS.get(key, key)
+    setting = _SETTING.get(key)
+    return (os.path.isfile(os.path.join(top, BLOCKS_FILE))
+            and (setting == "github" or (setting == "github-local"
+                                         and not os.path.isfile(os.path.join(top, FALLBACK_FILE)))))
 
 
 _MODES = {}
@@ -165,7 +184,15 @@ _MODES = {}
 # written by review_fallback_set in review_round.sh, read by
 # project_review_mode in project.sh and by review_mode here.
 FALLBACK_FILE = ".sclaude/local/feature/review-fallback"
+# A pull request read in review blocks (review_blocks.py), read here over a
+# github answer: project_review_mode in project.sh reads it the same way, and
+# in_blocks / project_review_in_blocks say when CI still counts.
+BLOCKS_FILE = ".sclaude/local/feature/review-blocks.json"
 _TOPS = {}
+
+
+# The review's word as set, before a move or the blocks: in_blocks reads it.
+_SETTING = {}
 
 
 def moved_for(cwd):
@@ -222,8 +249,11 @@ def review_mode(cwd):
             mode = value if value in ("local", "off", "github-local") else "github"
             break
     _TOPS[key] = top or key
+    _SETTING[key] = mode
     if mode == "github-local":
         mode = "local" if os.path.isfile(os.path.join(top or key, FALLBACK_FILE)) else "github"
+    if mode == "github" and os.path.isfile(os.path.join(top or key, BLOCKS_FILE)):
+        mode = "local"
     _MODES[key] = mode
     return mode
 
@@ -1782,41 +1812,7 @@ def night_yours(cwd, pr, repo):
                if NIGHT_MARK in line.split("\t", 2)[-1])
 
 
-def parts_threads(cwd, repo, prs):
-    """The threads still open on a split feature's parts' pull requests
-    (parts.sh), for the review of the feature's own pull request: a block, or
-    "" when none is open or GitHub cannot be read.
-
-    A part's pull request is merged once its review closes, and a thread
-    somebody opens on it after that reaches no session of its own: the
-    feature's pull request is the last place it can be answered before main.
-    """
-    out = []
-    for pr in prs:
-        try:
-            threads, _ = open_threads(cwd, pr, repo)
-        except Exception:
-            continue
-        for t in threads or []:
-            out.append("- PR #%s · `%s:%s` — %s %s" % (
-                pr, t.get("path"), t.get("line"),
-                headline(((t.get("comments") or [{}])[0] or {}).get("body") or ""),
-                t.get("url") or ""))
-    if not out:
-        return ""
-    return ("#### Threads open on the parts' pull requests\n\n"
-            "Opened or left after the part was merged. Answer each in its own "
-            "thread, and fix it here, on the feature's branch:\n\n" + "\n".join(out))
-
-
 def main():
-    # `--parts-threads <cwd> <repo> <pr>...`: the block of parts_threads.
-    if len(sys.argv) >= 4 and sys.argv[1] == "--parts-threads":
-        try:
-            sys.stdout.write(parts_threads(sys.argv[2], sys.argv[3], sys.argv[4:]))
-        except Exception:
-            pass
-        return 0
     # `--threads <cwd> <pr> <repo> [since]`: "<open> <opened since>", or
     # nothing when it cannot be read. See thread_counts.
     if len(sys.argv) >= 5 and sys.argv[1] == "--threads":

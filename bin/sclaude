@@ -145,7 +145,7 @@ for _module in core/io core/ui core/steps core/state core/project core/environme
                ship/vercel ship/qa ship/merge ship/demo ship/regression ship/regression_gate \
                ship/regression_fix ship/rollback cycle/watch core/picker commands/abandon \
                commands/actions commands/doctor improve/deferred core/terminal improve/retro \
-               core/scratch cycle/no_change review/local_review core/config tree/sync \
+               core/scratch cycle/no_change review/local_review review/review_blocks core/config tree/sync \
                improve/workshop improve/workbench commands/start commands/menu commands/step_commands commands/done \
                commands/feature_commands; do
   # shellcheck source=/dev/null

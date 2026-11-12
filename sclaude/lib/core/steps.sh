@@ -682,15 +682,20 @@ cycle_total() { echo $((${#STEPS[@]} + ${#AFTER_STEPS[@]})); }
 # Without the worktree, or when GitHub does not answer, it is "4/7 done".
 step_label() {
   local total; total="$(cycle_total)"
-  # A feature built in parts (parts.sh) says the part at work, built in
-  # step 2 or reviewed in steps 3 and 4: "2/7 development · part 2/3",
-  # "4/7 review · part 2/3". The whole, checked in step 2, is any step 2.
-  if [[ "$1" != "done" && -n "${2:-}" ]] && declare -F parts_label >/dev/null; then
+  # A feature built in parts (parts.sh) says the part built in step 2:
+  # "2/7 development · part 2/3"; the whole, checked in step 2, is any step
+  # 2. A pull request read in review blocks (review_blocks.sh) says the
+  # block in step 4: "4/7 review · block 2/5".
+  if [[ "$1" == code && -n "${2:-}" ]] && declare -F parts_label >/dev/null; then
     local part; part="$(parts_label "$2/.sclaude/local/feature/state.json" 2>/dev/null)"
-    if [[ -n "$part" && ( "$1" == code || "$1" == pr || "$1" == review ) ]]; then
+    if [[ -n "$part" ]]; then
       echo "$(($(step_index "$1") + 1))/$total $(step_title "$1") · $part"
       return
     fi
+  fi
+  if [[ "$1" == review && -n "${2:-}" ]] && declare -F blocks_active >/dev/null && blocks_active "$2"; then
+    echo "$(($(step_index "$1") + 1))/$total $(step_title "$1") · block $(blocks_now "$2")/$(blocks_total "$2")"
+    return
   fi
   if [[ "$1" != "done" ]]; then
     echo "$(($(step_index "$1") + 1))/$total $(step_title "$1")"

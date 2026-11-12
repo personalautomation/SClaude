@@ -334,9 +334,9 @@ def _parts_building(state):
     return _parts_open(state) and (state.get("parts") or {}).get("built") is not True
 
 
-def _parts_reviewing(state):
-    """A feature built in parts whose whole is accepted: a part's pull
-    request and review (steps 3 and 4)."""
+def _parts_joining(state):
+    """A feature built in parts whose whole is accepted and whose parts are
+    not one branch yet (parts_join)."""
     return _parts_open(state) and (state.get("parts") or {}).get("accepted") is True
 
 
@@ -378,23 +378,16 @@ def _in_step(state, step):
     if _sync_in_step(state):
         return "sync", "a sync with main is open, ahead of the step"
     # A feature built in parts (parts.sh) is in step 2 while its parts are
-    # built, and in steps 3 and 4 for each part's pull request and review once
-    # the whole is accepted. Step 2 over the whole is any feature's step 2.
+    # built, and joins them once the whole is accepted. Step 2 over the whole
+    # is any feature's step 2.
     parts = state.get("parts") or {}
     of = "%s/%s" % (parts.get("current"), _parts_count(parts))
     if _parts_building(state) and step == "code":
         if _running(state, "local"):
             return "reg_local", "part %s: the local regression is running" % of
         return "p_code", "step 2, part %s: development" % of
-    if _parts_reviewing(state) and step in ("pr", "review"):
-        # The part's own review is p_review: review_run is the feature's
-        # step 4, on the detailed map.
-        if step == "review" and _fresh(((state.get("review") or {}).get("local") or {}).get("running")):
-            return "p_review", "part %s: the local review is reading its pull request" % of
-        if step == "review" and _running(state, "local"):
-            return "p_review", "part %s: the local regression is running before its review closes" % of
-        return "p_" + step, "step %s, part %s: %s" % (
-            3 if step == "pr" else 4, of, {"pr": "its pull request", "review": "its review"}[step])
+    if _parts_joining(state):
+        return "p_join", "the parts become one branch"
     if step == "code" and _running(state, "local"):
         return "reg_local", "the local regression is running"
     if step == "code" and _fix_open(state, "local"):

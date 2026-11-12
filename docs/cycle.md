@@ -80,25 +80,28 @@ review, then the merge. These paths count as such in every product:
 One file anywhere else and the branch goes the whole way. A product whose
 `docs/` is built into its site is the case this assumption gets wrong.
 
-A feature too big for one review is built in parts, at the person's word at
-step 1. The parts are built one after another, and each one, once built, is
-shown to the person in a short demo of what it added, recorded before the
-next part starts, so that a remark reaches the next part early. The person
-accepts the whole once — the demo, built from the parts' own, and Accept —
-before any review is spent: a review of code
-the person has not seen is thrown away by the first large remark. Then each
-part has a pull request of its own into the feature's branch, reviewed alone
-in the order the parts were built and merged there; preview, QA and
-production run once, for the whole feature, which reaches main through one
-pull request. Before each part's pull request and merge, sclaude checks that
-nobody changed the parts' pull requests by hand on GitHub — a base, a merge, a
-branch rewritten — and stops if somebody did. A part whose branch does not
-take the feature's branch in without conflicts gets the sync session, which
-merges the feature's branch instead of main and keeps what the earlier parts'
-reviews decided. When the reviews begin, the parts' branches go up to GitHub
-together, in one push: a product's pre-push hook that asks what GitHub
-already carries should count the branches that push sends, or it refuses
-every part while the others are on the laptop only.
+A feature too big to build and show in one go is built in parts, at the
+person's word at step 1. The parts are built one after another, and each one,
+once built, is shown to the person in a short demo of what it added, recorded
+before the next part starts, so that a remark reaches the next part early. The
+person accepts the whole once — the demo, built from the parts' own, and
+Accept — before any review is spent: a review of code the person has not seen
+is thrown away by the first large remark. Then the parts become one branch,
+and the feature goes to main through one pull request, reviewed, previewed,
+tested by QA and shipped once.
+
+A pull request too big for one review is read in review blocks. Past 5,000
+changed lines a review reads part of the diff and calls the rest clean, so
+step 4 cuts it, once, from the finished code: each block a group of the plan's
+criteria with the files that carry them — by behaviour, not by layer, since a
+rule's bugs are where the database, the server and the screen meet — every
+changed file in exactly one block. sclaude checks the cut; a cut that fails
+twice gives way to the parts the feature was built in, or to a single read.
+The blocks are read one after another, each to a clean verdict, every round
+after a block's first read taking in the new commits across the whole pull
+request; a last pass reads the seams between the blocks. While blocks are
+read the review runs on the developer's machine; under a GitHub setting the
+project's CI still counts.
 
 ## Production rollback that refuses to trample somebody else
 
@@ -241,6 +244,9 @@ criteria are the check).
 `demoVoice` takes `on` (the default: the demo's videos are spoken, in English,
 by a model run on the machine's CPU — see [skills/sdemo](tools.md#skillssdemo))
 and `off` (silent videos, the captions alone).
+`reviewBlocks` takes `from`, the changed lines past which step 4 reads a pull
+request in review blocks (5000), and `size`, the lines a block holds at most
+(3000).
 `partAccept` takes `whole` (the default: a feature built in parts is accepted
 once, whole, when every part is built; each part before the last is shown in a
 demo of what it added, which asks nothing) and `each` (every part's

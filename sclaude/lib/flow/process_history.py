@@ -120,7 +120,7 @@ EDGE = "edge"
 # written where it is taken; tests/process.py holds the two to the code.
 RECORDED = ("workshop", "detail", "friction", "regression", "sync", "parts")
 # The parts map is played from the rows parts.sh and the steps write (`parts
-# capture/merged/stop`, the steps' sessions, each with its `part`), not from
+# capture/built/joined/stop`, the steps' sessions, each with its `part`), not from
 # edges: its arrows are what those rows mean, and none is written as one.
 _PARTS_INFERRED = "inferred from the parts' rows (parts.sh, the steps' sessions), not written as an edge"
 UNWRITTEN = {
@@ -443,7 +443,7 @@ def _sync_way(rows, now=None, cut=None):
 # edges written inside a part (code works, works pr, pr pr_check…) are the
 # part's way, not the feature's, and are not played on the detailed map.
 
-PARTS_STEP = {"code": "p_code", "pr": "p_pr", "review": "p_review"}
+PARTS_STEP = {"code": "p_code"}
 # A row's place on another map than its own, set by history for the costs
 # (process_costs._session_place): a part's sessions cost on the parts map.
 ON = "_on"
@@ -453,9 +453,8 @@ WHOLE = "_whole"
 
 def _parts_way(rows, first, on=False, now=None, cut=None):
     """A part's way through the parts map: its build's sittings; for the last
-    part, step 2 over the whole after it; then its pull request and review
-    with its local review, and its merge. `on`: the detailed map went on past
-    the last part."""
+    part, step 2 over the whole after it and the parts joined. `on`: the
+    detailed map went on past the last part."""
     way = ([{"n": "p_split"}] if first else []) + [{"n": "p_enter"}]
     sitting, by = None, None
 
@@ -468,26 +467,16 @@ def _parts_way(rows, first, on=False, now=None, cut=None):
         sitting, by = None, None
 
     def reach(node):
-        # The gates between: the build ends at p_built, a review begins with
-        # the feature's branch taken in.
-        last = way[-1]["n"]
-        if node == "p_whole" and last != "p_built":
+        # The gate between: the build ends at p_built.
+        if node == "p_whole" and way[-1]["n"] != "p_built":
             way.append({"n": "p_built"})
-        if node in ("p_pr", "p_review") and last in ("p_code", "p_built", "p_whole", "p_more"):
-            if last == "p_code":
-                way.append({"n": "p_built"})
-            way.append({"n": "p_take"})
 
     for r in rows:
         what, op, at = r["what"], r["op"], r["at"]
         head, _, rest = what.partition(".")
-        if (head == "steps" and rest in PARTS_STEP) or what == "review.local":
-            node = "p_whole" if r.get(WHOLE) else PARTS_STEP.get(rest, "p_review")
+        if head == "steps" and rest in PARTS_STEP:
+            node = "p_whole" if r.get(WHOLE) else PARTS_STEP[rest]
             if op in ("open", "start"):
-                # The local review's pass inside the review's conversation:
-                # the same minutes.
-                if sitting and what == "review.local":
-                    continue
                 if sitting:
                     # One opened in place of a conversation that died.
                     close(at)
@@ -502,16 +491,15 @@ def _parts_way(rows, first, on=False, now=None, cut=None):
                 sitting, by = None, None
                 if way[-1].get("k", 1) > 1:
                     way[-1]["k"] -= 1
-            elif sitting and by == what and (op in ("end", "stall", "finish")
-                                             or what == "review.local"):
+            elif sitting and by == what and op in ("end", "stall", "finish"):
                 close(at)
         elif what == "parts" and op in ("built", "stop"):
             close(at)
             if way[-1]["n"] != "p_built":
                 way.append({"n": "p_built"})
-        elif what == "parts" and op == "merged":
+        elif what == "parts" and op == "joined":
             close(at)
-            way += [{"n": "p_check"}, {"n": "p_merge", "from": at, "to": at}, {"n": "p_sync"}, {"n": "p_more"}]
+            way.append({"n": "p_join", "from": at, "to": at})
     # A sitting left open: going on by sclaude's state, up to now; else it
     # ended unseen, where `cut` says (_unseen_end), a guess the page marks.
     if sitting:
@@ -522,7 +510,9 @@ def _parts_way(rows, first, on=False, now=None, cut=None):
             if not now:
                 way[-1]["to"] = end
         way[-1]["live" if now else "unsure"] = True
-    if on and way[-1]["n"] == "p_more":
+    if on and way[-1]["n"] in ("p_whole", "p_join"):
+        if way[-1]["n"] != "p_join":
+            way.append({"n": "p_join"})
         way.append({"n": "p_on"})
     return way
 
@@ -533,8 +523,10 @@ def _part_of(r, pmode, current, total, last):
     and where the parts stand after it: (into, mode, current, total).
 
     The modes follow parts.sh: `build` while the parts are built, `whole`
-    while step 2 checks the whole, `review` while the parts' pull requests
-    are reviewed, `done` once the last is in."""
+    while step 2 checks the whole, `join` once it is accepted, `done` once
+    the parts are one branch. The rows of a part's own pull request and
+    review, from before parts were joined (2026-11), play on the detailed
+    map."""
     what, op = r["what"], r["op"]
     head, _, rest = what.partition(".")
     part = str(r.get("part") or "")
@@ -576,27 +568,11 @@ def _part_of(r, pmode, current, total, last):
             r[WHOLE] = True
             return lastkey, pmode, current, total
         if what == "parts" and op == "accepted":
-            return lastkey, "review", "1", total
-        # The first row of a part's pull request: the whole was accepted.
-        if part.isdigit() or (head == "steps" and rest in ("pr", "review") and op == "open"):
-            pmode, current = "review", "1"
-        else:
-            return None, pmode, current, total
-    if pmode == "review":
-        key = part if part.isdigit() else current
-        if part == "whole":
-            return None, "done", current, total
-        if what == "parts":
-            if op == "merged":
-                if total and int(key) >= total:
-                    pmode = "done"
-                else:
-                    current = str(int(key) + 1)
-            return key, pmode, current, total
-        if (head == "steps" and rest in ("pr", "review")) or what == "review.local":
-            return key, pmode, current, total
-        if what == EDGE and _map_of(_edge(r)[0]) == "detail":
-            return "drop", pmode, current, total
+            return lastkey, "join", current, total
+        return None, pmode, current, total
+    if pmode == "join":
+        if what == "parts" and op == "joined":
+            return (last[0] if last else current), "done", current, total
         return None, pmode, current, total
     return None, pmode, current, total
 
@@ -1055,10 +1031,6 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
                                       now_iso if key == list(syncs)[-1] and process_position._session_going(state, "sync") else None,
                                       unseen(rs)),
                             rs, "y_when", process_model.SYNC_EDGES, labels)})
-    # The pass the feature's own pull request follows: the last part
-    # merged — not one the person left out after the whole was built on the
-    # parts before it.
-    merged_keys = [k for k, rs in parts.items() if any(x["what"] == "parts" and x["op"] == "merged" for x in rs)]
     for j, (key, rs) in enumerate(parts.items()):
         index[("parts", key)] = len(passes["parts"])
         last = j == len(parts) - 1
@@ -1071,7 +1043,7 @@ def history(state, lines, here=None, transcripts=None, pass_rows=None):
         passes["parts"].append({
             "label": "%s · part %s%s%s%s" % (_short(rs[0]["at"]), key, ("/%d" % ptotal) if ptotal else "",
                                           (" · " + ends[-1]) if ends else "", " · the whole" if whole else ""),
-            "steps": _parts_way(rs, j == 0, pon and key == (merged_keys[-1] if merged_keys else list(parts)[-1]),
+            "steps": _parts_way(rs, j == 0, pon and last,
                                 now_iso if going else None, unseen(rs))})
     for key, rs in friction.items():
         if not quiet.get(key):

@@ -1,7 +1,5 @@
 # Big features, built in parts (v1.1)
 
-[![Big features, built in parts — 3 min](https://raw.githubusercontent.com/personalautomation/SClaude/main/docs/media/parts.jpg)](https://github.com/user-attachments/assets/05147af1-635f-471e-849c-bf1b25c7391f)
-
 Some features are simply big: ten thousand changed lines or more. That is
 exactly where AI coding starts to hurt.
 
@@ -20,7 +18,8 @@ preview and release each piece separately. Today a person's time and focus
 matter most, and that is exactly where things get missed.
 
 **In SClaude we try to remove the complexity, not move it.** A big feature
-stays one feature: **one issue, one plan, one QA**, built in parts.
+stays one feature: **one issue, one plan, one pull request, one QA**, built
+in parts.
 
 ## How it works
 
@@ -48,35 +47,41 @@ scenarios, one Accept. Only then does
 review start. Why after Accept? Because a demo often brings changes, and after
 any change every review has to be done again.
 
-**Each part is reviewed alone, in order.** The pull requests are nested: each
-part's PR targets the feature branch, and the feature's PR targets `main`.
-Before a part's PR opens, its branch takes in the reviewed part before it, so
-the diff shows that part alone. A small pull request gets a real review.
+**Then the parts become one branch, and one pull request.** The parts are
+stacked, so the last part's branch carries them all: the feature's branch
+moves to it, and step 3 opens one pull request into `main`. Preview, QA and
+production happen once, for the whole feature.
 
-**The feature's PR into main reads the seams.** Preview, QA and production
-happen once, for the whole feature. If an earlier part's review fix conflicts
-with a later part, a sync session merges it and keeps what the review decided.
+**The review reads the finished feature, in blocks.** A pull request this big
+is too much for one review, so step 4 cuts it once, from the finished code —
+not along the parts, which were drawn for building and showing before the
+code existed. Each block is a group of the plan's criteria with the files
+that carry them, so a rule is read end to end, from the database to the
+screen. The blocks are read one by one, each to a clean verdict, and their
+fixes go on top of the whole feature, so the tests check every part at once.
+A last pass reads the seams between the blocks.
 
 ```
-main ◄── feature PR (reads the seams; preview, QA, production once)
-           ▲
-   feat/<slug> ◄── part 1 PR ◄── part 2 PR ◄── part 3 PR
-                   (each reviewed alone, in the order built)
+feat/<slug>-1 ◄── -2 ◄── -3        (built and shown one by one)
+                          │ accepted
+                          ▼
+main ◄── one pull request: block 1 → block 2 → … → the seams
 ```
 
-**The result:** small contexts, lower cost, real reviews — and for you, still
-one feature to test.
+**The result:** small contexts, lower cost, a review that reads every line
+of the finished feature — and for you, still one feature to test.
 
 ## Controls
 
 - The menu shows where the parts are: `2/7 development · part 2/3` while they
-  are built, `4/7 review · part 2/3` while they are reviewed.
+  are built, and the review's block: `4/7 review · block 2/5`.
 - `partAccept: each` in `sclaude config` ends each part on its own demo and
   Accept, if you want to see every part.
 - `sclaude parts <name> stop` ships the feature with the parts built so far;
   the rest become an issue of their own.
-- Before each part's pull request and merge, SClaude checks that GitHub still
-  holds the parts as it left them, and stops with what to do if not.
+- `reviewBlocks` in the project's config sets when a pull request is read
+  in blocks (`from`, 5000 changed lines) and how big a block is (`size`,
+  3000). Any big pull request is read in blocks, built in parts or not.
 
 ## Read more
 

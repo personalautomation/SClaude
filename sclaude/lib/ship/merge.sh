@@ -219,13 +219,6 @@ merge_offer() {
   [[ -n "$pr" && "$pr" != "null" ]] || return 1
   command -v gh >/dev/null 2>&1 || return 1
   who="$(project_flow_mode merge)"
-  # A feature built in parts goes to main only with every part merged into
-  # its branch and none left open: a part's pull request whose base vanished
-  # with the merge would be closed by GitHub unmerged (parts.sh).
-  if [[ -n "$wt" ]] && declare -F parts_split >/dev/null && parts_split "$wt/.sclaude/local/feature/state.json"; then
-    parts_check_say "$wt" final || return 1
-  fi
-
   # QA's word, where there is a board to carry it.
   #
   # "In Done" is a person saying they looked at the deployment, and it is the

@@ -340,8 +340,10 @@ cases = [
      "", "review_close"),
     ("a local fix at step 4", {"step": "review", "regression": {"local": {"fix_status": "red open"}}},
      "", "review_close"),
-    ("a part's local review is the part's", {"step": "review", "parts": {"total": 2, "current": 1, "built": True, "accepted": True},
-                                              "review": {"local": {"running": now}}}, "", "p_review"),
+    ("parts accepted and not yet one branch", {"step": "pr", "parts": {"total": 2, "current": 1, "built": True, "accepted": True}},
+     "", "p_join"),
+    ("the parts joined: the feature's own review", {"step": "review", "parts": {"total": 2, "current": 1, "built": True, "accepted": True, "done": True},
+                                                    "review": {"local": {"running": now}}}, "", "review_run"),
     ("a preview fix", {"step": "review", "regression": {"preview": {"fix_status": "open"}}}, "", "fix_preview"),
     ("an old run", {"step": "review", "regression": {"local": {"status": "running",
                                                                "started": "2020-01-01T00:00:00+00:00"}}},
@@ -689,7 +691,7 @@ check("history: a sync plays along its edges and keeps its session's time",
 
 # A feature built in two parts: each part a pass on the parts map — its
 # build in step 2, then, after step 2 over the whole (on the last part's
-# pass), its pull request and review — then step 3 on the detailed map.
+# pass), the parts joined — then steps 3 and 4 once, on the detailed map.
 def build_rows(n, h, mine=True):
     """Part n's build from hour h; `mine`: with the part each row says."""
     p = {"part": str(n)} if mine else {}
@@ -701,20 +703,16 @@ def build_rows(n, h, mine=True):
         dict({"at": at(s + ":21"), "what": "parts", "op": "built"}, **p)]
 
 
-def review_rows(n, h, mine=True):
-    """Part n's pull request and review from hour h."""
-    p = {"part": str(n)} if mine else {}
+def feature_rows(h, wh):
+    """The feature's own pull request and review from hour h, the parts
+    joined."""
     s = "%02d" % h
     return [
-        dict({"at": at(s + ":21"), "what": "steps.pr", "op": "open", "session": "p%d" % n}, **p),
-        dict({"at": at(s + ":30"), "what": "steps.pr", "op": "finish", "session": "p%d" % n}, **p),
-        edge(s + ":30", "pr", "pr_check", "sclaude", **p), edge(s + ":30", "pr_check", "review_run", "sclaude", **p),
-        dict({"at": at(s + ":31"), "what": "review.local", "op": "start"}, **p),
-        dict({"at": at(s + ":36"), "what": "review.local", "op": "done"}, **p),
-        dict({"at": at(s + ":40"), "what": "steps.review", "op": "open", "session": "r%d" % n}, **p),
-        dict({"at": at(s + ":50"), "what": "steps.review", "op": "finish", "session": "r%d" % n}, **p),
-        edge(s + ":50", "review", "review_close", "sclaude", **p),
-        {"at": at(s + ":51"), "what": "parts", "op": "merged", "part": str(n), "pr": str(100 + n)}]
+        dict({"at": at(s + ":00"), "what": "steps.pr", "op": "open", "session": "pf"}, **wh),
+        dict({"at": at(s + ":09"), "what": "steps.pr", "op": "finish", "session": "pf"}, **wh),
+        edge(s + ":09", "pr", "pr_check", "sclaude", **wh), edge(s + ":09", "pr_check", "review_run", "sclaude", **wh),
+        dict({"at": at(s + ":10"), "what": "review.local", "op": "start"}, **wh),
+        dict({"at": at(s + ":15"), "what": "review.local", "op": "done"}, **wh)]
 
 
 for mine in (True, False):
@@ -727,23 +725,21 @@ for mine in (True, False):
         dict({"at": at("11:00"), "what": "steps.code", "op": "open", "session": "cw"}, **wh),
         dict({"at": at("11:30"), "what": "steps.code", "op": "finish", "session": "cw"}, **wh),
         edge("11:30", "code", "works", "sclaude", **wh), edge("11:40", "works", "pr", "person", **wh),
-        dict({"at": at("11:40"), "what": "parts", "op": "accepted"}, **wh)]
-        + review_rows(1, 12, mine) + review_rows(2, 13, mine) + [
-        dict({"at": at("14:41"), "what": "steps.pr", "op": "open", "session": "pf"}, **wh),
-        dict({"at": at("14:50"), "what": "steps.pr", "op": "finish", "session": "pf"}, **wh)],
+        dict({"at": at("11:40"), "what": "parts", "op": "accepted"}, **wh),
+        dict({"at": at("11:41"), "what": "parts", "op": "joined", "total": "2"}, **wh)]
+        + feature_rows(12, wh),
         transcripts={"c1": {"cost": 2.0}, "pf": {"cost": 1.0}, "cw": {"cost": 3.0}}.get)
     ps = split["passes"]["parts"]
     seqs = [[x["n"] for x in p["steps"]] for p in ps]
-    review = ["p_take", "p_pr", "p_review", "p_check", "p_merge", "p_sync", "p_more"]
     how = "with each row's part" if mine else "from the rows' order"
     check("history: a split feature plays a pass of the parts map per part, " + how,
-          seqs == [["p_split", "p_enter", "p_code", "p_built"] + review,
-                   ["p_enter", "p_code", "p_built", "p_whole"] + review + ["p_on"]]
-          and [x.get("s") for x in ps[0]["steps"] if x["n"] in ("p_code", "p_pr", "p_review")] == [20 * 60, 9 * 60, 15 * 60]
+          seqs == [["p_split", "p_enter", "p_code", "p_built"],
+                   ["p_enter", "p_code", "p_built", "p_whole", "p_join", "p_on"]]
+          and [x.get("s") for x in ps[0]["steps"] if x["n"] == "p_code"] == [20 * 60]
           and next(x for x in ps[1]["steps"] if x["n"] == "p_whole").get("s") == 30 * 60, str(seqs))
     vs = [v.get("n") or v["pass"][0] for v in split["visits"]]
     check("history: a split feature's detailed map plays steps 2-4 once, the parts beside them, " + how,
-          vs.count("code") == 1 and vs.count("pr") == 1 and "review" not in vs and "review_run" not in vs
+          vs.count("code") == 1 and vs.count("pr") == 1 and "review_run" in vs
           and vs[vs.index("code") + 1:vs.index("code") + 3] == ["parts", "parts"]
           and vs.index("works") > vs.index("code") + 2, str(vs))
     cost = split["metrics"]["cost"]
@@ -756,12 +752,12 @@ stopped = process.history({}, [
     {"at": at("10:30"), "what": "parts", "op": "stop", "part": "2"},
     {"at": at("11:00"), "what": "steps.code", "op": "open", "session": "cw", "part": "whole"},
     {"at": at("11:30"), "what": "steps.code", "op": "finish", "session": "cw", "part": "whole"},
-    {"at": at("11:40"), "what": "parts", "op": "accepted", "part": "whole"}]
-    + review_rows(1, 12) + [
+    {"at": at("11:40"), "what": "parts", "op": "accepted", "part": "whole"},
+    {"at": at("11:41"), "what": "parts", "op": "joined", "total": "1", "part": "1"},
     {"at": at("14:41"), "what": "steps.pr", "op": "open", "session": "pf", "part": "whole"}])
 sq = [[x["n"] for x in p["steps"]] for p in stopped["passes"]["parts"]]
-check("history: parts ended early review the parts kept, and go on to the feature's pull request",
-      sq and sq[0][-1] == "p_on" and "p_take" in sq[0], str(sq))
+check("history: parts ended early are joined as kept, and go on to the feature's pull request",
+      sq and sq[-1][-2:] == ["p_join", "p_on"], str(sq))
 
 undone = process.history({}, [
     {"at": at("08:59"), "what": "parts", "op": "capture", "total": "2"},

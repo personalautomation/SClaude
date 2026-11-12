@@ -73,18 +73,24 @@ FIELDS = [
     # --- a feature built in parts (parts.sh) ------------------------------------
     ("parts", (FEATURE,), "the whole node, cleared when a replan no longer splits the feature"),
     ("parts.total", (FEATURE,), "how many parts the plan splits it into; none when it is not split"),
-    ("parts.umbrella", (FEATURE,), "the parts' common branch, which each part's pull request goes into"),
-    ("parts.current", (FEATURE,), "the part being built, then the part whose pull request is reviewed"),
+    ("parts.umbrella", (FEATURE,), "the feature's branch, which the parts become once accepted"),
+    ("parts.current", (FEATURE,), "the part being built"),
     ("parts.built", (FEATURE,), "every part is built: step 2 checks the whole on the last part's branch"),
-    ("parts.accepted", (FEATURE,), "the person accepted the whole: the parts' pull requests are opened and reviewed, one by one"),
-    ("parts.done", (FEATURE,), "every part is reviewed and merged into the common branch: the feature's pull request into main"),
+    ("parts.accepted", (FEATURE,), "the person accepted the whole: the parts become one branch"),
+    ("parts.done", (FEATURE,), "the parts are one branch, the feature's (parts_join): it goes on as one"),
     ("parts.dropped", (FEATURE,), "the first part the person left out (`sclaude parts <name> stop`); it and the ones after are not built"),
     ("parts.<n>.title", (FEATURE,), "a part's title, from the plan"),
     ("parts.<n>.branch", (FEATURE,), "its branch, <umbrella>-<n>"),
-    ("parts.<n>.pr", (FEATURE,), "its pull request into the common branch"),
-    ("parts.<n>.merged", (FEATURE,), "when its pull request was merged into the common branch"),
-    ("parts.<n>.before", (FEATURE,), "the common branch on GitHub before sclaude merged the part, for the check for commits no part brought; `checked` once it has passed"),
-    ("parts.<n>.steps", (FEATURE,), "what its code, pull-request and review steps held, kept when the next part began"),
+    ("parts.<n>.pr", (FEATURE,), "its own pull request into the feature's branch, under the scheme before 2026-11: parts_join asks whether it was merged"),
+    ("parts.<n>.merged", (FEATURE,), "when its own pull request was merged into the feature's branch, under the scheme before 2026-11: parts_join reads it"),
+    ("parts.<n>.range", (FEATURE,), "its commits, <from>..<tip>, recorded as the parts were joined, for the review's cut"),
+    ("parts.<n>.steps", (FEATURE,), "what its steps held, kept when the next part began"),
+    ("blocks.total", (FEATURE,), "the review blocks and the seams after them; 0 when the pull request is read whole, none until step 4 decided"),
+    ("blocks.current", (FEATURE,), "the review block being read"),
+    ("blocks.label_before", (FEATURE,), "yes or no: the pull request carried no-review before the cut, as GitHub said; the seams leave the label on only on yes"),
+    ("blocks.pr", (FEATURE,), "the first pull request seen since the node was emptied, decided or not: it owns the cut and the join's base; another empties the node"),
+    ("blocks.base", (FEATURE,), "the commit the review reads from, when it is not where the branch left main"),
+    ("blocks.<k>.steps", (FEATURE,), "what step 4 held while block k was read, kept when the next began"),
 
     # --- a reopened feature ----------------------------------------------------
     ("reopened", (FEATURE,), "the step the feature was sent back to after it closed"),
@@ -196,7 +202,7 @@ FIELDS = [
 
 # Written whole from Python (start.sh's heredoc, session_runs, demo.py play) rather than
 # through state_set, so no state_get/state_set names them.
-WRITTEN_WHOLE = {"created", "steps.<step>.runs", "friction.<key>.runs", "parts.<n>.steps",
+WRITTEN_WHOLE = {"created", "steps.<step>.runs", "friction.<key>.runs", "parts.<n>.steps", "blocks.<k>.steps",
                  "demo_progress"}
 
 WILD = "<*>"

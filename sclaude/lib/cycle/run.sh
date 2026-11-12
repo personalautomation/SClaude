@@ -95,18 +95,15 @@ run_step() {
   mode="$(step_mode "$step")"
   # A feature built in parts (parts.sh): the tree on the part at work before
   # anything below asks which branch, which pull request. A plan split after
-  # step 2 began is taken up here too, its work so far becoming part 1.
+  # step 2 began is taken up here too, its work so far becoming part 1. The
+  # whole accepted and the parts not yet one branch — a run cut off after the
+  # Accept, or a feature whose first parts were reviewed in pull requests of
+  # their own — they become one first (parts_join), which goes on itself.
   [[ "$step" == code ]] && { parts_capture "$wt" || return 0; }
   if [[ "$step" == code || "$step" == pr || "$step" == review ]] && parts_open "$state"; then
-    # A part merged by a run cut off before the next part's pull request:
-    # that run's way on, not the part's review again.
-    if parts_reviewing "$state"; then
-      local part_now merged_at; part_now="$(parts_now "$state")"
-      merged_at="$(state_get "$state" "parts.$part_now.merged" 2>/dev/null || true)"
-      if [[ -n "$merged_at" && "$merged_at" != null ]]; then
-        parts_advance "$wt" "$slug" merged
-        return 0
-      fi
+    if parts_joining "$state"; then
+      parts_join "$wt" "$slug"
+      return 0
     fi
     parts_enter "$wt" || return 0
   fi
@@ -153,13 +150,6 @@ run_step() {
   if [[ "$reopened" != "$step" ]] && [[ "$step" == "pr" || "$step" == "review" ]]; then
     local branch pr_state
     branch="$(state_get "$state" branch || true)"
-    # A part's pull request goes into the common branch, and its merge there
-    # is the part's end only once its review closed: one merged before is a
-    # hand on GitHub, asked about (parts_merged_early).
-    if parts_reviewing "$state" && [[ -n "$branch" ]] && [[ "$(branch_pr_state "$branch")" == "MERGED" ]]; then
-      parts_merged_early "$wt" "$slug" || true
-      return 0
-    fi
     if [[ -n "$branch" ]] && [[ "$(branch_pr_state "$branch")" == "MERGED" ]]; then
       capture_pr "$wt"
       echo ""
@@ -264,17 +254,10 @@ run_step() {
   # conflicts leaves a tree on which a session must not be opened at all. A
   # refusal here is the one case where a step does not start.
   #
-  # Not into a part's branch: its pull request goes into the common branch,
-  # and main merged in here would be read as the part's own change. While the
-  # parts are built the branches stay off main; once they are reviewed, main
-  # goes into the common branch between parts (parts_advance), and the part
-  # takes it from there (parts_enter). Checked instead: what GitHub has of the parts is where the
-  # cycle left it (parts_check).
-  if parts_open "$state"; then
-    parts_check_say "$wt" || { info "  The step waits. Come back with: $SELF $slug"; return 0; }
-  else
-    sync_branch "$wt" || return 0
-  fi
+  # Not into a part's branch while the parts are built: the branches stay off
+  # main until they are one (parts_join), and the feature's branch takes main
+  # from then on, as any other.
+  parts_open "$state" || { sync_branch "$wt" || return 0; }
 
   # A review that passed clean has nothing for a session to answer.
   #
@@ -1050,8 +1033,8 @@ after_step() {
         extend_acceptance "$wt" reworded
         reword_acceptance "$wt"
       fi
-      if parts_reviewing "$state"; then
-        info "  The review of part $(parts_now "$state") closed — PR #${pr:-?} goes into $(parts_umbrella "$state")."
+      if blocks_active "$wt" && (( $(blocks_now "$wt") < $(blocks_total "$wt") )); then
+        info "  The review of block $(blocks_now "$wt") of $(blocks_total "$wt") of PR #${pr:-?} closed."
       elif [[ "$pr_state" == "MERGED" ]]; then
         info "  PR #${pr:-?} is merged — the review is done."
       elif no_deploy_feature "$wt"; then
@@ -1204,15 +1187,17 @@ after_step() {
     parts_built "$wt" "$slug"
     return 0
   fi
-  # The whole accepted: the parts' pull requests follow, from part 1.
+  # The whole accepted: the parts become one branch, and the feature goes on
+  # as one, its pull request opened from it (parts_join).
   if [[ "$step" == code ]] && parts_whole "$state"; then
     history_add "$state" parts accepted
     state_set "$state" parts.accepted true
+    parts_join "$wt" "$slug"
+    return 0
   fi
-  # A part's review closed: the part goes into the common branch, and the
-  # next part's pull request opens — or the feature's own (parts.sh).
-  if [[ "$step" == review ]] && parts_reviewing "$state"; then
-    parts_advance "$wt" "$slug"
+  # A review block closed: the next one is read (review_blocks.sh).
+  if [[ "$step" == review ]] && blocks_next "$wt" "$slug"; then
+    run_step "$wt" "$slug" review
     return 0
   fi
 

@@ -88,9 +88,9 @@ comment of their own. sclaude never edits an issue's description: the original
 request, the criteria and the status are separate comments, so the task as it
 was given stays readable.
 
-A feature too large for one review (about 10,000 changed lines) is offered as
-a split. If you take it, it stays **one feature: one issue, one plan, one QA**,
-built in parts. The plan gets a `## Parts` section (`### Part 1 — …`) and each
+A feature too large to build and show in one go (about 10,000 changed lines)
+is offered in parts. If you take it, it stays **one feature: one issue, one
+plan, one pull request, one QA**, built in parts. The plan gets a `## Parts` section (`### Part 1 — …`) and each
 criterion names its part (`AC7. [part 2] …`). Step 2 then builds the parts one
 after another, each in a session of its own on its own branch
 (`feat/<slug>-1`, `-2`, …) over the part before it. No pull request and no
@@ -117,28 +117,11 @@ When every part is built, step 2 closes on the last part's branch as for any
 feature: the whole thing checked as one, the demo — written from the parts'
 scenarios, not from scratch — and your Accept.
 
-Only then are the parts reviewed, one by one, in the order they were built:
-for each, its branch takes in the part before it as its review left it and
-the feature's branch, step 3 opens its pull request into the feature's
-branch, step 4 reviews that part alone, and sclaude merges it there. The review
-still sees the later parts' code, to know what relies on the part it reads;
-a decision that changes what a later part relies on is left in the plan as a
-note for that part, whose review checks it. After
-the last part, step 3 opens the feature's pull request into main, listing the
-parts' pull requests and closing the issue, and step 4 reads the seams
-between the parts. Preview, QA, the merge and production happen once, for the
-whole feature. The menu shows where the parts are: `2/7 development · part
-2/3` while they are built, `4/7 review · part 2/3` while they are reviewed.
-
-Before each part's pull request and each merge, sclaude checks that GitHub still
-holds the parts as it left them. A base changed by hand, a part's pull request
-merged or marked ready before its review closed, or a part's branch rewritten
-on GitHub stops the cycle with what to do. A part whose branch does not take
-the feature's branch in without conflicts — an earlier part's review fix
-meeting this part's code — gets the sync session, as a conflict with main
-does: it merges the feature's branch, keeps what the reviews decided and
-adapts the part to it. A part merged early is asked about: take it as the
-part's end, or leave it to you.
+Then the parts become one branch, the feature's, and the feature goes on as
+any other: step 3 opens one pull request into main, its description listing
+the parts, and step 4 reviews it — in review blocks, at that size (below).
+The menu shows where the parts are: `2/7 development · part 2/3` while they
+are built.
 
 To ship a split feature with the parts built so far, `sclaude parts <name>
 stop`, while the parts are built, leaves out the part at work and the ones
@@ -172,6 +155,21 @@ report in its terminal and sends it to the feature's topic: per round, what
 was found and how much of it sat on earlier fixes, and what the fix took and
 cost. The step closes when the review has nothing left open, the preview is
 deployed and its tests pass.
+A pull request too big for one review to read well — past 5,000 changed lines,
+generated files left out — is read in **review blocks**. As step 4 starts, a
+session cuts it once: each block is a group of the plan's criteria with the
+files that carry them, so that a rule is read end to end, from its criterion
+through the database and the server to the screen; tests go with their code,
+the manuals come last. The blocks are listed in the feature's topic and the
+terminal, and the review starts at once; the cut is kept in
+`.sclaude/local/feature/review-blocks.json`. Each block is read to a clean
+verdict before the next opens, its fixes going on top of the whole branch, and
+after the last a pass reads the seams between them — what changed in a block
+after it was read, the behaviours together. Meanwhile the review runs on this
+machine whatever the `review` setting; under a GitHub setting the project's
+CI there still counts. The menu says `4/7 review · block 2/5`.
+`reviewBlocks` in the project's config sets the two sizes (`from`, 5000, and
+`size`, 3000 lines a block).
 Once the preview's tests pass, before the issue goes to QA, when the
 product's code changed since the last demo — the review may have changed what
 the feature does — a headless session records a delta of what changed for the

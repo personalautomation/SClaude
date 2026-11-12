@@ -150,14 +150,6 @@ capture_pr() {
   [[ -n "$number" ]] || return 0
   state_set "$wt/.sclaude/local/feature/state.json" pr "$number"
   info "PR #$number recorded in the feature's state."
-  # A part's pull request (parts.sh) goes into the feature's common branch:
-  # recorded under the part, and kept off the issue and the board, which
-  # hear of the feature's own pull request into main at the end.
-  if declare -F parts_open >/dev/null && parts_open "$wt/.sclaude/local/feature/state.json"; then
-    state_set "$wt/.sclaude/local/feature/state.json" \
-      "parts.$(parts_now "$wt/.sclaude/local/feature/state.json").pr" "$number"
-    return 0
-  fi
   # Here rather than in step 3: every PR found comes through here — both one
   # just opened and one picked up by the early exit on an already merged one.
   pr_link_issue "$wt" "$number"

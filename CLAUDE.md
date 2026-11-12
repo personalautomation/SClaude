@@ -47,28 +47,22 @@ breaks the other silently — grep before you edit:
   which `acceptance.py --part` filters each part's criteria by;
   `tests/plan-split.py` checks the shape the prompt shows is the one read.
   The `<if:in-parts>`/`<if:parts-built>`/`<if:parts-done>`/`<if:asks-accept>`/
-  `<if:part-alone>`/`<if:part-again>`/`<if:parts-later>` keys and `<part>`, `<parts>`,
-  `<part-base>`, `<umbrella>`, `<base>`, `<later-parts>`, `<parts-tip>` are set by `render_prompt` in `prompt.sh` for `code.md`, `pr.md`
-  and `review.md`, by the phase `parts_building`/`parts_whole`/
-  `parts_reviewing` in `parts.sh` and by `partAccept` (`project_part_accept`
-  in `project.sh`, `CHOICES` in `config_menu.py`); `tests/parts.py` renders
-  them. A part reviewed before the last sees the later parts' branches
-  (`parts_later_set` in `parts.sh`) in `review.md`, in `code.md` for step 2
-  again and in the scope `local_review.sh` gives its review pass, and the
-  notes that open with `For part <n>:` in the plan's `## Agreed during
-  review` are what one part's review leaves another: `review.md` and
-  `code.md` write them, and read them with the pass's scope
-  (`local_review_parts_scope`);
-  `tests/parts.py` checks that the writer's phrase is the reader's. `parts built`, `parts accepted`, `parts merged` and `parts stop` rows
-  are read by `_part_of` in `process_history.py`; `tests/process.py` plays them.
-  A part's branch that does not take the part before it or the common
-  branch in without conflicts goes to the sync session (`parts_merge_in` →
-  `sync_with_main`) with `SYNC_FROM`/`SYNC_REF` set to it: the sync
-  session's path in `sync.sh` reads it through `sync_source`
+  `<if:part-alone>` keys and `<part>`, `<parts>`, `<part-base>`,
+  `<umbrella>`, `<base>` are set by `render_prompt` in `prompt.sh` for
+  `code.md` and `pr.md`, by the phase `parts_building`/`parts_whole` in
+  `parts.sh` and by `partAccept` (`project_part_accept` in `project.sh`,
+  `CHOICES` in `config_menu.py`); `tests/parts.py` renders them. `parts
+  built`, `parts accepted`, `parts joined` and `parts stop` rows are read by
+  `_part_of` in `process_history.py`; `tests/process.py` plays them. The
+  accepted parts become one branch (`parts_join`); a feature's branch that
+  does not merge into the last part goes to the sync session
+  (`parts_merge_in` → `sync_with_main`) with `SYNC_FROM`/`SYNC_REF` set to
+  it: the sync session's path in `sync.sh` reads it through `sync_source`
   (`merge_build_check`, about main alone, is not reached from there), and
-  `sync.md` takes
-  `<from>` and `<if:from-parts>` from it; `tests/parts.py` runs the
-  hand-over.
+  `sync.md` takes `<from>` and `<if:from-parts>` from it; `tests/parts.py`
+  runs the hand-over. `parts.<n>.range`, written by the join, is what
+  `draft`/`files` in `review_blocks.py` read; `tests/review-blocks.py`
+  writes the shape parts.sh writes.
 
   <!-- Changed by Claude on 2026-11-08 at the user's decision: a split
   feature stays one issue, one plan and one QA, built in parts inside step 2,
@@ -80,6 +74,31 @@ breaks the other silently — grep before you edit:
   request opened and reviewed, one by one, in the order they were built — a
   review spent before the person has seen the feature is thrown away by their
   first large remark. -->
+
+  <!-- Changed by Claude on 2026-11-12 at the user's decision: the parts
+  are for building and showing; accepted, they become one branch and one
+  pull request, which the review reads in blocks of its own (below). A
+  pull request per part saw its neighbours stale and its later parts lag
+  behind its review. -->
+
+- A pull request read in review blocks (`sclaude/lib/review/review_blocks.sh`,
+  `review_blocks.py`): the cut, `.sclaude/local/feature/review-blocks.json`,
+  is named by `blocks_file`, `FEATURE_BLOCKS` and `BLOCKS_FILE` in
+  `pr_context.py`, and its presence makes `project_review_mode` in
+  `project.sh` and `review_mode` in `pr_context.py` answer `local` over a
+  github answer; whether the project's CI still counts then is
+  `project_review_in_blocks` in `project.sh` (with `<if:actions-off>` in
+  `prompt.sh`) and `in_blocks` in `pr_context.py`, the same condition; the
+  journal's `block`/`read` come from `SCLAUDE_REVIEW_BLOCK`/
+  `SCLAUDE_REVIEW_READ`, set by `local_review_run` and read by `tag`,
+  `first`, `round` and `cached` in `local_review.py`; `<if:in-blocks>`,
+  `<block>`, `<blocks>`, `<block-title>` are set by `render_prompt` for
+  `review.md`; the cut's JSON shape is spelled out to its session by
+  `blocks_cut_prompt` and checked by `validate`. `tests/review-blocks.py`
+  runs each side, `tests/parts.py` renders the review prompt.
+
+  <!-- Added by Claude on 2026-11-12 at the user's request, with review
+  blocks. -->
 
 - `KeepAwake.ps1` writes hold-log lines that `bin/keepawake` greps for
   (`hold set|hold released|holding`).

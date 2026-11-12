@@ -338,7 +338,9 @@ project_migrations_dir() {
 # project_review_setting is the word as set; project_review_mode where the
 # feature's review runs now: `github-local` is `github`, or `local` for a
 # feature whose review could not run on GitHub and moved to this machine
-# (review_fallback_set in review_round.sh): its tree holds the mark.
+# (review_fallback_set in review_round.sh): its tree holds the mark. Either
+# github word is `local` too while the pull request is read in review blocks
+# (BLOCKS_FILE in pr_context.py reads the same file).
 project_review_setting() {
   local mode
   mode="$(project_get review "${1:-}" 2>/dev/null || true)"
@@ -351,13 +353,25 @@ project_review_setting() {
 project_review_mode() {
   local mode
   mode="$(project_review_setting "${1:-}")"
-  case "$mode" in
-    local|off|github) echo "$mode" ;;
-    *) if [[ -n "${1:-}" && -f "$1/.sclaude/local/feature/review-fallback" ]]; then
-         echo local
-       else
-         echo github
-       fi ;;
+  if [[ "$mode" == github-local ]]; then
+    if [[ -n "${1:-}" && -f "$1/.sclaude/local/feature/review-fallback" ]]; then mode=local; else mode=github; fi
+  fi
+  # A pull request read in review blocks (review_blocks.sh) is read here:
+  # a review in Actions reads the whole and cannot be held to a block. The
+  # same rule as review_mode in pr_context.py.
+  [[ "$mode" == github && -n "${1:-}" && -f "$1/.sclaude/local/feature/review-blocks.json" ]] && mode=local
+  echo "$mode"
+}
+
+# Whether the review runs here only because the pull request is read in
+# review blocks — `github`, or `github-local` with no move here — so the
+# Actions run and their CI counts: the same rule as in_blocks in pr_context.py.
+project_review_in_blocks() {
+  [[ -n "${1:-}" && -f "$1/.sclaude/local/feature/review-blocks.json" ]] || return 1
+  case "$(project_review_setting "$1")" in
+    github) return 0 ;;
+    github-local) [[ ! -f "$1/.sclaude/local/feature/review-fallback" ]] ;;
+    *) return 1 ;;
   esac
 }
 

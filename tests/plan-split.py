@@ -2,10 +2,9 @@
 #
 # A feature planned in parts (sclaude/prompts/plan.md, "If I choose to split").
 #
-# A feature too big for one review is split at step 1, at the person's word.
-# It stays one issue, one plan and one QA, and is built in parts inside
-# step 2, a pull request for each into the feature's common branch
-# (parts.sh). An earlier way made the first part the feature and filed the
+# A feature too big to build and show in one go is split at step 1, at the
+# person's word. It stays one issue, one plan, one pull request and one QA,
+# and is built in parts inside step 2 (parts.sh). An earlier way made the first part the feature and filed the
 # rest as issues of their own: preview, QA, the demo and production then ran
 # once per part, and main got each part on its own. Guarded here:
 #
@@ -58,7 +57,7 @@ def render(step, issue, in_part=False):
     return out.stdout
 
 
-LEAD = "the feature stays one: one issue, one plan, one QA"
+LEAD = "the feature stays one: one issue, one plan, one pull request, one QA"
 for issue in ("41", ""):
     plan = render("plan", issue)
     check("plan.md says the feature stays one (%s)" % (issue or "no issue"), LEAD in plan)

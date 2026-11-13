@@ -524,9 +524,7 @@ def _part_of(r, pmode, current, total, last):
 
     The modes follow parts.sh: `build` while the parts are built, `whole`
     while step 2 checks the whole, `join` once it is accepted, `done` once
-    the parts are one branch. The rows of a part's own pull request and
-    review, from before parts were joined (2026-11), play on the detailed
-    map."""
+    the parts are one branch."""
     what, op = r["what"], r["op"]
     head, _, rest = what.partition(".")
     part = str(r.get("part") or "")

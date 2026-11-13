@@ -6,10 +6,10 @@
 #
 # The state keeps where the review stands — `blocks.total` (the blocks and
 # the seams, 0 when the pull request is read whole), `blocks.current`,
-# `blocks.base` (written by parts_join alone, after it empties the node: the
-# commit the review reads from, when it is not where the branch left main — a
-# feature whose first parts were reviewed the old way — and gone as soon as
-# another pull request than the first one seen is);
+# `blocks.base` (the commit the review reads from, when it is not where the
+# branch left main: nothing writes it now; it is left in the one feature
+# joined after its first part was reviewed under the scheme before, and goes
+# with blocks_base's reading of it once that review closes);
 # the cut itself is review-blocks.json beside it, there while blocks are read
 # and taken off after the seams. Meanwhile the review runs on this machine
 # (project_review_mode): a review in Actions reads the whole pull request and
@@ -32,8 +32,11 @@ blocks_active() {
 blocks_now() { state_get "$1/.sclaude/local/feature/state.json" blocks.current 2>/dev/null || true; }
 blocks_total() { state_get "$1/.sclaude/local/feature/state.json" blocks.total 2>/dev/null || true; }
 
-# The commit the review reads from: the one recorded, else where the branch
-# left main.
+# The commit the review reads from: where the branch left main — or the one
+# recorded, `blocks.base`, which only the one feature joined after its first
+# part was reviewed under the scheme before still has. At the user's decision
+# it stays until that review closes, so the part is not read again; then the
+# state read and the field go, and this is the merge-base alone.
 blocks_base() {
   local wt="$1" base
   base="$(state_get "$wt/.sclaude/local/feature/state.json" blocks.base 2>/dev/null || true)"

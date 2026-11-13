@@ -280,6 +280,14 @@ try:
         json.dump({"pr": 7, "blocks": {"total": 3, "current": 1, "pr": 7, "label_before": "no"},
                    "steps": {"review": {"runs": [{"session": "r1"}], "rounds": 4, "enough": "pass"}}}, fh)
     check("read-here-while-in-blocks", sh('project_review_mode "%s"' % wt).strip(), "local")
+    # Ending the search mid-way, closing the review closes the block, and the
+    # question says so rather than "close step 4".
+    words = sh('source "%s/review/review_gate.sh"; blocks_now() { echo 1; }; blocks_total() { echo 3; }; '
+               'review_close_words "%s"' % (LIB, wt)).splitlines()
+    check("close-names-the-block", words, ["Close block 1/3 now and go on to block 2/3", "Close block 1/3"])
+    words = sh('source "%s/review/review_gate.sh"; blocks_active() { return 1; }; '
+               'review_close_words "%s"' % (LIB, wt)).splitlines()
+    check("close-without-blocks-is-step-4", words, ["Close step 4 now", "Close step 4"])
     out = sh('blocks_active "%s" && echo ACTIVE; blocks_next "%s" t && echo NEXT' % (wt, wt))
     with open(state) as fh:
         st = json.load(fh)

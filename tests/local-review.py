@@ -654,7 +654,7 @@ try:
         return marker in seen
 
     import time
-    check_true("stop-now-hint", read_until(b"[n n] stop now", 60))
+    check_true("stop-now-hint", read_until(b"[n n] stop, end the search", 60))
     # The boxes: [g] ticked shows ticked on the status line, and is kept.
     check_true("boxes-unticked", "☐ [s] last pass".encode() in seen and "auto ☐ [g] go on".encode() in seen)
     # g goes round auto → on → off; on is left for the checks below.

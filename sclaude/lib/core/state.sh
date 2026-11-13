@@ -351,9 +351,9 @@ history_add() {
 }
 
 # What history_add and session_runs say of the part a row is about: nothing
-# for a feature not built in parts; `part=<n> part_branch=<b> part_pr=<pr>`
-# while part <n> is built or reviewed (the pull request once it has one);
-# `part=whole` while the whole is checked and once every part is in. Words without spaces, one a field.
+# for a feature not built in parts; `part=<n> part_branch=<b>` while part
+# <n> is built; `part=whole` once every part is built: the whole checked,
+# the parts joined, and the feature after. Words without spaces, one a field.
 #
 #   parts_about <state>
 parts_about() {

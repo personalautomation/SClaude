@@ -202,14 +202,16 @@ review_close_gate() {
             # One choice of three, asked once: as two yes/no questions in a
             # row it was answered twice, the second only after the first's "no".
             info "    1) Check the fixes with a review pass — it resolves the threads they fixed and looks for nothing new"
-            info "    2) Close step 4 now, with the $count thread(s) as they are"
+            local close_what close_label
+            { read -r close_what; read -r close_label; } < <(review_close_words "$wt")
+            info "    2) $close_what, with the $count thread(s) as they are"
             info "    3) Leave it open and come back later"
             # Asked again on anything but 1-3: a stray Enter left in the
             # terminal read as "leave it open" and ended the step. No answer
             # at all (nobody to ask) leaves it open, as before.
             while :; do
               ask "${BOLD}Choose 1-3: ${OFF}" answer "pick:3" \
-                "Check the fixes" "Close step 4" "Leave it open" || { answer=3; ASKED_HOW=""; break; }
+                "Check the fixes" "$close_label" "Leave it open" || { answer=3; ASKED_HOW=""; break; }
               [[ "$answer" == [123] ]] && break
               printf '%s\n' "  Answer 1, 2 or 3." >&2
             done
@@ -223,7 +225,8 @@ review_close_gate() {
             fi
             [[ "$count" =~ ^[0-9]+$ ]] \
               && state_set "$wt/.sclaude/local/feature/state.json" steps.review.left_open "$count" 2>/dev/null
-            say "${BOLD}Step 4 closes as you said, with the threads as they are.${OFF}"
+            local closes="${close_label#Close }"
+            say "${BOLD}${closes^} closes as you said, with the threads as they are.${OFF}"
             REVIEW_CLOSE_BY=person REVIEW_CLOSE_HOW="$ASKED_HOW" REVIEW_CLOSE_NOTE="$count thread(s) left as they are"
             return 0
           fi
@@ -672,4 +675,23 @@ cmd_checks() {
   (( rc <= 3 )) && printf '%s %s %s\n' "$rc" "$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)" "$(date +%s)" \
     > "$(review_checked_file "$wt")" 2>/dev/null
   exit "$rc"
+}
+
+# What closing the review now closes, for the question after the person ended
+# the search: two lines, the option and its button. Read in blocks, closing it
+# closes the block and the next one is read (blocks_next) — "step 4" there
+# promised an end the review is far from; the last block, the seams, ends it.
+#
+#   review_close_words <wt>
+review_close_words() {
+  local bk bt
+  if declare -F blocks_active >/dev/null && blocks_active "$1"; then
+    bk="$(blocks_now "$1")"; bt="$(blocks_total "$1")"
+    if [[ "$bk" =~ ^[0-9]+$ && "$bt" =~ ^[0-9]+$ ]] && (( bk < bt )); then
+      printf 'Close block %s/%s now and go on to block %s/%s\nClose block %s/%s\n' \
+        "$bk" "$bt" "$((bk + 1))" "$bt" "$bk" "$bt"
+      return 0
+    fi
+  fi
+  printf 'Close step 4 now\nClose step 4\n'
 }

@@ -312,7 +312,7 @@ local_review_run() {
       # for the report to price (spent in local_review.py).
       python3 "$LIB/review/local_review.py" spent "$journal" "$base" "$head" "$((SECONDS - began))" \
         "$pass_session" "$pr" 2>/dev/null || true
-      warn "  Stopped pass $pass as you said; what earlier passes and rounds posted stays open on PR #$pr" >&2
+      warn "  Stopped pass $pass as you said, and the search for new findings with it; what earlier passes and rounds posted stays open on PR #$pr" >&2
       warn "  and goes to the review session." >&2
       count="$(python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null)" || return 1
       break
@@ -410,9 +410,9 @@ local_review_wait() {
       if [[ -n "$verify" ]]; then
         hint="checking the fixes only · $go ${BOLD}[g]${OFF} go on by itself"
       elif [[ "$armed" -eq 1 ]]; then
-        hint="press ${BOLD}[n]${OFF} again: stop now and drop this pass · any other key: carry on"
+        hint="press ${BOLD}[n]${OFF} again: drop this pass and end the search for new findings · any other key: carry on"
       else
-        hint="$(review_box "$said") ${BOLD}[s]${OFF} last pass for new findings · $go ${BOLD}[g]${OFF} go on by itself · ${BOLD}[n n]${OFF} stop now"
+        hint="$(review_box "$said") ${BOLD}[s]${OFF} last pass for new findings · $go ${BOLD}[g]${OFF} go on by itself · ${BOLD}[n n]${OFF} stop, end the search"
       fi
       # Not "Human in the loop", as the waits that need the person say: this
       # one goes on by itself, and the keys are there only to step in.

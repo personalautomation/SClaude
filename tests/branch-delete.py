@@ -14,7 +14,10 @@
 #   * commits past the head whose change main already holds: deleted;
 #   * commits past the head that main lacks, or that conflict with it: kept;
 #   * no merged pull request: kept;
-#   * `done` and the branch review both use it.
+#   * `done` and the branch review both use it;
+#   * the branch review keeps a feature's part branches, and says a pushed
+#     branch is pushed without guessing at its pull request;
+#   * `done` deletes the parts' branches the feature's branch holds.
 #
 # Run it with: python3 tests/branch-delete.py
 import os
@@ -135,6 +138,53 @@ try:
 
     # No merged pull request.
     check("no pull request: kept", delete(repo, "feat/past", ""), ("RC 1", True))
+
+    # The branch review: a part's branch of a feature in progress is the
+    # feature's, whatever it holds — one not yet given a commit or a push
+    # used to be offered for deletion — and a pushed branch with commits says
+    # so, not "PR still open" by guess.
+    git(repo, "switch", "-q", "-c", "feat/p", "main")
+    git(repo, "switch", "-q", "-c", "feat/p-1")
+    commit(repo, "p1")
+    git(repo, "switch", "-q", "-c", "feat/p-2", "main")
+    git(repo, "switch", "-q", "main")
+    wt = os.path.join(tmp, "wt")
+    git(repo, "worktree", "add", "-q", wt, "feat/p")
+    os.makedirs(os.path.join(wt, ".sclaude", "local", "feature"))
+    open(os.path.join(wt, ".sclaude", "local", "feature", "state.json"), "w").write("{}")
+    for name in ("pushed", "open"):
+        git(repo, "switch", "-q", "-c", "feat/" + name, "main")
+        commit(repo, name)
+        git(repo, "update-ref", "refs/remotes/origin/feat/" + name, "HEAD")
+    git(repo, "switch", "-q", "main")
+    script = ('REPO=%s; source "%s/tree/branches.sh"\n'
+              'state_get() { echo feat/p; }\n'
+              'parts_branches() { printf "feat/p-1\\nfeat/p-2\\n"; }\n'
+              'branch_pr_state() { [[ "$1" == feat/open ]] && echo OPEN; true; }\n'
+              'classify_branches' % (repo, LIB))
+    rows = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=ENV).stdout
+    said = {r.split("\t")[1]: (r.split("\t")[0], r.split("\t")[2]) for r in rows.splitlines() if r.count("\t") == 2}
+    check("a part with commits is the feature's", said.get("feat/p-1"), ("keep", "a part of feat/p, deleted with it"))
+    check("a part with none yet is the feature's", said.get("feat/p-2"), ("keep", "a part of feat/p, deleted with it"))
+    check("pushed, said without asking", (said.get("feat/pushed"), said.get("feat/open")),
+          (("keep", "has commits, pushed"), ("keep", "has commits, pushed")))
+
+    # `done` deletes the parts' branches with the feature's: the ones the
+    # feature's branch holds go, one carrying more stays.
+    git(repo, "switch", "-q", "-c", "feat/q-1", "main")
+    commit(repo, "q1")
+    git(repo, "switch", "-q", "-c", "feat/q-2")
+    commit(repo, "q2")
+    feature_tip = git(repo, "rev-parse", "HEAD")
+    git(repo, "switch", "-q", "-c", "feat/q-3")
+    commit(repo, "q3 after the join")
+    git(repo, "switch", "-q", "main")
+    script = ('REPO=%s; source "%s/tree/branches.sh"\nwarn() { echo "WARN $*"; }\n'
+              'printf "feat/q-1\\nfeat/q-2\\nfeat/q-3\\n" | branches_parts_delete %s' % (repo, LIB, feature_tip))
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=ENV).stdout
+    left = git(repo, "branch", "--format=%(refname:short)").split("\n")
+    check("parts held by the feature go", [b for b in ("feat/q-1", "feat/q-2", "feat/q-3") if b in left], ["feat/q-3"])
+    check("a part carrying more is said", "local branch feat/q-3 kept" in out, True)
 
     sclaude = "".join(open(os.path.join(ROOT, _p)).read()
         for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))

@@ -269,7 +269,8 @@ cmd_done() {
   # stays (branch_delete_merged).
   # Without a pull request there is no merged head to compare with: what the
   # branch held is on main already, or was dropped at no_change_settle.
-  local kept=0
+  local kept=0 feature_tip
+  feature_tip="$(git -C "$REPO" rev-parse -q --verify "refs/heads/$branch" 2>/dev/null || true)"
   if [[ "$no_change" == "true" ]]; then
     no_change_branch_delete "$branch" || kept=1
   else
@@ -299,25 +300,8 @@ cmd_done() {
       || warn "  could not delete origin/$branch"
   fi
 
-  # The parts' branches: each one's pull request was squashed into the
-  # feature's branch, so git cannot see them merged; GitHub's word that the
-  # pull request merged is what lets them go.
-  local part_branch
-  while IFS= read -r part_branch; do
-    [[ -n "$part_branch" ]] || continue
-    [[ "$(branch_pr_state "$part_branch")" == MERGED ]] || {
-      git -C "$REPO" rev-parse -q --verify "refs/heads/$part_branch" >/dev/null \
-        && warn "  local branch $part_branch kept: its pull request is not merged"
-      # Pushed before its review (parts_enter), it is on GitHub too.
-      [[ -n "$(git -C "$REPO" ls-remote --heads origin "$part_branch" 2>/dev/null)" ]] \
-        && warn "  origin/$part_branch kept: its pull request is not merged (git push origin --delete $part_branch)"
-      continue
-    }
-    git -C "$REPO" branch -D "$part_branch" >/dev/null 2>&1 || true
-    [[ -n "$(git -C "$REPO" ls-remote --heads origin "$part_branch" 2>/dev/null)" ]] \
-      && { git -C "$REPO" push origin --delete "$part_branch" >/dev/null 2>&1 \
-             || warn "  could not delete origin/$part_branch"; }
-  done <<< "$part_branches"
+  # The parts' branches go with the feature's (branches_parts_delete).
+  [[ "$kept" == 1 ]] || branches_parts_delete "$feature_tip" <<< "$part_branches"
 
   echo "${GREEN}Feature '$slug' cleaned up.${OFF}"
 }

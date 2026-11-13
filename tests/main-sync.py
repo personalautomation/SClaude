@@ -10,6 +10,7 @@
 #   * any other conflict opens a session; the sync counts as done only when
 #     the branch then merges cleanly and is pushed, and a session that left
 #     it otherwise is a sync broken off;
+#   * conflict markers committed by the session leave the sync not done;
 #   * a merge under way here is never clean, and commits here that origin's
 #     tip lacks are asked about with it;
 #   * sync_gate takes back a hand-off for the merge whenever origin's branch
@@ -188,6 +189,46 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(feed) as fh:
         check("code: the start names the conflict",
               "🔀 Step 5/7 started: sync with main, session 1 · 1 file(s) conflict" in fh.read(), True)
+
+    # The session added its files with the markers still in and committed:
+    # nothing is unmerged and the branch merges with main, yet it is no sync.
+    seed, wt = setup(tmp, "marked")
+    commit(seed, "app.txt", "one\nmain\nthree\n", "main's change")
+    git(seed, "push", "-q", "origin", "HEAD:main")
+    commit(wt, "app.txt", "one\nfeature\nthree\n", "feature's change")
+    git(wt, "push", "-q")
+    marked = ("git merge -q origin/main >/dev/null 2>&1; "
+              "git add app.txt; git commit -q --no-edit; git push -q origin feat/9-x; "
+              "echo done > .sclaude/local/feature/session-done")
+    rc, out = run(wt, 'sync_with_main "$PWD" 9-x', **dict(env, CLAUDE_DOES=marked))
+    check("marked: not synced", (rc, "Conflict markers committed in:" in out, "    app.txt" in out),
+          (1, True, True))
+    # Half the conflict resolved after the merge: what is left still counts.
+    seed, wt = setup(tmp, "half")
+    commit(seed, "app.txt", "one\nmain\n" + "same\n" * 8 + "main2\n", "main's change")
+    git(seed, "push", "-q", "origin", "HEAD:main")
+    commit(wt, "app.txt", "one\nfeature\n" + "same\n" * 8 + "feature2\n", "feature's change")
+    git(wt, "push", "-q")
+    half = ("git merge -q origin/main >/dev/null 2>&1; git add app.txt; git commit -q --no-edit; "
+            "python3 - <<'E'\n"
+            "s = open('app.txt').read(); i = s.index('<<<<<<<'); j = s.index('>>>>>>>', i); j = s.index('\\n', j) + 1\n"
+            "open('app.txt', 'w').write(s[:i] + 'both\\n' + s[j:])\nE\n"
+            "git commit -qam 'one hunk'; git push -q origin feat/9-x; "
+            "echo done > .sclaude/local/feature/session-done")
+    rc, out = run(wt, 'sync_with_main "$PWD" 9-x', **dict(env, CLAUDE_DOES=half))
+    check("half: not synced", (rc, "    app.txt" in out), (1, True))
+
+    # A file of the feature's own that holds such lines (a fixture): a clean
+    # merge with it is a sync like any other.
+    seed, wt = setup(tmp, "fixture")
+    commit(seed, "other.txt", "x\n", "main moves")
+    commit(seed, "app.txt", "one\nmain\nthree\n", "main's change")
+    git(seed, "push", "-q", "origin", "HEAD:main")
+    commit(wt, "fixture.txt", "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> other\n", "a conflict fixture")
+    commit(wt, "app.txt", "one\nfeature\nthree\n", "feature's change")
+    git(wt, "push", "-q")
+    rc, out = run(wt, 'sync_with_main "$PWD" 9-x', **dict(env, CLAUDE_DOES=resolve))
+    check("fixture: synced", (rc, "Conflict markers committed" in out), (3, False))
 
     # The session gave up: still apart from main, the run stops, and the
     # sync stands broken off; the next one is session 2.

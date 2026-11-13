@@ -243,8 +243,8 @@ own: that review comes between the step's last session and its end.
 **The review's keys on the phone** (`review_keys.py`). The message that a
 local review pass started ("Local review started: PR #7, round 3") carries the
 two keys its terminal takes: ⏭ the last pass for new findings (`[s]`, which
-becomes ↩️ to take it back) and ⏹ stop now (`[n n]`, asked once more before it
-stops). The message that a fix session started carries the first alone: the
+becomes ↩️ to take it back) and ⏹ end the search (`[n n]`: the pass stops at once, asked once more
+before it stops). The message that a fix session started carries the first alone: the
 round is the last, and after it the review only checks the fixes. A pass that
 only checks them has no buttons, as its terminal takes no keys. A press writes
 its word — `pass`, `back` or `now` — into the feature's channel

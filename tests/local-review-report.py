@@ -11,7 +11,8 @@
 #     of the pull request (pr_view), and the mode is read from the main
 #     checkout first;
 #   * the local review's own words are not taken for a person's;
-#   * a pull request that replaced a merged one starts the report afresh.
+#   * a pull request that replaced a merged one starts the report afresh;
+#   * a pass stopped before it answered is no round that found nothing.
 #
 # Run it with: python3 tests/local-review-report.py
 import datetime
@@ -137,6 +138,35 @@ try:
     # Findings no session has begun to fix: the fix waits, it is not zero.
     check("fix-waits-for-a-session", [l.split()[8:11] for l in out.splitlines() if l.startswith("  3 ")],
           [["w", "w", "w"]])
+
+    # A last pass stopped before it answered (spent): not a round that found
+    # nothing — the report once said "Converging" on one stopped in 9 seconds.
+    import local_review
+    kept = open(journal).read()
+    local_review.spent(journal, "h2", "h3", 9, "")
+    brief_path = os.path.join(tmp, "brief")
+    os.environ["SCLAUDE_REPORT_BRIEF"] = brief_path
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        review_report.main()
+    del os.environ["SCLAUDE_REPORT_BRIEF"]
+    out = buf.getvalue()
+    check_true("stopped-not-running", "still running" not in out)
+    check_true("stopped-not-the-briefs-round", "round 4" not in open(brief_path).read())
+    check_true("stopped-said", "Round 4 left no recorded answer" in out)
+    check_true("stopped-not-converging", "the last round found nothing" not in out)
+    # Every round so far stopped: nothing is going, on the phone either.
+    write(journal, json.dumps({"at": "2026-10-15T10:00:00+00:00", "seconds": 9, "base": "x",
+                               "head": "h0", "spent": True}) + "\n")
+    review_report.threads = lambda cwd, pr, repo: []
+    os.environ["SCLAUDE_REPORT_BRIEF"] = brief_path
+    with redirect_stdout(io.StringIO()):
+        review_report.main()
+    del os.environ["SCLAUDE_REPORT_BRIEF"]
+    check_true("all-stopped-nothing-going", "no review run has answered yet" in open(brief_path).read())
+    review_report.threads = lambda cwd, pr, repo: [thread(1, 10, "fixed"), thread(2, 10, "no fix"),
+                                                   thread(3, 11, "fixed"), thread(4, 12, "open")]
+    write(journal, kept)
 
     # Switched back to the workflow: a journal left from the local rounds is
     # not read, the workflow's runs are.

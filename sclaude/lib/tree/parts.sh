@@ -30,11 +30,6 @@
 # whole (`parts.current` counts the parts); `branch` names the branch at
 # work, and `parts.umbrella` the feature's.
 #
-# Before 2026-11, each part had a pull request of its own into the feature's
-# branch, reviewed and merged there one by one; a feature caught half-way
-# through that, its first parts merged (`parts.<n>.merged`), is joined the
-# same way, and its review reads from where those parts left the branch.
-#
 # Part of sclaude; pulled in with source from bin/sclaude.
 # It does not run on its own.
 
@@ -323,19 +318,16 @@ parts_on() {
 #
 # The parts are stacked, so the last part's branch carries them all: the
 # feature's branch is moved to it, and the tree with it. Where that branch
-# took commits of its own since the parts left it — the parts merged there
-# one by one under the scheme before (`parts.<n>.merged`), main synced in
+# took commits of its own since the parts left it — main synced in
 # between — it is merged into the last part first, a session resolving
-# the conflicts (parts_merge_in), and the review reads from where it stood:
-# what was reviewed there is not read again (`blocks.base`). Each part's
-# commits are kept as a range (`parts.<n>.range`): the review's cut reads
+# the conflicts (parts_merge_in). Each part's commits are kept as a range (`parts.<n>.range`): the review's cut reads
 # which part changed what. Cut off half-way, the next run comes back here
 # (parts_joining) and goes on where it stopped.
 #
 #   parts_join <wt> <slug>   → 1 when the parts could not be joined yet
 parts_join() {
   local wt="$1" slug="$2" state="$1/.sclaude/local/feature/state.json"
-  local umbrella last tip n b below from here merged=""
+  local umbrella last tip n b below from here
   umbrella="$(parts_umbrella "$state")"; last="$(parts_last "$state")"
   tip="$(parts_branch "$umbrella" "$last")"
   GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$wt" fetch -q origin 2>/dev/null || true
@@ -343,28 +335,7 @@ parts_join() {
     warn "  The last part's branch, $tip, is not on this machine: bring it back, then run $SELF $slug"
     return 1
   fi
-  # A part's own pull request still open (the scheme before): its review's
-  # fixes are on its branch alone, and joining now would leave them out.
   for (( n = 1; n <= last; n++ )); do
-    local own at
-    own="$(state_get "$state" "parts.$n.pr" 2>/dev/null || true)"
-    at="$(state_get "$state" "parts.$n.merged" 2>/dev/null || true)"
-    local said=""
-    [[ -n "$own" && "$own" != null ]] && [[ -z "$at" || "$at" == null ]] \
-      && said="$(cd "$wt" && gh pr view "$own" --json state --jq .state 2>/dev/null || true)"
-    # Merged by hand on GitHub since: recorded, as the scheme before did.
-    # Closed unmerged: the person took its fixes in by hand, as told.
-    [[ "$said" == MERGED ]] && { state_set "$state" "parts.$n.merged" "$(date -Iseconds)"; at=merged; }
-    [[ "$said" == CLOSED ]] && at=closed
-    if [[ -n "$own" && "$own" != null ]] && [[ -z "$at" || "$at" == null ]]; then
-      warn "  Part $n's own pull request, #$own, is not merged: its review's fixes are on its branch alone."
-      warn "  Merge it into $umbrella (or close it, and bring its fixes in by hand), then run $SELF $slug"
-      return 1
-    fi
-  done
-  for (( n = 1; n <= last; n++ )); do
-    local at; at="$(state_get "$state" "parts.$n.merged" 2>/dev/null || true)"
-    if [[ -n "$at" && "$at" != null ]]; then merged=1; continue; fi
     [[ -n "$(state_get "$state" "parts.$n.range" 2>/dev/null || true)" ]] && continue
     b="$(parts_branch "$umbrella" "$n")"
     git -C "$wt" rev-parse -q --verify "refs/heads/$b" >/dev/null || continue
@@ -387,17 +358,10 @@ parts_join() {
     here="$tip"
   fi
   # What the feature's branch holds that the parts do not: GitHub's copy
-  # first, where the merged parts landed; the tree's when GitHub has none.
+  # first, where main was synced in; the tree's when GitHub has none.
   local theirs="refs/remotes/origin/$umbrella"
   git -C "$wt" rev-parse -q --verify "$theirs" >/dev/null || theirs="refs/heads/$umbrella"
   if [[ "$here" == "$tip" ]] && ! git -C "$wt" merge-base --is-ancestor "$theirs" HEAD 2>/dev/null; then
-    # Kept before the merge: a merge that stops here and is finished by hand
-    # leaves nothing for the next run to read it from. Over an empty node:
-    # what a part's own pull request decided is not the feature's.
-    if [[ -n "$merged" ]]; then
-      blocks_clear "$wt"
-      state_set "$state" blocks.base "$(git -C "$wt" rev-parse "$theirs")"
-    fi
     # The state names the branch the tree is on before the sync reads it
     # (parts_on): the session is told to merge into and push `branch`, and
     # the umbrella left there would send it to the wrong one.
@@ -409,7 +373,6 @@ parts_join() {
       && git -C "$wt" switch -q "$umbrella" \
       || { warn "  Could not move $umbrella to $tip: do it by hand (git -C $wt branch -f $umbrella $tip), then run $SELF $slug"; return 1; }
   fi
-  parts_reset_steps "$state" "$(parts_now "$state")" pr review
   state_set "$state" branch "$umbrella"
   state_set "$state" parts.done true
   state_set "$state" step pr
@@ -460,8 +423,7 @@ parts_built() {
 # conversation for each step, a review's rounds counted again. The list of
 # conversations stays (`runs`) — the issue's summary and the costs read it —
 # and what the part's steps held is kept under the part. Only the steps
-# named: `code` after a part is built, `pr review` as the parts are joined
-# (a feature whose first parts had pull requests of their own).
+# named: `code` after a part is built.
 #
 #   parts_reset_steps <state> <n> <step>...
 parts_reset_steps() {
@@ -482,9 +444,6 @@ for s in names:
         kept[s] = steps.get(s)
     runs = (steps.get(s) or {}).get("runs")
     steps[s] = {"runs": runs} if runs else {}
-if "pr" in names:
-    for key in ("pr", "reopened", "reopened_pr", "reopened_by"):
-        data[key] = None
 state_file.write(path, data)
 PY
 }

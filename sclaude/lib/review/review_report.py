@@ -410,12 +410,17 @@ def local_runs(cwd, since=None, root=None):
         cost = pass_cost(cwd, row.get("session"), root) if row.get("session") else None
         if out and key == last:
             out[-1]["seconds"] += float(row.get("seconds") or 0)
+            out[-1]["stopped"] = out[-1]["stopped"] and bool(row.get("spent"))
             if cost is not None:
                 out[-1]["cost"] = (out[-1]["cost"] or 0) + cost
             continue
         out.append({"start": parse(row["at"]), "seconds": float(row.get("seconds") or 0),
                     "running": False, "cost": cost, "head": row.get("head"),
-                    "source": row.get("source") or "local"})
+                    "source": row.get("source") or "local",
+                    # No pass of it left a recorded answer — stopped, or its
+                    # answer not recorded: no round that found nothing, and
+                    # no word for the trend.
+                    "stopped": bool(row.get("spent"))})
         last = key
     return out
 
@@ -426,7 +431,8 @@ def rounds(found, runs):
     threads are split where ROUND_GAP passes between two of them."""
     if runs:
         out = [{"at": r["start"], "seconds": r.get("seconds"), "running": r["running"],
-                "cost": r.get("cost"), "head": r.get("head"), "threads": []}
+                "cost": r.get("cost"), "head": r.get("head"), "threads": [],
+                "stopped": bool(r.get("stopped"))}
                for r in runs]
         for t in found:
             i = 0
@@ -698,12 +704,15 @@ def newest(columns):
     return done[-1] if done else None
 
 
-def brief(pr, last, verdict_line, going=False):
+def brief(pr, last, verdict_line, going=False, ran=False):
     """The status update: <last> is (label, {measure: n}) or None; <going>,
-    that a review run has begun and not finished."""
+    that a review run has begun and not finished; <ran>, that runs before it
+    left no recorded answer (stopped, or their answers not recorded)."""
     if not last:
-        return "Review — PR %s: %s\n%s\n" % (
-            pr, "the first review run is going." if going else "no review run yet.", verdict_line)
+        said = ("a review run is going." if going and ran
+                else "the first review run is going." if going
+                else "no review run has answered yet." if ran else "no review run yet.")
+        return "Review — PR %s: %s\n%s\n" % (pr, said, verdict_line)
     label, values = last
     # No "#": Telegram makes a hashtag of "#N".
     return "Review — PR %s, %s\n%s\n%s\n" % (
@@ -771,8 +780,10 @@ def main():
     fixed, nofix, opened = count(found, "fixed"), count(found, "no fix"), count(found, "open")
     near_all = sum(1 for t in found if t["near_fix"])
     repeats = [t for t in found if t["repeat"]]
-    # A round still running has not said all it will: left out of the trend.
-    done = [g for g in groups if not g["running"]]
+    # A round still running has not said all it will, and one with no
+    # recorded answer said nothing: both left out of the trend — a stopped
+    # pass read as "the last round found nothing", converging.
+    done = [g for g in groups if not g["running"] and not g.get("stopped")]
     per_round = [len(g["threads"]) for g in done]
     columns = []
     # The runs whose findings are still being decided: a fix going on them,
@@ -814,7 +825,10 @@ def main():
             counts = (len(ts), sum(1 for t in ts if t["near_fix"]), sum(1 for t in ts if t["repeat"]))
             # Declined is the fix's decision, as it reads the findings.
             result = (count(ts, "no fix"), count(ts, "fixed"), count(ts, "open"))
-            columns.append(("round %d" % (i + 1), dict(zip(BRIEF_ROWS, counts + result)), g["running"]))
+            # A stopped round is no finished one for the phone's brief either:
+            # its zeros would say "found nothing" there too (newest).
+            columns.append(("round %d" % (i + 1), dict(zip(BRIEF_ROWS, counts + result)),
+                            g["running"] or g.get("stopped")))
             if g["running"]:
                 ftook = fcost = WAIT
             else:
@@ -853,6 +867,11 @@ def main():
         for i, cells in enumerate(table):
             print(row(cells, base=YELLOW + ";" + BOLD, rnd=str(i + 1)) if i == last
                   else row(cells, rnd=str(i + 1)))
+        stopped = [str(i + 1) for i, g in enumerate(groups) if g.get("stopped") and not g["threads"]]
+        if stopped:
+            print("  Round%s %s left no recorded answer (stopped, or its answer not recorded): "
+                  "not a round that found nothing, and not in the trend."
+                  % ("s" if len(stopped) > 1 else "", ", ".join(stopped)))
 
         def column(key, show):
             """A column's sum of what is known now: the total is where the
@@ -897,7 +916,7 @@ def main():
             line += ", %d waiting for you to resolve on GitHub" % left
         if acted is not None:
             line += " · acted on %d%% of the last %d" % (round(acted * 100), len(settled))
-        if len(done) < len(groups):
+        if any(g["running"] for g in groups):
             line += " · one review run still running"
         print(line)
 
@@ -910,7 +929,8 @@ def main():
     if path and not threads_failed:
         try:
             with open(path, "w") as fh:
-                fh.write(brief(pr, newest(columns), said, bool(columns)))
+                fh.write(brief(pr, newest(columns), said, any(g["running"] for g in groups),
+                                 any(g.get("stopped") for g in groups)))
         except OSError:
             pass
     path = os.environ.get(STUCK_ENV, "")

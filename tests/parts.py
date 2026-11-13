@@ -16,11 +16,11 @@
 #     becomes part 1, the common branch put back where it left main; never
 #     over uncommitted work;
 #   * parts_built goes on to the next part, and after the last to the whole;
-#   * parts_join moves the feature's branch to the last part, keeps each
-#     part's range, and — for a feature whose first parts were merged the old
-#     way — merges that branch in (a conflict to the sync session) and reads
-#     the review from where it stood; parts_merge_in undoes a merge that
-#     conflicts and hands it to the sync session;
+#   * parts_join moves the feature's branch to the last part and keeps each
+#     part's range; where that branch took commits of its own (main synced
+#     there) it is merged into the last part first, a conflict to the sync
+#     session; parts_merge_in undoes a merge that conflicts and hands it to
+#     the sync session;
 #   * `sclaude parts <name> stop` while building checks the whole on the last
 #     part kept, and is refused once the whole is accepted;
 #   * the local review's journal and its waiting findings are kept per pull
@@ -328,10 +328,10 @@ esac
     check("branches-for-the-clean-up", out.split(), ["feat/t-1", "feat/t-2"])
     joined = read_state()
 
-    # A feature whose first part was reviewed and merged the old way: the
-    # feature's branch, with part 1 squashed in after its review changed a
-    # line part 2 built on, merges into the last part — the conflict to the
-    # sync session — and the review reads from where that branch stood.
+    # The feature's branch took a commit of its own after the parts left it
+    # (main synced there): it merges into the last part — the conflict to the
+    # sync session, told to merge into and push the last part's branch, not
+    # the feature's it merges in — and the review reads from main.
     git("switch", "-q", "-c", "lg", base, cwd=wt)
     git("switch", "-q", "-c", "lg-1", cwd=wt)
     with open(os.path.join(wt, "l.txt"), "w") as fh:
@@ -345,48 +345,29 @@ esac
     lg2 = git("rev-parse", "HEAD", cwd=wt)
     git("switch", "-q", "lg", cwd=wt)
     with open(os.path.join(wt, "l.txt"), "w") as fh:
-        fh.write("one, reviewed\n")
-    git("add", "l.txt", cwd=wt); git("commit", "-q", "-m", "squash lg-1 (reviewed)", cwd=wt)
+        fh.write("one, from main\n")
+    git("add", "l.txt", cwd=wt); git("commit", "-q", "-m", "main synced", cwd=wt)
     git("push", "-q", "origin", "lg", cwd=wt)
-    reviewed = git("rev-parse", "HEAD", cwd=wt)
+    synced = git("rev-parse", "HEAD", cwd=wt)
     git("switch", "-q", "lg-1", cwd=wt)
-    write_state({"feature": "t", "branch": "lg-1", "issue": 41, "step": "review", "pr": 101,
-                 "steps": {"code": {"session": "cw", "done": True}, "review": {"session": "r1", "rounds": 9}},
+    write_state({"feature": "t", "branch": "lg-1", "issue": 41, "step": "code",
+                 "steps": {"code": {"session": "cw", "done": True}},
                  "parts": {"total": 2, "umbrella": "lg", "current": 1, "built": True, "accepted": True,
-                           "1": {"branch": "lg-1", "pr": 101, "merged": "2026-11-12T10:00:00+00:00"},
-                           "2": {"branch": "lg-2"}}})
+                           "1": {"branch": "lg-1"}, "2": {"branch": "lg-2"}}})
     sync_stub = ('sync_with_main() { echo "SYNC_FROM=$SYNC_FROM"; '
                  'echo "SYNC_INTO=$(state_get "$1/.sclaude/local/feature/state.json" branch)"; '
                  'git -C "$1" merge -q -X theirs --no-edit "$(sync_source)" >/dev/null 2>&1; return 3; }\n')
-    # Its pull request not merged yet: its review's fixes would be left out.
-    st = read_state(); merged_at = st["parts"]["1"].pop("merged"); write_state(st)
-    out, rc = run_bash('parts_join "%s" t' % wt, wt, bin_dir, sync_stub)
-    check("no-join-over-a-parts-open-pr", (rc, "#101, is not merged" in out, git("branch", "--show-current", cwd=wt)),
-          (1, True, "lg-1"))
-    # Merged by hand on GitHub since: read there and recorded.
-    with open(prs_file, "w") as fh:
-        json.dump({"101": {"state": "MERGED"}}, fh)
-    out, rc = run_bash('parts_join "%s" t >/dev/null; echo' % wt, wt, bin_dir, 'parts_merge_in() { return 1; }\n')
-    check("a-parts-pr-merged-on-github-is-recorded", bool(read_state()["parts"]["1"].get("merged")), True)
-    with open(prs_file, "w") as fh:
-        json.dump({}, fh)
-    st["parts"]["1"]["merged"] = merged_at; write_state(st)
     out, rc = run_bash('parts_join "%s" t' % wt, wt, bin_dir, sync_stub)
     st = read_state()
-    check("old-way-join-ok", (rc, "SYNC_FROM=lg" in out, "RUN_STEP pr" in out), (0, True, True))
-    # The sync session is told to merge into and push the branch the tree
-    # is on — the last part's — not the feature's branch it is merging in.
-    check("old-way-sync-merges-into-the-last-part", "SYNC_INTO=lg-2" in out, True)
-    check("old-way-joined-carries-both",
-          [subprocess.run(["git", "merge-base", "--is-ancestor", c, "lg"], cwd=wt).returncode for c in (reviewed, lg2)],
+    check("synced-join-ok", (rc, "SYNC_FROM=lg" in out, "RUN_STEP pr" in out), (0, True, True))
+    check("synced-sync-merges-into-the-last-part", "SYNC_INTO=lg-2" in out, True)
+    check("synced-joined-carries-both",
+          [subprocess.run(["git", "merge-base", "--is-ancestor", c, "lg"], cwd=wt).returncode for c in (synced, lg2)],
           [0, 0])
-    check("old-way-the-review-wins", open(os.path.join(wt, "l.txt")).read(), "one, reviewed\n")
-    check("old-way-reads-from-the-reviewed-branch", st["blocks"].get("base"), reviewed)
-    check("old-way-ranges-for-the-parts-not-merged",
-          (st["parts"]["1"].get("range"), st["parts"]["2"].get("range")), (None, "%s..%s" % (old1, lg2)))
-    check("old-way-the-parts-pr-cleared", (st.get("pr"), st["steps"].get("review"), st["parts"]["1"]["steps"]["review"]["rounds"]),
-          (None, {}, 9))
-    check("old-way-on-the-features-branch", (git("branch", "--show-current", cwd=wt), st.get("branch")), ("lg", "lg"))
+    check("synced-ranges", (st["parts"]["1"].get("range"), st["parts"]["2"].get("range")),
+          ("%s..%s" % (base, old1), "%s..%s" % (old1, lg2)))
+    check("synced-reads-from-main", (st.get("blocks") or {}).get("base"), None)
+    check("synced-on-the-features-branch", (git("branch", "--show-current", cwd=wt), st.get("branch")), ("lg", "lg"))
     write_state(joined)
     git("switch", "-q", "feat/t", cwd=wt)
 
@@ -455,19 +436,25 @@ esac
     check("no-stop-once-the-whole-is-accepted", (rc, "replan" in out), (1, True))
 
     # Every row of the history carries the part, and each new conversation.
-    st["parts"].update({"done": False, "current": 2, "2": {"branch": "feat/t-2", "pr": 102}})
+    st["parts"].update({"done": False, "built": False, "accepted": False, "current": 2, "2": {"branch": "feat/t-2"}})
     st["parts"].pop("dropped", None)
     write_state(st)
     run_bash('history_add "%s" qa in; session_runs "%s" steps.code open s9' % (spath, spath), wt, bin_dir)
     with open(os.path.join(fdir, "history.jsonl")) as fh:
         last = json.loads(fh.read().splitlines()[-1])
     check("history-row-names-the-part",
-          (last.get("part"), last.get("part_branch"), last.get("part_pr")), ("2", "feat/t-2", "102"))
+          (last.get("part"), last.get("part_branch"), "part_pr" in last), ("2", "feat/t-2", False))
     check("a-run-names-the-part", read_state()["steps"]["code"]["runs"][-1].get("part"), "2")
-    st = read_state(); st["parts"]["accepted"] = False; write_state(st)
+    st = read_state(); st["parts"]["built"] = True; write_state(st)
     run_bash('history_add "%s" qa mid' % spath, wt, bin_dir)
     with open(os.path.join(fdir, "history.jsonl")) as fh:
         check("checking-the-whole-is-the-whole", json.loads(fh.read().splitlines()[-1]).get("part"), "whole")
+    # Accepted, the parts not yet one branch: a sync session joining them is
+    # the whole's, not part 1's (parts.current is back at 1 by then).
+    st = read_state(); st["parts"].update({"accepted": True, "current": 1}); write_state(st)
+    run_bash('history_add "%s" qa join' % spath, wt, bin_dir)
+    with open(os.path.join(fdir, "history.jsonl")) as fh:
+        check("joining-is-the-whole", json.loads(fh.read().splitlines()[-1]).get("part"), "whole")
     st = read_state(); st["parts"]["done"] = True; write_state(st)
     run_bash('history_add "%s" qa out' % spath, wt, bin_dir)
     with open(os.path.join(fdir, "history.jsonl")) as fh:

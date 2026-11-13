@@ -75,7 +75,8 @@ branch_delete_merged() {
 #
 # main and the current branch are not considered at all.
 classify_branches() {
-  local current merged_list branch state has_own wt
+  local current merged_list branch state has_own wt tree st part
+  local -A parts_of=()
   # Without --prune the local refs/remotes/origin/* outlive branches that have
   # long been gone from GitHub, and the whole "the remote branch is gone" check
   # lies. A second of network; we skip silently when there is none.
@@ -84,6 +85,16 @@ classify_branches() {
   # The branches with no commits of their own beyond origin/main. Computed
   # once.
   merged_list="$(git -C "$REPO" branch --merged origin/main --format='%(refname:short)')"
+  # The parts' branches of a feature built in parts belong to it while its
+  # tree is here: the parts are built on them without a tree of their own,
+  # and `sclaude done` deletes them with the feature (parts_branches).
+  while IFS= read -r tree; do
+    st="$tree/.sclaude/local/feature/state.json"
+    [[ -f "$st" ]] || continue
+    while IFS= read -r part; do
+      [[ -n "$part" ]] && parts_of["$part"]="$(state_get "$st" parts.umbrella 2>/dev/null || true)"
+    done < <(parts_branches "$st" 2>/dev/null)
+  done < <(git -C "$REPO" worktree list --porcelain | sed -n 's/^worktree //p')
 
   while IFS=$'\t' read -r branch wt; do
     [[ -z "$branch" || "$branch" == "main" || "$branch" == "$current" ]] && continue
@@ -95,6 +106,10 @@ classify_branches() {
     # it holds: the orchestrator drives it, and `sclaude done` removes it after
     # the merge. Asking about it here would mean offering to tear down an
     # unfinished feature.
+    if [[ -n "${parts_of[$branch]+set}" ]]; then
+      printf 'keep\t%s\t%s\n' "$branch" "a part of ${parts_of[$branch]:-a feature in progress}, deleted with it"
+      continue
+    fi
     if [[ -n "$wt" ]]; then
       if [[ "$has_own" -eq 0 ]]; then
         printf 'keep\t%s\t%s\n' "$branch" "feature in progress, no commits yet"
@@ -120,7 +135,9 @@ classify_branches() {
           printf 'keep\t%s\t%s\n' "$branch" "nothing of its own beyond main"
         fi
       else
-        printf 'keep\t%s\t%s\n' "$branch" "has commits, PR still open"
+        # Work in progress, said as what is known without asking GitHub: a
+        # pull request is not guessed at — a part's branch never has one.
+        printf 'keep\t%s\t%s\n' "$branch" "has commits, pushed"
       fi
       continue
     fi
@@ -199,4 +216,34 @@ review_branches() {
       fi
     fi
   done <<< "$drop"
+}
+
+# The parts' branches of a feature being cleaned up (sclaude done): the parts
+# were joined into the feature's branch, so each one goes once its commits
+# are all in that branch's last tip — the local branch, and origin's as
+# GitHub has it; one carrying more is kept, and said. Called only when the
+# feature's branch itself went.
+#
+#   branches_parts_delete <feature tip>   (names on stdin, one a line)
+branches_parts_delete() {
+  local feature_tip="$1" part tip theirs
+  while IFS= read -r part; do
+    [[ -n "$part" ]] || continue
+    tip="$(git -C "$REPO" rev-parse -q --verify "refs/heads/$part" 2>/dev/null || true)"
+    if [[ -n "$tip" ]]; then
+      if [[ -n "$feature_tip" ]] && git -C "$REPO" merge-base --is-ancestor "$tip" "$feature_tip" 2>/dev/null; then
+        git -C "$REPO" branch -D "$part" >/dev/null 2>&1 || true
+      else
+        warn "  local branch $part kept: it carries commits the feature's branch did not take"
+      fi
+    fi
+    theirs="$(git -C "$REPO" ls-remote --heads origin "$part" 2>/dev/null | cut -f1)"
+    [[ -n "$theirs" ]] || continue
+    if [[ -n "$feature_tip" ]] && git -C "$REPO" merge-base --is-ancestor "$theirs" "$feature_tip" 2>/dev/null; then
+      git -C "$REPO" push origin --delete "$part" >/dev/null 2>&1 \
+        || warn "  could not delete origin/$part"
+    else
+      warn "  origin/$part kept: it carries commits the feature's branch did not take"
+    fi
+  done
 }

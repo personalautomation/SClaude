@@ -24,8 +24,7 @@
 #                                                 read is still to come
 #
 # With [pr], only that pull request's runs count: one journal may hold
-# several, a pull request closed and another opened, or a feature's parts'
-# from before 2026-11. While a pull request is read in review blocks
+# several, a pull request closed and another opened. While a pull request is read in review blocks
 # (review_blocks.sh) SCLAUDE_REVIEW_BLOCK names the block: `cached`, `round`
 # and `first` count its runs alone, and a run recorded then carries `block`
 # and `read` (tag); `since` stays the pull request's own. A row from before

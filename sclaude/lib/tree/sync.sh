@@ -40,9 +40,8 @@ SYNC_EFFORT="medium"
 # become one branch (parts_join → parts_merge_in in parts.sh) — the
 # feature's common branch, merged into the last part, set as locals around
 # the call: bash hands them to every function the caller calls. SYNC_FROM
-# names it; SYNC_REF, when set, is the revision itself (a local branch,
-# which origin may have deleted once its pull request merged), and is not
-# fetched. The sync session's path reads it through sync_source.
+# names it; SYNC_REF, when set, is the revision itself (the feature's
+# branch as GitHub has it, else as this tree does), and is not fetched. The sync session's path reads it through sync_source.
 SYNC_FROM="${SYNC_FROM:-main}"
 SYNC_REF="${SYNC_REF:-}"
 
@@ -369,12 +368,49 @@ sync_deferred() {
   return 0
 }
 
+# The files where a merge the sync session made left conflict markers: a
+# merge on the branch's own line since <before> — where the branch stood
+# when the session was launched — whose file holds more marker lines than
+# either of its parents, and HEAD still more than they. Counted, not matched: a file with such lines of its
+# own (a test fixture, a page about conflicts) has them on a side too.
+# Decided with the user: only the session's own merges are looked at —
+# markers it committed, refused, and then buried under a later clean merge
+# by a session after it, or let through by the next run once the branch
+# merges cleanly (the refusal named the files), are left to the review.
+#
+#   sync_marked <wt> <before>   → one file a line
+sync_marked() {
+  local wt="$1" before="$2" c f
+  [[ -n "$before" ]] || return 0
+  for c in $(git -C "$wt" rev-list --first-parent --merges "$before..HEAD" 2>/dev/null); do
+    while IFS= read -r -d '' f; do
+      local made one two
+      # Only a merge that made marker lines of its own — more than either
+      # parent had — is looked at; lines added after it count at HEAD too.
+      made="$(sync_marker_count "$wt" "$c:$f")"
+      [[ "$made" -gt 0 ]] || continue
+      one="$(sync_marker_count "$wt" "$c^1:$f")"; two="$(sync_marker_count "$wt" "$c^2:$f")"
+      (( made > one && made > two )) || continue
+      # Any of them left at HEAD — half a conflict resolved is still one.
+      local side=$(( one > two ? one : two ))
+      (( $(sync_marker_count "$wt" "HEAD:$f") > side )) && printf '%s\n' "$f"
+    done < <(git -C "$wt" diff --name-only -z "$c^1" "$c" 2>/dev/null)
+  done | LC_ALL=C sort -u
+}
+
+# How many conflict-marker lines a file holds, as <rev>:<path> names it.
+sync_marker_count() {
+  git -C "$1" show "$2" 2>/dev/null | grep -cE '^(<<<<<<<|>>>>>>>) ' || true
+}
+
 # Whether the branch is in the shape a sync leaves it: no merge under way, no
-# change left uncommitted, merging cleanly with origin/main, and pushed — when
+# change left uncommitted, no conflict markers committed, merging cleanly
+# with origin/main, and pushed — when
 # origin has the branch at all: one not pushed yet (cmd_sync before step 3)
 # stays local.
 #
-#   sync_settled <wt>
+#   sync_settled <wt> [before]   (before: where the session found the branch,
+#                                 for sync_marked)
 #
 # A check that cannot be made (no network) does not count against it, as in
 # sync_with_main: the push the session made moved origin's ref here already.
@@ -382,6 +418,15 @@ sync_settled() {
   local wt="$1" rc=0 remote
   sync_branch_name "$wt" >/dev/null || return 1
   ! merge_under_way "$wt" && tree_clean "$wt" || return 1
+  # Files added with their markers still in pass git's own checks — nothing
+  # is unmerged, and the tree merges — so they are looked for (sync_marked).
+  local marked
+  marked="$(sync_marked "$wt" "${2:-}")"
+  if [[ -n "$marked" ]]; then
+    warn "  Conflict markers committed in:"
+    sed 's/^/    /' <<< "$marked" >&2
+    return 1
+  fi
   merge_conflicts "$wt" >/dev/null || rc=$?
   [[ "$rc" -ne 1 ]] || return 1
   remote="$(sync_origin_tip "$wt")"
@@ -660,6 +705,7 @@ sync_with_main() {
   ask_feed say "$(phase_line "$([[ -n "$resume" ]] && echo resumed || echo started)" sync "$n") · $what"
 
   rm -f "$(done_marker "$wt")"
+  local before; before="$(git -C "$wt" rev-parse -q --verify HEAD 2>/dev/null || true)"
   session_watch_start "$wt" "$session"
   if [[ -n "$resume" ]]; then
     if [[ -n "$unfinished" ]]; then
@@ -690,7 +736,7 @@ sync_with_main() {
     return 1
   fi
   local settled=""
-  sync_settled "$wt" && settled=1
+  sync_settled "$wt" "$before" && settled=1
   if [[ -n "$settled" ]]; then
     session_runs "$state" sync finish "$session"
     history_edge "$state" sync merge_check session "settled"

@@ -1323,13 +1323,9 @@ carries them all, and the feature's branch is moved to it — the tree with
 it — and step 3 opens the feature's one pull request (`<if:parts-done>` in
 `pr.md`, listing the parts). Each part's commits are kept first as
 `parts.<n>.range`, `<from>..<tip>`: the review's cut reads which part changed
-what. Where the feature's branch took commits since the parts left it — a
-feature whose first parts were merged there under the scheme before
-(`parts.<n>.merged`) — it is merged into the last part (`parts_merge_in`: a
-plain merge, else the sync session with `SYNC_FROM` the feature's branch), and
-`blocks.base` keeps where it stood, so the review reads from there and not
-from main: what those parts' reviews read is not read again. `parts_reset_steps
-… pr review` clears such a part's old pull request from the state. A run cut off
+what. Where the feature's branch took commits since the parts left it — main
+synced there — it is merged into the last part (`parts_merge_in`: a plain
+merge, else the sync session with `SYNC_FROM` the feature's branch). A run cut off
 half-way finds `parts_joining` true and comes back (`run_step`). `sclaude
 done` deletes the parts' branches with the feature's (`parts_branches`).
 
@@ -1350,8 +1346,6 @@ are joined — with `part_branch` while a part is at work (`parts_about`,
 `part`; the played history (`_part_of`, `_parts_way`) and the costs place a
 row by it: each part one pass of the parts map, the whole and the join on the
 last part's pass; the feature's pull request and review on the detailed map.
-The rows of a part's own pull request and review, from before 2026-11, play
-on the detailed map too.
 
 ## Review blocks
 
@@ -1383,7 +1377,7 @@ parts as blocks — each file owned by the part whose range changed most of it,
 each criterion by its tag — and, for a feature not built in parts, to a single
 read. Fewer than two blocks is a single read. The cut is
 `review-blocks.json`; the state keeps `blocks.total` (the blocks and the
-seams), `blocks.current` and `blocks.base`. The person is told the blocks in
+seams) and `blocks.current`. The person is told the blocks in
 the topic and the terminal, and the review does not wait for them. The pull
 request takes the `no-review` label (`blocks.label_before` keeps whether
 GitHub said it carried one already: the seams leave on only a label that
@@ -1395,8 +1389,7 @@ to a block — and, under `github` or under `github-local` with no move here
 (a move for Actions minutes or a runner keeps its own rule), `in_blocks` and
 `project_review_in_blocks` keep the project's CI in the verdict, as for a
 review moved here for Claude's limit. `blocks.pr` names the first pull request
-seen since the node was emptied, decided or not: it owns the cut and the base
-the join left, and another one — after a merged one was reopened — empties
+seen since the node was emptied, decided or not: it owns the cut, and another one — after a merged one was reopened — empties
 the node, the cut on disk with it, and is decided afresh.
 
 **A block's first read** (`local_review_run`, `blocks_scope`): its criteria

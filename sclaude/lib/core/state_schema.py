@@ -81,15 +81,13 @@ FIELDS = [
     ("parts.dropped", (FEATURE,), "the first part the person left out (`sclaude parts <name> stop`); it and the ones after are not built"),
     ("parts.<n>.title", (FEATURE,), "a part's title, from the plan"),
     ("parts.<n>.branch", (FEATURE,), "its branch, <umbrella>-<n>"),
-    ("parts.<n>.pr", (FEATURE,), "its own pull request into the feature's branch, under the scheme before 2026-11: parts_join asks whether it was merged"),
-    ("parts.<n>.merged", (FEATURE,), "when its own pull request was merged into the feature's branch, under the scheme before 2026-11: parts_join reads it"),
     ("parts.<n>.range", (FEATURE,), "its commits, <from>..<tip>, recorded as the parts were joined, for the review's cut"),
     ("parts.<n>.steps", (FEATURE,), "what its steps held, kept when the next part began"),
     ("blocks.total", (FEATURE,), "the review blocks and the seams after them; 0 when the pull request is read whole, none until step 4 decided"),
     ("blocks.current", (FEATURE,), "the review block being read"),
     ("blocks.label_before", (FEATURE,), "yes or no: the pull request carried no-review before the cut, as GitHub said; the seams leave the label on only on yes"),
-    ("blocks.pr", (FEATURE,), "the first pull request seen since the node was emptied, decided or not: it owns the cut and the join's base; another empties the node"),
-    ("blocks.base", (FEATURE,), "the commit the review reads from, when it is not where the branch left main"),
+    ("blocks.pr", (FEATURE,), "the first pull request seen since the node was emptied, decided or not: it owns the cut; another empties the node"),
+    ("blocks.base", (FEATURE,), "the commit the review reads from, when it is not where the branch left main: written by nothing now, left in the one feature joined after its first part was reviewed under the scheme before; goes once that review closes"),
     ("blocks.<k>.steps", (FEATURE,), "what step 4 held while block k was read, kept when the next began"),
 
     # --- a reopened feature ----------------------------------------------------

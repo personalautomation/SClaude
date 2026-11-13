@@ -540,7 +540,7 @@ starts and ends, and each step once it is done; a review fix session with
 what it is handed and what it leaves (findings not fixed yet, new, fixed,
 declined, commits), and the review on this machine as it runs — its start
 carries the keys its terminal takes, ⏭ the last pass for new findings and ⏹
-stop now, and a fix session's start the first of them, so a review can be
+end the search, and a fix session's start the first of them, so a review can be
 ended from the phone; the buttons go once that pass or session ends; regressions
 (a red one names the specs that failed, by their titles), deploys and QA's
 moves on the board — in short messages, one step's lines apart from the next one's, silent unless something went wrong while you are

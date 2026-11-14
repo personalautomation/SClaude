@@ -70,7 +70,8 @@ def functions(names):
 RUN = "".join(open(os.path.join(LIB, m), encoding="utf-8").read()
           for m in ("cycle/run.sh", "cycle/session_watch.sh", "review/review_round.sh", "review/review_gate.sh",
                     "improve/friction.sh"))
-WATCH = 'source "%s/core/state.sh"\nsource "%s/core/pane.sh"\nLIB="%s"\n' % (LIB, LIB, LIB) + functions(
+WATCH = 'source "%s/core/state.sh"\nsource "%s/core/pane.sh"\nsource "%s/core/procinfo.sh"\nLIB="%s"\n' \
+    % (LIB, LIB, LIB, LIB) + functions(
     ["done_marker", "wait_note", "session_watch_start", "session_watch_stop", "stop_file"])
 END = os.path.join(LIB, "cycle", "session_end.py")
 
@@ -1465,14 +1466,18 @@ echo "watcher=[$SESSION_WATCHER]"
                  '  state_set "$1/.sclaude/local/feature/state.json" "friction.$3.done" true; }\n'
                  '%s; echo "RC=$?"\n') % (1 if fails else 0, call.replace("WT", wt))
         # A terminal of its own: the review before the retro needs one.
+        # Read while it runs and before the terminal's last end closes:
+        # macOS drops what was never read once it does, Linux keeps it.
         master, slave = pty.openpty()
-        subprocess.run(["bash", "-c", body], stdin=slave, stdout=slave, stderr=slave, timeout=30)
-        os.close(slave)
+        proc = subprocess.Popen(["bash", "-c", body], stdin=slave, stdout=slave, stderr=slave)
         seen = b""
-        while True:
+        deadline = time.time() + 30
+        while time.time() < deadline:
             ready, _, _ = select.select([master], [], [], 0.2)
             if not ready:
-                break
+                if proc.poll() is not None:
+                    break
+                continue
             try:
                 chunk = os.read(master, 4096)
             except OSError:
@@ -1480,6 +1485,10 @@ echo "watcher=[$SESSION_WATCHER]"
             if not chunk:
                 break
             seen += chunk
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        os.close(slave)
         os.close(master)
         with open(st) as fh:
             return seen.decode(errors="replace"), json.load(fh)["steps"]["review"]

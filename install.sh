@@ -12,6 +12,10 @@
 # the Windows side and wsl-update keeps the distribution current, and plain
 # Linux, where keepawake-linux holds this machine awake itself.
 #
+# On macOS sclaude runs with Homebrew's bash 5 and GNU tools, which this
+# offers to install, and launchd's agents in place of the systemd units. The
+# extras are Linux and WSL only, and --extras is passed over there.
+#
 #   ./install.sh               sclaude only (and the extras, if an earlier
 #                              install put them in)
 #   ./install.sh --extras      sclaude and the machine tools
@@ -66,17 +70,76 @@ for arg in "$@"; do
 done
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# --- macOS: Homebrew's bash and the GNU tools ---------------------------------
+#
+# sclaude is written for bash 4 and the GNU userland; a Mac has bash 3.2 and
+# BSD's tools, and sclaude/lib/core/macos.sh puts Homebrew's builds first for
+# every entry point. What is missing of them is offered here, with the
+# command shown first; then the installer goes on under bash 5 itself, so up
+# to here it is written for bash 3.2.
+#
+# SCLAUDE_OS (linux or macos) overrides what the system says, for the tests:
+# tests/install.py runs the Linux installer on a Mac too.
+MACOS=0
+case "${SCLAUDE_OS:-}" in
+  macos) MACOS=1 ;;
+  linux) ;;
+  *) [[ "${OSTYPE:-}" == darwin* ]] && MACOS=1 ;;
+esac
+if [[ $MACOS -eq 1 ]]; then
+  MACOS_FUNCTIONS_ONLY=1
+  # shellcheck source=sclaude/lib/core/macos.sh
+  source "$REPO/sclaude/lib/core/macos.sh"
+  unset MACOS_FUNCTIONS_ONLY
+  if ! macos_brew >/dev/null; then
+    echo "error: sclaude on macOS needs Homebrew — https://brew.sh — then re-run ./install.sh" >&2
+    exit 1
+  fi
+  MACOS_NEED="$(macos_missing)"
+  if [[ -n "$MACOS_NEED" ]]; then
+    echo "macOS: sclaude runs with Homebrew's bash 5 and GNU tools; missing: $MACOS_NEED"
+    echo "  $(macos_brew)/bin/brew install $MACOS_NEED"
+    if [[ ! -t 0 ]]; then
+      echo "  No terminal to ask in: run that, then ./install.sh again." >&2
+      exit 1
+    fi
+    # No default, as everywhere in sclaude: asked again until it is a yes or
+    # a no. End of input is a no.
+    while :; do
+      read -rp "  Install them now? [y/n] " answer || { answer=n; echo; }
+      case "$answer" in
+        y|Y|yes|YES|Yes) break ;;
+        n|N|no|NO|No) echo "  Not installed: sclaude cannot run without them." >&2; exit 1 ;;
+        *) echo "  Please answer y or n." ;;
+      esac
+    done
+    # shellcheck disable=SC2086  # the formulae, one word each
+    "$(macos_brew)/bin/brew" install $MACOS_NEED \
+      || { echo "error: brew install failed; nothing else was done" >&2; exit 1; }
+  fi
+  # Under bash 5 from here on, with the GNU tools first: this re-executes the
+  # installer with its own arguments when it runs under the system's bash.
+  source "$REPO/sclaude/lib/core/macos.sh"
+  if [[ $EXTRAS -eq 1 ]]; then
+    echo "note: the extras (keepawake, its Telegram bot, code-server) are Linux and WSL only;" >&2
+    echo "      installing sclaude alone" >&2
+    EXTRAS=0
+    POLKIT_CHOICE=no
+  fi
+fi
 BIN="$HOME/.local/bin"
 UNITS="$HOME/.config/systemd/user"
 SKILLS="$HOME/.claude/skills"
 CLAUDE="$HOME/.claude"
 
-mkdir -p "$BIN" "$UNITS" "$SKILLS" "$CLAUDE"
+mkdir -p "$BIN" "$SKILLS" "$CLAUDE"
+[[ $MACOS -eq 1 ]] || mkdir -p "$UNITS"
 
 # A machine an earlier install gave the extras keeps them on a plain re-run:
 # leaving its keepawake and bot units unwritten would let them drift from the
 # repository without a word.
-if [[ $EXTRAS -eq 0 && -L "$BIN/keepawake" ]]; then
+if [[ $MACOS -eq 0 && $EXTRAS -eq 0 && -L "$BIN/keepawake" ]]; then
   EXTRAS=1
   echo "extras: kept — an earlier install put them in"
 fi
@@ -96,8 +159,12 @@ unit() {
 # one day set up the units for one platform while the state went to the other.
 # KEEPAWAKE_PLATFORM (wsl|linux) overrides it there — for the tests.
 WSL=0
-[[ "$(python3 "$REPO/keepawake/state.py" platform 2>/dev/null)" == wsl ]] && WSL=1
-echo "platform: $([[ $WSL -eq 1 ]] && echo WSL || echo Linux)"
+[[ $MACOS -eq 0 && "$(python3 "$REPO/keepawake/state.py" platform 2>/dev/null)" == wsl ]] && WSL=1
+if [[ $MACOS -eq 1 ]]; then
+  echo "platform: macOS"
+else
+  echo "platform: $([[ $WSL -eq 1 ]] && echo WSL || echo Linux)"
+fi
 
 # systemd's user manager runs sclaude's watcher, proxy and gate, and every
 # extra. `command -v systemctl` is not enough: WSL ships the binary without
@@ -105,7 +172,9 @@ echo "platform: $([[ $WSL -eq 1 ]] && echo WSL || echo Linux)"
 # `systemctl --user` fails and set -e stops the install half-way without a
 # word. Asked once here, and what to do said plainly.
 SYSTEMD=0
-if command -v systemctl >/dev/null 2>&1 \
+if [[ $MACOS -eq 1 ]]; then
+  : # launchd's agents, below
+elif command -v systemctl >/dev/null 2>&1 \
    && systemctl --user show-environment >/dev/null 2>&1; then
   SYSTEMD=1
 else
@@ -131,13 +200,15 @@ for tool in sclaude sclaude-notify sclaude-watch sclaude-proxy chrome-debug; do
 done
 echo "symlinked: sclaude, sclaude-notify, sclaude-watch, sclaude-proxy, chrome-debug in $BIN"
 
-unit sclaude-watch.service
-unit sclaude-watch.timer
-unit sclaude-proxy.socket
-unit sclaude-proxy.service
-unit sclaude-gate.socket
-unit sclaude-gate.service
-echo "units: $UNITS/sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}, sclaude-gate{.socket,.service}"
+if [[ $MACOS -eq 0 ]]; then
+  unit sclaude-watch.service
+  unit sclaude-watch.timer
+  unit sclaude-proxy.socket
+  unit sclaude-proxy.service
+  unit sclaude-gate.socket
+  unit sclaude-gate.service
+  echo "units: $UNITS/sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}, sclaude-gate{.socket,.service}"
+fi
 
 if [[ $EXTRAS -eq 1 ]]; then
   for tool in keepawake code-server-start code-server-proxy; do
@@ -372,6 +443,40 @@ if [[ $SYSTEMD -eq 1 ]]; then
   systemctl --user list-timers sclaude-watch.timer $([[ $EXTRAS -eq 1 ]] && echo keepawake.timer) --no-pager || true
 fi
 
+# macOS: the watcher and the proxy as launchd agents in the user's login
+# session (sclaude/lib/core/launchd.sh). They run with this PATH — the GNU
+# tools first, ~/.local/bin on it — as the units run with systemd's. Loaded
+# again on every run, so that a changed template takes effect here and now.
+if [[ $MACOS -eq 1 ]]; then
+  INSTRUMENTS="$REPO"
+  # shellcheck source=sclaude/lib/core/launchd.sh
+  source "$REPO/sclaude/lib/core/launchd.sh"
+  agent_path="$PATH"
+  [[ ":$agent_path:" == *":$BIN:"* ]] || agent_path="$agent_path:$BIN"
+  # The proxy binds :3000 itself here: something else on it — a dev server
+  # started before features had ports of their own — would leave the agent
+  # restarting every ten seconds. Said, and the rest goes on. A proxy this
+  # agent already runs is no obstacle: it is reloaded.
+  holder=""
+  launchd_loaded sclaude.proxy \
+    || holder="$({ lsof -nP -iTCP:3000 -sTCP:LISTEN -Fc 2>/dev/null || true; } | sed -n 's/^c//p' | head -1)"
+  while read -r label; do
+    [[ -n "$label" ]] || continue
+    launchd_write "$label" "$agent_path" || true
+    if [[ "$label" == sclaude.proxy && -n "$holder" ]]; then
+      echo "note: $holder holds :3000 — sclaude.proxy is written but not loaded;" >&2
+      echo "      stop it, then: launchctl bootstrap $(launchd_domain) $(launchd_dir)/$label.plist" >&2
+      continue
+    fi
+    if launchd_load "$label"; then
+      echo "loaded: $label ($(launchd_dir)/$label.plist, log in $(launchd_logs))"
+    else
+      echo "note: launchd did not load $label; see $(launchd_dir)/$label.plist" >&2
+    fi
+  done < <(launchd_labels)
+  echo "not on macOS: the phone's gate — it comes with the Telegram bot, Linux and WSL only"
+fi
+
 # systemctl --user lives only while there is a user session. Closing the last
 # local terminal will kill the daemon — and that is precisely the scenario all
 # this is done for: working from a phone with the laptop closed.
@@ -516,7 +621,7 @@ case ":$PATH:" in
   *) echo "note: $BIN is not on PATH — add it in your shell rc" >&2 ;;
 esac
 
-if [[ $EXTRAS -eq 0 ]]; then
+if [[ $EXTRAS -eq 0 && $MACOS -eq 0 ]]; then
   echo "extras: not installed — keepawake, its Telegram bot, code-server, wsl-update"
   echo "        come with ./install.sh --extras"
 fi
@@ -524,5 +629,5 @@ fi
 echo ""
 echo "next: run 'sclaude doctor' — it checks what is still missing and names the fix"
 # Without systemd the install is not whole, and a script running it should
-# know: the error above said what to do.
-[[ $SYSTEMD -eq 1 ]] || exit 1
+# know: the error above said what to do. macOS has launchd instead.
+[[ $SYSTEMD -eq 1 || $MACOS -eq 1 ]] || exit 1

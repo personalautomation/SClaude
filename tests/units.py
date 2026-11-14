@@ -28,8 +28,21 @@ def refresh(inst, cfg):
               'is-failed) [ -e "%s/failed-$4" ] ;; is-active) [ -e "%s/active-$4" ] ;; '
               'is-enabled) cat "%s/enabled-$3" 2>/dev/null || echo static ;; esac; }; '
               'info() { echo "INFO $*"; }; units_refresh' % (LIB, LIB, inst, cfg, cfg, cfg, cfg))
-    return subprocess.run(["bash", "-c", script], env=dict(os.environ, HOME=cfg), check=True,
-                          capture_output=True, text=True).stdout
+    # The systemd side wherever the bench runs: launchd's is below.
+    return subprocess.run(["bash", "-c", script], env=dict(os.environ, HOME=cfg, SCLAUDE_OS="linux"),
+                          check=True, capture_output=True, text=True).stdout
+
+
+def agents_refresh(inst, home):
+    """units_refresh as macOS runs it, launchd's side, on any machine:
+    launchctl logs what it is told (`print` answers for a loaded-<label>
+    file), plutil reads the PATH as the real one would."""
+    script = ('source "%s/core/ui.sh" 2>/dev/null; source "%s/improve/instruments.sh"; INSTRUMENTS="%s"; '
+              'launchctl() { echo "$*" >> "%s/launchctl"; [[ "$1" != print ]] || [[ -e "%s/loaded-${2##*/}" ]]; }; '
+              'plutil() { sed -n "/<key>PATH<\\/key>/{n;s/.*<string>\\(.*\\)<\\/string>.*/\\1/p}" "${@: -1}"; }; '
+              'info() { echo "INFO $*"; }; units_refresh' % (LIB, LIB, inst, home, home))
+    return subprocess.run(["bash", "-c", script], env=dict(os.environ, HOME=home, SCLAUDE_OS="macos"),
+                          check=True, capture_output=True, text=True).stdout
 
 
 tmp = tempfile.mkdtemp()
@@ -132,6 +145,52 @@ try:
     os.symlink(own, a)
     refresh(inst, cfg)
     check("a unit of the person's own stays", os.path.islink(a), True)
+
+    # --- macOS: the launchd agents (sclaude/lib/core/launchd.sh) -------------
+    home = os.path.join(tmp, "mac")
+    agents_dir = os.path.join(home, "Library", "LaunchAgents")
+    os.makedirs(agents_dir)
+    os.makedirs(os.path.join(inst, "launchd"))
+    template = ("<key>ProgramArguments</key><string>@HOME@/.local/bin/x</string>\n"
+                "<key>PATH</key>\n<string>@PATH@</string>\n")
+    for label in ("sclaude.w", "sclaude.v"):
+        with open(os.path.join(inst, "launchd", label + ".plist"), "w") as fh:
+            fh.write(template)
+    agent = os.path.join(agents_dir, "sclaude.w.plist")
+    with open(agent, "w") as fh:
+        fh.write("<key>PATH</key>\n<string>/kept/path</string>\n")
+
+    def launched():
+        log = os.path.join(home, "launchctl")
+        try:
+            with open(log) as fh:
+                return fh.read()
+        except FileNotFoundError:
+            return ""
+        finally:
+            if os.path.exists(log):
+                os.remove(log)
+
+    agents_refresh(inst, home)
+    written = open(agent).read()
+    check("agent: written from the template", "%s/.local/bin/x" % home in written, True)
+    check("agent: the PATH it was installed with kept", "<string>/kept/path</string>" in written, True)
+    check("agent: one not installed stays so",
+          os.path.exists(os.path.join(agents_dir, "sclaude.v.plist")), False)
+    check("agent: not loaded, so loaded", "bootstrap gui/" in launched(), True)
+    check("no systemd unit dir made", os.path.exists(os.path.join(home, ".config", "systemd")), False)
+
+    agents_refresh(inst, home)
+    check("agent: nothing changed, nothing loaded", "bootstrap" in launched(), False)
+
+    with open(os.path.join(inst, "launchd", "sclaude.w.plist"), "a") as fh:
+        fh.write("<!-- changed -->\n")
+    open(os.path.join(home, "loaded-sclaude.w"), "w").close()
+    out = agents_refresh(inst, home)
+    log = launched()
+    check("agent: a loaded one is not reloaded", ("bootout" in log, "bootstrap" in log), (False, False))
+    check("agent: it is named for the person", "sclaude.w" in out and "./install.sh" in out, True)
+    check("agent: but written", "<!-- changed -->" in open(agent).read(), True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

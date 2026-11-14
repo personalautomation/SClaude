@@ -36,6 +36,16 @@ doctor_bad()  {
 }
 doctor_section() { echo ""; echo "${BOLD}$1${OFF}"; }
 
+# How this machine installs a package: Homebrew on macOS, apt elsewhere.
+doctor_install() {
+  if [[ "${OSTYPE:-}" == darwin* ]]; then
+    [[ "$1" == bsdutils ]] && { echo "script comes with macOS"; return; }
+    echo "brew install $1"
+  else
+    echo "apt install $1"
+  fi
+}
+
 doctor_tools() {
   doctor_section "Tools"
   local tool
@@ -48,9 +58,9 @@ doctor_tools() {
   done
   doctor_node
   command -v script >/dev/null 2>&1 && doctor_ok "script" \
-    || doctor_warn "script is not on PATH" "the terminal is not recorded for the retrospective before sclaude done: apt install bsdutils"
+    || doctor_warn "script is not on PATH" "the terminal is not recorded for the retrospective before sclaude done: $(doctor_install bsdutils)"
   command -v tmux >/dev/null 2>&1 && doctor_ok "tmux" \
-    || doctor_warn "tmux is not on PATH" "the terminal recording cannot be read back for the retrospective: apt install tmux"
+    || doctor_warn "tmux is not on PATH" "the terminal recording cannot be read back for the retrospective: $(doctor_install tmux)"
   if product_uses vercel; then
     command -v vercel >/dev/null 2>&1 && doctor_ok "vercel" \
       || doctor_warn "vercel is not on PATH" "the product deploys to Vercel: npm i -g vercel"
@@ -336,15 +346,42 @@ doctor_project_checks() {
   done < <(project_get doctor "$root" 2>/dev/null)
 }
 
+# macOS: Homebrew's GNU tools, and the launchd agents in place of the units.
+doctor_macos() {
+  local missing label
+  missing="$(macos_missing)"
+  if [[ -z "$missing" ]]; then
+    doctor_ok "Homebrew's bash and GNU tools ($MACOS_FORMULAE)"
+  else
+    doctor_bad "missing Homebrew formulae: $missing" "brew install $missing (or ./install.sh)"
+  fi
+  while read -r label; do
+    [[ -n "$label" ]] || continue
+    if [[ ! -f "$(launchd_dir)/$label.plist" ]]; then
+      doctor_warn "$label is not installed" "./install.sh writes and loads it"
+    elif launchd_loaded "$label"; then
+      doctor_ok "$label"
+    else
+      doctor_warn "$label is not loaded" "./install.sh loads it (log: $(launchd_logs))"
+    fi
+  done < <(launchd_labels)
+}
+
 doctor_machine() {
   doctor_section "This machine"
   local platform unit extras=0
   local -a units=(sclaude-watch.timer)
-  platform="$(python3 "$INSTRUMENTS/keepawake/state.py" platform 2>/dev/null || echo "?")"
+  if [[ "${OSTYPE:-}" == darwin* ]]; then
+    platform=macos
+  else
+    platform="$(python3 "$INSTRUMENTS/keepawake/state.py" platform 2>/dev/null || echo "?")"
+  fi
   doctor_ok "platform: $platform"
   # The machine tools come with ./install.sh --extras, which links keepawake;
   # without them their units are not missing, only not chosen.
-  if [[ -L "$HOME/.local/bin/keepawake" ]]; then
+  if [[ "$platform" == macos ]]; then
+    doctor_ok "extras: Linux and WSL only (keepawake, its bot, code-server)"
+  elif [[ -L "$HOME/.local/bin/keepawake" ]]; then
     extras=1
     units+=(keepawake.timer keepawake-telegram.service
             "keepawake-$([[ "$platform" == wsl ]] && echo windows || echo linux).service")
@@ -352,7 +389,9 @@ doctor_machine() {
     doctor_ok "extras not installed (keepawake, its bot, code-server: ./install.sh --extras)"
   fi
 
-  if command -v systemctl >/dev/null 2>&1; then
+  if [[ "$platform" == macos ]]; then
+    doctor_macos
+  elif command -v systemctl >/dev/null 2>&1; then
     for unit in "${units[@]}"; do
       if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
         doctor_ok "$unit"

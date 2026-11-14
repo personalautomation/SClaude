@@ -115,3 +115,62 @@ def functions(names, missing=None, script=None):
             continue
         out.append(text)
     return "\n".join(out)
+
+
+def on_terminal(command, input=None, env=None, timeout=60):
+    """Runs a shell command on a pseudo-terminal of its own and returns what
+    it printed, as `script` would show it.
+
+    `input` is typed once the command has printed something — its prompt —
+    rather than all at once at the start: BSD's script, macOS's, hands the
+    terminal its whole stdin and an end of file before the program reads, and
+    a `read -s` that flushes the terminal's input then reads nothing."""
+    import pty
+    import select
+    import time
+    pid, fd = pty.fork()
+    if pid == 0:
+        try:
+            if env is not None:
+                os.execvpe("sh", ["sh", "-c", command], env)
+            os.execvp("sh", ["sh", "-c", command])
+        finally:
+            os._exit(127)
+    out = b""
+    typed = input is None
+    end = time.time() + timeout
+    try:
+        while time.time() < end:
+            ready, _, _ = select.select([fd], [], [], 0.1)
+            if not ready:
+                continue
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            out += chunk
+            if not typed:
+                typed = True
+                try:
+                    os.write(fd, input.encode())
+                except OSError:
+                    pass         # it ended without reading: nothing to type into
+    finally:
+        os.close(fd)
+        try:
+            os.waitpid(pid, 0)
+        except ChildProcessError:
+            pass
+    return out.decode(errors="replace")
+
+
+def under_terminal(command):
+    """argv that runs a shell command under `script`, on a terminal of its
+    own: util-linux's script on Linux takes the command in -c, macOS's (BSD's)
+    after the file. -e passes the command's exit status on either way."""
+    import sys
+    if sys.platform == "darwin":
+        return ["script", "-q", "-e", "/dev/null", "sh", "-c", command]
+    return ["script", "-qec", command, "/dev/null"]

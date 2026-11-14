@@ -87,6 +87,7 @@ import feature_db  # noqa: E402 — PORT_SLOTS, the single source of truth
 import dev_login  # noqa: E402
 import process  # noqa: E402 — the process map, and a feature's place on it
 import page_asset  # noqa: E402 — the tab's icon
+import procinfo  # noqa: E402 — other processes and their ports, Linux or macOS
 
 PORT = int(os.environ.get("SCLAUDE_PROXY_PORT") or 3000)
 BIND = os.environ.get("SCLAUDE_PROXY_BIND") or "0.0.0.0"
@@ -595,30 +596,21 @@ def status_page(label, wt, state):
 
 # --- stopping the idle --------------------------------------------------------
 #
-# The check runs in a worker thread: it reads all of /proc and runs `ss`, and
-# on the event loop that would stall every proxied connection — HMR sockets and
-# page loads of every feature — for the length of it. The thread gets a
-# snapshot of what the loop knows and returns the features to stop; the loop
-# alone touches STARTING and STOPPING and starts processes.
+# The check runs in a worker thread: it reads every process's directory and
+# the listening ports (procinfo), and on the event loop that would stall every
+# proxied connection — HMR sockets and page loads of every feature — for the
+# length of it. The thread gets a snapshot of what the loop knows and returns
+# the features to stop; the loop alone touches STARTING and STOPPING and
+# starts processes.
 
 def listeners():
-    """{port: set of process groups listening on it}, from one `ss` run."""
-    try:
-        out = subprocess.run(["ss", "-ltnpH"], capture_output=True, text=True,
-                             timeout=5).stdout
-    except (OSError, subprocess.SubprocessError):
-        return {}
+    """{port: set of process groups listening on it}, from one `ss` run
+    (`lsof` on macOS)."""
     groups = {}
-    for line in out.splitlines():
-        cols = line.split()
-        if len(cols) < 4:
-            continue
-        port = cols[3].rsplit(":", 1)[-1]
-        if not port.isdigit():
-            continue
-        for pid in re.findall(r"pid=(\d+)", line):
+    for port, pids in procinfo.listening_pids().items():
+        for pid in pids:
             try:
-                groups.setdefault(int(port), set()).add(os.getpgid(int(pid)))
+                groups.setdefault(port, set()).add(os.getpgid(pid))
             except OSError:
                 pass
     return groups
@@ -626,14 +618,11 @@ def listeners():
 
 def working_dirs():
     """[(pid, pgid, cwd)] of every process whose directory can be read, from
-    one pass over /proc."""
+    one pass over /proc (`lsof` on macOS)."""
     out = []
-    for name in os.listdir("/proc"):
-        if not name.isdigit():
-            continue
-        pid = int(name)
+    for pid, cwd in procinfo.working_dirs():
         try:
-            out.append((pid, os.getpgid(pid), os.readlink("/proc/%d/cwd" % pid)))
+            out.append((pid, os.getpgid(pid), cwd))
         except OSError:
             continue
     return out

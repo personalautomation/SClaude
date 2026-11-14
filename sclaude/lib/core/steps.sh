@@ -14,6 +14,8 @@
 # them), STEP_SPEC (each step's launch) and PHASE_ICON. Adding a step means a
 # line there and `python3 cycle_steps.py sh > cycle_steps.sh`.
 source "$(dirname "${BASH_SOURCE[0]}")/cycle_steps.sh"
+# What other processes are and which ports they hold, on Linux and macOS.
+source "$(dirname "${BASH_SOURCE[0]}")/procinfo.sh"
 
 # How often to ask GitHub whether the pull request has been merged, in seconds.
 #
@@ -375,7 +377,7 @@ instruments_workers() {
   root="$(readlink -f "$INSTRUMENTS" 2>/dev/null)" || return 0
   [[ -n "$root" ]] || return 0
   for pid in $(pgrep -x claude 2>/dev/null); do
-    dir="$(readlink -f "/proc/$pid/cwd" 2>/dev/null)" || continue
+    dir="$(proc_cwd "$pid")" || continue
     [[ "$dir" == "$root" || "$dir" == "$root"/* ]] || continue
     echo "pid $pid: claude in $dir, up $(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
   done
@@ -1287,7 +1289,7 @@ step_close_merged() {
     [[ "$(state_get "$state" "steps.$s.done" 2>/dev/null || true)" == "true" ]] \
       || step_run "$wt" "$s" close
     state_set "$state" "steps.$s.done" true
-    if [[ "$(state_get "$state" "steps.$s.finished" || true)" =~ ^(|null)$ ]]; then
+    if [[ "$(state_get "$state" "steps.$s.finished" || true)" =~ ^(null)?$ ]]; then
       state_set "$state" "steps.$s.finished" "$now"
     fi
   done

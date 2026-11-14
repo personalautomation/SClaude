@@ -698,6 +698,34 @@ import _path  # every folder of sclaude/lib on the path
 Names stay unique across the folders and clear of the standard library's;
 `tests/paths.py` checks it.
 
+## Linux and macOS
+
+sclaude runs on Linux, WSL and macOS. On a Mac it runs with Homebrew's bash 5
+and GNU tools ahead of the system's: every bash entry point (`bin/sclaude`,
+`sclaude-watch`, `sclaude-notify`, `chrome-debug`, `githooks/commit-msg`,
+`install.sh`) sources `sclaude/lib/core/macos.sh` first, which puts them on
+`PATH` and re-executes under bash 5. So GNU spellings (`sed -i`, `stat -c`,
+`date -d`, `timeout`, `setsid`, `flock`) stay as they are; a new bash entry
+point takes the same two lines.
+
+What GNU on `PATH` does not give a Mac goes through one place:
+
+- other processes and their ports — `/proc`, `ss` — through
+  `sclaude/lib/core/procinfo.sh` and `procinfo.py` (`ps` and `lsof` on
+  macOS, the kernel for a process's environment); `tests/procinfo.py` fails
+  on a `/proc` read or an `ss` run anywhere else in sclaude. keepawake, the
+  Linux and WSL extras, keeps its own;
+- the units — systemd on Linux, launchd agents on macOS (`launchd/*.plist`,
+  `sclaude/lib/core/launchd.sh`), written by `install.sh` and refreshed by
+  `units_refresh`; `SCLAUDE_OS` (`linux`, `macos`) overrides the system for
+  `tests/install.py` and `tests/units.py`, which run each side anywhere;
+- `script`, whose flags differ (`term_record` in `terminal.sh`;
+  `benchlib.on_terminal` and `under_terminal` for the benches).
+
+Run the benches through `tests/run` on a Mac: it gives them the same `PATH`
+and a temporary directory by its real path (`/private/var/…`, which git and
+`pwd` answer with).
+
 ## Tests
 
 `python3 tests/<name>.py` — each file is standalone and exits non-zero on

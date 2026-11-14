@@ -146,6 +146,9 @@ alone, and none takes a standard module's name; `tests/paths.py` checks both.
 | `sclaude/lib/core/project.sh` | what the project says about itself, and the wizard that writes it |
 | `sclaude/lib/core/environment.sh` | which database this machine's features work against |
 | `sclaude/lib/core/developer.sh` | who is running it, and whether they maintain the orchestrator (`MAINTAINERS`) |
+| `sclaude/lib/core/procinfo.sh`, `procinfo.py` | what sclaude asks about other processes and the ports they hold — a process's directory, name, parent, environment, which ports listen — from `/proc` and `ss` on Linux, from `ps` and `lsof` on macOS; every caller asks here rather than reading `/proc` itself |
+| `sclaude/lib/core/macos.sh` | what each bash entry point does first on macOS: Homebrew's bash 5 in place of the system's 3.2, and the GNU tools ahead of BSD's on `PATH`, for sclaude and everything it starts |
+| `sclaude/lib/core/launchd.sh` | sclaude's launchd agents on macOS (`launchd/*.plist`), which take the systemd units' place: written and loaded by `install.sh`, brought up to date by `units_refresh` |
 | `sclaude/lib/commands/doctor.sh` | `sclaude doctor`: what this machine lacks, with the fix for each gap |
 | `sclaude/lib/core/page_asset.py` | reads a page's script or style kept as a file beside the module that draws it (`process_*.js`, `dora_*.css`…) |
 | `sclaude/lib/core/cycle_steps.py` | the cycle's steps once: their order, each one's launch (model, effort, mode, title), the icons the lines open with, the sessions numbered after them; `cycle_steps.sh` is written from it for the shell (`python3 cycle_steps.py sh > cycle_steps.sh`), and the bot and the process map read it directly |

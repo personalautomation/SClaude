@@ -79,7 +79,8 @@ def world(tmp, systemd=True, settings=True):
             fh.write("#!/usr/bin/env bash\n" + body)
         os.chmod(path, 0o755)
     env = {k: v for k, v in os.environ.items() if not k.startswith("KEEPAWAKE_")}
-    env.update(HOME=home, USER="someone", KEEPAWAKE_PLATFORM="linux",
+    # The Linux installer wherever the bench runs: macOS's is checked below.
+    env.update(HOME=home, USER="someone", KEEPAWAKE_PLATFORM="linux", SCLAUDE_OS="linux",
                KEEPAWAKE_POLKIT_RULE=os.path.join(etc, "49-keepawake.rules"),
                PATH=stubs + ":" + os.environ["PATH"])
     cfg = os.path.join(tmp, "checkout-config")
@@ -283,6 +284,50 @@ with tempfile.TemporaryDirectory() as tmp:
     code = []
     out = run(env, "--update=sometimes", extras=False, rc=code)
     check("settings-bad-flag-refused", (code, "--update takes" in out), ([2], True))
+
+# macOS's installer, on a Mac only: it needs Homebrew's formulae, which it
+# offers to install, and launchd, stood in for here by a launchctl that logs.
+if sys.platform == "darwin":
+    print("macOS")
+    with tempfile.TemporaryDirectory() as tmp:
+        env, _, calls = world(tmp)
+        env.pop("SCLAUDE_OS")
+        stubs = env["PATH"].split(":")[0]
+        launched = os.path.join(tmp, "launchctl.calls")
+        with open(os.path.join(stubs, "launchctl"), "w") as fh:
+            fh.write('#!/usr/bin/env bash\necho "$*" >> %s\n[[ "$1" != print ]]\n' % launched)
+        os.chmod(os.path.join(stubs, "launchctl"), 0o755)
+        # Who holds :3000, as lsof -F says it; nobody unless the bench writes
+        # one, so the machine's own proxy does not decide the answer.
+        holder = os.path.join(tmp, "port.holder")
+        with open(os.path.join(stubs, "lsof"), "w") as fh:
+            fh.write('#!/usr/bin/env bash\n[[ -f %s ]] && cat %s\nexit 0\n' % (holder, holder))
+        os.chmod(os.path.join(stubs, "lsof"), 0o755)
+        code = []
+        out = run(env, rc=code)
+        agents = os.path.join(env["HOME"], "Library", "LaunchAgents")
+        check("macos-exit-0", code, [0])
+        check("macos-platform-said", "platform: macOS" in out, True)
+        check("macos-extras-passed-over", "Linux and WSL only" in out, True)
+        check("macos-no-keepawake", os.path.exists(os.path.join(env["HOME"], ".local", "bin", "keepawake")), False)
+        check("macos-no-systemctl", os.path.exists(calls), False)
+        check("macos-agents-written", sorted(os.listdir(agents)) if os.path.isdir(agents) else [],
+              ["sclaude.proxy.plist", "sclaude.watch.plist"])
+        log = open(launched).read() if os.path.exists(launched) else ""
+        check("macos-agents-loaded", log.count("bootstrap gui/"), 2)
+        proxy = open(os.path.join(agents, "sclaude.proxy.plist")).read() if os.path.isdir(agents) else ""
+        check("macos-agent-placeholders-filled", "@" in re.sub(r"<!--.*?-->", "", proxy, flags=re.S), False)
+        check("macos-agent-gnu-first", "/libexec/gnubin:" in proxy and "/opt/bash/bin" in proxy, True)
+        # :3000 held by something else: the proxy's agent is written, not loaded.
+        with open(holder, "w") as fh:
+            fh.write("p123\ncnode\n")
+        os.remove(launched)
+        out = run(env)
+        log = open(launched).read() if os.path.exists(launched) else ""
+        loaded = [line for line in log.splitlines() if line.startswith("bootstrap ")]
+        check("macos-port-held-proxy-not-loaded",
+              ([("sclaude.proxy" in line) for line in loaded], "node holds :3000" in out),
+              ([False], True))
 
 print("the words agree with sclaude's")
 DEV = open(os.path.join(ROOT, "sclaude", "lib", "core", "developer.sh"), encoding="utf-8").read()

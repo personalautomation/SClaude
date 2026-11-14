@@ -20,6 +20,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import benchlib  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LIB = os.path.join(ROOT, "sclaude", "lib")
 
@@ -68,9 +71,7 @@ source %(lib)s/improve/workbench.sh
 cmd_workshop
 ''' % {"live": live, "prompts": os.path.join(ROOT, "sclaude", "prompts"), "log": log,
            "lib": LIB, "does": session_does}
-        out = subprocess.run(["script", "-qec", "bash -c %s" % shlex.quote(script),
-                              "/dev/null"], capture_output=True, text=True,
-                             stdin=subprocess.DEVNULL).stdout
+        out = benchlib.on_terminal("bash -c %s" % shlex.quote(script))
         launched = open(log).read().split("\n") if os.path.exists(log) else []
         if os.path.exists(log):
             os.unlink(log)
@@ -189,10 +190,9 @@ cmd_workshop
           published("echo b > b && git add b && git ID commit -qm b"), False)
 
     # sclaude.contribute off: nothing made.
-    out = subprocess.run(["script", "-qec", "bash -c %s" % shlex.quote(
+    out = benchlib.on_terminal("bash -c %s" % shlex.quote(
         'INSTRUMENTS=%s; SELF=sclaude; die() { echo "DIE $*"; exit 1; };'
-        ' contribute_mode() { echo off; }; source %s/improve/workbench.sh; cmd_workshop' % (live, LIB)),
-        "/dev/null"], capture_output=True, text=True, stdin=subprocess.DEVNULL).stdout
+        ' contribute_mode() { echo off; }; source %s/improve/workbench.sh; cmd_workshop' % (live, LIB)))
     check("contribute off: refused", "changing sclaude is off" in out, True)
 
     # No terminal: nothing made.

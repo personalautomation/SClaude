@@ -31,6 +31,9 @@
 # No declaration, no stack: the feature keeps whatever .env.local points at, as
 # before.
 
+# What other processes are and which ports they hold, on Linux and macOS.
+source "$(dirname "${BASH_SOURCE[0]}")/../core/procinfo.sh"
+
 # The blocks of ports stacks are given, ten each. Well clear of the main stack's
 # 54320-54329 and of the dev servers' 3100-3199.
 DB_BLOCK_FIRST=55000
@@ -74,7 +77,7 @@ db_base() {
   mkdir -p "$DEV_REGISTRY" || return 1
   (
     flock -w 10 9 || exit 1
-    listening="$(ss -ltnH 2>/dev/null | awk '{print $4}' | sed 's/.*://' | tr '\n' ' ')"
+    listening="$(ports_listening | tr '\n' ' ')"
     PYTHONPATH="${STATE_CORE:-${LIB:-}/core}" python3 - "$wt" "$state" "$DEV_REGISTRY" "$DB_BLOCK_FIRST" "$DB_BLOCK_LAST" \
       "$listening" <<'PY'
 import json, os, sys
@@ -211,10 +214,10 @@ docker_desktop_exe() {
 # running" at the start of the step, and starting it was one command. So
 # sclaude starts it itself rather than only saying so.
 #
-# Two ways in, the first that applies: Docker Desktop on Windows, reached from
-# WSL (docker_desktop_exe), or a docker.service under systemd, started only
-# where sudo needs no password: a password prompt in the middle of a step would
-# hang it with nobody told.
+# Three ways in, the first that applies: Docker Desktop on Windows, reached
+# from WSL (docker_desktop_exe), Docker Desktop on macOS, or a docker.service
+# under systemd, started only where sudo needs no password: a password prompt
+# in the middle of a step would hang it with nobody told.
 #
 # Only a daemon that is not there is started. A socket this user may not open,
 # or a CLI that is missing, is not something starting Docker mends, and it is
@@ -245,6 +248,9 @@ docker_ensure() {
   if exe="$(docker_desktop_exe)"; then
     info "  docker: not running — starting Docker Desktop…"
     ( setsid "$exe" </dev/null >/dev/null 2>&1 & )
+  elif [[ "${OSTYPE:-}" == darwin* && -d /Applications/Docker.app ]]; then
+    info "  docker: not running — starting Docker Desktop…"
+    open -g -a /Applications/Docker.app >/dev/null 2>&1 || { touch "$DOCKER_FAILED" 2>/dev/null; return 1; }
   elif command -v systemctl >/dev/null 2>&1 && systemctl cat docker.service >/dev/null 2>&1 \
        && ! systemctl is-active --quiet docker && sudo -n true 2>/dev/null; then
     info "  docker: not running — starting docker.service…"

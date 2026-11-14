@@ -44,7 +44,9 @@ universal benchmarks.
 
 ## Know before you start
 
-SClaude runs on Linux and Windows with WSL2 today. macOS is not supported yet.
+SClaude runs on Linux, Windows with WSL2 and macOS — there with Homebrew's bash
+and GNU tools, which the installer offers. Working from the phone (keepawake
+and the Telegram bot) is Linux and WSL2 only for now.
 Every section of the product's config is optional: without a test suite there
 is simply no test gate, and SClaude says so where it would have acted.
 

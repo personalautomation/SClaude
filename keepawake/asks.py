@@ -10,6 +10,8 @@ import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import time
 
 from keepawake.i18n import STRINGS, t
@@ -756,6 +758,19 @@ def tty_of_pid(pid):
     #
     # The process's name in stat sits in brackets and may itself contain
     # brackets and spaces, so we cut at the last ')' rather than the first.
+    #
+    # macOS has no /proc: there it is `ps -o tty=` after all ("ttys003", or
+    # "??" without one).
+    if sys.platform == "darwin":
+        try:
+            name = subprocess.run(["ps", "-o", "tty=", "-p", str(int(pid))], capture_output=True,
+                                  text=True, timeout=5).stdout.strip()
+        except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+            return None
+        if not name or name.startswith("?"):
+            return None
+        path = "/dev/" + name
+        return path if os.path.exists(path) else None
     try:
         with open("/proc/%d/stat" % int(pid)) as fh:
             raw = fh.read()
@@ -780,6 +795,14 @@ def tty_of_pid(pid):
 
 def from_phone(pid):
     """Whether the process was started by a press on the phone."""
+    if sys.platform == "darwin":
+        # ps shows the environment after the command, a space between each.
+        try:
+            line = subprocess.run(["ps", "-wwE", "-o", "command=", "-p", str(int(pid))],
+                                  capture_output=True, text=True, timeout=5).stdout
+        except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+            return False
+        return " SCLAUDE_FROM_PHONE=1 " in " %s " % line.strip()
     try:
         with open("/proc/%d/environ" % int(pid), "rb") as fh:
             return b"\0SCLAUDE_FROM_PHONE=1\0" in b"\0" + fh.read()

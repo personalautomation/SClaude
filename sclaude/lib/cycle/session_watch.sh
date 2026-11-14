@@ -6,6 +6,9 @@
 # Part of sclaude; pulled in with source from bin/sclaude.
 # It does not run on its own.
 
+# What other processes are and which ports they hold, on Linux and macOS.
+source "$(dirname "${BASH_SOURCE[0]}")/../core/procinfo.sh"
+
 # Where [N] in sclaude's tab stops the run: everything after the session ran
 # as on its own end, and sclaude stops before the next step's session, or
 # before the preview after step 4 (session_watch_stop marks it). Said once:
@@ -20,7 +23,7 @@
 # sclaude given the same pid.
 #
 #   stop_asked <what would begin> <slug>
-stop_file() { printf '%s/sclaude-stop-%s-%s' "${TMPDIR:-/tmp}" "$$" "$(awk '{print $22}' "/proc/$$/stat" 2>/dev/null)"; }
+stop_file() { printf '%s/sclaude-stop-%s-%s' "${TMPDIR:-/tmp}" "$$" "$(proc_start "$$")"; }
 
 stop_asked() {
   [[ -e "$(stop_file)" ]] || return 1

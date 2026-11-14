@@ -50,6 +50,9 @@
 # regression simply has none, and the gate says so instead of running a table
 # that belongs to somebody else.
 
+# What other processes are and which ports they hold, on Linux and macOS.
+source "$(dirname "${BASH_SOURCE[0]}")/../core/procinfo.sh"
+
 # How many fixing attempts one stage gets before the feature is handed back to
 # the human. Two, because a test that does not come right in two goes usually
 # means the wrong thing is being repaired — and because an unbounded loop
@@ -415,10 +418,10 @@ os.replace(tmp, path)
 PY
 }
 
-# The one-minute load average, or nothing where /proc has none.
+# The one-minute load average, or nothing where it cannot be read.
 regression_load() {
   local one _
-  read -r one _ < /proc/loadavg 2>/dev/null || return 0
+  one="$(load_one)" || return 0
   printf '%s' "$one"
 }
 

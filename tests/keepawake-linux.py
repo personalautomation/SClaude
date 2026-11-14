@@ -3,9 +3,11 @@
 # A bench for keepawake on plain Linux: where the state lives without Windows,
 # and bin/keepawake-linux, the holding side that replaces KeepAwake.ps1 there.
 #
-# systemd-inhibit is replaced by a stub that either holds (sleeps) or refuses
-# (exits at once) per lock level, so the fallback from the full set to idle can
-# be driven without asking logind for anything.
+# systemd-inhibit is replaced by a stub that either holds (a sleeping child, as
+# systemd-inhibit starts the command it holds the lock for) or refuses (exits)
+# per lock level, so the fallback from the full set to idle can be driven
+# without asking logind for anything. A refusal slow to exit must not pass for
+# a lock: under a loaded machine it did, when a fixed pause decided.
 #
 # What each case would look like broken:
 #
@@ -71,8 +73,9 @@ os.environ["KEEPAWAKE_PLATFORM"] = "linux"
 stub = os.path.join(tmp, "inhibit")
 with open(stub, "w") as fh:
     fh.write('#!/usr/bin/env bash\n'
-             'case " $REFUSE " in *" $1 "*) exit 1 ;; esac\n'
-             'exec sleep 300\n')
+             # A refusal starts nothing: the wait for it replaces the stub.
+             'case " $REFUSE " in *" $1 "*) exec sleep "${SLOW:-0}" ;; esac\n'
+             'sleep 300\n')
 os.chmod(stub, 0o755)
 os.environ["KEEPAWAKE_INHIBIT"] = stub
 os.environ["KEEPAWAKE_STATE"] = os.path.join(tmp, "state.json")
@@ -131,6 +134,16 @@ try:
     check("partial-noted-once",
           sum(1 for line in log_lines() if line.startswith("NOTE: logind granted only")), 1)
     holder.release()
+
+    # A refusal that takes two seconds to come is still a refusal.
+    os.environ["REFUSE"] = "sleep:idle:handle-lid-switch"
+    os.environ["SLOW"] = "2"
+    holder = kl.Holder()
+    set_state(updated_ts=now, until_ts=now + 3600)
+    holder.tick(now)
+    check("a-slow-refusal-is-not-a-lock", (holder.holding(), holder.what), (True, "sleep:idle"))
+    holder.release()
+    os.environ.pop("SLOW")
 
     os.environ["REFUSE"] = " ".join(kl.WHAT)
     holder = kl.Holder()

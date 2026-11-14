@@ -32,10 +32,32 @@ from keepawake import hold_loop  # noqa: E402
 # refused.
 WHAT = ("sleep:idle:handle-lid-switch", "sleep:idle", "idle")
 
+# How long to wait for logind's answer before taking a live systemd-inhibit as
+# granted. The answer itself is told apart by what the process does, not by
+# time; this only bounds a logind that never answers.
+GRANT_WAIT = 10
+
+
+def granted(child):
+    """Whether systemd-inhibit took the lock. Granted, it starts the command
+    it holds the lock for (`sleep infinity`) as a child of its own; refused,
+    it exits without starting anything. A fixed pause took a refusal that was
+    slow to exit — a loaded machine — for a lock."""
+    deadline = time.monotonic() + GRANT_WAIT
+    while time.monotonic() < deadline:
+        if child.poll() is not None:
+            return False
+        if subprocess.run(["pgrep", "-P", str(child.pid)], stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode == 0:
+            return True
+        time.sleep(0.1)
+    return child.poll() is None
+
 
 def inhibit_command(what):
     # KEEPAWAKE_INHIBIT is for the tests: a stand-in that behaves like the lock
-    # without asking logind for anything.
+    # without asking logind for anything — a child of its own while it holds,
+    # an exit when it refuses.
     override = os.environ.get("KEEPAWAKE_INHIBIT")
     if override:
         return [override, what]
@@ -77,13 +99,12 @@ class Holder(hold_loop.Holder):
                                          start_new_session=True)
             except OSError:
                 continue
-            # A refusal from logind ends the process at once; a granted lock
-            # keeps it waiting on `sleep infinity`.
-            time.sleep(1)
-            if child.poll() is None:
+            if granted(child):
                 self.child = child
                 self.what = what
                 return True
+            self.child = child
+            self.release()
         return False
 
     def release(self):

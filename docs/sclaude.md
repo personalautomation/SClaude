@@ -482,7 +482,11 @@ first in its column; threads a later round posted at a place where none of
 its fixes landed (fixed elsewhere) stay in the place's chain, and the round after the last of them is the one
 that checks it (a small point in its row, no line drawn down to it); the touched files are
 ordered so that each next one shares the most rounds with the last; the
-heights are scaled to fit the panel. A thread's
+heights are scaled to fit the panel, which can also cover the whole page.
+Behind the rows' names one pale icicle sums every file: the development's
+lines on top, then the lines each round touched (a fix's larger side), on a
+square-root scale, each row split by its threads' outcomes, saturated and
+hatched as the places are. A thread's
 outcome is read from review-reversals, review-yours (the night's mark),
 `decline_of` and GitHub's resolved flag, in that order; its round is the
 one whose head its first comment was posted on. The person's hands are the

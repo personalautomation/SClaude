@@ -1,5 +1,5 @@
 // The review's map of the feature, a panel over the lower half of the page
-// while a review step is in view — the feature standing there, the step
+// (or all of it, full screen) while a review step is in view — the feature standing there, the step
 // clicked, or the player on it. Drawn from /__sclaude/flow/review
 // (sclaude/lib/review/review_map.py):
 //
@@ -12,7 +12,9 @@
 //   its hue: how the thread it answered ended; its saturation: code against
 //     comments; hatched: the fix added lines (code born in review);
 //   dots: the threads, where they were posted; ✋ the person, ringed red
-//     where the answer was the recommended one given within seconds.
+//     where the answer was the recommended one given within seconds;
+//   behind the rows' names: one pale icicle of every file at once, the
+//     development's lines over the lines each round touched.
 const reviewMap = (() => {
   const REVIEW = new Set(['review_run', 'review_close', 'review']);
   const OUT = {
@@ -24,6 +26,7 @@ const reviewMap = (() => {
   const panel = document.getElementById('rv');
   const chip = document.getElementById('rv-chip');
   const body = panel.querySelector('.rv-body');
+  const bar = document.getElementById('player');
   let data = null, fetched = 0, drawnKey = '', until = null, ctx = {live: false, sel: null, play: null}, shown = false, loading = null;
   let off = false, drawn = false, placesNow = [], doneOf = () => false, whyOf = () => '';
   // How icicles are drawn: 'fix' joins the files one fix touched; 'file'
@@ -79,16 +82,33 @@ const reviewMap = (() => {
     const show = want && !off;
     if (show === shown) { if (show) draw(); return; }
     shown = show;
+    if (!show) full(false);
     panel.hidden = !show;
     document.body.classList.toggle('rv-open', show);
     room();
     if (show) { load(); draw(); requestAnimationFrame(centre); }
   }
+  // Full screen covers the page: the room kept below it is the half
+  // panel's, so the page and the player stand where they were on the way back.
+  function full(on) {
+    if (panel.classList.contains('rv-max') === on) return;
+    panel.classList.toggle('rv-max', on);
+    const b = panel.querySelector('.rv-full');
+    b.setAttribute('aria-pressed', String(on));
+    b.textContent = on ? '🗗 exit full screen' : '⛶ full screen';
+    document.body.classList.toggle('rv-maxed', on);
+    if (!on) room();
+    if (shown) draw();
+  }
   function room() {
+    if (panel.classList.contains('rv-max')) return;
     const px = shown ? panel.offsetHeight : 0;
     document.documentElement.style.setProperty('--rvh', px + 'px');
   }
   addEventListener('resize', () => { room(); if (shown) draw(); });
+  // The player shown or gone (it hides after its last step is sent): the
+  // room kept for it in full screen follows.
+  if (bar) new MutationObserver(() => { if (shown) draw(); }).observe(bar, {attributes: true, attributeFilter: ['hidden']});
   // The review step's blocks in the middle of what the panel leaves above it:
   // the whole process's map, scrolled inside its card and the page.
   function centre() {
@@ -133,10 +153,20 @@ const reviewMap = (() => {
   }
   function draw() {
     if (!shown || !data) return;
+    // Full screen, the player keeps its place at the bottom, over the
+    // panel: the map's scroller ends above it (a margin, so its scroll bar
+    // is lifted too), by its height, measured, while it shows — at most a
+    // quarter of the panel, so a short screen still has a map to see; what
+    // the cap leaves out is padding inside, so the last rows scroll out
+    // from under the player.
+    const need = panel.classList.contains('rv-max') && bar && !bar.hidden ? bar.offsetHeight + 20 : 0;
+    const pad = Math.floor(Math.min(need, panel.clientHeight / 4));
+    body.style.marginBottom = pad ? pad + 'px' : '';
+    body.style.paddingBottom = need > pad ? (need - pad) + 'px' : '';
     // Each poll and each player step asks again; the drawing is rebuilt only
     // when what it is drawn from changed, so the element under the pointer
     // and the scroll stay as they were.
-    const key = [fetched, until, mode, panel.classList.contains('rv-nohands'), body.clientWidth, body.clientHeight, dark()].join('|');
+    const key = [fetched, until, mode, panel.classList.contains('rv-nohands'), body.clientWidth, body.clientHeight, need, dark()].join('|');
     if (key === drawnKey) return;
     drawnKey = key;
     // The places are numbered afresh: a tooltip kept by number would show another's.
@@ -320,7 +350,7 @@ const reviewMap = (() => {
     // clientHeight already leaves out a bar that is there; one about to
     // come with this drawing is taken off here.
     const coming = W > body.clientWidth && body.scrollWidth <= body.clientWidth ? 15 : 0;
-    const room = Math.max(ROWMIN * 2, body.clientHeight - coming - HEAD - BOTTOM);
+    const room = Math.max(ROWMIN * 2, body.clientHeight - (need - pad) - coming - HEAD - BOTTOM);
     const raw = [devLen ? tall(devLen) : 26].concat(rounds.map((r) => tall(r._len)));
     const fit = (k) => raw.reduce((a, v) => a + Math.max(ROWMIN, v * k), 0);
     let lo = 0, hi = 1;
@@ -395,6 +425,9 @@ const reviewMap = (() => {
         + '<text x="' + (g.x0 + 4).toFixed(1) + '" y="14">' + h(label) + '</text></g>');
       if (k) svg.push('<line class="rv-bsep" x1="' + (g.x0 - BGAP / 2).toFixed(1) + '" x2="' + (g.x0 - BGAP / 2).toFixed(1) + '" y1="2" y2="' + H + '"/>');
     });
+    // The summary icicle goes here, behind the rows' names, once the
+    // places below say how much each round changed.
+    const sumAt = svg.length;
     svg.push('<text class="rv-rt" x="6" y="' + (top + 15) + '">Development' + (devLen ? ' · ' + dur(devLen) : '') + '</text>');
     if (two(0)) svg.push('<text class="rv-rs" x="6" y="' + (top + 29) + '">+' + devAdd + ' lines</text>');
     // The rounds: a line, and what each was.
@@ -517,6 +550,54 @@ const reviewMap = (() => {
       p.cx = Math.min(p.hi - p.w / 2, Math.max(p.lo + p.w / 2, (p.x0 + p.x1) / 2));
       p.l = p.cx - p.w / 2; p.r = p.cx + p.w / 2;
     });
+    // Behind the rows' names, one quiet icicle of every file at once: the
+    // development's lines on top, then the lines each round touched (a
+    // fix's larger side, so a line rewritten counts once, as the
+    // development's lines do), on a square-root scale so a round stays visible under a large development.
+    // Coloured as the icicles are, paler: a row split by how its lines'
+    // threads ended, saturated by code against comments, hatched where the
+    // round added more than it took away.
+    {
+      const per = places.map((ps) => {
+        const r = {changed: 0, net: 0, out: {}};
+        ps.forEach((p) => {
+          r.net += p.net;
+          p.hs.forEach((x) => {
+            const o = r.out[x.outcome] = r.out[x.outcome] || {n: 0, code: 0, comment: 0};
+            const n = Math.max(x.add, x.del);
+            o.n += n; r.changed += n; o.code += x.code; o.comment += x.comment;
+          });
+        });
+        return r;
+      });
+      let dc = 0, dm = 0;
+      files.forEach((f) => { dc += (devf[f] || {}).code || 0; dm += (devf[f] || {}).comment || 0; });
+      const most = Math.max(1, devAdd, ...per.map((r) => r.changed));
+      const wOf = (v) => (GUT - 16) * Math.sqrt(v / most), mid = (GUT - 4) / 2;
+      const lerp = (wd, t) => mid - wd / 2 + wd * t;
+      const out = ['<g class="rv-sumi">'];
+      let wPrev = wOf(devAdd);
+      out.push('<rect x="' + f1(mid - wPrev / 2) + '" y="' + top + '" width="' + f1(wPrev) + '" height="' + f1(ys[0] - top) + '" fill="' + devColour(dc + dm ? dc / (dc + dm) : 1, 1) + '"/>');
+      per.forEach((r, i) => {
+        const w = wOf(r.changed), y0 = ys[i], y1 = ys[i + 1];
+        const parts = Object.keys(OUT).filter((k) => r.out[k] && r.out[k].n);
+        const sum = parts.reduce((a, k) => a + r.out[k].n, 0);
+        const outline = 'M' + f1(mid - wPrev / 2) + ',' + f1(y0) + ' L' + f1(mid + wPrev / 2) + ',' + f1(y0)
+          + ' L' + f1(mid + w / 2) + ',' + f1(y1) + ' L' + f1(mid - w / 2) + ',' + f1(y1) + 'Z';
+        if (!sum) out.push('<path d="' + outline + '" fill="' + colour('side', 1) + '"/>');
+        let a = 0;
+        parts.forEach((k) => {
+          const o = r.out[k], b = a + o.n / sum;
+          out.push('<path d="M' + f1(lerp(wPrev, a)) + ',' + f1(y0) + ' L' + f1(lerp(wPrev, b)) + ',' + f1(y0)
+            + ' L' + f1(lerp(w, b)) + ',' + f1(y1) + ' L' + f1(lerp(w, a)) + ',' + f1(y1) + 'Z" fill="'
+            + colour(k, o.code + o.comment ? o.code / (o.code + o.comment) : 1) + '"/>');
+          a = b;
+        });
+        if (r.net >= 3) out.push('<path d="' + outline + '" fill="url(#rv-hatch)"/>');
+        wPrev = w;
+      });
+      svg.splice(sumAt, 0, out.join('') + '</g>');
+    }
     // For the hover: each place's round, the places that hang from it, the
     // threads posted at it in its round and your answers about them.
     const flat = [];
@@ -944,6 +1025,7 @@ const reviewMap = (() => {
     panel.classList.toggle('rv-nohands', !ev.target.checked); draw();
   });
   panel.querySelector('.rv-centre').addEventListener('click', centre);
+  panel.querySelector('.rv-full').addEventListener('click', () => full(!panel.classList.contains('rv-max')));
   panel.querySelectorAll('.rv-mode input').forEach((r) => {
     r.checked = r.value === mode;
     r.addEventListener('change', () => {
@@ -962,6 +1044,12 @@ const reviewMap = (() => {
       update();
     }, 0);
   });
+  // Esc in full screen only leaves it: caught before the page's own Esc
+  // (the selection cleared, the player stopped) is reached.
+  addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape' || !panel.classList.contains('rv-max')) return;
+    ev.stopPropagation(); full(false);
+  }, true);
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { ctx.sel = null; update(); } });
   // The player on a place: the panel follows it, to the moment it left.
   document.addEventListener('pl-step', (ev) => {

@@ -54,8 +54,8 @@ PLAYER_BAR = """<div id="player" hidden><button type="button" class="pl-pause" t
 
 LIVE_STYLE = page_asset.read(__file__, "process_live.css")
 
-# The review's map, over the lower half of the page while a review step is
-# in view (process_review.js, from sclaude/lib/review/review_map.py).
+# The review's map, over the lower half of the page (or all of it, full
+# screen) while a review step is in view (process_review.js, from sclaude/lib/review/review_map.py).
 REVIEW_SCRIPT = page_asset.read(__file__, "process_review.js")
 REVIEW_STYLE = page_asset.read(__file__, "process_review.css")
 REVIEW_PANEL = """<div id="rv" role="region" aria-label="The review map" hidden><div class="rv-top"><h3>📊 The review</h3>
@@ -63,6 +63,7 @@ REVIEW_PANEL = """<div id="rv" role="region" aria-label="The review map" hidden>
 <span class="rv-mode" role="radiogroup" aria-label="Icicles"><label title="Join the files one fix touched: one thread, or one subagent's work"><input type="radio" name="rv-mode" value="fix"> by fix</label><label title="One icicle a file, splitting where its changes part, never joined to another"><input type="radio" name="rv-mode" value="file"> by file</label></span>
 <label title="The person's answers and threads"><input type="checkbox" class="rv-hands" checked> ✋</label>
 <button type="button" class="rv-centre" title="Bring the review step back to the middle">⌖</button>
+<button type="button" class="rv-full" aria-pressed="false" title="The review's map over the whole page; Esc or this button brings it back">⛶ full screen</button>
 <button type="button" class="rv-off" title="Do not show the review's details; the 📊 button brings them back">✕ hide</button></div>
 <div class="rv-legend"></div><div class="rv-body"></div></div>
 <button type="button" id="rv-chip" hidden title="Show the review's map">📊 Review map</button>"""

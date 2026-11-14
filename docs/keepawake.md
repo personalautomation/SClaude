@@ -66,6 +66,9 @@ means exactly what it says.
 | `bin/keepawake-linux` | the holding side on plain Linux: a `systemd-inhibit` lock |
 | `bin/keepawake-macos` | the holding side on macOS: an IOKit power assertion, and the lid through `pmset` where the sudoers rule allows it |
 | `launchd/keepawake.plist`, `launchd/keepawake.hold.plist` | macOS's agents: the minute's count and the holding side |
+| `launchd/keepawake.telegram.plist` | macOS's agent for the bot, written once the token is there |
+| `launchd/keepawake.code-server.plist` | macOS's agent for code-server, loaded and started only by the bot |
+| `keepawake/units.py` | what a button runs for a service: `systemctl --user` on Linux, `launchctl` for the same service's agent on macOS |
 | `keepawake/state.py` | the state under `flock`, atomic writes, the "should we hold" decision |
 | `keepawake/telegramd.py` | the bot's process: the environment, the loop, the periodic checks; when its own code or sclaude's library changes and the new code imports, it runs itself again in place (the sclaude runs it started live on) |
 | `keepawake/botapi.py` | Telegram's Bot API client with its retries, and the bot's profile |
@@ -88,7 +91,7 @@ means exactly what it says.
 | `keepawake/i18n.py` | the bot's strings in Russian and English |
 | `keepawake/docs.py` | the docs the bot prints on a button |
 | `bin/code-server-start` | opens the repository chosen in the bot |
-| `bin/code-server-proxy` | the localhost forward, address from code-server's config |
+| `bin/code-server-proxy` | the localhost forward on Linux and WSL, address from code-server's config |
 | `windows/KeepAwake.ps1` | `SetThreadExecutionState` and the polling loop on the Windows side |
 | `windows/KeepAwake.vbs` | a hidden manual start, should it be needed |
 | `bin/keepawake-windows` | starts and stops the Windows side from WSL |
@@ -163,9 +166,32 @@ side to be wrong on.
 from `ps`, `lsof` and `nettop` through `procinfo.sh` (a dev server started by
 hand counts by the bytes it sent, not wrote: macOS keeps no count of a
 process's writes); the services are launchd agents in the user's session, and
-code-server is Homebrew's service when there is one; an SSH session needs
+code-server is keepawake's own agent, or Homebrew's service when that is the
+one running; an SSH session needs
 Remote Login, whose job launchd keeps in the system domain while it is on;
 since OpenSSH 9.8 a session is an `sshd-session` process, on Linux too.
+
+**The bot names services as systemd does, and units.py translates.** Every
+button that starts, stops or restarts something — code-server, the bot itself,
+the phone's gate — and `sclaude-notify`'s check that the bot is up ask
+`keepawake/units.py`, which on a Mac runs `launchctl` for the agent of the same
+service: `kickstart` to start (loading an agent written but not loaded first, as
+systemctl finds a unit file on its own), `kickstart -k` to restart,
+`kill TERM` to stop, and `launchctl print` for whether it runs. The proxy asks
+it the same about code-server.
+
+**No EnvironmentFile.** launchd has no way to read the token's file into the
+environment, and a plist in `LaunchAgents` is readable by everyone, so the bot
+reads `~/.config/keepawake/env` itself when its environment has no token; the
+mode check on that file is the same.
+
+**code-server is started by the bot alone.** Its agent has neither `RunAtLoad`
+nor `KeepAlive`: launchd's way of restarting a failed job, `SuccessfulExit`,
+runs the job at every login to learn how it exits, which would bring up a
+server meant to start on a button and to stay down after its idle timeout. Nor
+is there a `localhost:8080` forward: it serves a Windows browser outside the
+tailnet, and a Mac's browser opens code-server at its own address, which the
+bot's links and the proxy's Code Server redirect read from its config.
 
 ## Driving sclaude from the bot
 

@@ -90,8 +90,8 @@ with an error.
 By default that is sclaude alone. The machine tools that grew up next to it —
 [keepawake](tools.md#binkeepawake) and its Telegram bot, code-server,
 [wsl-update](tools.md#binwsl-update) — come with `./install.sh --extras`. A machine
-that already has them keeps them on a plain re-run. A Mac takes keepawake of
-them; the bot, code-server and wsl-update are Linux and WSL only.
+that already has them keeps them on a plain re-run. A Mac takes all of them but
+wsl-update and the Windows side, which are WSL's.
 
 ### On macOS
 
@@ -109,27 +109,39 @@ everything they start, so your shell's `PATH` and its own `bash` stay as you
 have them; only the GNU directories go first, never Homebrew's `bin` as a
 whole, so a Node from nvm still wins over Homebrew's.
 
-In place of the systemd units, two launchd agents in your login session,
-written into `~/Library/LaunchAgents` and loaded by `install.sh`:
+In place of the systemd units, launchd agents in your login session, written
+into `~/Library/LaunchAgents` and loaded by `install.sh`:
 
 | agent | what it does | Linux's |
 |---|---|---|
 | `sclaude.watch` | asks GitHub what QA has done, every five minutes | `sclaude-watch.timer` |
 | `sclaude.proxy` | every feature's dev server at `<feature>.localhost:3000` | `sclaude-proxy.socket` |
+| `sclaude.gate` | the phone's entry behind `tailscale funnel`: launchd listens on `127.0.0.1:3001` and starts the gate on the first connection | `sclaude-gate.socket` |
 
 Their logs are in `~/Library/Logs/sclaude/`. `sclaude doctor` says whether
-both are loaded and whether a formula is missing; `./install.sh` again loads
+each is loaded and whether a formula is missing; `./install.sh` again loads
 an agent that is not.
 
-With `--extras`, two more: `keepawake`, which counts what holds the Mac awake
-once a minute, and `keepawake.hold`, which holds it with a power assertion
-while there is work ([keepawake on macOS](tools.md#keepawake-on-macos)). A
-closed lid is held only with a sudoers rule for `pmset`, which `install.sh`
+With `--extras`, more of them:
+
+| agent | what it does | Linux's |
+|---|---|---|
+| `keepawake` | counts what holds the Mac awake, once a minute | `keepawake.timer` |
+| `keepawake.hold` | holds it with a power assertion while there is work ([keepawake on macOS](tools.md#keepawake-on-macos)) | `keepawake-linux.service` |
+| `keepawake.telegram` | the Telegram bot; written only once `~/.config/keepawake/env` has its token | `keepawake-telegram.service` |
+| `keepawake.code-server` | code-server on the repository chosen in the bot; loaded, and started only by the bot's button | `code-server.service` |
+
+A closed lid is held only with a sudoers rule for `pmset`, which `install.sh`
 offers, shows the undo for, and adds at your yes (`--lid` without asking).
 
-What macOS does not have yet: the Telegram bot and code-server, and with the
-bot the phone's gate, so working from the phone is Linux and WSL only. Docker
-Desktop is started when a feature's database needs it, as on WSL.
+code-server comes from Homebrew (`brew install code-server`) or its standalone
+install in `~/.local`, configured in `~/.config/code-server/config.yaml` as on
+Linux. A Mac has no `localhost:8080` forward: that one is for a Windows
+browser outside the tailnet, and a Mac's browser opens code-server at its own
+address. The bot's links and the funnel need the `tailscale` command on
+`PATH`, which the Tailscale app installs from its settings (or
+`brew install tailscale`). Docker Desktop is started when a feature's database
+needs it, as on WSL.
 
 It asks three questions about this machine, once (a re-run keeps the answers):
 

@@ -2186,9 +2186,12 @@ os.environ.pop("KEEPAWAKE_CHAT_ID", None)
 from keepawake import docs as docs_mod
 
 check_true("the sections are there", len(docs_mod.SECTIONS) >= 5)
-for key in docs_mod.SECTIONS:
-    for lang in ("ru", "en"):
+_saved_os = os.environ.get("SCLAUDE_OS")
+for system in ("linux", "macos"):
+    os.environ["SCLAUDE_OS"] = system
+    for key, lang in [(k, lg) for k in docs_mod.SECTIONS for lg in ("ru", "en")]:
         body_d = docs_mod.section(key, lang)
+        key = "%s/%s" % (system, key)
         check_true("%s/%s is non-empty" % (key, lang), len(body_d) > 200)
         # Telegram's ceiling is 4096 bytes, so we count in those rather than
         # characters: Cyrillic takes two apiece.
@@ -2203,6 +2206,17 @@ for key in docs_mod.SECTIONS:
         stripped = re.sub(r"</?(b|i|code)>", "", body_d)
         check("%s/%s has no unescaped brackets" % (key, lang),
               "<" in stripped.replace("&lt;", "").replace("&gt;", ""), False)
+        # A Mac's sections tell nothing of WSL's machinery; the WSL remarks
+        # 'why' carries are replaced word for word, and a reworded remark
+        # would slip through without this.
+        if system == "macos":
+            check("%s/%s says nothing of WSL's machinery" % (key, lang),
+                  [w for w in ("WSL", "systemctl", "journalctl", "systemd", "Windows") if w in body_d], [])
+if _saved_os is None:
+    os.environ.pop("SCLAUDE_OS", None)
+else:
+    os.environ["SCLAUDE_OS"] = _saved_os
+check_true("every Mac section is one of the sections", set(docs_mod.MAC_SECTIONS) <= set(docs_mod.SECTIONS))
 
 check("an unknown section does not bring it down", docs_mod.section("nope", "ru"), "")
 

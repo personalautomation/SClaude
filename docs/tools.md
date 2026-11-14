@@ -539,8 +539,8 @@ Installed with `./install.sh --extras`.
 Keeps the machine awake while there is work going on, so it can continue from a
 phone while the laptop stands closed. Under WSL it holds Windows awake; on plain
 Linux it holds the machine itself (see [below](#keepawake-on-plain-linux)), and
-on a Mac too ([below](#keepawake-on-macos)). The Telegram bot and code-server
-are Linux and WSL only for now.
+on a Mac too ([below](#keepawake-on-macos)), the Telegram bot and code-server
+with it.
 
 **What holds it.** A person at the machine — an SSH session, an open
 code-server tab, traffic over Tailscale — holds it for as long as they are
@@ -693,6 +693,25 @@ remove it later:
 sudo rm /etc/sudoers.d/keepawake && sudo pmset -a disablesleep 0
 ```
 
+The bot is the agent `keepawake.telegram`, which `install.sh` writes and loads
+only once `~/.config/keepawake/env` has its token, and which launchd keeps
+running. The token stays in that file: the bot reads it itself, so it never goes
+into a plist. Its log is `~/Library/Logs/sclaude/telegram.log`.
+
+code-server is the agent `keepawake.code-server`, on the repository chosen in
+the bot. Loading it starts nothing: the bot's button starts it, its idle timeout
+ends it, and nothing brings it back. Install it with `brew install code-server`;
+the config is `~/.config/code-server/config.yaml`, as on Linux. There is no
+`localhost:8080` forward on a Mac — it is for a Windows browser outside the
+tailnet — so the laptop opens code-server at its own address, which is what the
+bot's links say.
+
+The phone's gate is the agent `sclaude.gate`, loaded on every Mac: launchd
+listens on `127.0.0.1:3001` and starts the gate on the first connection, and
+the gate exits again after half an hour with nobody looking. Phone access needs
+the `tailscale` command on `PATH`; the Tailscale app installs it from its
+settings, or `brew install tailscale` brings its own.
+
 ### Configuration
 
 **Telegram.** Create a bot with `@BotFather`, find your `chat_id` (message the
@@ -704,11 +723,13 @@ bot and open `https://api.telegram.org/bot<TOKEN>/getUpdates`), and fill in
 cp keepawake/env.example ~/.config/keepawake/env
 chmod 600 ~/.config/keepawake/env
 $EDITOR ~/.config/keepawake/env
-systemctl --user enable --now keepawake-telegram.service
+systemctl --user enable --now keepawake-telegram.service   # Linux, WSL
+./install.sh --extras                                      # macOS: writes and loads keepawake.telegram
 ```
 
 **SSH for Termius** is the one part that needs `sudo`, which is why `install.sh`
-does not do it:
+does not do it. On a Mac it is Remote Login, in System Settings → General →
+Sharing; on Linux and WSL:
 
 ```bash
 sudo apt-get install -y openssh-server
@@ -735,12 +756,13 @@ WSL, so the phone reaches it directly.
 
 code-server opens in the phone's browser at `http://<tailscale-ip>:8080`; the
 password is in `~/.config/code-server/config.yaml`. Put its `bind-addr` on the
-Tailscale address: `install.sh` then also opens `localhost:8080` for the
-laptop's browser. A code-server left on its default `127.0.0.1:8080` gets no
+Tailscale address: on Linux and WSL `install.sh` then also opens
+`localhost:8080` for the laptop's browser. A code-server left on its default `127.0.0.1:8080` gets no
 such forward — it already answers there.
 
 ```bash
-journalctl --user -u keepawake-telegram.service -f   # the bot's log
+journalctl --user -u keepawake-telegram.service -f   # the bot's log on Linux and WSL
+tail -f ~/Library/Logs/sclaude/telegram.log          # and on a Mac
 ```
 
 ## statusline.py

@@ -4308,6 +4308,42 @@ check_true("without buttons there is a hint about a number",
            i18n.t("ask.pick") in asks.ask_text(
                "myapp", {"form": "pick:12", "prompt": "Which one?"}))
 
+# --- which processes are a running sclaude (SCLAUDE_PROC) ------------------
+#
+# sclaude starts through its `#!/usr/bin/env bash` line, so its command line
+# reads "bash /…/sclaude …". The pattern was `^sclaude`, which matched no
+# sclaude ever started that way, and a running step held nothing. Real
+# processes rather than strings: what pgrep sees is the point.
+_ka = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "keepawake")
+_pat = subprocess.run(["bash", "-c", "eval \"$(sed -n '/^SCLAUDE_PROC=/p' %s)\"; "
+                       "printf %%s \"$SCLAUDE_PROC\"" % shlex.quote(_ka)],
+                      capture_output=True, text=True).stdout
+_bin = tempfile.mkdtemp(prefix="keepawake-test-proc-")
+_procs = {}
+try:
+    for _name in ("sclaude", "sclaude-watch"):
+        with open(os.path.join(_bin, _name), "w") as _fh:
+            _fh.write("#!/usr/bin/env bash\nsleep 30\n")
+        os.chmod(os.path.join(_bin, _name), 0o755)
+        _procs[_name] = subprocess.Popen([os.path.join(_bin, _name), "new", "--issue", "7"])
+    # A command that only names sclaude in its arguments is not one.
+    _procs["grep"] = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)",
+                                       "sclaude"])
+    time.sleep(0.5)
+    _found = set(int(p) for p in subprocess.run(["pgrep", "-f", _pat], capture_output=True,
+                                                 text=True).stdout.split())
+    check("a running sclaude, started by its shebang, is found",
+          _procs["sclaude"].pid in _found, True)
+    check("sclaude-watch is not sclaude", _procs["sclaude-watch"].pid in _found, False)
+    check("a command naming sclaude in its arguments is not sclaude",
+          _procs["grep"].pid in _found, False)
+finally:
+    for _p in _procs.values():
+        _p.kill()
+        _p.wait()
+    shutil.rmtree(_bin, ignore_errors=True)
+
+
 # --- which sclaude features the detector sees (sclaude_states) -------------
 #
 # A step holds the machine awake only if its feature's state.json is found.

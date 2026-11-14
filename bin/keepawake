@@ -373,8 +373,14 @@ print(sum(1 for p in (d.get('Peer') or {}).values()
 #
 # The ^ anchor is essential: without it pgrep -f catches any command where the
 # word "sclaude" merely appears in the arguments — while debugging it caught the
-# checking command itself. With the anchor only a process whose argv[0] starts
-# with sclaude matches.
+# checking command itself. With the anchor only a process whose argv[0] is
+# sclaude matches — or whose argv[0] is a bash running it: sclaude is started
+# through its `#!/usr/bin/env bash` line, so the kernel hands bash the script's
+# path and the command line reads "bash /…/sclaude new …" (on macOS Homebrew's
+# bash, which macos.sh runs it under). `^sclaude` alone matched neither, and a
+# running step held nothing.
+SCLAUDE_PROC='^([^ ]*/)?sclaude( |$)|^([^ ]*/)?bash ([^ ]*/)?sclaude( |$)'
+
 count_sclaude() {
   local -A prev=()
   read_snapshot prev
@@ -394,7 +400,7 @@ count_sclaude() {
   done
 
   local pid alive=0
-  for pid in $(pgrep -f '^sclaude' 2>/dev/null); do
+  for pid in $(pgrep -f "$SCLAUDE_PROC" 2>/dev/null); do
     [[ -n "${skip[$pid]:-}" ]] && continue
     alive=1
     break

@@ -40,6 +40,26 @@ def free_port():
         return s.getsockname()[1]
 
 
+def bound_in_block(slot):
+    """A block's base (a multiple of ten) and a socket listening on base + slot.
+
+    The base comes from a free port, but base + slot is another port, which a
+    bench running beside this one may hold: try blocks until one binds.
+    """
+    for _ in range(50):
+        base = free_port()
+        base -= base % 10
+        sock = socket.socket()
+        try:
+            sock.bind(("127.0.0.1", base + slot))
+        except OSError:
+            sock.close()
+            continue
+        sock.listen(1)
+        return base, sock
+    raise RuntimeError("no block with base + %d free" % slot)
+
+
 def answers_on(port):
     try:
         socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
@@ -689,17 +709,13 @@ def main():
         # enabled in the stub config and actually listening, at base + 3 — but
         # not Inbucket: disabled in that same config, so its port (base + 4)
         # is never even guessed at, let alone offered as a dead link.
-        svc_base = free_port()
-        svc_base -= svc_base % 10  # a block boundary, so base+3 is ours to bind
-        svc_wt = register(registry, root, "svc", free_port(), db_base=svc_base)
-        os.makedirs(os.path.join(svc_wt, "supabase"))
-        with open(os.path.join(svc_wt, "supabase", "config.toml"), "w") as fh:
-            fh.write("[studio]\nenabled = true\nport = 999\n"
-                     "[local_smtp]\nenabled = false\nport = 999\n")
-        studio = socket.socket()
-        studio.bind(("127.0.0.1", svc_base + 3))
-        studio.listen(1)
+        svc_base, studio = bound_in_block(3)
         try:
+            svc_wt = register(registry, root, "svc", free_port(), db_base=svc_base)
+            os.makedirs(os.path.join(svc_wt, "supabase"))
+            with open(os.path.join(svc_wt, "supabase", "config.toml"), "w") as fh:
+                fh.write("[studio]\nenabled = true\nport = 999\n"
+                         "[local_smtp]\nenabled = false\nport = 999\n")
             status, _, body = request(port, host)
             check("a running, enabled service is offered, by its own port",
                   "href='http://127.0.0.1:%d/'" % (svc_base + 3) in body
@@ -713,6 +729,9 @@ def main():
         # nothing listening on Studio's port this time.
         svc_base2 = free_port()
         svc_base2 -= svc_base2 % 10
+        while answers_on(svc_base2 + 3):  # a bench beside this one's server
+            svc_base2 = free_port()
+            svc_base2 -= svc_base2 % 10
         svc2_wt = register(registry, root, "svc2", free_port(), db_base=svc_base2)
         os.makedirs(os.path.join(svc2_wt, "supabase"))
         with open(os.path.join(svc2_wt, "supabase", "config.toml"), "w") as fh:

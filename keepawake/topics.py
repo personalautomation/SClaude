@@ -8,6 +8,7 @@ import glob
 import json
 import logging
 import os
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -352,8 +353,14 @@ def asks_for_new(pid):
     """Whether the process asking is `sclaude new` — the start the new-feature
     topic was made for."""
     try:
-        with open("/proc/%d/cmdline" % int(pid or 0), "rb") as fh:
-            args = fh.read().split(b"\0")
+        if sys.platform == "darwin":
+            # No /proc: the words from the kernel, exactly, as ps reads them.
+            from keepawake import project_config
+            words = project_config.sclaude_module("procinfo").darwin_procargs(int(pid or 0))[0]
+            args = [w.encode() for w in words]
+        else:
+            with open("/proc/%d/cmdline" % int(pid or 0), "rb") as fh:
+                args = fh.read().split(b"\0")
     except (OSError, ValueError):
         return False
     return any(os.path.basename(a) == b"sclaude" for a in args) and b"new" in args

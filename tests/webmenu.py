@@ -24,7 +24,7 @@ os.environ["KEEPAWAKE_STATE"] = os.path.join(box, "state.json")
 os.environ["KEEPAWAKE_LOCK"] = os.path.join(box, ".lock")
 
 from keepawake import webmenu  # noqa: E402
-from keepawake import asks, botapi, card_view, handling, menus, phone_access, repos, services, sessions, shell, state, status_report, topics  # noqa: E402
+from keepawake import asks, botapi, card_view, handling, menus, phone_access, repos, services, sessions, shell, state, status_report, topics, units  # noqa: E402
 
 REAL_CARD = card_view.card
 from keepawake.i18n import STRINGS, t  # noqa: E402
@@ -166,7 +166,8 @@ check_true("the Menu button is plain again",
            ("setChatMenuButton", {"menu_button": {"type": "commands"}, "chat_id": 12345}) in CALLS)
 
 view = press("svc_restart")
-check_true("the restart restarts the bot's unit", webmenu.BOT_UNIT in SPAWNED[-1][-1])
+check_true("the restart restarts the bot's unit",
+           units.command("restart", webmenu.BOT_UNIT) in SPAWNED[-1][-1])
 check("its line in the chat is reported on by the new process",
       read().get("restart_notify"), MESSAGE[0])
 check("as a line, with no Settings menu under it", read().get("restart_page"), True)
@@ -188,7 +189,7 @@ with state.locked() as st:
     st["restart_page"] = True
 view = press("restart_wait:%d" % (time.time() - webmenu.RESTART_WAIT - 5))
 check("a bot not back in time is said to be so",
-      (view["text"], view["follow"]), (t("svc.notback", unit=webmenu.BOT_UNIT), None))
+      (view["text"], view["follow"]), (t("svc.notback", log=units.log_command(webmenu.BOT_UNIT)), None))
 with state.locked() as st:
     st["restart_page"] = False
 # A restart whose line never reached the chat still ends the page's wait.

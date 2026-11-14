@@ -7,6 +7,7 @@ import logging
 import os
 import signal
 import subprocess
+import sys
 
 from keepawake.i18n import t
 
@@ -105,6 +106,19 @@ def run(cmd, timeout=25):
 
 
 def uptime_of(pid):
+    if sys.platform == "darwin":
+        # No /proc: ps says how long the process has run, as
+        # [[days-]hours:]minutes:seconds.
+        try:
+            out = subprocess.run(["ps", "-o", "etime=", "-p", str(int(pid))], capture_output=True,
+                                 text=True, timeout=5).stdout.strip()
+            days, _, clock = out.rpartition("-")
+            secs = 0
+            for part in clock.split(":"):
+                secs = secs * 60 + int(part)
+            return secs + int(days or 0) * 86400
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return 0
     try:
         with open("/proc/%d/stat" % pid) as fh:
             # Field 22 (starttime) is in ticks since the system booted. The

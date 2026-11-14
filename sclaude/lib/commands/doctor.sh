@@ -358,7 +358,11 @@ doctor_macos() {
   fi
   while read -r label; do
     [[ -n "$label" ]] || continue
-    if [[ ! -f "$(launchd_dir)/$label.plist" ]]; then
+    if [[ "$label" == keepawake.telegram && ! -f "$(launchd_dir)/$label.plist" ]]; then
+      # Written only once the token is there (install.sh); the bot's own
+      # lines below say whether it is.
+      doctor_ok "$label is not set up (optional: the token in ~/.config/keepawake/env, then ./install.sh)"
+    elif [[ ! -f "$(launchd_dir)/$label.plist" ]]; then
       doctor_warn "$label is not installed" "./install.sh writes and loads it"
     elif launchd_loaded "$label"; then
       doctor_ok "$label"
@@ -430,9 +434,6 @@ doctor_machine() {
     doctor_warn "keepawake holds idle only; a closed lid still sleeps" \
       "./install.sh --lid adds the sudoers rule that allows it (asks for sudo)"
   fi
-  # The Telegram bot is not on macOS yet.
-  [[ "$platform" == macos ]] && return
-
   local env="$HOME/.config/keepawake/env"
   if [[ ! -f "$env" ]]; then
     doctor_warn "no Telegram bot (~/.config/keepawake/env)" \

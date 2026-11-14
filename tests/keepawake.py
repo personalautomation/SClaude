@@ -4795,6 +4795,101 @@ try:
 finally:
     shutil.rmtree(_copy, ignore_errors=True)
 
+# --- the services the bot drives: systemd's units, launchd's agents ----------
+#
+# keepawake/units.py says what a button runs on each system; the bench plays
+# both wherever it runs (SCLAUDE_OS), with a launchctl and a systemctl that
+# answer as the bench says.
+
+from keepawake import units  # noqa: E402
+
+_stubs = tempfile.mkdtemp()
+_saved_env = {k: os.environ.get(k) for k in ("SCLAUDE_OS", "PATH", "HOME",
+                                              "KEEPAWAKE_BOT_TOKEN", "KEEPAWAKE_CHAT_ID")}
+try:
+    for _name in ("launchctl", "systemctl"):
+        with open(os.path.join(_stubs, _name), "w") as fh:
+            fh.write('#!/usr/bin/env bash\n[[ -f "%s/rc" ]] && exit "$(cat "%s/rc")"\n'
+                     '[[ -f "%s/out" ]] && cat "%s/out"\nexit 0\n' % ((_stubs,) * 4))
+        os.chmod(os.path.join(_stubs, _name), 0o755)
+    os.environ["PATH"] = _stubs + ":" + os.environ["PATH"]
+
+    def _answer(out="", rc=None):
+        with open(os.path.join(_stubs, "out"), "w") as fh:
+            fh.write(out)
+        if rc is None:
+            if os.path.exists(os.path.join(_stubs, "rc")):
+                os.remove(os.path.join(_stubs, "rc"))
+        else:
+            with open(os.path.join(_stubs, "rc"), "w") as fh:
+                fh.write(str(rc))
+
+    os.environ["SCLAUDE_OS"] = "linux"
+    check("linux: a button runs systemctl",
+          units.command("restart", "code-server.service"), "systemctl --user restart code-server.service")
+    _answer()
+    check_true("linux: an active unit is active", units.active("code-server.service"))
+    _answer(rc=3)
+    check("linux: an inactive one is not", units.active("code-server.service"), False)
+    check("linux: the log is the journal's",
+          units.log_command(state.BOT_UNIT), "journalctl --user -u keepawake-telegram.service")
+
+    os.environ["SCLAUDE_OS"] = "macos"
+    _tgt = "gui/%d/keepawake.code-server" % os.getuid()
+    check("macos: start loads the agent if need be, then kickstarts it",
+          (units.command("start", "code-server.service").endswith("&& launchctl kickstart " + _tgt),
+           "launchctl bootstrap gui/%d " % os.getuid() in units.command("start", "code-server.service")),
+          (True, True))
+    check("macos: restart kicks it with -k",
+          units.command("restart", "code-server.service").endswith("launchctl kickstart -k " + _tgt), True)
+    check("macos: stop sends TERM", units.command("stop", "code-server.service"),
+          "launchctl kill TERM " + _tgt)
+    check("macos: the bot's unit is the bot's agent", units.label(state.BOT_UNIT), "keepawake.telegram")
+    _answer("gui/501/keepawake.telegram = {\n\tactive count = 1\n\tstate = running\n}\n")
+    check_true("macos: a running agent is active", units.active(state.BOT_UNIT))
+    _answer("gui/501/keepawake.code-server = {\n\tstate = not running\n}\n")
+    check("macos: a loaded one that does not run is not", units.active("code-server.service"), False)
+    check_true("macos: a loaded socket is active", units.active("sclaude-gate.socket"))
+    _answer(rc=113)
+    check("macos: one launchd does not have is not", units.active(state.BOT_UNIT), False)
+    check("macos: the log is the agent's file",
+          units.log_command(state.BOT_UNIT), "tail -n 50 ~/Library/Logs/sclaude/telegram.log")
+
+    # The token from the file when the environment has none: launchd has no
+    # EnvironmentFile=, and a plist is no place for a secret.
+    os.environ["HOME"] = _stubs
+    os.environ.pop("KEEPAWAKE_BOT_TOKEN", None)
+    os.environ.pop("KEEPAWAKE_CHAT_ID", None)
+    os.makedirs(os.path.join(_stubs, ".config", "keepawake"))
+    _env = os.path.join(_stubs, ".config", "keepawake", "env")
+    with open(_env, "w") as fh:
+        fh.write("# a comment\nKEEPAWAKE_BOT_TOKEN='77:abc'\nKEEPAWAKE_CHAT_ID=42\n")
+    os.chmod(_env, 0o600)
+    check("the token is read from the file", telegramd.load_env(), ("77:abc", "42"))
+    os.environ["KEEPAWAKE_BOT_TOKEN"] = "88:env"
+    check("the environment's comes first", telegramd.load_env(), ("88:env", "42"))
+    os.chmod(_env, 0o644)
+    try:
+        telegramd.load_env()
+        check("a file others can read is refused", "ran", "refused")
+    except SystemExit:
+        pass
+finally:
+    for _k, _v in _saved_env.items():
+        if _v is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _v
+    shutil.rmtree(_stubs, ignore_errors=True)
+
+_sleeper = subprocess.Popen(["sleep", "30"])
+try:
+    time.sleep(1.2)
+    check_true("uptime_of counts a process's seconds", 1 <= shell.uptime_of(_sleeper.pid) <= 5)
+finally:
+    _sleeper.kill()
+    _sleeper.wait()
+
 if failures:
     print("FAILED: %d" % len(failures))
     for name, want, got in failures:

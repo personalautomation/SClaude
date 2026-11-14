@@ -15,7 +15,7 @@
 #
 # On macOS sclaude runs with Homebrew's bash 5 and GNU tools, which this
 # offers to install, and launchd's agents in place of the systemd units. Of
-# the extras a Mac takes keepawake; its Telegram bot and code-server are Linux
+# the extras a Mac takes keepawake and its Telegram bot; code-server is Linux
 # and WSL only for now.
 #
 #   ./install.sh               sclaude only (and the extras, if an earlier
@@ -142,6 +142,14 @@ if [[ $EXTRAS -eq 0 && -L "$BIN/keepawake" ]]; then
   echo "extras: kept — an earlier install put them in"
 fi
 
+# Whether ~/.config/keepawake/env has the bot's token: the bot's unit or agent
+# is turned on only then. A service falling into a restart loop straight after
+# installation is a poor first impression and rubbish in the log.
+bot_token_set() {
+  [[ -s "$HOME/.config/keepawake/env" ]] \
+    && grep -q '^KEEPAWAKE_BOT_TOKEN=.\+' "$HOME/.config/keepawake/env" 2>/dev/null
+}
+
 # A systemd unit, written into $UNITS with this checkout's path put in for
 # @REPO@: the checkout may live under any name, and a unit cannot find it any
 # other way. Written, not linked — a link would carry the placeholder — so
@@ -209,8 +217,8 @@ if [[ $MACOS -eq 0 ]]; then
 fi
 
 if [[ $EXTRAS -eq 1 && $MACOS -eq 1 ]]; then
-  # The holding side and the minute's count are launchd agents, below; the bot
-  # and code-server are not on macOS yet.
+  # The holding side, the minute's count and the bot are launchd agents,
+  # below; code-server is not on macOS yet.
   ln -sfn "$REPO/bin/keepawake"       "$BIN/keepawake"
   ln -sfn "$REPO/bin/keepawake-macos" "$BIN/keepawake-macos"
   echo "symlinked (extras): keepawake, keepawake-macos in $BIN"
@@ -311,8 +319,8 @@ setting_offer leaks "$SET_LEAKS" leaks_modes_explain "ask auto off"
 
 # --- keepawake: the Windows side and the secrets -----------------------------
 
-# The secrets are the Telegram bot's, which macOS does not run yet.
-if [[ $EXTRAS -eq 1 && $MACOS -eq 0 ]]; then
+# The secrets are the Telegram bot's.
+if [[ $EXTRAS -eq 1 ]]; then
   # The secrets directory. We do not touch the env file itself: an installer must
   # never overwrite somebody's token.
   mkdir -p "$HOME/.config/keepawake"
@@ -433,11 +441,8 @@ if [[ $SYSTEMD -eq 1 ]]; then
       echo "note: no ~/.config/code-server/config.yaml — code-server is not configured" >&2
     fi
 
-    # We enable the daemon only with the token filled in: a service falling into a
-    # restart loop straight after installation is a poor first impression and
-    # rubbish in the journal.
-    if [[ -s "$HOME/.config/keepawake/env" ]] \
-       && grep -q '^KEEPAWAKE_BOT_TOKEN=.\+' "$HOME/.config/keepawake/env" 2>/dev/null; then
+    # We enable the daemon only with the token filled in (bot_token_set).
+    if bot_token_set; then
       systemctl --user enable --now keepawake-telegram.service
       echo "enabled: keepawake-telegram.service"
     else
@@ -467,6 +472,12 @@ if [[ $MACOS -eq 1 ]]; then
     || holder="$({ lsof -nP -iTCP:3000 -sTCP:LISTEN -Fc 2>/dev/null || true; } | sed -n 's/^c//p' | head -1)"
   while read -r label; do
     [[ -n "$label" ]] || continue
+    # The bot only with its token (bot_token_set). Without one an agent
+    # written earlier is left as it is: taking it out is the person's call.
+    if [[ "$label" == keepawake.telegram ]] && ! bot_token_set; then
+      echo "note: keepawake.telegram is not set up — there is no token in ~/.config/keepawake/env" >&2
+      continue
+    fi
     launchd_write "$label" "$agent_path" || true
     if [[ "$label" == sclaude.proxy && -n "$holder" ]]; then
       echo "note: $holder holds :3000 — sclaude.proxy is written but not loaded;" >&2
@@ -479,7 +490,7 @@ if [[ $MACOS -eq 1 ]]; then
       echo "note: launchd did not load $label; see $(launchd_dir)/$label.plist" >&2
     fi
   done < <(launchd_labels; [[ $EXTRAS -eq 1 ]] && launchd_labels extras)
-  echo "not on macOS: the phone's gate — it comes with the Telegram bot, Linux and WSL only"
+  echo "not on macOS yet: the phone's gate (the Mini App behind tailscale funnel)"
   if [[ $EXTRAS -eq 1 ]] && ! launchctl print system/com.openssh.sshd >/dev/null 2>&1; then
     echo "note: Remote Login is off — no SSH session from a phone; turn it on in" >&2
     echo "      System Settings → General → Sharing" >&2
@@ -716,7 +727,7 @@ case ":$PATH:" in
 esac
 
 if [[ $EXTRAS -eq 0 && $MACOS -eq 1 ]]; then
-  echo "extras: not installed — keepawake comes with ./install.sh --extras"
+  echo "extras: not installed — keepawake and its Telegram bot come with ./install.sh --extras"
 elif [[ $EXTRAS -eq 0 ]]; then
   echo "extras: not installed — keepawake, its Telegram bot, code-server, wsl-update"
   echo "        come with ./install.sh --extras"

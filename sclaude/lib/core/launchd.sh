@@ -8,7 +8,7 @@
 #
 # sclaude's own agents are sclaude.*: the watcher and the proxy, on every Mac.
 # keepawake.* are the extras' (./install.sh --extras): the minute's count of
-# holders and the holding side. The phone's gate comes with the Telegram bot.
+# holders, the holding side and the Telegram bot.
 
 launchd_dir() { printf '%s\n' "$HOME/Library/LaunchAgents"; }
 launchd_logs() { printf '%s\n' "$HOME/Library/Logs/sclaude"; }

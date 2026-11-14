@@ -15,7 +15,7 @@ import urllib.request
 
 from keepawake.i18n import t
 from keepawake.state import locked, read
-from keepawake import card_view, services, shell
+from keepawake import card_view, services, shell, units
 
 
 log = logging.getLogger("keepawake")
@@ -126,7 +126,7 @@ def phone_on():
     On means the funnel is set up; the app opens once the address is
     published (gate_origin)."""
     PUBLISHED.update(host="", ok=False)
-    start = "" if port_open(GATE_PORT) else "systemctl --user start sclaude-gate.socket && "
+    start = "" if port_open(GATE_PORT) else units.command("start", "sclaude-gate.socket") + " && "
     out = shell.run(start + FUNNEL_ON, timeout=60)
     with locked() as st:
         st["phone_on_at"] = int(time.time())

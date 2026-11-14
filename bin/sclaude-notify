@@ -296,13 +296,9 @@ def bot_running():
     said = os.environ.get("KEEPAWAKE_BOT_ALIVE")
     if said is not None:
         return said == "1"
-    import subprocess
+    from keepawake import units
     from keepawake.state import BOT_UNIT
-    try:
-        return subprocess.run(["systemctl", "--user", "is-active", "--quiet", BOT_UNIT],
-                              timeout=5).returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
+    return units.active(BOT_UNIT)
 
 
 def into_feed():

@@ -318,7 +318,8 @@ if sys.platform == "darwin":
         out = run(env, extras=False, rc=code)
         check("macos-exit-0", code, [0])
         check("macos-platform-said", "platform: macOS" in out, True)
-        check("macos-extras-offered", "keepawake comes with ./install.sh --extras" in out, True)
+        check("macos-extras-offered", "keepawake and its Telegram bot come with ./install.sh --extras" in out,
+              True)
         check("macos-no-keepawake", os.path.exists(os.path.join(bin_dir, "keepawake")), False)
         check("macos-no-systemctl", os.path.exists(calls), False)
         check("macos-agents-written", sorted(os.listdir(agents)) if os.path.isdir(agents) else [],
@@ -348,6 +349,30 @@ if sys.platform == "darwin":
         check("macos-lid-offered-without-a-terminal",
               ("sudoers rule for the lid" in out, "./install.sh --lid" in out,
                os.path.exists(rule)), (True, True, False))
+        check("macos-bot-waits-for-its-token",
+              ("keepawake.telegram is not set up" in out, "keepawake.telegram" in log),
+              (True, False))
+        secrets = os.path.join(env["HOME"], ".config", "keepawake")
+        check("macos-secrets-dir-made", oct(os.stat(secrets).st_mode & 0o777), "0o700")
+
+        # The token in place: the bot's agent is written and loaded, and the
+        # token stays in the file, which the bot reads itself.
+        with open(os.path.join(secrets, "env"), "w") as fh:
+            fh.write("KEEPAWAKE_BOT_TOKEN=123:secret\nKEEPAWAKE_CHAT_ID=42\n")
+        os.remove(launched)
+        out = run(env, "--no-lid")
+        bot = os.path.join(agents, "keepawake.telegram.plist")
+        body = open(bot).read() if os.path.exists(bot) else ""
+        check("macos-bot-agent-written", os.path.exists(bot), True)
+        check("macos-bot-agent-loaded", "bootstrap gui/" in open(launched).read() and
+              any(line.endswith("keepawake.telegram.plist") for line in open(launched).read().splitlines()),
+              True)
+        check("macos-bot-runs-telegramd", "%s/keepawake/telegramd.py" % ROOT in body
+              or "%s/keepawake/telegramd.py" % os.path.realpath(ROOT) in body, True)
+        check("macos-bot-agent-has-no-token", "123:secret" in body, False)
+        check("macos-bot-agent-is-a-plist",
+              subprocess.run(["plutil", "-lint", bot], capture_output=True).returncode, 0)
+        check("macos-env-made-private", oct(os.stat(os.path.join(secrets, "env")).st_mode & 0o777), "0o600")
 
         out = run(env, "--lid")
         text = open(rule).read() if os.path.exists(rule) else ""

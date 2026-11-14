@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 
 from keepawake.i18n import t
-from keepawake import menus, phone_access, repos, sessions, shell, status_report
+from keepawake import menus, phone_access, repos, sessions, status_report, units
 
 
 log = logging.getLogger("keepawake")
@@ -53,8 +53,7 @@ def chrome_keyboard(config=None):
 
 
 def code_running():
-    out = shell.run("systemctl --user is-active code-server.service")
-    return out.strip() == "active"
+    return units.active("code-server.service")
 
 
 def code_url():

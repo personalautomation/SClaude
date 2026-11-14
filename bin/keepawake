@@ -264,13 +264,14 @@ count_claude() {
 # filled in inconsistently under WSL, and tmux and screen give false negatives
 # there. A live session is always a descendant of sshd with a line like
 # `sshd: <user>@pts/3`, which also cuts off the master daemon and short-lived
-# `sshd: [accepted]` entries.
+# `sshd: [accepted]` entries. Since OpenSSH 9.8 the session is a process of its
+# own, sshd-session, and its line reads `sshd-session: <user>@pts/3`.
 count_ssh() {
   local -A seen=()
   local pid cmd tty
-  for pid in $(pgrep -x sshd 2>/dev/null); do
+  for pid in $(pgrep -x 'sshd|sshd-session' 2>/dev/null); do
     cmd=$(tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline")
-    [[ "$cmd" != sshd:* ]] && continue
+    [[ "$cmd" != sshd:* && "$cmd" != sshd-session:* ]] && continue
     [[ "$cmd" == *"[accepted]"* || "$cmd" == *"[listener]"* || "$cmd" == *"[net]"* ]] && continue
     [[ "$cmd" != *@* ]] && continue
     tty="${cmd##*@}"

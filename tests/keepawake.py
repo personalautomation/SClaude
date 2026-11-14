@@ -376,6 +376,39 @@ check("duplicates on one pty collapse",
 check("an unrelated process does not count",
       ssh_sessions([("bash", 900), ("sshd: ilia@pts/2", 900)]), 1)
 
+# And the detector itself, on the lines OpenSSH writes: since 9.8 a session is
+# a process of its own, sshd-session, which `pgrep -x sshd` did not find and
+# whose line does not start with "sshd:" — Debian 13 and macOS among others.
+# pgrep is faked with the processes, and their lines with them.
+def bash_ssh(procs):
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "keepawake")
+    fn = subprocess.run(["sed", "-n", "/^count_ssh() {/,/^}$/p", script],
+                        capture_output=True, text=True).stdout
+    root = tempfile.mkdtemp(prefix="keepawake-test-ssh-")
+    names = {}
+    for pid, (comm, line) in enumerate(procs, 100):
+        names.setdefault(comm, []).append(pid)
+        os.makedirs(os.path.join(root, str(pid)))
+        with open(os.path.join(root, str(pid), "cmdline"), "w") as fh:
+            fh.write(line.replace(" ", "\0"))
+    pgrep = ("pgrep() { local p; for n in ${2//|/ }; do case $n in %s esac; done; }"
+             % " ".join("%s) echo %s ;;" % (n, " ".join(map(str, pids)))
+                        for n, pids in names.items()))
+    body = fn.replace("/proc/", root + "/") + "\n" + pgrep + "\ncount_ssh"
+    try:
+        return subprocess.run(["bash", "-c", body], capture_output=True, text=True).stdout.strip()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+check("an OpenSSH 10 session is counted",
+      bash_ssh([("sshd", "sshd: /usr/sbin/sshd [listener] 0 of 10-100 startups"),
+                ("sshd-session", "sshd-session: ilia [priv]"),
+                ("sshd-session", "sshd-session: ilia@pts/0")]), "1")
+check("a session before OpenSSH 9.8 is counted still",
+      bash_ssh([("sshd", "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"),
+                ("sshd", "sshd: ilia [priv]"), ("sshd", "sshd: ilia@pts/2")]), "1")
+
 
 # --------------------------------------------------------- the bash counters
 

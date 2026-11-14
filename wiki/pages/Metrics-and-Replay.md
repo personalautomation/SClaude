@@ -35,6 +35,27 @@ feature take so many steps? Why so long? What can I do better?*
 
 People start it as a game and end up thinking about how to improve.
 
+## The review's map: when to stop reviewing
+
+Writing code with AI is cheap; reviewing it is slow and expensive, and
+stopping too early or too late are both costly. Under the review step the
+page shows the review as a map: on top all the code the development wrote,
+a column per file, and below a band per round. From the code hang icicles —
+each place the review kept sending fixes to, a band a round as wide as the
+lines it changed there: narrowing as fewer are touched, widening as review
+draws in more code or another file, merging and splitting as places meet
+and part, stopping where review stopped coming back. Code that was not part
+of the development has nothing above it: its icicle starts in the middle of
+the review. Its colour says how the thread ended (fixed, declined, left to you, decided at
+night, would undo a fix), pale when the fix touched only comments, hatched
+when it added code. Threads pile up as dots where review found many. ✋ marks each time a person stepped in, ringed red where
+they took the recommended answer within seconds. Played back, the map grows
+round by round.
+
+It is a diagnosis, not a cure: it shows which parts of the code have had
+enough review and which are still worth it, and leaves the decision with
+the person.
+
 ## Why not a leaderboard
 
 | others | SClaude |

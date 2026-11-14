@@ -186,9 +186,23 @@ local_review_run() {
     block="$(blocks_now "$wt")"
     SCLAUDE_REVIEW_BLOCK="$block"
     python3 "$LIB/review/local_review.py" first "$journal" "$head" "$pr" 2>/dev/null && first=1
+    # Its files changed by more than a block is cut to since it was last
+    # read whole (a rework, a large fix): read whole again, so that no line
+    # of it is left to a diff too long to read well — even on a head a
+    # round already read as a diff.
+    # Once the person ended the search a pass only checks the fixes: the
+    # block is not read whole, and they are told so.
+    if [[ -z "$first" ]] && blocks_stale "$wt" "$head"; then
+      if [[ -z "$(review_enough "$wt")" ]]; then
+        first=1
+        info "  Block $block changed by a block's size since it was read whole: it is read whole again." >&2
+      else
+        warn "  Block $block changed by a block's size since it was read whole; you ended the search, so it is not read whole again." >&2
+      fi
+    fi
     SCLAUDE_REVIEW_READ="${first:+first}"
   fi
-  if python3 "$LIB/review/local_review.py" cached "$journal" "$head" "$pr" 2>/dev/null; then
+  if [[ -z "$first" ]] && python3 "$LIB/review/local_review.py" cached "$journal" "$head" "$pr" 2>/dev/null; then
     python3 "$LIB/review/local_review.py" open "$wt" "$pr" "$repo" "$journal" 2>/dev/null || return 1
     return 0
   fi
@@ -763,6 +777,11 @@ local_review_count() {
 local_review_done() {
   local head
   head="$(git -C "$1" rev-parse HEAD 2>/dev/null)" || return 1
+  # A block to be read whole again has its pass still to come on this head.
+  if declare -F blocks_active >/dev/null && blocks_active "$1" && [[ -z "$(review_enough "$1")" ]] \
+      && blocks_stale "$1" "$head"; then
+    return 1
+  fi
   python3 "$LIB/review/local_review.py" cached "$(review_journal "$1")" "$head" \
     "$(state_get "$1/.sclaude/local/feature/state.json" pr 2>/dev/null || true)" 2>/dev/null
 }

@@ -212,6 +212,14 @@ blocks_next() {
   [[ "$k" =~ ^[0-9]+$ ]] || return 1
   pr="$(state_get "$state" pr 2>/dev/null || true)"
   head="$(git -C "$wt" rev-parse HEAD)"
+  # Still changed past its size since its whole read: the person ended the
+  # search, or let the head go unreviewed — it closes, and its close says so
+  # (the terminal here, the topic in the close's own line below).
+  local unread=""
+  if blocks_stale "$wt" "$head"; then
+    unread=", its latest change not read whole (the search was ended, or the head went unreviewed)"
+    warn_here "  Block $k/$total closes$unread."
+  fi
   if (( k >= total )); then
     history_add "$state" blocks done
     rm -f "$(blocks_file "$wt")"
@@ -226,7 +234,7 @@ blocks_next() {
   fi
   python3 "$LIB/review/review_blocks.py" close "$(blocks_file "$wt")" "$k" "$head" 2>/dev/null || true
   history_add "$state" blocks closed block="$k"
-  ask_feed say "🧱 Block $k/$total of PR #${pr:-?} reviewed." 2>/dev/null || true
+  ask_feed say "🧱 Block $k/$total of PR #${pr:-?} reviewed$unread." 2>/dev/null || true
   # The step's record begun again, its conversations kept (the issue's
   # summary and the costs read `runs`), and what it held kept under the
   # block: a block's rounds, its "enough", counted apart.
@@ -270,6 +278,25 @@ blocks_scope() {
   else
     python3 "$LIB/review/review_blocks.py" scope "$wt" "$(blocks_file "$wt")" "$k" "$head"
   fi
+}
+
+# Whether the block read now changed by reviewBlocks.size lines or more
+# since its last whole read (review_blocks.py stale): more than a round's
+# diff is read well, so its next pass reads it whole (local_review_run),
+# also on a head a round read as a diff; the gate runs a pass before every
+# close here, so the block is read whole before it closes, and
+# local_review_done answers "not done" meanwhile, so the pass is reported.
+# With the search ended it is not, and its close says so (blocks_next).
+#
+#   blocks_stale <wt> <head>
+blocks_stale() {
+  local wt="$1" head="$2" k whole_at limit pr
+  k="$(blocks_now "$wt")"; [[ "$k" =~ ^[0-9]+$ ]] || return 1
+  pr="$(state_get "$wt/.sclaude/local/feature/state.json" pr 2>/dev/null || true)"
+  whole_at="$(SCLAUDE_REVIEW_BLOCK="$k" python3 "$LIB/review/local_review.py" whole "$(review_journal "$wt")" "$pr" 2>/dev/null || true)"
+  [[ -n "$whole_at" && "$whole_at" != "$head" ]] || return 1
+  limit="$(project_get reviewBlocks.size "$wt" 2>/dev/null || true)"; [[ "$limit" =~ ^[0-9]+$ ]] || limit=3000
+  python3 "$LIB/review/review_blocks.py" stale "$wt" "$(blocks_file "$wt")" "$k" "$whole_at" "$head" "$limit" 2>/dev/null
 }
 
 #   blocks_touched <wt> <since> <head>

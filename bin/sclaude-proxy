@@ -918,6 +918,14 @@ async def own_page(target, host, headers=None):
                            kind="application/json; charset=utf-8")
         body = await flow_state(label, found[0])
         return respond("200 OK", body, kind="application/json; charset=utf-8")
+    if url.path == "/__sclaude/flow/review":
+        label = (parse_qs(url.query).get("f") or [""])[0]
+        found = feature(label)
+        if not found:
+            return respond("404 Not Found", json.dumps({"error": "no such feature"}),
+                           kind="application/json; charset=utf-8")
+        body = await review_map(label, found[0])
+        return respond("200 OK", body, kind="application/json; charset=utf-8")
     if url.path.startswith(DEMO_PREFIX):
         return await asyncio.to_thread(demo_file, url.path, (headers or {}).get("range", ""))
     if url.path == "/__sclaude/clear":
@@ -1134,57 +1142,88 @@ def flow_slug(wt):
         return ""
 
 
-def flow_run(wt):
-    """`sclaude _flow` in the feature's tree, its JSON line or an error.
+def run_line(argv, cwd, limit):
+    """argv's last stdout line, parsed as JSON; else {"error": its last
+    stderr line}, or {} when it said nothing.
 
-    In a session of its own, ended whole on a timeout: killing sclaude alone
-    would leave a hung `git fetch` or `gh` holding its stdout, and the read
-    would wait on them for ever."""
-    slug = flow_slug(wt) or os.path.basename(wt)
-    answer = {}
+    In a session of its own, ended whole on a timeout: killing the child
+    alone would leave a hung `git fetch` or `gh` holding its stdout, and the
+    read would wait on them for ever."""
     try:
-        proc = subprocess.Popen([SCLAUDE, "_flow", slug], cwd=wt, env=run_env(),
-                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, start_new_session=True)
+        proc = subprocess.Popen(argv, cwd=cwd, env=run_env(), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                start_new_session=True)
     except OSError:
-        proc = None
-    if proc:
+        return {}
+    try:
+        out, err = proc.communicate(timeout=limit)
+    except subprocess.TimeoutExpired:
         try:
-            out, _ = proc.communicate(timeout=FLOW_LIMIT)
-            lines = out.decode("utf-8", "replace").strip().splitlines()
-            answer = json.loads(lines[-1]) if lines else {}
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except OSError:
-                pass
-            proc.communicate()
-        except (ValueError, IndexError):
-            answer = {}
-    if not answer:
-        answer = {"error": "sclaude _flow did not answer"}
-    return json.dumps(answer)
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        proc.communicate()
+        return {}
+    lines = out.decode("utf-8", "replace").strip().splitlines()
+    try:
+        answer = json.loads(lines[-1]) if lines else None
+    except ValueError:
+        answer = None
+    if isinstance(answer, dict):
+        return answer
+    said = err.decode("utf-8", "replace").strip().splitlines()
+    return {"error": said[-1]} if said else {}
 
 
-def flow_state(label, wt):
-    """The feature's answer, at most FLOW_FRESH old, from one run at a time.
+def flow_run(wt):
+    """`sclaude _flow` in the feature's tree, its JSON line or an error."""
+    slug = flow_slug(wt) or os.path.basename(wt)
+    answer = run_line([SCLAUDE, "_flow", slug], wt, FLOW_LIMIT)
+    return json.dumps(answer or {"error": "sclaude _flow did not answer"})
+
+
+def kept_run(store, label, fresh, run, wt):
+    """run(wt)'s answer, at most `fresh` seconds old, from one run at a time.
 
     The run is kept apart from the requests that wait on it: a request that
     goes away (a tab closed) leaves it running, and its result is stored
-    when it ends, whoever is still waiting."""
-    held = FLOW.setdefault(label, {"at": 0.0, "body": "{}", "task": None})
-    if time.time() - held["at"] < FLOW_FRESH:
+    when it ends, whoever is still waiting. An error is answered but not
+    kept, so the next request tries again."""
+    held = store.setdefault(label, {"at": 0.0, "body": "{}", "task": None})
+    if time.time() - held["at"] < fresh:
         return asyncio.sleep(0, held["body"])
     if held["task"] is None:
-        task = asyncio.ensure_future(asyncio.to_thread(flow_run, wt))
+        task = asyncio.ensure_future(asyncio.to_thread(run, wt))
 
         def stored(done):
             held["task"] = None
-            if not done.cancelled() and done.exception() is None:
+            if not done.cancelled() and done.exception() is None and '"error"' not in done.result()[:12]:
                 held["at"], held["body"] = time.time(), done.result()
         task.add_done_callback(stored)
         held["task"] = task
     return asyncio.shield(held["task"])
+
+
+def flow_state(label, wt):
+    return kept_run(FLOW, label, FLOW_FRESH, flow_run, wt)
+
+
+# The review's map of a feature (sclaude/lib/review/review_map.py), drawn
+# under the review step of its process map: its answer kept REVIEW_MAP_FRESH
+# seconds — it reads git, GitHub's threads and the tree's transcripts.
+REVIEW_MAP = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "sclaude", "lib",
+                          "review", "review_map.py")
+REVIEW_MAP_FRESH = float(os.environ.get("SCLAUDE_REVIEW_MAP_FRESH") or 30)
+REVIEW_MAPS = {}
+
+
+def review_map_run(wt):
+    answer = run_line([sys.executable, REVIEW_MAP, wt], wt, FLOW_LIMIT * 2)
+    return json.dumps(answer or {"error": "review_map.py did not answer"})
+
+
+def review_map(label, wt):
+    return kept_run(REVIEW_MAPS, label, REVIEW_MAP_FRESH, review_map_run, wt)
 
 
 # --- the connection ----------------------------------------------------------

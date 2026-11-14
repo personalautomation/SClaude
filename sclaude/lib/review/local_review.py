@@ -22,6 +22,7 @@
 #
 #   local_review.py first <journal> <head> <pr>   exit 0 when the review block's first
 #                                                 read is still to come
+#   local_review.py whole <journal> <pr>          the head the block was last read whole at
 #
 # With [pr], only that pull request's runs count: one journal may hold
 # several, a pull request closed and another opened. While a pull request is read in review blocks
@@ -488,6 +489,10 @@ def main(argv):
         mine = rows(args[0], pr=args[2], block=block_now())
         return 0 if not mine or (mine[-1]["head"] == args[1] and mine[-1].get("more")
                                  and mine[-1].get("read") == "first") else 1
+    if cmd == "whole" and len(args) == 2:
+        mine = [r for r in rows(args[0], pr=args[1], block=block_now()) if r.get("read") == "first"]
+        print(mine[-1]["head"] if mine else "")
+        return 0
     if cmd == "base" and len(args) in (1, 2):
         last = rows(args[0], pr=args[1] if len(args) > 1 else None)
         print(last[-1]["head"] if last else "")

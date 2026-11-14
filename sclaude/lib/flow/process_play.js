@@ -42,6 +42,8 @@ const player = (() => {
       delete el.__pl;
     });
     document.body.classList.remove('playing');
+    // The review's map follows the player (process_review.js): none now.
+    document.dispatchEvent(new CustomEvent('pl-step', {detail: null}));
     played = null; current = null;
     drawMetrics();
   }
@@ -232,6 +234,7 @@ const player = (() => {
         + (s.from ? ' · ' + when(s.from) + (s.to && s.to !== s.from ? ' – ' + when(s.to) : '') : '')
         + (s.here ? ' · it is here now' : ''));
       g.classList.add('pl-now');
+      document.dispatchEvent(new CustomEvent('pl-step', {detail: {n: s.n, map: s.map, from: s.from, to: s.to}}));
       current = {key: s.map + ':' + s.n, m: s.m || {}};
       drawMetrics();
       const was = played[current.key] || {};

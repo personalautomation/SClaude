@@ -54,6 +54,19 @@ PLAYER_BAR = """<div id="player" hidden><button type="button" class="pl-pause" t
 
 LIVE_STYLE = page_asset.read(__file__, "process_live.css")
 
+# The review's map, over the lower half of the page while a review step is
+# in view (process_review.js, from sclaude/lib/review/review_map.py).
+REVIEW_SCRIPT = page_asset.read(__file__, "process_review.js")
+REVIEW_STYLE = page_asset.read(__file__, "process_review.css")
+REVIEW_PANEL = """<div id="rv" role="region" aria-label="The review map" hidden><div class="rv-top"><h3>📊 The review</h3>
+<span class="rv-sum muted">…</span>
+<span class="rv-mode" role="radiogroup" aria-label="Icicles"><label title="Join the files one fix touched: one thread, or one subagent's work"><input type="radio" name="rv-mode" value="fix"> by fix</label><label title="One icicle a file, splitting where its changes part, never joined to another"><input type="radio" name="rv-mode" value="file"> by file</label></span>
+<label title="The person's answers and threads"><input type="checkbox" class="rv-hands" checked> ✋</label>
+<button type="button" class="rv-centre" title="Bring the review step back to the middle">⌖</button>
+<button type="button" class="rv-off" title="Do not show the review's details; the 📊 button brings them back">✕ hide</button></div>
+<div class="rv-legend"></div><div class="rv-body"></div></div>
+<button type="button" id="rv-chip" hidden title="Show the review's map">📊 Review map</button>"""
+
 
 def page(label, cfg=None, demo=None):
     """A feature's map: the same drawing as its project's config draws it,
@@ -123,8 +136,9 @@ def _page(label, demo=None):
 </div>
 <button id="clear" type="button" hidden>Clear the selection</button>
 %s
-</main><script>%s%s%s%s</script></body></html>
-""" % (process_diagram.esc(label), process_diagram.STYLE, LIVE_STYLE + PLAY_STYLE, process_diagram.esc(label),
+%s
+</main><script>%s%s%s%s%s</script></body></html>
+""" % (process_diagram.esc(label), process_diagram.STYLE, LIVE_STYLE + PLAY_STYLE + REVIEW_STYLE, process_diagram.esc(label),
        ' · <a href="%s">🎬 demo: %s</a>' % (process_diagram.esc(demo[0]), process_diagram.esc(demo[1])) if demo else "",
        process_diagram.esc(label), process_diagram.LEGEND,
        play_head("detail", "The whole process"), detail.svg(),
@@ -134,5 +148,6 @@ def _page(label, demo=None):
        play_head("regression", "A stage's regression", passes=True), process_diagram.Diagram(*process_config.node_sets()[4]).svg(),
        play_head("sync", "Main and the branch", passes=True), process_diagram.Diagram(*process_config.node_sets()[5]).svg(),
        play_head("parts", "A feature built in parts", passes=True), process_diagram.Diagram(*process_config.node_sets()[6]).svg(),
-       process_doc.commands_table(), PLAYER_BAR,
-       process_doc.INTERACT_SCRIPT.replace("/*MODEL*/", json.dumps(process_doc.client_model())), PLAY_SCRIPT, script, process_doc.URL_SCRIPT)
+       process_doc.commands_table(), PLAYER_BAR, REVIEW_PANEL,
+       process_doc.INTERACT_SCRIPT.replace("/*MODEL*/", json.dumps(process_doc.client_model())), PLAY_SCRIPT, script,
+       REVIEW_SCRIPT, process_doc.URL_SCRIPT)

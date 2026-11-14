@@ -130,6 +130,11 @@ most of them built into the flow, the rest shared as team practice:
   animation on the process map: each step in turn, its minutes, its prompts,
   its cost. People watch it again and again, and start asking why it went
   the way it did.
+- **A map of the review.** Under the review step, every file of the pull
+  request and every round: where the fixes went, how each thread ended,
+  where a person stepped in and how fast they took the recommended answer.
+  It shows where review still finds real bugs and where it has turned to
+  polishing comments, so the person knows when to stop it.
 - **Metrics with no overhead.** Not a single field to fill in. DORA's four
   keys, the pull request's way, quality, flow, how autonomous Claude was and
   what it cost — collected as a by-product of a process that helps the

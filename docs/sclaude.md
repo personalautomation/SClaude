@@ -417,6 +417,87 @@ line of description while it carries them. The transcripts are read through a ca
 the history (`transcripts.json`), so a poll reads only what grew, and a
 conversation still going at most once a minute.
 
+**The review's map** (`sclaude/lib/review/review_map.py`, drawn by
+`process_review.js` under a review step, served at `/__sclaude/flow/review`)
+logs nothing of its own: the rounds are the journal's passes on the pull
+request (a head read again is one round, unless the review block changed;
+a stopped pass on a head of its own one too),
+the fixes the hunks of `git diff` from one round's head to the next one's
+(the last to the tree's HEAD) in the files the branch's own commits changed
+— a merge of main between rounds is no fix —, placed by their line in the
+newer version; a fix takes the outcome of the nearest thread of its round on
+its file, within 15 lines of the fix's line in the round's head (where the
+thread was posted; one posted on a commit between round heads is carried to
+the head first), and failing that
+the thread a subagent of the fixing session was given, when it edited the
+fix's file: the subagent's transcript beside the session's names the files
+it edited, and its brief the finding's file and line (`path:12`, `line 12`;
+a file named without a line is not a finding), matched to the nearest
+thread of its round within ten lines. A fix the session made itself, with no
+thread near, is "no thread". Every file gets a projected axis (`project`): every line that was ever in
+it keeps a place — a deleted line keeps its slot, the lines a fix wrote are
+put right after the ones it replaced — so a fix's place (`p0`/`p1`, the
+lines it removed and wrote) and a thread's (`p`) are the same place in every
+round, and an icicle grows from the lines it changed. A file whose fixes do
+not add up to its next version (a rename) is placed by line numbers instead.
+The panel draws by fix (files joined by thread or subagent) or by file (one
+icicle a file, never joined), a choice kept in the browser. Read in review blocks, the columns are grouped by block (the cut's
+`blocks`, FEATURE_BLOCKS), each block's name over its files, a line between
+two, and the files the cut does not name last. On the page the
+development's diff up to the first round is the block on top (its height
+the log of the time from the branch's first commit), a file's column as
+wide as the root of what it wrote; a round's fixes close together in one
+file are one place, and places in two files join when they are one fix —
+the same thread, or the work of one subagent given at most two findings — the files ordered so that linked ones sit side by side; a place hangs from every place of the round before its code overlaps
+(several: a merge), a place's bottom is shared among those hanging from it
+in proportion to their widths (a split); each is a trapezoid, its bottom as
+wide as the lines the round changed there on one scale for the map (the one
+at which four places in five fit their columns, the rest held to theirs),
+its top the slices of the places above (a parent always shares a file with
+it), its own width under the development's code in the first round, or a
+point mid-row where nothing is above it; a place no later round came back to
+is cut flat, and closes to a point mid-way down the next row only once its
+chain is done — every thread of it and of the places it grew from fixed,
+declined or declined as undoing a fix, the first round after its fix that
+opened its files read all of it (its last pass not stopped at the cap, the
+journal's `more`) and posted no thread there, and the round after that one
+has begun, so that round's fixes are all in. What a round opened (`seen`,
+`seen_files`) is read from its passes' transcripts — a file read, named in a
+command, or shown as a diff header in a command's output; a round that never
+opened a place's files is drawn as a continuation of its icicle in its colour fading down, and a
+GitHub run, with no transcript here, counts as having read everything; a thread whose reply names a commit of a round's range and, among
+the commit's files, the one the fix landed in (by its name, a stem that is
+no plain word, or a stem's first part with a digit that no other file of the
+commit shares — `replied`) gives that round's unthreaded fixes in the file
+to the thread and is kept as `fixedIn`: the file is put beside the thread's
+in both ways of drawing, and the round's place there hangs from the
+thread's place — a stream when the two columns are side by side or one
+(a merge is drawn as one stream a parent), a jump further away: a mark
+where it leaves and one where it lands, links to each other
+(`#rvj-<n>-out`/`-in`). A file the review created that the fixes of
+another file moved into for good — nothing in the first from the round the
+second starts, nothing in the second before, the second in the first's
+block or in none (the cut was made before the review wrote it) — goes on under the
+first in its column; threads a later round posted at a place where none of
+its fixes landed (fixed elsewhere) stay in the place's chain, and the round after the last of them is the one
+that checks it (a small point in its row, no line drawn down to it); the touched files are
+ordered so that each next one shares the most rounds with the last; the
+heights are scaled to fit the panel. A thread's
+outcome is read from review-reversals, review-yours (the night's mark),
+`decline_of` and GitHub's resolved flag, in that order; its round is the
+one whose head its first comment was posted on. The person's hands are the
+AskUserQuestion calls answered in the tree's transcripts (the wait, the
+option marked "(Recommended)", a `discussion_r` link in the question), the
+answers to sclaude in the history, and the threads a person opened. A
+round's cost is the report's (`review_report.py`): its passes by their
+sessions, stopped ones too, and each fix launch on the last round begun
+before it (`fixes_per_round`). A pass stopped or not taken (`spent`) on a
+head of its own is a round, `stopped`, as the report counts it, reading
+nothing (`seen` empty); the state says the block read now (`blockNow`) and
+whether step 4 is over (`closed`), when the last round closes too. Comment lines are told
+by how they start, and a file of prose is all comment — nothing knows a
+product's language.
+
 Besides the cycle at a glance and the whole process, two
 maps take apart what the whole one marks on its sessions: W, a session
 changing sclaude in its workshop and the publishing after it, and F, the
@@ -1404,9 +1485,23 @@ block read now. The journal tags every run with `block` and `read`
 head. **Its rounds** read the new commits across the whole pull request, with
 the closed blocks' files they touched and the criteria each answers for
 (`blocks_touched`): a fix made for one block may break another's rule, and
-the diff alone does not say which.
+the diff alone does not say which. A block whose own files, with those no
+block owns, changed by `reviewBlocks.size` lines or more since its last whole
+read (`whole` in `local_review.py` names that head, `stale` in
+`review_blocks.py` counts, generated files left out) — a rework at the
+person's word, a large fix — is read whole again on the next pass, so that no
+line of it is left to a diff too long to read well.
 
-**Closing a block** (`blocks_next`, from `after_step`): a review step that
+**Closing a block** (`blocks_next`, from `after_step`): a block changed past
+`reviewBlocks.size` lines since its last whole read (`blocks_stale`, the
+branch's own commits only, merges left out) is not closed before it is read
+whole: its next pass reads it whole (`local_review_run`, past the cache of a
+head already read as a diff), and the gate runs a pass before every close
+of a review read here; `local_review_done` answers "not done" meanwhile, so
+that pass is reported like any. With the search ended the pass only checks
+the fixes, and a block closing still stale — the search ended, or the head
+let go unreviewed — says in the terminal and the topic that its change was
+not read whole. A review step that
 closed with nothing open closes the block instead while it is not the last —
 the head kept in the cut's `closed`, step 4's record begun again with its
 conversations kept and the old one under `blocks.<k>`, so the block's rounds,

@@ -194,6 +194,11 @@ try:
     empty = review_blocks.scope(wt, os.path.join(tmp, "gone.json"), 2, fix)
     check("a-block-with-no-files-left-reads-no-diff", ("-- `" in empty or "-- ." in empty, "None of its files" in empty),
           (False, True))
+    # A block whose files changed by a block's size since its whole read is
+    # read whole again; generated files and other blocks' files count nothing.
+    check("a-block-changed-past-the-limit-is-stale",
+          (review_blocks.stale(wt, cut, 2, p2, fix, 1), review_blocks.stale(wt, cut, 2, p2, fix, 2),
+           review_blocks.stale(wt, cut, 2, fix, fix, 1)), (True, False, False))
     seams = review_blocks.seams(wt, cut, fix)
     check("seams-name-a-closed-blocks-late-change",
           "block 1 (Taking a ticket, criteria AC1): `git diff %s..%s -- take/a`" % (p2, fix) in seams, True)
@@ -219,6 +224,8 @@ try:
           ("3", "1"))
     check("cached-per-block", (lr("1", "cached", j, "h2", "7").returncode, lr("3", "cached", j, "h2", "7").returncode), (0, 1))
     check("since-is-the-prs", lr("3", "since", j, "h9", "7").stdout.strip(), "h2")
+    check("whole-is-the-blocks-last-first-read",
+          (lr("1", "whole", j, "7").stdout.strip(), lr("3", "whole", j, "7").stdout.strip()), ("h1", ""))
     os.environ["SCLAUDE_REVIEW_BLOCK"] = "2"
     os.environ["SCLAUDE_REVIEW_READ"] = "first"
     row = {}
@@ -276,6 +283,8 @@ try:
         src = fh.read()
     check("the-block-named-before-its-first-read-is-asked",
           src.index('SCLAUDE_REVIEW_BLOCK="$block"') < src.index('local_review.py" first'), True)
+    check("a-stale-block-is-read-whole-before-the-read-is-tagged",
+          src.index('blocks_stale "$wt" "$head"') < src.index('SCLAUDE_REVIEW_READ="${first:+first}"'), True)
     with open(state, "w") as fh:
         json.dump({"pr": 7, "blocks": {"total": 3, "current": 1, "pr": 7, "label_before": "no"},
                    "steps": {"review": {"runs": [{"session": "r1"}], "rounds": 4, "enough": "pass"}}}, fh)
@@ -385,6 +394,50 @@ try:
     with open(state) as fh:
         st = json.load(fh)
     check("a-new-pr-decided-afresh", (st["blocks"], os.path.exists(cut)), ({"pr": 8, "total": 0}, False))
+    # A block changed past a block's size since its whole read: read whole
+    # on its next pass, and not closed before.
+    review_blocks.save(cut, good)
+    jj = os.path.join(tmp, "stale.jsonl")
+    with open(jj, "w") as fh:
+        fh.write(json.dumps({"at": "2026-11-12T10:00:00", "head": base, "pr": "9", "block": "1", "read": "first"}) + "\n")
+    with open(state, "w") as fh:
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+    stub = 'review_journal() { echo %s; }; review_enough() { :; }; ' % jj
+    head = git(wt, "rev-parse", "HEAD")
+    check("a-changed-block-is-stale",
+          (sh(stub + 'project_get() { echo 1; }; blocks_stale "%s" %s && echo STALE' % (wt, head)).strip(),
+           sh(stub + 'project_get() { echo 99999; }; blocks_stale "%s" %s || echo FRESH' % (wt, head)).strip()),
+          ("STALE", "FRESH"))
+    # Its pass on this head is still to come (the gate runs it before the
+    # close), unless the person ended the search.
+    # The head read as a diff already: cached, yet not done.
+    with open(jj, "a") as fh:
+        fh.write(json.dumps({"at": "2026-11-12T11:00:00", "head": head, "pr": "9", "block": "1", "read": "delta"}) + "\n")
+    done = 'source "%s/review/local_review.sh"; project_get() { echo 1; }; blocks_active() { :; }; ' % LIB
+    check("a-fresh-block-read-as-a-diff-is-done",
+          sh(done.replace("echo 1;", "echo 99999;") + stub + 'local_review_done "%s" && echo DONE || echo PENDING' % wt).strip().splitlines()[-1], "DONE")
+    check("a-stale-block-is-not-done-on-a-read-head",
+          sh(done + stub + 'local_review_done "%s" && echo DONE || echo PENDING' % wt).strip().splitlines()[-1], "PENDING")
+    feed = 'ask_feed() { echo "FEED $*"; }; history_add() { :; }; '
+    with open(state, "w") as fh:
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+    out = sh(stub + feed + 'project_get() { echo 99999; }; blocks_next "%s" t; echo END' % wt)
+    check("a-fresh-block-closes-quietly", ("not read whole" in out, "FEED say 🧱 Block 1/3 of PR #9 reviewed." in out), (False, True))
+    with open(state, "w") as fh:
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+    review_blocks.save(cut, good)
+    out = sh(stub + feed + 'project_get() { echo 1; }; blocks_next "%s" t; echo END' % wt)
+    with open(state) as fh:
+        check("a-stale-block-closing-says-it-was-not-read-whole",
+              (out.count("not read whole"), "FEED say 🧱 Block 1/3 of PR #9 reviewed, its latest change not read whole" in out,
+               json.load(fh)["blocks"]["current"]), (2, True, 2))
+    # A merge brings no change of the block's own.
+    git(wt, "checkout", "-q", "-b", "side", base)
+    commit(wt, "on main", take__a="m\n" * 50)
+    git(wt, "checkout", "-q", "-")
+    git(wt, "merge", "-q", "--no-edit", "-X", "theirs", "side")
+    merged = git(wt, "rev-parse", "HEAD")
+    check("a-merge-is-no-change-of-the-block", review_blocks.stale(wt, cut, 1, head, merged, 1), False)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

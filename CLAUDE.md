@@ -91,7 +91,10 @@ breaks the other silently — grep before you edit:
   `prompt.sh`) and `in_blocks` in `pr_context.py`, the same condition; the
   journal's `block`/`read` come from `SCLAUDE_REVIEW_BLOCK`/
   `SCLAUDE_REVIEW_READ`, set by `local_review_run` and read by `tag`,
-  `first`, `round` and `cached` in `local_review.py`; `<if:in-blocks>`,
+  `first`, `round`, `cached` and `whole` in `local_review.py` — `whole`
+  names the head of a block's last `read: first` run, from which
+  `blocks_stale` (`stale` in `review_blocks.py`) counts the change that
+  has a block read whole again; `<if:in-blocks>`,
   `<block>`, `<blocks>`, `<block-title>` are set by `render_prompt` for
   `review.md`; the cut's JSON shape is spelled out to its session by
   `blocks_cut_prompt` and checked by `validate`. `tests/review-blocks.py`
@@ -337,6 +340,21 @@ breaks the other silently — grep before you edit:
 
   <!-- Added by Claude on 2026-11-10 at the user's request: the review moves
   to this machine when GitHub's runs out of Claude quota or Actions minutes. -->
+
+- The review's map (`sclaude/lib/review/review_map.py`) reads the journal
+  by `JOURNAL` in `local_review.py`, the review blocks' cut by
+  `FEATURE_BLOCKS` in `review_blocks.py`, the person's threads by `YOURS_FILE`
+  and `NIGHT_MARK`, the declines by `decline_of`, `review-reversals` as
+  `reversals_file` in `review_round.sh` names it, and the history's `ask
+  answered` rows `ask_log` writes; `bin/sclaude-proxy` runs it for
+  `/__sclaude/flow/review`, which `process_review.js` asks; the player's
+  `pl-step` event (`process_play.js`) and `reviewMap.live` in
+  `process_live.js` say which place is in view. `tests/review-map.py` runs
+  each side. Renamed on one side alone, the map comes up empty or never
+  shows.
+
+  <!-- Added by Claude on 2026-11-13 at the user's request, with the
+  review's map under the review step. -->
 
 - `CONTEXT_FILE` in `statusline.py` (`/tmp/claude-statusline-context-<session>`)
   is read by `review_context` in `sclaude/lib/review/review_round.sh`, which decides by it

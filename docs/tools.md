@@ -242,7 +242,78 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   that map — a clock on each place counting its time, then the arrow it took,
   a friction review or a change to sclaude jumping to its own map and back;
   by those two maps' headings a list chooses which pass to play. While it
-  plays the History follows it, and a click on a line plays from there. The
+  plays the History follows it, and a click on a line plays from there.
+  On a review step — where the feature stands, the step you click, or the
+  player passing it — the lower half of the page shows **the review's map**,
+  and the step is centred in the half above. On top lies all the code the
+  development wrote, as tall as the log of how long it took, a column for
+  each file the review touched (the others thin strips); below it a band for
+  each review round, the same way. A line keeps its place across the rounds
+  — a line a fix deleted keeps its room, the lines it wrote stand next to
+  what they replaced — so a column stays the same code from top to bottom.
+  Two ways to draw the icicles, chosen by the switch in the panel: **by
+  fix** joins the files one fix touched, **by file** keeps one icicle a file
+  that splits where its changes part. From the code hang icicles: each place
+  the review sent fixes to, a straight-sided band a round whose bottom is as
+  wide as the lines that round changed there and whose top is the round
+  before's: it narrows as fewer lines are touched, widens as more are or
+  another file is drawn in — one fix answering the same thread there, or one
+  subagent of the fixing session working on one or two findings in both
+  (files fixed together are placed side by side) — merges where two places
+  of one round meet in the next, splits where one parts. Where no round came back it is cut flat —
+  waiting — until it is done: every thread of it has an outcome (fixed or declined,
+  none open or waiting for you), the first round after the fix that opened
+  its file read all of it and found nothing there, and that round's own fixing is over — the next round
+  has begun — so no fix can still land there; then it closes to a point in
+  the middle of that round. Code no thread led to closes the same way.
+  A round that never opened the file — a review that stopped after its
+  findings, or did not get there — found nothing there by not looking: the
+  icicle goes on through it in its own colour fading down, still to be
+  checked. A pull request read in review blocks has its columns grouped by
+  block, each block's name over its files and a line between two, so a
+  round of block 1 not opening block 4's files reads as the cut, and a pale
+  icicle inside its own block as a gap; the hover says which: a later
+  block's file waits for that block's whole read, a file the cut does not
+  name for the next block read whole. Once step 4 is over the last round's
+  icicles close too, its fixing being over. When the reply to
+  a thread names the commit and the file the fix landed in — another file,
+  a new migration for one — that file is put beside the thread's and the
+  icicle slides into it, in both ways of drawing. Where the fixes moved on
+  from one file to the next for good (a migration fixed by the next
+  migration, and that by the next — the next file in the first's block or,
+  written after the cut, in none), the next file goes on under the first
+  in one column, a dashed line and its name where it starts. A file too far
+  to slide to — in another block — gets a jump: ↗ where the icicle leaves,
+  ↘ where it lands, each a link to the other. Threads a later round
+  posts at a place where no fix of that round lands, with no such reply,
+  are still the place's: it closes, with a small point
+  in the row of the round that checked it, once they all have an outcome
+  and the round after reads past them. The hover says what
+  an open icicle waits for. A place
+  with nothing above it — code first touched in a later round, or a file
+  the development did not write — starts as a point in the middle of its
+  round. An icicle's colour is how the thread it answered ended (fixed, declined,
+  left to you, decided at night, would undo a fix, open, or no thread at
+  all), pale where it touched comments rather than code, hatched where it
+  added lines. Dots are the threads, piled into a column where a round
+  posted several close together, so a tall pile is a place the review kept
+  finding things; ✋ with a number how many times you
+  stepped in during a round or at one place (answers and your own threads),
+  ringed red where you took the recommended answer within seconds — the
+  questions are in its tooltip. Hovering an icicle tells where it is, what
+  that round changed there, the threads posted at it and your answers about
+  them, the icicle round by round as a small bar chart, how much of the
+  code written there it has changed, and a reading: converging, growing
+  again, only comments lately, mostly declined, or ended. Each round is named by its block first when the
+  pull request is read in review blocks — "Block 2 · round 3", the rounds
+  counted afresh in each block, a heavier line where a block opens — and
+  says how long it lasted, whether it ran on this machine or on
+  GitHub or was stopped with no answer (a round of its own, as the review's
+  report numbers it, the commits after it its fixes), what it found and what
+  it cost — its passes and the fixes of its findings, priced as the report
+  prices them; while the player runs, the map shows the review as it
+  stood at that moment. ✕ hide turns it off in this browser, and 📊 brings it
+  back. The
   history starts with sessions run since sclaude keeps it. Checkboxes above
   the maps put in each block what it took: ✋ your input — each message to
   Claude after its turn, each answer to its question or to sclaude's, each

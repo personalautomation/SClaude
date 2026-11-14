@@ -88,6 +88,7 @@ function render(v) {
     ul.append(li);
   });
   window.processMap.paint();
+  if (window.reviewMap) reviewMap.live(here);
   player.update(v.history);
   document.getElementById('err').textContent = v.error || '';
 }

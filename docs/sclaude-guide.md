@@ -168,8 +168,10 @@ after the last a pass reads the seams between them — what changed in a block
 after it was read, the behaviours together. Meanwhile the review runs on this
 machine whatever the `review` setting; under a GitHub setting the project's
 CI there still counts. The menu says `4/7 review · block 2/5`.
-`reviewBlocks` in the project's config sets the two sizes (`from`, 5000, and
-`size`, 3000 lines a block).
+A block whose files change by more than a block's size after it was read
+(a rework, a large fix) is read whole again before it closes — unless you
+ended the search, when you are told it was not. `reviewBlocks` in the project's
+config sets the two sizes (`from`, 5000, and `size`, 3000 lines a block).
 Once the preview's tests pass, before the issue goes to QA, when the
 product's code changed since the last demo — the review may have changed what
 the feature does — a headless session records a delta of what changed for the

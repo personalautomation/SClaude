@@ -246,7 +246,8 @@ by a model run on the machine's CPU — see [skills/sdemo](tools.md#skillssdemo)
 and `off` (silent videos, the captions alone).
 `reviewBlocks` takes `from`, the changed lines past which step 4 reads a pull
 request in review blocks (5000), and `size`, the lines a block holds at most
-(3000).
+(3000) — and the change to a block's files after which it is read whole
+again.
 `partAccept` takes `whole` (the default: a feature built in parts is accepted
 once, whole, when every part is built; each part before the last is shown in a
 demo of what it added, which asks nothing) and `each` (every part's

@@ -38,6 +38,9 @@
 #   review_blocks.py touched <wt> <file> <k> <from> <head>
 #                                                     closed blocks' files a later round changed
 #   review_blocks.py close <file> <k> <head>          block <k> closed at <head>
+#   review_blocks.py stale <wt> <file> <k> <since> <head> <limit>
+#                                                     exit 0 when block <k>'s files changed
+#                                                     by <limit> lines or more since <since>
 #
 # The file (FEATURE_BLOCKS, review-blocks.json beside the feature's state):
 #   {"base": <commit the review reads from>, "head": <the head cut>,
@@ -369,6 +372,30 @@ def touched(wt, path, k, since, head):
             "that block's criteria (the plan has their text): " + "; ".join(out))
 
 
+def stale(wt, path, k, since, head, limit):
+    """Whether block <k>'s own files — and the files no block owns, which
+    its read takes — changed by <limit> lines or more since <since>, the
+    head it was last read whole at: more than a round's commits, read as a
+    diff, are read well (a rework at the person's word, a large fix), so
+    the block is read whole again. Generated files count nothing, nor what
+    a merge brought (main, a sync): only the branch's own commits, as a
+    round reads them."""
+    data = load(path)
+    # The seams own no file: what changed in a closed block is theirs to read.
+    if not 1 <= k <= len(data["blocks"]):
+        return False
+    owned = {f for o in data["blocks"] for f in o.get("files") or []}
+    mine = set(data["blocks"][k - 1].get("files") or [])
+    lines = 0
+    for line in git(wt, "log", "--first-parent", "--no-merges", "--numstat", "--no-renames", "--format=",
+                    "%s..%s" % (since, head)).splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3 or not (parts[2] in mine or parts[2] not in owned) or generated(wt, parts[2]):
+            continue
+        lines += sum(int(n) for n in parts[:2] if n.isdigit())
+    return lines >= limit
+
+
 def close(path, k, head):
     data = load(path)
     data.setdefault("closed", {})[str(k)] = head
@@ -414,6 +441,8 @@ def main(argv):
     if cmd == "touched" and len(a) == 5:
         print(touched(a[0], a[1], int(a[2]), a[3], a[4]))
         return 0
+    if cmd == "stale" and len(a) == 6:
+        return 0 if stale(a[0], a[1], int(a[2]), a[3], a[4], int(a[5])) else 1
     if cmd == "close" and len(a) == 3:
         return close(a[0], int(a[1]), a[2])
     return 2

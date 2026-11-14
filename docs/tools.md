@@ -538,7 +538,9 @@ Installed with `./install.sh --extras`.
 
 Keeps the machine awake while there is work going on, so it can continue from a
 phone while the laptop stands closed. Under WSL it holds Windows awake; on plain
-Linux it holds the machine itself (see [below](#keepawake-on-plain-linux)).
+Linux it holds the machine itself (see [below](#keepawake-on-plain-linux)), and
+on a Mac too ([below](#keepawake-on-macos)). The Telegram bot and code-server
+are Linux and WSL only for now.
 
 **What holds it.** A person at the machine — an SSH session, an open
 code-server tab, traffic over Tailscale — holds it for as long as they are
@@ -641,8 +643,8 @@ it, and the hold log says so once.
 `install.sh --extras` offers to change that on plain Linux, and only there. It explains
 when the rule is worth having (a laptop you close while working from a phone),
 shows the command that removes it, and asks for a yes or a no.
-`./install.sh --polkit` adds it without asking, `--no-polkit` skips the
-question. To remove it later:
+`./install.sh --lid` (or `--polkit`) adds it without asking, `--no-lid`
+(`--no-polkit`) skips the question. To remove it later:
 
 ```bash
 sudo rm /etc/polkit-1/rules.d/49-keepawake.rules && systemctl --user restart keepawake-linux.service
@@ -661,6 +663,34 @@ polkit.addRule(function(action, subject) {
 });
 RULE
 systemctl --user restart keepawake-linux.service
+```
+
+### keepawake on macOS
+
+Two launchd agents in your login session, written into `~/Library/LaunchAgents`
+by `./install.sh --extras`: `keepawake` counts the holders once a minute, and
+`keepawake.hold` runs `keepawake-macos`, which holds the Mac with a power
+assertion while there is work. `pmset -g assertions` names it — "keepawake:
+work in progress" — and macOS drops it by itself if the holder dies. It stops
+idle sleep; the display still sleeps as usual. Their logs are in
+`~/Library/Logs/sclaude/`, the hold's own log in
+`~/.local/state/keepawake/hold.log`.
+
+A person at the Mac itself counts as presence too: `keepawake` reads how long
+its keyboard and mouse have been idle, which is what lets a dev server hold the
+Mac while you work in a browser. An SSH session needs Remote Login, in System
+Settings → General → Sharing; `keepawake status` says when it is off.
+
+No power assertion holds a closed lid: only root can, with
+`pmset -a disablesleep 1`. `install.sh --extras` offers a sudoers rule that lets
+your user run exactly that and its `0` without a password, and nothing else;
+`keepawake-macos` then turns it on while it holds and off when it lets go, so
+the Mac stays up with its lid shut until the work ends — in a bag too.
+`./install.sh --lid` adds it without asking, `--no-lid` skips the question. To
+remove it later:
+
+```bash
+sudo rm /etc/sudoers.d/keepawake && sudo pmset -a disablesleep 0
 ```
 
 ### Configuration

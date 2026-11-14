@@ -79,6 +79,33 @@ try:
     check("port_addresses: loopback", sh('port_addresses %d' % port), "127.0.0.1:%d" % port)
     check("port_addresses: nobody", sh('port_addresses 1'), "")
     check("load_one: a number", bool(re.match(r"^[0-9.]+$", sh('load_one'))), True)
+    check("ports_pids: the port and its listener",
+          "%d %d" % (port, os.getpid()) in sh('ports_pids').splitlines(), True)
+
+    # What a server puts out grows when it answers: this bench answers a
+    # client of its own socket, by write(2) — counted as written on Linux and
+    # as sent on macOS.
+    client = socket.create_connection(("127.0.0.1", port))
+    conn, _ = server.accept()
+    before = sh('proc_output_bytes %d' % os.getpid())
+    os.write(conn.fileno(), b"x" * 5000)
+    client.recv(10000)
+    time.sleep(0.2)
+    after = sh('proc_output_bytes %d' % os.getpid())
+    check("proc_output_bytes: numbers", (before.isdigit(), after.isdigit()), (True, True))
+    check("proc_output_bytes: an answer counts",
+          after.isdigit() and before.isdigit() and int(after) - int(before) >= 5000, True)
+    check("proc_output_bytes: nothing for no process", sh('proc_output_bytes 999999'), "")
+    conn.close()
+    client.close()
+
+    # The keyboard at the machine itself: the Mac's HID system answers; Linux
+    # gives no such answer to a process outside the session.
+    idle = sh('input_idle || echo none')
+    if sys.platform == "darwin":
+        check("input_idle: seconds on macOS", idle.isdigit(), True)
+    else:
+        check("input_idle: no answer on Linux", idle, "none")
 
     check("procinfo.py: listening_pids", os.getpid() in procinfo.listening_pids().get(port, set()), True)
     check("procinfo.py: working_dirs", (pid, work) in procinfo.working_dirs(), True)
@@ -90,13 +117,14 @@ finally:
         proc.wait()
     shutil.rmtree(tmp, ignore_errors=True)
 
-# Nothing but procinfo reads /proc or runs ss. keepawake, the Linux and WSL
-# machine tools, is outside sclaude's reach on macOS and keeps its own; a
+# Nothing but procinfo reads /proc or runs ss — keepawake's detector and
+# holders included, which run on macOS too. The bot's Python modules
+# (keepawake/*.py) keep their own reads, each with macOS's beside it. A
 # comment saying where something comes from is not a read.
 OWN = {os.path.join("sclaude", "lib", "core", n) for n in ("procinfo.sh", "procinfo.py")}
 READ = re.compile(r"""/proc/|["']/proc["']|\bss\s+-|\["ss",""")
 paths = [os.path.join("bin", n) for n in os.listdir(os.path.join(ROOT, "bin"))
-         if n.startswith(("sclaude", "chrome-debug"))]
+         if n.startswith(("sclaude", "chrome-debug", "keepawake"))]
 for top in ("sclaude", "skills"):
     for d, _, names in os.walk(os.path.join(ROOT, top)):
         paths += [os.path.relpath(os.path.join(d, n), ROOT) for n in names

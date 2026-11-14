@@ -359,8 +359,9 @@ The full account is in [Privacy](docs/privacy.md).
 
 Observed in the team that runs it: a 10–20% productivity improvement and
 about 5% fewer tokens in the first weeks — project observations, not
-universal benchmarks. On macOS the cycle runs in full; working from the phone
-(keepawake and the Telegram bot) is Linux and WSL2 only for now.
+universal benchmarks. On macOS the cycle runs in full, and keepawake keeps
+the Mac awake under work; the Telegram bot, and with it working from the
+phone, is Linux and WSL2 only for now.
 
 ## Get started
 

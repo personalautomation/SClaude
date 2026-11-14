@@ -148,11 +148,15 @@ try:
                  "hold released", "holding, until 14:00"):
         check("status-greps-%s" % line.split(",")[0].split(":")[0].replace(" ", "-"),
               re.search(pattern, line) is not None, True)
-    source = open(os.path.join(ROOT, "bin", "keepawake-linux"), encoding="utf-8").read()
+    # The loop keepawake-linux and keepawake-macos share writes them.
+    source = open(os.path.join(ROOT, "keepawake", "hold_loop.py"), encoding="utf-8").read()
     for literal in ('"hold set: a person is at the machine"', '"hold set, until %s"',
                     '"hold released"', '"holding, until %s"'):
-        check("linux-writes-%s" % literal.strip('"').split(",")[0].split(":")[0].replace(" ", "-"),
+        check("loop-writes-%s" % literal.strip('"').split(",")[0].split(":")[0].replace(" ", "-"),
               literal in source, True)
+    for holder_bin in ("keepawake-linux", "keepawake-macos"):
+        text = open(os.path.join(ROOT, "bin", holder_bin), encoding="utf-8").read()
+        check("%s-runs-the-shared-loop" % holder_bin, "hold_loop.run(" in text, True)
     ps1 = open(os.path.join(ROOT, "windows", "KeepAwake.ps1"), encoding="utf-8").read()
     for literal in ("hold set: a person is at the machine", "hold set, until",
                     "hold released", "holding, until"):

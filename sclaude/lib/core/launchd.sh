@@ -6,20 +6,25 @@
 # writes them again when an update changed a template. Written, not linked,
 # for the same reason as the units: a link would carry the placeholders.
 #
-# Only the watcher and the proxy have agents. The phone's gate comes with the
-# Telegram bot, which is Linux and WSL only for now.
+# sclaude's own agents are sclaude.*: the watcher and the proxy, on every Mac.
+# keepawake.* are the extras' (./install.sh --extras): the minute's count of
+# holders and the holding side. The phone's gate comes with the Telegram bot.
 
 launchd_dir() { printf '%s\n' "$HOME/Library/LaunchAgents"; }
 launchd_logs() { printf '%s\n' "$HOME/Library/Logs/sclaude"; }
 launchd_domain() { printf 'gui/%s\n' "$(id -u)"; }
 
-# The labels of the agents the checkout has templates for, one a line.
+# The labels of the agents the checkout has templates for, one a line:
+# sclaude's own (the default, `core`), the extras' (`extras`) or both (`all`).
 launchd_labels() {
-  local src
+  local kind="${1:-core}" src label
   for src in "$INSTRUMENTS"/launchd/*.plist; do
     [[ -f "$src" ]] || continue
-    src="${src##*/}"
-    echo "${src%.plist}"
+    label="${src##*/}"
+    label="${label%.plist}"
+    case "$kind:$label" in
+      core:sclaude.*|extras:keepawake*|all:*) echo "$label" ;;
+    esac
   done
 }
 
@@ -87,7 +92,7 @@ launchd_refresh() {
     else
       launchd_load "$label" || true
     fi
-  done < <(launchd_labels)
+  done < <(launchd_labels all)
   [[ -n "$stale" ]] && info "  updated, and running on the old file until reloaded:${stale} (./install.sh reloads them)"
   return 0
 }

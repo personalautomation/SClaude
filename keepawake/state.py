@@ -138,14 +138,25 @@ def win_user():
     return None
 
 
-def is_wsl():
-    # Which side holds the machine awake. Under WSL it is KeepAwake.ps1 on
-    # Windows, reading the state from drive C; on a plain Linux machine it is
-    # bin/keepawake-linux, reading it from the Linux filesystem. KEEPAWAKE_PLATFORM
-    # is for the tests, which must be able to ask both questions on one machine.
+def platform():
+    # Which side holds the machine awake: "wsl" — KeepAwake.ps1 on Windows,
+    # reading the state from drive C; "linux" — bin/keepawake-linux on a plain
+    # Linux machine; "macos" — bin/keepawake-macos, with a power assertion.
+    # KEEPAWAKE_PLATFORM is for the tests, which must be able to ask each
+    # question on one machine.
     forced = os.environ.get("KEEPAWAKE_PLATFORM")
     if forced:
-        return forced == "wsl"
+        return forced
+    if sys.platform == "darwin":
+        return "macos"
+    return "wsl" if _wsl_host() else "linux"
+
+
+def is_wsl():
+    return platform() == "wsl"
+
+
+def _wsl_host():
     # The kernel alone is not enough: a Docker container on a WSL host runs the
     # same Microsoft kernel and has no Windows to hold. A Windows drive to write
     # the state to is what the WSL side actually needs.
@@ -161,6 +172,9 @@ def is_wsl():
 
 
 def linux_state_dir():
+    # This machine's own state directory, macOS's included: the XDG place
+    # sclaude keeps the rest of its state in there too. Only the agents'
+    # output goes to ~/Library/Logs, where Console looks for it.
     base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
     return os.path.join(base, "keepawake")
 
@@ -180,7 +194,8 @@ def state_path():
         return env
     if not is_wsl():
         # No Windows to read it from the other side: the holder is a process
-        # on this machine, and the file lives beside the rest of our state.
+        # on this machine (keepawake-linux, keepawake-macos), and the file
+        # lives beside the rest of our state.
         return os.path.join(linux_state_dir(), "state.json")
     user = win_user()
     if not user:
@@ -190,9 +205,9 @@ def state_path():
 
 def hold_log_path():
     # The holder's own log, beside the state it reads: KeepAwake.ps1 writes
-    # keepawake-ps.log on Windows, keepawake-linux writes hold.log. Both write
-    # the same lines ("hold set", "hold released", "holding"), which is what
-    # `keepawake status` greps for.
+    # keepawake-ps.log on Windows, keepawake-linux and keepawake-macos write
+    # hold.log. All of them write the same lines ("hold set", "hold released",
+    # "holding"), which is what `keepawake status` greps for.
     env = os.environ.get("KEEPAWAKE_HOLD_LOG")
     if env:
         return env
@@ -546,7 +561,7 @@ def _cli(argv):
     if cmd == "hold":
         return 0 if should_hold(read(), now) else 1
     if cmd == "platform":
-        print("wsl" if is_wsl() else "linux")
+        print(platform())
         return 0
     if cmd == "holdlog":
         print(hold_log_path())

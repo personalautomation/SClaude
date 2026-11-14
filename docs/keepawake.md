@@ -62,6 +62,10 @@ means exactly what it says.
 | File | What is in it |
 | --- | --- |
 | `bin/keepawake` | the holder detector, `status`, manual extension |
+| `keepawake/hold_loop.py` | the holding side's loop on Linux and macOS: the state read every 30 seconds, the lock taken and dropped, the log lines `status` greps |
+| `bin/keepawake-linux` | the holding side on plain Linux: a `systemd-inhibit` lock |
+| `bin/keepawake-macos` | the holding side on macOS: an IOKit power assertion, and the lid through `pmset` where the sudoers rule allows it |
+| `launchd/keepawake.plist`, `launchd/keepawake.hold.plist` | macOS's agents: the minute's count and the holding side |
 | `keepawake/state.py` | the state under `flock`, atomic writes, the "should we hold" decision |
 | `keepawake/telegramd.py` | the bot's process: the environment, the loop, the periodic checks; when its own code or sclaude's library changes and the new code imports, it runs itself again in place (the sclaude runs it started live on) |
 | `keepawake/botapi.py` | Telegram's Bot API client with its retries, and the bot's profile |
@@ -118,6 +122,50 @@ button.
 that, a press on yesterday's notification would extend the hold at an arbitrary
 moment the next day; the window is now checked, and a stale button answers with
 an alert.
+
+## On a Mac
+
+**The counting is bin/keepawake's, as everywhere; the holding is a power
+assertion.** `keepawake-macos` runs the loop Linux's holder runs
+(`keepawake/hold_loop.py`) and, while the state says to hold, keeps an IOKit
+assertion, `PreventUserIdleSystemSleep`, made through ctypes rather than by a
+`caffeinate` child. Made directly it carries a name of its own, so
+`pmset -g assertions` says "keepawake: work in progress" rather than one more
+"caffeinate command-line tool"; and macOS drops it when the process ends,
+however it ends, which is the fail-safe a `systemd-inhibit` child gives Linux
+and the stale-state check gives Windows. The display is not held: the screen
+goes dark by its own settings while the machine works on.
+
+**The lid takes root, so it is a choice.** No assertion a user's process can
+take holds a MacBook with its lid shut; `pmset -a disablesleep 1` does, and
+only root can run it. The optional sudoers rule `install.sh` offers lets the
+person's user run exactly that and its `0`; the holder turns it on with the
+hold and off with the release. Unlike the assertion, the setting outlives the
+process, so the holder leaves a mark that it turned it on
+(`~/.local/state/keepawake/.macos-lid`) and, finding the mark at start — a
+holder killed mid-hold, launchd bringing it back — turns it off before
+anything else. A `disablesleep` the person set themselves carries no mark and
+is left alone. The undo the installer prints turns it off too: with the rule
+gone the holder could not, and a Mac left with it on would never sleep.
+
+**A tty's atime means nothing there.** macOS moves no stamp of a terminal on a
+read: typing changes its mtime by the echo alone, exactly as a program's
+output does. So neither the "an hour without a keystroke" count nor the
+bot's "is the person at the terminal that asked" (`at_terminal`) can be
+read from the tty. What the Mac does keep is how long its own keyboard and
+mouse have been idle — the HID system's idle time (`input_idle` in
+`procinfo.sh`, `asks.input_idle`) — and both read that instead. It cannot
+tell one window from another, and a terminal reached over SSH from the phone
+is not seen at all; a question asked there is told with sound, which is the
+side to be wrong on.
+
+**The rest is the platform's own.** The other processes and their ports come
+from `ps`, `lsof` and `nettop` through `procinfo.sh` (a dev server started by
+hand counts by the bytes it sent, not wrote: macOS keeps no count of a
+process's writes); the services are launchd agents in the user's session, and
+code-server is Homebrew's service when there is one; an SSH session needs
+Remote Login, whose job launchd keeps in the system domain while it is on;
+since OpenSSH 9.8 a session is an `sshd-session` process, on Linux too.
 
 ## Driving sclaude from the bot
 

@@ -167,6 +167,50 @@ port_pid() {
   fi
 }
 
+# "<port> <pid>" for every TCP port something listens on, one a line, a pid
+# per line where several share a port; only the pids this user may see on
+# Linux, and on macOS only this user's own processes.
+ports_pids() {
+  if procinfo_darwin; then
+    lsof -nP -iTCP -sTCP:LISTEN -Fpn 2>/dev/null \
+      | awk '/^p/ { pid = substr($0, 2) }
+             /^n/ { port = $0; sub(/.*:/, "", port); print port, pid }' | sort -u
+  else
+    ss -ltnpH 2>/dev/null | awk '{ port = $4; sub(/.*:/, "", port)
+      line = $0
+      while (match(line, /pid=[0-9]+/)) {
+        print port, substr(line, RSTART + 4, RLENGTH - 4)
+        line = substr(line, RSTART + RLENGTH)
+      } }' | sort -u
+  fi
+}
+
+# How many bytes a process has put out so far, as a counter that grows when it
+# answers anybody: on Linux what it wrote (wchar in /proc/<pid>/io — files,
+# pipes, sockets alike), on macOS what it sent over the network (nettop's
+# bytes_out; the kernel keeps no count of a process's writes there, and its
+# disk writes leave out a log printed to a terminal). Nothing when it cannot
+# be read.
+proc_output_bytes() {
+  if procinfo_darwin; then
+    nettop -P -L 1 -n -x -J bytes_out -p "$1" 2>/dev/null \
+      | awk -F, 'NR > 1 && $2 ~ /^[0-9]+$/ { n += $2; seen = 1 } END { if (seen) print n }'
+  else
+    awk '/^wchar:/ {print $2; exit}' "/proc/$1/io" 2>/dev/null
+  fi
+}
+
+# Seconds since the last keystroke or mouse move at the machine itself: on
+# macOS the HID system's idle time. Linux gives no such answer to a process
+# outside the session, nor WSL of Windows' keyboard: 1, and nothing printed.
+input_idle() {
+  procinfo_darwin || return 1
+  local ns
+  ns="$(ioreg -c IOHIDSystem -d 4 2>/dev/null | awk '/"HIDIdleTime"/ { print $NF; exit }')"
+  [[ "$ns" =~ ^[0-9]+$ ]] || return 1
+  echo $(( ns / 1000000000 ))
+}
+
 # The load average over the last minute; 1 when it cannot be read.
 load_one() {
   local one

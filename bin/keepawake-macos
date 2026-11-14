@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+#
+# The holding side of keepawake on macOS — what KeepAwake.ps1 is on Windows,
+# and keepawake-linux on a plain Linux machine.
+#
+# bin/keepawake decides; this executes. The loop is keepawake/hold_loop.py,
+# shared with Linux: every 30 seconds it reads the state file and, while the
+# answer is yes, this holds two things:
+#
+# - a power assertion, PreventUserIdleSystemSleep, made through IOKit and named
+#   "keepawake: work in progress", so that `pmset -g assertions` says who keeps
+#   the Mac up. It stops the idle timer from sleeping the machine, as
+#   caffeinate -i does; it does not keep the display on. macOS drops it when
+#   the process ends, however it ends — the fail-safe that systemd-inhibit's
+#   child gives Linux — and the loop drops it when the work does.
+#
+# - the lid, where the person allowed it. No assertion holds a closed lid on a
+#   MacBook: only root can, with `pmset -a disablesleep 1`. install.sh offers a
+#   sudoers rule (/etc/sudoers.d/keepawake) that lets this user run exactly
+#   that and its `0`, and nothing else; with it the holder turns the setting
+#   on while it holds and off when it lets go. Without it the lid still
+#   sleeps, which is said once in the log. Unlike an assertion the setting
+#   outlives the process, so the holder marks that it was the one to turn it
+#   on (LID_MARK) and, finding the mark at start — a holder that was killed —
+#   turns it off. A setting the person made themselves carries no mark and is
+#   left alone.
+#
+#   keepawake-macos          run the loop (what the keepawake.hold agent calls)
+#
+# Run by launchd as an agent in the user's session; one instance at a time.
+import ctypes
+import ctypes.util
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+from keepawake import hold_loop, state  # noqa: E402
+
+ASSERTION_TYPE = "PreventUserIdleSystemSleep"
+ASSERTION_NAME = "keepawake: work in progress"
+# The mark that the holder turned disablesleep on, beside its state.
+LID_MARK = os.path.join(state.linux_state_dir(), ".macos-lid")
+PMSET = "/usr/bin/pmset"
+
+_K_CF_STRING_ENCODING_UTF8 = 0x08000100
+_K_IOPM_ASSERTION_LEVEL_ON = 255
+
+
+class Assertion:
+    """An IOKit power assertion of this process: made, then released."""
+
+    def __init__(self):
+        self._iokit = None
+        self._cf = None
+
+    def _load(self):
+        if self._iokit is None:
+            self._iokit = ctypes.cdll.LoadLibrary(ctypes.util.find_library("IOKit"))
+            self._cf = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreFoundation"))
+            self._cf.CFStringCreateWithCString.restype = ctypes.c_void_p
+            self._cf.CFStringCreateWithCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                                           ctypes.c_uint32]
+            self._cf.CFRelease.argtypes = [ctypes.c_void_p]
+            self._iokit.IOPMAssertionCreateWithName.argtypes = [
+                ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_uint32)]
+            self._iokit.IOPMAssertionRelease.argtypes = [ctypes.c_uint32]
+
+    def _cfstr(self, text):
+        return self._cf.CFStringCreateWithCString(None, text.encode(), _K_CF_STRING_ENCODING_UTF8)
+
+    def create(self):
+        """The assertion's id, or None when IOKit refused it."""
+        try:
+            self._load()
+        except OSError:
+            return None
+        kind, name = self._cfstr(ASSERTION_TYPE), self._cfstr(ASSERTION_NAME)
+        try:
+            aid = ctypes.c_uint32(0)
+            rc = self._iokit.IOPMAssertionCreateWithName(
+                kind, _K_IOPM_ASSERTION_LEVEL_ON, name, ctypes.byref(aid))
+        finally:
+            self._cf.CFRelease(kind)
+            self._cf.CFRelease(name)
+        return aid.value if rc == 0 else None
+
+    def release(self, aid):
+        self._iokit.IOPMAssertionRelease(aid)
+
+
+def pmset_command(args):
+    # KEEPAWAKE_PMSET is for the tests: a stand-in for `sudo -n pmset`, which
+    # asks nobody for anything.
+    override = os.environ.get("KEEPAWAKE_PMSET")
+    if override:
+        return [override] + args
+    return ["sudo", "-n", PMSET] + args
+
+
+def lid_allowed():
+    """Whether the sudoers rule lets this user turn disablesleep on, asked
+    without running it and without a password prompt."""
+    override = os.environ.get("KEEPAWAKE_PMSET")
+    argv = ([override, "check"] if override
+            else ["sudo", "-n", "-l", PMSET, "-a", "disablesleep", "1"])
+    try:
+        return subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def set_lid(on):
+    """Turns disablesleep on or off; True when pmset took it."""
+    try:
+        ok = subprocess.run(pmset_command(["-a", "disablesleep", "1" if on else "0"]),
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if ok and on:
+        try:
+            os.makedirs(os.path.dirname(LID_MARK), exist_ok=True)
+            open(LID_MARK, "w").close()
+        except OSError:
+            pass
+    elif ok:
+        try:
+            os.unlink(LID_MARK)
+        except OSError:
+            pass
+    return ok
+
+
+class Holder(hold_loop.Holder):
+    """The power assertion, and the lid where the sudoers rule allows it."""
+
+    refused = "IOKit refused the power assertion (%s)" % ASSERTION_TYPE
+
+    def __init__(self, assertion=None):
+        super().__init__()
+        self.assertion = assertion or Assertion()
+        self.aid = None
+        self.lid = False
+        # A lid a killed holder left held: turned off before anything else, so
+        # that the Mac does not stay up with nothing holding it.
+        if os.path.exists(LID_MARK):
+            set_lid(False)
+
+    def holding(self):
+        return self.aid is not None
+
+    def held(self):
+        return self.aid is not None or self.lid
+
+    def partial(self):
+        if self.lid:
+            return None
+        return ("only idle sleep is held; a closed lid still sleeps. "
+                "./install.sh --lid adds the sudoers rule that holds it too.")
+
+    def acquire(self):
+        self.aid = self.assertion.create()
+        if self.aid is None:
+            return False
+        self.lid = lid_allowed() and set_lid(True)
+        return True
+
+    def release(self):
+        if self.aid is not None:
+            try:
+                self.assertion.release(self.aid)
+            except Exception:
+                pass  # the assertion goes with the process in any case
+            self.aid = None
+        if self.lid:
+            set_lid(False)
+            self.lid = False
+
+
+def main():
+    return hold_loop.run(Holder(), "keepawake-macos", ".macos-hold.lock")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

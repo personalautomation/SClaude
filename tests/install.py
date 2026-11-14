@@ -303,13 +303,23 @@ if sys.platform == "darwin":
         with open(os.path.join(stubs, "lsof"), "w") as fh:
             fh.write('#!/usr/bin/env bash\n[[ -f %s ]] && cat %s\nexit 0\n' % (holder, holder))
         os.chmod(os.path.join(stubs, "lsof"), 0o755)
-        code = []
-        out = run(env, rc=code)
+        # The sudoers rule goes where the bench says; sudo installs it there
+        # without making it root's, which a bench cannot.
+        rule = os.path.join(tmp, "sudoers.d", "keepawake")
+        os.makedirs(os.path.dirname(rule))
+        env["KEEPAWAKE_SUDOERS_RULE"] = rule
+        with open(os.path.join(stubs, "sudo"), "w") as fh:
+            fh.write('#!/usr/bin/env bash\n'
+                     'if [[ "$1" == install ]]; then cp "${@: -2:1}" "${@: -1}"; exit; fi\n'
+                     '"$@"\n')
+        bin_dir = os.path.join(env["HOME"], ".local", "bin")
         agents = os.path.join(env["HOME"], "Library", "LaunchAgents")
+        code = []
+        out = run(env, extras=False, rc=code)
         check("macos-exit-0", code, [0])
         check("macos-platform-said", "platform: macOS" in out, True)
-        check("macos-extras-passed-over", "Linux and WSL only" in out, True)
-        check("macos-no-keepawake", os.path.exists(os.path.join(env["HOME"], ".local", "bin", "keepawake")), False)
+        check("macos-extras-offered", "keepawake comes with ./install.sh --extras" in out, True)
+        check("macos-no-keepawake", os.path.exists(os.path.join(bin_dir, "keepawake")), False)
         check("macos-no-systemctl", os.path.exists(calls), False)
         check("macos-agents-written", sorted(os.listdir(agents)) if os.path.isdir(agents) else [],
               ["sclaude.proxy.plist", "sclaude.watch.plist"])
@@ -318,6 +328,40 @@ if sys.platform == "darwin":
         proxy = open(os.path.join(agents, "sclaude.proxy.plist")).read() if os.path.isdir(agents) else ""
         check("macos-agent-placeholders-filled", "@" in re.sub(r"<!--.*?-->", "", proxy, flags=re.S), False)
         check("macos-agent-gnu-first", "/libexec/gnubin:" in proxy and "/opt/bash/bin" in proxy, True)
+
+        print("macOS extras")
+        os.remove(launched)
+        out = run(env, rc=code)
+        check("macos-extras-exit-0", code[-1], 0)
+        check("macos-extras-linked",
+              [os.path.islink(os.path.join(bin_dir, n)) for n in ("keepawake", "keepawake-macos")],
+              [True, True])
+        check("macos-extras-no-code-server", os.path.exists(os.path.join(bin_dir, "code-server-start")),
+              False)
+        check("macos-extras-agents", sorted(os.listdir(agents)),
+              ["keepawake.hold.plist", "keepawake.plist", "sclaude.proxy.plist", "sclaude.watch.plist"])
+        log = open(launched).read()
+        check("macos-extras-loaded", log.count("bootstrap gui/"), 4)
+        hold = open(os.path.join(agents, "keepawake.hold.plist")).read()
+        check("macos-hold-runs-the-holder", os.path.join(bin_dir, "keepawake-macos") in hold, True)
+        check("macos-no-polkit-on-a-mac", "polkit" in out, False)
+        check("macos-lid-offered-without-a-terminal",
+              ("sudoers rule for the lid" in out, "./install.sh --lid" in out,
+               os.path.exists(rule)), (True, True, False))
+
+        out = run(env, "--lid")
+        text = open(rule).read() if os.path.exists(rule) else ""
+        check("macos-lid-rule-written", "someone ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, "
+              "/usr/bin/pmset -a disablesleep 0" in text, True)
+        check("macos-lid-rule-passes-visudo",
+              subprocess.run(["visudo", "-cf", rule], capture_output=True).returncode, 0)
+        check("macos-lid-undo-said", "sudo pmset -a disablesleep 0" in out, True)
+        out = run(env)
+        check("macos-lid-rule-kept", "the sudoers rule is in place" in out, True)
+        out = run(env, extras=False)
+        check("macos-extras-kept", ("extras: kept" in out, sorted(os.listdir(agents))[0]),
+              (True, "keepawake.hold.plist"))
+
         # :3000 held by something else: the proxy's agent is written, not loaded.
         with open(holder, "w") as fh:
             fh.write("p123\ncnode\n")
@@ -326,8 +370,8 @@ if sys.platform == "darwin":
         log = open(launched).read() if os.path.exists(launched) else ""
         loaded = [line for line in log.splitlines() if line.startswith("bootstrap ")]
         check("macos-port-held-proxy-not-loaded",
-              ([("sclaude.proxy" in line) for line in loaded], "node holds :3000" in out),
-              ([False], True))
+              ("node holds :3000" in out, any("sclaude.proxy" in line for line in loaded)),
+              (True, False))
 
 print("the words agree with sclaude's")
 DEV = open(os.path.join(ROOT, "sclaude", "lib", "core", "developer.sh"), encoding="utf-8").read()

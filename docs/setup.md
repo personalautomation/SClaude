@@ -90,8 +90,8 @@ with an error.
 By default that is sclaude alone. The machine tools that grew up next to it —
 [keepawake](tools.md#binkeepawake) and its Telegram bot, code-server,
 [wsl-update](tools.md#binwsl-update) — come with `./install.sh --extras`. A machine
-that already has them keeps them on a plain re-run. The extras are Linux and
-WSL only.
+that already has them keeps them on a plain re-run. A Mac takes keepawake of
+them; the bot, code-server and wsl-update are Linux and WSL only.
 
 ### On macOS
 
@@ -121,10 +121,15 @@ Their logs are in `~/Library/Logs/sclaude/`. `sclaude doctor` says whether
 both are loaded and whether a formula is missing; `./install.sh` again loads
 an agent that is not.
 
-What macOS does not have yet: the extras — keepawake, the Telegram bot,
-code-server — and with the bot the phone's gate, so working from the phone
-is Linux and WSL only. Docker Desktop is started when a feature's database
-needs it, as on WSL.
+With `--extras`, two more: `keepawake`, which counts what holds the Mac awake
+once a minute, and `keepawake.hold`, which holds it with a power assertion
+while there is work ([keepawake on macOS](tools.md#keepawake-on-macos)). A
+closed lid is held only with a sudoers rule for `pmset`, which `install.sh`
+offers, shows the undo for, and adds at your yes (`--lid` without asking).
+
+What macOS does not have yet: the Telegram bot and code-server, and with the
+bot the phone's gate, so working from the phone is Linux and WSL only. Docker
+Desktop is started when a feature's database needs it, as on WSL.
 
 It asks three questions about this machine, once (a re-run keeps the answers):
 

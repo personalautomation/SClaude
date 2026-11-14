@@ -8,20 +8,24 @@
 # keepawake and its Telegram bot, code-server, wsl-update, the Windows side —
 # come with --extras. Somebody who came for sclaude does not expect them.
 #
-# The extras have two platforms: WSL, where keepawake holds Windows awake from
-# the Windows side and wsl-update keeps the distribution current, and plain
-# Linux, where keepawake-linux holds this machine awake itself.
+# The extras have three platforms: WSL, where keepawake holds Windows awake
+# from the Windows side and wsl-update keeps the distribution current; plain
+# Linux, where keepawake-linux holds this machine awake itself; and macOS,
+# where keepawake-macos does, with a power assertion.
 #
 # On macOS sclaude runs with Homebrew's bash 5 and GNU tools, which this
-# offers to install, and launchd's agents in place of the systemd units. The
-# extras are Linux and WSL only, and --extras is passed over there.
+# offers to install, and launchd's agents in place of the systemd units. Of
+# the extras a Mac takes keepawake; its Telegram bot and code-server are Linux
+# and WSL only for now.
 #
 #   ./install.sh               sclaude only (and the extras, if an earlier
 #                              install put them in)
 #   ./install.sh --extras      sclaude and the machine tools
-#   ./install.sh --polkit      the extras, and keepawake's polkit rule
-#                              without asking
-#   ./install.sh --no-polkit   do not add it, and do not ask
+#   ./install.sh --lid         the extras, and what lets keepawake hold a
+#                              closed lid, without asking: a polkit rule on
+#                              Linux, a sudoers rule for pmset on macOS
+#   ./install.sh --no-lid      do not add it, and do not ask
+#   --polkit, --no-polkit      the same as --lid and --no-lid
 #
 # Three questions of this machine are asked once, and kept in this checkout's
 # git config (sclaude.update, sclaude.contribute, sclaude.leaks): whether
@@ -48,8 +52,8 @@ SET_LEAKS=""
 for arg in "$@"; do
   case "$arg" in
     --extras)    EXTRAS=1 ;;
-    --polkit)    POLKIT_CHOICE=yes; EXTRAS=1 ;;  # the rule is keepawake's
-    --no-polkit) POLKIT_CHOICE=no ;;
+    --lid|--polkit)       POLKIT_CHOICE=yes; EXTRAS=1 ;;  # the rule is keepawake's
+    --no-lid|--no-polkit) POLKIT_CHOICE=no ;;
     --update=*)
       SET_UPDATE="${arg#*=}"
       [[ " auto notify off " == *" $SET_UPDATE "* ]] \
@@ -121,12 +125,6 @@ if [[ $MACOS -eq 1 ]]; then
   # Under bash 5 from here on, with the GNU tools first: this re-executes the
   # installer with its own arguments when it runs under the system's bash.
   source "$REPO/sclaude/lib/core/macos.sh"
-  if [[ $EXTRAS -eq 1 ]]; then
-    echo "note: the extras (keepawake, its Telegram bot, code-server) are Linux and WSL only;" >&2
-    echo "      installing sclaude alone" >&2
-    EXTRAS=0
-    POLKIT_CHOICE=no
-  fi
 fi
 BIN="$HOME/.local/bin"
 UNITS="$HOME/.config/systemd/user"
@@ -139,7 +137,7 @@ mkdir -p "$BIN" "$SKILLS" "$CLAUDE"
 # A machine an earlier install gave the extras keeps them on a plain re-run:
 # leaving its keepawake and bot units unwritten would let them drift from the
 # repository without a word.
-if [[ $MACOS -eq 0 && $EXTRAS -eq 0 && -L "$BIN/keepawake" ]]; then
+if [[ $EXTRAS -eq 0 && -L "$BIN/keepawake" ]]; then
   EXTRAS=1
   echo "extras: kept — an earlier install put them in"
 fi
@@ -210,7 +208,13 @@ if [[ $MACOS -eq 0 ]]; then
   echo "units: $UNITS/sclaude-watch{.service,.timer}, sclaude-proxy{.socket,.service}, sclaude-gate{.socket,.service}"
 fi
 
-if [[ $EXTRAS -eq 1 ]]; then
+if [[ $EXTRAS -eq 1 && $MACOS -eq 1 ]]; then
+  # The holding side and the minute's count are launchd agents, below; the bot
+  # and code-server are not on macOS yet.
+  ln -sfn "$REPO/bin/keepawake"       "$BIN/keepawake"
+  ln -sfn "$REPO/bin/keepawake-macos" "$BIN/keepawake-macos"
+  echo "symlinked (extras): keepawake, keepawake-macos in $BIN"
+elif [[ $EXTRAS -eq 1 ]]; then
   for tool in keepawake code-server-start code-server-proxy; do
     ln -sfn "$REPO/bin/$tool" "$BIN/$tool"
   done
@@ -307,7 +311,8 @@ setting_offer leaks "$SET_LEAKS" leaks_modes_explain "ask auto off"
 
 # --- keepawake: the Windows side and the secrets -----------------------------
 
-if [[ $EXTRAS -eq 1 ]]; then
+# The secrets are the Telegram bot's, which macOS does not run yet.
+if [[ $EXTRAS -eq 1 && $MACOS -eq 0 ]]; then
   # The secrets directory. We do not touch the env file itself: an installer must
   # never overwrite somebody's token.
   mkdir -p "$HOME/.config/keepawake"
@@ -473,8 +478,12 @@ if [[ $MACOS -eq 1 ]]; then
     else
       echo "note: launchd did not load $label; see $(launchd_dir)/$label.plist" >&2
     fi
-  done < <(launchd_labels)
+  done < <(launchd_labels; [[ $EXTRAS -eq 1 ]] && launchd_labels extras)
   echo "not on macOS: the phone's gate — it comes with the Telegram bot, Linux and WSL only"
+  if [[ $EXTRAS -eq 1 ]] && ! launchctl print system/com.openssh.sshd >/dev/null 2>&1; then
+    echo "note: Remote Login is off — no SSH session from a phone; turn it on in" >&2
+    echo "      System Settings → General → Sharing" >&2
+  fi
 fi
 
 # systemctl --user lives only while there is a user session. Closing the last
@@ -557,7 +566,7 @@ polkit_add() {
 
 polkit_offer() {
   [[ $EXTRAS -eq 1 ]] || return 0
-  [[ $WSL -eq 0 ]] || return 0
+  [[ $WSL -eq 0 && $MACOS -eq 0 ]] || return 0
   command -v loginctl >/dev/null 2>&1 || return 0
   [[ -d "$(dirname "$(dirname "$POLKIT_RULE")")" ]] || return 0
 
@@ -616,12 +625,99 @@ polkit_offer() {
 
 polkit_offer
 
+# --- keepawake's sudoers rule: optional, macOS only ---------------------------
+#
+# The power assertion keepawake-macos takes stops idle sleep, but nothing a
+# user's process can take keeps a MacBook up with its lid closed: only root
+# can, with `pmset -a disablesleep 1`. A sudoers rule lets this user run
+# exactly that and its `0` without a password, and nothing else; the holder
+# turns it on while it holds and off when it lets go. Offered as the polkit
+# rule is, with the undo command shown before the question: it is a rule in
+# the system's sudo, and the person decides.
+#
+# The undo turns disablesleep off too: with the rule gone a holder could no
+# longer turn it off itself, and a Mac left with it on never sleeps.
+SUDOERS_RULE="${KEEPAWAKE_SUDOERS_RULE:-/etc/sudoers.d/keepawake}"
+LID_OFF="sudo rm $SUDOERS_RULE && sudo pmset -a disablesleep 0"
+
+lid_rule_text() {
+  printf '%s\n' \
+    "# Written by sclaude's install.sh: lets keepawake-macos keep a closed lid from" \
+    '# sleeping the Mac while there is work going on, and nothing else.' \
+    "# To remove: $LID_OFF" \
+    "$USER ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0"
+}
+
+lid_add() {
+  local tmp
+  tmp="$(mktemp)"
+  lid_rule_text > "$tmp"
+  # visudo checks it before sudo reads it: a broken file in sudoers.d stops
+  # sudo working at all.
+  if visudo -cf "$tmp" >/dev/null \
+     && sudo install -m 0440 -o root -g wheel "$tmp" "$SUDOERS_RULE"; then
+    echo "added: $SUDOERS_RULE — a closed lid no longer sleeps while there is work"
+    echo "       to turn it off: $LID_OFF"
+  else
+    echo "note: the sudoers rule was not written (sudo refused, or visudo did not pass it);" >&2
+    echo "      keepawake-macos keeps holding idle sleep only" >&2
+  fi
+  rm -f "$tmp"
+}
+
+lid_offer_macos() {
+  [[ $EXTRAS -eq 1 && $MACOS -eq 1 ]] || return 0
+  if [[ -f "$SUDOERS_RULE" ]]; then
+    echo "keepawake: the sudoers rule is in place — a closed lid does not sleep while there is work"
+    echo "           to turn it off: $LID_OFF"
+    return 0
+  fi
+  [[ "$POLKIT_CHOICE" == no ]] && return 0
+  if [[ "$POLKIT_CHOICE" == yes ]]; then
+    lid_add
+    return 0
+  fi
+
+  echo ""
+  echo "keepawake: an optional sudoers rule for the lid (macOS)"
+  echo "  Without it keepawake-macos stops only idle sleep. Closing the lid still"
+  echo "  puts the Mac to sleep, and whatever runs from your phone — an SSH"
+  echo "  session, a Claude step — stops with it."
+  echo "  With it, keepawake turns pmset's disablesleep on while there is work"
+  echo "  going on (claude, SSH, a tailnet connection) and off once it ends."
+  echo "  The Mac then stays awake with the lid shut, in a bag too, until the"
+  echo "  work ends: worth it if you close it and keep working from a phone."
+  echo "  It lets user '$USER' run 'pmset -a disablesleep 1' and '… 0' without a"
+  echo "  password, and nothing else. Writing it needs sudo. To turn it off later:"
+  echo "    $LID_OFF"
+
+  if [[ ! -t 0 ]]; then
+    echo "  No terminal to ask in: run ./install.sh --lid to add it." >&2
+    return 0
+  fi
+  # No default, as everywhere in sclaude: asked again until it is a yes or a
+  # no. End of input is a no — there is nobody left to answer.
+  local answer=""
+  while :; do
+    read -rp "  Add it now? [y/n] " answer || { answer=n; echo; }
+    case "${answer,,}" in
+      y|yes) lid_add; break ;;
+      n|no)  echo "  Not added. Later: ./install.sh --lid"; break ;;
+      *)     echo "  Please answer y or n." ;;
+    esac
+  done
+}
+
+lid_offer_macos
+
 case ":$PATH:" in
   *":$BIN:"*) ;;
   *) echo "note: $BIN is not on PATH — add it in your shell rc" >&2 ;;
 esac
 
-if [[ $EXTRAS -eq 0 && $MACOS -eq 0 ]]; then
+if [[ $EXTRAS -eq 0 && $MACOS -eq 1 ]]; then
+  echo "extras: not installed — keepawake comes with ./install.sh --extras"
+elif [[ $EXTRAS -eq 0 ]]; then
   echo "extras: not installed — keepawake, its Telegram bot, code-server, wsl-update"
   echo "        come with ./install.sh --extras"
 fi

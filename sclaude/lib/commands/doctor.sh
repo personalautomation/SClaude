@@ -346,9 +346,10 @@ doctor_project_checks() {
   done < <(project_get doctor "$root" 2>/dev/null)
 }
 
-# macOS: Homebrew's GNU tools, and the launchd agents in place of the units.
+# macOS: Homebrew's GNU tools, and the launchd agents in place of the units —
+# the extras' too when they are installed (`doctor_macos extras`).
 doctor_macos() {
-  local missing label
+  local missing label extras="${1:-}"
   missing="$(macos_missing)"
   if [[ -z "$missing" ]]; then
     doctor_ok "Homebrew's bash and GNU tools ($MACOS_FORMULAE)"
@@ -364,7 +365,7 @@ doctor_macos() {
     else
       doctor_warn "$label is not loaded" "./install.sh loads it (log: $(launchd_logs))"
     fi
-  done < <(launchd_labels)
+  done < <(launchd_labels; [[ -n "$extras" ]] && launchd_labels extras)
 }
 
 doctor_machine() {
@@ -379,8 +380,10 @@ doctor_machine() {
   doctor_ok "platform: $platform"
   # The machine tools come with ./install.sh --extras, which links keepawake;
   # without them their units are not missing, only not chosen.
-  if [[ "$platform" == macos ]]; then
-    doctor_ok "extras: Linux and WSL only (keepawake, its bot, code-server)"
+  if [[ "$platform" == macos && -L "$HOME/.local/bin/keepawake" ]]; then
+    extras=1
+  elif [[ "$platform" == macos ]]; then
+    doctor_ok "extras not installed (keepawake: ./install.sh --extras)"
   elif [[ -L "$HOME/.local/bin/keepawake" ]]; then
     extras=1
     units+=(keepawake.timer keepawake-telegram.service
@@ -390,7 +393,7 @@ doctor_machine() {
   fi
 
   if [[ "$platform" == macos ]]; then
-    doctor_macos
+    doctor_macos "$([[ "$extras" -eq 1 ]] && echo extras)"
   elif command -v systemctl >/dev/null 2>&1; then
     for unit in "${units[@]}"; do
       if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
@@ -421,6 +424,14 @@ doctor_machine() {
     doctor_warn "keepawake holds idle only; a closed lid still sleeps" \
       "./install.sh --polkit adds the rule that allows it (asks for sudo)"
   fi
+  # macOS: install.sh's sudoers rule for pmset, which /etc/sudoers.d shows.
+  if [[ "$extras" -eq 1 && "$platform" == macos \
+        && ! -f "${KEEPAWAKE_SUDOERS_RULE:-/etc/sudoers.d/keepawake}" ]]; then
+    doctor_warn "keepawake holds idle only; a closed lid still sleeps" \
+      "./install.sh --lid adds the sudoers rule that allows it (asks for sudo)"
+  fi
+  # The Telegram bot is not on macOS yet.
+  [[ "$platform" == macos ]] && return
 
   local env="$HOME/.config/keepawake/env"
   if [[ ! -f "$env" ]]; then

@@ -26,12 +26,10 @@ import threading
 import time
 import urllib.error
 
-# keepawake and its bot are machine tools for Linux and WSL (./install.sh
-# --extras, which macOS does not take yet): the hold reads /proc and logind,
-# the services are systemd's. On macOS there is nothing of theirs to test.
-if sys.platform == "darwin":
-    print("skipped: keepawake is not installed on macOS (./install.sh --extras is Linux and WSL only)")
-    sys.exit(0)
+# keepawake runs on Linux, WSL and macOS alike; what it asks about other
+# processes goes through procinfo, which the counters' cases stand in for.
+PROCINFO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                        "sclaude", "lib", "core", "procinfo.sh")
 
 # A tab opened by a press on the phone exports SCLAUDE_FROM_PHONE to every
 # session in it, and a test run there inherits it: questions then skip the
@@ -394,7 +392,8 @@ def bash_ssh(procs):
     pgrep = ("pgrep() { local p; for n in ${2//|/ }; do case $n in %s esac; done; }"
              % " ".join("%s) echo %s ;;" % (n, " ".join(map(str, pids)))
                         for n, pids in names.items()))
-    body = fn.replace("/proc/", root + "/") + "\n" + pgrep + "\ncount_ssh"
+    cmdline = "proc_cmdline() { tr '\\0' ' ' < %s/$1/cmdline; }" % shlex.quote(root)
+    body = "\n".join([fn, pgrep, cmdline, "count_ssh"])
     try:
         return subprocess.run(["bash", "-c", body], capture_output=True, text=True).stdout.strip()
     finally:
@@ -429,17 +428,17 @@ def bash_count(func, fake_procs="", snapshot=None, overrides=None):
                  "/^CLAUDE_PROJECTS=/p", "/^CLAUDE_FRESH_MINUTES=/p",
                  "/^CLAUDE_REMEMBER_MINUTES=/p",
                  "/^VSCODE_HISTORY=/p", "/^DEV_LOG_REL=/p",
-                 "/^have()/,/^}/p", "/^ppid_of/,/^}/p",
+                 "/^have()/,/^}/p",
                  # The soft holders' sign of activity: the previous run's
                  # snapshot and a comparison against it. Without them the count_
                  # functions do not run at all.
                  "/^read_snapshot/,/^}/p", "/^remember/,/^}/p",
-                 "/^grew/,/^}/p", "/^io_wchar_of/,/^}/p",
+                 "/^grew/,/^}/p",
                  "/^transcript_size/,/^}/p", "/^sclaude_states/,/^}/p",
                  "/^%s/,/^}/p" % func):
         parts.append(subprocess.run(["sed", "-n", expr, script],
                                     capture_output=True, text=True).stdout)
-    snippet = "\n".join(p for p in parts if p.strip())
+    snippet = "source %s\n" % shlex.quote(PROCINFO) + "\n".join(p for p in parts if p.strip())
     # A snapshot of our own rather than one shared with the real detector:
     # otherwise the count depends on what the timer saw a minute ago, and the
     # test flickers along with it.
@@ -603,44 +602,41 @@ check("two live sessions are counted separately", int(out), 2)
 #
 # We set a name with spaces through prctl(PR_SET_NAME): exec -a changes argv[0]
 # while it is comm that reaches stat, so faking it through argv will not do
-# here.
-spaced = subprocess.Popen([sys.executable, "-c", """
-import ctypes, time
-ctypes.CDLL("libc.so.6").prctl(15, b"npm exec chrome", 0, 0, 0)
-time.sleep(15)
-"""])
-# Waited for rather than slept on: with the suite running in parallel the
-# child took longer than a fixed pause to rename itself, and every check
-# below read the interpreter's own name.
-deadline = time.time() + 10
-comm = ""
-while time.time() < deadline:
+# here. The parent is procinfo's proc_parent now. Linux only: macOS has no
+# stat file to misread, and its ps gives the ppid as a field of its own.
+if os.path.isdir("/proc"):
+    spaced = subprocess.Popen([sys.executable, "-c",
+                               "import ctypes, time\n"
+                               "ctypes.CDLL('libc.so.6').prctl(15, b'npm exec chrome', 0, 0, 0)\n"
+                               "time.sleep(15)\n"])
+    # Waited for rather than slept on: with the suite running in parallel the
+    # child took longer than a fixed pause to rename itself, and every check
+    # below read the interpreter's own name.
+    deadline = time.time() + 10
+    comm = ""
+    while time.time() < deadline:
+        try:
+            comm = open("/proc/%d/comm" % spaced.pid).read().strip()
+        except OSError:
+            comm = ""
+        if comm == "npm exec chrome":
+            break
+        time.sleep(0.1)
     try:
-        comm = open("/proc/%d/comm" % spaced.pid).read().strip()
-    except OSError:
-        comm = ""
-    if comm == "npm exec chrome":
-        break
-    time.sleep(0.1)
-try:
-    check("comm really does contain spaces", comm, "npm exec chrome")
+        check("comm really does contain spaces", comm, "npm exec chrome")
 
-    snippet = subprocess.run(
-        ["sed", "-n", "/^ppid_of/,/^}/p",
-         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                      "bin", "keepawake")],
-        capture_output=True, text=True).stdout
-    got = subprocess.run(["bash", "-c", "%s\nppid_of %d" % (snippet, spaced.pid)],
-                         capture_output=True, text=True).stdout.strip()
-    check_true("ppid_of returns a number for a name with spaces", got.isdigit())
+        got = subprocess.run(["bash", "-c", "source %s\nproc_parent %d"
+                              % (shlex.quote(PROCINFO), spaced.pid)],
+                             capture_output=True, text=True).stdout.strip()
+        check("proc_parent returns the parent for a name with spaces", got, str(os.getpid()))
 
-    bad = subprocess.run(
-        ["bash", "-c", "awk '{print $4}' /proc/%d/stat" % spaced.pid],
-        capture_output=True, text=True).stdout.strip()
-    check_true("field 4 of stat is unreliable for such a name", not bad.isdigit())
-finally:
-    spaced.terminate()
-    spaced.wait(timeout=5)
+        bad = subprocess.run(
+            ["bash", "-c", "awk '{print $4}' /proc/%d/stat" % spaced.pid],
+            capture_output=True, text=True).stdout.strip()
+        check_true("field 4 of stat is unreliable for such a name", not bad.isdigit())
+    finally:
+        spaced.terminate()
+        spaced.wait(timeout=5)
 
 
 # ------------------------------------------- status in systemd's environment
@@ -2432,9 +2428,9 @@ check_true("VS Code's activity is measured by its edit journal",
 # by hand where there is no such log.
 check_true("the dev server's activity is measured by its log", "DEV_LOG_REL" in ka_body)
 check_true("the log is found by the process's working directory",
-           "/proc/$pid/cwd" in ka_body)
-check_true("without a log the counter of written bytes is left",
-           "io_wchar_of" in ka_body)
+           'proc_cwd "$pid"' in ka_body)
+check_true("without a log the counter of bytes put out is left",
+           'proc_output_bytes "$pid"' in ka_body)
 check_true("hard holders require no sign of activity",
            "grew" not in ka_body[ka_body.index("count_ssh()"):
                                  ka_body.index("CODE_HEARTBEAT=")])
@@ -2506,8 +2502,8 @@ def bash_dev(active, around):
     stubs = "\n".join([
         'DEV_PORT=3000',
         'DEV_LOG_REL=".sclaude/local/feature/dev.log"',
-        'ss() { echo \'LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=42,fd=20))\'; }',
-        'readlink() { printf %%s %s; }' % shlex.quote(wt),
+        'ports_pids() { echo 3000 42; }',
+        'proc_cwd() { printf %%s %s; }' % shlex.quote(wt),
         'read_snapshot() { :; }',
         'grew() { return %d; }' % (0 if active else 1),
         'someone_around() { return %d; }' % (0 if around else 1),
@@ -2528,17 +2524,16 @@ def bash_devs(listeners):
     wt = tempfile.mkdtemp(prefix="keepawake-test-devs-")
     os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
     open(os.path.join(wt, ".sclaude/local/feature", "dev.log"), "w").write("GET / 200\n")
-    lines = "\n".join(
-        "LISTEN 0 511 0.0.0.0:%d 0.0.0.0:* users:((\"node\",pid=%d,fd=20))" % (port, pid)
-        for port, pid in listeners)
+    lines = "\n".join("%d %d" % (port, pid) for port, pid in listeners)
     stubs = "\n".join([
         'DEV_PORT=3000', 'DEV_PORT_FIRST=3100', 'DEV_PORT_LAST=3199',
         'DEV_LOG_REL=".sclaude/local/feature/dev.log"',
-        "ss() { printf '%%s\\n' %s; }" % shlex.quote(lines),
+        "ports_pids() { printf '%%s\\n' %s; }" % shlex.quote(lines),
         # Only pid 42 is a feature's server with a log; any other has none.
-        'readlink() { case "$2" in /proc/42/*) printf %%s %s ;; *) printf %%s /nonexistent ;; esac; }'
+        'proc_cwd() { case "$1" in 42) printf %%s %s ;; *) printf %%s /nonexistent ;; esac; }'
         % shlex.quote(wt),
-        'io_wchar_of() { :; }',
+        'proc_cmdline() { echo node; }',
+        'proc_output_bytes() { :; }',
         'read_snapshot() { :; }',
         'grew() { return 0; }',
         'someone_around() { return 0; }',
@@ -2555,7 +2550,7 @@ check("a port that only looks like the range as text holds nothing",
 
 def bash_codesrv(around):
     stubs = "\n".join([
-        'systemctl() { return 0; }',
+        'service_up() { return 0; }',
         'someone_around() { return %d; }' % (0 if around else 1),
     ])
     return bash_fn(["count_code_server"], stubs, "count_code_server")
@@ -2605,6 +2600,13 @@ check_true("busyness is taken from the claude count rather than from is_busy",
 
 import pty
 
+# macOS moves no stamp of a tty on a read, and the bot asks the HID system how
+# long the Mac's keyboard has been silent instead (asks.input_idle). The bench
+# stands in for the keyboard there: ageing the terminal is silence at it, typing
+# is a key pressed, and a prompt printed touches neither.
+HID_IDLE = [0]
+if sys.platform == "darwin":
+    asks.input_idle = lambda: HID_IDLE[0]
 
 
 class Pty(object):
@@ -2628,6 +2630,7 @@ class Pty(object):
         # way.
         old = time.time() - seconds
         os.utime(self.name, (old, old))
+        HID_IDLE[0] = seconds
 
     def prints(self, text):
         # We print from the process's side, as ask() itself does: we write to
@@ -2641,6 +2644,7 @@ class Pty(object):
 
     def types(self, text):
         os.write(self.master, text.encode())
+        HID_IDLE[0] = 0
         time.sleep(0.4)
 
     def __exit__(self, *exc):
@@ -4502,9 +4506,11 @@ try:
     os.makedirs(_bin)
     with open(os.path.join(_bin, "sclaude-notify"), "w") as fh:
         fh.write(_notify_src)
-    # Beside a copy of the checkout, as the link resolves to one.
-    os.symlink(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "keepawake"),
-               os.path.join(_tg_dir, "keepawake"))
+    # Beside a copy of the checkout, as the link resolves to one: keepawake/
+    # for the record, sclaude/ for macos.sh, which a Mac sources first.
+    for _part in ("keepawake", "sclaude"):
+        os.symlink(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), _part),
+                   os.path.join(_tg_dir, _part))
     _env = dict(os.environ, HOME=_home, KEEPAWAKE_TOPICS=os.path.join(_tg_dir, "topics"))
     subprocess.run(["bash", os.path.join(_bin, "sclaude-notify"), "--in", _wt, "--as", "demo", "hello"],
                    env=_env, timeout=30)

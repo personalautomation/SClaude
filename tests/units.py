@@ -191,6 +191,34 @@ try:
     check("agent: a loaded one is not reloaded", ("bootout" in log, "bootstrap" in log), (False, False))
     check("agent: it is named for the person", "sclaude.w" in out and "./install.sh" in out, True)
     check("agent: but written", "<!-- changed -->" in open(agent).read(), True)
+
+    # A reload waits for the old job to be gone: bootout returns while its
+    # process still exits, and launchd refuses the label until then. Here
+    # `print` answers "loaded" twice after the bootout, and a bootstrap before
+    # that fails, as launchd's does.
+    gone = os.path.join(home, "gone-after")
+    script = ('source "%s/core/ui.sh" 2>/dev/null; source "%s/core/launchd.sh"; INSTRUMENTS="%s"; '
+              'sleep() { :; }; '
+              'launchctl() { echo "$*" >> "%s/launchctl"; case "$1" in '
+              'bootout) echo 2 > "%s" ;; '
+              'print) [[ -e "%s" ]] || return 0; n=$(cat "%s"); (( n > 0 )) || return 1; '
+              'echo $(( n - 1 )) > "%s"; return 0 ;; '
+              'bootstrap) [[ ! -e "%s" || "$(cat "%s")" == 0 ]] ;; esac; }; '
+              'launchd_load sclaude.w; echo "rc=$?"' % ((LIB, LIB, inst, home) + (gone,) * 6))
+    out = subprocess.run(["bash", "-c", script], env=dict(os.environ, HOME=home, SCLAUDE_OS="macos"),
+                         capture_output=True, text=True).stdout
+    log = launched().splitlines()
+    check("agent: a reload waits for the old job, then loads it",
+          ([line.split()[0] for line in log], out.strip()),
+          (["print", "bootout", "print", "print", "print", "bootstrap"], "rc=0"))
+
+    script = ('source "%s/core/ui.sh" 2>/dev/null; source "%s/core/launchd.sh"; INSTRUMENTS="%s"; '
+              'sleep() { :; }; launchctl() { echo "$*" >> "%s/launchctl"; [[ "$1" != bootstrap && "$1" != print ]]; }; '
+              'launchd_load sclaude.w; echo "rc=$?"' % (LIB, LIB, inst, home))
+    out = subprocess.run(["bash", "-c", script], env=dict(os.environ, HOME=home, SCLAUDE_OS="macos"),
+                         capture_output=True, text=True).stdout
+    check("agent: a load launchd keeps refusing fails after a few tries",
+          (launched().count("bootstrap"), out.strip()), (3, "rc=1"))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

@@ -53,11 +53,30 @@ launchd_loaded() {
 
 # Loads an agent from its file, unloading the one loaded first: launchd reads
 # a plist only when it is loaded.
+#
+# bootout returns while the job's process may still be exiting — the holder
+# lets go of its assertion and the lid on SIGTERM first — and until it is gone
+# launchd refuses the label ("Bootstrap failed: 5: Input/output error"). A
+# reload by install.sh left keepawake.hold unloaded that way, the Mac unheld
+# with a one-line note. So the old job is waited for, up to the 20 seconds
+# launchd gives a process to exit (ExitTimeOut), and the load is tried again
+# a few times before it counts as failed.
+LAUNCHD_WAIT_TRIES="${LAUNCHD_WAIT_TRIES:-40}"
 launchd_load() {
-  local label="$1" plist
+  local label="$1" plist try
   plist="$(launchd_dir)/$label.plist"
-  launchd_loaded "$label" && launchctl bootout "$(launchd_domain)/$label" >/dev/null 2>&1
-  launchctl bootstrap "$(launchd_domain)" "$plist" 2>/dev/null
+  if launchd_loaded "$label"; then
+    launchctl bootout "$(launchd_domain)/$label" >/dev/null 2>&1
+    for (( try = 0; try < LAUNCHD_WAIT_TRIES; try++ )); do
+      launchd_loaded "$label" || break
+      sleep 0.5
+    done
+  fi
+  for (( try = 0; try < 3; try++ )); do
+    launchctl bootstrap "$(launchd_domain)" "$plist" 2>/dev/null && return 0
+    sleep 1
+  done
+  return 1
 }
 
 # Writes an agent's file with the given PATH; 0 when it changed, 1 when it

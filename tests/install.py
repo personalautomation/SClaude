@@ -323,9 +323,17 @@ if sys.platform == "darwin":
         check("macos-no-keepawake", os.path.exists(os.path.join(bin_dir, "keepawake")), False)
         check("macos-no-systemctl", os.path.exists(calls), False)
         check("macos-agents-written", sorted(os.listdir(agents)) if os.path.isdir(agents) else [],
-              ["sclaude.proxy.plist", "sclaude.watch.plist"])
+              ["sclaude.gate.plist", "sclaude.proxy.plist", "sclaude.watch.plist"])
         log = open(launched).read() if os.path.exists(launched) else ""
-        check("macos-agents-loaded", log.count("bootstrap gui/"), 2)
+        check("macos-agents-loaded", log.count("bootstrap gui/"), 3)
+        gate = open(os.path.join(agents, "sclaude.gate.plist")).read() if os.path.isdir(agents) else ""
+        check("macos-gate-on-demand-on-loopback",
+              ("<string>--gate</string>" in gate, "<string>127.0.0.1</string>" in gate,
+               "<string>3001</string>" in gate,
+               "RunAtLoad" in re.sub(r"<!--.*?-->", "", gate, flags=re.S)), (True, True, True, False))
+        check("macos-gate-agent-is-a-plist",
+              subprocess.run(["plutil", "-lint", os.path.join(agents, "sclaude.gate.plist")],
+                             capture_output=True).returncode, 0)
         proxy = open(os.path.join(agents, "sclaude.proxy.plist")).read() if os.path.isdir(agents) else ""
         check("macos-agent-placeholders-filled", "@" in re.sub(r"<!--.*?-->", "", proxy, flags=re.S), False)
         check("macos-agent-gnu-first", "/libexec/gnubin:" in proxy and "/opt/bash/bin" in proxy, True)
@@ -342,9 +350,9 @@ if sys.platform == "darwin":
                os.path.exists(os.path.join(bin_dir, "code-server-proxy"))), (True, False))
         check("macos-extras-agents", sorted(os.listdir(agents)),
               ["keepawake.code-server.plist", "keepawake.hold.plist", "keepawake.plist",
-               "sclaude.proxy.plist", "sclaude.watch.plist"])
+               "sclaude.gate.plist", "sclaude.proxy.plist", "sclaude.watch.plist"])
         log = open(launched).read()
-        check("macos-extras-loaded", log.count("bootstrap gui/"), 5)
+        check("macos-extras-loaded", log.count("bootstrap gui/"), 6)
         code_agent = open(os.path.join(agents, "keepawake.code-server.plist")).read()
         check("macos-code-server-runs-the-wrapper",
               os.path.join(bin_dir, "code-server-start") in code_agent, True)
@@ -406,6 +414,9 @@ if sys.platform == "darwin":
         loaded = [line for line in log.splitlines() if line.startswith("bootstrap ")]
         check("macos-port-held-proxy-not-loaded",
               ("node holds :3000" in out, any("sclaude.proxy" in line for line in loaded)),
+              (True, False))
+        check("macos-port-held-gate-not-loaded",
+              ("node holds :3001" in out, any("sclaude.gate" in line for line in loaded)),
               (True, False))
 
 print("the words agree with sclaude's")

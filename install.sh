@@ -15,8 +15,8 @@
 #
 # On macOS sclaude runs with Homebrew's bash 5 and GNU tools, which this
 # offers to install, and launchd's agents in place of the systemd units. Of
-# the extras a Mac takes keepawake, its Telegram bot and code-server; the
-# phone's gate is Linux and WSL only for now.
+# the extras a Mac takes all but wsl-update and the Windows side: keepawake,
+# its Telegram bot and code-server.
 #
 #   ./install.sh               sclaude only (and the extras, if an earlier
 #                              install put them in)
@@ -465,13 +465,18 @@ if [[ $MACOS -eq 1 ]]; then
   source "$REPO/sclaude/lib/core/launchd.sh"
   agent_path="$PATH"
   [[ ":$agent_path:" == *":$BIN:"* ]] || agent_path="$agent_path:$BIN"
-  # The proxy binds :3000 itself here: something else on it — a dev server
-  # started before features had ports of their own — would leave the agent
-  # restarting every ten seconds. Said, and the rest goes on. A proxy this
-  # agent already runs is no obstacle: it is reloaded.
-  holder=""
-  launchd_loaded sclaude.proxy \
-    || holder="$({ lsof -nP -iTCP:3000 -sTCP:LISTEN -Fc 2>/dev/null || true; } | sed -n 's/^c//p' | head -1)"
+  # The proxy binds :3000 itself here, and launchd binds the gate's :3001 as
+  # it loads sclaude.gate: something else on either — a dev server started
+  # before features had ports of their own, a gate run by hand — would leave
+  # the agent restarting every ten seconds, or not loaded at all. Said, and the
+  # rest goes on. A port the agent itself holds is no obstacle: it is reloaded.
+  port_holder() {
+    launchd_loaded "$1" && return 0
+    { lsof -nP -iTCP:"$2" -sTCP:LISTEN -Fc 2>/dev/null || true; } | sed -n 's/^c//p' | head -1
+  }
+  declare -A held=([sclaude.proxy]="$(port_holder sclaude.proxy 3000)"
+                   [sclaude.gate]="$(port_holder sclaude.gate 3001)")
+  declare -A port_of=([sclaude.proxy]=3000 [sclaude.gate]=3001)
   while read -r label; do
     [[ -n "$label" ]] || continue
     # The bot only with its token (bot_token_set). Without one an agent
@@ -481,8 +486,8 @@ if [[ $MACOS -eq 1 ]]; then
       continue
     fi
     launchd_write "$label" "$agent_path" || true
-    if [[ "$label" == sclaude.proxy && -n "$holder" ]]; then
-      echo "note: $holder holds :3000 — sclaude.proxy is written but not loaded;" >&2
+    if [[ -n "${held[$label]:-}" ]]; then
+      echo "note: ${held[$label]} holds :${port_of[$label]} — $label is written but not loaded;" >&2
       echo "      stop it, then: launchctl bootstrap $(launchd_domain) $(launchd_dir)/$label.plist" >&2
       continue
     fi
@@ -492,7 +497,13 @@ if [[ $MACOS -eq 1 ]]; then
       echo "note: launchd did not load $label; see $(launchd_dir)/$label.plist" >&2
     fi
   done < <(launchd_labels; [[ $EXTRAS -eq 1 ]] && launchd_labels extras)
-  echo "not on macOS yet: the phone's gate (the Mini App behind tailscale funnel)"
+  # The phone's gate goes out through `tailscale funnel`, and the bot reads
+  # the tailnet's addresses with the same command. The Mac app does not put
+  # it on PATH by itself.
+  if [[ $EXTRAS -eq 1 ]] && ! command -v tailscale >/dev/null 2>&1; then
+    echo "note: no tailscale command on PATH — the bot's phone links and the phone's gate need it;" >&2
+    echo "      the Tailscale app offers to install it in its settings (or: brew install tailscale)" >&2
+  fi
   # code-server is loaded and not started, as on Linux: a button in the bot
   # brings it up, and its idle timeout takes it down.
   if [[ $EXTRAS -eq 1 ]]; then

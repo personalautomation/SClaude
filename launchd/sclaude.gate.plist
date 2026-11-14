@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS's sclaude-gate.socket and sclaude-gate.service: the phone's entry to
+  features through Telegram (sclaude-proxy --gate), behind `tailscale funnel`
+  on :8443. Written into ~/Library/LaunchAgents by install.sh
+  (sclaude/lib/core/launchd.sh), with @HOME@, @PATH@ and @LOGS@ put in.
+
+  Started on demand, as the socket unit starts it: launchd listens on
+  127.0.0.1:3001 while the agent is loaded and starts the gate on the first
+  connection; the gate takes the socket by its name here (LAUNCHD_SOCKET,
+  launch_activate_socket in bin/sclaude-proxy). It exits after half an hour
+  with nobody looking, or when its code changed, and launchd starts it again
+  on the next connection. Harmless until a funnel points at it: loopback
+  only, and the gate lets in the bot's owner alone.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>sclaude.gate</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@HOME@/.local/bin/sclaude-proxy</string>
+    <string>--gate</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+  </dict>
+  <key>Sockets</key>
+  <dict>
+    <key>Listeners</key>
+    <dict>
+      <!-- Loopback only: `tailscale funnel` connects from this machine, and
+           nothing else may. -->
+      <key>SockNodeName</key>
+      <string>127.0.0.1</string>
+      <key>SockServiceName</key>
+      <string>3001</string>
+      <key>SockType</key>
+      <string>stream</string>
+      <key>SockFamily</key>
+      <string>IPv4</string>
+    </dict>
+  </dict>
+  <!-- As KillMode=process: the menu page starts sessions (Continue, a new
+       feature) from inside the gate, and the gate exiting when idle must not
+       take them with it. -->
+  <key>AbandonProcessGroup</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>@LOGS@/gate.log</string>
+  <key>StandardErrorPath</key>
+  <string>@LOGS@/gate.log</string>
+</dict>
+</plist>

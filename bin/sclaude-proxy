@@ -1355,8 +1355,9 @@ async def handle(reader, writer):
 # --- the gate: the phone's entry from the internet ---------------------------
 #
 # `sclaude-proxy --gate` is what `tailscale funnel` publishes for the phone's
-# Telegram Mini App (sclaude-gate.socket on 127.0.0.1:3001; the bot turns the
-# funnel on and off with phone access). It routes nothing itself: a request it lets
+# Telegram Mini App (sclaude-gate.socket on 127.0.0.1:3001, launchd's
+# sclaude.gate on a Mac; the bot turns the funnel on and off with phone
+# access). It routes nothing itself: a request it lets
 # in goes on to the proxy on :3000 as it came, so starting, routing and idling
 # stay in one process. Its own job is who: a page opened from the bot proves
 # itself with Telegram's signed initData once (tg_webapp.py) and then carries
@@ -1990,6 +1991,37 @@ def gate_code_runs():
         return False
 
 
+# The name of the gate's socket in launchd/sclaude.gate.plist (Sockets).
+LAUNCHD_SOCKET = "Listeners"
+
+
+def launchd_sockets(name):
+    """The listening sockets launchd holds for this job under `name` in its
+    plist's Sockets, as file descriptors; [] when launchd did not start this
+    process with one (launch_activate_socket says ESRCH then), or off macOS.
+    launchd's socket activation, as LISTEN_FDS is systemd's."""
+    if sys.platform != "darwin":
+        return []
+    import ctypes
+    import ctypes.util
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        activate = libc.launch_activate_socket
+    except (OSError, AttributeError):
+        return []
+    activate.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+                         ctypes.POINTER(ctypes.c_size_t)]
+    activate.restype = ctypes.c_int
+    fds = ctypes.POINTER(ctypes.c_int)()
+    count = ctypes.c_size_t(0)
+    if activate(name.encode(), ctypes.byref(fds), ctypes.byref(count)) != 0:
+        return []
+    out = [fds[i] for i in range(count.value)]
+    libc.free.argtypes = [ctypes.c_void_p]
+    libc.free(ctypes.cast(fds, ctypes.c_void_p))
+    return out
+
+
 async def gate_main():
     env = tg_webapp.read_env(GATE_ENV)
     token = env.get("KEEPAWAKE_BOT_TOKEN", "")
@@ -2001,10 +2033,19 @@ async def gate_main():
     GATE.update(token=token, owner=int(owner), last=time.time())
     socketed = os.environ.get("LISTEN_PID") == str(os.getpid()) \
         and int(os.environ.get("LISTEN_FDS") or 0) >= 1
+    launchd = [] if socketed else launchd_sockets(LAUNCHD_SOCKET)
     if socketed:
         # sclaude-gate.socket holds the port; exiting when idle gives it back
         # to systemd, which starts the gate again on the next connection.
         sock = socket.socket(fileno=3)
+    elif launchd:
+        # The same with launchd's sclaude.gate: it keeps listening while the
+        # gate is gone, and starts it on the next connection. One address is
+        # all the plist names.
+        sock = socket.socket(fileno=launchd[0])
+        for extra in launchd[1:]:
+            os.close(extra)
+        socketed = True
     else:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

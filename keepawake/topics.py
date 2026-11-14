@@ -414,7 +414,13 @@ def adopt_new_topic(bot, name, slug):
 
 
 def new_worktrees(repo, since):
-    """Slugs of the repository's features whose worktree appeared after since."""
+    """Slugs of the repository's features whose worktree appeared after since,
+    the newest first."""
+    # The newest first, because the caller gives the topic to the first: a
+    # start's own worktree is the last made, and another feature started a
+    # few seconds earlier still falls in the window. In the order the
+    # directory lists them, which is the filesystem's own, the topic went to
+    # either.
     prefix = os.path.basename(repo) + "-"
     out = []
     for git in glob.glob(os.path.join(glob.escape(os.path.dirname(repo)),
@@ -425,8 +431,8 @@ def new_worktrees(repo, since):
         except OSError:
             continue
         if born >= since - 60 and feature_dir(repo, slug):
-            out.append(slug)
-    return out
+            out.append((born, slug))
+    return [slug for _, slug in sorted(out, reverse=True)]
 
 
 def check_new_topics(bot):

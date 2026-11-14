@@ -225,6 +225,18 @@ with tempfile.TemporaryDirectory() as tmp:
           ("extras: kept" in out,
            os.path.exists(os.path.join(units, "keepawake-telegram.service"))), (True, True))
 
+    # The bot's unit is enabled with its token and chat id, not before: the
+    # bot exits without either, and systemd would restart it every ten seconds.
+    secrets = os.path.join(env["HOME"], ".config", "keepawake", "env")
+    for body, want in (("KEEPAWAKE_BOT_TOKEN=1:x\nKEEPAWAKE_CHAT_ID=\n", False),
+                       ("KEEPAWAKE_BOT_TOKEN=1:x\nKEEPAWAKE_CHAT_ID='-100123'\n", True)):
+        with open(secrets, "w") as fh:
+            fh.write(body)
+        os.remove(calls)
+        run(env, "--no-polkit")
+        check("bot-unit-enabled-%s" % ("with-chat-id" if want else "not-without-chat-id"),
+              "enable --now keepawake-telegram.service" in open(calls).read(), want)
+
     print("no systemd")
     env, rule, calls = world(os.path.join(tmp, "nosystemd"), systemd=False)
     code = []
@@ -368,10 +380,21 @@ if sys.platform == "darwin":
               ("sudoers rule for the lid" in out, "./install.sh --lid" in out,
                os.path.exists(rule)), (True, True, False))
         check("macos-bot-waits-for-its-token",
-              ("keepawake.telegram is not set up" in out, "keepawake.telegram" in log),
+              ("keepawake.telegram is not loaded" in out,
+               any(line.startswith("bootstrap ") and "keepawake.telegram" in line for line in log.splitlines())),
               (True, False))
         secrets = os.path.join(env["HOME"], ".config", "keepawake")
         check("macos-secrets-dir-made", oct(os.stat(secrets).st_mode & 0o777), "0o700")
+
+        # A token with no chat id is not enough: the bot would exit and be
+        # restarted every ten seconds.
+        with open(os.path.join(secrets, "env"), "w") as fh:
+            fh.write("KEEPAWAKE_BOT_TOKEN=123:secret\nKEEPAWAKE_CHAT_ID=\n")
+        os.remove(launched)
+        out = run(env, "--no-lid")
+        check("macos-bot-waits-for-its-chat-id",
+              ("lacks the token or the chat id" in out,
+               os.path.exists(os.path.join(agents, "keepawake.telegram.plist"))), (True, False))
 
         # The token in place: the bot's agent is written and loaded, and the
         # token stays in the file, which the bot reads itself.

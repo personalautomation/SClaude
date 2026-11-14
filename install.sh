@@ -142,12 +142,16 @@ if [[ $EXTRAS -eq 0 && -L "$BIN/keepawake" ]]; then
   echo "extras: kept — an earlier install put them in"
 fi
 
-# Whether ~/.config/keepawake/env has the bot's token: the bot's unit or agent
-# is turned on only then. A service falling into a restart loop straight after
-# installation is a poor first impression and rubbish in the log.
-bot_token_set() {
-  [[ -s "$HOME/.config/keepawake/env" ]] \
-    && grep -q '^KEEPAWAKE_BOT_TOKEN=.\+' "$HOME/.config/keepawake/env" 2>/dev/null
+# Whether ~/.config/keepawake/env has the bot's token and chat id: the bot's
+# unit or agent is turned on only then. The bot exits without either, and a
+# service falling into a restart loop straight after installation is a poor
+# first impression and rubbish in the log. The chat id is a number, negative
+# for a group, and may be quoted.
+bot_env_set() {
+  local env="$HOME/.config/keepawake/env"
+  [[ -s "$env" ]] \
+    && grep -q '^KEEPAWAKE_BOT_TOKEN=.\+' "$env" 2>/dev/null \
+    && grep -Eq "^KEEPAWAKE_CHAT_ID=[\"']?-?[0-9]+" "$env" 2>/dev/null
 }
 
 # A systemd unit, written into $UNITS with this checkout's path put in for
@@ -443,12 +447,12 @@ if [[ $SYSTEMD -eq 1 ]]; then
       echo "note: no ~/.config/code-server/config.yaml — code-server is not configured" >&2
     fi
 
-    # We enable the daemon only with the token filled in (bot_token_set).
-    if bot_token_set; then
+    # We enable the daemon only with the token and chat id filled in (bot_env_set).
+    if bot_env_set; then
       systemctl --user enable --now keepawake-telegram.service
       echo "enabled: keepawake-telegram.service"
     else
-      echo "note: keepawake-telegram is not enabled — there is no token in ~/.config/keepawake/env" >&2
+      echo "note: keepawake-telegram is not enabled — ~/.config/keepawake/env lacks the token or the chat id" >&2
     fi
   fi
 
@@ -479,10 +483,12 @@ if [[ $MACOS -eq 1 ]]; then
   declare -A port_of=([sclaude.proxy]=3000 [sclaude.gate]=3001)
   while read -r label; do
     [[ -n "$label" ]] || continue
-    # The bot only with its token (bot_token_set). Without one an agent
-    # written earlier is left as it is: taking it out is the person's call.
-    if [[ "$label" == keepawake.telegram ]] && ! bot_token_set; then
-      echo "note: keepawake.telegram is not set up — there is no token in ~/.config/keepawake/env" >&2
+    # The bot only with its token and chat id (bot_env_set). Without them an
+    # agent loaded earlier is unloaded, so that it stops restarting every ten
+    # seconds; its file stays for the next run to load again.
+    if [[ "$label" == keepawake.telegram ]] && ! bot_env_set; then
+      launchd_loaded "$label" && launchctl bootout "$(launchd_domain)/$label" >/dev/null 2>&1
+      echo "note: keepawake.telegram is not loaded — ~/.config/keepawake/env lacks the token or the chat id" >&2
       continue
     fi
     launchd_write "$label" "$agent_path" || true

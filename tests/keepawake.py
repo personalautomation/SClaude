@@ -2133,7 +2133,11 @@ if os.path.exists(cfg):
     # <a href>, which is additionally rejected with a 400 error.
     body = services.code_text()
     check("localhost is not used as a link", "localhost:8080" in body, False)
-    check_true("the local address is given as an IP", "127.0.0.1:8080" in body)
+    # The laptop's own link: the forward on Linux, code-server's own address
+    # on a Mac (whatever this machine's config says), an IP either way.
+    check_true("the local address is given as an IP",
+               services.code_local() in body
+               and re.fullmatch(r"http://\d+\.\d+\.\d+\.\d+:\d+", services.code_local()))
 
 os.environ.pop("KEEPAWAKE_BOT_TOKEN", None)
 os.environ.pop("KEEPAWAKE_CHAT_ID", None)

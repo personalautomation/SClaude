@@ -15,8 +15,8 @@
 #
 # On macOS sclaude runs with Homebrew's bash 5 and GNU tools, which this
 # offers to install, and launchd's agents in place of the systemd units. Of
-# the extras a Mac takes keepawake and its Telegram bot; code-server is Linux
-# and WSL only for now.
+# the extras a Mac takes keepawake, its Telegram bot and code-server; the
+# phone's gate is Linux and WSL only for now.
 #
 #   ./install.sh               sclaude only (and the extras, if an earlier
 #                              install put them in)
@@ -217,11 +217,13 @@ if [[ $MACOS -eq 0 ]]; then
 fi
 
 if [[ $EXTRAS -eq 1 && $MACOS -eq 1 ]]; then
-  # The holding side, the minute's count and the bot are launchd agents,
-  # below; code-server is not on macOS yet.
-  ln -sfn "$REPO/bin/keepawake"       "$BIN/keepawake"
-  ln -sfn "$REPO/bin/keepawake-macos" "$BIN/keepawake-macos"
-  echo "symlinked (extras): keepawake, keepawake-macos in $BIN"
+  # The holding side, the minute's count, the bot and code-server are launchd
+  # agents, below. No code-server-proxy: the forward is for a Windows browser
+  # outside the tailnet, and a Mac's browser is in it.
+  for tool in keepawake keepawake-macos code-server-start; do
+    ln -sfn "$REPO/bin/$tool" "$BIN/$tool"
+  done
+  echo "symlinked (extras): keepawake, keepawake-macos, code-server-start in $BIN"
 elif [[ $EXTRAS -eq 1 ]]; then
   for tool in keepawake code-server-start code-server-proxy; do
     ln -sfn "$REPO/bin/$tool" "$BIN/$tool"
@@ -491,6 +493,19 @@ if [[ $MACOS -eq 1 ]]; then
     fi
   done < <(launchd_labels; [[ $EXTRAS -eq 1 ]] && launchd_labels extras)
   echo "not on macOS yet: the phone's gate (the Mini App behind tailscale funnel)"
+  # code-server is loaded and not started, as on Linux: a button in the bot
+  # brings it up, and its idle timeout takes it down.
+  if [[ $EXTRAS -eq 1 ]]; then
+    if [[ -f "$HOME/.config/code-server/config.yaml" ]]; then
+      bind="$(sed -n 's/^bind-addr:[[:space:]]*//p' "$HOME/.config/code-server/config.yaml" | head -1)"
+      echo "on demand: code-server (${bind:-127.0.0.1:8080, its default}) — by a button in the bot"
+    else
+      echo "note: no ~/.config/code-server/config.yaml — code-server is not configured" >&2
+    fi
+    if [[ ! -x "$HOME/.local/bin/code-server" ]] && ! command -v code-server >/dev/null 2>&1; then
+      echo "note: code-server is not installed — brew install code-server" >&2
+    fi
+  fi
   if [[ $EXTRAS -eq 1 ]] && ! launchctl print system/com.openssh.sshd >/dev/null 2>&1; then
     echo "note: Remote Login is off — no SSH session from a phone; turn it on in" >&2
     echo "      System Settings → General → Sharing" >&2

@@ -4827,10 +4827,12 @@ try:
     os.environ["SCLAUDE_OS"] = "linux"
     check("linux: a button runs systemctl",
           units.command("restart", "code-server.service"), "systemctl --user restart code-server.service")
-    _answer()
+    _answer("loaded\nactive\n")
     check_true("linux: an active unit is active", units.active("code-server.service"))
-    _answer(rc=3)
-    check("linux: an inactive one is not", units.active("code-server.service"), False)
+    _answer("loaded\ninactive\n")
+    check("linux: an inactive one is not", units.status("code-server.service"), False)
+    _answer("not-found\ninactive\n")
+    check("linux: a unit not installed is no unit", units.status("code-server.service"), None)
     check("linux: the log is the journal's",
           units.log_command(state.BOT_UNIT), "journalctl --user -u keepawake-telegram.service")
 
@@ -4851,7 +4853,7 @@ try:
     check("macos: a loaded one that does not run is not", units.active("code-server.service"), False)
     check_true("macos: a loaded socket is active", units.active("sclaude-gate.socket"))
     _answer(rc=113)
-    check("macos: one launchd does not have is not", units.active(state.BOT_UNIT), False)
+    check("macos: one launchd does not have is no agent", units.status(state.BOT_UNIT), None)
     check("macos: the log is the agent's file",
           units.log_command(state.BOT_UNIT), "tail -n 50 ~/Library/Logs/sclaude/telegram.log")
 
@@ -4874,6 +4876,22 @@ try:
         check("a file others can read is refused", "ran", "refused")
     except SystemExit:
         pass
+
+    # code-server for the laptop's browser: Linux's forward on 127.0.0.1:8080,
+    # a Mac's code-server at its own address (no forward there).
+    os.makedirs(os.path.join(_stubs, ".config", "code-server"))
+    _code_cfg = os.path.join(_stubs, ".config", "code-server", "config.yaml")
+    with open(_code_cfg, "w") as fh:
+        fh.write("bind-addr: 100.64.0.5:8080\npassword: x\n")
+    os.environ["SCLAUDE_OS"] = "linux"
+    check("linux: the laptop opens code-server through the forward",
+          services.code_local(), "http://127.0.0.1:8080")
+    os.environ["SCLAUDE_OS"] = "macos"
+    check("macos: the laptop opens code-server at its own address",
+          services.code_local(), "http://100.64.0.5:8080")
+    with open(_code_cfg, "w") as fh:
+        fh.write("bind-addr: 0.0.0.0:8081\n")
+    check("macos: every address is opened on loopback", services.code_local(), "http://127.0.0.1:8081")
 finally:
     for _k, _v in _saved_env.items():
         if _v is None:

@@ -872,25 +872,25 @@ async def own_page(target, host, headers=None):
                            await gather_listing(host, "No such feature: %s" % label))
         # Started only when nothing answers yet: the socket, or a code-server
         # run some other way, is already the way in.
-        if not await asyncio.to_thread(code_running) and not await asyncio.to_thread(answers, 8080):
+        if not await asyncio.to_thread(code_running) and not await asyncio.to_thread(code_answers):
             try:
                 done = await asyncio.to_thread(
-                    subprocess.run, ["systemctl", "--user", "start", CODE_SERVICE],
+                    subprocess.run, ["bash", "-c", keepawake_units().command("start", CODE_SERVICE)],
                     stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
-                why = done.stderr.strip() if done.returncode else ""
+                why = (done.stderr.strip() or "it would not start") if done.returncode else ""
             except (OSError, subprocess.TimeoutExpired) as exc:
-                why = str(exc) or "systemctl did not answer"
+                why = str(exc) or "the service manager did not answer"
             if why:
                 return respond("502 Bad Gateway", page("Not started", (
                     "<h1>code-server did not start</h1><p>%s</p>" % html.escape(why))))
         # Whatever the service says: active comes the moment it forks, the
         # port only once it has bound — and with the socket, at once.
         for _ in range(20):
-            if await asyncio.to_thread(answers, 8080):
+            if await asyncio.to_thread(code_answers):
                 break
             await asyncio.sleep(0.5)
         return respond("303 See Other", "", (
-            "Location: %s/?%s" % (CODE_LOCAL, urlencode({"folder": found[0]})),))
+            "Location: %s/?%s" % (code_local()[0], urlencode({"folder": found[0]})),))
     if url.path == "/__sclaude/bpmn":
         # The whole cycle with no feature's place on it: the printed page,
         # drawn from the model now rather than read from a build, as this
@@ -1059,29 +1059,53 @@ MAP_NAME = "Process map (BPMN)"
 # as it stands. Only main's — the numbers are the product's, not a feature's.
 DORA_PAGE = ".sclaude/local/dora/index.html"
 DORA_NAME = "DORA metrics"
-# code-server for this machine's browser, at one address either way install.sh
-# sets it up: code-server-local.socket listening here and starting code-server
-# on contact (bind-addr elsewhere), or code-server itself on 127.0.0.1:8080
-# with the socket left off — and then nothing starts it on contact, so
-# /__sclaude/code starts the service first. Whether it runs is the
+# code-server for this machine's browser. On Linux at one address either way
+# install.sh sets it up: code-server-local.socket listening here and starting
+# code-server on contact (bind-addr elsewhere), or code-server itself on
+# 127.0.0.1:8080 with the socket left off — and then nothing starts it on
+# contact, so /__sclaude/code starts the service first. Whether it runs is the
 # service's to say: the socket's port always answers.
+#
+# On a Mac there is no forward: the forward is for a Windows browser outside
+# the tailnet, and a Mac's browser is on a machine in it. code-server is
+# reached at its own address there, from its config (code_server).
 CODE_LOCAL = "http://127.0.0.1:8080"
 CODE_SERVICE = os.environ.get("SCLAUDE_CODE_SERVICE") or "code-server.service"
+
+
+def keepawake_units():
+    """keepawake/units.py: a service as systemd's unit or launchd's agent."""
+    root = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from keepawake import units
+    return units
+
+
+def code_local():
+    """(address, host, port) of code-server for this machine's browser."""
+    if keepawake_units().on_macos():
+        host, port = code_server()
+        # Every address includes loopback, and a browser refuses 0.0.0.0.
+        if host in ("", "0.0.0.0", "::", "[::]"):
+            host = "127.0.0.1"
+        return "http://%s:%d" % (host, port), host.strip("[]"), port
+    return CODE_LOCAL, "127.0.0.1", 8080
+
+
+def code_answers():
+    _, host, port = code_local()
+    try:
+        with socket.create_connection((host, port), timeout=0.3):
+            return True
+    except OSError:
+        return False
 
 
 def code_running():
     """True while code-server's service runs, False while it does not, None
     where there is no such service — no line for it then."""
-    try:
-        done = subprocess.run(["systemctl", "--user", "show", "-p", "LoadState,ActiveState", "--value",
-                               CODE_SERVICE], stdin=subprocess.DEVNULL, capture_output=True,
-                              text=True, timeout=5)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    load, _, active = done.stdout.strip().partition("\n")
-    if done.returncode != 0 or load.strip() != "loaded":
-        return None
-    return active.strip() == "active"
+    return keepawake_units().status(CODE_SERVICE)
 FLOW_FRESH = float(os.environ.get("SCLAUDE_FLOW_FRESH") or 14)
 FLOW_LIMIT = 60
 FLOW = {}

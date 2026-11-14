@@ -4,8 +4,9 @@
 #
 # A wrapper rather than a path straight in the unit: the choice lives in
 # keepawake's state and is changed by a button in Telegram, while the unit is
-# read by systemd once at boot. Without this layer, changing repository would
-# require editing the unit and a daemon-reload.
+# read by systemd once at boot (and the agent by launchd at load). Without
+# this layer, changing repository would require editing the unit and a
+# daemon-reload.
 #
 # No choice made, or the directory is gone — open the home directory: an empty
 # editor is more use than a failed service.
@@ -19,4 +20,11 @@ if [[ -z "$target" || ! -d "$target" ]]; then
   target="$HOME"
 fi
 
-exec "$HOME/.local/bin/code-server" "$target"
+# The standalone install puts code-server in ~/.local/bin; Homebrew's, on a
+# Mac, is wherever brew links it, which the agent's PATH has.
+server="$HOME/.local/bin/code-server"
+[[ -x "$server" ]] || server="$(command -v code-server)" || {
+  echo "code-server-start: no code-server in ~/.local/bin or on PATH" >&2
+  exit 1
+}
+exec "$server" "$target"

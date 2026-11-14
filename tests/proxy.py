@@ -271,6 +271,25 @@ def check_peers(registry, stub, log):
     loader = SourceFileLoader("sclaude_proxy", PROXY)
     mod = module_from_spec(spec_from_loader("sclaude_proxy", loader))
     loader.exec_module(mod)
+    # code-server for this machine's browser: Linux's forward on
+    # 127.0.0.1:8080, a Mac's code-server at its own address.
+    saved_os = os.environ.get("SCLAUDE_OS")
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+        fh.write("bind-addr: 100.64.0.5:8080\n")
+    mod.CODE_CONFIG = fh.name
+    try:
+        os.environ["SCLAUDE_OS"] = "linux"
+        check("code-server: the forward on Linux", mod.code_local(),
+              ("http://127.0.0.1:8080", "127.0.0.1", 8080))
+        os.environ["SCLAUDE_OS"] = "macos"
+        check("code-server: its own address on a Mac", mod.code_local(),
+              ("http://100.64.0.5:8080", "100.64.0.5", 8080))
+    finally:
+        os.remove(fh.name)
+        if saved_os is None:
+            os.environ.pop("SCLAUDE_OS", None)
+        else:
+            os.environ["SCLAUDE_OS"] = saved_os
     # A tree an older sclaude still runs keeps its state in .feature/.
     old = tempfile.mkdtemp(prefix="proxy-old-")
     try:

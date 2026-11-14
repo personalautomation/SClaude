@@ -337,11 +337,13 @@ service_up() {
 # an open tab is the hard holder code, a terminal in it likewise, while the
 # service by itself proves nothing beyond having been switched on once.
 #
-# On macOS the service is Homebrew's (`brew services start code-server`), whose
-# agent has the label below; code-server keeps its XDG paths there too, so the
-# heartbeat above is where it is on Linux.
+# On macOS the service is the agent install.sh writes (keepawake.code-server,
+# what keepawake/units.py names code-server.service), or Homebrew's, for a
+# server started with `brew services start code-server`. code-server keeps its
+# XDG paths there too, so the heartbeat above is where it is on Linux.
 count_code_server() {
-  service_up code-server.service homebrew.mxcl.code-server \
+  { service_up code-server.service keepawake.code-server \
+      || { procinfo_darwin && service_up code-server.service homebrew.mxcl.code-server; }; } \
     || { printf '0'; return; }
   someone_around || { printf '0'; return; }
   printf '1'

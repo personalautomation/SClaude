@@ -70,23 +70,34 @@ def command(verb, unit):
     return "%s && launchctl kickstart %s%s" % (load, "-k " if verb == "restart" else "", tgt)
 
 
-def active(unit, timeout=5):
-    """Whether the unit runs. A socket counts once it is loaded: launchd
-    listens for it from then on, as systemd does for an active socket."""
+def status(unit, timeout=5):
+    """True while the unit runs, False while it does not, None when there is
+    no such unit or agent here. A socket counts as running once it is loaded:
+    launchd listens for it from then on, as systemd does for an active
+    socket."""
     try:
         if not on_macos():
-            return subprocess.run(["systemctl", "--user", "is-active", "--quiet", unit],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                  timeout=timeout).returncode == 0
-        out = subprocess.run(["launchctl", "print", target(unit)], capture_output=True,
-                             text=True, timeout=timeout)
+            done = subprocess.run(["systemctl", "--user", "show", "-p", "LoadState,ActiveState",
+                                   "--value", unit], stdin=subprocess.DEVNULL,
+                                  capture_output=True, text=True, timeout=timeout)
+            load, _, state = done.stdout.strip().partition("\n")
+            if done.returncode != 0 or load.strip() != "loaded":
+                return None
+            return state.strip() == "active"
+        done = subprocess.run(["launchctl", "print", target(unit)], stdin=subprocess.DEVNULL,
+                              capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
-        return False
-    if out.returncode != 0:
-        return False
+        return None
+    if done.returncode != 0:
+        return None
     if unit.endswith(".socket"):
         return True
-    return any(line.strip() == "state = running" for line in out.stdout.splitlines())
+    return any(line.strip() == "state = running" for line in done.stdout.splitlines())
+
+
+def active(unit, timeout=5):
+    """Whether the unit runs."""
+    return status(unit, timeout) is True
 
 
 def restart_later(unit, delay):

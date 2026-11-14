@@ -70,6 +70,21 @@ def code_url():
     return "http://localhost:8080"
 
 
+def code_local():
+    """code-server for this laptop's browser. On Linux 127.0.0.1:8080: the
+    forward (code-server-local.socket) for a Windows browser outside the
+    tailnet, or code-server itself. A Mac has no forward: its browser is on a
+    machine in the tailnet, and opens code-server at its own address."""
+    if not units.on_macos():
+        return "http://127.0.0.1:8080"
+    # Every address includes loopback, a browser refuses 0.0.0.0, and
+    # Telegram makes no link of localhost (below).
+    url = code_url()
+    for loop in ("//0.0.0.0:", "//[::]:", "//localhost:"):
+        url = url.replace(loop, "//127.0.0.1:")
+    return url
+
+
 # The port sclaude-proxy holds (bin/sclaude-proxy): every feature is
 # http://<feature>.localhost:3000 through it, and a bare localhost:3000 is the
 # list of features. chrome-debug opens that by default.
@@ -192,4 +207,4 @@ def code_text(folder_name=""):
                  password=t("code.password", pw=status_report.escape(pw)) if pw else t("code.nopassword"))
     return t("code.title", state=state_label,
              folder=t("code.folder", name=status_report.escape(code_folder())),
-             url=code_url(), local="http://127.0.0.1:8080")
+             url=code_url(), local=code_local())

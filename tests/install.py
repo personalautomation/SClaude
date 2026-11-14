@@ -337,12 +337,22 @@ if sys.platform == "darwin":
         check("macos-extras-linked",
               [os.path.islink(os.path.join(bin_dir, n)) for n in ("keepawake", "keepawake-macos")],
               [True, True])
-        check("macos-extras-no-code-server", os.path.exists(os.path.join(bin_dir, "code-server-start")),
-              False)
+        check("macos-extras-code-server-wrapper",
+              (os.path.islink(os.path.join(bin_dir, "code-server-start")),
+               os.path.exists(os.path.join(bin_dir, "code-server-proxy"))), (True, False))
         check("macos-extras-agents", sorted(os.listdir(agents)),
-              ["keepawake.hold.plist", "keepawake.plist", "sclaude.proxy.plist", "sclaude.watch.plist"])
+              ["keepawake.code-server.plist", "keepawake.hold.plist", "keepawake.plist",
+               "sclaude.proxy.plist", "sclaude.watch.plist"])
         log = open(launched).read()
-        check("macos-extras-loaded", log.count("bootstrap gui/"), 4)
+        check("macos-extras-loaded", log.count("bootstrap gui/"), 5)
+        code_agent = open(os.path.join(agents, "keepawake.code-server.plist")).read()
+        check("macos-code-server-runs-the-wrapper",
+              os.path.join(bin_dir, "code-server-start") in code_agent, True)
+        check("macos-code-server-not-started-by-loading",
+              ("RunAtLoad" in re.sub(r"<!--.*?-->", "", code_agent, flags=re.S),
+               "KeepAlive" in re.sub(r"<!--.*?-->", "", code_agent, flags=re.S)), (False, False))
+        check("macos-code-server-unconfigured-said",
+              "no ~/.config/code-server/config.yaml" in out, True)
         hold = open(os.path.join(agents, "keepawake.hold.plist")).read()
         check("macos-hold-runs-the-holder", os.path.join(bin_dir, "keepawake-macos") in hold, True)
         check("macos-no-polkit-on-a-mac", "polkit" in out, False)
@@ -384,8 +394,8 @@ if sys.platform == "darwin":
         out = run(env)
         check("macos-lid-rule-kept", "the sudoers rule is in place" in out, True)
         out = run(env, extras=False)
-        check("macos-extras-kept", ("extras: kept" in out, sorted(os.listdir(agents))[0]),
-              (True, "keepawake.hold.plist"))
+        check("macos-extras-kept", ("extras: kept" in out, "keepawake.hold.plist" in os.listdir(agents)),
+              (True, True))
 
         # :3000 held by something else: the proxy's agent is written, not loaded.
         with open(holder, "w") as fh:

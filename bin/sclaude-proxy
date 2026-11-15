@@ -1086,9 +1086,10 @@ def code_local():
     """(address, host, port) of code-server for this machine's browser."""
     if keepawake_units().on_macos():
         host, port = code_server()
-        # Every address includes loopback, a browser refuses 0.0.0.0, and the
-        # bot (services.code_local) names localhost as 127.0.0.1: the same here.
-        if host in ("", "0.0.0.0", "::", "[::]", "localhost"):
+        # Every address includes loopback, and a browser refuses 0.0.0.0.
+        # localhost stays: code-server bound to it listens on ::1 alone on a
+        # Mac, which 127.0.0.1 would not reach.
+        if host in ("", "0.0.0.0", "::", "[::]"):
             host = "127.0.0.1"
         return "http://%s:%d" % (host, port), host.strip("[]"), port
     return CODE_LOCAL, "127.0.0.1", 8080

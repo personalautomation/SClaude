@@ -500,6 +500,9 @@ if [[ $MACOS -eq 1 ]]; then
       launchctl bootout "$(launchd_domain)/$label" >/dev/null 2>&1 || true
       rm -f "$(launchd_dir)/$label.plist"
       echo "note: $off" >&2
+      # A refused bootout leaves the job restarting until logout, its file gone.
+      launchd_loaded "$label" \
+        && echo "      launchd still runs it — unload it with: launchctl bootout $(launchd_domain)/$label" >&2
       continue
     fi
     wrote=0

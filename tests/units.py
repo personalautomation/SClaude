@@ -190,7 +190,8 @@ try:
     log = launched()
     check("agent: a loaded one is not reloaded", ("bootout" in log, "bootstrap" in log), (False, False))
     check("agent: it is named for the person", "sclaude.w" in out and "./install.sh" in out, True)
-    check("agent: but written", "<!-- changed -->" in open(agent).read(), True)
+    check("agent: its file left for install.sh to find changed",
+          "<!-- changed -->" in open(agent).read(), False)
 
     # A reload waits for the old job to be gone: bootout returns while its
     # process still exits, and launchd refuses the label until then. Here

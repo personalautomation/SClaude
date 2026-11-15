@@ -99,23 +99,24 @@ launchd_write() {
 # that is not loaded is loaded, as launchd would load it at the next login
 # (install.sh leaves no file for an agent it keeps off); a loaded one is
 # named, for the person to reload: unloading the proxy from here would stop
-# the sclaude it started.
+# the sclaude it started. Its file is left as it is, for install.sh to find
+# changed: install.sh reloads an agent whose file it rewrites, and one this
+# had rewritten already it would take for unchanged, and leave running on the
+# old file.
 launchd_refresh() {
-  local label path rc stale=""
+  local label path stale=""
   [[ -d "$(launchd_dir)" ]] || return 0
   while read -r label; do
     [[ -n "$label" && -f "$(launchd_dir)/$label.plist" ]] || continue
     path="$(launchd_path_of "$label")"
     [[ -n "$path" ]] || path="$PATH"
-    launchd_write "$label" "$path"
-    rc=$?
-    (( rc == 0 )) || continue
     if launchd_loaded "$label"; then
-      stale+=" $label"
-    else
+      [[ "$(launchd_render "$label" "$path")" == "$(cat "$(launchd_dir)/$label.plist")" ]] \
+        || stale+=" $label"
+    elif launchd_write "$label" "$path"; then
       launchd_load "$label" || true
     fi
   done < <(launchd_labels all)
-  [[ -n "$stale" ]] && info "  updated, and running on the old file until reloaded:${stale} (./install.sh reloads them)"
+  [[ -n "$stale" ]] && info "  changed, and running on the old file until reloaded:${stale} (./install.sh reloads them)"
   return 0
 }

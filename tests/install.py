@@ -306,8 +306,14 @@ if sys.platform == "darwin":
         env.pop("SCLAUDE_OS")
         stubs = env["PATH"].split(":")[0]
         launched = os.path.join(tmp, "launchctl.calls")
+        # An agent is loaded while loaded-<label> is there, which the bench
+        # writes and bootout takes away; bootout-fails has bootout refuse, as
+        # launchctl does for a job still exiting.
         with open(os.path.join(stubs, "launchctl"), "w") as fh:
-            fh.write('#!/usr/bin/env bash\necho "$*" >> %s\n[[ "$1" != print ]]\n' % launched)
+            fh.write('#!/usr/bin/env bash\necho "$*" >> %s\ncase "$1" in\n'
+                     '  print) [[ -e "%s/loaded-${2##*/}" ]] ;;\n'
+                     '  bootout) [[ ! -e "%s/bootout-fails" ]] && rm -f "%s/loaded-${2##*/}" ;;\n'
+                     'esac\n' % (launched, tmp, tmp, tmp))
         os.chmod(os.path.join(stubs, "launchctl"), 0o755)
         # Who holds :3000, as lsof -F says it; nobody unless the bench writes
         # one, so the machine's own proxy does not decide the answer.
@@ -415,6 +421,47 @@ if sys.platform == "darwin":
               subprocess.run(["plutil", "-lint", bot], capture_output=True).returncode, 0)
         check("macos-env-made-private", oct(os.stat(os.path.join(secrets, "env")).st_mode & 0o777), "0o600")
 
+        # A re-run reloads only what changed: an unchanged agent that is
+        # loaded is left running (a reload would stop code-server for good).
+        def mark_loaded():
+            for name in os.listdir(agents):
+                open(os.path.join(tmp, "loaded-" + name[:-len(".plist")]), "w").close()
+
+        def unmark_loaded():
+            for name in os.listdir(tmp):
+                if name.startswith("loaded-"):
+                    os.remove(os.path.join(tmp, name))
+
+        mark_loaded()
+        with open(os.path.join(agents, "keepawake.hold.plist"), "a") as fh:
+            fh.write("<!-- an older template -->\n")
+        os.remove(launched)
+        out = run(env, "--no-lid")
+        log = open(launched).read().splitlines()
+        check("macos-rerun-unchanged-left-running",
+              sorted(line.split("/")[-1] for line in log if line.startswith(("bootout ", "bootstrap "))),
+              ["keepawake.hold", "keepawake.hold.plist"])
+        check("macos-rerun-unchanged-said", "running: keepawake.code-server, unchanged" in out, True)
+
+        # The bot's token taken away while it runs, and launchd refusing to
+        # unload it: the installer goes on, and its file is gone, so that
+        # neither the next login nor units_refresh loads it again.
+        unmark_loaded()
+        open(os.path.join(tmp, "loaded-keepawake.telegram"), "w").close()
+        open(os.path.join(tmp, "bootout-fails"), "w").close()
+        with open(os.path.join(secrets, "env"), "w") as fh:
+            fh.write("KEEPAWAKE_BOT_TOKEN=\nKEEPAWAKE_CHAT_ID=42\n")
+        code = []
+        out = run(env, "--no-lid", rc=code)
+        check("macos-bot-off-bootout-refused",
+              (code, "keepawake.telegram is not loaded" in out, "Remote Login is off" in out,
+               os.path.exists(os.path.join(agents, "keepawake.telegram.plist"))),
+              ([0], True, True, False))
+        os.remove(os.path.join(tmp, "bootout-fails"))
+        unmark_loaded()
+        with open(os.path.join(secrets, "env"), "w") as fh:
+            fh.write("KEEPAWAKE_BOT_TOKEN=123:secret\nKEEPAWAKE_CHAT_ID=42\n")
+
         out = run(env, "--lid")
         text = open(rule).read() if os.path.exists(rule) else ""
         check("macos-lid-rule-written", "someone ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, "
@@ -441,6 +488,11 @@ if sys.platform == "darwin":
         check("macos-port-held-gate-not-loaded",
               ("node holds :3001" in out, any("sclaude.gate" in line for line in loaded)),
               (True, False))
+        # Their files go too, or launchd would load them at the next login.
+        check("macos-port-held-files-removed",
+              ("run ./install.sh again" in out,
+               [os.path.exists(os.path.join(agents, n)) for n in ("sclaude.proxy.plist", "sclaude.gate.plist")]),
+              (True, [False, False]))
 
 print("the words agree with sclaude's")
 DEV = open(os.path.join(ROOT, "sclaude", "lib", "core", "developer.sh"), encoding="utf-8").read()

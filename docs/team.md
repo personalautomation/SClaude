@@ -1,7 +1,7 @@
 # For a team
 
 instruments is meant to be installed as it is by a small team with a product of
-its own — several developers, each on their own Linux or WSL machine, with no
+its own — several developers, each on their own Linux, WSL or macOS machine, with no
 server in between.
 
 **Nobody forks it.** Everybody installs from this repository, and every sclaude

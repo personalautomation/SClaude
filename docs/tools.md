@@ -694,9 +694,10 @@ sudo rm /etc/sudoers.d/keepawake && sudo pmset -a disablesleep 0
 ```
 
 The bot is the agent `keepawake.telegram`, which `install.sh` writes and loads
-only once `~/.config/keepawake/env` has its token, and which launchd keeps
-running. The token stays in that file: the bot reads it itself, so it never goes
-into a plist. Its log is `~/Library/Logs/sclaude/telegram.log`.
+only once `~/.config/keepawake/env` has its token and your chat id (see
+[Configuration](#configuration)), and which launchd keeps running. The token
+stays in that file: the bot reads it itself, so it never goes into a plist.
+Its log is `~/Library/Logs/sclaude/telegram.log`.
 
 code-server is the agent `keepawake.code-server`, on the repository chosen in
 the bot. Loading it starts nothing: the bot's button starts it, its idle timeout

@@ -719,8 +719,8 @@ point takes the same two lines.
 What GNU on `PATH` does not give a Mac goes through one place:
 
 - other processes and their ports — `/proc`, `ss` — through
-  `sclaude/lib/core/procinfo.sh` and `procinfo.py` (`ps`, `lsof` and
-  `nettop` on macOS, the kernel for a process's environment, the HID system
+  `sclaude/lib/core/procinfo.sh` and `procinfo.py` (`ps` and `lsof`
+  on macOS, the kernel for a process's environment, the HID system
   for the keyboard's idle time); `tests/procinfo.py` fails on a `/proc` read
   or an `ss` run anywhere else in sclaude and in keepawake's scripts. The
   bot's Python modules keep their own reads, macOS's beside each;

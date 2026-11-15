@@ -2,9 +2,11 @@
 #
 # The templates are launchd/<label>.plist in the checkout. install.sh writes
 # each into ~/Library/LaunchAgents with this machine's values put in for
-# @HOME@, @PATH@ and @LOGS@ and loads it; units_refresh (instruments.sh)
-# writes them again when an update changed a template. Written, not linked,
-# for the same reason as the units: a link would carry the placeholders.
+# @HOME@, @PATH@ and @LOGS@ and loads it, and removes the file of one it
+# keeps off (launchd loads every file there at login); units_refresh
+# (instruments.sh) writes them again when an update changed a template.
+# Written, not linked, for the same reason as the units: a link would carry
+# the placeholders.
 #
 # sclaude's own agents are sclaude.*: the watcher and the proxy, on every Mac.
 # keepawake.* are the extras' (./install.sh --extras): the minute's count of
@@ -94,8 +96,10 @@ launchd_write() {
 
 # Brings the installed agents up to the checkout's templates, each with the
 # PATH it was installed with. Only agents already installed are touched. One
-# that is not loaded is loaded; a loaded one is named, for the person to
-# reload: unloading the proxy from here would stop the sclaude it started.
+# that is not loaded is loaded, as launchd would load it at the next login
+# (install.sh leaves no file for an agent it keeps off); a loaded one is
+# named, for the person to reload: unloading the proxy from here would stop
+# the sclaude it started.
 launchd_refresh() {
   local label path rc stale=""
   [[ -d "$(launchd_dir)" ]] || return 0

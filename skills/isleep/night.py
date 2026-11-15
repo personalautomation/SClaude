@@ -85,9 +85,10 @@ from pathlib import Path
 # and a process's exact words from sclaude's procinfo, through the link
 # ~/.claude/skills/isleep resolves to.
 DARWIN = sys.platform == "darwin"
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.realpath(__file__)))), "sclaude", "lib", "core"))
-import procinfo  # noqa: E402
+if DARWIN:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.realpath(__file__)))), "sclaude", "lib", "core"))
+    import procinfo
 
 HOURS = 12        # a night that nobody ends is over after this
 STOP_NUDGES = 40  # Stop nudges per session per night: a bound on the cost

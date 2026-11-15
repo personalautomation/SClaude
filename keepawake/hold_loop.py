@@ -15,7 +15,10 @@
 # A platform's holder subclasses Holder with four things: acquire() takes the
 # lock and says whether anything was granted, release() drops it, holding()
 # says whether it is still held, and partial() names what was refused of it,
-# once there is something to say.
+# once there is something to say. started() runs once the single-instance lock
+# is this process's, before the first tick: whatever a dead holder left behind
+# is cleared there, not before — a second holder that loses the lock must not
+# touch what the running one holds.
 import fcntl
 import os
 import signal
@@ -78,6 +81,9 @@ class Holder:
         """Whether a lock was taken and not released, alive or not."""
         raise NotImplementedError
 
+    def started(self):
+        """Called once this process holds the single-instance lock."""
+
     def tick(self, now=None):
         now = int(time.time()) if now is None else now
         data = state.read()
@@ -124,6 +130,7 @@ def run(holder, name, lock_name):
     except OSError:
         log("exit: %s is already running (this one's pid is %d)" % (name, os.getpid()))
         return 0
+    holder.started()
 
     def stop(signum, frame):
         if holder.held():

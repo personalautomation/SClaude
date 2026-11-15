@@ -120,7 +120,11 @@ into `~/Library/LaunchAgents` and loaded by `install.sh`:
 
 Their logs are in `~/Library/Logs/sclaude/`. `sclaude doctor` says whether
 each is loaded and whether a formula is missing; `./install.sh` again loads
-an agent that is not.
+an agent that is not and reloads one whose file changed, and leaves the rest
+running. An agent it keeps off — the proxy or the gate while another process
+holds its port — is not left in `~/Library/LaunchAgents`, where launchd would
+load it at the next login: the note says what holds the port, and
+`./install.sh` once it is free installs the agent.
 
 With `--extras`, more of them:
 
@@ -128,7 +132,7 @@ With `--extras`, more of them:
 |---|---|---|
 | `keepawake` | counts what holds the Mac awake, once a minute | `keepawake.timer` |
 | `keepawake.hold` | holds it with a power assertion while there is work ([keepawake on macOS](tools.md#keepawake-on-macos)) | `keepawake-linux.service` |
-| `keepawake.telegram` | the Telegram bot; written only once `~/.config/keepawake/env` has its token | `keepawake-telegram.service` |
+| `keepawake.telegram` | the Telegram bot; written only once `~/.config/keepawake/env` has its token and your chat id ([Configuration](tools.md#configuration)) | `keepawake-telegram.service` |
 | `keepawake.code-server` | code-server on the repository chosen in the bot; loaded, and started only by the bot's button | `code-server.service` |
 
 A closed lid is held only with a sudoers rule for `pmset`, which `install.sh`

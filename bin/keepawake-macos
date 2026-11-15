@@ -21,9 +21,9 @@
 #   on while it holds and off when it lets go. Without it the lid still
 #   sleeps, which is said once in the log. Unlike an assertion the setting
 #   outlives the process, so the holder marks that it was the one to turn it
-#   on (LID_MARK) and, finding the mark at start — a holder that was killed —
-#   turns it off. A setting the person made themselves carries no mark and is
-#   left alone.
+#   on (LID_MARK) and, finding the mark once it holds the single-instance lock
+#   — a holder that was killed — turns it off. A setting the person made
+#   themselves carries no mark and is left alone.
 #
 #   keepawake-macos          run the loop (what the keepawake.hold agent calls)
 #
@@ -144,8 +144,12 @@ class Holder(hold_loop.Holder):
         self.assertion = assertion or Assertion()
         self.aid = None
         self.lid = False
+
+    def started(self):
         # A lid a killed holder left held: turned off before anything else, so
-        # that the Mac does not stay up with nothing holding it.
+        # that the Mac does not stay up with nothing holding it. Only once the
+        # lock is ours: a second holder that loses it would otherwise turn the
+        # lid off under the running one, which goes on believing it holds it.
         if os.path.exists(LID_MARK):
             set_lid(False)
 

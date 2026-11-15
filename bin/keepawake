@@ -152,8 +152,7 @@ read_snapshot() {
 # Bytes the process put out (procinfo's proc_output_bytes): what it wrote on
 # Linux — wchar specifically, not rchar: reading grows even when idling (the
 # server polls files), whereas a process writes only when answering a request
-# or keeping a log — and what it sent over the network on macOS, which is the
-# answer to a request itself.
+# or keeping a log. macOS has no such counter, and gives nothing.
 
 # Whether a holder's counter has changed since the previous run. A key's first
 # appearance counts as "active": there is nothing to judge by, and the better
@@ -356,19 +355,31 @@ count_code_server() {
 # shellIntegration catches any process that merely happens to have the word in
 # its arguments — while debugging it caught the bash of the Claude Code session
 # itself. Kinship cannot be faked; a substring match can happen by accident.
+#
+# The kinship is walked in one snapshot of every process: a ps for each of the
+# user's processes and another for each step up its chain came to thousands of
+# forks a minute on a Mac, where proc_parent is a ps of its own.
 count_code() {
   local srv
   srv=$(pgrep -f 'code-server.*out/node/entry' 2>/dev/null | head -1)
   [[ -z "$srv" ]] && { printf '0'; return; }
 
-  local -A seen=()
-  local pid tty anc hops
-  for pid in $(ps -u "$USER" -o pid= 2>/dev/null); do
-    tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
-    [[ -z "$tty" || "$tty" == "?" ]] && continue
+  local -A parent=() seen=()
+  local -a mine=()
+  local me pid ppid uid tty anc hops entry
+  me=$(id -u)
+  while read -r pid ppid uid tty; do
+    parent[$pid]=$ppid
+    # "?" is no terminal, "??" on macOS: code-server's own children (the
+    # extension host, ptyHost, the watcher) are there, and are not terminals.
+    [[ "$uid" == "$me" && -n "$tty" && "$tty" != "?"* ]] && mine+=("$pid $tty")
+  done < <(ps -A -o pid=,ppid=,uid=,tty= 2>/dev/null)
+
+  for entry in "${mine[@]}"; do
+    read -r pid tty <<< "$entry"
     anc=$pid
     for hops in 1 2 3 4 5 6; do
-      anc=$(proc_parent "$anc")
+      anc=${parent[$anc]:-}
       [[ -z "$anc" ]] && break
       (( anc <= 1 )) && break
       if [[ "$anc" == "$srv" ]]; then seen[$tty]=1; break; fi
@@ -568,10 +579,10 @@ count_vscode() {
 # leads there regardless of whose feature it is and who started the server.
 #
 # If the log is not there — the server was started by hand somewhere else — we
-# look at the counter of bytes it put out (proc_output_bytes: written on Linux,
-# sent over the network on macOS). The same fact (the server answered
-# something), measured by the kernel instead of the filesystem, and it works
-# for any server on this port.
+# look at the counter of bytes it put out (proc_output_bytes). The same fact
+# (the server answered something), measured by the kernel instead of the
+# filesystem, and it works for any server on this port — on Linux: macOS
+# keeps no such counter, so there a server started by hand is not counted.
 #
 # But writing is not enough either. A request comes not from a person but from a
 # browser: a tab left open goes to the server by itself — an HMR reconnect, the
@@ -670,6 +681,13 @@ BUSY_LOADAVG=0.7
 # a live person — what they type moves atime, and the shell's echo immediately
 # moves mtime, so a live session has both fresh at once.
 #
+# Except on macOS, where a terminal's atime does not move on reading: it stays
+# at the moment the terminal was opened, and the smaller stamp would call every
+# session idle — work over SSH from the phone with the lid closed included,
+# and the bot would ask every hour whether to let the Mac sleep while the
+# person typed. There mtime is all there is: the echo of a keystroke moves it,
+# and so, unavoidably, does a forgotten tab still printing.
+#
 # Prints 999999 if there are no interactive sessions at all. That is not "a very
 # long idle" but "nothing to measure": the reading side is obliged to tell one
 # from the other, otherwise you get "277 hours without input" on a machine that
@@ -690,6 +708,7 @@ idle_seconds() {
     atime=$(stat -c %X "/dev/$tty" 2>/dev/null || echo 0)
     # The smaller stamp is that very "both are silent". Across terminals we
     # then take the largest: one where work is really happening is enough.
+    procinfo_darwin && atime=$mtime
     seen=$(( mtime < atime ? mtime : atime ))
     (( seen > newest )) && newest=$seen
   done

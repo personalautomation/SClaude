@@ -66,7 +66,7 @@ means exactly what it says.
 | `bin/keepawake-linux` | the holding side on plain Linux: a `systemd-inhibit` lock |
 | `bin/keepawake-macos` | the holding side on macOS: an IOKit power assertion, and the lid through `pmset` where the sudoers rule allows it |
 | `launchd/keepawake.plist`, `launchd/keepawake.hold.plist` | macOS's agents: the minute's count and the holding side |
-| `launchd/keepawake.telegram.plist` | macOS's agent for the bot, written once the token is there |
+| `launchd/keepawake.telegram.plist` | macOS's agent for the bot, written once the token and the chat id are there |
 | `launchd/keepawake.code-server.plist` | macOS's agent for code-server, loaded and started only by the bot |
 | `keepawake/units.py` | what a button runs for a service: `systemctl --user` on Linux, `launchctl` for the same service's agent on macOS |
 | `keepawake/state.py` | the state under `flock`, atomic writes, the "should we hold" decision |
@@ -147,25 +147,29 @@ hold and off with the release. Unlike the assertion, the setting outlives the
 process, so the holder leaves a mark that it turned it on
 (`~/.local/state/keepawake/.macos-lid`) and, finding the mark at start — a
 holder killed mid-hold, launchd bringing it back — turns it off before
-anything else. A `disablesleep` the person set themselves carries no mark and
+anything else, once it holds the single-instance lock: a second holder that
+loses the lock, started while the first still runs, leaves the lid alone. A
+`disablesleep` the person set themselves carries no mark and
 is left alone. The undo the installer prints turns it off too: with the rule
 gone the holder could not, and a Mac left with it on would never sleep.
 
 **A tty's atime means nothing there.** macOS moves no stamp of a terminal on a
 read: typing changes its mtime by the echo alone, exactly as a program's
-output does. So neither the "an hour without a keystroke" count nor the
-bot's "is the person at the terminal that asked" (`at_terminal`) can be
-read from the tty. What the Mac does keep is how long its own keyboard and
-mouse have been idle — the HID system's idle time (`input_idle` in
-`procinfo.sh`, `asks.input_idle`) — and both read that instead. It cannot
-tell one window from another, and a terminal reached over SSH from the phone
-is not seen at all; a question asked there is told with sound, which is the
-side to be wrong on.
+output does. So the bot's "is the person at the terminal that asked"
+(`at_terminal`) cannot be read from the tty. What the Mac does keep is how
+long its own keyboard and mouse have been idle — the HID system's idle time
+(`input_idle` in `procinfo.sh`, `asks.input_idle`) — and `at_terminal` reads
+that instead. It cannot tell one window from another, and a terminal reached
+over SSH from the phone is not seen at all; a question asked there is told
+with sound, which is the side to be wrong on. The "an hour without input"
+count takes the HID idle time and the terminals' mtime alone, so work over
+SSH from the phone with the lid closed is still someone there; the price is
+that a forgotten tab still printing counts as someone too.
 
 **The rest is the platform's own.** The other processes and their ports come
-from `ps`, `lsof` and `nettop` through `procinfo.sh` (a dev server started by
-hand counts by the bytes it sent, not wrote: macOS keeps no count of a
-process's writes); the services are launchd agents in the user's session, and
+from `ps` and `lsof` through `procinfo.sh` (a dev server started by hand,
+outside sclaude, does not hold a Mac: it has no log of sclaude's to watch,
+and macOS keeps no count of the bytes a process wrote); the services are launchd agents in the user's session, and
 code-server is keepawake's own agent, or Homebrew's service when that is the
 one running; an SSH session needs
 Remote Login, whose job launchd keeps in the system domain while it is on;

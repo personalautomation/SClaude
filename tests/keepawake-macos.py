@@ -17,6 +17,8 @@
 #   the lid               with the rule, a closed lid sleeps under remote work;
 #                         without it, pmset is run and refused every minute.
 #   a killed holder       disablesleep stays on, and the Mac never sleeps again.
+#   a second holder       one that loses the lock turns the running one's lid
+#                         off, and a shut lid sleeps the Mac mid-work.
 #   the person's own      a disablesleep the person set is turned off.
 #   refusal               an assertion IOKit refused is taken for a hold.
 #
@@ -51,7 +53,7 @@ os.environ.pop("KEEPAWAKE_HOLD_LOG", None)
 os.environ["KEEPAWAKE_PLATFORM"] = "macos"
 os.environ["XDG_STATE_HOME"] = os.path.join(tmp, "xdg")
 
-from keepawake import state  # noqa: E402
+from keepawake import hold_loop, state  # noqa: E402
 
 print("state on a Mac")
 check("state-path-macos", state.state_path(),
@@ -179,11 +181,30 @@ try:
     set_state(updated_ts=now, until_ts=now + 3600)
     holder.tick(now)
     check("held-again", pmset_calls()[-1], "-a disablesleep 1")
-    km.Holder(fake)
+    # A second holder started while this one runs — by hand, or launchd
+    # during a reload — finds the lock taken and exits: the running holder's
+    # lid and mark are left as they are, or a shut lid sleeps it mid-work.
+    lock = open(os.path.join(state.linux_state_dir(), ".macos-hold.lock"), "w")
+    hold_loop.fcntl.flock(lock, hold_loop.fcntl.LOCK_EX | hold_loop.fcntl.LOCK_NB)
+    before = len(pmset_calls())
+    check("a-second-holder-exits", hold_loop.run(km.Holder(fake), "keepawake-macos",
+                                                 ".macos-hold.lock"), 0)
+    check("a-second-holder-leaves-the-lid", (len(pmset_calls()), os.path.exists(km.LID_MARK)),
+          (before, True))
+    lock.close()
+
+    # The next holder, once the lock is its own, turns the left-over lid off.
+    class Starting(km.Holder):
+        def tick(self, now=None):
+            raise SystemExit  # the first tick comes after started(); stop there
+    try:
+        hold_loop.run(Starting(fake), "keepawake-macos", ".macos-hold.lock")
+    except SystemExit:
+        pass
     check("the-next-holder-turns-it-off", pmset_calls()[-1], "-a disablesleep 0")
     # The person's own disablesleep has no mark, and is left alone.
     before = len(pmset_calls())
-    km.Holder(fake)
+    km.Holder(fake).started()
     check("the-persons-own-left-alone", len(pmset_calls()), before)
 
     print("refusal")

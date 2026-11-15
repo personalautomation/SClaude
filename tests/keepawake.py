@@ -2578,6 +2578,35 @@ check("the code-server service with a person present is a holder", bash_codesrv(
 check("a running service does not hold by itself", bash_codesrv(False), "0")
 
 
+# Terminals inside code-server, by kinship in one snapshot of the processes.
+# The server is 500; its own children have no terminal — "?" from procps, "??"
+# from a Mac's ps — and must not count, or code-server alone holds the machine
+# hard for as long as it lives.
+def bash_code(none, terminals):
+    rows = ["1 0 0 %s" % none, "500 1 501 %s" % none,
+            "600 500 501 %s" % none, "601 500 501 %s" % none,
+            # A terminal outside code-server, and another user's under it.
+            "800 1 501 ttys001", "900 601 0 ttys009"]
+    for n, tty in enumerate(terminals):
+        # A shell in a code-server terminal, and a command it runs on the same tty.
+        rows += ["%d 601 501 %s" % (700 + 2 * n, tty), "%d %d 501 %s" % (701 + 2 * n, 700 + 2 * n, tty)]
+    calls = tempfile.mktemp(prefix="keepawake-test-ps-")
+    stubs = "\n".join([
+        'pgrep() { echo 500; }',
+        'id() { echo 501; }',
+        "ps() { echo >> %s; printf '%%s\\n' %s; }" % (calls, shlex.quote("\n".join(rows))),
+    ])
+    got = bash_fn(["count_code"], stubs, "count_code")
+    with open(calls) as fh:
+        return got, len(fh.read().splitlines())
+
+
+for none in ("?", "??"):
+    check("code-server's own children are no terminal (%r)" % none, bash_code(none, []), ("0", 1))
+    check("each code-server terminal counts once, by one ps (%r)" % none,
+          bash_code(none, ["ttys003", "ttys004"]), ("2", 1))
+
+
 # "Is there anyone here" means recent input or noticeable load. The first
 # answers for a person, the second for a long build without a single keystroke:
 # that is work too.

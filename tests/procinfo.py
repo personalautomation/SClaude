@@ -83,8 +83,8 @@ try:
           "%d %d" % (port, os.getpid()) in sh('ports_pids').splitlines(), True)
 
     # What a server puts out grows when it answers: this bench answers a
-    # client of its own socket, by write(2) — counted as written on Linux and
-    # as sent on macOS.
+    # client of its own socket, by write(2). macOS keeps no such counter, and
+    # gives nothing.
     client = socket.create_connection(("127.0.0.1", port))
     conn, _ = server.accept()
     before = sh('proc_output_bytes %d' % os.getpid())
@@ -92,9 +92,12 @@ try:
     client.recv(10000)
     time.sleep(0.2)
     after = sh('proc_output_bytes %d' % os.getpid())
-    check("proc_output_bytes: numbers", (before.isdigit(), after.isdigit()), (True, True))
-    check("proc_output_bytes: an answer counts",
-          after.isdigit() and before.isdigit() and int(after) - int(before) >= 5000, True)
+    if sys.platform == "darwin":
+        check("proc_output_bytes: nothing on macOS", (before, after), ("", ""))
+    else:
+        check("proc_output_bytes: numbers", (before.isdigit(), after.isdigit()), (True, True))
+        check("proc_output_bytes: an answer counts",
+              after.isdigit() and before.isdigit() and int(after) - int(before) >= 5000, True)
     check("proc_output_bytes: nothing for no process", sh('proc_output_bytes 999999'), "")
     conn.close()
     client.close()

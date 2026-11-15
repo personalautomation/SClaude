@@ -359,9 +359,10 @@ doctor_macos() {
   while read -r label; do
     [[ -n "$label" ]] || continue
     if [[ "$label" == keepawake.telegram && ! -f "$(launchd_dir)/$label.plist" ]]; then
-      # Written only once the token is there (install.sh); the bot's own
+      # Written only once the token and the chat id are there (bot_env_set
+      # in install.sh); the bot's own
       # lines below say whether it is.
-      doctor_ok "$label is not set up (optional: the token in ~/.config/keepawake/env, then ./install.sh)"
+      doctor_ok "$label is not set up (optional: the token and the chat id in ~/.config/keepawake/env, then ./install.sh)"
     elif [[ ! -f "$(launchd_dir)/$label.plist" ]]; then
       doctor_warn "$label is not installed" "./install.sh writes and loads it"
     elif launchd_loaded "$label"; then
@@ -403,7 +404,7 @@ doctor_machine() {
       if systemctl --user is-active --quiet "$unit" 2>/dev/null; then
         doctor_ok "$unit"
       else
-        doctor_warn "$unit is not running" "./install.sh enables it (the bot only once its token is set)"
+        doctor_warn "$unit is not running" "./install.sh enables it (the bot only once its token and chat id are set)"
       fi
     done
     if [[ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" == "yes" ]]; then

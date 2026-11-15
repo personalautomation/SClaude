@@ -16,7 +16,7 @@ import time
 
 from keepawake.i18n import STRINGS, t
 from keepawake.state import locked, read
-from keepawake import menus, repos, sessions, status_report, topics, widgets
+from keepawake import menus, project_config, repos, sessions, status_report, topics, widgets
 
 
 log = logging.getLogger("keepawake")
@@ -795,18 +795,10 @@ def tty_of_pid(pid):
 
 def from_phone(pid):
     """Whether the process was started by a press on the phone."""
-    if sys.platform == "darwin":
-        # ps shows the environment after the command, a space between each.
-        try:
-            line = subprocess.run(["ps", "-wwE", "-o", "command=", "-p", str(int(pid))],
-                                  capture_output=True, text=True, timeout=5).stdout
-        except (OSError, ValueError, TypeError, subprocess.SubprocessError):
-            return False
-        return " SCLAUDE_FROM_PHONE=1 " in " %s " % line.strip()
     try:
-        with open("/proc/%d/environ" % int(pid), "rb") as fh:
-            return b"\0SCLAUDE_FROM_PHONE=1\0" in b"\0" + fh.read()
-    except (OSError, ValueError, TypeError):
+        procinfo = project_config.sclaude_module("procinfo")
+        return "SCLAUDE_FROM_PHONE=1" in procinfo.environ_of(int(pid))
+    except (ValueError, TypeError):
         return False
 
 

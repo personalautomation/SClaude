@@ -186,18 +186,15 @@ ports_pids() {
 }
 
 # How many bytes a process has put out so far, as a counter that grows when it
-# answers anybody: on Linux what it wrote (wchar in /proc/<pid>/io — files,
-# pipes, sockets alike), on macOS what it sent over the network (nettop's
-# bytes_out; the kernel keeps no count of a process's writes there, and its
-# disk writes leave out a log printed to a terminal). Nothing when it cannot
-# be read.
+# answers anybody: what it wrote (wchar in /proc/<pid>/io — files, pipes,
+# sockets alike). Nothing when it cannot be read, and always nothing on macOS:
+# the kernel keeps no count of a process's writes there, its disk writes leave
+# out a log printed to a terminal, and nettop's bytes_out counts only the
+# connections open at the moment it looks — a request answered and closed
+# between two looks never shows.
 proc_output_bytes() {
-  if procinfo_darwin; then
-    nettop -P -L 1 -n -x -J bytes_out -p "$1" 2>/dev/null \
-      | awk -F, 'NR > 1 && $2 ~ /^[0-9]+$/ { n += $2; seen = 1 } END { if (seen) print n }'
-  else
-    awk '/^wchar:/ {print $2; exit}' "/proc/$1/io" 2>/dev/null
-  fi
+  procinfo_darwin && return 0
+  awk '/^wchar:/ {print $2; exit}' "/proc/$1/io" 2>/dev/null
 }
 
 # Seconds since the last keystroke or mouse move at the machine itself: on

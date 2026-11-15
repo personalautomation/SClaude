@@ -461,8 +461,11 @@ fi
 
 # macOS: the watcher and the proxy as launchd agents in the user's login
 # session (sclaude/lib/core/launchd.sh). They run with this PATH — the GNU
-# tools first, ~/.local/bin on it — as the units run with systemd's. Loaded
-# again on every run, so that a changed template takes effect here and now.
+# tools first, ~/.local/bin on it — as the units run with systemd's. An agent
+# is loaded again when its file changed, so that a changed template takes
+# effect here and now, and loaded when it is not; one unchanged and loaded is
+# left running, as a re-run on Linux leaves the units: a reload would stop
+# code-server, which nothing but the bot starts again.
 if [[ $MACOS -eq 1 ]]; then
   INSTRUMENTS="$REPO"
   # shellcheck source=sclaude/lib/core/launchd.sh
@@ -473,7 +476,7 @@ if [[ $MACOS -eq 1 ]]; then
   # it loads sclaude.gate: something else on either — a dev server started
   # before features had ports of their own, a gate run by hand — would leave
   # the agent restarting every ten seconds, or not loaded at all. Said, and the
-  # rest goes on. A port the agent itself holds is no obstacle: it is reloaded.
+  # rest goes on. A port the agent itself holds is no obstacle.
   port_holder() {
     launchd_loaded "$1" && return 0
     { lsof -nP -iTCP:"$2" -sTCP:LISTEN -Fc 2>/dev/null || true; } | sed -n 's/^c//p' | head -1
@@ -483,18 +486,26 @@ if [[ $MACOS -eq 1 ]]; then
   declare -A port_of=([sclaude.proxy]=3000 [sclaude.gate]=3001)
   while read -r label; do
     [[ -n "$label" ]] || continue
-    # The bot only with its token and chat id (bot_env_set). Without them an
-    # agent loaded earlier is unloaded, so that it stops restarting every ten
-    # seconds; its file stays for the next run to load again.
+    # An agent kept off — the bot without its token and chat id (bot_env_set),
+    # an agent whose port is held — is unloaded and its file removed: launchd
+    # loads every file in LaunchAgents at login, and units_refresh one that is
+    # installed and not loaded, and either would restart it every ten seconds.
+    off=""
     if [[ "$label" == keepawake.telegram ]] && ! bot_env_set; then
-      launchd_loaded "$label" && launchctl bootout "$(launchd_domain)/$label" >/dev/null 2>&1
-      echo "note: keepawake.telegram is not loaded — ~/.config/keepawake/env lacks the token or the chat id" >&2
+      off="keepawake.telegram is not loaded — ~/.config/keepawake/env lacks the token or the chat id"
+    elif [[ -n "${held[$label]:-}" ]]; then
+      off="${held[$label]} holds :${port_of[$label]} — $label is not installed; stop it, then run ./install.sh again"
+    fi
+    if [[ -n "$off" ]]; then
+      launchctl bootout "$(launchd_domain)/$label" >/dev/null 2>&1 || true
+      rm -f "$(launchd_dir)/$label.plist"
+      echo "note: $off" >&2
       continue
     fi
-    launchd_write "$label" "$agent_path" || true
-    if [[ -n "${held[$label]:-}" ]]; then
-      echo "note: ${held[$label]} holds :${port_of[$label]} — $label is written but not loaded;" >&2
-      echo "      stop it, then: launchctl bootstrap $(launchd_domain) $(launchd_dir)/$label.plist" >&2
+    wrote=0
+    launchd_write "$label" "$agent_path" || wrote=$?
+    if (( wrote == 1 )) && launchd_loaded "$label"; then
+      echo "running: $label, unchanged ($(launchd_dir)/$label.plist, log in $(launchd_logs))"
       continue
     fi
     if launchd_load "$label"; then

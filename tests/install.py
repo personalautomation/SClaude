@@ -40,6 +40,9 @@ import sys
 import tempfile
 import time
 
+# launchd_load marks each load under the state directory: under HOME here.
+os.environ.pop("XDG_STATE_HOME", None)
+
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 INSTALL = os.path.join(ROOT, "install.sh")
 failures = []
@@ -443,6 +446,19 @@ if sys.platform == "darwin":
               ["keepawake.hold", "keepawake.hold.plist"])
         check("macos-rerun-unchanged-said", "running: keepawake.code-server, unchanged" in out, True)
 
+        # units_refresh wrote a loaded agent's file after its last load: the
+        # file is what install.sh would write, and still not what launchd
+        # runs on, so it is reloaded.
+        mark_loaded()
+        later = time.time() + 60
+        os.utime(os.path.join(agents, "keepawake.plist"), (later, later))
+        os.remove(launched)
+        out = run(env, "--no-lid")
+        log = open(launched).read().splitlines()
+        check("macos-rerun-refreshed-file-reloaded",
+              sorted(line.split("/")[-1] for line in log if line.startswith(("bootout ", "bootstrap "))),
+              ["keepawake", "keepawake.plist"])
+
         # The bot's token taken away while it runs, and launchd refusing to
         # unload it: the installer goes on, and its file is gone, so that
         # neither the next login nor units_refresh loads it again.
@@ -452,11 +468,12 @@ if sys.platform == "darwin":
         with open(os.path.join(secrets, "env"), "w") as fh:
             fh.write("KEEPAWAKE_BOT_TOKEN=\nKEEPAWAKE_CHAT_ID=42\n")
         code = []
-        out = run(env, "--no-lid", rc=code)
+        out = run(dict(env, LAUNCHD_WAIT_TRIES="1"), "--no-lid", rc=code)
         check("macos-bot-off-bootout-refused",
-              (code, "keepawake.telegram is not loaded" in out, "Remote Login is off" in out,
+              (code, "keepawake.telegram is not loaded" in out, "launchd still runs it" in out,
+               "Remote Login is off" in out,
                os.path.exists(os.path.join(agents, "keepawake.telegram.plist"))),
-              ([0], True, True, False))
+              ([0], True, True, True, False))
         os.remove(os.path.join(tmp, "bootout-fails"))
         unmark_loaded()
         with open(os.path.join(secrets, "env"), "w") as fh:

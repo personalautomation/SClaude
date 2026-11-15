@@ -120,8 +120,8 @@ into `~/Library/LaunchAgents` and loaded by `install.sh`:
 
 Their logs are in `~/Library/Logs/sclaude/`. `sclaude doctor` says whether
 each is loaded and whether a formula is missing; `./install.sh` again loads
-an agent that is not and reloads one whose file changed, and leaves the rest
-running. An agent it keeps off — the proxy or the gate while another process
+an agent that is not and reloads one whose file changed since it was loaded
+(by itself, or by an update of sclaude), and leaves the rest running. An agent it keeps off — the proxy or the gate while another process
 holds its port — is not left in `~/Library/LaunchAgents`, where launchd would
 load it at the next login: the note says what holds the port, and
 `./install.sh` once it is free installs the agent.

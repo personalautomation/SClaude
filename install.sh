@@ -497,17 +497,15 @@ if [[ $MACOS -eq 1 ]]; then
       off="${held[$label]} holds :${port_of[$label]} — $label is not installed; stop it, then run ./install.sh again"
     fi
     if [[ -n "$off" ]]; then
-      launchctl bootout "$(launchd_domain)/$label" >/dev/null 2>&1 || true
       rm -f "$(launchd_dir)/$label.plist"
       echo "note: $off" >&2
-      # A refused bootout leaves the job restarting until logout, its file gone.
-      launchd_loaded "$label" \
-        && echo "      launchd still runs it — unload it with: launchctl bootout $(launchd_domain)/$label" >&2
+      # A job that outlives its bootout restarts until logout, its file gone.
+      launchd_unload "$label" \
+        || echo "      launchd still runs it — unload it with: launchctl bootout $(launchd_domain)/$label" >&2
       continue
     fi
-    wrote=0
-    launchd_write "$label" "$agent_path" || wrote=$?
-    if (( wrote == 1 )) && launchd_loaded "$label"; then
+    launchd_write "$label" "$agent_path" || true
+    if launchd_current "$label"; then
       echo "running: $label, unchanged ($(launchd_dir)/$label.plist, log in $(launchd_logs))"
       continue
     fi

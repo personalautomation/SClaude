@@ -13,6 +13,9 @@ import subprocess
 import sys
 import tempfile
 
+# launchd_load marks each load under the state directory: under HOME here.
+os.environ.pop("XDG_STATE_HOME", None)
+
 LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sclaude", "lib")
 failures = []
 
@@ -190,8 +193,7 @@ try:
     log = launched()
     check("agent: a loaded one is not reloaded", ("bootout" in log, "bootstrap" in log), (False, False))
     check("agent: it is named for the person", "sclaude.w" in out and "./install.sh" in out, True)
-    check("agent: its file left for install.sh to find changed",
-          "<!-- changed -->" in open(agent).read(), False)
+    check("agent: but written", "<!-- changed -->" in open(agent).read(), True)
 
     # A reload waits for the old job to be gone: bootout returns while its
     # process still exits, and launchd refuses the label until then. Here

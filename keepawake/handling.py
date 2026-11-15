@@ -391,7 +391,7 @@ class Handler(object):
             return
         on, out = phone_access.phone_on()
         if not on:
-            self.bot.send(t("chrome.gatefail", log=status_report.escape(out[-1500:])))
+            self.bot.send(phone_access.fail_text(out))
             return
         log.info("phone access turned on by /phone")
         sleep_warning.wait_for_phone(self.bot.send(t("svc.phonewait")))
@@ -548,7 +548,7 @@ class Handler(object):
             if not on:
                 # Most often: funnel not allowed for this node in the tailnet
                 # policy, or this user is not Tailscale's operator.
-                self.bot.edit(message_id, t("chrome.gatefail", log=status_report.escape(out[-1500:])),
+                self.bot.edit(message_id, phone_access.fail_text(out),
                               menus.services_keyboard())
                 return
             log.info("phone access turned on")

@@ -134,6 +134,15 @@ def phone_on():
     return bool(gate_origin(None, False)), out
 
 
+def fail_text(out):
+    """What the chat says when phone access did not turn on: the commands'
+    last lines (tailscale's link to allow funnel, most often), and what is
+    needed once on this system."""
+    from keepawake import status_report
+    key = "chrome.gatefailmac" if units.on_macos() else "chrome.gatefail"
+    return t(key, log=status_report.escape(out[-1500:]))
+
+
 # A funnel just turned on is not reachable at once: Tailscale publishes its
 # name in public DNS only after a while (five minutes once), and a phone that
 # asks before then is told the name does not exist — and keeps that answer for

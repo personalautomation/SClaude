@@ -189,6 +189,13 @@ STRINGS = {
                           "⚠️ Phone access did not turn on:\n<pre>%(log)s</pre>\n"
                           "<i>Needed once: funnel allowed for the laptop in the tailnet "
                           "policy, and <code>sudo tailscale set --operator=$USER</code>.</i>"),
+    # On a Mac the Tailscale app runs its daemon as the person: no operator.
+    "chrome.gatefailmac": ("⚠️ Доступ с телефона не включился:\n<pre>%(log)s</pre>\n"
+                           "<i>Нужно один раз: funnel разрешён для этого Mac в политике "
+                           "tailnet — по ссылке выше, если она есть, — и нажать ещё раз.</i>",
+                           "⚠️ Phone access did not turn on:\n<pre>%(log)s</pre>\n"
+                           "<i>Needed once: funnel allowed for this Mac in the tailnet "
+                           "policy — at the link above, if there is one — then press again.</i>"),
     "chrome.all":        ("Все фичи — localhost:3000", "All features — localhost:3000"),
     "chrome.stopbrowser": ("⏹ Chrome", "⏹ Chrome"),
     "chrome.up":         ("✅ браузер запущен", "✅ browser running"),

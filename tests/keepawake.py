@@ -4874,6 +4874,15 @@ try:
     check("macos: one launchd does not have is no agent", units.status(state.BOT_UNIT), None)
     check("macos: the log is the agent's file",
           units.log_command(state.BOT_UNIT), "tail -n 50 ~/Library/Logs/sclaude/telegram.log")
+    # Phone access not turned on: tailscale's own lines, and what is needed
+    # once there — a Tailscale operator on Linux, none with the Mac's app.
+    _out = "Funnel is not enabled on your tailnet.\nTo enable, visit:\n  https://login.tailscale.com/f/funnel"
+    check("macos: the failure keeps tailscale's link, and asks for no operator",
+          (_out.splitlines()[-1].strip() in phone_access.fail_text(_out),
+           "--operator" in phone_access.fail_text(_out)), (True, False))
+    os.environ["SCLAUDE_OS"] = "linux"
+    check_true("linux: the failure names the operator", "--operator" in phone_access.fail_text(_out))
+    os.environ["SCLAUDE_OS"] = "macos"
 
     # The token from the file when the environment has none: launchd has no
     # EnvironmentFile=, and a plist is no place for a secret.

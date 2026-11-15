@@ -136,9 +136,12 @@ render_prompt() {
   local -x SCLAUDE_V_IN_BLOCKS="" SCLAUDE_V_BLOCK="" SCLAUDE_V_BLOCKS="" SCLAUDE_V_BLOCK_TITLE=""
   if [[ "$step" == review && -n "$wt" ]] && declare -F blocks_active >/dev/null && blocks_active "$wt"; then
     SCLAUDE_V_IN_BLOCKS=1
-    SCLAUDE_V_BLOCK="$(blocks_now "$wt")" SCLAUDE_V_BLOCKS="$(blocks_total "$wt")"
+    # The block by its id, as the cut and the journal name it (its place
+    # until a split moved the places); the seams by their place.
+    local bk; bk="$(blocks_now "$wt")"
+    SCLAUDE_V_BLOCK="$(blocks_id "$wt" "$bk")" SCLAUDE_V_BLOCKS="$(blocks_total "$wt")"
     SCLAUDE_V_BLOCK_TITLE="$(python3 -c 'import json,sys; b=json.load(open(sys.argv[1]))["blocks"]; k=int(sys.argv[2]); print(b[k-1]["title"] if k <= len(b) else "the seams between the blocks")' \
-      "$(blocks_file "$wt")" "$SCLAUDE_V_BLOCK" 2>/dev/null || echo "block $SCLAUDE_V_BLOCK")"
+      "$(blocks_file "$wt")" "$bk" 2>/dev/null || echo "block $SCLAUDE_V_BLOCK")"
   fi
   local -x SCLAUDE_B_ISSUE_CONTEXT=""
   local -x SCLAUDE_B_MANUAL_TOC=""

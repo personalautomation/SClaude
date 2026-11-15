@@ -688,8 +688,8 @@ review_close_words() {
   if declare -F blocks_active >/dev/null && blocks_active "$1"; then
     bk="$(blocks_now "$1")"; bt="$(blocks_total "$1")"
     if [[ "$bk" =~ ^[0-9]+$ && "$bt" =~ ^[0-9]+$ ]] && (( bk < bt )); then
-      printf 'Close block %s/%s now and go on to block %s/%s\nClose block %s/%s\n' \
-        "$bk" "$bt" "$((bk + 1))" "$bt" "$bk" "$bt"
+      local now next; now="$(blocks_label "$1" "$bk" "$bt")"; next="$(blocks_label "$1" $((bk + 1)) "$bt")"
+      printf 'Close block %s now and go on to block %s\nClose block %s\n' "$now" "$next" "$now"
       return 0
     fi
   fi

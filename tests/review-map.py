@@ -91,6 +91,14 @@ with tempfile.TemporaryDirectory() as tmp:
                     replies=[pr_context.DECLINE_PREFIX + ": not needed"], resolved=True),
              thread(3, "app.py", 5, first, "2026-01-01T10:02:00Z"),
              thread(4, "app.py", 20, first, "2026-01-01T10:02:00Z"),
+             # Noted as a reversal, then resolved without a decline: still
+             # a reversal, whatever became of it.
+             thread(7, "app.py", 24, first, "2026-01-01T10:02:00Z", resolved=True),
+             # Noted as a reversal, given to a subagent later and resolved,
+             # a reply naming a commit: a reversal, and no fix of that commit
+             # is taken for it.
+             thread(8, "app.py", 27, first, "2026-01-01T10:02:00Z", resolved=True,
+                    replies=["Would undo the fix in %s, app.py" % second[:7]]),
              thread(5, "notes.md", 1, "", "2026-01-01T12:30:00Z", bot=False),
              # Fixed in another file, the reply says: the commit and the file.
              thread(6, "app.py", 38, first, "2026-01-01T10:03:00Z",
@@ -101,7 +109,7 @@ with tempfile.TemporaryDirectory() as tmp:
     with open(os.path.join(tree, pr_context.YOURS_FILE), "w") as fh:
         fh.write(url % 3 + "\tkeep it " + pr_context.NIGHT_MARK + ")\n")
     with open(os.path.join(feature, "review-reversals"), "w") as fh:
-        fh.write(url % 4 + "\tundoes the guard\n")
+        fh.write(url % 4 + "\tundoes the guard\n# counted 2026-01-01T11:00:00+00:00\n" + url % 7 + "\tundoes the flag\n" + url % 8 + "\tundoes the cap\n")
 
     # A transcript of the fix session: one question about thread 2,
     # answered with the recommended option eight seconds later.
@@ -121,6 +129,12 @@ with tempfile.TemporaryDirectory() as tmp:
                                                       "input": {"file_path": os.path.join(tree, "app.py")}},
                                                      {"type": "tool_use", "id": "e2", "name": "Edit",
                                                       "input": {"file_path": os.path.join(tree, "notes.md")}}]}}) + "\n")
+    with open(os.path.join(agents, "agent-a2.jsonl"), "w") as fh:
+        fh.write(json.dumps({"type": "user", "timestamp": "2026-01-01T10:42:00.000Z",
+                             "message": {"content": "Apply %s after all." % (url % 8)}}) + "\n")
+        fh.write(json.dumps({"type": "assistant", "timestamp": "2026-01-01T10:43:00.000Z",
+                             "message": {"content": [{"type": "tool_use", "id": "e3", "name": "Edit",
+                                                      "input": {"file_path": os.path.join(tree, "cap.txt")}}]}}) + "\n")
     with open(os.path.join(folder, "s1.jsonl"), "w") as fh:
         fh.write(json.dumps({"type": "assistant", "timestamp": "2026-01-01T10:30:00.000Z",
                              "message": {"content": [{"type": "tool_use", "id": "t1", "name": "AskUserQuestion",
@@ -134,6 +148,22 @@ with tempfile.TemporaryDirectory() as tmp:
     out = subprocess.run([sys.executable, MAP, tree], capture_output=True, text=True, env=env)
     check("review_map.py exits 0 (%s)" % out.stderr.strip()[-200:], out.returncode == 0)
     d = json.loads(out.stdout)
+    # A cut whose first block was split: the blocks by their ids, the cut
+    # before kept for the page to play (review_blocks.py split).
+    cutfile = os.path.join(tree, ".sclaude", "local", "feature", "review-blocks.json")
+    with open(cutfile, "w") as fh:
+        json.dump({"base": "x", "blocks": [{"id": "1a", "title": "A", "files": ["app.py"]},
+                                           {"id": "1b", "title": "B", "files": ["notes.md"]}, {"title": "C", "files": []}],
+                   "earlier": [{"until": "2026-01-01T10:10:00+00:00", "split": "1",
+                                "blocks": [{"id": "1", "title": "AB", "files": ["app.py", "notes.md"]}]}]}, fh)
+    cut = json.loads(subprocess.run([sys.executable, MAP, tree], capture_output=True, text=True, env=env).stdout)
+    os.remove(cutfile)
+    check("the blocks carry their criteria", cut["blocks"][0]["criteria"] == [])
+    check("the blocks carry their ids, a block without one its place",
+          [(b["n"], b["id"]) for b in cut["blocks"]] == [(1, "1a"), (2, "1b"), (3, "3")])
+    check("the cut before a split is kept, by its time",
+          [(e["split"], [b["id"] for b in e["blocks"]]) for e in cut["earlier"]] == [("1", ["1"])]
+          and cut["earlier"][0]["until"] == 1767262200.0)
     check("two rounds: a head read twice is one; a missing commit, another PR and a pass stopped on a read head left out",
           [r["head"] for r in d["rounds"]] == [first, second] and not any(r["stopped"] for r in d["rounds"]))
     check("a round read twice adds its time", d["rounds"][0]["seconds"] == 90)
@@ -169,7 +199,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a round with no transcript here does not say what it read", all(r["seen"] is None for r in d["rounds"]))
     out_by = {t["rid"]: t["outcome"] for t in d["threads"] if t["rid"] != "r6"}
     check("thread outcomes: fixed, declined, night, reversal, open",
-          out_by == {"r1": "fixed", "r2": "declined", "r3": "night", "r4": "reversal", "r5": "open"})
+          out_by == {"r1": "fixed", "r2": "declined", "r3": "night", "r4": "reversal", "r5": "open", "r7": "reversal", "r8": "reversal"})
+    flags = {t["rid"]: (t["resolved"], t["left"]) for t in d["threads"]}
+    check("threads carry whether they are resolved and whether a reply left them",
+          (flags["r2"], flags["r4"], flags["r7"], flags["r8"]) == ((True, True), (False, False), (True, False), (True, False)))
+    check("a reversal's reply naming a commit takes no fix of it",
+          not any(h["thread"] == "r8" for h in d["hunks"]))
     by = {t["rid"]: t for t in d["threads"]}
     check("a thread with no commit falls in the round of its time", by["r5"]["r"] == 1
           and by["r5"]["by"] == "person")
@@ -225,6 +260,19 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a line of a later commit carried back to a round head",
           review_map.shifted(tree, later, second, "app.py", 20, {}) == 15
           and review_map.shifted(tree, later, second, "app.py", 3, {}) == 1)
+    with open(os.path.join(tree, "app.py"), "a") as fh:
+        fh.write("asked1 = 1\nasked2 = 2\n")
+    git(tree, "commit", "-qam", "feat: what the person asked for")
+    with open(os.path.join(tree, "app.py"), "a") as fh:
+        fh.write("fixed1 = 1\n")
+    git(tree, "commit", "-qam", "fix: a finding")
+    with open(os.path.join(tree, "app.py"), "a") as fh:
+        fh.write("asked3 = 3\n")
+    git(tree, "commit", "-qam", "test: more\n\nRequirement: the person said so")
+    got = review_map.asked_lines(tree, later, git(tree, "rev-parse", "HEAD"))
+    n = len(lines)
+    check("lines of a feat commit or one with a Requirement are the person's, a fix's are not",
+          got == {"app.py": {n + 1, n + 2, n + 4}})
     check("a path named is not a longer path ending in it",
           review_map.named("lib/x.js", "Read src/lib/x.js") is False
           and review_map.named("lib/x.js", '{"file_path": "lib/x.js"}') is True)
@@ -235,14 +283,28 @@ with tempfile.TemporaryDirectory() as tmp:
             {"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": os.path.join(tree, "notes.md")}}]}}) + "\n")
     old_home = claude_usage.ROOT
     claude_usage.ROOT = os.path.join(home, ".claude", "projects")
-    check("a file read by its absolute path counts as opened",
-          review_map.seen_files(tree, ["p1"], ["app.py", "notes.md"]) == ["notes.md"])
+    check("a file read by its absolute path, all of it, was read whole",
+          review_map.seen_files(tree, ["p1"], ["app.py", "notes.md"], {"notes.md": 40}) == {"notes.md": "whole"})
+    check("one longer than a Read gives was read in part",
+          review_map.seen_files(tree, ["p1"], ["app.py", "notes.md"], {"notes.md": 4000}) == {"notes.md": "part"})
     with open(sess, "a") as fh:
         fh.write(json.dumps({"type": "user", "message": {"content": [
             {"type": "tool_result", "tool_use_id": "r2",
              "content": "   394\tdiff --git a/app.py b/app.py\n   395\tindex 1..2"}]}}) + "\n")
-    check("a diff a Read showed, its lines numbered, counts as opened",
-          review_map.seen_files(tree, ["p1"], ["app.py", "notes.md"]) == ["app.py", "notes.md"])
+    with open(sess, "a") as fh:
+        fh.write(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "r4", "name": "Bash",
+             "input": {"command": "git diff --stat main -- other.py", "description": "check other.py"}}]}}) + "\n")
+    check("a command naming git diff without showing one is a part looked at",
+          review_map.seen_files(tree, ["p1"], ["other.py"], {}) == {"other.py": "part"})
+    check("a diff a Read showed, its lines numbered, counts as its changes seen",
+          review_map.seen_files(tree, ["p1"], ["app.py", "notes.md"], {"notes.md": 40}) == {"app.py": "diff", "notes.md": "whole"})
+    with open(sess, "a") as fh:
+        fh.write(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "r3", "name": "Read",
+             "input": {"file_path": os.path.join(tree, "app.py"), "offset": 10, "limit": 5}}]}}) + "\n")
+    check("a slice read after the diff keeps the most seen",
+          review_map.seen_files(tree, ["p1"], ["app.py"], {})["app.py"] == "diff")
     claude_usage.ROOT = old_home
     # The names the map reads are its owners'.
     check("review-reversals is reversals_file's name",

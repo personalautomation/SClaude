@@ -183,9 +183,13 @@ local_review_run() {
   local -x SCLAUDE_REVIEW_BLOCK="" SCLAUDE_REVIEW_READ=""
   local block="" first=""
   if declare -F blocks_active >/dev/null && blocks_active "$wt"; then
-    block="$(blocks_now "$wt")"
+    block="$(blocks_id "$wt")"
     SCLAUDE_REVIEW_BLOCK="$block"
     python3 "$LIB/review/local_review.py" first "$journal" "$head" "$pr" 2>/dev/null && first=1
+    # A first read under way (a capped pass followed up on its head) goes
+    # on as it began; any other whole read comes to a block within the size.
+    local begun=""
+    [[ -n "$first" ]] && begun="$(python3 "$LIB/review/local_review.py" whole "$journal" "$pr" 2>/dev/null || true)"
     # Its files changed by more than a block is cut to since it was last
     # read whole (a rework, a large fix): read whole again, so that no line
     # of it is left to a diff too long to read well — even on a head a
@@ -199,6 +203,13 @@ local_review_run() {
       else
         warn "  Block $block changed by a block's size since it was read whole; you ended the search, so it is not read whole again." >&2
       fi
+    fi
+    # About to be read whole and past the size: split by behaviour first,
+    # the read going to its first part, a block of its own (a new id: its
+    # first read).
+    if [[ -n "$first" && -z "$begun" ]] && blocks_split "$wt" "$head"; then
+      block="$(blocks_id "$wt")"
+      SCLAUDE_REVIEW_BLOCK="$block"
     fi
     SCLAUDE_REVIEW_READ="${first:+first}"
   fi
@@ -259,7 +270,7 @@ local_review_run() {
     printf '%s\n' "${BOLD}── Checking the fixes · PR #${pr:-?} · $LOCAL_REVIEW_MODEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
     info "  You ended the search for new findings: this only resolves what the commits fixed." >&2
   else
-    printf '%s\n' "${BOLD}── Review pass · PR #${pr:-?}${block:+ · block $block/$(blocks_total "$wt")} · $LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
+    printf '%s\n' "${BOLD}── Review pass · PR #${pr:-?}${block:+ · block $(blocks_label "$wt")} · $LOCAL_REVIEW_MODEL, $LOCAL_REVIEW_LEVEL · ${base:0:7}..${head:0:7} ──${OFF}" >&2
   fi
 
   local earlier began new more cap pass=1 round

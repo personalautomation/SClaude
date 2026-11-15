@@ -516,10 +516,13 @@ review_keep() {
 review_context_log() {
   local wt="$1" slug="$2" session="$3" outcome="$4" held="$5" rounds="$6" root comments reversals
   root="$(scratch_root "$wt")" || return 0
-  # Counted and emptied: each row holds the stretch since the one before it.
-  reversals="$(grep -c . "$(reversals_file "$wt")" 2>/dev/null || true)"
+  # Each row holds the stretch since the one before it: the lines after the
+  # last `#` mark, which the count leaves behind it. The lines themselves
+  # stay — the review's map colours each such thread by them for good.
+  local rf; rf="$(reversals_file "$wt")"
+  reversals="$(awk '/^#/ { n = 0; next } NF { n++ } END { print n + 0 }' "$rf" 2>/dev/null || true)"
   [[ "$reversals" =~ ^[0-9]+$ ]] || reversals=0
-  : > "$(reversals_file "$wt")" 2>/dev/null || true
+  (( reversals )) && printf '# counted %s\n' "$(date -Iseconds)" >> "$rf" 2>/dev/null
   comments="$(python3 - "$wt/.sclaude/local/feature/state.json" "$session" <<'PY' 2>/dev/null || true
 import json, sys
 with open(sys.argv[1]) as fh:
@@ -538,7 +541,8 @@ PY
 # undo a fix the pull request had already settled — one line each, the
 # thread's link and what it would undo. review.md asks for it; the count goes
 # into review_context_log, the measure of whether a long session still holds
-# on to what it settled.
+# on to what it settled, which marks what it counted with a `#` line; the
+# review's map (REVERSALS in review_map.py) reads the links.
 reversals_file() {
   echo "$1/.sclaude/local/feature/review-reversals"
 }

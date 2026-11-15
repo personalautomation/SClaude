@@ -94,7 +94,16 @@ breaks the other silently — grep before you edit:
   `first`, `round`, `cached` and `whole` in `local_review.py` — `whole`
   names the head of a block's last `read: first` run, from which
   `blocks_stale` (`stale` in `review_blocks.py`) counts the change that
-  has a block read whole again; `<if:in-blocks>`,
+  has a block read whole again; a block's `id` (its name for good,
+  `ident`, `blocks_id`) is what `SCLAUDE_REVIEW_BLOCK`, the journal's
+  `block` and the history's `blocks closed`/`blocks split` carry, and a
+  split's parts are named after it (`split` in `review_blocks.py`, the
+  part ids `process_review.js` reads back for its mark); the split's
+  answer shape is spelled out by `blocks_split_prompt` and checked by
+  `split`; the size a block is cut and split against when the project sets
+  none is `SIZE` in `review_blocks.py`, which the map reports, and each
+  fallback of `reviewBlocks.size` in `review_blocks.sh`; `earlier`, the cut before a split, is read by `review_map.py`
+  for the page; `<if:in-blocks>`,
   `<block>`, `<blocks>`, `<block-title>` are set by `render_prompt` for
   `review.md`; the cut's JSON shape is spelled out to its session by
   `blocks_cut_prompt` and checked by `validate`. `tests/review-blocks.py`

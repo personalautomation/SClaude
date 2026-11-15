@@ -170,7 +170,11 @@ machine whatever the `review` setting; under a GitHub setting the project's
 CI there still counts. The menu says `4/7 review · block 2/5`.
 A block whose files change by more than a block's size after it was read
 (a rework, a large fix) is read whole again before it closes — unless you
-ended the search, when you are told it was not. `reviewBlocks` in the project's
+ended the search, when you are told it was not. A block that has grown past a
+block's size by then — its fixes added files, a rework added code — is first
+split by behaviour into smaller blocks (`1a`, `1b`, …), each read whole on its
+own, and the topic shows the blocks as they are now; the blocks after keep
+their names. `reviewBlocks` in the project's
 config sets the two sizes (`from`, 5000, and `size`, 3000 lines a block).
 Once the preview's tests pass, before the issue goes to QA, when the
 product's code changed since the last demo — the review may have changed what

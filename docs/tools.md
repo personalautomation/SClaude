@@ -294,8 +294,24 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   the development did not write — starts as a point in the middle of its
   round. An icicle's colour is how the thread it answered ended (fixed, declined,
   left to you, decided at night, would undo a fix, open, or no thread at
-  all), pale where it touched comments rather than code, hatched where it
-  added lines. Dots are the threads, piled into a column where a round
+  all — a finding noted as undoing a fix stays that colour however its
+  thread ended later, which its hover says); the share of it that is code you asked for during the review (a
+  `feat` commit, or one with a `Requirement:` line) is beige, as the code
+  written before the review is; darker the more earlier rounds had already
+  rewritten that spot (0, 1, 2, 3 or more). Solid where a line of code
+  changed, hollow where none did; a pattern for each kind of change it
+  holds, laid over one another — tests /, migrations \, docs and config —,
+  only comments in the code ·. A green line at the foot of a round's row, under a file,
+  says the round read it and found nothing there — thick when it read the
+  whole file or all its change; a thin blue one, only the last fixes'
+  change; a dashed yellow one, a part only. A review block's name is
+  green once it is read and closed, blue while it is read; hovering it
+  gives its changed lines against what one pass reads whole, its files and
+  criteria, and what its rounds cost and found, the threads of its last
+  rounds in a row — at the moment shown when the history is played back;
+  a click folds it to a sliver, and again opens it, remembered for that
+  feature. None is drawn where the
+  file's icicle goes on through the row; the row it closes in keeps it. Dots are the threads, piled into a column where a round
   posted several close together, so a tall pile is a place the review kept
   finding things; ✋ with a number how many times you
   stepped in during a round or at one place (answers and your own threads),

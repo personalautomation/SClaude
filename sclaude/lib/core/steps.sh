@@ -694,7 +694,7 @@ step_label() {
     fi
   fi
   if [[ "$1" == review && -n "${2:-}" ]] && declare -F blocks_active >/dev/null && blocks_active "$2"; then
-    echo "$(($(step_index "$1") + 1))/$total $(step_title "$1") · block $(blocks_now "$2")/$(blocks_total "$2")"
+    echo "$(($(step_index "$1") + 1))/$total $(step_title "$1") · block $(blocks_label "$2")"
     return
   fi
   if [[ "$1" != "done" ]]; then

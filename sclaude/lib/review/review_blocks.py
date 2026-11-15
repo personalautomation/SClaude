@@ -26,6 +26,17 @@
 # A cut that fails twice gives way to the parts the feature was built in
 # (draft), or, for a feature built in one go, to a single read as before.
 #
+# A block outgrows its cut: the fixes of its rounds — new files among them,
+# which its whole read takes — or a rework add to it, until a pass cannot
+# read it whole in earnest. Before such a read (its first, or again once it
+# went stale) a block past the size is split by the same rule, by behaviour,
+# its criteria and files shared out (split, blocks_split in
+# review_blocks.sh). A block keeps its `id` for good — the journal and the
+# history name it by that — so the parts of block "1" are "1a", "1b", and
+# the blocks after keep theirs while their places move up; the cut as it
+# stood before is kept in `earlier`, for the review's map to show what was
+# read under which.
+#
 #   review_blocks.py size <wt> <base>                 changed lines, generated files left out
 #   review_blocks.py files <wt> <base> <state>        a line a changed file, for the cut's session
 #   review_blocks.py take <answer> <out> <base> <head>  the session's JSON into the cut
@@ -41,12 +52,24 @@
 #   review_blocks.py stale <wt> <file> <k> <since> <head> <limit>
 #                                                     exit 0 when block <k>'s files changed
 #                                                     by <limit> lines or more since <since>
+#   review_blocks.py id <file> <k>                    block <k>'s id, what the journal names it by
+#   review_blocks.py outgrown <wt> <file> <k> <head> <limit>
+#                                                     exit 0 when block <k> (with the files no
+#                                                     block owns, which it takes) is past <limit>
+#   review_blocks.py brief <wt> <file> <k> <head>     block <k> as the splitting session reads it
+#   review_blocks.py split <wt> <file> <k> <head> <answer> <limit>
+#                                                     the session's parts in place of block <k>;
+#                                                     their faults, one a line, and exit 1 on any
+#   review_blocks.py tried <file> <k> <head>          a split of block <k> failed on <head>: not again
 #
 # The file (FEATURE_BLOCKS, review-blocks.json beside the feature's state):
 #   {"base": <commit the review reads from>, "head": <the head cut>,
 #    "source": "session" | "parts" , "rules": [{"title", "criteria", "where"}],
 #    "blocks": [{"title", "criteria": [ids], "files": [paths], "why",
-#                "contracts": [text]}], "closed": {"<k>": <head>}}
+#                "contracts": [text], "id": "<its name for good; its place when absent>"}],
+#    "closed": {"<k>": <head>}, "tried": {"<id>": <head a split did not hold on>},
+#    "earlier": [{"until": <ISO time>, "head": <head>, "split": "<id>",
+#                 "blocks": [{"id", "title", "files", "criteria"}]}]}
 import json
 import os
 import re
@@ -58,6 +81,9 @@ import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 import acceptance  # noqa: E402
 
 FEATURE_BLOCKS = os.path.join(".sclaude", "local", "feature", "review-blocks.json")
+# reviewBlocks.size when the project sets none: the changed lines one pass
+# reads whole. review_blocks.sh falls back to the same figure.
+SIZE = 3000
 
 # Files a tool writes: owned like any other, never counted in a block's size
 # — a regenerated lock file or snapshot is no reading.
@@ -258,7 +284,7 @@ def summary(path):
     out = []
     for i, b in enumerate(data["blocks"], 1):
         crit = ", ".join(b.get("criteria") or []) or "no criterion of its own"
-        out.append("%d. %s — %d files; %s" % (i, b["title"], len(b.get("files") or []), crit))
+        out.append("%s. %s — %d files; %s" % (ident(data, i), b["title"], len(b.get("files") or []), crit))
     out.append("%d. The seams: the blocks together, and what changed in a closed block after it closed"
                % (len(data["blocks"]) + 1))
     return out
@@ -269,20 +295,150 @@ def criteria_text(wt, ids):
     return ["- %s — %s" % (c, known.get(c, "(not in the plan)")) for c in ids]
 
 
+def ident(data, k):
+    """Block <k>'s id: its name for good, its place until a split moved the
+    places."""
+    return str(data["blocks"][k - 1].get("id") or k)
+
+
+def adopt(wt, path, data, k, head):
+    """A file the fixes added, owned by no block: block <k>, read now, takes
+    it, so that every line is read whole once. The files changed now."""
+    files = changed(wt, data["base"], head)
+    owned = {f for o in data["blocks"] for f in o.get("files") or []}
+    orphans = sorted(f for f in files if f not in owned)
+    if orphans:
+        b = data["blocks"][k - 1]
+        b["files"] = list(b.get("files") or []) + orphans
+        save(path, data)
+    return files
+
+
+def outgrown(wt, path, k, head, limit):
+    """Whether block <k>, with the files it takes, is past <limit> changed
+    lines (generated ones left out) and more than one file: past what a
+    pass reads whole in earnest."""
+    data = load(path)
+    if not 1 <= k <= len(data["blocks"]) or (data.get("tried") or {}).get(ident(data, k)) == head:
+        return False
+    files = adopt(wt, path, data, k, head)
+    own = [f for f in data["blocks"][k - 1].get("files") or [] if f in files]
+    return len(own) > 1 and sum(files[f] for f in own if not generated(wt, f)) > limit
+
+
+def brief(wt, path, k, head):
+    """Block <k> for the session that splits it: what it answers for, its
+    files now, where it meets the others."""
+    data = load(path)
+    b = data["blocks"][k - 1]
+    files = changed(wt, data["base"], head)
+    lines = ["Block %s: %s%s" % (ident(data, k), b.get("title") or "", " — %s" % b["why"] if b.get("why") else "")]
+    if b.get("criteria"):
+        lines += ["", "Its criteria (.sclaude/local/feature/plan.md has the plan around them):"]
+        lines += criteria_text(wt, b["criteria"])
+    lines += ["", "Its files — path, lines changed, generated or not, or \"no longer changed\" for one "
+              "a fix took back:"]
+    lines += ["%s\t%d\t%s" % (f, files[f], "generated" if generated(wt, f) else "-") if f in files
+              else "%s\t0\tno longer changed" % f for f in b.get("files") or []]
+    if b.get("contracts"):
+        lines += ["", "Where it meets the other blocks:"] + ["- %s" % c for c in b["contracts"]]
+    return "\n".join(lines)
+
+
+def split(wt, path, k, head, answer, limit):
+    """The session's parts in place of block <k>, when they hold: every
+    file and criterion of the block in exactly one part, two parts or more,
+    none past <limit> but a single file. Each part named for good after the
+    block (1 → 1a, 1b; 1a → 1a1, 1a2), every block given its id before the
+    places move, and the cut as it stood kept in `earlier`. The faults,
+    nothing written, when they do not hold."""
+    try:
+        with open(answer, encoding="utf-8") as fh:
+            text = fh.read()
+        parts = json.loads(text[text.index("{"):text.rindex("}") + 1]).get("blocks")
+    except (OSError, ValueError, AttributeError) as e:
+        return ["no JSON object of the shape asked for in the answer (%s)" % e]
+    data = load(path)
+    b = data["blocks"][k - 1]
+    files = changed(wt, data["base"], head)
+    # Every file the block owns, a change taken back by a fix too: it still
+    # carries one of its behaviours, and a later change reads it there.
+    mine = list(b.get("files") or [])
+    if not isinstance(parts, list) or len(parts) < 2:
+        return ["give two blocks or more: one block is the block as it is"]
+    faults, seen, crit = [], {}, {}
+    for i, p in enumerate(parts, 1):
+        if not isinstance(p, dict) or not p.get("title"):
+            faults.append("part %d has no title" % i)
+            continue
+        own = p.get("files", [])
+        lists = [own, p.get("criteria", []), p.get("contracts", [])]
+        if not (isinstance(p["title"], str) and isinstance(p.get("why", ""), str)
+                and all(isinstance(x, list) and all(isinstance(v, str) for v in x) for x in lists)):
+            faults.append("part %d: `title` and `why` are strings, `files`, `criteria` and `contracts` "
+                          "lists of strings" % i)
+            continue
+        if not own:
+            faults.append("part %d (%s) owns no file" % (i, p["title"]))
+        elif all(f in mine and f not in files for f in own):
+            faults.append("part %d (%s) owns only files the pull request no longer changes (%s): "
+                          "put them with a part that has changes" % (i, p["title"], ", ".join(own)))
+        for f in own:
+            if f in seen:
+                faults.append("%s is in part %d and part %d: a file has one owner" % (f, seen[f], i))
+            elif f not in mine:
+                faults.append("%s is in part %d but is not the block's" % (f, i))
+            seen.setdefault(f, i)
+        lines = sum(files.get(f, 0) for f in own if not generated(wt, f))
+        if len(own) > 1 and lines > limit:
+            faults.append("part %d (%s) has %d changed lines, past %d: split it further"
+                          % (i, p["title"], lines, limit))
+        for c in p.get("criteria") or []:
+            crit.setdefault(c, []).append(i)
+    for f in sorted(set(mine) - set(seen)):
+        faults.append("%s is the block's and in no part" % f)
+    for c in b.get("criteria") or []:
+        if c not in crit:
+            faults.append("criterion %s is in no part" % c)
+        elif len(crit[c]) > 1:
+            faults.append("criterion %s is in parts %s: one each" % (c, ", ".join(map(str, crit[c]))))
+    for c in sorted(set(crit) - set(b.get("criteria") or [])):
+        faults.append("criterion %s is not the block's" % c)
+    if faults:
+        return faults
+    import datetime
+    for i, o in enumerate(data["blocks"], 1):
+        o.setdefault("id", str(i))
+    data.setdefault("earlier", []).append({
+        "until": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "head": head, "split": b["id"],
+        "blocks": [{"id": o["id"], "title": o.get("title") or "", "files": list(o.get("files") or []),
+                    "criteria": list(o.get("criteria") or [])} for o in data["blocks"]]})
+    mark = "1" if b["id"][-1].isalpha() else "a"
+    names = [b["id"] + (str(i) if mark == "1" else chr(ord("a") + i - 1)) for i in range(1, len(parts) + 1)]
+    new = [{"id": n, "title": p["title"], "criteria": p.get("criteria") or [], "files": p.get("files") or [],
+            "why": p.get("why") or "", "contracts": p.get("contracts") or []} for n, p in zip(names, parts)]
+    data["blocks"][k - 1:k] = new
+    save(path, data)
+    return []
+
+
+def tried(path, k, head):
+    """A split of block <k> tried on <head> and not held: not tried there
+    again (outgrown answers no)."""
+    data = load(path)
+    data.setdefault("tried", {})[ident(data, k)] = head
+    save(path, data)
+    return 0
+
+
 def scope(wt, path, k, head):
     """Block <k>'s first read, as the scope sentence local_review.sh hands
     the pass."""
     data = load(path)
     blocks, base = data["blocks"], data["base"]
     b = blocks[k - 1]
-    files = changed(wt, base, head)
-    # A file the fixes of earlier blocks added, owned by none: the block read
-    # now takes it, so that every line is read whole once.
-    owned = {f for o in blocks for f in o.get("files") or []}
-    orphans = sorted(f for f in files if f not in owned)
-    if orphans:
-        b["files"] = list(b.get("files") or []) + orphans
-        save(path, data)
+    files = adopt(wt, path, data, k, head)
     own = [f for f in b["files"] if f in files]
     if own:
         read = ("Its files, each read whole as it is at %s, and what this pull request changed in "
@@ -293,8 +449,10 @@ def scope(wt, path, k, head):
         read = ("None of its files is changed by this pull request any more (%s): an earlier "
                 "block's fixes took them back. Check that its criteria hold in the code as it is "
                 "at %s, and read no diff as its own." % (", ".join(b["files"]) or "none", head[:7]))
-    lines = ["block %d of %d of this pull request, read on its own: **%s**%s"
-             % (k, len(blocks), b["title"], " — %s" % b["why"] if b.get("why") else "")]
+    name = ident(data, k)
+    place = "%d of %d" % (k, len(blocks)) if name == str(k) else "%s (%d of %d)" % (name, k, len(blocks))
+    lines = ["block %s of this pull request, read on its own: **%s**%s"
+             % (place, b["title"], " — %s" % b["why"] if b.get("why") else "")]
     if b.get("criteria"):
         lines += ["", "The behaviours it answers for, the plan's criteria "
                   "(.sclaude/local/feature/plan.md has the plan around them):"]
@@ -315,7 +473,7 @@ def scope(wt, path, k, head):
                   "Open their files to follow this block's criteria end to end, through every layer "
                   "they pass, or to check a contract, and report what breaks this block's "
                   "behaviours wherever it is; do not review their code for its own sake." % "; ".join(
-                      "%d. %s%s" % (i, t, " (read, closed)" if str(i) in data.get("closed", {}) else "")
+                      "%s. %s%s" % (ident(data, i), t, " (read, closed)" if str(i) in data.get("closed", {}) else "")
                       for i, t in others)]
     return "\n".join(lines)
 
@@ -325,7 +483,7 @@ def seams(wt, path, head):
     blocks, base = data["blocks"], data["base"]
     lines = ["the seams of this pull request, read after each of its blocks was reviewed on its "
              "own: %s. Do not look for every bug again; look for what no block could see:" % "; ".join(
-                 "%d. %s" % (i, b["title"]) for i, b in enumerate(blocks, 1)),
+                 "%s. %s" % (ident(data, i), b["title"]) for i, b in enumerate(blocks, 1)),
              "",
              "- the behaviours together: two blocks' criteria that share state, an order of "
              "events or a permission, run against each other;",
@@ -339,8 +497,8 @@ def seams(wt, path, head):
         late = sorted(set(b["files"]) & set(changed(wt, at, head)))
         if late:
             any_late = True
-            lines.append("  - block %d (%s, criteria %s): `git diff %s..%s -- %s`" % (
-                i, b["title"], ", ".join(b.get("criteria") or []) or "none", at, head, " ".join(late)))
+            lines.append("  - block %s (%s, criteria %s): `git diff %s..%s -- %s`" % (
+                ident(data, i), b["title"], ", ".join(b.get("criteria") or []) or "none", at, head, " ".join(late)))
     if not any_late:
         lines.append("  - none: no block's files changed after it closed;")
     rules = data.get("rules") or []
@@ -364,8 +522,8 @@ def touched(wt, path, k, since, head):
             continue
         late = sorted(hit & set(b["files"]))
         if late:
-            out.append("%s — block %d, %s, answers for %s" % (
-                ", ".join(late), i, b["title"], ", ".join(b.get("criteria") or []) or "no criterion"))
+            out.append("%s — block %s, %s, answers for %s" % (
+                ", ".join(late), ident(data, i), b["title"], ", ".join(b.get("criteria") or []) or "no criterion"))
     if not out:
         return ""
     return (" These commits change files of blocks already reviewed; check each change keeps "
@@ -443,6 +601,20 @@ def main(argv):
         return 0
     if cmd == "stale" and len(a) == 6:
         return 0 if stale(a[0], a[1], int(a[2]), a[3], a[4], int(a[5])) else 1
+    if cmd == "id" and len(a) == 2:
+        print(ident(load(a[0]), int(a[1])))
+        return 0
+    if cmd == "outgrown" and len(a) == 5:
+        return 0 if outgrown(a[0], a[1], int(a[2]), a[3], int(a[4])) else 1
+    if cmd == "brief" and len(a) == 4:
+        print(brief(a[0], a[1], int(a[2]), a[3]))
+        return 0
+    if cmd == "split" and len(a) == 6:
+        faults = split(a[0], a[1], int(a[2]), a[3], a[4], int(a[5]))
+        print("\n".join(faults))
+        return 1 if faults else 0
+    if cmd == "tried" and len(a) == 3:
+        return tried(a[0], int(a[1]), a[2])
     if cmd == "close" and len(a) == 3:
         return close(a[0], int(a[1]), a[2])
     return 2

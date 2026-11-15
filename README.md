@@ -132,7 +132,9 @@ most of them built into the flow, the rest shared as team practice:
   the way it did.
 - **A map of the review.** Under the review step, every file of the pull
   request and every round: where the fixes went, how each thread ended,
-  where a person stepped in and how fast they took the recommended answer.
+  where a person stepped in and how fast they took the recommended answer,
+  where a round read a file and found nothing, how often review went back
+  over its own fixes, and what the person asked for along the way, apart.
   It shows where review still finds real bugs and where it has turned to
   polishing comments, so the person knows when to stop it.
 - **Metrics with no overhead.** Not a single field to fill in. DORA's four
@@ -299,7 +301,8 @@ no direct pushes.
   review reads part of the diff and calls the rest clean, so sclaude cuts
   it by behaviour — each rule with the code that carries it, from the
   database to the screen — reads the blocks one by one, then the seams
-  between them.
+  between them. A block that the fixes grow past what one pass reads whole
+  is cut again before its next whole read, the foundation first.
 
 The whole list of what closes each step is in
 [How the cycle is kept in line](docs/cycle.md).

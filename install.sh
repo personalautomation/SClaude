@@ -506,9 +506,11 @@ if [[ $MACOS -eq 1 ]]; then
     fi
     wrote=0
     launchd_write "$label" "$agent_path" || wrote=$?
+    # Not written: a loaded agent goes on as it runs, one that is not is
+    # loaded from the file already there.
     if (( wrote == 2 )); then
-      echo "note: could not write $(launchd_dir)/$label.plist — $label is left as it was" >&2
-      continue
+      echo "note: could not write $(launchd_dir)/$label.plist" >&2
+      launchd_loaded "$label" && continue
     fi
     if launchd_current "$label"; then
       echo "running: $label, unchanged ($(launchd_dir)/$label.plist, log in $(launchd_logs))"

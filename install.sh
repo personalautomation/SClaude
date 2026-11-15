@@ -504,7 +504,12 @@ if [[ $MACOS -eq 1 ]]; then
         || echo "      launchd still runs it — unload it with: launchctl bootout $(launchd_domain)/$label" >&2
       continue
     fi
-    launchd_write "$label" "$agent_path" || true
+    wrote=0
+    launchd_write "$label" "$agent_path" || wrote=$?
+    if (( wrote == 2 )); then
+      echo "note: could not write $(launchd_dir)/$label.plist — $label is left as it was" >&2
+      continue
+    fi
     if launchd_current "$label"; then
       echo "running: $label, unchanged ($(launchd_dir)/$label.plist, log in $(launchd_logs))"
       continue

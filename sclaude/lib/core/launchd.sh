@@ -74,9 +74,10 @@ launchd_current() {
 # long poll — and until it is gone launchd still prints the job, and refuses
 # the label to a bootstrap ("Bootstrap failed: 5: Input/output error"). A
 # reload by install.sh left keepawake.hold unloaded that way, the Mac unheld
-# with a one-line note. So the job is waited for, up to the 20 seconds launchd
-# gives a process to exit (ExitTimeOut).
-LAUNCHD_WAIT_TRIES="${LAUNCHD_WAIT_TRIES:-40}"
+# with a one-line note. So the job is waited for, ten seconds past the 20
+# launchd gives a process to exit before it kills it (ExitTimeOut): a job
+# still there then is one launchd did not take down.
+LAUNCHD_WAIT_TRIES="${LAUNCHD_WAIT_TRIES:-60}"
 launchd_unload() {
   local try
   launchd_loaded "$1" || return 0
@@ -89,17 +90,23 @@ launchd_unload() {
 }
 
 # Loads an agent from its file, unloading the one loaded first, and tries the
-# load a few times before it counts as failed.
+# load a few times before it counts as failed. The mark takes the file's own
+# time, read before the load: a file written while it loads is then newer
+# than the mark, and reloaded once more rather than taken for what runs.
 launchd_load() {
-  local label="$1" try
+  local label="$1" try plist mark
+  plist="$(launchd_dir)/$label.plist"
+  mark="$(launchd_mark "$label")"
+  mkdir -p "${mark%/*}" && touch -r "$plist" "$mark.next" 2>/dev/null
   launchd_unload "$label" || true
   for (( try = 0; try < 3; try++ )); do
-    if launchctl bootstrap "$(launchd_domain)" "$(launchd_dir)/$label.plist" 2>/dev/null; then
-      mkdir -p "$(dirname "$(launchd_mark "$label")")" && touch "$(launchd_mark "$label")"
+    if launchctl bootstrap "$(launchd_domain)" "$plist" 2>/dev/null; then
+      mv -f "$mark.next" "$mark" 2>/dev/null
       return 0
     fi
     sleep 1
   done
+  rm -f "$mark.next"
   return 1
 }
 

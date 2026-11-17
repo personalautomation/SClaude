@@ -158,8 +158,8 @@ PY
     SCLAUDE_V_MAP_OFF="${map_off:+1}" \
     SCLAUDE_V_PR_NUMBER="$pr_number" \
     SCLAUDE_V_NO_CHANGE="$no_change" \
-    SCLAUDE_V_TERMINAL_RAW="$wt/.sclaude/local/feature/terminal" \
-    SCLAUDE_V_TRANSCRIPTS="$(transcript_dir "$wt")" \
+    SCLAUDE_V_TERMINAL_RAW="$(term_mirror "$wt")" \
+    SCLAUDE_V_TRANSCRIPTS="$(transcripts_mirror "$wt")" \
     SCLAUDE_V_WORKTREE="$wt" \
     SCLAUDE_V_BRANCH="$(state_get "$fstate" branch 2>/dev/null || true)" \
     SCLAUDE_V_INSTRUMENTS="$INSTRUMENTS" \
@@ -203,9 +203,7 @@ PY
   [[ -n "$last" ]] && which=(--resume "$session")
   ( cd "$wt" && claude_launch "${which[@]}" --model opus --effort medium \
       "${guard[@]}" \
-      --permission-mode plan --add-dir "$INSTRUMENTS" --add-dir "$TERM_DIR" \
-      --add-dir "$(cd "$wt" && term_dir)" \
-      --add-dir "$HOME/.claude/projects" \
+      --permission-mode plan --add-dir "$INSTRUMENTS" \
       -n "$(session_label retro)/$slug" "$prompt" )
   session_watch_stop
   # The live checkout moved on while it ran: what it published was brought in

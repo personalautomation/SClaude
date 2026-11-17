@@ -162,6 +162,30 @@ term_skip() {
   fi
 }
 
+# Every raw recording a feature has, linked into its tree, with a list of
+# them beside; prints the list's path. The recordings live where term_dir
+# put them — the main checkout, or ~/.claude/sclaude/terminal — and a
+# session given those with --add-dir meets Claude Code's trust question at
+# every start; the tree is its own directory. Hard links, so the run still
+# being recorded goes on growing in the tree too; a copy across file systems.
+#
+#   term_mirror <worktree>
+term_mirror() {
+  local wt="$1" list="$1/.sclaude/local/feature/terminal"
+  local dir="$1/.sclaude/local/terminal-raw" out="$1/.sclaude/local/terminal-raw.txt" run dest
+  mkdir -p "$dir"
+  : > "$out"
+  if [[ -s "$list" ]]; then
+    while IFS= read -r run; do
+      [[ -f "$run" ]] || continue
+      dest="$dir/${run##*/}"
+      ln -f "$run" "$dest" 2>/dev/null || cp -f "$run" "$dest" 2>/dev/null || continue
+      echo "$dest" >> "$out"
+    done < "$list"
+  fi
+  echo "$out"
+}
+
 # Every recording a feature has, played back into one text file. Prints the
 # file's path; returns 1 when there is nothing.
 term_render() {

@@ -287,6 +287,35 @@ echo "rc=$?"
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+# --- the raw recordings handed to the retrospective (term_mirror) ---
+#
+# Linked into the feature's tree rather than handed over with --add-dir: Claude
+# Code asks at every start whether to trust a directory added that way.
+tmp = tempfile.mkdtemp()
+try:
+    rec_dir = os.path.join(tmp, "recordings")
+    wt = os.path.join(tmp, "wt")
+    os.makedirs(rec_dir)
+    os.makedirs(os.path.join(wt, ".sclaude/local/feature"))
+    rec = os.path.join(rec_dir, "20261009-100000-1.log")
+    with open(rec, "w") as fh:
+        fh.write("run one\n")
+    with open(os.path.join(wt, ".sclaude/local/feature/terminal"), "w") as fh:
+        fh.write(rec + "\n" + os.path.join(rec_dir, "gone.log") + "\n")
+    script = 'source "%s/core/terminal.sh"; term_mirror "%s"' % (LIB, wt)
+    listed = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.strip()
+    check("mirror-list-in-the-tree", listed, os.path.join(wt, ".sclaude/local/terminal-raw.txt"))
+    linked = open(listed).read().split()
+    check("mirror-names-what-exists", linked, [os.path.join(wt, ".sclaude/local/terminal-raw", os.path.basename(rec))])
+    # A run still recorded keeps growing where the session reads it.
+    with open(rec, "a") as fh:
+        fh.write("run one goes on\n")
+    check("mirror-follows-the-run", open(linked[0]).read() if linked else "", "run one\nrun one goes on\n")
+    retro_sh = open(os.path.join(LIB, "improve", "retro.sh")).read()
+    check("retro-no-recordings-dir", ('"$TERM_DIR"' in retro_sh, "term_dir)" in retro_sh), (False, False))
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
 # --- where a project's runs are recorded (term_dir, scratch_hide) ---
 proj = tempfile.mkdtemp()
 try:

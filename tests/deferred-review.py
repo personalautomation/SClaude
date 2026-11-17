@@ -36,7 +36,7 @@ def git(cwd, *args):
                           text=True, env=env, check=True).stdout
 
 
-def review(repo, prompt_out, dirty=False):
+def review(repo, prompt_out, dirty=False, memedit=""):
     """Run cmd_deferred with the session stubbed; its output."""
     script = r'''
 set -uo pipefail
@@ -48,13 +48,25 @@ new_session_id() { echo 00000000-0000-0000-0000-000000000000; }
 review_guard_settings() { :; }
 instruments_state() { echo same; }; instruments_unchanged() { :; }
 session_watch_start() { :; }; session_watch_stop() { :; }; session_closed() { return 0; }
-claude_launch() { printf '%%s' "${@: -1}" > "%(out)s"; [[ -z "${DIRTY:-}" ]] || echo x > dirty.txt; }
+claude_launch() {
+  printf '%%s' "${@: -1}" > "%(out)s"; printf '%%s\n' "$@" > "%(out)s.args"
+  [[ -z "${DIRTY:-}" ]] || echo x > dirty.txt
+  if [[ -n "${MEMEDIT:-}" ]]; then
+    # The session edits its copy, while another session of the product
+    # changes one of the same files in the memory itself.
+    echo edited > .sclaude/local/memory/a.md; rm .sclaude/local/memory/b.md
+    echo new > .sclaude/local/memory/new.md
+    echo mine > .sclaude/local/memory/c.md; echo theirs > "$MEMEDIT/c.md"
+  fi
+}
 gh() { :; }
 link_node_modules() { echo "LINKED $REPO -> $1"; }
 deps_get() { [[ "$1" == dir ]] && echo node_modules; }
 cmd_deferred
 ''' % {"lib": LIB, "prompts": PROMPTS, "root": ROOT, "out": prompt_out}
-    env = dict(os.environ, DIRTY="1" if dirty else "", SCLAUDE_DEV="tester")
+    # A home of its own: the memory the review carries back is written there.
+    env = dict(os.environ, DIRTY="1" if dirty else "", SCLAUDE_DEV="tester",
+               HOME=os.path.join(os.path.dirname(repo), "home"), MEMEDIT=memedit)
     return subprocess.run(["bash", "-c", script], cwd=repo, capture_output=True,
                           text=True, timeout=60, env=env).stdout
 
@@ -90,8 +102,17 @@ try:
     with open(os.path.join(d, "13-b.tsv"), "w") as fh:
         fh.write("2026-09-02\tmyapp\t13-b\treview\tclass-b\tOnly here.\n")
 
+    # Claude Code's memory for the product, by the encoding Claude Code uses
+    # for the main checkout.
+    memory = os.path.join(tmp, "home", ".claude", "projects",
+                          re.sub(r"[^a-zA-Z0-9]", "-", repo), "memory")
+    os.makedirs(memory)
+    for name in ("a.md", "b.md", "c.md", "d.md"):
+        with open(os.path.join(memory, name), "w") as fh:
+            fh.write("old\n")
+
     out_file = os.path.join(tmp, "prompt.txt")
-    out = review(repo, out_file)
+    out = review(repo, out_file, memedit=memory)
     prompt = open(out_file).read() if os.path.exists(out_file) else ""
     check("review-ran", "DIE" in out, False)
     check("names-mains-file", "deferred/12-a.tsv" in prompt, True)
@@ -101,7 +122,61 @@ try:
     check("memory-filled", "<memory>" in prompt, False)
     # The config as the main checkout holds it, set and not committed.
     check("config-in-the-tree", "/.sclaude/local/main-config.json" in prompt, True)
-    check("memory-of-main", "/.claude/projects/%s/memory" % re.sub(r"[^a-zA-Z0-9]", "-", repo) in prompt, True)
+    # The memory is handed over as a copy in the tree: ~/.claude/projects
+    # added with --add-dir put Claude Code's trust question before every review.
+    check("memory-copy-in-the-tree", "/.sclaude/local/memory" in prompt, True)
+    check("no-projects-dir", ".claude/projects" in prompt + open(out_file + ".args").read(), False)
+
+    def read(name):
+        try:
+            return open(os.path.join(memory, name)).read()
+        except OSError:
+            return None
+    # What the session changed in the copy is carried back; a file another
+    # session changed meanwhile keeps theirs, with the review's beside it.
+    check("memory-edit-back", read("a.md"), "edited\n")
+    check("memory-removal-back", read("b.md"), None)
+    check("memory-new-back", read("new.md"), "new\n")
+    check("memory-untouched", read("d.md"), "old\n")
+    check("memory-theirs-kept", read("c.md"), "theirs\n")
+    check("memory-mine-beside", read("c.md.from-deferred"), "mine\n")
+    check("memory-clash-named", "c.md.from-deferred" in out, True)
+
+    # A copy left holding edits — a run killed before carrying it back, a
+    # session the workshop reopened — is carried back before it is made
+    # again; and a copy carried back once is not carried again, so the memory
+    # moving on later reads as no clash.
+    tree = os.path.join(tmp, "left")
+    left = os.path.join(tree, ".sclaude", "local", "memory")
+    mem2 = os.path.join(tmp, "mem2")
+    os.makedirs(mem2)
+    with open(os.path.join(mem2, "x.md"), "w") as fh:
+        fh.write("old\n")
+
+    def mem_sh(body):
+        return subprocess.run(["bash", "-c", 'for m in core/state core/scratch improve/deferred; do source "%s/$m.sh"; done; '
+                               'info() { echo "INFO $*"; }; warn() { echo "WARN $*"; }; %s' % (LIB, body)],
+                              capture_output=True, text=True).stdout
+    mem_sh('deferred_memory_in "%s" "%s"' % (mem2, tree))
+    with open(os.path.join(left, "x.md"), "w") as fh:
+        fh.write("left\n")
+    said = mem_sh('deferred_memory_back "%s"' % tree)
+    check("memory-back-by-the-tree", (open(os.path.join(mem2, "x.md")).read(), tree in said), ("left\n", True))
+    with open(os.path.join(mem2, "x.md"), "w") as fh:
+        fh.write("moved on\n")
+    again = mem_sh('deferred_memory_back "%s"' % tree)
+    check("memory-not-carried-twice", (again, open(os.path.join(mem2, "x.md")).read()), ("", "moved on\n"))
+    with open(os.path.join(left, "x.md"), "w") as fh:
+        fh.write("left again\n")
+    with open(os.path.join(mem2, "x.md"), "w") as fh:
+        fh.write("left\n")
+    shutil.copy(os.path.join(mem2, "x.md"), os.path.join(left + "-at-start", "x.md"))
+    mem_sh('deferred_memory_in "%s" "%s"' % (mem2, tree))
+    check("memory-left-carried-first", open(os.path.join(mem2, "x.md")).read(), "left again\n")
+    check("memory-copy-made-again", open(os.path.join(left, "x.md")).read(), "left again\n")
+    # The workshop carries a reopened session's copy back by the tree alone.
+    workshop = open(os.path.join(LIB, "improve", "workshop.sh")).read()
+    check("workshop-reopen-carries-back", 'deferred_memory_back "$tree"' in workshop, True)
     # A review that changed nothing says so and leaves no tree or branch.
     check("nothing-says-so", "the review committed nothing to the product" in out, True)
     check("nothing-no-tree", trees(tmp), [])
@@ -226,7 +301,16 @@ try:
     out = review(repo, out_file)
     check("empty-main-keeps-work", branches(repo), [branch])
     git(repo, "branch", "-q", "-D", branch)
+    # An earlier day's tree with no workshop record, left by a run killed
+    # before it carried its memory copy back: carried back as a review
+    # starts, though there is nothing to review.
+    killed = repo + "-deferred-tester-2020-01-01"
+    mem_sh('deferred_memory_in "%s" "%s"' % (memory, killed))
+    with open(os.path.join(killed, ".sclaude", "local", "memory", "d.md"), "w") as fh:
+        fh.write("killed\n")
     out = review(repo, out_file)
+    shutil.rmtree(killed)
+    check("killed-run-carried-back", read("d.md"), "killed\n")
     check("empty-main-says-so", "Nothing deferred on main" in out, True)
     check("empty-main-no-session", os.path.exists(out_file), False)
     check("empty-main-no-worktree", [w for w in os.listdir(tmp) if w.startswith("myapp-deferred-")], [])

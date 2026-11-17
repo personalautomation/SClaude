@@ -276,17 +276,18 @@ run_friction() {
   local reading="$reviewed"
   [[ -z "$reread" && -s "$batch" ]] && reading="$batch"
 
-  local transcript prompt count
-  transcript="$(python3 - "$wt" "$wt/.sclaude/local/feature/state.json" "$LIB" <<'PYEOF'
+  local transcript prompt count mirror
+  # The tree's transcripts, mirrored into it: the session reads them there,
+  # not in ~/.claude/projects, which it could reach only through a directory
+  # Claude Code asks about at every start (transcripts_mirror).
+  mirror="$(transcripts_mirror "$wt")"
+  transcript="$(python3 - "$wt" "$wt/.sclaude/local/feature/state.json" "$LIB" "$mirror" <<'PYEOF'
 import json, os, sys
 wt, state = sys.argv[1], sys.argv[2]
 sys.path.insert(0, sys.argv[3])
 import _path  # noqa: E402,F401 — every folder of sclaude/lib on the path
 from session_end import chain
-# The same method as in capture_plan: the sessions directory is the worktree's
-# path with everything but letters and digits replaced by a hyphen.
-encoded = "".join(c if c.isalnum() else "-" for c in wt)
-base = os.path.expanduser(os.path.join("~/.claude/projects", encoded))
+base = sys.argv[4]
 try:
     with open(state) as fh:
         saved = json.load(fh)
@@ -492,7 +493,7 @@ sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSH
     session_watch_start "" "$session" "$done_file" "$where"
     ( cd "$where" && claude_launch --resume "$session" --model opus --effort medium \
         "${guard[@]}" \
-        --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$INSTRUMENTS" \
+        --permission-mode plan --add-dir "$INSTRUMENTS" \
         -n "$(session_label friction "$key")/$slug" \
         "Back in the friction review for feature '$slug'. Pick up where the conversation left off; re-read $reading if you need to." )
   else
@@ -515,7 +516,7 @@ sys.stdout.write(sys.stdin.read().replace("<workshop-rules>", os.environ["WORKSH
     session_watch_start "" "$session" "$done_file" "$where"
     ( cd "$where" && claude_launch --session-id "$session" --model opus --effort medium \
         "${guard[@]}" \
-        --permission-mode plan --add-dir "$HOME/.claude/projects" --add-dir "$INSTRUMENTS" \
+        --permission-mode plan --add-dir "$INSTRUMENTS" \
         -n "$(session_label friction "$key")/$slug" "$prompt" )
   fi
   session_watch_stop

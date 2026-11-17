@@ -449,6 +449,28 @@ transcript_dir() {
   echo "$HOME/.claude/projects/$encoded"
 }
 
+# The tree's sessions directory, mirrored into the tree for a session that
+# reads transcripts (the friction review, the retrospective); prints the
+# mirror's path. Claude Code asks at every start whether to trust a directory
+# passed with --add-dir that no session was started in, and ~/.claude/projects
+# is one, so handing it over that way put a question before every such review.
+# The tree is the session's own directory, trusted already. Hard links, so a
+# feature's megabytes of transcripts take no room twice and go with the tree;
+# a copy where the two are on different file systems.
+# Made again at each launch, at the same path, so a resumed session finds
+# what it was told.
+transcripts_mirror() {
+  local wt="$1" src dest
+  src="$(transcript_dir "$wt")"
+  dest="$wt/.sclaude/local/transcripts"
+  scratch_hide "$wt"
+  mkdir -p "$dest"
+  if [[ -d "$src" ]]; then
+    cp -alf "$src/." "$dest/" 2>/dev/null || cp -af "$src/." "$dest/" 2>/dev/null || true
+  fi
+  echo "$dest"
+}
+
 # The transcript a session's conversation lives in now, and its id.
 #
 # Claude Code may carry a conversation on under a new id while the process

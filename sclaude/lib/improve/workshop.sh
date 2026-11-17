@@ -406,6 +406,9 @@ workshop_pending() {
       && dev_env_load "$tree"
     declare -F session_git_env >/dev/null && session_git_env "$session"
     claude_launch "${CLAUDE_AGAIN[@]}" "$missing" )
+  # A deferred review's session edits a copy of Claude Code's memory in its
+  # tree (deferred.sh); reopened here, what it changed there goes back.
+  declare -F deferred_memory_back >/dev/null && deferred_memory_back "$tree"
   return 0
 }
 

@@ -539,6 +539,28 @@ check("friction-may-fix-the-project", "<worktree>" in body and "<branch>" in bod
 # The review runs in the feature's tree, with sclaude's checkout added to read.
 check("friction-runs-in-the-worktree", RUN.count('( cd "$where" && claude_launch'), 2)
 check("friction-reads-sclaude", RUN.count('--add-dir "$INSTRUMENTS" \\'), 2)
+# No review is handed ~/.claude/projects with --add-dir: Claude Code asks at
+# every start whether to trust such a directory. The transcripts are mirrored
+# into the tree instead (transcripts_mirror), the memory copied (deferred.sh).
+for m in ("friction", "retro", "deferred"):
+    text = open(os.path.join(LIB, "improve", m + ".sh"), encoding="utf-8").read()
+    check("no-projects-dir-" + m, '--add-dir "$HOME/.claude/projects"' in text, False)
+mirror_home = os.path.join(tmp, "mirror-home")
+mirror_wt = os.path.join(tmp, "mirror-wt")
+mirror_src = os.path.join(mirror_home, ".claude", "projects", re.sub(r"[^a-zA-Z0-9]", "-", mirror_wt))
+os.makedirs(os.path.join(mirror_src, "s1", "subagents"))
+os.makedirs(mirror_wt)
+with open(os.path.join(mirror_src, "s1.jsonl"), "w") as fh:
+    fh.write("{}\n")
+with open(os.path.join(mirror_src, "s1", "subagents", "a.jsonl"), "w") as fh:
+    fh.write("{}\n")
+mirrored = [subprocess.run(
+    ["bash", "-c", 'source "%s/core/state.sh"; scratch_hide() { :; }; transcripts_mirror "%s"' % (LIB, mirror_wt)],
+    capture_output=True, text=True, env=dict(os.environ, HOME=mirror_home)).stdout.strip() for _ in range(2)]
+check("mirror-in-the-tree", mirrored, [os.path.join(mirror_wt, ".sclaude", "local", "transcripts")] * 2)
+check("mirror-has-transcripts", sorted(os.path.relpath(os.path.join(b, n), mirrored[0])
+                                       for b, _, ns in os.walk(mirrored[0]) for n in ns),
+      ["s1.jsonl", os.path.join("s1", "subagents", "a.jsonl")])
 
 # --- what rides along to production -------------------------------------------
 repo = os.path.join(tmp, "riders")

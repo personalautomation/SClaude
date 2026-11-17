@@ -399,6 +399,113 @@ deferred_offer() {
   fi
 }
 
+# The memory's copy for the deferred review, in the tree's .sclaude/local,
+# hidden from git: `memory`, which the session edits, `memory-at-start`, the
+# files as they were, and `memory-of`, the memory they are a copy of — so
+# that whatever reopens the tree's session carries its edits back by the
+# tree alone (deferred_memory_back). Made again at each launch, after what
+# the copy left there still holds is carried back.
+#
+#   deferred_memory_in <memory> <tree>
+deferred_memory_in() {
+  local live="$1" work="$2/.sclaude/local/memory"
+  deferred_memory_back "$2"
+  rm -rf "$work" "$work-at-start"
+  mkdir -p "$work" "$work-at-start"
+  printf '%s\n' "$live" > "$2/.sclaude/local/memory-of"
+  [[ -d "$live" ]] || return 0
+  cp -a "$live/." "$work/" 2>/dev/null || true
+  # From the copy, not from the memory again: a file written there between
+  # two reads would be in the snapshot alone, and read as the review removing it.
+  cp -a "$work/." "$work-at-start/" 2>/dev/null || true
+}
+
+# The tree's memory copy carried back to the memory it was made of; nothing
+# where the tree has none. Called after every session that may have edited
+# it: the review's own, one the workshop reopens (workshop_pending, by
+# `sclaude deferred` or `sclaude core-send`), and over every one of the
+# person's deferred trees when a review starts, for a run killed before
+# it carried its copy back.
+#
+#   deferred_memory_back <tree>
+deferred_memory_back() {
+  local of="$1/.sclaude/local/memory-of" live
+  [[ -s "$of" ]] || return 0
+  live="$(head -n 1 "$of")"
+  deferred_memory_out "$live" "$1/.sclaude/local/memory"
+}
+
+# What the session changed in the copy goes back to the memory, file by
+# file: written, or removed where it removed one. Other sessions of the
+# product keep writing that memory while the review runs, so a file changed
+# there since the start is not overwritten: the review's version goes beside
+# it as `<name>.from-deferred`, and both are named.
+#
+#   deferred_memory_out <memory> <copy>
+deferred_memory_out() {
+  local live="$1" work="$2" what path
+  [[ -d "$work" && -d "$work-at-start" ]] || return 0
+  while IFS=$'\t' read -r what path; do
+    case "$what" in
+      wrote)   info "  the deferred review in ${work%/.sclaude/*} changed Claude Code's memory: $path" ;;
+      removed) info "  the deferred review in ${work%/.sclaude/*} removed from Claude Code's memory: $path" ;;
+      beside)  warn "  the memory changed while the deferred review in ${work%/.sclaude/*} ran; its version is beside it: $path" ;;
+      kept)    warn "  the deferred review in ${work%/.sclaude/*} removed $path, which changed while it ran; it stays" ;;
+    esac
+  done < <(python3 - "$live" "$work" "$work-at-start" <<'MEMORY'
+import filecmp, os, shutil, sys
+
+live, work, start = sys.argv[1:4]
+
+
+def files(top):
+    found = set()
+    for base, _, names in os.walk(top):
+        for name in names:
+            found.add(os.path.relpath(os.path.join(base, name), top))
+    return found
+
+
+def same(a, b):
+    """Both absent, or both files with the same bytes."""
+    if os.path.isfile(a) != os.path.isfile(b):
+        return False
+    return not os.path.isfile(a) or filecmp.cmp(a, b, shallow=False)
+
+
+def put(src, dest):
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    shutil.copy2(src, dest)
+
+
+for rel in sorted(files(work) | files(start)):
+    w, s, mem = (os.path.join(top, rel) for top in (work, start, live))
+    if same(w, s):
+        continue  # untouched by the review
+    if same(w, mem):
+        pass  # already the same there
+    elif not same(mem, s):
+        if os.path.isfile(w):
+            put(w, mem + ".from-deferred")
+            print("beside\t%s.from-deferred" % mem)
+        else:
+            print("kept\t%s" % mem)
+    elif os.path.isfile(w):
+        put(w, mem)
+        print("wrote\t%s" % mem)
+    else:
+        os.remove(mem)
+        print("removed\t%s" % mem)
+    # Carried back: a later carry-back of this copy starts from here, and
+    # neither writes it again nor takes the memory moving on for a clash.
+    if os.path.isfile(w):
+        put(w, s)
+    elif os.path.isfile(s):
+        os.remove(s)
+MEMORY
+  )
+}
+
 # The review itself: a session in plan mode, in a worktree of the product's
 # main on a branch of its own, since its result — the files trimmed, rules
 # written into the policy or the product's CLAUDE.md — is a change to the
@@ -427,6 +534,9 @@ cmd_deferred() {
   # whose name starts with this one's.
   local kept kept_branch
   for kept in "$root-deferred-$who-"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]; do
+    # A memory copy left holding edits, by a run killed before carrying it
+    # back, goes back first, whatever the tree holds besides.
+    [[ -d "$kept" ]] && deferred_memory_back "$kept"
     [[ -d "$kept" && -f "$(workshop_record "$kept")" ]] || continue
     workshop_pending "$kept"
     [[ "$kept" == "$wt" ]] && continue
@@ -497,10 +607,17 @@ cmd_deferred() {
   mkdir -p "${config%/*}"
   python3 "$LIB/core/config_menu.py" effective "$root/.sclaude/config.json" > "$config" 2>/dev/null \
     || cp "$root/.sclaude/config.json" "$config" 2>/dev/null || echo '{}' > "$config"
+  # Claude Code's memory for the product, copied into the tree too: it lives
+  # in ~/.claude/projects, which the session could reach only through
+  # --add-dir, and Claude Code asks at every start whether to trust a
+  # directory added that way. What the session changes in the copy is
+  # carried back when it ends (deferred_memory_back).
+  local memory="$wt/.sclaude/local/memory"
+  deferred_memory_in "$(transcript_dir "$root")/memory" "$wt"
   prompt="$(D_FILES="${list%$'\n'}" D_STAMPS="${stamps%$'\n'}" D_WT="$wt" D_BRANCH="$branch" \
     D_RULES="$(product_rules_dir "$wt")" D_INSTRUMENTS="$INSTRUMENTS" \
     D_DONE="$done_file" D_TODAY="$(date +%F)" D_WORKSHOP="$(workshop_rules "$wt")" \
-    D_MEMORY="$(transcript_dir "$root")/memory" D_CONFIG="$config" \
+    D_MEMORY="$memory" D_CONFIG="$config" \
     python3 - "$PROMPTS/friction-deferred.md" <<'PY'
 import os, sys
 text = open(sys.argv[1], encoding="utf-8").read()
@@ -534,8 +651,9 @@ PY
   local before_instruments; before_instruments="$(instruments_state)"
   ( cd "$wt" && claude_launch --session-id "$session" --model opus --effort medium \
       "${guard[@]}" --permission-mode plan --add-dir "$INSTRUMENTS" \
-      --add-dir "$HOME/.claude/projects" -n "friction/deferred" "$prompt" )
+      -n "friction/deferred" "$prompt" )
   session_watch_stop
+  deferred_memory_back "$wt"
   instruments_unchanged "$before_instruments" "deferred review" || true
   session_closed "$done_file" "$wt" "$session" "" "" deferred || true
 
@@ -570,8 +688,8 @@ PY
       [[ -z "$push_out" ]] || warn "$(tail -n 12 <<< "$push_out" | sed 's/^/     /')"
     fi
   elif [[ -z "$dirty" ]]; then
-    # Not "changed nothing": a fix to Claude Code's memory is made outside
-    # the tree, and is in the session's report.
+    # Not "changed nothing": a fix to Claude Code's memory is not committed —
+    # deferred_memory_back carried it back and named it above.
     info "  the review committed nothing to the product"
   fi
   # Edits the session made and did not commit are its work too: "changed

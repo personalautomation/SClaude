@@ -4948,6 +4948,11 @@ try:
     with open(_code_cfg, "w") as fh:
         fh.write("bind-addr: 0.0.0.0:8081\n")
     check("macos: every address is opened on loopback", services.code_local(), "http://127.0.0.1:8081")
+    # localhost stays: code-server bound to it listens on ::1 alone on a Mac,
+    # as the proxy's code_local keeps it too.
+    with open(_code_cfg, "w") as fh:
+        fh.write("bind-addr: localhost:8082\n")
+    check("macos: localhost is kept", services.code_local(), "http://localhost:8082")
 finally:
     for _k, _v in _saved_env.items():
         if _v is None:

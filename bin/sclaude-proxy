@@ -665,6 +665,11 @@ def idle_features(snapshot):
         return []
     groups = listeners()
     processes = working_dirs()
+    # Never empty on a live system — the proxy itself has a directory — so an
+    # empty list is lsof that failed or timed out on macOS: nothing is known,
+    # and nothing is stopped.
+    if not processes:
+        return []
     return [(label, wt) for label, wt, port in candidates
             if not busy(os.path.realpath(wt), groups.get(port, set()), processes,
                         snapshot["mine"])]

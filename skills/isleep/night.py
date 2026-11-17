@@ -333,7 +333,7 @@ def argv_of(pid):
     if DARWIN:
         try:
             return procinfo.darwin_procargs(pid)[0]
-        except (OSError, ValueError):
+        except (OSError, ValueError, TypeError):  # TypeError: no pid found
             return []
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()

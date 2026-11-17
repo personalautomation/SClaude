@@ -32,8 +32,13 @@ launchd_labels() {
   done
 }
 
-# A value made safe for a sed replacement between | delimiters.
-launchd_escape() { printf '%s' "$1" | sed 's/[&|\\]/\\&/g'; }
+# A value made safe for the plist's XML (&, <, >), then for a sed replacement
+# between | delimiters: a PATH holding "R&D", or a checkout under a name with
+# "<", would otherwise leave the agent a file launchd refuses to load.
+launchd_escape() {
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' \
+    | sed 's/[&|\\]/\\&/g'
+}
 
 # The template filled in, on stdout: `launchd_render <label> <PATH>`.
 launchd_render() {

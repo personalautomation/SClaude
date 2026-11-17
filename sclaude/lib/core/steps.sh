@@ -376,7 +376,7 @@ instruments_workers() {
   local root pid dir
   root="$(readlink -f "$INSTRUMENTS" 2>/dev/null)" || return 0
   [[ -n "$root" ]] || return 0
-  for pid in $(pgrep -x claude 2>/dev/null); do
+  for pid in $(proc_pids_named claude); do
     dir="$(proc_cwd "$pid")" || continue
     [[ "$dir" == "$root" || "$dir" == "$root"/* ]] || continue
     echo "pid $pid: claude in $dir, up $(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"

@@ -36,6 +36,19 @@ proc_name() {
   fi
 }
 
+# The pids of the processes named NAME, as proc_name says it, one a line.
+# Not pgrep -x on macOS: it matches the executable's own name there, which
+# for Claude Code is its version.
+proc_pids_named() {
+  if procinfo_darwin; then
+    ps -A -o pid=,comm= 2>/dev/null \
+      | awk -v want="$1" '{ pid = $1; sub(/^[ ]*[0-9]+[ ]+/, ""); sub(/.*\//, "")
+                            if ($0 == want) print pid }'
+  else
+    pgrep -x "$1" 2>/dev/null
+  fi
+}
+
 # The command line, its words joined by spaces.
 proc_cmdline() {
   if procinfo_darwin; then

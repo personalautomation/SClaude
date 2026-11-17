@@ -58,6 +58,9 @@ try:
     check("proc_name", sh('proc_name %d' % pid), os.path.basename(sleep))
     check("proc_cmdline", sh('proc_cmdline %d' % pid).split()[-1], "60")
     check("proc_exe", sh('proc_exe %d' % pid), sleep)
+    # What instruments_workers finds claude by: pgrep -x misses it on macOS,
+    # where the executable's own name is its version.
+    check("proc_pids_named", str(pid) in sh("proc_pids_named %s" % os.path.basename(sleep)).split(), True)
     check("proc_parent", sh('proc_parent %d' % pid), str(os.getpid()))
     check("proc_cwd: a directory with a space", sh('proc_cwd %d' % pid), work)
     check("proc_cwds: listed", "%d %s" % (pid, work) in sh('proc_cwds').splitlines(), True)

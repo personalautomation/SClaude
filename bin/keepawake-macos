@@ -179,8 +179,9 @@ class Holder(hold_loop.Holder):
             except Exception:
                 pass  # the assertion goes with the process in any case
             self.aid = None
-        if self.lid:
-            set_lid(False)
+        # A pmset that failed leaves the lid held: kept True, the next tick
+        # finds held() and tries the release again.
+        if self.lid and set_lid(False):
             self.lid = False
 
 

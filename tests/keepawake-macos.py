@@ -175,6 +175,17 @@ try:
     check("lid-let-go", pmset_calls()[-1], "-a disablesleep 0")
     check("mark-gone", os.path.exists(km.LID_MARK), False)
 
+    print("a release pmset refused is tried again")
+    set_state(updated_ts=now, until_ts=now + 3600)
+    holder.tick(now)
+    set_state(updated_ts=now, until_ts=now - 1)
+    os.environ["RULE"] = "no"            # sudo refuses: the rule just removed
+    holder.tick(now)
+    check("lid-kept-on-refusal", (holder.lid, holder.held()), (True, True))
+    os.environ["RULE"] = "yes"
+    holder.tick(now)
+    check("lid-let-go-on-retry", (holder.lid, pmset_calls()[-1]), (False, "-a disablesleep 0"))
+
     print("a killed holder's lid")
     # A holder killed while holding leaves disablesleep on, and its mark.
     holder.tick(now)

@@ -59,10 +59,7 @@ check("units.LABELS keys are systemd units of the checkout",
 keepawake = read("bin", "keepawake")
 said = re.findall(r"\b(?:service_up|unit_state)\s+\S+\s+([A-Za-z][\w.-]*)", keepawake)
 check("bin/keepawake asks after agents by label", bool(said), True)
-# Homebrew's own agent, which a code-server installed with brew runs under:
-# not ours to write, asked after as a second chance.
-FOREIGN = {"homebrew.mxcl.code-server"}
-check("bin/keepawake's labels name templates", unknown(set(said) - FOREIGN), [])
+check("bin/keepawake's labels name templates", unknown(said), [])
 
 install = read("install.sh")
 in_install = re.findall(r"\[((?:sclaude|keepawake)\.[\w-]+)\]=", install)

@@ -77,10 +77,11 @@ def code_local():
     machine in the tailnet, and opens code-server at its own address."""
     if not units.on_macos():
         return "http://127.0.0.1:8080"
-    # Every address includes loopback, a browser refuses 0.0.0.0, and
-    # Telegram makes no link of localhost (below).
+    # Every address includes loopback and a browser refuses 0.0.0.0.
+    # localhost stays, as bin/sclaude-proxy's code_local keeps it: code-server
+    # bound to it listens on ::1 alone there, and the address is shown as text.
     url = code_url()
-    for loop in ("//0.0.0.0:", "//[::]:", "//localhost:"):
+    for loop in ("//0.0.0.0:", "//[::]:"):
         url = url.replace(loop, "//127.0.0.1:")
     return url
 

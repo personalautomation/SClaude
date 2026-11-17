@@ -104,7 +104,13 @@ def env_lines(mapping, status, workdir):
 
 # What two texts of SQL are compared by: the CLI keeps a migration as the
 # statements it split the file into, trimmed, and without the separators.
-UNSPACED = re.compile(r"[\s;]+")
+# Runs of whitespace and separators become one space rather than nothing, so
+# an edit to the spacing inside a string literal still counts.
+SPACING = re.compile(r"[\s;]+")
+
+
+def unspaced(sql):
+    return SPACING.sub(" ", sql).strip()
 
 
 def stale_migrations(rows, files):
@@ -117,13 +123,13 @@ def stale_migrations(rows, files):
     version again, so a migration edited after it ran — a review's fix, a
     feature's migrations folded into one — left the stack on the old SQL with
     nothing said, and the feature was tried on a schema it no longer has.
-    Whitespace and semicolons aside, the stored statements are the file."""
+    Spacing and semicolons aside, the stored statements are the file."""
     out = []
     for row in sorted(rows or [], key=lambda r: str(r.get("v"))):
         version = str(row.get("v"))
         if version not in files:
             out.append("%s gone" % version)
-        elif UNSPACED.sub("", "".join(row.get("s") or [])) != UNSPACED.sub("", files[version]):
+        elif unspaced(" ".join(row.get("s") or [])) != unspaced(files[version]):
             out.append("%s changed" % version)
     return out
 

@@ -68,6 +68,7 @@ FILES = [
     ("claude-tab.log", "what claude said on stderr in a tab, and how it exited"),
     ("db.env", "the feature database's connection, sourced by the regression's local stage"),
     ("db.log", "the feature database's start and migrations"),
+    ("db.lock", "held from the database's stale-migration check to its fill, so two starts reset and fill it once"),
     ("db-copy.sql", "main's rows, dumped for the copy into the feature's database"),
     ("supabase", "the feature's own Supabase project"),
     ("telegram.json", "the bot's record of the feature's topic (FEATURE_RECORD in topics.py)"),

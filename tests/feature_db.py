@@ -808,6 +808,11 @@ def stale_cases():
           feature_db.stale_migrations(rows, dict(files, **{"0002": "create table b (id bigint);"})), ["0002 changed"])
     check("stale: a file gone is gone",
           feature_db.stale_migrations(rows, {"0001": files["0001"]}), ["0002 gone"])
+    check("stale: spacing inside a literal counts",
+          feature_db.stale_migrations([{"v": "0001", "s": ["select 'a b'"]}], {"0001": "select 'ab';"}),
+          ["0001 changed"])
+    check("stale: statements without space between them match",
+          feature_db.stale_migrations(rows, {"0001": files["0001"], "0002": "create table b (id int);comment on table b is 'b'"}), [])
     check("stale: a file not applied yet is not stale",
           feature_db.stale_migrations(rows[:1], files), [])
 
@@ -851,6 +856,26 @@ def stale_cases():
         bash(root, docker + 'db_rebuild "%s"' % a)
         check("stale: a rebuild resets once, not twice",
               len([c for c in calls(root)[before:] if c.startswith("db reset")]), 1)
+
+        # Two starts at once on a migration edited since: one reset, and the
+        # other finds the stack current. The reset takes a while and leaves the
+        # stack holding the file it applied, as a real one does.
+        slow = os.path.join(root, "slow-reset")
+        with open(slow, "w") as fh:
+            fh.write('#!/usr/bin/env bash\nif [[ "$1" == db ]]; then sleep 1; '
+                     'printf \'[{"v": "0001", "s": ["%%s"]}]\' "$(cat %s)" > %s; fi\nexec "%s" "$@"\n'
+                     % (os.path.join(a, "supabase", "migrations", "0001_a.sql"), answer, cli))
+        os.chmod(slow, 0o755)
+        write_config(a, slow, "echo run >> %s" % seeded)
+        with open(os.path.join(a, "supabase", "migrations", "0001_a.sql"), "w") as fh:
+            fh.write("create table a (id text)")
+        before = len(calls(root))
+        fills = open(seeded).read().count("run")
+        bash(root, docker + 'ensure_db "%s" & ensure_db "%s" & wait' % (a, a))
+        check("stale: two starts at once reset the stack once",
+              len([c for c in calls(root)[before:] if c.startswith("db reset")]), 1)
+        check("stale: and fill it once", open(seeded).read().count("run") - fills, 1)
+        write_config(a, cli, "echo run >> %s" % seeded)
 
         before = len(calls(root))
         bash(root, 'docker() { [[ "$1" == exec ]] && return 1; return 0; }\nensure_db "%s"' % a)

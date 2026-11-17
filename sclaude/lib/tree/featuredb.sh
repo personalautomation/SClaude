@@ -365,7 +365,15 @@ ensure_db() {
   # reset `sclaude dev --rebuild-db` runs, and filled again below; what the
   # feature made in it since its fill goes, the same as there. Not within
   # db_rebuild, which resets it next anyway.
-  local stale="" reset_failed=""
+  #
+  # From here to the fill under the feature's lock: a lazy start of the dev
+  # server runs this beside the regression's, and both saw the same changed
+  # migration — two resets, the second wiping the first one's fill under its
+  # tests, and the fill run twice. The second waits, finds the stack current
+  # and the fill done. Only here, not around the start (above).
+  local stale="" reset_failed="" lock
+  exec {lock}>"$wt/.sclaude/local/feature/db.lock"
+  flock -w 300 "$lock" || true
   [[ -n "${DB_REBUILDING:-}" ]] || stale="$(db_stale "$wt" "$dir" | paste -sd, - | sed 's/,/, /g')"
   if [[ -n "$stale" ]]; then
     info "  database: applied migrations no longer match their files ($stale) — building it again from this feature's migrations…"
@@ -387,6 +395,7 @@ ensure_db() {
   if ! python3 "$LIB/tree/feature_db.py" envfile "$(project_config_with database.local "$wt")" "$dir" \
          <<<"$status" > "$envf.tmp.$$"; then
     rm -f "$envf" "$envf.tmp.$$"
+    flock -u "$lock"; exec {lock}>&-
     warn "  database: the stack did not report every value the project maps — sharing the main local database"
     return 0
   fi
@@ -397,6 +406,8 @@ ensure_db() {
   # Not after a reset that failed: a fill over half a schema fails too, or
   # worse, and db_rebuild leaves it unfilled the same way.
   [[ -n "$reset_failed" || "$(state_get "$state" db.ready 2>/dev/null)" == "true" ]] || db_fill "$wt"
+  # Unlocked by hand: what the fill started inherited the descriptor.
+  flock -u "$lock"; exec {lock}>&-
   # Said when the stack was started here, else once in this process: a
   # database already up said so again at every session and regression.
   if [[ -n "$started" || "${DB_SAID:-}" != "$wt" ]]; then

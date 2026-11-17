@@ -1291,7 +1291,7 @@ feature's and main's after a sync, are applied on every start. One applied
 already and changed since — edited in a review's fix, or gone, folded into
 another — is one `migration up` never runs again, so before applying them
 sclaude compares the SQL the stack keeps for each applied migration
-(`supabase_migrations.schema_migrations`, whitespace and semicolons aside) with
+(`supabase_migrations.schema_migrations`, spacing and semicolons aside) with
 its file (`db_stale`). A stack that differs is reset and filled again, as by
 `sclaude dev --rebuild-db`, and the line says which migrations it was for.
 

@@ -47,8 +47,13 @@ draws in more code or another file, merging and splitting as places meet
 and part, stopping where review stopped coming back. Code that was not part
 of the development has nothing above it: its icicle starts in the middle of
 the review. Its colour says how the thread ended (fixed, declined, left to you, decided at
-night, would undo a fix), pale when the fix touched only comments, hatched
-when it added code. Threads pile up as dots where review found many. ✋ marks each time a person stepped in, ringed red where
+night, would undo a fix), with the share the person asked for during the
+review in the development's beige; it darkens the more often review had
+already rewritten that spot; a pattern marks a migration among changed code,
+and a place where neither code nor a migration changed is hollow, its
+patterns saying what was touched instead: tests, docs and config, comments. A green line under a file in a round's row says that
+round read it and found nothing (blue and thin: only the last fixes;
+yellow and dashed: a part), so a run of rounds that each found nothing anywhere shows. Threads pile up as dots where review found many. ✋ marks each time a person stepped in, ringed red where
 they took the recommended answer within seconds. Played back, the map grows
 round by round.
 

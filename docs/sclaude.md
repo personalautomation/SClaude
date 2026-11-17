@@ -488,10 +488,28 @@ ordered so that each next one shares the most rounds with the last; the
 heights are scaled to fit the panel, which can also cover the whole page.
 Behind the rows' names one pale icicle sums every file: the development's
 lines on top, then the lines each round touched (a fix's larger side), on a
-square-root scale, each row split by its threads' outcomes, saturated and
-hatched as the places are. A thread's
-outcome is read from review-reversals, review-yours (the night's mark),
-`decline_of` and GitHub's resolved flag, in that order; its round is the
+square-root scale, each row split by its threads' outcomes. A hunk whose
+added lines are mostly from a commit the person asked for (`asked_lines`: a
+`feat` subject or a `Requirement:` trailer, by a blame of the round's range)
+is `asked`, drawn as the development's; a place's lightness is how many
+earlier rounds' other hunks overlap its own (its `depth`, 3 and more alike),
+its fill split by the share of `asked` lines; solid when a line of code in
+an ordinary file or a migration changed, hollow otherwise; a solid place's only pattern is
+a migration's, a hollow one's each kind of file it touched instead
+(`kindOf`, by path) and comments alone. A thread
+left as it is gets no `fixedIn`: the commits its reply names are reasons.
+A place hangs from the nearest round above that changed its code, bridged
+through the rounds between; a kid in its parent's file takes the part of
+the parent's bottom above its own code, so a narrow fix under a wide one
+starts narrow; a place with no parent starts at its own width, a point
+only in a file that did not exist yet. Each block carries `lines` and
+`generated` (its files' changed lines now, as `outgrown` counts them) and
+the map `blockSize` (`reviewBlocks.size`). A thread's
+outcome is read from review-reversals (a reversal for good, however its
+thread was resolved later — whether it was applied cannot be told; the
+commits its replies name are reasons, never its fix), review-yours (the night's mark), `decline_of` and
+GitHub's resolved flag, in that order; a file's change counts as read
+(`diff`) only where a diff of it was shown; its round is the
 one whose head its first comment was posted on. The person's hands are the
 AskUserQuestion calls answered in the tree's transcripts (the wait, the
 option marked "(Recommended)", a `discussion_r` link in the question), the
@@ -500,7 +518,12 @@ round's cost is the report's (`review_report.py`): its passes by their
 sessions, stopped ones too, and each fix launch on the last round begun
 before it (`fixes_per_round`). A pass stopped or not taken (`spent`) on a
 head of its own is a round, `stopped`, as the report counts it, reading
-nothing (`seen` empty); the state says the block read now (`blockNow`) and
+nothing (`seen` empty); `how` says per file how far a round read it —
+`whole` (a Read of all of it), `diff` (its change shown: all of it in a
+`read: first` pass, the last fixes' in a delta) or `part` — and the page
+draws a strip at the row's foot where it read and posted nothing; the
+outcome `reversal` stays, since `review_context_log` marks what it counted
+with a `#` line rather than emptying the file; the state says the block read now (`blockNow`) and
 whether step 4 is over (`closed`), when the last round closes too. Comment lines are told
 by how they start, and a file of prose is all comment — nothing knows a
 product's language.
@@ -1268,7 +1291,13 @@ The stack runs from `.sclaude/local/feature/supabase/`: a rewritten copy of the 
 `supabase/config.toml` — the tracked one is never touched, or the ports would
 ride into a commit — and symlinks for everything else, so the migrations the
 feature writes are the ones its stack applies. Pending migrations, the
-feature's and main's after a sync, are applied on every start.
+feature's and main's after a sync, are applied on every start. One applied
+already and changed since — edited in a review's fix, or gone, folded into
+another — is one `migration up` never runs again, so before applying them
+sclaude compares the SQL the stack keeps for each applied migration
+(`supabase_migrations.schema_migrations`, spacing and semicolons aside) with
+its file (`db_stale`). A stack that differs is reset and filled again, as by
+`sclaude dev --rebuild-db`, and the line says which migrations it was for.
 
 `.sclaude/local/feature/db.env` points the feature at it, and every process sclaude starts
 there sources it — the dev server, the local regression, the claude session.
@@ -1457,7 +1486,12 @@ cut's JSON (`take` reads it from around a fence): each block a group of the
 plan's criteria with the files that carry them — by behaviour, not by layer,
 since a rule's bugs are where the database, the server and the screen meet;
 tests with their code; manuals last; `rules` for criteria every behaviour
-follows (permissions, errors, notifications). `validate` checks every changed
+follows (permissions, errors, notifications); the foundation — the data
+model and its rules, the shared files, the files that build the `rules`, the
+most important behaviour — leaning into the first blocks, with the behaviour
+that rests most directly on it rather than as a block of one layer; a
+leaning, not a law, since a fix there reaches every block and the later ones then read on
+code already reviewed. `validate` checks every changed
 file in exactly one block, every criterion in one block or rule, no block
 past `reviewBlocks.size` changed lines (3000) unless it is one file; a second
 try is told what the first got wrong. Two refusals fall back to `draft`, the
@@ -1498,6 +1532,36 @@ read (`whole` in `local_review.py` names that head, `stale` in
 `review_blocks.py` counts, generated files left out) — a rework at the
 person's word, a large fix — is read whole again on the next pass, so that no
 line of it is left to a diff too long to read well.
+
+**A block outgrows its cut**: its fixes add files, which its whole read takes,
+or a rework adds code, until a pass cannot read it whole in earnest. Before a
+whole read — a block's first, or a stale block's again, not a capped first
+read followed up on its head — a block past `reviewBlocks.size` changed lines,
+with the files no block owns, and more than one file (`outgrown`) is split
+(`blocks_split`, from `local_review_run`): a session like the cut's, given the
+block alone (`brief`: its criteria, its files now, its contracts), answers
+with its parts in the cut's shape, and `split` checks them — every file and
+criterion of the block in exactly one part, two parts or more, none past the
+size but a single file — a second try told the faults, and failing that the
+block is read as it is, and — once an answer was judged and did not hold —
+not split again on that head (`tried`: a pass retried by itself would pay
+for the sessions each time); a session that failed, or a crash of the check
+(said as such, its trace in the log), judged nothing and marks nothing — a
+passing failure does not leave the block unsplit for the head, at the price
+of a retry paying again. A part may not own only files no longer changed. Its files the pull request no longer changes are offered too, each
+to go with its behaviour. The prompt names a block by its id; the menu, the
+close question and the topic by its place of the total, with its id before
+it once a split moved the places (`blocks_label`: "2/5", "3 (4/5)"). The parts take its place, `blocks.total` grows, and
+the read goes to the first part. A block keeps its `id` for good (its place
+until a split first moved the places), and the journal and the history name
+it by that, so old rounds stay the old block's: the parts of `1` are `1a`,
+`1b`, of `1a` `1a1`, `1a2`, and the blocks after keep theirs. The cut as it
+stood is kept in `earlier`, which the review's map plays: played back, the
+columns are grouped by the cut of that moment, and a dashed line across the
+map at the first round after a split names the block and its parts; a click
+on it opens a card of what happened — when, the block as it was, and each
+part with its files and criteria (`earlier` keeps the criteria too). A split costs what a cut does,
+under a dollar; the whole read it comes before was to be paid anyway.
 
 **Closing a block** (`blocks_next`, from `after_step`): a block changed past
 `reviewBlocks.size` lines since its last whole read (`blocks_stale`, the

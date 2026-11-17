@@ -268,7 +268,10 @@ echo "rc=$?"
     began = time.time()
     text = run({"PANE_TEST_FOCUS_SILENT": "1"})
     check("silent-keeper-tab-opened", (pane_count(), "rc=0" in text), (1, True))
-    check("silent-keeper-gave-up", 9 < time.time() - began < 25, True)
+    # Given up, not hung on its sleep, and not at once: by the read's ten
+    # seconds or the seven-second budget the script is handed, whichever a
+    # loaded machine reaches first.
+    check("silent-keeper-gave-up", 5 < time.time() - began < 25, True)
     keeper_pid = int(open(focus + ".pid").read()) if os.path.exists(focus + ".pid") else None
     time.sleep(0.5)
     check("silent-keeper-stopped", keeper_pid is not None and not os.path.exists("/proc/%d" % keeper_pid), True)

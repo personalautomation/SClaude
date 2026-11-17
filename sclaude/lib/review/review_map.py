@@ -20,7 +20,8 @@
 #   * the threads: GitHub's review threads (path, line, the commit a comment
 #     was posted on), and how each ended — fixed, declined ("Left as it is",
 #     decline_of), the person's to decide (review-yours, a night's mark among
-#     them) or declined as undoing a settled fix (review-reversals);
+#     them) or noted as undoing a settled fix (review-reversals: a reversal
+#     for good, however it was resolved later);
 #   * the person: each AskUserQuestion answered in the tree's transcripts —
 #     how long it waited, whether the answer was the option marked
 #     "(Recommended)", and the thread its question linked to — and the
@@ -31,7 +32,8 @@
 #     those files answer that thread; a fix no subagent made (the session's
 #     own, a line or two) takes the nearest thread of its round in its file;
 #   * the blocks: the review blocks the pull request is cut into, if it is
-#     (FEATURE_BLOCKS in review_blocks.py), each with its files;
+#     (FEATURE_BLOCKS in review_blocks.py), each with its files and its id,
+#     and the cuts that stood before a block was split (`earlier`);
 #   * the cost: the conversations that started within a round.
 #
 # SCLAUDE_REVIEW_MAP_THREADS names a JSON file of thread nodes to read
@@ -50,6 +52,8 @@ import cycle_steps  # noqa: E402
 import pr_context  # noqa: E402
 import review_report  # noqa: E402
 from local_review import JOURNAL  # noqa: E402
+import process_config  # noqa: E402
+import review_blocks  # noqa: E402
 from review_blocks import FEATURE_BLOCKS  # noqa: E402
 
 STATE = ".sclaude/local/feature/state.json"
@@ -170,7 +174,7 @@ def rounds_of(tree, pr):
             continue
         out.append({"at": r["at"], "t": ts(r["at"]), "head": r["head"], "seconds": int(r.get("seconds") or 0),
                     "source": r.get("source") or "local", "new": None if r.get("spent") else r.get("new"),
-                    "resolved": r.get("resolved"), "block": r.get("block"),
+                    "resolved": r.get("resolved"), "block": r.get("block"), "read": r.get("read"),
                     "more": False if r.get("spent") else bool(r.get("more")), "stopped": bool(r.get("spent")),
                     "sessions": [r["session"]] if r.get("session") and not r.get("spent") else [],
                     "spent": [r["session"]] if r.get("session") and r.get("spent") else []})
@@ -220,6 +224,33 @@ def hunks(tree, a, b):
         if line[1:].strip():
             cur["comment" if comment_line(path, line[1:]) else "code"] += 1
     return found
+
+
+def asked_lines(tree, a, b):
+    """{path: lines in b} that the commits from a to b the person asked for
+    wrote: a `feat` commit (Conventional Commits) or one carrying a
+    `Requirement:` trailer — the development going on during the review, not
+    a fix of a finding (review.md: a fix needs no Requirement footer). A
+    blame of each file they touched says which lines are theirs."""
+    log = git(tree, "log", "--first-parent", "--no-merges",
+              "--format=%x01%H%x02%s%x02%(trailers:key=Requirement,valueonly,separator=;)", a + ".." + b) or ""
+    mine = set()
+    for rec in log.split("\x01")[1:]:
+        sha, subject, req = (rec.strip("\n").split("\x02") + ["", ""])[:3]
+        if re.match(r"feat(\(|!|:)", subject) or req.strip():
+            mine.add(sha)
+    out = {}
+    for sha in mine:
+        for path in (git(tree, "show", "--name-only", "--format=", sha) or "").split("\n"):
+            if not path or path in out:
+                continue
+            got = set()
+            for line in (git(tree, "blame", "-l", "-s", "--root", a + ".." + b, "--", path) or "").splitlines():
+                m = re.match(r"\^?([0-9a-f]{40})\s+(\d+)\)", line) or re.match(r"\^?([0-9a-f]{40})\s+(?:\S+\s+)?(\d+)\)", line)
+                if m and m.group(1) in mine:
+                    got.add(int(m.group(2)))
+            out[path] = got
+    return out
 
 
 def project(paths, rounds, fixes, threads, dev, final):
@@ -324,13 +355,13 @@ def thread_nodes(tree, pr, repo):
 
 
 def tab_file(path):
-    """{link: text} of a file of `link<TAB>text` lines."""
+    """{link: text} of a file of `link<TAB>text` lines; `#` lines are marks."""
     out = {}
     try:
         with open(path, encoding="utf-8") as fh:
             for line in fh:
                 link, _, text = line.rstrip("\n").partition("\t")
-                if link.strip():
+                if link.strip() and not link.startswith("#"):
                     out[link.strip()] = text
     except OSError:
         pass
@@ -374,6 +405,12 @@ def threads_of(tree, nodes, rounds):
         rid = RID.search(url)
         bot = ((first.get("author") or {}).get("__typename")) == "Bot" \
             or pr_context.signed_locally(first.get("body"))
+        # A finding noted as undoing a settled fix is a reversal for good,
+        # however it was resolved later: the colour says the review proposed
+        # it, the tooltip how the thread ended. Decided by the user on
+        # 2026-11-15: whether one resolved without a decline was applied
+        # after all or left by hand cannot be told — a subagent's brief, a
+        # reply's commit, a fix near its line each misread one case.
         if url in reversed_:
             outcome = "reversal"
         elif url in yours:
@@ -401,6 +438,9 @@ def threads_of(tree, nodes, rounds):
                     "t": ts(at), "path": t.get("path") or "", "line": line,
                     "at": at, "r": r, "outcome": outcome, "by": "review" if bot else "person",
                     "resolvedBy": ((t.get("resolvedBy") or {}).get("login")) or "",
+                    # How a reversal's thread ended, for its hover: the
+                    # outcome alone no longer says it.
+                    "resolved": bool(t.get("isResolved")), "left": bool(pr_context.decline_of(comments[1:])),
                     "title": headline(first.get("body")),
                     "_replies": [c.get("body") or "" for c in comments[1:]]})
     return out
@@ -418,7 +458,8 @@ def replied(tree, rounds, ends, threads, fixes):
     file. A file is named by its name; by its stem when the stem is no plain
     word (a digit, _ or - in it); or by the stem's first part when that holds
     a digit and no other file of the commit shares it; a commit outside every
-    round's range is no fix of the review."""
+    round's range is no fix of the review, nor is a commit a thread left as
+    it is names."""
     commits = {}
     def round_of(sha):
         if sha not in commits:
@@ -435,6 +476,10 @@ def replied(tree, rounds, ends, threads, fixes):
                         break
         return commits[sha]
     for t in threads:
+        # A thread left as it is names commits as its reasons — the fix it
+        # would undo, the decision it stands on — not as its fix.
+        if t["outcome"] in ("declined", "reversal", "yours", "night"):
+            continue
         text = "\n".join(t.get("_replies") or [])
         for sha in SHA.findall(text):
             found = round_of(sha)
@@ -480,18 +525,28 @@ def named(path, text):
     return re.search(r"(?<![\w./-])" + re.escape(path) + r"(?![\w/-])", text) is not None
 
 
-def seen_files(tree, sessions, paths):
-    """The files of the pull request a round's passes opened: read (Read,
+RANK = {"part": 1, "diff": 2, "whole": 3}
+READ_WHOLE = 2000  # lines the Read tool gives without a limit
+
+
+def seen_files(tree, sessions, paths, lines=None):
+    """The files of the pull request a round's passes opened — read (Read,
     Grep), named in a command (git diff -- it, cat, sed), or shown as a diff
     header in a command's output — in the passes' transcripts and their
-    subagents' (a saved long output counts once a Read shows it). None when
-    no pass left a transcript here (a GitHub run): what
-    it read is not known. A pass that found nothing in a file it never
-    opened says nothing about it."""
+    subagents' (a saved long output counts once a Read shows it), each with
+    how far: "whole" (a Read of all of it: no offset or limit, the file
+    within what one Read gives, by `lines`), "diff" (its changes shown) or
+    "part" (a slice, a search, a name in a command). None when no pass left
+    a transcript here (a GitHub run): what it read is not known. A pass that
+    found nothing in a file it never opened says nothing about it."""
     folder = os.path.join(claude_usage.ROOT, claude_usage.project_name(tree))
-    found, any_read = set(), False
+    found, any_read = {}, False
     wanted = set(paths)
     root = tree.rstrip("/") + "/"
+
+    def saw(p, how):
+        if RANK[how] > RANK.get(found.get(p), 0):
+            found[p] = how
     for sid in sessions:
         files = [os.path.join(folder, sid + ".jsonl")]
         try:
@@ -521,14 +576,25 @@ def seen_files(tree, sessions, paths):
                             continue
                         if b.get("type") == "tool_use":
                             # The file tools name a file by its absolute path.
-                            text = json.dumps(b.get("input") or {}, ensure_ascii=False).replace(root, "")
-                            found.update(p for p in wanted if p in text and named(p, text))
+                            inp = b.get("input") or {}
+                            text = json.dumps(inp, ensure_ascii=False).replace(root, "")
+                            whole = None
+                            if b.get("name") == "Read" and not inp.get("offset") and not inp.get("limit"):
+                                whole = str(inp.get("file_path") or "").replace(root, "")
+                            for p in wanted:
+                                if p in text and named(p, text):
+                                    # Its change counts as read only where a diff of it
+                                    # was shown (DIFF_HEADER, below): a command naming
+                                    # git diff may print counts or names alone.
+                                    saw(p, "whole" if p == whole and (lines or {}).get(p, 0) <= READ_WHOLE else "part")
                         elif b.get("type") == "tool_result":
                             c = b.get("content")
                             c = c if isinstance(c, str) else " ".join(
                                 x.get("text") or "" for x in c or [] if isinstance(x, dict))
-                            found.update(p for p in DIFF_HEADER.findall(c) if p in wanted)
-    return sorted(found) if any_read else None
+                            for p in DIFF_HEADER.findall(c):
+                                if p in wanted:
+                                    saw(p, "diff")
+    return found if any_read else None
 
 
 def round_at(rounds, at):
@@ -763,8 +829,14 @@ def build(tree):
             # that round's: telling them apart needs a blame of each.
             own = set((git(tree, "log", "--first-parent", "--no-merges", "--name-only", "--format=",
                            r["head"] + ".." + ends[i]) or "").split("\n")) - {""}
+            asked = asked_lines(tree, r["head"], ends[i])
             for h in hunks(tree, r["head"], ends[i]):
                 h["r"] = i
+                # Lines the person asked for are the development's, wherever
+                # in the review they came: the page draws them as such.
+                theirs = asked.get(h["path"])
+                if theirs and h["add"] and sum(1 for k in range(h["x"], h["x"] + h["n"]) if k in theirs) * 2 > h["add"]:
+                    h["asked"] = True
                 (fixes if h["path"] in own else carried).append(h)
     # The files: what the pull request changed by its first round, and every
     # file a fix or a thread touched since.
@@ -798,7 +870,9 @@ def build(tree):
     for r in rounds:
         sessions = r["sessions"]
         # A stopped pass said nothing that counts: it read nothing either.
-        r["seen"] = [] if r["stopped"] else seen_files(tree, sessions, paths) if r.get("source") != "github" else None
+        how = {} if r["stopped"] else seen_files(tree, sessions, paths, r["lines"]) if r.get("source") != "github" else None
+        r["seen"] = None if how is None else sorted(how)
+        r["how"] = how
     axis = project(paths, rounds, fixes + carried, threads, dev, final)
     # Each fix's answer: the nearest thread of its round in its file, within
     # NEAR lines; failing that, the thread a subagent of its round was given
@@ -846,8 +920,34 @@ def build(tree):
     # The review blocks the pull request is read in, when it is: each
     # changed file is in one, and the page groups the columns by them.
     cut = read_json(os.path.join(tree, FEATURE_BLOCKS), {})
-    blocks = [{"n": i + 1, "title": b.get("title") or "", "files": b.get("files") or []}
-              for i, b in enumerate(cut.get("blocks") or []) if isinstance(b, dict)]
+    def shown(bs):
+        return [{"n": i + 1, "id": str(b.get("id") or i + 1), "title": b.get("title") or "",
+                 "files": b.get("files") or [], "criteria": b.get("criteria") or []}
+                for i, b in enumerate(bs or []) if isinstance(b, dict)]
+    blocks = shown(cut.get("blocks"))
+    # Each block's size now, as the split measures it (review_blocks.py
+    # outgrown): its files' changed lines, generated ones left out, against
+    # reviewBlocks.size.
+    try:
+        now_changed = review_blocks.changed(tree, cut["base"], head or "HEAD") if blocks and cut.get("base") else {}
+    except subprocess.TimeoutExpired:
+        now_changed = {}
+    if now_changed:
+        for b in blocks:
+            gen = {f: review_blocks.generated(tree, f) for f in b["files"] if f in now_changed}
+            b["lines"] = sum(now_changed[f] for f, g in gen.items() if not g)
+            b["generated"] = sum(now_changed[f] for f, g in gen.items() if g)
+    size = (process_config.config_of(tree).get("reviewBlocks") or {}).get("size")
+    size = "" if size is None else str(size)
+    # The cut as it stood before each split (review_blocks.py split): what
+    # the rounds before it read under, for the page to show as it played.
+    earlier = []
+    for e in cut.get("earlier") or []:
+        try:
+            until = datetime.datetime.fromisoformat(e["until"]).timestamp()
+        except (KeyError, TypeError, ValueError):
+            continue
+        earlier.append({"until": until, "split": str(e.get("split") or ""), "blocks": shown(e.get("blocks"))})
     # Where the review stands: the block read now (none once the seams are
     # past), and whether step 4 is over — no round comes after the last,
     # whose fixing is then over too.
@@ -855,8 +955,9 @@ def build(tree):
     step = state.get("step") or ""
     closed = step == "done" or step in places and places.index(step) > places.index("review")
     now = (state.get("blocks") or {}).get("current")
-    return {"pr": pr, "repo": repo, "head": head, "final": final, "dev": dev, "blocks": blocks,
+    return {"pr": pr, "repo": repo, "head": head, "final": final, "dev": dev, "blocks": blocks, "earlier": earlier,
             "blockNow": now if isinstance(now, int) and blocks and not closed else None, "closed": closed,
+            "blockSize": int(size) if size.isdigit() else review_blocks.SIZE,
             "files": [dict({"path": p, "lines": rounds[0]["lines"].get(p, 0)},
                            **({"axis": axis[p]} if p in axis else {})) for p in paths],
             "rounds": rounds, "hunks": fixes, "threads": threads, "hands": hands}

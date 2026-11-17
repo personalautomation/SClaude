@@ -17,9 +17,12 @@
 #
 #   feature_db.py config <src config.toml> <dst config.toml> <project_id> <base>
 #   feature_db.py envfile <.sclaude/config.json> <workdir>   < `supabase status -o env`
+#   feature_db.py stale <migrations dir>   < the stack's schema_migrations as JSON
 #
 # Called from featuredb.sh; each subcommand is a function below, for the tests.
+import glob
 import json
+import os
 import re
 import shlex
 import sys
@@ -99,6 +102,54 @@ def env_lines(mapping, status, workdir):
     return lines
 
 
+# What two texts of SQL are compared by: the CLI keeps a migration as the
+# statements it split the file into, trimmed, and without the separators.
+# Runs of whitespace and separators become one space rather than nothing: a
+# space added inside a string literal where there was none, or taken out,
+# still counts. A run made longer or shorter, or a tab for a space, does not:
+# what lay between the statements is not kept, so spacing cannot be compared
+# exactly.
+SPACING = re.compile(r"[\s;]+")
+
+
+def unspaced(sql):
+    return SPACING.sub(" ", sql).strip()
+
+
+def stale_migrations(rows, files):
+    """The applied migrations a stack no longer matches, as `<version> changed`
+    or `<version> gone`, in order of version.
+
+    `rows` are the stack's supabase_migrations.schema_migrations, each
+    {"v": version, "s": [statements]}; `files` maps a version to its file's
+    text. Applied is not the same as current: `migration up` never runs a
+    version again, so a migration edited after it ran — a review's fix, a
+    feature's migrations folded into one — left the stack on the old SQL with
+    nothing said, and the feature was tried on a schema it no longer has.
+    Spacing and semicolons aside, the stored statements are the file."""
+    out = []
+    for row in sorted(rows or [], key=lambda r: str(r.get("v"))):
+        version = str(row.get("v"))
+        if version not in files:
+            out.append("%s gone" % version)
+        elif unspaced(" ".join(row.get("s") or [])) != unspaced(files[version]):
+            out.append("%s changed" % version)
+    return out
+
+
+def migration_files(folder):
+    """Each migration file's text by its version, the part of its name before
+    the first "_", as the Supabase CLI reads it."""
+    files = {}
+    for path in glob.glob(os.path.join(folder, "*.sql")):
+        name = os.path.basename(path)
+        version = name.split("_", 1)[0]
+        if "_" in name and version.isdigit():
+            with open(path, errors="replace") as fh:
+                files[version] = fh.read()
+    return files
+
+
 def main(argv):
     if len(argv) >= 5 and argv[0] == "config":
         src, dst, project_id, base = argv[1:5]
@@ -116,7 +167,19 @@ def main(argv):
             return 1
         sys.stdout.write("\n".join(lines) + "\n")
         return 0
-    sys.stderr.write("usage: feature_db.py config|envfile …\n")
+    if len(argv) >= 2 and argv[0] == "stale":
+        # What the stack could not be asked, or answered oddly, is no claim
+        # that it is stale: a rebuild throws its data away.
+        try:
+            rows = json.loads(sys.stdin.read() or "null")
+        except ValueError:
+            return 0
+        if not isinstance(rows, list) or not os.path.isdir(argv[1]):
+            return 0
+        for line in stale_migrations(rows, migration_files(argv[1])):
+            print(line)
+        return 0
+    sys.stderr.write("usage: feature_db.py config|envfile|stale …\n")
     return 2
 
 

@@ -4,7 +4,7 @@
 // (`pin`), what is selected (`sel`, the elements' keys), and a play — which
 // map (`play`), which pass on a map of passes (`pass`), the place it is at
 // (`at`, its index in the play), its speed (`speed`), "this map only"
-// (`only`) and paused (`paused`). In the hash: nothing of it goes to sclaude,
+// (`only`) and paused (`paused`); the review's map full screen (`rv`). In the hash: nothing of it goes to sclaude,
 // and a change does not load the page again. A hash naming a section alone
 // (the legend's links) is read as `s`.
 (() => {
@@ -31,6 +31,7 @@
     if (tab && tab.dataset.tab !== 'actions') p.set('tab', tab.dataset.tab);
     const dock = document.getElementById('dock');
     if (dock) p.set('pin', dock.hidden ? '0' : '1');
+    if (window.reviewMap && window.reviewMap.full()) p.set('rv', 'full');
     const sel = window.processMap ? window.processMap.selected() : [];
     if (sel.length) p.set('sel', sel.join(','));
     const play = window.player && window.player.state();
@@ -71,6 +72,7 @@
   } finally {
     window.processUrlRestoring = false;
   }
+  if (wanted.get('rv') === 'full' && window.reviewMap) window.reviewMap.full(true);
   if (wanted.get('sel') && window.processMap) window.processMap.select(wanted.get('sel').split(','));
   if (wanted.get('play') && window.player) {
     window.player.want({map: wanted.get('play'), pass: wanted.get('pass'), at: +wanted.get('at') || 0,

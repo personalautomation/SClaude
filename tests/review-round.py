@@ -917,7 +917,11 @@ echo "watcher=[$SESSION_WATCHER]"
     with open(reversals, "w") as fh:
         fh.write("https://x/pull/1#discussion_r1\tundoes abc\nhttps://x/pull/1#discussion_r2\tundoes def\n")
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30).stdout
-    check("reversals-emptied-once-counted", os.path.getsize(reversals), 0)
+    with open(reversals) as fh:
+        kept = fh.read().splitlines()
+    # Counted once and kept: the map colours the threads by these lines.
+    check("reversals-kept-and-marked", [x.split("\t")[0][-2:] for x in kept[:2]] + [kept[2][:10]],
+          ["r1", "r2", "# counted "])
     check("context-joined", out.split("\n")[0], "120003 50010 13 1000000")
     check("carry-on-names-the-share", "Your context is at 12% — under the 40%" in out, True)
     try:
@@ -929,6 +933,10 @@ echo "watcher=[$SESSION_WATCHER]"
     os.remove(shared)
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30).stdout
     check("context-without-statusline", out.split("\n")[0], "120003 50010 - -")
+    with open(os.path.join(repo, ".sclaude/local/review-context.log")) as fh:
+        check("reversals-counted-once", fh.read().splitlines()[-1].split("\t")[-1], "0")
+    with open(reversals) as fh:
+        check("no-mark-for-nothing", len(fh.read().splitlines()), 3)
 
     # --- the round goes on in the same session under the threshold -------------
     rot = RUN[RUN.index("review_reopen() {"):]

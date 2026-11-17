@@ -20,7 +20,11 @@
 #     its cache — the pull request's last head stays the one to read from;
 #   * while blocks are read the review runs here, whatever the setting;
 #   * blocks_next closes a block, begins step 4's record afresh, keeps the
-#     old one under the block, and after the seams goes no further.
+#     old one under the block, and after the seams goes no further;
+#   * a block past the size is split by behaviour before it is read whole:
+#     the parts hold every file and criterion once, take its place named
+#     after it (1a, 1b; 1a1), the cut before is kept, and the shell moves
+#     the count and tells the person; within the size no session runs.
 #
 # Run it with: python3 tests/review-blocks.py
 import json
@@ -438,6 +442,153 @@ try:
     git(wt, "merge", "-q", "--no-edit", "-X", "theirs", "side")
     merged = git(wt, "rev-parse", "HEAD")
     check("a-merge-is-no-change-of-the-block", review_blocks.stale(wt, cut, 1, head, merged, 1), False)
+    # A block grown past the size is split by behaviour before it is read
+    # whole: the parts take its place, named for good after it, the blocks
+    # after keep their ids, and the cut as it stood is kept.
+    review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))
+    check("a-block-past-the-size-has-outgrown",
+          (review_blocks.outgrown(wt, cut, 1, merged, 20), review_blocks.outgrown(wt, cut, 1, merged, 3000)), (True, False))
+    parts = {"blocks": [
+        {"title": "Taking", "criteria": ["AC1"], "files": ["take/a", "package-lock.json"], "why": "w", "contracts": []},
+        {"title": "Shared", "criteria": [], "files": ["shared/s", "mine/new"], "why": "w", "contracts": []}]}
+
+    def split_faults(change, limit=3000):
+        bad = json.loads(json.dumps(parts))
+        change(bad)
+        with open(answer, "w") as fh:
+            fh.write(json.dumps(bad))
+        before = json.dumps(review_blocks.load(cut))
+        got = review_blocks.split(wt, cut, 1, merged, answer, limit)
+        check("a-split-that-does-not-hold-writes-nothing", json.dumps(review_blocks.load(cut)), before)
+        return got
+
+    check("a-split-file-nowhere", split_faults(lambda d: d["blocks"][1]["files"].clear()),
+          ["part 2 (Shared) owns no file", "mine/new is the block's and in no part",
+           "shared/s is the block's and in no part"])
+    check("a-split-criterion-twice", split_faults(lambda d: d["blocks"][1]["criteria"].append("AC1")),
+          ["criterion AC1 is in parts 1, 2: one each"])
+    check("a-split-of-a-falsy-wrong-shape", split_faults(lambda d: d["blocks"][1].update(contracts=0))[0],
+          "part 2: `title` and `why` are strings, `files`, `criteria` and `contracts` lists of strings")
+    check("a-split-of-one-is-none", split_faults(lambda d: d["blocks"].pop()),
+          ["give two blocks or more: one block is the block as it is"])
+    check("a-split-file-of-another-block", split_faults(lambda d: d["blocks"][1]["files"].append("mine/b")),
+          ["mine/b is in part 2 but is not the block's"])
+    check("a-part-of-foreign-files-is-told-only-so", split_faults(lambda d: d["blocks"].append({"title": "X", "files": ["made/up"]})),
+          ["made/up is in part 3 but is not the block's"])
+    check("a-split-part-past-the-size", split_faults(lambda d: None, limit=20),
+          ["part 1 (Taking) has 50 changed lines, past 20: split it further"])
+    check("a-split-of-the-wrong-shape", split_faults(lambda d: d["blocks"][1].update(criteria="AC1")),
+          ["part 2: `title` and `why` are strings, `files`, `criteria` and `contracts` lists of strings",
+           "mine/new is the block's and in no part", "shared/s is the block's and in no part"])
+    with open(answer, "w") as fh:
+        fh.write("```json\n%s\n```" % json.dumps(parts))
+    keep = review_blocks.load(cut)
+    keep["blocks"][0]["files"].append("README")
+    review_blocks.save(cut, keep)
+    check("a-file-no-longer-changed-is-offered-and-placed",
+          ("README\t0\tno longer changed" in review_blocks.brief(wt, cut, 1, merged),
+           review_blocks.split(wt, cut, 1, merged, answer, 3000)), (True, ["README is the block's and in no part"]))
+    with open(answer, "w") as fh:
+        fh.write(json.dumps({"blocks": parts["blocks"] + [{"title": "Gone", "criteria": [], "files": ["README"]}]}))
+    check("a-part-of-unchanged-files-alone-is-none", review_blocks.split(wt, cut, 1, merged, answer, 3000),
+          ["part 3 (Gone) owns only files the pull request no longer changes (README): put them with a part that has changes"])
+    with open(answer, "w") as fh:
+        fh.write(json.dumps({"blocks": [dict(parts["blocks"][0], files=parts["blocks"][0]["files"] + ["README"]),
+                                        parts["blocks"][1]]}))
+    check("a-split-that-holds", review_blocks.split(wt, cut, 1, merged, answer, 3000), [])
+    after = review_blocks.load(cut)
+    check("the-parts-take-its-place-named-after-it", [b["id"] for b in after["blocks"]], ["1a", "1b", "2"])
+    check("the-cut-before-is-kept", ([e["split"] for e in after["earlier"]],
+                                    [b["id"] for b in after["earlier"][0]["blocks"]]), (["1"], ["1", "2"]))
+    check("the-journal-names-a-part-by-its-id",
+          [review_blocks.ident(after, k) for k in (1, 2, 3)], ["1a", "1b", "2"])
+    check("the-summary-names-the-ids", [l.split(".")[0] for l in review_blocks.summary(cut)][:3], ["1a", "1b", "2"])
+    check("a-parts-read-names-its-place", review_blocks.scope(wt, cut, 2, merged).startswith("block 1b (2 of 3)"), True)
+    with open(answer, "w") as fh:
+        fh.write(json.dumps({"blocks": [
+            {"title": "Taking", "criteria": ["AC1"], "files": ["take/a", "README"]},
+            {"title": "Lock", "criteria": [], "files": ["package-lock.json"]}]}))
+    check("a-part-split-again", (review_blocks.split(wt, cut, 1, merged, answer, 3000),
+                                 [b["id"] for b in review_blocks.load(cut)["blocks"]]), ([], ["1a1", "1a2", "1b", "2"]))
+    # The shell: the session's answer taken, the state's count moved, the
+    # person told; within the size nothing runs.
+    review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))
+    with open(answer, "w") as fh:
+        fh.write(json.dumps(parts))
+    bindir = os.path.join(tmp, "bin")
+    os.makedirs(bindir, exist_ok=True)
+    with open(os.path.join(bindir, "claude"), "w") as fh:
+        fh.write("#!/bin/sh\necho RAN >> %s/claude.log\ncat %s\n" % (tmp, answer))
+    os.chmod(os.path.join(bindir, "claude"), 0o755)
+    with open(state, "w") as fh:
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+    split_sh = ('PATH=%s:$PATH; LOCAL_REVIEW_MODEL=m; local_review_file() { echo %s/split$2; }; '
+                'blocks_base() { echo %s; }; history_add() { echo "HISTORY $*"; }; ask_feed() { echo "FEED $*"; }; '
+                % (bindir, tmp, base))
+    out = sh(split_sh + 'project_get() { echo 99999; }; blocks_split "%s" %s && echo SPLIT || echo AS-IT-IS' % (wt, merged))
+    check("within-the-size-no-session", ("AS-IT-IS" in out, os.path.exists(os.path.join(tmp, "claude.log"))), (True, False))
+    # A split that did not hold is not tried again on that head.
+    review_blocks.tried(cut, 1, merged)
+    check("a-failed-split-is-not-tried-again-on-its-head",
+          (review_blocks.outgrown(wt, cut, 1, merged, 20), review_blocks.outgrown(wt, cut, 1, p2, 20)), (False, True))
+    review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))
+    out = sh(split_sh + 'project_get() { echo 55; }; blocks_split "%s" %s && echo SPLIT; echo "ID=$(blocks_id "%s")"' % (wt, merged, wt))
+    with open(state) as fh:
+        st = json.load(fh)
+    check("a-split-in-the-shell", ("SPLIT" in out, st["blocks"]["total"], st["blocks"]["current"],
+                                   "HISTORY " + state + " blocks split block=1 parts=2" in out,
+                                   "FEED say 🧱 Block 1 had grown past 55 lines: it is split in 2" in out,
+                                   "ID=1a" in out),
+          (True, 4, 1, True, True, True))
+    check("a-split-block-is-labelled-by-its-id-and-place",
+          [sh('blocks_label "%s" %d' % (wt, k)).strip() for k in (1, 2, 3, 4)], ["1a (1/4)", "1b (2/4)", "2 (3/4)", "4/4"])
+    # The first session fails (a quota), the second answers: its answer is
+    # read; a failed session is no fault to mend and marks nothing.
+    review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))
+    with open(state, "w") as fh:
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+    with open(os.path.join(bindir, "claude"), "w") as fh:
+        fh.write("#!/bin/sh\nn=$(cat %s/calls 2>/dev/null || echo 0); n=$((n+1)); echo $n > %s/calls\n"
+                 "echo \"$2\" > %s/prompt$n\n[ \"$FAIL\" = all ] && exit 1\n[ $n = 1 ] && exit 1\ncat %s\n"
+                 % (tmp, tmp, tmp, answer))
+    out = sh(split_sh + 'project_get() { echo 55; }; blocks_split "%s" %s && echo SPLIT' % (wt, merged))
+    check("a-second-try-after-a-failed-session-is-read",
+          ("SPLIT" in out, "did not hold" in open(os.path.join(tmp, "prompt2")).read()), (True, False))
+    review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))
+    with open(state, "w") as fh:
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+    sh(split_sh + 'export FAIL=all; project_get() { echo 55; }; blocks_split "%s" %s' % (wt, merged))
+    check("sessions-that-failed-mark-nothing", "tried" in review_blocks.load(cut), False)
+    with open(answer, "w") as fh:
+        fh.write("no json here")
+    os.remove(os.path.join(tmp, "calls"))
+    sh(split_sh + 'project_get() { echo 55; }; blocks_split "%s" %s' % (wt, merged))
+    check("answers-that-did-not-hold-mark-the-head", review_blocks.load(cut).get("tried"), {"1": merged})
+    # A crash of the check is sclaude's: said, and nothing marked.
+    review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))
+    with open(answer, "w") as fh:
+        fh.write(json.dumps(parts))
+    with open(os.path.join(bindir, "claude"), "w") as fh:
+        fh.write("#!/bin/sh\necho '{' > %s\ncat %s\n" % (cut, answer))
+    with open(state, "w") as fh:
+        json.dump({"pr": 9, "blocks": {"total": 3, "current": 1, "pr": 9, "base": base}}, fh)
+    out = sh(split_sh + 'project_get() { echo 55; }; blocks_split "%s" %s || echo AS-IT-IS' % (wt, merged))
+    check("a-crash-of-the-check-is-said-and-marks-nothing",
+          ("Checking the split of block 1 failed" in out, "AS-IT-IS" in out, "does not hold" in out,
+           open(cut).read().strip()), (True, True, False, "{"))
+    review_blocks.save(cut, dict(good, base=base, head=p2, source="session", closed={}))
+    with open(os.path.join(LIB, "review", "local_review.sh")) as fh:
+        src = fh.read()
+    check("a-block-is-split-before-its-whole-read-is-tagged",
+          src.index('blocks_stale "$wt" "$head"') < src.index('blocks_split "$wt" "$head"')
+          < src.index('SCLAUDE_REVIEW_READ="${first:+first}"'), True)
+    # The size a block is cut and split against when the project sets
+    # none: one figure in the shell and in SIZE, which the map reads.
+    import re
+    with open(os.path.join(LIB, "review", "review_blocks.sh")) as fh:
+        falls = re.findall(r"\|\| (?:size|limit)=(\d+)", fh.read())
+    check("the-default-block-size-is-one-figure", set(falls), {str(review_blocks.SIZE)})
+    check("the-default-block-size-in-every-reader", len(falls), 3)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

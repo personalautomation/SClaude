@@ -30,6 +30,22 @@ blocks_active() {
 }
 
 blocks_now() { state_get "$1/.sclaude/local/feature/state.json" blocks.current 2>/dev/null || true; }
+# Block <k>'s id (the one read now without <k>): its name for good, which the
+# journal and the history name it by — its place until a split moved the
+# places (blocks_split). The seams have none.
+blocks_id() {
+  local k="${2:-$(blocks_now "$1")}"
+  python3 "$LIB/review/review_blocks.py" id "$(blocks_file "$1")" "$k" 2>/dev/null || echo "$k"
+}
+# Block <k> as the person reads it: its place of the total — the progress —
+# and, once a split moved the places, its id before it: "2/5", "3 (4/5)",
+# the seams "5/5".
+blocks_label() {
+  local k="${2:-$(blocks_now "$1")}" total="${3:-}" id
+  [[ -n "$total" ]] || total="$(blocks_total "$1")"
+  if [[ "$k" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] && (( k < total )); then id="$(blocks_id "$1" "$k")"; else id="$k"; fi
+  if [[ "$id" == "$k" ]]; then echo "$k/$total"; else echo "$id ($k/$total)"; fi
+}
 blocks_total() { state_get "$1/.sclaude/local/feature/state.json" blocks.total 2>/dev/null || true; }
 
 # The commit the review reads from: where the branch left main — or the one
@@ -75,7 +91,7 @@ blocks_ensure() {
   base="$(blocks_base "$wt")" || return 0
   [[ -n "$base" ]] || return 0
   from="$(project_get reviewBlocks.from "$wt" 2>/dev/null || true)"; [[ "$from" =~ ^[0-9]+$ ]] || from=5000
-  size="$(project_get reviewBlocks.size "$wt" 2>/dev/null || true)"; [[ "$size" =~ ^[0-9]+$ ]] || size=3000
+  size="$(project_get reviewBlocks.size "$wt" 2>/dev/null || true)"; [[ "$size" =~ ^[0-9]+$ ]] || size=3000  # SIZE in review_blocks.py
   lines="$(python3 "$LIB/review/review_blocks.py" size "$wt" "$base" 2>/dev/null || echo 0)"
   if (( lines <= from )); then
     state_set "$state" blocks.total 0
@@ -184,7 +200,7 @@ Rules:
 - Files a tool wrote (marked generated below) go with the code they follow, and do not count towards the size.
 - Each block's changed lines, generated files left out, stay under $size, unless the block is a single file.
 - Every criterion of the plan is in exactly one block — or in \`rules\`, when it is a rule every behaviour follows (permissions, errors, validation shared by all) rather than a behaviour of its own; a criterion the plan marks for no part is often one.
-- Order the blocks so that what others rest on comes first: the behaviour the rest build on, then those built on it; the manuals last.
+- Order the blocks so that what others rest on comes first. Lean the foundation into the first blocks — the data model and the rules it enforces, the shared files many behaviours call, the files that build the \`rules\` every behaviour follows, the most important behaviour — then the behaviours built on it; the manuals last. The foundation still goes in by behaviour: the behaviour that rests most directly on it takes it into its block, with its criteria, rather than a block of the schema and the helpers alone. A fix in the foundation reaches every block: read early, the later blocks read on code already reviewed rather than code that will still change under them. A leaning, not a law: a file only one behaviour uses goes with that behaviour, wherever it comes.
 - Two to eight blocks. Read the code as you need to (\`git show $head:<path>\`, \`git diff $base..$head -- <path>\`) — do not read it all.
 
 The changed files — path, lines changed, generated or not, the parts whose commits changed it:
@@ -195,6 +211,102 @@ $faults
 }
 Answer with exactly this shape, nothing around it:
 {"blocks": [{"title": "<the behaviours, in a few words>", "criteria": ["AC1", "AC4"], "files": ["<path>", ...], "why": "<one sentence: what holds these together>", "contracts": ["<with block N: what one gives the other>"]}], "rules": [{"title": "<the rule>", "criteria": ["AC9"], "where": ["<path that builds it>"]}]}
+TEXT
+}
+
+# A block past the size, before it is read whole (its first read, or again
+# once it went stale): a session splits it by behaviour, as the cut was
+# made, the faults of a first try told to a second; parts that hold take its
+# place (review_blocks.py split) and the blocks after move up a place,
+# keeping their ids. 0 when it was split, for the caller to read the first
+# part; 1 when it is read as it is — within the size, the seams, or two
+# tries that did not hold. Its cost is a cut's, under a dollar: the whole
+# read it comes before is the price, and that is read in earnest after it.
+#
+#   blocks_split <wt> <head>
+blocks_split() {
+  local wt="$1" head="$2" state="$1/.sclaude/local/feature/state.json" k total limit file id
+  local answer text faults="" told="" judged="" try n parts rc
+  k="$(blocks_now "$wt")"; total="$(blocks_total "$wt")"
+  [[ "$k" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] && (( k < total )) || return 1
+  limit="$(project_get reviewBlocks.size "$wt" 2>/dev/null || true)"; [[ "$limit" =~ ^[0-9]+$ ]] || limit=3000  # SIZE in review_blocks.py
+  file="$(blocks_file "$wt")"
+  python3 "$LIB/review/review_blocks.py" outgrown "$wt" "$file" "$k" "$head" "$limit" 2>/dev/null || return 1
+  id="$(blocks_id "$wt" "$k")"
+  answer="$(local_review_file "$wt" -split.md)"
+  info "  Block $id has grown past $limit changed lines: a session splits it by behaviour ($LOCAL_REVIEW_MODEL)…"
+  # Only an answer judged and found wanting is told to the next try, and
+  # only then is the head marked: a session that failed (a quota, the
+  # network) judged nothing, and a crash here is sclaude's, not the answer's.
+  for try in 1 2; do
+    text="$(blocks_split_prompt "$(python3 "$LIB/review/review_blocks.py" brief "$wt" "$file" "$k" "$head")" \
+              "$(blocks_base "$wt")" "$head" "$limit" "$told")"
+    if ! ( cd "$wt" && exec claude -p "$text" --model "$LOCAL_REVIEW_MODEL" \
+             --allowedTools "Read" "Grep" "Glob" \
+               "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" \
+             --disallowedTools "Edit" "Write" "NotebookEdit" "Bash(gh:*)" \
+               "Bash(git push:*)" "Bash(git commit:*)" \
+             >"$answer" 2>>"$(local_review_file "$wt" .log)" </dev/null ); then
+      warn "  The session splitting block $id, try $try, failed."
+      continue
+    fi
+    rc=0
+    faults="$(python3 "$LIB/review/review_blocks.py" split "$wt" "$file" "$k" "$head" "$answer" "$limit" \
+              2>>"$(local_review_file "$wt" .log)")" || rc=$?
+    if (( rc == 0 )); then
+      n="$(python3 "$LIB/review/review_blocks.py" count "$file" 2>/dev/null || echo 0)"
+      parts=$(( n + 1 - total + 1 ))
+      state_set "$state" blocks.total $((n + 1))
+      history_add "$state" blocks split block="$id" parts="$parts"
+      local said; said="$(python3 "$LIB/review/review_blocks.py" summary "$file" 2>/dev/null)"
+      info "  Block $id is split in $parts; the blocks now:"
+      printf '%s\n' "$said" | sed 's/^/    /' >&2
+      ask_feed say "🧱 Block $id had grown past $limit lines: it is split in $parts, each read whole (now $(blocks_label "$wt" "$k"))."$'\n'"$said" 2>/dev/null || true
+      return 0
+    fi
+    if [[ -z "$faults" ]]; then
+      warn "  Checking the split of block $id failed (its log: $(local_review_file "$wt" .log))."
+      break
+    fi
+    judged=1 told="$faults"
+    warn "  The split of block $id, try $try, does not hold:"
+    printf '%s\n' "$faults" | head -8 | sed 's/^/    /' >&2
+  done
+  # Judged and not held: not tried again on this head, so a pass that fails
+  # or is stopped and runs again (ten times, gone on by itself) does not pay
+  # for two sessions each time. A session that failed, or a crash of the
+  # check, marks nothing, even though a retry pays again: at the user's
+  # decision (2026-11-15), a passing failure must not leave the block
+  # unsplit for the rest of the head.
+  [[ -n "$judged" ]] && python3 "$LIB/review/review_blocks.py" tried "$file" "$k" "$head" 2>/dev/null
+  warn "  Block $id is read whole as it is."
+  return 1
+}
+
+blocks_split_prompt() {
+  local brief="$1" base="$2" head="$3" size="$4" faults="$5"
+  cat <<TEXT
+You split one review block of a pull request in two or more, unattended: nobody will answer a question. Change no file; answer with one JSON object and nothing else.
+
+The pull request is \`git diff $base..$head\`, read in blocks, one after another, each read whole by a review. This block has grown past what one review reads whole in earnest — its fixes, the files they added, or a rework: it is to be read as two blocks or more instead. Its plan is .sclaude/local/feature/plan.md.
+
+$brief
+
+Rules — the same as the blocks were cut by:
+- A block is one or more behaviours — groups of its criteria — with the files that carry them, so that a reviewer follows each rule end to end, through every layer it passes, to its tests. Cut by behaviour, not by layer.
+- Every file above is in exactly one block; a file several behaviours share goes to the block of the behaviour the others rest on, or, when that block would grow past the size, into a block of its own right after it. Tests go with the code they test; a file a fix added goes with the behaviour it fixes.
+- Files marked generated go with the code they follow and do not count towards the size.
+- Files marked "no longer changed" go with the behaviour they carry, in a block that also has changed files: a block of them alone has nothing to read.
+- Each block's changed lines, generated files left out, stay under $size, unless the block is a single file.
+- Every criterion above is in exactly one block.
+- Order the blocks so that what others rest on comes first: the data model and the rules it enforces, the shared files and the files that build the rules every behaviour follows lean into the first block, with the behaviour that rests most directly on them — not a block of one layer; a leaning, not a law: a file only one behaviour uses goes with that behaviour.
+- Read the code as you need to (\`git show $head:<path>\`, \`git diff $base..$head -- <path>\`) — do not read it all.
+${faults:+
+A split tried before did not hold: mend these, and keep the rest of the rules:
+$faults
+}
+Answer with exactly this shape, nothing around it:
+{"blocks": [{"title": "<the behaviours, in a few words>", "criteria": ["AC1", "AC4"], "files": ["<path>", ...], "why": "<one sentence: what holds these together>", "contracts": ["<with block N: what one gives the other>"]}]}
 TEXT
 }
 
@@ -218,7 +330,7 @@ blocks_next() {
   local unread=""
   if blocks_stale "$wt" "$head"; then
     unread=", its latest change not read whole (the search was ended, or the head went unreviewed)"
-    warn_here "  Block $k/$total closes$unread."
+    warn_here "  Block $(blocks_label "$wt" "$k") closes$unread."
   fi
   if (( k >= total )); then
     history_add "$state" blocks done
@@ -233,8 +345,9 @@ blocks_next() {
     return 1
   fi
   python3 "$LIB/review/review_blocks.py" close "$(blocks_file "$wt")" "$k" "$head" 2>/dev/null || true
-  history_add "$state" blocks closed block="$k"
-  ask_feed say "🧱 Block $k/$total of PR #${pr:-?} reviewed$unread." 2>/dev/null || true
+  local id; id="$(blocks_id "$wt" "$k")"
+  history_add "$state" blocks closed block="$id"
+  ask_feed say "🧱 Block $(blocks_label "$wt" "$k") of PR #${pr:-?} reviewed$unread." 2>/dev/null || true
   # The step's record begun again, its conversations kept (the issue's
   # summary and the costs read `runs`), and what it held kept under the
   # block: a block's rounds, its "enough", counted apart.
@@ -256,9 +369,9 @@ PY
   state_set "$state" blocks.current $((k + 1))
   echo ""
   if (( k + 1 == total )); then
-    info "  Block $k of $total is reviewed. Last: the seams between the blocks."
+    info "  Block $id of $total is reviewed. Last: the seams between the blocks."
   else
-    info "  Block $k of $total is reviewed. Next: block $((k + 1))."
+    info "  Block $id of $total is reviewed. Next: block $(blocks_id "$wt" $((k + 1)))."
   fi
   return 0
 }
@@ -293,9 +406,9 @@ blocks_stale() {
   local wt="$1" head="$2" k whole_at limit pr
   k="$(blocks_now "$wt")"; [[ "$k" =~ ^[0-9]+$ ]] || return 1
   pr="$(state_get "$wt/.sclaude/local/feature/state.json" pr 2>/dev/null || true)"
-  whole_at="$(SCLAUDE_REVIEW_BLOCK="$k" python3 "$LIB/review/local_review.py" whole "$(review_journal "$wt")" "$pr" 2>/dev/null || true)"
+  whole_at="$(SCLAUDE_REVIEW_BLOCK="$(blocks_id "$wt" "$k")" python3 "$LIB/review/local_review.py" whole "$(review_journal "$wt")" "$pr" 2>/dev/null || true)"
   [[ -n "$whole_at" && "$whole_at" != "$head" ]] || return 1
-  limit="$(project_get reviewBlocks.size "$wt" 2>/dev/null || true)"; [[ "$limit" =~ ^[0-9]+$ ]] || limit=3000
+  limit="$(project_get reviewBlocks.size "$wt" 2>/dev/null || true)"; [[ "$limit" =~ ^[0-9]+$ ]] || limit=3000  # SIZE in review_blocks.py
   python3 "$LIB/review/review_blocks.py" stale "$wt" "$(blocks_file "$wt")" "$k" "$whole_at" "$head" "$limit" 2>/dev/null
 }
 

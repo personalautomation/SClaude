@@ -81,7 +81,9 @@ of the finished feature — and for you, still one feature to test.
   the rest become an issue of their own.
 - `reviewBlocks` in the project's config sets when a pull request is read
   in blocks (`from`, 5000 changed lines) and how big a block is (`size`,
-  3000). Any big pull request is read in blocks, built in parts or not.
+  3000). Any big pull request is read in blocks, built in parts or not. A
+  block that its fixes or a rework grew past that size is split by behaviour
+  (`1a`, `1b`) before it is read whole again.
 
 ## Read more
 

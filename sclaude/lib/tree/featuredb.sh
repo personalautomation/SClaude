@@ -362,7 +362,33 @@ ensure_db() {
   # already applied here — applies all the same (--include-all): refused, it
   # left the suite running on a schema without main's change. One that still
   # fails is the stack's alone, and rebuilding it is the answer.
-  if ! (cd "$wt" && $cli migration up --include-all --workdir "$dir") >> "$log" 2>&1; then
+  #
+  # Before them, the ones applied already and changed since: `migration up`
+  # never runs a version twice, so a migration edited after it ran — a fix
+  # in review, a feature's migrations folded into one — left the stack on
+  # the old SQL with nothing said, and the feature was tried on a schema it
+  # no longer has. Such a stack is built again from the migrations, the
+  # reset `sclaude dev --rebuild-db` runs, and filled again below; what the
+  # feature made in it since its fill goes, the same as there. Not within
+  # db_rebuild, which resets it next anyway.
+  #
+  # From here to the fill under the feature's lock: a lazy start of the dev
+  # server runs this beside the regression's, and both saw the same changed
+  # migration — two resets, the second wiping the first one's fill under its
+  # tests, and the fill run twice. The second waits, finds the stack current
+  # and the fill done (db_lock). Only here, not around the start (above).
+  local stale="" reset_failed=""
+  db_lock "$wt"
+  [[ -n "${DB_REBUILDING:-}" ]] || stale="$(db_stale "$wt" "$dir" | paste -sd, - | sed 's/,/, /g')"
+  if [[ -n "$stale" ]]; then
+    info "  database: applied migrations no longer match their files ($stale) — building it again from this feature's migrations…"
+    state_set "$state" db.ready false
+    state_set "$state" db.copied false
+    if ! (cd "$wt" && $cli db reset --workdir "$dir") >> "$log" 2>&1; then
+      warn "  database: the reset failed — see .sclaude/local/feature/db.log; rebuild it with: sclaude dev --rebuild-db"
+      reset_failed=1
+    fi
+  elif ! (cd "$wt" && $cli migration up --include-all --workdir "$dir") >> "$log" 2>&1; then
     warn "  database: pending migrations did not apply — see .sclaude/local/feature/db.log."
     warn "  This feature's database is its own; rebuild it with: sclaude dev --rebuild-db"
   fi
@@ -374,6 +400,7 @@ ensure_db() {
   if ! python3 "$LIB/tree/feature_db.py" envfile "$(project_config_with database.local "$wt")" "$dir" \
          <<<"$status" > "$envf.tmp.$$"; then
     rm -f "$envf" "$envf.tmp.$$"
+    db_unlock
     warn "  database: the stack did not report every value the project maps — sharing the main local database"
     return 0
   fi
@@ -381,7 +408,10 @@ ensure_db() {
 
   # Filled once: a new stack has the schema and nothing else, and a feature
   # that cannot sign anybody in cannot be looked at.
-  [[ "$(state_get "$state" db.ready 2>/dev/null)" == "true" ]] || db_fill "$wt"
+  # Not after a reset that failed: a fill over half a schema fails too, or
+  # worse, and db_rebuild leaves it unfilled the same way.
+  [[ -n "$reset_failed" || "$(state_get "$state" db.ready 2>/dev/null)" == "true" ]] || db_fill "$wt"
+  db_unlock
   # Said when the stack was started here, else once in this process: a
   # database already up said so again at every session and regression.
   if [[ -n "$started" || "${DB_SAID:-}" != "$wt" ]]; then
@@ -424,19 +454,50 @@ db_fill() {
 # object storage stays behind, a cost and not a loss.
 db_rebuild() {
   local wt="$1" envf="$1/.sclaude/local/feature/db.env" state="$1/.sclaude/local/feature/state.json"
-  ensure_db "$wt"
+  DB_REBUILDING=1 ensure_db "$wt"
   [[ -f "$envf" ]] || { warn "  database: this feature has no local database of its own — nothing rebuilt"; return 1; }
   info "  database: building it again from this feature's migrations…"
   # Not ready from here on: a reset that fails half way leaves the database
   # emptied, and the next start has to fill it once it is whole again.
+  # Under the lock ensure_db takes for its own reset and fill, so a start
+  # beside it waits rather than migrating or filling it half way.
+  db_lock "$wt"
   state_set "$state" db.ready false
   state_set "$state" db.copied false
   if ! (cd "$wt" && $(db_cli "$wt") db reset \
           --workdir "$wt/.sclaude/local/feature/supabase") >> "$wt/.sclaude/local/feature/db.log" 2>&1; then
+    db_unlock
     warn "  database: the reset failed — see .sclaude/local/feature/db.log"
     return 1
   fi
   db_fill "$wt"
+  local rc=$?
+  db_unlock
+  return "$rc"
+}
+
+# The feature's database lock, from the stale-migration check (or a rebuild's
+# reset) to the fill: two starts at once reset and fill it once. Said when it
+# has to wait, since a reset and a copy take minutes and the wait looks like a
+# hang; given up after SCLAUDE_DB_LOCK_WAIT seconds (900) with a warning, as a
+# holder that never ends must not stop the feature. Released by hand: what
+# the fill started inherits the descriptor.
+DB_LOCK_FD=""
+db_lock() {
+  local limit="${SCLAUDE_DB_LOCK_WAIT:-900}"
+  [[ "$limit" =~ ^[0-9]+$ ]] || limit=900
+  exec {DB_LOCK_FD}>"$1/.sclaude/local/feature/db.lock"
+  flock -n "$DB_LOCK_FD" && return 0
+  info "  database: another start of this feature's database is resetting or filling it — waiting for it…"
+  flock -w "$limit" "$DB_LOCK_FD" && return 0
+  warn "  database: still busy after ${limit}s — going on without waiting"
+}
+
+db_unlock() {
+  [[ -n "$DB_LOCK_FD" ]] || return 0
+  flock -u "$DB_LOCK_FD"
+  exec {DB_LOCK_FD}>&-
+  DB_LOCK_FD=""
 }
 
 # The Postgres container of a stack, by its project_id.
@@ -453,6 +514,18 @@ db_main_container() {
   [[ -n "$own" ]] || return 1
   own="$(sed -E 's/[^a-zA-Z0-9_.-]+/_/g' <<<"$own")"
   db_container "${own:0:40}"
+}
+
+# The migrations this feature's stack applied and no longer matches, one a
+# line: `<version> changed` (its file edited since) or `<version> gone` (its
+# file no longer there). Nothing when the stack could not be asked: a rebuild
+# throws data away, and it is done only on an answer.
+db_stale() {
+  local wt="$1" dir="$2" db
+  db="$(db_container "$(db_project_id "$wt")")"
+  docker exec "$db" psql -U supabase_admin -d postgres -Atc \
+    "select coalesce(json_agg(json_build_object('v', version, 's', statements)), '[]') from supabase_migrations.schema_migrations" \
+    2>/dev/null | python3 "$LIB/tree/feature_db.py" stale "$dir/supabase/migrations"
 }
 
 # The migration versions a stack has applied, one a line, in order.

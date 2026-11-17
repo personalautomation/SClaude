@@ -1,4 +1,120 @@
 
+// --- hover notes that hold ---------------------------------------------------
+// A note shown on hover stays while the pointer moves onto it, so its text
+// can be selected and copied (the user's word, 2026-11-17): it is placed once
+// for what is hovered, not dragged along with the pointer, and hidden a
+// moment after the pointer has left both; going over something else on the
+// way to it changes it only if the pointer stays there. One note is open at
+// a time. holdTip(el) gives a note element show(key, html, ev, hovered),
+// leave(), hide(), redraw(), detach() and busy; the review's map uses it too.
+const TIPS = [];
+function holdTip(tip) {
+  const GRACE = 400, SWITCH = 180;
+  let key = null, timer = 0, pend = 0, inside = false, drag = false;
+  tip.classList.add('hold-tip');
+  const hide = () => {
+    clearTimeout(timer); clearTimeout(pend);
+    tip.hidden = true; key = null; inside = false;
+  };
+  const leave = () => {
+    clearTimeout(pend);
+    if (tip.hidden || inside || drag) return;
+    clearTimeout(timer); timer = setTimeout(hide, GRACE);
+  };
+  tip.addEventListener('mouseenter', () => { inside = true; clearTimeout(timer); clearTimeout(pend); });
+  tip.addEventListener('mouseleave', () => { inside = false; leave(); });
+  // Selecting its text may drag the pointer out: it stays till the button is let go.
+  tip.addEventListener('mousedown', () => { drag = true; });
+  document.addEventListener('mouseup', () => { if (drag) { drag = false; if (!inside) leave(); } });
+  // Placed off what is hovered, so it does not cover where the pointer is
+  // heading: below a small thing (a block, a dot, a button) or above it
+  // where there is no room; beside the pointer, never under it, on a large
+  // one (an icicle) or where neither side has room for the note.
+  function place(cx, cy, r) {
+    const pad = 10, w = tip.offsetWidth, hh = tip.offsetHeight;
+    let x, y;
+    const small = r && r.width <= 320 && r.height <= 200;
+    const below = small && r.bottom + 6 + hh <= innerHeight - 8, above = small && r.top - hh - 6 >= 4;
+    if (below || above) {
+      x = Math.min(cx - 12, innerWidth - w - 8);
+      y = below ? r.bottom + 6 : r.top - hh - 6;
+    } else {
+      // Room on neither side, or a large thing: beside the pointer.
+      x = cx + pad; y = cy - hh - pad;
+      if (x + w > innerWidth - 8) x = cx - w - pad;
+      if (y < 8) y = Math.min(cy + pad + 8, innerHeight - hh - 8);
+    }
+    tip.style.left = Math.max(4, x) + 'px'; tip.style.top = Math.max(4, y) + 'px';
+  }
+  function show(k, html, ev, el) {
+    if (inside || drag) return;
+    clearTimeout(timer);
+    if (k === key && !tip.hidden) { clearTimeout(pend); return; }
+    // Measured now, and again when it shows if still on the page: a redraw
+    // before the switch detaches it, a scroll moves it.
+    const cx = ev.clientX, cy = ev.clientY, r = el && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+    const go = () => {
+      const text = typeof html === 'function' ? html() : html;
+      if (!text) { hide(); return; }
+      TIPS.forEach((t) => { if (t !== api) t.hide(); });
+      key = k; tip.innerHTML = text; tip.hidden = false; place(cx, cy, el && el.isConnected ? el.getBoundingClientRect() : r);
+    };
+    clearTimeout(pend);
+    if (tip.hidden) go(); else pend = setTimeout(go, SWITCH);
+  }
+  // The same note with new text, where it stands (a title changed under it).
+  function redraw(k, html) { if (!tip.hidden) { key = k; tip.innerHTML = html; } }
+  // Kept open over a redraw that renumbered what it was about: no key, so
+  // the next hover always draws afresh.
+  function detach() { key = null; }
+  const api = {show, leave, hide, redraw, detach, get key() { return tip.hidden ? null : key; },
+    get busy() { return !tip.hidden && (inside || drag); }};
+  TIPS.push(api);
+  return api;
+}
+const inTip = (el) => !!(el && el.closest && el.closest('.hold-tip'));
+// The browser's own tooltips — a title attribute, an SVG <title> — vanish
+// as the pointer moves and cannot be selected; they are shown as a note
+// that holds. On first hover the text moves into data-tip (a title set or
+// redrawn later is taken afresh); tipOf/setTip read and write it for code
+// that changes a title while the page is open.
+function tipOf(el) {
+  const t = el.querySelector(':scope > title');
+  return t ? t.textContent : el.getAttribute('title') || el.dataset.tip || '';
+}
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
+function setTip(el, text) {
+  const t = el.querySelector(':scope > title');
+  if (t) t.textContent = text; else el.dataset.tip = text;
+  // Its note open now: it says the new text at once.
+  if (el.tipId && (titleTip.key || '').startsWith(el.tipId)) titleTip.redraw(el.tipId + text, esc(text));
+}
+function titled(el) {
+  for (; el && el.nodeType === 1; el = el.parentNode) {
+    if (inTip(el)) return null;
+    const t = el.querySelector(':scope > title');
+    if (t) { el.dataset.tip = t.textContent; t.remove(); }
+    if (el.hasAttribute('title')) {
+      el.dataset.tip = el.getAttribute('title');
+      // A glyph alone (⌖, ⏸, ✕) names nothing: the title becomes its name.
+      if (!el.hasAttribute('aria-label') && el.textContent.trim().length <= 2) el.setAttribute('aria-label', el.dataset.tip);
+      el.removeAttribute('title');
+    }
+    if (el.dataset && el.dataset.tip) return el;
+  }
+  return null;
+}
+const titleEl = Object.assign(document.createElement('div'), {id: 'tip-t', hidden: true});
+document.body.append(titleEl);
+const titleTip = holdTip(titleEl);
+document.addEventListener('mouseover', (ev) => {
+  if (inTip(ev.target)) return;
+  const el = titled(ev.target);
+  if (!el) { titleTip.leave(); return; }
+  if (!el.tipId) el.tipId = 't' + Math.random();
+  titleTip.show(el.tipId + el.dataset.tip, esc(el.dataset.tip), ev, el);
+});
+
 const M = /*MODEL*/;
 const byNode = {};
 Object.entries(M.edges).forEach(([k, e]) => {
@@ -74,20 +190,16 @@ function tipFor(k) {
 }
 const tip = document.createElement('div');
 tip.id = 'tip'; tip.hidden = true; document.body.append(tip);
+const mapTip = holdTip(tip);
 document.addEventListener('mouseover', (ev) => {
+  if (inTip(ev.target)) return;
   const el = ev.target.closest('[data-key]');
   const k = el && scope(el) ? el.dataset.key : null;
-  if (k === hover) return;
-  hover = k; paint();
-  tip.innerHTML = k ? tipFor(k) : ''; tip.hidden = !tip.innerHTML;
-});
-document.addEventListener('mousemove', (ev) => {
-  if (tip.hidden) return;
-  const pad = 16, w = tip.offsetWidth, hh = tip.offsetHeight;
-  let x = ev.clientX + pad, y = ev.clientY + pad;
-  if (x + w > innerWidth - 8) x = ev.clientX - w - pad;
-  if (y + hh > innerHeight - 8) y = ev.clientY - hh - pad;
-  tip.style.left = Math.max(4, x) + 'px'; tip.style.top = Math.max(4, y) + 'px';
+  if (k !== hover) { hover = k; paint(); }
+  // A badge's own note, inside a block, is the one shown there.
+  const own = k && titled(ev.target);
+  if (k && !(own && el.contains(own))) mapTip.show(k, () => tipFor(k), ev, el);
+  else mapTip.leave();
 });
 document.addEventListener('click', (ev) => {
   if (ev.target.closest('#clear')) { sel.clear(); paint(); return; }

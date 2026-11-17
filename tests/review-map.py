@@ -198,8 +198,8 @@ with tempfile.TemporaryDirectory() as tmp:
           six.get("fixedIn") == {"r": 0, "files": ["notes.md"]} and "_replies" not in six)
     check("a round with no transcript here does not say what it read", all(r["seen"] is None for r in d["rounds"]))
     out_by = {t["rid"]: t["outcome"] for t in d["threads"] if t["rid"] != "r6"}
-    check("thread outcomes: fixed, declined, night, reversal, open",
-          out_by == {"r1": "fixed", "r2": "declined", "r3": "night", "r4": "reversal", "r5": "open", "r7": "reversal", "r8": "reversal"})
+    check("thread outcomes: fixed, declined, left to the person (a night's too), reversal, open",
+          out_by == {"r1": "fixed", "r2": "declined", "r3": "yours", "r4": "reversal", "r5": "open", "r7": "reversal", "r8": "reversal"})
     flags = {t["rid"]: (t["resolved"], t["left"]) for t in d["threads"]}
     check("threads carry whether they are resolved and whether a reply left them",
           (flags["r2"], flags["r4"], flags["r7"], flags["r8"]) == ((True, True), (False, False), (True, False), (True, False)))

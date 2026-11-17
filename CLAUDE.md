@@ -383,7 +383,7 @@ breaks the other silently — grep before you edit:
 - The review's map (`sclaude/lib/review/review_map.py`) reads the journal
   by `JOURNAL` in `local_review.py`, the review blocks' cut by
   `FEATURE_BLOCKS` in `review_blocks.py`, the person's threads by `YOURS_FILE`
-  and `NIGHT_MARK`, the declines by `decline_of`, `review-reversals` as
+  (a night's among them, not told apart), the declines by `decline_of`, `review-reversals` as
   `reversals_file` in `review_round.sh` names it, and the history's `ask
   answered` rows `ask_log` writes; `bin/sclaude-proxy` runs it for
   `/__sclaude/flow/review`, which `process_review.js` asks; the player's

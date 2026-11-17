@@ -590,7 +590,11 @@ tr.is-picked td:first-child{box-shadow:inset 4px 0 0 var(--signal)}
 font:600 14px var(--body);background:var(--ink);color:var(--paper);box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer}
 #tip{position:fixed;z-index:30;max-width:340px;padding:10px 12px;border-radius:10px;background:var(--surface);
 color:var(--ink);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.18);font-size:13px;
-line-height:1.4;pointer-events:none}
+line-height:1.4}
+#tip-t{position:fixed;z-index:45;max-width:min(420px,92vw);padding:7px 10px;border-radius:8px;background:var(--surface);
+color:var(--ink);border:1px solid var(--line);box-shadow:0 6px 18px rgba(0,0,0,.18);font-size:12.5px;line-height:1.4;
+white-space:pre-line;overflow-wrap:anywhere}
+.hold-tip{pointer-events:auto;user-select:text;-webkit-user-select:text;cursor:text}.hold-tip[hidden]{display:none}
 #tip p{margin:4px 0}#tip .spec{font:600 12px var(--mono);color:var(--violet);margin-top:2px}#tip .tk{color:var(--muted);font-size:12px}#tip i{color:var(--muted);font-style:normal}
 .printbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:6px 0 12px;font-size:14px}
 .printbar select,.printbar button{font:inherit;padding:5px 8px;border-radius:8px;border:1px solid var(--line);

@@ -25,14 +25,13 @@ const reviewMap = (() => {
   const REVIEW = new Set(['review_run', 'review_close', 'review']);
   const OUT = {
     fixed: [168, 'fixed'], declined: [0, 'declined'], yours: [38, 'left to you'],
-    night: [268, 'decided at night'], reversal: [6, 'would undo a fix'], open: [222, 'open'],
+    reversal: [6, 'would undo a fix'], open: [222, 'open'],
     side: [210, 'no thread'], asked: [75, 'asked for by the person'],
   };
   const FAST = 20;  // seconds: an answer quicker than this is a reflex
   const panel = document.getElementById('rv');
   const chip = document.getElementById('rv-chip');
   const body = panel.querySelector('.rv-body');
-  const bar = document.getElementById('player');
   let data = null, fetched = 0, drawnKey = '', until = null, ctx = {live: false, sel: null, play: null}, shown = false, loading = null;
   let off = false, drawn = false, placesNow = [], doneOf = () => false, whyOf = () => '';
   // How icicles are drawn: 'fix' joins the files one fix touched; 'file'
@@ -52,12 +51,12 @@ const reviewMap = (() => {
   const h = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]);
   // Colour is a category, tone a count. The hue says how the thread a fix
   // answered ended — the rare ones that ask for the person (would undo a
-  // fix, open, left to you, decided at night) loud, fixed calm, a fix with
+  // fix, open, left to you) loud, fixed calm, a fix with
   // no thread a light grey, code the person asked for the development's
   // beige. The lightness says how many earlier rounds of review had already
   // rewritten that spot: 0, 1, 2, 3 or more, darker each (lighter on a dark
   // page) — in equal steps of OKLCH's perceived lightness.
-  const HUE = {fixed: [0.16, 180], declined: [0.04, 60], yours: [0.18, 70], night: [0.18, 300],
+  const HUE = {fixed: [0.16, 180], declined: [0.04, 60], yours: [0.18, 70],
     reversal: [0.22, 27], open: [0.2, 262], side: [0.045, 250]};
   const STEPS = 4;
   function colour(outcome, depth) {
@@ -136,7 +135,7 @@ const reviewMap = (() => {
     // The block it was cut from: 1a from 1, 1a2 from 1a.
     const fromParent = /[a-z]\d+$/.test(b.id) ? b.id.replace(/\d+$/, '') : /[a-z]$/.test(b.id) ? b.id.slice(0, -1) : '';
     return '<div class="t-f">Block ' + h(b.id) + ': ' + h(b.title) + '</div>'
-      + (say ? '<div class="t-r"><b class="rv-st-' + st + '">' + say + '</b></div>' : '')
+      + (say ? '<div class="t-r"><b class="rv-st-' + st + '">' + say + '</b> <span class="muted">— the colour of its name</span></div>' : '')
       + '<div class="t-r">' + (b.lines != null ? '<b' + (over ? ' class="rv-over"' : '') + '>' + b.lines + ' changed lines</b>' + (over ? ' — over the ' + data.blockSize + ' one pass reads whole' : ' of the ' + data.blockSize + ' one pass reads whole')
         + (b.generated ? ' (+' + b.generated + ' generated)' : '') + ' · ' : '') + b.files.length + ' file' + (b.files.length === 1 ? '' : 's')
         + ' · ' + b.criteria.length + (b.criteria.length === 1 ? ' criterion' : ' criteria') + '</div>'
@@ -208,9 +207,6 @@ const reviewMap = (() => {
     document.documentElement.style.setProperty('--rvh', px + 'px');
   }
   addEventListener('resize', () => { room(); if (shown) draw(); });
-  // The player shown or gone (it hides after its last step is sent): the
-  // room kept for it in full screen follows.
-  if (bar) new MutationObserver(() => { if (shown) draw(); }).observe(bar, {attributes: true, attributeFilter: ['hidden']});
   // The review step's blocks in the middle of what the panel leaves above it:
   // the whole process's map, scrolled inside its card and the page.
   function centre() {
@@ -245,40 +241,44 @@ const reviewMap = (() => {
   function summary(d, rounds) {
     const n = {}, hands = d.hands.filter((x) => until == null || (x.t || 0) * 1000 <= until);
     d.threads.forEach((t) => { if (until == null || (t.t || 0) * 1000 <= until) n[t.outcome] = (n[t.outcome] || 0) + 1; });
-    // The person's own asks during the review are the development's, not
-    // code the review grew.
-    const sumNet = (xs) => xs.reduce((a, x) => a + Math.max(0, x.add - x.del), 0);
-    const grown = sumNet(d.hunks.filter((x) => x.r < rounds.length && !x.asked));
-    const asked = sumNet(d.hunks.filter((x) => x.r < rounds.length && x.asked));
+    // Lines added and removed, every round's changes summed; the person's
+    // own asks during the review are the development's, counted apart.
+    const sum = (xs) => xs.reduce((a, x) => [a[0] + x.add, a[1] + x.del], [0, 0]);
+    const inRounds = d.hunks.filter((x) => x.r < rounds.length);
+    const [rAdd, rDel] = sum(inRounds.filter((x) => !x.asked));
+    const [aAdd, aDel] = sum(inRounds.filter((x) => x.asked));
+    // 12635 → 12.6K: the header stays one line.
+    const kilo = (n) => n < 1000 ? String(n) : (n / 1000).toFixed(n < 100000 ? 1 : 0).replace(/\.0$/, '') + 'K';
+    const pm = (a, b) => '+' + kilo(a) + ' −' + kilo(b);
+    const linesSay = 'Lines the review\'s own fixes added (+) and removed (−), every round\'s changes summed: '
+      + 'a spot rewritten in several rounds counts each time; tests, docs and migrations count too.\n'
+      + 'In brackets, the same for what the person asked for during the review (feat and Requirement: commits, beige on the map): '
+      + 'the development\'s work, not the review\'s.\n\nExactly: +' + rAdd + ' −' + rDel + (aAdd || aDel ? '; asked for +' + aAdd + ' −' + aDel : '');
     const cost = rounds.reduce((a, r) => a + (r.cost || 0), 0);
     const fast = hands.filter((x) => x.rec && x.waited != null && x.waited <= FAST).length;
     const rec = hands.filter((x) => x.rec).length;
     return '<b>PR #' + h(d.pr) + '</b> · ' + rounds.length + ' round' + (rounds.length === 1 ? '' : 's')
       + (cost ? ' · $' + cost.toFixed(2) : '')
       + ' · threads: ' + Object.entries(n).map(([k, v]) => '<span class="rv-k" style="--c:' + colour(k, 1) + '">' + v + ' ' + OUT[k][1] + '</span>').join(' ')
-      + ' · +' + grown + ' lines born in review' + (asked ? ' (+' + asked + ' asked for by the person)' : '')
+      + ' · <span class="rv-lines" title="' + h(linesSay) + '">' + pm(rAdd, rDel) + ' lines in review fixes' + (aAdd || aDel ? ' (' + pm(aAdd, aDel) + ' asked for by the person)' : '') + '</span>'
       + ' · ✋ ' + hands.length + (rec ? ' (' + rec + ' recommended' + (fast ? ', <b class="rv-fast">' + fast + ' within ' + FAST + ' s</b>' : '') + ')' : '');
   }
   function draw() {
     if (!shown || !data) return;
-    // Full screen, the player keeps its place at the bottom, over the
-    // panel: the map's scroller ends above it (a margin, so its scroll bar
-    // is lifted too), by its height, measured, while it shows — at most a
-    // quarter of the panel, so a short screen still has a map to see; what
-    // the cap leaves out is padding inside, so the last rows scroll out
-    // from under the player.
-    const need = panel.classList.contains('rv-max') && bar && !bar.hidden ? bar.offsetHeight + 20 : 0;
-    const pad = Math.floor(Math.min(need, panel.clientHeight / 4));
-    body.style.marginBottom = pad ? pad + 'px' : '';
-    body.style.paddingBottom = need > pad ? (need - pad) + 'px' : '';
+    // Full screen, no strip is kept for the player (the user's word,
+    // 2026-11-17: it took too much of the screen): it floats in the bottom
+    // right corner, see-through until the pointer is on it (the CSS), and
+    // the rows are fitted to the whole panel.
     // Each poll and each player step asks again; the drawing is rebuilt only
     // when what it is drawn from changed, so the element under the pointer
     // and the scroll stay as they were.
-    const key = [fetched, until, mode, panel.classList.contains('rv-nohands'), body.clientWidth, body.clientHeight, need, dark(), [...folded].join(',')].join('|');
+    const key = [fetched, until, mode, panel.classList.contains('rv-nohands'), body.clientWidth, body.clientHeight, dark(), [...folded].join(',')].join('|');
     if (key === drawnKey) return;
     drawnKey = key;
-    // The places are numbered afresh: a tooltip kept by number would show another's.
-    tip.hidden = true; tip.dataset.i = '';
+    // The places are numbered afresh: a tooltip kept by number would show
+    // another's — unless the pointer is in it, reading or selecting: its
+    // text is a snapshot and stays.
+    if (hold.busy) hold.detach(); else hold.hide();
     const d = data;
     if (d.error) { body.innerHTML = '<p class="muted rv-wait">' + h(d.error) + '</p>'; return; }
     let rounds = d.rounds;
@@ -478,7 +478,7 @@ const reviewMap = (() => {
     // clientHeight already leaves out a bar that is there; one about to
     // come with this drawing is taken off here.
     const coming = W > body.clientWidth && body.scrollWidth <= body.clientWidth ? 15 : 0;
-    const room = Math.max(ROWMIN * 2, body.clientHeight - (need - pad) - coming - HEAD - BOTTOM);
+    const room = Math.max(ROWMIN * 2, body.clientHeight - coming - HEAD - BOTTOM);
     const raw = [devLen ? tall(devLen) : 26].concat(rounds.map((r) => tall(r._len)));
     const fit = (k) => raw.reduce((a, v) => a + Math.max(ROWMIN, v * k), 0);
     let lo = 0, hi = 1;
@@ -493,6 +493,10 @@ const reviewMap = (() => {
     const two = (i) => hs[i] >= 34;
     const svg = ['<svg class="rv-svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">',
       '<defs>' + patterns('rv-p') + '</defs>'];
+    // The blocks' names and the files' names: a strip of their own, held
+    // at the top while the rounds scroll under it (the user's word,
+    // 2026-11-17); it scrolls sideways with the map.
+    const head = [];
     // The lanes, and on top all the code the development wrote: each file's
     // block, darker where the pull request changed it.
     let devAdd = 0, lane = 0;
@@ -520,7 +524,7 @@ const reviewMap = (() => {
         svg.push('<rect class="rv-col' + (lane ? ' odd' : '') + '" x="' + c[0].toFixed(1) + '" y="' + top + '" width="' + c[1].toFixed(1) + '" height="' + (H - top - 6) + '"/>');
       }
       // A file the development did not write: nothing above it.
-      if (dv.add) svg.push('<g class="rv-dev"><title>' + h(f) + ' — +' + dv.add + ' lines written before the review (' + dv.code + ' code, ' + dv.comment + ' comment)</title>'
+      if (dv.add) svg.push('<g class="rv-dev"><title>' + h(f) + ' — +' + dv.add + ' lines written before the review (' + dv.code + ' code, ' + dv.comment + ' comment)\n\nBeige: the development\'s code; the stronger stripes, where in the file its lines are</title>'
         + '<rect x="' + c[0].toFixed(1) + '" y="' + top + '" width="' + c[1].toFixed(1) + '" height="' + bandH.toFixed(1) + '" fill="' + devColour(0.45) + '"/>'
         + (dv.proj && axisOf[f] ? dv.proj.map(([a, b]) => [a, b, true]) : dv.regions).map(([x, n, onAxis]) => {
           const x0 = onAxis ? ax(f, x) : at(0, f, x);
@@ -537,7 +541,7 @@ const reviewMap = (() => {
       });
       const lift = (lines.length - 1) * LH / 2;
       const tx = c[0] + c[1] / 2 + 3 - lift * 0.819, ty = HEAD - 6 - lift * 0.574;
-      if (touched.has(f)) svg.push('<g class="rv-file"><title>' + h(stack.join('\n↓ ')) + (stack.length > 1 ? '\n\nThe fixes moved on from one file to the next: each goes on under the one before, in this column.' : '')
+      if (touched.has(f)) head.push('<g class="rv-file"><title>' + h(stack.join('\n↓ ')) + (stack.length > 1 ? '\n\nThe fixes moved on from one file to the next: each goes on under the one before, in this column.' : '')
         + '</title><text transform="translate(' + tx.toFixed(1) + ',' + ty.toFixed(1) + ') rotate(-55)">'
         + lines.map((l, k) => '<tspan x="0"' + (k ? ' dy="' + LH + '"' : '') + '>' + h(l) + '</tspan>').join('') + '</text></g>');
       // Where the column goes on in the next file: a line across it, and
@@ -560,15 +564,15 @@ const reviewMap = (() => {
       const fold = b && folded.has(b.id);
       const label = fold ? '▸' + b.id : room < 3 ? '' : ((b ? '▾ ' : '') + name + (b && room > name.length + 6 ? ' · ' + b.title : '')).slice(0, room);
       const st = b ? blockState(b) : '';
-      svg.push('<g class="rv-bk' + (st ? ' rv-bk-' + st : '') + '"' + (b ? ' data-n="' + b.n + '"' : '') + '>' + (b ? '' : '<title>' + h(full) + '</title>')
+      head.push('<g class="rv-bk' + (st ? ' rv-bk-' + st : '') + '"' + (b ? ' data-n="' + b.n + '"' : '') + '>' + (b ? '' : '<title>' + h(full) + '</title>')
         + '<rect x="' + g.x0.toFixed(1) + '" y="2" width="' + Math.max(1, g.x1 - g.x0).toFixed(1) + '" height="16" rx="3"/>'
         + '<text x="' + (g.x0 + 4).toFixed(1) + '" y="14">' + h(label) + '</text></g>');
-      if (k) svg.push('<line class="rv-bsep" x1="' + (g.x0 - BGAP / 2).toFixed(1) + '" x2="' + (g.x0 - BGAP / 2).toFixed(1) + '" y1="2" y2="' + H + '"/>');
+      if (k) [svg, head].forEach((to) => to.push('<line class="rv-bsep" x1="' + (g.x0 - BGAP / 2).toFixed(1) + '" x2="' + (g.x0 - BGAP / 2).toFixed(1) + '" y1="2" y2="' + (to === head ? HEAD : H) + '"/>'));
     });
     // The summary icicle goes here, behind the rows' names, once the
     // places below say how much each round changed.
     const sumAt = svg.length;
-    svg.push('<text class="rv-rt" x="6" y="' + (top + 15) + '">Development' + (devLen ? ' · ' + dur(devLen) : '') + '</text>');
+    svg.push('<text class="rv-rt" x="6" y="' + (top + 15) + '">Development' + (devLen ? '<tspan class="rv-dur"> · ' + dur(devLen) + '</tspan>' : '') + '</text>');
     if (two(0)) svg.push('<text class="rv-rs" x="6" y="' + (top + 29) + '">+' + devAdd + ' lines</text>');
     // The rounds: a line, and what each was.
     rounds.forEach((r, i) => {
@@ -584,11 +588,13 @@ const reviewMap = (() => {
         + (r.stopped ? '\nStopped: the pass left no recorded answer, so it found and read nothing that counts; the commits after it are its fixes' : '')
         + (r.new != null ? '\n' + r.new + ' new finding' + (r.new === 1 ? '' : 's') : '')
         + (r.cost ? '\n$' + r.cost.toFixed(2) + ': its passes and the fixes of what it found, as the review report prices them' : '')
-        + (r.seen ? '\nOpened ' + r.seen.length + ' of the ' + files.length + ' files on the map (pale icicles: code it never opened)' : r.source === 'github' ? '\nWhat a GitHub run read is not known here' : '') + '</title>'
-        + '<text class="rv-rt" x="6" y="' + (ys[i] + 15) + '">' + roundName(i) + ' · ' + dur(r._len) + '</text>'
+        + (r.seen ? '\nOpened ' + r.seen.length + ' of the ' + files.length + ' files on the map (pale icicles: code it never opened)' : r.source === 'github' ? '\nWhat a GitHub run read is not known here' : '')
+        + '\n\nBehind the name, every file summed in one icicle: left of its axis the development\'s code this round touched, right the review\'s own, coloured by how their threads ended; the line leans right where the round grew the code, left where it shrank it, ' + (dark() ? 'lighter' : 'darker') + ' the more threads it posted' + '</title>'
+        + '<text class="rv-rt" x="6" y="' + (ys[i] + 15) + '">' + roundName(i) + '<tspan class="rv-dur"> · ' + dur(r._len) + '</tspan></text>'
         + (two(i + 1) ? '<text class="rv-rs" x="6" y="' + (ys[i] + 29) + '">' + (r.stopped ? 'stopped, no answer' : r.source === 'github' ? 'on GitHub' : 'on this machine')
           + (r.new != null ? ' · ' + r.new + ' found' : '') + (r.cost ? ' · $' + r.cost.toFixed(2) : '') + '</text>' : '') + '</g>');
     });
+    const rowsEnd = svg.length;
     // Where a block was split: a line across the map at the first round
     // after it, naming the block and its parts; a click tells the story.
     (d.earlier || []).forEach((e, j) => {
@@ -825,6 +831,16 @@ const reviewMap = (() => {
     // The body under the rounds' names, which have a halo to read over
     // it; the line over them, thin enough not to hide a word.
     const [sumBody, sumNet] = summed((x) => fi[x.path] != null, (t) => fi[t.path] != null, devAdd, 0, GUT - 4, 'rv-sumi', '');
+    // The rounds' names held at the left while the map scrolls sideways
+    // (the user's word, 2026-11-17): as wide as the longest name, so the
+    // durations after it stay on the map and scroll away; the summed
+    // icicle drawn again to that width behind them.
+    const measure = document.createElement('canvas').getContext('2d');
+    measure.font = '700 11.5px ' + getComputedStyle(body).fontFamily;
+    const pinW = Math.min(GUT, Math.ceil(Math.max(measure.measureText('Development').width, ...rounds.map((r, i) => measure.measureText(roundName(i)).width))) + 12);
+    const [pinBody, pinNet] = summed((x) => fi[x.path] != null, (t) => fi[t.path] != null, devAdd, 0, pinW - 4, 'rv-sumi', '');
+    const pin = '<rect class="rv-headbg" x="0" y="' + top + '" width="' + pinW + '" height="' + (H - top) + '"/>' + pinBody + svg.slice(sumAt, rowsEnd).join('') + pinNet
+      + '<line class="rv-pinedge" x1="' + (pinW - 0.5) + '" x2="' + (pinW - 0.5) + '" y1="' + top + '" y2="' + H + '"/>';
     svg.splice(sumAt, 0, sumBody);
     svg.push(sumNet);
     // For the hover: each place's round, the places that hang from it, the
@@ -1041,6 +1057,7 @@ const reviewMap = (() => {
       // A later round read it: the rows that did not open it are known to
       // end there, so they are drawn as the icicle is, not fading.
       const known = p.verify != null;
+      p.look = {pale: !!ghost, tent: !!tent, done: isDone};
       // The pale rows: the place's own colour fading down to pale, while no
       // round has read it since.
       const gid = 'rv-g' + p.id;
@@ -1086,6 +1103,7 @@ const reviewMap = (() => {
     const CLEAN = {whole: 3, all: 3, delta: 2, part: 1.4};
     const SAY = {whole: 'read the whole file', all: 'read all its change (a whole read of the block)',
       delta: 'read the last fixes\' change in it', part: 'looked at a part of it'};
+    const LINE = {whole: 'a thick green line', all: 'a thick green line', delta: 'a thin blue line', part: 'a dashed yellow line'};
     // Where an icicle goes on through a row — its fix's row, the pale rows
     // under it — the column was plainly opened: no strip. The row it closes
     // in keeps one: that round read it and found nothing more.
@@ -1109,7 +1127,7 @@ const reviewMap = (() => {
         const col = cols[c], w = CLEAN[b.k], y = ys[ri + 1] - w / 2 - 1;
         svg.push('<line class="rv-clean rv-clean-' + b.k + '" x1="' + f1(col[0] + 1) + '" x2="' + f1(col[0] + col[1] - 1)
           + '" y1="' + f1(y) + '" y2="' + f1(y) + '" style="stroke-width:' + w + '"><title>' + h(roundName(ri)) + ' ' + SAY[b.k]
-          + ' and found nothing there:\n' + h(b.f.join('\n')) + '</title></line>');
+          + ' and found nothing there:\n' + h(b.f.join('\n')) + '\n\nDrawn as ' + LINE[b.k] + ' under the file, in that round\'s row</title></line>');
       });
     });
     // A folded block: one icicle of all its files, drawn as the one behind
@@ -1154,7 +1172,7 @@ const reviewMap = (() => {
     // pile down from the round's line into one column, a dot each in the
     // colour of how it ended — the taller the column, the more the review
     // found there.
-    const ORDER = ['open', 'reversal', 'yours', 'night', 'declined', 'fixed', 'side'];
+    const ORDER = ['open', 'reversal', 'yours', 'declined', 'fixed', 'side'];
     // A dot's radius, and what a pile takes across with its outline (or
     // its +n), for the ✋ to keep clear of.
     // How the dots, the +n and the ✋ are laid out and kept off one another
@@ -1191,13 +1209,15 @@ const reviewMap = (() => {
         svg.push('<a href="' + h(t.url) + '" target="_blank" rel="noopener"><circle class="rv-th' + (t.by === 'person' ? ' you' : '') + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1)
           + '" r="' + R + '" fill="' + colour(t.outcome, 1) + '"><title>' + h(t.path) + ':' + t.line + ' — ' + h(t.title) + '\n' + h(howEnded(t))
           + (t.by === 'person' ? '\nyour thread' : '')
+          + '\nThe dot\'s colour: how the thread ended' + (t.by === 'person' ? '; the thick ring: your own thread' : '')
           + (p.all.length > 1 ? '\n' + p.all.length + ' threads here' : '') + '</title></circle></a>');
       });
       if (over) {
         const rest = p.all.slice(shown.length);
         const y = ys[p.r] + TOP + shown.length * STEP;
         svg.push('<text class="rv-more" x="' + x.toFixed(1) + '" y="' + (y + 2.5).toFixed(1) + '">' + more + '<title>'
-          + h(rest.map((t) => t.path + ':' + t.line + ' — ' + t.title + ' (' + howEnded(t) + ')').join('\n')) + '</title></text>');
+          + h(rest.map((t) => t.path + ':' + t.line + ' — ' + t.title + ' (' + howEnded(t) + ')').join('\n'))
+          + '\n\n' + more + ': the threads past what the row has room for' + '</title></text>');
       }
     });
     // The person, gathered: one ✋ for each round's answers in the margin,
@@ -1242,7 +1262,8 @@ const reviewMap = (() => {
           + (rec ? '\n' + rec + ' took the recommended answer' + (fast ? ', ' + fast + ' within ' + FAST + ' s' : '') : '')
           + (other ? '\n' + other + ' chose otherwise' : '') + (mine ? '\n' + mine + ' your own thread' + (mine > 1 ? 's' : '') : '')
           + (said ? '\n' + said + ' answered sclaude' : '')
-          + (waits.length ? '\nhalf answered within ' + dur(waits[Math.floor((waits.length - 1) / 2)]) : '');
+          + (waits.length ? '\nhalf answered within ' + dur(waits[Math.floor((waits.length - 1) / 2)]) : '')
+          + (fast ? '\nThe thick red ring: a recommended answer given within ' + FAST + ' s' : rec ? '\nThe thin ring: the recommended answer taken' : '');
         const list = all.filter((p) => p.q).slice(0, 8).map((p) => '\n• ' + h(p.q.slice(0, 140)) + (p.a ? ' → ' + h(p.a.slice(0, 60)) : '')).join('');
         svg.push('<g class="rv-hand' + (fast ? ' fast' : rec ? ' rec' : '') + '"><title>' + h(head) + list + (all.filter((p) => p.q).length > 8 ? '\n…' : '') + '</title>'
           + (fast || rec ? '<circle cx="' + x.toFixed(1) + '" cy="' + (y - 4).toFixed(1) + '" r="8"/>' : '')
@@ -1252,8 +1273,12 @@ const reviewMap = (() => {
     }
     svg.push('</svg>');
     const keep = [body.scrollLeft, body.scrollTop];
-    body.innerHTML = svg.join('');
+    svg[0] = svg[0].replace('<svg ', '<svg style="margin-top:-' + HEAD + 'px" ');
+    body.innerHTML = '<div class="rv-wrap" style="width:' + W + 'px"><svg class="rv-svg rv-head" width="' + W + '" height="' + HEAD + '" viewBox="0 0 ' + W + ' ' + HEAD + '"><rect class="rv-headbg" width="' + W + '" height="' + HEAD + '"/>'
+      + head.join('') + '</svg><div class="rv-pin" style="width:' + pinW + 'px"><svg class="rv-svg" width="' + pinW + '" height="' + (H - HEAD) + '" viewBox="0 ' + HEAD + ' ' + pinW + ' ' + (H - HEAD) + '">'
+      + pin + '</svg></div>' + svg.join('') + '</div>';
     body.scrollLeft = keep[0];
+    body.classList.toggle('rv-sx', body.scrollLeft > 2);
     // Too many rounds to fit: open on the latest, and follow the player down.
     body.scrollTop = until != null || !drawn ? body.scrollHeight : keep[1];
     drawn = true;
@@ -1265,6 +1290,7 @@ const reviewMap = (() => {
   // polishing comments, declined more than taken, or ended.
   const tip = document.createElement('div');
   tip.id = 'rv-tip'; tip.hidden = true; document.body.append(tip);
+  const hold = holdTip(tip);
   // The whole icicle a place is part of: every place it joins to, up and
   // down, through merges and splits.
   function lineage(p) {
@@ -1294,10 +1320,15 @@ const reviewMap = (() => {
     const series = [];
     for (let r = first; r <= last; r++) series.push([r, byRound[r] || null]);
     const most = Math.max(1, ...series.map(([, v]) => v ? v.changed : 0));
-    const bars = '<div class="t-sp">' + series.map(([r, v]) => {
+    // Many rounds: the bars narrow to fit the note, and only every k-th
+    // round is named — always the one hovered — so the names never overlap.
+    const ROOM = 370, lw = 6 * Math.max(...series.map(([r]) => roundName(r, true).length)) + 4;
+    const slot = Math.min(17, ROOM / series.length), every = Math.max(1, Math.ceil(lw / slot));
+    const named = (r) => r === p.ri || (Math.abs(r - p.ri) >= every && (r - first) % every === 0);
+    const bars = '<div class="t-sp' + (slot < 17 ? ' tight' : '') + '" style="--slot:' + slot.toFixed(1) + 'px">' + series.map(([r, v]) => {
       const out = v ? Object.entries(v.out).sort((a, b) => b[1] - a[1])[0][0] : 'side';
       return '<span class="' + (r === p.ri ? 'on' : '') + '" title="' + roundName(r) + ': ' + (v ? v.changed + ' lines, ' + v.th.length + ' threads' : 'not touched') + '">'
-        + '<i style="height:' + (v ? Math.max(2, 34 * v.changed / most) : 0).toFixed(0) + 'px;background:' + (v ? colour(out, 1) : 'none') + '"></i><b>' + roundName(r, true) + '</b></span>';
+        + '<i style="height:' + (v ? Math.max(2, 34 * v.changed / most) : 0).toFixed(0) + 'px;background:' + (v ? colour(out, 1) : 'none') + '"></i><b>' + (named(r) ? roundName(r, true) : '&nbsp;') + '</b></span>';
     }).join('') + '</div>';
     // The reading, most telling first.
     const ths = all.flatMap((q) => q.th);
@@ -1353,23 +1384,47 @@ const reviewMap = (() => {
       + '<div class="t-h">This icicle, round by round (lines changed)</div>' + bars
       + '<div class="t-r muted">' + churn + ' lines changed here over ' + series.filter(([, v]) => v).length + ' round' + (series.filter(([, v]) => v).length > 1 ? 's' : '')
       + (devLines ? ' — ' + Math.round(100 * churn / devLines) + '% of the ' + devLines + ' lines the development wrote in ' + (p.files.length > 1 ? 'these files' : 'this file') : ' — in code the development did not write') + '</div>'
-      + says.map(([k, t]) => '<div class="t-say t-' + k + '">' + h(t) + '</div>').join('');
+      + says.map(([k, t]) => '<div class="t-say t-' + k + '">' + h(t) + '</div>').join('')
+      + drawnAs(p);
   }
-  body.addEventListener('mousemove', (ev) => {
+  // What this place's look means — only the legend's entries drawn here,
+  // so a note says what its colour and patterns are without the legend
+  // (the user's word, 2026-11-17).
+  function drawnAs(p) {
+    const fill = colour(p.outcome, p.depth);
+    const box = (c, pat, hollow) => '<svg width="12" height="12"><rect width="12" height="12" fill="' + c + '"' + (hollow ? ' fill-opacity=".28"' : '') + '/>'
+      + (pat ? '<rect width="12" height="12" fill="url(#rv-p-' + pat + ')"/>' : '') + '</svg>';
+    const row = (sw, say) => '<div class="t-k">' + sw + '<span>' + say + '</span></div>';
+    const KIND = {test: 'tests', doc: 'docs, config', comment: 'comments'};
+    const out = [];
+    out.push(row(box(fill), p.outcome === 'asked' ? '<b>beige</b>: the person asked for these lines'
+      : p.outcome === 'side' ? '<b>grey</b>: no thread asked for these fixes'
+      : '<b>' + OUT[p.outcome][1] + '</b>: the colour is how its thread ended'));
+    out.push(row('<span class="t-steps">' + [0, 1, 2, 3].map((k) => '<i style="background:' + colour(p.outcome, k) + (k === Math.min(3, p.depth || 0) ? ';outline:1.5px solid var(--ink)' : '') + '"></i>').join('') + '</span>',
+      p.depth ? (dark() ? 'lighter' : 'darker') + ': review had rewritten this spot in ' + p.depth + ' earlier round' + (p.depth > 1 ? 's' : '') : 'the lightest step: no earlier round had rewritten this spot'));
+    if (p.outcome !== 'asked' && p.askedShare > 0.02) out.push(row(box(colour('asked', p.depth)), 'beige on the left, ' + Math.round(p.askedShare * 100) + '%: lines the person asked for'));
+    if (p.solid) out.push(row(box(fill, p.flags.has('schema') ? 'schema' : ''), 'solid: code changed' + (p.flags.has('schema') ? ', the \\ hatching a migration among it' : '')));
+    else {
+      out.push(row(box(fill, '', true), 'hollow: no code or migration changed, only what its patterns say'));
+      FLAGS.filter((f) => f !== 'schema' && p.flags.has(f)).forEach((f) => out.push(row(box(fill, f, true), KIND[f])));
+    }
+    const look = p.look || {};
+    if (look.pale) out.push(row(box(fill, '', true), 'pale below: no round has opened this code since'));
+    if (look.done) out.push(row('<b class="t-g">▼</b>', 'closed to a point: done'));
+    if (look.tent) out.push(row('<b class="t-g">⋯</b>', 'dashed point: read by the round still fixing; closes once its fixing ends'));
+    return '<div class="t-h">How it is drawn</div>' + out.join('');
+  }
+  // The held names come up only once the map is scrolled sideways: at
+  // rest the whole name and its duration are there on the map.
+  body.addEventListener('scroll', () => body.classList.toggle('rv-sx', body.scrollLeft > 2), {passive: true});
+  body.addEventListener('mouseover', (ev) => {
     const bk = ev.target.closest && ev.target.closest('.rv-bk[data-n]');
     const blk = bk && blocksNow.find((b) => b.n === +bk.dataset.n);
     const g = !blk && ev.target.closest && ev.target.closest('.rv-fix');
-    if (!blk && (!g || !placesNow[+g.dataset.i])) { tip.hidden = true; return; }
-    const id = blk ? 'b' + blk.id : g.dataset.i;
-    if (tip.dataset.i !== id) { tip.innerHTML = blk ? blockTip(blk) : tipHtml(placesNow[+g.dataset.i]); tip.dataset.i = id; }
-    tip.hidden = false;
-    const pad = 14, w = tip.offsetWidth, hh = tip.offsetHeight;
-    let x = ev.clientX + pad, y = ev.clientY - hh - pad;
-    if (x + w > innerWidth - 8) x = ev.clientX - w - pad;
-    if (y < 8) y = ev.clientY + pad;
-    tip.style.left = Math.max(4, x) + 'px'; tip.style.top = Math.max(4, y) + 'px';
+    if (!blk && (!g || !placesNow[+g.dataset.i])) { hold.leave(); return; }
+    hold.show(blk ? 'b' + blk.id : 'p' + g.dataset.i, () => blk ? blockTip(blk) : tipHtml(placesNow[+g.dataset.i]), ev, blk ? bk : g);
   });
-  body.addEventListener('mouseleave', () => { tip.hidden = true; });
+  body.addEventListener('mouseleave', () => hold.leave());
   // A split's line clicked: a card of what happened — the block as it
   // was, and the parts it became, each with what it answers for.
   const card = document.createElement('div');
@@ -1413,7 +1468,7 @@ const reviewMap = (() => {
     if (!b) return;
     if (folded.has(b.id)) folded.delete(b.id); else folded.add(b.id);
     try { localStorage.setItem(FOLDED, JSON.stringify([...folded])); } catch (e) {}
-    tip.dataset.i = ''; tip.hidden = true;
+    hold.hide();
     draw();
   });
   // A jump's mark: to its other end, in the middle of the map, lit a moment.
@@ -1445,24 +1500,43 @@ const reviewMap = (() => {
     setTimeout(() => el.classList.remove('rv-lit'), 1800);
   });
 
+  // The legend: a short name a kind, and on hover what it means (the
+  // user's word, 2026-11-17: the screen keeps the names short).
   function legend() {
-    const sw = (c, say, cls) => '<span class="rv-k' + (cls ? ' ' + cls : '') + '" style="--c:' + c + '">' + say + '</span>';
-    const pat = (id, say, solid) => '<span class="rv-k"><svg width="12" height="12"><rect width="12" height="12" fill="' + (solid ? colour('fixed', 1) : colour('side', 1))
-      + '"' + (solid ? '' : ' fill-opacity=".28"') + '/><rect width="12" height="12" fill="url(#rv-lp-' + id + ')"/></svg>' + say + '</span>';
-    // The legend's swatches share one set of patterns of their own ids:
-    // the map's are inside the map, which may be drawn while this is hidden.
-    panel.querySelector('.rv-legend').innerHTML = '<svg width="0" height="0" style="position:absolute"><defs>' + patterns('rv-lp') + '</defs></svg>' + sw(devColour(1), 'the development\'s code (before the review, or asked for in it)')
-      + ['fixed', 'declined', 'yours', 'night', 'reversal', 'open', 'side'].map((k) => sw(colour(k, 1), OUT[k][1])).join('')
-      + '<span class="rv-k rv-steps">' + [0, 1, 2, 3].map((k) => '<i style="background:' + colour('fixed', k) + '"></i>').join('')
-      + ' ' + (dark() ? 'lighter' : 'darker') + ': rewritten by 0, 1, 2, 3+ earlier rounds</span>'
-      + '<span class="rv-k rv-steps">' + [0, 1, 2, 3].map((k) => '<i style="background:' + netTone(k) + '"></i>').join('')
-      + ' summed icicles (behind the rounds, a folded block): left of the axis the development\'s code, right the review\'s own; the line, right grown, left shrunk; ' + (dark() ? 'lighter' : 'darker') + ': 0, 1–2, 3–5, 6+ threads review posted</span>'
-      + pat('schema', 'solid: code changed, \\ a migration among it', true)
-      + '<span class="rv-k rv-hol" style="--c:' + colour('fixed', 1) + '">hollow: no code or migration, only</span>'
-      + pat('test', 'tests') + pat('doc', 'docs, config') + pat('comment', 'comments')
-      + '<span class="rv-k rv-uk">pale: no round has opened that code since</span><span>⋯ dashed close: read by the round still fixing</span>'
-      + '<span class="rv-k rv-ck">read whole, nothing found</span><span class="rv-k rv-dk">read the last fixes, nothing found</span><span class="rv-k rv-pk">looked at a part, nothing found</span>'
-      + '<span>⋮ threads, a dot each, piled where they are many, +n for those past the row</span><span><b class="rv-fast">◯✋ 5 · 2⚡</b> 5 times you stepped in, 2 took the recommended answer within ' + FAST + ' s</span>';
+    const tl = (say) => ' title="' + h(say) + '"';
+    const sw = (c, name, say, cls) => '<span class="rv-k' + (cls ? ' ' + cls : '') + '" style="--c:' + c + '"' + tl(say) + '>' + name + '</span>';
+    const pat = (id, name, say, solid) => '<span class="rv-k"' + tl(say) + '><svg width="12" height="12"><rect width="12" height="12" fill="' + (solid ? colour('fixed', 1) : colour('side', 1))
+      + '"' + (solid ? '' : ' fill-opacity=".28"') + '/><rect width="12" height="12" fill="url(#rv-lp-' + id + ')"/></svg>' + name + '</span>';
+    const mark = (sign, name, say) => '<span class="rv-k rv-m"' + tl(say) + '><b>' + sign + '</b>' + name + '</span>';
+    const group = (name, items) => '<span class="rv-lg"><i>' + name + '</i>' + items + '</span>';
+    const lighter = dark() ? 'lighter' : 'darker';
+    const ENDED = {
+      fixed: 'A thread that was fixed: the colour of the lines changed for it, and of its dot.',
+      declined: 'A finding left as it is, by decision: the reply says why.',
+      yours: 'Left to you: the session would not decide it — or a night session did, for you to confirm — and handed it to the person.',
+      reversal: 'A finding that would undo an earlier fix — a sign the review goes round in circles.',
+      open: 'Still open: no outcome yet.',
+      side: 'Changes no thread asked for: they came along with others, in the same commit.',
+    };
+    const NAME = {fixed: 'fixed', declined: 'declined', yours: 'yours', reversal: 'undoes a fix', open: 'open', side: 'no thread'};
+    panel.querySelector('.rv-legend').innerHTML = '<svg width="0" height="0" style="position:absolute"><defs>' + patterns('rv-lp') + '</defs></svg>'
+      + group('colour', sw(devColour(1), 'development', 'The development\'s code: written before the review, or asked for by the person during it (feat and Requirement: commits). Across the top, a file\'s band; below, the person\'s asks.')
+        + Object.keys(NAME).map((k) => sw(colour(k, 1), NAME[k], 'How the thread ended — ' + ENDED[k])).join(''))
+      + group('tone', '<span class="rv-k rv-steps"' + tl(lighter[0].toUpperCase() + lighter.slice(1) + ' the more earlier rounds had already rewritten the same spot: 0, 1, 2, 3 or more. A spot that keeps being rewritten is where review circles.') + '>'
+        + [0, 1, 2, 3].map((k) => '<i style="background:' + colour('fixed', k) + '"></i>').join('') + ' rewrites</span>')
+      + group('fill', pat('schema', 'code', 'Solid: code changed there. The \\ hatching: a migration among it.', true)
+        + '<span class="rv-k rv-hol" style="--c:' + colour('fixed', 1) + '"' + tl('Hollow: no code or migration changed — only what its patterns say: tests, docs and config, comments. Usually polishing.') + '>hollow</span>'
+        + pat('test', 'tests', 'The / hatching: tests were changed there.') + pat('doc', 'docs', 'The — lines: docs or config files were changed there.')
+        + pat('comment', 'comments', 'The dots: only comments were changed there.'))
+      + group('shape', '<span class="rv-k rv-uk"' + tl('Pale: no round has opened that code since its fix — it is still unchecked, and the icicle goes on through those rows.') + '>unread</span>'
+        + mark('▼', 'done', 'Closed to a point in the row of the round that read it and found nothing: every thread of it has an outcome, and its fixing ended.')
+        + mark('⋯', 'closing', 'A dashed point: the round still fixing read it and found nothing; it closes once that fixing ends, unless a fix lands here.')
+        + '<span class="rv-k rv-steps"' + tl('Behind the rounds\' names, and in a folded block: every file summed in one icicle. Left of its axis the development\'s code a round touched, right the review\'s own — leaning right, review is polishing its own work. The thin line: right where the round grew the code, left where it shrank it, ' + lighter + ' the more threads review posted (0, 1–2, 3–5, 6+).') + '>'
+        + [0, 1, 2, 3].map((k) => '<i style="background:' + netTone(k) + '"></i>').join('') + ' sum</span>')
+      + group('nothing found', sw('', 'whole', 'A thick green line under a file: that round read the whole file (or the block\'s whole change) and found nothing in it.', 'rv-ck')
+        + sw('', 'last fixes', 'A thin blue line: that round read only the last fixes\' change in the file and found nothing.', 'rv-dk')
+        + sw('', 'a part', 'A dashed yellow line: that round looked at a part of the file and found nothing.', 'rv-pk'));
+
   }
   legend();
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { legend(); draw(); });

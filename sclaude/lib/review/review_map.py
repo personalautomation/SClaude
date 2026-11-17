@@ -19,8 +19,8 @@
 #     so a place keeps its spot as the file grows around it;
 #   * the threads: GitHub's review threads (path, line, the commit a comment
 #     was posted on), and how each ended — fixed, declined ("Left as it is",
-#     decline_of), the person's to decide (review-yours, a night's mark among
-#     them) or noted as undoing a settled fix (review-reversals: a reversal
+#     decline_of), the person's to decide (review-yours; one a night decided
+#     is theirs too, the map does not tell it apart) or noted as undoing a settled fix (review-reversals: a reversal
 #     for good, however it was resolved later);
 #   * the person: each AskUserQuestion answered in the tree's transcripts —
 #     how long it waited, whether the answer was the option marked
@@ -414,7 +414,9 @@ def threads_of(tree, nodes, rounds):
         if url in reversed_:
             outcome = "reversal"
         elif url in yours:
-            outcome = "night" if pr_context.NIGHT_MARK in (yours[url] or "") else "yours"
+            # Decided at night or not, it waits for the person: one colour
+            # (the user's word, 2026-11-17).
+            outcome = "yours"
         elif pr_context.decline_of(comments[1:]):
             outcome = "declined"
         elif t.get("isResolved"):
@@ -478,7 +480,7 @@ def replied(tree, rounds, ends, threads, fixes):
     for t in threads:
         # A thread left as it is names commits as its reasons — the fix it
         # would undo, the decision it stands on — not as its fix.
-        if t["outcome"] in ("declined", "reversal", "yours", "night"):
+        if t["outcome"] in ("declined", "reversal", "yours"):
             continue
         text = "\n".join(t.get("_replies") or [])
         for sha in SHA.findall(text):

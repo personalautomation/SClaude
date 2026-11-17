@@ -11,7 +11,7 @@ function render(v) {
   // F and W at work now: their rings turn.
   document.querySelectorAll('.badge.busy, .badge.stalled').forEach((b) => {
     b.classList.remove('busy', 'stalled');
-    b.querySelector('title').textContent = b.dataset.why;
+    setTip(b, b.dataset.why);
   });
   // The glance's blocks carry their step's letters (ALIAS):
   // they turn with it.
@@ -24,8 +24,7 @@ function render(v) {
       // On hover, how it goes now, under why it is there: each place's note
       // added, where two places turn the same letter of one block.
       const note = ((v.notes || {})[id] || {})[f];
-      const t = b.querySelector('title');
-      t.textContent = (b.classList.contains('busy') ? t.textContent : b.dataset.why) + (note ? '\n' + note : '');
+      setTip(b, (b.classList.contains('busy') ? tipOf(b) : b.dataset.why) + (note ? '\n' + note : ''));
       b.classList.add('busy');
     }))));
   // A sync with main has no block on the glance: its S stands
@@ -38,7 +37,7 @@ function render(v) {
     [id].concat(M.alias[id] || [], POS[id] || []).forEach((at) =>
       document.querySelectorAll('svg.map [data-node="' + at + '"] .b-S').forEach((b) => {
         b.classList.add('stalled');
-        b.querySelector('title').textContent = b.dataset.why + '\n' + notes.S;
+        setTip(b, b.dataset.why + '\n' + notes.S);
       }));
   });
   (v.busy ? syncAt : []).forEach((id) => (POS[id] || []).forEach((at) =>

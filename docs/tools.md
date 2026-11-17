@@ -322,7 +322,7 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   with nothing above it — code first touched in a later round, or a file
   the development did not write — starts as a point in the middle of its
   round. An icicle's colour is how the thread it answered ended (fixed, declined,
-  left to you, decided at night, would undo a fix, open, or no thread at
+  left to you (a night's decision too), would undo a fix, open, or no thread at
   all — a finding noted as undoing a fix stays that colour however its
   thread ended later, which its hover says); the share of it that is code you asked for during the review (a
   `feat` commit, or one with a `Requirement:` line) is beige, as the code

@@ -11,12 +11,18 @@ background:var(--surface);border-top:2px solid var(--line);box-shadow:0 -8px 24p
 .rv-top button,.rv-top label{font:600 12.5px var(--body);padding:3px 9px;border-radius:7px;border:1px solid var(--line);
 background:var(--surface);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
 .rv-legend{display:flex;flex-wrap:wrap;gap:4px 10px;padding:4px 16px;font-size:12px;color:var(--muted)}
-.rv-k{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.rv-k{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;cursor:help}
+.rv-lg{display:inline-flex;flex-wrap:wrap;align-items:center;gap:2px 8px}.rv-lg>i{font-style:normal;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.03em;opacity:.75}
+.rv-m::before{display:none}.rv-m b{font-weight:700;color:var(--ink)}
+.rv-legend .rv-steps::before{display:none}.rv-legend .rv-k:has(svg)::before{display:none}
 .rv-k::before{content:"";width:10px;height:10px;border-radius:2px;background:var(--c);border:1px solid var(--line)}
 .rv-fast{color:var(--human)}
 .rv-body{flex:1;overflow:auto;padding:0 4px 0 0}
 .rv-wait{padding:12px 16px}
 .rv-svg{display:block;font-family:var(--body)}
+.rv-head{position:sticky;top:0;z-index:3}
+.rv-pin{position:sticky;left:0;z-index:2;height:0;overflow:visible;visibility:hidden}.rv-sx .rv-pin{visibility:visible}.rv-pinedge{stroke:var(--line);stroke-width:1}
+.rv-pin .rv-dur,.rv-pin .rv-rs{display:none}.rv-headbg{fill:var(--surface)}
 .rv-col{fill:var(--lane-a,var(--paper));stroke:var(--line);stroke-width:.8}
 .rv-col.odd{fill:var(--lane-b,var(--paper))}
 .rv-file text{font-size:10.5px;fill:var(--muted)}
@@ -51,9 +57,15 @@ html{scroll-padding-bottom:var(--rvh,0px)}
 body.rv-open .detail-card{max-height:calc(100vh - var(--rvh) - 24px)}
 body.rv-open .panel{max-height:calc(100vh - var(--rvh) - 24px);overflow:auto}
 body.rv-open:not(.rv-maxed) #player{bottom:calc(var(--rvh) + 10px)}
+/* Full screen: the page under the panel does not scroll (one scroll bar,
+   the map's), and the player floats in the corner, over the map,
+   see-through until the pointer is on it. */
+html:has(body.rv-maxed){overflow:hidden}
+body.rv-maxed #player{left:auto;right:24px;bottom:24px;opacity:.6;transition:opacity .15s}
+body.rv-maxed #player:hover,body.rv-maxed #player:focus-within{opacity:1}
 @media (max-width:700px){#rv{height:60vh}.rv-legend{display:none}}
 #rv-tip{position:fixed;z-index:40;max-width:min(400px,92vw);padding:9px 11px;border-radius:10px;background:var(--surface);
-color:var(--ink);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.22);font:12.5px/1.4 var(--body);pointer-events:none}
+color:var(--ink);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.22);font:12.5px/1.4 var(--body)}
 #rv-tip[hidden]{display:none}
 #rv-tip .t-f{font-weight:700;overflow-wrap:anywhere}
 #rv-tip .t-r{margin-top:4px}
@@ -64,7 +76,11 @@ color:var(--ink);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.
 #rv-tip .t-sp span{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:14px}
 #rv-tip .t-sp i{display:block;width:12px;border-radius:2px 2px 0 0;border:1px solid var(--line)}
 #rv-tip .t-sp b{font-size:10px;color:var(--muted);font-weight:600}
-#rv-tip .t-sp span.on b{color:var(--ink)}#rv-tip .t-sp span.on i{outline:2px solid var(--ink)}
+#rv-tip .t-sp.tight{gap:0}#rv-tip .t-sp.tight span{min-width:0;width:var(--slot);flex:none}
+#rv-tip .t-sp.tight i{width:max(2px,calc(var(--slot) - 1px));border-width:0}#rv-tip .t-sp.tight b{white-space:nowrap;overflow:visible;width:0;display:flex;justify-content:center}
+#rv-tip .t-sp span.on b{color:var(--ink)}#rv-tip .t-sp span.on i{outline:2px solid var(--ink);margin-bottom:3px}
+#rv-tip .t-k{display:flex;gap:6px;align-items:center;margin-top:2px}#rv-tip .t-k svg{flex:none;border:1px solid var(--line);border-radius:2px}
+#rv-tip .t-steps{display:inline-flex;gap:1px;flex:none}#rv-tip .t-steps i{width:7px;height:12px;border-radius:1px}#rv-tip .t-g{flex:none;width:12px;text-align:center}
 #rv-tip .t-say{margin-top:5px;padding:4px 7px;border-radius:6px;background:var(--lane-b,var(--paper))}
 #rv-tip .t-end{border-left:3px solid var(--auto)}#rv-tip .t-wait{border-left:3px solid var(--signal)}#rv-tip .t-conv{border-left:3px solid var(--auto)}
 #rv-tip .t-grow{border-left:3px solid var(--human)}#rv-tip .t-polish{border-left:3px solid var(--muted)}
@@ -109,7 +125,7 @@ background:var(--surface);color:var(--ink);border:1px solid var(--line);border-l
 .rv-ck::before{background:var(--clean,hsl(140,55%,38%));height:3px;border:0}
 .rv-pk::before{background:var(--partly,hsl(46,95%,48%));height:2px;border:0}
 .rv-dot{fill:var(--ink);opacity:.55}
-.rv-steps{gap:1px}.rv-steps i{width:9px;height:10px;display:inline-block}
+.rv-steps{gap:1px}.rv-steps i{width:9px;height:10px;display:inline-block}.rv-steps i:last-of-type{margin-right:3px}
 .rv-k svg{border:1px solid var(--line);border-radius:2px}
 .rv-fix .rv-hollow{fill-opacity:.28;stroke-width:.6}
 .rv-hol::before{background:color-mix(in srgb,var(--c) 28%,transparent);border:.6px solid var(--c)}
@@ -121,3 +137,4 @@ background:var(--surface);color:var(--ink);border:1px solid var(--line);border-l
 .rv-over{color:var(--signal,#c33)}
 .rv-fix.rv-lit .rv-shape{animation:rv-flash 1.8s ease-out}
 @keyframes rv-flash{0%{filter:brightness(1.6) drop-shadow(0 0 4px var(--signal))}100%{filter:none}}
+.rv-lines{cursor:help;border-bottom:1px dotted var(--muted)}

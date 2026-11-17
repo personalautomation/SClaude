@@ -1287,7 +1287,13 @@ The stack runs from `.sclaude/local/feature/supabase/`: a rewritten copy of the 
 `supabase/config.toml` — the tracked one is never touched, or the ports would
 ride into a commit — and symlinks for everything else, so the migrations the
 feature writes are the ones its stack applies. Pending migrations, the
-feature's and main's after a sync, are applied on every start.
+feature's and main's after a sync, are applied on every start. One applied
+already and changed since — edited in a review's fix, or gone, folded into
+another — is one `migration up` never runs again, so before applying them
+sclaude compares the SQL the stack keeps for each applied migration
+(`supabase_migrations.schema_migrations`, whitespace and semicolons aside) with
+its file (`db_stale`). A stack that differs is reset and filled again, as by
+`sclaude dev --rebuild-db`, and the line says which migrations it was for.
 
 `.sclaude/local/feature/db.env` points the feature at it, and every process sclaude starts
 there sources it — the dev server, the local regression, the claude session.

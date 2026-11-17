@@ -797,10 +797,74 @@ def failed_start_cases():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def stale_cases():
+    """A migration edited or removed after the stack applied it: `migration
+    up` would skip it in silence, so the stack is reset and filled again."""
+    rows = [{"v": "0001", "s": ["create table a (id int)"]},
+            {"v": "0002", "s": ["create table b (id int)", "comment on table b is 'b'"]}]
+    files = {"0001": "create table a (id int);\n", "0002": "create table b (id int);\n\ncomment on table b is 'b';\n"}
+    check("stale: the same SQL, spaced otherwise, is current", feature_db.stale_migrations(rows, files), [])
+    check("stale: an edited file is changed",
+          feature_db.stale_migrations(rows, dict(files, **{"0002": "create table b (id bigint);"})), ["0002 changed"])
+    check("stale: a file gone is gone",
+          feature_db.stale_migrations(rows, {"0001": files["0001"]}), ["0002 gone"])
+    check("stale: a file not applied yet is not stale",
+          feature_db.stale_migrations(rows[:1], files), [])
+
+    root = tempfile.mkdtemp(prefix="sclaude-featuredb-stale-")
+    try:
+        os.makedirs(os.path.join(root, "repo"))
+        os.makedirs(os.path.join(root, "registry"))
+        cli = os.path.join(root, "stub-supabase")
+        with open(cli, "w") as fh:
+            fh.write(STUB_CLI)
+        os.chmod(cli, 0o755)
+        seeded = os.path.join(root, "seeded")
+        a = feature_tree(root, "a")
+        write_config(a, cli, "echo run >> %s" % seeded)
+        with open(os.path.join(a, "supabase", "migrations", "0001_a.sql"), "w") as fh:
+            fh.write(files["0001"])
+        answer = os.path.join(root, "applied.json")
+        with open(answer, "w") as fh:
+            json.dump(rows[:1], fh)
+        # The stack's answer to the one query db_stale asks.
+        docker = 'docker() { [[ "$1" == exec ]] && cat "%s"; return 0; }\n' % answer
+        bash(root, docker + 'ensure_db "%s"' % a)
+        check("stale: a current stack is migrated, not reset",
+              [c.split(" ")[0] + " " + c.split(" ")[1] for c in calls(root)
+               if c.startswith(("migration up", "db reset"))], ["migration up"])
+        check("stale: and filled once", open(seeded).read().count("run"), 1)
+
+        with open(os.path.join(a, "supabase", "migrations", "0001_a.sql"), "w") as fh:
+            fh.write("create table a (id bigint);\n")
+        before = len(calls(root))
+        out = bash(root, docker + 'ensure_db "%s"' % a)
+        ran = calls(root)[before:]
+        check("stale: an edited migration resets the stack",
+              any(c.startswith("db reset --workdir") for c in ran)
+              and not any(c.startswith("migration up") for c in ran), True)
+        check("stale: and says which", "0001 changed" in out, True)
+        check("stale: the reset stack is filled again", open(seeded).read().count("run"), 2)
+        check("stale: and ends ready", state(a).get("db", {}).get("ready"), True)
+
+        before = len(calls(root))
+        bash(root, docker + 'db_rebuild "%s"' % a)
+        check("stale: a rebuild resets once, not twice",
+              len([c for c in calls(root)[before:] if c.startswith("db reset")]), 1)
+
+        before = len(calls(root))
+        bash(root, 'docker() { [[ "$1" == exec ]] && return 1; return 0; }\nensure_db "%s"' % a)
+        check("stale: a stack that cannot be asked is not reset",
+              any(c.startswith("db reset") for c in calls(root)[before:]), False)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     config_cases()
     env_cases()
     ensure_cases()
+    stale_cases()
     failed_start_cases()
     copy_cases()
     same_schema_cases()

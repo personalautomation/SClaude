@@ -847,8 +847,15 @@ one that changes what sclaude offers a team, not every `feat`: it is not done
 until the README names what it gives and the wiki's concept page it belongs
 to in `wiki/pages/` carries it (a page of its own, linked from Home and
 `_Sidebar.md`, when it is a story of its own). A maintainer who pushes `main`
-then rebuilds the wiki into its clone and pushes it; nobody else can push the
-wiki.
+then rebuilds the wiki into its clone and pushes it; only collaborators can
+edit the wiki. The rebuild's commit subject starts with `Rebuild from`
+(`REBUILD` in `wiki/build.py`): the build fetches the clone, stops while it
+is behind its remote (pull it first), lists the clone's commits after the
+last such one — an edit made on GitHub — and stops, so the person reads them
+before they are overwritten; `--overwrite` goes on once they have.
+
+<!-- Added by Claude on 2026-11-17 at the user's request: wiki edits by
+collaborators are watched at each rebuild, not overwritten unseen. -->
 
 <!-- Added by Claude on 2026-11-09 at the user's request: a significant new
 feature of the tools updates the README and the wiki, not only the guides. -->

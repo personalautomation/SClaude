@@ -10,6 +10,7 @@ to any project: they live here, symlinked into `~/.local/bin` and
 | [`sclaude`](sclaude-guide.md#binsclaude) | runs a feature from issue to production with Claude doing the work and a person making the decisions |
 | [`skills/pr`](#skillspr) | a `/pr` skill: opens a pull request the way the team does it |
 | [`skills/sreview`](#skillssreview) | a `/sreview` skill: review and fix in iterations until the review finds nothing substantive |
+| [`skills/scontrib`](#skillsscontrib) | a `/scontrib` skill: an outside contributor's pull request checked, finished, reviewed and merged with them as its author |
 | [`skills/sdemo`](#skillssdemo) | a `/sdemo` skill: a recorded demo of a feature — clicked through as its users, with captions on what to look at, a step to take over from — or `live` in chrome-debug, or plain signed-in links; `/sdemo ac` by its acceptance criteria |
 | [`skills/isleep`](#skillsisleep) | an `/isleep` skill: night mode — Claude carries on alone, decides instead of asking, and reports in the morning |
 | [`sclaude-proxy`](#binsclaude-proxy) | one address per feature: `http://<feature>.localhost:3000` |
@@ -56,6 +57,32 @@ part of the code as a comment beside that code, or in its doc. In a project run 
 sclaude it takes the check commands, the review mode and the review rules from
 there, and with a pull request open keeps the findings as its threads. It
 commits once per iteration; pushing is left to the project's own rules.
+
+## skills/scontrib
+
+`/scontrib <n>` takes pull request `<n>` from someone outside the maintainers
+to `main` without sending it back: what it lacks, we finish.
+
+Nothing of the pull request runs on your machine before it is checked — not
+even its git hooks: it is read from a fetched copy, not checked out. First it
+says what the pull request brings, what it changes for what is
+already supported, and whether it fits the repository's rules. Then it checks
+it as code from someone not yet trusted, before running any of it: calls to
+other services, what listens where, sudo and system files, hidden code,
+the guards untouched, new dependencies, who wrote the commits, and whether
+it was really reviewed. It stops there for your decision.
+
+On your yes it checks the pull request out in a worktree beside the checkout,
+merges `main` into it, lists any new coupling between files in `CLAUDE.md` with a
+test, runs the suite and `/sreview` over the whole pull request. Before
+anything is pushed it asks again; then it pushes the fixes to the
+contributor's branch, approves the pull request from your account and
+prepares a squash merge, which runs only on your word: the contributor stays
+the commit's author, you are its `Reviewed-by`, and the pull request shows as
+merged. Where `main` takes updates only from admins, it hands you the merge
+command to run. After the
+merge it rebuilds the wiki, tells sessions with unpushed commits to rebase,
+and removes its worktree.
 
 ## skills/sdemo
 

@@ -132,6 +132,8 @@ with tempfile.TemporaryDirectory() as tmp:
     out = w.run()
     check("dirty-not-updated", os.path.isfile(os.path.join(w.me, "c.txt")), False)
     check("dirty-said", "uncommitted changes" in out, True)
+    offered = [l.split("To take it: ", 1)[1] for l in out.splitlines() if "To take it: " in l]
+    check("dirty-offers-the-command", (offered, "Stash your changes" in out), (["sclaude update"], True))
     check("dirty-edit-kept", open(os.path.join(w.me, "a.txt")).read(), "hand edit\n")
 
     print("offline")
@@ -191,6 +193,91 @@ with tempfile.TemporaryDirectory() as tmp:
     out = w.run()
     check("wip-not-merged", (os.path.isfile(os.path.join(w.me, "d.txt")),
                              "not" in out and "sclaude's to merge into" in out), (False, True))
+    # The way to main is a bare command on a line of its own, pasted whole.
+    lines = out.splitlines()
+    after = [lines[i + 1].replace("INFO", "").strip() for i, l in enumerate(lines[:-1]) if "Or, to leave" in l]
+    check("switch-to-main-alone-on-its-line",
+          [a.startswith("git -C ") and ")" not in a for a in after], [True])
+
+    print("a contribution taken in as a squashed pull request")
+    # gh answers whether origin is a fork: a stand-in on PATH says it.
+    stubs = os.path.join(tmp, "stubs")
+    os.makedirs(stubs)
+    with open(os.path.join(stubs, "gh"), "w") as fh:
+        fh.write('#!/usr/bin/env bash\necho "${FORK:-false}"\n')
+    os.chmod(os.path.join(stubs, "gh"), 0o755)
+    on_path = {"PATH": stubs + os.pathsep + ENV.get("PATH", "")}
+
+    def squash_world(name):
+        os.makedirs(os.path.join(tmp, name))
+        sw = World(os.path.join(tmp, name))
+        commit(sw.me, "port.txt", "port\n")          # my commits, two of them
+        commit(sw.me, "port2.txt", "more\n")
+        sw.upstream_commit("port.txt", "port\n")     # main takes them in, squashed
+        sw.upstream_commit("port2.txt", "more\n")
+        sw.upstream_commit("after.txt", "later\n")   # and moves on
+        return sw
+
+    sw = squash_world("3")
+    out = sw.run(env=on_path)
+    check("taken-in-main-follows", (git(sw.me, "rev-parse", "HEAD") == git(sw.me, "rev-parse", "origin/main"),
+                                   "in sclaude's main already" in out, "REEXEC" in out), (True, True, True))
+
+    sw = squash_world("4")
+    out = sw.run(env=dict(on_path, FORK="true"))
+    check("taken-in-on-a-fork-not-moved", (os.path.isfile(os.path.join(sw.me, "after.txt")),
+                                          "consider taking it" in out, "RETURNED" in out), (False, True, True))
+
+    # The branch made from main after the commits: main holds them too.
+    sw = squash_world("5")
+    git(sw.me, "switch", "-q", "-c", "dev/me-feature")
+    out = sw.run(env=on_path)
+    check("taken-in-branch-switches-to-main", (sw.branch(), os.path.isfile(os.path.join(sw.me, "after.txt")),
+                                              git(sw.me, "rev-parse", "--verify", "-q", "dev/me-feature") != ""),
+          ("main", True, True))
+
+    sw = squash_world("6")
+    commit(sw.me, "real.txt", "not in main\n")      # work main does not have
+    out = sw.run(env=on_path)
+    check("own-work-on-main-kept-and-offered", (os.path.isfile(os.path.join(sw.me, "real.txt")),
+                                               "diverged" in out, "switch -c dev/me && git" in out,
+                                               "RETURNED" in out), (True, True, True, True))
+    # dev/<name> taken already (an earlier proposal): the offer names a free one.
+    git(sw.me, "branch", "dev/me", "origin/main~3")
+    out = sw.run(env=on_path)
+    check("offer-names-a-free-branch", ("switch -c dev/me-" in out, "switch -c dev/me &&" in out), (True, False))
+    # A branch with no commits of its own, only behind — kept on an older
+    # sclaude on purpose — is left where it is, with the note.
+    sw2 = squash_world("9")
+    git(sw2.me, "switch", "-q", "-c", "pinned", "origin/main")
+    sw2.upstream_commit("later.txt", "later\n")
+    out2 = sw2.run(env=on_path)
+    check("pinned-branch-left-alone", (sw2.branch(), "consider taking it" in out2), ("pinned", True))
+
+    # The command line is only the command: pasted whole, it runs as printed.
+    offered = [l.split("To take it: ", 1)[1] for l in out.splitlines() if "To take it: " in l]
+    check("offer-line-is-only-the-command", [c for c in offered if "—" in c or "(" in c], [])
+
+
+    # main tracks the person's fork: started from another branch, main is not moved.
+    sw = squash_world("7")
+    git(sw.me, "remote", "add", "mine", sw.origin)
+    git(sw.me, "fetch", "-q", "mine")
+    git(sw.me, "branch", "-q", "--set-upstream-to", "mine/main", "main")
+    before = git(sw.me, "rev-parse", "main")
+    git(sw.me, "switch", "-q", "-c", "try")
+    out = sw.run(env=on_path)
+    check("main-on-a-fork-not-reset", (git(sw.me, "rev-parse", "main") == before, sw.branch()), (True, "try"))
+    # The same with a main that has nothing of its own: not fast-forwarded either.
+    sw = squash_world("10")
+    git(sw.me, "remote", "add", "mine", sw.origin)
+    git(sw.me, "fetch", "-q", "mine")
+    git(sw.me, "switch", "-q", "-c", "try")
+    git(sw.me, "branch", "-q", "-f", "main", "mine/main~3")
+    git(sw.me, "branch", "-q", "--set-upstream-to", "mine/main", "main")
+    before = git(sw.me, "rev-parse", "main")
+    out = sw.run(env=on_path)
+    check("clean-main-on-a-fork-not-moved", (git(sw.me, "rev-parse", "main") == before, sw.branch()), (True, "try"))
 
     print("a merge that fails without a conflict")
     git(w.me, "switch", "-q", "dev/alice-b")

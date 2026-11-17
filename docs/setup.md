@@ -153,8 +153,11 @@ It asks three questions about this machine, once (a re-run keeps the answers):
 
 - **Updates of sclaude.** `notify` (recommended): each start lists what is new
   on this repository's `main`, and `sclaude update` takes it once you have read
-  it. `auto`: each start takes it by itself. `off`: sclaude never fetches
-  itself.
+  it. `auto`: each start takes it by itself; when your own commits or edits
+  in the checkout stand in the way, the start says a newer version is there
+  and the command that takes it, and goes on. Commits of yours that `main`
+  already has — a pull request of yours taken in — no longer hold it back,
+  unless you work through a fork. `off`: sclaude never fetches itself.
 - **Sending fixes of sclaude back.** The retrospective and the friction reviews
   can fix sclaude itself and send the fix to this public repository (see "When
   a session finds a bug in sclaude"). `ask`: you see the commits and the files,

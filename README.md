@@ -387,7 +387,7 @@ what is already there. The details are in [Installation](docs/setup.md#installat
 | [How the cycle is kept in line](docs/cycle.md) | what closes each step, what is refused, the gates, the rollback, what is measured, the decisions a product may hand to sclaude |
 | [For a team](docs/team.md) | one copy for everybody, the product's config, layered rules, who changes the orchestrator |
 | [Privacy](docs/privacy.md) | what leaves your machine, what stays, what listens |
-| [The tools](docs/tools.md) | the skills (`/pr`, `/sreview`, `/sdemo`, `/isleep`), the per-feature proxy, chrome-debug, keepawake and its Telegram bot, the rest |
+| [The tools](docs/tools.md) | the skills (`/pr`, `/sreview`, `/scontrib`, `/sdemo`, `/isleep`), the per-feature proxy, chrome-debug, keepawake and its Telegram bot, the rest |
 | [The decks and the process map](docs/presentations/README.md) | building the decks, printing the map |
 | [docs/sclaude.md](docs/sclaude.md), [docs/keepawake.md](docs/keepawake.md) | how the parts work inside, and why they were built that way |
 

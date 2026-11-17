@@ -298,7 +298,9 @@ instruments_others() {
 #                      sessions read the files being replaced (see
 #                      instruments_others). The update waits for a free moment.
 #   another branch     anything but main and dev/<name> is somebody's own work,
-#                      and main is not merged into it.
+#                      and main is not merged into it — unless its own commits
+#                      are all in main already (instruments_taken_in): then it
+#                      is left for main, kept as it is.
 #
 # After a change the process re-executes itself: bash has already read this
 # file and sourced every module, and carrying on would run the old code over
@@ -373,6 +375,47 @@ cmd_update() {
   info "  The next sclaude command runs it."
 }
 
+# Whether everything HEAD has is in sclaude's main already — a change taken
+# in as a squashed pull request, under commits of another name: merging the
+# two gives main's own tree. Such commits are nothing to keep; left, they
+# hold the checkout off main for good. A HEAD with no commits of its own —
+# only behind, as a branch kept on an older sclaude on purpose — is not one.
+instruments_taken_in() {
+  local merged main
+  ! git -C "$INSTRUMENTS" merge-base --is-ancestor HEAD origin/main 2>/dev/null || return 1
+  merged="$(git -C "$INSTRUMENTS" merge-tree --write-tree HEAD origin/main 2>/dev/null)" || return 1
+  main="$(git -C "$INSTRUMENTS" rev-parse 'origin/main^{tree}' 2>/dev/null)" || return 1
+  [[ -n "$main" && "${merged%%$'\n'*}" == "$main" ]]
+}
+
+# Whether moving this checkout onto sclaude's main is ours to do: the branch
+# follows origin (or nothing), and origin is sclaude's own repository, not
+# somebody's fork. A person who works through a fork keeps their checkout
+# where they put it — told, never moved. Not known (no gh, no network) is not
+# a yes.
+instruments_follows_upstream() {
+  local up url
+  up="$(git -C "$INSTRUMENTS" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+  [[ -z "$up" || "$up" == origin/* ]] || return 1
+  url="$(git -C "$INSTRUMENTS" remote get-url origin 2>/dev/null)" || return 1
+  [[ "$(GH_PROMPT_DISABLED=1 timeout 10 gh repo view "$url" --json isFork --jq .isFork 2>/dev/null)" == false ]]
+}
+
+# Said at a start when main has a newer sclaude that could not be taken here:
+# that there is one, and the command that takes it — a note, not a question:
+# the run goes on, on the code it has.
+#
+# Every command stands alone on its line, to be pasted whole: what it does
+# goes on the next, and a second command it calls for on a line of its own.
+#
+#   instruments_offer <commits behind> <command> [<what it does> [<then this>]]
+instruments_offer() {
+  info "  instruments: sclaude has a newer version on main ($1 commit(s)); consider taking it."
+  info "  To take it: $2"
+  [[ -z "${3:-}" ]] || info "  $3"
+  [[ -z "${4:-}" ]] || info "    $4"
+}
+
 # Brings the checkout up to sclaude's main, as far as that is safe here and
 # now; 0 when it changed and the process has to run again.
 instruments_take() {
@@ -396,19 +439,68 @@ instruments_take() {
   else
     behind="$(git -C "$INSTRUMENTS" rev-list --count HEAD..origin/main 2>/dev/null || true)"
     if [[ "$behind" =~ ^[0-9]+$ && "$behind" -gt 0 ]]; then
+      name="$(developer_name 2>/dev/null || true)"; name="${name:-local}"
+      # The checkout's path as it is pasted back into a shell, spaces and all.
+      local dir; printf -v dir '%q' "$INSTRUMENTS"
       if [[ -n "$(git -C "$INSTRUMENTS" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
         warn "  instruments: $behind commit(s) behind main, not updated —"
         warn "  $INSTRUMENTS has uncommitted changes"
+        # In words, not a chain of git commands: pasted later, after the
+        # person committed or reverted, a stash that saves nothing would pop
+        # an older entry onto the work (decided by the user, 2026-11-17).
+        # On main a commit of the edits would itself hold main back
+        # (diverged): stash there; a branch of one's own takes a merge.
+        if [[ "$branch" == main ]]; then
+          instruments_offer "$behind" "$SELF update" "Stash your changes in $dir first, and git stash pop after."
+        elif instruments_own_branch "$branch"; then
+          instruments_offer "$behind" "$SELF update" "Commit or stash your changes in $dir first."
+        else
+          instruments_offer "$behind" "$SELF update" "Commit or stash your changes in $dir, and switch it to main, first."
+        fi
       elif [[ "$branch" == "main" ]]; then
+        own="$(git -C "$INSTRUMENTS" rev-parse --short HEAD 2>/dev/null)"
         if git -C "$INSTRUMENTS" merge -q --ff-only origin/main >/dev/null 2>&1; then
           info "  instruments: updated by $behind commit(s) from main"
           changed=1
+        elif instruments_taken_in && instruments_follows_upstream \
+             && git -C "$INSTRUMENTS" reset -q --keep origin/main >/dev/null 2>&1; then
+          info "  instruments: your commits on main are in sclaude's main already (taken in"
+          info "  as a pull request); main follows it again (they were $own)"
+          changed=1
         else
           warn "  instruments: main has diverged from origin/main; not updated"
+          # The move cmd_propose makes: onto dev/<name> (with the time when
+          # that is taken), and main back to sclaude's; main is merged into
+          # that branch at every start from then on.
+          local keep="dev/$name"
+          git -C "$INSTRUMENTS" rev-parse -q --verify "refs/heads/$keep" >/dev/null 2>&1 \
+            && keep="dev/$name-$(date +%Y%m%d-%H%M)"
+          instruments_offer "$behind" "git -C $dir switch -c $keep && git -C $dir branch -f main origin/main" \
+            "Your commits go on with you on $keep, and main is merged into it at every start."
         fi
       elif ! instruments_own_branch "$branch"; then
-        info "  instruments: $behind commit(s) behind main; $branch is not"
-        info "  sclaude's to merge into (only main and dev/<name> are)"
+        # Its main may hold the same commits (made there, then branched), so
+        # main is taken the way main is above; neither works, and the branch
+        # is switched back to as it was.
+        if instruments_taken_in && instruments_follows_upstream \
+           && git -C "$INSTRUMENTS" switch -q main >/dev/null 2>&1; then
+          # main is asked again — its own upstream may be the person's fork.
+          if instruments_follows_upstream \
+             && { git -C "$INSTRUMENTS" merge -q --ff-only origin/main >/dev/null 2>&1 \
+                  || { instruments_taken_in \
+                       && git -C "$INSTRUMENTS" reset -q --keep origin/main >/dev/null 2>&1; }; }; then
+            info "  instruments: $branch is in sclaude's main already (taken in as a pull"
+            info "  request); switched to main, which follows it again"
+            changed=1
+          else
+            git -C "$INSTRUMENTS" switch -q "$branch" >/dev/null 2>&1
+          fi
+        fi
+        if [[ -z "$changed" ]]; then
+          info "  instruments: $behind commit(s) behind main; $branch is not"
+          info "  sclaude's to merge into (only main and dev/<name> are)"
+          instruments_offer "$behind" "git -C $dir merge origin/main" "Or, to leave $branch for main:" "git -C $dir switch main"
+        fi
       else
         local merge_out
         if merge_out="$(git -C "$INSTRUMENTS" merge -q --no-edit origin/main 2>&1)"; then
@@ -421,7 +513,7 @@ instruments_take() {
           # a failure.
           git -C "$INSTRUMENTS" merge --abort >/dev/null 2>&1 || true
           warn "  instruments: merging main into $branch conflicts; left as it was"
-          warn "  resolve it by hand: git -C $INSTRUMENTS merge origin/main"
+          warn "  resolve it by hand: git -C $dir merge origin/main"
         else
           warn "  instruments: could not merge main into $branch; left as it was"
           warn "  git said: $(head -1 <<< "$merge_out")"

@@ -96,7 +96,14 @@ in full once per new head of main, a line after that), and `sclaude update`
 developer's branch. Unset, or set to an unknown word, the start asks the
 install question once at the terminal and saves the answer; with no terminal
 it acts as `notify` and asks again next time. A dirty tree or a conflict leaves the code as it was and
-says so; no network is silent; afterwards the process re-executes itself so it
+says so, with the command that takes the update (`instruments_offer`, a note
+the run goes past); commits main already has under other names — a pull
+request squashed in — are dropped by moving to `origin/main` (`git reset
+--keep`, or switching a branch that is not sclaude's back to `main`) when
+merging the two gives main's own tree and the checkout has commits of its
+own (`instruments_taken_in`; a branch only behind is left alone), and only
+where the branch follows origin and origin is not a fork
+(`instruments_follows_upstream`, asked of `gh`; not known is no); no network is silent; afterwards the process re-executes itself so it
 does not run old code over new files. `SCLAUDE_NO_SYNC=1` turns it off.
 The same holds at the end of a step's session, which may have run for hours:
 if `bin/sclaude` or a module changed on disk meanwhile, the process hands what

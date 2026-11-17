@@ -14,17 +14,27 @@ rewritten to the wiki pages that now hold their targets; links to anything
 else in the repository go to its file on GitHub.
 
     python3 wiki/build.py OUT_DIR    # OUT_DIR: a clone of SClaude.wiki.git
+    python3 wiki/build.py --overwrite OUT_DIR
 
 Every .md file in OUT_DIR is removed first: the wiki is all built from here.
+So before that, a clone's commits since the last rebuild — anybody's edit on
+GitHub, whose subject does not start with REBUILD — are listed and the build
+stops: the person reads them before they are overwritten (what is worth
+keeping goes into docs/ or wiki/pages/), then runs it with --overwrite. A
+rebuild is committed with a subject starting with REBUILD.
 """
 
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PAGES = os.path.join(ROOT, "wiki", "pages")
 BLOB = "https://github.com/personalautomation/SClaude/blob/main/"
+# How a rebuild's commit in the wiki's clone begins; anything after the last
+# one is an edit made on GitHub.
+REBUILD = "Rebuild from"
 
 # (source, wiki page, title, split into a page per section, prefix of those pages)
 DOCS = [
@@ -178,9 +188,56 @@ def build(out):
     return len(pages)
 
 
+def edits_since_rebuild(out):
+    """The clone's commits after its last rebuild, newest first, as
+    "<sha> <author> <date> <subject>"; [] for a directory that is not a clone
+    itself — asked of its own .git only, so a folder inside some other
+    checkout never reads that one's history. Any other failure of git stops
+    the build: a guard that turns itself off would overwrite edits unseen."""
+    if not os.path.exists(os.path.join(out, ".git")):
+        return []
+    # An edit made on GitHub since the clone was last pulled is in no local
+    # history: a clone behind its remote stops the build until it is pulled.
+    remotes = subprocess.run(["git", "-C", out, "remote"], capture_output=True, text=True).stdout.split()
+    if remotes:
+        fetched = subprocess.run(["git", "-C", out, "fetch", "-q"], capture_output=True, text=True)
+        if fetched.returncode:
+            sys.exit("wiki/build.py: could not fetch %s:\n%s" % (out, fetched.stderr.strip()))
+        counted = subprocess.run(["git", "-C", out, "rev-list", "--count", "HEAD..@{u}"],
+                                 capture_output=True, text=True)
+        if counted.returncode:
+            sys.exit("wiki/build.py: whether %s is behind its remote cannot be told — its "
+                     "branch follows no remote branch (git -C %s branch -u origin/<branch>), "
+                     "or there is no branch:\n%s" % (out, out, counted.stderr.strip()))
+        behind = counted.stdout.strip()
+        if behind != "0":
+            sys.exit("wiki/build.py: %s is %s commit(s) behind its remote; pull it first "
+                     "(git -C %s pull --ff-only), then build again." % (out, behind, out))
+    # Fields split by NUL: an author's name holds spaces.
+    done = subprocess.run(["git", "-C", out, "log", "--format=%h%x00%an%x00%ad%x00%s",
+                           "--date=short"], capture_output=True, text=True)
+    if done.returncode:
+        sys.exit("wiki/build.py: git could not read %s's history:\n%s"
+                 % (out, done.stderr.strip()))
+    edits = []
+    for line in done.stdout.splitlines():
+        fields = line.split("\0")
+        if fields[-1].startswith(REBUILD):
+            break
+        edits.append(" ".join(fields))
+    return edits
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or not os.path.isdir(sys.argv[1]):
-        sys.exit("usage: wiki/build.py OUT_DIR")
+    args = sys.argv[1:]
+    overwrite = "--overwrite" in args
+    args = [a for a in args if a != "--overwrite"]
+    if len(args) != 1 or not os.path.isdir(args[0]):
+        sys.exit("usage: wiki/build.py [--overwrite] OUT_DIR")
+    edits = edits_since_rebuild(args[0])
+    if edits and not overwrite:
+        sys.exit("The wiki was edited since its last rebuild; read these before they are\n"
+                 "overwritten, then run again with --overwrite:\n  " + "\n  ".join(edits))
+    sys.argv[1:] = args
     n = build(sys.argv[1])
     print("%d generated pages, %d hand-written, in %s"
           % (n, len(os.listdir(PAGES)), sys.argv[1]))

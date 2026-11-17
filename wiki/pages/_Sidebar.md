@@ -29,7 +29,7 @@
 - [Team setup](Team-Setup)
 - [Privacy in full](Privacy-in-Full)
 - [The tools](Tools)
-  - [/pr](Tool-skills-pr) · [/sreview](Tool-skills-sreview) · [/sdemo](Tool-skills-sdemo) · [/isleep](Tool-skills-isleep)
+  - [/pr](Tool-skills-pr) · [/sreview](Tool-skills-sreview) · [/scontrib](Tool-skills-scontrib) · [/sdemo](Tool-skills-sdemo) · [/isleep](Tool-skills-isleep)
   - [sclaude-proxy](Tool-bin-sclaude-proxy) · [chrome-debug](Tool-bin-chrome-debug)
   - [keepawake](Tool-bin-keepawake) · [wsl-update](Tool-bin-wsl-update)
   - [statusline](Tool-statusline-py) · [commit-msg](Tool-githooks-commit-msg)

@@ -48,6 +48,10 @@ proposes:
 Your name is the part of your git email before the `@`, or
 `git config --global sclaude.developer <name>`.
 
+A maintainer takes a pull request in without sending it back for changes:
+it is checked, finished and reviewed on its own branch, the fixes pushed to
+it, and merged as one commit with you as its author.
+
 sclaude's sessions never change your checkout of this repository: a session
 that finds a bug in sclaude fixes it in its feature's workshop, and sclaude
 sends that the same way — a pull request for you, after checking it for your

@@ -1,6 +1,6 @@
 ---
 name: sreview
-description: Run iterations of code review and fixing on the current branch until the review finds nothing substantive, stopping every N iterations (default 5) to ask whether to go on. Each review is a fresh subagent; questions to the user are asked per class of finding, and the answers are kept as policies that settle similar findings now and in later runs. Works in any repository; in a project run by sclaude it follows sclaude's review settings and rules. Runs only when the user invokes /sreview, or when a sclaude session's instructions tell it to review the change it made in sclaude's workshop.
+description: Run iterations of code review and fixing on the current branch until the review finds nothing substantive, stopping every N iterations (default 5) to ask whether to go on. Each review is a fresh subagent; questions to the user are asked per class of finding, and the answers are kept as policies that settle similar findings now and in later runs. Works in any repository; in a project run by sclaude it follows sclaude's review settings and rules. Runs only when the user invokes /sreview, when /scontrib (invoked by the user) runs it over a contributor's pull request, or when a sclaude session's instructions tell it to review the change it made in sclaude's workshop.
 argument-hint: "[iterations before asking, default 5]"
 ---
 
@@ -43,13 +43,19 @@ the user in the language they write in.
      `git log --format='%H %(trailers:key=Claude-Session,valueonly)'`);
    - the uncommitted changes to files this session edited, and only those.
 
+   Under `/scontrib` the scope is the whole pull request instead —
+   `git diff <base>...HEAD`, the contributor's commits and ours — as that
+   skill says; nothing of it is another session's.
+
    Say the scope in a line (commits, files). If the session cannot tell its own
    work apart — no trailer, nothing it remembers editing — ask the user for the
    scope rather than taking the whole branch.
 
 ## Other sessions' code
 
-A finding on code this session did not write is not fixed here. Find its owner:
+A finding on code this session did not write is not fixed here — except an
+outside contributor's pull request taken in with `/scontrib`, whose code is
+this session's to fix and whose scope is the whole pull request. Find its owner:
 `git blame` the lines → the commit → its `Claude-Session:` trailer. If that
 session is active (`ListAgents`), send it the finding verbatim with
 `path:line` and the failure scenario (`SendMessage`) and leave it to it; say
@@ -121,7 +127,8 @@ not seen your fixes. It invokes the `code-review` skill at the level above, and
 changes no file and posts nothing. Its scope, in plain words:
 
 - iteration 1: this session's work (step 0.6) — its commits by SHA and its
-  uncommitted files; the rest of the branch only as context, not to report on;
+  uncommitted files, or under `/scontrib` the whole pull request; the rest of
+  the branch only as context, not to report on;
 - later iterations: this session's commits since the last reviewed head —
   your fixes are where new bugs come from;
 - **what was settled**, verbatim, so it does not raise it again: every policy in

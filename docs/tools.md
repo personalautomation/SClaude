@@ -293,6 +293,16 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   its file read all of it and found nothing there, and that round's own fixing is over — the next round
   has begun — so no fix can still land there; then it closes to a point in
   the middle of that round. Code no thread led to closes the same way.
+  An icicle is one problem's line of descent, not a stretch of the file: a
+  fix grows from the fix whose lines its thread was posted on, or whose
+  lines it rewrote, and a problem found after an icicle closed starts an
+  icicle of its own, however near. The exception is shown in purple: a
+  thread on the very lines a closed icicle's fixes wrote — a problem in the
+  review's own fix that the round which closed it read and passed (a thread
+  there that was declined, or that would undo a fix, reopens the icicle
+  without the purple: it was no problem the check missed). The
+  icicle goes on through it, a purple bar marks the round that passed it
+  and a purple ring the thread found later.
   A round that never opened the file — a review that stopped after its
   findings, or did not get there — found nothing there by not looking: the
   icicle goes on through it in its own colour fading down, still to be

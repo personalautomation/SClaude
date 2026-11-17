@@ -458,8 +458,23 @@ development's diff up to the first round is the block on top (its height
 the log of the time from the branch's first commit), a file's column as
 wide as the root of what it wrote; a round's fixes close together in one
 file are one place, and places in two files join when they are one fix —
-the same thread, or the work of one subagent given at most two findings — the files ordered so that linked ones sit side by side; a place hangs from every place of the round before its code overlaps
-(several: a merge), a place's bottom is shared among those hanging from it
+the same thread, or the work of one subagent given at most two findings — the files ordered so that linked ones sit side by side; a place hangs from the places of the fixes it grows from
+(several: a merge), wherever above — `lineage`: the axis is also a blame
+(`writer` in `project`), so a thread knows the fix that wrote its line
+(`of`) and a fix the fixes whose lines it rewrote; a fix grows from its
+thread's `of`, or with no thread from what it rewrote (`from`), until the
+chain closes — a round after its last fix or thread that read it whole
+(not `stopped`, not `more`, its files in `seen`), with every thread of it
+settled and none of its own there; a fix of that same round landing on it
+keeps it going. After that a fix there starts a new icicle; a thread on the
+closed chain's own lines reopens it and, when it was a problem (fixed, open
+or with the person — not declined, not a reversal), keeps `missed`, the
+round that passed it, drawn purple (`rv-missed`, a ring on the dot) — only
+for a chain that fixed a thread, as a closed chain of fixes answering none
+is code the review wrote unasked. The person's asks write no lines of the
+review's. A "Fixed in <sha>" reply counts in the thread's own file, named
+or not, for the fixes that commit itself changed (deletions included). A file with no axis falls
+back to the places of the nearest round above whose code overlaps; a place's bottom is shared among those hanging from it
 in proportion to their widths (a split); each is a trapezoid, its bottom as
 wide as the lines the round changed there on one scale for the map (the one
 at which four places in five fit their columns, the rest held to theirs),

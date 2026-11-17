@@ -46,7 +46,10 @@ lines it changed there: narrowing as fewer are touched, widening as review
 draws in more code or another file, merging and splitting as places meet
 and part, stopping where review stopped coming back. Code that was not part
 of the development has nothing above it: its icicle starts in the middle of
-the review. Its colour says how the thread ended (fixed, declined, left to you, would
+the review. An icicle follows one problem, not a stretch of the file: once a
+round has read a fix and found nothing, a problem found later nearby starts
+an icicle of its own — unless it sits on the very lines that fix wrote, a
+check that missed, which the map marks in purple. Its colour says how the thread ended (fixed, declined, left to you, would
 undo a fix), with the share the person asked for during the
 review in the development's beige; it darkens the more often review had
 already rewritten that spot; a pattern marks a migration among changed code,

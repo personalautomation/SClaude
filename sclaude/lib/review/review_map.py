@@ -262,12 +262,19 @@ def project(paths, rounds, fixes, threads, dev, final):
     lines it wrote), p on each thread, `proj` on each file of `dev` (its
     regions) and returns {path: length of its axis}. A file whose fixes do
     not add up to its next version (a rename, a binary) gets no axis, and
-    the page places it by line numbers as before."""
+    the page places it by line numbers as before.
+
+    A place is a line's identity, so the axis is also a blame: `writer`
+    holds the fix that wrote each place. A fix of the review (one with an
+    `i`) gets `_blame`, the fixes whose lines it rewrote (or, writing new
+    lines only, the one fix whose lines it went in between), and a thread
+    `_of`, the fix that wrote the line it was posted on: lineage() reads
+    both."""
     lengths = {}
     for f in paths:
         n0 = rounds[0]["lines"].get(f, 0)
         cur, axis, nxt = list(range(n0)), list(range(n0)), n0
-        snaps, owned, ok = [], [], True
+        snaps, owned, ok, writer = [], [], True, {}
         for i, r in enumerate(rounds):
             snaps.append(list(cur))
             hs = sorted((h for h in fixes if h["r"] == i and h["path"] == f), key=lambda h: h["ox"])
@@ -278,6 +285,20 @@ def project(paths, rounds, fixes, threads, dev, final):
                 new = list(range(nxt, nxt + h["n"] if h["add"] else nxt))
                 nxt += len(new)
                 plans.append((h, gone, anchor, new))
+                # The person's asks are the development's lines: no fix of
+                # the review wrote them, nor grows from them.
+                if "i" in h and not h.get("asked"):
+                    if gone:
+                        by = {writer[s]["i"] for s in gone if "i" in writer.get(s, {})}
+                    else:
+                        after = cur[h["ox"]] if 0 <= h["ox"] < len(cur) else None
+                        a, b = writer.get(anchor, {}), writer.get(after, {})
+                        by = {a["i"]} if "i" in a and a is b else set()
+                    h["_blame"] = sorted(by)
+            for h, gone, anchor, new in plans:
+                if not h.get("asked"):
+                    for s in new:
+                        writer[s] = h
             # Inserted from the end of the axis back, so the places found
             # once for the round still hold.
             where = {slot: k for k, slot in enumerate(axis)} if plans else {}
@@ -293,6 +314,9 @@ def project(paths, rounds, fixes, threads, dev, final):
                 ok = False
                 break
         if not ok:
+            for h in fixes:
+                if h["path"] == f:
+                    h.pop("_blame", None)
             continue
         pos = {slot: k for k, slot in enumerate(axis)}
         lengths[f] = len(axis)
@@ -305,6 +329,9 @@ def project(paths, rounds, fixes, threads, dev, final):
                 snap = snaps[t["r"]]
                 if 1 <= (t["line"] or 0) <= len(snap):
                     t["p"] = pos[snap[t["line"] - 1]]
+                    by = writer.get(snap[t["line"] - 1], {})
+                    if "i" in by:
+                        t["_of"] = by["i"]
         d = dev["files"].get(f)
         if d:
             d["proj"] = [[pos[snaps[0][x - 1]], pos[snaps[0][min(x + n - 1, len(snaps[0])) - 1]] + 1]
@@ -463,6 +490,31 @@ def replied(tree, rounds, ends, threads, fixes):
     round's range is no fix of the review, nor is a commit a thread left as
     it is names."""
     commits = {}
+    spans = {}
+    def changes(a, b, path):
+        """{(ox, on, body)} of `git diff -U0 a b -- path`."""
+        out, cur, body = set(), None, []
+        for line in (git(tree, "diff", "-U0", "--no-color", "--no-ext-diff", a, b, "--", path) or "").splitlines() + ["@@"]:
+            if line.startswith("@@"):
+                if cur:
+                    out.add(cur + ("\n".join(body),))
+                m = HUNK.match(line)
+                cur = (int(m.group(1)), int(m.group(2)) if m.group(2) is not None else 1) if m else None
+                body = []
+            elif cur and line[:1] in "+-":
+                body.append(line)
+        return out
+    def wrote(full, r, h):
+        """Whether commit `full` changed fix h's lines: the round's diff up
+        to it against the one up to its parent, both from the round's head,
+        so what it alone changed is in the head's lines as h is — a
+        deletion too, and whatever a later commit of the round did there."""
+        key = (full, r, h["path"])
+        if key not in spans:
+            head = rounds[r]["head"]
+            spans[key] = [(ox, on) for ox, on, _ in changes(head, full, h["path"]) - changes(head, full + "^", h["path"])]
+        lo, hi = h["ox"], h["ox"] + max(h["on"], 1) - 1
+        return any(ox <= hi and lo <= ox + max(on, 1) - 1 for ox, on in spans[key])
     def round_of(sha):
         if sha not in commits:
             full = (git(tree, "rev-parse", "--verify", "-q", sha + "^{commit}") or "").strip()
@@ -474,7 +526,7 @@ def replied(tree, rounds, ends, threads, fixes):
                             and git(tree, "merge-base", "--is-ancestor", full, ends[i]) is not None \
                             and full != r["head"]:
                         names = [n for n in (git(tree, "show", "--name-only", "--format=", full) or "").splitlines() if n]
-                        commits[sha] = (i, names)
+                        commits[sha] = (i, names, full)
                         break
         return commits[sha]
     for t in threads:
@@ -487,7 +539,7 @@ def replied(tree, rounds, ends, threads, fixes):
             found = round_of(sha)
             if not found:
                 continue
-            r, names = found
+            r, names, full = found
             def said(name):
                 base = os.path.basename(name)
                 stem = base.rsplit(".", 1)[0]
@@ -507,13 +559,127 @@ def replied(tree, rounds, ends, threads, fixes):
                     lead = re.split(r"[_.-]", os.path.basename(n).rsplit(".", 1)[0])[0]
                     leads[lead] = leads.get(lead, 0) + 1
                 best = [n for n in ones if leads[re.split(r"[_.-]", os.path.basename(n).rsplit(".", 1)[0])[0]] == 1]
+            # The thread's own file needs no naming: "Fixed in <sha>" of a
+            # commit that changed it is a fix there — of the round's fixes in
+            # it that answer nothing else, only those whose lines that very
+            # commit changed (wrote()), so the round's other work in a long
+            # file is not taken for it — named in the reply or not.
+            own = t["path"] in names
+            if own and t["path"] not in best:
+                best.append(t["path"])
             if not best:
                 continue
-            t["fixedIn"] = {"r": r, "files": best}
+            # Another file is where the page lets the icicle slide; its own
+            # is where it grows anyway.
+            away = [n for n in best if n != t["path"]]
+            if away:
+                t["fixedIn"] = {"r": r, "files": away}
             for h in fixes:
                 if h["r"] == r and h["path"] in best and not h["thread"]:
+                    if own and h["path"] == t["path"] and not wrote(full, r, h):
+                        continue
                     h["thread"], h["outcome"], h["via"] = t["rid"], t["outcome"], "reply"
             break
+
+
+def settled(t):
+    """A thread with an outcome that needs nobody: fixed, declined, or a
+    reversal left as it is or resolved — the page's settled()."""
+    return t["outcome"] in ("fixed", "declined") or (t["outcome"] == "reversal" and (t["left"] or t["resolved"]))
+
+
+def lineage(rounds, fixes, threads):
+    """What each fix grows from — the icicle it continues — and which
+    threads a check missed. An icicle is one problem's line of descent: a
+    thread, the fix that answered it (`thread`), threads later posted on
+    the lines that fix wrote (`_of`, project's blame), their fixes, and so
+    on; a fix answering no thread grows from the fixes whose lines it
+    rewrote (`_blame`). Nearness on the axis says nothing.
+
+    A chain closes at the first round after its last fix or thread that
+    read it whole and found nothing there: every thread of it settled, the
+    round neither stopped nor cut short at its cap (`more`), all its files
+    opened (a GitHub run, which leaves no transcript here, taken as read),
+    and no thread of that round on its lines — unless that round's own
+    fixing then lands on it, which keeps it going. After that a change there is
+    something new and starts an icicle of its own — except a thread on the
+    lines the chain wrote: that is a problem in the review's own fix which
+    the closing round read and passed. The chain goes on through it, and
+    the thread keeps `missed`, the round that closed the chain too early —
+    when it was a problem: fixed, or still open or with the person; a
+    declined one reopens the chain without the mark.
+    Only a chain that fixed a thread can miss one: a closed chain of fixes
+    answering none is code the review wrote unasked, and a thread there
+    later is new, its `of` dropped. Writes `from` on each fix and `of`/`missed` on each thread."""
+    root = list(range(len(fixes)))
+    def find(k):
+        while root[k] != k:
+            root[k] = root[root[k]]
+            k = root[k]
+        return k
+    chains = {}
+    by_rid = {t["rid"]: t for t in threads if t["rid"]}
+    for i, r in enumerate(rounds):
+        on = {}
+        for t in threads:
+            if t.get("_of") is not None and t["r"] is not None and t["r"] <= i:
+                on.setdefault(find(t["_of"]), []).append(t)
+        if not r["stopped"] and not r["more"]:
+            for c, ch in chains.items():
+                if ch["closed"] is not None or ch["last"] >= i:
+                    continue
+                if any(t["r"] == i for t in on.get(c, [])):
+                    continue
+                if r["seen"] is not None and not ch["files"] <= set(r["seen"]):
+                    continue
+                answered = [by_rid[fixes[k]["thread"]] for k in ch["members"] if fixes[k]["thread"] in by_rid]
+                if all(settled(t) for t in answered + [t for t in on.get(c, []) if t["r"] < i]):
+                    ch["closed"] = i
+        for t in threads:
+            if t["r"] != i or t.get("_of") is None:
+                continue
+            ch = chains.get(find(t["_of"]))
+            if ch is None:
+                continue
+            if ch["closed"] is not None:
+                if not any(fixes[k]["thread"] in by_rid for k in ch["members"]):
+                    # Code the review wrote answering no thread — often
+                    # pages of it — closed and later found wanting: no fix
+                    # of a problem was passed, so this one is new.
+                    t["_of"] = None
+                    continue
+                # A real problem found there, or one still waiting: the check
+                # missed it. A declined one was no problem, and a reversal
+                # is the review undoing its own fix, already told in red.
+                if t["outcome"] in ("fixed", "open", "yours"):
+                    t["missed"] = ch["closed"]
+                ch["closed"] = None
+            ch["last"] = max(ch["last"], i)
+        for k, h in enumerate(fixes):
+            if h["r"] != i:
+                continue
+            t = by_rid.get(h["thread"])
+            raw = ([t["_of"]] if t.get("_of") is not None else []) if t else h.get("_blame", [])
+            # The closing round's own fixing is not over yet: a fix of it
+            # landing on the chain keeps it going (the page's `closing`).
+            h["from"] = [p for p in raw if fixes[p]["r"] < i and chains[find(p)]["closed"] in (None, i)]
+            for p in h["from"]:
+                chains[find(p)]["closed"] = None
+            chains[k] = {"members": [k], "files": {h["path"]}, "last": i, "closed": None}
+            for p in h["from"]:
+                a, b = find(p), find(k)
+                if a == b:
+                    continue
+                root[b] = a
+                ca, cb = chains[a], chains.pop(b)
+                ca["members"] += cb["members"]
+                ca["files"] |= cb["files"]
+                ca["last"] = max(ca["last"], cb["last"])
+    for h in fixes:
+        h.pop("_blame", None)
+        h.setdefault("from", [])
+    for t in threads:
+        t["of"] = t.pop("_of", None)
 
 
 # A diff header at a line's start, or after the line number a Read of a
@@ -875,6 +1041,8 @@ def build(tree):
         how = {} if r["stopped"] else seen_files(tree, sessions, paths, r["lines"]) if r.get("source") != "github" else None
         r["seen"] = None if how is None else sorted(how)
         r["how"] = how
+    for k, h in enumerate(fixes):
+        h["i"] = k
     axis = project(paths, rounds, fixes + carried, threads, dev, final)
     # Each fix's answer: the nearest thread of its round in its file, within
     # NEAR lines; failing that, the thread a subagent of its round was given
@@ -911,6 +1079,9 @@ def build(tree):
         if best:
             h["outcome"], h["thread"], h["via"] = best[1]["outcome"], best[1]["rid"], "near"
     replied(tree, rounds, ends, threads, fixes)
+    lineage(rounds, fixes, threads)
+    for h in fixes:
+        h.pop("i", None)
     for t in threads:
         t.pop("_replies", None)
     costs = costs_of(tree, rounds)

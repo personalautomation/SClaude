@@ -616,14 +616,17 @@ const reviewMap = (() => {
     // place, and places in two files join when they are one fix (one
     // thread, or one subagent's work): an icicle widens when
     // the round draws another file in. A place hangs
-    // from the place of the round before it overlaps most, or from the
-    // development's block; a file the development did not write has
-    // nothing above it, and its place starts as a point. Each file's share
+    // from the places of the fixes it grows from (review_map.py's lineage:
+    // one problem's line of descent, cut where a round read it and found
+    // nothing), or from the development's block; a file the development
+    // did not write has nothing above it, and its place starts as a point. Each file's share
     // of the width is its column's times sqrt(changed / written), so an
     // icicle narrows as fewer of that code's lines are touched, and grows
     // again when a round touches more. A place no later round comes back to
     // ends in a point.
     const places = rounds.map(() => []);
+    // Each fix's place, for the places that grow from it.
+    const placeOf = new Map();
     const f1 = (n) => n.toFixed(1);
     // How many earlier rounds' fixes had already rewritten each fix's spot —
     // the review going over its own work. Lines the person asked for are
@@ -739,18 +742,34 @@ const reviewMap = (() => {
         p.files = Object.keys(perFile);
         p.lo = cols[p.ci0][0]; p.hi = cols[p.ci1][0] + cols[p.ci1][1];
         p.dev = p.files.some((f) => (devf[f] || {}).add);
-        // It hangs from every place of the round before in one of its files
-        // whose code overlaps, give or take a third of its narrowest column:
-        // two or more is a merge, and a place two of this round hang from
-        // splits. A neighbouring column's place is never a parent.
-        // Rounds that touched none of that code in between do not break it:
-        // the nearest round above that did is where it hangs from, bridged.
-        const reach = Math.min(...p.files.map((f) => cols[fi[f]][1])) * 0.3;
-        p.ups = [];
-        for (let k = ri - 1; k >= 0 && !p.ups.length; k--) {
-          p.ups = places[k].filter((q) => q.files.some((f) => p.files.includes(f))
-            && Math.min(q.x1, p.x1 + reach) - Math.max(q.x0, p.x0 - reach) > 0);
+        // It hangs from the places of the fixes it grows from
+        // (review_map.py's lineage: the thread it answers was posted on
+        // their lines, or it rewrote them, and their chain was not closed
+        // yet), in its own files, however many rounds above — rounds that
+        // left that code alone are bridged. Two or more is a merge, and a
+        // place two of this round hang from splits. Nearness says nothing:
+        // a fix beside a closed icicle starts its own.
+        // A file with no axis (a rename, a binary) has no lineage: there it
+        // hangs from the nearest round above whose code overlaps, give or
+        // take a third of its narrowest column.
+        p.hs.forEach((x) => placeOf.set(x, p));
+        const from = new Set(p.hs.flatMap((x) => x.from || []).map((k) => d.hunks[k])
+          .filter((y) => y && p.files.includes(y.path)));
+        p.ups = [...new Set([...from].map((y) => placeOf.get(y)).filter((q) => q && q.ri !== ri))];
+        const loose = p.files.filter((f) => !axisOf[f]);
+        if (loose.length) {
+          // Measured from its part in those files alone, not the whole place.
+          const own = p.bits.filter((b) => loose.includes(b.f));
+          const x0 = Math.min(...own.map((b) => b.x0)), x1 = Math.max(...own.map((b) => b.x1));
+          const reach = Math.min(...loose.map((f) => cols[fi[f]][1])) * 0.3;
+          let near = [];
+          for (let k = ri - 1; k >= 0 && !near.length; k--) {
+            near = places[k].filter((q) => q.bits.some((b) => loose.includes(b.f)
+              && Math.min(b.x1, x1 + reach) - Math.max(b.x0, x0 - reach) > 0));
+          }
+          near.forEach((q) => { if (!p.ups.includes(q)) p.ups.push(q); });
         }
+        p.ri = ri;
       });
     });
     // The width at a round's bottom is the lines the round changed there, on
@@ -864,9 +883,14 @@ const reviewMap = (() => {
       if (!fx || t.r == null || t.r >= rounds.length || fi[t.path] == null) return;
       const x = threadX(t);
       const reach = cols[fi[t.path]][1] * 0.3;
-      const src = flat.filter((q) => q.ri < t.r && q.files.includes(t.path) && x >= q.x0 - reach && x <= q.x1 + reach)
-        .sort((a, b) => b.ri - a.ri)[0];
-      if (!src) return;
+      // Where it was posted: the place of the fix that wrote its line; off
+      // the axis, the latest place near it.
+      const src = t.p != null ? (t.of != null ? placeOf.get(d.hunks[t.of]) : null)
+        : flat.filter((q) => q.ri < t.r && q.files.includes(t.path) && x >= q.x0 - reach && x <= q.x1 + reach)
+          .sort((a, b) => b.ri - a.ri)[0];
+      // Posted on the development's lines (no fix wrote them), it has no
+      // place to come from: the fix there starts its own icicle, and the
+      // thread is still that place's, for the hover.
       // Into its own column or the next it is drawn as a stream; further
       // away a stream would read as a line through other files' icicles, so
       // it jumps: a mark where it leaves and one where it lands, each a link
@@ -877,7 +901,7 @@ const reviewMap = (() => {
         // one, never a stream, whose kid would not be drawn: a jump, whose
         // mark opens the block (`data-unfold`).
         // The thread is still the place's (below) whatever is folded.
-        if (!src.files.every(isFold)) {
+        if (src && !src.files.every(isFold)) {
           if (!q.files.every(isFold) && q.files.some((f) => fx.files.includes(f) && Math.abs(fi[f] - fi[t.path]) <= 1)) {
             if (!q.ups.includes(src)) { q.ups.push(src); src.kids.push(q); }
           } else {
@@ -932,15 +956,18 @@ const reviewMap = (() => {
       while (todo.length) { const p_ = todo.shift(); p_.ups.concat(p_.jin || []).forEach((q) => { if (!all.has(q)) { all.add(q); todo.push(q); } }); }
       return [...all];
     }
-    // Threads a later round posted at a place where no fix of that round
-    // landed — fixed elsewhere (a new migration, a caller), or not yet —
-    // are still the place's: its chain goes on through them, and the round
-    // that reads past the last of them is the one that checks it.
+    // Threads a later round posted on the lines a place's fixes wrote
+    // (review_map.py's `of`) where no fix of that round landed — fixed
+    // elsewhere (a new migration, a caller), or not yet — are still the
+    // place's: its chain goes on through them, and the round that reads
+    // past the last of them is the one that checks it. Off the axis, the
+    // threads near it, as before there was a blame.
     const inPlace = new Set(flat.flatMap((q) => q.th));
     function later(p) {
       const reach = Math.min(...p.files.map((f) => cols[fi[f]][1])) * 0.3;
       return d.threads.filter((t) => t.r != null && t.r > p.ri && t.r < rounds.length && !inPlace.has(t)
-        && p.files.includes(t.path) && threadX(t) >= p.x0 - reach && threadX(t) <= p.x1 + reach);
+        && p.files.includes(t.path) && (t.p != null ? t.of != null && p.hs.includes(d.hunks[t.of])
+          : threadX(t) >= p.x0 - reach && threadX(t) <= p.x1 + reach));
     }
     // Done: every thread of the chain (if any) has an outcome, the round
     // after its last fix or thread read all of it and found nothing there,
@@ -1168,6 +1195,21 @@ const reviewMap = (() => {
       svg.push(mark(id + '-in', id + '-out', q.l - 9, y, '↘',
         'Came from ' + here + ' (' + roundName(src.ri).toLowerCase() + '): a reply says its thread was fixed here.\nClick to see where it left.', -1));
     }));
+    // A check that missed: a round read a fixed problem's chain whole,
+    // found nothing and closed it, and a later round found a problem on the
+    // very lines that chain's fixes wrote (review_map.py's `missed`). The
+    // icicle goes on through it; where the round passed it, a purple bar
+    // across it, and the thread's dot a purple ring.
+    d.threads.forEach((t) => {
+      if (t.missed == null || t.of == null || t.r == null || t.r >= rounds.length || t.missed >= rounds.length) return;
+      if (until != null && t.t * 1000 > until) return;
+      const q = placeOf.get(d.hunks[t.of]);
+      if (!q || q.files.every(isFold)) return;
+      const y = (ys[t.missed] + ys[t.missed + 1]) / 2;
+      svg.push('<g class="rv-missed"><title>' + h(roundName(t.missed)) + ' read this fix and passed it; '
+        + h(roundName(t.r).toLowerCase()) + ' then found a problem on the lines it wrote:\n' + h(t.path) + ':' + t.line + ' — ' + h(t.title)
+        + '</title><line x1="' + f1(q.l - 3) + '" x2="' + f1(q.r + 3) + '" y1="' + f1(y) + '" y2="' + f1(y) + '"/></g>');
+    });
     // The threads, stacked: those a round posted close together in the code
     // pile down from the round's line into one column, a dot each in the
     // colour of how it ended — the taller the column, the more the review
@@ -1206,9 +1248,10 @@ const reviewMap = (() => {
       (pileAt[p.r] = pileAt[p.r] || []).push([x, Math.max(R + 0.5, more.length * 2.3 + 1)]);
       shown.forEach((t, k) => {
         const y = ys[p.r] + TOP + k * STEP;
-        svg.push('<a href="' + h(t.url) + '" target="_blank" rel="noopener"><circle class="rv-th' + (t.by === 'person' ? ' you' : '') + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1)
+        svg.push('<a href="' + h(t.url) + '" target="_blank" rel="noopener"><circle class="rv-th' + (t.by === 'person' ? ' you' : '') + (t.missed != null ? ' missed' : '') + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1)
           + '" r="' + R + '" fill="' + colour(t.outcome, 1) + '"><title>' + h(t.path) + ':' + t.line + ' — ' + h(t.title) + '\n' + h(howEnded(t))
           + (t.by === 'person' ? '\nyour thread' : '')
+          + (t.missed != null ? '\nThe purple ring: on lines a fix wrote that ' + roundName(t.missed).toLowerCase() + ' read and passed — the check missed it' : '')
           + '\nThe dot\'s colour: how the thread ended' + (t.by === 'person' ? '; the thick ring: your own thread' : '')
           + (p.all.length > 1 ? '\n' + p.all.length + ' threads here' : '') + '</title></circle></a>');
       });
@@ -1531,6 +1574,7 @@ const reviewMap = (() => {
       + group('shape', '<span class="rv-k rv-uk"' + tl('Pale: no round has opened that code since its fix — it is still unchecked, and the icicle goes on through those rows.') + '>unread</span>'
         + mark('▼', 'done', 'Closed to a point in the row of the round that read it and found nothing: every thread of it has an outcome, and its fixing ended.')
         + mark('⋯', 'closing', 'A dashed point: the round still fixing read it and found nothing; it closes once that fixing ends, unless a fix lands here.')
+        + '<span class="rv-k rv-mk"' + tl('Purple: a check that missed. A round read a fixed problem\'s icicle, found nothing and closed it; a later round found a problem on the very lines those fixes wrote. The bar marks the round that passed it, the ring the thread found later. A problem elsewhere starts an icicle of its own.') + '>missed</span>'
         + '<span class="rv-k rv-steps"' + tl('Behind the rounds\' names, and in a folded block: every file summed in one icicle. Left of its axis the development\'s code a round touched, right the review\'s own — leaning right, review is polishing its own work. The thin line: right where the round grew the code, left where it shrank it, ' + lighter + ' the more threads review posted (0, 1–2, 3–5, 6+).') + '>'
         + [0, 1, 2, 3].map((k) => '<i style="background:' + netTone(k) + '"></i>').join('') + ' sum</span>')
       + group('nothing found', sw('', 'whole', 'A thick green line under a file: that round read the whole file (or the block\'s whole change) and found nothing in it.', 'rv-ck')

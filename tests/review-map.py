@@ -341,6 +341,119 @@ with tempfile.TemporaryDirectory() as tmp:
     out = subprocess.run([sys.executable, MAP, empty], capture_output=True, text=True, env=env)
     check("a tree with no review: no rounds", out.returncode == 0 and json.loads(out.stdout)["rounds"] == [])
 
+# One problem's line of descent (review_map.py's project blame and lineage),
+# on rounds made up for it: no git needed.
+import review_map  # noqa: E402
+
+rounds = [{"lines": {"f": 10}}, {"lines": {"f": 11}}]
+a = {"i": 0, "r": 0, "path": "f", "x": 5, "n": 2, "ox": 5, "on": 1, "add": 2, "del": 1}
+b = {"i": 1, "r": 1, "path": "f", "x": 5, "n": 1, "ox": 5, "on": 1, "add": 1, "del": 1}
+c = {"i": 2, "r": 1, "path": "f", "x": 11, "n": 1, "ox": 10, "on": 0, "add": 1, "del": 0}
+on_a = {"path": "f", "r": 1, "line": 6}
+on_dev = {"path": "f", "r": 1, "line": 9}
+review_map.project(["f"], rounds, [a, b, c], [on_a, on_dev], {"files": {}}, {"f": 12})
+check("blame on the axis: a fix rewriting another's lines grows from it, one writing among the development's from none",
+      b["_blame"] == [0] and a["_blame"] == [] and c["_blame"] == [])
+check("blame on the axis: a thread knows the fix that wrote its line", on_a.get("_of") == 0 and "_of" not in on_dev)
+
+asked = {"i": 0, "r": 0, "path": "f", "x": 5, "n": 2, "ox": 5, "on": 1, "add": 2, "del": 1, "asked": True}
+later = {"i": 1, "r": 1, "path": "f", "x": 5, "n": 1, "ox": 5, "on": 1, "add": 1, "del": 1}
+on_asked = {"path": "f", "r": 1, "line": 6}
+review_map.project(["f"], [{"lines": {"f": 10}}, {"lines": {"f": 11}}], [asked, later], [on_asked], {"files": {}}, {"f": 11})
+check("the lines the person asked for are the development's: no fix wrote them",
+      later["_blame"] == [] and "_of" not in on_asked)
+
+
+# "Fixed in <sha>" in the thread's own file credits only what that commit
+# changed: a deletion too, and even after a later commit of the round
+# edited the same spot — not the round's other work in the file.
+with tempfile.TemporaryDirectory() as tmp2:
+    t2 = os.path.join(tmp2, "t")
+    os.makedirs(t2)
+    git(t2, "init", "-q")
+    git(t2, "config", "user.email", "t@t")
+    git(t2, "config", "user.name", "t")
+    lines = ["l%d" % i for i in range(1, 61)]
+    def put(ls, msg):
+        with open(os.path.join(t2, "f"), "w") as fh:
+            fh.write("\n".join(ls) + "\n")
+        git(t2, "add", "f")
+        git(t2, "commit", "-qm", msg)
+        return git(t2, "rev-parse", "HEAD")
+    head = put(lines, "base")
+    lines = lines[:9] + lines[12:]           # A: delete l10..l12
+    a_sha = put(lines, "A")
+    lines[8] = "l9 edited"                   # B: edit beside A's deletion
+    lines[49] = "far away"                   # and far from it
+    end = put(lines, "B")
+    fx = review_map.hunks(t2, head, end)
+    for h in fx:
+        h.update({"r": 0, "thread": "", "outcome": "side", "via": ""})
+    th = [{"rid": "r1", "path": "f", "outcome": "fixed", "_replies": ["Fixed in %s: dropped." % a_sha[:7]]}]
+    review_map.replied(t2, [{"head": head}], [end], th, fx)
+    got = sorted((h["ox"], h["thread"]) for h in fx)
+    check("an own-file reply credits the commit's own change, a deletion or one edited after, not the round's other work (%s)" % got,
+          [t for _, t in got] == ["r1", ""] and "fixedIn" not in th[0])
+
+
+def made(n, seen=None):
+    return [{"stopped": False, "more": False, "seen": seen} for _ in range(n)]
+
+
+def fix(i, r, thread="", blame=()):
+    return {"i": i, "r": r, "path": "f", "thread": thread, "_blame": list(blame)}
+
+
+def finding(rid, r, of=None, outcome="fixed"):
+    return {"rid": rid, "r": r, "path": "f", "outcome": outcome, "left": False, "resolved": outcome == "fixed", "_of": of}
+
+
+# Round 0 finds t1 and fixes it; round 1 reads the fix and finds nothing:
+# closed. Round 2's fix rewriting those lines with no thread is new; a
+# thread there in round 3 is a check that missed, and its fix goes on.
+fx = [fix(0, 0, "t1"), fix(1, 2, blame=[0]), fix(2, 3, "t2")]
+th = [finding("t1", 0), finding("t2", 3, of=0)]
+review_map.lineage(made(4), fx, th)
+check("a round that read a fixed chain and found nothing closes it: a fix there after is new",
+      fx[1]["from"] == [])
+check("a thread on the closed chain's own lines was missed by the round that closed it, and its fix goes on",
+      th[1]["missed"] == 1 and fx[2]["from"] == [0] and th[1]["of"] == 0 and "missed" not in th[0])
+
+# The closing round's own fixing landing on the chain keeps it going.
+fx = [fix(0, 0, "t1"), fix(1, 1, blame=[0])]
+review_map.lineage(made(2), fx, [finding("t1", 0)])
+check("a fix of the round that read the chain clean, landing on it, keeps it going", fx[1]["from"] == [0])
+
+# A declined thread on a closed chain's lines was no problem: no mark.
+th = [finding("t1", 0), finding("t2", 2, of=0, outcome="declined")]
+review_map.lineage(made(3), [fix(0, 0, "t1")], th)
+check("a declined thread on a closed chain is no check that missed", "missed" not in th[1])
+
+# A round that never opened the file closes nothing: the fix after it goes on.
+fx = [fix(0, 0, "t1"), fix(1, 1, blame=[0])]
+review_map.lineage(made(2, seen=[]), fx, [finding("t1", 0)])
+check("a round that did not open the file closes nothing", fx[1]["from"] == [0])
+
+# An open thread holds the chain open: the next fix there goes on.
+fx = [fix(0, 0, "t1"), fix(1, 2, blame=[0])]
+review_map.lineage(made(3), fx, [finding("t1", 0, outcome="open")])
+check("a chain with a thread still open does not close", fx[1]["from"] == [0])
+
+# A round that stopped at its cap said not all it found: no close.
+rs = made(2)
+rs[1]["more"] = True
+fx = [fix(0, 0, "t1"), fix(1, 1, blame=[0])]
+review_map.lineage(rs, fx, [finding("t1", 0)])
+check("a round cut short at its cap closes nothing", fx[1]["from"] == [0])
+
+# Code the review wrote answering no thread, closed: a thread there later is
+# new, not a check that missed.
+fx = [fix(0, 0), fix(1, 3, "t9")]
+th = [finding("t9", 3, of=0)]
+review_map.lineage(made(4), fx, th)
+check("a closed chain that fixed no thread misses none: the thread there starts anew",
+      "missed" not in th[0] and th[0]["of"] is None and fx[1]["from"] == [])
+
 # The page carries the panel, its script, and the player's and the poll's hooks.
 page = subprocess.run([sys.executable, os.path.join(ROOT, "sclaude", "lib", "flow", "process.py"),
                        "page", "x"], capture_output=True, text=True).stdout
@@ -353,5 +466,7 @@ check("the player tells the panel each place", page.count("'pl-step'") >= 3)
 check("the poll tells the panel where the feature stands", "reviewMap.live(here)" in page)
 check("a jump's two marks link each other, and a column goes on in the next file",
       "data-go" in page and "rvj-" in page and "rv-next" in page)
+check("the page hangs a place from its lineage and marks a check that missed",
+      "x.from" in page and "t.missed" in page and "rv-missed" in page)
 
 sys.exit(1 if failures else 0)

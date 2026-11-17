@@ -104,8 +104,11 @@ def env_lines(mapping, status, workdir):
 
 # What two texts of SQL are compared by: the CLI keeps a migration as the
 # statements it split the file into, trimmed, and without the separators.
-# Runs of whitespace and separators become one space rather than nothing, so
-# an edit to the spacing inside a string literal still counts.
+# Runs of whitespace and separators become one space rather than nothing: a
+# space added inside a string literal where there was none, or taken out,
+# still counts. A run made longer or shorter, or a tab for a space, does not:
+# what lay between the statements is not kept, so spacing cannot be compared
+# exactly.
 SPACING = re.compile(r"[\s;]+")
 
 

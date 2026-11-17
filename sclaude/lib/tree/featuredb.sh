@@ -370,10 +370,9 @@ ensure_db() {
   # server runs this beside the regression's, and both saw the same changed
   # migration — two resets, the second wiping the first one's fill under its
   # tests, and the fill run twice. The second waits, finds the stack current
-  # and the fill done. Only here, not around the start (above).
-  local stale="" reset_failed="" lock
-  exec {lock}>"$wt/.sclaude/local/feature/db.lock"
-  flock -w 300 "$lock" || true
+  # and the fill done (db_lock). Only here, not around the start (above).
+  local stale="" reset_failed=""
+  db_lock "$wt"
   [[ -n "${DB_REBUILDING:-}" ]] || stale="$(db_stale "$wt" "$dir" | paste -sd, - | sed 's/,/, /g')"
   if [[ -n "$stale" ]]; then
     info "  database: applied migrations no longer match their files ($stale) — building it again from this feature's migrations…"
@@ -395,7 +394,7 @@ ensure_db() {
   if ! python3 "$LIB/tree/feature_db.py" envfile "$(project_config_with database.local "$wt")" "$dir" \
          <<<"$status" > "$envf.tmp.$$"; then
     rm -f "$envf" "$envf.tmp.$$"
-    flock -u "$lock"; exec {lock}>&-
+    db_unlock
     warn "  database: the stack did not report every value the project maps — sharing the main local database"
     return 0
   fi
@@ -406,8 +405,7 @@ ensure_db() {
   # Not after a reset that failed: a fill over half a schema fails too, or
   # worse, and db_rebuild leaves it unfilled the same way.
   [[ -n "$reset_failed" || "$(state_get "$state" db.ready 2>/dev/null)" == "true" ]] || db_fill "$wt"
-  # Unlocked by hand: what the fill started inherited the descriptor.
-  flock -u "$lock"; exec {lock}>&-
+  db_unlock
   # Said when the stack was started here, else once in this process: a
   # database already up said so again at every session and regression.
   if [[ -n "$started" || "${DB_SAID:-}" != "$wt" ]]; then
@@ -455,14 +453,45 @@ db_rebuild() {
   info "  database: building it again from this feature's migrations…"
   # Not ready from here on: a reset that fails half way leaves the database
   # emptied, and the next start has to fill it once it is whole again.
+  # Under the lock ensure_db takes for its own reset and fill, so a start
+  # beside it waits rather than migrating or filling it half way.
+  db_lock "$wt"
   state_set "$state" db.ready false
   state_set "$state" db.copied false
   if ! (cd "$wt" && $(db_cli "$wt") db reset \
           --workdir "$wt/.sclaude/local/feature/supabase") >> "$wt/.sclaude/local/feature/db.log" 2>&1; then
+    db_unlock
     warn "  database: the reset failed — see .sclaude/local/feature/db.log"
     return 1
   fi
   db_fill "$wt"
+  local rc=$?
+  db_unlock
+  return "$rc"
+}
+
+# The feature's database lock, from the stale-migration check (or a rebuild's
+# reset) to the fill: two starts at once reset and fill it once. Said when it
+# has to wait, since a reset and a copy take minutes and the wait looks like a
+# hang; given up after SCLAUDE_DB_LOCK_WAIT seconds (900) with a warning, as a
+# holder that never ends must not stop the feature. Released by hand: what
+# the fill started inherits the descriptor.
+DB_LOCK_FD=""
+db_lock() {
+  local limit="${SCLAUDE_DB_LOCK_WAIT:-900}"
+  [[ "$limit" =~ ^[0-9]+$ ]] || limit=900
+  exec {DB_LOCK_FD}>"$1/.sclaude/local/feature/db.lock"
+  flock -n "$DB_LOCK_FD" && return 0
+  info "  database: another start of this feature's database is resetting or filling it — waiting for it…"
+  flock -w "$limit" "$DB_LOCK_FD" && return 0
+  warn "  database: still busy after ${limit}s — going on without waiting"
+}
+
+db_unlock() {
+  [[ -n "$DB_LOCK_FD" ]] || return 0
+  flock -u "$DB_LOCK_FD"
+  exec {DB_LOCK_FD}>&-
+  DB_LOCK_FD=""
 }
 
 # The Postgres container of a stack, by its project_id.

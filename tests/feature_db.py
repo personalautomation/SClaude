@@ -808,7 +808,7 @@ def stale_cases():
           feature_db.stale_migrations(rows, dict(files, **{"0002": "create table b (id bigint);"})), ["0002 changed"])
     check("stale: a file gone is gone",
           feature_db.stale_migrations(rows, {"0001": files["0001"]}), ["0002 gone"])
-    check("stale: spacing inside a literal counts",
+    check("stale: a space taken out of a literal counts",
           feature_db.stale_migrations([{"v": "0001", "s": ["select 'a b'"]}], {"0001": "select 'ab';"}),
           ["0001 changed"])
     check("stale: statements without space between them match",
@@ -875,6 +875,20 @@ def stale_cases():
         check("stale: two starts at once reset the stack once",
               len([c for c in calls(root)[before:] if c.startswith("db reset")]), 1)
         check("stale: and fill it once", open(seeded).read().count("run") - fills, 1)
+
+        # A rebuild beside a start: the start waits, says so, and neither
+        # migrates nor fills the stack under the rebuild.
+        fills = open(seeded).read().count("run")
+        out = bash(root, docker + 'db_rebuild "%s" & sleep 0.5; ensure_db "%s"; wait' % (a, a))
+        check("stale: a start beside a rebuild waits for it", "waiting for it" in out, True)
+        check("stale: and the stack is filled once", open(seeded).read().count("run") - fills, 1)
+
+        # A holder that never lets go: given up with a warning, not waited on.
+        out = bash(root, docker + 'exec 8>"%s"; flock 8; ( ensure_db "%s" )'
+                   % (os.path.join(a, ".sclaude/local/feature", "db.lock"), a),
+                   {"SCLAUDE_DB_LOCK_WAIT": "1"})
+        check("stale: a lock never released is given up with a warning",
+              "going on without waiting" in out, True)
         write_config(a, cli, "echo run >> %s" % seeded)
 
         before = len(calls(root))

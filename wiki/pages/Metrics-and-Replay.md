@@ -49,9 +49,9 @@ of the development has nothing above it: its icicle starts in the middle of
 the review. Its colour says how the thread ended (fixed, declined, left to you, decided at
 night, would undo a fix), with the share the person asked for during the
 review in the development's beige; it darkens the more often review had
-already rewritten that spot; it is hollow where no line of code changed, and
-patterns laid over one another say what else did: tests, migrations, docs and
-config, only comments. A green line under a file in a round's row says that
+already rewritten that spot; a pattern marks a migration among changed code,
+and a place where neither code nor a migration changed is hollow, its
+patterns saying what was touched instead: tests, docs and config, comments. A green line under a file in a round's row says that
 round read it and found nothing (blue and thin: only the last fixes;
 yellow and dashed: a part), so a run of rounds that each found nothing anywhere shows. Threads pile up as dots where review found many. ✋ marks each time a person stepped in, ringed red where
 they took the recommended answer within seconds. Played back, the map grows

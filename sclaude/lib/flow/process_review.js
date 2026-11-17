@@ -56,20 +56,21 @@ const reviewMap = (() => {
   // beige. The lightness says how many earlier rounds of review had already
   // rewritten that spot: 0, 1, 2, 3 or more, darker each (lighter on a dark
   // page) — in equal steps of OKLCH's perceived lightness.
-  const HUE = {fixed: [0.12, 180], declined: [0.02, 60], yours: [0.16, 72], night: [0.15, 300],
-    reversal: [0.2, 27], open: [0.19, 262], side: [0.012, 250]};
+  const HUE = {fixed: [0.16, 180], declined: [0.04, 60], yours: [0.18, 70], night: [0.18, 300],
+    reversal: [0.22, 27], open: [0.2, 262], side: [0.045, 250]};
   const STEPS = 4;
   function colour(outcome, depth) {
     const k = Math.min(STEPS - 1, Math.max(0, depth || 0));
-    if (outcome === 'asked') return 'oklch(' + (dark() ? 0.5 + 0.08 * k : 0.82 - 0.08 * k).toFixed(2) + ' 0.05 75)';
+    if (outcome === 'asked') return 'oklch(' + (dark() ? 0.56 + 0.08 * k : 0.74 - 0.08 * k).toFixed(2) + ' 0.09 75)';
     const [c, hue] = HUE[outcome] || HUE.side;
-    let l = dark() ? 0.48 + 0.1 * k : 0.8 - 0.1 * k;
-    if (outcome === 'side') l += dark() ? -0.08 : 0.1;
+    // No outline: the fill alone carries the shape, so even the lightest
+    // step stays well off the lanes' near-white.
+    let l = dark() ? 0.56 + 0.1 * k : 0.64 - 0.1 * k;
     return 'oklch(' + l.toFixed(2) + ' ' + c + ' ' + hue + ')';
   }
   // The development's code, before the review or asked for during it.
   function devColour(alpha) {
-    return 'oklch(' + (dark() ? 0.56 : 0.82) + ' 0.05 75 / ' + alpha + ')';
+    return 'oklch(' + (dark() ? 0.56 : 0.74) + ' 0.09 75 / ' + alpha + ')';
   }
   // What kind of file a fix lands in: each kind a place touched is a
   // pattern of its own over its colour; ordinary code is the solid fill.
@@ -416,7 +417,7 @@ const reviewMap = (() => {
     const groupsN = hasBlocks ? new Set(files.map((f) => blockOf[f] || 999)).size : 1;
     const open_ = files.filter((f) => !isFold(f));
     const avail = width - GUT - 8 - GAP * open_.length - BGAP * (groupsN - 1) - THIN * open_.filter((f) => !touched.has(f)).length
-      - FOLD * Object.keys(foldN).length;
+      - (FOLD + GAP) * Object.keys(foldN).length;
     const cols = [], groups = [];
     let cx = GUT;
     files.forEach((f, i) => {
@@ -425,10 +426,15 @@ const reviewMap = (() => {
         if (groups.length) cx += BGAP;
         groups.push({g: g, x0: cx, x1: cx});
       }
-      const fold = isFold(f);
-      const w = fold ? FOLD / foldN[g] : touched.has(f) ? Math.max(MINW, avail * weight[i] / total) : THIN;
-      cols.push([cx, w]); cx += w + (fold ? 0 : GAP);
-      groups[groups.length - 1].x1 = cx - (fold ? 0 : GAP);
+      // A folded block is one column: every file of it spans the whole
+      // sliver, its places laid over the others' — the block's summary,
+      // not its files cut to a pixel each.
+      const fold = isFold(f), grp = groups[groups.length - 1];
+      if (fold && grp.fold) { cols.push([grp.x0, FOLD]); return; }
+      if (fold) grp.fold = true;
+      const w = fold ? FOLD : touched.has(f) ? Math.max(MINW, avail * weight[i] / total) : THIN;
+      cols.push([cx, w]); cx += w + GAP;
+      grp.x1 = cx - GAP;
     });
     const W = Math.max(width, cx + 8);
     const fi = {}; files.forEach((f, i) => { stackOf(f).forEach((g) => { fi[g] = i; }); });
@@ -486,9 +492,20 @@ const reviewMap = (() => {
     let devAdd = 0, lane = 0;
     // Where a column goes on in another file: drawn over the icicles, below.
     const nexts = [];
+    const foldLane = new Set();
     files.forEach((f, i) => {
       const c = cols[i], dv = devf[f] || {add: 0, code: 0, comment: 0, regions: []};
       devAdd += dv.add;
+      // A folded block: one lane, no names (its header names the block);
+      // its development is the top of its summed icicle, below.
+      if (isFold(f)) {
+        if (!foldLane.has(c[0])) {
+          foldLane.add(c[0]);
+          lane = (lane + 1) % 2;
+          svg.push('<rect class="rv-col' + (lane ? ' odd' : '') + '" x="' + c[0].toFixed(1) + '" y="' + top + '" width="' + c[1].toFixed(1) + '" height="' + (H - top - 6) + '"/>');
+        }
+        return;
+      }
       // A lane, alternating, only where something happened — a fix or a
       // thread: a file the review never touched has none, and the picture
       // stays clean.
@@ -641,7 +658,10 @@ const reviewMap = (() => {
         g.sort((a, b) => a.ci - b.ci || a.x0 - b.x0);
         let run = null;
         g.forEach((b) => {
-          if (run && b.ci - run.ci1 <= 1 && b.ci !== run.bits[run.bits.length - 1].ci) {
+          // Never across a folded block's edge: its places are its icicle's.
+          const fa = files[b.ci], fb = files[run ? run.ci1 : b.ci];
+          const apart = (isFold(fa) || isFold(fb)) && blockOf[fa] !== blockOf[fb];
+          if (run && !apart && b.ci - run.ci1 <= 1 && b.ci !== run.bits[run.bits.length - 1].ci) {
             run.bits.push(b); run.ci1 = b.ci; run.x1 = Math.max(run.x1, b.x1);
           } else if (run && b.ci === run.ci1) {
             // A second place in the same file, joined through the other file:
@@ -680,9 +700,11 @@ const reviewMap = (() => {
           if (k !== 'code') p.flags.add(k);
           else { inCode++; codeLines += x.code; }
         });
-        // Ordinary code changed: a solid fill; only comments there, or none
-        // of it touched: hollow — the program itself did not change here.
-        p.solid = codeLines > 0;
+        // Ordinary code or a migration changed — what the product does: a
+        // solid fill; only comments, tests, docs or config: hollow, the
+        // program itself did not change here (the user's word, 2026-11-17:
+        // a migration changes the schema, so it is code).
+        p.solid = codeLines > 0 || p.flags.has('schema');
         if (inCode && !codeLines) p.flags.add('comment');
         p.askedShare = p.changed ? asked / p.changed : 0;
         p.outcome = Object.entries(by).sort((a, b) => b[1] - a[1])[0]?.[0] || 'asked';
@@ -711,7 +733,7 @@ const reviewMap = (() => {
     // one scale for the whole map: the scale at which four places in five
     // fit the columns they stand in; the rest are held to their columns.
     const all = places.flat();
-    const fits = all.map((p) => (p.hi - p.lo) / Math.max(1, p.changed)).sort((a, b) => a - b);
+    const fits = all.filter((p) => !p.files.every(isFold)).map((p) => (p.hi - p.lo) / Math.max(1, p.changed)).sort((a, b) => a - b);
     const scale = fits.length ? fits[Math.floor(fits.length * 0.2)] : 1;
     all.forEach((p) => {
       p.w = Math.min(p.hi - p.lo, Math.max(3, p.changed * scale));
@@ -793,11 +815,18 @@ const reviewMap = (() => {
       // to the other. Either way the chain goes on there.
       places[fx.r] && places[fx.r].forEach((q) => {
         if (q === src || !q.files.some((f) => fx.files.includes(f))) return;
-        if (q.files.some((f) => fx.files.includes(f) && Math.abs(fi[f] - fi[t.path]) <= 1)) {
-          if (!q.ups.includes(src)) { q.ups.push(src); src.kids.push(q); }
-        } else {
-          q.jin = q.jin || []; src.jout = src.jout || [];
-          if (!q.jin.includes(src)) { q.jin.push(src); src.jout.push(q); }
+        // Out of a folded block nothing goes: its places are not drawn. Into
+        // one, never a stream, whose kid would not be drawn: a jump, whose
+        // mark opens the block (`data-unfold`).
+        // The thread is still the place's (below) whatever is folded.
+        if (!src.files.every(isFold)) {
+          if (!q.files.every(isFold) && q.files.some((f) => fx.files.includes(f) && Math.abs(fi[f] - fi[t.path]) <= 1)) {
+            if (!q.ups.includes(src)) { q.ups.push(src); src.kids.push(q); }
+          } else {
+            q.jin = q.jin || []; src.jout = src.jout || [];
+            if (!q.jin.includes(src)) { q.jin.push(src); src.jout.push(q); }
+            (src.joutBy = src.joutBy || new Map()).set(q, t);
+          }
         }
         if (!q.th.includes(t)) q.th.push(t);
         q.slid = q.slid || [];
@@ -901,6 +930,8 @@ const reviewMap = (() => {
     whyOf = why;
     doneOf = done;
     places.forEach((ps, ri) => ps.forEach((p) => {
+      // A folded block's places are drawn as its one summed icicle, below.
+      if (p.files.every(isFold)) return;
       const y0 = ys[ri], y1 = ys[ri + 1];
       // A trapezoid: the bottom as wide as the lines this round changed
       // here; the top the slices of the places above it has (wider than one
@@ -982,13 +1013,17 @@ const reviewMap = (() => {
         fill = 'url(#' + gid + 'a)';
       }
       const edge = colour(p.outcome, p.depth);
-      const over = FLAGS.filter((f) => p.flags.has(f)).map((f) => '<path d="' + d_ + '" fill="url(#rv-p-' + f + ')"/>').join('');
+      // Where code or a migration changed, comments and tests come with it:
+      // only a migration is told apart. Where neither did, what was touched
+      // instead is the news: tests, docs and config, comments, laid over
+      // each other (the user's word, 2026-11-17).
+      const over = FLAGS.filter((f) => p.flags.has(f) && (p.solid ? f === 'schema' : f !== 'schema')).map((f) => '<path d="' + d_ + '" fill="url(#rv-p-' + f + ')"/>').join('');
       svg.push('<g class="rv-fix" data-i="' + p.id + '">' + split
         + (ghost && known ? '<path class="rv-shape" d="' + ghost + '" fill="' + fill + '"/>' : '')
         + (ghost && !known ? '<linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + colour(p.outcome, p.depth)
-          + '" stop-opacity="0.9"/><stop offset="1" stop-color="' + colour(p.outcome, p.depth) + '" stop-opacity="0.12"/></linearGradient>'
+          + '" stop-opacity="0.9"/><stop offset="1" stop-color="' + colour(p.outcome, p.depth) + '" stop-opacity="0.4"/></linearGradient>'
           + '<linearGradient id="' + gid + 's" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + colour(p.outcome, p.depth)
-          + '" stop-opacity="0.9"/><stop offset="1" stop-color="' + colour(p.outcome, p.depth) + '" stop-opacity="0"/></linearGradient>'
+          + '" stop-opacity="0.9"/><stop offset="1" stop-color="' + colour(p.outcome, p.depth) + '" stop-opacity="0.5"/></linearGradient>'
           + '<path class="rv-ghost" d="' + ghost + '" fill="url(#' + gid + ')" stroke="url(#' + gid + 's)"/>' : '')
         + '<path class="rv-shape' + (p.solid ? '' : ' rv-hollow') + '" d="' + d_ + '" fill="' + fill + '"' + (p.solid ? '' : ' stroke="' + edge + '"') + '/>'
         + (tent ? '<path class="rv-tent" d="' + tent + '" stroke="' + edge + '"/>' : '')
@@ -1022,7 +1057,7 @@ const reviewMap = (() => {
       const hit = new Set(d.threads.filter((t) => t.r === ri).map((t) => t.path));
       const best = {};
       Object.entries(r.how).forEach(([f, how]) => {
-        if (fi[f] == null || hit.has(f) || (busy[ri] && busy[ri].has(fi[f]))) return;
+        if (fi[f] == null || isFold(f) || hit.has(f) || (busy[ri] && busy[ri].has(fi[f]))) return;
         const k = how === 'whole' ? 'whole' : how === 'diff' ? (r.read === 'first' ? 'all' : 'delta') : 'part';
         const c = fi[f];
         if (!best[c] || CLEAN[k] > CLEAN[best[c].k]) best[c] = {k: k, f: []};
@@ -1035,8 +1070,50 @@ const reviewMap = (() => {
           + ' and found nothing there:\n' + h(b.f.join('\n')) + '</title></line>');
       });
     });
+    // A folded block: one icicle of all its files, as the one behind the
+    // rows' names sums the whole pull request — the development's lines on
+    // top, then the lines each round touched in the block (a fix's larger
+    // side), on a square-root scale, centred, each row split left to right
+    // by how its lines' threads ended.
+    groups.filter((g) => g.fold).forEach((g) => {
+      const mine = files.filter((f) => blockOf[f] === g.g).flatMap(stackOf);
+      const inBlock = new Set(mine);
+      const dev = mine.reduce((a, f) => a + ((devf[f] || {}).add || 0), 0);
+      const per = rounds.map((r, ri) => {
+        const out = {};
+        let n = 0;
+        d.hunks.forEach((x) => {
+          if (x.r !== ri || !inBlock.has(x.path)) return;
+          const k = x.asked ? 'asked' : x.outcome, v = Math.max(x.add, x.del);
+          out[k] = (out[k] || 0) + v; n += v;
+        });
+        return {n: n, out: out};
+      });
+      const most = Math.max(1, dev, ...per.map((r) => r.n));
+      const full = g.x1 - g.x0 - 4, mid = (g.x0 + g.x1) / 2;
+      const wOf = (v) => v ? Math.max(2, full * Math.sqrt(v / most)) : 0;
+      let wPrev = wOf(dev);
+      const out = ['<g class="rv-fold"><title>Block folded: every file of it in one icicle — the lines each round touched there, split by how their threads ended. Click its name to open it.</title>'];
+      if (wPrev) out.push('<rect x="' + f1(mid - wPrev / 2) + '" y="' + top + '" width="' + f1(wPrev) + '" height="' + f1(ys[0] - top) + '" fill="' + devColour(1) + '"/>');
+      per.forEach((r, i) => {
+        const w = wOf(r.n), y0 = ys[i], y1 = ys[i + 1];
+        // After rounds that left the block alone it starts at its own width:
+        // a point would read as code written there.
+        if (!wPrev) wPrev = w;
+        const lerp = (wd, t) => mid - wd / 2 + wd * t;
+        const parts = Object.keys(OUT).filter((k) => r.out[k]);
+        let a = 0;
+        parts.forEach((k) => {
+          const b = a + r.out[k] / r.n;
+          out.push('<path d="M' + f1(lerp(wPrev, a)) + ',' + f1(y0) + ' L' + f1(lerp(wPrev, b)) + ',' + f1(y0)
+            + ' L' + f1(lerp(w, b)) + ',' + f1(y1) + ' L' + f1(lerp(w, a)) + ',' + f1(y1) + 'Z" fill="' + colour(k, 1) + '"/>');
+          a = b;
+        });
+        wPrev = w;
+      });
+      svg.push(out.join('') + '</g>');
+    });
     svg.push(...nexts);
-    let jn = 0;
     const offs = {};
     // Marks at one spot fan out away from the place: out to the right, in
     // to the left.
@@ -1047,13 +1124,23 @@ const reviewMap = (() => {
       return '<a class="rv-jump" id="' + id + '" href="#' + go + '" data-go="' + go + '"><title>' + h(say) + '</title>'
         + '<circle cx="' + cx.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="6.5"/><text x="' + cx.toFixed(1) + '" y="' + (y + 3.5).toFixed(1) + '">' + glyph + '</text></a>';
     };
+    // A mark into a folded block opens it and goes to the place of that
+    // round in that file holding the thread (`data-r`, `data-file`,
+    // `data-rid`): opened, the block's
+    // places are grouped afresh and the link may be a stream.
+    let jn = 0;
     flat.forEach((src) => (src.jout || []).forEach((q) => {
-      jn++;
+      const id = 'rvj-' + (++jn);
       const y = Math.max(ys[q.ri] + 14, (ys[q.ri] + ys[q.ri + 1]) / 2);
       const there = q.files.join(', '), here = src.files.join(', ');
-      svg.push(mark('rvj-' + jn + '-out', 'rvj-' + jn + '-in', src.cx, y, '↗',
-        'Goes on in ' + there + ' (' + roundName(q.ri).toLowerCase() + '): a reply says its thread was fixed there.\nClick to go there.', 1));
-      svg.push(mark('rvj-' + jn + '-in', 'rvj-' + jn + '-out', q.l - 9, y, '↘',
+      const shut = q.files.every(isFold) && idOfN[blockOf[q.files[0]]];
+      const out = mark(id + '-out', id + '-in', src.cx, y, '↗',
+        'Goes on in ' + there + ' (' + roundName(q.ri).toLowerCase() + '): a reply says its thread was fixed there.\nClick to go there'
+        + (shut ? ', opening block ' + shut : '') + '.', 1);
+      const t = src.joutBy && src.joutBy.get(q);
+      svg.push(shut ? out.replace('<a class="rv-jump"', '<a class="rv-jump" data-unfold="' + h(shut) + '" data-r="' + q.ri + '" data-file="' + h((t && t.fixedIn && q.files.find((f) => t.fixedIn.files.includes(f))) || q.files[0]) + '" data-rid="' + h(t ? t.rid : '') + '"') : out);
+      if (shut) return;
+      svg.push(mark(id + '-in', id + '-out', q.l - 9, y, '↘',
         'Came from ' + here + ' (' + roundName(src.ri).toLowerCase() + '): a reply says its thread was fixed here.\nClick to see where it left.', -1));
     }));
     // The threads, stacked: those a round posted close together in the code
@@ -1292,7 +1379,23 @@ const reviewMap = (() => {
     const a = ev.target.closest && ev.target.closest('[data-go]');
     if (!a) return;
     ev.preventDefault();
-    const el = body.querySelector('#' + a.dataset.go);
+    // Into a folded block: open it, then go to the place of that round
+    // that holds the thread, however the opened block groups its places.
+    let el = null;
+    if (a.dataset.unfold) {
+      folded.delete(a.dataset.unfold);
+      try { localStorage.setItem(FOLDED, JSON.stringify([...folded])); } catch (e) {}
+      draw();
+      // In the file it leads to — the thread's own place in its own file
+      // may share the round — and among its places there the one holding
+      // the thread, when it has an id.
+      const here = placesNow.filter((q) => q.ri === +a.dataset.r && q.files.includes(a.dataset.file));
+      const rid = a.dataset.rid;
+      const p = (rid && here.find((q) => q.th.some((t) => t.rid === rid))) || here[0];
+      el = p && body.querySelector('.rv-fix[data-i="' + p.id + '"]');
+    } else {
+      el = body.querySelector('#' + a.dataset.go);
+    }
     if (!el) return;
     const r = el.getBoundingClientRect(), b = body.getBoundingClientRect();
     body.scrollBy({left: r.left + r.width / 2 - (b.left + b.width / 2), top: r.top + r.height / 2 - (b.top + b.height / 2), behavior: 'smooth'});
@@ -1302,16 +1405,17 @@ const reviewMap = (() => {
 
   function legend() {
     const sw = (c, say, cls) => '<span class="rv-k' + (cls ? ' ' + cls : '') + '" style="--c:' + c + '">' + say + '</span>';
-    const pat = (id, say) => '<span class="rv-k"><svg width="12" height="12"><rect width="12" height="12" fill="' + colour('side', 1)
-      + '"/><rect width="12" height="12" fill="url(#rv-lp-' + id + ')"/></svg>' + say + '</span>';
+    const pat = (id, say, solid) => '<span class="rv-k"><svg width="12" height="12"><rect width="12" height="12" fill="' + (solid ? colour('fixed', 1) : colour('side', 1))
+      + '"' + (solid ? '' : ' fill-opacity=".28"') + '/><rect width="12" height="12" fill="url(#rv-lp-' + id + ')"/></svg>' + say + '</span>';
     // The legend's swatches share one set of patterns of their own ids:
     // the map's are inside the map, which may be drawn while this is hidden.
     panel.querySelector('.rv-legend').innerHTML = '<svg width="0" height="0" style="position:absolute"><defs>' + patterns('rv-lp') + '</defs></svg>' + sw(devColour(1), 'the development\'s code (before the review, or asked for in it)')
       + ['fixed', 'declined', 'yours', 'night', 'reversal', 'open', 'side'].map((k) => sw(colour(k, 1), OUT[k][1])).join('')
       + '<span class="rv-k rv-steps">' + [0, 1, 2, 3].map((k) => '<i style="background:' + colour('fixed', k) + '"></i>').join('')
       + ' darker: rewritten by 0, 1, 2, 3+ earlier rounds</span>'
-      + '<span class="rv-k rv-hol" style="--c:' + colour('fixed', 1) + '">hollow: no line of code changed</span>'
-      + pat('test', 'tests') + pat('schema', 'migrations') + pat('doc', 'docs, config') + pat('comment', 'comments')
+      + pat('schema', 'solid: code changed, \\ a migration among it', true)
+      + '<span class="rv-k rv-hol" style="--c:' + colour('fixed', 1) + '">hollow: no code or migration, only</span>'
+      + pat('test', 'tests') + pat('doc', 'docs, config') + pat('comment', 'comments')
       + '<span class="rv-k rv-uk">pale: no round has opened that code since</span><span>⋯ dashed close: read by the round still fixing</span>'
       + '<span class="rv-k rv-ck">read whole, nothing found</span><span class="rv-k rv-dk">read the last fixes, nothing found</span><span class="rv-k rv-pk">looked at a part, nothing found</span>'
       + '<span>⋮ threads, a dot each, piled where they are many</span><span><b class="rv-fast">◯✋ 5 · 2⚡</b> 5 times you stepped in, 2 took the recommended answer within ' + FAST + ' s</span>';

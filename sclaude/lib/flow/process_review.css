@@ -25,7 +25,7 @@ background:var(--surface);color:var(--ink);cursor:pointer;display:inline-flex;al
 .rv-sumi{opacity:.32;pointer-events:none}
 .rv-rt{font-size:11.5px;font-weight:700;fill:var(--ink)}
 .rv-rs{font-size:10.5px;fill:var(--muted)}
-.rv-fix .rv-shape{stroke:var(--ink);stroke-opacity:.3;stroke-width:.7}
+.rv-fix .rv-shape:not(.rv-hollow){stroke:none}
 .rv-trail{stroke:var(--ink);stroke-width:1.5;stroke-dasharray:3 3;opacity:.6}
 .rv-stem{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 3;opacity:.6}
 .rv-hl{stroke:var(--ink);stroke-width:1.2;opacity:.45}
@@ -107,11 +107,13 @@ background:var(--surface);color:var(--ink);border:1px solid var(--line);border-l
 .rv-dot{fill:var(--ink);opacity:.55}
 .rv-steps{gap:1px}.rv-steps i{width:9px;height:10px;display:inline-block}
 .rv-k svg{border:1px solid var(--line);border-radius:2px}
-.rv-fix .rv-hollow{fill-opacity:.22;stroke-opacity:1;stroke-width:1.3}
-.rv-hol::before{background:color-mix(in srgb,var(--c) 22%,transparent);border:1.3px solid var(--c)}
+.rv-fix .rv-hollow{fill-opacity:.28;stroke-width:.6}
+.rv-hol::before{background:color-mix(in srgb,var(--c) 28%,transparent);border:.6px solid var(--c)}
 .rv-bk[data-n]{cursor:pointer}
 .rv-bk-done rect{fill:color-mix(in srgb,var(--clean,hsl(140,55%,38%)) 14%,var(--surface));stroke:var(--clean,hsl(140,55%,38%))}
 .rv-bk-now rect{fill:color-mix(in srgb,hsl(222,80%,55%) 14%,var(--surface));stroke:hsl(222,80%,55%);stroke-width:1.5}
 .rv-bk-wait text{fill:var(--muted)}
 .rv-st-done{color:var(--clean,hsl(140,55%,38%))}.rv-st-now{color:hsl(222,80%,55%)}.rv-st-wait{color:var(--muted)}
 .rv-over{color:var(--signal,#c33)}
+.rv-fix.rv-lit .rv-shape{animation:rv-flash 1.8s ease-out}
+@keyframes rv-flash{0%{filter:brightness(1.6) drop-shadow(0 0 4px var(--signal))}100%{filter:none}}

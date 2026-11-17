@@ -284,7 +284,9 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   written after the cut, in none), the next file goes on under the first
   in one column, a dashed line and its name where it starts. A file too far
   to slide to — in another block — gets a jump: ↗ where the icicle leaves,
-  ↘ where it lands, each a link to the other. Threads a later round
+  ↘ where it lands, each a link to the other; into a folded block only ↗
+  is drawn, and a click opens the block and goes to where it landed.
+  Threads a later round
   posts at a place where no fix of that round lands, with no such reply,
   are still the place's: it closes, with a small point
   in the row of the round that checked it, once they all have an outcome
@@ -298,10 +300,11 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   thread ended later, which its hover says); the share of it that is code you asked for during the review (a
   `feat` commit, or one with a `Requirement:` line) is beige, as the code
   written before the review is; darker the more earlier rounds had already
-  rewritten that spot (0, 1, 2, 3 or more). Solid where a line of code
-  changed, hollow where none did; a pattern for each kind of change it
-  holds, laid over one another — tests /, migrations \, docs and config —,
-  only comments in the code ·. A green line at the foot of a round's row, under a file,
+  rewritten that spot (0, 1, 2, 3 or more). Solid where a line of code or
+  a migration changed — what the product does — with \ when a migration
+  was among it; hollow where neither did, with a pattern for what was
+  touched instead, laid over one another: tests /, docs and config —,
+  comments ·. A green line at the foot of a round's row, under a file,
   says the round read it and found nothing there — thick when it read the
   whole file or all its change; a thin blue one, only the last fixes'
   change; a dashed yellow one, a part only. A review block's name is
@@ -309,8 +312,11 @@ systemctl --user enable --now sclaude-proxy.socket   # install.sh does this
   gives its changed lines against what one pass reads whole, its files and
   criteria, and what its rounds cost and found, the threads of its last
   rounds in a row — at the moment shown when the history is played back;
-  a click folds it to a sliver, and again opens it, remembered for that
-  feature. None is drawn where the
+  a click folds it to a sliver, one icicle summing its files as the one
+  behind the rounds' names sums them all, and again opens it, remembered
+  for that feature. The icicle behind the rounds' names is centred: its
+  width is the lines a round touched, its colours left to right their
+  share by outcome. None is drawn where the
   file's icicle goes on through the row; the row it closes in keeps it. Dots are the threads, piled into a column where a round
   posted several close together, so a tall pile is a place the review kept
   finding things; ✋ with a number how many times you

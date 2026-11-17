@@ -491,8 +491,9 @@ added lines are mostly from a commit the person asked for (`asked_lines`: a
 is `asked`, drawn as the development's; a place's lightness is how many
 earlier rounds' other hunks overlap its own (its `depth`, 3 and more alike),
 its fill split by the share of `asked` lines; solid when a line of code in
-an ordinary file changed, hollow otherwise; a pattern for each kind of file
-it touched (`kindOf`, by path) and for comments alone in the code. A thread
+an ordinary file or a migration changed, hollow otherwise; a solid place's only pattern is
+a migration's, a hollow one's each kind of file it touched instead
+(`kindOf`, by path) and comments alone. A thread
 left as it is gets no `fixedIn`: the commits its reply names are reasons.
 A place hangs from the nearest round above that changed its code, bridged
 through the rounds between; a kid in its parent's file takes the part of

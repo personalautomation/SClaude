@@ -38,6 +38,13 @@ topic is: `<slug> · <repo>`.
 `sclaude --help` has the rest. In the menu, tick "show actions after choosing" to
 get every action for a feature in one list instead of remembering commands.
 
+Before the menu, sclaude lists the branches in progress and offers to delete
+the ones with nothing left to hold — their pull request merged. A worktree you
+opened yourself, beside sclaude's, is among them once main holds its merged
+pull request and nothing in it is uncommitted; deleting it takes its ignored
+files (build caches, a copied `.env`) with it. One answer covers the whole
+list: `n` keeps every branch on it.
+
 ## A feature, start to finish
 
 **Starting.** `sclaude new` offers the repository's open issues, yours first;

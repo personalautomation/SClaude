@@ -60,16 +60,6 @@ workbench_published() {
     || workbench_on_main "$wt" "$branch"
 }
 
-# Whether a session still works in a workshop: a process whose directory is
-# in it. A press never removes one under a live session.
-workbench_busy() {
-  local wt="$1" cwd p
-  while read -r p cwd; do
-    [[ "$cwd" == "$wt" || "$cwd" == "$wt"/* ]] && return 0
-  done < <(proc_cwds)
-  return 1
-}
-
 # A workshop and the branch it was made on removed; 1 when git would not. The
 # branch by the workshop's name: the session may have moved HEAD to another
 # (a pull request's) or left it detached.
@@ -108,7 +98,7 @@ cmd_workshop() {
   # Workshops an earlier press left — a pull request merged since, a session
   # that published after all — go once what they hold is on main.
   for kept in "$(workbench_dir "")"[0-9]*; do
-    [[ -d "$kept" ]] && ! workbench_busy "$kept" && workbench_published "$kept" && workbench_remove "$kept" \
+    [[ -d "$kept" ]] && ! proc_in_dir "$kept" && workbench_published "$kept" && workbench_remove "$kept" \
       && info "  removed an earlier workshop, now on main: $kept"
   done
   stamp="$(date +%Y%m%d-%H%M%S)"

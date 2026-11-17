@@ -118,6 +118,17 @@ proc_cwds() {
   fi
 }
 
+# Whether a process works in a directory: its working directory is the
+# directory or below it. Read whole from proc_cwds, so a path with a space
+# in it is compared whole.
+proc_in_dir() {
+  local dir="$1" cwd p
+  while read -r p cwd; do
+    [[ "$cwd" == "$dir" || "$cwd" == "$dir"/* ]] && return 0
+  done < <(proc_cwds)
+  return 1
+}
+
 # Whether a process's environment holds NAME=VALUE exactly.
 proc_env_has() {
   local pid="$1" want="$2"

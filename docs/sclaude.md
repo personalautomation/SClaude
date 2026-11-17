@@ -1365,7 +1365,14 @@ nothing.
 has nothing left to hold: a branch with a merged PR and a branch whose remote
 copy is gone (GitHub removes it after the merge). Everything else is shown as a
 list with no offer — unpushed commits, a PR closed without a merge, a feature
-with a live worktree. A `fetch --prune` is done before the sorting, otherwise the
+with a live worktree. A worktree opened by hand (no `.sclaude/local` in it)
+is the exception: once main holds everything its branch carries through a
+merged PR, a clean one is offered for deletion with its branch, the worktree
+removed first, its ignored files (build caches, copied `.env` files) with it;
+one with uncommitted changes, or one a process works in, is listed as such.
+A worktree that is not there (deleted by hand, or on a drive not mounted) is
+listed and never offered, since it may only be unmounted; once it is gone
+for good, `git worktree remove <path>` drops it and the branch is offered. A `fetch --prune` is done before the sorting, otherwise the
 local `origin/*` outlives branches that have long been gone and the check lies.
 
 ## A feature built in parts

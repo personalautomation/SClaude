@@ -64,6 +64,11 @@ try:
     check("proc_parent", sh('proc_parent %d' % pid), str(os.getpid()))
     check("proc_cwd: a directory with a space", sh('proc_cwd %d' % pid), work)
     check("proc_cwds: listed", "%d %s" % (pid, work) in sh('proc_cwds').splitlines(), True)
+    check("proc_in_dir: the directory, a space in it",
+          sh('proc_in_dir "%s" && echo y || echo n' % work), "y")
+    check("proc_in_dir: a directory above it", sh('proc_in_dir "%s" && echo y || echo n' % tmp), "y")
+    check("proc_in_dir: not a name it starts with",
+          sh('proc_in_dir "%s" && echo y || echo n' % os.path.join(tmp, "a di")), "n")
     check("proc_env_has: the whole value",
           sh('proc_env_has %d "SCLAUDE_PROCINFO_MARK=tree one" && echo y || echo n' % pid), "y")
     check("proc_env_has: not a prefix of it",

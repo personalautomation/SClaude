@@ -5,6 +5,9 @@
 # Part of sclaude; pulled in with source from bin/sclaude.
 # It does not run on its own.
 
+# Which processes work in a tree left behind (proc_cwds), on Linux and macOS.
+source "$(dirname "${BASH_SOURCE[0]}")/../core/procinfo.sh"
+
 # --- branches with nothing left to hold --------------------------------------
 #
 # Branches pile up: the PR is merged, the work is in main, and the local branch
@@ -33,7 +36,7 @@ branch_pr_state() {
 # `git branch -d` refuses; a local tip equal to this commit says the refusal is
 # a false alarm — everything the branch holds went into main through the PR.
 merged_pr_head() {
-  gh pr list --head "$1" --state merged --limit 1 --json headRefOid \
+  gh pr list --head "$1" --base main --state merged --limit 1 --json headRefOid \
     --jq '.[0].headRefOid // empty' 2>/dev/null || true
 }
 
@@ -52,20 +55,41 @@ merged_pr_head() {
 #
 #   branch_delete_merged <branch>  → 0 deleted, 2 deleted as squash-merged, 1 kept
 branch_delete_merged() {
-  local branch="$1" tip head merged
+  local branch="$1"
   git -C "$REPO" branch -d "$branch" >/dev/null 2>&1 && return 0
-  tip="$(git -C "$REPO" rev-parse -q --verify "refs/heads/$branch" 2>/dev/null)" || return 1
+  branch_squash_held "$branch" || return 1
+  git -C "$REPO" branch -D "$branch" >/dev/null 2>&1 && return 2
+  return 1
+}
+
+# Whether main holds everything a branch carries by way of its merged pull
+# request (the test branch_delete_merged deletes by, above). Asked before a
+# tree is removed too, so that it never goes for a branch that stays.
+#
+#   branch_squash_held <branch> [<tip>]  → 0 held, 1 not (or not known)
+#
+# <tip>, when given, is judged rather than the branch's tip read again: the
+# one the caller then deletes.
+branch_squash_held() {
+  local branch="$1" tip="${2:-}" head merged
+  [[ -n "$tip" ]] \
+    || tip="$(git -C "$REPO" rev-parse -q --verify "refs/heads/$branch" 2>/dev/null)" || return 1
   head="$(cd "$REPO" && merged_pr_head "$branch")"
   [[ -n "$head" ]] || return 1
-  if [[ "$tip" != "$head" ]]; then
+  # The head may be a commit GitHub alone has (pushed from elsewhere, its
+  # branch deleted after the merge); a pull request's head can be fetched.
+  git -C "$REPO" cat-file -e "$head^{commit}" 2>/dev/null \
+    || git -C "$REPO" fetch -q --no-write-fetch-head origin "$head" 2>/dev/null || true
+  # A tip behind the merged head (the PR got commits this clone never
+  # fetched) is all in it.
+  if ! git -C "$REPO" merge-base --is-ancestor "$tip" "$head" 2>/dev/null; then
     git -C "$REPO" merge-base --is-ancestor "$head" "$tip" 2>/dev/null || return 1
     merged="$(git -C "$REPO" merge-tree --write-tree --merge-base="$head" \
                 origin/main "$tip" 2>/dev/null)" || return 1
     [[ "$merged" == "$(git -C "$REPO" rev-parse -q --verify 'origin/main^{tree}')" ]] \
       || return 1
   fi
-  git -C "$REPO" branch -D "$branch" >/dev/null 2>&1 && return 2
-  return 1
+  return 0
 }
 
 # Sorts the local branches into buckets and prints a line per branch:
@@ -75,7 +99,7 @@ branch_delete_merged() {
 #
 # main and the current branch are not considered at all.
 classify_branches() {
-  local current merged_list branch state has_own wt tree st part
+  local current merged_list branch state has_own wt tree st part wt_status
   local -A parts_of=()
   # Without --prune the local refs/remotes/origin/* outlive branches that have
   # long been gone from GitHub, and the whole "the remote branch is gone" check
@@ -111,6 +135,31 @@ classify_branches() {
       continue
     fi
     if [[ -n "$wt" ]]; then
+      # A tree opened by hand outlives its merged pull request with nothing
+      # to remove it: `sclaude done` knows only features. It was listed as in
+      # progress for good. One with no .sclaude/local at all is not sclaude's
+      # — a feature's, a deferred review's with its workshop inside, a
+      # recording — and when main holds all its branch carries
+      # (branch_squash_held: a merged pull request, nothing past it main
+      # lacks) a clean one goes with its branch, review_branches removing the
+      # tree first. One with changes of its own, one a process works in (a
+      # session, an editor going on after the merge) and one whose status
+      # git does not give are the human's. So is a tree that is not there:
+      # deleted by hand, or on a drive not mounted now (a feature's gone
+      # looks like any other), so it is said, not offered.
+      if [[ ! -d "$wt" ]]; then
+        printf 'keep\t%s\t%s\n' "$branch" "its worktree is missing (deleted, or not mounted) — if it is gone: git worktree remove $(printf '%q' "$wt")"
+        continue
+      fi
+      if [[ ! -e "$wt/.sclaude/local" ]] && branch_squash_held "$branch"; then
+        wt_status="$(git -C "$wt" status --porcelain 2>/dev/null)" || wt_status="unreadable"
+        if [[ -z "$wt_status" ]] && ! proc_in_dir "$(readlink -f "$wt")"; then
+          printf 'drop\t%s\t%s\n' "$branch" "PR merged, its worktree left behind ($wt)"
+        else
+          printf 'keep\t%s\t%s\n' "$branch" "PR merged, but its worktree is in use or not clean ($wt)"
+        fi
+        continue
+      fi
       if [[ "$has_own" -eq 0 ]]; then
         printf 'keep\t%s\t%s\n' "$branch" "feature in progress, no commits yet"
       else
@@ -200,6 +249,36 @@ review_branches() {
 
   while IFS=$'\t' read -r _ branch reason; do
     [[ -z "$branch" ]] && continue
+    # A branch checked out in a tree left behind cannot be deleted while the
+    # tree is there. Asked again here, before the tree goes, rather than
+    # taken from the list: the question may have waited while a commit was
+    # made in the tree, and a GitHub that does not answer now leaves both
+    # standing; a process that came into the tree meanwhile keeps it too, and
+    # so does a tree that went missing (unmounted, or a feature's deleted).
+    # `git worktree remove` without --force takes only a clean one.
+    # The tip judged is the one deleted (update-ref with the old value): a
+    # commit made after it was read keeps the branch. update-ref leaves the
+    # branch's section in the config, which `branch -D` would have taken.
+    local bwt btip
+    bwt="$(git -C "$REPO" for-each-ref --format='%(worktreepath)' "refs/heads/$branch")"
+    if [[ -n "$bwt" ]]; then
+      btip="$(git -C "$REPO" rev-parse -q --verify "refs/heads/$branch")"
+      if [[ -z "$btip" ]] || ! branch_squash_held "$branch" "$btip"; then
+        warn "  $branch — could not confirm main holds all of it (a new commit, or GitHub did not answer); its worktree $bwt left alone"
+      elif [[ ! -d "$bwt" ]]; then
+        warn "  $branch — its worktree $bwt is missing now; left alone"
+      elif proc_in_dir "$(readlink -f "$bwt")"; then
+        warn "  $branch — something works in its worktree $bwt now; left alone"
+      elif ! git -C "$REPO" worktree remove "$bwt" >/dev/null 2>&1; then
+        warn "  $branch — its worktree $bwt could not be removed; left alone"
+      elif git -C "$REPO" update-ref -d "refs/heads/$branch" "$btip" >/dev/null 2>&1; then
+        git -C "$REPO" config --remove-section "branch.$branch" >/dev/null 2>&1 || true
+        echo "  ${GREEN}deleted${OFF} $branch and its worktree $bwt"
+      else
+        warn "  $branch — its worktree $bwt was removed, but git refused to delete the branch"
+      fi
+      continue
+    fi
     # Only commits a merged PR and main do not hold go to the human
     # (branch_delete_merged).
     local rc=0

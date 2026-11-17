@@ -11,13 +11,18 @@
 #   * merged into main the ordinary way: deleted by -d;
 #   * squash-merged, tip at the pull request's head: deleted;
 #   * a commit past the pull request's head: kept;
+#   * a tip behind the pull request's head: deleted;
 #   * commits past the head whose change main already holds: deleted;
 #   * commits past the head that main lacks, or that conflict with it: kept;
 #   * no merged pull request: kept;
 #   * `done` and the branch review both use it;
 #   * the branch review keeps a feature's part branches, and says a pushed
 #     branch is pushed without guessing at its pull request;
-#   * `done` deletes the parts' branches the feature's branch holds.
+#   * `done` deletes the parts' branches the feature's branch holds;
+#   * a tree opened by hand (no .sclaude/local) whose merged pull request
+#     main holds is offered with its branch when clean, kept when it has
+#     changes, past the merged head or sclaude's own; the review removes the
+#     tree before the branch.
 #
 # Run it with: python3 tests/branch-delete.py
 import os
@@ -60,6 +65,7 @@ def commit(repo, name):
 
 
 tmp = tempfile.mkdtemp()
+busy = None
 try:
     repo = os.path.join(tmp, "repo")
     subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True)
@@ -136,6 +142,18 @@ try:
     git(repo, "switch", "-q", "main")
     check("past the head, conflicting: kept", delete(repo, "feat/sq4", head), ("RC 1", True))
 
+    # The tip behind the merged head: the PR got a commit this clone never
+    # fetched. Everything the branch has went in.
+    git(repo, "switch", "-q", "-c", "feat/behind", "main")
+    commit(repo, "behind-1")
+    head = commit(repo, "behind-2")
+    git(repo, "switch", "-q", "main")
+    git(repo, "merge", "-q", "--squash", "feat/behind")
+    git(repo, "commit", "-q", "-m", "behind (#5)")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "branch", "-f", "feat/behind", "feat/behind~1")
+    check("tip behind the merged head: deleted", delete(repo, "feat/behind", head), ("RC 2", False))
+
     # No merged pull request.
     check("no pull request: kept", delete(repo, "feat/past", ""), ("RC 1", True))
 
@@ -186,6 +204,108 @@ try:
     check("parts held by the feature go", [b for b in ("feat/q-1", "feat/q-2", "feat/q-3") if b in left], ["feat/q-3"])
     check("a part carrying more is said", "local branch feat/q-3 kept" in out, True)
 
+    # A tree opened by hand, its pull request merged: a clean one goes with
+    # its branch, the tree first; one with changes is kept. A feature's tree
+    # (feat/p above has a state) is never asked about. A commit past the merged head that main lacks keeps the tree, and so
+    # does sclaude's own .sclaude/local in it (a deferred review's tree, its
+    # workshop inside).
+    heads = {}
+    for name in ("hand", "dirty", "past", "ours", "busy", "gone"):
+        git(repo, "switch", "-q", "-c", "fix/" + name, "main")
+        heads["fix/" + name] = commit(repo, "h-" + name)
+        if name == "past":
+            commit(repo, "after the merge, not on main")
+        git(repo, "switch", "-q", "main")
+        # The busy one has a space in its path: compared whole.
+        git(repo, "worktree", "add", "-q", os.path.join(tmp, "busy tree" if name == "busy" else name), "fix/" + name)
+    os.makedirs(os.path.join(tmp, "ours", ".sclaude", "local", "instruments"))
+    with open(os.path.join(repo, ".git", "info", "exclude"), "a") as fh:
+        fh.write(".sclaude/local/\n")
+    hand = os.path.join(tmp, "hand")
+    with open(os.path.join(hand, ".gitignore"), "w") as fh:
+        fh.write(".next/\n")
+    git(hand, "add", ".gitignore")
+    git(hand, "commit", "-q", "-m", "ignore .next")
+    os.makedirs(os.path.join(hand, ".next"))
+    open(os.path.join(hand, ".next", "cache"), "w").close()   # ignored: still clean
+    open(os.path.join(tmp, "dirty", "wip"), "w").close()
+    heads["fix/hand"] = git(repo, "rev-parse", "fix/hand")
+    # A process at work in a clean tree (a session going on after the merge).
+    busy = subprocess.Popen(["sleep", "60"], cwd=os.path.join(tmp, "busy tree"))
+    # A tree deleted by hand and never pruned: git still names it.
+    shutil.rmtree(os.path.join(tmp, "gone"))
+    script = ('REPO=%s; source "%s/tree/branches.sh"\n'
+              'state_get() { echo feat/p; }\n'
+              'parts_branches() { printf "feat/p-1\\nfeat/p-2\\n"; }\n'
+              'branch_pr_state() { true; }\n'
+              'merged_pr_head() { case "$1" in %s esac; }\n'
+              'classify_branches' % (repo, LIB, " ".join("%s) echo %s ;;" % kv for kv in heads.items())))
+    rows = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=ENV).stdout
+    said = {r.split("\t")[1]: (r.split("\t")[0], r.split("\t")[2]) for r in rows.splitlines() if r.count("\t") == 2}
+    check("a tree a process works in: kept", said.get("fix/busy"),
+          ("keep", "PR merged, but its worktree is in use or not clean (%s)" % os.path.join(tmp, "busy tree")))
+    check("a tree that is not there: said, not offered", said.get("fix/gone"),
+          ("keep", "its worktree is missing (deleted, or not mounted) — if it is gone: "
+           "git worktree remove %s" % os.path.join(tmp, "gone")))
+    # Offered, then gone before the yes: kept.
+    script = ('REPO=%s; source "%s/tree/branches.sh"\n'
+              'classify_branches() { printf "drop\\tfix/gone\\tx\\n"; }\n'
+              'align_columns() { :; }\nask() { printf -v "$2" y; }\nis_yes() { true; }\n'
+              'warn() { echo "WARN $*"; }\nmerged_pr_head() { echo %s; }\n'
+              'review_branches' % (repo, LIB, heads["fix/gone"]))
+    said_gone = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=ENV,
+                               stdin=subprocess.DEVNULL).stdout
+    check("a tree gone before the yes keeps its branch",
+          ("fix/gone" in git(repo, "branch", "--format=%(refname:short)").split("\n"),
+           "is missing now" in said_gone), (True, True))
+    check("a clean tree by hand, merged: offered", said.get("fix/hand"),
+          ("drop", "PR merged, its worktree left behind (%s)" % hand))
+    check("a tree by hand with changes: kept", said.get("fix/dirty"),
+          ("keep", "PR merged, but its worktree is in use or not clean (%s)" % os.path.join(tmp, "dirty")))
+    check("a feature's tree is not asked about", (said.get("feat/p") or ("",))[0], "keep")
+    check("past the merged head, not on main: kept", (said.get("fix/past") or ("",))[0], "keep")
+    check("sclaude's own tree: kept", (said.get("fix/ours") or ("",))[0], "keep")
+    git(repo, "config", "branch.fix/hand.remote", "origin")
+    script = ('REPO=%s; source "%s/tree/branches.sh"\n'
+              'classify_branches() { printf "drop\\tfix/hand\\tx\\n"; }\n'
+              'align_columns() { :; }\nask() { printf -v "$2" y; }\nis_yes() { true; }\n'
+              'warn() { echo "WARN $*"; }\nmerged_pr_head() { echo %s; }\n'
+              'review_branches' % (repo, LIB, heads["fix/hand"]))
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=ENV,
+                         stdin=subprocess.DEVNULL).stdout
+    left = git(repo, "branch", "--format=%(refname:short)").split("\n")
+    # A process that came into the tree while the question waited keeps it.
+    script = ('REPO=%s; source "%s/tree/branches.sh"\n'
+              'classify_branches() { printf "drop\\tfix/busy\\tx\\n"; }\n'
+              'align_columns() { :; }\nask() { printf -v "$2" y; }\nis_yes() { true; }\n'
+              'warn() { echo "WARN $*"; }\nmerged_pr_head() { echo %s; }\n'
+              'review_branches' % (repo, LIB, heads["fix/busy"]))
+    said_busy = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=ENV,
+                               stdin=subprocess.DEVNULL).stdout
+    check("a process in the tree when asked keeps it",
+          (os.path.exists(os.path.join(tmp, "busy tree")), "something works in its worktree" in said_busy),
+          (True, True))
+
+    # Asked again before the tree goes: a commit made in it while the
+    # question waited keeps both.
+    commit(os.path.join(tmp, "dirty"), "wip")
+    script = ('REPO=%s; source "%s/tree/branches.sh"\n'
+              'classify_branches() { printf "drop\\tfix/dirty\\tx\\n"; }\n'
+              'align_columns() { :; }\nask() { printf -v "$2" y; }\nis_yes() { true; }\n'
+              'warn() { echo "WARN $*"; }\nmerged_pr_head() { echo %s; }\n'
+              'review_branches' % (repo, LIB, heads["fix/dirty"]))
+    kept = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=ENV,
+                          stdin=subprocess.DEVNULL).stdout
+    check("a commit made while asked keeps the tree and the branch",
+          (os.path.exists(os.path.join(tmp, "dirty")),
+           "fix/dirty" in git(repo, "branch", "--format=%(refname:short)").split("\n"),
+           "could not confirm main holds all of it" in kept), (True, True, True))
+    check("the branch's config section goes with it",
+          subprocess.run(["git", "-C", repo, "config", "--get-regexp", r"^branch\.fix/hand\."],
+                         capture_output=True, text=True).stdout, "")
+    check("the review removes the tree, then the branch",
+          (os.path.exists(hand), "fix/hand" in left, out.count("deleted")), (False, False, 1))
+
     sclaude = "".join(open(os.path.join(ROOT, _p)).read()
         for _p in ("bin/sclaude", "sclaude/lib/commands/start.sh", "sclaude/lib/commands/menu.sh", "sclaude/lib/commands/step_commands.sh", "sclaude/lib/commands/done.sh", "sclaude/lib/commands/feature_commands.sh"))
     with open(os.path.join(LIB, "tree", "branches.sh")) as fh:
@@ -196,6 +316,9 @@ try:
     check("done forces nothing itself", 'branch -D "$branch"' in done, False)
     check("the branch review uses it", 'branch_delete_merged "$branch"' in branches, True)
 finally:
+    if busy:
+        busy.kill()
+        busy.wait()
     shutil.rmtree(tmp, ignore_errors=True)
 
 if failures:

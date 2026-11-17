@@ -3,7 +3,7 @@
 <!--
   macOS's code-server.service: VS Code in the browser, for working from a
   phone, opened on the repository chosen in the bot (bin/code-server-start).
-  One of the extras (./install.sh --extras), written into ~/Library/LaunchAgents
+  One of the extras (install.sh's extras), written into ~/Library/LaunchAgents
   by install.sh (sclaude/lib/core/launchd.sh) with the home, PATH and the log directory
   put in. bind-addr, the password and the idle timeout are in
   ~/.config/code-server/config.yaml, as on Linux.

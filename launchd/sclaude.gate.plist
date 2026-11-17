@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   macOS's sclaude-gate.socket and sclaude-gate.service: the phone's entry to
-  features through Telegram (sclaude-proxy --gate), behind `tailscale funnel`
+  features through Telegram (sclaude-proxy as the gate), behind `tailscale funnel`
   on :8443. Written into ~/Library/LaunchAgents by install.sh
   (sclaude/lib/core/launchd.sh), with the home, PATH and the log directory put in.
 

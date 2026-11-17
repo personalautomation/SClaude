@@ -190,6 +190,12 @@ try:
     set_state(updated_ts=now, until_ts=now + 3600)
     holder.tick(now)
     check("lid-kept-on-new-hold", holder.lid, True)
+    # Refused once more as that hold ends: said again, not left at the hold's
+    # "hold set" line.
+    set_state(updated_ts=now, until_ts=now - 1)
+    os.environ["RULE"] = "no"
+    holder.tick(now)
+    check("second-refusal-said", log_lines()[-1].startswith("holding: pmset refused"), True)
     set_state(updated_ts=now, until_ts=now - 1)
     os.environ["RULE"] = "yes"
     holder.tick(now)
@@ -223,6 +229,19 @@ try:
     except SystemExit:
         pass
     check("the-next-holder-turns-it-off", pmset_calls()[-1], "-a disablesleep 0")
+
+    # One whose pmset refuses keeps the lid marked held, for tick() to retry.
+    open(km.LID_MARK, "w").close()
+    os.environ["RULE"] = "no"
+    refused_start = km.Holder(fake)
+    refused_start.started()
+    check("a-refused-start-keeps-the-lid", (refused_start.lid, refused_start.held()), (True, True))
+    os.environ["RULE"] = "yes"
+    set_state(updated_ts=now, until_ts=now - 1)
+    refused_start.tick(now)
+    check("and-lets-it-go-on-the-next-tick", (refused_start.lid, os.path.exists(km.LID_MARK)),
+          (False, False))
+    set_state(updated_ts=now, until_ts=now + 3600)   # what the checks below hold under
     # The person's own disablesleep has no mark, and is left alone.
     before = len(pmset_calls())
     km.Holder(fake).started()

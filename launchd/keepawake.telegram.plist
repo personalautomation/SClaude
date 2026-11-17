@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   macOS's keepawake-telegram.service: keepawake's Telegram bot. One of the
-  extras (./install.sh --extras), written into ~/Library/LaunchAgents by
+  extras (install.sh's extras), written into ~/Library/LaunchAgents by
   install.sh (sclaude/lib/core/launchd.sh) with the home, PATH, the log directory and
   the checkout put in, and only once ~/.config/keepawake/env has the token and the
   chat id (bot_env_set): the bot exits without either, and an agent restarting

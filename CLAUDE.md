@@ -115,7 +115,9 @@ breaks the other silently — grep before you edit:
 - `KeepAwake.ps1` and `keepawake/hold_loop.py` (the holding side of
   `keepawake-linux` and `keepawake-macos`) write hold-log lines that
   `bin/keepawake` greps for (`hold set|hold released|holding`);
-  `tests/keepawake-linux.py` checks all three sides.
+  `tests/keepawake-linux.py` checks all three sides. `hold_loop.py` alone
+  writes `holding: <stuck_text>` for a release that left part of the hold
+  in place, which the grep's `holding` takes too.
 - The sudoers rule `install.sh` writes for the lid (`lid_rule_text`) names
   `/usr/bin/pmset -a disablesleep 1` and `… 0`, word for word what
   `bin/keepawake-macos` runs through `sudo -n` (`pmset_command`,

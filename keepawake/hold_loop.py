@@ -10,7 +10,10 @@
 #
 # The log lines are the Windows side's, word for word: "hold set", "hold
 # released", "holding". `keepawake status` greps for exactly those, so they are
-# coupled strings (see CLAUDE.md) — change them together or not at all.
+# coupled strings (see CLAUDE.md) — change them together or not at all. One is
+# this side's alone: "holding: <stuck_text>", a release that left part of the
+# hold in place (a Mac's lid); it reaches the status through the grep's
+# "holding", which a narrower grep ("holding, until") would lose.
 #
 # A platform's holder subclasses Holder with four things: acquire() takes the
 # lock and says whether anything was granted, release() drops it, holding()
@@ -98,6 +101,7 @@ class Holder:
             # "hold set", because from here on the machine is held again.
             if self.acquire():
                 self.broken = False
+                self.stuck = False
                 if data.get("hard_hold"):
                     log("hold set: a person is at the machine")
                 else:
@@ -147,7 +151,7 @@ def run(holder, name, lock_name):
     def stop(signum, frame):
         if holder.held():
             holder.release()
-            log("hold released")
+            log("holding: " + holder.stuck_text if holder.held() else "hold released")
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, stop)

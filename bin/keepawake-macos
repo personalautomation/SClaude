@@ -138,8 +138,8 @@ class Holder(hold_loop.Holder):
     """The power assertion, and the lid where the sudoers rule allows it."""
 
     refused = "IOKit refused the power assertion (%s)" % ASSERTION_TYPE
-    stuck_text = ("pmset refused to turn disablesleep off: a closed lid still does not "
-                  "sleep; tried again every tick")
+    stuck_text = ("pmset refused to turn disablesleep off: a closed lid does not sleep "
+                  "until it is let go")
 
     def __init__(self, assertion=None):
         super().__init__()
@@ -152,8 +152,9 @@ class Holder(hold_loop.Holder):
         # that the Mac does not stay up with nothing holding it. Only once the
         # lock is ours: a second holder that loses it would otherwise turn the
         # lid off under the running one, which goes on believing it holds it.
-        if os.path.exists(LID_MARK):
-            set_lid(False)
+        # One pmset refuses stays marked held, so that tick() tries again.
+        if os.path.exists(LID_MARK) and not set_lid(False):
+            self.lid = True
 
     def holding(self):
         return self.aid is not None

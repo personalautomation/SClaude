@@ -84,6 +84,27 @@ for t in templates:
             in_comments.append("%s.plist:%d" % (t, n))
 check("placeholders only inside <string>", in_comments, [])
 
+# Each template is a well-formed plist as it stands and as launchd_render
+# fills it with paths holding what XML minds (&, <, >, "--").
+import subprocess  # noqa: E402
+import xml.dom.minidom  # noqa: E402
+
+LIB = os.path.join(ROOT, "sclaude", "lib")
+awkward = "/opt/R&D/a<b>--c/bin:/usr/bin"
+malformed = []
+for t in templates:
+    rendered = subprocess.run(
+        ["bash", "-c", 'source "%s/core/launchd.sh"; INSTRUMENTS="$1"; HOME="$2"; '
+                       'launchd_logs() { echo "$2/Logs--x"; }; launchd_render "$3" "$4"'
+         % LIB, "_", ROOT, "/Users/a--b&c", t, awkward],
+        capture_output=True, text=True).stdout
+    for kind, text in (("raw", read("launchd", t + ".plist")), ("rendered", rendered)):
+        try:
+            xml.dom.minidom.parseString(text)
+        except Exception as error:
+            malformed.append("%s %s: %s" % (kind, t, error))
+check("templates are well-formed XML, raw and rendered", malformed, [])
+
 # launchd_labels in launchd.sh: core:sclaude.*, extras:keepawake*.
 check("every template is the core's or the extras'",
       [t for t in templates if not (t.startswith("sclaude.") or t.startswith("keepawake"))], [])
